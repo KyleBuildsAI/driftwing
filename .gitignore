@@ -16,6 +16,8 @@ npm-debug.log*
 # Screenshots and captures from photo mode
 *.png
 *.jpg
+# README screenshots are documentation, not captures
+!docs/*.jpg
 *.webm
 *.zip
 

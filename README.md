@@ -1,5 +1,9 @@
 # DRIFTWING
 
+[![A low-poly glider flying between snowy peaks at golden hour, sun and god rays overhead](docs/screenshot.jpg)](https://kylebuildsai.github.io/driftwing/?seed=D27TEH)
+
+*Seed D27TEH at golden hour. [Play it in your browser](https://kylebuildsai.github.io/driftwing/?seed=D27TEH).*
+
 An ambient infinite-flight exploration game in a single `index.html`. You pilot a low-poly glider over an
 endless procedural world at golden hour. There is no fail state, no fuel and no enemies. An AI copilot named
 WREN rides along: talk to it or type to it, and it can set waypoints, fly the plane, change the time of day
