@@ -18,7 +18,7 @@ export const FLIGHT_MODES = Object.freeze(['classic', 'sim']);
 export const VIEW_IDS = Object.freeze(['chase', 'cockpit', 'wing', 'flyby']);
 export const UNIT_SYSTEMS = Object.freeze(['metric', 'aviation']);
 export const QUALITY_PREFERENCES = Object.freeze(['auto', 'minimal', 'low', 'medium', 'high', 'ultra']);
-export const FRAME_TARGETS = Object.freeze(['auto', 30, 60, 72, 90, 120, 144, 165, 240]);
+export const FRAME_TARGETS = Object.freeze(['auto', 60, 120, 144, 240, 'uncapped']);
 export const MIXER_BUSES = Object.freeze(['master', 'engine', 'environment', 'ui', 'copilot', 'music']);
 
 const unitRange = (min, max) => (value) => Number.isFinite(value) && value >= min && value <= max;

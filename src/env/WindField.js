@@ -1,42 +1,55 @@
 // WindField: the air every craft flies through, as one query.
 //
-//   sample(position, time, out?) -> { vel: {x, y, z} m/s, turbulence: 0..1 }
+//   sample(pos, t, out?) -> { vel: THREE.Vector3 (m/s), turbulence: 0..1 }
 //
-// The field is a sum of layers, each a pure function of position and time plus slowly changing
-// world state (sun, clouds), so the same query always answers the same way within a frame:
-//   ambient     prevailing wind from the shared windDirection/windStrength uniforms (the clouds
-//               drift with the same wind), with a boundary-layer profile above the ground
-//   ridge       wind blowing up a slope rises with it (lift on the windward face, sink in the lee),
-//               fading with height above the terrain
-//   thermals    a rising column under every visible cumulus, strength set by the sun and the
-//               cloud's size, leaning downwind, with a sinking ring around the core
-//   turbulence  gusts from smooth space-time noise; mechanical near the ground and in the lee,
-//               convective at thermal edges, light chop everywhere
-//   sources     anything else that moves air registers here (a debug updraft in Phase 1; the
-//               Phase 2 event director's spawns) and is found through a spatial hash
+// The field is a sum of layers, each a pure function of position, time and the sun, so the same
+// query gives the same answer (replays and remote wingmen in later phases rely on that):
+//   ambient     seeded prevailing wind (the shared windDirection/windStrength uniforms the clouds
+//               drift with) that strengthens and veers slowly with height above the ground
+//   ridge       the wind component blowing into a slope rises with it (lift on the windward face,
+//               sink in the lee), from the gradient of the shared height function
+//   thermals    seeded columns over sunny land: strongest at midday, off at night, each living a
+//               few minutes, leaning downwind, with a sinking ring around the core. The cloud system
+//               draws a small cumulus cap on top of each one (thermalsNear)
+//   turbulence  gusts from smooth space-time noise, scaled by wind speed and low height above the
+//               ground, plus lee rotor and thermal-edge chop
+//   sources     Phase 2 writers: addSource({ id, bounds, sample(pos, t) }) found through a spatial
+//               hash. Phase 1 proves the path with a dev-only debug updraft (createDebugUpdraft)
 //
-// Craft read airspeed as (craft velocity - sample().vel). CLASSIC scales the result down itself.
+// Craft compute airspeed as velocity - sample(pos, t).vel. CLASSIC scales the result down itself.
+import * as THREE from 'three/webgpu';
 import { headingFromVector, wrapDegrees } from '../core/util.js';
 
-const SOURCE_CELL = 256;
-const SOURCE_GLOBAL_RADIUS = SOURCE_CELL * 6;
 const AMBIENT_SPEED = 6;
 const AMBIENT_REFERENCE_AGL = 400;
 const RIDGE_PROBE = 40;
 const RIDGE_DECAY = 160;
-const THERMAL_SEARCH_RADIUS = 1200;
-const THERMAL_CORE_FRACTION = 0.42;
-const THERMAL_LEAN_LIMIT = 160;
-const THERMAL_CLIMB_FOR_LEAN = 3;
+const RIDGE_MAX_SLOPE = 1.2;
+
+const THERMAL_CELL = 1400;
+const THERMAL_CACHE_LIMIT = 600;
+const THERMAL_CLIMB_FOR_LEAN = 2.5;
+const THERMAL_LEAN_SHARE = 0.35;
+const THERMAL_LEAN_LIMIT = 260;
+const THERMAL_RING = 2.2;
+/** Chance of a thermal per cell, by biome: bright dry ground triggers the best thermals. */
+const THERMAL_BIOME_CHANCE = Object.freeze({ dunes: 0.85, meadows: 0.8, pine: 0.45, archipelago: 0.35, snow: 0.15 });
+
+const SOURCE_CELL = 256;
+const SOURCE_GLOBAL_CELLS = 64;
 
 function smoothstep(edge0, edge1, value) {
   const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
 }
 
-/** Smooth 1D noise in [-1, 1]: a few incommensurate sines, phase-shifted by the world seed. */
+function cellHashKey(cellX, cellZ) {
+  return cellX * 73856093 + cellZ * 19349663;
+}
+
+/** Smooth noise in about [-1, 1]: incommensurate sines, phase-shifted by the world seed. */
 function createGustNoise(seedHash) {
-  const phases = Array.from({ length: 12 }, (unused, index) => ((seedHash * (index + 7) * 2654435761) >>> 0) / 4294967296 * Math.PI * 2);
+  const phases = Array.from({ length: 16 }, (unused, index) => (((seedHash + 1) * (index + 7) * 2654435761) >>> 0) / 4294967296 * Math.PI * 2);
   return function gust(channel, time, x, z) {
     const base = channel * 4;
     return (
@@ -48,18 +61,32 @@ function createGustNoise(seedHash) {
   };
 }
 
+/** Normalizes a source's bounds to an axis-aligned box. Accepts { min, max } or { center, radius }. */
+function boxFromBounds(bounds) {
+  if (!bounds || typeof bounds !== 'object') throw new TypeError('wind source needs bounds');
+  const finite = (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z);
+  if (finite(bounds.min) && finite(bounds.max)) {
+    return {
+      minX: Math.min(bounds.min.x, bounds.max.x), minY: Math.min(bounds.min.y, bounds.max.y), minZ: Math.min(bounds.min.z, bounds.max.z),
+      maxX: Math.max(bounds.min.x, bounds.max.x), maxY: Math.max(bounds.min.y, bounds.max.y), maxZ: Math.max(bounds.min.z, bounds.max.z),
+    };
+  }
+  if (finite(bounds.center) && Number.isFinite(bounds.radius) && bounds.radius > 0) {
+    const { center, radius } = bounds;
+    return { minX: center.x - radius, minY: center.y - radius, minZ: center.z - radius, maxX: center.x + radius, maxY: center.y + radius, maxZ: center.z + radius };
+  }
+  throw new TypeError('wind source bounds must be { min, max } or { center, radius } with finite values');
+}
+
 export function createWindField({ world, uniforms, state, bus }) {
-  const gust = createGustNoise(world.seedHash);
+  const gust = createGustNoise(world.seedHash >>> 0);
+  const thermalCells = new Map();
   const sources = new Map();
   const sourceCells = new Map();
   const globalSources = new Set();
-  const sourceScratch = { x: 0, y: 0, z: 0 };
-  const thermalScratch = [];
-  const thermalPool = [];
-  let thermalProvider = null;
-  let nextSourceId = 1;
-
-  const layerTotals = { ambient: { x: 0, y: 0, z: 0 }, ridge: 0, thermal: 0, sources: 0 };
+  const samplePosition = new THREE.Vector3();
+  const ambientScratch = new THREE.Vector3();
+  const lastLayers = { ambient: new THREE.Vector3(), ridge: 0, thermal: 0, gust: new THREE.Vector3(), sources: 0, turbulence: 0 };
 
   // ---- Ambient ----------------------------------------------------------------------------
   function ambientProfile(heightAboveGround) {
@@ -67,90 +94,125 @@ export function createWindField({ world, uniforms, state, bus }) {
     return Math.min(1.25, Math.max(0.35, (agl / AMBIENT_REFERENCE_AGL) ** 0.14));
   }
 
-  function ambientSpeed() {
-    return AMBIENT_SPEED * uniforms.windStrength.value;
+  /** Writes the ambient wind at heightAboveGround into target: stronger and veered up to 20 deg aloft. */
+  function ambientAt(heightAboveGround, target) {
+    const direction = uniforms.windDirection.value;
+    const speed = AMBIENT_SPEED * uniforms.windStrength.value * ambientProfile(heightAboveGround);
+    const veer = 0.35 * smoothstep(0, 1500, heightAboveGround);
+    const cosVeer = Math.cos(veer);
+    const sinVeer = Math.sin(veer);
+    return target.set((direction.x * cosVeer - direction.y * sinVeer) * speed, 0, (direction.x * sinVeer + direction.y * cosVeer) * speed);
   }
 
   // ---- Ridge lift -------------------------------------------------------------------------
-  function ridgeLift(x, z, ground, heightAboveGround, windX, windZ) {
-    if (heightAboveGround > RIDGE_DECAY * 5) return { lift: 0, lee: 0 };
-    const slopeX = (world.groundHeight(x + RIDGE_PROBE, z) - ground) / RIDGE_PROBE;
-    const slopeZ = (world.groundHeight(x, z + RIDGE_PROBE) - ground) / RIDGE_PROBE;
-    const upslope = windX * Math.max(-1.2, Math.min(1.2, slopeX)) + windZ * Math.max(-1.2, Math.min(1.2, slopeZ));
+  function ridgeLift(x, z, surface, heightAboveGround, windX, windZ, result) {
+    result.lift = 0;
+    result.lee = 0;
+    if (heightAboveGround > RIDGE_DECAY * 5) return result;
+    const slopeX = Math.max(-RIDGE_MAX_SLOPE, Math.min(RIDGE_MAX_SLOPE, (world.groundHeight(x + RIDGE_PROBE, z) - surface) / RIDGE_PROBE));
+    const slopeZ = Math.max(-RIDGE_MAX_SLOPE, Math.min(RIDGE_MAX_SLOPE, (world.groundHeight(x, z + RIDGE_PROBE) - surface) / RIDGE_PROBE));
+    const upslope = windX * slopeX + windZ * slopeZ;
     const decay = Math.exp(-Math.max(heightAboveGround, 0) / RIDGE_DECAY);
-    return { lift: upslope * decay, lee: Math.max(0, -upslope) * decay };
+    result.lift = upslope * decay;
+    result.lee = Math.max(0, -upslope) * decay;
+    return result;
   }
 
   // ---- Thermals ----------------------------------------------------------------------------
   function solarFactor() {
-    return smoothstep(4, 35, state.time.sunElevation);
+    return smoothstep(3, 45, state.time.sunElevation);
   }
 
-  /** Vertical profile of a thermal between the ground (0) and cloud base (1), peak about 1. */
+  /** The seeded thermal of a cell, or null. Cached: it samples the terrain and biome once. */
+  function thermalForCell(cellX, cellZ) {
+    const key = cellHashKey(cellX, cellZ);
+    if (thermalCells.has(key)) {
+      const cached = thermalCells.get(key);
+      if (cached === null || (cached.cellX === cellX && cached.cellZ === cellZ)) return cached;
+    }
+    if (thermalCells.size > THERMAL_CACHE_LIMIT) thermalCells.delete(thermalCells.keys().next().value);
+    const roll = (salt) => world.hash2(cellX, cellZ, salt);
+    const x = (cellX + 0.15 + 0.7 * roll(901)) * THERMAL_CELL;
+    const z = (cellZ + 0.15 + 0.7 * roll(902)) * THERMAL_CELL;
+    const ground = world.groundHeight(x, z);
+    const chance = THERMAL_BIOME_CHANCE[world.biomeAt(x, z).key] ?? 0.4;
+    if (ground < world.WATER_LEVEL + 2 || roll(900) >= chance) {
+      thermalCells.set(key, null);
+      return null;
+    }
+    const thermal = {
+      id: `thermal:${cellX}:${cellZ}`,
+      cellX,
+      cellZ,
+      x,
+      z,
+      ground,
+      radius: 70 + 90 * roll(904),
+      peak: 1.8 + 2.7 * roll(905),
+      top: ground + 650 + 700 * roll(906),
+      phase: roll(907),
+      period: 900 + 600 * roll(908),
+    };
+    thermalCells.set(key, thermal);
+    return thermal;
+  }
+
+  /** Current core strength (m/s) of a thermal: the sun times its slow life cycle. */
+  function thermalStrength(thermal, time) {
+    const cycle = 0.5 + 0.5 * Math.sin(Math.PI * 2 * (time / thermal.period + thermal.phase));
+    return thermal.peak * solarFactor() * smoothstep(0.25, 0.6, cycle);
+  }
+
+  /** Where the column is at height: it drifts downwind as it rises. */
+  function thermalLean(thermal, height, windX, windZ, target) {
+    const rise = Math.max(0, height - thermal.ground);
+    const distance = Math.min(THERMAL_LEAN_LIMIT, (rise / THERMAL_CLIMB_FOR_LEAN) * THERMAL_LEAN_SHARE);
+    const windSpeed = Math.hypot(windX, windZ) || 1;
+    const share = distance * Math.min(1, windSpeed / 6);
+    target.x = thermal.x + (windX / windSpeed) * share;
+    target.z = thermal.z + (windZ / windSpeed) * share;
+    return target;
+  }
+
+  /** Vertical profile between the ground (0) and the cap (1), peak near 1. */
   function thermalProfile(normalizedHeight) {
     if (normalizedHeight <= 0) return 0;
     if (normalizedHeight >= 1) return Math.max(0, 0.35 * (1 - (normalizedHeight - 1) * 8));
     return Math.max(0.3 * normalizedHeight, Math.cbrt(normalizedHeight) * (1 - 0.9 * normalizedHeight) / 0.5);
   }
 
-  /** Records one core reported by the provider, reusing pooled records (sampled at 120 Hz). */
-  function pushThermal(coreX, coreZ, radius, base, growth) {
-    const index = thermalScratch.length;
-    if (!thermalPool[index]) thermalPool[index] = { x: 0, z: 0, radius: 0, base: 0, growth: 0 };
-    const core = thermalPool[index];
-    core.x = coreX;
-    core.z = coreZ;
-    core.radius = radius;
-    core.base = base;
-    core.growth = growth;
-    thermalScratch.push(core);
-  }
-
-  /** Fills thermalScratch with the thermal cores near (x, z). */
-  function collectThermals(x, z) {
-    thermalScratch.length = 0;
-    if (thermalProvider) thermalProvider(x, z, THERMAL_SEARCH_RADIUS, pushThermal);
-    return thermalScratch;
-  }
-
-  function thermalAt(x, y, z, ground, windX, windZ, result) {
+  const leanScratch = { x: 0, z: 0 };
+  function thermalAt(x, y, z, time, windX, windZ, result) {
     result.lift = 0;
     result.edge = 0;
-    const sun = solarFactor();
-    if (sun <= 0) return result;
-    const cores = collectThermals(x, z);
-    for (const core of cores) {
-      const baseAgl = core.base - ground;
-      if (baseAgl < 60) continue;
-      const normalizedHeight = (y - ground) / baseAgl;
-      if (normalizedHeight <= 0 || normalizedHeight > 1.15) continue;
-      // The column rises from upwind of the cloud it feeds, so low down it sits further upwind.
-      const lean = Math.min(THERMAL_LEAN_LIMIT, (core.base - y) / THERMAL_CLIMB_FOR_LEAN * 0.08);
-      const centerX = core.x - windX * lean;
-      const centerZ = core.z - windZ * lean;
-      const radius = Math.max(45, core.radius * THERMAL_CORE_FRACTION);
-      const distance = Math.hypot(x - centerX, z - centerZ);
-      if (distance > radius * 2.2) continue;
-      const peak = sun * (1.2 + 3.2 * core.growth * Math.min(1, core.radius / 260));
-      const vertical = peak * thermalProfile(normalizedHeight);
-      const ratio = distance / radius;
-      if (ratio < 1) {
-        result.lift += vertical * (1 - ratio * ratio);
-        result.edge = Math.max(result.edge, smoothstep(0.55, 1, ratio) * vertical);
-      } else {
-        const ring = Math.sin(Math.PI * Math.min(1, (ratio - 1) / 1.2));
-        result.lift -= 0.28 * vertical * ring;
-        result.edge = Math.max(result.edge, 0.6 * ring * vertical);
+    if (solarFactor() <= 0) return result;
+    const centerCellX = Math.floor(x / THERMAL_CELL);
+    const centerCellZ = Math.floor(z / THERMAL_CELL);
+    for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
+      for (let offsetX = -1; offsetX <= 1; offsetX++) {
+        const thermal = thermalForCell(centerCellX + offsetX, centerCellZ + offsetZ);
+        if (!thermal) continue;
+        const normalizedHeight = (y - thermal.ground) / (thermal.top - thermal.ground);
+        if (normalizedHeight <= 0 || normalizedHeight > 1.15) continue;
+        thermalLean(thermal, y, windX, windZ, leanScratch);
+        const ratio = Math.hypot(x - leanScratch.x, z - leanScratch.z) / thermal.radius;
+        if (ratio > 1 + THERMAL_RING) continue;
+        const vertical = thermalStrength(thermal, time) * thermalProfile(normalizedHeight);
+        if (vertical <= 0) continue;
+        if (ratio < 1) {
+          result.lift += vertical * (1 - ratio * ratio);
+          result.edge = Math.max(result.edge, smoothstep(0.55, 1, ratio) * vertical);
+        } else {
+          const ring = Math.sin(Math.PI * Math.min(1, (ratio - 1) / THERMAL_RING));
+          result.lift -= 0.28 * vertical * ring;
+          result.edge = Math.max(result.edge, 0.6 * ring * vertical);
+        }
       }
     }
     return result;
   }
 
-  // ---- Sources --------------------------------------------------------------------------------
-  function cellKey(cellX, cellZ) {
-    return `${cellX},${cellZ}`;
-  }
-
+  // ---- Sources (Phase 2 writer API) ----------------------------------------------------------
   function unindexSource(entry) {
     globalSources.delete(entry);
     for (const key of entry.cells) sourceCells.get(key)?.delete(entry);
@@ -159,125 +221,154 @@ export function createWindField({ world, uniforms, state, bus }) {
 
   function indexSource(entry) {
     unindexSource(entry);
-    const { position, radius } = entry.source;
-    if (radius > SOURCE_GLOBAL_RADIUS) {
+    const box = entry.box;
+    const minX = Math.floor(box.minX / SOURCE_CELL);
+    const maxX = Math.floor(box.maxX / SOURCE_CELL);
+    const minZ = Math.floor(box.minZ / SOURCE_CELL);
+    const maxZ = Math.floor(box.maxZ / SOURCE_CELL);
+    if ((maxX - minX + 1) * (maxZ - minZ + 1) > SOURCE_GLOBAL_CELLS) {
       globalSources.add(entry);
       return;
     }
-    const minX = Math.floor((position.x - radius) / SOURCE_CELL);
-    const maxX = Math.floor((position.x + radius) / SOURCE_CELL);
-    const minZ = Math.floor((position.z - radius) / SOURCE_CELL);
-    const maxZ = Math.floor((position.z + radius) / SOURCE_CELL);
     for (let cellX = minX; cellX <= maxX; cellX++) {
       for (let cellZ = minZ; cellZ <= maxZ; cellZ++) {
-        const key = cellKey(cellX, cellZ);
-        if (!sourceCells.has(key)) sourceCells.set(key, new Set());
-        sourceCells.get(key).add(entry);
+        const key = cellHashKey(cellX, cellZ);
+        let bucket = sourceCells.get(key);
+        if (!bucket) {
+          bucket = new Set();
+          sourceCells.set(key, bucket);
+        }
+        bucket.add(entry);
         entry.cells.push(key);
       }
     }
   }
 
-  function validateSource(source) {
-    const position = source && source.position;
-    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y) || !Number.isFinite(position.z)) {
-      throw new TypeError('wind source needs a finite position {x, y, z}');
+  let sourceTurbulence = 0;
+  function visitSource(entry, position, time, out) {
+    const box = entry.box;
+    if (position.x < box.minX || position.x > box.maxX || position.y < box.minY || position.y > box.maxY || position.z < box.minZ || position.z > box.maxZ) return;
+    let result;
+    try {
+      result = entry.sample(position, time);
+    } catch (error) {
+      if (!entry.failed) {
+        entry.failed = true;
+        console.error(`[DRIFTWING] wind source "${entry.id}" failed to sample`, error);
+      }
+      return;
     }
-    if (!(source.radius > 0) || !Number.isFinite(source.radius)) throw new TypeError('wind source needs a positive radius');
-    if (typeof source.sample !== 'function') throw new TypeError('wind source needs sample(dx, dy, dz, time, outVel) -> turbulence');
-    if (typeof source.kind !== 'string' || !source.kind) throw new TypeError('wind source needs a kind');
+    if (!result) return;
+    const vel = result.vel;
+    if (vel && Number.isFinite(vel.x) && Number.isFinite(vel.y) && Number.isFinite(vel.z)) {
+      out.vel.x += vel.x;
+      out.vel.y += vel.y;
+      out.vel.z += vel.z;
+    }
+    if (Number.isFinite(result.turbulence)) sourceTurbulence = Math.max(sourceTurbulence, Math.min(1, Math.max(0, result.turbulence)));
   }
 
-  function applySources(x, y, z, time, out) {
-    let turbulence = 0;
-    const key = cellKey(Math.floor(x / SOURCE_CELL), Math.floor(z / SOURCE_CELL));
-    const local = sourceCells.get(key);
-    const visit = (entry) => {
-      const { position, radius } = entry.source;
-      const dx = x - position.x;
-      const dy = y - position.y;
-      const dz = z - position.z;
-      if (dx * dx + dy * dy + dz * dz > radius * radius) return;
-      sourceScratch.x = 0;
-      sourceScratch.y = 0;
-      sourceScratch.z = 0;
-      const sourceTurbulence = entry.source.sample(dx, dy, dz, time, sourceScratch);
-      if (Number.isFinite(sourceScratch.x) && Number.isFinite(sourceScratch.y) && Number.isFinite(sourceScratch.z)) {
-        out.vel.x += sourceScratch.x;
-        out.vel.y += sourceScratch.y;
-        out.vel.z += sourceScratch.z;
-      }
-      if (Number.isFinite(sourceTurbulence)) turbulence = Math.max(turbulence, sourceTurbulence);
-    };
-    if (local) for (const entry of local) visit(entry);
-    for (const entry of globalSources) visit(entry);
-    return turbulence;
+  function applySources(position, time, out) {
+    sourceTurbulence = 0;
+    const bucket = sourceCells.get(cellHashKey(Math.floor(position.x / SOURCE_CELL), Math.floor(position.z / SOURCE_CELL)));
+    if (bucket) for (const entry of bucket) visitSource(entry, position, time, out);
+    for (const entry of globalSources) visitSource(entry, position, time, out);
+    return sourceTurbulence;
+  }
+
+  function describeSource(entry) {
+    const box = entry.box;
+    const center = { x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2, z: (box.minZ + box.maxZ) / 2 };
+    const radius = Math.hypot(box.maxX - box.minX, box.maxY - box.minY, box.maxZ - box.minZ) / 2;
+    return { id: entry.id, kind: entry.kind, position: center, radius };
   }
 
   // ---- Public sample ---------------------------------------------------------------------------
+  const ridgeResult = { lift: 0, lee: 0 };
   const thermalResult = { lift: 0, edge: 0 };
 
-  function sample(position, time = state.time.elapsed, out = { vel: { x: 0, y: 0, z: 0 }, turbulence: 0 }) {
-    const { x, y, z } = position;
-    const ground = world.groundHeight(x, z);
-    const heightAboveGround = y - Math.max(ground, world.WATER_LEVEL);
-    const direction = uniforms.windDirection.value;
-    const speed = ambientSpeed() * ambientProfile(heightAboveGround);
-    const windX = direction.x * speed;
-    const windZ = direction.y * speed;
-    out.vel.x = windX;
-    out.vel.y = 0;
-    out.vel.z = windZ;
-    layerTotals.ambient.x = windX;
-    layerTotals.ambient.z = windZ;
+  function sample(pos, t = state.time.elapsed, out = { vel: new THREE.Vector3(), turbulence: 0 }) {
+    const { x, y, z } = pos;
+    const surface = Math.max(world.groundHeight(x, z), world.WATER_LEVEL);
+    const heightAboveGround = y - surface;
 
-    const ridge = ridgeLift(x, z, Math.max(ground, world.WATER_LEVEL), heightAboveGround, windX, windZ);
-    out.vel.y += ridge.lift;
-    layerTotals.ridge = ridge.lift;
+    ambientAt(heightAboveGround, lastLayers.ambient);
+    out.vel.copy(lastLayers.ambient);
+    const windX = lastLayers.ambient.x;
+    const windZ = lastLayers.ambient.z;
+    const windSpeed = Math.hypot(windX, windZ);
 
-    thermalAt(x, y, z, Math.max(ground, world.WATER_LEVEL), direction.x, direction.y, thermalResult);
-    out.vel.y += thermalResult.lift;
-    layerTotals.thermal = thermalResult.lift;
+    ridgeLift(x, z, surface, heightAboveGround, windX, windZ, ridgeResult);
+    thermalAt(x, y, z, t, windX, windZ, thermalResult);
+    out.vel.y += ridgeResult.lift + thermalResult.lift;
+    lastLayers.ridge = ridgeResult.lift;
+    lastLayers.thermal = thermalResult.lift;
 
-    // Turbulence intensity (m/s standard deviation) from each mechanism, then gusts from noise.
-    const mechanical = 0.16 * speed * Math.exp(-Math.max(heightAboveGround, 0) / 260);
-    const lee = 0.9 * ridge.lee;
-    const convective = 0.45 * thermalResult.edge;
-    const chop = 0.25;
-    const sigma = Math.hypot(mechanical, lee, convective, chop);
-    out.vel.x += sigma * gust(0, time, x, z);
-    out.vel.y += sigma * 0.6 * gust(1, time, z, x);
-    out.vel.z += sigma * gust(2, time, x + 311, z - 173);
+    // Turbulence intensity (m/s): mechanical near the ground, lee rotor, thermal edges, light chop.
+    const mechanical = 0.16 * windSpeed * Math.exp(-Math.max(heightAboveGround, 0) / 260);
+    const sigma = Math.hypot(mechanical, 0.9 * ridgeResult.lee, 0.45 * thermalResult.edge, 0.2);
+    lastLayers.gust.set(sigma * gust(0, t, x, z), sigma * 0.6 * gust(1, t, z, x), sigma * gust(2, t, x + 311, z - 173));
+    out.vel.add(lastLayers.gust);
 
-    const sourceTurbulence = sources.size ? applySources(x, y, z, time, out) : 0;
-    layerTotals.sources = sources.size;
-    out.turbulence = Math.min(1, Math.max(sigma / 3, sourceTurbulence));
+    let fromSources = 0;
+    if (sources.size > 0) {
+      samplePosition.set(x, y, z);
+      fromSources = applySources(samplePosition, t, out);
+    }
+    lastLayers.sources = sources.size;
+    out.turbulence = Math.min(1, Math.max(sigma / 3, fromSources));
+    lastLayers.turbulence = out.turbulence;
     return out;
+  }
+
+  /**
+   * Visits the thermals whose columns stand within radius of (x, z) at time t:
+   * visit({ id, x, z, radius, ground, top, strength, capX, capZ }). The cloud system draws a
+   * cumulus cap at (capX, top, capZ) sized by strength.
+   */
+  function thermalsNear(x, z, radius, visit, t = state.time.elapsed) {
+    const reach = Math.ceil(radius / THERMAL_CELL) + 1;
+    const centerCellX = Math.floor(x / THERMAL_CELL);
+    const centerCellZ = Math.floor(z / THERMAL_CELL);
+    for (let offsetZ = -reach; offsetZ <= reach; offsetZ++) {
+      for (let offsetX = -reach; offsetX <= reach; offsetX++) {
+        const thermal = thermalForCell(centerCellX + offsetX, centerCellZ + offsetZ);
+        if (!thermal || Math.hypot(thermal.x - x, thermal.z - z) > radius) continue;
+        ambientAt(thermal.top - thermal.ground, ambientScratch);
+        thermalLean(thermal, thermal.top, ambientScratch.x, ambientScratch.z, leanScratch);
+        visit({ id: thermal.id, x: thermal.x, z: thermal.z, radius: thermal.radius, ground: thermal.ground, top: thermal.top, strength: thermalStrength(thermal, t), capX: leanScratch.x, capZ: leanScratch.z });
+      }
+    }
   }
 
   return {
     sample,
+    thermalsNear,
 
     /**
-     * Registers a wind source: { kind, position {x,y,z}, radius, sample(dx, dy, dz, time, outVel) }.
-     * sample adds its velocity into outVel for the offset from the source centre and returns a
-     * turbulence value 0..1. Returns the source id. Call moveSource(id) after changing position.
+     * Adds a wind source: { id, bounds, sample(pos, t), kind? }. bounds is { min, max } (world-space
+     * box) or { center, radius }; sample(pos, t) returns { vel?: {x,y,z}, turbulence?: 0..1 } or null
+     * and is only called for positions inside bounds. Velocities add to the field; turbulence takes
+     * the maximum. Returns the id.
      */
     addSource(source) {
-      validateSource(source);
-      const id = source.id ? String(source.id) : `wind-${nextSourceId++}`;
+      if (!source || typeof source.sample !== 'function') throw new TypeError('wind source needs sample(pos, t)');
+      const id = String(source.id ?? '');
+      if (!id) throw new TypeError('wind source needs an id');
       if (sources.has(id)) throw new Error(`wind source "${id}" already exists`);
-      const entry = { id, source, cells: [] };
+      const kind = typeof source.kind === 'string' && source.kind ? source.kind : 'source';
+      const entry = { id, kind, box: boxFromBounds(source.bounds), sample: source.sample, cells: [], failed: false };
       sources.set(id, entry);
       indexSource(entry);
-      bus.emitTyped('windSourceAdded', { id, kind: source.kind, position: { x: source.position.x, y: source.position.y, z: source.position.z }, radius: source.radius });
+      bus.emitTyped('windSourceAdded', describeSource(entry));
       return id;
     },
 
-    /** Re-indexes a source after its position or radius changed. */
-    moveSource(id) {
+    /** Moves or resizes a source (same bounds forms as addSource). */
+    setSourceBounds(id, bounds) {
       const entry = sources.get(id);
       if (!entry) return false;
+      entry.box = boxFromBounds(bounds);
       indexSource(entry);
       return true;
     },
@@ -287,70 +378,61 @@ export function createWindField({ world, uniforms, state, bus }) {
       if (!entry) return false;
       unindexSource(entry);
       sources.delete(id);
-      bus.emitTyped('windSourceRemoved', { id, kind: entry.source.kind });
+      bus.emitTyped('windSourceRemoved', { id, kind: entry.kind });
       return true;
     },
 
     get sourceCount() { return sources.size; },
     listSources() {
-      return [...sources.values()].map(({ id, source }) => ({ id, kind: source.kind, position: { ...source.position }, radius: source.radius }));
+      return [...sources.values()].map(describeSource);
     },
 
-    /**
-     * Installs the function that lists cumulus cores near a point:
-     * provider(x, z, radius, visit) calls visit(coreX, coreZ, coreRadius, cloudBase, growth) per core.
-     */
-    setThermalProvider(provider) {
-      thermalProvider = typeof provider === 'function' ? provider : null;
-    },
-
-    /** The strongest thermal core near position, for the copilot and instruments. */
-    nearestThermal(position) {
-      const cores = collectThermals(position.x, position.z);
-      const sun = solarFactor();
+    /** The nearest working thermal (core at least minStrength m/s), for the copilot and instruments. */
+    nearestThermal(pos, minStrength = 0.8, t = state.time.elapsed) {
       let best = null;
-      for (const core of cores) {
-        const strength = sun * (1.2 + 3.2 * core.growth * Math.min(1, core.radius / 260));
-        if (strength < 0.5) continue;
-        const distance = Math.hypot(core.x - position.x, core.z - position.z);
-        if (!best || distance < best.distance) best = { x: core.x, z: core.z, base: core.base, strength, distance };
-      }
+      thermalsNear(pos.x, pos.z, THERMAL_CELL * 2, (thermal) => {
+        if (thermal.strength < minStrength) return;
+        const distance = Math.hypot(thermal.x - pos.x, thermal.z - pos.z);
+        if (!best || distance < best.distance) best = { ...thermal, distance };
+      }, t);
       return best;
     },
 
-    /** Ambient wind at position: speed (m/s) and the compass direction it blows FROM (degrees). */
-    ambientAt(position) {
-      const ground = world.groundHeight(position.x, position.z);
-      const speed = ambientSpeed() * ambientProfile(position.y - Math.max(ground, world.WATER_LEVEL));
-      const direction = uniforms.windDirection.value;
-      return { speed, fromDegrees: wrapDegrees(headingFromVector(direction.x, direction.y) + 180) };
+    /** Ambient wind at pos: speed (m/s) and the compass direction it blows FROM (degrees). */
+    ambientAt(pos) {
+      const surface = Math.max(world.groundHeight(pos.x, pos.z), world.WATER_LEVEL);
+      const vector = ambientAt(pos.y - surface, new THREE.Vector3());
+      return { speed: Math.hypot(vector.x, vector.z), fromDegrees: wrapDegrees(headingFromVector(vector.x, vector.z) + 180) };
     },
 
-    /** Per-layer values from the last sample (for the dev overlay). */
-    get lastLayers() { return layerTotals; },
+    /** Per-layer values from the most recent sample (dev overlay, instruments). */
+    get lastLayers() { return lastLayers; },
   };
 }
 
 /**
- * A dev-only wind source: a rising column with a gentle swirl. Used to prove the source path
- * end to end (addSource, spatial hash, sampling, removal) before Phase 2 spawns exist.
+ * Dev-only wind source: a rising column with a gentle swirl, used to prove addSource, the spatial
+ * hash, sampling and removal end to end before Phase 2 spawns exist.
  */
-export function createDebugUpdraft({ position, radius = 220, strength = 6, id } = {}) {
+export function createDebugUpdraft({ id = 'debug-updraft', center, radius = 220, strength = 6 }) {
+  const result = { vel: new THREE.Vector3(), turbulence: 0 };
+  const origin = { x: center.x, y: center.y, z: center.z };
   return {
     id,
     kind: 'debug-updraft',
-    position: { x: position.x, y: position.y, z: position.z },
-    radius,
-    sample(dx, dy, dz, time, outVel) {
+    bounds: { center: origin, radius },
+    sample(pos) {
+      const dx = pos.x - origin.x;
+      const dy = pos.y - origin.y;
+      const dz = pos.z - origin.z;
       const horizontal = Math.hypot(dx, dz) / radius;
       const vertical = Math.abs(dy) / radius;
       const falloff = Math.max(0, 1 - horizontal * horizontal) * Math.max(0, 1 - vertical * vertical);
-      outVel.y += strength * falloff;
       const swirl = 0.25 * strength * falloff;
       const length = Math.hypot(dx, dz) || 1;
-      outVel.x += (-dz / length) * swirl;
-      outVel.z += (dx / length) * swirl;
-      return 0.4 * falloff;
+      result.vel.set((-dz / length) * swirl, strength * falloff, (dx / length) * swirl);
+      result.turbulence = 0.4 * falloff;
+      return result;
     },
   };
 }
