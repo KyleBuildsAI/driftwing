@@ -9,6 +9,8 @@
 //
 // --file-protocol opens the page from file:// (as a double-click would) instead
 // of serving it from the local static server.
+// --url <address> loads an already-running server instead (e.g. the Vite dev server at
+// http://127.0.0.1:5199); --query is appended to it.
 //
 // Steps (JSON array, run in order after the game reports ready):
 //   { "wait": 1000 }                         sleep ms
@@ -48,6 +50,7 @@ function parseArgs(argv) {
     headful: false,
     browser: null,
     fileProtocol: false,
+    url: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -64,6 +67,7 @@ function parseArgs(argv) {
       case '--headful': options.headful = true; break;
       case '--browser': options.browser = next(); break;
       case '--file-protocol': options.fileProtocol = true; break;
+      case '--url': options.url = next(); break;
       default: throw new Error(`Unknown flag ${flag}`);
     }
   }
@@ -101,7 +105,11 @@ async function main() {
   const query = options.query ? `?${options.query}` : '';
   let server = null;
   let url;
-  if (options.fileProtocol) {
+  if (options.url) {
+    const base = new URL(options.url);
+    for (const [key, value] of new URLSearchParams(options.query)) base.searchParams.set(key, value);
+    url = base.href;
+  } else if (options.fileProtocol) {
     url = `${pathToFileURL(filePath).href}${query}`;
   } else {
     const started = await startStaticServer({ port: 0, root: dirname(filePath), quiet: true });

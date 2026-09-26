@@ -1,19 +1,28 @@
 {
   "name": "driftwing",
-  "version": "1.0.0",
+  "version": "2.0.0-phase.1",
   "private": true,
-  "description": "DRIFTWING: an ambient infinite-flight exploration game in a single index.html (three.js WebGPU)",
+  "description": "DRIFTWING: an ambient infinite-flight exploration game (three.js WebGPU, Vite)",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
-    "serve": "node tools/serve.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "build:single": "vite build --mode single",
+    "preview": "vite preview",
+    "serve:single": "node tools/serve.mjs 5199 dist-single",
     "copilot-server": "node tools/copilot-server.mjs",
-    "test": "node tools/smoke-test.mjs"
+    "test": "npm run build:single && node tools/smoke-test.mjs --file dist-single/index.html"
+  },
+  "dependencies": {
+    "three": "0.184.0"
   },
   "devDependencies": {
-    "puppeteer-core": "^24.0.0"
+    "puppeteer-core": "24.43.1",
+    "vite": "7.3.6",
+    "vite-plugin-singlefile": "2.3.3"
   },
   "license": "UNLICENSED"
 }
