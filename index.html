@@ -13960,11 +13960,22 @@ function createAudioSystem(ctx) {
     return ctx.userHasInteracted === true;
   }
 
-  // ---- Buffers ---------------------------------------------------------------------------------------
-  function createPinkNoiseBuffer(context, seconds) {
-    const length = Math.floor(context.sampleRate * seconds);
-    const fade = Math.floor(context.sampleRate * 0.08);
-    const buffer = context.createBuffer(2, length, context.sampleRate);
+  // ---- Buffers, prepared in idle time --------------------------------------------------------------
+  // About 7 s of stereo noise plus a reverb tail take ~100 ms to generate; doing that on the
+  // first click stalled a frame. AudioBuffer needs no context, so the samples are written in small
+  // idle-time slices right after load, and unlock() only has to create the context.
+  const BUFFER_SAMPLE_RATE = 48000;
+  const NOISE_SECONDS = 4;
+  const REVERB_SECONDS = 2.8;
+  const REVERB_DECAY_POWER = 2.6;
+  const SAMPLES_PER_SLICE = 4096;
+  const bufferJobs = [];
+  let preparedBuffers = null;
+  let pendingBuffers = null;
+
+  function* fillPinkNoise(buffer) {
+    const length = buffer.length;
+    const fade = Math.floor(buffer.sampleRate * 0.08);
     const generated = new Float32Array(length + fade);
     for (let channel = 0; channel < 2; channel++) {
       let b0 = 0;
@@ -13984,6 +13995,7 @@ function createAudioSystem(ctx) {
         b5 = -0.7616 * b5 - white * 0.016898;
         generated[index] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
         b6 = white * 0.115926;
+        if (index % SAMPLES_PER_SLICE === 0) yield;
       }
       const data = buffer.getChannelData(channel);
       data.set(generated.subarray(0, length));
@@ -13992,13 +14004,12 @@ function createAudioSystem(ctx) {
         const blend = index / fade;
         data[index] = generated[index] * blend + generated[length + index] * (1 - blend);
       }
+      yield;
     }
-    return buffer;
   }
 
-  function createImpulseResponse(context, seconds, decayPower) {
-    const length = Math.floor(context.sampleRate * seconds);
-    const buffer = context.createBuffer(2, length, context.sampleRate);
+  function* fillImpulseResponse(buffer, decayPower) {
+    const length = buffer.length;
     for (let channel = 0; channel < 2; channel++) {
       const data = buffer.getChannelData(channel);
       let smoothed = 0;
@@ -14008,13 +14019,63 @@ function createAudioSystem(ctx) {
         const white = Math.random() * 2 - 1;
         smoothed += (white - smoothed) * (0.62 - 0.5 * progress);
         data[index] = smoothed * envelope;
+        if (index % SAMPLES_PER_SLICE === 0) yield;
       }
       for (let reflection = 0; reflection < 6; reflection++) {
-        const index = Math.floor(context.sampleRate * (0.011 + reflection * 0.009 + Math.random() * 0.006));
+        const index = Math.floor(buffer.sampleRate * (0.011 + reflection * 0.009 + Math.random() * 0.006));
         if (index < length) data[index] += (Math.random() < 0.5 ? -1 : 1) * (0.5 - reflection * 0.06);
       }
     }
-    return buffer;
+  }
+
+  function makeBuffer(seconds, context) {
+    const sampleRate = context ? context.sampleRate : BUFFER_SAMPLE_RATE;
+    const length = Math.floor(sampleRate * seconds);
+    return context ? context.createBuffer(2, length, sampleRate) : new AudioBuffer({ numberOfChannels: 2, length, sampleRate });
+  }
+
+  function queueBufferJobs(context) {
+    const noise = makeBuffer(NOISE_SECONDS, context);
+    const reverb = makeBuffer(REVERB_SECONDS, context);
+    bufferJobs.push(fillPinkNoise(noise), fillImpulseResponse(reverb, REVERB_DECAY_POWER));
+    pendingBuffers = { noise, reverb };
+  }
+
+  function stepBufferJob() {
+    if (bufferJobs[0].next().done) bufferJobs.shift();
+    if (bufferJobs.length === 0) preparedBuffers = pendingBuffers;
+  }
+
+  function requestIdle(callback) {
+    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(callback, { timeout: 2000 });
+    else setTimeout(() => callback({ timeRemaining: () => 6, didTimeout: false }), 30);
+  }
+
+  function runBufferJobsWhileIdle(deadline) {
+    while (bufferJobs.length > 0 && (deadline.timeRemaining() > 2 || deadline.didTimeout)) {
+      stepBufferJob();
+      if (deadline.didTimeout) break;
+    }
+    if (bufferJobs.length > 0) requestIdle(runBufferJobsWhileIdle);
+  }
+
+  /** The prepared noise + reverb buffers; finishes any remaining slices now if the player was quicker. */
+  function takePreparedBuffers(context) {
+    if (!pendingBuffers) queueBufferJobs(context);
+    while (bufferJobs.length > 0) stepBufferJob();
+    return preparedBuffers;
+  }
+
+  if (typeof AudioBuffer === 'function') {
+    try {
+      queueBufferJobs(null);
+      requestIdle(runBufferJobsWhileIdle);
+    } catch (error) {
+      // Older engines without the AudioBuffer constructor: buffers are built at unlock instead.
+      noteIssue(error);
+      bufferJobs.length = 0;
+      pendingBuffers = null;
+    }
   }
 
   // ---- Graph -----------------------------------------------------------------------------------------
@@ -14032,14 +14093,14 @@ function createAudioSystem(ctx) {
 
     const effects = context.createGain();
     effects.connect(master);
+    const { noise, reverb: reverbBuffer } = takePreparedBuffers(context);
     const reverb = context.createConvolver();
-    reverb.buffer = createImpulseResponse(context, 2.8, 2.6);
+    reverb.buffer = reverbBuffer;
     const reverbReturn = context.createGain();
     reverbReturn.gain.value = 0.36;
     reverb.connect(reverbReturn);
     reverbReturn.connect(master);
 
-    const noise = createPinkNoiseBuffer(context, 4);
     const start = context.currentTime + 0.02;
 
     const windBodySource = context.createBufferSource();
