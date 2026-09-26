@@ -636,11 +636,11 @@
   #ui-root .dw-target-label {
     position: absolute;
     left: 0;
-    top: 26px;
-    transform: translateX(-50%);
+    top: 0;
+    transform: translate3d(28px, -50%, 0);
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     gap: 1px;
     padding: 3px 9px 4px;
     border-radius: 9px;
@@ -648,7 +648,7 @@
     white-space: nowrap;
     text-shadow: 0 1px 2px rgba(8, 6, 12, 0.45);
   }
-  #ui-root .dw-target.dw-label-above .dw-target-label { top: -26px; transform: translate(-50%, -100%); }
+  #ui-root .dw-target.dw-label-left .dw-target-label { align-items: flex-end; }
   #ui-root .dw-target-name { font-size: 9.5px; font-weight: 650; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dw-gold); }
   #ui-root .dw-target-distance { font-size: 13px; font-weight: 500; color: var(--dw-text); font-variant-numeric: tabular-nums; }
   #ui-root .dw-target-chevron {
@@ -692,7 +692,7 @@
     gap: 6px;
     width: min(480px, calc(100vw - 32px));
   }
-  #ui-root.dw-photo-on .dw-toasts { top: calc(var(--dw-letterbox) + 14px); }
+  #ui-root.dw-photo-on .dw-toasts { display: none; }
   #ui-root .dw-toast {
     display: inline-flex;
     align-items: center;
@@ -740,8 +740,10 @@
     z-index: -1;
   }
   #ui-root .dw-banner.dw-show { opacity: 1; transform: translate(-50%, 0); transition: opacity 0.9s ease, transform 1.2s var(--dw-ease); }
-  #ui-root.dw-photo-on .dw-banner,
   #ui-root.dw-hud-off .dw-banner { opacity: 0; }
+  /* Photo mode: transient overlays vanish at once rather than fading over the view. */
+  #ui-root.dw-photo-on .dw-banner,
+  #ui-root.dw-photo-on .dw-banner.dw-show { opacity: 0; visibility: hidden; transition: none; }
   #ui-root .dw-banner-label {
     font-size: 10.5px;
     font-weight: 650;
@@ -780,7 +782,7 @@
     align-items: center;
     gap: 8px;
   }
-  #ui-root.dw-photo-on .dw-speech { opacity: 0; visibility: hidden; }
+  #ui-root.dw-photo-on .dw-speech { opacity: 0; visibility: hidden; transition: none; }
   #ui-root .dw-subtitle {
     display: flex;
     align-items: baseline;
@@ -862,6 +864,7 @@
   #ui-root.dw-command-open .dw-hint.dw-show,
   #ui-root.dw-panel-open .dw-hint.dw-show,
   #ui-root.dw-hud-off .dw-hint.dw-show { opacity: 0; visibility: hidden; transition: opacity 0.25s ease, visibility 0s linear 0.25s; }
+  #ui-root.dw-photo-on .dw-hint.dw-show { opacity: 0; visibility: hidden; transition: none; }
   #ui-root .dw-hint-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
   #ui-root .dw-hint-item kbd { min-width: 18px; height: 18px; font-size: 10px; }
 
@@ -1310,7 +1313,8 @@
     justify-content: center;
     gap: 14px;
   }
-  #ui-root .dw-photo-meta { font-size: 12px; letter-spacing: 0.08em; color: var(--dw-text-faint); font-variant-numeric: tabular-nums; }
+  #ui-root .dw-photo-meta { font-size: 12px; letter-spacing: 0.08em; color: var(--dw-text-faint); font-variant-numeric: tabular-nums; transition: color 0.3s ease; }
+  #ui-root .dw-photo-meta.dw-photo-status { color: var(--dw-gold); }
   #ui-root .dw-photo-bar {
     position: absolute;
     inset: 0 var(--dw-right) 0 var(--dw-left);
@@ -1442,7 +1446,6 @@
   #ui-root.dw-touch #dw-panel-help .dw-panel-body { display: flex; flex-direction: column; }
   #ui-root.dw-touch #dw-panel-help .dw-lede { order: -2; }
   #ui-root.dw-touch #dw-panel-help .dw-help-touch { order: -1; }
-  #ui-root.dw-touch.dw-photo-on .dw-toasts { top: calc(var(--dw-letterbox) + 14px); }
   #ui-root.dw-touch .dw-photo-hint { white-space: normal; line-height: 1.35; }
   #ui-root.dw-touch .dw-hint { max-width: 100%; }
   #ui-root.dw-touch .dw-photo-actions kbd { display: none; }
@@ -1522,7 +1525,7 @@
   <div class="dw-target" id="dw-target" aria-hidden="true">
     <div class="dw-target-on">
       <svg class="dw-target-reticle" viewBox="0 0 48 48"><circle class="dw-target-halo" cx="24" cy="24" r="17"/><path class="dw-target-diamond" d="M24 13l8 11-8 11-8-11z"/><g class="dw-target-ringmark"><circle cx="24" cy="24" r="9.5"/><path d="M24 9.5v4M24 34.5v4M9.5 24h4M34.5 24h4"/></g></svg>
-      <div class="dw-target-label"><span class="dw-target-name" id="dw-target-name">Waypoint</span><span class="dw-target-distance" id="dw-target-distance">0 m</span></div>
+      <div class="dw-target-label" id="dw-target-label"><span class="dw-target-name" id="dw-target-name">Waypoint</span><span class="dw-target-distance" id="dw-target-distance">0 m</span></div>
     </div>
     <div class="dw-target-off">
       <svg class="dw-target-chevron" id="dw-target-chevron" viewBox="0 0 24 24"><path d="M4.5 4.2L21 12 4.5 19.8 8.4 12z"/></svg>
@@ -1785,21 +1788,21 @@
         <h3 class="dw-micro">Keyboard</h3>
         <dl class="dw-keys">
           <dt><kbd>W</kbd><kbd>S</kbd></dt><dd>Throttle up / down</dd>
-          <dt><kbd>A</kbd><kbd>D</kbd></dt><dd>Bank left / right to turn (double tap for a barrel roll)</dd>
-          <dt><kbd>&larr;</kbd><kbd>&rarr;</kbd></dt><dd>Bank left / right</dd>
+          <dt><kbd>A</kbd><kbd>D</kbd></dt><dd>Hold to bank and turn; double tap for a barrel roll</dd>
+          <dt><kbd>&larr;</kbd><kbd>&rarr;</kbd></dt><dd>Bank and turn (no barrel roll)</dd>
           <dt><kbd>&uarr;</kbd><kbd>&darr;</kbd></dt><dd>Nose up / down (Invert pitch in Settings)</dd>
-          <dt><kbd>Q</kbd><kbd>E</kbd></dt><dd>Rudder, a gentle yaw</dd>
+          <dt><kbd>Q</kbd><kbd>E</kbd></dt><dd>Rudder: a gentle yaw left / right</dd>
           <dt><kbd>Space</kbd></dt><dd>Boost</dd>
           <dt><kbd>Shift</kbd></dt><dd>Hold for fine control</dd>
         </dl>
-        <p class="dw-note">Let go of the controls and the glider levels its wings by itself.</p>
+        <p class="dw-note">Let go and the wings level by themselves; the nose follows a moment later.</p>
       </div>
       <div class="dw-group">
         <h3 class="dw-micro">Mouse</h3>
         <dl class="dw-keys">
-          <dt><span class="dw-key-word">Click</span></dt><dd>Steer with the mouse: sideways banks, up and down pitches (Esc releases it)</dd>
+          <dt><span class="dw-key-word">Click</span></dt><dd>Capture the mouse to steer: sideways banks, up and down pitches. <kbd>Esc</kbd> releases it</dd>
           <dt><span class="dw-key-word">Drag</span></dt><dd>Steer without capturing the pointer</dd>
-          <dt><span class="dw-key-word">Wheel</span></dt><dd>Throttle</dd>
+          <dt><span class="dw-key-word">Wheel</span></dt><dd>Throttle (scroll up for more)</dd>
         </dl>
       </div>
       <div class="dw-group dw-help-touch">
@@ -1815,6 +1818,7 @@
         <dl class="dw-keys">
           <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move the camera</dd>
           <dt><kbd>Q</kbd><kbd>E</kbd></dt><dd>Down / up</dd>
+          <dt><kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd></dt><dd>Look around</dd>
           <dt><span class="dw-key-word">Mouse</span></dt><dd>Look around (drag, or move while captured)</dd>
           <dt><span class="dw-key-word">Wheel</span></dt><dd>Zoom</dd>
           <dt><kbd>Shift</kbd></dt><dd>Move faster</dd>
@@ -2795,14 +2799,15 @@ function findSpawn(world, sunDirection) {
  * - Pooled fixed-size meshes refilled in place; skirts hide T-junction gaps.
  * - Worker-side vegetation scatter shown as pooled per-chunk InstancedMeshes.
  * - Terrain material: vertex colours, per-face normals, cloud shadows on the
- *   sun term only, underwater depth tint and an animated shoreline foam band.
+ *   sun term only, a soft underwater depth gradient (faceted lighting and colour
+ *   steps eased out below the waterline) and an animated shoreline foam band.
  */
 function createTerrainSystem(ctx) {
   const { scene, camera, world, state, bus, uniforms } = ctx;
   const {
     Fn, vec2, vec3, vec4, color, uniform, texture, attribute, positionWorld, positionGeometry,
     vertexColor, smoothstep, mix, sin, cos, mod, saturate, min, abs, dot, oneMinus, modelWorldMatrix,
-    screenCoordinate, fract, floor,
+    screenCoordinate, fract, floor, exp, normalize, normalView, cameraViewMatrix,
   } = TSL;
 
   // ---- Tuning --------------------------------------------------------------------------
@@ -3311,15 +3316,29 @@ function createTerrainSystem(ctx) {
     return saturate(swash.mul(swashLace).add(froth.mul(0.85))).mul(band).mul(pulse);
   })();
 
+  /**
+   * Underwater look. Seen through the semi-transparent water, flat-shaded seabed facets would read
+   * as a harsh stair-step pattern (per-face lighting and palette steps along the depth contours).
+   * Below the waterline the face colour is pulled toward a smooth depth colour (turquoise shallows
+   * -> deep blue, ~85% by 12 m) and the lighting normal is eased toward straight up, so the seabed
+   * shades as one soft gradient. The first ~3 m keep the sandy turquoise lift of the reef flats.
+   */
+  const seabedDepth = uniforms.waterLevel.sub(positionWorld.y).max(0.0);
+  const seabedDepthColor = mix(shallowWaterColor.mul(0.82), deepWaterColor, smoothstep(1.5, 12.0, seabedDepth));
+  const seabedFade = oneMinus(exp(seabedDepth.sub(0.8).max(0.0).div(-5.5))).mul(0.95);
+  const seabedCalm = smoothstep(0.2, 2.5, seabedDepth).mul(0.92);
+  const worldUpView = cameraViewMatrix.transformDirection(vec3(0, 1, 0));
+  const terrainNormalNode = normalize(mix(normalView, worldUpView, seabedCalm));
+
   const terrainColorNode = Fn(() => {
     const base = vertexColor().rgb;
     const heightAboveWater = positionWorld.y.sub(uniforms.waterLevel);
-    const depth = heightAboveWater.negate().max(0.0);
+    const depth = seabedDepth;
     const wetSand = oneMinus(smoothstep(0.15, 1.6, heightAboveWater)).mul(smoothstep(-0.3, 0.0, heightAboveWater));
     const dried = base.mul(oneMinus(wetSand.mul(0.34)));
     const shallowLift = smoothstep(0.0, 0.35, depth).mul(oneMinus(smoothstep(1.1, 3.0, depth)));
     const lifted = mix(dried, shallowWaterColor.mul(dried.add(0.35)), shallowLift.mul(0.55));
-    const submerged = mix(lifted, deepWaterColor, smoothstep(0.4, 26.0, depth).mul(0.9));
+    const submerged = mix(lifted, seabedDepthColor, seabedFade);
     return vec4(mix(submerged, foamColor, shoreFoam.mul(0.94)).mul(cloudAlbedoDim), 1.0);
   })();
   // Foam catches a little light of its own so it still reads on coasts facing away from the sun.
@@ -3327,6 +3346,7 @@ function createTerrainSystem(ctx) {
 
   const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
   material.colorNode = terrainColorNode;
+  material.normalNode = terrainNormalNode;
   material.emissiveNode = terrainEmissiveNode;
   material.receivedShadowNode = cloudShadowReceiver;
   material.name = 'terrain';
@@ -3343,6 +3363,7 @@ function createTerrainSystem(ctx) {
   })();
   const fadeMaterial = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
   fadeMaterial.colorNode = terrainColorNode;
+  fadeMaterial.normalNode = terrainNormalNode;
   fadeMaterial.emissiveNode = terrainEmissiveNode;
   fadeMaterial.receivedShadowNode = cloudShadowReceiver;
   fadeMaterial.opacityNode = lodFadeOpacity;
@@ -8773,7 +8794,23 @@ function createFlightSystem(ctx) {
     TERRAIN_MAX_PITCH: 20 * DEG,
     LOOKAHEAD_DISTANCES: Object.freeze([0, 90, 180, 300, 450, 650, 900, 1300]),
     PATH_LOOKAHEAD_DISTANCES: Object.freeze([150, 350, 650]),
+    // Heading hold / waypoint following: calm, wide turns.
+    WAYPOINT_STEERING: Object.freeze({ BANK_PER_DEGREE: 1.2, MAX_BANK: 30 * DEG, DAMPING: 2.2, MAX_ROLL_RATE: 45 * DEG }),
+    // Ring following threads 16 m rings: firmer banking toward a point on the ring's axis
+    // (cross-track correction), altitude timed to arrive at the ring's height, and terrain
+    // sampled only up to just past the ring (the course guarantees clearance there).
+    RING_STEERING: Object.freeze({ BANK_PER_DEGREE: 2.0, MAX_BANK: 40 * DEG, DAMPING: 3.5, MAX_ROLL_RATE: 60 * DEG }),
+    RING_MAX_PITCH: 12 * DEG,
+    RING_MIN_TIME_TO_RING: 1.5,
+    RING_VERTICAL_SPEED_GAIN: 0.015,
+    RING_LOOKAHEAD_MARGIN: 150,
+    RING_TRACK_LEAD_SECONDS: 2.4,
+    RING_TRACK_LEAD_MIN: 100,
+    RING_TRACK_LEAD_MAX: 200,
   });
+  // Load factor shown to fx / audio: ~1/cos(bank) in a level turn plus a modest share of
+  // the pitch-rate pull, soft-capped (the arcade turn and pitch rates would read ~9 g).
+  const LOAD = Object.freeze({ PULL_SHARE: 0.2, KNEE: 3.5, CAP: 5, MIN: -1, SMOOTHING: 5, MIN_BANK_COS: 0.2, BARREL_ROLL_EXTRA: 0.8 });
 
   const WORLD_UP = new T.Vector3(0, 1, 0);
   const LOCAL_RIGHT = new T.Vector3(1, 0, 0);
@@ -8787,8 +8824,6 @@ function createFlightSystem(ctx) {
   const bodyUp = new T.Vector3();
   const bodyRight = new T.Vector3();
   const horizontalRight = new T.Vector3();
-  const previousVelocity = player.velocity.clone();
-  const acceleration = new T.Vector3();
   const rollOffset = new T.Quaternion();
   const corkscrewOffset = new T.Vector3();
   const scratchQuaternion = new T.Quaternion();
@@ -8816,10 +8851,20 @@ function createFlightSystem(ctx) {
     age: Infinity,
     heights: new Float64Array(LOOKAHEAD_SAMPLE_COUNT),
     distances: new Float64Array(LOOKAHEAD_SAMPLE_COUNT),
+    count: 0,
+    limit: Infinity,
     floor: 0,
     gradient: 0,
   };
-  const autopilotTarget = { heading: 0, altitude: 0, clearance: 0 };
+  const autopilotTarget = {
+    heading: 0,
+    altitude: 0,
+    clearance: 0,
+    ring: false,
+    ringDistance: 0,
+    lookaheadHeading: 0,
+    lookaheadLimit: Infinity,
+  };
   let speed = player.speed;
   let stalled = false;
   let idleSeconds = 0;
@@ -9411,16 +9456,22 @@ function createFlightSystem(ctx) {
     return rightGround < leftGround ? 1 : -1;
   }
 
-  /** Samples world.heightAt along the target heading and the current path (cached). */
-  function refreshLookahead(headingDegrees) {
+  /**
+   * Samples world.heightAt along `headingDegrees` and the current path (cached), ignoring
+   * points farther than `maxDistance` (ring following stops just past the ring).
+   */
+  function refreshLookahead(headingDegrees, maxDistance) {
     const position = player.position;
     const moved = Math.hypot(position.x - lookahead.x, position.z - lookahead.z);
     const turned = Math.abs(wrapSignedDegrees(headingDegrees - lookahead.heading));
-    if (moved < 80 && turned < 6 && lookahead.age <= 0.6) return;
+    const limitChanged = Number.isFinite(maxDistance) !== Number.isFinite(lookahead.limit)
+      || (Number.isFinite(maxDistance) && Math.abs(lookahead.limit - moved - maxDistance) > 40);
+    if (moved < 80 && turned < 6 && lookahead.age <= 0.6 && !limitChanged) return;
     const directionX = Math.sin(headingDegrees * DEG);
     const directionZ = -Math.cos(headingDegrees * DEG);
     let sample = 0;
     for (const distance of AUTOPILOT.LOOKAHEAD_DISTANCES) {
+      if (distance > maxDistance) break;
       lookahead.heights[sample] = world.heightAt(position.x + directionX * distance, position.z + directionZ * distance);
       lookahead.distances[sample] = distance;
       sample++;
@@ -9428,10 +9479,13 @@ function createFlightSystem(ctx) {
     // Also along the current flight path, which differs from the target heading mid-turn.
     const pathLength = Math.max(Math.hypot(pathDirection.x, pathDirection.z), 1e-3);
     for (const distance of AUTOPILOT.PATH_LOOKAHEAD_DISTANCES) {
+      if (distance > maxDistance) break;
       lookahead.heights[sample] = world.heightAt(position.x + (pathDirection.x / pathLength) * distance, position.z + (pathDirection.z / pathLength) * distance);
       lookahead.distances[sample] = distance;
       sample++;
     }
+    lookahead.count = sample;
+    lookahead.limit = maxDistance;
     lookahead.x = position.x;
     lookahead.z = position.z;
     lookahead.heading = headingDegrees;
@@ -9443,7 +9497,7 @@ function createFlightSystem(ctx) {
     const altitude = player.position.y;
     let floor = CONFIG.WATER_LEVEL + clearance;
     let gradient = -Infinity;
-    for (let sample = 0; sample < LOOKAHEAD_SAMPLE_COUNT; sample++) {
+    for (let sample = 0; sample < lookahead.count; sample++) {
       const needed = Math.max(lookahead.heights[sample], CONFIG.WATER_LEVEL) + clearance;
       floor = Math.max(floor, needed);
       const distance = lookahead.distances[sample];
@@ -9453,47 +9507,96 @@ function createFlightSystem(ctx) {
     lookahead.gradient = gradient;
   }
 
+  /**
+   * Ring target: steer for a point on the ring's axis a couple of seconds ahead of the
+   * glider's projection onto that axis (cross-track correction), so the glider arrives on
+   * the axis instead of merely pointing at the centre. Terrain is sampled on the direct
+   * line to the ring and at most RING_LOOKAHEAD_MARGIN past it.
+   */
+  function aimAtRing(target, ringPosition, ringNormal) {
+    const position = player.position;
+    const toRingX = ringPosition.x - position.x;
+    const toRingZ = ringPosition.z - position.z;
+    const distance = Math.hypot(toRingX, toRingZ);
+    target.ring = true;
+    target.ringDistance = distance;
+    target.heading = headingFromVector(toRingX, toRingZ);
+    target.lookaheadHeading = target.heading;
+    target.lookaheadLimit = distance + AUTOPILOT.RING_LOOKAHEAD_MARGIN;
+    target.clearance = AUTOPILOT.RING_CLEARANCE;
+    if (Number.isFinite(ringPosition.y)) target.altitude = ringPosition.y;
+    const axisLength = ringNormal ? Math.hypot(ringNormal.x, ringNormal.z) : 0;
+    if (!(axisLength > 0.2)) return;
+    const axisX = ringNormal.x / axisLength;
+    const axisZ = ringNormal.z / axisLength;
+    const alongAxis = toRingX * axisX + toRingZ * axisZ;
+    const lead = clamp(speed * AUTOPILOT.RING_TRACK_LEAD_SECONDS, AUTOPILOT.RING_TRACK_LEAD_MIN, AUTOPILOT.RING_TRACK_LEAD_MAX);
+    target.heading = headingFromVector(toRingX + axisX * (lead - alongAxis), toRingZ + axisZ * (lead - alongAxis));
+  }
+
   function resolveAutopilotTarget(autopilot) {
     const target = autopilotTarget;
     target.heading = autopilot.heading;
     target.altitude = autopilot.altitude;
     target.clearance = AUTOPILOT.CLEARANCE;
-    if (!autopilot.followWaypoint) return target;
-    const position = player.position;
-    const ring = state.ringCourse;
-    if (ring && ring.active && ring.nextRingPosition && Number.isFinite(ring.nextRingPosition.x)) {
-      target.heading = bearingTo(position.x, position.z, ring.nextRingPosition.x, ring.nextRingPosition.z);
-      if (Number.isFinite(ring.nextRingPosition.y)) target.altitude = ring.nextRingPosition.y;
-      target.clearance = AUTOPILOT.RING_CLEARANCE;
-    } else if (state.waypoint && Number.isFinite(state.waypoint.x) && Number.isFinite(state.waypoint.z)) {
-      target.heading = bearingTo(position.x, position.z, state.waypoint.x, state.waypoint.z);
+    target.ring = false;
+    target.ringDistance = 0;
+    target.lookaheadLimit = Infinity;
+    if (autopilot.followWaypoint) {
+      const course = state.ringCourse;
+      const ringPosition = course && course.active ? course.nextRingPosition : null;
+      const waypoint = state.waypoint;
+      if (ringPosition && Number.isFinite(ringPosition.x) && Number.isFinite(ringPosition.z)) {
+        aimAtRing(target, ringPosition, course.nextRingNormal);
+      } else if (waypoint && Number.isFinite(waypoint.x) && Number.isFinite(waypoint.z)) {
+        target.heading = bearingTo(player.position.x, player.position.z, waypoint.x, waypoint.z);
+      }
+      autopilot.heading = target.heading;
     }
-    autopilot.heading = target.heading;
+    if (!target.ring) target.lookaheadHeading = target.heading;
     return target;
   }
 
   function computeAutopilot(step) {
-    const autopilot = player.autopilot;
-    const target = resolveAutopilotTarget(autopilot);
+    const target = resolveAutopilotTarget(player.autopilot);
     lookahead.age += step;
-    refreshLookahead(target.heading);
+    refreshLookahead(target.lookaheadHeading, target.lookaheadLimit);
     evaluateTerrainClearance(target.clearance);
-    const terrainFloor = lookahead.floor;
-    const desiredAltitude = Math.max(target.altitude, terrainFloor);
-    const terrainLimited = terrainFloor > target.altitude + 5;
+    const terrainLimited = lookahead.floor > target.altitude + 5;
+    updateAutopilotBank(target, step);
+    const altitudeError = updateAutopilotPitch(target, Math.max(target.altitude, lookahead.floor), terrainLimited);
+    const climbing = (altitudeError > 40 && terrainLimited) || lookahead.gradient > 0.08 ? 0.3 : 0;
+    autopilotState.throttle = clamp(AUTOPILOT.CRUISE_THROTTLE + (SPEED.CRUISE - speed) * 0.02 + climbing, 0.3, 0.95);
+  }
 
+  function updateAutopilotBank(target, step) {
+    const steering = target.ring ? AUTOPILOT.RING_STEERING : AUTOPILOT.WAYPOINT_STEERING;
     const headingError = wrapSignedDegrees(target.heading - player.heading);
-    const desiredBank = clamp(headingError * 1.2 * DEG, -AUTOPILOT.MAX_BANK, AUTOPILOT.MAX_BANK);
-    autopilotState.commandedBank = damp(autopilotState.commandedBank, desiredBank, 2.2, step);
-    autopilotState.rollRate = clamp(wrapSignedRadians(autopilotState.commandedBank - frame.bank) * 2.8, -45 * DEG, 45 * DEG);
+    const desiredBank = clamp(headingError * steering.BANK_PER_DEGREE * DEG, -steering.MAX_BANK, steering.MAX_BANK);
+    autopilotState.commandedBank = damp(autopilotState.commandedBank, desiredBank, steering.DAMPING, step);
+    autopilotState.rollRate = clamp(wrapSignedRadians(autopilotState.commandedBank - frame.bank) * 2.8, -steering.MAX_ROLL_RATE, steering.MAX_ROLL_RATE);
+  }
 
+  /**
+   * Pitch toward the desired altitude. Following a ring, the vertical speed is fed forward so
+   * the glider reaches the ring's height as it arrives (time to ring >= 1.5 s), up to 12 deg,
+   * and the model's nose drop in banks is cancelled so turns do not sag under the ring.
+   * Returns the altitude error (m).
+   */
+  function updateAutopilotPitch(target, desiredAltitude, terrainLimited) {
     const altitudeError = desiredAltitude - player.position.y;
-    const pitchLimit = terrainLimited && altitudeError > 0 ? AUTOPILOT.TERRAIN_PITCH : AUTOPILOT.MAX_PITCH;
+    const ringTracking = target.ring && !terrainLimited;
+    let pitchLimit = AUTOPILOT.MAX_PITCH;
+    if (terrainLimited && altitudeError > 0) pitchLimit = AUTOPILOT.TERRAIN_PITCH;
+    else if (ringTracking) pitchLimit = AUTOPILOT.RING_MAX_PITCH;
     const maxVerticalSpeed = speed * Math.sin(pitchLimit);
-    const desiredVerticalSpeed = clamp(altitudeError * 0.12, -maxVerticalSpeed, maxVerticalSpeed);
+    const closureRate = ringTracking ? 1 / Math.max(target.ringDistance / Math.max(speed, 1), AUTOPILOT.RING_MIN_TIME_TO_RING) : 0.12;
+    const desiredVerticalSpeed = clamp(altitudeError * closureRate, -maxVerticalSpeed, maxVerticalSpeed);
     const verticalSpeed = pathDirection.y * speed;
+    const verticalSpeedGain = ringTracking ? AUTOPILOT.RING_VERTICAL_SPEED_GAIN : 0.006;
+    const verticalTrim = ringTracking ? 0.06 : 0.05;
     let desiredPitch = clamp(
-      Math.asin(clamp(desiredVerticalSpeed / Math.max(speed, 1), -1, 1)) + clamp((desiredVerticalSpeed - verticalSpeed) * 0.006, -0.05, 0.05),
+      Math.asin(clamp(desiredVerticalSpeed / Math.max(speed, 1), -1, 1)) + clamp((desiredVerticalSpeed - verticalSpeed) * verticalSpeedGain, -verticalTrim, verticalTrim),
       -pitchLimit,
       pitchLimit,
     );
@@ -9503,10 +9606,11 @@ function createFlightSystem(ctx) {
       const terrainPitch = Math.min(Math.atan(lookahead.gradient * 1.25), AUTOPILOT.TERRAIN_MAX_PITCH);
       if (terrainPitch > desiredPitch) desiredPitch = terrainPitch;
     }
-    const pitchGain = terrainClimb ? 3 : 2.2;
-    autopilotState.worldPitchRate = clamp((desiredPitch - frame.pitch) * pitchGain, -25 * DEG, 25 * DEG);
-    const climbing = (altitudeError > 40 && terrainLimited) || lookahead.gradient > 0.08 ? 0.3 : 0;
-    autopilotState.throttle = clamp(AUTOPILOT.CRUISE_THROTTLE + (SPEED.CRUISE - speed) * 0.02 + climbing, 0.3, 0.95);
+    const pitchGain = terrainClimb || ringTracking ? 3 : 2.2;
+    let worldPitchRate = clamp((desiredPitch - frame.pitch) * pitchGain, -25 * DEG, 25 * DEG);
+    if (ringTracking) worldPitchRate += BANK_NOSE_DROP * Math.sin(frame.bank) ** 2;
+    autopilotState.worldPitchRate = worldPitchRate;
+    return altitudeError;
   }
 
   function updateAutopilotOverride(step) {
@@ -9686,14 +9790,31 @@ function createFlightSystem(ctx) {
     if (step > 0) {
       const headingChange = wrapSignedDegrees(player.heading - previousHeading) / step;
       smoothedYawRate = damp(smoothedYawRate, headingChange, 10, step);
-      acceleration.copy(player.velocity).sub(previousVelocity).divideScalar(step);
-      const loadFactor = (acceleration.dot(player.up) + GRAVITY * player.up.y) / GRAVITY;
-      if (Number.isFinite(loadFactor)) smoothedGForce = damp(smoothedGForce, clamp(loadFactor, -3, 9), 8, step);
+      const loadFactor = computeLoadFactor();
+      if (Number.isFinite(loadFactor)) smoothedGForce = damp(smoothedGForce, loadFactor, LOAD.SMOOTHING, step);
     }
     player.yawRate = smoothedYawRate;
     player.gForce = smoothedGForce;
     previousHeading = player.heading;
-    previousVelocity.copy(player.velocity);
+  }
+
+  /**
+   * Plausible load factor for this arcade model: cos(path pitch) / cos(bank) for the turn
+   * (the model's exaggerated turn gain does not inflate it), plus a modest share of the
+   * pitch-rate pull (v * q / g), both weaker on a slow wing, soft-capped toward LOAD.CAP.
+   */
+  function computeLoadFactor() {
+    const liftShare = 0.35 + 0.65 * frame.liftFactor;
+    const bankCos = Math.max(Math.abs(Math.cos(frame.bank)), LOAD.MIN_BANK_COS);
+    const pathPitchCos = Math.sqrt(Math.max(0, 1 - pathDirection.y * pathDirection.y));
+    const turnLoad = 1 + (pathPitchCos / bankCos - 1) * liftShare;
+    const pitchRate = rates.pitch + rates.worldPitch * Math.cos(frame.bank);
+    const pullLoad = ((speed * pitchRate) / GRAVITY) * LOAD.PULL_SHARE * liftShare;
+    const rollLoad = barrel.active ? LOAD.BARREL_ROLL_EXTRA * Math.sin(Math.PI * player.barrelRoll.progress) : 0;
+    const load = turnLoad + pullLoad + rollLoad;
+    if (load <= LOAD.KNEE) return Math.max(load, LOAD.MIN);
+    const headroom = LOAD.CAP - LOAD.KNEE;
+    return LOAD.KNEE + headroom * Math.tanh((load - LOAD.KNEE) / headroom);
   }
 
   // ---- Visual animation ----------------------------------------------------------------------
@@ -9854,7 +9975,6 @@ function createFlightSystem(ctx) {
     }
     lookahead.age = Infinity;
     previousHeading = heading;
-    previousVelocity.copy(pathDirection).multiplyScalar(speed);
     writeDerivedState(0);
     corkscrewOffset.set(0, 0, 0);
     syncVisual();
@@ -12615,10 +12735,10 @@ function createWaypointSystem(ctx) {
 //@@BEGIN rings
 /**
  * RING COURSES: a smooth course of glowing low-poly tori laid out ahead of the
- * glider. The path picks gentle turns that favour low ground (so it threads
+ * glider. The path picks lively turns that favour low ground (so it threads
  * valleys), keeps every ring >= 60 m above the rendered ground sampled along the
  * path and above the autopilot's terrain look-ahead floor, limits climbs and
- * dives to gentle grades (so "follow the rings" can fly it), and orients each
+ * dives to moderate grades (so "follow the rings" can fly it), and orients each
  * ring along the path tangent. Pass detection tests the segment flown this frame against
  * the current ring's plane. Sound comes from the audio system's own listeners
  * for ring:passed (pitch rising with streak, panned), ring:missed and
@@ -12637,23 +12757,30 @@ function createRingCourseSystem(ctx) {
   const CAPACITY = 24;
   const MIN_RINGS = 3;
   const DEFAULT_RINGS = 10;
-  const RING_RADIUS = 18;
-  const PASS_RADIUS = 19.5;
+  const RING_RADIUS = 16;
+  const PASS_RADIUS = RING_RADIUS + 1.5;
   const MISS_DISTANCE_PAST = 150;
   const ABANDON_DISTANCE = 4500;
   const TELEPORT_DISTANCE = 400;
   const CLEARANCE = 60;
-  // Courses must be flyable by WREN's autopilot ("follow the rings"), which banks at most 30 deg
-  // (~425 m turn radius at cruise), tracks altitude with a slow 8 deg-limited loop, and keeps
-  // ~45 m above the highest terrain up to 1.3 km ahead on its bearing to the ring. So: gentle
-  // turns, gentle grades, and every ring above that look-ahead floor.
+  // Courses must be flyable by WREN's autopilot ("follow the rings"), which tracks onto each
+  // ring's axis banking up to 40 deg, times its climb / descent (up to 12 deg) to reach the
+  // ring's height on arrival, and keeps ~45 m above the terrain on its line to the ring and up
+  // to 150 m past it. So: turns up to 14 deg per ring, grades up to 6 % (steeper, <= 15 %, only
+  // where terrain ahead demands it, spread over the course), and every ring above
+  // that look-ahead floor (sampled to AUTOPILOT_LOOKAHEAD past the ring, with some slack).
   const SPACING_MIN = 320;
   const SPACING_MAX = 420;
-  const MAX_TURN = 9;
-  const FIRST_TURN = 4;
-  const TURN_CANDIDATES = [0, -4.5, 4.5, -9, 9];
-  const MAX_GRADE = 0.03;
-  const AUTOPILOT_LOOKAHEAD = 1300;
+  const MAX_TURN = 14;
+  const FIRST_TURN = 6;
+  const TURN_CANDIDATES = [0, -7, 7, -14, 14];
+  const TURN_WANDER = 9;
+  const MAX_GRADE = 0.06;
+  const MAX_TERRAIN_GRADE = 0.15;
+  const ENTRY_MAX_GRADE = 0.12;
+  const ENTRY_STRETCH = [1, 1.5, 2, 2.6, 3.3];
+  const ALTITUDE_WAVE = 22;
+  const AUTOPILOT_LOOKAHEAD = 220;
   const AUTOPILOT_FLOOR_CLEARANCE = 58;
   const LOOKAHEAD_SAMPLES = 9;
   const INTRO_SECONDS = 0.55;
@@ -12754,6 +12881,7 @@ function createRingCourseSystem(ctx) {
   const origin = new T.Vector3();
   const previousPosition = new T.Vector3().copy(state.player.position);
   const nextRingPosition = { x: 0, y: 0, z: 0 };
+  const nextRingNormal = { x: 0, y: 0, z: 1 };
   const forwardZ = new T.Vector3(0, 0, 1);
   const scratchDirection = new T.Vector3();
   const scratchSide = new T.Vector3();
@@ -12774,6 +12902,7 @@ function createRingCourseSystem(ctx) {
     elapsed: 0,
     nextIndex: 0,
     nextRingPosition: null,
+    nextRingNormal: null,
     nextRingDistance: 0,
   });
 
@@ -12809,29 +12938,54 @@ function createRingCourseSystem(ctx) {
     return highest;
   }
 
+  /** A ring `spacing` metres from (x, z) along `candidateHeading`, with its terrain floor. */
+  function placeCandidate(x, z, candidateHeading, spacing) {
+    const direction = vectorFromHeading(candidateHeading, scratchDirection);
+    const endX = x + direction.x * spacing;
+    const endZ = z + direction.z * spacing;
+    const alongSamples = Math.max(6, Math.round(spacing / 60));
+    const local = Math.max(groundAlong(x, z, endX, endZ, alongSamples), groundAroundRing(endX, endZ, candidateHeading));
+    const ahead = groundAhead(x, z, direction, spacing, spacing + AUTOPILOT_LOOKAHEAD);
+    return { x: endX, z: endZ, ground: local, floor: Math.max(local + CLEARANCE, ahead + AUTOPILOT_FLOOR_CLEARANCE), spacing };
+  }
+
+  /**
+   * The first ring moves farther out (up to the last ENTRY_STRETCH factor) until the climb to
+   * it from the glider's altitude is <= ENTRY_MAX_GRADE: starting low near rising ground, a
+   * ring 60 m over the ridge ahead would otherwise be out of reach.
+   */
+  function placeFirstCandidate(x, z, candidateHeading, spacing, startAltitude) {
+    let placement = null;
+    for (const stretch of ENTRY_STRETCH) {
+      placement = placeCandidate(x, z, candidateHeading, spacing * stretch);
+      if ((placement.floor - startAltitude) / placement.spacing <= ENTRY_MAX_GRADE) break;
+    }
+    return placement;
+  }
+
   function planHeadings(total) {
     const player = state.player;
+    const startAltitude = player.position.y;
     const plan = [];
     let heading = player.heading;
     let x = player.position.x;
     let z = player.position.z;
     let wander = 0;
     for (let index = 0; index < total; index++) {
-      const spacing = index === 0 ? 340 + Math.random() * 60 : SPACING_MIN + Math.random() * (SPACING_MAX - SPACING_MIN);
-      wander = wander * 0.7 + (Math.random() * 2 - 1) * 6;
-      const turnLimit = index === 0 ? FIRST_TURN : MAX_TURN;
+      const first = index === 0;
+      const spacing = first ? 340 + Math.random() * 60 : SPACING_MIN + Math.random() * (SPACING_MAX - SPACING_MIN);
+      wander = wander * 0.7 + (Math.random() * 2 - 1) * TURN_WANDER;
+      const turnLimit = first ? FIRST_TURN : MAX_TURN;
       let best = null;
       for (const offset of TURN_CANDIDATES) {
         const turn = clamp(wander + offset, -turnLimit, turnLimit);
         const candidateHeading = heading + turn;
-        const direction = vectorFromHeading(candidateHeading, scratchDirection);
-        const endX = x + direction.x * spacing;
-        const endZ = z + direction.z * spacing;
-        const local = Math.max(groundAlong(x, z, endX, endZ, 6), groundAroundRing(endX, endZ, candidateHeading));
-        const ahead = groundAhead(x, z, direction, spacing, spacing + AUTOPILOT_LOOKAHEAD);
-        const floor = Math.max(local + CLEARANCE, ahead + AUTOPILOT_FLOOR_CLEARANCE);
-        const score = floor + Math.abs(turn) * 2.5 + Math.abs(turn - wander) * 1.5;
-        if (!best || score < best.score) best = { score, heading: candidateHeading, x: endX, z: endZ, ground: local, floor, spacing, y: 0 };
+        const placement = first
+          ? placeFirstCandidate(x, z, candidateHeading, spacing, startAltitude)
+          : placeCandidate(x, z, candidateHeading, spacing);
+        const steepEntry = first ? Math.max(0, (placement.floor - startAltitude) / placement.spacing - ENTRY_MAX_GRADE) : 0;
+        const score = placement.floor + Math.abs(turn) * 2.5 + Math.abs(turn - wander) * 1.5 + steepEntry * 2000;
+        if (!best || score < best.score) best = { score, heading: candidateHeading, ...placement, y: 0 };
       }
       heading = best.heading;
       x = best.x;
@@ -12841,14 +12995,31 @@ function createRingCourseSystem(ctx) {
     return plan;
   }
 
-  /** Altitudes: a gentle wave near the entry altitude, never under the floor, ring-to-ring grade <= MAX_GRADE. */
+  /**
+   * The grade the course may use: MAX_GRADE, steepened (up to MAX_TERRAIN_GRADE) only as much
+   * as terrain ahead demands, measured from the glider's entry altitude so that the climb to a
+   * high ring later in the course is spread over the whole course, entry leg included.
+   */
+  function courseGrade(plan, startAltitude) {
+    let travelled = 0;
+    let required = MAX_GRADE;
+    for (const entry of plan) {
+      travelled += entry.spacing;
+      required = Math.max(required, (entry.floor - startAltitude) / travelled);
+    }
+    return Math.min(required, MAX_TERRAIN_GRADE);
+  }
+
+  /** Altitudes: a rolling wave near the entry altitude, never under the floor, grades <= courseGrade (entry leg included). */
   function planAltitudes(plan) {
     const startAltitude = state.player.position.y;
     const wavePhase = Math.random() * Math.PI * 2;
-    const ceiling = CONFIG.MAX_ALTITUDE - 120;
+    // Stay under the flight model's soft ceiling (it eases the nose down in the top 260 m).
+    const ceiling = CONFIG.MAX_ALTITUDE - 300;
+    const grade = courseGrade(plan, startAltitude);
     for (let index = 0; index < plan.length; index++) {
       const entry = plan[index];
-      const wave = 12 * Math.sin(index * 0.9 + wavePhase) + (Math.random() - 0.5) * 6;
+      const wave = ALTITUDE_WAVE * Math.sin(index * 0.9 + wavePhase) + (Math.random() - 0.5) * 10;
       const target = startAltitude + wave;
       entry.y = Math.max(target, entry.floor);
     }
@@ -12857,11 +13028,21 @@ function createRingCourseSystem(ctx) {
     for (let index = 1; index < plan.length; index++) {
       const entry = plan[index];
       const previous = plan[index - 1];
-      const band = entry.spacing * MAX_GRADE;
+      const band = entry.spacing * grade;
       entry.y = Math.max(entry.floor, clamp(entry.y, previous.y - band, previous.y + band));
     }
+    // Raise earlier rings toward later high ones, but never above what the glider can reach
+    // from its entry at `grade` (or the ring's own floor): if the terrain demands more, the
+    // steep leg stays next to that terrain instead of turning the first rings into a wall.
+    let travelled = 0;
+    const reachable = plan.map((entry) => {
+      travelled += entry.spacing;
+      return startAltitude + travelled * grade;
+    });
     for (let index = plan.length - 2; index >= 0; index--) {
-      plan[index].y = Math.max(plan[index].y, plan[index + 1].y - plan[index + 1].spacing * MAX_GRADE);
+      const entry = plan[index];
+      const needed = plan[index + 1].y - plan[index + 1].spacing * grade;
+      entry.y = Math.max(entry.y, Math.min(needed, Math.max(reachable[index], entry.floor)));
     }
     for (const entry of plan) entry.y = Math.min(entry.y, ceiling);
   }
@@ -13160,9 +13341,16 @@ function createRingCourseSystem(ctx) {
       nextRingPosition.y = center.y;
       nextRingPosition.z = center.z;
       ringCourse.nextRingPosition = nextRingPosition;
+      // The ring's facing (its axis, along the course): the autopilot tracks onto this line.
+      const normal = rings[course.nextIndex].normal;
+      nextRingNormal.x = normal.x;
+      nextRingNormal.y = normal.y;
+      nextRingNormal.z = normal.z;
+      ringCourse.nextRingNormal = nextRingNormal;
       ringCourse.nextRingDistance = state.player.position.distanceTo(center);
     } else {
       ringCourse.nextRingPosition = null;
+      ringCourse.nextRingNormal = null;
       ringCourse.nextRingDistance = 0;
     }
   }
@@ -14246,7 +14434,11 @@ class Copilot {
     return false;
   }
 
-  /** Share (0..1) of the ground around (x, z) drawn snow-white: the centre plus rings at 250 m and 550 m. */
+  /**
+   * Share (0..1) of the ground around (x, z) drawn snow-white: the centre plus rings at 250 m and
+   * 550 m. Snow is only as white as the snow and pine weight in the colour blend, so a meadow-blended
+   * slope just above the snow line counts as partly green.
+   */
   static snowCover(world, x, z) {
     let snowy = 0;
     let total = 0;
@@ -14258,26 +14450,81 @@ class Copilot {
         const sampleZ = z - Math.cos(angle) * radius;
         const info = world.biomeAt(sampleX, sampleZ);
         total++;
-        if (info.weights[0] + info.weights[1] < 0.55) continue;
-        if (world.heightAt(sampleX, sampleZ) > Copilot.snowLineFor(info.temperature)) snowy++;
+        if (world.heightAt(sampleX, sampleZ) > Copilot.snowLineFor(info.temperature)) snowy += Math.min(1, info.weights[0] + info.weights[1]);
       }
     }
     return snowy / total;
   }
 
-  /**
-   * Visually honest description of the ground around (x, z). The dominant biome
-   * alone misleads: 'snow' ground below the snow line is drawn as grey-green
-   * foothills, pine ground above it is white, and strong blends look like
-   * both. Snow is judged from the cover of the surrounding ground, not one
-   * point. Returns { phrase, key, snowy, foothills, overWater, peaksNearby }.
-   */
-  static describePlace(world, x, z, groundHeight) {
-    const info = world.biomeAt(x, z);
-    const ground = Number.isFinite(groundHeight) ? groundHeight : world.groundHeight(x, z);
-    const name = info.name;
+  /** The strongest other biome when its weight is high enough to show in the ground colours, else null. */
+  static blendPartner(world, info) {
     const secondIndex = Copilot.secondBiomeIndex(info);
-    const blend = secondIndex >= 0 && info.weights[secondIndex] >= 0.3 ? world.BIOMES[secondIndex] : null;
+    return secondIndex >= 0 && info.weights[secondIndex] >= 0.25 ? world.BIOMES[secondIndex] : null;
+  }
+
+  /** Flower country under the Snow Peaks: 'high meadows' only when the ground really is high. */
+  static meadowsBelowPeaks(ground) {
+    return ground >= 150 ? 'the high meadows below the Snow Peaks' : 'the meadows at the foot of the Snow Peaks';
+  }
+
+  /**
+   * Snow-dominant ground, judged the way the terrain is coloured: white only above the local snow
+   * line (and only as white as the snow weight in the blend), grey scree just under it, and below
+   * that foothills tinted by the blend partner (green meadows, pines, sand). Fills place.phrase /
+   * snowy / foothills / peaksNearby.
+   */
+  static describeSnowCountry(world, x, z, ground, info, partner, place) {
+    const snowLine = Copilot.snowLineFor(info.temperature);
+    const cover = Copilot.snowCover(world, x, z);
+    if (ground > snowLine && cover >= 0.5) {
+      place.snowy = true;
+      place.phrase = partner?.key === 'pine' ? 'the snowfields above the Pine Valleys' : 'the snowfields of the Snow Peaks';
+      return;
+    }
+    if (ground > snowLine) {
+      const climbing = {
+        meadows: 'the slopes where the Flower Meadows climb into the Snow Peaks',
+        pine: 'the slopes where the pines give way to snow',
+        dunes: 'the dry slopes at the edge of the Snow Peaks',
+        archipelago: 'the coastal slopes of the Snow Peaks',
+      };
+      place.phrase = (partner && climbing[partner.key]) || 'the snowline of the Snow Peaks';
+      return;
+    }
+    place.foothills = true;
+    place.peaksNearby = cover >= 0.2 || Copilot.snowyPeaksAround(world, x, z);
+    const below = {
+      meadows: Copilot.meadowsBelowPeaks(ground),
+      pine: 'the wooded foothills of the Snow Peaks',
+      dunes: 'the dry foothills of the Snow Peaks',
+      archipelago: 'the coastal foothills of the Snow Peaks',
+    };
+    if (partner && below[partner.key]) place.phrase = below[partner.key];
+    else place.phrase = ground > snowLine - 60 ? 'the high slopes just below the snowline' : 'the foothills of the Snow Peaks';
+  }
+
+  /**
+   * Visually honest description of the ground around (x, z), always a noun phrase that reads after
+   * "over" or "above". The dominant biome alone misleads: 'snow' ground below the snow line is drawn
+   * as grey-green foothills, pine ground above it is white, and strong blends look like both, so the
+   * blend partner is named when its weight shows. With a heading, land is judged a little ahead
+   * (PLACE_LEAD metres), where the pilot is actually looking, unless that point is water. Returns
+   * { phrase, key, snowy, foothills, overWater, peaksNearby }.
+   */
+  static describePlace(world, x, z, groundHeight, heading) {
+    const PLACE_LEAD = 300;
+    const groundBelow = Number.isFinite(groundHeight) ? groundHeight : world.groundHeight(x, z);
+    if (Number.isFinite(heading) && groundBelow >= CONFIG.WATER_LEVEL - 0.5) {
+      const radians = heading * DEG;
+      const leadX = x + Math.sin(radians) * PLACE_LEAD;
+      const leadZ = z - Math.cos(radians) * PLACE_LEAD;
+      const leadGround = world.groundHeight(leadX, leadZ);
+      if (leadGround >= CONFIG.WATER_LEVEL - 0.5) return Copilot.describePlace(world, leadX, leadZ, leadGround);
+    }
+    const info = world.biomeAt(x, z);
+    const ground = groundBelow;
+    const name = info.name;
+    const partner = Copilot.blendPartner(world, info);
     const place = {
       phrase: `the ${name}`,
       key: info.key,
@@ -14289,37 +14536,34 @@ class Copilot {
     if (ground < CONFIG.WATER_LEVEL - 0.5) {
       place.overWater = true;
       const deep = ground < CONFIG.WATER_LEVEL - 18;
-      if (info.key === 'archipelago') place.phrase = deep ? 'open water in the Archipelago' : 'the lagoons of the Archipelago';
+      if (info.key === 'archipelago') place.phrase = deep ? 'open water between the islands' : 'the lagoons of the Archipelago';
       else place.phrase = deep ? `open water off the ${name}` : `the shallows off the ${name}`;
       return place;
     }
-    const blendName = blend ? (blend.key === 'snow' ? 'foothills of the Snow Peaks' : blend.name) : '';
-    const cover = info.key === 'snow' || info.key === 'pine' ? Copilot.snowCover(world, x, z) : 0;
     switch (info.key) {
       case 'snow':
-        if (cover >= 0.55) {
-          place.snowy = true;
-        } else if (cover >= 0.2) {
-          place.phrase = blend ? `the snowline, where the Snow Peaks give way to the ${blend.name}` : 'the snowline of the Snow Peaks';
-        } else {
-          place.foothills = true;
-          place.peaksNearby = Copilot.snowyPeaksAround(world, x, z);
-          place.phrase = blend ? `the foothills where the Snow Peaks meet the ${blend.name}` : 'the foothills of the Snow Peaks';
-        }
+        Copilot.describeSnowCountry(world, x, z, ground, info, partner, place);
         break;
-      case 'pine':
-        if (cover >= 0.55) {
+      case 'pine': {
+        const cover = Copilot.snowCover(world, x, z);
+        if (cover >= 0.5 && ground > Copilot.snowLineFor(info.temperature)) {
           place.snowy = true;
           place.phrase = 'the snowy ridges of the Pine Valleys';
-        } else if (blend) {
-          place.phrase = `the Pine Valleys, near the ${blendName}`;
+        } else if (cover >= 0.5) {
+          place.phrase = 'a pine valley between snowy ridges';
+        } else if (partner) {
+          place.phrase = partner.key === 'snow' ? 'the Pine Valleys, below the Snow Peaks' : `the Pine Valleys, on the edge of the ${partner.name}`;
         }
         break;
+      }
       case 'archipelago':
         place.phrase = 'the islands of the Archipelago';
         break;
+      case 'meadows':
+        if (partner) place.phrase = partner.key === 'snow' ? Copilot.meadowsBelowPeaks(ground) : `the Flower Meadows, on the edge of the ${partner.name}`;
+        break;
       default:
-        if (blend) place.phrase = `the ${name}, near the ${blendName}`;
+        if (partner) place.phrase = `the ${name}, on the edge of the ${partner.name}`;
     }
     return place;
   }
@@ -15021,7 +15265,7 @@ function createCopilotSystem(ctx) {
 
   // ---- Action executor ------------------------------------------------------------------------------------
   const FIND_SPECS = {
-    mountains: { kind: 'biome', key: 'mountains', phrase: 'mountains', label: 'Mountains' },
+    mountains: { kind: 'biome', key: 'mountains', phrase: 'the mountains', label: 'Mountains' },
     snow: { kind: 'snow', key: 'snow', phrase: 'snowy peaks', label: 'Snowy peaks' },
     ocean: { kind: 'biome', key: 'ocean', phrase: 'open ocean', label: 'Open ocean' },
     archipelago: { kind: 'biome', key: 'archipelago', phrase: 'the islands', label: 'Archipelago' },
@@ -15045,8 +15289,8 @@ function createCopilotSystem(ctx) {
 
   /** Where we are, as it actually looks from the cockpit (see Copilot.describePlace). */
   function currentPlace() {
-    const position = state.player.position;
-    return Copilot.describePlace(world, position.x, position.z, state.player.groundHeight);
+    const player = state.player;
+    return Copilot.describePlace(world, player.position.x, player.position.z, player.groundHeight, player.heading);
   }
 
   /** The core snapshot plus the visually honest place phrase, for both brains. */
@@ -15266,7 +15510,7 @@ function createCopilotSystem(ctx) {
       else if (spec.key === 'mountains') alreadyThere = here.key === 'snow' && state.player.groundHeight >= 320;
       else if (spec.kind === 'biome') alreadyThere = !here.overWater && here.key === spec.key && !here.foothills;
       let text = alreadyThere
-        ? `We're already over ${subject}. I've marked a spot ${target.phrase}.`
+        ? `We're already ${spec.kind === 'snow' ? 'among' : 'over'} ${subject}. I've marked a spot ${target.phrase}.`
         : pick('findFound', [`Found ${subject}, ${target.phrase}.`, `${subject.charAt(0).toUpperCase()}${subject.slice(1)}: ${target.phrase}.`]);
       if (spec.kind === 'landmark' && !discovered) text += " It's not in the journal yet.";
       text += autopilot ? ' Waypoint set, autopilot engaged.' : ' Waypoint set.';
@@ -15368,9 +15612,10 @@ function createCopilotSystem(ctx) {
   };
   const BIOME_LINES = {
     snow: ['Snow Peaks below. After dark, keep an eye out for the aurora.', 'Snow country. The ridges catch the light beautifully up here.'],
-    snowFoothills: ['The Snow Peaks start here. Foothills for now; the snow lies higher up.', "We're in the foothills of the Snow Peaks. The snow starts higher up."],
+    snowFoothills: ['The Snow Peaks start here. Foothills for now; the snow lies higher up.', "Foothills of the Snow Peaks. We'll need more height to reach the snow."],
     snowFoothillsPeaks: ['Foothills of the Snow Peaks. You can see the snow on the ridges around us.', "We're in the Snow Peaks' foothills. Look at the snow on those ridges."],
-    pine: ['Pine valleys below. Look at all that green.', 'Into the pine country. The valleys run on for miles.'],
+    snowline: ["The Snow Peaks. We're right at the snowline.", 'Snow Peaks. The snow starts just about here.'],
+    pine: ['Pine valleys below. Look at all that green.', 'Into the pine country. The valleys run on and on.'],
     pineSnowy: ['Snowy ridges above the Pine Valleys.', 'Pine country, high enough for snow on the ridges.'],
     dunes: ['The Dune Sea. Watch how the light moves over the sand.', 'Desert below. Those dunes go on forever.'],
     archipelago: ["Islands below. The water's clear enough to see the reefs.", 'The archipelago. Look at the colour of those shallows.'],
@@ -15457,7 +15702,8 @@ function createCopilotSystem(ctx) {
   /** Biome welcome line that matches what the ground below actually looks like. */
   function biomeLineKey(key) {
     const place = currentPlace();
-    if (key === 'snow' && !place.snowy) return place.peaksNearby ? 'snowFoothillsPeaks' : 'snowFoothills';
+    if (key === 'snow' && place.foothills) return place.peaksNearby ? 'snowFoothillsPeaks' : 'snowFoothills';
+    if (key === 'snow' && !place.snowy) return 'snowline';
     if (key === 'pine' && place.snowy) return 'pineSnowy';
     return key;
   }
@@ -15613,7 +15859,17 @@ function createUISystem(ctx) {
   const SEED_PATTERN = /^[A-Za-z0-9-]{1,24}$/;
   const SEED_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const FIRST_RUN_KEY = 'driftwing.ui.firstRunHintSeen';
-  const MAX_TOASTS = 3;
+  const MAX_TOASTS = 2;
+  // Toasts raised in photo mode wait for the exit; older ones are no longer news.
+  const DEFERRED_TOAST_MAX_AGE = 45;
+  // Seconds a banner or toast must have been on screen to count as read when photo mode cuts it short.
+  const OVERLAY_READ_SECONDS = 1.6;
+  // World-space radius of what the target marker points at (rings.js ring + halo; waypoints.js ground ring),
+  // so the label can sit beside the target instead of on top of it.
+  const TARGET_FOOTPRINT = { ring: 22, waypoint: 46 };
+  const TARGET_LABEL_MIN_OFFSET = 28;
+  const TARGET_LABEL_MAX_OFFSET = 190;
+  const TARGET_LABEL_WIDTH = 124;
   const LANDMARK_MARKER_COUNT = 4;
   const LANDMARK_MARKER_RADIUS = 4500;
   const COMMAND_HISTORY_LIMIT = 16;
@@ -15669,6 +15925,7 @@ function createUISystem(ctx) {
     menuNewWorld: requireElement('dw-menu-new-world'),
     mic: requireElement('dw-mic'),
     target: requireElement('dw-target'),
+    targetLabel: requireElement('dw-target-label'),
     targetName: requireElement('dw-target-name'),
     targetDistance: requireElement('dw-target-distance'),
     targetChevron: requireElement('dw-target-chevron'),
@@ -15766,14 +16023,17 @@ function createUISystem(ctx) {
   const chipState = { minute: -1, label: null, phase: '', ringIndex: -1, ringTotal: -1, ringTenths: -1, ringStreak: -1 };
   const targetState = {
     kind: null, shownKind: null, label: '', distance: 0, mode: '', x: NaN, y: NaN, angle: NaN, distanceKey: NaN, name: '', near: null,
-    labelAbove: false, waypointX: NaN, waypointZ: NaN, waypointBase: 0,
+    labelOffset: NaN, labelLeft: false, waypointX: NaN, waypointZ: NaN, waypointBase: 0,
   };
   const subtitleState = { visible: false, expiresAt: 0 };
   const transcriptState = { visible: false, expiresAt: Infinity };
-  const bannerState = { phase: 'idle', until: 0, queue: [] };
+  const bannerState = { phase: 'idle', until: 0, queue: [], current: null, shownAt: 0 };
   const biomeBannerState = { lastKey: state.player.biome ? state.player.biome.key : null, lastShownAt: -Infinity, pending: null, pendingSince: 0 };
   const hintState = { showAt: Infinity, hideAt: Infinity, visible: false, dodging: false, speechLayout: -1, left: 0, right: 0, top: 0, bottom: 0 };
   const toasts = [];
+  const deferredToasts = [];
+  let deferredToastFlushAt = 0;
+  const photoState = { metaText: '', statusText: '', statusUntil: 0, statusShown: false, refreshTimer: 0, targetLabel: '', targetUntil: 0 };
   const commandHistory = [];
   let commandHistoryIndex = -1;
   const journalStatElements = { distance: null, time: null, altitude: null, landmarks: null };
@@ -16252,6 +16512,7 @@ function createUISystem(ctx) {
     projected.copy(targetWorld).applyMatrix4(camera.matrixWorldInverse);
     const cameraX = projected.x;
     const cameraY = projected.y;
+    const depth = -projected.z;
     const behind = projected.z > -0.5;
     const width = view.width;
     const height = view.height;
@@ -16267,9 +16528,7 @@ function createUISystem(ctx) {
     if (onScreen) {
       setTargetMode('on');
       placeTarget(screenX, screenY);
-      // Near the bottom of the marker area the label sits above the reticle so
-      // it never slides under the subtitle / hint stack at the bottom centre.
-      setTargetLabelAbove(screenY > height - targetMargins.bottom - 60);
+      placeTargetLabel(screenX, depth, height);
       return;
     }
     const centerX = (targetMargins.left + width - targetMargins.right) * 0.5;
@@ -16310,10 +16569,28 @@ function createUISystem(ctx) {
     targetState.y = y;
     dom.target.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
   }
-  function setTargetLabelAbove(above) {
-    if (above === targetState.labelAbove) return;
-    targetState.labelAbove = above;
-    dom.target.classList.toggle('dw-label-above', above);
+  /**
+   * The label sits beside the reticle at its height, just clear of the target's projected
+   * footprint (the ring itself, or the beacon's ground ring below the reticle), so the target
+   * stays visible. It flips to the left when the right side is short of room. When the target
+   * fills a large part of the view, the label tucks in next to the reticle inside the opening.
+   */
+  function placeTargetLabel(screenX, depth, height) {
+    const focalPixels = camera.projectionMatrix.elements[5] * height * 0.5;
+    const footprint = ((TARGET_FOOTPRINT[targetState.kind] || 0) * focalPixels) / Math.max(depth, 1);
+    const clearOffset = footprint + 14;
+    const rawOffset = clearOffset <= TARGET_LABEL_MAX_OFFSET ? Math.max(TARGET_LABEL_MIN_OFFSET, clearOffset) : TARGET_LABEL_MIN_OFFSET;
+    const offset = Math.round(rawOffset / 2) * 2;
+    const roomRight = view.width - screenX - 12;
+    const roomLeft = screenX - 12;
+    const left = offset + TARGET_LABEL_WIDTH > roomRight && roomLeft > roomRight;
+    if (offset === targetState.labelOffset && left === targetState.labelLeft) return;
+    targetState.labelOffset = offset;
+    if (left !== targetState.labelLeft) {
+      targetState.labelLeft = left;
+      dom.target.classList.toggle('dw-label-left', left);
+    }
+    dom.targetLabel.style.transform = left ? `translate3d(calc(${-offset}px - 100%), -50%, 0)` : `translate3d(${offset}px, -50%, 0)`;
   }
 
   /**
@@ -16382,50 +16659,143 @@ function createUISystem(ctx) {
   // ---------------------------------------------------------------------------
   // Toasts
   // ---------------------------------------------------------------------------
+  /**
+   * Toasts coalesce by `options.key` (default: the text): a toast whose key is already on
+   * screen replaces that one and restarts its timer instead of stacking. At most MAX_TOASTS
+   * stay visible. In photo mode nothing is drawn over the view: `options.photo` picks
+   * 'defer' (default: shown after photo mode), 'status' (brief line in the photo bar, also the
+   * default for warnings) or 'drop'.
+   */
   function toast(text, options = {}) {
     const message = String(text ?? '').trim();
     if (!message) return;
     const kind = TOAST_KINDS.has(options.kind) ? options.kind : 'info';
     const duration = Number.isFinite(options.duration) ? clamp(options.duration, 1, 20) : clamp(2.4 + message.length * 0.035, 2.8, 6.5);
-    toastSerial++;
-    for (const entry of toasts) {
-      if (entry.text === message && entry.leaveAt === null) {
-        entry.expiresAt = uiClock + duration;
-        return;
-      }
-    }
+    const key = typeof options.key === 'string' && options.key ? options.key : message;
     const wrap = Boolean(options.wrap) || message.length > 72;
+    toastSerial++;
+    if (photoActive) {
+      routePhotoToast(message, key, kind, options);
+      return;
+    }
+    const existing = findToast(key);
+    if (existing) {
+      refreshToast(existing, message, kind, duration, wrap);
+      return;
+    }
     const element = document.createElement('div');
-    element.className = `dw-toast glass dw-toast-${kind}${wrap ? ' dw-toast-wrap' : ''}`;
     element.setAttribute('role', 'status');
     const dot = document.createElement('span');
     dot.className = 'dw-toast-dot';
     const label = document.createElement('span');
-    label.className = wrap ? 'dw-toast-text dw-wrap' : 'dw-toast-text';
-    label.textContent = message;
     element.append(dot, label);
+    const entry = { element, label, key, text: '', kind, wrap, duration, expiresAt: uiClock + duration, leaveAt: null, shownAt: uiClock };
+    setToastContent(entry, message, kind, wrap);
     dom.toasts.append(element);
-    toasts.push({ element, text: message, expiresAt: uiClock + duration, leaveAt: null });
-    const maxToasts = view.height < 480 ? 1 : touchMode && view.height > view.width ? MAX_TOASTS - 1 : MAX_TOASTS;
+    toasts.push(entry);
+    enforceToastCap();
+  }
+
+  function setToastContent(entry, message, kind, wrap) {
+    entry.text = message;
+    entry.kind = kind;
+    entry.wrap = wrap;
+    entry.element.className = `dw-toast glass dw-toast-${kind}${wrap ? ' dw-toast-wrap' : ''}`;
+    entry.label.className = wrap ? 'dw-toast-text dw-wrap' : 'dw-toast-text';
+    entry.label.textContent = message;
+  }
+
+  function findToast(key) {
+    for (let index = toasts.length - 1; index >= 0; index--) {
+      if (toasts[index].key === key) return toasts[index];
+    }
+    return null;
+  }
+
+  /** Replaces a toast in place; one on its way out slides back in instead of a new one stacking. */
+  function refreshToast(entry, message, kind, duration, wrap) {
+    const reviving = entry.leaveAt !== null;
+    const changed = entry.text !== message || entry.kind !== kind;
+    setToastContent(entry, message, kind, wrap);
+    entry.leaveAt = null;
+    entry.duration = duration;
+    entry.expiresAt = uiClock + duration;
+    if (reviving) {
+      entry.shownAt = uiClock;
+      enforceToastCap();
+    } else if (changed && !reducedMotionQuery.matches) {
+      entry.element.animate([{ transform: 'scale(1.035)', filter: 'brightness(1.25)' }, { transform: 'none', filter: 'none' }], { duration: 320, easing: 'ease-out' });
+    }
+  }
+
+  function startToastExit(entry) {
+    entry.leaveAt = uiClock + 0.45;
+    entry.element.classList.add('dw-leaving');
+  }
+
+  /** Oldest toasts beyond the cap leave; at most one extra is still animating out. */
+  function enforceToastCap() {
+    const maxToasts = view.height < 480 ? 1 : MAX_TOASTS;
     let activeCount = 0;
     for (const entry of toasts) if (entry.leaveAt === null) activeCount++;
     for (const entry of toasts) {
       if (activeCount <= maxToasts) break;
       if (entry.leaveAt === null) {
-        entry.expiresAt = uiClock;
+        startToastExit(entry);
         activeCount--;
       }
     }
+    let leavingKept = 0;
+    for (let index = toasts.length - 1; index >= 0; index--) {
+      const entry = toasts[index];
+      if (entry.leaveAt === null) continue;
+      if (leavingKept < 1) {
+        leavingKept++;
+        continue;
+      }
+      entry.element.remove();
+      toasts.splice(index, 1);
+    }
+  }
+
+  function routePhotoToast(message, key, kind, options) {
+    const policy = options.photo || (kind === 'warning' ? 'status' : 'defer');
+    if (policy === 'status') showPhotoStatus(message);
+    else if (policy === 'defer') deferToast(message, key, { kind, key, duration: options.duration, wrap: options.wrap });
+  }
+
+  function deferToast(message, key, options) {
+    const index = deferredToasts.findIndex((entry) => entry.key === key);
+    if (index >= 0) deferredToasts.splice(index, 1);
+    deferredToasts.push({ text: message, key, options, queuedAt: uiClock });
+    if (deferredToasts.length > MAX_TOASTS) deferredToasts.shift();
+  }
+
+  function flushDeferredToasts() {
+    deferredToastFlushAt = 0;
+    const pending = deferredToasts.splice(0);
+    for (const entry of pending) {
+      if (uiClock - entry.queuedAt <= DEFERRED_TOAST_MAX_AGE) toast(entry.text, entry.options);
+    }
+  }
+
+  /** Photo mode clears the stack at once; toasts that had barely appeared return afterwards. */
+  function clearToastsForPhoto() {
+    for (const entry of toasts) {
+      if (entry.leaveAt === null && uiClock - entry.shownAt < OVERLAY_READ_SECONDS) {
+        deferToast(entry.text, entry.key, { kind: entry.kind, key: entry.key, duration: entry.duration, wrap: entry.wrap });
+      }
+      entry.element.remove();
+    }
+    toasts.length = 0;
   }
 
   function updateToasts() {
+    if (deferredToastFlushAt && !photoActive && uiClock >= deferredToastFlushAt) flushDeferredToasts();
     for (let index = toasts.length - 1; index >= 0; index--) {
       const entry = toasts[index];
       if (entry.leaveAt === null) {
-        if (uiClock >= entry.expiresAt) {
-          entry.leaveAt = uiClock + 0.45;
-          entry.element.classList.add('dw-leaving');
-        }
+        if (uiClock >= entry.expiresAt) startToastExit(entry);
       } else if (uiClock >= entry.leaveAt) {
         entry.element.remove();
         toasts.splice(index, 1);
@@ -16514,11 +16884,32 @@ function createUISystem(ctx) {
       dom.bannerPalette.replaceChildren();
     }
     dom.banner.classList.add('dw-show');
+    bannerState.current = entry;
+    bannerState.shownAt = uiClock;
+  }
+  /**
+   * Photo mode hides the banner at once (the CSS drops its fade). A banner cut short before it
+   * could be read goes back to the front of the queue and plays after photo mode.
+   */
+  function suspendBannerForPhoto() {
+    const current = bannerState.current;
+    if (bannerState.phase === 'showing' && current && uiClock - bannerState.shownAt < OVERLAY_READ_SECONDS) {
+      if (!bannerState.queue.some((queued) => queued.title === current.title)) bannerState.queue.unshift(current);
+    }
+    dom.banner.classList.remove('dw-show');
+    bannerState.phase = 'idle';
+    bannerState.current = null;
+  }
+  /** Queued banners wait for the letterbox to clear after photo mode. */
+  function resumeBannersAfterPhoto() {
+    const earliest = uiClock + 0.9;
+    for (const entry of bannerState.queue) entry.notBefore = Math.max(entry.notBefore || 0, earliest);
   }
   function updateBanner() {
     if (bannerState.phase === 'showing' && uiClock >= bannerState.until) {
       dom.banner.classList.remove('dw-show');
       bannerState.phase = 'leaving';
+      bannerState.current = null;
       bannerState.until = uiClock + 1.3;
     } else if (bannerState.phase === 'leaving' && uiClock >= bannerState.until) {
       bannerState.phase = 'idle';
@@ -16573,7 +16964,7 @@ function createUISystem(ctx) {
 
   function toggleMic() {
     if (micState === 'unsupported') {
-      toast('Voice input is not available in this browser. You can type to WREN instead.');
+      toast('Voice input is not available in this browser. You can type to WREN instead.', { key: 'mic', photo: 'status' });
       openCommandBar();
       return;
     }
@@ -16647,7 +17038,7 @@ function createUISystem(ctx) {
 
   function clearWaypoint() {
     if (!state.waypoint) {
-      toast('There is no waypoint to clear.');
+      toast('There is no waypoint to clear.', { key: 'waypoint' });
       return;
     }
     runAction({ type: 'clearWaypoint' });
@@ -16664,7 +17055,7 @@ function createUISystem(ctx) {
   function toggleVoice() {
     const next = !settings.get('copilotVoice');
     settings.set('copilotVoice', next);
-    toast(next ? 'WREN voice on' : 'WREN voice off. Subtitles only');
+    toast(next ? 'WREN voice on' : 'WREN voice off. Subtitles only', { key: 'voice', photo: 'status' });
   }
 
   function toggleFpsBadge() {
@@ -17100,10 +17491,45 @@ function createUISystem(ctx) {
   // Photo mode chrome
   // ---------------------------------------------------------------------------
   function renderPhotoChrome() {
-    dom.photoMeta.textContent = `${capitalize(state.time.label || '')} · ${formatClock(state.time.dayTime)} · Seed ${state.seed}`;
+    photoState.refreshTimer = 0;
+    renderPhotoMeta();
     dom.photoHint.innerHTML = touchMode
       ? 'Drag on the left to look around'
       : '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Q</kbd><kbd>E</kbd> down / up · Mouse look · Wheel zoom · <kbd>Shift</kbd> faster';
+  }
+  /**
+   * Live time label for the photo bar. While a requested time change is still easing the sky
+   * toward its target, the target's label is shown (the clock itself stays live).
+   */
+  function photoMetaText() {
+    const time = state.time;
+    const label = photoState.targetLabel && uiClock < photoState.targetUntil ? photoState.targetLabel : time.label || '';
+    return `${capitalize(label)} · ${formatClock(Number(time.dayTime) || 0)} · Seed ${state.seed}`;
+  }
+  /** Writes the photo bar meta line (or a brief status such as a saved photo) when it changes. */
+  function renderPhotoMeta() {
+    const status = photoState.statusText && uiClock < photoState.statusUntil ? photoState.statusText : '';
+    const text = status || photoMetaText();
+    if (text !== photoState.metaText) {
+      photoState.metaText = text;
+      dom.photoMeta.textContent = text;
+    }
+    const statusShown = Boolean(status);
+    if (statusShown !== photoState.statusShown) {
+      photoState.statusShown = statusShown;
+      dom.photoMeta.classList.toggle('dw-photo-status', statusShown);
+    }
+  }
+  function showPhotoStatus(text) {
+    photoState.statusText = text;
+    photoState.statusUntil = uiClock + clamp(1.8 + text.length * 0.03, 2.4, 4.5);
+    renderPhotoMeta();
+  }
+  function updatePhotoChrome(step) {
+    photoState.refreshTimer -= step;
+    if (photoState.refreshTimer > 0) return;
+    photoState.refreshTimer = 0.5;
+    renderPhotoMeta();
   }
   function setPhotoMode(active) {
     const next = Boolean(active);
@@ -17115,8 +17541,15 @@ function createUISystem(ctx) {
     if (next) {
       closeCommandBar();
       showPanel(null);
+      suspendBannerForPhoto();
+      clearToastsForPhoto();
+      photoState.statusText = '';
       renderPhotoChrome();
-      if (bannerState.phase === 'showing') bannerState.until = uiClock;
+    } else {
+      resumeBannersAfterPhoto();
+      if (deferredToasts.length > 0) deferredToastFlushAt = uiClock + 0.7;
+      // A first-run hint paused by photo mode gets enough time to be read again.
+      if (hintState.visible) hintState.hideAt = Math.max(hintState.hideAt, uiClock + 3);
     }
     if (touchMode) {
       releaseStick();
@@ -17544,8 +17977,8 @@ function createUISystem(ctx) {
     autopilotDetailTimer = 0;
     if (enabled === lastAutopilotEnabled) return;
     lastAutopilotEnabled = enabled;
-    if (enabled) toast(payload.followWaypoint && (state.waypoint || state.ringCourse.active) ? 'Autopilot engaged, following the marker' : 'Autopilot engaged');
-    else toast(payload.reason === 'manual override' ? 'Autopilot off. You have the controls' : 'Autopilot off');
+    if (enabled) toast(payload.followWaypoint && (state.waypoint || state.ringCourse.active) ? 'Autopilot engaged, following the marker' : 'Autopilot engaged', { key: 'autopilot' });
+    else toast(payload.reason === 'manual override' ? 'Autopilot off. You have the controls' : 'Autopilot off', { key: 'autopilot' });
     wake();
   });
   bus.on('waypoint:set', (payload) => {
@@ -17554,21 +17987,21 @@ function createUISystem(ctx) {
     const distance = Number.isFinite(payload.x) && Number.isFinite(payload.z) ? Math.hypot(payload.x - player.x, payload.z - player.z) : NaN;
     const label = typeof payload.label === 'string' && payload.label.trim() && payload.label.trim().toLowerCase() !== 'waypoint' ? payload.label.trim() : '';
     const distanceText = Number.isFinite(distance) ? formatDistance(distance) : '';
-    toast(['Waypoint set', label, distanceText].filter(Boolean).join(' · '), { kind: 'success' });
+    toast(['Waypoint set', label, distanceText].filter(Boolean).join(' · '), { kind: 'success', key: 'waypoint' });
     targetState.waypointX = NaN;
     wake();
   });
   bus.on('waypoint:reached', (payload) => {
     waypointReachedAt = uiClock;
     const label = payload && typeof payload.label === 'string' && payload.label.trim() && payload.label.trim().toLowerCase() !== 'waypoint' ? payload.label.trim() : '';
-    toast(label ? `Arrived at ${label}` : 'Waypoint reached', { kind: 'success' });
+    toast(label ? `Arrived at ${label}` : 'Waypoint reached', { kind: 'success', key: 'waypoint' });
   });
   bus.on('waypoint:cleared', () => {
-    if (uiClock - waypointReachedAt > 4) toast('Waypoint cleared');
+    if (uiClock - waypointReachedAt > 4) toast('Waypoint cleared', { key: 'waypoint' });
   });
   bus.on('rings:started', (payload) => {
     const total = payload && Number.isFinite(payload.total) ? payload.total : 0;
-    toast(total ? `Ring course: ${total} rings. Follow the gold marker` : 'Ring course started', { kind: 'success' });
+    toast(total ? `Ring course: ${total} rings. Follow the gold marker` : 'Ring course started', { kind: 'success', key: 'rings' });
     chipState.ringIndex = -1;
     wake();
   });
@@ -17582,12 +18015,17 @@ function createUISystem(ctx) {
     queueBanner({ label: 'Course complete', title: `${passed} of ${total} rings`, detail: `${formatRaceTime(payload.time)} · best streak ${bestStreak}`, duration: 5.2 });
     if (activePanel === 'journal') renderJournal();
   });
-  bus.on('rings:cancelled', () => toast('Ring course cancelled'));
+  bus.on('rings:cancelled', () => toast('Ring course cancelled', { key: 'rings' }));
   bus.on('time:changed', (payload) => {
     if (!payload) return;
     const name = payload.preset && PRESET_LABELS[payload.preset] ? PRESET_LABELS[payload.preset] : String(payload.label || '').trim();
-    if (name) toast(`Shifting to ${name}`);
+    const easing = Number(payload.transition) > 0;
+    photoState.targetLabel = easing ? String(payload.label || '').trim() : '';
+    photoState.targetUntil = easing ? uiClock + Number(payload.transition) + 0.2 : 0;
+    // One coalescing toast per change; the photo bar's live label covers it in photo mode.
+    if (name) toast(`Shifting to ${name}`, { key: 'time', photo: 'drop' });
     chipState.label = null;
+    if (photoActive) renderPhotoMeta();
     wake();
   });
   bus.on('journal:changed', () => {
@@ -17595,7 +18033,7 @@ function createUISystem(ctx) {
   });
   bus.on('screenshot:taken', () => {
     playShutterFlash();
-    toast('Photo saved to your downloads', { kind: 'success' });
+    toast('Photo saved to your downloads', { kind: 'success', photo: 'status' });
   });
   bus.on('settings:changed', (payload) => {
     if (!payload || !payload.key) return;
@@ -17629,7 +18067,7 @@ function createUISystem(ctx) {
   // ---------------------------------------------------------------------------
   // Per-frame update
   // ---------------------------------------------------------------------------
-  function updateTimers() {
+  function updateTimers(step) {
     updateToasts();
     if (subtitleState.visible && uiClock >= subtitleState.expiresAt) hideSubtitle();
     if (transcriptState.visible && uiClock >= transcriptState.expiresAt) {
@@ -17638,7 +18076,11 @@ function createUISystem(ctx) {
     }
     updatePendingBiome();
     updateBanner();
-    if (uiClock >= hintState.showAt) {
+    if (photoActive) {
+      // The first-run hint waits out photo mode: its show / hide timers are paused.
+      if (Number.isFinite(hintState.showAt)) hintState.showAt += step;
+      if (Number.isFinite(hintState.hideAt)) hintState.hideAt += step;
+    } else if (uiClock >= hintState.showAt) {
       hintState.showAt = Infinity;
       hintState.hideAt = uiClock + 6.5;
       hintState.visible = true;
@@ -17676,7 +18118,8 @@ function createUISystem(ctx) {
     lastUpdateAt = now;
     uiClock += step;
     updateAutoHide();
-    updateTimers();
+    updateTimers(step);
+    if (photoActive) updatePhotoChrome(step);
     const ringActive = Boolean(state.ringCourse && state.ringCourse.active);
     setRootClass('dw-ring-active', ringActive);
     const hudShown = state.ready && !idle && !hudHiddenByUser && !photoActive;
