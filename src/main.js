@@ -27,6 +27,9 @@ import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, be
 import { EventBus } from './core/eventBus.js';
 import { attachTypedEvents } from './core/events.js';
 import { createWindField } from './env/WindField.js';
+import { craftRegistry } from './craft/registry.js';
+import { createControlState } from './input/controlState.js';
+import { createFlightTelemetry, airDensity, speedOfSound } from './flight/telemetry.js';
 import { storage } from './core/storage.js';
 import { findSpawn } from './world/spawn.js';
 import { resolveSeed } from './core/seed.js';
@@ -158,6 +161,7 @@ async function boot() {
       autopilot: { enabled: false, heading: spawn.heading, altitude: spawn.y, followWaypoint: false },
       biome: world.biomeAt(spawn.x, spawn.z),
     },
+    flight: createFlightTelemetry(),
     waypoint: null,
     ringCourse: { active: false, total: 0, passed: 0, streak: 0, bestStreak: 0, elapsed: 0, nextIndex: 0 },
     perf: { fps: 60, frameMs: 16.7 },
@@ -194,6 +198,8 @@ async function boot() {
     worldOptions: WORLD_OPTIONS,
     state,
     input,
+    controls: createControlState(),
+    craftRegistry,
     uniforms,
     textures: { cloudShadow: cloudShadowTexture },
     quality: {},
@@ -475,6 +481,49 @@ async function boot() {
     if (Number.isFinite(player.heading)) lastGood.heading = player.heading;
   }
 
+  // ---- Bridges from the v1 arcade flight and input state to the v2 contracts -----------------
+  // ctx.controls (ControlState) and state.flight (telemetry) are what v2 systems read.
+  const windSample = { vel: new THREE.Vector3(), turbulence: 0 };
+  function bridgeLegacyControls() {
+    const controls = ctx.controls;
+    controls.pitch = input.pitch;
+    controls.roll = input.roll;
+    controls.yaw = input.yaw;
+    controls.throttle = state.player.throttle;
+  }
+  function writeLegacyTelemetry() {
+    const player = state.player;
+    const flight = state.flight;
+    flight.position.copy(player.position);
+    flight.velocity.copy(player.velocity);
+    flight.quaternion.copy(player.quaternion);
+    ctx.wind.sample(player.position, state.time.elapsed, windSample);
+    flight.wind.copy(windSample.vel);
+    flight.turbulence = windSample.turbulence;
+    flight.airVelocity.copy(player.velocity).sub(windSample.vel);
+    flight.airspeed = flight.airVelocity.length();
+    flight.indicatedAirspeed = flight.airspeed * Math.sqrt(airDensity(player.altitude) / 1.225);
+    flight.groundSpeed = Math.hypot(player.velocity.x, player.velocity.z);
+    flight.mach = flight.airspeed / speedOfSound(player.altitude);
+    flight.altitude = player.altitude;
+    flight.agl = player.agl;
+    flight.radarAltitude = player.agl;
+    flight.verticalSpeed = player.verticalSpeed;
+    flight.vario = player.verticalSpeed;
+    flight.heading = player.heading;
+    flight.pitch = player.pitch;
+    flight.roll = player.roll;
+    flight.gLoad = player.gForce;
+    flight.throttle = player.throttle;
+    flight.rpm = player.throttle;
+    flight.stall.stalled = player.stalled;
+    flight.stall.warning = player.stalled;
+    flight.autopilot.enabled = player.autopilot.enabled;
+    flight.autopilot.heading = player.autopilot.heading;
+    flight.autopilot.altitude = player.autopilot.altitude;
+    flight.glideRatio = player.verticalSpeed < -0.1 ? flight.groundSpeed / -player.verticalSpeed : 0;
+  }
+
   // ---- Biome tracking ----------------------------------------------------------------------------
   let biomeTimer = 0;
   function trackBiome(dt) {
@@ -520,7 +569,11 @@ async function boot() {
         disabledSystems.add(name);
         console.error(`[DRIFTWING] system "${name}" crashed and was disabled`, error);
       }
-      if (name === 'flight') enforceSafety();
+      if (name === 'input') bridgeLegacyControls();
+      if (name === 'flight') {
+        enforceSafety();
+        writeLegacyTelemetry();
+      }
     }
     if (!state.paused) trackBiome(simDt);
     perf.update(realDt, lastCpuMs);
