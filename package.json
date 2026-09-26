@@ -1,0 +1,19 @@
+{
+  "name": "driftwing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DRIFTWING: an ambient infinite-flight exploration game in a single index.html (three.js WebGPU)",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "serve": "node tools/serve.mjs",
+    "copilot-server": "node tools/copilot-server.mjs",
+    "test": "node tools/smoke-test.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24.0.0"
+  },
+  "license": "UNLICENSED"
+}
