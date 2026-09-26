@@ -6873,6 +6873,13 @@ function createCloudSystem(ctx) {
     shadeColor.value.lerp(lookScratch.color.copy(uniforms.skyZenithColor.value).multiplyScalar(0.9), 0.12);
     // Warm light bounced up from the lit landscape under the flat bases.
     bounceColor.value.copy(uniforms.skyHorizonColor.value).multiplyScalar(0.07 * (1 - time.nightFactor));
+    // Afterglow: around sunset and sunrise the undersides take the pink horizon light instead of
+    // turning slate grey, so twilight clouds read as lit cumulus rather than storm blobs.
+    const afterglow = MathUtils.smoothstep(elevation, -7, -2) * (1 - MathUtils.smoothstep(elevation, 2, 6));
+    if (afterglow > 0) {
+      shadeColor.value.lerp(lookScratch.color.copy(uniforms.skyHorizonColor.value).multiplyScalar(0.42), 0.5 * afterglow);
+      bounceColor.value.add(lookScratch.color.copy(uniforms.skyHorizonColor.value).multiplyScalar(0.1 * afterglow));
+    }
     const moonAbove = MathUtils.smoothstep(time.moonDirection.y, 0, 0.12);
     moonColor.value.copy(MOONLIGHT).multiplyScalar(time.nightFactor * moonAbove);
     rimColor.value.copy(sunColor).multiplyScalar(0.3 + 0.85 * time.goldenFactor);
