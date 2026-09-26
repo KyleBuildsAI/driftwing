@@ -6599,6 +6599,8 @@ function createCloudSystem(ctx) {
   veil.renderOrder = 1000;
   veil.visible = false;
   camera.add(veil);
+  // First shown long after boot: let core compile their pipelines behind the loading fade.
+  ctx.registerPrewarm?.(veil);
 
   // ---- Per-frame instance rebuild -------------------------------------------------------------
   const reference = new T.Vector3().copy(state.player.position);
@@ -7892,6 +7894,7 @@ function createFxSystem(ctx) {
     mesh.visible = false;
     mesh.name = 'contrail';
     scene.add(mesh);
+    ctx.registerPrewarm?.(mesh);
     return {
       mesh,
       geometry,
@@ -8174,6 +8177,8 @@ function createFxSystem(ctx) {
   streakMesh.visible = false;
   streakMesh.name = 'wind-streaks';
   scene.add(streakMesh);
+  // First shown long after boot: let core compile their pipelines behind the loading fade.
+  ctx.registerPrewarm?.(streakMesh);
 
   const streakX = new Float64Array(STREAK_CAPACITY);
   const streakY = new Float64Array(STREAK_CAPACITY);
@@ -8311,6 +8316,7 @@ function createFxSystem(ctx) {
   particleSprite.visible = false;
   particleSprite.name = 'fx-bursts';
   scene.add(particleSprite);
+  ctx.registerPrewarm?.(particleSprite);
 
   const particleX = new Float64Array(PARTICLE_CAPACITY);
   const particleY = new Float64Array(PARTICLE_CAPACITY);
@@ -11213,6 +11219,20 @@ function createLandmarkSystem(ctx) {
   beamGeometry.rotateZ(Math.PI / 2);
   const haloGeometry = addGradientColors(new THREE.IcosahedronGeometry(1, 2), [2.2, 1.7, 1.0, 1], [2.2, 1.7, 1.0, 1], 1);
   const runeLightGeometry = addGradientColors(new THREE.IcosahedronGeometry(1, 2), [0.25, 1.1, 0.95, 1], [0.25, 1.1, 0.95, 1], 1);
+  // Landmark meshes are built lazily as sites come into range; register one proxy per material
+  // (same attribute layout: position, normal, RGBA colour) so core compiles them during the fade.
+  function registerLandmarkPrewarm() {
+    const solidProxy = new THREE.Mesh(haloGeometry, solidMaterial);
+    const balloonProxy = new THREE.Mesh(haloGeometry, balloonMaterial);
+    for (const proxy of [solidProxy, balloonProxy]) {
+      proxy.castShadow = true;
+      proxy.receiveShadow = true;
+    }
+    for (const proxy of [solidProxy, balloonProxy, new THREE.Mesh(runeLightGeometry, glowMaterial), new THREE.Mesh(beamGeometry, beamMaterial)]) {
+      ctx.registerPrewarm?.(proxy);
+    }
+  }
+  registerLandmarkPrewarm();
   const flameGeometry = addGradientColors(
     new THREE.LatheGeometry([0, 0.32, 0.5, 0.42, 0.24, 0].map((radius, index) => new THREE.Vector2(radius, [0, 0.3, 0.9, 1.7, 2.5, 3.3][index])), 10),
     [3.0, 2.4, 1.3, 1],
@@ -13064,6 +13084,8 @@ function createWaypointSystem(ctx) {
   pillar.add(haloMesh, coreMesh);
   beacon.add(pillar, groundMesh, diamondMesh);
   scene.add(beacon);
+  // First shown long after boot: let core compile their pipelines behind the loading fade.
+  ctx.registerPrewarm?.(beacon);
 
   // ---- Runtime state ----------------------------------------------------------------------
   const base = new T.Vector3();
@@ -13357,6 +13379,8 @@ function createRingCourseSystem(ctx) {
   haloMesh.name = 'ring-course-halos';
   haloMesh.renderOrder = 3;
   scene.add(bodyMesh, haloMesh, gateMesh);
+  // First shown long after boot: let core compile their pipelines behind the loading fade.
+  for (const mesh of [bodyMesh, haloMesh, gateMesh]) ctx.registerPrewarm?.(mesh);
 
   // ---- Course state -----------------------------------------------------------------------------
   const rings = Array.from({ length: CAPACITY }, () => ({
@@ -19256,6 +19280,65 @@ async function boot() {
 
   const perf = createPerfGovernor(ctx);
 
+  // ---- Pipeline prewarm ----------------------------------------------------------------------
+  // Systems register objects that first appear long after boot (ring courses, beacons, bursts,
+  // landmarks). Behind the loading fade, core renders those very objects (forced visible and
+  // drawable just before each warm-up render), so their node graphs and GPU pipelines are built
+  // before the player could notice a hitch. Proxies would not do: instanced objects bind their
+  // own instance buffers into their shaders. Parentless registrations join a temporary group.
+  const prewarmSources = [];
+  const prewarmTargets = [];
+  const prewarmGroup = new THREE.Group();
+  prewarmGroup.name = 'prewarm-stand-ins';
+  ctx.registerPrewarm = (object) => {
+    if (object && object.isObject3D) prewarmSources.push(object);
+  };
+  function beginPrewarm() {
+    const seen = new Set();
+    const remember = (node) => {
+      if (seen.has(node)) return;
+      seen.add(node);
+      const drawable = node.isMesh || node.isSprite || node.isLine;
+      prewarmTargets.push({
+        node,
+        visible: node.visible,
+        drawable,
+        frustumCulled: node.frustumCulled,
+        count: node.count,
+        drawCount: drawable && node.geometry ? node.geometry.drawRange.count : null,
+      });
+    };
+    for (const root of prewarmSources) {
+      if (!root.parent) prewarmGroup.add(root);
+      for (let node = root.parent; node && node !== scene; node = node.parent) remember(node);
+      root.traverse(remember);
+    }
+    if (prewarmGroup.children.length > 0) scene.add(prewarmGroup);
+  }
+  function forcePrewarmDrawable() {
+    for (const target of prewarmTargets) {
+      const node = target.node;
+      node.visible = true;
+      if (!target.drawable) continue;
+      node.frustumCulled = false;
+      if ((node.isInstancedMesh || node.isSprite) && !(node.count > 0)) node.count = 1;
+      if (node.geometry && node.geometry.drawRange.count === 0) node.geometry.drawRange.count = Infinity;
+    }
+  }
+  function endPrewarmProxies() {
+    for (const target of prewarmTargets) {
+      const node = target.node;
+      node.visible = target.visible;
+      if (!target.drawable) continue;
+      node.frustumCulled = target.frustumCulled;
+      if (target.count !== undefined) node.count = target.count;
+      if (target.drawCount !== null && node.geometry) node.geometry.drawRange.count = target.drawCount;
+    }
+    prewarmTargets.length = 0;
+    if (prewarmGroup.parent) scene.remove(prewarmGroup);
+    prewarmGroup.clear();
+  }
+
   // ---- Systems (creation order matters for cross-references at construction) --------
   const factories = [
     ['audio', createAudioSystem],
@@ -19297,6 +19380,7 @@ async function boot() {
     }
   }
   callSystemHook('prewarm');
+  beginPrewarm();
   const fadeStatus = document.getElementById('fade-status');
   if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
   const UPDATE_ORDER = ['input', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'copilot', 'audio', 'ui'];
@@ -19501,6 +19585,7 @@ async function boot() {
       restorePixelRatio = renderer.getPixelRatio();
       renderer.setPixelRatio(Math.min(restorePixelRatio * shot.scale, 4096 / Math.max(1, window.innerWidth)));
     }
+    if (!fadeStarted) forcePrewarmDrawable();
     render();
     lastCpuMs = performance.now() - cpuStart;
     if (shot) captureScreenshot();
@@ -19516,6 +19601,7 @@ async function boot() {
         fadeStarted = true;
         state.ready = true;
         callSystemHook('endPrewarm');
+        endPrewarmProxies();
         fade.classList.add('clear');
         debugHandle.readyMs = Math.round(performance.now());
         bus.emit('game:ready', {});
