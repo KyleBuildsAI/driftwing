@@ -19,7 +19,7 @@
 //   { "eval": "window.DRIFTWING.state.player.speed" }  evaluate, result is logged
 //   { "shot": "name" }                       screenshot to <out>/<name>.png
 import puppeteer from 'puppeteer-core';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -109,10 +109,11 @@ async function main() {
     url = `http://localhost:${started.port}/${filePath.split(/[\\/]/).pop()}${query}`;
   }
 
+  const profileDir = join(tmpdir(), `driftwing-profile-${process.pid}`);
   const browser = await puppeteer.launch({
     executablePath,
     headless: !options.headful,
-    userDataDir: join(tmpdir(), `driftwing-profile-${process.pid}`),
+    userDataDir: profileDir,
     args: [
       '--enable-unsafe-webgpu',
       '--ignore-gpu-blocklist',
@@ -120,7 +121,6 @@ async function main() {
       '--mute-audio',
       '--no-first-run',
       '--no-default-browser-check',
-      '--autoplay-policy=no-user-gesture-required',
       `--window-size=${options.width},${options.height}`,
     ],
     defaultViewport: { width: options.width, height: options.height },
@@ -189,6 +189,12 @@ async function main() {
   } finally {
     await browser.close().catch((error) => process.stderr.write(`browser close failed: ${error.message}\n`));
     server?.close();
+    try {
+      rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (error) {
+      process.stderr.write(`could not remove temporary profile ${profileDir}: ${error.message}
+`);
+    }
   }
 
   const passed = report.ready && report.errors.length === 0 && report.warnings.length === 0 && report.screenshotsDiffer;

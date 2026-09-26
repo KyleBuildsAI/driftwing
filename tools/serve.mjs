@@ -19,11 +19,19 @@ const MIME_TYPES = {
 export function startStaticServer({ port = 8080, root = process.cwd(), quiet = false } = {}) {
   const rootDir = resolve(root);
   const server = createServer(async (request, response) => {
+    let urlPath;
     try {
-      const urlPath = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+      urlPath = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+    } catch (error) {
+      response.writeHead(400).end('Bad request');
+      return;
+    }
+    try {
       const relativePath = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
       const filePath = normalize(join(rootDir, relativePath));
-      if (!filePath.startsWith(rootDir + sep) && filePath !== rootDir) {
+      // Only the game's own files: no dotfiles (.git, .env) and no node_modules.
+      const isPrivate = relativePath.split(/[\\/]+/).some((segment) => segment.startsWith('.') || segment === 'node_modules');
+      if ((!filePath.startsWith(rootDir + sep) && filePath !== rootDir) || isPrivate) {
         response.writeHead(403).end('Forbidden');
         return;
       }
@@ -43,7 +51,8 @@ export function startStaticServer({ port = 8080, root = process.cwd(), quiet = f
       });
       response.end(body);
     } catch (error) {
-      response.writeHead(500).end(String(error));
+      process.stderr.write(`serve: ${request.url} failed: ${error.message}\n`);
+      response.writeHead(500).end('Internal error');
     }
   });
   return new Promise((resolvePromise, rejectPromise) => {
