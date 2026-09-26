@@ -6666,7 +6666,9 @@ function createCloudSystem(ctx) {
         advanceCluster(cluster, dt, elapsed);
         cluster.worldX = cluster.centerX + drift.x;
         cluster.worldZ = cluster.centerZ + drift.z;
-        const distance = Math.hypot(cluster.worldX - reference.x, cluster.worldZ - reference.z);
+        const offsetX = cluster.worldX - reference.x;
+        const offsetZ = cluster.worldZ - reference.z;
+        const distance = Math.sqrt(offsetX * offsetX + offsetZ * offsetZ);
         const edgeVisibility = 1 - MathUtils.smoothstep(distance, EDGE_FADE_START, VIEW_RANGE);
         cluster.visibleScale = cluster.growth * edgeVisibility;
         cluster.sizeScale = (0.6 + 0.4 * cluster.growth) * (0.8 + 0.2 * edgeVisibility);
@@ -6677,12 +6679,17 @@ function createCloudSystem(ctx) {
       }
     }
     mesh.count = Math.min(instanceCount, CAPACITY);
-    mesh.instanceMatrix.clearUpdateRanges();
-    mesh.instanceMatrix.needsUpdate = true;
-    shapeAttribute.clearUpdateRanges();
-    shapeAttribute.needsUpdate = true;
-    centreAttribute.clearUpdateRanges();
-    centreAttribute.needsUpdate = true;
+    // Upload only the live instances, not the whole 2048-instance capacity every frame.
+    uploadLiveRange(mesh.instanceMatrix, 16);
+    uploadLiveRange(shapeAttribute, 4);
+    uploadLiveRange(centreAttribute, 4);
+  }
+
+  function uploadLiveRange(attribute, itemSize) {
+    attribute.clearUpdateRanges();
+    if (mesh.count === 0) return;
+    attribute.addUpdateRange(0, mesh.count * itemSize);
+    attribute.needsUpdate = true;
   }
 
   function evictDistantClusters() {
