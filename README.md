@@ -20,11 +20,17 @@ or lay out a ring course.
 
 ## Running it
 
+**Play online:** <https://kylebuildsai.github.io/driftwing/> (GitHub Pages). Share a world by copying the URL; it
+always carries the seed, for example <https://kylebuildsai.github.io/driftwing/?seed=K7Q2ZD>.
+
+To run it locally instead:
+
 The game is one self-contained file: double-click `index.html` to play. It needs an internet connection the
 first time to fetch three.js from the jsDelivr CDN. Browsers with WebGPU use it; the rest fall back to WebGL2
 automatically. It was tested in Chrome on Windows on both backends and from `file://`.
 
-For microphone input (the Web Speech API needs a secure origin), serve it over `http://localhost` instead:
+For microphone input the Web Speech API needs a secure origin: the online version (HTTPS) works, and locally you
+can serve it over `http://localhost`:
 
 ```bash
 npm run serve
