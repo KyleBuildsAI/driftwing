@@ -129,6 +129,7 @@ async function boot() {
     time: {
       elapsed: 0,
       realElapsed: 0,
+      frameDt: 0,
       dayTime: startDayTime,
       sunDirection: startSun.clone(),
       moonDirection: moonDirectionForDayTime(startDayTime),
@@ -554,6 +555,8 @@ async function boot() {
     if (!(realDt > 0) || realDt > 0.25) realDt = 1 / 60;
     realDt = Math.min(realDt, 1 / 20);
     const simDt = state.paused ? 0 : realDt;
+    // Unclamped frame time (capped at 0.1 s after a stall) for the fixed-step physics clock.
+    state.time.frameDt = state.paused ? 0 : Math.min(Math.max(rawFrameMs / 1000, 0), 0.1);
     state.frame++;
     state.time.elapsed += simDt;
     state.time.realElapsed += realDt;
