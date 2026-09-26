@@ -1,0 +1,87 @@
+// Typed game events: the stable contract later phases subscribe to (the event director, replay,
+// multiplayer and the copilot all listen here instead of reaching into systems).
+//
+// Every typed event has a payload shape. In development builds (and with ?debug=1) each emit is
+// checked against its shape so a producer that drifts is caught at the source. Untyped events
+// (the v1 'namespace:verb' ones) pass through the same EventBus unchanged.
+
+/** Field types understood by the validator. */
+const FIELD_CHECKS = Object.freeze({
+  string: (value) => typeof value === 'string',
+  number: (value) => Number.isFinite(value),
+  boolean: (value) => typeof value === 'boolean',
+  object: (value) => value !== null && typeof value === 'object',
+  vector3: (value) => value !== null && typeof value === 'object' && Number.isFinite(value.x) && Number.isFinite(value.y) && Number.isFinite(value.z),
+});
+
+export const LANDING_GRADES = Object.freeze(['butter', 'smooth', 'firm', 'hard']);
+
+/**
+ * Event name -> payload fields. A field is a FIELD_CHECKS type name, an array of allowed values, or
+ * an object { type, optional: true }.
+ */
+export const EVENT_TYPES = Object.freeze({
+  /** Flight model switched between CLASSIC and SIM. */
+  modeChanged: { mode: ['classic', 'sim'], previous: ['classic', 'sim'] },
+  /** A different craft is now flying. */
+  craftChanged: { craft: 'string', previous: 'string' },
+  /** Touchdown graded by sink rate (m/s, positive down) and side load. */
+  landed: { grade: LANDING_GRADES, craft: 'string', sinkRate: 'number', groundSpeed: 'number', position: 'vector3' },
+  /** Terrain or water impact handled by fade and respawn. */
+  softCrash: { craft: 'string', reason: 'string', impactSpeed: 'number', position: 'vector3' },
+  /** First visit to a landmark in this world. */
+  discovery: { id: 'string', name: 'string', kind: 'string', position: 'vector3' },
+  /** A wind source joined or left the WindField (Phase 2 spawns publish these). */
+  windSourceAdded: { id: 'string', kind: 'string', position: 'vector3', radius: 'number' },
+  windSourceRemoved: { id: 'string', kind: 'string' },
+  /** Camera view changed. */
+  viewChanged: { view: 'string', craft: 'string', mode: ['classic', 'sim'] },
+  /** An input device connected or disconnected (identified by vendor/product, never slot). */
+  deviceConnected: { deviceKey: 'string', kind: 'string', name: 'string' },
+  deviceDisconnected: { deviceKey: 'string', kind: 'string', name: 'string' },
+  /** The craft was put back into the air by a relaunch (aerotow, peak launch, respawn). */
+  relaunched: { craft: 'string', method: 'string', position: 'vector3' },
+});
+
+function describeFailure(type, payload) {
+  const shape = EVENT_TYPES[type];
+  if (payload === null || typeof payload !== 'object') return 'payload is not an object';
+  for (const [field, rule] of Object.entries(shape)) {
+    const spec = Array.isArray(rule) || typeof rule === 'string' ? { type: rule } : rule;
+    const value = payload[field];
+    if (value === undefined && spec.optional) continue;
+    const valid = Array.isArray(spec.type) ? spec.type.includes(value) : FIELD_CHECKS[spec.type](value);
+    if (!valid) return `field "${field}" is ${JSON.stringify(value)}`;
+  }
+  return null;
+}
+
+/**
+ * Adds typed emit/on helpers to an EventBus. validate turns payload checks on (dev builds and
+ * ?debug=1); a bad payload is reported once per event type and still delivered.
+ */
+export function attachTypedEvents(bus, { validate = false } = {}) {
+  const reported = new Set();
+  bus.emitTyped = (type, payload) => {
+    if (!(type in EVENT_TYPES)) throw new Error(`[DRIFTWING] unknown typed event "${type}"`);
+    if (validate) {
+      const failure = describeFailure(type, payload);
+      if (failure && !reported.has(type)) {
+        reported.add(type);
+        console.error(`[DRIFTWING] event "${type}" payload invalid: ${failure}`);
+      }
+    }
+    bus.emit(type, payload);
+  };
+  bus.onTyped = (type, listener) => {
+    if (!(type in EVENT_TYPES)) throw new Error(`[DRIFTWING] unknown typed event "${type}"`);
+    return bus.on(type, listener);
+  };
+
+  // v1 landmarks announce 'landmark:discovered'; republish it as the typed 'discovery'.
+  bus.on('landmark:discovered', ({ site, name, type }) => {
+    const position = { x: site.x, y: Math.max(site.plateauHeight, 0), z: site.z };
+    bus.emitTyped('discovery', { id: site.id, name, kind: type, position });
+  });
+  return bus;
+}

@@ -2,7 +2,6 @@ import * as THREE from 'three/webgpu';
 import { clamp, wrapDegrees, vectorFromHeading, bearingTo, isFiniteVector, isFiniteQuaternion } from '../core/util.js';
 import { CONFIG } from '../core/config.js';
 import { Copilot, RemoteCopilot } from '../copilot/copilot.js';
-import { DEFAULT_SETTINGS } from '../core/settings.js';
 import { storage } from '../core/storage.js';
 
 /**
@@ -1872,7 +1871,7 @@ export function createUISystem(ctx) {
     }
   }
   function syncAllSettings() {
-    for (const key of Object.keys(DEFAULT_SETTINGS)) syncSetting(key);
+    for (const key of Object.keys(settings.all())) syncSetting(key);
   }
   /** Same rule the remote brain applies: an absolute http(s) URL, or null. */
   function validateEndpoint(value) {
