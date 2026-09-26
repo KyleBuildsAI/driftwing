@@ -6,7 +6,8 @@ WREN rides along: talk to it or type to it, and it can set waypoints, fly the pl
 or lay out a ring course.
 
 - **Engine:** three.js r184 with `WebGPURenderer` and an automatic WebGL2 fallback, loaded from a CDN import map.
-  There is no build step.
+  There is no build step. (r184 is pinned on purpose; bump it deliberately after checking the three.js migration
+  notes, since the WebGPU and TSL APIs change between releases.)
 - **World:** chunked heightmap terrain generated in Web Workers from seeded simplex noise. It blends five biomes
   (snow peaks, pine valleys, dune sea, archipelago, flower meadows) and uses ring LOD with skirts and pooled
   meshes. Worlds are fully deterministic from the seed shown in the UI, so a seed can be shared.
@@ -46,7 +47,7 @@ Then open <http://localhost:8080/>. The server has no dependencies; `node tools/
 
 | Action | Keyboard / mouse | Touch |
 | --- | --- | --- |
-| Pitch and bank | Mouse (click the view to capture it, `Esc` releases), or drag with the left button; arrow keys; `A` / `D` bank | Left joystick |
+| Pitch and bank | Mouse (click the view to capture it, `Esc` releases), or drag with the left button; arrow keys; `A` / `D` bank. Banking turns the glider; let go and the wings level. | Left joystick |
 | Throttle | `W` / `S`, mouse wheel | Right slider |
 | Boost (on cooldown) | `Space` | Boost button |
 | Barrel roll | Double-tap `A` or `D` | Roll buttons |
@@ -63,6 +64,11 @@ Then open <http://localhost:8080/>. The server has no dependencies; `node tools/
 | FPS badge / hide HUD | `I` / `Tab` | |
 
 The HUD fades out after three seconds without input and comes back on any input.
+
+Settings (gear icon) cover the day length (2 to 30 minutes, or frozen), quality (auto, or a fixed preset from
+minimal to ultra), mouse sensitivity, inverted pitch, WREN's voice and chatter, the remote copilot, volume, an FPS
+badge and HUD auto-hide. On auto quality the game lowers view distance and resolution before frames start to drop,
+and raises them again when there is headroom.
 
 ## WREN, the copilot
 
@@ -91,10 +97,12 @@ npm run copilot-server
 Then open Settings in the game, turn on **Remote copilot** and keep the endpoint `http://localhost:3000/copilot`.
 If port 3000 is reserved on your machine (common on Windows with Hyper-V or WSL), run the server on another
 port, for example `PORT=3300 npm run copilot-server`, and set the endpoint to `http://localhost:3300/copilot`.
-The server only answers the game's own origins (`file://` and `localhost`).
 The server answers from its own rules. If `ANTHROPIC_API_KEY` is set in its environment, it asks Claude first
 (model from `COPILOT_MODEL`, default `claude-haiku-4-5-20251001` for latency). The key is read only from the
-environment and never sent to the browser. See the header of `tools/copilot-server.mjs` for all options.
+environment and never sent to the browser. The server only answers the game's own origins (`file://` pages and
+`localhost` / `127.0.0.1` on any port); add others with `ALLOWED_ORIGINS`, so an unrelated website cannot spend
+your key through it. `COPILOT_TEST_DELAY=1` enables the `?delay=ms` test aid for exercising the 800 ms fallback.
+See the header of `tools/copilot-server.mjs` for all options.
 
 ## Testing
 
@@ -136,6 +144,18 @@ falling through chunks that have not loaded yet.
 Safety guards: `dt` is clamped against tab-blur spikes, the attitude is checked for NaN, the altitude is
 clamped to terrain and water, the worker queue is bounded and stale jobs are dropped, and the performance
 governor reduces view distance and resolution before the frame rate drops.
+
+## Known limitations
+
+- The first click or key press unlocks audio. Creating the browser's AudioContext can take around 0.1 s on some
+  machines, so a single frame may stutter at that moment.
+- On some GPUs the very first ring course causes one short hitch as the driver prepares it. Every shader the game
+  uses is compiled behind the loading fade, but first-draw work inside the driver can still show once.
+- The WebGL2 fallback takes a few seconds longer to start than WebGPU, because WebGL compiles its shaders
+  synchronously.
+- Voice input uses the Web Speech API, which works in Chrome and Edge and needs microphone permission. Some browsers
+  refuse the microphone on `file://`; use `npm run serve` if the mic is blocked. Typing to WREN always works.
+- three.js loads from the jsDelivr CDN, so the first launch needs a network connection.
 
 ## Project layout
 
