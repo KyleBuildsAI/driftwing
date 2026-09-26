@@ -1,8 +1,12 @@
 # DRIFTWING
 
-[![A low-poly glider flying between snowy peaks at golden hour, sun and god rays overhead](docs/screenshot.jpg)](https://kylebuildsai.github.io/driftwing/?seed=D27TEH)
+<p align="center">
+  <a href="https://kylebuildsai.github.io/driftwing/?seed=D27TEH"><img src="docs/screenshot.jpg" width="49%" alt="A low-poly glider flying between snowy peaks at golden hour, sun and god rays overhead"></a>
+  <a href="https://kylebuildsai.github.io/driftwing/?seed=ARCH1&amp;time=0.02"><img src="docs/screenshot-night.jpg" width="49%" alt="The glider at night over snowy spires under green aurora curtains and stars"></a>
+</p>
 
-*Seed D27TEH at golden hour. [Play it in your browser](https://kylebuildsai.github.io/driftwing/?seed=D27TEH).*
+*Golden hour over seed D27TEH, and aurora at night over seed ARCH1. Click either shot to fly that world in your
+browser.*
 
 An ambient infinite-flight exploration game in a single `index.html`. You pilot a low-poly glider over an
 endless procedural world at golden hour. There is no fail state, no fuel and no enemies. An AI copilot named
