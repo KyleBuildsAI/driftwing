@@ -79,7 +79,6 @@
   #boot-error[hidden] { display: none; }
   #boot-error h1 { font-weight: 600; letter-spacing: 0.3em; font-size: 20px; margin: 0 0 12px; }
   #boot-error p { max-width: 460px; margin: 0 auto; opacity: 0.8; }
-/*@@BEGIN ui-css*/
   /* ==========================================================================
      DRIFTWING UI: minimal warm glass HUD, panels, touch controls, photo chrome.
      Everything is scoped under #ui-root.
@@ -1489,7 +1488,6 @@
     #ui-root .dw-mic[data-state="thinking"] .dw-mic-spinner { border-color: rgba(243, 199, 122, 0.7); }
     #ui-root .dw-target-halo { animation: none; }
   }
-/*@@END ui-css*/
 </style>
 <script type="importmap">
 {
@@ -1520,7 +1518,6 @@
     <p id="boot-error-message">This browser could not start a WebGPU or WebGL2 renderer.</p>
   </div>
 </div>
-<!--@@BEGIN ui-html-->
 <div id="ui-root" class="dw-root">
   <svg class="dw-sprites" width="0" height="0" aria-hidden="true" focusable="false">
     <defs>
@@ -1946,7 +1943,6 @@
   </div>
   <div class="dw-flash" id="dw-flash"></div>
 </div>
-<!--@@END ui-html-->
 <script type="module">
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
@@ -2849,7 +2845,6 @@ function findSpawn(world, sunDirection) {
   return { x: best.x, y, z: best.z, heading: bestHeading };
 }
 
-//@@BEGIN terrain
 /**
  * TERRAIN: the infinite streamed world surface.
  * - Square chunks (CONFIG.CHUNK_SIZE) are generated in Web Workers (Blob URL:
@@ -4883,9 +4878,7 @@ function createTerrainSystem(ctx) {
     },
   };
 }
-//@@END terrain
 
-//@@BEGIN sky
 /**
  * SKY / ATMOSPHERE: owns the time of day and everything the sky does with it.
  * - Day cycle with a time warp (golden hours linger, nights pass quicker), presets and smooth transitions.
@@ -5754,9 +5747,7 @@ function createSkySystem(ctx) {
     },
   };
 }
-//@@END sky
 
-//@@BEGIN water
 /**
  * WATER: an 8 km wave grid that follows the camera.
  *
@@ -6155,9 +6146,7 @@ function createWaterSystem(ctx) {
     },
   };
 }
-//@@END water
 
-//@@BEGIN clouds
 /**
  * CLOUDS: world-anchored low-poly cumulus that drift with the wind.
  *
@@ -7000,9 +6989,7 @@ function createCloudSystem(ctx) {
     },
   };
 }
-//@@END clouds
 
-//@@BEGIN birds
 /**
  * BIRDS: boid flocks drifting over the landscape.
  * One InstancedMesh (body + two wings, flat-shaded dark warm silhouettes). The wing flap runs in the
@@ -7796,9 +7783,7 @@ function createBirdSystem(ctx) {
     },
   };
 }
-//@@END birds
 
-//@@BEGIN fx
 /**
  * FX: wingtip vapour contrails, wind streaks at speed and golden particle bursts.
  * - Contrails: two fixed-capacity ring-buffer ribbons fed by flight.getWingtips() while banking hard,
@@ -8615,9 +8600,7 @@ function createFxSystem(ctx) {
     },
   };
 }
-//@@END fx
 
-//@@BEGIN input
 /**
  * INPUT: keyboard, pointer-lock virtual stick with a recentring spring, drag-to-steer
  * fallback, wheel throttle, touch merge, double-tap barrel rolls and photo-mode routing.
@@ -9035,9 +9018,7 @@ function createInputSystem(ctx) {
     },
   };
 }
-//@@END input
 
-//@@BEGIN flight
 /**
  * FLIGHT: arcade flight model with soul (bank-to-turn handling with coordinated turns,
  * energy trade in climbs and dives, soft stall, boost with cooldown, auto-level, ground
@@ -10425,9 +10406,7 @@ function createFlightSystem(ctx) {
     },
   };
 }
-//@@END flight
 
-//@@BEGIN camera
 /**
  * CAMERA RIG: chase camera (critically damped lag, partial bank, look-ahead, FOV stretch,
  * low-frequency speed / boost / event shake, terrain-safe) and the photo-mode free camera
@@ -10917,9 +10896,7 @@ function createCameraRig(ctx) {
     },
   };
 }
-//@@END camera
 
-//@@BEGIN landmarks
 /**
  * LANDMARKS: procedural set pieces on the world generator's landmark sites.
  * - arch: a natural stone arch with wavy strata and snow / moss / sand caps;
@@ -12916,9 +12893,7 @@ function createLandmarkSystem(ctx) {
     },
   };
 }
-//@@END landmarks
 
-//@@BEGIN journal
 /**
  * JOURNAL: the per-seed discovery log. Records biomes visited, landmarks found,
  * distance flown, highest altitude, flight time and ring-course results (best
@@ -13201,9 +13176,7 @@ function createJournal(ctx) {
     },
   };
 }
-//@@END journal
 
-//@@BEGIN waypoints
 /**
  * WAYPOINTS: a warm golden beacon marks the waypoint. It is a tall additive
  * light pillar (vertical alpha gradient, soft edges, slow upward light bands),
@@ -13515,9 +13488,7 @@ function createWaypointSystem(ctx) {
     },
   };
 }
-//@@END waypoints
 
-//@@BEGIN rings
 /**
  * RING COURSES: a smooth course of glowing low-poly tori laid out ahead of the
  * glider. The path picks lively turns that favour low ground (so it threads
@@ -14163,9 +14134,7 @@ function createRingCourseSystem(ctx) {
     },
   };
 }
-//@@END rings
 
-//@@BEGIN audio
 /**
  * AUDIO: a small procedural WebAudio engine.
  * - The AudioContext is created only inside a user activation ('user:gesture', or unlock() called from
@@ -14934,9 +14903,7 @@ function createAudioSystem(ctx) {
     },
   };
 }
-//@@END audio
 
-//@@BEGIN copilot
 /**
  * COPILOT "WREN".
  * - Copilot: the default local brain, a tolerant keyword grammar that turns a
@@ -16686,9 +16653,7 @@ function createCopilotSystem(ctx) {
     },
   };
 }
-//@@END copilot
 
-//@@BEGIN ui
 /**
  * UI: warm glass HUD (compass tape, flight instruments, waypoint / ring marker,
  * status chips), WREN subtitles + live transcript, command bar, toasts and
@@ -19301,7 +19266,6 @@ function createUISystem(ctx) {
 
   return { update, toast, setSubtitle, setMicState, showPanel, setPhotoMode, wake };
 }
-//@@END ui
 
 // ============================================================================
 // POST-PROCESSING: bloom + warm grade + vignette + grain (degrades to direct).
