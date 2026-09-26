@@ -19,8 +19,13 @@
 // Protocol:
 //   POST /copilot  body {flightState, transcript}  ->  {speech, action}
 //   GET  /health   -> {ok, brain, model}
-//   Testing aid: POST /copilot?delay=1500 waits 1.5 s before answering, which
-//   exercises the game's timeout + local fallback path.
+//   Testing aid (only with COPILOT_TEST_DELAY=1): POST /copilot?delay=1500 waits 1.5 s
+//   before answering, which exercises the game's timeout + local fallback path.
+//
+// Security: only the game's own origins may call it (file:// pages send Origin "null",
+// plus http(s)://localhost, 127.0.0.1 and [::1] on any port). Add more with
+// ALLOWED_ORIGINS=https://example.com,https://other.example. Other origins get 403, so
+// an unrelated website cannot spend your Claude key through this server.
 import { createServer } from 'node:http';
 
 const PORT = Number.parseInt(process.env.PORT ?? '3000', 10) || 3000;
@@ -32,6 +37,9 @@ const CLAUDE_BUDGET_MS = clamp(Number.parseInt(process.env.COPILOT_CLAUDE_BUDGET
 const WARMUP = process.env.COPILOT_WARMUP !== '0';
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TEST_DELAY_MS = 5000;
+const TEST_DELAY_ENABLED = process.env.COPILOT_TEST_DELAY === '1';
+const EXTRA_ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean);
+const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 const MAX_SPEECH_LENGTH = 400;
 const MAX_LABEL_LENGTH = 48;
 
@@ -394,36 +402,57 @@ async function askClaude(flightState, transcript, budgetMs) {
 }
 
 // ---- HTTP ---------------------------------------------------------------------------------------------------
+function isAllowedOrigin(origin) {
+  return origin === 'null' || LOCAL_ORIGIN_PATTERN.test(origin) || EXTRA_ALLOWED_ORIGINS.includes(origin);
+}
+
+/** CORS for the game's own origins only. Returns false when the request must be refused. */
 function applyCors(request, response) {
-  response.setHeader('Access-Control-Allow-Origin', '*');
+  const origin = request.headers.origin;
+  response.setHeader('Vary', 'Origin');
+  if (origin === undefined) return true;
+  if (!isAllowedOrigin(origin)) return false;
+  response.setHeader('Access-Control-Allow-Origin', origin);
   response.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   response.setHeader('Access-Control-Max-Age', '600');
   if (request.headers['access-control-request-private-network'] === 'true') {
     response.setHeader('Access-Control-Allow-Private-Network', 'true');
   }
+  return true;
 }
 
-function sendJson(response, status, payload) {
+function sendJson(response, status, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
-  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...extraHeaders });
   response.end(body);
+}
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
 }
 
 function readJsonBody(request) {
   return new Promise((resolveBody, rejectBody) => {
     const chunks = [];
     let size = 0;
+    let tooLarge = false;
     request.on('data', (chunk) => {
+      if (tooLarge) return;
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
-        rejectBody(new Error('request body too large'));
-        request.destroy();
+        tooLarge = true;
+        chunks.length = 0;
+        rejectBody(new HttpError(413, 'request body too large'));
         return;
       }
       chunks.push(chunk);
     });
     request.on('end', () => {
+      if (tooLarge) return;
       try {
         resolveBody(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
       } catch (error) {
@@ -442,12 +471,18 @@ async function handleCopilot(request, response, url) {
   try {
     body = await readJsonBody(request);
   } catch (error) {
+    if (error.status === 413) {
+      // Answer first, then drop the rest of the upload.
+      response.once('finish', () => request.destroy());
+      sendJson(response, 413, { error: error.message }, { Connection: 'close' });
+      return;
+    }
     sendJson(response, 400, { error: error.message });
     return;
   }
   const transcript = typeof body?.transcript === 'string' ? body.transcript.slice(0, 500) : '';
   const flightState = body?.flightState && typeof body.flightState === 'object' ? body.flightState : {};
-  const delay = clamp(Number(url.searchParams.get('delay')) || 0, 0, MAX_TEST_DELAY_MS);
+  const delay = TEST_DELAY_ENABLED ? clamp(Number(url.searchParams.get('delay')) || 0, 0, MAX_TEST_DELAY_MS) : 0;
   if (delay > 0) await sleep(delay);
 
   let reply = null;
@@ -466,7 +501,10 @@ async function handleCopilot(request, response, url) {
 }
 
 function handleRequest(request, response) {
-  applyCors(request, response);
+  if (!applyCors(request, response)) {
+    sendJson(response, 403, { error: 'origin not allowed' });
+    return;
+  }
   const url = new URL(request.url ?? '/', 'http://localhost');
   if (request.method === 'OPTIONS') {
     response.writeHead(204);

@@ -15653,6 +15653,18 @@ function createCopilotSystem(ctx) {
     return line;
   }
 
+  // ---- Input hints -----------------------------------------------------------------------------------------
+  /** How to open the command bar on this device: the C key, or the chat button on touch screens. */
+  function commandHint() {
+    const touch = window.matchMedia?.('(pointer: coarse)').matches || new URLSearchParams(window.location.search).get('touch') === '1';
+    return touch ? 'Tap the chat button' : 'Press C';
+  }
+  function typeInsteadLine(lead) {
+    const hint = commandHint();
+    const joined = /(^|\s)or$/.test(lead) ? hint.charAt(0).toLowerCase() + hint.slice(1) : hint;
+    return `${lead} ${joined} to type to me instead.`;
+  }
+
   // ---- Speech in ------------------------------------------------------------------------------------------
   const voiceInput = (() => {
     const RecognitionClass = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition || null : null;
@@ -15662,16 +15674,17 @@ function createCopilotSystem(ctx) {
     let errored = false;
     let errorTimer = 0;
     let lastError = null;
+    // Built on demand so the hint matches the device (key or chat button).
     const ERROR_LINES = {
-      'not-allowed': "I can't use the microphone. Check the browser's permission, or press C to type to me.",
-      'service-not-allowed': "Voice input is blocked here. Press C and type to me instead.",
-      'no-speech': "I didn't hear anything. Tap the mic and try again.",
-      'audio-capture': "I can't find a microphone. Press C to type to me instead.",
-      network: 'Voice recognition needs a network connection. You can type to me with C.',
-      'language-not-supported': "Voice input isn't available in this language. Press C to type instead.",
-      'bad-grammar': "I couldn't make sense of that. Try again?",
+      'not-allowed': () => typeInsteadLine("I can't use the microphone. Check the browser's permission, or"),
+      'service-not-allowed': () => typeInsteadLine('Voice input is blocked here.'),
+      'no-speech': () => "I didn't hear anything. Tap the mic and try again.",
+      'audio-capture': () => typeInsteadLine("I can't find a microphone."),
+      network: () => typeInsteadLine('Voice recognition needs a network connection.'),
+      'language-not-supported': () => typeInsteadLine("Voice input isn't available in this language."),
+      'bad-grammar': () => "I couldn't make sense of that. Try again?",
     };
-    const UNSUPPORTED_LINE = "Voice input isn't available in this browser. Press C to type to me instead.";
+    const unsupportedLine = () => typeInsteadLine("Voice input isn't available in this browser.");
 
     function setState(nextState, message) {
       bus.emit('copilot:listening', message ? { state: nextState, message } : { state: nextState });
@@ -15680,7 +15693,7 @@ function createCopilotSystem(ctx) {
     function reportError(code) {
       errored = true;
       lastError = code;
-      const message = ERROR_LINES[code] || "Voice input hit a snag. Press C to type to me instead.";
+      const message = ERROR_LINES[code] ? ERROR_LINES[code]() : typeInsteadLine('Voice input hit a snag.');
       setState('error', message);
       say(message, 'system');
       errorTimer = ERROR_DISPLAY_SECONDS;
@@ -15713,8 +15726,8 @@ function createCopilotSystem(ctx) {
 
     function start() {
       if (!RecognitionClass) {
-        setState('unsupported', UNSUPPORTED_LINE);
-        say(UNSUPPORTED_LINE, 'system');
+        setState('unsupported', unsupportedLine());
+        say(unsupportedLine(), 'system');
         return false;
       }
       if (listening) return true;
@@ -15782,7 +15795,7 @@ function createCopilotSystem(ctx) {
         if (errorTimer <= 0 && !listening) setState('idle');
       },
       announceSupport() {
-        if (!RecognitionClass) setState('unsupported', UNSUPPORTED_LINE);
+        if (!RecognitionClass) setState('unsupported', unsupportedLine());
       },
     };
   })();
@@ -16100,6 +16113,15 @@ function createCopilotSystem(ctx) {
   async function processAsk(rawText, inputSource) {
     const text = Copilot.cleanText(String(rawText ?? ''), 300);
     if (!text) return { speech: '', action: null, source: 'local', ok: false, result: '' };
+    asksInFlight++;
+    try {
+      return await answerAsk(text, inputSource);
+    } finally {
+      asksInFlight--;
+    }
+  }
+
+  async function answerAsk(text, inputSource) {
     const activeBrain = brain;
     const isRemote = activeBrain instanceof RemoteCopilot;
     if (isRemote || inputSource === 'voice') bus.emit('copilot:listening', { state: 'thinking' });
@@ -16146,8 +16168,11 @@ function createCopilotSystem(ctx) {
     meadows: ['Flower meadows. Pink, gold and lavender as far as you can see.', 'Meadow country. Soft hills and wildflowers.'],
   };
 
+  // Replies in flight: unsolicited lines wait so they never talk over the pilot or the answer.
+  let asksInFlight = 0;
   function chatterAllowed() {
     if (!settings.get('copilotChatter') || state.photoMode || !state.ready) return false;
+    if (asksInFlight > 0 || voiceInput.isListening()) return false;
     const now = state.time.realElapsed;
     return now - chatter.lastUnsolicitedAt >= MIN_CHATTER_GAP && now - lastLineAt >= QUIET_AFTER_ANY_LINE;
   }
@@ -16205,8 +16230,8 @@ function createCopilotSystem(ctx) {
     const hour = state.time.dayTime * 24;
     const opener = hour < 4.5 ? 'Hello' : hour < 12 ? 'Morning' : hour < 17 ? 'Afternoon' : 'Evening';
     return pick('hello', [
-      `${opener}, pilot. WREN here. It's ${label} over ${place}. Press C whenever you want to talk.`,
-      `WREN here. ${label.charAt(0).toUpperCase()}${label.slice(1)} over ${place}, and calm air. Press C if you need me.`,
+      `${opener}, pilot. WREN here. It's ${label} over ${place}. ${commandHint()} whenever you want to talk.`,
+      `WREN here. ${label.charAt(0).toUpperCase()}${label.slice(1)} over ${place}, and calm air. ${commandHint()} if you need me.`,
     ]);
   }
 
