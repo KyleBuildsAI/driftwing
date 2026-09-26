@@ -1,0 +1,82 @@
+// ControlState: the one device-independent description of what the pilot is asking for.
+//
+// Every input source (keyboard, mouse virtual stick, touch, gamepad, HOTAS) contributes to the
+// same ControlState; flight models, cameras and UI read only this. Axes are normalized:
+//   roll, pitch, yaw         -1..1   (right, nose up, nose right positive)
+//   throttle, collective      0..1
+//   brakeL, brakeR            0..1
+//   flaps                     0..1   (commanded setting; craft quantize to their notches)
+//   trim                     -1..1   (pitch trim position)
+//   lookX, lookY             -1..1   (free-look rate)
+// Discrete actions arrive as a Set of action ids that fired since the previous physics tick.
+
+export const AXES = Object.freeze(['roll', 'pitch', 'yaw', 'throttle', 'collective', 'brakeL', 'brakeR', 'flaps', 'trim', 'lookX', 'lookY']);
+
+/**
+ * Every rebindable discrete action, with the label shown in the controls panel. Order is the order
+ * the panel lists them in.
+ */
+export const ACTIONS = Object.freeze({
+  copilotPTT: 'Copilot push-to-talk',
+  craftAbility: 'Craft ability',
+  boost: 'Boost (CLASSIC)',
+  waypointNearest: 'Waypoint to nearest landmark',
+  photoMode: 'Photo mode',
+  viewCycle: 'Cycle view',
+  viewForward: 'Look forward',
+  viewBack: 'Look back',
+  viewLeft: 'Look left',
+  viewRight: 'Look right',
+  recenterView: 'Recenter view',
+  craftNext: 'Next craft',
+  craftPrev: 'Previous craft',
+  modeToggle: 'CLASSIC / SIM',
+  gearToggle: 'Landing gear',
+  flapsUp: 'Flaps up',
+  flapsDown: 'Flaps down',
+  airbrake: 'Airbrake / spoilers',
+  autopilotToggle: 'Autopilot',
+  timeForward: 'Time of day forward',
+  timeBack: 'Time of day back',
+  ringCourse: 'Ring course',
+  journal: 'Journal',
+  settings: 'Settings',
+  controlsPanel: 'Controls panel',
+  relaunch: 'Relaunch',
+  engineToggle: 'Engine on / off',
+  chuteDeploy: 'Deploy parachute',
+});
+export const ACTION_IDS = Object.freeze(Object.keys(ACTIONS));
+
+export function createControlState() {
+  return {
+    roll: 0,
+    pitch: 0,
+    yaw: 0,
+    throttle: 0.5,
+    collective: 0.5,
+    brakeL: 0,
+    brakeR: 0,
+    flaps: 0,
+    trim: 0,
+    lookX: 0,
+    lookY: 0,
+    /** Action ids pressed since the last physics tick consumed them. */
+    actions: new Set(),
+    /** Action ids currently held (for hold-type actions such as airbrake and PTT). */
+    held: new Set(),
+    /** Which source last moved each axis: 'keyboard' | 'mouse' | 'touch' | 'gamepad' | 'hotas'. */
+    sources: {},
+  };
+}
+
+/** Copies axis values and action sets from source into target (used for tick snapshots). */
+export function copyControlState(target, source) {
+  for (const axis of AXES) target[axis] = source[axis];
+  target.actions.clear();
+  for (const action of source.actions) target.actions.add(action);
+  target.held.clear();
+  for (const action of source.held) target.held.add(action);
+  Object.assign(target.sources, source.sources);
+  return target;
+}

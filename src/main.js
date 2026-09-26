@@ -25,6 +25,9 @@ import { createWaypointSystem } from './gameplay/waypoints.js';
 import { createWorldGen } from './world/worldgen.js';
 import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName, isFiniteVector, isFiniteQuaternion } from './core/util.js';
 import { EventBus } from './core/eventBus.js';
+import { attachTypedEvents } from './core/events.js';
+import { createWindField } from './env/WindField.js';
+import { storage } from './core/storage.js';
 import { findSpawn } from './world/spawn.js';
 import { resolveSeed } from './core/seed.js';
 import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation } from './core/sun.js';
@@ -35,7 +38,8 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
 // ============================================================================
 async function boot() {
   const params = new URLSearchParams(window.location.search);
-  const bus = new EventBus();
+  await storage.init();
+  const bus = attachTypedEvents(new EventBus(), { validate: import.meta.env.DEV || params.get('debug') === '1' });
   const settings = createSettings(bus);
   const seed = resolveSeed(params);
   if (params.get('seed') !== seed) {
@@ -184,7 +188,9 @@ async function boot() {
     camera,
     bus,
     settings,
+    storage,
     world,
+    wind: null,
     worldOptions: WORLD_OPTIONS,
     state,
     input,
@@ -215,6 +221,8 @@ async function boot() {
   window.addEventListener('pointerdown', onFirstGesture, true);
   window.addEventListener('keydown', onFirstGesture, true);
   window.addEventListener('touchstart', onFirstGesture, true);
+
+  ctx.wind = createWindField({ world, uniforms, state, bus });
 
   const perf = createPerfGovernor(ctx);
 

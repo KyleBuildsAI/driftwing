@@ -790,6 +790,26 @@ export function createCloudSystem(ctx) {
     for (const cluster of clusterCache.values()) cluster.weatherTimer = 0;
   });
 
+  // ---- Thermal cores for the WindField: every visible cumulus caps a thermal ---------------------
+  function thermalCoresNear(x, z, radius, visit) {
+    const cloudX = x - drift.x;
+    const cloudZ = z - drift.z;
+    const reach = Math.ceil(radius / CELL_SIZE);
+    const centerCellX = Math.floor(cloudX / CELL_SIZE);
+    const centerCellZ = Math.floor(cloudZ / CELL_SIZE);
+    for (let offsetZ = -reach; offsetZ <= reach; offsetZ++) {
+      for (let offsetX = -reach; offsetX <= reach; offsetX++) {
+        const cluster = clusterCache.get(clusterKey(centerCellX + offsetX, centerCellZ + offsetZ));
+        if (!cluster || cluster.growth < MIN_VISIBLE_SCALE) continue;
+        const coreX = cluster.centerX + drift.x;
+        const coreZ = cluster.centerZ + drift.z;
+        if (Math.hypot(coreX - x, coreZ - z) > radius + cluster.radius) continue;
+        visit(coreX, coreZ, cluster.radius * cluster.sizeScale, cluster.base, cluster.growth);
+      }
+    }
+  }
+  if (ctx.wind) ctx.wind.setThermalProvider(thermalCoresNear);
+
   state.player.inCloud = 0;
   refreshReference();
   updateWind(state.time.elapsed);
@@ -824,6 +844,7 @@ export function createCloudSystem(ctx) {
     getCoverageAt(x, z) {
       return coverageAt(x, z);
     },
+    thermalCoresNear,
     getStats() {
       return {
         clusters: visibleClusters,
