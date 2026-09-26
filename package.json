@@ -1,6 +1,6 @@
 {
   "name": "driftwing",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "DRIFTWING: an ambient infinite-flight exploration game in a single index.html (three.js WebGPU)",
   "type": "module",
