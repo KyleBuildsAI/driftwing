@@ -5,7 +5,10 @@
 // Usage:
 //   node tools/smoke-test.mjs [--file index.html] [--query "seed=42&renderer=webgl"]
 //     [--seconds 8] [--out <dir>] [--steps '<json array>' | --steps-file steps.json]
-//     [--width 1280] [--height 720] [--headful] [--browser <path>]
+//     [--width 1280] [--height 720] [--headful] [--browser <path>] [--file-protocol]
+//
+// --file-protocol opens the page from file:// (as a double-click would) instead
+// of serving it from the local static server.
 //
 // Steps (JSON array, run in order after the game reports ready):
 //   { "wait": 1000 }                         sleep ms
@@ -19,7 +22,7 @@ import puppeteer from 'puppeteer-core';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startStaticServer } from './serve.mjs';
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -44,6 +47,7 @@ function parseArgs(argv) {
     height: 720,
     headful: false,
     browser: null,
+    fileProtocol: false,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -59,6 +63,7 @@ function parseArgs(argv) {
       case '--height': options.height = Number(next()); break;
       case '--headful': options.headful = true; break;
       case '--browser': options.browser = next(); break;
+      case '--file-protocol': options.fileProtocol = true; break;
       default: throw new Error(`Unknown flag ${flag}`);
     }
   }
@@ -93,8 +98,16 @@ async function main() {
   if (!executablePath) throw new Error('No Chrome/Edge found; set CHROME_PATH');
 
   const filePath = resolve(PROJECT_ROOT, options.file);
-  const { server, port } = await startStaticServer({ port: 0, root: dirname(filePath), quiet: true });
-  const url = `http://localhost:${port}/${filePath.split(/[\\/]/).pop()}${options.query ? `?${options.query}` : ''}`;
+  const query = options.query ? `?${options.query}` : '';
+  let server = null;
+  let url;
+  if (options.fileProtocol) {
+    url = `${pathToFileURL(filePath).href}${query}`;
+  } else {
+    const started = await startStaticServer({ port: 0, root: dirname(filePath), quiet: true });
+    server = started.server;
+    url = `http://localhost:${started.port}/${filePath.split(/[\\/]/).pop()}${query}`;
+  }
 
   const browser = await puppeteer.launch({
     executablePath,
@@ -174,8 +187,8 @@ async function main() {
       .evaluate(() => (window.DRIFTWING?.getStats ? window.DRIFTWING.getStats() : null))
       .catch((error) => `getStats failed: ${error.message}`);
   } finally {
-    await browser.close().catch(() => {});
-    server.close();
+    await browser.close().catch((error) => process.stderr.write(`browser close failed: ${error.message}\n`));
+    server?.close();
   }
 
   const passed = report.ready && report.errors.length === 0 && report.warnings.length === 0 && report.screenshotsDiffer;
