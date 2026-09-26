@@ -110,7 +110,7 @@ const CONFIG = Object.freeze({
   START_SUN_ELEVATION_DEG: 9,
   SUN_MAX_ELEVATION_DEG: 62,
   CLOUD_SHADOW: Object.freeze({ SIZE: 128, WORLD: 4096 }),
-  CAMERA: Object.freeze({ FOV_BASE: 60, FOV_MAX: 78, NEAR: 0.5 }),
+  CAMERA: Object.freeze({ FOV_BASE: 60, FOV_MAX: 78, NEAR: 1 }),
   REMOTE_COPILOT_DEFAULT_ENDPOINT: 'http://localhost:3000/copilot',
   REMOTE_COPILOT_TIMEOUT_MS: 800,
   UI_IDLE_HIDE_MS: 3000,
@@ -1307,7 +1307,8 @@ async function boot() {
       webgpuAvailable = false;
     }
   }
-  const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: !webgpuAvailable });
+  // Reversed depth only on WebGPU: on WebGL2 it needs EXT_clip_control (warns otherwise).
+  const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: !webgpuAvailable, reversedDepthBuffer: webgpuAvailable });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
