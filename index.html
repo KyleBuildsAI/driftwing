@@ -11517,7 +11517,8 @@ function createLandmarkSystem(ctx) {
   const ARCH_RING_POINTS = 12;
   const ARCH_STEPS = 30;
 
-  function buildArch(site) {
+  /** Seeded proportions of one arch: span, height, leg and top sections, lean. */
+  function createArchShape(site) {
     const random = createRandom(site, 11);
     const style = ARCH_STYLES[site.biomeKey] || ARCH_STYLES.meadows;
     const span = 60 + 50 * site.variant;
@@ -11530,21 +11531,28 @@ function createLandmarkSystem(ctx) {
     const lean = (random() - 0.5) * 0.1;
     const skew = (random() - 0.5) * 0.16 * halfSpan;
     const wobble = (random() - 0.5) * 6;
+    return { site, random, style, span, height, halfSpan, legThickness, topThickness, legDepth, topDepth, lean, skew, wobble };
+  }
 
-    function footRange(sideIndex, cosAngle, sinAngle) {
-      const centerX = (sideIndex === 0 ? -1 : 1) * halfSpan;
-      let min = Infinity;
-      let max = -Infinity;
-      for (const [offsetX, offsetZ] of FOOT_SAMPLES) {
-        const localX = centerX + offsetX * legThickness[sideIndex] * 0.5;
-        const localZ = offsetZ * legDepth * 0.5;
-        const ground = world.groundHeight(site.x + localX * cosAngle + localZ * sinAngle, site.z - localX * sinAngle + localZ * cosAngle);
-        min = Math.min(min, ground);
-        max = Math.max(max, ground);
-      }
-      return { min, max };
+  /** Lowest and highest ground under one foot for a trial orientation. */
+  function archFootRange(arch, sideIndex, cosAngle, sinAngle) {
+    const { site, halfSpan, legThickness, legDepth } = arch;
+    const centerX = (sideIndex === 0 ? -1 : 1) * halfSpan;
+    let min = Infinity;
+    let max = -Infinity;
+    for (const [offsetX, offsetZ] of FOOT_SAMPLES) {
+      const localX = centerX + offsetX * legThickness[sideIndex] * 0.5;
+      const localZ = offsetZ * legDepth * 0.5;
+      const ground = world.groundHeight(site.x + localX * cosAngle + localZ * sinAngle, site.z - localX * sinAngle + localZ * cosAngle);
+      min = Math.min(min, ground);
+      max = Math.max(max, ground);
     }
-    // Turn the span (deterministically) so both feet stand on similar ground.
+    return { min, max };
+  }
+
+  /** Turns the span (deterministically) so both feet stand on similar ground. */
+  function chooseArchRotation(arch) {
+    const { site } = arch;
     let rotation = site.rotation;
     let feet = null;
     let bestScore = Infinity;
@@ -11552,7 +11560,7 @@ function createLandmarkSystem(ctx) {
       const trial = site.rotation + (candidate * Math.PI) / 8;
       const cosTrial = Math.cos(trial);
       const sinTrial = Math.sin(trial);
-      const trialFeet = [footRange(0, cosTrial, sinTrial), footRange(1, cosTrial, sinTrial)];
+      const trialFeet = [archFootRange(arch, 0, cosTrial, sinTrial), archFootRange(arch, 1, cosTrial, sinTrial)];
       const imbalance = Math.abs(trialFeet[0].min + trialFeet[0].max - trialFeet[1].min - trialFeet[1].max) * 0.5;
       const unevenness = trialFeet[0].max - trialFeet[0].min + trialFeet[1].max - trialFeet[1].min;
       const score = imbalance + 0.3 * unevenness;
@@ -11562,6 +11570,13 @@ function createLandmarkSystem(ctx) {
         feet = trialFeet;
       }
     }
+    return { rotation, feet };
+  }
+
+  /** Base height, buried leg bottoms and local-to-world helpers for the chosen rotation. */
+  function seatArch(arch, orientation) {
+    const { site, height } = arch;
+    const { rotation, feet } = orientation;
     const cosRotation = Math.cos(rotation);
     const sinRotation = Math.sin(rotation);
     const worldX = (localX, localZ) => site.x + localX * cosRotation + localZ * sinRotation;
@@ -11569,43 +11584,58 @@ function createLandmarkSystem(ctx) {
     const centerGround = world.groundHeight(site.x, site.z);
     const baseY = Math.max(feet[0].max, feet[1].max, centerGround - height * 0.3) - 0.5;
     const bottoms = [feet[0].min - baseY - 15, feet[1].min - baseY - 15];
+    return { rotation, cosRotation, sinRotation, worldX, worldZ, baseY, bottoms };
+  }
 
-    // Centre-line frames: left leg (bottom-up), the half-ellipse, right leg (top-down).
+  function archLegFrame(arch, sideIndex, fraction) {
+    const side = sideIndex === 0 ? -1 : 1;
+    const y = arch.bottoms[sideIndex] * fraction;
+    return {
+      x: side * (arch.halfSpan + 2.5 * fraction), y, z: arch.lean * y, nx: side, ny: 0,
+      thickness: arch.legThickness[sideIndex] * (1 + 0.45 * fraction),
+      depth: arch.legDepth * (1 + 0.35 * fraction),
+    };
+  }
+
+  /** One frame of the half-ellipse, thinning from the legs toward the crown. */
+  function archSpanFrame(arch, step) {
+    const { random, height, halfSpan, legThickness, topThickness, legDepth, topDepth, lean, skew, wobble } = arch;
+    const stepJitter = step > 0 && step < ARCH_STEPS ? (random() - 0.5) * 0.45 : 0;
+    const angle = ((step + stepJitter) / ARCH_STEPS) * Math.PI;
+    const cosAngle = Math.cos(angle);
+    const sinAngle = Math.sin(angle);
+    const normalX = -height * cosAngle;
+    const normalY = halfSpan * sinAngle;
+    const normalLength = Math.hypot(normalX, normalY);
+    const legBlend = lerp(legThickness[0], legThickness[1], step / ARCH_STEPS);
+    const y = height * sinAngle;
+    return {
+      x: -halfSpan * cosAngle + skew * sinAngle,
+      y,
+      z: lean * y + wobble * Math.sin(2 * angle) * 0.5,
+      nx: normalX / normalLength,
+      ny: normalY / normalLength,
+      thickness: topThickness + (legBlend - topThickness) * Math.pow(1 - sinAngle, 0.9),
+      depth: topDepth + (legDepth - topDepth) * Math.pow(1 - sinAngle, 0.8),
+    };
+  }
+
+  /** Centre-line frames: left leg (bottom-up), the half-ellipse, right leg (top-down). */
+  function buildArchFrames(arch) {
     const frames = [];
-    function legFrame(sideIndex, fraction) {
-      const side = sideIndex === 0 ? -1 : 1;
-      const y = bottoms[sideIndex] * fraction;
-      frames.push({
-        x: side * (halfSpan + 2.5 * fraction), y, z: lean * y, nx: side, ny: 0,
-        thickness: legThickness[sideIndex] * (1 + 0.45 * fraction),
-        depth: legDepth * (1 + 0.35 * fraction),
-      });
-    }
-    for (const fraction of [1, 0.6, 0.25]) legFrame(0, fraction);
-    for (let step = 0; step <= ARCH_STEPS; step++) {
-      const stepJitter = step > 0 && step < ARCH_STEPS ? (random() - 0.5) * 0.45 : 0;
-      const angle = ((step + stepJitter) / ARCH_STEPS) * Math.PI;
-      const cosAngle = Math.cos(angle);
-      const sinAngle = Math.sin(angle);
-      const normalX = -height * cosAngle;
-      const normalY = halfSpan * sinAngle;
-      const normalLength = Math.hypot(normalX, normalY);
-      const legBlend = lerp(legThickness[0], legThickness[1], step / ARCH_STEPS);
-      const y = height * sinAngle;
-      frames.push({
-        x: -halfSpan * cosAngle + skew * sinAngle,
-        y,
-        z: lean * y + wobble * Math.sin(2 * angle) * 0.5,
-        nx: normalX / normalLength,
-        ny: normalY / normalLength,
-        thickness: topThickness + (legBlend - topThickness) * Math.pow(1 - sinAngle, 0.9),
-        depth: topDepth + (legDepth - topDepth) * Math.pow(1 - sinAngle, 0.8),
-      });
-    }
-    for (const fraction of [0.25, 0.6, 1]) legFrame(1, fraction);
+    for (const fraction of [1, 0.6, 0.25]) frames.push(archLegFrame(arch, 0, fraction));
+    for (let step = 0; step <= ARCH_STEPS; step++) frames.push(archSpanFrame(arch, step));
+    for (const fraction of [0.25, 0.6, 1]) frames.push(archLegFrame(arch, 1, fraction));
+    return frames;
+  }
 
-    // Lumpy cross-sections: a coarse random field every 3 frames, eased, plus
-    // gentle bulges of the centre line so the span never reads as a tube.
+  /**
+   * Lumpy cross-sections: a coarse random field every 3 frames, eased, plus gentle
+   * bulges of the centre line so the span never reads as a tube. Also returns the
+   * inner outline (x, y pairs) used to detect threading.
+   */
+  function buildArchRings(arch, frames) {
+    const { random } = arch;
     const fieldStride = ARCH_RING_POINTS + 2;
     const coarseRows = Math.ceil(frames.length / 3) + 2;
     const field = Array.from({ length: coarseRows * fieldStride }, () => random() * 2 - 1);
@@ -11634,15 +11664,19 @@ function createLandmarkSystem(ctx) {
       innerOutline.push(inner.x, inner.y);
       return ring;
     });
+    return { rings, innerOutline };
+  }
 
-    // Strata: wide, gently dipping bands (subtle for granite), caps on top faces.
+  /** Strata: wide, gently dipping bands (subtle for granite), caps on top faces. */
+  function createArchPaint(arch) {
+    const { site, random, style, height } = arch;
     const bandHeight = style.capFrom < 0 || site.biomeKey === 'pine' ? 11 + 6 * random() : 6.5 + 5 * random();
     const bandPhase = random() * 20;
     const bandDip = (random() - 0.5) * 0.16;
     const capFromY = style.capFrom < 0 ? -Infinity : height * style.capFrom;
     const capThreshold = style.capFrom < 0 ? 0.3 : 0.45;
     const bandCount = style.bands.length;
-    const paintRock = (face) => {
+    return (face) => {
       const wave = 1.8 * Math.sin(face.x * 0.04 + face.z * 0.03 + bandPhase);
       const band = Math.floor((face.y + bandPhase + wave + face.x * bandDip) / bandHeight);
       const base = style.bands[((band % bandCount) + bandCount) % bandCount];
@@ -11655,12 +11689,14 @@ function createLandmarkSystem(ctx) {
       if (face.y < 3) factor *= 0.9;
       return scaled(base, factor);
     };
+  }
 
-    const builder = createBuilder();
-    builder.loft(rings, paintRock, { capStart: true, capEnd: true });
-
-    // Weathered rock masses along the outer flanks break the silhouette (kept
-    // off the inner edge so the opening matches the threading outline).
+  /**
+   * Weathered rock masses along the outer flanks break the silhouette (kept off the
+   * inner edge so the opening matches the threading outline).
+   */
+  function addArchMasses(builder, arch, frames, paintRock) {
+    const { random } = arch;
     const massCenter = new THREE.Vector3();
     for (let frameIndex = 2; frameIndex < frames.length - 2; frameIndex += 3) {
       const frame = frames[frameIndex];
@@ -11673,8 +11709,11 @@ function createLandmarkSystem(ctx) {
       const radius = Math.min(frame.thickness, frame.depth) * (0.34 + 0.14 * random());
       builder.rock(massCenter, radius, random, paintRock, { squash: 0.55 + 0.25 * random(), jitter: 0.28 });
     }
+  }
 
-    // Massive boulders merged into the feet and outer flanks, then loose rubble.
+  /** Massive boulders merged into the feet and outer flanks, then loose rubble. */
+  function addArchRubble(builder, arch, paintRock) {
+    const { random, halfSpan, legThickness, legDepth, baseY, worldX, worldZ } = arch;
     const rubbleCenter = new THREE.Vector3();
     const addRubble = (localX, localZ, radius, buryFraction) => {
       const ground = world.groundHeight(worldX(localX, localZ), worldZ(localX, localZ)) - baseY;
@@ -11698,8 +11737,11 @@ function createLandmarkSystem(ctx) {
     for (let index = 0; index < 3; index++) {
       addRubble((random() - 0.5) * halfSpan * 0.9, (random() - 0.5) * legDepth * 2.2, 2 + 3 * random(), 0.25);
     }
+  }
 
-    const geometry = builder.build();
+  /** Wraps the arch geometry in its placed group with discovery and threading data. */
+  function createArchInstance(arch, geometry, innerOutline) {
+    const { site, baseY, rotation, height, topThickness, skew, span, worldX, worldZ } = arch;
     const mesh = solidMesh(geometry);
     const group = new THREE.Group();
     group.position.set(site.x, baseY, site.z);
@@ -11720,8 +11762,8 @@ function createLandmarkSystem(ctx) {
       thread: {
         polygon: Float64Array.from(innerOutline),
         baseY,
-        cos: cosRotation,
-        sin: sinRotation,
+        cos: arch.cosRotation,
+        sin: arch.sinRotation,
         lastTime: -Infinity,
         // Centre of the opening in world space (useful for guidance and tests).
         aim: { x: worldX(aimLocalX, 0), y: baseY + innerHeight * 0.42, z: worldZ(aimLocalX, 0) },
@@ -11729,6 +11771,19 @@ function createLandmarkSystem(ctx) {
         height,
       },
     };
+  }
+
+  function buildArch(site) {
+    const arch = createArchShape(site);
+    Object.assign(arch, seatArch(arch, chooseArchRotation(arch)));
+    const frames = buildArchFrames(arch);
+    const { rings, innerOutline } = buildArchRings(arch, frames);
+    const paintRock = createArchPaint(arch);
+    const builder = createBuilder();
+    builder.loft(rings, paintRock, { capStart: true, capEnd: true });
+    addArchMasses(builder, arch, frames, paintRock);
+    addArchRubble(builder, arch, paintRock);
+    return createArchInstance(arch, builder.build(), innerOutline);
   }
 
   // ---- Monolith circle ---------------------------------------------------------------------
@@ -11780,51 +11835,73 @@ function createLandmarkSystem(ctx) {
     };
   }
 
-  function buildMonoliths(site, descriptor) {
+  // Scratch transform for placing stones (landmarks are built one at a time).
+  const stonePosition = new THREE.Vector3();
+  const stoneQuaternion = new THREE.Quaternion();
+  const stoneEuler = new THREE.Euler();
+  const stoneMatrix = new THREE.Matrix4();
+  const runeOrigin = new THREE.Vector3();
+
+  function yawToCenter(localX, localZ) {
+    return Math.atan2(-localX, -localZ);
+  }
+
+  /** Per-build state shared by the monolith helpers; stoneBase tints paintStone. */
+  function createStoneCircle(site, descriptor) {
     const random = createRandom(site, 23);
     const style = STONE_STYLES[site.biomeKey] || STONE_STYLES.meadows;
-    const count = descriptor.count;
-    const radius = 28 + 12 * site.variant;
     const baseY = world.groundHeight(site.x, site.z);
-    const localGround = (localX, localZ) => world.groundHeight(site.x + localX, site.z + localZ) - baseY;
-    const builder = createBuilder();
-    const matrix = new THREE.Matrix4();
-    const quaternion = new THREE.Quaternion();
-    const euler = new THREE.Euler();
-    const position = new THREE.Vector3();
-    const runeOrigin = new THREE.Vector3();
-
-    let stoneBase = style.bases[0];
-    const paintStone = (face) => {
+    const circle = {
+      site,
+      random,
+      style,
+      count: descriptor.count,
+      radius: 28 + 12 * site.variant,
+      baseY,
+      localGround: (localX, localZ) => world.groundHeight(site.x + localX, site.z + localZ) - baseY,
+      builder: createBuilder(),
+      stoneBase: style.bases[0],
+      paintStone: null,
+    };
+    circle.paintStone = (face) => {
       let factor = 0.9 + 0.16 * random();
-      if (face.ny > 0.62) return blended(stoneBase, style.cap, 0.85, 0.96 + 0.06 * random());
+      if (face.ny > 0.62) return blended(circle.stoneBase, style.cap, 0.85, 0.96 + 0.06 * random());
       if (face.ny < -0.3) factor *= 0.74;
       if (face.y < 1.2) factor *= 0.86;
-      if (random() < 0.12) return blended(stoneBase, style.lichen, 0.5, factor);
-      return scaled(stoneBase, factor);
+      if (random() < 0.12) return blended(circle.stoneBase, style.lichen, 0.5, factor);
+      return scaled(circle.stoneBase, factor);
     };
+    return circle;
+  }
 
-    function placeStone(localX, localZ, yaw, leanForward, leanSide, spec, runes) {
-      stoneBase = pickFrom(style.bases, random);
-      position.set(localX, localGround(localX, localZ) + (spec.lift || 0), localZ);
-      quaternion.setFromEuler(euler.set(leanForward, yaw, leanSide, 'YXZ'));
-      matrix.compose(position, quaternion, UNIT_SCALE);
-      builder.setTransform(matrix);
-      const depthAt = addStandingStone(builder, random, spec, paintStone);
-      if (runes) {
-        const glyphScale = clamp(spec.width * 0.3, 0.95, 1.3);
-        const glyphCount = spec.height > 14 ? 2 : 1;
-        let glyphY = spec.height * 0.4;
-        for (let glyphIndex = 0; glyphIndex < glyphCount; glyphIndex++) {
-          runeOrigin.set(0, glyphY, depthAt(glyphY + 0.8 * glyphScale));
-          carveGlyph(builder, pickFrom(RUNE_GLYPHS, random), runeOrigin, X_AXIS, Y_AXIS, Z_AXIS, glyphScale);
-          glyphY += 1.6 * glyphScale + 1.0;
-        }
-      }
-      builder.clearTransform();
+  /** One or two glyphs up the inner face of a standing stone (stone space). */
+  function carveStoneRunes(circle, spec, depthAt) {
+    const glyphScale = clamp(spec.width * 0.3, 0.95, 1.3);
+    const glyphCount = spec.height > 14 ? 2 : 1;
+    let glyphY = spec.height * 0.4;
+    for (let glyphIndex = 0; glyphIndex < glyphCount; glyphIndex++) {
+      runeOrigin.set(0, glyphY, depthAt(glyphY + 0.8 * glyphScale));
+      carveGlyph(circle.builder, pickFrom(RUNE_GLYPHS, circle.random), runeOrigin, X_AXIS, Y_AXIS, Z_AXIS, glyphScale);
+      glyphY += 1.6 * glyphScale + 1.0;
     }
-    const yawToCenter = (localX, localZ) => Math.atan2(-localX, -localZ);
+  }
 
+  /** Stands a stone on the ground at (localX, localZ), leaning and facing yaw. */
+  function placeStone(circle, localX, localZ, yaw, leanForward, leanSide, spec, runes) {
+    const { builder, random, style } = circle;
+    circle.stoneBase = pickFrom(style.bases, random);
+    stonePosition.set(localX, circle.localGround(localX, localZ) + (spec.lift || 0), localZ);
+    stoneQuaternion.setFromEuler(stoneEuler.set(leanForward, yaw, leanSide, 'YXZ'));
+    stoneMatrix.compose(stonePosition, stoneQuaternion, UNIT_SCALE);
+    builder.setTransform(stoneMatrix);
+    const depthAt = addStandingStone(builder, random, spec, circle.paintStone);
+    if (runes) carveStoneRunes(circle, spec, depthAt);
+    builder.clearTransform();
+  }
+
+  /** Which ring slots hold trilithons or a fallen stone, and where the tall side faces. */
+  function planStoneSlots(circle) {
+    const { random, count } = circle;
     const pairCount = count >= 11 ? 3 : 2;
     const slotCount = count - pairCount;
     const firstPair = Math.floor(random() * slotCount);
@@ -11836,113 +11913,151 @@ function createLandmarkSystem(ctx) {
       if (!pairSlots.has(candidate)) fallenSlot = candidate;
     }
     const tallSide = random() * TWO_PI;
+    return { slotCount, pairSlots, fallenSlot, tallSide };
+  }
 
-    for (let slot = 0; slot < slotCount; slot++) {
-      const angle = site.rotation + (slot / slotCount) * TWO_PI + (random() - 0.5) * 0.1;
-      const tallness = 0.5 + 0.5 * Math.cos(angle - tallSide);
+  /** Trilithon: two close uprights of equal height capped by a lintel. */
+  function addTrilithon(circle, spot) {
+    const { builder, random, style } = circle;
+    const { angle, tallness, centerX, centerZ, yaw } = spot;
+    const width = 3.9 + 1.2 * random();
+    const depth = 2.4 + 0.8 * random();
+    const pairHeight = 12 + 9 * Math.max(tallness, 0.35) * (0.8 + 0.2 * random());
+    const gap = 2.4 + 0.8 * random();
+    const tangentX = -Math.sin(angle);
+    const tangentZ = Math.cos(angle);
+    const offset = (gap + width) * 0.5;
+    const uprights = [-1, 1].map((sign) => ({ x: centerX + tangentX * offset * sign, z: centerZ + tangentZ * offset * sign }));
+    const grounds = uprights.map((upright) => circle.localGround(upright.x, upright.z));
+    const top = Math.max(grounds[0], grounds[1]) + pairHeight;
+    uprights.forEach((upright, index) => {
+      const uprightHeight = top - grounds[index];
+      placeStone(circle, upright.x, upright.z, yaw, 0, 0, { width, depth, height: uprightHeight, sink: 2.5, flatTop: true }, index === 0);
+    });
+    circle.stoneBase = pickFrom(style.bases, random);
+    const along = new THREE.Vector3(tangentX, 0, tangentZ);
+    const inward = new THREE.Vector3(-Math.cos(angle), 0, -Math.sin(angle));
+    const lintelCenter = new THREE.Vector3(centerX, top + 0.85, centerZ);
+    builder.box(lintelCenter, along, Y_AXIS, inward, offset + width * 0.5 + 0.35, 0.85, depth * 0.46, circle.paintStone);
+    runeOrigin.copy(lintelCenter).addScaledVector(inward, depth * 0.46).addScaledVector(Y_AXIS, -0.62);
+    carveGlyph(builder, RUNE_GLYPHS[4], runeOrigin, along.clone().negate(), new THREE.Vector3(0, 0.78, 0), inward, 1);
+  }
+
+  /** A broken stone lying outward where it fell. */
+  function addFallenStone(circle, spot) {
+    const { builder, random, style } = circle;
+    const { angle, centerX, centerZ, yaw } = spot;
+    const width = 3.6 + 1.4 * random();
+    const depth = 2.2 + 0.8 * random();
+    const length = 9 + 6 * random();
+    const outwardYaw = yaw + Math.PI;
+    const lie = (distanceOut, pieceLength, pieceYaw, flatTop) => {
+      const pieceX = centerX + Math.cos(angle) * distanceOut;
+      const pieceZ = centerZ + Math.sin(angle) * distanceOut;
+      circle.stoneBase = pickFrom(style.bases, random);
+      stonePosition.set(pieceX, circle.localGround(pieceX, pieceZ) + depth * 0.32, pieceZ);
+      stoneQuaternion.setFromEuler(stoneEuler.set(Math.PI / 2 - 0.05, pieceYaw, (random() - 0.5) * 0.2, 'YXZ'));
+      stoneMatrix.compose(stonePosition, stoneQuaternion, UNIT_SCALE);
+      builder.setTransform(stoneMatrix);
+      addStandingStone(builder, random, { width, depth, height: pieceLength, sink: 0.4, flatTop }, circle.paintStone);
+      builder.clearTransform();
+    };
+    lie(0, length * 0.55, outwardYaw, true);
+    lie(length * 0.55 + 1.2, length * 0.4, outwardYaw + (random() - 0.5) * 0.4, false);
+  }
+
+  /** A single rune-carved standing stone, taller toward the circle's tall side. */
+  function addUprightStone(circle, spot) {
+    const { random } = circle;
+    const height = 8 + 14 * clamp(0.55 * spot.tallness + 0.45 * random(), 0, 1);
+    const width = 3.4 + 2.2 * random() + height * 0.06;
+    const depth = 2.0 + 1.2 * random();
+    const leanForward = (random() - 0.5) * 0.08 + (random() < 0.15 ? 0.14 : 0);
+    placeStone(circle, spot.centerX, spot.centerZ, spot.yaw, leanForward, (random() - 0.5) * 0.07, { width, depth, height, sink: 2.2 }, true);
+  }
+
+  /** The ring itself: trilithons, at most one fallen stone and single uprights. */
+  function addRingStones(circle, plan) {
+    const { site, random, radius } = circle;
+    for (let slot = 0; slot < plan.slotCount; slot++) {
+      const angle = site.rotation + (slot / plan.slotCount) * TWO_PI + (random() - 0.5) * 0.1;
+      const tallness = 0.5 + 0.5 * Math.cos(angle - plan.tallSide);
       const ringRadius = radius + (random() - 0.5) * 2.4;
       const centerX = Math.cos(angle) * ringRadius;
       const centerZ = Math.sin(angle) * ringRadius;
-      const yaw = yawToCenter(centerX, centerZ);
-      if (pairSlots.has(slot)) {
-        // Trilithon: two close uprights of equal height capped by a lintel.
-        const width = 3.9 + 1.2 * random();
-        const depth = 2.4 + 0.8 * random();
-        const pairHeight = 12 + 9 * Math.max(tallness, 0.35) * (0.8 + 0.2 * random());
-        const gap = 2.4 + 0.8 * random();
-        const tangentX = -Math.sin(angle);
-        const tangentZ = Math.cos(angle);
-        const offset = (gap + width) * 0.5;
-        const uprights = [-1, 1].map((sign) => ({ x: centerX + tangentX * offset * sign, z: centerZ + tangentZ * offset * sign }));
-        const grounds = uprights.map((upright) => localGround(upright.x, upright.z));
-        const top = Math.max(grounds[0], grounds[1]) + pairHeight;
-        uprights.forEach((upright, index) => {
-          const uprightHeight = top - grounds[index];
-          placeStone(upright.x, upright.z, yaw, 0, 0, { width, depth, height: uprightHeight, sink: 2.5, flatTop: true }, index === 0);
-        });
-        stoneBase = pickFrom(style.bases, random);
-        const along = new THREE.Vector3(tangentX, 0, tangentZ);
-        const inward = new THREE.Vector3(-Math.cos(angle), 0, -Math.sin(angle));
-        const lintelCenter = new THREE.Vector3(centerX, top + 0.85, centerZ);
-        builder.box(lintelCenter, along, Y_AXIS, inward, offset + width * 0.5 + 0.35, 0.85, depth * 0.46, paintStone);
-        runeOrigin.copy(lintelCenter).addScaledVector(inward, depth * 0.46).addScaledVector(Y_AXIS, -0.62);
-        carveGlyph(builder, RUNE_GLYPHS[4], runeOrigin, along.clone().negate(), new THREE.Vector3(0, 0.78, 0), inward, 1);
-      } else if (slot === fallenSlot) {
-        // A broken stone lying outward where it fell.
-        const width = 3.6 + 1.4 * random();
-        const depth = 2.2 + 0.8 * random();
-        const length = 9 + 6 * random();
-        const outwardYaw = yaw + Math.PI;
-        const lie = (distanceOut, pieceLength, pieceYaw, flatTop) => {
-          const pieceX = centerX + Math.cos(angle) * distanceOut;
-          const pieceZ = centerZ + Math.sin(angle) * distanceOut;
-          stoneBase = pickFrom(style.bases, random);
-          position.set(pieceX, localGround(pieceX, pieceZ) + depth * 0.32, pieceZ);
-          quaternion.setFromEuler(euler.set(Math.PI / 2 - 0.05, pieceYaw, (random() - 0.5) * 0.2, 'YXZ'));
-          matrix.compose(position, quaternion, UNIT_SCALE);
-          builder.setTransform(matrix);
-          addStandingStone(builder, random, { width, depth, height: pieceLength, sink: 0.4, flatTop }, paintStone);
-          builder.clearTransform();
-        };
-        lie(0, length * 0.55, outwardYaw, true);
-        lie(length * 0.55 + 1.2, length * 0.4, outwardYaw + (random() - 0.5) * 0.4, false);
-      } else {
-        const height = 8 + 14 * clamp(0.55 * tallness + 0.45 * random(), 0, 1);
-        const width = 3.4 + 2.2 * random() + height * 0.06;
-        const depth = 2.0 + 1.2 * random();
-        const leanForward = (random() - 0.5) * 0.08 + (random() < 0.15 ? 0.14 : 0);
-        placeStone(centerX, centerZ, yaw, leanForward, (random() - 0.5) * 0.07, { width, depth, height, sink: 2.2 }, true);
-      }
+      const spot = { angle, tallness, centerX, centerZ, yaw: yawToCenter(centerX, centerZ) };
+      if (plan.pairSlots.has(slot)) addTrilithon(circle, spot);
+      else if (slot === plan.fallenSlot) addFallenStone(circle, spot);
+      else addUprightStone(circle, spot);
     }
+  }
 
-    // Heel stone outside the circle, aligned with the site's axis.
-    const heelAngle = site.rotation + Math.PI * 0.5;
-    const heelRadius = radius + 16 + 6 * random();
+  /** Heel stone outside the circle, aligned with the site's axis. */
+  function addHeelStone(circle) {
+    const heelAngle = circle.site.rotation + Math.PI * 0.5;
+    const heelRadius = circle.radius + 16 + 6 * circle.random();
     const heelX = Math.cos(heelAngle) * heelRadius;
     const heelZ = Math.sin(heelAngle) * heelRadius;
-    placeStone(heelX, heelZ, yawToCenter(heelX, heelZ), 0.14, 0.05, { width: 3.2, depth: 2.2, height: 6 + 3 * random(), sink: 2 }, false);
+    placeStone(circle, heelX, heelZ, yawToCenter(heelX, heelZ), 0.14, 0.05, { width: 3.2, depth: 2.2, height: 6 + 3 * circle.random(), sink: 2 }, false);
+  }
 
-    // Central altar on a plinth, runes laid into its top, paving ring around it.
+  /** Central altar on a plinth with runes laid into its top; returns its ground height. */
+  function addAltar(circle) {
+    const { site, builder, random, style, paintStone } = circle;
     const axisX = new THREE.Vector3(Math.cos(site.rotation), 0, -Math.sin(site.rotation));
     const axisZ = new THREE.Vector3(Math.sin(site.rotation), 0, Math.cos(site.rotation));
-    const altarGround = localGround(0, 0);
-    stoneBase = style.bases[1];
+    const altarGround = circle.localGround(0, 0);
+    circle.stoneBase = style.bases[1];
     builder.box(new THREE.Vector3(0, altarGround + 0.1, 0), axisX, Y_AXIS, axisZ, 3.3, 0.5, 2.4, paintStone);
     builder.box(new THREE.Vector3(0, altarGround + 1.05, 0), axisX, Y_AXIS, axisZ, 2.2, 0.5, 1.35, paintStone);
     runeOrigin.set(0, altarGround + 1.55, 0).addScaledVector(axisZ, -0.62);
     carveGlyph(builder, pickFrom(RUNE_GLYPHS, random), runeOrigin.clone().addScaledVector(axisX, -1.1), axisX, axisZ, Y_AXIS, 0.75);
     carveGlyph(builder, RUNE_GLYPHS[4], runeOrigin, axisX, axisZ, Y_AXIS, 0.75);
     carveGlyph(builder, pickFrom(RUNE_GLYPHS, random), runeOrigin.clone().addScaledVector(axisX, 1.1), axisX, axisZ, Y_AXIS, 0.75);
+    return altarGround;
+  }
+
+  /** Paving ring around the altar. */
+  function addAltarPaving(circle) {
+    const { site, builder, random, style } = circle;
     const pavingCount = 14;
     for (let index = 0; index < pavingCount; index++) {
       const angle = site.rotation + (index / pavingCount) * TWO_PI + (random() - 0.5) * 0.08;
       const pavingRadius = 7.6 + (random() - 0.5) * 0.6;
       const pavingX = Math.cos(angle) * pavingRadius;
       const pavingZ = Math.sin(angle) * pavingRadius;
-      stoneBase = pickFrom(style.bases, random);
+      circle.stoneBase = pickFrom(style.bases, random);
       builder.box(
-        new THREE.Vector3(pavingX, localGround(pavingX, pavingZ) + 0.02, pavingZ),
+        new THREE.Vector3(pavingX, circle.localGround(pavingX, pavingZ) + 0.02, pavingZ),
         new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle)),
         Y_AXIS,
         new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)),
         1.35,
         0.22,
         0.85,
-        paintStone,
+        circle.paintStone,
       );
     }
-    // A few weathered boulders beyond the ring.
+  }
+
+  /** A few weathered boulders beyond the ring. */
+  function addOuterBoulders(circle) {
+    const { builder, random, style, radius } = circle;
     for (let index = 0; index < 5; index++) {
       const angle = random() * TWO_PI;
       const boulderRadius = radius + 8 + 18 * random();
       const boulderX = Math.cos(angle) * boulderRadius;
       const boulderZ = Math.sin(angle) * boulderRadius;
       const size = 1.2 + 1.8 * random();
-      stoneBase = pickFrom(style.bases, random);
-      builder.rock(new THREE.Vector3(boulderX, localGround(boulderX, boulderZ) + size * 0.15, boulderZ), size, random, paintStone);
+      circle.stoneBase = pickFrom(style.bases, random);
+      builder.rock(new THREE.Vector3(boulderX, circle.localGround(boulderX, boulderZ) + size * 0.15, boulderZ), size, random, circle.paintStone);
     }
+  }
 
-    const geometry = builder.build();
+  /** Wraps the circle's geometry in its group with a rune-light that pulses at night. */
+  function createMonolithInstance(circle, altarGround) {
+    const { site, baseY, random } = circle;
+    const geometry = circle.builder.build();
     const mesh = solidMesh(geometry);
     const group = new THREE.Group();
     group.position.set(site.x, baseY, site.z);
@@ -11974,6 +12089,16 @@ function createLandmarkSystem(ctx) {
     };
   }
 
+  function buildMonoliths(site, descriptor) {
+    const circle = createStoneCircle(site, descriptor);
+    addRingStones(circle, planStoneSlots(circle));
+    addHeelStone(circle);
+    const altarGround = addAltar(circle);
+    addAltarPaving(circle);
+    addOuterBoulders(circle);
+    return createMonolithInstance(circle, altarGround);
+  }
+
   // ---- Lighthouse ------------------------------------------------------------------------------
   function buildBoatGeometry() {
     const builder = createBuilder();
@@ -11994,44 +12119,73 @@ function createLandmarkSystem(ctx) {
     return builder.build();
   }
 
-  function buildLighthouse(site) {
+  function towerRadiusAt(y) {
+    return lerp(4.3, 2.95, (y - 1.6) / 32.2);
+  }
+  function towerFacetAngle(facet) {
+    return ((facet + 0.5) / 16) * TWO_PI;
+  }
+  function towerBandAt(scheme, y) {
+    let band = 0;
+    for (let index = 1; index < scheme.length - 1; index++) if (y > scheme[index]) band = index;
+    return band;
+  }
+  /** Distance along a bearing from the site to the first ground below 0.6 m, or null. */
+  function findShoreDistance(site, angle, from, to, step) {
+    const cosAngle = Math.cos(angle);
+    const sinAngle = Math.sin(angle);
+    for (let reach = from; reach <= to; reach += step) {
+      if (world.groundHeight(site.x + cosAngle * reach, site.z + sinAngle * reach) < 0.6) return reach;
+    }
+    return null;
+  }
+
+  /** Per-build state shared by the lighthouse helpers. */
+  function createLighthouseContext(site) {
     const random = createRandom(site, 37);
     const builder = createBuilder();
     const baseY = world.groundHeight(site.x, site.z);
-    const localGround = (localX, localZ) => world.groundHeight(site.x + localX, site.z + localZ) - baseY;
     const scheme = pickFrom(LIGHTHOUSE_BANDS, random);
-    const bandAt = (y) => {
-      let band = 0;
-      for (let index = 1; index < scheme.length - 1; index++) if (y > scheme[index]) band = index;
-      return band;
+    return {
+      site,
+      random,
+      builder,
+      baseY,
+      localGround: (localX, localZ) => world.groundHeight(site.x + localX, site.z + localZ) - baseY,
+      scheme,
+      cottageAngle: site.rotation + 0.9 + random() * 0.6,
     };
-    const towerRadius = (y) => lerp(4.3, 2.95, (y - 1.6) / 32.2);
-    const facetAngle = (facet) => ((facet + 0.5) / 16) * TWO_PI;
-    const cottageAngle = site.rotation + 0.9 + random() * 0.6;
+  }
 
-    // Plinth and banded tower.
+  /** Plinth and banded tower. */
+  function buildLighthouseTower(light) {
+    const { builder, random, scheme } = light;
     builder.loft([circleRing(0, -1.8, 0, 5.8, 8, Math.PI / 8), circleRing(0, 1.6, 0, 5.3, 8, Math.PI / 8)], () => scaled(PLINTH_STONE, 0.9 + 0.14 * random()), { capStart: true, capEnd: true });
     const paintTower = (face) => {
       if (Math.abs(face.ny) > 0.7) return TOWER_WHITE;
-      return scaled(bandAt(face.y) % 2 === 0 ? TOWER_WHITE : TOWER_RED, 0.97 + 0.05 * random());
+      return scaled(towerBandAt(scheme, face.y) % 2 === 0 ? TOWER_WHITE : TOWER_RED, 0.97 + 0.05 * random());
     };
-    builder.loft(scheme.map((y) => circleRing(0, y, 0, towerRadius(y), 16)), paintTower, { capEnd: true });
+    builder.loft(scheme.map((y) => circleRing(0, y, 0, towerRadiusAt(y), 16)), paintTower, { capEnd: true });
+  }
 
-    // Door toward the cottage and small windows up the tower.
-    const doorFacet = Math.round((((cottageAngle / TWO_PI) * 16 - 0.5) % 16 + 16) % 16);
+  /** Door toward the cottage and small windows up the tower. */
+  function addTowerOpenings(light) {
+    const doorFacet = Math.round((((light.cottageAngle / TWO_PI) * 16 - 0.5) % 16 + 16) % 16);
     const facetBox = (facet, y, halfWidth, halfHeight, paint) => {
-      const angle = facetAngle(facet);
+      const angle = towerFacetAngle(facet);
       const outward = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
       const tangent = new THREE.Vector3(-Math.sin(angle), 0, Math.cos(angle));
-      const apothem = towerRadius(y) * Math.cos(Math.PI / 16);
-      builder.box(outward.clone().multiplyScalar(apothem + 0.04).setY(y), tangent, Y_AXIS, outward, halfWidth, halfHeight, 0.22, paint);
+      const apothem = towerRadiusAt(y) * Math.cos(Math.PI / 16);
+      light.builder.box(outward.clone().multiplyScalar(apothem + 0.04).setY(y), tangent, Y_AXIS, outward, halfWidth, halfHeight, 0.22, paint);
     };
     facetBox(doorFacet, 2.75, 0.72, 1.15, DOOR_WOOD);
     facetBox(doorFacet + 5, 11.2, 0.38, 0.6, WINDOW_COLOR);
     facetBox(doorFacet + 10, 18.6, 0.36, 0.58, WINDOW_COLOR);
     facetBox(doorFacet + 3, 26.4, 0.34, 0.55, WINDOW_COLOR);
+  }
 
-    // Gallery with railing.
+  /** Gallery deck with a post-and-rail railing. */
+  function buildLighthouseGallery(builder) {
     builder.loft([circleRing(0, 33.7, 0, 5.1, 16), circleRing(0, 34.35, 0, 5.1, 16)], IRON, { capStart: true, capEnd: true });
     const posts = [];
     for (let index = 0; index < 16; index++) {
@@ -12048,8 +12202,11 @@ function createLandmarkSystem(ctx) {
       const across = new THREE.Vector3().crossVectors(Y_AXIS, along);
       builder.box(new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5).setY(35.45), along, Y_AXIS, across, halfLength, 0.05, 0.05, IRON);
     }
+  }
 
-    // Lantern room: base wall, glowing glass, mullions, roof and finial.
+  /** Lantern room: base wall, glowing glass, mullions, roof and finial. */
+  function buildLanternRoom(light) {
+    const { builder, random } = light;
     const octagonPhase = Math.PI / 8;
     builder.loft([circleRing(0, 34.35, 0, 2.55, 8, octagonPhase), circleRing(0, 35.2, 0, 2.55, 8, octagonPhase)], LANTERN_BASE, { capEnd: true });
     builder.loft([circleRing(0, 35.2, 0, 2.3, 8, octagonPhase), circleRing(0, 38.0, 0, 2.3, 8, octagonPhase)], LANTERN_GLASS);
@@ -12062,13 +12219,16 @@ function createLandmarkSystem(ctx) {
     builder.fan(roofRim[1], new THREE.Vector3(0, 40.8, 0), ROOF_RED, new THREE.Vector3(0, 38.6, 0));
     builder.box(new THREE.Vector3(0, 41.3, 0), X_AXIS, Y_AXIS, Z_AXIS, 0.05, 0.6, 0.05, IRON);
     builder.rock(new THREE.Vector3(0, 41.0, 0), 0.34, random, IRON, { squash: 1, jitter: 0.04 });
+  }
 
-    // Keeper's cottage with a gabled roof, chimney, door and warm windows.
+  /** Keeper's cottage with a gabled roof, chimney, door and warm windows. */
+  function buildKeeperCottage(light) {
+    const { builder, random, cottageAngle } = light;
     const cottageDistance = 15 + 3 * random();
     const cottageX = Math.cos(cottageAngle) * cottageDistance;
     const cottageZ = Math.sin(cottageAngle) * cottageDistance;
     const cottageMatrix = new THREE.Matrix4().compose(
-      new THREE.Vector3(cottageX, localGround(cottageX, cottageZ), cottageZ),
+      new THREE.Vector3(cottageX, light.localGround(cottageX, cottageZ), cottageZ),
       // Long side tangential, front door (+z) facing the tower.
       new THREE.Quaternion().setFromAxisAngle(Y_AXIS, -cottageAngle - Math.PI / 2),
       UNIT_SCALE,
@@ -12091,18 +12251,11 @@ function createLandmarkSystem(ctx) {
     }
     builder.box(new THREE.Vector3(-4.22, 1.75, 0), Z_AXIS, Y_AXIS, X_AXIS, 0.5, 0.55, 0.08, WINDOW_COLOR);
     builder.clearTransform();
+  }
 
-    // Shoreline: boulders around the island and a dock with a path down to it.
-    const shoreDistance = (angle, from, to, step) => {
-      const cosAngle = Math.cos(angle);
-      const sinAngle = Math.sin(angle);
-      for (let reach = from; reach <= to; reach += step) {
-        if (world.groundHeight(site.x + cosAngle * reach, site.z + sinAngle * reach) < 0.6) return reach;
-      }
-      return null;
-    };
-    const dockAngle = site.rotation + Math.PI + (random() - 0.5) * 0.9;
-    const dockShore = shoreDistance(dockAngle, 30, 160, 2);
+  /** Boulder clusters where the island meets the sea, leaving a gap for the dock. */
+  function buildShoreRocks(light, dockAngle, dockShore) {
+    const { site, builder, random, baseY } = light;
     let rockBase = SHORE_ROCKS[0];
     const paintShoreRock = (face) => {
       if (face.ny > 0.75 && random() < 0.3) return blended(rockBase, SUN_BLEACHED, 0.6, 1);
@@ -12112,7 +12265,7 @@ function createLandmarkSystem(ctx) {
       const angle = site.rotation + (index / 13) * TWO_PI + (random() - 0.5) * 0.35;
       const angularGap = Math.abs(Math.atan2(Math.sin(angle - dockAngle), Math.cos(angle - dockAngle)));
       if (dockShore !== null && angularGap < 0.3) continue;
-      const shore = shoreDistance(angle, 36, 160, 4);
+      const shore = findShoreDistance(site, angle, 36, 160, 4);
       if (shore === null) continue;
       const clusterSize = 1 + Math.floor(random() * 3);
       for (let member = 0; member < clusterSize; member++) {
@@ -12122,57 +12275,74 @@ function createLandmarkSystem(ctx) {
         const rockZ = Math.sin(memberAngle) * reach;
         const size = 1.4 + 3.6 * random() ** 2;
         rockBase = pickFrom(SHORE_ROCKS, random);
-        builder.rock(new THREE.Vector3(rockX, Math.max(localGround(rockX, rockZ), -1.4 - baseY) + size * 0.3, rockZ), size, random, paintShoreRock);
+        builder.rock(new THREE.Vector3(rockX, Math.max(light.localGround(rockX, rockZ), -1.4 - baseY) + size * 0.3, rockZ), size, random, paintShoreRock);
       }
     }
+  }
 
-    let boat = null;
-    const geometries = [];
-    if (dockShore !== null) {
-      const direction = new THREE.Vector3(Math.cos(dockAngle), 0, Math.sin(dockAngle));
-      const across = new THREE.Vector3(-Math.sin(dockAngle), 0, Math.cos(dockAngle));
-      const deckTop = 1.7 - baseY;
-      const start = dockShore - 6;
-      const end = dockShore + 18;
-      const point = new THREE.Vector3();
-      for (let reach = start, plank = 0; reach < end; reach += 0.62, plank++) {
-        point.copy(direction).multiplyScalar(reach + 0.28).setY(deckTop - 0.12);
-        builder.box(point, across, Y_AXIS, direction, 1.45, 0.12, 0.27, scaled(PLANKS[plank % PLANKS.length], 0.92 + 0.14 * random()));
-      }
-      for (let reach = start + 0.6; reach <= end + 0.01; reach += 3) {
-        for (const side of [-1, 1]) {
-          const postX = direction.x * reach + across.x * side * 1.35;
-          const postZ = direction.z * reach + across.z * side * 1.35;
-          const bottom = Math.max(localGround(postX, postZ), -4 - baseY);
-          const top = deckTop + 0.45;
-          if (top - bottom < 0.8) continue;
-          builder.box(new THREE.Vector3(postX, (top + bottom) * 0.5, postZ), X_AXIS, Y_AXIS, Z_AXIS, 0.16, (top - bottom) * 0.5, 0.16, DOCK_POST);
-        }
-      }
-      for (let reach = 7; reach < dockShore - 6; reach += 2.6) {
-        const lateral = (random() - 0.5) * 0.8;
-        const stoneX = direction.x * reach + across.x * lateral;
-        const stoneZ = direction.z * reach + across.z * lateral;
-        builder.rock(new THREE.Vector3(stoneX, localGround(stoneX, stoneZ) + 0.02, stoneZ), 0.75, random, () => scaled(PATH_STONE, 0.9 + 0.15 * random()), { squash: 0.22, jitter: 0.12 });
-      }
-      const boatGeometry = buildBoatGeometry();
-      geometries.push(boatGeometry);
-      boat = solidMesh(boatGeometry);
-      const boatReach = dockShore + 11;
-      boat.position.set(direction.x * boatReach + across.x * 3.3, 0.25 - baseY, direction.z * boatReach + across.z * 3.3);
-      boat.rotation.y = -dockAngle;
-      boat.userData.baseY = boat.position.y;
+  /** Plank deck out over the water on posts that reach the sea bed. */
+  function addDockDeck(light, dock) {
+    const { builder, random, baseY } = light;
+    const { direction, across, deckTop, start, end } = dock;
+    const point = new THREE.Vector3();
+    for (let reach = start, plank = 0; reach < end; reach += 0.62, plank++) {
+      point.copy(direction).multiplyScalar(reach + 0.28).setY(deckTop - 0.12);
+      builder.box(point, across, Y_AXIS, direction, 1.45, 0.12, 0.27, scaled(PLANKS[plank % PLANKS.length], 0.92 + 0.14 * random()));
     }
+    for (let reach = start + 0.6; reach <= end + 0.01; reach += 3) {
+      for (const side of [-1, 1]) {
+        const postX = direction.x * reach + across.x * side * 1.35;
+        const postZ = direction.z * reach + across.z * side * 1.35;
+        const bottom = Math.max(light.localGround(postX, postZ), -4 - baseY);
+        const top = deckTop + 0.45;
+        if (top - bottom < 0.8) continue;
+        builder.box(new THREE.Vector3(postX, (top + bottom) * 0.5, postZ), X_AXIS, Y_AXIS, Z_AXIS, 0.16, (top - bottom) * 0.5, 0.16, DOCK_POST);
+      }
+    }
+  }
 
-    const geometry = builder.build();
-    geometries.unshift(geometry);
-    const mesh = solidMesh(geometry);
-    const group = new THREE.Group();
-    group.position.set(site.x, baseY, site.z);
-    group.add(mesh);
-    freeze(mesh);
-    if (boat) group.add(boat);
+  /** Stepping-stone path from the tower down to the dock. */
+  function addDockPath(light, dock) {
+    const { builder, random } = light;
+    const { direction, across } = dock;
+    for (let reach = 7; reach < dock.shore - 6; reach += 2.6) {
+      const lateral = (random() - 0.5) * 0.8;
+      const stoneX = direction.x * reach + across.x * lateral;
+      const stoneZ = direction.z * reach + across.z * lateral;
+      builder.rock(new THREE.Vector3(stoneX, light.localGround(stoneX, stoneZ) + 0.02, stoneZ), 0.75, random, () => scaled(PATH_STONE, 0.9 + 0.15 * random()), { squash: 0.22, jitter: 0.12 });
+    }
+  }
 
+  /** Rowboat moored beside the dock end (its own geometry, bobbed by animate). */
+  function createRowboat(light, dock) {
+    const { direction, across } = dock;
+    const geometry = buildBoatGeometry();
+    const boat = solidMesh(geometry);
+    const boatReach = dock.shore + 11;
+    boat.position.set(direction.x * boatReach + across.x * 3.3, 0.25 - light.baseY, direction.z * boatReach + across.z * 3.3);
+    boat.rotation.y = -dock.angle;
+    boat.userData.baseY = boat.position.y;
+    return { boat, geometry };
+  }
+
+  /** Dock, path and rowboat on the shore facing dockAngle; returns the boat parts. */
+  function buildDock(light, dockAngle, dockShore) {
+    const dock = {
+      angle: dockAngle,
+      shore: dockShore,
+      direction: new THREE.Vector3(Math.cos(dockAngle), 0, Math.sin(dockAngle)),
+      across: new THREE.Vector3(-Math.sin(dockAngle), 0, Math.cos(dockAngle)),
+      deckTop: 1.7 - light.baseY,
+      start: dockShore - 6,
+      end: dockShore + 18,
+    };
+    addDockDeck(light, dock);
+    addDockPath(light, dock);
+    return createRowboat(light, dock);
+  }
+
+  /** Twin beams on a pivot at lantern height, plus the lantern halo. */
+  function createLighthouseBeam() {
     const pivot = new THREE.Group();
     pivot.position.set(0, LANTERN_HEIGHT, 0);
     const beamForward = new THREE.Mesh(beamGeometry, beamMaterial);
@@ -12185,12 +12355,15 @@ function createLandmarkSystem(ctx) {
     halo.scale.setScalar(3.4);
     halo.userData.glow = 0;
     freeze(halo);
-    group.add(pivot, halo);
-    freeze(group);
+    return { pivot, halo };
+  }
 
-    const beamPhase = random() * TWO_PI;
-    const lanternY = baseY + LANTERN_HEIGHT;
-    function animate(dt, time) {
+  /** Turns the beam, flashes the halo toward the viewer and bobs the boat. */
+  function createLighthouseAnimation(light, lamp, boat, beamPhase) {
+    const { site } = light;
+    const { pivot, halo } = lamp;
+    const lanternY = light.baseY + LANTERN_HEIGHT;
+    return function animate(dt, time) {
       const beamAngle = beamPhase + time * BEAM_TURN_RATE;
       pivot.rotation.y = beamAngle;
       const toCameraX = camera.position.x - site.x;
@@ -12203,8 +12376,25 @@ function createLandmarkSystem(ctx) {
         boat.position.y = boat.userData.baseY + 0.12 * Math.sin(time * 1.3 + beamPhase);
         boat.rotation.x = 0.05 * Math.sin(time * 0.9 + beamPhase);
       }
-    }
+    };
+  }
 
+  /** Wraps the lighthouse geometry, boat and lamp in the placed group. */
+  function createLighthouseInstance(light, dock) {
+    const { site, baseY } = light;
+    const boat = dock ? dock.boat : null;
+    const geometry = light.builder.build();
+    const geometries = dock ? [geometry, dock.geometry] : [geometry];
+    const mesh = solidMesh(geometry);
+    const group = new THREE.Group();
+    group.position.set(site.x, baseY, site.z);
+    group.add(mesh);
+    freeze(mesh);
+    if (boat) group.add(boat);
+    const lamp = createLighthouseBeam();
+    group.add(lamp.pivot, lamp.halo);
+    freeze(group);
+    const animate = createLighthouseAnimation(light, lamp, boat, light.random() * TWO_PI);
     let triangles = 0;
     for (const item of geometries) triangles += item.attributes.position.count / 3;
     return {
@@ -12216,6 +12406,21 @@ function createLandmarkSystem(ctx) {
       balloons: null,
       thread: null,
     };
+  }
+
+  function buildLighthouse(site) {
+    const light = createLighthouseContext(site);
+    buildLighthouseTower(light);
+    addTowerOpenings(light);
+    buildLighthouseGallery(light.builder);
+    buildLanternRoom(light);
+    buildKeeperCottage(light);
+    // Shoreline: boulders around the island and a dock with a path down to it.
+    const dockAngle = site.rotation + Math.PI + (light.random() - 0.5) * 0.9;
+    const dockShore = findShoreDistance(site, dockAngle, 30, 160, 2);
+    buildShoreRocks(light, dockAngle, dockShore);
+    const dock = dockShore === null ? null : buildDock(light, dockAngle, dockShore);
+    return createLighthouseInstance(light, dock);
   }
 
   // ---- Balloons ---------------------------------------------------------------------------------
@@ -12230,9 +12435,8 @@ function createLandmarkSystem(ctx) {
     }
   }
 
-  function buildBalloonGeometry(random, palette, pattern, scale) {
-    const builder = createBuilder();
-    const height = ENVELOPE_HEIGHT * scale;
+  /** Patterned envelope; the gores glow most near the mouth when the burner fires. */
+  function addBalloonEnvelope(builder, random, palette, pattern, height) {
     const segments = 16;
     const rows = BALLOON_PROFILE.length - 2;
     const rings = BALLOON_PROFILE.map(([radius, y]) => circleRing(0, y * height, 0, radius * height, segments));
@@ -12249,34 +12453,160 @@ function createLandmarkSystem(ctx) {
       return paintOut;
     };
     builder.loft(rings, paintEnvelope, { capStart: true });
+  }
 
-    const basketTop = -7.6 * scale;
+  function addBalloonBasket(builder, basketTop) {
     builder.box(new THREE.Vector3(0, basketTop - 0.65, 0), X_AXIS, Y_AXIS, Z_AXIS, 0.8, 0.65, 0.8, WICKER);
     builder.box(new THREE.Vector3(0, basketTop - 0.02, 0), X_AXIS, Y_AXIS, Z_AXIS, 0.88, 0.1, 0.88, WICKER_RIM);
-    const burnerY = -5.6 * scale;
+  }
+
+  function addBalloonBurner(builder, burnerY) {
     builder.box(new THREE.Vector3(0, burnerY, 0), X_AXIS, Y_AXIS, Z_AXIS, 0.36, 0.28, 0.36, BURNER_METAL);
-    const mouthRadius = BALLOON_PROFILE[1][0] * height;
+  }
+
+  /** A thin square-section box from one point to another (ropes and struts). */
+  function addRiggingLine(builder, from, to, halfWidth, paint) {
+    const along = new THREE.Vector3().subVectors(to, from);
+    const halfLength = along.length() * 0.5;
+    along.normalize();
+    const side = new THREE.Vector3().crossVectors(along, Math.abs(along.y) > 0.9 ? X_AXIS : Y_AXIS).normalize();
+    const third = new THREE.Vector3().crossVectors(along, side);
+    builder.box(new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5), along, side, third, halfLength, halfWidth, halfWidth, paint);
+  }
+
+  /** From each basket corner: a rope up to the envelope mouth and a strut to the burner. */
+  function addBalloonRigging(builder, basketTop, burnerY, mouthRadius) {
     const lineStart = new THREE.Vector3();
     const lineEnd = new THREE.Vector3();
-    const addLine = (from, to, halfWidth, paint) => {
-      const along = new THREE.Vector3().subVectors(to, from);
-      const halfLength = along.length() * 0.5;
-      along.normalize();
-      const side = new THREE.Vector3().crossVectors(along, Math.abs(along.y) > 0.9 ? X_AXIS : Y_AXIS).normalize();
-      const third = new THREE.Vector3().crossVectors(along, side);
-      builder.box(new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5), along, side, third, halfLength, halfWidth, halfWidth, paint);
-    };
     for (let corner = 0; corner < 4; corner++) {
       const cornerX = corner & 1 ? 0.78 : -0.78;
       const cornerZ = corner & 2 ? 0.78 : -0.78;
       const angle = Math.atan2(cornerZ, cornerX);
       lineStart.set(cornerX, basketTop, cornerZ);
       lineEnd.set(Math.cos(angle) * mouthRadius, 0, Math.sin(angle) * mouthRadius);
-      addLine(lineStart, lineEnd, 0.05, ROPE);
+      addRiggingLine(builder, lineStart, lineEnd, 0.05, ROPE);
       lineEnd.set(cornerX * 0.4, burnerY, cornerZ * 0.4);
-      addLine(lineStart, lineEnd, 0.04, BURNER_METAL);
+      addRiggingLine(builder, lineStart, lineEnd, 0.04, BURNER_METAL);
     }
+  }
+
+  function buildBalloonGeometry(random, palette, pattern, scale) {
+    const builder = createBuilder();
+    const height = ENVELOPE_HEIGHT * scale;
+    addBalloonEnvelope(builder, random, palette, pattern, height);
+    const basketTop = -7.6 * scale;
+    addBalloonBasket(builder, basketTop);
+    const burnerY = -5.6 * scale;
+    addBalloonBurner(builder, burnerY);
+    addBalloonRigging(builder, basketTop, burnerY, BALLOON_PROFILE[1][0] * height);
     return builder.build();
+  }
+
+  /** Balloon mesh with its (hidden until lit) burner flame. */
+  function createBalloonMesh(geometry, scale) {
+    const mesh = solidMesh(geometry, balloonMaterial);
+    mesh.userData.burnGlow = 0;
+    const flame = new THREE.Mesh(flameGeometry, glowMaterial);
+    flame.position.set(0, -5.35 * scale, 0);
+    flame.visible = false;
+    flame.userData.glow = 0;
+    mesh.add(flame);
+    return { mesh, flame };
+  }
+
+  /** Seeded drift, height and burner timing for one balloon of the fair. */
+  function createBalloonState(fair, index, mesh, flame, scale) {
+    const { site, random, count, heightOrder } = fair;
+    const angle = (index / count) * TWO_PI + random() * 0.8;
+    const ringRadius = 50 + 110 * random();
+    return {
+      mesh,
+      flame,
+      scale,
+      baseX: Math.cos(angle) * ringRadius,
+      baseZ: Math.sin(angle) * ringRadius,
+      alongAmplitude: 180 + 220 * random(),
+      acrossAmplitude: 90 + 140 * random(),
+      alongFrequency: 0.004 + 0.004 * random(),
+      acrossFrequency: 0.003 + 0.004 * random(),
+      alongPhase: random() * TWO_PI,
+      acrossPhase: random() * TWO_PI,
+      heightAboveGround: 120 + (count > 1 ? (200 * heightOrder[index]) / (count - 1) : 100) + (random() - 0.5) * 8,
+      bobPhase: random() * TWO_PI,
+      swayPhase: random() * TWO_PI,
+      spinPhase: random() * TWO_PI,
+      spinRate: (random() - 0.5) * 0.04,
+      altitude: NaN,
+      groundUnder: Math.max(site.groundHeight, CONFIG.WATER_LEVEL),
+      groundTimer: 0,
+      burnTimer: 1 + 9 * random(),
+      burning: false,
+      burnLevel: 0,
+      flickerPhase: random() * TWO_PI,
+    };
+  }
+
+  /** Moves one balloon along its wind-aligned drift, easing toward its height over the ground. */
+  function driftBalloon(site, balloon, index, wind, dt, time) {
+    const along = balloon.alongAmplitude * Math.sin(balloon.alongFrequency * time + balloon.alongPhase);
+    const across = balloon.acrossAmplitude * Math.sin(balloon.acrossFrequency * time + balloon.acrossPhase);
+    const localX = balloon.baseX + wind.x * along - wind.y * across;
+    const localZ = balloon.baseZ + wind.y * along + wind.x * across;
+    balloon.groundTimer -= dt;
+    if (balloon.groundTimer <= 0 || !Number.isFinite(balloon.altitude)) {
+      balloon.groundTimer = 0.5 + 0.05 * index;
+      balloon.groundUnder = Math.max(world.groundHeight(site.x + localX, site.z + localZ), CONFIG.WATER_LEVEL);
+    }
+    const target = balloon.groundUnder + balloon.heightAboveGround + 7 * Math.sin(0.23 * time + balloon.bobPhase) + 2.5 * Math.sin(0.61 * time + balloon.swayPhase);
+    balloon.altitude = Number.isFinite(balloon.altitude) ? damp(balloon.altitude, target, 0.35, dt) : target;
+    balloon.mesh.position.set(localX, balloon.altitude, localZ);
+    balloon.mesh.rotation.set(
+      0.025 * Math.sin(0.41 * time + balloon.swayPhase),
+      balloon.spinPhase + balloon.spinRate * time,
+      0.025 * Math.sin(0.33 * time + balloon.bobPhase),
+    );
+  }
+
+  /** Toggles the burner now and then; the flame and envelope glow follow its level. */
+  function updateBalloonBurner(balloon, dt, time) {
+    if (dt > 0) {
+      balloon.burnTimer -= dt;
+      if (balloon.burnTimer <= 0) {
+        balloon.burning = !balloon.burning;
+        balloon.burnTimer = balloon.burning ? 1.2 + 2.2 * Math.random() : 5 + 11 * Math.random();
+      }
+      balloon.burnLevel = damp(balloon.burnLevel, balloon.burning ? 1 : 0, 9, dt);
+    }
+    const flicker = 0.75 + 0.25 * Math.sin(time * 31 + balloon.flickerPhase) * Math.sin(time * 17.3);
+    const level = balloon.burnLevel;
+    balloon.flame.visible = level > 0.02;
+    balloon.flame.scale.set((0.8 + 0.3 * flicker) * balloon.scale, Math.max(0.01, (0.6 + 0.6 * flicker) * level) * balloon.scale, (0.8 + 0.3 * flicker) * balloon.scale);
+    balloon.flame.userData.glow = level * (0.9 + 0.4 * flicker);
+    balloon.mesh.userData.burnGlow = level * (0.3 + 0.35 * flicker) * (0.3 + 1.25 * nightness);
+  }
+
+  function createBalloonAnimation(site, balloons) {
+    const wind = uniforms.windDirection.value;
+    return function animate(dt, time) {
+      for (let index = 0; index < balloons.length; index++) {
+        driftBalloon(site, balloons[index], index, wind, dt, time);
+        updateBalloonBurner(balloons[index], dt, time);
+      }
+    };
+  }
+
+  /** Discovery distance: the nearest balloon (aimed a little above its basket). */
+  function createBalloonMeasure(site, balloons) {
+    return function measure(player) {
+      let nearest = Infinity;
+      for (const balloon of balloons) {
+        const dx = site.x + balloon.mesh.position.x - player.x;
+        const dy = balloon.mesh.position.y + 8 - player.y;
+        const dz = site.z + balloon.mesh.position.z - player.z;
+        nearest = Math.min(nearest, Math.sqrt(dx * dx + dy * dy + dz * dz));
+      }
+      return nearest;
+    };
   }
 
   function buildBalloons(site, descriptor) {
@@ -12287,6 +12617,7 @@ function createLandmarkSystem(ctx) {
     const palettes = shuffled(BALLOON_PALETTES, random);
     const patterns = shuffled(BALLOON_PATTERNS, random);
     const heightOrder = shuffled(Array.from({ length: count }, (unused, index) => index), random);
+    const fair = { site, random, count, heightOrder };
     const balloons = [];
     const geometries = [];
     let triangles = 0;
@@ -12295,95 +12626,13 @@ function createLandmarkSystem(ctx) {
       const geometry = buildBalloonGeometry(random, palettes[index % palettes.length], patterns[index % patterns.length], scale);
       geometries.push(geometry);
       triangles += geometry.attributes.position.count / 3;
-      const mesh = solidMesh(geometry, balloonMaterial);
-      mesh.userData.burnGlow = 0;
-      const flame = new THREE.Mesh(flameGeometry, glowMaterial);
-      flame.position.set(0, -5.35 * scale, 0);
-      flame.visible = false;
-      flame.userData.glow = 0;
-      mesh.add(flame);
+      const { mesh, flame } = createBalloonMesh(geometry, scale);
       group.add(mesh);
-      const angle = (index / count) * TWO_PI + random() * 0.8;
-      const ringRadius = 50 + 110 * random();
-      balloons.push({
-        mesh,
-        flame,
-        scale,
-        baseX: Math.cos(angle) * ringRadius,
-        baseZ: Math.sin(angle) * ringRadius,
-        alongAmplitude: 180 + 220 * random(),
-        acrossAmplitude: 90 + 140 * random(),
-        alongFrequency: 0.004 + 0.004 * random(),
-        acrossFrequency: 0.003 + 0.004 * random(),
-        alongPhase: random() * TWO_PI,
-        acrossPhase: random() * TWO_PI,
-        heightAboveGround: 120 + (count > 1 ? (200 * heightOrder[index]) / (count - 1) : 100) + (random() - 0.5) * 8,
-        bobPhase: random() * TWO_PI,
-        swayPhase: random() * TWO_PI,
-        spinPhase: random() * TWO_PI,
-        spinRate: (random() - 0.5) * 0.04,
-        altitude: NaN,
-        groundUnder: Math.max(site.groundHeight, CONFIG.WATER_LEVEL),
-        groundTimer: 0,
-        burnTimer: 1 + 9 * random(),
-        burning: false,
-        burnLevel: 0,
-        flickerPhase: random() * TWO_PI,
-      });
+      balloons.push(createBalloonState(fair, index, mesh, flame, scale));
     }
-
-    const wind = uniforms.windDirection.value;
-    function animate(dt, time) {
-      for (let index = 0; index < balloons.length; index++) {
-        const balloon = balloons[index];
-        const along = balloon.alongAmplitude * Math.sin(balloon.alongFrequency * time + balloon.alongPhase);
-        const across = balloon.acrossAmplitude * Math.sin(balloon.acrossFrequency * time + balloon.acrossPhase);
-        const localX = balloon.baseX + wind.x * along - wind.y * across;
-        const localZ = balloon.baseZ + wind.y * along + wind.x * across;
-        balloon.groundTimer -= dt;
-        if (balloon.groundTimer <= 0 || !Number.isFinite(balloon.altitude)) {
-          balloon.groundTimer = 0.5 + 0.05 * index;
-          balloon.groundUnder = Math.max(world.groundHeight(site.x + localX, site.z + localZ), CONFIG.WATER_LEVEL);
-        }
-        const target = balloon.groundUnder + balloon.heightAboveGround + 7 * Math.sin(0.23 * time + balloon.bobPhase) + 2.5 * Math.sin(0.61 * time + balloon.swayPhase);
-        balloon.altitude = Number.isFinite(balloon.altitude) ? damp(balloon.altitude, target, 0.35, dt) : target;
-        balloon.mesh.position.set(localX, balloon.altitude, localZ);
-        balloon.mesh.rotation.set(
-          0.025 * Math.sin(0.41 * time + balloon.swayPhase),
-          balloon.spinPhase + balloon.spinRate * time,
-          0.025 * Math.sin(0.33 * time + balloon.bobPhase),
-        );
-
-        if (dt > 0) {
-          balloon.burnTimer -= dt;
-          if (balloon.burnTimer <= 0) {
-            balloon.burning = !balloon.burning;
-            balloon.burnTimer = balloon.burning ? 1.2 + 2.2 * Math.random() : 5 + 11 * Math.random();
-          }
-          balloon.burnLevel = damp(balloon.burnLevel, balloon.burning ? 1 : 0, 9, dt);
-        }
-        const flicker = 0.75 + 0.25 * Math.sin(time * 31 + balloon.flickerPhase) * Math.sin(time * 17.3);
-        const level = balloon.burnLevel;
-        balloon.flame.visible = level > 0.02;
-        balloon.flame.scale.set((0.8 + 0.3 * flicker) * balloon.scale, Math.max(0.01, (0.6 + 0.6 * flicker) * level) * balloon.scale, (0.8 + 0.3 * flicker) * balloon.scale);
-        balloon.flame.userData.glow = level * (0.9 + 0.4 * flicker);
-        balloon.mesh.userData.burnGlow = level * (0.3 + 0.35 * flicker) * (0.3 + 1.25 * nightness);
-      }
-    }
+    const animate = createBalloonAnimation(site, balloons);
     animate(0, state.time.elapsed);
-
-    function measure(player) {
-      let nearest = Infinity;
-      for (const balloon of balloons) {
-        const dx = site.x + balloon.mesh.position.x - player.x;
-        const dy = balloon.mesh.position.y + 8 - player.y;
-        const dz = site.z + balloon.mesh.position.z - player.z;
-        nearest = Math.min(nearest, Math.sqrt(dx * dx + dy * dy + dz * dz));
-      }
-      return nearest;
-    }
-
-    return { group, geometries, triangles, measure, animate, balloons, thread: null };
+    return { group, geometries, triangles, measure: createBalloonMeasure(site, balloons), animate, balloons, thread: null };
   }
 
   const BUILDERS = { arch: buildArch, monoliths: buildMonoliths, lighthouse: buildLighthouse, balloons: buildBalloons };
@@ -14093,7 +14342,8 @@ function createAudioSystem(ctx) {
   }
 
   // ---- Graph -----------------------------------------------------------------------------------------
-  function buildGraph(context) {
+  /** Master gain into a gentle compressor, plus the effects send and the reverb return. */
+  function createOutputChain(context, reverbBuffer) {
     const master = context.createGain();
     master.gain.value = 0;
     const compressor = context.createDynamicsCompressor();
@@ -14107,16 +14357,17 @@ function createAudioSystem(ctx) {
 
     const effects = context.createGain();
     effects.connect(master);
-    const { noise, reverb: reverbBuffer } = takePreparedBuffers(context);
     const reverb = context.createConvolver();
     reverb.buffer = reverbBuffer;
     const reverbReturn = context.createGain();
     reverbReturn.gain.value = 0.36;
     reverb.connect(reverbReturn);
     reverbReturn.connect(master);
+    return { master, effects, reverb };
+  }
 
-    const start = context.currentTime + 0.02;
-
+  /** Two looping noise layers: a low body and a panned, brighter rush of air. */
+  function createWindLayers(context, noise, master, start) {
     const windBodySource = context.createBufferSource();
     windBodySource.buffer = noise;
     windBodySource.loop = true;
@@ -14146,6 +14397,13 @@ function createAudioSystem(ctx) {
     windAirGain.connect(windPanner);
     windPanner.connect(master);
 
+    windBodySource.start(start, 0);
+    windAirSource.start(start, 1.7);
+    return { windBodyFilter, windBodyGain, windAirFilter, windAirGain, windPanner };
+  }
+
+  /** A soft detuned prop hum with a slow tremolo, following the throttle. */
+  function createPropHum(context, master, start) {
     const propFilter = context.createBiquadFilter();
     propFilter.type = 'lowpass';
     propFilter.frequency.value = 420;
@@ -14175,25 +14433,19 @@ function createAudioSystem(ctx) {
     propFilter.connect(propTremolo);
     propTremolo.connect(propGain);
     propGain.connect(master);
-
-    windBodySource.start(start, 0);
-    windAirSource.start(start, 1.7);
     propLfo.start(start);
+    return { propFilter, propGain, propLfo, propOscillators };
+  }
 
+  function buildGraph(context) {
+    const { noise, reverb: reverbBuffer } = takePreparedBuffers(context);
+    const start = context.currentTime + 0.02;
+    const output = createOutputChain(context, reverbBuffer);
     return {
-      master,
-      effects,
-      reverb,
+      ...output,
       noise,
-      windBodyFilter,
-      windBodyGain,
-      windAirFilter,
-      windAirGain,
-      windPanner,
-      propFilter,
-      propGain,
-      propLfo,
-      propOscillators,
+      ...createWindLayers(context, noise, output.master, start),
+      ...createPropHum(context, output.master, start),
     };
   }
 
@@ -18306,16 +18558,10 @@ function createUISystem(ctx) {
   function syncAllSettings() {
     for (const key of Object.keys(DEFAULT_SETTINGS)) syncSetting(key);
   }
+  /** Same rule the remote brain applies: an absolute http(s) URL, or null. */
   function validateEndpoint(value) {
     const text = String(value || '').trim();
-    if (!text) return null;
-    let parsed;
-    try {
-      parsed = new URL(text);
-    } catch (error) {
-      return null;
-    }
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : null;
+    return text ? RemoteCopilot.validEndpoint(text) : null;
   }
   function setEndpointInvalid(invalid) {
     dom.endpointInput.classList.toggle('dw-invalid', invalid);
@@ -19129,7 +19375,11 @@ function createPerfGovernor(ctx) {
   let slowSeconds = 0;
   let fastSeconds = 0;
   let cooldown = 3;
+  let readySince = null;
   const blockedUntil = new Array(levels.length).fill(0);
+  // Frames behind the loading fade are slow by design (pipelines compiling), and the first
+  // seconds after it settle caches: judging them would degrade quality for nothing.
+  const SETTLE_SECONDS = 4;
 
   function apply(index, reason) {
     levelIndex = clamp(index, 0, levels.length - 1);
@@ -19169,6 +19419,13 @@ function createPerfGovernor(ctx) {
       state.perf.cpuMs = cpuEmaMs;
       state.perf.displayIntervalMs = displayIntervalMs;
       if (settings.get('quality') !== 'auto' || state.photoMode) return;
+      if (!state.ready) return;
+      if (readySince === null) readySince = state.time.realElapsed;
+      if (state.time.realElapsed - readySince < SETTLE_SECONDS) {
+        slowSeconds = 0;
+        fastSeconds = 0;
+        return;
+      }
       const targetMs = Math.max(displayIntervalMs, 1000 / 60);
       const struggling = emaMs > targetMs * 1.1 || cpuEmaMs > targetMs * 0.85;
       const comfortable = emaMs < targetMs * 1.03 && cpuEmaMs < targetMs * 0.5;
