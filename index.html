@@ -44,6 +44,26 @@
     transition: opacity 1s ease;
   }
   #fade.clear { opacity: 0; }
+  #fade {
+    display: grid;
+    place-content: center;
+    gap: 14px;
+    text-align: center;
+  }
+  #fade .fade-title {
+    font: 500 15px/1 var(--font-ui);
+    letter-spacing: 0.62em;
+    margin-right: -0.62em;
+    color: #f3c77a;
+  }
+  #fade .fade-status {
+    font: 400 12px/1.4 var(--font-ui);
+    letter-spacing: 0.08em;
+    color: rgba(244, 239, 230, 0.55);
+    animation: fade-breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes fade-breathe { 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) { #fade .fade-status { animation: none; } }
   #boot-error {
     position: fixed;
     inset: 0;
@@ -717,9 +737,9 @@
   #ui-root .dw-banner {
     position: absolute;
     z-index: 12;
-    top: clamp(222px, 30vh, 340px);
-    left: 50%;
-    width: min(640px, calc(100vw - 32px));
+    top: var(--dw-banner-top, clamp(222px, 30vh, 340px));
+    left: var(--dw-banner-x, 50%);
+    width: var(--dw-banner-width, min(640px, calc(100vw - 32px)));
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -798,7 +818,7 @@
   }
   /* A hidden subtitle leaves the flow (in place, bottom-centred) so the hint and
      transcript settle at the bottom instead of floating toward mid-screen. */
-  #ui-root .dw-subtitle:not(.dw-show) { position: absolute; left: 0; right: 0; bottom: 0; width: fit-content; margin: 0 auto; }
+  #ui-root .dw-subtitle.dw-gone { position: absolute; left: 0; right: 0; bottom: 0; width: fit-content; margin: 0 auto; }
   #ui-root .dw-subtitle.dw-show { opacity: 1; visibility: visible; transform: none; transition: opacity 0.35s ease, transform 0.45s var(--dw-ease), visibility 0s; }
   #ui-root .dw-subtitle-label {
     flex: none;
@@ -1409,8 +1429,9 @@
     #ui-root.dw-touch .dw-debug { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 300px); right: var(--dw-right); }
     #ui-root.dw-touch .dw-toasts { top: calc(var(--dw-top) + 206px); }
     #ui-root.dw-touch.dw-ring-active .dw-toasts { top: calc(var(--dw-top) + 268px); }
-    #ui-root.dw-touch .dw-banner { top: 42vh; }
-    #ui-root.dw-touch .dw-speech { bottom: calc(env(safe-area-inset-bottom, 0px) + 236px); width: calc(100vw - 32px); }
+    #ui-root.dw-touch .dw-banner { top: var(--dw-banner-top, 42vh); }
+    #ui-root.dw-touch .dw-speech { bottom: var(--dw-speech-bottom, calc(env(safe-area-inset-bottom, 0px) + 236px)); width: calc(100vw - 32px); }
+    #ui-root.dw-touch.dw-speech-top .dw-speech { top: var(--dw-speech-top, 200px); bottom: auto; }
     #ui-root.dw-touch .dw-command { bottom: auto; top: calc(var(--dw-top) + 8px); max-height: calc(100vh - 340px); }
     #ui-root.dw-touch .dw-panel { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: min(78vh, 680px); transform: translateY(24px); }
     #ui-root.dw-touch .dw-panel.dw-menu { height: auto; }
@@ -1429,7 +1450,7 @@
     #ui-root.dw-touch .dw-toasts { top: calc(var(--dw-top) + 72px); width: min(420px, calc(100vw - 420px)); }
     #ui-root.dw-touch .dw-speech { bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); width: min(460px, calc(100vw - 470px)); }
     #ui-root.dw-touch .dw-subtitle-text { font-size: 14.5px; }
-    #ui-root.dw-touch .dw-banner { top: max(120px, 30vh); }
+    #ui-root.dw-touch .dw-banner { top: var(--dw-banner-top, max(120px, 30vh)); }
     #ui-root.dw-touch .dw-command { bottom: auto; top: var(--dw-top); max-height: calc(100vh - 24px); }
     #ui-root.dw-touch .dw-stick-zone { height: 78vh; }
   }
@@ -1477,12 +1498,22 @@
     "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js",
     "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.tsl.js",
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/"
+  },
+  "integrity": {
+    "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.webgpu.js": "sha384-vatRh9vQy/B/ECoJSF7P/Jg9rF6KVuG/ovU+3Wp/BUaCcpR0DM+a4zCEbQ8Y/RFK",
+    "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.core.js": "sha384-dw2ooPewaEIrAgl6oFDBmmBWCE9oW9LxRGcfwZ0hLvEprzo202wXl7vCYHRlSnOT",
+    "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.tsl.js": "sha384-dqftyqccaI6qYFdGtJtugSSe4YKncDgGHttpZJr+lR/vSq18VR5ubqlzEHdGLdJ1",
+    "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/tsl/display/BloomNode.js": "sha384-JY+Ri6mH+uGpGzXvjSbeTfTdjYGDDyceT1y/WbDQxLqu/AIPooYld4thLOHD0fnF",
+    "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/utils/BufferGeometryUtils.js": "sha384-7hDmXj1Pzh+247/oGQWqojXH2XGbc0fOGrcNmbi5ly2QK0IC1ouPa/niSKBka6nl"
   }
 }
 </script>
 </head>
 <body>
-<div id="fade"></div>
+<div id="fade" role="status" aria-live="polite">
+  <div class="fade-title">DRIFTWING</div>
+  <div class="fade-status" id="fade-status">Shaping the world</div>
+</div>
 <div id="boot-error" hidden>
   <div>
     <h1>DRIFTWING</h1>
@@ -1637,7 +1668,7 @@
   <div class="dw-speech" id="dw-speech">
     <div class="dw-hint glass" id="dw-hint" aria-live="polite"></div>
     <div class="dw-transcript" id="dw-transcript" aria-live="polite"><span class="dw-transcript-label">You</span><span class="dw-transcript-text" id="dw-transcript-text"></span><span class="dw-listening-dots"><i></i><i></i><i></i></span></div>
-    <div class="dw-subtitle glass" id="dw-subtitle" aria-live="polite">
+    <div class="dw-subtitle glass dw-gone" id="dw-subtitle" aria-live="polite">
       <span class="dw-subtitle-label"><span id="dw-subtitle-label">WREN</span><span class="dw-remote-dot" title="Remote brain"></span></span>
       <span class="dw-subtitle-text" id="dw-subtitle-text"></span>
     </div>
@@ -1889,7 +1920,7 @@
       <div class="dw-slider-thumb" id="dw-slider-thumb"></div>
       <span class="dw-slider-label">THR</span>
     </div>
-    <div class="dw-action-cluster">
+    <div class="dw-action-cluster" id="dw-action-cluster">
       <button type="button" class="dw-touch-button glass dw-touch-menu" data-action="open-menu" aria-label="Menu"><svg class="dw-icon"><use href="#dw-i-menu"/></svg></button>
       <button type="button" class="dw-touch-button glass dw-roll-left" id="dw-roll-left" aria-label="Barrel roll left"><svg class="dw-icon dw-mirror"><use href="#dw-i-roll"/></svg></button>
       <button type="button" class="dw-touch-button glass dw-roll-right" id="dw-roll-right" aria-label="Barrel roll right"><svg class="dw-icon"><use href="#dw-i-roll"/></svg></button>
@@ -1939,7 +1970,7 @@ const CONFIG = Object.freeze({
   MAX_ALTITUDE: 2600,
   SPEED: Object.freeze({ MIN: 24, STALL: 32, CRUISE: 62, MAX: 135, BOOST_MAX: 170 }),
   DAY_LENGTH_DEFAULT: 360,
-  START_SUN_ELEVATION_DEG: 9,
+  START_SUN_ELEVATION_DEG: 13,
   SUN_MAX_ELEVATION_DEG: 62,
   CLOUD_SHADOW: Object.freeze({ SIZE: 128, WORLD: 4096 }),
   CAMERA: Object.freeze({ FOV_BASE: 60, FOV_MAX: 78, NEAR: 1 }),
@@ -2354,36 +2385,39 @@ function createWorldGen(seedString, options) {
   function forestNoise(x, z) { return fbm(x, z, 1 / 650, 3, 22); }
   function flowerFieldNoise(x, z) { return fbm(x, z, 1 / 420, 2, 23); }
 
-  function paletteIndex(biome, x, z, height, slope, normalX, normalZ, faceHash, snowLine) {
+  // Palette choice per biome. `patch` is a smooth noise field (roughly -1..1, patches of
+  // ~50 m with slightly dithered edges) that picks between neighbouring palette
+  // entries; `faceHash` is only used for rare single-face accents.
+  function paletteIndex(biome, x, z, height, slope, normalX, normalZ, faceHash, patch, snowLine) {
     const nearShore = height < WATER_LEVEL + 2.2;
     switch (biome) {
       case 0:
         if (nearShore) return 2;
-        if (slope > 0.62) return faceHash < 0.5 ? 0 : 1;
-        if (height > snowLine) return slope > 0.42 ? 3 : faceHash < 0.12 ? 5 : 4;
-        if (height > snowLine - 60) return faceHash < 0.5 ? 2 : 3;
-        return faceHash < 0.5 ? 1 : 2;
+        if (slope > 0.62) return patch < 0 ? 0 : 1;
+        if (height > snowLine) return slope > 0.42 ? 3 : faceHash < 0.05 ? 5 : 4;
+        if (height > snowLine - 60) return patch < 0.1 ? 2 : 3;
+        return patch < 0 ? 1 : 2;
       case 1:
         if (nearShore) return 3;
         if (slope > 0.6) return 4;
         if (height > snowLine) return 5;
-        if (forestNoise(x, z) > 0.05) return faceHash < 0.55 ? 0 : 3;
-        return faceHash < 0.45 ? 1 : faceHash < 0.8 ? 2 : 0;
+        if (forestNoise(x, z) > 0.05) return patch < 0.15 ? 0 : 3;
+        return patch < -0.25 ? 0 : patch < 0.3 ? 1 : 2;
       case 2: {
         if (slope > 0.5) return 3;
-        if (height > 70 && slope < 0.2) return faceHash < 0.5 ? 4 : 3;
+        if (height > 70 && slope < 0.2) return patch < 0 ? 4 : 3;
         if (height < 22) return 5;
-        if (faceHash > 0.97) return 4;
+        if (faceHash > 0.985) return 4;
         const leeFacing = normalX * DUNE_COS + normalZ * DUNE_SIN;
         if (leeFacing < -0.12) return 2;
-        return faceHash < 0.6 ? 0 : 1;
+        return patch < 0.1 ? 0 : 1;
       }
       case 3:
         if (height < WATER_LEVEL - 12) return 0;
         if (height < WATER_LEVEL - 0.3) return 1;
         if (height < WATER_LEVEL + 2.4) return 2;
         if (slope > 0.55) return 5;
-        return faceHash < 0.55 ? 3 : 4;
+        return patch < 0.05 ? 3 : 4;
       default: {
         if (nearShore || slope > 0.5) return 2;
         // Flower drifts: smooth noise fields pick both where flowers grow and which
@@ -2392,8 +2426,8 @@ function createWorldGen(seedString, options) {
           const hue = noise(x, z, 1 / 160, 47);
           return hue < -0.22 ? 3 : hue < 0.22 ? 4 : 5;
         }
-        if (faceHash > 0.975) return 3 + (Math.floor(faceHash * 1000) % 3);
-        return faceHash < 0.55 ? 0 : 1;
+        if (faceHash > 0.985) return 3 + (Math.floor(faceHash * 1000) % 3);
+        return patch < 0.05 ? 0 : 1;
       }
     }
   }
@@ -2405,29 +2439,31 @@ function createWorldGen(seedString, options) {
    * Flat face colour (linear RGB) for a triangle whose centroid is (x, height, z).
    * slope = 1 - normalY (0 flat .. 1 vertical); normalX/normalZ = face normal.
    * faceHash = stable per-face random in [0, 1) (use hash2 of the face's lattice cell).
+   * Each face takes its colour from ONE biome, chosen by a smooth noise field against
+   * the biome weights, so blend zones become organic patches of pure palette colours
+   * instead of weight-averaged grey.
    */
   function faceColor(x, z, height, slope, normalX, normalZ, faceHash, out, offset) {
     climate(x, z, colorClimate);
     biomeWeights(colorClimate.temperature, colorClimate.moisture, colorWeights);
     const snowLine = 140 + 640 * colorClimate.temperature;
-    let red = 0;
-    let green = 0;
-    let blue = 0;
-    let total = 0;
-    for (let biome = 0; biome < 5; biome++) {
-      const weight = colorWeights[biome];
-      if (weight < 0.02) continue;
-      const index = paletteIndex(biome, x, z, height, slope, normalX, normalZ, faceHash, snowLine) * 3;
-      const palette = PALETTES[biome];
-      red += weight * palette[index];
-      green += weight * palette[index + 1];
-      blue += weight * palette[index + 2];
-      total += weight;
+    const blendPick = clamp01(0.5 + 0.62 * (0.75 * noise(x, z, 1 / 70, 46) + 0.25 * noise(x, z, 1 / 21, 45))) * 0.88 + faceHash * 0.12;
+    let biome = 4;
+    let accumulated = 0;
+    for (let index = 0; index < 5; index++) {
+      accumulated += colorWeights[index];
+      if (blendPick <= accumulated) {
+        biome = index;
+        break;
+      }
     }
-    const jitter = (0.94 + 0.12 * faceHash) / total;
-    out[offset] = red * jitter;
-    out[offset + 1] = green * jitter;
-    out[offset + 2] = blue * jitter;
+    const patch = noise(x, z, 1 / 48, 44) + (faceHash - 0.5) * 0.35;
+    const index = paletteIndex(biome, x, z, height, slope, normalX, normalZ, faceHash, patch, snowLine) * 3;
+    const palette = PALETTES[biome];
+    const jitter = 0.95 + 0.1 * faceHash;
+    out[offset] = palette[index] * jitter;
+    out[offset + 1] = palette[index + 1] * jitter;
+    out[offset + 2] = palette[index + 2] * jitter;
   }
 
   // ---- Vegetation scatter ------------------------------------------------------
@@ -2646,14 +2682,14 @@ class EventBus {
 }
 
 // ---- Persistent storage (localStorage can throw in private modes) -------------
+// read() returns the fallback when storage is blocked or the stored JSON is
+// corrupt; write() reports failure so callers can tell the player once.
 const storage = {
-  available: true,
   read(key, fallback) {
     try {
       const raw = window.localStorage.getItem(key);
       return raw === null ? fallback : JSON.parse(raw);
     } catch (error) {
-      storage.available = false;
       return fallback;
     }
   },
@@ -2662,7 +2698,6 @@ const storage = {
       window.localStorage.setItem(key, JSON.stringify(value));
       return true;
     } catch (error) {
-      storage.available = false;
       return false;
     }
   },
@@ -2683,30 +2718,53 @@ const DEFAULT_SETTINGS = Object.freeze({
   hudAutoHide: true,
 });
 
+const QUALITY_PREFERENCES = Object.freeze(['auto', 'minimal', 'low', 'medium', 'high', 'ultra']);
+const SETTING_VALIDATORS = Object.freeze({
+  dayLength: (value) => Number.isFinite(value) && value >= 60 && value <= 3600,
+  quality: (value) => QUALITY_PREFERENCES.includes(value),
+  mouseSensitivity: (value) => Number.isFinite(value) && value >= 0.2 && value <= 4,
+  masterVolume: (value) => Number.isFinite(value) && value >= 0 && value <= 1,
+  remoteEndpoint: (value) => /^https?:\/\/[^\s]+$/i.test(value),
+});
+
+function isValidSetting(key, value) {
+  if (!(key in DEFAULT_SETTINGS) || typeof value !== typeof DEFAULT_SETTINGS[key]) return false;
+  const validator = SETTING_VALIDATORS[key];
+  return validator ? validator(value) : true;
+}
+
 function createSettings(bus) {
   const STORAGE_KEY = 'driftwing.settings.v1';
   const stored = storage.read(STORAGE_KEY, {});
   const values = { ...DEFAULT_SETTINGS };
   for (const key of Object.keys(DEFAULT_SETTINGS)) {
-    if (stored && typeof stored[key] === typeof DEFAULT_SETTINGS[key]) values[key] = stored[key];
+    if (stored && isValidSetting(key, stored[key])) values[key] = stored[key];
   }
+  let saveFailureReported = false;
   return {
     get(key) { return values[key]; },
     all() { return { ...values }; },
     set(key, value) {
-      if (!(key in DEFAULT_SETTINGS) || typeof value !== typeof DEFAULT_SETTINGS[key]) return false;
+      if (!isValidSetting(key, value)) return false;
       if (values[key] === value) return true;
       values[key] = value;
-      storage.write(STORAGE_KEY, values);
+      if (!storage.write(STORAGE_KEY, values) && !saveFailureReported) {
+        saveFailureReported = true;
+        bus.emit('notify', { text: 'This browser is blocking storage, so settings will reset next visit.', kind: 'warning' });
+      }
       bus.emit('settings:changed', { key, value, settings: { ...values } });
       return true;
     },
   };
 }
 
+/** Seed from the URL, normalised to A-Z 0-9 and dashes (max 24), or a fresh random one. */
 function resolveSeed(params) {
   const requested = params.get('seed');
-  if (requested && /^[A-Za-z0-9-]{1,24}$/.test(requested)) return requested.toUpperCase();
+  if (requested) {
+    const normalised = requested.toUpperCase().replace(/[^A-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+    if (normalised) return normalised;
+  }
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const bytes = new Uint8Array(6);
   crypto.getRandomValues(bytes);
@@ -2757,9 +2815,10 @@ function findSpawn(world, sunDirection) {
       }
       const relief = Math.min(max - min, 520);
       // Prefer the heart of a biome over blend zones so the first view has a clear identity.
-      const purity = Math.max(...world.biomeAt(x, z).weights);
-      const score = relief * 0.6 + land * 22 - ring * 18 + (here > -10 ? 40 : -120) + (purity - 0.5) * 160;
-      if (!best || score > best.score) best = { x, z, score };
+      const biome = world.biomeAt(x, z);
+      const purity = Math.max(...biome.weights);
+      const score = relief * 0.6 + land * 22 - ring * 18 + (here > -10 ? 40 : -120) + (purity < 0.65 ? -600 : (purity - 0.65) * 300);
+      if (!best || score > best.score) best = { x, z, score, biomeKey: biome.key };
     }
   }
   let bestHeading = wrapDegrees(sunHeading - 40);
@@ -2769,8 +2828,12 @@ function findSpawn(world, sunDirection) {
     const forward = vectorFromHeading(heading);
     let score = 0;
     for (let step = 1; step <= 6; step++) {
-      const height = world.heightAt(best.x + forward.x * step * 320, best.z + forward.z * step * 320);
+      const aheadX = best.x + forward.x * step * 320;
+      const aheadZ = best.z + forward.z * step * 320;
+      const height = world.heightAt(aheadX, aheadZ);
       score += Math.min(height, 600) * 0.2 + (height > 4 ? 30 : 0);
+      // The first view should show the biome the intro banner names.
+      if (step <= 4) score += world.biomeAt(aheadX, aheadZ).key === best.biomeKey ? 45 : -70;
     }
     if (score > bestHeadingScore) {
       bestHeadingScore = score;
@@ -2807,7 +2870,7 @@ function createTerrainSystem(ctx) {
   const {
     Fn, vec2, vec3, vec4, color, uniform, texture, attribute, positionWorld, positionGeometry,
     vertexColor, smoothstep, mix, sin, cos, mod, saturate, min, abs, dot, oneMinus, modelWorldMatrix,
-    screenCoordinate, fract, floor, exp, normalize, normalView, cameraViewMatrix,
+    screenCoordinate, fract, floor, exp, normalize, normalView, cameraViewMatrix, fwidth, cameraPosition,
   } = TSL;
 
   // ---- Tuning --------------------------------------------------------------------------
@@ -2850,6 +2913,13 @@ function createTerrainSystem(ctx) {
   const LOD_FADE_SECONDS = 0.7;
   const MAX_FADING_CHUNKS = 64;
   const VEGETATION_GROW_SECONDS = 0.9;
+  // Vegetation casts sun shadows only inside the LOD0 rings (the shadow box is +-320 m anyway;
+  // farther chunks only added shadow-pass draws down-sun of the view).
+  const VEGETATION_SHADOW_RINGS = LOD_RING_LIMITS[0];
+  // Shoreline foam fades out with view distance (and with the scene fog) so far coasts never
+  // keep a crisp white rim through the haze.
+  const FOAM_FADE_NEAR = 350;
+  const FOAM_FADE_FAR = 1300;
 
   const builderConfig = {
     chunkSize: CHUNK_SIZE,
@@ -3294,26 +3364,46 @@ function createTerrainSystem(ctx) {
   const shallowWaterColor = color(0x5cc6b8);
   const foamColor = color(0xfff6ea);
 
+  // Scene fog range, copied from `scene.fog` each frame (the sky module animates it).
+  const foamFogNear = uniform(400);
+  const foamFogFar = uniform(2400);
+
   /**
    * Shoreline foam amount (0..1) where the ground is within ~[-0.4, +1.4] m of the water level:
    * a swash line that surges up the beach and recedes (phase varies along the coast), plus a
    * lacy froth ribbon hugging the mean waterline, both torn by drifting noise.
+   * Anti-aliased against the pixel footprint: the metre-scale lace is replaced by its mean once
+   * a pixel covers more ground than it can resolve, and every height edge is widened by the
+   * height one pixel spans (a box filter), so a band thinner than a pixel turns into a faint soft
+   * line rather than dashes along the facets. Distance and fog fade it out entirely.
    */
   const shoreFoam = Fn(() => {
     const seconds = uniforms.time;
     const heightAboveWater = positionWorld.y.sub(uniforms.waterLevel);
+    const heightStep = fwidth(heightAboveWater).mul(0.75);
+    const groundStep = fwidth(positionWorld.xz).length();
     const wrapped = mod(positionWorld.xz, WRAP_PERIOD);
     const breakup = foamBreakup(wrapped, seconds);
-    const lace = foamLace(wrapped, seconds).add(breakup.mul(0.3));
-    const band = smoothstep(-0.4, 0.0, heightAboveWater).mul(oneMinus(smoothstep(1.1, 1.4, heightAboveWater)));
+    const laceDetail = oneMinus(smoothstep(0.35, 1.1, groundStep));
+    const lace = foamLace(wrapped, seconds).mul(laceDetail).add(breakup.mul(0.3));
+    const band = smoothstep(heightStep.negate().sub(0.4), heightStep, heightAboveWater)
+      .mul(oneMinus(smoothstep(heightStep.negate().add(1.1), heightStep.add(1.4), heightAboveWater)));
     const surge = sin(seconds.mul(0.85).add(breakup.mul(2.6))).mul(0.5).add(0.5);
     const swashFront = mix(-0.1, 1.05, surge.mul(surge));
     const belowFront = swashFront.sub(heightAboveWater);
-    const swash = smoothstep(-0.02, 0.06, belowFront).mul(oneMinus(smoothstep(0.1, 0.6, belowFront)));
+    const swash = smoothstep(heightStep.negate().sub(0.02), heightStep.add(0.06), belowFront)
+      .mul(oneMinus(smoothstep(0.1, heightStep.add(0.6), belowFront)));
     const swashLace = smoothstep(-0.45, 0.25, lace.add(0.2));
-    const froth = oneMinus(smoothstep(0.05, 0.42, abs(heightAboveWater.sub(0.14)))).mul(smoothstep(-0.55, 0.1, lace));
+    // The froth ribbon is ~0.8 m of height wide: once a pixel spans more, it dims toward its average.
+    const frothCoverage = oneMinus(smoothstep(0.15, 1.6, heightStep).mul(0.7));
+    const froth = oneMinus(smoothstep(0.05, heightStep.add(0.42), abs(heightAboveWater.sub(0.14))))
+      .mul(smoothstep(-0.55, 0.1, lace))
+      .mul(frothCoverage);
     const pulse = sin(seconds.mul(0.7).add(breakup.mul(1.9))).mul(0.15).add(0.85);
-    return saturate(swash.mul(swashLace).add(froth.mul(0.85))).mul(band).mul(pulse);
+    const viewDistance = positionWorld.sub(cameraPosition).length();
+    const distanceFade = oneMinus(smoothstep(FOAM_FADE_NEAR, FOAM_FADE_FAR, viewDistance));
+    const fogFade = oneMinus(smoothstep(foamFogNear, foamFogFar, viewDistance));
+    return saturate(swash.mul(swashLace).add(froth.mul(0.85))).mul(band).mul(pulse).mul(distanceFade).mul(fogFade);
   })();
 
   /**
@@ -4156,8 +4246,11 @@ function createTerrainSystem(ctx) {
   }
   function refreshVegetationVisibility(chunk) {
     const terrainShown = chunk.displayedLod >= 0;
+    const castsShadow = chunk.ring <= VEGETATION_SHADOW_RINGS;
     for (const mesh of chunk.vegetationMeshes) {
-      mesh.visible = terrainShown && (mesh.userData.vegetationType !== VEGETATION.FLOWERS || chunk.ring <= FLOWER_RINGS);
+      const isFlower = mesh.userData.vegetationType === VEGETATION.FLOWERS;
+      mesh.visible = terrainShown && (!isFlower || chunk.ring <= FLOWER_RINGS);
+      mesh.castShadow = castsShadow && !isFlower;
     }
   }
 
@@ -4431,12 +4524,16 @@ function createTerrainSystem(ctx) {
     queueDirty = true;
   }
 
-  function handleWorkerFailure(genuine, detail) {
+  /** Losing the workers is a genuine environment failure (e.g. a CSP without blob: workers): say so once. */
+  function reportWorkerFailure(detail) {
+    if (workerFailureReported) return;
+    workerFailureReported = true;
+    console.error('[DRIFTWING] terrain worker failed; continuing with main-thread generation', detail);
+  }
+
+  function handleWorkerFailure(detail) {
     if (mode !== 'workers') return;
-    if (genuine && !workerFailureReported) {
-      workerFailureReported = true;
-      console.error('[DRIFTWING] terrain worker failed; continuing with main-thread generation', detail);
-    }
+    reportWorkerFailure(detail);
     switchToMainThread();
   }
 
@@ -4454,7 +4551,7 @@ function createTerrainSystem(ctx) {
       return;
     }
     if (message.type === 'error') {
-      handleWorkerFailure(true, `${message.message}\n${message.stack}`);
+      handleWorkerFailure(`${message.message}\n${message.stack}`);
       return;
     }
     if (message.type === 'mesh' || message.type === 'scatter') {
@@ -4467,6 +4564,7 @@ function createTerrainSystem(ctx) {
 
   function startWorkers() {
     if (typeof Worker !== 'function' || typeof Blob !== 'function' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+      reportWorkerFailure('this browser has no Worker, Blob or URL.createObjectURL');
       return false;
     }
     const source = `${ctx.worldSource}\n${createChunkBuilder.toString()}\n(${terrainWorkerMain.toString()})();\n`;
@@ -4480,15 +4578,16 @@ function createTerrainSystem(ctx) {
         worker.onmessage = (event) => handleWorkerMessage(record, event.data);
         worker.onerror = (event) => {
           event.preventDefault();
-          handleWorkerFailure(record.ready, event.message || 'worker error event');
+          handleWorkerFailure(event.message || 'terrain worker error event');
         };
-        worker.onmessageerror = () => handleWorkerFailure(true, 'terrain worker message could not be deserialised');
+        worker.onmessageerror = () => handleWorkerFailure('terrain worker message could not be deserialised');
         worker.postMessage({ type: 'init', seed: world.seed, options: ctx.worldOptions, config: builderConfig });
         workerRecords.push(record);
       }
       return true;
     } catch (error) {
       stopWorkers();
+      reportWorkerFailure(error);
       return false;
     }
   }
@@ -4681,6 +4780,10 @@ function createTerrainSystem(ctx) {
         if (warmupFramesLeft === 0) finishWarmup();
       }
       if (qualityDirty) readQuality();
+      if (scene.fog) {
+        foamFogNear.value = scene.fog.near;
+        foamFogFar.value = Math.max(scene.fog.far, scene.fog.near + 1);
+      }
       const centerChanged = updateFocus(dt, realDt);
       replanTimer -= realDt;
       if (centerChanged || qualityDirty) {
@@ -4695,7 +4798,7 @@ function createTerrainSystem(ctx) {
         dispatchToWorkers();
         if (!workersReady) {
           workerWaitSeconds += realDt;
-          if (workerWaitSeconds > WORKER_READY_TIMEOUT) handleWorkerFailure(false, 'terrain workers did not start');
+          if (workerWaitSeconds > WORKER_READY_TIMEOUT) handleWorkerFailure(`terrain workers did not start within ${WORKER_READY_TIMEOUT} s`);
         }
       }
       if (mode === 'main-thread') runMainThreadJobs(state.ready ? MAIN_THREAD_BUDGET_MS : MAIN_THREAD_STARTUP_BUDGET_MS);
@@ -4796,9 +4899,9 @@ function createTerrainSystem(ctx) {
 function createSkySystem(ctx) {
   const { scene, camera, renderer, state, uniforms, settings, bus, CONFIG: config } = ctx;
   const {
-    Fn, If, uniform, float, vec2, vec3, positionWorldDirection, positionView, cameraViewMatrix,
-    dot, pow, exp, mix, smoothstep, saturate, sin, cos, abs, fract, floor, sqrt, length, clamp: clampNode, step, max,
-    fog, mx_noise_float: noise3, hash, screenCoordinate,
+    Fn, If, Loop, uniform, float, int, vec2, vec3, positionWorldDirection, positionView, cameraViewMatrix, cameraPosition,
+    dot, pow, exp, exp2, mix, smoothstep, saturate, sin, cos, abs, fract, floor, sqrt, length, clamp: clampNode, step, max,
+    fog, hash, screenCoordinate,
   } = TSL;
 
   // ---- Tunables -----------------------------------------------------------------------------------
@@ -4807,15 +4910,34 @@ function createSkySystem(ctx) {
   const STAR_CELL_SCALE = 96;
   const AURORA_LAYERS = 20;
   const SHADOW_EXTENT = 320;
-  const LIGHT_DISTANCE = 1600;
-  const SHADOW_FAR = LIGHT_DISTANCE + 1500;
+  // Shadow box depth along the light: sized each frame to the receivers the camera can see (see
+  // updateShadowDepth). The up-sun reach always covers tall casters whose shadows fall into the box.
+  const SHADOW_MAX_REACH = 1500;
+  const SHADOW_MIN_DOWN_SUN = 260;
+  const SHADOW_CASTER_HEIGHT = 140;
+  const SHADOW_BIAS_METERS = 0.37;
+  const LIGHT_DISTANCE = SHADOW_MAX_REACH;
   const MIN_LIGHT_ELEVATION = 2.5 * DEG;
   const FOG_VERTICAL_SCALE = 0.35;
+  // Fog: near never closes in below this; the haze thins with the height of the view ray above the
+  // ground under the glider, so looking down from altitude stays clear while the world edge (a
+  // separate, height-independent term) always melts into the sky.
+  const FOG_NEAR_FLOOR = 450;
+  const FOG_SCALE_HEIGHT = 230;
+  const FOG_HIGH_DENSITY = 0.3;
+  const FOG_EDGE_START = 0.7;
   const DOME_RADIUS_FRACTION = 0.82;
   const CAMERA_FAR_MARGIN = 2500;
-  const WARP_GOLDEN_RATE = 0.4;
+  // Clock speed by sun elevation (relative; normalised so a full loop still lasts dayLength). The
+  // golden band (-3..14 deg) runs slowest, so the golden-hour start keeps ~60 s of low warm sun
+  // before sunset; blue hour runs a little faster and night fastest.
+  const WARP_GOLDEN_RATE = 0.16;
+  const WARP_TWILIGHT_RATE = 0.55;
   const WARP_DAY_RATE = 1;
-  const WARP_NIGHT_RATE = 1.5;
+  const WARP_NIGHT_RATE = 2;
+  const WARP_GOLDEN_LOW = -3;
+  const WARP_GOLDEN_HIGH = 14;
+  const WARP_EDGE = 4;
   const DEFAULT_TRANSITION_SECONDS = 2.5;
   const CELESTIAL_POLE = new THREE.Vector3(0, Math.sin(52 * DEG), -Math.cos(52 * DEG)).normalize();
   const GALAXY_NORMAL = new THREE.Vector3(0.62, 0.31, -0.72).normalize();
@@ -4843,7 +4965,7 @@ function createSkySystem(ctx) {
     horizonFalloff: scalarKeys([[-18, 2.6], [-6, 2.6], [0, 3.0], [8, 3.6], [20, 5.0], [40, 6.0]]),
     sunIntensity: scalarKeys([[-4, 0], [-1, 0.25], [0.5, 0.9], [3, 1.7], [8, 2.4], [16, 2.9], [30, 3.1], [50, 3.1]]),
     discIntensity: scalarKeys([[-2, 4], [2, 9], [8, 14], [20, 20], [45, 24]]),
-    hemisphereIntensity: scalarKeys([[-18, 1.3], [-10, 1.35], [-5, 1.55], [-1, 1.45], [4, 1.05], [10, 1.05], [30, 1.15]]),
+    hemisphereIntensity: scalarKeys([[-18, 1.55], [-10, 1.6], [-5, 1.9], [-1, 2.1], [4, 2.0], [10, 2.0], [30, 2.1]]),
     moonIntensity: scalarKeys([[-18, 0.62], [-10, 0.5], [-4, 0.2], [0, 0]]),
     exposure: scalarKeys([[-18, 1.3], [-8, 1.25], [-2, 1.12], [4, 1.02], [10, 1.0], [30, 0.95], [50, 0.93]]),
     warmth: scalarKeys([[-18, 0.2], [-8, 0.3], [-2, 0.75], [4, 1.0], [12, 0.95], [25, 0.65], [45, 0.5]]),
@@ -4917,8 +5039,11 @@ function createSkySystem(ctx) {
   /** Relative speed of the clock: golden hours linger, nights pass a little quicker. */
   function warpRate(elevation) {
     const outside = elevation >= 0 ? WARP_DAY_RATE : WARP_NIGHT_RATE;
-    const golden = 1 - smoothRange(11, 15, Math.abs(elevation));
-    return outside + (WARP_GOLDEN_RATE - outside) * golden;
+    const aboveGoldenFloor = smoothRange(WARP_GOLDEN_LOW - WARP_EDGE, WARP_GOLDEN_LOW, elevation);
+    const golden = aboveGoldenFloor * (1 - smoothRange(WARP_GOLDEN_HIGH, WARP_GOLDEN_HIGH + WARP_EDGE, elevation));
+    const rate = outside + (WARP_GOLDEN_RATE - outside) * golden;
+    const twilight = smoothRange(-14, -10, elevation) * (1 - aboveGoldenFloor);
+    return rate + (WARP_TWILIGHT_RATE - rate) * twilight;
   }
   /** Integral of 1 / rate over one loop: scales the warp so a full loop still lasts dayLength seconds. */
   const WARP_NORMALISATION = (() => {
@@ -4990,10 +5115,13 @@ function createSkySystem(ctx) {
     starStrength: uniform(0),
     starRotation: uniform(new THREE.Matrix3()),
     auroraStrength: uniform(0),
+    fogLayerBase: uniform(0),
     auroraGlow: uniform(new THREE.Color(0, 0, 0)),
     fogNear: uniform(400),
     fogFar: uniform(2400),
   };
+
+  const auroraLayerCount = uniform(AURORA_LAYERS, 'int');
 
   // ---- TSL helpers ---------------------------------------------------------------------------------
   /** Dave Hoskins' sine-free hashes (float based, stable for moderate cell coordinates). */
@@ -5007,6 +5135,22 @@ function createSkySystem(ctx) {
     const mixed = scaled.add(dot(scaled, scaled.yxz.add(33.33)));
     return fract(mixed.xxy.add(mixed.yxx).mul(mixed.zyx));
   });
+
+  /**
+   * Cheap value noise in [-0.75, 0.75] (trilinear over hashed lattice corners). A real shader function
+   * (layout), so every call site shares one small body: the MaterialX Perlin noise it replaces made the
+   * sky dome the slowest program to link on the WebGL2 fallback.
+   */
+  const valueNoise3 = Fn(([pointInput]) => {
+    const point = vec3(pointInput).toVar();
+    const cell = floor(point).toVar();
+    const local = fract(point);
+    const blend = local.mul(local).mul(local.mul(-2.0).add(3.0)).toVar();
+    const corner = (x, y, z) => hash13(cell.add(vec3(x, y, z)));
+    const low = mix(mix(corner(0, 0, 0), corner(1, 0, 0), blend.x), mix(corner(0, 1, 0), corner(1, 1, 0), blend.x), blend.y);
+    const high = mix(mix(corner(0, 0, 1), corner(1, 0, 1), blend.x), mix(corner(0, 1, 1), corner(1, 1, 1), blend.x), blend.y);
+    return mix(low, high, blend.z).mul(1.5).sub(0.75);
+  }).setLayout({ name: 'skyValueNoise', type: 'float', inputs: [{ name: 'pointInput', type: 'vec3' }] });
 
   /**
    * Base sky radiance for a unit world direction: gradient keyed by sun elevation, azimuth-tinted horizon,
@@ -5087,8 +5231,8 @@ function createSkySystem(ctx) {
       const planar = vec2(dot(direction, sky.sunRight), dot(direction, sky.sunUp));
       const radial = planar.div(max(length(planar), 0.0001));
       const drift = time.mul(0.012);
-      const coarse = noise3(vec3(radial.mul(4.0), drift));
-      const fine = noise3(vec3(radial.mul(11.0), drift.mul(1.7).add(4.2)));
+      const coarse = valueNoise3(vec3(radial.mul(4.0), drift));
+      const fine = valueNoise3(vec3(radial.mul(11.0), drift.mul(1.7).add(4.2)));
       const beams = smoothstep(-0.2, 0.5, coarse.mul(0.65).add(fine.mul(0.35)));
       const falloff = exp(sunOffset.mul(-2.4)).mul(smoothstep(0.025, 0.2, sunOffset));
       const skyMask = smoothstep(-0.004, 0.06, up).mul(fadeOut(0.16, 0.62, up));
@@ -5107,7 +5251,7 @@ function createSkySystem(ctx) {
       const facing = sqrt(saturate(float(1).sub(radiusSq)));
       const surfaceNormal = sky.moonRight.mul(localX).add(sky.moonUp.mul(localY)).sub(uniforms.moonDirection.mul(facing));
       const lit = max(saturate(dot(surfaceNormal, uniforms.sunDirection).mul(0.9).add(0.1)), 0.05);
-      const maria = smoothstep(-0.35, 0.45, noise3(vec3(localX.mul(2.3), localY.mul(2.3), 7.1)));
+      const maria = smoothstep(-0.35, 0.45, valueNoise3(vec3(localX.mul(2.3), localY.mul(2.3), 7.1)));
       const albedo = mix(0.58, 1.0, maria);
       const inside = fadeOut(MOON_ANGULAR_RADIUS * 0.9, MOON_ANGULAR_RADIUS, moonOffset).mul(smoothstep(-0.003, 0.004, up));
       moonCover.assign(inside);
@@ -5135,7 +5279,7 @@ function createSkySystem(ctx) {
       const tint = mix(vec3(0.72, 0.82, 1.0), vec3(1.0, 0.86, 0.68), jitter.z);
       const horizonFade = smoothstep(0.0, 0.24, up).mul(float(1).sub(moonCover));
       const stars = tint.mul(core.mul(brightness).mul(twinkle).mul(present));
-      const milkyNoise = noise3(starDirection.mul(4.5)).mul(0.5).add(0.5);
+      const milkyNoise = valueNoise3(starDirection.mul(4.5)).mul(0.5).add(0.5);
       const milkyWay = vec3(0.05, 0.055, 0.085).mul(band.mul(milkyNoise.mul(milkyNoise)).mul(1.6));
       radiance.addAssign(stars.add(milkyWay).mul(horizonFade.mul(sky.starStrength)));
     });
@@ -5145,25 +5289,26 @@ function createSkySystem(ctx) {
       const accumulated = vec3(0).toVar();
       const average = vec3(0).toVar();
       const spinAngle = time.mul(0.06);
-      const spinCos = cos(spinAngle);
-      const spinSin = sin(spinAngle);
+      const spinCos = cos(spinAngle).toVar();
+      const spinSin = sin(spinAngle).toVar();
       const pixel = floor(screenCoordinate.xy);
-      const dither = hash(pixel.x.add(pixel.y.mul(4099.0)));
+      const dither = hash(pixel.x.add(pixel.y.mul(4099.0))).toVar();
       const perspective = up.mul(2.0).add(0.4);
+      const planeDirection = direction.zx.mul(1.6).div(perspective).toVar();
       const layerStride = 49 / (AURORA_LAYERS - 1);
-      for (let layer = 0; layer < AURORA_LAYERS; layer++) {
-        const equivalent = layer * layerStride;
-        const nextEquivalent = (layer + 1) * layerStride;
-        const layerHeight = 0.8 + Math.pow(equivalent, 1.4) * 0.002;
-        const layerStep = (Math.pow(nextEquivalent, 1.4) - Math.pow(equivalent, 1.4)) * 0.002;
-        const distanceAlong = float(layerHeight).add(dither.mul(layerStep * 0.5)).div(perspective);
-        const planePoint = direction.zx.mul(distanceAlong).mul(1.6);
-        const density = auroraNoise(planePoint, spinCos, spinSin);
-        const hue = sin(vec3(1 - 2.15, 1 + 0.5, 1 - 1.2).add(equivalent * 0.043)).mul(0.5).add(0.5);
+      // A real shader loop with a uniform bound: the compiler cannot unroll it, so the program links
+      // with one layer body instead of AURORA_LAYERS inlined copies.
+      Loop({ start: int(0), end: auroraLayerCount, type: 'int', condition: '<' }, ({ i }) => {
+        const equivalent = float(i).mul(layerStride);
+        const heightCurve = pow(equivalent, 1.4);
+        const layerStep = pow(equivalent.add(layerStride), 1.4).sub(heightCurve).mul(0.002);
+        const distanceAlong = heightCurve.mul(0.002).add(0.8).add(dither.mul(layerStep).mul(0.5));
+        const density = auroraNoise(planeDirection.mul(distanceAlong), spinCos, spinSin);
+        const hue = sin(vec3(1 - 2.15, 1 + 0.5, 1 - 1.2).add(equivalent.mul(0.043))).mul(0.5).add(0.5);
         average.assign(mix(average, hue.mul(density), 0.5));
-        const weight = Math.pow(2, -equivalent * 0.052 - 2.5) * smoothRange(0, 5, equivalent + layerStride * 0.5) * layerStride;
+        const weight = exp2(equivalent.mul(-0.052).sub(2.5)).mul(smoothstep(0.0, 5.0, equivalent.add(layerStride * 0.5))).mul(layerStride);
         accumulated.addAssign(average.mul(weight));
-      }
+      });
       // The curtains hang along a slowly drifting east-west arc across the northern sky.
       const northReach = direction.z.negate().mul(float(1.05).div(perspective));
       const arcOffset = northReach.sub(sin(time.mul(0.013)).mul(0.25).add(1.15)).div(0.7);
@@ -5195,8 +5340,15 @@ function createSkySystem(ctx) {
   const viewDirectionWorld = positionView.transformDirection(cameraViewMatrix);
   const worldOffset = viewDirectionWorld.mul(length(positionView));
   const hazeDistance = length(vec3(worldOffset.x, worldOffset.y.mul(FOG_VERTICAL_SCALE), worldOffset.z));
-  const hazeAmount = smoothstep(sky.fogNear, sky.fogFar, hazeDistance);
-  scene.fogNode = fog(skyBase(viewDirectionWorld), hazeAmount.mul(hazeAmount));
+  // Low haze is densest near the ground under the glider: attenuate it by the view ray's mid height
+  // so looking down from altitude stays clear. The edge term ignores height, so the world edge always
+  // melts into the sky.
+  const fragmentHeight = cameraPosition.y.add(worldOffset.y);
+  const rayMidHeight = cameraPosition.y.add(fragmentHeight).mul(0.5).sub(sky.fogLayerBase);
+  const layerDensity = mix(float(FOG_HIGH_DENSITY), float(1), exp(max(rayMidHeight, 0.0).div(FOG_SCALE_HEIGHT).negate()));
+  const layerHaze = smoothstep(sky.fogNear, sky.fogFar, hazeDistance);
+  const edgeHaze = smoothstep(sky.fogFar.mul(FOG_EDGE_START), sky.fogFar, hazeDistance);
+  scene.fogNode = fog(skyBase(viewDirectionWorld), max(layerHaze.mul(layerHaze).mul(layerDensity), edgeHaze.mul(edgeHaze)));
   const backgroundColor = new THREE.Color();
   scene.background = backgroundColor;
 
@@ -5211,7 +5363,7 @@ function createSkySystem(ctx) {
   sunLight.castShadow = true;
   sunLight.shadow.radius = 3;
   sunLight.shadow.camera.near = 1;
-  sunLight.shadow.camera.far = SHADOW_FAR;
+  sunLight.shadow.camera.far = LIGHT_DISTANCE + SHADOW_MIN_DOWN_SUN;
   sunLight.shadow.camera.left = -SHADOW_EXTENT;
   sunLight.shadow.camera.right = SHADOW_EXTENT;
   sunLight.shadow.camera.top = SHADOW_EXTENT;
@@ -5233,7 +5385,7 @@ function createSkySystem(ctx) {
     const size = ctx.quality.shadowMapSize || 2048;
     if (sunLight.shadow.mapSize.x !== size) sunLight.shadow.mapSize.set(size, size);
     const texel = (2 * SHADOW_EXTENT) / size;
-    sunLight.shadow.bias = -0.00012;
+    sunLight.shadow.bias = -SHADOW_BIAS_METERS / (sunLight.shadow.camera.far - sunLight.shadow.camera.near);
     sunLight.shadow.normalBias = texel * 1.4;
   }
   applyShadowQuality();
@@ -5376,7 +5528,9 @@ function createSkySystem(ctx) {
     const agl = Number.isFinite(state.player.agl) ? state.player.agl : 0;
     const clearAir = 0.1 * smoothRange(250, 1400, agl);
     const targetFar = viewDistance * 0.95;
-    const targetNear = viewDistance * (0.3 - 0.15 * haze + clearAir);
+    const targetNear = Math.min(Math.max(FOG_NEAR_FLOOR, viewDistance * (0.3 - 0.15 * haze + clearAir)), targetFar * 0.8);
+    const groundBelow = Math.max(Number.isFinite(state.player.groundHeight) ? state.player.groundHeight : 0, config.WATER_LEVEL);
+    sky.fogLayerBase.value = sky.fogLayerBase.value === 0 ? groundBelow : damp(sky.fogLayerBase.value, groundBelow, 0.6, realDt);
     if (fogFarCurrent < 0) {
       fogFarCurrent = targetFar;
       fogNearCurrent = targetNear;
@@ -5472,10 +5626,28 @@ function createSkySystem(ctx) {
     focus.applyMatrix4(scratch.lightRotation);
     lightTarget.position.copy(focus);
     sunLight.position.copy(focus).addScaledVector(lightDirection, LIGHT_DISTANCE);
+    updateShadowDepth(lightDirection, focus);
     const moonDirection = scratch.moonLightDirection.copy(state.time.moonDirection);
     if (moonDirection.y < 0.05) moonDirection.y = 0.05;
     moonDirection.normalize();
     moonLight.position.copy(focus).addScaledVector(moonDirection, LIGHT_DISTANCE);
+  }
+
+  /**
+   * Shadow box depth: the up-sun reach is fixed (tall casters), the down-sun reach only extends as far
+   * as the ground below the focus needs at the current sun angle, instead of a fixed 3 km slab.
+   */
+  function updateShadowDepth(lightDirection, focus) {
+    const shadowCamera = sunLight.shadow.camera;
+    const sinElevation = Math.max(lightDirection.y, 0.08);
+    const ground = Math.max(ctx.world.groundHeight(focus.x, focus.z), config.WATER_LEVEL);
+    const drop = Math.max(0, focus.y - ground) + SHADOW_CASTER_HEIGHT;
+    const downSun = clamp(drop / sinElevation, SHADOW_MIN_DOWN_SUN, SHADOW_MAX_REACH);
+    const far = Math.round(LIGHT_DISTANCE + downSun);
+    if (Math.abs(far - shadowCamera.far) < 12) return;
+    shadowCamera.far = far;
+    shadowCamera.updateProjectionMatrix();
+    sunLight.shadow.bias = -SHADOW_BIAS_METERS / (far - shadowCamera.near);
   }
 
   function updateDome() {
@@ -6228,9 +6400,34 @@ function createCloudSystem(ctx) {
     return density * (0.16 + 0.78 * MathUtils.smoothstep(weather, 0.34, 0.72));
   }
 
+  // Opening shot: the air around the spawn and its first stretch of flight path stays clear for a
+  // while, then those clusters grow back in through the normal growth smoothing (no popping).
+  const SPAWN_CLEAR_SECONDS = 25;
+  const SPAWN_CLEAR_FADE_SECONDS = 12;
+  const SPAWN_CLEAR_MARGIN = 350;
+  const SPAWN_PATH_LENGTH = 2200;
+  const spawnPath = {
+    x: state.spawn?.x ?? state.player.position.x,
+    z: state.spawn?.z ?? state.player.position.z,
+    directionX: Math.sin((state.spawn?.heading ?? 0) * DEG),
+    directionZ: -Math.cos((state.spawn?.heading ?? 0) * DEG),
+  };
+
+  function spawnClearance(cluster, elapsed) {
+    if (elapsed >= SPAWN_CLEAR_SECONDS + SPAWN_CLEAR_FADE_SECONDS) return 1;
+    const offsetX = cluster.centerX + drift.x - spawnPath.x;
+    const offsetZ = cluster.centerZ + drift.z - spawnPath.z;
+    const along = clamp(offsetX * spawnPath.directionX + offsetZ * spawnPath.directionZ, 0, SPAWN_PATH_LENGTH);
+    const gapX = offsetX - spawnPath.directionX * along;
+    const gapZ = offsetZ - spawnPath.directionZ * along;
+    const reach = cluster.radius + SPAWN_CLEAR_MARGIN;
+    if (gapX * gapX + gapZ * gapZ > reach * reach) return 1;
+    return MathUtils.smoothstep(elapsed, SPAWN_CLEAR_SECONDS, SPAWN_CLEAR_SECONDS + SPAWN_CLEAR_FADE_SECONDS);
+  }
+
   function growthTargetFor(cluster, elapsed) {
     const coverage = coverageProbability(cluster.centerX, cluster.centerZ, elapsed);
-    return MathUtils.smoothstep(coverage, cluster.presenceRoll - 0.1, cluster.presenceRoll + 0.1);
+    return MathUtils.smoothstep(coverage, cluster.presenceRoll - 0.1, cluster.presenceRoll + 0.1) * spawnClearance(cluster, elapsed);
   }
 
   function sampleGround(cluster) {
@@ -6820,7 +7017,12 @@ function createBirdSystem(ctx) {
   const MAX_AGL = 220;
   const FLOOR_MARGIN = 15;
   const GRAVITY = 9.81;
-  const GROUND_SAMPLES_PER_FRAME = 16;
+  // Ground probes: each live bird re-probes about every 0.4 s, looking 1.6 s ahead; the 3-sample
+  // rendered-mesh probe is only needed within PRECISE_FLOOR_CLEARANCE of the floor.
+  const GROUND_REFRESH_SECONDS = 0.4;
+  const GROUND_LOOK_AHEAD_SECONDS = 1.6;
+  const PRECISE_FLOOR_CLEARANCE = 70;
+  const MAX_GROUND_SAMPLES_PER_FRAME = 16;
   const SPAWN_FADE_SECONDS = 1.6;
   const player = state.player;
 
@@ -6953,6 +7155,7 @@ function createBirdSystem(ctx) {
       centerY: 0,
       centerZ: 0,
       radius: 0,
+      fade: 0,
     });
   }
 
@@ -6978,7 +7181,7 @@ function createBirdSystem(ctx) {
 
   function playerHeadingRadians() {
     const velocity = player.velocity;
-    const horizontal = Math.hypot(velocity.x, velocity.z);
+    const horizontal = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
     if (horizontal > 1) return Math.atan2(velocity.x, -velocity.z);
     return Math.atan2(player.forward.x, -player.forward.z);
   }
@@ -7067,14 +7270,49 @@ function createBirdSystem(ctx) {
   }
 
   // ---- Boids ----------------------------------------------------------------------------------------
-  function refreshGroundSamples() {
-    for (let sample = 0; sample < GROUND_SAMPLES_PER_FRAME; sample++) {
+  // Hot-loop rule: per-bird helpers take only integer indices and object references and write their
+  // results into typed-array scratch, so no double is ever boxed and the per-bird loop allocates
+  // nothing (Math.hypot is avoided for the same reason: its arguments are boxed on every call).
+  const NEIGHBOR_SEPARATION = 0;
+  const NEIGHBOR_ALIGNMENT = 3;
+  const NEIGHBOR_COHESION = 6;
+  const NEIGHBOR_COUNT = 9;
+  const neighborhood = new Float64Array(10);
+  const steering = new Float64Array(3);
+  const SEPARATION_RADIUS_SQ = SEPARATION_RADIUS * SEPARATION_RADIUS;
+  const NEIGHBOR_RADIUS_SQ = NEIGHBOR_RADIUS * NEIGHBOR_RADIUS;
+  let stepSeconds = 0;
+  let stepExcitementDecay = 1;
+  let stepBankBlend = 0;
+  let groundProbeBudget = 0;
+
+  /** Probes the ground under and ahead of one bird; the rendered-mesh probe is used only near the floor. */
+  function probeGroundBelow(index) {
+    const x = positionX[index];
+    const z = positionZ[index];
+    const ahead = surfaceHeight(x + velocityX[index] * GROUND_LOOK_AHEAD_SECONDS, z + velocityZ[index] * GROUND_LOOK_AHEAD_SECONDS);
+    // groundHeight costs three analytic samples. High above the floor the analytic height is within a
+    // few metres of the mesh, far inside the cushion, so the single-sample probe is enough there.
+    const nearFloor = positionY[index] - groundBelow[index] < PRECISE_FLOOR_CLEARANCE;
+    const below = nearFloor ? renderedSurfaceHeight(x, z) : surfaceHeight(x, z);
+    groundBelow[index] = Math.max(below, ahead);
+  }
+
+  function activeBirdCount() {
+    let count = 0;
+    for (const flock of flocks) if (flock.active) count += flock.count;
+    return count;
+  }
+
+  /** Re-probes the ground under each live bird about every GROUND_REFRESH_SECONDS (frame-rate independent). */
+  function refreshGroundSamples(dt) {
+    groundProbeBudget = Math.min(groundProbeBudget + (activeBirdCount() * dt) / GROUND_REFRESH_SECONDS, MAX_GROUND_SAMPLES_PER_FRAME);
+    for (let visited = 0; visited < CAPACITY && groundProbeBudget >= 1; visited++) {
       groundCursor = (groundCursor + 1) % CAPACITY;
       const flock = flocks[Math.floor(groundCursor / BIRDS_PER_SLOT)];
       if (!flock.active || groundCursor >= flock.start + flock.count) continue;
-      const lookAheadX = positionX[groundCursor] + velocityX[groundCursor] * 1.6;
-      const lookAheadZ = positionZ[groundCursor] + velocityZ[groundCursor] * 1.6;
-      groundBelow[groundCursor] = Math.max(renderedSurfaceHeight(positionX[groundCursor], positionZ[groundCursor]), surfaceHeight(lookAheadX, lookAheadZ));
+      probeGroundBelow(groundCursor);
+      groundProbeBudget -= 1;
     }
   }
 
@@ -7118,121 +7356,150 @@ function createBirdSystem(ctx) {
     flock.targetY = flock.targetGround + flock.preferredAgl;
   }
 
+  /** 1 for a calm bird, down to 0.15 while fully excited (flocking rules loosen during a scatter). */
+  function calmness(index) {
+    return 1 - 0.85 * excitementLevel[index];
+  }
+
+  /** Sums separation push, neighbour velocity and neighbour offset within NEIGHBOR_RADIUS. */
+  function gatherNeighbors(index, start, end) {
+    neighborhood.fill(0);
+    const x = positionX[index];
+    const y = positionY[index];
+    const z = positionZ[index];
+    for (let other = start; other < end; other++) {
+      if (other === index) continue;
+      const dx = positionX[other] - x;
+      const dy = positionY[other] - y;
+      const dz = positionZ[other] - z;
+      const distanceSq = dx * dx + dy * dy + dz * dz;
+      if (distanceSq > NEIGHBOR_RADIUS_SQ) continue;
+      if (distanceSq < SEPARATION_RADIUS_SQ && distanceSq > 1e-6) {
+        const distance = Math.sqrt(distanceSq);
+        const push = (1 - distance / SEPARATION_RADIUS) / distance;
+        neighborhood[NEIGHBOR_SEPARATION] -= dx * push;
+        neighborhood[NEIGHBOR_SEPARATION + 1] -= dy * push;
+        neighborhood[NEIGHBOR_SEPARATION + 2] -= dz * push;
+      }
+      neighborhood[NEIGHBOR_ALIGNMENT] += velocityX[other];
+      neighborhood[NEIGHBOR_ALIGNMENT + 1] += velocityY[other];
+      neighborhood[NEIGHBOR_ALIGNMENT + 2] += velocityZ[other];
+      neighborhood[NEIGHBOR_COHESION] += dx;
+      neighborhood[NEIGHBOR_COHESION + 1] += dy;
+      neighborhood[NEIGHBOR_COHESION + 2] += dz;
+      neighborhood[NEIGHBOR_COUNT] += 1;
+    }
+  }
+
+  /** Separation, alignment and cohesion from the gathered neighbourhood, plus a loose pull to the centre. */
+  function steerWithFlock(index, flock) {
+    const calm = calmness(index);
+    steering[0] = neighborhood[NEIGHBOR_SEPARATION] * 14;
+    steering[1] = neighborhood[NEIGHBOR_SEPARATION + 1] * 14;
+    steering[2] = neighborhood[NEIGHBOR_SEPARATION + 2] * 14;
+    const neighbors = neighborhood[NEIGHBOR_COUNT];
+    if (neighbors > 0) {
+      steering[0] += (neighborhood[NEIGHBOR_ALIGNMENT] / neighbors - velocityX[index]) * 1.4 * calm + (neighborhood[NEIGHBOR_COHESION] / neighbors) * 0.16 * calm;
+      steering[1] += (neighborhood[NEIGHBOR_ALIGNMENT + 1] / neighbors - velocityY[index]) * 1.4 * calm + (neighborhood[NEIGHBOR_COHESION + 1] / neighbors) * 0.16 * calm;
+      steering[2] += (neighborhood[NEIGHBOR_ALIGNMENT + 2] / neighbors - velocityZ[index]) * 1.4 * calm + (neighborhood[NEIGHBOR_COHESION + 2] / neighbors) * 0.16 * calm;
+    }
+    // Loose pull toward the flock centre keeps stragglers from drifting off.
+    steering[0] += (flock.centerX - positionX[index]) * 0.012 * calm;
+    steering[1] += (flock.centerY - positionY[index]) * 0.012 * calm;
+    steering[2] += (flock.centerZ - positionZ[index]) * 0.012 * calm;
+  }
+
+  /** Seek the wandering flock target at cruise speed (half strength vertically). */
+  function steerTowardTarget(index, flock) {
+    const calm = calmness(index);
+    const toTargetX = flock.targetX - positionX[index];
+    const toTargetY = flock.targetY - positionY[index];
+    const toTargetZ = flock.targetZ - positionZ[index];
+    const toTargetLength = Math.sqrt(toTargetX * toTargetX + toTargetY * toTargetY + toTargetZ * toTargetZ) || 1;
+    const desiredScale = flock.cruiseSpeed / toTargetLength;
+    steering[0] += (toTargetX * desiredScale - velocityX[index]) * 0.55 * calm;
+    steering[1] += (toTargetY * desiredScale * 0.5 - velocityY[index]) * 0.55 * calm;
+    steering[2] += (toTargetZ * desiredScale - velocityZ[index]) * 0.55 * calm;
+  }
+
+  /** Flee along the scatter direction while excited. */
+  function steerAwayFromGlider(index) {
+    const excitement = excitementLevel[index];
+    if (excitement <= 0.01) return;
+    const fleeStrength = 18 * excitement;
+    steering[0] += fleeX[index] * fleeStrength;
+    steering[1] += fleeY[index] * fleeStrength;
+    steering[2] += fleeZ[index] * fleeStrength;
+  }
+
+  /** Terrain avoidance: climb when inside a soft 25 m cushion above ground + FLOOR_MARGIN. */
+  function steerAboveTerrain(index) {
+    const cushion = groundBelow[index] + FLOOR_MARGIN + 25 - positionY[index];
+    if (cushion > 0) steering[1] += cushion * 0.9;
+  }
+
+  function limitSteering(index) {
+    const lengthSq = steering[0] * steering[0] + steering[1] * steering[1] + steering[2] * steering[2];
+    const limit = 12 + 22 * excitementLevel[index];
+    if (lengthSq <= limit * limit) return;
+    const scale = limit / Math.sqrt(lengthSq);
+    steering[0] *= scale;
+    steering[1] *= scale;
+    steering[2] *= scale;
+  }
+
+  /** Applies the steering to velocity (climb and speed limits), banks into the turn and moves the bird. */
+  function integrateBird(index) {
+    const dt = stepSeconds;
+    const excitement = excitementLevel[index];
+    let vx = velocityX[index] + steering[0] * dt;
+    let vy = velocityY[index] + steering[1] * dt;
+    let vz = velocityZ[index] + steering[2] * dt;
+    const climbLimit = 4.5 + 7 * excitement;
+    vy = clamp(vy, -climbLimit, climbLimit);
+    const speed = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
+    const clampedSpeed = clamp(speed, MIN_SPEED, MAX_SPEED + 14 * excitement);
+    if (clampedSpeed !== speed) {
+      const scale = clampedSpeed / speed;
+      vx *= scale;
+      vy *= scale;
+      vz *= scale;
+    }
+    // Bank into turns: lateral acceleration against the horizontal right vector.
+    const horizontal = Math.sqrt(vx * vx + vz * vz) || 1;
+    const lateral = (steering[0] * -vz + steering[2] * vx) / horizontal;
+    const targetBank = clamp(Math.atan2(lateral, GRAVITY), -1.05, 1.05);
+    bankAngle[index] += (targetBank - bankAngle[index]) * stepBankBlend;
+    velocityX[index] = vx;
+    velocityY[index] = vy;
+    velocityZ[index] = vz;
+    positionX[index] += vx * dt;
+    positionY[index] += vy * dt;
+    positionZ[index] += vz * dt;
+    const floor = groundBelow[index] + FLOOR_MARGIN;
+    if (positionY[index] < floor) {
+      positionY[index] = floor;
+      if (velocityY[index] < 1) velocityY[index] = 1;
+    }
+    excitementLevel[index] = excitement * stepExcitementDecay;
+    extraPhase[index] = (extraPhase[index] + excitement * 11 * dt) % (Math.PI * 2);
+  }
+
   function simulateFlock(flock, dt) {
+    stepSeconds = dt;
+    stepExcitementDecay = Math.exp(-dt / 2.4);
+    // Same blend as damp(bank, target, 3.5, dt), computed once per frame.
+    stepBankBlend = 1 - Math.exp(-3.5 * dt);
     const start = flock.start;
     const end = start + flock.count;
-    const separationRadiusSq = SEPARATION_RADIUS * SEPARATION_RADIUS;
-    const neighborRadiusSq = NEIGHBOR_RADIUS * NEIGHBOR_RADIUS;
-    const excitementDecay = Math.exp(-dt / 2.4);
     for (let index = start; index < end; index++) {
-      const x = positionX[index];
-      const y = positionY[index];
-      const z = positionZ[index];
-      let separationX = 0;
-      let separationY = 0;
-      let separationZ = 0;
-      let alignX = 0;
-      let alignY = 0;
-      let alignZ = 0;
-      let cohesionX = 0;
-      let cohesionY = 0;
-      let cohesionZ = 0;
-      let neighbors = 0;
-      for (let other = start; other < end; other++) {
-        if (other === index) continue;
-        const dx = positionX[other] - x;
-        const dy = positionY[other] - y;
-        const dz = positionZ[other] - z;
-        const distanceSq = dx * dx + dy * dy + dz * dz;
-        if (distanceSq > neighborRadiusSq) continue;
-        if (distanceSq < separationRadiusSq && distanceSq > 1e-6) {
-          const distance = Math.sqrt(distanceSq);
-          const push = (1 - distance / SEPARATION_RADIUS) / distance;
-          separationX -= dx * push;
-          separationY -= dy * push;
-          separationZ -= dz * push;
-        }
-        alignX += velocityX[other];
-        alignY += velocityY[other];
-        alignZ += velocityZ[other];
-        cohesionX += dx;
-        cohesionY += dy;
-        cohesionZ += dz;
-        neighbors++;
-      }
-      const excitement = excitementLevel[index];
-      const calm = 1 - 0.85 * excitement;
-      let accelX = separationX * 14;
-      let accelY = separationY * 14;
-      let accelZ = separationZ * 14;
-      if (neighbors > 0) {
-        accelX += (alignX / neighbors - velocityX[index]) * 1.4 * calm + (cohesionX / neighbors) * 0.16 * calm;
-        accelY += (alignY / neighbors - velocityY[index]) * 1.4 * calm + (cohesionY / neighbors) * 0.16 * calm;
-        accelZ += (alignZ / neighbors - velocityZ[index]) * 1.4 * calm + (cohesionZ / neighbors) * 0.16 * calm;
-      }
-      // Loose pull toward the flock centre keeps stragglers from drifting off.
-      accelX += (flock.centerX - x) * 0.012 * calm;
-      accelY += (flock.centerY - y) * 0.012 * calm;
-      accelZ += (flock.centerZ - z) * 0.012 * calm;
-      // Seek the wandering flock target at cruise speed.
-      const toTargetX = flock.targetX - x;
-      const toTargetY = flock.targetY - y;
-      const toTargetZ = flock.targetZ - z;
-      const toTargetLength = Math.hypot(toTargetX, toTargetY, toTargetZ) || 1;
-      const desiredScale = flock.cruiseSpeed / toTargetLength;
-      accelX += (toTargetX * desiredScale - velocityX[index]) * 0.55 * calm;
-      accelY += (toTargetY * desiredScale * 0.5 - velocityY[index]) * 0.55 * calm;
-      accelZ += (toTargetZ * desiredScale - velocityZ[index]) * 0.55 * calm;
-      // Flee along the scatter direction while excited.
-      if (excitement > 0.01) {
-        const fleeStrength = 18 * excitement;
-        accelX += fleeX[index] * fleeStrength;
-        accelY += fleeY[index] * fleeStrength;
-        accelZ += fleeZ[index] * fleeStrength;
-      }
-      // Terrain avoidance: stay above ground + FLOOR_MARGIN with a soft cushion.
-      const floor = groundBelow[index] + FLOOR_MARGIN;
-      const cushion = floor + 25 - y;
-      if (cushion > 0) accelY += cushion * 0.9;
-      const accelLength = Math.hypot(accelX, accelY, accelZ);
-      const accelLimit = 12 + 22 * excitement;
-      if (accelLength > accelLimit) {
-        const limit = accelLimit / accelLength;
-        accelX *= limit;
-        accelY *= limit;
-        accelZ *= limit;
-      }
-      let vx = velocityX[index] + accelX * dt;
-      let vy = velocityY[index] + accelY * dt;
-      let vz = velocityZ[index] + accelZ * dt;
-      const climbLimit = 4.5 + 7 * excitement;
-      vy = clamp(vy, -climbLimit, climbLimit);
-      const speed = Math.hypot(vx, vy, vz) || 1;
-      const maxSpeed = MAX_SPEED + 14 * excitement;
-      const clampedSpeed = clamp(speed, MIN_SPEED, maxSpeed);
-      if (clampedSpeed !== speed) {
-        const scale = clampedSpeed / speed;
-        vx *= scale;
-        vy *= scale;
-        vz *= scale;
-      }
-      // Bank into turns: lateral acceleration against the horizontal right vector.
-      const horizontal = Math.hypot(vx, vz) || 1;
-      const lateral = (accelX * -vz + accelZ * vx) / horizontal;
-      const targetBank = clamp(Math.atan2(lateral, GRAVITY), -1.05, 1.05);
-      bankAngle[index] = damp(bankAngle[index], targetBank, 3.5, dt);
-      velocityX[index] = vx;
-      velocityY[index] = vy;
-      velocityZ[index] = vz;
-      positionX[index] = x + vx * dt;
-      positionY[index] = y + vy * dt;
-      positionZ[index] = z + vz * dt;
-      if (positionY[index] < floor) {
-        positionY[index] = floor;
-        if (velocityY[index] < 1) velocityY[index] = 1;
-      }
-      excitementLevel[index] = excitement * excitementDecay;
-      extraPhase[index] = (extraPhase[index] + excitement * 11 * dt) % (Math.PI * 2);
+      gatherNeighbors(index, start, end);
+      steerWithFlock(index, flock);
+      steerTowardTarget(index, flock);
+      steerAwayFromGlider(index);
+      steerAboveTerrain(index);
+      limitSteering(index);
+      integrateBird(index);
     }
   }
 
@@ -7279,19 +7546,19 @@ function createBirdSystem(ctx) {
       let perpX = dx - pathDirection.x * along;
       let perpY = dy - pathDirection.y * along;
       let perpZ = dz - pathDirection.z * along;
-      let perpLength = Math.hypot(perpX, perpY, perpZ);
+      let perpLength = Math.sqrt(perpX * perpX + perpY * perpY + perpZ * perpZ);
       if (perpLength < 0.5) {
         const angle = Math.random() * Math.PI * 2;
         perpX = Math.cos(angle) * -pathDirection.z;
         perpY = Math.sin(angle) * 0.5;
         perpZ = Math.cos(angle) * pathDirection.x;
-        perpLength = Math.hypot(perpX, perpY, perpZ) || 1;
+        perpLength = Math.sqrt(perpX * perpX + perpY * perpY + perpZ * perpZ) || 1;
       }
       const forwardShare = (along >= 0 ? 0.3 : -0.15);
       let directionX = perpX / perpLength + pathDirection.x * forwardShare + (Math.random() - 0.5) * 0.45;
       let directionY = perpY / perpLength + 0.75 + Math.random() * 0.4;
       let directionZ = perpZ / perpLength + pathDirection.z * forwardShare + (Math.random() - 0.5) * 0.45;
-      const directionLength = Math.hypot(directionX, directionY, directionZ) || 1;
+      const directionLength = Math.sqrt(directionX * directionX + directionY * directionY + directionZ * directionZ) || 1;
       directionX /= directionLength;
       directionY /= directionLength;
       directionZ /= directionLength;
@@ -7310,7 +7577,7 @@ function createBirdSystem(ctx) {
     flock.scatterCooldown = 4;
     if (fled === 0) return;
     // The flock regroups away from the glider's path.
-    if (Math.hypot(fleeSumX, fleeSumZ) > 0.1) flock.heading = Math.atan2(fleeSumX, -fleeSumZ);
+    if (fleeSumX * fleeSumX + fleeSumZ * fleeSumZ > 0.01) flock.heading = Math.atan2(fleeSumX, -fleeSumZ);
     flock.preferredAgl = clamp(flock.preferredAgl + 25, MIN_AGL, MAX_AGL);
     bus.emit('birds:scattered', {
       count: fled,
@@ -7319,26 +7586,36 @@ function createBirdSystem(ctx) {
   }
 
   // ---- Instance matrices ------------------------------------------------------------------------------
+  // Floating origin near the player keeps instance translations small (float32-safe far from 0,0).
   const origin = new T.Vector3();
   const matrixArray = mesh.instanceMatrix.array;
 
-  function writeBirdMatrix(index, scale, originX, originY, originZ) {
+  function hideBirdInstance(offset, axisOffset) {
+    matrixArray.fill(0, offset, offset + 16);
+    axisRightData.fill(0, axisOffset, axisOffset + 3);
+    axisUpData.fill(0, axisOffset, axisOffset + 3);
+  }
+
+  /** Writes one bird's instance matrix (velocity-aligned, banked) and its flap axes/state. */
+  function writeBirdMatrix(index, flock) {
     const offset = index * 16;
     const axisOffset = index * 4;
+    const inFlock = flock.active && index < flock.start + flock.count;
+    const scale = inFlock ? birdScale[index] * flock.fade : 0;
+    axisRightData[axisOffset + 3] = extraPhase[index];
+    axisUpData[axisOffset + 3] = inFlock ? excitementLevel[index] : 0;
     if (scale <= 0) {
-      matrixArray.fill(0, offset, offset + 16);
-      axisRightData.fill(0, axisOffset, axisOffset + 3);
-      axisUpData.fill(0, axisOffset, axisOffset + 3);
+      hideBirdInstance(offset, axisOffset);
       return;
     }
     const vx = velocityX[index];
     const vy = velocityY[index];
     const vz = velocityZ[index];
-    const speed = Math.hypot(vx, vy, vz) || 1;
+    const speed = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
     const forwardX = vx / speed;
     const forwardY = vy / speed;
     const forwardZ = vz / speed;
-    const horizontal = Math.hypot(forwardX, forwardZ) || 1e-6;
+    const horizontal = Math.sqrt(forwardX * forwardX + forwardZ * forwardZ) || 1e-6;
     const baseRightX = -forwardZ / horizontal;
     const baseRightZ = forwardX / horizontal;
     // up0 = right0 x forward
@@ -7366,9 +7643,9 @@ function createBirdSystem(ctx) {
     matrixArray[offset + 9] = -forwardY * scale;
     matrixArray[offset + 10] = -forwardZ * scale;
     matrixArray[offset + 11] = 0;
-    matrixArray[offset + 12] = positionX[index] - originX;
-    matrixArray[offset + 13] = positionY[index] - originY;
-    matrixArray[offset + 14] = positionZ[index] - originZ;
+    matrixArray[offset + 12] = positionX[index] - origin.x;
+    matrixArray[offset + 13] = positionY[index] - origin.y;
+    matrixArray[offset + 14] = positionZ[index] - origin.z;
     matrixArray[offset + 15] = 1;
     axisRightData[axisOffset] = matrixArray[offset];
     axisRightData[axisOffset + 1] = matrixArray[offset + 1];
@@ -7378,41 +7655,43 @@ function createBirdSystem(ctx) {
     axisUpData[axisOffset + 2] = matrixArray[offset + 6];
   }
 
-  function writeInstances() {
-    // Floating origin near the player keeps instance translations small (float32-safe far from 0,0).
-    origin.set(Math.round(player.position.x / 64) * 64, Math.round(player.position.y / 64) * 64, Math.round(player.position.z / 64) * 64);
-    mesh.position.copy(origin);
-    let boundsX = 0;
-    let boundsY = 0;
-    let boundsZ = 0;
+  /** Bounding sphere (mesh-local) around every active flock; returns the number of active flocks. */
+  function updateBirdBounds() {
+    let sumX = 0;
+    let sumY = 0;
+    let sumZ = 0;
     let activeFlocks = 0;
     for (const flock of flocks) {
-      const fade = flock.active ? smooth01(flock.age / SPAWN_FADE_SECONDS) : 0;
-      for (let index = flock.start; index < flock.start + BIRDS_PER_SLOT; index++) {
-        const inFlock = flock.active && index < flock.start + flock.count;
-        writeBirdMatrix(index, inFlock ? birdScale[index] * fade : 0, origin.x, origin.y, origin.z);
-        axisRightData[index * 4 + 3] = extraPhase[index];
-        axisUpData[index * 4 + 3] = inFlock ? excitementLevel[index] : 0;
-      }
-      if (flock.active) {
-        boundsX += flock.centerX;
-        boundsY += flock.centerY;
-        boundsZ += flock.centerZ;
-        activeFlocks++;
-      }
+      if (!flock.active) continue;
+      sumX += flock.centerX;
+      sumY += flock.centerY;
+      sumZ += flock.centerZ;
+      activeFlocks++;
     }
-    mesh.visible = activeFlocks > 0;
-    if (activeFlocks > 0) {
-      const sphere = mesh.boundingSphere;
-      sphere.center.set(boundsX / activeFlocks - origin.x, boundsY / activeFlocks - origin.y, boundsZ / activeFlocks - origin.z);
-      let radius = 1;
-      for (const flock of flocks) {
-        if (!flock.active) continue;
-        const distance = Math.hypot(flock.centerX - origin.x - sphere.center.x, flock.centerY - origin.y - sphere.center.y, flock.centerZ - origin.z - sphere.center.z);
-        radius = Math.max(radius, distance + flock.radius + 4);
-      }
-      sphere.radius = radius;
+    if (activeFlocks === 0) return 0;
+    const sphere = mesh.boundingSphere;
+    sphere.center.set(sumX / activeFlocks - origin.x, sumY / activeFlocks - origin.y, sumZ / activeFlocks - origin.z);
+    let radius = 1;
+    for (const flock of flocks) {
+      if (!flock.active) continue;
+      const dx = flock.centerX - origin.x - sphere.center.x;
+      const dy = flock.centerY - origin.y - sphere.center.y;
+      const dz = flock.centerZ - origin.z - sphere.center.z;
+      radius = Math.max(radius, Math.sqrt(dx * dx + dy * dy + dz * dz) + flock.radius + 4);
     }
+    sphere.radius = radius;
+    return activeFlocks;
+  }
+
+  function writeInstances() {
+    origin.set(Math.round(player.position.x / 64) * 64, Math.round(player.position.y / 64) * 64, Math.round(player.position.z / 64) * 64);
+    mesh.position.copy(origin);
+    for (const flock of flocks) {
+      flock.fade = flock.active ? smooth01(flock.age / SPAWN_FADE_SECONDS) : 0;
+      const end = flock.start + BIRDS_PER_SLOT;
+      for (let index = flock.start; index < end; index++) writeBirdMatrix(index, flock);
+    }
+    mesh.visible = updateBirdBounds() > 0;
     mesh.instanceMatrix.clearUpdateRanges();
     mesh.instanceMatrix.needsUpdate = true;
     axisRightAttribute.needsUpdate = true;
@@ -7438,7 +7717,9 @@ function createBirdSystem(ctx) {
     const pz = player.position.z;
     for (const flock of flocks) {
       if (!flock.active) continue;
-      const distance = Math.hypot(flock.centerX - px, flock.centerZ - pz);
+      const dx = flock.centerX - px;
+      const dz = flock.centerZ - pz;
+      const distance = Math.sqrt(dx * dx + dz * dz);
       if (flock.retiring && distance > 900) {
         deactivateFlock(flock);
       } else if (!flock.retiring && distance > RECYCLE_DISTANCE) {
@@ -7452,7 +7733,7 @@ function createBirdSystem(ctx) {
     update(dt) {
       if (dt > 0) {
         simulationTime += dt;
-        refreshGroundSamples();
+        refreshGroundSamples(dt);
         for (const flock of flocks) {
           if (!flock.active) continue;
           flock.age += dt;
@@ -7482,7 +7763,10 @@ function createBirdSystem(ctx) {
         for (let index = flock.start; index < flock.start + flock.count; index++) {
           if (excitementLevel[index] > 0.5) excited++;
         }
-        const distance = Math.hypot(flock.centerX - player.position.x, flock.centerY - player.position.y, flock.centerZ - player.position.z);
+        const dx = flock.centerX - player.position.x;
+        const dy = flock.centerY - player.position.y;
+        const dz = flock.centerZ - player.position.z;
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (!nearest || distance < nearest.distance) {
           nearest = {
             x: Math.round(flock.centerX),
@@ -7648,12 +7932,20 @@ function createFxSystem(ctx) {
     return (trail.head + trail.count - 1) % CONTRAIL_CAPACITY;
   }
 
+  /** Distance from a wingtip to one stored sample (sqrt of sums: Math.hypot boxes its arguments). */
+  function tipDistanceToSample(trail, index, tip) {
+    const dx = tip.x - trail.sampleX[index];
+    const dy = tip.y - trail.sampleY[index];
+    const dz = tip.z - trail.sampleZ[index];
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
   function pushSample(trail, tip, strength) {
     let index;
     let along = 0;
     if (trail.count > 0) {
       const last = newestSampleIndex(trail);
-      along = trail.along[last] + Math.hypot(tip.x - trail.sampleX[last], tip.y - trail.sampleY[last], tip.z - trail.sampleZ[last]);
+      along = trail.along[last] + tipDistanceToSample(trail, last, tip);
     }
     if (trail.count < CONTRAIL_CAPACITY) {
       index = (trail.head + trail.count) % CONTRAIL_CAPACITY;
@@ -7709,7 +8001,7 @@ function createFxSystem(ctx) {
         return;
       }
       const last = newestSampleIndex(trail);
-      const distance = Math.hypot(tip.x - trail.sampleX[last], tip.y - trail.sampleY[last], tip.z - trail.sampleZ[last]);
+      const distance = tipDistanceToSample(trail, last, tip);
       if (distance > CONTRAIL_SPACING || contrailClock - trail.lastEmitTime > CONTRAIL_MAX_INTERVAL) pushSample(trail, tip, strength);
     } else if (trail.emitting) {
       pushSample(trail, tip, 0);
@@ -7737,7 +8029,7 @@ function createFxSystem(ctx) {
       trail.pointZ[points] = tip.z;
       trail.pointAge[points] = 0;
       trail.pointStrength[points] = contrailStrength;
-      trail.pointAlong[points] = (trail.along[last] + Math.hypot(tip.x - trail.sampleX[last], tip.y - trail.sampleY[last], tip.z - trail.sampleZ[last])) % 65536;
+      trail.pointAlong[points] = (trail.along[last] + tipDistanceToSample(trail, last, tip)) % 65536;
       points++;
     }
     return points;
@@ -8309,7 +8601,8 @@ function createFxSystem(ctx) {
 /**
  * INPUT: keyboard, pointer-lock virtual stick with a recentring spring, drag-to-steer
  * fallback, wheel throttle, touch merge, double-tap barrel rolls and photo-mode routing.
- * Writes ctx.input every frame (CONTRACT.md section 3). In photo mode the flight axes
+ * Writes ctx.input every frame (pitch / roll / yaw in [-1, 1], throttleDelta, throttleTarget,
+ * boost, fineControl, mouseActive, lastActivity; the UI writes ctx.input.touch). In photo mode the flight axes
  * stay neutral and keys / mouse / wheel feed the free camera through readPhotoControls().
  */
 function createInputSystem(ctx) {
@@ -8731,7 +9024,10 @@ function createInputSystem(ctx) {
  * cushion, soft ceiling, terrain-aware autopilot with manual override, canned barrel
  * roll; the stick alone can never leave the glider inverted) plus the low-poly
  * motor-glider: animated ailerons / elevator / rudder, spinning prop, nav lights and strobe.
- * Owns state.player motion fields (CONTRACT.md section 3); core clamps afterwards.
+ * Owns the state.player motion fields (position, quaternion, velocity, speed, throttle,
+ * heading / pitch / roll, forward / up / right, yawRate, gForce, stalled, boost, barrelRoll,
+ * autopilot); core clamps the result afterwards. Non-finite state (shared or internal) is
+ * repaired at the start of every step, keeping the last good pose, so the glider never freezes.
  */
 function createFlightSystem(ctx) {
   const { THREE: T, TSL: tsl, scene, state, input, bus, world, uniforms } = ctx;
@@ -8872,6 +9168,8 @@ function createFlightSystem(ctx) {
   let throttleGoal = null;
   let lastThrottleTarget = input.throttleTarget;
   let previousHeading = player.heading;
+  let lastFiniteHeading = Number.isFinite(player.heading) ? player.heading : 0;
+  const lastFinitePosition = player.position.clone();
   let smoothedYawRate = 0;
   let smoothedGForce = 1;
   let propAngle = 0;
@@ -9324,16 +9622,86 @@ function createFlightSystem(ctx) {
   // ============================================================================================
   // FLIGHT MODEL
   // ============================================================================================
+  /**
+   * Reads the shared pose back (core may have clamped it). A non-finite or zero-length shared
+   * quaternion keeps last frame's attitude; if that is unusable too, the wings are levelled on
+   * the last finite heading. Any non-finite integrator resets the transient flight state.
+   */
   function syncFromState() {
-    if (!barrel.active) attitude.copy(player.quaternion);
+    if (isFiniteVector(player.position)) lastFinitePosition.copy(player.position);
+    else player.position.copy(lastFinitePosition);
+    if (Number.isFinite(player.heading)) lastFiniteHeading = player.heading;
+    const sharedAttitudeValid = isFiniteQuaternion(player.quaternion);
+    if (!barrel.active && sharedAttitudeValid) attitude.copy(player.quaternion);
+    let attitudeRebuilt = false;
     if (!isFiniteQuaternion(attitude)) {
-      attitude.copy(player.quaternion);
-      barrel.active = false;
+      if (sharedAttitudeValid) attitude.copy(player.quaternion);
+      else attitude.setFromAxisAngle(WORLD_UP, -lastFiniteHeading * DEG);
+      attitudeRebuilt = true;
     }
-    speed = Number.isFinite(player.speed) ? clamp(player.speed, SPEED.MIN, SPEED.BOOST_MAX) : SPEED.CRUISE;
+    attitude.normalize();
+    if (Number.isFinite(player.speed)) speed = clamp(player.speed, SPEED.MIN, SPEED.BOOST_MAX);
+    else if (!Number.isFinite(speed)) speed = SPEED.CRUISE;
     const velocityLength = player.velocity.length();
     if (velocityLength > 1 && Number.isFinite(velocityLength)) pathDirection.copy(player.velocity).divideScalar(velocityLength);
     else pathDirection.set(0, 0, -1).applyQuaternion(attitude);
+    if (attitudeRebuilt || !internalsAreFinite()) resetInternals(lastFiniteHeading);
+  }
+
+  /** NaN or Infinity in any integrator makes the sum non-finite (one check per frame). */
+  function internalsAreFinite() {
+    const sum = rates.pitch + rates.roll + rates.yaw + rates.worldPitch + rates.turn
+      + speed + pathDirection.x + pathDirection.y + pathDirection.z
+      + assist.cushion + assist.proximity + assist.urgency + assist.risingTerrain + assist.ceiling + assist.evade + assist.evadeDirection
+      + autopilotState.commandedBank + autopilotState.rollRate + autopilotState.worldPitchRate + autopilotState.throttle + autopilotState.overrideSeconds
+      + controlSurfaces.aileron + controlSurfaces.elevator + controlSurfaces.rudder
+      + barrel.elapsed + barrel.angle + corkscrewOffset.x + corkscrewOffset.y + corkscrewOffset.z
+      + smoothedYawRate + smoothedGForce + previousHeading + propAngle + idleSeconds + pitchIdleSeconds;
+    return Number.isFinite(sum);
+  }
+
+  /** Clears rates, smoothers, assists and the canned roll; keeps attitude, speed and position. */
+  function resetInternals(heading) {
+    rates.pitch = 0;
+    rates.roll = 0;
+    rates.yaw = 0;
+    rates.worldPitch = 0;
+    rates.turn = 0;
+    assist.cushion = 0;
+    assist.proximity = 0;
+    assist.urgency = 0;
+    assist.risingTerrain = 0;
+    assist.ceiling = 0;
+    assist.evade = 0;
+    assist.evadeDirection = 0;
+    barrel.active = false;
+    barrel.elapsed = 0;
+    barrel.angle = 0;
+    player.barrelRoll.active = false;
+    player.barrelRoll.progress = 0;
+    autopilotState.commandedBank = 0;
+    autopilotState.rollRate = 0;
+    autopilotState.worldPitchRate = 0;
+    autopilotState.overrideSeconds = 0;
+    if (!Number.isFinite(autopilotState.throttle)) autopilotState.throttle = AUTOPILOT.CRUISE_THROTTLE;
+    if (!Number.isFinite(player.throttle)) player.throttle = AUTOPILOT.CRUISE_THROTTLE;
+    controlSurfaces.aileron = 0;
+    controlSurfaces.elevator = 0;
+    controlSurfaces.rudder = 0;
+    corkscrewOffset.set(0, 0, 0);
+    if (!Number.isFinite(propAngle)) propAngle = 0;
+    stalled = false;
+    idleSeconds = 0;
+    pitchIdleSeconds = 0;
+    smoothedYawRate = 0;
+    smoothedGForce = 1;
+    lookahead.age = Infinity;
+    previousHeading = heading;
+  }
+
+  /** Stick axes as finite values in [-1, 1] (a bad input value reads as centred). */
+  function axisValue(value) {
+    return Number.isFinite(value) ? clamp(value, -1, 1) : 0;
   }
 
   function computeAttitudeFrame() {
@@ -9357,9 +9725,10 @@ function createFlightSystem(ctx) {
       }
     }
     let throttle = Number.isFinite(player.throttle) ? player.throttle : AUTOPILOT.CRUISE_THROTTLE;
-    if (input.throttleDelta !== 0) {
+    const throttleDelta = axisValue(input.throttleDelta);
+    if (throttleDelta !== 0) {
       throttleGoal = null;
-      throttle += input.throttleDelta * THROTTLE_RATE * step;
+      throttle += throttleDelta * THROTTLE_RATE * step;
       autopilotState.throttleOverride = true;
     } else if (throttleGoal !== null) {
       throttle = damp(throttle, throttleGoal, 5, step);
@@ -9654,11 +10023,11 @@ function createFlightSystem(ctx) {
     let yawCommand = 0;
     if (autopilotActive) computeAutopilot(step);
     else {
-      pitchCommand = clamp(input.pitch, -1, 1);
+      pitchCommand = axisValue(input.pitch);
       // Near the surface the pilot cannot push the nose further down: there is no crash state.
       if (pitchCommand < 0) pitchCommand *= 1 - assist.cushion;
-      rollCommand = barrel.active ? 0 : clamp(input.roll, -1, 1);
-      yawCommand = clamp(input.yaw, -1, 1);
+      rollCommand = barrel.active ? 0 : axisValue(input.roll);
+      yawCommand = axisValue(input.yaw);
     }
     const hasInput = Math.abs(pitchCommand) > 0.05 || Math.abs(rollCommand) > 0.05 || Math.abs(yawCommand) > 0.05;
     idleSeconds = hasInput || barrel.active ? 0 : idleSeconds + step;
@@ -9783,6 +10152,8 @@ function createFlightSystem(ctx) {
     player.velocity.copy(pathDirection).multiplyScalar(speed);
     const horizontal = Math.hypot(player.forward.x, player.forward.z);
     if (horizontal > 0.05) player.heading = headingFromVector(player.forward.x, player.forward.z);
+    else if (!Number.isFinite(player.heading)) player.heading = lastFiniteHeading;
+    if (Number.isFinite(player.heading)) lastFiniteHeading = player.heading;
     player.pitch = Math.asin(clamp(player.forward.y, -1, 1)) / DEG;
     player.roll = Math.atan2(-player.right.y, player.up.y) / DEG;
     player.verticalSpeed = player.velocity.y;
@@ -9945,38 +10316,30 @@ function createFlightSystem(ctx) {
     return wingtips;
   }
 
+  /** Level flight at cruise from (x, y, z); also core's recovery path after a non-finite pose. */
   function resetTo(target = {}) {
     const { x, y, z } = target;
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return false;
-    const heading = Number.isFinite(target.heading) ? wrapDegrees(target.heading) : player.heading;
+    let heading = lastFiniteHeading;
+    if (Number.isFinite(target.heading)) heading = wrapDegrees(target.heading);
+    else if (Number.isFinite(player.heading)) heading = player.heading;
     player.position.set(x, y, z);
+    lastFinitePosition.set(x, y, z);
     attitude.setFromAxisAngle(WORLD_UP, -heading * DEG);
     vectorFromHeading(heading, pathDirection);
     speed = SPEED.CRUISE;
-    rates.pitch = 0;
-    rates.roll = 0;
-    rates.yaw = 0;
-    rates.worldPitch = 0;
-    rates.turn = 0;
-    barrel.active = false;
-    barrel.angle = 0;
-    player.barrelRoll.active = false;
-    player.barrelRoll.progress = 0;
+    resetInternals(heading);
     player.boost.active = false;
     player.boost.remaining = 0;
     player.boost.cooldown = 0;
-    stalled = false;
-    idleSeconds = 0;
-    smoothedGForce = 1;
-    smoothedYawRate = 0;
+    player.heading = heading;
+    lastFiniteHeading = heading;
     if (player.autopilot.enabled) {
       player.autopilot.heading = heading;
       player.autopilot.altitude = clamp(y, AUTOPILOT.MIN_ALTITUDE, CONFIG.MAX_ALTITUDE - 150);
     }
-    lookahead.age = Infinity;
-    previousHeading = heading;
+    computeAttitudeFrame();
     writeDerivedState(0);
-    corkscrewOffset.set(0, 0, 0);
     syncVisual();
     ctx.systems.camera?.snap?.();
     return true;
@@ -10004,6 +10367,7 @@ function createFlightSystem(ctx) {
       updateEnergy(step);
       updatePath(step);
       player.position.addScaledVector(pathDirection, speed * step);
+      if (isFiniteVector(player.position)) lastFinitePosition.copy(player.position);
       updateBarrelRoll(step);
       writeDerivedState(step);
       animateModel(step);
@@ -10048,6 +10412,9 @@ function createFlightSystem(ctx) {
  * CAMERA RIG: chase camera (critically damped lag, partial bank, look-ahead, FOV stretch,
  * low-frequency speed / boost / event shake, terrain-safe) and the photo-mode free camera
  * (WASD / QE move, mouse or touch look, wheel zoom, Shift fast) with a smooth return.
+ * Narrow / portrait screens widen the lens and pull the chase back so the whole wingspan
+ * fits, and shift the frame so the glider sits above the bottom UI band. Any non-finite
+ * chase state re-seats the camera at once, so a bad frame never reaches the renderer.
  */
 function createCameraRig(ctx) {
   const { THREE: T, camera, state, world, bus, settings, input } = ctx;
@@ -10089,6 +10456,18 @@ function createCameraRig(ctx) {
     RETURN_SECONDS: 0.9,
     ROLL_LAMBDA: 4,
   });
+  // Portrait framing: at the base chase distance, keep at least HALF_WIDTH metres visible on
+  // either side of the glider (15 m wingspan -> at most ~65 % of the screen width). Half of the
+  // correction (in log terms) widens the lens, the other half pulls the camera back, so neither
+  // the perspective nor the glider's size changes drastically. On tall screens a lens shift
+  // (view offset, a fraction of the screen height) lifts the glider into the upper-middle third.
+  const FRAMING = Object.freeze({
+    HALF_WIDTH: 11.5,
+    MAX_FOV: 90,
+    LIFT: 0.15,
+    LIFT_START_ASPECT: 1.05,
+    LIFT_FULL_ASPECT: 0.55,
+  });
   const WORLD_UP = new T.Vector3(0, 1, 0);
 
   // ---- Chase state --------------------------------------------------------------------
@@ -10108,8 +10487,8 @@ function createCameraRig(ctx) {
     acceleration: 0,
   };
   const shapeTarget = { distance: CHASE.DISTANCE, height: CHASE.HEIGHT, ahead: CHASE.AHEAD };
-  const targetLook = new T.Vector3();
-  const targetUp = new T.Vector3();
+  const targetLook = new T.Vector3(0, 0, -1);
+  const targetUp = new T.Vector3(0, 1, 0);
   const desiredRelative = new T.Vector3();
   const planeForward = new T.Vector3();
   const planeUp = new T.Vector3();
@@ -10138,8 +10517,9 @@ function createCameraRig(ctx) {
   const moveForward = new T.Vector3();
   const moveRight = new T.Vector3();
   const desiredVelocity = new T.Vector3();
-  const transition = { elapsed: 0, fromPosition: new T.Vector3(), fromQuaternion: new T.Quaternion(), fromFov: CAMERA_CONFIG.FOV_BASE };
-  let appliedFov = camera.fov;
+  const transition = { elapsed: 0, fromPosition: new T.Vector3(), fromQuaternion: new T.Quaternion(), fromFov: CAMERA_CONFIG.FOV_BASE, fromLift: 0 };
+  const framing = { aspect: NaN, fovTanScale: 1, distanceScale: 1, lift: 0 };
+  const projection = { fov: camera.fov, lift: 0, aspect: camera.aspect };
 
   function smooth01(value) {
     const t = clamp(value, 0, 1);
@@ -10157,18 +10537,47 @@ function createCameraRig(ctx) {
   function groundFloor(x, z) {
     return Math.max(world.groundHeight(x, z), CONFIG.WATER_LEVEL);
   }
+  function vectorSum(vector) {
+    return vector.x + vector.y + vector.z;
+  }
+
+  // ---- Portrait / narrow-screen framing (recomputed only when the aspect changes) ---------------
+  function updateFraming() {
+    const aspect = camera.aspect;
+    if (aspect === framing.aspect) return;
+    framing.aspect = aspect;
+    const validAspect = Number.isFinite(aspect) && aspect > 0;
+    const baseTan = Math.tan((CAMERA_CONFIG.FOV_BASE * DEG) / 2);
+    const requiredTan = FRAMING.HALF_WIDTH / CHASE.DISTANCE;
+    const deficit = validAspect ? Math.max(1, requiredTan / (baseTan * aspect)) : 1;
+    const maxTanScale = Math.tan((FRAMING.MAX_FOV * DEG) / 2) / baseTan;
+    framing.fovTanScale = Math.min(Math.sqrt(deficit), maxTanScale);
+    framing.distanceScale = deficit / framing.fovTanScale;
+    const tallness = validAspect ? (FRAMING.LIFT_START_ASPECT - aspect) / (FRAMING.LIFT_START_ASPECT - FRAMING.LIFT_FULL_ASPECT) : 0;
+    framing.lift = FRAMING.LIFT * smooth01(tallness);
+  }
+
+  /** Landscape vertical FOV -> the FOV used on this screen (wider on narrow screens). */
+  function framedFov(fov) {
+    if (framing.fovTanScale === 1) return fov;
+    const widened = (2 * Math.atan(Math.tan((fov * DEG) / 2) * framing.fovTanScale)) / DEG;
+    return Math.min(FRAMING.MAX_FOV, widened);
+  }
 
   // ---- Chase camera -------------------------------------------------------------------------
   function speedFraction() {
     return clamp((player.speed - 30) / (SPEED.BOOST_MAX - 30), 0, 1);
   }
 
+  /** Returns false (targets unchanged) when neither attitude source is usable. */
   function computeChaseTargets() {
-    const attitude = ctx.systems.flight?.getBaseQuaternion?.() ?? player.quaternion;
+    let attitude = ctx.systems.flight?.getBaseQuaternion?.() ?? player.quaternion;
+    if (!isFiniteQuaternion(attitude)) attitude = player.quaternion;
+    if (!isFiniteQuaternion(attitude)) return false;
     planeForward.set(0, 0, -1).applyQuaternion(attitude);
     planeUp.set(0, 1, 0).applyQuaternion(attitude);
     const velocityLength = player.velocity.length();
-    if (velocityLength > 1) velocityDirection.copy(player.velocity).divideScalar(velocityLength);
+    if (velocityLength > 1 && Number.isFinite(velocityLength)) velocityDirection.copy(player.velocity).divideScalar(velocityLength);
     else velocityDirection.copy(planeForward);
     targetLook.copy(planeForward).multiplyScalar(1 - CHASE.VELOCITY_SHARE).addScaledVector(velocityDirection, CHASE.VELOCITY_SHARE).normalize();
     // Blend of the plane's up and world up: follows ~60% of the bank, continuous through
@@ -10176,17 +10585,20 @@ function createCameraRig(ctx) {
     targetUp.copy(planeUp).multiplyScalar(CHASE.BANK_SHARE).addScaledVector(WORLD_UP, 1 - CHASE.BANK_SHARE);
     if (targetUp.lengthSq() < 1e-6) targetUp.copy(planeUp);
     targetUp.normalize();
+    return true;
   }
 
   function desiredShape() {
     const fraction = speedFraction();
-    shapeTarget.distance = CHASE.DISTANCE + CHASE.DISTANCE_RANGE * fraction + clamp(chase.acceleration * CHASE.ACCEL_PULLBACK, -1.5, 3.5);
-    shapeTarget.height = CHASE.HEIGHT + CHASE.HEIGHT_RANGE * fraction;
+    const pullback = framing.distanceScale;
+    shapeTarget.distance = (CHASE.DISTANCE + CHASE.DISTANCE_RANGE * fraction) * pullback + clamp(chase.acceleration * CHASE.ACCEL_PULLBACK, -1.5, 3.5);
+    shapeTarget.height = (CHASE.HEIGHT + CHASE.HEIGHT_RANGE * fraction) * pullback;
     shapeTarget.ahead = CHASE.AHEAD + CHASE.AHEAD_RANGE * fraction;
     return shapeTarget;
   }
 
   function snap() {
+    updateFraming();
     computeChaseTargets();
     chase.look.copy(targetLook);
     chase.up.copy(targetUp);
@@ -10207,12 +10619,23 @@ function createCameraRig(ctx) {
     const overCruise = smooth01((player.speed - SPEED.CRUISE) / (SPEED.MAX - SPEED.CRUISE));
     const range = CAMERA_CONFIG.FOV_MAX - CAMERA_CONFIG.FOV_BASE;
     const boostExtra = player.boost.active ? 0.35 * range : 0;
-    return Math.min(CAMERA_CONFIG.FOV_MAX, CAMERA_CONFIG.FOV_BASE + range * 0.85 * overCruise + boostExtra);
+    return framedFov(Math.min(CAMERA_CONFIG.FOV_MAX, CAMERA_CONFIG.FOV_BASE + range * 0.85 * overCruise + boostExtra));
+  }
+
+  /** True when every chase integrator is finite (NaN / Infinity propagate through the sum). */
+  function chaseStateIsFinite() {
+    const sum = vectorSum(chase.relative) + vectorSum(chase.relativeVelocity) + vectorSum(chase.look) + vectorSum(chase.up)
+      + vectorSum(chase.position) + vectorSum(chase.lastPlanePosition) + chase.quaternion.w + chase.quaternion.x
+      + chase.distance + chase.height + chase.ahead + chase.fov + chase.acceleration + chase.lastSpeed;
+    return Number.isFinite(sum);
   }
 
   function updateChase(dt) {
     const step = Math.min(Math.max(dt, 0), 0.05);
-    if (player.position.distanceTo(chase.lastPlanePosition) > CHASE.TELEPORT_DISTANCE) snap();
+    updateFraming();
+    // Written so that a NaN distance or any NaN chase state also re-seats the camera.
+    const planeMoved = player.position.distanceTo(chase.lastPlanePosition);
+    if (!(planeMoved <= CHASE.TELEPORT_DISTANCE) || !chaseStateIsFinite()) snap();
     chase.lastPlanePosition.copy(player.position);
     if (step <= 0) {
       solveChasePose();
@@ -10222,7 +10645,10 @@ function createCameraRig(ctx) {
     chase.lastSpeed = player.speed;
     chase.acceleration = damp(chase.acceleration, clamp(acceleration, -40, 40), 3, step);
 
-    computeChaseTargets();
+    if (!computeChaseTargets()) {
+      solveChasePose();
+      return;
+    }
     blendToward(chase.look, targetLook, CHASE.LOOK_LAMBDA, step);
     blendToward(chase.up, targetUp, CHASE.UP_LAMBDA, step);
     const shape = desiredShape();
@@ -10241,6 +10667,7 @@ function createCameraRig(ctx) {
     chase.fov = damp(chase.fov, targetFov(), CHASE.FOV_LAMBDA, step);
     updateShake(step);
     solveChasePose();
+    if (!chaseStateIsFinite()) snap();
   }
 
   function keepAboveTerrain() {
@@ -10293,14 +10720,19 @@ function createCameraRig(ctx) {
   }
 
   // ---- Photo mode free camera -------------------------------------------------------------------
-  function enterPhotoMode() {
-    free.position.copy(camera.position);
+  function enterPhotoModeFrom(position, quaternion, fov) {
+    free.position.copy(position);
     free.velocity.set(0, 0, 0);
-    free.euler.setFromQuaternion(camera.quaternion, 'YXZ');
+    free.euler.setFromQuaternion(quaternion, 'YXZ');
     free.yaw = free.euler.y;
     free.pitch = clamp(free.euler.x, -1.5, 1.5);
     free.roll = free.euler.z;
-    free.fov = camera.fov;
+    free.fov = clamp(fov, PHOTO.MIN_FOV, PHOTO.MAX_FOV);
+  }
+
+  function enterPhotoMode() {
+    if (isFiniteVector(camera.position) && isFiniteQuaternion(camera.quaternion)) enterPhotoModeFrom(camera.position, camera.quaternion, camera.fov);
+    else enterPhotoModeFrom(chase.position, chase.quaternion, chase.fov);
     mode = 'photo';
   }
 
@@ -10308,6 +10740,7 @@ function createCameraRig(ctx) {
     transition.fromPosition.copy(camera.position);
     transition.fromQuaternion.copy(camera.quaternion);
     transition.fromFov = camera.fov;
+    transition.fromLift = projection.lift;
     transition.elapsed = 0;
     mode = 'returning';
   }
@@ -10327,6 +10760,9 @@ function createCameraRig(ctx) {
     if (touch && touch.active) {
       free.yaw -= clamp(Number(touch.x) || 0, -1, 1) * PHOTO.TOUCH_LOOK_RATE * step;
       free.pitch += clamp(Number(touch.y) || 0, -1, 1) * PHOTO.TOUCH_LOOK_RATE * 0.75 * step * invert;
+    }
+    if (!Number.isFinite(free.yaw + free.pitch + free.roll + free.fov) || !isFiniteVector(free.position) || !isFiniteVector(free.velocity)) {
+      enterPhotoModeFrom(chase.position, chase.quaternion, chase.fov);
     }
     free.pitch = clamp(free.pitch, -1.5, 1.5);
     free.roll = damp(free.roll, 0, PHOTO.ROLL_LAMBDA, step);
@@ -10363,7 +10799,7 @@ function createCameraRig(ctx) {
 
     camera.position.copy(free.position);
     camera.quaternion.copy(free.quaternion);
-    setFov(free.fov);
+    applyProjection(free.fov, 0);
   }
 
   function applyReturnTransition(realDt) {
@@ -10371,21 +10807,34 @@ function createCameraRig(ctx) {
     const blend = easeInOutCubic(clamp(transition.elapsed / PHOTO.RETURN_SECONDS, 0, 1));
     camera.position.lerpVectors(transition.fromPosition, chase.position, blend);
     camera.quaternion.slerpQuaternions(transition.fromQuaternion, chase.quaternion, blend);
-    setFov(transition.fromFov + (chase.fov - transition.fromFov) * blend);
+    const fov = transition.fromFov + (chase.fov - transition.fromFov) * blend;
+    applyProjection(fov, transition.fromLift + (framing.lift - transition.fromLift) * blend);
     if (blend >= 1) mode = 'chase';
   }
 
-  function setFov(fov) {
-    if (Math.abs(fov - appliedFov) < 0.01) return;
-    appliedFov = fov;
+  /**
+   * FOV plus the portrait lens shift. setViewOffset(aspect, 1, 0, lift, aspect, 1) keeps the
+   * aspect and moves the frustum window down by lift x its height, so the picture moves up.
+   * Core's resize handler only sets aspect + updateProjectionMatrix, which keeps the offset.
+   */
+  function applyProjection(fov, lift) {
+    const aspect = camera.aspect;
+    if (Math.abs(fov - projection.fov) < 0.01 && Math.abs(lift - projection.lift) < 0.0005 && aspect === projection.aspect) return;
+    projection.fov = fov;
+    projection.lift = lift;
+    projection.aspect = aspect;
     camera.fov = fov;
-    camera.updateProjectionMatrix();
+    if (lift > 0.0005) camera.setViewOffset(aspect, 1, 0, lift, aspect, 1);
+    else if (camera.view && camera.view.enabled) camera.clearViewOffset();
+    else camera.updateProjectionMatrix();
   }
 
   function applyChase() {
+    // A non-finite pose never reaches the renderer: keep the last good frame instead.
+    if (!isFiniteVector(chase.position) || !isFiniteQuaternion(chase.quaternion)) return;
     camera.position.copy(chase.position);
     camera.quaternion.copy(chase.quaternion);
-    setFov(chase.fov);
+    applyProjection(chase.fov, framing.lift);
   }
 
   bus.on('boost', () => {
@@ -12189,7 +12638,8 @@ function createLandmarkSystem(ctx) {
 //@@BEGIN journal
 /**
  * JOURNAL: the per-seed discovery log. Records biomes visited, landmarks found,
- * distance flown, highest altitude, flight time and ring-course bests, and
+ * distance flown, highest altitude, flight time and ring-course results (best
+ * clean time, best streak, the best result including misses and the last run), and
  * persists them with `storage` under `driftwing.journal.<seed>`.
  * Saves are throttled (every ~5 s while flying), immediate on discoveries,
  * biome firsts and finished ring courses, and flushed when the page hides.
@@ -12223,8 +12673,31 @@ function createJournal(ctx) {
       distanceFlown: 0,
       maxAltitude: 0,
       flightTime: 0,
-      ringCourses: { completed: 0, bestStreak: 0, bestTime: null },
+      ringCourses: { completed: 0, bestStreak: 0, bestTime: null, bestResult: null, lastResult: null },
     };
+  }
+
+  /**
+   * One finished course as stored: { passed, total, time } (time in seconds), or null when the
+   * values are unusable. Used both for fresh results and for repairing stored ones.
+   */
+  function sanitizeCourseResult(result) {
+    if (!result || typeof result !== 'object') return null;
+    const total = Math.floor(nonNegative(result.total));
+    const passed = Math.min(Math.floor(nonNegative(result.passed)), total);
+    const time = finiteNumber(result.time, NaN);
+    if (total <= 0 || !(time > 0)) return null;
+    return { passed, total, time: roundTo(time, 2) };
+  }
+
+  /** True when `candidate` beats `current`: more of the course passed, then a faster time. */
+  function isBetterCourse(candidate, current) {
+    if (current === null) return true;
+    const candidateShare = candidate.passed / candidate.total;
+    const currentShare = current.passed / current.total;
+    if (candidateShare !== currentShare) return candidateShare > currentShare;
+    if (candidate.passed !== current.passed) return candidate.passed > current.passed;
+    return candidate.time < current.time;
   }
 
   /** Validates one stored landmark entry; returns null when it is unusable. */
@@ -12272,6 +12745,8 @@ function createJournal(ctx) {
       completed: Math.floor(nonNegative(rings.completed)),
       bestStreak: Math.floor(nonNegative(rings.bestStreak)),
       bestTime: bestTime > 0 ? bestTime : null,
+      bestResult: sanitizeCourseResult(rings.bestResult),
+      lastResult: sanitizeCourseResult(rings.lastResult),
     };
     return data;
   }
@@ -12294,7 +12769,11 @@ function createJournal(ctx) {
       distanceFlown: roundTo(data.distanceFlown, 1),
       maxAltitude: roundTo(data.maxAltitude, 1),
       flightTime: roundTo(data.flightTime, 1),
-      ringCourses: { ...data.ringCourses },
+      ringCourses: {
+        ...data.ringCourses,
+        bestResult: data.ringCourses.bestResult ? { ...data.ringCourses.bestResult } : null,
+        lastResult: data.ringCourses.lastResult ? { ...data.ringCourses.lastResult } : null,
+      },
     };
   }
 
@@ -12396,7 +12875,10 @@ function createJournal(ctx) {
 
     /**
      * Records a finished ring course. bestTime only counts clean runs (every
-     * ring passed). Returns the updated bests plus which ones were beaten.
+     * ring passed); bestResult ({ passed, total, time }) keeps the best run
+     * including misses (most of the course passed, then fastest) and
+     * lastResult the latest one. Returns the updated bests plus which ones
+     * were beaten.
      */
     recordRingCourse(result) {
       const passed = Math.floor(nonNegative(result?.passed));
@@ -12412,9 +12894,27 @@ function createJournal(ctx) {
         rings.bestTime = roundTo(time, 2);
         isBestTime = true;
       }
+      const courseResult = sanitizeCourseResult({ passed, total, time });
+      let isBestResult = false;
+      if (courseResult !== null) {
+        rings.lastResult = courseResult;
+        if (isBetterCourse(courseResult, rings.bestResult)) {
+          rings.bestResult = { ...courseResult };
+          isBestResult = true;
+        }
+      }
       markChanged('rings');
       save();
-      return { completed: rings.completed, bestStreak: rings.bestStreak, bestTime: rings.bestTime, isBestStreak, isBestTime };
+      return {
+        completed: rings.completed,
+        bestStreak: rings.bestStreak,
+        bestTime: rings.bestTime,
+        bestResult: rings.bestResult ? { ...rings.bestResult } : null,
+        lastResult: rings.lastResult ? { ...rings.lastResult } : null,
+        isBestStreak,
+        isBestTime,
+        isBestResult,
+      };
     },
   };
 }
@@ -15876,6 +16376,24 @@ function createUISystem(ctx) {
   const STICK_DEADZONE = 0.08;
   const SLIDER_PADDING = 12;
   const BOOST_BURN_SECONDS = 2.2;
+  const SUBTITLE_FADE_SECONDS = 0.62;
+  // The intro banner waits until the biome under and ahead of the glider has settled;
+  // biome banners then stay quiet for a while so the opening is not re-announced.
+  const INTRO_STABLE_SECONDS = 2;
+  const INTRO_AHEAD_METRES = 320;
+  const INTRO_AHEAD_PATIENCE = 6;
+  const INTRO_GIVE_UP_SECONDS = 12;
+  const BIOME_QUIET_AFTER_INTRO = 15;
+  // A banner beside an open panel needs at least this much free width, else it waits.
+  const BANNER_MIN_FREE_WIDTH = 340;
+  // Portrait touch layout (CSS px / seconds).
+  const PORTRAIT_CHECK_SECONDS = 0.15;
+  const PORTRAIT_SLOT_SWITCH_SECONDS = 0.8;
+  const PORTRAIT_GLIDER_PADDING = 14;
+  const PORTRAIT_SPEECH_RESERVE = 104;
+  const PORTRAIT_TOAST_LANE = 46;
+  // Glider outline in its local frame (metres, -z forward): nose, belly, fin tip, tail cone, wingtips.
+  const GLIDER_OUTLINE = [[0, 0, -3.2], [0, -0.55, 0], [0, 1.95, 4.4], [0, 0.35, 5.2], [-7.35, 0.45, 0.4], [7.35, 0.45, 0.4]];
   const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
   const coarsePointerQuery = window.matchMedia('(pointer: coarse)');
 
@@ -15936,6 +16454,7 @@ function createUISystem(ctx) {
     bannerTitle: requireElement('dw-banner-title'),
     bannerDetail: requireElement('dw-banner-detail'),
     bannerPalette: requireElement('dw-banner-palette'),
+    speech: requireElement('dw-speech'),
     hint: requireElement('dw-hint'),
     transcriptText: requireElement('dw-transcript-text'),
     subtitle: requireElement('dw-subtitle'),
@@ -15959,6 +16478,9 @@ function createUISystem(ctx) {
     stick: requireElement('dw-stick'),
     stickKnob: requireElement('dw-stick-knob'),
     throttleSlider: requireElement('dw-throttle-slider'),
+    actionCluster: requireElement('dw-action-cluster'),
+    chips: requireElement('dw-chips'),
+    flightCard: requireElement('dw-flight'),
     sliderFill: requireElement('dw-slider-fill'),
     sliderThumb: requireElement('dw-slider-thumb'),
     touchBoost: requireElement('dw-touch-boost'),
@@ -16025,10 +16547,16 @@ function createUISystem(ctx) {
     kind: null, shownKind: null, label: '', distance: 0, mode: '', x: NaN, y: NaN, angle: NaN, distanceKey: NaN, name: '', near: null,
     labelOffset: NaN, labelLeft: false, waypointX: NaN, waypointZ: NaN, waypointBase: 0,
   };
-  const subtitleState = { visible: false, expiresAt: 0 };
+  const subtitleState = { visible: false, expiresAt: 0, collapseAt: Infinity };
   const transcriptState = { visible: false, expiresAt: Infinity };
-  const bannerState = { phase: 'idle', until: 0, queue: [], current: null, shownAt: 0 };
-  const biomeBannerState = { lastKey: state.player.biome ? state.player.biome.key : null, lastShownAt: -Infinity, pending: null, pendingSince: 0 };
+  const bannerState = { phase: 'idle', until: 0, queue: [], current: null, shownAt: 0, retryAt: 0, sharesSpeech: false };
+  const bannerCss = { x: '', width: '', top: '' };
+  const biomeBannerState = { lastKey: state.player.biome ? state.player.biome.key : null, lastShownAt: -Infinity, pending: null, pendingSince: 0, suppressUntil: 0 };
+  const introState = { phase: 'idle', key: null, stableSince: 0, startedAt: 0, timer: 0 };
+  const portraitState = {
+    active: false, timer: 0, slot: 'bottom', pendingSlot: 'bottom', pendingSince: 0,
+    gliderTop: NaN, gliderBottom: NaN, topSlotY: 0, bottomSlotY: 0, cssTop: '', cssBottom: '',
+  };
   const hintState = { showAt: Infinity, hideAt: Infinity, visible: false, dodging: false, speechLayout: -1, left: 0, right: 0, top: 0, bottom: 0 };
   const toasts = [];
   const deferredToasts = [];
@@ -16041,6 +16569,7 @@ function createUISystem(ctx) {
 
   const targetWorld = new T.Vector3();
   const projected = new T.Vector3();
+  const gliderPoint = new T.Vector3();
 
   // ---------------------------------------------------------------------------
   // Small helpers
@@ -16815,14 +17344,36 @@ function createUISystem(ctx) {
     dom.subtitleText.textContent = message;
     dom.subtitleLabel.textContent = typeof options.label === 'string' && options.label.trim() ? options.label.trim() : 'WREN';
     dom.subtitle.classList.toggle('dw-remote', options.source === 'remote');
+    subtitleState.collapseAt = Infinity;
+    if (dom.subtitle.classList.contains('dw-gone')) reflowSpeech(() => dom.subtitle.classList.remove('dw-gone'));
     dom.subtitle.classList.add('dw-show');
     subtitleState.visible = true;
     subtitleState.expiresAt = uiClock + (Number.isFinite(options.duration) ? clamp(options.duration, 1, 30) : readingSeconds(message));
+    yieldBannerToSpeech();
   }
+  /** Fades the subtitle out in place; it leaves the layout only once the fade has finished. */
   function hideSubtitle() {
     if (!subtitleState.visible) return;
     subtitleState.visible = false;
+    subtitleState.collapseAt = uiClock + SUBTITLE_FADE_SECONDS;
     dom.subtitle.classList.remove('dw-show');
+  }
+  function collapseSubtitle() {
+    subtitleState.collapseAt = Infinity;
+    reflowSpeech(() => dom.subtitle.classList.add('dw-gone'));
+  }
+  /**
+   * Applies a layout change to the speech stack, then glides the first-run hint from where it
+   * was (FLIP), so it never jumps into (or through) the space the subtitle leaves.
+   */
+  function reflowSpeech(change) {
+    const before = hintState.visible ? dom.hint.getBoundingClientRect().top : NaN;
+    change();
+    if (!hintState.visible) return;
+    measureHint();
+    const offset = before - hintState.top;
+    if (Math.abs(offset) < 1 || reducedMotionQuery.matches) return;
+    dom.hint.animate([{ translate: `0 ${offset.toFixed(1)}px` }, { translate: '0 0' }], { duration: 480, easing: 'cubic-bezier(0.22, 0.8, 0.26, 1)' });
   }
 
   function showTranscript(text, final) {
@@ -16840,6 +17391,7 @@ function createUISystem(ctx) {
     transcriptState.visible = true;
     transcriptState.expiresAt = final ? uiClock + 2.8 : Infinity;
     setRootClass('dw-transcript-on', true);
+    yieldBannerToSpeech();
   }
   function hideTranscriptSoon(delaySeconds) {
     if (!transcriptState.visible) return;
@@ -16870,7 +17422,7 @@ function createUISystem(ctx) {
     bannerState.queue.push(entry);
     if (bannerState.queue.length > 4) bannerState.queue.shift();
   }
-  function presentBanner(entry) {
+  function fillBanner(entry) {
     dom.bannerLabel.textContent = entry.label || '';
     dom.bannerTitle.textContent = entry.title || '';
     dom.bannerDetail.textContent = entry.detail || '';
@@ -16883,27 +17435,102 @@ function createUISystem(ctx) {
     } else {
       dom.bannerPalette.replaceChildren();
     }
+  }
+  function presentBanner(entry) {
     dom.banner.classList.add('dw-show');
     bannerState.current = entry;
     bannerState.shownAt = uiClock;
+    bannerState.phase = 'showing';
+    bannerState.until = uiClock + (entry.duration || 4.4);
   }
   /**
-   * Photo mode hides the banner at once (the CSS drops its fade). A banner cut short before it
-   * could be read goes back to the front of the queue and plays after photo mode.
+   * Hides the banner early (photo mode, a panel covering it, speech taking its slot). A banner
+   * cut short before it could be read goes back to the front of the queue.
    */
-  function suspendBannerForPhoto() {
+  function suspendBanner() {
     const current = bannerState.current;
     if (bannerState.phase === 'showing' && current && uiClock - bannerState.shownAt < OVERLAY_READ_SECONDS) {
       if (!bannerState.queue.some((queued) => queued.title === current.title)) bannerState.queue.unshift(current);
     }
     dom.banner.classList.remove('dw-show');
-    bannerState.phase = 'idle';
+    if (bannerState.phase === 'showing') {
+      bannerState.phase = 'leaving';
+      bannerState.until = uiClock + (photoActive ? 0 : 1.1);
+    }
     bannerState.current = null;
   }
   /** Queued banners wait for the letterbox to clear after photo mode. */
   function resumeBannersAfterPhoto() {
     const earliest = uiClock + 0.9;
     for (const entry of bannerState.queue) entry.notBefore = Math.max(entry.notBefore || 0, earliest);
+  }
+  /** A biome banner is stale once the glider has left that biome. */
+  function isBannerStale(entry) {
+    return Boolean(entry.biomeKey) && Boolean(state.player.biome) && state.player.biome.key !== entry.biomeKey;
+  }
+  function writeBannerVar(name, cacheKey, value) {
+    if (bannerCss[cacheKey] === value) return;
+    bannerCss[cacheKey] = value;
+    if (value) root.style.setProperty(name, value);
+    else root.style.removeProperty(name);
+  }
+  function setBannerColumn(centreX, width) {
+    writeBannerVar('--dw-banner-x', 'x', Number.isFinite(centreX) ? `${Math.round(centreX)}px` : '');
+    writeBannerVar('--dw-banner-width', 'width', Number.isFinite(width) ? `${Math.round(width)}px` : '');
+  }
+  function setBannerTop(top) {
+    writeBannerVar('--dw-banner-top', 'top', Number.isFinite(top) ? `${Math.round(top)}px` : '');
+  }
+  /**
+   * Positions the banner where nothing covers it: beside an open side panel, or (portrait touch)
+   * in a free band above or below the glider. Returns false when there is no room yet.
+   */
+  function placeBanner() {
+    const panelRect = activePanel ? panels[activePanel].getBoundingClientRect() : null;
+    bannerState.sharesSpeech = false;
+    if (portraitState.active) {
+      setBannerColumn(NaN, NaN);
+      return placeBannerPortrait(panelRect);
+    }
+    setBannerTop(NaN);
+    if (!panelRect) {
+      setBannerColumn(NaN, NaN);
+      return true;
+    }
+    const freeWidth = panelRect.left - 16;
+    if (freeWidth < BANNER_MIN_FREE_WIDTH) return false;
+    setBannerColumn(8 + freeWidth / 2, Math.min(640, freeWidth - 24));
+    return true;
+  }
+  function placeBannerPortrait(panelRect) {
+    const layout = portraitState;
+    if (!Number.isFinite(layout.gliderTop)) return !panelRect;
+    const floor = panelRect ? Math.min(layout.bottomSlotY, panelRect.top - 8) : layout.bottomSlotY;
+    const speechUp = layout.slot === 'top';
+    const reserve = Math.max(speechStackHeight(), PORTRAIT_SPEECH_RESERVE) + 8;
+    const bands = [
+      [speechUp ? layout.topSlotY + reserve : layout.topSlotY, Math.min(layout.gliderTop, floor)],
+      [layout.gliderBottom, speechUp ? floor : Math.min(floor, layout.bottomSlotY - reserve)],
+    ];
+    // While WREN is quiet, the speech slot itself is free for a banner.
+    if (!speechStackVisible()) bands.push(speechUp ? [layout.topSlotY, Math.min(layout.gliderTop, floor)] : [layout.gliderBottom, floor]);
+    const height = dom.banner.offsetHeight;
+    for (let index = 0; index < bands.length; index++) {
+      const [start, end] = bands[index];
+      if (end - start < height) continue;
+      bannerState.sharesSpeech = index === 2;
+      setBannerTop(start + Math.min((end - start - height) / 2, 40));
+      return true;
+    }
+    return false;
+  }
+  /** Speech wins its slot: a banner borrowing that slot steps aside when WREN talks. */
+  function yieldBannerToSpeech() {
+    if (bannerState.phase === 'showing' && bannerState.sharesSpeech) suspendBanner();
+  }
+  /** A panel opened or closed: move the showing banner beside it, or hold it until it closes. */
+  function refreshBannerPlacement() {
+    if (bannerState.phase === 'showing' && !placeBanner()) suspendBanner();
   }
   function updateBanner() {
     if (bannerState.phase === 'showing' && uiClock >= bannerState.until) {
@@ -16916,20 +17543,174 @@ function createUISystem(ctx) {
     }
     if (bannerState.phase !== 'idle' || bannerState.queue.length === 0 || photoActive) return;
     const next = bannerState.queue[0];
-    if (next.notBefore && uiClock < next.notBefore) return;
+    if ((next.notBefore && uiClock < next.notBefore) || uiClock < bannerState.retryAt) return;
+    if (isBannerStale(next)) {
+      bannerState.queue.shift();
+      return;
+    }
+    fillBanner(next);
+    if (!placeBanner()) {
+      bannerState.retryAt = uiClock + 0.25;
+      return;
+    }
     bannerState.queue.shift();
     presentBanner(next);
-    bannerState.phase = 'showing';
-    bannerState.until = uiClock + (next.duration || 4.4);
+  }
+  function startIntroBanner() {
+    introState.phase = 'waiting';
+    introState.key = null;
+    introState.startedAt = uiClock;
+    introState.timer = 0;
+  }
+  function biomeKeyAhead(metres) {
+    const player = state.player;
+    if (!Number.isFinite(player.heading) || !isFiniteVector(player.position)) return null;
+    const forward = vectorFromHeading(player.heading);
+    const info = world.biomeAt(player.position.x + forward.x * metres, player.position.z + forward.z * metres);
+    return info ? info.key : null;
+  }
+  /**
+   * "Now flying over X" names the biome the player is actually seeing: it waits until the biome
+   * under the glider has held for a moment and matches the ground ahead (or patience runs out).
+   */
+  function updateIntroBanner(step) {
+    if (introState.phase !== 'waiting') return;
+    introState.timer -= step;
+    if (introState.timer > 0) return;
+    introState.timer = 0.25;
+    const biome = state.player.biome;
+    const waited = uiClock - introState.startedAt;
+    if (waited >= INTRO_GIVE_UP_SECONDS) {
+      introState.phase = 'done';
+      return;
+    }
+    if (!biome || !biome.key) return;
+    if (biome.key !== introState.key) {
+      introState.key = biome.key;
+      introState.stableSince = uiClock;
+    }
+    if (uiClock - introState.stableSince < INTRO_STABLE_SECONDS) return;
+    if (waited < INTRO_AHEAD_PATIENCE && biomeKeyAhead(INTRO_AHEAD_METRES) !== biome.key) return;
+    introState.phase = 'done';
+    biomeBannerState.lastKey = biome.key;
+    biomeBannerState.lastShownAt = uiClock;
+    biomeBannerState.suppressUntil = uiClock + BIOME_QUIET_AFTER_INTRO;
+    queueBanner({ label: 'Now flying over', title: biome.name, detail: introDetail(biome), paletteIndex: biome.index, biomeKey: biome.key });
+  }
+  /** WREN's own description of the view (e.g. "meadows at the foot of the Snow Peaks") when it adds nuance. */
+  function introDetail(biome) {
+    if (typeof Copilot !== 'function' || typeof Copilot.describePlace !== 'function') return '';
+    const player = state.player;
+    const place = Copilot.describePlace(world, player.position.x, player.position.z, player.groundHeight, player.heading);
+    if (!place || !place.phrase || place.phrase === `the ${biome.name}`) return '';
+    return place.phrase.charAt(0).toUpperCase() + place.phrase.slice(1);
   }
   function updatePendingBiome() {
     const pending = biomeBannerState.pending;
-    if (!pending || uiClock - biomeBannerState.pendingSince < 1.2 || uiClock - biomeBannerState.lastShownAt < 10) return;
+    if (!pending || introState.phase === 'waiting' || uiClock < biomeBannerState.suppressUntil) return;
+    if (uiClock - biomeBannerState.pendingSince < 1.2 || uiClock - biomeBannerState.lastShownAt < 10) return;
     biomeBannerState.pending = null;
     if (pending.key === biomeBannerState.lastKey) return;
     biomeBannerState.lastKey = pending.key;
     biomeBannerState.lastShownAt = uiClock;
-    queueBanner({ label: 'Entering', title: pending.name, paletteIndex: pending.index });
+    queueBanner({ label: 'Entering', title: pending.name, paletteIndex: pending.index, biomeKey: pending.key });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Portrait touch layout: the speech stack and banner keep clear of the glider
+  // ---------------------------------------------------------------------------
+  function speechStackVisible() {
+    return subtitleState.visible || hintState.visible || transcriptState.visible;
+  }
+  function speechStackHeight() {
+    return speechStackVisible() ? dom.speech.getBoundingClientRect().height : 0;
+  }
+  /** Screen-space vertical extent of the glider in CSS px (wings clipped at the screen edges). */
+  function measureGliderSpan() {
+    const player = state.player;
+    if (!isFiniteVector(player.position) || !isFiniteQuaternion(player.quaternion)) return false;
+    projected.copy(player.position).project(camera);
+    if (!(projected.z < 1)) return false;
+    const centreX = (projected.x + 1) * 0.5 * view.width;
+    const centreY = (1 - projected.y) * 0.5 * view.height;
+    let top = centreY;
+    let bottom = centreY;
+    for (const [x, y, z] of GLIDER_OUTLINE) {
+      gliderPoint.set(x, y, z).applyQuaternion(player.quaternion).add(player.position);
+      projected.copy(gliderPoint).project(camera);
+      if (!(projected.z < 1)) continue;
+      const screenX = (projected.x + 1) * 0.5 * view.width;
+      let screenY = (1 - projected.y) * 0.5 * view.height;
+      if ((screenX < 0 || screenX > view.width) && Math.abs(screenX - centreX) > 1) {
+        const along = ((screenX < 0 ? 0 : view.width) - centreX) / (screenX - centreX);
+        screenY = centreY + (screenY - centreY) * clamp(along, 0, 1);
+      }
+      top = Math.min(top, screenY);
+      bottom = Math.max(bottom, screenY);
+    }
+    portraitState.gliderTop = top - PORTRAIT_GLIDER_PADDING;
+    portraitState.gliderBottom = bottom + PORTRAIT_GLIDER_PADDING;
+    return true;
+  }
+  /** The top slot starts under the HUD cards and the toast lane; the bottom slot ends above the touch controls. */
+  function measurePortraitSlots() {
+    const cardsBottom = Math.max(dom.chips.getBoundingClientRect().bottom, dom.flightCard.getBoundingClientRect().bottom);
+    const controlsTop = Math.min(dom.throttleSlider.getBoundingClientRect().top, dom.actionCluster.getBoundingClientRect().top);
+    portraitState.topSlotY = Math.round(cardsBottom + PORTRAIT_TOAST_LANE);
+    portraitState.bottomSlotY = Math.round(controlsTop - 10);
+  }
+  function gliderOverlap(start, end) {
+    return Math.max(0, Math.min(end, portraitState.gliderBottom) - Math.max(start, portraitState.gliderTop));
+  }
+  function writeSpeechVar(name, cacheKey, value) {
+    if (portraitState[cacheKey] === value) return;
+    portraitState[cacheKey] = value;
+    if (value) root.style.setProperty(name, value);
+    else root.style.removeProperty(name);
+  }
+  function applySpeechSlot() {
+    const layout = portraitState;
+    writeSpeechVar('--dw-speech-top', 'cssTop', layout.active ? `${layout.topSlotY}px` : '');
+    writeSpeechVar('--dw-speech-bottom', 'cssBottom', layout.active ? `${Math.max(0, Math.round(view.height - layout.bottomSlotY))}px` : '');
+    setRootClass('dw-speech-top', layout.active && layout.slot === 'top');
+  }
+  /**
+   * Portrait phones: dock WREN's speech stack above the touch controls, or under the HUD cards
+   * when the glider sits low on screen, whichever keeps it off the aircraft. A slot change
+   * while text is showing must persist for a moment first, so the stack never flickers.
+   */
+  function updatePortraitLayout(step) {
+    const active = touchMode && view.height > view.width && state.ready && !photoActive;
+    if (active !== portraitState.active) {
+      portraitState.active = active;
+      portraitState.timer = 0;
+      if (!active) {
+        portraitState.slot = 'bottom';
+        portraitState.gliderTop = NaN;
+        applySpeechSlot();
+      }
+    }
+    if (!active) return;
+    portraitState.timer -= step;
+    if (portraitState.timer > 0) return;
+    portraitState.timer = PORTRAIT_CHECK_SECONDS;
+    if (!measureGliderSpan()) return;
+    measurePortraitSlots();
+    const reserve = Math.max(speechStackHeight(), PORTRAIT_SPEECH_RESERVE);
+    const bottomOverlap = gliderOverlap(portraitState.bottomSlotY - reserve, portraitState.bottomSlotY);
+    const topOverlap = gliderOverlap(portraitState.topSlotY, portraitState.topSlotY + reserve);
+    const wanted = topOverlap + 8 < bottomOverlap ? 'top' : 'bottom';
+    if (wanted === portraitState.slot) {
+      portraitState.pendingSlot = wanted;
+    } else if (!speechStackVisible()) {
+      portraitState.slot = wanted;
+    } else if (portraitState.pendingSlot !== wanted) {
+      portraitState.pendingSlot = wanted;
+      portraitState.pendingSince = uiClock;
+    } else if (uiClock - portraitState.pendingSince >= PORTRAIT_SLOT_SWITCH_SECONDS) {
+      portraitState.slot = wanted;
+    }
+    applySpeechSlot();
   }
 
   // ---------------------------------------------------------------------------
@@ -17234,6 +18015,7 @@ function createUISystem(ctx) {
     }
     activePanel = next;
     setRootClass('dw-panel-open', Boolean(next));
+    refreshBannerPlacement();
     if (next) {
       if (touchMode && commandOpen) closeCommandBar();
       releasePointerLock();
@@ -17541,7 +18323,7 @@ function createUISystem(ctx) {
     if (next) {
       closeCommandBar();
       showPanel(null);
-      suspendBannerForPhoto();
+      suspendBanner();
       clearToastsForPhoto();
       photoState.statusText = '';
       renderPhotoChrome();
@@ -17932,12 +18714,7 @@ function createUISystem(ctx) {
     setRootClass('dw-revealing', true);
     revealEndsAt = uiClock + 2.4;
     wake();
-    const biome = state.player.biome;
-    if (biome && biome.name) {
-      biomeBannerState.lastKey = biome.key;
-      biomeBannerState.lastShownAt = uiClock;
-      queueBanner({ label: 'Now flying over', title: biome.name, paletteIndex: biome.index, notBefore: uiClock + 1.1 });
-    }
+    startIntroBanner();
     scheduleFirstRunHint();
   });
   bus.on('copilot:speech', (payload) => {
@@ -18074,6 +18851,8 @@ function createUISystem(ctx) {
       transcriptState.visible = false;
       setRootClass('dw-transcript-on', false);
     }
+    if (uiClock >= subtitleState.collapseAt) collapseSubtitle();
+    updateIntroBanner(step);
     updatePendingBiome();
     updateBanner();
     if (photoActive) {
@@ -18119,6 +18898,7 @@ function createUISystem(ctx) {
     uiClock += step;
     updateAutoHide();
     updateTimers(step);
+    updatePortraitLayout(step);
     if (photoActive) updatePhotoChrome(step);
     const ringActive = Boolean(state.ringCourse && state.ringCourse.active);
     setRootClass('dw-ring-active', ringActive);
@@ -18156,34 +18936,39 @@ function createUISystem(ctx) {
 // ============================================================================
 // POST-PROCESSING: bloom + warm grade + vignette + grain (degrades to direct).
 // ============================================================================
-// Everything in outputNode is linear HDR; RenderPipeline applies ACES tone
-// mapping + sRGB afterwards (outputColorTransform = true).
+// Grade and vignette run in linear HDR. The pipeline's automatic colour transform is
+// off: renderOutput() applies ACES + sRGB, then grain is added in display space
+// (grain added before the tone curve is crushed to nothing in highlights).
 function createPostStack(renderer, scene, camera, uniforms) {
-  const { pass, uniform, uv, vec2, vec3, vec4, float, smoothstep, mix, luminance, saturation, rand, fract } = TSL;
+  const { pass, uniform, uv, vec2, vec3, vec4, float, smoothstep, mix, luminance, saturation, rand, fract, renderOutput } = TSL;
   const controls = {
     vignette: uniform(0.4),
-    grain: uniform(0.028),
+    grain: uniform(0.042),
     saturation: uniform(1.06),
     warmth: uniform(1),
     exposure: uniform(1),
   };
   const pipeline = new THREE.RenderPipeline(renderer);
+  pipeline.outputColorTransform = false;
   const scenePass = pass(scene, camera);
   const sceneColor = scenePass.getTextureNode('output');
   const bloomNode = bloom(sceneColor, 0.3, 0.5, 0.9);
 
-  function grade(hdr) {
+  function compose(hdr) {
     const luma = luminance(hdr);
     const warmTint = mix(vec3(1, 1, 1), vec3(1.05, 1.0, 0.9), controls.warmth);
     const coolShadows = mix(vec3(0.92, 0.97, 1.07), vec3(1, 1, 1), smoothstep(float(0.0), float(0.3), luma));
     let color = saturation(hdr.mul(controls.exposure), controls.saturation).mul(warmTint).mul(coolShadows);
     const edge = uv().sub(vec2(0.5, 0.5)).mul(vec2(1.0, 0.8)).length();
     color = color.mul(float(1).sub(smoothstep(float(0.3), float(0.85), edge).mul(controls.vignette)));
-    const grain = rand(uv().add(fract(uniforms.time.mul(0.713)))).sub(0.5).mul(controls.grain);
-    return vec4(color.add(grain.mul(luminance(color).add(0.06))), 1);
+    const display = renderOutput(vec4(color, 1));
+    const displayLuma = luminance(display.rgb);
+    const midtoneWeight = displayLuma.mul(displayLuma.oneMinus()).mul(3.2).add(0.2);
+    const grain = rand(uv().add(fract(uniforms.time.mul(0.713)))).sub(0.5).mul(controls.grain).mul(midtoneWeight);
+    return vec4(display.rgb.add(grain), 1);
   }
-  const outputWithBloom = grade(sceneColor.rgb.add(bloomNode.rgb));
-  const outputWithoutBloom = grade(sceneColor.rgb);
+  const outputWithBloom = compose(sceneColor.rgb.add(bloomNode.rgb));
+  const outputWithoutBloom = compose(sceneColor.rgb);
   let bloomEnabled = true;
   pipeline.outputNode = outputWithBloom;
   return {
@@ -18201,13 +18986,22 @@ function createPostStack(renderer, scene, camera, uniforms) {
 
 // ============================================================================
 // PERFORMANCE GOVERNOR: steps quality down before frame drops, back up slowly.
+// Thresholds are relative to the measured display interval (60 fps floor), and
+// CPU time per frame is a leading signal so view distance drops before vsync misses.
 // ============================================================================
 function createPerfGovernor(ctx) {
   const { renderer, settings, bus, state } = ctx;
   const levels = CONFIG.QUALITY_LEVELS;
   const fixedIndex = { minimal: 0, low: 1, medium: 2, high: 3, ultra: 4 };
+  const recentFrameMs = new Float32Array(120);
+  const sortScratch = new Float32Array(120);
+  let recentCount = 0;
+  let recentCursor = 0;
+  let intervalTimer = 0;
+  let displayIntervalMs = 1000 / 60;
   let levelIndex = 3;
   let emaMs = 16.7;
+  let cpuEmaMs = 4;
   let slowSeconds = 0;
   let fastSeconds = 0;
   let cooldown = 3;
@@ -18224,19 +19018,39 @@ function createPerfGovernor(ctx) {
     const preference = settings.get('quality');
     apply(preference in fixedIndex ? fixedIndex[preference] : 3, 'settings');
   }
+  /** Display refresh interval: a low percentile of recent frame times (vsync-bound frames). */
+  function estimateDisplayInterval() {
+    sortScratch.set(recentFrameMs.subarray(0, recentCount));
+    const sorted = sortScratch.subarray(0, recentCount).sort();
+    return clamp(sorted[Math.floor(recentCount * 0.2)], 6.5, 40);
+  }
   bus.on('settings:changed', ({ key }) => { if (key === 'quality') fromSettings(); });
   fromSettings();
 
   return {
-    update(realDt) {
+    update(realDt, cpuMs = 0) {
       const ms = realDt * 1000;
       emaMs += (ms - emaMs) * 0.08;
+      cpuEmaMs += (cpuMs - cpuEmaMs) * 0.08;
+      recentFrameMs[recentCursor] = ms;
+      recentCursor = (recentCursor + 1) % recentFrameMs.length;
+      recentCount = Math.min(recentCount + 1, recentFrameMs.length);
+      intervalTimer += realDt;
+      if (intervalTimer > 2 && recentCount >= 60) {
+        intervalTimer = 0;
+        displayIntervalMs = estimateDisplayInterval();
+      }
       state.perf.fps = 1000 / emaMs;
       state.perf.frameMs = emaMs;
+      state.perf.cpuMs = cpuEmaMs;
+      state.perf.displayIntervalMs = displayIntervalMs;
       if (settings.get('quality') !== 'auto' || state.photoMode) return;
+      const targetMs = Math.max(displayIntervalMs, 1000 / 60);
+      const struggling = emaMs > targetMs * 1.1 || cpuEmaMs > targetMs * 0.85;
+      const comfortable = emaMs < targetMs * 1.03 && cpuEmaMs < targetMs * 0.5;
       cooldown -= realDt;
-      if (emaMs > 18.2) { slowSeconds += realDt; fastSeconds = 0; }
-      else if (emaMs < 16.95) { fastSeconds += realDt; slowSeconds = 0; }
+      if (struggling) { slowSeconds += realDt; fastSeconds = 0; }
+      else if (comfortable) { fastSeconds += realDt; slowSeconds = 0; }
       else { slowSeconds = 0; fastSeconds = 0; }
       if (cooldown > 0) return;
       if (slowSeconds > 1.2 && levelIndex > 0) {
@@ -18289,7 +19103,7 @@ async function boot() {
   document.body.prepend(renderer.domElement);
   await renderer.init();
   const backend = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2';
-  console.info(`[DRIFTWING] backend=${backend} three r${THREE.REVISION} seed=${seed}`);
+  if (params.get('debug') === '1') console.info(`[DRIFTWING] backend=${backend} three r${THREE.REVISION} seed=${seed}`);
 
   // ---- Scene, camera, shared uniforms ----------------------------------------------
   const scene = new THREE.Scene();
@@ -18469,8 +19283,22 @@ async function boot() {
       ctx.systems[name] = { update() {}, failed: true };
     }
   }
-  // Precompile every pipeline before the first frame: WebGL2 otherwise stalls
-  // several seconds linking programs synchronously inside frame 1.
+  // Optional lifecycle hooks: prewarm() right after creation (draw lazily-shown
+  // materials once behind the fade so the first ring course, beacon, boost or
+  // landmark doesn't hitch on a pipeline compile), endPrewarm() when the fade starts.
+  function callSystemHook(hookName) {
+    for (const [name, system] of Object.entries(ctx.systems)) {
+      if (typeof system[hookName] !== 'function') continue;
+      try {
+        system[hookName]();
+      } catch (error) {
+        console.error(`[DRIFTWING] system "${name}" ${hookName} failed`, error);
+      }
+    }
+  }
+  callSystemHook('prewarm');
+  const fadeStatus = document.getElementById('fade-status');
+  if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
   const UPDATE_ORDER = ['input', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'copilot', 'audio', 'ui'];
 
   // ---- Flight-state snapshot for the copilot (local or remote brain) -----------------
@@ -18546,8 +19374,11 @@ async function boot() {
   try {
     post = createPostStack(renderer, scene, camera, uniforms);
     ctx.post = post;
-    post.setBloomEnabled(ctx.quality.bloom !== false);
-    bus.on('quality:changed', (quality) => post?.setBloomEnabled(quality.bloom !== false));
+    // Bloom is only dropped when the player picks the minimal preset; the auto
+    // governor never toggles it, since the swap recompiles the output pipeline.
+    const bloomWanted = (quality) => quality.bloom !== false || quality.auto === true;
+    post.setBloomEnabled(bloomWanted(ctx.quality));
+    bus.on('quality:changed', (quality) => post?.setBloomEnabled(bloomWanted(quality)));
   } catch (error) {
     console.error('[DRIFTWING] post stack unavailable, rendering directly', error);
   }
@@ -18576,7 +19407,12 @@ async function boot() {
   window.addEventListener('resize', onResize);
 
   // ---- Safety net: NaN attitude, terrain clamp, altitude ceiling -------------------------
-  const lastGood = { position: state.player.position.clone(), quaternion: state.player.quaternion.clone(), velocity: state.player.velocity.clone() };
+  const lastGood = {
+    position: state.player.position.clone(),
+    quaternion: state.player.quaternion.clone(),
+    velocity: state.player.velocity.clone(),
+    heading: spawn.heading,
+  };
   function enforceSafety() {
     const player = state.player;
     if (!isFiniteVector(player.position) || !isFiniteQuaternion(player.quaternion) || !isFiniteVector(player.velocity) || !Number.isFinite(player.speed)) {
@@ -18584,6 +19420,9 @@ async function boot() {
       player.quaternion.copy(lastGood.quaternion);
       player.velocity.copy(lastGood.velocity);
       player.speed = Math.max(CONFIG.SPEED.STALL, lastGood.velocity.length());
+      // Let the flight model rebuild its internal integrators (and snap the camera)
+      // from the restored pose, otherwise NaN rates would re-poison it next frame.
+      ctx.systems.flight.resetTo?.({ x: player.position.x, y: player.position.y, z: player.position.z, heading: lastGood.heading });
     } else {
       player.quaternion.normalize();
     }
@@ -18603,6 +19442,7 @@ async function boot() {
     lastGood.position.copy(player.position);
     lastGood.quaternion.copy(player.quaternion);
     lastGood.velocity.copy(player.velocity);
+    if (Number.isFinite(player.heading)) lastGood.heading = player.heading;
   }
 
   // ---- Biome tracking ----------------------------------------------------------------------------
@@ -18624,8 +19464,12 @@ async function boot() {
   const fade = document.getElementById('fade');
   let fadeStarted = false;
   let warmupFrames = 0;
+  let stableFrames = 0;
+  let lastCpuMs = 0;
+  const loopStartMs = performance.now();
 
   function frame(timeMs) {
+    const rawFrameMs = lastTimeMs === null ? 0 : timeMs - lastTimeMs;
     let realDt = lastTimeMs === null ? 1 / 60 : (timeMs - lastTimeMs) / 1000;
     lastTimeMs = timeMs;
     if (!(realDt > 0) || realDt > 0.25) realDt = 1 / 60;
@@ -18649,7 +19493,7 @@ async function boot() {
       if (name === 'flight') enforceSafety();
     }
     if (!state.paused) trackBiome(simDt);
-    perf.update(realDt, performance.now() - cpuStart);
+    perf.update(realDt, lastCpuMs);
     const shot = screenshotRequest;
     screenshotRequest = null;
     let restorePixelRatio = 0;
@@ -18658,15 +19502,20 @@ async function boot() {
       renderer.setPixelRatio(Math.min(restorePixelRatio * shot.scale, 4096 / Math.max(1, window.innerWidth)));
     }
     render();
+    lastCpuMs = performance.now() - cpuStart;
     if (shot) captureScreenshot();
     if (restorePixelRatio) renderer.setPixelRatio(restorePixelRatio);
 
+    // The fade lifts once the ground is built AND frames arrive steadily (pipeline
+    // compiles finished), so it never reveals a frozen canvas; 8 s safety cap.
     if (!fadeStarted) {
       warmupFrames++;
       const terrainReady = ctx.systems.terrain.isReadyAround ? ctx.systems.terrain.isReadyAround(state.player.position.x, state.player.position.z) : true;
-      if ((terrainReady && warmupFrames > 3) || state.time.realElapsed > 6) {
+      stableFrames = terrainReady && rawFrameMs > 0 && rawFrameMs < 45 ? stableFrames + 1 : 0;
+      if ((warmupFrames > 3 && stableFrames >= 6) || performance.now() - loopStartMs > 8000) {
         fadeStarted = true;
         state.ready = true;
+        callSystemHook('endPrewarm');
         fade.classList.add('clear');
         debugHandle.readyMs = Math.round(performance.now());
         bus.emit('game:ready', {});

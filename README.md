@@ -19,10 +19,11 @@ or lay out a ring course.
 
 ## Running it
 
-The game is one self-contained file, so you can open `index.html` directly in a current browser (Chrome, Edge,
-Safari 26+, or Firefox with WebGPU; other browsers use the WebGL2 fallback).
+The game is one self-contained file: double-click `index.html` to play. It needs an internet connection the
+first time to fetch three.js from the jsDelivr CDN. Browsers with WebGPU use it; the rest fall back to WebGL2
+automatically. It was tested in Chrome on Windows on both backends and from `file://`.
 
-For microphone input and the most consistent behaviour, serve it over `http://localhost` instead:
+For microphone input (the Web Speech API needs a secure origin), serve it over `http://localhost` instead:
 
 ```bash
 npm run serve
@@ -88,6 +89,9 @@ npm run copilot-server
 ```
 
 Then open Settings in the game, turn on **Remote copilot** and keep the endpoint `http://localhost:3000/copilot`.
+If port 3000 is reserved on your machine (common on Windows with Hyper-V or WSL), run the server on another
+port, for example `PORT=3300 npm run copilot-server`, and set the endpoint to `http://localhost:3300/copilot`.
+The server only answers the game's own origins (`file://` and `localhost`).
 The server answers from its own rules. If `ANTHROPIC_API_KEY` is set in its environment, it asks Claude first
 (model from `COPILOT_MODEL`, default `claude-haiku-4-5-20251001` for latency). The key is read only from the
 environment and never sent to the browser. See the header of `tools/copilot-server.mjs` for all options.
@@ -120,6 +124,9 @@ node tools/smoke-test.mjs --steps '[{"press":"KeyP"},{"wait":800},{"shot":"photo
 2. **Systems.** Terrain, sky, water, clouds, birds, effects, input, flight, camera, landmarks, journal,
    waypoints, rings, audio, copilot and UI. Each is created by a `create*System(ctx)` factory and updated
    in a fixed order each frame.
+
+three.js is pinned to r184 and every module fetched from the CDN is checked against a SHA-384 hash in the import
+map's `integrity` block, so a tampered or changed file is refused.
 
 The terrain Web Worker is created from a Blob URL. Its source is `createWorldGen.toString()` plus the
 worker's mesh builder, so the worker and the main thread share one implementation of the world. The main
