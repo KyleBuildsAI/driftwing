@@ -35,6 +35,7 @@ import { waveDrag, thrustFactor } from '../../src/flight/jetAero.js';
 import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
 import { groundPose } from '../../src/flight/placement.js';
+import { neutralLoad } from '../../src/flight/trim.js';
 import { DEG, clamp } from '../../src/core/util.js';
 
 const DT = 1 / 120;
@@ -42,6 +43,7 @@ const KMH = 3.6;
 const TOLERANCE = 0.1;
 const VERBOSE = process.argv.includes('--verbose');
 const profile = jet.simProfile;
+const fcs = profile.jet.fcs;
 
 function log(...parts) {
   if (VERBOSE) process.stdout.write(`${parts.join(' ')}\n`);
@@ -556,11 +558,11 @@ function testLanding() {
   rig.tick();
   rig.selectFlaps(2);
   // Front-side approach through the fly-by-wire: the stick flies a 3 degree glide path and flares,
-  // the throttle holds 265 km/h.
+  // the throttle holds 285 km/h (about 155 kt, 13 degrees on final).
   const lateral = createLateralPilot();
   const speedPid = createPid(0.08, 0.04, 0, 0, 0.95);
   speedPid.reset(0.55);
-  const approachSpeed = 265 / KMH;
+  const approachSpeed = 285 / KMH;
   let touchdown = null;
   let aoaAtTouchdown = NaN;
   rig.run(90, (lab) => {
@@ -572,11 +574,13 @@ function testLanding() {
     const targetPath = -Math.asin(Math.min(targetSink / Math.max(lab.data.airspeed, 30), 0.3));
     // The fly-by-wire flies load factor: ask for the load that bends the path onto the target.
     const load = Math.cos(lab.data.flightPath) + (lab.data.airspeed / 9.81) * 1.0 * (targetPath - lab.data.flightPath);
-    lab.pilot.pitch = clamp((load - 1) / (profile.targets.gLimit - 1), -0.3, 0.5);
+    // Neutral stick holds the 1 g load along the path (jetFcs.js); aft stick adds up to the G limit.
+    const neutral = clamp(neutralLoad(lab.data.flightPath, lab.data.bank), fcs.neutralMinLoad, fcs.neutralMaxLoad);
+    lab.pilot.pitch = clamp((load - neutral) / (profile.targets.gLimit - neutral), -0.3, 0.5);
     lab.pilot.throttle = wheelHeight > 0.5 ? speedPid.update((approachSpeed - lab.data.airspeed) / 5, DT) : 0;
     if (Math.round(lab.time * 120) % 120 === 0) log(`  landing t ${lab.time.toFixed(1)} agl ${agl.toFixed(1)} V ${(lab.data.airspeed * KMH).toFixed(0)} vs ${lab.data.verticalSpeed.toFixed(1)} aoa ${(lab.data.aoa / DEG).toFixed(1)} thr ${lab.pilot.throttle.toFixed(2)} gear ${lab.writeTelemetry().gear.down} flaps ${lab.telemetry.flaps.toFixed(2)}`);
     if (lab.model.contact.touchdown && !touchdown) {
-      touchdown = { speed: lab.data.airspeed, sink: lab.model.contact.touchdown.sinkRate };
+      touchdown = { speed: lab.data.airspeed, sink: lab.model.contact.touchdown.sinkRate, strike: lab.model.contact.bodyStrike ? lab.model.contact.bodyStrike.part : null };
       aoaAtTouchdown = lab.data.aoa / DEG;
       return true;
     }
@@ -589,7 +593,8 @@ function testLanding() {
   rig.run(3);
   const grade = rig.events.landed[0] ? rig.events.landed[0].grade : 'none';
   record('touchdown speed (full flaps, gear down)', touchdown ? touchdown.speed * KMH : NaN, 265, { unit: 'km/h', decimals: 0, note: `sink ${touchdown ? touchdown.sink.toFixed(2) : '-'} m/s, AoA ${aoaAtTouchdown.toFixed(1)} deg, grade ${grade}` });
-  record('landing grade', grade, 'butter/smooth/firm', { compare: ['butter', 'smooth', 'firm'].includes(grade) });
+  const strike = touchdown ? touchdown.strike : null;
+  record('landing grade (no tail strike)', grade, 'butter/smooth/firm', { compare: ['butter', 'smooth', 'firm'].includes(grade) && !strike, note: strike ? `strike: ${strike}` : 'no strikes' });
 }
 
 /** Parked on the tricycle gear, and taxiing with nose-wheel steering on the rudder. */

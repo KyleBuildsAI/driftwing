@@ -18,6 +18,8 @@
 //     only and stops at the detent. The craft ability (craftState.abRequest = 'toggle') pushes the
 //     lever through the detent to full afterburner; pulling the lever back cancels it.
 //   Crossing the detent writes craftState.abDetent (the audio click) and shows a short notice.
+//   The flight control system's overspeed protection caps the effective lever (controls.powerLimit)
+//   without moving the pilot's: the burner range closes first, and reopens as the speed comes back.
 import { DEG, clamp } from '../core/util.js';
 import { SEA_LEVEL_DENSITY, smoothstep, speedOfSound } from './aero.js';
 
@@ -117,7 +119,8 @@ export function createJetExtension({ profile, bus, craftState = {}, limits = {},
   // ============================================================================================
   /**
    * Reads the lever and the ability's request; returns the dry command (0..1 of military power) and
-   * sets the afterburner command. Writes the effective lever (the instrument's throttle) to systems.
+   * sets the afterburner command. Writes the effective lever (the instrument's throttle, after the
+   * flight control system's controls.powerLimit) to systems.
    */
   function readLever(controls, systems) {
     const detent = clamp(Number.isFinite(controls.afterburnerDetent) ? controls.afterburnerDetent : 0.95, 0.8, 1);
@@ -146,9 +149,15 @@ export function createJetExtension({ profile, bus, craftState = {}, limits = {},
 
     const commanded = running && (lever.latched || lever.physical);
     const stage = Math.max(lever.latched ? 1 : 0, lever.physical ? clamp((position - detent) / Math.max(1 - detent, 1e-3), 0, 1) : 0);
-    const dry = physicalLever ? Math.min(position / detent, 1) : position;
-    spool.abCommand = commanded ? stage : 0;
-    systems.throttle = commanded ? detent + (1 - detent) * stage : dry * detent;
+    const pilotDry = physicalLever ? Math.min(position / detent, 1) : position;
+    // The effective lever, capped by the flight control system's power limit (overspeed protection):
+    // the cap closes the afterburner range first, then the dry range, without moving the pilot's lever.
+    const pilotLever = commanded ? detent + (1 - detent) * stage : pilotDry * detent;
+    const powerLimit = clamp(Number.isFinite(controls.powerLimit) ? controls.powerLimit : 1, 0, 1);
+    const effective = Math.min(pilotLever, powerLimit);
+    const dry = commanded && effective >= detent ? 1 : effective / detent;
+    spool.abCommand = commanded && effective > detent ? (effective - detent) / Math.max(1 - detent, 1e-3) : 0;
+    systems.throttle = effective;
 
     if (commanded !== lever.commanded) {
       lever.commanded = commanded;
@@ -158,7 +167,7 @@ export function createJetExtension({ profile, bus, craftState = {}, limits = {},
         notify(commanded ? 'Afterburner.' : 'Afterburner off.', commanded ? 'success' : 'info');
       }
     }
-    return commanded ? 1 : dry;
+    return dry;
   }
 
   // ============================================================================================
@@ -342,6 +351,8 @@ export function createJetExtension({ profile, bus, craftState = {}, limits = {},
   }
 
   flightData.mach = 0;
+  /** The Mach limit beside the equivalent-airspeed Vne (flightData.vne), for the FCS and the trim. */
+  flightData.vneMach = vneMach;
 
   return {
     engine: engineHooks,

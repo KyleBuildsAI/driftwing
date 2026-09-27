@@ -226,6 +226,14 @@ const simProfile = Object.freeze({
       trimHoldDamping: 0.3,
       trimLimit: 0.6,
       trimGroundDecaySeconds: 6,
+      // Neutral stick's load band (g) around the 1 g load along the path (the trim's hands-off band).
+      neutralMinLoad: 0.85,
+      neutralMaxLoad: 1.2,
+      // Overspeed protection from this share of the limit (EAS Vne or the Mach limit), predicted
+      // overspeedLead s ahead; after a conversion the speed eases to at most safeSpeedShare of it.
+      overspeedStart: 0.97,
+      overspeedLead: 1.5,
+      safeSpeedShare: 0.9,
     }),
     handling: Object.freeze({
       // Above this dynamic pressure (Pa) the stabilator's authority falls as 1 / q, so full aft stick
