@@ -137,22 +137,33 @@ export function stallWarningActive(level, stallMargin, stalled, suppressed) {
 //                       +-PATH_LIMIT), within a comfort band of load factors, and trades path for speed
 //                       near the minimum and maximum speeds; so the speed changes along the path and the
 //                       pilot trims it with the stick, which returns to the path hold on release.
+// Levels in between blend the two: at 75 % half of each law's elevator and half of each error rate.
 // Both laws integrate into the same trim (memory.trimBase), with their error rates blended by the
 // weight, so moving the slider never jumps the elevator and the loops never fight each other.
-// Hands off, neither law ever trims into more than HANDS_OFF_MAX_LOAD: the direct law's hold lowers
-// its angle of attack instead, the load law clamps its command.
+// Hands off, neither law trims into more than HANDS_OFF_MAX_LOAD: the direct law's hold steers to the
+// angle of attack that sheds the excess load (more allowed in a steep dive, to pull out), the load law
+// clamps its command to the comfort band (HANDS_OFF_MIN_LOAD .. HANDS_OFF_MAX_LOAD) and slews it.
+// After a trimmed reset (primeAssists) both start from the trimmed elevator with the angle of attack,
+// the path and the load of the trim already captured.
+//
+// Pitch attitude protection (+30 / -20 degrees): the load law bounds its command so the attitude
+// approaches the limits at a rate proportional to the margin left (and comes back past them); the
+// direct law's share gets the same limits as an elevator limit (below).
 //
 // Roll: auto-level when the roll axis is idle, bank protection (the roll command toward more bank
-// fades out before BANK_LIMIT and reverses past it, so full stick holds about 65 degrees), and
-// auto-coordination on the rudder.
+// fades out before BANK_LIMIT and reverses past it, so full stick holds about 62-66 degrees and
+// letting go springs back below 30 within a couple of seconds), and auto-coordination on the rudder.
 //
 // Overspeed protection: near Vne the spoilers come out and the power comes back.
 //
-// Limiters on the final elevator (they also protect the autopilot): the AoA and G limiters and the
-// pitch attitude protection (+PITCH_UP_LIMIT / PITCH_DOWN_LIMIT): an elevator ceiling (and floor)
-// that, inside a band near the limit, may only move toward the limit as fast as the remaining margin
-// allows and pushes back past it. Hands off the integrator is kept consistent with a limited output
-// (anti-windup), so letting go never leaves a stored pull behind.
+// Limiters on the final elevator (they also protect the autopilot): the AoA and G limiters, and the
+// pitch attitude protection for the direct law's share: an elevator ceiling (and floor) that, inside a
+// band near the limit, may only move toward the limit as fast as the remaining margin allows and
+// pushes back past it. The integrator is kept consistent with a limited output (anti-windup), so
+// letting go never leaves a stored pull behind.
+//
+// Protections, the path hold and auto-level ramp in over 50-100 % (the catalog above), so they fade
+// out toward 50 %.
 const FIXED_WING = Object.freeze({
   /** Stick inside this is "hands off" for that axis. */
   IDLE: 0.05,
@@ -179,7 +190,9 @@ const FIXED_WING = Object.freeze({
     LOW_SPAN: 15 * DEG,
     MAX_OFFSET: 0.8,
     GROUND_DECAY_SECONDS: 6,
+    /** The hold's load cap sits this far below HANDS_OFF_MAX_LOAD (the loop overshoots a little). */
     COMFORT_MARGIN: 0.1,
+    /** The cap rises by up to DIVE_ALLOWANCE g as the path steepens from DIVE_FROM to DIVE_FULL down. */
     DIVE_ALLOWANCE: 1,
     DIVE_FROM: 20 * DEG,
     DIVE_FULL: 45 * DEG,
