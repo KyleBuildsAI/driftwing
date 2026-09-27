@@ -890,7 +890,7 @@ export default Object.freeze({
   instruments: Object.freeze(['airspeed', 'altitude', 'attitude', 'heading', 'vsi', 'aoa', 'g', 'throttle', 'flapsGear']),
   abilities: Object.freeze({ craftAbility }),
   // Cruise about 800 km/h; a take-off needs a long flat strip.
-  spawn: Object.freeze({ cruise: 222, cruiseThrottle: 0.34, hover: false, relaunch: 'airstart', canStartOnGround: true, runwayLength: 900 }),
+  spawn: Object.freeze({ cruise: 222, cruiseThrottle: 0.34, hover: false, relaunch: 'airstart', canStartOnGround: true, runwayLength: 600 }),
   // Vne: 410 m/s equivalent airspeed (about 1480 km/h indicated) or Mach 1.7, whichever comes first.
   limits: Object.freeze({ vne: 410, vneMach: 1.7, gLimit: 9, crashSinkRate: 4.5, bodyStrikeSpeed: 3, floats: false }),
 });

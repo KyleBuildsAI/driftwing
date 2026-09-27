@@ -12,6 +12,20 @@ const FLAT = Object.freeze({
   RUNWAY_LENGTH: 180,
   RUNWAY_STEP: 30,
   RUNWAY_MAX_DEVIATION: 7,
+  /**
+   * Longer strips (a jet's take-off run) must be smooth, not just level: sampled every LONG_STEP, no
+   * bump or dip beyond LONG_MAX_BUMP about the straight line from start to end, which may climb or
+   * fall by at most LONG_MAX_GRADE.
+   */
+  LONG_STEP: 15,
+  LONG_MAX_BUMP: 3,
+  LONG_MAX_GRADE: 0.02,
+  /**
+   * Smooth long strips are rare in rugged country, so the fallback ranks candidates by the smoothness
+   * of their strip (score per metre of bump) and never by a footprint alone.
+   */
+  LONG_DEVIATION_WEIGHT: 0.03,
+  LONG_UNCHECKED_PENALTY: 1,
   /** Dry means the whole footprint stands this far above the water. */
   MIN_DRY_HEIGHT: 1.5,
   RING_STEP: 90,
@@ -123,17 +137,36 @@ function quickLook(world, x, z) {
   return { center, slope: Math.max(east, west, south, north) / radius };
 }
 
-/** Largest rise or dip along a take-off run of `length` metres, and whether the run stays dry. */
-function runway(world, x, z, heading, center, waterLevel, length = FLAT.RUNWAY_LENGTH) {
+/** Largest rise or dip along the take-off run (m), and whether the run stays dry. */
+function runway(world, x, z, heading, center, waterLevel) {
   const direction = vectorFromHeading(heading);
   let deviation = 0;
   let dry = true;
-  for (let distance = FLAT.RUNWAY_STEP; distance <= length; distance += FLAT.RUNWAY_STEP) {
+  for (let distance = FLAT.RUNWAY_STEP; distance <= FLAT.RUNWAY_LENGTH; distance += FLAT.RUNWAY_STEP) {
     const height = world.groundHeight(x + direction.x * distance, z + direction.z * distance);
     deviation = Math.max(deviation, Math.abs(height - center));
     if (height < waterLevel + FLAT.MIN_DRY_HEIGHT) dry = false;
   }
   return { deviation, dry };
+}
+
+/**
+ * A long take-off strip: its bumpiness (m) about the straight line from the start to the end, plus
+ * the height its grade climbs or falls beyond LONG_MAX_GRADE, and whether it stays dry.
+ */
+function longRunway(world, x, z, heading, center, waterLevel, length) {
+  const direction = vectorFromHeading(heading);
+  const endHeight = world.groundHeight(x + direction.x * length, z + direction.z * length);
+  let bump = 0;
+  let dry = endHeight >= waterLevel + FLAT.MIN_DRY_HEIGHT;
+  for (let distance = FLAT.LONG_STEP; distance < length; distance += FLAT.LONG_STEP) {
+    const height = world.groundHeight(x + direction.x * distance, z + direction.z * distance);
+    const line = center + ((endHeight - center) * distance) / length;
+    bump = Math.max(bump, Math.abs(height - line));
+    if (height < waterLevel + FLAT.MIN_DRY_HEIGHT) dry = false;
+  }
+  const gradeExcess = Math.max(0, Math.abs(endHeight - center) / length - FLAT.LONG_MAX_GRADE) * length;
+  return { deviation: bump + gradeExcess, dry };
 }
 
 /**
@@ -156,11 +189,12 @@ export function vegetationClearance(contacts, margin = 2, runwayLength = FLAT.RU
  * vegetationClearance) the spot and its run must also be clear of trees, cacti and rocks. Falls back
  * to the flattest dry spot seen when nothing within MAX_RADIUS passes. Returns { x, z, ground, slope,
  * runwayDeviation, flat, clearOfVegetation } (clearOfVegetation is null when it was not checked).
- * runwayLength (m, default 180) is the take-off run a craft needs (the jet asks for a long strip); the
- * rise or dip it allows grows with the square root of the length.
+ * runwayLength (m, default 180) is the take-off run a craft needs; a longer strip (the jet's) must also
+ * be smooth and gently graded (see longRunway).
  */
 export function findFlatSpot(world, x, z, { waterLevel = 0, headingFor = () => 0, clearance = null, runwayLength = FLAT.RUNWAY_LENGTH } = {}) {
-  const maxDeviation = FLAT.RUNWAY_MAX_DEVIATION * Math.sqrt(Math.max(runwayLength, FLAT.RUNWAY_LENGTH) / FLAT.RUNWAY_LENGTH);
+  const long = runwayLength > FLAT.RUNWAY_LENGTH;
+  const maxDeviation = long ? FLAT.LONG_MAX_BUMP : FLAT.RUNWAY_MAX_DEVIATION;
   const vegetation = clearance && typeof world.scatterChunk === 'function' ? createVegetationProbe(world) : null;
   let fallback = null;
   let gentlest = null;
@@ -181,12 +215,14 @@ export function findFlatSpot(world, x, z, { waterLevel = 0, headingFor = () => 0
       if (foot.lowest < waterLevel + FLAT.MIN_DRY_HEIGHT) continue;
       const score = foot.slope + radius * FLAT.DISTANCE_WEIGHT;
       if (foot.slope > FLAT.MAX_SLOPE) {
-        if (!fallback || score < fallback.score) fallback = { x: candidateX, z: candidateZ, ground: foot.center, slope: foot.slope, runwayDeviation: Infinity, flat: false, clearOfVegetation: null, score };
+        const steepScore = score + (long ? FLAT.LONG_UNCHECKED_PENALTY : 0);
+        if (!fallback || steepScore < fallback.score) fallback = { x: candidateX, z: candidateZ, ground: foot.center, slope: foot.slope, runwayDeviation: Infinity, flat: false, clearOfVegetation: null, score: steepScore };
         continue;
       }
       const heading = headingFor(candidateX, candidateZ);
-      const run = runway(world, candidateX, candidateZ, heading, foot.center, waterLevel, runwayLength);
-      const candidate = { x: candidateX, z: candidateZ, heading, ground: foot.center, slope: foot.slope, runwayDeviation: run.deviation, flat: run.dry && run.deviation <= maxDeviation, clearOfVegetation: null, score: score + run.deviation / runwayLength };
+      const run = long ? longRunway(world, candidateX, candidateZ, heading, foot.center, waterLevel, runwayLength) : runway(world, candidateX, candidateZ, heading, foot.center, waterLevel);
+      const runScore = long ? run.deviation * FLAT.LONG_DEVIATION_WEIGHT + (run.dry ? 0 : FLAT.LONG_UNCHECKED_PENALTY) : run.deviation / FLAT.RUNWAY_LENGTH;
+      const candidate = { x: candidateX, z: candidateZ, heading, ground: foot.center, slope: foot.slope, runwayDeviation: run.deviation, flat: run.dry && run.deviation <= maxDeviation, clearOfVegetation: null, score: score + runScore };
       if (candidate.flat) flatInRing.push(candidate);
       if (!fallback || candidate.score < fallback.score) fallback = candidate;
     }
