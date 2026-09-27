@@ -24,6 +24,7 @@
 //   turtle       upside down on the ground: the ability flips it back onto its feet
 //   propWash     a fast vertical descent into the props' own wake costs thrust and shakes the frame
 //   autopilot    heading, altitude and speed hold through angle mode; the hands-off hold hovers
+//   settings     the player's settings.fpv rate and expo reshape the rate curve, live on a change
 //
 // Usage: node tools/lab/fpv.mjs [--verbose]
 // Prints a table (measured vs target) and exits non-zero if any check fails.
@@ -36,7 +37,7 @@ import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
 import { groundPose } from '../../src/flight/placement.js';
 import { describeAssists } from '../../src/flight/assists.js';
-import { betaflightRate, maxRate, stickForRate, climbForThrottle } from '../../src/flight/SimQuad.js';
+import { betaflightRate, maxRate, stickForRate, climbForThrottle, ratesForFpvSetting } from '../../src/flight/SimQuad.js';
 import { DEG, clamp } from '../../src/core/util.js';
 import { createWorldGen } from '../../src/world/worldgen.js';
 import { WORLD_OPTIONS } from '../../src/core/config.js';
@@ -63,14 +64,14 @@ function createFlatWorld(ground = 0) {
 }
 
 /** The quad in the lab: model, the pilot's ControlState, the tick copy the stages shape, the env. */
-function createRig({ assists = 0, world = createFlatWorld(0) } = {}) {
+function createRig({ assists = 0, world = createFlatWorld(0), settings = null } = {}) {
   const craft = fpv;
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const events = { notify: [], landed: [] };
   bus.on('notify', (payload) => events.notify.push(payload.text));
   bus.onTyped('landed', (payload) => events.landed.push(payload));
   const craftState = craft.abilities.craftAbility.initialState();
-  const model = flightModels.create(craft.simProfile.model, { profile: craft.simProfile, craft, world, bus, state: null, input: null, craftState });
+  const model = flightModels.create(craft.simProfile.model, { profile: craft.simProfile, craft, world, bus, state: null, input: null, craftState, settings });
   const pilot = createControlState();
   const controls = createControlState();
   const autopilot = { enabled: false, heading: 0, altitude: 0, speed: 0, followWaypoint: false };
@@ -78,7 +79,7 @@ function createRig({ assists = 0, world = createFlatWorld(0) } = {}) {
   telemetry.assists = assists;
   const env = { time: 0, wind: { vel: new THREE.Vector3(), turbulence: 0 }, groundHeight: world.groundHeight, waterLevel: WATER_LEVEL, rho: SEA_LEVEL_RHO, world, craftState, assists, handsOff: false, autopilot, telemetry };
   const context = { dt: DT, model, craft, craftId: craft.id, env, autopilot, assists, handsOff: false, telemetry, activeAssists: [], game: { ringCourse: { active: false }, waypoint: null } };
-  const rig = { craft, model, data: model.flightData, pilot, controls, autopilot, env, context, events, craftState, time: 0, tether: null };
+  const rig = { craft, model, data: model.flightData, pilot, controls, autopilot, env, context, events, craftState, bus, time: 0, tether: null };
 
   rig.tick = () => {
     copyControlState(controls, pilot);
@@ -256,8 +257,7 @@ function testTopSpeed() {
   check('topSpeed', 'forward tilt at top speed', round(-rig.data.pitch / DEG, 1), '60-88 deg nose down', -rig.data.pitch / DEG > 60 && -rig.data.pitch / DEG < 88, 'deg');
 }
 
-function steadyRate(axis, stick) {
-  const rig = createRig({ assists: 0 });
+function steadyRate(axis, stick, rig = createRig({ assists: 0 })) {
   rig.airborne({ altitude: 500, throttle: 0.45 });
   rig.pilot[axis] = stick;
   let peak = 0;
@@ -681,6 +681,51 @@ function testSnapshot() {
   check('snapshot', 'restore replays the same flight', round(after.distanceTo(replayed), 5), '< 1e-6 m', after.distanceTo(replayed) < 1e-6, 'm');
 }
 
+/**
+ * A settings store holding only the FPV setup; change() announces on the rig's bus the way the real
+ * store does (holder.rig is set once the rig that reads the store exists).
+ */
+function createFpvSettings(holder, initial) {
+  let value = { ...initial };
+  return {
+    get: (key) => (key === 'fpv' ? { ...value } : undefined),
+    change(patch) {
+      value = { ...value, ...patch };
+      holder.rig.bus.emit('settings:changed', { key: 'fpv', value: { ...value }, settings: { fpv: { ...value } } });
+    },
+  };
+}
+
+function testSettings() {
+  const initial = { uptilt: 25, expo: 0.3, rate: 670 };
+  const holder = { rig: null };
+  const settings = createFpvSettings(holder, initial);
+  const rig = createRig({ assists: 0, settings });
+  holder.rig = rig;
+  const rates = rig.data.rates;
+  check('settings', 'default setting: full-stick rate', round(maxRate(rates.roll), 1), '670 deg/s +-0.5', Math.abs(maxRate(rates.roll) - 670) <= 0.5, 'deg/s');
+  const defaultHalf = betaflightRate(0.5, fpv.inputProfile.rates.roll);
+  check('settings', 'default setting: curve unchanged at 1/2', round(betaflightRate(0.5, rates.roll), 2), `${round(defaultHalf, 2)} +-0.1`, Math.abs(betaflightRate(0.5, rates.roll) - defaultHalf) <= 0.1, 'deg/s');
+
+  settings.change({ rate: 1000, expo: 0.6 });
+  check('settings', 'live change: full-stick rate (curve)', round(maxRate(rates.roll), 1), '1000 deg/s +-0.5', Math.abs(maxRate(rates.roll) - 1000) <= 0.5 && Math.abs(maxRate(rates.yaw) - 1000) <= 0.5, 'deg/s');
+  const reference = referenceRate(0.5, rates.pitch);
+  check('settings', 'live change: expo 0.6 at 1/2 stick', round(betaflightRate(0.5, rates.pitch), 1), `${round(reference, 1)} (Betaflight formula)`, Math.abs(betaflightRate(0.5, rates.pitch) - reference) < 0.05 && rates.pitch.expo === 0.6, 'deg/s');
+  const fast = steadyRate('roll', 1, rig);
+  check('settings', 'live change: roll rate, full stick', round(fast.steady, 0), '1000 deg/s +-5%', within(fast.steady, 1000, 0.05), 'deg/s');
+
+  settings.change({ rate: 200, expo: 0 });
+  check('settings', 'slowest setting: 200 deg/s, linear', `${round(maxRate(rates.roll), 1)} (super ${rates.roll.superRate})`, '200 deg/s, no super rate', Math.abs(maxRate(rates.roll) - 200) <= 0.5 && rates.roll.superRate === 0);
+  const linear = steadyRate('roll', 0.5, rig);
+  check('settings', 'expo 0: half stick in flight', round(linear.steady, 1), '100 deg/s +-5%', within(linear.steady, 100, 0.05), 'deg/s');
+  const below = ratesForFpvSetting({ rate: 150, expo: 0.3 }, fpv.inputProfile.rates.roll);
+  check('settings', 'rate below the RC rate lowers it', `rc ${round(below.rcRate, 3)}, ${round(maxRate(below), 1)} deg/s`, 'rc 0.75, 150 deg/s', Math.abs(maxRate(below) - 150) <= 0.5 && below.superRate === 0);
+
+  rig.model.dispose();
+  settings.change({ rate: 800 });
+  check('settings', 'disposed model stops listening', round(maxRate(rates.roll), 1), '200 deg/s (unchanged)', Math.abs(maxRate(rates.roll) - 200) <= 0.5, 'deg/s');
+}
+
 // ============================================================================================
 // RUN
 // ============================================================================================
@@ -700,6 +745,7 @@ testTurtle();
 testPropWash();
 testAutopilot();
 testSnapshot();
+testSettings();
 
 const widths = { test: 13, name: 40, measured: 34, target: 42 };
 const pad = (text, width) => String(text).padEnd(width).slice(0, width);

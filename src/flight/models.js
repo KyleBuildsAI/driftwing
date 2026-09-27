@@ -3,7 +3,8 @@
 //
 //   flightModels.register('fixedWing', createSimFixedWingModel);
 //
-// A factory is called as factory({ profile, craft, world, bus, state, input }) and returns a
+// A factory is called as factory({ profile, craft, world, bus, state, input, craftState, settings })
+// (SIM models also get the craft's ability state and the settings store) and returns a
 // FlightModel (docs/architecture.md): { kind, reset(pose), step(dt, controls, env), state, contact,
 // writeTelemetry(flight), snapshot(), restore(snapshot) }. `profile` is the craft's simProfile for
 // SIM models (its `model` field names the kind) and its arcadeProfile for 'arcade'.

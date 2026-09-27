@@ -109,6 +109,8 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
     if (kind === 'factor') return `${Number(value).toFixed(2)}×`;
     if (kind === 'percent') return `${Math.round(Number(value) * 100)}%`;
     if (kind === 'degrees') return `${Math.round(Number(value))}°`;
+    if (kind === 'rate') return `${Math.round(Number(value))}°/s`;
+    if (kind === 'decimal') return Number(value).toFixed(2);
     return String(value);
   }
 

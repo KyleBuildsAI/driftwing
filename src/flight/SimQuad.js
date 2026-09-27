@@ -91,6 +91,29 @@ function resolveRates(rates) {
   };
 }
 
+/** Betaflight's effective RC rate (the increment applies above an RC rate of 2). */
+function effectiveRcRate(rcRate) {
+  return rcRate > 2 ? rcRate + RC_RATE_INCREMENTAL * (rcRate - 2) : rcRate;
+}
+
+/**
+ * Rates for the player's FPV setup (settings.fpv { rate, expo }) on top of a craft's rates: the
+ * craft's RC rate is kept and the super rate chosen so full stick gives `rate` deg/s; a rate below
+ * what the RC rate gives on its own lowers the RC rate instead (no super rate). Missing or invalid
+ * fields keep the craft's value.
+ */
+export function ratesForFpvSetting(setting, base = DEFAULT_QUAD_RATES) {
+  const resolved = resolveRates(base);
+  const expo = setting && Number.isFinite(setting.expo) ? clamp(setting.expo, 0, 1) : resolved.expo;
+  if (!setting || !Number.isFinite(setting.rate) || setting.rate <= 0) return { ...resolved, expo };
+  const wanted = setting.rate;
+  const linear = 200 * effectiveRcRate(resolved.rcRate);
+  if (wanted >= linear) return { rcRate: resolved.rcRate, superRate: clamp(1 - linear / wanted, 0, 0.99), expo };
+  const effective = wanted / 200;
+  const rcRate = effective <= 2 ? effective : (effective + RC_RATE_INCREMENTAL * 2) / (1 + RC_RATE_INCREMENTAL);
+  return { rcRate, superRate: 0, expo };
+}
+
 /**
  * Betaflight rates: the rate setpoint (deg/s, signed) for a stick deflection (-1..1). rates:
  * { rcRate, superRate (0..0.99), expo (0..1) }, Betaflight's values divided by 100.
@@ -99,8 +122,7 @@ export function betaflightRate(stick, rates = DEFAULT_QUAD_RATES) {
   const command = clamp(Number.isFinite(stick) ? stick : 0, -1, 1);
   const magnitude = Math.abs(command);
   const shaped = command * magnitude * magnitude * magnitude * rates.expo + command * (1 - rates.expo);
-  const rcRate = rates.rcRate > 2 ? rates.rcRate + RC_RATE_INCREMENTAL * (rates.rcRate - 2) : rates.rcRate;
-  let rate = 200 * rcRate * shaped;
+  let rate = 200 * effectiveRcRate(rates.rcRate) * shaped;
   if (rates.superRate > 0) rate /= clamp(1 - magnitude * rates.superRate, 0.01, 1);
   return rate;
 }
@@ -189,17 +211,36 @@ function buildFrame(profile) {
   };
 }
 
-export function createSimQuadModel({ profile, craft, bus, craftState = {} }) {
+/**
+ * settings (optional): the player's settings store. Its fpv { rate, expo } shape the rate curve on
+ * every axis over the craft's inputProfile.rates, live on 'settings:changed'. Without it (the labs)
+ * the craft's own rates apply.
+ */
+export function createSimQuadModel({ profile, craft, bus, craftState = {}, settings = null }) {
   const limits = craft && craft.limits ? craft.limits : {};
   const craftId = craft && craft.id ? craft.id : 'craft';
   const craftName = craft && craft.name ? craft.name : 'craft';
   const inputProfile = (craft && craft.inputProfile) || {};
   const rateProfile = inputProfile.rates || {};
-  const rates = {
+  const craftRates = {
     roll: resolveRates(rateProfile.roll ?? rateProfile),
     pitch: resolveRates(rateProfile.pitch ?? rateProfile),
     yaw: resolveRates(rateProfile.yaw ?? rateProfile),
   };
+  /** The live rates (the controller and the autopilot read these objects; updated in place). */
+  const rates = { roll: { ...craftRates.roll }, pitch: { ...craftRates.pitch }, yaw: { ...craftRates.yaw } };
+  function applyFpvSetting(setting) {
+    for (const axis of Object.keys(rates)) Object.assign(rates[axis], ratesForFpvSetting(setting, craftRates[axis]));
+  }
+  let stopSettingsListener = null;
+  if (settings && typeof settings.get === 'function') {
+    applyFpvSetting(settings.get('fpv'));
+    if (bus) {
+      stopSettingsListener = bus.on('settings:changed', (change) => {
+        if (change && change.key === 'fpv') applyFpvSetting(change.value);
+      });
+    }
+  }
   const frame = buildFrame(profile);
   const motorProfile = profile.motor;
   const aero = profile.aero;
@@ -1047,6 +1088,8 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {} }) {
     dispose() {
       contactReport.touchdown = null;
       contactReport.bodyStrike = null;
+      if (stopSettingsListener) stopSettingsListener();
+      stopSettingsListener = null;
     },
   };
 }

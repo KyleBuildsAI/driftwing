@@ -251,7 +251,7 @@ export function createFlightController(ctx) {
   }
 
   function createSimModel(kind) {
-    return models.create(kind, { profile: craft.simProfile, craft, world, bus, state, input, craftState });
+    return models.create(kind, { profile: craft.simProfile, craft, world, bus, state, input, craftState, settings });
   }
 
   function simKind() {
