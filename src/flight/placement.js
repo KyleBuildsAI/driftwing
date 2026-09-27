@@ -1,5 +1,6 @@
 // Ground placement for "Start on ground": a nearby flat, dry spot found with a slope check on the
-// shared height function (the same one collision uses), and the craft's resting pose on its gear.
+// shared height function (the same one collision uses), clear of the scattered vegetation along the
+// take-off run, and the craft's resting pose on its gear.
 import * as THREE from 'three/webgpu';
 import { DEG, vectorFromHeading } from '../core/util.js';
 
@@ -16,9 +17,81 @@ const FLAT = Object.freeze({
   RING_STEP: 90,
   MAX_RADIUS: 4500,
   DISTANCE_WEIGHT: 0.000015,
+  /** Candidates whose analytic height rises this many times MAX_SLOPE are rejected before the full check. */
+  QUICK_REJECT_FACTOR: 1.6,
 });
 const PITCH_SEARCH = Object.freeze({ MIN: -25 * DEG, MAX: 30 * DEG });
 const TANGENT_TOLERANCE = 1e-6;
+/**
+ * Vegetation clearance. Trees, palms, cacti and rocks come from the world's deterministic scatter at
+ * full density (every quality level draws a subset of it); ground-cover flowers never block. At most
+ * CHUNK_BUDGET chunks are scattered per search (about 2 ms each), so a forest-covered region cannot
+ * stall a craft switch: past the budget, spots are judged on the terrain alone.
+ */
+const VEGETATION_CLEARANCE = Object.freeze({ CHUNK_BUDGET: 40, TREE_RADIUS: 2.6, SMALL_RADIUS: 1.3 });
+
+/** Obstacle lookups for one search: scatters chunks on demand (cached, within the budget). */
+function createVegetationProbe(world) {
+  const chunkSize = world.CHUNK_SIZE;
+  const stride = world.SCATTER_STRIDE;
+  const types = world.VEGETATION;
+  const cache = new Map();
+  let scattered = 0;
+
+  /** Flat [x, z, radius, ...] obstacles of a chunk, or null once the budget is spent. */
+  function chunkObstacles(chunkX, chunkZ) {
+    const key = `${chunkX},${chunkZ}`;
+    if (cache.has(key)) return cache.get(key);
+    if (scattered >= VEGETATION_CLEARANCE.CHUNK_BUDGET) return null;
+    scattered++;
+    const raw = world.scatterChunk(chunkX, chunkZ, 1);
+    const obstacles = [];
+    for (let offset = 0; offset < raw.length; offset += stride) {
+      const type = raw[offset + 5];
+      if (type === types.FLOWERS) continue;
+      const small = type === types.ROCK || type === types.CACTUS;
+      const radius = (small ? VEGETATION_CLEARANCE.SMALL_RADIUS : VEGETATION_CLEARANCE.TREE_RADIUS) * raw[offset + 3];
+      obstacles.push(chunkX * chunkSize + raw[offset], chunkZ * chunkSize + raw[offset + 2], radius);
+    }
+    cache.set(key, obstacles);
+    return obstacles;
+  }
+
+  /**
+   * Whether vegetation stands within `radius` of the parking spot (x, z) or within `halfWidth` of the
+   * take-off run of `length` metres along heading. Returns null when the budget ran out before every
+   * chunk involved could be checked.
+   */
+  function blocked(x, z, heading, { radius, halfWidth, length }) {
+    const direction = vectorFromHeading(heading);
+    const endX = x + direction.x * length;
+    const endZ = z + direction.z * length;
+    const margin = Math.max(radius, halfWidth) + VEGETATION_CLEARANCE.TREE_RADIUS * 2;
+    const minChunkX = Math.floor((Math.min(x, endX) - margin) / chunkSize);
+    const maxChunkX = Math.floor((Math.max(x, endX) + margin) / chunkSize);
+    const minChunkZ = Math.floor((Math.min(z, endZ) - margin) / chunkSize);
+    const maxChunkZ = Math.floor((Math.max(z, endZ) + margin) / chunkSize);
+    for (let chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+      for (let chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+        const obstacles = chunkObstacles(chunkX, chunkZ);
+        if (!obstacles) return null;
+        for (let index = 0; index < obstacles.length; index += 3) {
+          const offsetX = obstacles[index] - x;
+          const offsetZ = obstacles[index + 1] - z;
+          const size = obstacles[index + 2];
+          if (Math.hypot(offsetX, offsetZ) < radius + size) return true;
+          const along = offsetX * direction.x + offsetZ * direction.z;
+          if (along < 0 || along > length) continue;
+          const across = Math.abs(offsetX * direction.z - offsetZ * direction.x);
+          if (across < halfWidth + size) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  return { blocked };
+}
 
 /** Steepest rise per metre from (x, z) out to the footprint radii, and the lowest point there. */
 function footprint(world, x, z) {
@@ -36,6 +109,20 @@ function footprint(world, x, z) {
   return { center, slope, lowest };
 }
 
+/**
+ * Cheap estimate from the analytic height (5 samples instead of the footprint's 17 mesh heights of
+ * 4 samples each): the centre height and the steepest rise per metre out to the outer footprint radius.
+ */
+function quickLook(world, x, z) {
+  const radius = FLAT.FOOTPRINT_RADII[FLAT.FOOTPRINT_RADII.length - 1];
+  const center = world.heightAt(x, z);
+  const east = Math.abs(world.heightAt(x + radius, z) - center);
+  const west = Math.abs(world.heightAt(x - radius, z) - center);
+  const south = Math.abs(world.heightAt(x, z + radius) - center);
+  const north = Math.abs(world.heightAt(x, z - radius) - center);
+  return { center, slope: Math.max(east, west, south, north) / radius };
+}
+
 /** Largest rise or dip along the take-off run (m), and whether the run stays dry. */
 function runway(world, x, z, heading, center, waterLevel) {
   const direction = vectorFromHeading(heading);
@@ -50,35 +137,71 @@ function runway(world, x, z, heading, center, waterLevel) {
 }
 
 /**
- * Nearest flat, dry spot to (x, z), searching outward in rings. headingFor(x, z) gives the take-off
- * heading there (into the wind), whose run must be clear as well. Falls back to the flattest dry spot
- * seen when nothing within MAX_RADIUS passes. Returns { x, z, ground, slope, runwayDeviation, flat }.
+ * Clearance a craft needs from vegetation, from its contact points (body axes, m): the parking circle
+ * reaches past its farthest point, the take-off corridor past its wingtips.
  */
-export function findFlatSpot(world, x, z, { waterLevel = 0, headingFor = () => 0 } = {}) {
+export function vegetationClearance(contacts, margin = 2) {
+  let radius = 0;
+  let halfWidth = 0;
+  for (const contact of contacts) {
+    radius = Math.max(radius, Math.hypot(contact.position[0], contact.position[2]));
+    halfWidth = Math.max(halfWidth, Math.abs(contact.position[0]));
+  }
+  return { radius: radius + margin, halfWidth: halfWidth + margin, length: FLAT.RUNWAY_LENGTH };
+}
+
+/**
+ * Nearest flat, dry spot to (x, z), searching outward in rings. headingFor(x, z) gives the take-off
+ * heading there (into the wind), whose run must be flat and dry as well. With `clearance` (see
+ * vegetationClearance) the spot and its run must also be clear of trees, cacti and rocks. Falls back
+ * to the flattest dry spot seen when nothing within MAX_RADIUS passes. Returns { x, z, ground, slope,
+ * runwayDeviation, flat, clearOfVegetation } (clearOfVegetation is null when it was not checked).
+ */
+export function findFlatSpot(world, x, z, { waterLevel = 0, headingFor = () => 0, clearance = null } = {}) {
+  const vegetation = clearance && typeof world.scatterChunk === 'function' ? createVegetationProbe(world) : null;
   let fallback = null;
+  let gentlest = null;
   for (let radius = 0; radius <= FLAT.MAX_RADIUS; radius += FLAT.RING_STEP) {
     const samples = radius === 0 ? 1 : Math.max(8, Math.round((2 * Math.PI * radius) / FLAT.RING_STEP));
-    let ringBest = null;
+    const flatInRing = [];
     for (let sample = 0; sample < samples; sample++) {
       const angle = (sample / samples) * Math.PI * 2;
       const candidateX = x + Math.cos(angle) * radius;
       const candidateZ = z + Math.sin(angle) * radius;
+      const rough = quickLook(world, candidateX, candidateZ);
+      if (rough.center < waterLevel + FLAT.MIN_DRY_HEIGHT) continue;
+      if (rough.slope > FLAT.MAX_SLOPE * FLAT.QUICK_REJECT_FACTOR) {
+        if (!gentlest || rough.slope < gentlest.slope) gentlest = { x: candidateX, z: candidateZ, slope: rough.slope };
+        continue;
+      }
       const foot = footprint(world, candidateX, candidateZ);
       if (foot.lowest < waterLevel + FLAT.MIN_DRY_HEIGHT) continue;
       const score = foot.slope + radius * FLAT.DISTANCE_WEIGHT;
       if (foot.slope > FLAT.MAX_SLOPE) {
-        if (!fallback || score < fallback.score) fallback = { x: candidateX, z: candidateZ, ground: foot.center, slope: foot.slope, runwayDeviation: Infinity, flat: false, score };
+        if (!fallback || score < fallback.score) fallback = { x: candidateX, z: candidateZ, ground: foot.center, slope: foot.slope, runwayDeviation: Infinity, flat: false, clearOfVegetation: null, score };
         continue;
       }
-      const run = runway(world, candidateX, candidateZ, headingFor(candidateX, candidateZ), foot.center, waterLevel);
-      const candidate = { x: candidateX, z: candidateZ, ground: foot.center, slope: foot.slope, runwayDeviation: run.deviation, flat: run.dry && run.deviation <= FLAT.RUNWAY_MAX_DEVIATION, score: score + run.deviation / FLAT.RUNWAY_LENGTH };
-      if (candidate.flat && (!ringBest || candidate.score < ringBest.score)) ringBest = candidate;
+      const heading = headingFor(candidateX, candidateZ);
+      const run = runway(world, candidateX, candidateZ, heading, foot.center, waterLevel);
+      const candidate = { x: candidateX, z: candidateZ, heading, ground: foot.center, slope: foot.slope, runwayDeviation: run.deviation, flat: run.dry && run.deviation <= FLAT.RUNWAY_MAX_DEVIATION, clearOfVegetation: null, score: score + run.deviation / FLAT.RUNWAY_LENGTH };
+      if (candidate.flat) flatInRing.push(candidate);
       if (!fallback || candidate.score < fallback.score) fallback = candidate;
     }
-    if (ringBest) return ringBest;
+    // Best first: the first flat spot whose parking circle and take-off run are clear of vegetation.
+    flatInRing.sort((first, second) => first.score - second.score);
+    for (const candidate of flatInRing) {
+      if (!vegetation) return candidate;
+      const blocked = vegetation.blocked(candidate.x, candidate.z, candidate.heading, clearance);
+      if (blocked === true) continue;
+      candidate.clearOfVegetation = blocked === false ? true : null;
+      return candidate;
+    }
   }
   if (fallback) return fallback;
-  return { x, z, ground: world.groundHeight(x, z), slope: Infinity, runwayDeviation: Infinity, flat: false, score: Infinity };
+  // Nothing passed the quick check anywhere (rugged country): the gentlest spot seen.
+  const last = gentlest ?? { x, z };
+  const foot = footprint(world, last.x, last.z);
+  return { x: last.x, z: last.z, ground: foot.center, slope: foot.slope, runwayDeviation: Infinity, flat: false, clearOfVegetation: null, score: Infinity };
 }
 
 /** Height of a body point (x right, y up, z aft) after pitching the nose up by pitch radians. */
