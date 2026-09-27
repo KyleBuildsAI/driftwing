@@ -16,6 +16,7 @@
 //   high AoA       critical angle of attack; 100 % assists keep it below; wing rock at 0 %
 //   takeoff        lift-off speed and roll (half flaps, afterburner)
 //   landing        touchdown speed and grade (full flaps, 13 degrees angle of attack)
+//   ground         parked on the gear without creeping; nose-wheel steering on the rudder
 //   gear           transit time, stays down on the ground, gear drag
 //   speed brake    extra drag on the airbrake
 //   AB detent      keyboard stops at the detent; the ability pushes through and pulling back cancels;
@@ -579,12 +580,12 @@ function testLanding() {
     const agl = lab.model.state.position.y;
     // Glide path, then an exponential flare over the last 10 m of wheel height.
     const wheelHeight = agl - 2.1;
-    const targetSink = clamp(0.35 + 0.3 * wheelHeight, 0.35, 3.8);
+    const targetSink = clamp(0.35 + 0.34 * wheelHeight, 0.35, 3.8);
     const targetPath = -Math.asin(Math.min(targetSink / Math.max(lab.data.airspeed, 30), 0.3));
     // The fly-by-wire flies load factor: ask for the load that bends the path onto the target.
     const load = Math.cos(lab.data.flightPath) + (lab.data.airspeed / 9.81) * 1.0 * (targetPath - lab.data.flightPath);
     lab.pilot.pitch = clamp((load - 1) / (profile.targets.gLimit - 1), -0.3, 0.5);
-    lab.pilot.throttle = wheelHeight > 1.5 ? speedPid.update((approachSpeed - lab.data.airspeed) / 5, DT) : 0;
+    lab.pilot.throttle = wheelHeight > 0.5 ? speedPid.update((approachSpeed - lab.data.airspeed) / 5, DT) : 0;
     if (Math.round(lab.time * 120) % 120 === 0) log(`  landing t ${lab.time.toFixed(1)} agl ${agl.toFixed(1)} V ${(lab.data.airspeed * KMH).toFixed(0)} vs ${lab.data.verticalSpeed.toFixed(1)} aoa ${(lab.data.aoa / DEG).toFixed(1)} thr ${lab.pilot.throttle.toFixed(2)} gear ${lab.writeTelemetry().gear.down} flaps ${lab.telemetry.flaps.toFixed(2)}`);
     if (lab.model.contact.touchdown && !touchdown) {
       touchdown = { speed: lab.data.airspeed, sink: lab.model.contact.touchdown.sinkRate };
@@ -601,6 +602,37 @@ function testLanding() {
   const grade = rig.events.landed[0] ? rig.events.landed[0].grade : 'none';
   record('touchdown speed (full flaps, gear down)', touchdown ? touchdown.speed * KMH : NaN, 265, { unit: 'km/h', decimals: 0, note: `sink ${touchdown ? touchdown.sink.toFixed(2) : '-'} m/s, AoA ${aoaAtTouchdown.toFixed(1)} deg, grade ${grade}` });
   record('landing grade', grade, 'butter/smooth/firm', { compare: ['butter', 'smooth', 'firm'].includes(grade) });
+}
+
+/** Parked on the tricycle gear, and taxiing with nose-wheel steering on the rudder. */
+function testGround() {
+  const parked = createRig({ ground: 0, assists: 1 });
+  parked.setAssists(1);
+  parked.parked();
+  const start = parked.model.state.position.clone();
+  let strike = null;
+  parked.run(10, (lab) => {
+    if (lab.model.contact.bodyStrike) strike = lab.model.contact.bodyStrike.part;
+  });
+  const creep = Math.hypot(parked.model.state.position.x - start.x, parked.model.state.position.z - start.z);
+  record('parked 10 s: creep', creep, 0.3, { unit: 'm', compare: 'max', decimals: 3, note: `${strike ? `strike: ${strike}` : 'no strikes'}, pitch ${(parked.data.pitch / DEG).toFixed(1)} deg` });
+
+  const taxi = createRig({ ground: 0, assists: 1 });
+  taxi.setAssists(1);
+  taxi.parked();
+  taxi.pilot.throttle = 0.35;
+  taxi.run(12, (lab) => {
+    lab.pilot.throttle = lab.data.airspeed > 5 ? 0.02 : 0.3;
+  });
+  const headingBefore = taxi.data.heading;
+  let taxiStrike = null;
+  taxi.run(6, (lab) => {
+    lab.pilot.yaw = 1;
+    lab.pilot.throttle = lab.data.airspeed > 5 ? 0.02 : 0.3;
+    if (lab.model.contact.bodyStrike) taxiStrike = lab.model.contact.bodyStrike.part;
+  });
+  const turned = ((((taxi.data.heading - headingBefore + 180) % 360) + 360) % 360) - 180;
+  record('nose-wheel steering: full right rudder, 6 s taxi at 18 km/h', turned, 30, { unit: 'deg', compare: taxiStrike === null && turned >= 30 ? true : false, note: `${(taxi.data.airspeed * KMH).toFixed(0)} km/h, ${taxiStrike ? `strike: ${taxiStrike}` : 'no strikes'}` });
 }
 
 function testGear() {
@@ -759,7 +791,7 @@ function printTable() {
 
 const started = Date.now();
 const only = process.argv.find((argument) => argument.startsWith('--only='));
-const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGear, testSpeedBrake, testDetent, testAutopilot, testLimits };
+const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGround, testGear, testSpeedBrake, testDetent, testAutopilot, testLimits };
 for (const [name, test] of Object.entries(tests)) {
   if (only && !name.toLowerCase().includes(only.slice(7).toLowerCase())) continue;
   test();

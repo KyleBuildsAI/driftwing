@@ -172,7 +172,7 @@ const simProfile = Object.freeze({
       ram: 0.15, // ram recovery: thrust * (1 + ram * Mach)
       inletMach: 2.1, // the fixed inlet runs out of pressure recovery past this
       idleSpool: 0.62,
-      idleThrust: 0.05, // share of military thrust at idle
+      idleThrust: 0.03, // share of military thrust at idle (parked on its wheels it does not creep)
       spoolUpSeconds: 1.75,
       spoolDownSeconds: 1.1,
       abLightOffSeconds: 0.35,
@@ -244,13 +244,13 @@ const simProfile = Object.freeze({
     }),
   }),
   contacts: Object.freeze([
-    Object.freeze({ id: 'noseWheel', kind: 'wheel', gear: true, retracts: true, steerable: true, steerAngle: 32, position: Object.freeze([0, -2.08, -3.3]), spring: 180000, damping: 16000, rollingFriction: 0.02, sideFriction: 0.8 }),
-    Object.freeze({ id: 'leftMain', kind: 'wheel', gear: true, retracts: true, brake: true, position: Object.freeze([-0.97, -2.08, 1.85]), spring: 450000, damping: 36000, rollingFriction: 0.02, sideFriction: 0.85 }),
-    Object.freeze({ id: 'rightMain', kind: 'wheel', gear: true, retracts: true, brake: true, position: Object.freeze([0.97, -2.08, 1.85]), spring: 450000, damping: 36000, rollingFriction: 0.02, sideFriction: 0.85 }),
+    Object.freeze({ id: 'noseWheel', kind: 'wheel', gear: true, retracts: true, steerable: true, steerAngle: 22, position: Object.freeze([0, -2.08, -3.3]), spring: 180000, damping: 16000, rollingFriction: 0.02, sideFriction: 0.8 }),
+    Object.freeze({ id: 'leftMain', kind: 'wheel', gear: true, retracts: true, brake: true, position: Object.freeze([-1.1, -2.08, 1.85]), spring: 450000, damping: 36000, rollingFriction: 0.02, sideFriction: 0.85 }),
+    Object.freeze({ id: 'rightMain', kind: 'wheel', gear: true, retracts: true, brake: true, position: Object.freeze([1.1, -2.08, 1.85]), spring: 450000, damping: 36000, rollingFriction: 0.02, sideFriction: 0.85 }),
     Object.freeze({ id: 'noseTip', kind: 'body', gear: false, position: Object.freeze([0, -0.05, -7.4]) }),
     Object.freeze({ id: 'intake', kind: 'body', gear: false, position: Object.freeze([0, -1.3, -3.5]) }),
-    Object.freeze({ id: 'leftFairing', kind: 'body', gear: false, position: Object.freeze([-1.2, -0.86, 1.0]) }),
-    Object.freeze({ id: 'rightFairing', kind: 'body', gear: false, position: Object.freeze([1.2, -0.86, 1.0]) }),
+    Object.freeze({ id: 'leftFairing', kind: 'body', gear: false, position: Object.freeze([-1.3, -0.86, 1.0]) }),
+    Object.freeze({ id: 'rightFairing', kind: 'body', gear: false, position: Object.freeze([1.3, -0.86, 1.0]) }),
     Object.freeze({ id: 'leftVentral', kind: 'body', gear: false, position: Object.freeze([-0.62, -1.1, 5.3]) }),
     Object.freeze({ id: 'rightVentral', kind: 'body', gear: false, position: Object.freeze([0.62, -1.1, 5.3]) }),
     Object.freeze({ id: 'nozzle', kind: 'body', gear: false, position: Object.freeze([0, -0.48, 7.25]) }),
@@ -405,7 +405,7 @@ function buildIntake(builder) {
 }
 
 // Blended belly under the wing roots: [z, half width, bottom]; it houses the main gear.
-const FAIRING = [[-0.9, 0.6, -0.62], [-0.2, 1.12, -0.8], [0.8, 1.32, -0.86], [1.9, 1.26, -0.84], [2.9, 0.98, -0.76], [3.6, 0.66, -0.64]];
+const FAIRING = [[-0.9, 0.6, -0.62], [-0.2, 1.2, -0.8], [0.8, 1.46, -0.86], [1.9, 1.38, -0.84], [2.9, 1.02, -0.76], [3.6, 0.66, -0.64]];
 function buildFairings(builder) {
   const sections = FAIRING.map(([z, halfWidth, bottom]) => [
     [-halfWidth, WING.Y - 0.06, z], [halfWidth, WING.Y - 0.06, z], [halfWidth * 0.97, bottom + 0.16, z], [halfWidth * 0.8, bottom + 0.03, z],
@@ -553,7 +553,7 @@ function buildWheelGeometry(radius, width) {
 // Landing gear: legs pivot at their top; the nose leg swings aft into the intake belly, the mains
 // swing forward into the fairings, twisting their wheels flat. Doors open while the gear is out.
 const NOSE_GEAR = Object.freeze({ PIVOT: Object.freeze([0, -1.0, -3.0]), AXLE: Object.freeze([0, -1.78, -3.3]), RADIUS: 0.3, WIDTH: 0.2, RETRACT: -112 * DEG });
-const MAIN_GEAR = Object.freeze({ PIVOT: Object.freeze([0.72, -0.62, 1.5]), AXLE: Object.freeze([0.97, -1.7, 1.85]), RADIUS: 0.38, WIDTH: 0.24, RETRACT: 108 * DEG, TWIST: 90 * DEG });
+const MAIN_GEAR = Object.freeze({ PIVOT: Object.freeze([0.85, -0.62, 1.5]), AXLE: Object.freeze([1.1, -1.7, 1.85]), RADIUS: 0.38, WIDTH: 0.24, RETRACT: 108 * DEG, TWIST: 90 * DEG });
 
 /**
  * One gear leg as nested groups: pivot (swing) -> leg bar and the wheel on a twist group at the axle.
@@ -692,7 +692,7 @@ function buildMesh(ctx) {
   for (const side of [1, -1]) {
     // Nose doors hinge along the bay's sides and swing down; main doors hinge inboard and swing down.
     doors.push({ pivot: addPivot(root, buildDoor([0.2 * side, -1.325, -3.2], [0.2 * side, -1.325, -1.85], 0.2, [-side, 0, 0]), bodyMaterial), angle: side * 88 * DEG });
-    doors.push({ pivot: addPivot(root, buildDoor([0.5 * side, -0.87, -0.15], [0.5 * side, -0.87, 1.7], 0.82, [side, 0, 0]), bodyMaterial), angle: -side * 95 * DEG });
+    doors.push({ pivot: addPivot(root, buildDoor([0.5 * side, -0.87, -0.15], [0.5 * side, -0.87, 1.7], 0.96, [side, 0, 0]), bodyMaterial), angle: -side * 95 * DEG });
   }
 
   const navLights = createNavLights(root, {
