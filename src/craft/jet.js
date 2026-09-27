@@ -369,16 +369,39 @@ const fuselageTop = (z) => {
   return body.centreY + body.halfHeight;
 };
 
-function buildFuselage(builder) {
+/**
+ * The skin over the cockpit tub and the instrument panel, in front of the pilot (the upper faces of
+ * the fuselage segments from z -5.3 to -3.2): a separate part the cockpit view hides, so the panel
+ * down in the tub is not covered by the outside of the nose.
+ */
+const COCKPIT_SKIN = Object.freeze({ FROM: 3, TO: 4, FACES: Object.freeze([2, 3, 4]) });
+
+function fuselageTint(segment, face) {
+  if (segment <= 1) return PALETTE.charcoal;
+  if (face >= 8 && face <= 15) return face === 8 || face === 15 ? PALETTE.cream : PALETTE.creamShade;
+  // An orange cheat line along each side from behind the radome to the tail.
+  if ((face === 0 || face === 7) && segment >= 3 && segment <= 10) return PALETTE.orange;
+  return PALETTE.cream;
+}
+
+/** The fuselage into `builder`, except the skin over the cockpit tub, which goes into `cockpitSkin`. */
+function buildFuselage(builder, cockpitSkin) {
   const sections = FUSELAGE.map(([z, centreY, halfWidth, halfHeight]) => ellipseRing(z, centreY, halfWidth, halfHeight, FUSELAGE_SIDES, 360 / FUSELAGE_SIDES / 2));
-  // Face k spans ring angles 11.25 + 22.5 k .. + 22.5: k 3-4 is the top, 11-12 the belly.
-  builder.loft(sections, (segment, face) => {
-    if (segment <= 1) return PALETTE.charcoal;
-    if (face >= 8 && face <= 15) return face === 8 || face === 15 ? PALETTE.cream : PALETTE.creamShade;
-    // An orange cheat line along each side from behind the radome to the tail.
-    if ((face === 0 || face === 7) && segment >= 3 && segment <= 10) return PALETTE.orange;
-    return PALETTE.cream;
-  }, { capStart: PALETTE.charcoal, capEnd: PALETTE.charcoal });
+  // Face k spans ring angles 11.25 + 22.5 k .. + 22.5: k 3 is the top, 11-12 the belly.
+  const { FROM, TO } = COCKPIT_SKIN;
+  builder.loft(sections.slice(0, FROM + 1), fuselageTint, { capStart: PALETTE.charcoal });
+  builder.loft(sections.slice(TO + 1), (segment, face) => fuselageTint(segment + TO + 1, face), { capEnd: PALETTE.charcoal });
+  for (let segment = FROM; segment <= TO; segment++) {
+    const front = sections[segment];
+    const back = sections[segment + 1];
+    // The loft's inside reference: midway between the two ring centres.
+    const inside = [0, (FUSELAGE[segment][1] + FUSELAGE[segment + 1][1]) / 2, (FUSELAGE[segment][0] + FUSELAGE[segment + 1][0]) / 2];
+    for (let face = 0; face < FUSELAGE_SIDES; face++) {
+      const next = (face + 1) % FUSELAGE_SIDES;
+      const target = COCKPIT_SKIN.FACES.includes(face) ? cockpitSkin : builder;
+      target.quad(front[face], front[next], back[next], back[face], fuselageTint(segment, face), inside);
+    }
+  }
 }
 
 // Dorsal spine from the canopy to the fin, with an orange stripe on its crest.
@@ -647,7 +670,8 @@ function buildMesh(ctx) {
   const flight = ctx.state.flight;
 
   const airframe = createMeshBuilder();
-  buildFuselage(airframe);
+  const cockpitSkinBuilder = createMeshBuilder();
+  buildFuselage(airframe, cockpitSkinBuilder);
   buildSpine(airframe);
   buildIntake(airframe);
   buildFairings(airframe);
@@ -656,6 +680,8 @@ function buildMesh(ctx) {
   buildFin(airframe);
   buildBooms(airframe);
   addSolid(root, airframe.toGeometry(null), bodyMaterial);
+  const cockpitSkin = addSolid(root, cockpitSkinBuilder.toGeometry(null), bodyMaterial);
+  cockpitSkin.userData.hideInCockpit = true;
 
   // Canopy glass, its frame and the pilot would sit around the eye: the cockpit view hides them.
   const canopy = addSolid(root, buildCanopy(), materials.canopy);
