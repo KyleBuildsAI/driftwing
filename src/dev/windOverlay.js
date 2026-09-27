@@ -7,15 +7,17 @@
 // cool for sink, pale for level air.
 //
 // The field is read through wind.probe, so the craft's own per-layer reading (wind.lastLayers) is
-// never disturbed, and resampled at SAMPLE_HZ rather than every frame. The mesh is built on first
-// use. Toggled by settings.windOverlay (settings panel, Developer group) and by the Arrows button the
-// overlay adds to the dev badge. It is an ordinary scene object that exists only while the setting
-// is on, so photo captures contain it only when the overlay is enabled.
+// never disturbed. The grid is resampled SAMPLE_HZ times a second, each pass spread over the frames
+// in between, so no single frame pays for the whole grid. The mesh is built on first use. Toggled by
+// settings.windOverlay (settings panel, Developer group) and by the Arrows button the overlay adds to
+// the dev badge. It is an ordinary scene object drawn only while the setting is on, so photo
+// captures contain it only when the overlay is enabled.
 
 const GRID_SIDE = 13;
 const SPACING = 64;
 const LAYER_COUNT = 2;
-const ARROW_CAPACITY = GRID_SIDE * GRID_SIDE * LAYER_COUNT;
+const GRID_COLUMNS = GRID_SIDE * GRID_SIDE;
+const ARROW_CAPACITY = GRID_COLUMNS * LAYER_COUNT;
 const TERRAIN_AGL = 45;
 /** The altitude layer snaps to this step, and is skipped where it would sit on the terrain layer. */
 const ALTITUDE_STEP = 10;
@@ -29,7 +31,7 @@ const WIDTH_PER_LENGTH = 0.16;
 /** Vertical wind (m/s) that reaches the full lift or sink colour. */
 const VERTICAL_FULL = 3;
 // Linear colours: level air, lift, sink.
-const LEVEL_COLOR = [0.82, 0.85, 0.9];
+const LEVEL_COLOR = [0.66, 0.72, 0.8];
 const LIFT_COLOR = [1, 0.36, 0.06];
 const SINK_COLOR = [0.08, 0.38, 1];
 
@@ -88,7 +90,6 @@ export function createWindOverlaySystem(ctx) {
 
   let mesh = null;
   let enabled = false;
-  let sampleTimer = 0;
   const windSample = { vel: new T.Vector3(), turbulence: 0 };
   const probePoint = new T.Vector3();
   const direction = new T.Vector3();
@@ -98,7 +99,7 @@ export function createWindOverlaySystem(ctx) {
   const instanceQuaternion = new T.Quaternion();
   const instanceScale = new T.Vector3();
   const instanceColor = new T.Color();
-  const stats = { arrows: 0, maxLift: 0, maxSink: 0, maxSpeed: 0, sampleMs: 0 };
+  const stats = { arrows: 0, maxLift: 0, maxSink: 0, maxSpeed: 0, sampleMs: 0, chunkMs: 0 };
 
   /** A unit arrow along +z: a thin shaft from 0 to 0.7 and a cone head to 1. */
   function buildArrowGeometry() {
@@ -121,9 +122,12 @@ export function createWindOverlaySystem(ctx) {
     const arrows = new T.InstancedMesh(buildArrowGeometry(), material, ARROW_CAPACITY);
     arrows.name = 'wind-overlay';
     arrows.instanceMatrix.setUsage(T.DynamicDrawUsage);
-    for (let index = 0; index < ARROW_CAPACITY; index++) arrows.setColorAt(index, instanceColor.setRGB(...LEVEL_COLOR));
+    const hidden = new T.Matrix4().makeScale(0, 0, 0);
+    for (let index = 0; index < ARROW_CAPACITY; index++) {
+      arrows.setMatrixAt(index, hidden);
+      arrows.setColorAt(index, instanceColor.setRGB(...LEVEL_COLOR));
+    }
     arrows.instanceColor.setUsage(T.DynamicDrawUsage);
-    arrows.count = 0;
     arrows.frustumCulled = false;
     arrows.castShadow = false;
     arrows.receiveShadow = false;
@@ -157,44 +161,77 @@ export function createWindOverlaySystem(ctx) {
     instanceMatrix.compose(instancePosition, instanceQuaternion, instanceScale);
     mesh.setMatrixAt(index, instanceMatrix);
     mesh.setColorAt(index, colorFor(velocity.y));
-    stats.maxLift = Math.max(stats.maxLift, velocity.y);
-    stats.maxSink = Math.min(stats.maxSink, velocity.y);
-    stats.maxSpeed = Math.max(stats.maxSpeed, speed);
+    sweep.lift = Math.max(sweep.lift, velocity.y);
+    sweep.sink = Math.min(sweep.sink, velocity.y);
+    sweep.speed = Math.max(sweep.speed, speed);
     return true;
   }
 
-  function resample() {
-    const startMs = performance.now();
+  const hiddenMatrix = new T.Matrix4().makeScale(0, 0, 0);
+  // The current sweep: the grid is latched when it starts so every arrow of one pass shares it.
+  const sweep = { nextColumn: 0, originX: 0, originZ: 0, altitude: 0, visible: 0, lift: 0, sink: 0, speed: 0, ms: 0, chunkMs: 0 };
+
+  function beginSweep() {
     const craft = state.player.position;
-    const originX = Math.round(craft.x / SPACING) * SPACING;
-    const originZ = Math.round(craft.z / SPACING) * SPACING;
-    const altitude = Math.round(craft.y / ALTITUDE_STEP) * ALTITUDE_STEP;
+    sweep.nextColumn = 0;
+    sweep.originX = Math.round(craft.x / SPACING) * SPACING;
+    sweep.originZ = Math.round(craft.z / SPACING) * SPACING;
+    sweep.altitude = Math.round(craft.y / ALTITUDE_STEP) * ALTITUDE_STEP;
+    sweep.visible = 0;
+    sweep.lift = 0;
+    sweep.sink = 0;
+    sweep.speed = 0;
+    sweep.ms = 0;
+    sweep.chunkMs = 0;
+  }
+
+  function finishSweep() {
+    stats.arrows = sweep.visible;
+    stats.maxLift = sweep.lift;
+    stats.maxSink = sweep.sink;
+    stats.maxSpeed = sweep.speed;
+    stats.sampleMs = Math.round(sweep.ms * 100) / 100;
+    stats.chunkMs = Math.round(sweep.chunkMs * 100) / 100;
+  }
+
+  /** Samples one grid column: the terrain-hugging arrow and, clear of it, the craft-altitude arrow. */
+  function sampleColumn(column) {
     const half = (GRID_SIDE - 1) / 2;
-    stats.maxLift = 0;
-    stats.maxSink = 0;
-    stats.maxSpeed = 0;
-    let count = 0;
-    for (let row = 0; row < GRID_SIDE; row++) {
-      const z = originZ + (row - half) * SPACING;
-      for (let column = 0; column < GRID_SIDE; column++) {
-        const x = originX + (column - half) * SPACING;
-        const surface = Math.max(world.groundHeight(x, z), world.WATER_LEVEL);
-        const terrainY = surface + TERRAIN_AGL;
-        if (writeArrow(count, x, terrainY, z)) count++;
-        if (altitude - terrainY > ALTITUDE_LAYER_CLEARANCE && writeArrow(count, x, altitude, z)) count++;
-      }
-    }
-    mesh.count = count;
-    stats.arrows = count;
+    const x = sweep.originX + ((column % GRID_SIDE) - half) * SPACING;
+    const z = sweep.originZ + (Math.floor(column / GRID_SIDE) - half) * SPACING;
+    const surface = Math.max(world.groundHeight(x, z), world.WATER_LEVEL);
+    const terrainY = surface + TERRAIN_AGL;
+    const terrainSlot = column * LAYER_COUNT;
+    if (writeArrow(terrainSlot, x, terrainY, z)) sweep.visible++;
+    else mesh.setMatrixAt(terrainSlot, hiddenMatrix);
+    if (sweep.altitude - terrainY > ALTITUDE_LAYER_CLEARANCE && writeArrow(terrainSlot + 1, x, sweep.altitude, z)) sweep.visible++;
+    else mesh.setMatrixAt(terrainSlot + 1, hiddenMatrix);
+  }
+
+  /**
+   * Resamples the next share of the grid: SAMPLE_HZ full passes per second, spread over the frames
+   * in between so no single frame pays for the whole grid.
+   */
+  function resampleChunk(realDt) {
+    const startMs = performance.now();
+    if (sweep.nextColumn >= GRID_COLUMNS) beginSweep();
+    const first = sweep.nextColumn;
+    const share = Math.max(1, Math.ceil(GRID_COLUMNS * SAMPLE_HZ * Math.max(realDt, 0)));
+    const last = Math.min(GRID_COLUMNS, first + share);
+    for (let column = first; column < last; column++) sampleColumn(column);
+    sweep.nextColumn = last;
+    const firstSlot = first * LAYER_COUNT;
+    const slotCount = (last - first) * LAYER_COUNT;
     mesh.instanceMatrix.clearUpdateRanges();
     mesh.instanceColor.clearUpdateRanges();
-    if (count > 0) {
-      mesh.instanceMatrix.addUpdateRange(0, count * 16);
-      mesh.instanceColor.addUpdateRange(0, count * 3);
-      mesh.instanceMatrix.needsUpdate = true;
-      mesh.instanceColor.needsUpdate = true;
-    }
-    stats.sampleMs = Math.round((performance.now() - startMs) * 100) / 100;
+    mesh.instanceMatrix.addUpdateRange(firstSlot * 16, slotCount * 16);
+    mesh.instanceColor.addUpdateRange(firstSlot * 3, slotCount * 3);
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.instanceColor.needsUpdate = true;
+    const elapsedMs = performance.now() - startMs;
+    sweep.ms += elapsedMs;
+    sweep.chunkMs = Math.max(sweep.chunkMs, elapsedMs);
+    if (last >= GRID_COLUMNS) finishSweep();
   }
 
   const arrowsButton = (() => {
@@ -216,8 +253,8 @@ export function createWindOverlaySystem(ctx) {
     enabled = wanted;
     if (enabled && !mesh) mesh = buildMesh();
     if (mesh) mesh.visible = enabled;
-    // Resample on the next update so a fresh grid appears at once.
-    sampleTimer = 0;
+    // A fresh pass starts on the next update, from the craft's current position.
+    if (enabled) sweep.nextColumn = GRID_COLUMNS;
   }
 
   bus.on('settings:changed', (payload) => {
@@ -228,10 +265,7 @@ export function createWindOverlaySystem(ctx) {
   return {
     update(simDt, realDt) {
       if (!enabled) return;
-      sampleTimer -= realDt;
-      if (sampleTimer > 0) return;
-      sampleTimer = 1 / SAMPLE_HZ;
-      resample();
+      resampleChunk(realDt);
     },
     isEnabled: () => enabled,
     getStats() {
@@ -243,6 +277,7 @@ export function createWindOverlaySystem(ctx) {
         maxSink: Math.round(stats.maxSink * 100) / 100,
         maxSpeed: Math.round(stats.maxSpeed * 100) / 100,
         sampleMs: stats.sampleMs,
+        chunkMs: stats.chunkMs,
       };
     },
   };
