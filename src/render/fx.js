@@ -8,7 +8,8 @@ import { CONFIG } from '../core/config.js';
  * - Contrails: two fixed-capacity ring-buffer ribbons fed by flight.getWingtips() while banking hard,
  *   pulling g or flying fast; camera-facing width that spreads with age, soft wispy edges, 2.6 s fade.
  * - Wind streaks: world-anchored air motes around the flight path drawn as thin additive motion-blur
- *   quads; they appear above ~70% of max speed and thicken during boost.
+ *   quads; they appear above ~70% of max speed and thicken during boost, or as strongly as the craft
+ *   asks through state.flight.craftState.windStreaks (0..1).
  * - Bursts: instanced additive glow sprites (Sprite + PointsNodeMaterial) for boost, ring, waypoint and
  *   discovery moments. Listens to 'boost', 'ring:passed', 'waypoint:reached', 'landmark:discovered';
  *   direct burst() calls for the same moment are de-duplicated so nothing fires twice.
@@ -421,7 +422,9 @@ export function createFxSystem(ctx) {
   function updateStreaks(realDt) {
     const speedRatio = player.speed / MAX_SPEED;
     const boosting = player.boost && player.boost.active ? 1 : 0;
-    const target = state.photoMode ? 0 : Math.min(1.25, smooth01((speedRatio - 0.7) / 0.3) * 0.8 + boosting * 0.55);
+    // A craft may ask for streaks below v1's speeds (the wingsuit: speed and terrain proximity cue).
+    const craftCue = clamp(Number(state.flight?.craftState?.windStreaks) || 0, 0, 1);
+    const target = state.photoMode ? 0 : Math.min(1.25, Math.max(smooth01((speedRatio - 0.7) / 0.3) * 0.8, craftCue) + boosting * 0.55);
     streakIntensity = damp(streakIntensity, target, 2.5, realDt);
     if (streakIntensity < 0.01) {
       streakMesh.visible = false;

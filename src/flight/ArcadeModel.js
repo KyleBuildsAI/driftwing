@@ -68,6 +68,11 @@ export function createArcadeModel({ profile, world, bus, state, input: initialIn
   const AUTOPILOT = profile.AUTOPILOT;
   const LOAD = profile.LOAD;
   const SURFACE_TURN_SHARE = profile.SURFACE_TURN_SHARE;
+  // Optional, for engineless craft (the wingsuit): ENGINE false ignores the throttle (no powered climb;
+  // boost only while not climbing) and LEVEL_PITCH is the attitude the pitch auto-level settles to (its
+  // glide). Absent, both keep v1's behaviour exactly.
+  const ENGINE = profile.ENGINE !== false;
+  const LEVEL_PITCH = Number.isFinite(profile.LEVEL_PITCH) ? profile.LEVEL_PITCH : 0;
 
   const WORLD_UP = new THREE.Vector3(0, 1, 0);
   const LOCAL_RIGHT = new THREE.Vector3(1, 0, 0);
@@ -522,6 +527,8 @@ export function createArcadeModel({ profile, world, bus, state, input: initialIn
       -pitchLimit,
       pitchLimit,
     );
+    // Without an engine the altitude cannot be held: glide, steeper only when the target is below.
+    if (!ENGINE) desiredPitch = Math.min(desiredPitch + LEVEL_PITCH, LEVEL_PITCH);
     // Rising terrain ahead: climb at the gradient it needs (with margin), up to 20 degrees.
     const terrainClimb = lookahead.gradient > 0;
     if (terrainClimb) {
@@ -621,7 +628,7 @@ export function createArcadeModel({ profile, world, bus, state, input: initialIn
     let levelBlend = 0;
     if (!autopilotActive && !barrel.active) {
       levelBlend = smooth01((pitchIdleSeconds - AUTO_LEVEL_DELAY) / 0.8) * verticalWeight;
-      const settlePitch = -BANK_SETTLE_PITCH * bankSin * bankSin;
+      const settlePitch = LEVEL_PITCH - BANK_SETTLE_PITCH * bankSin * bankSin;
       worldPitchRate += clamp((settlePitch - frame.pitch) * 0.7, -15 * DEG, 15 * DEG) * levelBlend;
     }
     if (Math.abs(frame.bank) < 100 * DEG) worldPitchRate -= BANK_NOSE_DROP * bankSin * bankSin * verticalWeight * (1 - levelBlend);
@@ -647,8 +654,8 @@ export function createArcadeModel({ profile, world, bus, state, input: initialIn
 
   function updateEnergy(step) {
     const terminalSpeed = SPEED.MAX * Math.pow(player.throttle, THROTTLE_SPEED_EXPONENT);
-    let thrust = DRAG_COEFFICIENT * terminalSpeed * terminalSpeed;
-    if (player.boost.active) thrust = Math.max(thrust, DRAG_COEFFICIENT * SPEED.BOOST_MAX * SPEED.BOOST_MAX);
+    let thrust = ENGINE ? DRAG_COEFFICIENT * terminalSpeed * terminalSpeed : 0;
+    if (player.boost.active) thrust = Math.max(thrust, DRAG_COEFFICIENT * SPEED.BOOST_MAX * SPEED.BOOST_MAX * (ENGINE ? 1 : 1 - smooth01(pathDirection.y / 0.1)));
     thrust *= 1 - 0.6 * assist.ceiling;
     const drag = DRAG_COEFFICIENT * speed * speed;
     const induced = INDUCED_DRAG * clamp(smoothedGForce - 1, 0, INDUCED_MAX_EXTRA_G);

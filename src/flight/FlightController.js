@@ -739,6 +739,11 @@ export function createFlightController(ctx) {
 
   function respawnAfterCrash() {
     const position = sim ? sim.state.position : player.position;
+    // Craft that cannot climb (spawn.respawn 'peak': the wingsuit) start again from the nearest peak.
+    if (craft.spawn.respawn === 'peak' && isFiniteVector(position)) {
+      launchFromPeak();
+      return;
+    }
     const heading = sim ? headingOfQuaternion(sim.state.quaternion, currentHeading()) : currentHeading();
     const x = Number.isFinite(position.x) ? position.x : player.position.x;
     const z = Number.isFinite(position.z) ? position.z : player.position.z;
@@ -837,8 +842,15 @@ export function createFlightController(ctx) {
       notify('No high peak nearby, so we start from the air.', 'info');
       return airstart();
     }
-    const launch = planPeakLaunch(world, peak);
-    resetActiveModel(airbornePose(launch.position, launch.heading));
+    const dive = craft.spawn.peakDive;
+    const launch = planPeakLaunch(world, peak, dive ? { diveAngle: dive.angle } : undefined);
+    const pose = airbornePose(launch.position, launch.heading);
+    // Craft with a peak dive leave the edge nose down at their launch speed instead of level at cruise.
+    if (dive && Number.isFinite(launch.pitch)) {
+      pose.quaternion.multiply(scratchQuaternion.setFromAxisAngle(scratchRight.set(1, 0, 0), launch.pitch * DEG));
+      pose.velocity.set(0, 0, -(mode === 'sim' ? dive.speed : dive.classicSpeed)).applyQuaternion(pose.quaternion);
+    }
+    resetActiveModel(pose);
     player.heading = launch.heading;
     clearBlend();
     syncVisual();
@@ -1114,6 +1126,10 @@ export function createFlightController(ctx) {
     get telemetry() { return telemetry; },
     get player() { return player; },
     notify,
+    /** The craft's relaunch (aerotow, peak launch, airstart), for abilities that bring the craft back up. */
+    relaunch() {
+      return relaunch();
+    },
     /** Emits a particle trail ('smoke' | 'spray') from one of the mesh's named anchors; it drifts with the wind. */
     emitTrail(kind, anchorName, dt) {
       const anchor = mesh && mesh.anchors ? mesh.anchors[anchorName] : null;

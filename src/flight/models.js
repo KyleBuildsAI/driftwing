@@ -16,6 +16,8 @@
 import { createArcadeModel } from './ArcadeModel.js';
 import { createSimFixedWingModel } from './SimFixedWing.js';
 import { createSimHelicopterModel } from './SimHelicopter.js';
+import { createSimWingsuitModel } from './SimWingsuit.js';
+import { createSimQuadModel } from './SimQuad.js';
 import { createAutopilotStage } from './autopilot.js';
 import { createAssistStage } from './assists.js';
 
@@ -121,6 +123,8 @@ export const flightModels = createFlightModelRegistry();
 flightModels.register('arcade', createArcadeModel);
 flightModels.register('fixedWing', createSimFixedWingModel);
 flightModels.register('helicopter', createSimHelicopterModel);
+flightModels.register('wingsuit', createSimWingsuitModel);
+flightModels.register('quad', createSimQuadModel);
 flightModels.register('jet', createSimFixedWingModel);
 flightModels.registerControlStage(createAutopilotStage());
 flightModels.registerControlStage(createAssistStage());
