@@ -646,7 +646,26 @@ export function createFlightController(ctx) {
     const wasOnGround = pose.onGround;
     disposeCraft();
     clearBlend();
-    installCraft(nextId);
+    try {
+      installCraft(nextId);
+    } catch (error) {
+      // A craft that fails to build must not take the flight system down: fly the previous one on.
+      console.error(`[DRIFTWING] craft "${nextId}" failed to load`, error);
+      if (mesh) {
+        scene.remove(mesh.root);
+        mesh.dispose();
+        mesh = null;
+      }
+      installCraft(previous);
+      if (mode === 'sim' && simAvailable()) sim = createSimModel(simKind());
+      resetModelTelemetry();
+      spawnAfterCraftChange(pose, wasOnGround);
+      syncVisual();
+      snapCamera();
+      settings.set('craft', previous);
+      notify(`The ${craftLabel(nextId)} could not be loaded, so you're still flying the ${craftLabel(previous)}.`, 'warning');
+      return false;
+    }
     let modeFellBack = false;
     if (mode === 'sim') {
       if (simAvailable()) {

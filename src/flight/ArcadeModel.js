@@ -1109,7 +1109,26 @@ export function createArcadeModel({ profile, world, bus, state, input: initialIn
  * The FlightModel surface matches the v1 model (reset, resetTo, setAutopilot, boost, barrelRoll which
  * rotorcraft refuse, getBaseQuaternion, getPath, getStats, visual, corkscrewOffset, wobbleQuaternion).
  */
+const HOVER_REQUIRED = Object.freeze([
+  'MAX_FORWARD_SPEED', 'MAX_REVERSE_SPEED', 'MAX_SIDE_SPEED', 'ACCELERATION', 'BRAKING', 'CLIMB_RATE', 'DESCENT_RATE',
+  'VERTICAL_RESPONSE', 'ATTITUDE_RESPONSE', 'THROTTLE_DEADBAND', 'THROTTLE_RATE', 'YAW_RATE', 'TURN_RATE',
+  'TURN_REFERENCE_SPEED', 'MAX_BANK', 'MAX_PITCH', 'CRUISE_PITCH', 'MIN_AGL', 'CUSHION_HEIGHT', 'SETTLE_SPEED',
+  'ROTOR_SPEED', 'DISC_TILT',
+]);
+const HOVER_AUTOPILOT_REQUIRED = Object.freeze([
+  'CRUISE_THROTTLE', 'CRUISE_SPEED', 'MIN_ALTITUDE', 'CLEARANCE', 'OVERRIDE_INPUT', 'OVERRIDE_SECONDS',
+]);
+
+/** Throws a clear error naming the first missing field, so a bad profile fails at craft switch. */
+function validateHoverProfile(profile) {
+  const missing = HOVER_REQUIRED.find((key) => !Number.isFinite(profile.hover[key]))
+    ?? HOVER_AUTOPILOT_REQUIRED.map((key) => `AUTOPILOT.${key}`).find((path) => !Number.isFinite(profile.AUTOPILOT?.[path.slice(10)]));
+  if (missing) throw new Error(`hover arcadeProfile is missing ${missing.startsWith('AUTOPILOT') ? missing : `hover.${missing}`}`);
+  if (!Array.isArray(profile.AUTOPILOT.LOOKAHEAD_SECONDS)) throw new Error('hover arcadeProfile is missing AUTOPILOT.LOOKAHEAD_SECONDS');
+}
+
 function createHoverArcadeModel({ profile, world, bus, state, input: initialInput }) {
+  validateHoverProfile(profile);
   const player = state.player;
   const HOVER = profile.hover;
   const SPEED = profile.SPEED;
