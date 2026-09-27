@@ -4,7 +4,7 @@
 //   variometer    climb beeps whose pitch and rate rise with the climb, a low tone in strong sink;
 //                 for craft with a 'vario' instrument, in SIM or when the vario is switched on
 //   gear motor    while state.flight.gear.transit (or gear.down) changes, then a lock clunk
-//   flap motor    while state.flight.flaps moves
+//   flap motor    while state.flight.flaps moves (or briefly when flapNotch changes)
 //   touchdown     'landed' event or a new ground contact: thump plus tire chirp (wheels), scrape
 //                 (skids) or a soft body thud, scaled by sink rate and ground speed
 //   detent click  afterburner engage/disengage, or crossing craftState.abDetent
@@ -17,6 +17,7 @@ import { glide, holdAt } from './synthKit.js';
 
 const MOTOR_HOLD_SECONDS = 0.15;
 const GEAR_EDGE_RUN_SECONDS = 0.6;
+const FLAP_NOTCH_RUN_SECONDS = 0.5;
 const TOUCHDOWN_GUARD_SECONDS = 0.35;
 const DETENT_GUARD_SECONDS = 0.15;
 const VARIO_LOOKAHEAD = 0.14;
@@ -248,7 +249,7 @@ export function createFlightCues(kit) {
   let varioMode = 'quiet';
   const motors = {
     gear: { synth: gearMotor, activeUntil: 0, running: false, runStart: 0, lastValue: null, lastDown: null },
-    flaps: { synth: flapMotor, activeUntil: 0, running: false, runStart: 0, lastValue: null },
+    flaps: { synth: flapMotor, activeUntil: 0, running: false, runStart: 0, lastValue: null, lastNotch: null },
   };
   let lastOnGround = null;
   let lastAfterburner = null;
@@ -295,6 +296,9 @@ export function createFlightCues(kit) {
     glide(varioSinkGain.gain, 0, time, 0.05);
     varioOn = false;
     varioMode = 'quiet';
+    readout.vario.mode = 'quiet';
+    readout.vario.frequency = 0;
+    readout.vario.period = 0;
   }
 
   function updateVario(time, climb, profile) {
@@ -376,8 +380,15 @@ export function createFlightCues(kit) {
 
     const flapState = motors.flaps;
     const flaps = Number.isFinite(flight.flaps) ? flight.flaps : 0;
-    const flapsMoving = flapState.lastValue !== null && Math.abs(flaps - flapState.lastValue) > 1e-4;
+    let flapsMoving = flapState.lastValue !== null && Math.abs(flaps - flapState.lastValue) > 1e-4;
+    // Likewise a notch change the model applies in one step runs the flap motor briefly.
+    const notch = Number.isFinite(flight.flapNotch) ? flight.flapNotch : 0;
+    if (flapState.lastNotch !== null && notch !== flapState.lastNotch) {
+      flapState.activeUntil = Math.max(flapState.activeUntil, time + FLAP_NOTCH_RUN_SECONDS);
+      flapsMoving = true;
+    }
     flapState.lastValue = flaps;
+    flapState.lastNotch = notch;
     runMotor(flapState, flapsMoving, time, pitch, clamp(flaps, 0, 1));
     readout.motors.gear = gearState.running;
     readout.motors.flaps = flapState.running;
@@ -473,6 +484,7 @@ export function createFlightCues(kit) {
         glide(motor.synth.output.gain, 0, time, 0.05);
       }
       motors.gear.lastDown = null;
+      motors.flaps.lastNotch = null;
       lastOnGround = null;
       lastAfterburner = null;
       lastDetent = null;
