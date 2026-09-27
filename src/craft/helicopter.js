@@ -200,7 +200,7 @@ function cabinSections() {
 function buildCabin(builder, sections) {
   const lower = new Set([FACE.LOWER_LEFT, FACE.BELLY_LEFT, FACE.BELLY_RIGHT, FACE.LOWER_RIGHT]);
   builder.loft(sections, (segment, face) => {
-    if (lower.has(face)) return segment >= 5 ? PALETTE.creamShade : PALETTE.charcoal;
+    if (lower.has(face)) return segment === 0 ? PALETTE.orange : PALETTE.creamShade;
     // An orange band down each flank behind the doors, and the engine-bay cowl stripe.
     if ((face === FACE.LEFT || face === FACE.RIGHT) && segment >= 4 && segment <= 6) return PALETTE.orange;
     if (segment === 0) return PALETTE.orange;
@@ -593,7 +593,8 @@ export default Object.freeze({
   cameraRig: Object.freeze({
     eye: EYE,
     chase: Object.freeze({ distance: 14.5, height: 4.4, lookAhead: 10 }),
-    wing: Object.freeze({ position: Object.freeze([2.3, -0.9, 0.6]), target: Object.freeze([0, 0.2, -2]) }),
+    // A tail-boom camera looking forward along the cabin, under the rotor.
+    wing: Object.freeze({ position: Object.freeze([0.9, 1.0, 4.2]), target: Object.freeze([0, 0.6, -1.2]) }),
     fpv: null,
     // Bubble cabin: low sills, a centre spine and door bows, and a centre console with the flight and
     // engine instruments under the glareshield; the cyclic between the knees.
@@ -607,8 +608,8 @@ export default Object.freeze({
       roof: 0.52,
       stick: true,
       panel: Object.freeze({
-        width: 0.54,
-        center: Object.freeze([0, -0.44, -0.64]),
+        width: 0.56,
+        center: Object.freeze([0, -0.38, -0.64]),
         layout: Object.freeze([
           Object.freeze(['airspeed', 'attitude', 'altitude', 'rotorRpm', 'torque']),
           Object.freeze(['radarAlt', 'heading', 'vsi', 'throttle']),

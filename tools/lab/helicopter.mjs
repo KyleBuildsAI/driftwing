@@ -462,7 +462,8 @@ function testAutorotation() {
   });
   const landed = rig.events.landed[0];
   const sinkRate = landed ? landed.sinkRate : touchdownSink;
-  record('autorotation flare: touchdown sink rate', sinkRate, 1.2, { unit: 'm/s', compare: 'max', note: landed ? `${landed.grade}, ${landed.groundSpeed.toFixed(1)} m/s ground speed, rotor down to ${(minRpm * 100).toFixed(0)} %` : `no graded landing (${Number.isFinite(touchdownSpeed) ? touchdownSpeed.toFixed(1) : '-'} m/s)` });
+  record('autorotation flare: touchdown sink rate', sinkRate, 1.2, { unit: 'm/s', compare: 'max', note: landed ? `${landed.grade}, rotor down to ${(minRpm * 100).toFixed(0)} %` : `no graded landing (${Number.isFinite(touchdownSpeed) ? touchdownSpeed.toFixed(1) : '-'} m/s)` });
+  record('autorotation flare: touchdown ground speed', landed ? landed.groundSpeed : 99, 13, { unit: 'm/s', compare: 'max', decimals: 1, note: 'a run-on landing on the skids' });
 
   // 0 %: the collective left at the hover setting after the engine quits -> the rotor decays.
   const raw = createRig({ assists: 0.5 });

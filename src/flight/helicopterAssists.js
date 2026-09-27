@@ -108,6 +108,10 @@ export const HELI_TUNING = Object.freeze({
     FLARE_BASE_PITCH: 6 * DEG,
     FLARE_PITCH_GAIN: 4 * DEG,
     FLARE_DESCENT_PER_METRE: 0.3,
+    /** ...and at least FLARE_SPEED_GAIN per m/s of ground speed above FLARE_SPEED_BASE + FLARE_SPEED_PER_METRE x height. */
+    FLARE_SPEED_GAIN: 0.6 * DEG,
+    FLARE_SPEED_BASE: 5,
+    FLARE_SPEED_PER_METRE: 1,
     FLARE_RPM: 1.05,
     LEVEL_AGL: 3.5,
     LEVEL_PITCH: 4 * DEG,
@@ -487,7 +491,8 @@ function autorotationAssist(memory, data, position, dt, cyclicIdle, controls, ou
     // The nose comes up as far as it takes to bring the descent down with the height (no balloon),
     // and eases as the forward speed runs out.
     const descentTarget = tuning.FLARE_DESCENT_PER_METRE * height;
-    const flare = tuning.FLARE_BASE_PITCH + tuning.FLARE_PITCH_GAIN * (descent - descentTarget);
+    const speedTarget = tuning.FLARE_SPEED_BASE + tuning.FLARE_SPEED_PER_METRE * height;
+    const flare = tuning.FLARE_BASE_PITCH + Math.max(tuning.FLARE_PITCH_GAIN * (descent - descentTarget), tuning.FLARE_SPEED_GAIN * (data.groundSpeed - speedTarget));
     pitchTarget = clamp(flare, 0, tuning.FLARE_PITCH) * smooth01(data.groundSpeed / 8);
     memory.positionCaptured = false;
   } else {
