@@ -94,7 +94,8 @@ export function createCameraSystem(ctx) {
   let instrumentElapsed = 0;
   let zoomTan = 1;
   const redrawTimes = [];
-  const counters = { panelRedraws: 0, hudTicks: 0, instrumentTicks: 0, viewChanges: 0, returnFlights: 0 };
+  // panelDrawMs / hudDrawMs: smoothed CPU time of one 30 Hz repaint.
+  const counters = { panelRedraws: 0, hudTicks: 0, instrumentTicks: 0, viewChanges: 0, returnFlights: 0, panelDrawMs: 0, hudDrawMs: 0 };
 
   // ---- Context helpers ------------------------------------------------------------------------------
   function flightSystem() {
@@ -505,10 +506,14 @@ export function createCameraSystem(ctx) {
     const cockpitOnScreen = view === 'cockpit' && !photo && !returnFlight.active;
     const cockpit = views.cockpit.cockpit;
     if (tick && cockpitOnScreen && cockpit && cockpit.panel) {
+      const started = performance.now();
       cockpit.panel.redraw(instruments);
+      counters.panelDrawMs += (performance.now() - started - counters.panelDrawMs) * 0.1;
       counters.panelRedraws++;
     }
+    const hudStarted = performance.now();
     hud.update(realDt, tick && !photo);
+    if (tick && hud.visible && !photo) counters.hudDrawMs += (performance.now() - hudStarted - counters.hudDrawMs) * 0.1;
     if (tick && hud.visible && !photo) counters.hudTicks++;
   }
 
@@ -624,6 +629,8 @@ export function createCameraSystem(ctx) {
           panelRedraws: counters.panelRedraws,
           hudRedraws: counters.hudTicks,
           redrawHz: Math.round(measuredRedrawHz() * 10) / 10,
+          panelDrawMs: Math.round(counters.panelDrawMs * 100) / 100,
+          hudDrawMs: Math.round(counters.hudDrawMs * 100) / 100,
           units: instruments.source.units.system,
         },
         hud: hud.getStats(),
