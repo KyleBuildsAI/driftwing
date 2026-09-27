@@ -1176,6 +1176,7 @@ export function createUISystem(ctx) {
     if (!state.ready || storage.read(SIM_HINT_KEY, false) === true) return;
     if (hintState.visible) {
       renderHint();
+      hintState.hideAt = Math.max(hintState.hideAt, uiClock + 6.5);
       storage.write(SIM_HINT_KEY, true);
       return;
     }
