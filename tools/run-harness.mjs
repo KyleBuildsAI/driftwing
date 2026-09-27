@@ -31,6 +31,8 @@ const RESERVED_PORT = 5199;
 /** Ports Chrome refuses to load (net::ERR_UNSAFE_PORT) in the range the OS may hand out. */
 const CHROME_UNSAFE_PORTS = new Set([5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080]);
 const POLL_MS = 3000;
+/** Chrome's own close can hang for minutes on a loaded machine; after this the runner kills it. */
+const CLOSE_TIMEOUT_MS = 30000;
 const EXPECTED_BACKEND = Object.freeze({ webgpu: 'WebGPU', webgl: 'WebGL2' });
 
 function parseArgs(argv) {
@@ -79,6 +81,25 @@ function parseArgs(argv) {
 }
 
 const sleep = (ms) => new Promise((resolveSleep) => { setTimeout(resolveSleep, ms); });
+
+function log(started, text) {
+  process.stdout.write(`run-harness: [${Math.round((Date.now() - started) / 1000)} s] ${text}\n`);
+}
+
+/** Closes the browser we launched; kills its process when close() does not finish in time. */
+async function closeBrowser(browser, problems) {
+  const closed = await Promise.race([
+    browser.close().then(() => true, (error) => {
+      problems.push(`browser close failed: ${error.message}`);
+      return false;
+    }),
+    sleep(CLOSE_TIMEOUT_MS).then(() => false),
+  ]);
+  if (closed) return 'closed';
+  const child = browser.process();
+  if (child && child.exitCode === null) child.kill('SIGKILL');
+  return 'killed after the close timed out';
+}
 
 /** A free TCP port on 127.0.0.1 that Chrome will load and that is not the player's port. */
 async function findFreePort() {
@@ -281,7 +302,7 @@ async function main() {
       state = await readProgress(page);
       const line = describeProgress(state);
       if (line !== lastLine) {
-        process.stdout.write(`run-harness: [${Math.round((Date.now() - started) / 1000)} s] ${line}\n`);
+        log(started, line);
         lastLine = line;
       }
       if (state && state.status === 'complete') break;
@@ -289,6 +310,7 @@ async function main() {
     if (!state || state.status !== 'complete') throw new Error(`the harness did not finish within ${Math.round(timeLimitMs(options) / 60000)} min (last state: ${lastLine})`);
 
     report = await page.evaluate(() => JSON.parse(JSON.stringify(window.DRIFTWING.testReport)));
+    log(started, 'harness complete, taking the summary screenshots');
     runner.backend = report.environment?.backends ?? [report.environment?.backend];
     runner.result = report.result;
     await sleep(1500);
@@ -313,8 +335,9 @@ async function main() {
   } catch (error) {
     runner.problems.push(error.message);
   } finally {
-    if (browser) await browser.close().catch((error) => runner.problems.push(`browser close failed: ${error.message}`));
+    if (browser) log(started, `browser ${await closeBrowser(browser, runner.problems)}`);
     await server.close().catch((error) => runner.problems.push(`dev server close failed: ${error.message}`));
+    log(started, 'dev server stopped');
     try {
       rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     } catch (error) {

@@ -44,7 +44,13 @@ export function createFrameProfiler(ctx, { exclude = [] } = {}) {
           .sort((first, second) => second.duration - first.duration)
           .slice(0, 3)
           .map((script) => `${String(script.sourceURL || script.invoker || 'script').split('/').pop()}${script.sourceFunctionName ? ` ${script.sourceFunctionName}` : ''} ${round1(script.duration)} ms`);
-        loafEntries.push({ start: entry.startTime, end: entry.startTime + entry.duration, duration: entry.duration, blockingDuration: entry.blockingDuration ?? null, scriptsMs, topScripts });
+        const end = entry.startTime + entry.duration;
+        // Phases: tasks before the rendering update, the rendering update up to style and layout
+        // (rAF callbacks: the game frame), then style, layout and paint.
+        const renderStart = entry.renderStart > 0 ? entry.renderStart : end;
+        const styleStart = entry.styleAndLayoutStart > 0 ? entry.styleAndLayoutStart : end;
+        const phases = { tasksMs: round1(renderStart - entry.startTime), renderMs: round1(styleStart - renderStart), styleLayoutMs: round1(end - styleStart) };
+        loafEntries.push({ start: entry.startTime, end, duration: entry.duration, blockingDuration: entry.blockingDuration ?? null, scriptsMs, topScripts, phases });
         if (loafEntries.length > MAX_LOAF_ENTRIES) loafEntries.shift();
       }
     });
@@ -110,7 +116,7 @@ export function createFrameProfiler(ctx, { exclude = [] } = {}) {
         cause,
         systemsMs: round1(frame.systemsMs),
         topSystems: frame.top,
-        loaf: best ? { durationMs: round1(best.duration), overlapMs: round1(bestOverlap), scriptsMs: round1(best.scriptsMs), blockingMs: best.blockingDuration === null ? null : round1(best.blockingDuration), topScripts: best.topScripts } : null,
+        loaf: best ? { durationMs: round1(best.duration), overlapMs: round1(bestOverlap), scriptsMs: round1(best.scriptsMs), blockingMs: best.blockingDuration === null ? null : round1(best.blockingDuration), topScripts: best.topScripts, ...best.phases } : null,
       };
     },
 

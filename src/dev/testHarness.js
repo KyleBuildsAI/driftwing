@@ -880,8 +880,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
       if (elapsed > config.runWarmupSeconds) {
         const detail = frameMs > config.frameLimitMs ? { startMs: now - frameMs, endMs: now, systemsMs: frameWork.systemsMs, top: frameWork.top } : null;
         run.recorder.push(frameMs, elapsed - config.runWarmupSeconds, detail);
-      }
-      else {
+      } else {
         run.warmupFrames++;
         run.warmupMaxMs = Math.max(run.warmupMaxMs, frameMs);
       }
