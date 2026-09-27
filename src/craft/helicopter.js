@@ -390,9 +390,10 @@ function createRotorDisc(radius) {
   const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true });
   const distance = length(uv().sub(0.5)).mul(2);
   const band = smoothstep(float(0.06), float(0.14), distance).mul(float(1).sub(smoothstep(float(0.93), float(1), distance)));
-  const tipRing = smoothstep(float(0.86), float(0.9), distance).mul(float(1).sub(smoothstep(float(0.9), float(0.95), distance)));
-  material.colorNode = mix(color(0x33363f), color(0xe0703a), tipRing.mul(0.6));
-  material.opacityNode = band.mul(distance.mul(0.35).add(0.65)).mul(opacity).add(tipRing.mul(opacity).mul(0.25));
+  // The orange tip stripes blur into a faint ring just inside the tips.
+  const tipRing = smoothstep(float(0.87), float(0.9), distance).mul(float(1).sub(smoothstep(float(0.9), float(0.94), distance)));
+  material.colorNode = mix(color(0x3a3d46), color(0xd98a5c), tipRing.mul(0.45));
+  material.opacityNode = band.mul(distance.mul(0.4).add(0.6)).mul(opacity).mul(tipRing.mul(0.25).add(1));
   const geometry = new THREE.CircleGeometry(radius, 56);
   geometry.rotateX(-Math.PI / 2);
   const positions = geometry.attributes.position;
@@ -407,7 +408,7 @@ function createRotorDisc(radius) {
     mesh,
     /** Faint while the rotor spins up, a soft disc at governed speed; hidden while it is stopped. */
     update(share, coning) {
-      opacity.value = share > 0.03 ? 0.04 + 0.2 * smooth01((share - 0.1) / 0.8) : 0;
+      opacity.value = share > 0.03 ? 0.05 + 0.17 * smooth01((share - 0.1) / 0.8) : 0;
       mesh.visible = share > 0.03;
       mesh.scale.y = Math.tan(coning);
     },
@@ -591,7 +592,7 @@ export default Object.freeze({
   }),
   cameraRig: Object.freeze({
     eye: EYE,
-    chase: Object.freeze({ distance: 16, height: 4.6, lookAhead: 10 }),
+    chase: Object.freeze({ distance: 14.5, height: 4.4, lookAhead: 10 }),
     wing: Object.freeze({ position: Object.freeze([2.3, -0.9, 0.6]), target: Object.freeze([0, 0.2, -2]) }),
     fpv: null,
     // Bubble cabin: low sills, a centre spine and door bows, and a centre console with the flight and
@@ -606,8 +607,8 @@ export default Object.freeze({
       roof: 0.52,
       stick: true,
       panel: Object.freeze({
-        width: 0.66,
-        center: Object.freeze([0, -0.34, -0.66]),
+        width: 0.54,
+        center: Object.freeze([0, -0.44, -0.64]),
         layout: Object.freeze([
           Object.freeze(['airspeed', 'attitude', 'altitude', 'rotorRpm', 'torque']),
           Object.freeze(['radarAlt', 'heading', 'vsi', 'throttle']),

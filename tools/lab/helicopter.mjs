@@ -599,6 +599,30 @@ function testLanding() {
   });
   record('hard arrival on the skids exceeds the crash sink rate', touchdown ? touchdown.sinkRate : 0, limits.crashSinkRate, { unit: 'm/s', compare: 'min', note: `limit ${limits.crashSinkRate} m/s -> soft crash in the controller; graded landings ${hard.events.landed.length}` });
 
+  // 100 %: no touchdown on a 22 degree slope or on water; the auto-hover holds a low hover instead.
+  for (const surface of ['slope', 'water']) {
+    const guarded = createRig({ assists: 1 });
+    if (surface === 'slope') {
+      const rise = Math.tan(22 * DEG);
+      guarded.world.groundHeight = (x) => x * rise;
+      guarded.env.groundHeight = guarded.world.groundHeight;
+    } else {
+      guarded.world.groundHeight = () => -6;
+      guarded.env.groundHeight = guarded.world.groundHeight;
+      guarded.env.waterLevel = 0;
+    }
+    guarded.airborne({ altitude: 16 });
+    guarded.run(4);
+    guarded.pilot.throttle = 0.15;
+    let touched = false;
+    let strike = '';
+    guarded.run(25, (lab) => {
+      if (lab.model.contact.onGround || lab.model.contact.water) touched = true;
+      if (lab.model.contact.bodyStrike) strike = lab.model.contact.bodyStrike.part;
+    });
+    record(`100 % landing guard over ${surface === 'slope' ? 'a 22 deg slope' : 'water'}`, guarded.data.agl, [1.5, 4], { unit: 'm', compare: touched || strike ? false : 'range', decimals: 2, note: touched || strike ? `touched ${strike}` : 'holds a low hover (lever down)' });
+  }
+
   // Lift off from the ground at 100 %: lever above the detent.
   const liftoff = createRig({ assists: 1 });
   liftoff.parked({ lever: 0.5 });

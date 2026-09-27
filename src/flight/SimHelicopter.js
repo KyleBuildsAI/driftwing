@@ -228,6 +228,7 @@ function buildHelicopter(profile) {
     vrs: profile.vortexRing,
     bladeStall: profile.bladeStall,
     skidDepth: -Math.min(...profile.contacts.filter((contact) => contact.gear).map((contact) => contact.position[1])),
+    tailPoint: profile.contacts.filter((contact) => !contact.gear).reduce((aftmost, contact) => (!aftmost || contact.position[2] > aftmost.position[2] ? contact : aftmost), null),
   };
 }
 
@@ -334,6 +335,9 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
     translationalLift: 0,
     groundEffect: 0,
     overspeed: false,
+    /** The aft-most body point (tail stinger): how far behind the skids it sits and how high above their plane (m). */
+    tailArm: heli.tailPoint ? heli.tailPoint.position[2] : 0,
+    tailHeight: heli.tailPoint ? heli.tailPoint.position[1] + heli.skidDepth : 0,
     vne,
     gLimit,
     mass,

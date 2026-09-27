@@ -112,8 +112,16 @@ export const HELI_TUNING = Object.freeze({
     LEVEL_AGL: 3.5,
     LEVEL_PITCH: 4 * DEG,
     CUSHION_P: 0.12,
+    /** The flare keeps the tail stinger this far (m) above the ground. */
+    TAIL_MARGIN: 0.8,
   }),
   HOVER_HOLD: Object.freeze({ STICK_SPEED: 5, LEVER_RATE: 2.5, PEDAL_RATE: 25 * DEG }),
+  /**
+   * Terrain awareness at full assists: the auto-hover will not set the skids down on a slope steeper
+   * than SLOPE_LIMIT or on water (it holds GUARD_HEIGHT above it); the autorotation flare looks
+   * LOOKAHEAD_SECONDS ahead along the track for rising ground.
+   */
+  TERRAIN: Object.freeze({ SLOPE_PROBE: 3, SLOPE_LIMIT: 14 * DEG, GUARD_HEIGHT: 2.5, LOOKAHEAD_SECONDS: Object.freeze([1, 2, 3]) }),
   PICKUP: Object.freeze({ MOVE: 0.03, SLEW: 0.6 }),
 });
 
@@ -319,6 +327,34 @@ function verticalSpeedToCollective(memory, data, verticalSpeedTarget, dt) {
 }
 
 /**
+ * The ground around the helicopter from the shared height function: the slope under it (rad),
+ * whether it is over water, and the skids' height above the highest surface along the track over the
+ * next few seconds (m; at most the height above the ground below).
+ */
+function terrainAround(env, position, data, out) {
+  const tuning = HELI_TUNING.TERRAIN;
+  const ground = env.groundHeight;
+  const water = Number.isFinite(env.waterLevel) ? env.waterLevel : -Infinity;
+  const probe = tuning.SLOPE_PROBE;
+  const eastWest = ground(position.x + probe, position.z) - ground(position.x - probe, position.z);
+  const northSouth = ground(position.x, position.z + probe) - ground(position.x, position.z - probe);
+  const here = ground(position.x, position.z);
+  out.slope = Math.atan(Math.hypot(eastWest, northSouth) / (2 * probe));
+  out.water = here < water;
+  const agl = Number.isFinite(data.agl) ? data.agl : Infinity;
+  const skids = Math.max(here, water) + agl;
+  let ahead = agl;
+  const velocity = data.velocity;
+  for (const seconds of tuning.LOOKAHEAD_SECONDS) {
+    const surface = Math.max(ground(position.x + velocity.x * seconds, position.z + velocity.z * seconds), water);
+    ahead = Math.min(ahead, skids - surface);
+  }
+  out.heightAhead = ahead;
+  return out;
+}
+const terrainScratch = { slope: 0, water: false, heightAhead: Infinity };
+
+/**
  * Descent limit at low airspeed (m/s, negative): the auto-hover never descends into its own wake
  * fast enough to settle into the vortex ring; with airspeed the full descent rate returns.
  */
@@ -416,9 +452,10 @@ const tiltOut = { pitch: 0, bank: 0 };
  * held by the collective; the flare (nose up) turns the forward speed into rotor thrust and rpm; then
  * level the skids and cushion the touchdown with the rotor's stored energy.
  */
-function autorotationAssist(memory, data, position, dt, cyclicIdle, controls, out) {
+function autorotationAssist(memory, data, position, dt, cyclicIdle, controls, out, env) {
   const tuning = HELI_TUNING.AUTOROTATION;
-  const height = Number.isFinite(data.agl) ? data.agl : Infinity;
+  // Height for the flare: the lower of the height above the ground here and the ground ahead.
+  const height = terrainAround(env, position, data, terrainScratch).heightAhead;
   const descent = Math.max(0, -data.verticalSpeed);
   const flareHeight = tuning.FLARE_BASE + tuning.FLARE_PER_DESCENT * descent;
   const levelling = height < tuning.LEVEL_AGL || data.onGround;
@@ -457,6 +494,11 @@ function autorotationAssist(memory, data, position, dt, cyclicIdle, controls, ou
     velocityToAttitude(memory, data, position, tuning.GLIDE_SPEED, 0, dt, tiltOut, tuning.GLIDE_TILT);
     pitchTarget = tiltOut.pitch;
     bankTarget = tiltOut.bank;
+  }
+  // Near the ground the nose may only come up as far as the tail stinger clears the surface.
+  if (cyclicIdle && data.tailArm > 0) {
+    const clearance = (Math.max(0, height) + data.tailHeight - tuning.TAIL_MARGIN) / data.tailArm;
+    pitchTarget = Math.min(pitchTarget, Math.asin(clamp(clearance, 0, 0.7)));
   }
   attitudeToCyclic(memory, data, pitchTarget, bankTarget, dt, attitudeOut);
   out.pitch = attitudeOut.pitch;
@@ -540,7 +582,7 @@ const helicopterAssistHandler = Object.freeze({
 
     // ---- Engine off at full assists: autorotation assist ----------------------------------------------
     if (!data.engineRunning && hover > 0 && (!data.onGround || data.rotorRpm > 0.3)) {
-      autorotationAssist(memory, data, position, dt, cyclicIdle, controls, autorotationOut);
+      autorotationAssist(memory, data, position, dt, cyclicIdle, controls, autorotationOut, context.env);
       controls.pitch = clamp(controls.pitch + (autorotationOut.pitch - controls.pitch) * hover, -1, 1);
       controls.roll = clamp(controls.roll + (autorotationOut.roll - controls.roll) * hover, -1, 1);
       controls.collective = lever + (autorotationOut.collective - lever) * hover;
@@ -618,6 +660,12 @@ const helicopterAssistHandler = Object.freeze({
         memory.altitudeCaptured = false;
       }
       verticalTarget = Math.max(verticalTarget, landingDescentLimit(data), ringSafeDescent(data));
+      // No touchdown on a steep slope or on water: hold a low hover above it instead.
+      const guard = tuning.TERRAIN.GUARD_HEIGHT;
+      if (!data.onGround && data.agl < guard + 2) {
+        const terrain = terrainAround(context.env, position, data, terrainScratch);
+        if (terrain.water || terrain.slope > tuning.TERRAIN.SLOPE_LIMIT) verticalTarget = Math.max(verticalTarget, (guard - data.agl) * 0.8);
+      }
       const collective = verticalSpeedToCollective(memory, data, verticalTarget, dt);
       controls.collective = lever + (collective - lever) * hover;
     } else {
