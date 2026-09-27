@@ -147,7 +147,7 @@ function smooth01(value) {
 // CONTROL LOOPS (shared by the assists and the autopilot)
 // ============================================================================================
 /** Per-loop memory: integrators, captured targets and the collective pickup. */
-export function createLoopMemory() {
+function createLoopMemory() {
   return {
     resetCount: -1,
     initialized: false,
@@ -159,7 +159,6 @@ export function createLoopMemory() {
     holdBank: 0,
     holdCaptured: false,
     cyclicIdle: 0,
-    pedalIdle: 0,
     headingTarget: 0,
     headingIntegral: 0,
     tiltIntegralForward: 0,
@@ -173,7 +172,6 @@ export function createLoopMemory() {
     verticalIntegral: 0,
     collective: 0.5,
     collectiveCeiling: 1,
-    autoCollective: 0.5,
     autoIntegral: 0,
     flaring: false,
     ringEscape: false,
@@ -209,8 +207,9 @@ function initializeLoops(memory, data, controls) {
   memory.altitudeCaptured = false;
   memory.verticalIntegral = 0;
   memory.collective = data.collective;
-  memory.autoCollective = data.collective;
   memory.autoIntegral = 0;
+  memory.flaring = false;
+  memory.ringEscape = false;
 }
 
 /** Groundspeed in the heading frame: forward and to the right (m/s). */
@@ -550,7 +549,8 @@ const helicopterAssistHandler = Object.freeze({
     const dt = context.dt;
     const position = model.state.position;
     const craftState = context.env && context.env.craftState ? context.env.craftState : {};
-    const autopilotFlying = Boolean(context.autopilot && context.autopilot.enabled);
+    // The autopilot flies only with the engine running; engine off, the assists take the autorotation.
+    const autopilotFlying = Boolean(context.autopilot && context.autopilot.enabled) && data.engineRunning;
     if (!memory.initialized) initializeLoops(memory, data, controls);
 
     const rawLever = clamp(Number.isFinite(controls.collective) ? controls.collective : 0.5, 0, 1);
@@ -753,6 +753,11 @@ const helicopterAutopilot = Object.freeze({
     }
     const model = context.model;
     const data = model.flightData;
+    if (!data.engineRunning) {
+      // No power to hold anything with: the assists' autorotation flies it (at any level while held hands off).
+      memory.engaged = false;
+      return false;
+    }
     const dt = context.dt;
     const position = model.state.position;
     const env = context.env;
@@ -772,7 +777,7 @@ const helicopterAutopilot = Object.freeze({
 
     // ---- Collective: altitude -> vertical speed -> collective ------------------------------------------------
     const verticalTarget = Math.max(clamp((altitudeTarget - position.y) * AUTOPILOT.CLIMB_PER_METRE, -AUTOPILOT.MAX_DESCENT, AUTOPILOT.MAX_CLIMB), landingDescentLimit(data));
-    controls.collective = data.engineRunning ? verticalSpeedToCollective(memory, data, verticalTarget, dt) : controls.collective;
+    controls.collective = verticalSpeedToCollective(memory, data, verticalTarget, dt);
 
     // ---- Cyclic and pedals ---------------------------------------------------------------------------------------
     const headingError = wrapSignedRadians((headingTarget - data.heading) * DEG);

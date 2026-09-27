@@ -729,6 +729,11 @@ function testAutopilot() {
   hold.autopilot.speed = 50;
   hold.run(40);
   record('hands-off hold: hovering', hold.data.groundSpeed, 1, { unit: 'm/s', compare: 'max', note: `altitude ${hold.position().y.toFixed(1)} m` });
+  // Engine off with the autopilot engaged: the autopilot stands aside and the assists autorotate.
+  hold.pilot.actions.add('engineToggle');
+  hold.tick();
+  hold.run(15);
+  record('autopilot engaged, engine off: autorotation holds the rotor', hold.data.rotorRpm * 100, [92, 110], { unit: '%', compare: 'range', decimals: 1, note: `descending ${(-hold.data.verticalSpeed).toFixed(1)} m/s at ${hold.data.airspeed.toFixed(1)} m/s` });
 }
 
 /** The assist catalog the UI tooltip lists. */

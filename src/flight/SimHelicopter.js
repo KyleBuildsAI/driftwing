@@ -47,7 +47,7 @@ const TAIL_CL_MAX = 1.1;
 /** Induced velocity follows its target with this time constant (dynamic inflow). */
 const INFLOW_SECONDS = 0.1;
 /** Minimum hover-induced velocity used to normalize the inflow curves (m/s). */
-const MIN_INDUCED = 0.5;
+const MIN_INDUCED = 0.1;
 /** The empirical axial-descent inflow polynomial (vortex ring and turbulent wake states). */
 const DESCENT_INFLOW = Object.freeze([1, -1.125, -1.372, -1.718, -0.655]);
 /** The turbine delivers at most this multiple of its rated torque at low shaft speed. */
@@ -484,18 +484,21 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
     computeDiscNormal(discNormal);
 
     const thrustScale = rho * heli.discArea * Math.max(tip, 1) * Math.max(tip, 1);
+    // The wake runs along the thrust: for negative thrust (flat pitch on the ground) it reverses, so the
+    // induced velocity is a signed state that passes smoothly through zero.
+    const direction = rotor.thrust >= 0 ? 1 : -1;
     const hoverInduced = Math.max(Math.sqrt(Math.abs(rotor.thrust) / (2 * rho * heli.discArea)), MIN_INDUCED);
-    const axialRatio = climb / hoverInduced;
+    const axialRatio = (direction * climb) / hoverInduced;
     const edgewiseRatio = edgewise / hoverInduced;
     const groundShare = groundEffectShare(hubHeight, heli.radius, edgewiseRatio);
     // Near the hover the empirical axial curve (vortex ring, turbulent wake) scaled by Glauert's
     // forward-flight reduction; with edgewise flow, Glauert's full momentum solution.
     let freeInduced = hoverInduced * axialInflowRatio(axialRatio) * forwardInflowRatio(edgewiseRatio);
     const sweptWake = smoothstep(0.6, 1.6, edgewiseRatio);
-    if (sweptWake > 0) freeInduced += (glauertInflow(hoverInduced, edgewise, climb) - freeInduced) * sweptWake;
-    const targetInduced = freeInduced * (1 - groundShare);
+    if (sweptWake > 0) freeInduced += (glauertInflow(hoverInduced, edgewise, direction * climb) - freeInduced) * sweptWake;
+    const targetInduced = direction * freeInduced * (1 - groundShare);
     rotor.induced += (targetInduced - rotor.induced) * (1 - Math.exp(-dt / INFLOW_SECONDS));
-    const inducedSigned = rotor.thrust >= 0 ? rotor.induced : -rotor.induced;
+    const inducedSigned = rotor.induced;
     const advance = edgewise / Math.max(tip, 1);
     const inflow = (climb + inducedSigned) / Math.max(tip, 1);
     const pitch = heli.collectiveMin + controlsActual.collective * (heli.collectiveMax - heli.collectiveMin);
@@ -558,7 +561,7 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
       momentBody.z += heli.rotation * stall.rollMoment * stallMoment * (1 + 0.3 * noise(time, 3.1, 5));
     }
     // Rotor-wash download on the fuselage in the hover, fading with airspeed.
-    const wash = 2 * rotor.induced;
+    const wash = 2 * Math.max(rotor.induced, 0);
     const washShare = 1 - smoothstep(0.5 * hoverInduced, 2.2 * hoverInduced, edgewise);
     forceBody.y -= 0.5 * rho * wash * wash * heli.download * washShare;
 
