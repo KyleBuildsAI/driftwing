@@ -21,22 +21,14 @@
 //   { "eval": "window.DRIFTWING.state.player.speed" }  evaluate, result is logged
 //   { "shot": "name" }                       screenshot to <out>/<name>.png
 import puppeteer from 'puppeteer-core';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { findBrowser } from './browser.mjs';
 import { startStaticServer } from './serve.mjs';
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BROWSER_CANDIDATES = [
-  process.env.CHROME_PATH,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-].filter(Boolean);
 
 function parseArgs(argv) {
   const options = {
@@ -98,8 +90,7 @@ async function runSteps(page, steps, options, report) {
 async function main() {
   const options = parseArgs(process.argv);
   mkdirSync(options.out, { recursive: true });
-  const executablePath = options.browser ?? BROWSER_CANDIDATES.find((candidate) => existsSync(candidate));
-  if (!executablePath) throw new Error('No Chrome/Edge found; set CHROME_PATH');
+  const executablePath = findBrowser(options.browser);
 
   const filePath = resolve(PROJECT_ROOT, options.file);
   const query = options.query ? `?${options.query}` : '';
