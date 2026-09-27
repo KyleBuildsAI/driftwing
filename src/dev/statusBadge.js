@@ -14,6 +14,7 @@ const SAMPLE_CAPACITY = 2048;
 const DEVICE_KIND_LABELS = Object.freeze({
   'hotas-stick': 'Stick',
   'hotas-throttle': 'Throttle',
+  'hotas-pedals': 'Pedals',
   gamepad: 'Gamepad',
   keyboard: 'Keyboard',
   mouse: 'Mouse',
