@@ -285,6 +285,8 @@ function createFixedWingMemory() {
     attitudeRate: 0,
     lastSpeed: NaN,
     acceleration: 0,
+    /** Flight path through the air mass (rad), updated every tick. */
+    airPath: 0,
     lastPitch: 0,
   };
 }
@@ -324,8 +326,15 @@ function loadPerAoa(data) {
   return Number.isFinite(perAoa) ? Math.max(perAoa, 1 / (20 * DEG)) : 1 / (20 * DEG);
 }
 
-/** Smoothed rates the loops read: airspeed change (m/s^2) and pitch attitude change (rad/s). */
+/**
+ * Smoothed rates the loops read: airspeed change (m/s^2) and pitch attitude change (rad/s); and the
+ * flight path through the air mass (from the attitude and the angle of attack, no sideslip), which is
+ * what the path hold holds: in rising or sinking air the craft goes up or down with it (a glider
+ * keeps the lift of a thermal) instead of fighting it.
+ */
 function updateRates(data, memory, dt) {
+  const sinPath = Math.sin(data.pitch) * Math.cos(data.aoa) - Math.cos(data.pitch) * Math.cos(data.bank) * Math.sin(data.aoa);
+  memory.airPath = Math.asin(clamp(Number.isFinite(sinPath) ? sinPath : 0, -1, 1));
   const speedRate = Number.isFinite(memory.lastSpeed) ? clamp((data.airspeed - memory.lastSpeed) / dt, -15, 15) : 0;
   memory.lastSpeed = data.airspeed;
   memory.acceleration += (speedRate - memory.acceleration) * (1 - Math.exp(-FIXED_WING.PATH_HOLD.ACCELERATION_SMOOTHING * dt));
@@ -365,7 +374,7 @@ function protectLoad(loadCommand, data, speed, weight, handsOff, memory) {
   let command = loadCommand;
   if (weight > 0) {
     const cosBank = Math.max(Math.cos(data.bank), 0.3);
-    const pathLoad = Math.cos(data.flightPath);
+    const pathLoad = Math.cos(memory.airPath);
     const attitude = data.pitch + tuning.LEAD * memory.attitudeRate;
     const upper = (pathLoad + (speed * tuning.PITCH_RATE_GAIN * (tuning.PITCH_UP_LIMIT - attitude)) / GRAVITY) / cosBank;
     const lower = (pathLoad + (speed * tuning.PITCH_RATE_GAIN * (tuning.PITCH_DOWN_LIMIT - attitude)) / GRAVITY) / cosBank;
@@ -373,7 +382,7 @@ function protectLoad(loadCommand, data, speed, weight, handsOff, memory) {
     command += weight * (bounded - command);
   }
   if (handsOff) {
-    const floor = Math.min(FIXED_WING.HANDS_OFF_MIN_LOAD, Math.cos(data.flightPath) - tuning.PUSH_MARGIN);
+    const floor = Math.min(FIXED_WING.HANDS_OFF_MIN_LOAD, Math.cos(memory.airPath) - tuning.PUSH_MARGIN);
     command = clamp(command, floor, FIXED_WING.HANDS_OFF_MAX_LOAD);
   }
   return command;
@@ -411,7 +420,7 @@ function applyPitchAssist(controls, data, trimWeight, fbw, pitchProtection, memo
     // the angle of attack that sheds the excess load (the load per rad of angle of attack grows with
     // the dynamic pressure) instead of the hold. In a steep dive (a phugoid the pilot started) the cap
     // rises by up to DIVE_ALLOWANCE so the hold can still pull out before the speed runs away.
-    const diveAllowance = autoTrim.DIVE_ALLOWANCE * smoothstep(autoTrim.DIVE_FROM, autoTrim.DIVE_FULL, -data.flightPath);
+    const diveAllowance = autoTrim.DIVE_ALLOWANCE * smoothstep(autoTrim.DIVE_FROM, autoTrim.DIVE_FULL, -memory.airPath);
     const capLoad = FIXED_WING.HANDS_OFF_MAX_LOAD - autoTrim.COMFORT_MARGIN + diveAllowance;
     const error = Math.min(memory.holdAoa - data.aoa, (capLoad - data.gLoad) / loadPerAoa(data));
     directRate = trimWeight * autoTrim.HOLD_I * error;
@@ -425,7 +434,7 @@ function applyPitchAssist(controls, data, trimWeight, fbw, pitchProtection, memo
     const speed = Math.max(data.airspeed, 1);
     const referenceSpeed = Math.max(data.stallSpeed * law.SCHEDULE_REFERENCE, 5);
     const schedule = clamp((referenceSpeed * referenceSpeed) / (speed * speed), law.SCHEDULE_MIN, law.SCHEDULE_MAX);
-    const neutral = neutralLoad(data.flightPath, data.bank);
+    const neutral = neutralLoad(memory.airPath, data.bank);
     let loadCommand;
     if (!idle) {
       memory.pathHolding = false;
@@ -434,10 +443,10 @@ function applyPitchAssist(controls, data, trimWeight, fbw, pitchProtection, memo
     } else {
       // The path is tracked until the stick has been idle for IDLE_DELAY, then held.
       if (!memory.pathHolding) {
-        memory.pathHold = clamp(data.flightPath, -FIXED_WING.PATH_HOLD.PATH_LIMIT, FIXED_WING.PATH_HOLD.PATH_LIMIT);
+        memory.pathHold = clamp(memory.airPath, -FIXED_WING.PATH_HOLD.PATH_LIMIT, FIXED_WING.PATH_HOLD.PATH_LIMIT);
         if (settled) memory.pathHolding = true;
       }
-      const pathError = protectedPath(data, memory) - data.flightPath;
+      const pathError = protectedPath(data, memory) - memory.airPath;
       const target = protectLoad(neutral + (speed * FIXED_WING.PATH_HOLD.PATH_GAIN * pathError) / GRAVITY, data, speed, pitchProtection, true, memory);
       // Hands off the command moves at most HANDS_OFF_SLEW (from the load flown at release), so a
       // new hold eases in instead of stepping the elevator.
