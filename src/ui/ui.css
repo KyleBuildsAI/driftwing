@@ -1578,17 +1578,17 @@
     #ui-root.dw-touch .dw-flight .dw-value > span:first-child { font-size: 22px; }
     #ui-root.dw-touch .dw-readout { min-width: 74px; gap: 3px; }
     #ui-root.dw-touch .dw-throttle-track { width: 46px; }
-    #ui-root.dw-touch .dw-modebar { top: calc(var(--dw-top) + 70px); }
+    #ui-root.dw-touch .dw-modebar { top: calc(var(--dw-top) + 78px); }
     #ui-root.dw-touch .dw-chips { top: var(--dw-top); left: auto; right: var(--dw-right); align-items: flex-end; }
     #ui-root.dw-touch .dw-debug,
     #ui-root.dw-touch .dw-devbadge { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 240px); }
-    #ui-root.dw-touch .dw-toasts { top: calc(var(--dw-top) + 72px); width: min(420px, calc(100vw - 420px)); }
+    #ui-root.dw-touch .dw-toasts { top: calc(var(--dw-top) + 120px); width: min(420px, calc(100vw - 420px)); }
     #ui-root.dw-touch .dw-speech { bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); width: min(460px, calc(100vw - 470px)); }
     #ui-root.dw-touch .dw-subtitle-text { font-size: 14.5px; }
     #ui-root.dw-touch .dw-banner { top: var(--dw-banner-top, max(120px, 30vh)); }
     #ui-root.dw-touch .dw-command { bottom: auto; top: var(--dw-top); max-height: calc(100vh - 24px); }
     /* The steering zone stops short of the pill and picker under the flight card. */
-    #ui-root.dw-touch .dw-stick-zone { height: min(78vh, calc(100vh - var(--dw-top) - 112px)); }
+    #ui-root.dw-touch .dw-stick-zone { height: min(78vh, calc(100vh - var(--dw-top) - 122px)); }
   }
   @media (orientation: landscape) and (max-height: 460px) {
     #ui-root.dw-touch .dw-throttle-slider { height: 168px; }
@@ -1597,6 +1597,7 @@
     #ui-root.dw-touch .dw-stick { width: 124px; height: 124px; }
     #ui-root.dw-touch .dw-panel { top: 8px; bottom: 8px; }
     #ui-root.dw-touch .dw-banner-title { font-size: 28px; }
+    #ui-root.dw-touch .dw-devbadge { top: calc(var(--dw-top) + 44px); bottom: auto; }
   }
 
   /* Touch: controls help leads with the touch section; photo chrome without key hints. */
