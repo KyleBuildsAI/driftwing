@@ -3,6 +3,7 @@ import { clamp, wrapDegrees, vectorFromHeading, bearingTo, isFiniteVector, isFin
 import { CONFIG } from '../core/config.js';
 import { Copilot } from '../copilot/copilot.js';
 import { storage } from '../core/storage.js';
+import { createControlsPanel } from './controlsPanel.js';
 import { createCraftPicker } from './craftPicker.js';
 import { createHotasPrompt } from './hotasPrompt.js';
 import { createModePill } from './modePill.js';
@@ -13,8 +14,9 @@ import { createStatusBadge } from '../dev/statusBadge.js';
  * UI: warm glass HUD (compass tape, flight instruments, waypoint / ring marker,
  * status chips, CLASSIC | SIM pill and craft picker), WREN subtitles + live
  * transcript, command bar, toasts, the HOTAS prompt and banners, Journal /
- * Settings / Help / Menu panels, touch controls, photo-mode chrome, the dev
- * status badge, first-run hint, idle auto-hide and every UI hotkey.
+ * Settings / Controls / Help / Menu panels, touch controls, photo-mode chrome,
+ * the dev status badge, the mode-aware first-run hint, idle auto-hide and every
+ * UI hotkey.
  * DOM writes happen only when a displayed value changes; positions use
  * compositor-only transforms; nothing is allocated per frame except the short
  * strings for values that actually changed.
@@ -36,6 +38,7 @@ export function createUISystem(ctx) {
     sunset: 'sunset', dusk: 'dusk', night: 'night', midnight: 'midnight',
   };
   const TIME_CYCLE = ['dawn', 'noon', 'golden', 'night'];
+  const LANDING_GRADE_LABELS = { butter: 'Butter', smooth: 'Smooth', firm: 'Firm', hard: 'Hard' };
   const TOAST_KINDS = new Set(['info', 'success', 'warning']);
   const MIC_STATES = new Set(['idle', 'listening', 'thinking', 'unsupported', 'error']);
   const MIC_TIPS = {
@@ -55,6 +58,8 @@ export function createUISystem(ctx) {
   const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   const SEED_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const FIRST_RUN_KEY = 'driftwing.ui.firstRunHintSeen';
+  // The SIM key layer gets its own one-time hint the first time SIM is flown.
+  const SIM_HINT_KEY = 'driftwing.ui.simHintSeen';
   const MAX_TOASTS = 2;
   // Toasts raised in photo mode wait for the exit; older ones are no longer news.
   const DEFERRED_TOAST_MAX_AGE = 45;
@@ -163,6 +168,9 @@ export function createUISystem(ctx) {
     quickAutopilot: requireElement('dw-quick-autopilot'),
     quickRings: requireElement('dw-quick-rings'),
     journalSeed: requireElement('dw-journal-seed'),
+    helpMode: requireElement('dw-help-mode'),
+    helpFlight: requireElement('dw-help-flight'),
+    helpShortcuts: requireElement('dw-help-shortcuts'),
     journalBody: requireElement('dw-journal-body'),
     menuSeed: requireElement('dw-menu-seed'),
     modePill: requireElement('dw-mode-pill'),
@@ -189,6 +197,7 @@ export function createUISystem(ctx) {
   const panels = {
     journal: requireElement('dw-panel-journal'),
     settings: requireElement('dw-panel-settings'),
+    controls: requireElement('dw-panel-controls'),
     help: requireElement('dw-panel-help'),
     menu: requireElement('dw-panel-menu'),
   };
@@ -1054,9 +1063,16 @@ export function createUISystem(ctx) {
     const mode = ctx.systems.flight?.getMode?.();
     return mode === 'sim' || mode === 'classic' ? mode : settings.get('mode');
   }
-  /** SIM hides the CLASSIC-only chrome (boost, barrel-roll buttons); see ui.css. */
+  /**
+   * SIM hides the CLASSIC-only chrome (boost, barrel-roll buttons) and swaps the help panel's
+   * mode variants (see ui.css and controlsPanel.css); a showing hint and the open help follow.
+   */
   function applyFlightMode() {
-    setRootClass('dw-sim', activeFlightMode() === 'sim');
+    const sim = activeFlightMode() === 'sim';
+    if (rootClassCache.get('dw-sim') === sim) return;
+    setRootClass('dw-sim', sim);
+    if (hintState.visible) renderHint();
+    if (activePanel === 'help') renderHelp();
   }
 
   // ---------------------------------------------------------------------------
@@ -1125,15 +1141,178 @@ export function createUISystem(ctx) {
     transcriptState.expiresAt = Math.min(transcriptState.expiresAt, uiClock + delaySeconds);
   }
 
+  /**
+   * The first-run hint strip. CLASSIC shows v1's keys; SIM shows its own layer (throttle lever,
+   * rudder, gear / flaps / airbrake, view cycle and the craft ability) from the keyboard bindings.
+   */
   function renderHint() {
-    dom.hint.innerHTML = touchMode
-      ? '<span class="dw-hint-item">Drag on the left to steer</span><span class="dw-hint-item">Slide right for throttle</span><span class="dw-hint-item">Tap the mic for WREN</span>'
-      : '<span class="dw-hint-item"><kbd>Click</kbd> steer with the mouse</span><span class="dw-hint-item"><kbd>W</kbd><kbd>S</kbd> throttle</span><span class="dw-hint-item"><kbd>Space</kbd> boost</span><span class="dw-hint-item"><kbd>C</kbd> ask WREN</span>';
+    if (touchMode) {
+      dom.hint.innerHTML = '<span class="dw-hint-item">Drag on the left to steer</span><span class="dw-hint-item">Slide right for throttle</span><span class="dw-hint-item">Tap the mic for WREN</span>';
+    } else if (activeFlightMode() === 'sim') {
+      dom.hint.innerHTML = [
+        '<span class="dw-hint-item"><kbd>Click</kbd> virtual stick</span>',
+        hintItem(['throttle'], 'throttle lever'),
+        hintItem(['yaw'], 'rudder', 'negative'),
+        hintItem(['gearToggle', 'flapsDown', 'airbrake'], 'gear, flaps, airbrake'),
+        hintItem(['viewCycle'], 'view'),
+        hintItem(['craftAbility'], abilityLabel().toLowerCase()),
+      ].join('');
+    } else {
+      dom.hint.innerHTML = '<span class="dw-hint-item"><kbd>Click</kbd> steer with the mouse</span><span class="dw-hint-item"><kbd>W</kbd><kbd>S</kbd> throttle</span><span class="dw-hint-item"><kbd>Space</kbd> boost</span><span class="dw-hint-item"><kbd>C</kbd> ask WREN</span>';
+    }
+    if (hintState.visible) measureHint();
+  }
+  function hintItem(targets, label, order = 'positive') {
+    const keys = keyGroupsHtml(targetKeyGroups(targets, 'sim', { order }));
+    return keys ? `<span class="dw-hint-item">${keys} ${escapeHtml(label)}</span>` : '';
   }
   function scheduleFirstRunHint() {
     if (storage.read(FIRST_RUN_KEY, false) === true) return;
     // After the intro banner, so the opening view stays uncluttered.
     hintState.showAt = uiClock + 5.6;
+  }
+  /** The first switch to SIM shows the SIM hint once (unless a hint is already on its way). */
+  function scheduleSimHint() {
+    if (!state.ready || storage.read(SIM_HINT_KEY, false) === true) return;
+    if (hintState.visible) {
+      renderHint();
+      storage.write(SIM_HINT_KEY, true);
+      return;
+    }
+    if (!Number.isFinite(hintState.showAt)) hintState.showAt = uiClock + 0.8;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mode-aware key lists (first-run hint, help), read from the keyboard bindings
+  // ---------------------------------------------------------------------------
+  const ARROW_GLYPHS = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→' };
+  const CRAFT_SELECT_TARGETS = ['craftSelect1', 'craftSelect2', 'craftSelect3', 'craftSelect4', 'craftSelect5', 'craftSelect6'];
+  const FINE_CONTROL_ENTRY = { keys: [['Shift']], text: 'Hold for fine control' };
+  const HELP_FLIGHT = {
+    classic: [
+      { targets: ['throttle'], text: 'Throttle up / down' },
+      { targets: ['roll'], order: 'negative', filter: (ref) => Boolean(ref.doubleTapRoll), text: 'Hold to bank and turn; double tap for a barrel roll' },
+      { targets: ['roll'], order: 'negative', filter: (ref) => !ref.doubleTapRoll, text: 'Bank and turn (no barrel roll)' },
+      { targets: ['pitch'], text: 'Nose up / down (Invert pitch in Settings)' },
+      { targets: ['yaw'], order: 'negative', text: 'Rudder: a gentle yaw left / right' },
+      { targets: ['boost'], text: 'Boost' },
+      FINE_CONTROL_ENTRY,
+    ],
+    sim: [
+      { targets: ['throttle'], text: 'Throttle lever up / down' },
+      { targets: ['roll'], order: 'negative', text: 'Bank with the ailerons' },
+      { targets: ['pitch'], text: 'Nose up / down (Invert pitch in Settings)' },
+      { targets: ['yaw'], order: 'negative', text: 'Rudder left / right' },
+      { targets: ['trim'], text: 'Pitch trim nose up / down' },
+      { targets: ['gearToggle'], text: 'Landing gear up / down' },
+      { targets: ['flapsDown', 'flapsUp'], text: 'Flaps down / up' },
+      { targets: ['airbrake'], text: 'Airbrake or spoilers (hold); wheel brakes on the ground' },
+      { targets: ['viewCycle'], text: 'Cycle the view' },
+      { targets: ['craftAbility'], text: () => `Craft ability: ${abilityLabel()}` },
+      FINE_CONTROL_ENTRY,
+    ],
+  };
+  const HELP_SHORTCUTS = [
+    { targets: ['modeToggle'], text: 'Switch CLASSIC / SIM' },
+    { craftKeys: true, text: 'Glider, bush plane, jet, helicopter, wingsuit, FPV drone' },
+    { targets: ['craftPrev', 'craftNext'], text: 'Previous / next craft' },
+    { keys: { classic: [['C'], ['Enter'], ['/']], sim: [['Enter'], ['/']] }, text: 'Ask WREN' },
+    { keys: [['M']], text: 'Talk to WREN' },
+    { targets: ['copilotPTT'], text: 'Push to talk to WREN (hold)' },
+    { targets: ['photoMode'], html: 'Photo mode (<kbd>K</kbd> captures)' },
+    { targets: ['journal'], text: 'Journal' },
+    { targets: ['settings'], text: 'Settings' },
+    { targets: ['controlsPanel'], text: 'Controls: bindings and calibration' },
+    { keys: [['H'], ['?']], text: 'This help' },
+    { targets: ['timeForward', 'timeBack'], text: 'Next / previous time of day' },
+    { targets: ['waypointAhead'], extraKeys: [['X']], text: 'Waypoint ahead / clear it' },
+    { targets: ['waypointNearest'], text: 'Waypoint to the nearest landmark' },
+    { targets: ['autopilotToggle'], text: 'Autopilot' },
+    { targets: ['ringCourse'], text: 'Ring course start / cancel' },
+    { targets: ['viewForward', 'viewBack', 'viewLeft', 'viewRight'], text: 'View forward, back, left, right' },
+    { targets: ['recenterView'], text: 'Recenter the view' },
+    { targets: ['relaunch'], text: 'Relaunch (aerotow, peak or air start)' },
+    { targets: ['engineToggle'], text: 'Engine on / off' },
+    { targets: ['chuteDeploy'], text: 'Deploy the parachute' },
+    { keys: [['Shift', 'V']], text: 'WREN voice on / off' },
+    { keys: [['I']], text: 'FPS and stats' },
+    { keys: [['Tab']], text: 'Hide or show the HUD' },
+    { keys: [['Esc']], text: 'Close a panel or leave photo mode' },
+  ];
+
+  function abilityLabel() {
+    const module = ctx.craftRegistry.get(settings.get('craft'));
+    return module?.abilities?.craftAbility?.label ?? 'Craft ability';
+  }
+  /** Keyboard references of a target that apply in mode for the current craft (none before input starts). */
+  function keyboardRefs(target, mode) {
+    const bindings = ctx.systems.input?.bindings;
+    if (!bindings) return [];
+    return bindings.getRefs('keyboard', target, settings.get('craft')).filter((ref) => !ref.mode || ref.mode === mode);
+  }
+  function keyName(code) {
+    return ARROW_GLYPHS[code] ?? ctx.systems.input?.describeRef({ type: 'key', code }, 'keyboard') ?? code;
+  }
+  /** Key names of one reference: ['Shift', 'F'] or an axis pair ('negative' order puts left / down first). */
+  function refKeyNames(ref, order) {
+    if (ref.type === 'key') return ref.shift ? ['Shift', keyName(ref.code)] : [keyName(ref.code)];
+    if (ref.type === 'keys') return order === 'negative' ? [keyName(ref.negative), keyName(ref.positive)] : [keyName(ref.positive), keyName(ref.negative)];
+    return [];
+  }
+  /** Every key group ([names]) the keyboard binds to targets in mode. */
+  function targetKeyGroups(targets, mode, { order = 'positive', filter = null } = {}) {
+    const groups = [];
+    for (const target of targets) {
+      for (const ref of keyboardRefs(target, mode)) {
+        if (filter && !filter(ref)) continue;
+        const names = refKeyNames(ref, order);
+        if (names.length > 0) groups.push(names);
+      }
+    }
+    return groups;
+  }
+  /** Single keys sit side by side (as v1 listed them); combinations and pairs are split by a slash. */
+  function keyGroupsHtml(groups) {
+    const separated = groups.length > 1 && groups.some((names) => names.length > 1);
+    const parts = groups.map((names) => names.map((name) => `<kbd>${escapeHtml(name)}</kbd>`).join(''));
+    return parts.join(separated ? '<span class="dw-key-sep">/</span>' : '');
+  }
+  /** The six craft keys, as "1-6" when they are the digit row. */
+  function craftKeysHtml(mode) {
+    const groups = CRAFT_SELECT_TARGETS.map((target) => targetKeyGroups([target], mode)[0] ?? null);
+    const digits = groups.every((names, index) => names && names.length === 1 && names[0] === String(index + 1));
+    if (digits) return '<kbd>1</kbd><span class="dw-key-sep">-</span><kbd>6</kbd>';
+    return keyGroupsHtml(groups.filter(Boolean));
+  }
+  function helpRowHtml(entry, mode) {
+    let keys;
+    if (entry.craftKeys) keys = craftKeysHtml(mode);
+    else if (entry.keys) keys = keyGroupsHtml(Array.isArray(entry.keys) ? entry.keys : entry.keys[mode]);
+    else keys = keyGroupsHtml([...targetKeyGroups(entry.targets, mode, entry), ...(entry.extraKeys ?? [])]);
+    const text = entry.html ?? escapeHtml(typeof entry.text === 'function' ? entry.text() : entry.text);
+    return `<dt>${keys || '<span class="dw-key-word">Unbound</span>'}</dt><dd>${text}</dd>`;
+  }
+  /** Fills the help panel's key lists for the mode being flown. */
+  function renderHelp() {
+    const mode = activeFlightMode();
+    const modeToggle = keyGroupsHtml(targetKeyGroups(['modeToggle'], mode)) || 'The mode pill';
+    const waypointKey = keyGroupsHtml(targetKeyGroups(['waypointAhead'], 'sim')) || 'the controls panel';
+    dom.helpMode.innerHTML = mode === 'sim'
+      ? `<strong>SIM</strong> flies the full flight model with its own key layer: gear, flaps, airbrake, view cycle and the craft ability; waypoint ahead moves to ${waypointKey}. ${modeToggle} returns to CLASSIC.`
+      : `<strong>CLASSIC</strong> is the original arcade flight: forgiving handling, boost and barrel rolls. ${modeToggle} switches to SIM.`;
+    dom.helpFlight.innerHTML = HELP_FLIGHT[mode].map((entry) => helpRowHtml(entry, mode)).join('');
+    dom.helpShortcuts.innerHTML = HELP_SHORTCUTS.map((entry) => helpRowHtml(entry, mode)).join('');
+  }
+  let helpBindingsWired = false;
+  /** Keeps the open help panel and a showing hint current when bindings change. */
+  function wireHelpBindings() {
+    const bindings = ctx.systems.input?.bindings;
+    if (helpBindingsWired || !bindings) return;
+    helpBindingsWired = true;
+    bindings.onChange(() => {
+      if (activePanel === 'help') renderHelp();
+      if (hintState.visible) renderHint();
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -1733,6 +1912,7 @@ export function createUISystem(ctx) {
       if (next === 'journal') renderJournal();
       return true;
     }
+    if (activePanel === 'controls') controlsPanel.onClose();
     for (const [panelName, panel] of Object.entries(panels)) {
       const open = panelName === next;
       if (!open) releaseFocusWithin(panel);
@@ -1748,6 +1928,11 @@ export function createUISystem(ctx) {
       releasePointerLock();
       if (next === 'journal') renderJournal();
       if (next === 'settings') settingsPanel.syncAll();
+      if (next === 'controls') controlsPanel.onOpen();
+      if (next === 'help') {
+        wireHelpBindings();
+        renderHelp();
+      }
       if (next === 'menu') dom.menuSeed.textContent = `Seed ${state.seed}`;
       journalStatsTimer = 2;
       playBlip();
@@ -1757,6 +1942,17 @@ export function createUISystem(ctx) {
   }
   function togglePanel(name) {
     showPanel(activePanel === name ? null : name);
+  }
+  /**
+   * Opens the controls panel ('controlsPanel' action, the settings button, or the bus event
+   * 'ui:openControls' { calibrate } the copilot sends for "calibrate controls"); calibrate starts
+   * the calibration wizard for every connected controller. Leaves photo mode first.
+   */
+  function openControls(options = {}) {
+    if (photoActive) togglePhotoMode(false);
+    if (!showPanel('controls')) return false;
+    if (options && options.calibrate) return controlsPanel.startCalibration(null);
+    return true;
   }
 
   // ---- Journal ------------------------------------------------------------------
@@ -1827,12 +2023,50 @@ export function createUISystem(ctx) {
     html.push(statCard('Streak', [String(bestStreak), bestStreak === 1 ? 'ring' : 'rings'], 'rings-streak'));
     html.push(statCard('Best', Number.isFinite(bestTime) && bestTime > 0 ? [formatRaceTime(bestTime), ''] : ['None', ''], 'rings-time'));
     html.push('</div></div>');
+    html.push(landingsHtml(data.landings));
 
     dom.journalBody.innerHTML = html.join('');
     journalStatElements.distance = dom.journalBody.querySelector('[data-stat="distance"]');
     journalStatElements.time = dom.journalBody.querySelector('[data-stat="time"]');
     journalStatElements.altitude = dom.journalBody.querySelector('[data-stat="altitude"]');
     journalStatElements.landmarks = dom.journalBody.querySelector('[data-stat="landmarks"]');
+  }
+  function craftNameFor(craftId) {
+    return ctx.craftRegistry.catalog.find((entry) => entry.id === craftId)?.name ?? capitalize(craftId || 'unknown craft');
+  }
+  /** Touchdown sink rate in the player's units, with the other unit alongside. */
+  function formatSinkRate(sinkRate) {
+    const feetPerMinute = Math.round((sinkRate * 196.85) / 10) * 10;
+    return settings.get('units') === 'aviation' ? `${feetPerMinute} fpm (${sinkRate.toFixed(1)} m/s)` : `${sinkRate.toFixed(1)} m/s (${feetPerMinute} fpm)`;
+  }
+  function formatGroundSpeed(metresPerSecond) {
+    return settings.get('units') === 'aviation' ? `${Math.round(metresPerSecond * 1.943844)} kt` : `${Math.round(metresPerSecond * 3.6)} km/h`;
+  }
+  function formatWhen(epochMs) {
+    if (!(epochMs > 0)) return '';
+    const seconds = (Date.now() - epochMs) / 1000;
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
+    return new Date(epochMs).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+  /** Journal section for graded SIM landings: the best one (grade, sink rate, craft, when), count and last. */
+  function landingsHtml(landings) {
+    const html = ['<div class="dw-group"><h3 class="dw-micro">Landings</h3>'];
+    const best = landings && landings.best;
+    if (!best || !LANDING_GRADE_LABELS[best.grade]) {
+      html.push('<p class="dw-empty">No graded landings yet. In SIM every touchdown is graded butter, smooth, firm or hard, and the best one is kept here.</p></div>');
+      return html.join('');
+    }
+    const meta = [craftNameFor(best.craft), `${formatGroundSpeed(best.groundSpeed)} over the ground`, formatWhen(best.at)].filter(Boolean).join(' · ');
+    html.push(`<div class="dw-landing-best dw-grade-${best.grade}" data-landing-grade="${best.grade}"><span class="dw-landing-grade">${LANDING_GRADE_LABELS[best.grade]}</span><span class="dw-landing-detail"><span>Best landing: ${escapeHtml(formatSinkRate(best.sinkRate))} sink</span><span class="dw-landing-meta">${escapeHtml(meta)}</span></span></div>`);
+    const count = Math.max(0, Math.round(Number(landings.count) || 0));
+    const last = landings.last && LANDING_GRADE_LABELS[landings.last.grade] ? landings.last : null;
+    html.push('<div class="dw-landing-bests">');
+    html.push(statCard('Graded', [String(count), count === 1 ? 'landing' : 'landings'], 'landings-count'));
+    html.push(statCard('Last', last ? [LANDING_GRADE_LABELS[last.grade], formatSinkRate(last.sinkRate).split(' (')[0]] : ['None', ''], 'landings-last'));
+    html.push('</div></div>');
+    return html.join('');
   }
   function writeStat(element, parts) {
     if (!element) return;
@@ -1854,8 +2088,9 @@ export function createUISystem(ctx) {
     writeStat(journalStatElements.landmarks, stats.landmarks);
   }
 
-  // ---- Settings -------------------------------------------------------------------
+  // ---- Settings and controls ------------------------------------------------------
   const settingsPanel = createSettingsPanel({ panel: panels.settings, ctx, toast, navigateToSeed });
+  const controlsPanel = createControlsPanel({ panel: panels.controls, ctx });
 
   // ---------------------------------------------------------------------------
   // Photo mode chrome
@@ -2173,6 +2408,7 @@ export function createUISystem(ctx) {
   }
   function handleEscape() {
     if (commandOpen) closeCommandBar();
+    else if (activePanel === 'controls' && controlsPanel.handleEscape()) return;
     else if (activePanel) showPanel(null);
     else if (photoActive) togglePhotoMode(false);
     else if (hudHiddenByUser) toggleHud();
@@ -2199,6 +2435,8 @@ export function createUISystem(ctx) {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (isTypingTarget(event.target)) return;
     if (event.target instanceof HTMLButtonElement && root.contains(event.target) && (event.key === 'Enter' || event.key === ' ')) return;
+    // Tab moves focus through an open panel's controls instead of hiding the HUD.
+    if (event.code === 'Tab' && activePanel && panels[activePanel].contains(document.activeElement)) return;
     if (ctx.systems.input?.consumesKey?.(event)) return;
     const hotkey = resolveHotkey(event);
     if (!hotkey) return;
@@ -2242,6 +2480,7 @@ export function createUISystem(ctx) {
       case 'photoMode': togglePhotoMode(!state.photoMode); break;
       case 'journal': togglePanel('journal'); break;
       case 'settings': togglePanel('settings'); break;
+      case 'controlsPanel': togglePanel('controls'); break;
       case 'timeForward': cycleTimePreset(); break;
       case 'timeBack': cycleTimePresetBack(); break;
       case 'ringCourse': toggleRingCourse(); break;
@@ -2285,6 +2524,8 @@ export function createUISystem(ctx) {
       case 'toggle-journal': togglePanel('journal'); break;
       case 'toggle-settings': togglePanel('settings'); break;
       case 'toggle-help': togglePanel('help'); break;
+      case 'open-controls': openControls(); break;
+      case 'calibrate-controls': openControls({ calibrate: true }); break;
       case 'open-menu': togglePanel('menu'); break;
       case 'close-panel': showPanel(null); break;
       case 'copy-link': copyShareLink(); break;
@@ -2452,8 +2693,17 @@ export function createUISystem(ctx) {
     if (payload.key === 'showFps') applyDebugVisibility();
     if (payload.key === 'hudAutoHide' && !payload.value) wake();
     if (payload.key === 'mode') applyFlightMode();
+    if (payload.key === 'units' && activePanel === 'journal') renderJournal();
   });
-  bus.onTyped('modeChanged', applyFlightMode);
+  bus.onTyped('modeChanged', (payload) => {
+    applyFlightMode();
+    if (payload && payload.mode === 'sim') scheduleSimHint();
+  });
+  bus.onTyped('craftChanged', () => {
+    if (activePanel === 'help') renderHelp();
+    if (hintState.visible) renderHint();
+  });
+  bus.on('ui:openControls', (payload) => openControls(payload || {}));
   bus.on('quality:changed', () => {
     debugTimer = 0;
   });
@@ -2502,6 +2752,7 @@ export function createUISystem(ctx) {
       dom.hint.classList.add('dw-show');
       measureHint();
       storage.write(FIRST_RUN_KEY, true);
+      if (activeFlightMode() === 'sim') storage.write(SIM_HINT_KEY, true);
     } else if (uiClock >= hintState.hideAt) {
       hintState.hideAt = Infinity;
       hintState.visible = false;
@@ -2566,11 +2817,12 @@ export function createUISystem(ctx) {
     hotasPrompt.update(step);
     if (activePanel === 'journal') updateJournalStats(step);
     if (activePanel === 'settings') settingsPanel.update(step);
+    if (activePanel === 'controls') controlsPanel.update(step);
   }
 
   return {
-    update, toast, setSubtitle, setMicState, showPanel, togglePanel, setPhotoMode, wake,
-    /** v2 chrome for tests and other systems: the pill, picker, HOTAS prompt and settings tabs. */
-    modePill, craftPicker, hotasPrompt, settingsPanel, statusBadge,
+    update, toast, setSubtitle, setMicState, showPanel, togglePanel, setPhotoMode, wake, openControls,
+    /** v2 chrome for tests and other systems: the pill, picker, HOTAS prompt, settings tabs and controls panel. */
+    modePill, craftPicker, hotasPrompt, settingsPanel, controlsPanel, statusBadge,
   };
 }
