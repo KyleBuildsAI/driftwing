@@ -104,7 +104,7 @@ export function createFlightActionHandlers(ctx, helpers) {
   /** What the assists do at a level, with partial ones marked. */
   function assistSummary(level, modelKind) {
     const weights = assistWeights(level, modelKind);
-    const names = { coordination: 'auto-coordination', autoTrim: 'auto-trim', stallWarning: 'stall warning', aoaLimiter: 'AoA limiter', gLimiter: 'G limiter', autoLevel: 'auto-level', autoHover: 'auto-hover', headingHold: 'heading hold', angleMode: 'angle mode', altitudeHold: 'altitude hold' };
+    const names = { coordination: 'auto-coordination', autoTrim: 'auto-trim', stallWarning: 'stall warning', aoaLimiter: 'AoA limiter', gLimiter: 'G limiter', autoLevel: 'auto-level', pathHold: 'flight-path hold', bankProtection: 'bank protection', pitchProtection: 'pitch protection', overspeedProtection: 'overspeed protection', autoHover: 'auto-hover', headingHold: 'heading hold', angleMode: 'angle mode', altitudeHold: 'altitude hold' };
     const full = [];
     const partial = [];
     for (const [key, weight] of Object.entries(weights)) {

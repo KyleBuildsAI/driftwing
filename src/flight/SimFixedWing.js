@@ -308,6 +308,8 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     dynamicPressure: 0,
     mass,
     wingArea,
+    /** The wing's lift-curve slope (per rad): load factor per rad of angle of attack = q S slope / (m g). */
+    liftSlope: airframe.curve.clAlpha,
     resetCount: 0,
   };
 
