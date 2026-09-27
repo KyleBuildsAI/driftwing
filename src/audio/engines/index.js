@@ -11,10 +11,13 @@
 //   spatial              bool  false keeps the engine centred and unpositioned in external views
 //   stallHorn            bool  sound the stall horn on state.flight.stall.warning (SIM)
 //   stallAoa             deg   AoA where buffet peaks when the model reports no stall.buffet; null = off
+//   stallHornStyle       'horn' (continuous reed horn, light aircraft) | 'beep' (pulsed tone, jets)
 //   touchdown            'wheels' (thump and tire chirp) | 'skids' (thump and scrape) | 'body' (soft thump)
 //   callouts             bool  radar-altitude landing callouts apply to this craft
 //   vario                bool  variometer audio; defaults to instruments including 'vario'
+//   varioLift            m/s   vario climb beeps above this climb rate
 //   varioSink            m/s   vario sink tone below this (negative) climb rate
+//   motorPitch           0.5..2 pitch of the gear and flap motors (small craft whine higher)
 //   level                0..2  overall engine loudness trim
 import { CONFIG } from '../../core/config.js';
 import { createDroneSynth } from './drone.js';
@@ -31,17 +34,20 @@ const COMMON_DEFAULTS = Object.freeze({
   spatial: true,
   stallHorn: false,
   stallAoa: null,
+  stallHornStyle: 'horn',
   touchdown: 'wheels',
   callouts: true,
   vario: null,
+  varioLift: 0.2,
   varioSink: -2,
+  motorPitch: 1,
   level: 1,
 });
 
 export const ENGINE_FAMILIES = Object.freeze({
   glider: {
     create: createGliderSynth,
-    defaults: { spatial: false, airflowSpeed: 55, interiorCutoff: 1500, stallHorn: true, stallAoa: 14 },
+    defaults: { spatial: false, airflowSpeed: 55, interiorCutoff: 1500, stallHorn: true, stallAoa: 14, varioSink: -1.5 },
   },
   prop: {
     create: createPropSynth,
@@ -55,6 +61,7 @@ export const ENGINE_FAMILIES = Object.freeze({
     defaults: {
       whineHz: 3100, rumbleHz: 46, idleSpool: 0.62, spoolUp: 1.1, spoolDown: 1.8, afterburnerRoar: 1,
       airflowSpeed: 280, classicAirflowSpeed: 300, interiorCutoff: 700, stallHorn: true, stallAoa: 25,
+      stallHornStyle: 'beep', motorPitch: 0.8,
     },
   },
   heli: {
@@ -78,19 +85,25 @@ export const ENGINE_FAMILIES = Object.freeze({
 });
 
 const PROFILE_CACHE = new WeakMap();
+let fallbackProfile = null;
 
 /**
  * The complete profile for a craft: family defaults under the craft's own audioProfile. vario
- * resolves to the craft's instruments when the profile does not say. Results are cached per
- * profile object.
+ * resolves to the craft's instruments when the profile does not say (and, with no instrument list
+ * at all, to true for the glider family). Results are cached per profile object; a missing profile
+ * resolves to one shared glider profile.
  */
 export function resolveAudioProfile(audioProfile, instruments) {
   const source = audioProfile && typeof audioProfile === 'object' ? audioProfile : null;
   if (source && PROFILE_CACHE.has(source)) return PROFILE_CACHE.get(source);
+  if (!source && fallbackProfile) return fallbackProfile;
   const family = source && ENGINE_FAMILIES[source.engine] ? source.engine : 'glider';
   const resolved = { ...COMMON_DEFAULTS, ...ENGINE_FAMILIES[family].defaults, ...(source ?? {}), engine: family };
-  if (typeof resolved.vario !== 'boolean') resolved.vario = Array.isArray(instruments) && instruments.includes('vario');
+  if (typeof resolved.vario !== 'boolean') {
+    resolved.vario = Array.isArray(instruments) ? instruments.includes('vario') : family === 'glider';
+  }
   const frozen = Object.freeze(resolved);
   if (source) PROFILE_CACHE.set(source, frozen);
+  else fallbackProfile = frozen;
   return frozen;
 }

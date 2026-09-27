@@ -3,7 +3,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { CONFIG, WORLD_OPTIONS } from './core/config.js';
-import { createAudioSystem } from './audio/audio.js';
+import { createAudioSystem } from './audio/AudioEngine.js';
 import { createBirdSystem } from './render/birds.js';
 import { createCameraRig } from './camera/chase.js';
 import { createCloudSystem } from './render/clouds.js';
