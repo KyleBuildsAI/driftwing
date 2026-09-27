@@ -18,7 +18,8 @@
 //   takeoff      bush plane: ground roll and distance to 15 m
 //   landing      approach, flare, touchdown grade (the landed event), roll to a stop with brakes
 //   crosswind    bush plane: taxi 30 s in a 6 m/s crosswind with rudder and differential brakes
-//   autopilot    heading, altitude and speed hold through the flight model; engagement from a dive
+//   autopilot    heading, altitude and speed hold through the flight model; engagement from a dive;
+//                ring following through a 16 m ring off the track
 //   rest         parked on its gear for 10 s: settles without bouncing, creeping or striking
 //   systems      glider: spoilers on both toe brakes / the airbrake action, no-flaps and no-engine
 //                notices; bush plane: flap notches and travel, the flap lever with hysteresis, engine
@@ -740,6 +741,35 @@ function autopilotHold(craft) {
   return { settled, recovery: { levelSeconds: levelAt, maxLoad: diveLoad, minLoad: minimumLoad, gLimit: craft.limits.gLimit } };
 }
 
+/**
+ * Autopilot ring following (v1 behaviour, through the flight model): a ring 900 m ahead, 150 m to
+ * the right and above (below for the glider), facing along the original heading. Returns the miss
+ * distance from the ring's centre where the craft crosses the ring's plane (rings are 16 m radius).
+ */
+function ringFollowing(craft) {
+  const powered = craft === bushplane;
+  const rig = createRig(craft, { assists: 1 });
+  rig.airborne({ speed: powered ? 45 : 30, altitude: 1000, throttle: powered ? 0.7 : 0 });
+  const ring = { x: 150, y: powered ? 1040 : 975, z: -900 };
+  const normal = { x: 0, y: 0, z: -1 };
+  rig.context.game = { ringCourse: { active: true, nextRingPosition: ring, nextRingNormal: normal }, waypoint: null };
+  Object.assign(rig.autopilot, { enabled: true, heading: 0, altitude: 1000, speed: powered ? 45 : 28, followWaypoint: true });
+  let miss = Infinity;
+  let previousSide = null;
+  rig.run(90, (lab) => {
+    const position = lab.model.state.position;
+    const side = (position.z - ring.z) * normal.z > 0;
+    if (previousSide === false && side === true) {
+      miss = Math.hypot(position.x - ring.x, position.y - ring.y);
+      log(`  ${craft.id} ring pass: dx ${(position.x - ring.x).toFixed(1)} dy ${(position.y - ring.y).toFixed(1)} heading ${lab.data.heading.toFixed(1)} bank ${(lab.data.bank / DEG).toFixed(1)} at ${lab.time.toFixed(1)} s`);
+      return true;
+    }
+    previousSide = side;
+    return false;
+  });
+  return { miss };
+}
+
 /** Parked for 10 s: how far it creeps, how much it bounces, and no body strike. */
 function rest(craft) {
   const rig = createRig(craft);
@@ -961,6 +991,8 @@ function commonTests(name, craft) {
   if (craft === bushplane) record(name, 'autopilot altitude +150 m', Math.abs(hold.settled.altitude), 10, { unit: 'm', compare: 'max', decimals: 1 });
   record(name, 'autopilot speed hold', Math.abs(hold.settled.speed), 2, { unit: 'm/s', compare: 'max', decimals: 2, note: craft === glider ? 'pitch holds speed (no engine)' : 'throttle PI' });
   record(name, 'autopilot engage in a 60 deg spiral dive', hold.recovery.levelSeconds, 8, { unit: 's', compare: 'max', note: `to bank < 35 deg and path > -5 deg; ${hold.recovery.minLoad.toFixed(2)}..${hold.recovery.maxLoad.toFixed(2)} g (limit ${hold.recovery.gLimit})` });
+  const ringPass = ringFollowing(craft);
+  record(name, 'autopilot ring following', ringPass.miss, 16, { unit: 'm', compare: 'max', note: 'through a 16 m ring 900 m ahead, 150 m off the track' });
   const parked = rest(craft);
   record(name, 'parked 10 s: creep', parked.moved, 0.3, { unit: 'm', compare: 'max', decimals: 3, note: `${parked.contacts} contacts, max bounce ${parked.maxVertical.toFixed(3)} m/s, ${describeStrike(parked.strike)}` });
 }
