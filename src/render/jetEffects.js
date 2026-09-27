@@ -12,6 +12,7 @@
 // are drawn once when the craft is built so their pipelines compile before they are first needed.
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { clamp, damp } from '../core/util.js';
 
 const { Fn, uniform, float, vec3, uv, sin, cos, fract, pow, abs, mix, saturate, smoothstep, dot, normalize, normalView, positionView, instancedBufferAttribute } = TSL;
@@ -161,7 +162,7 @@ function createWingtipVapor(ctx, tips) {
   flat.translate(0, 0, TIP_VAPOR.LENGTH / 2);
   const upright = flat.clone();
   upright.rotateZ(Math.PI / 2);
-  const geometry = ctx.addons.BufferGeometryUtils.mergeGeometries([flat, upright]);
+  const geometry = mergeGeometries([flat, upright]);
   flat.dispose();
   upright.dispose();
   const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide });
