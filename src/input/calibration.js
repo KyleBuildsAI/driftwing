@@ -71,10 +71,6 @@ function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function finiteOr(value, fallback) {
-  return Number.isFinite(value) ? value : fallback;
-}
-
 /** Validates a stored record; returns a clean record or null. */
 function sanitizeRecord(raw, deviceKey) {
   if (!isPlainObject(raw) || raw.deviceKey !== deviceKey) return null;
@@ -624,10 +620,3 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
     get cancelled() { return cancelled; },
   };
 }
-
-/** Default calibration-free centre for bipolar axes (exported for the panel's "reset" preview). */
-export function defaultAxisCalibration() {
-  return { min: -1, center: 0, max: 1 };
-}
-
-export { finiteOr };
