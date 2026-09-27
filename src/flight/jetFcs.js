@@ -152,7 +152,8 @@ function autoLevel(controls, data, weight, memory, dt, tuning) {
 
 /**
  * Auto-trim on the direct (non fly-by-wire) path: while the stick is held the trim creeps toward it;
- * hands off, a PI loop holds the flight path captured at release. Returns the trimmed stick.
+ * hands off, a PI loop holds the flight path captured at release, inside the hands-off load band.
+ * Returns the trimmed stick.
  */
 function autoTrim(stick, data, weight, memory, dt, tuning) {
   const idle = Math.abs(stick) < IDLE;
@@ -166,8 +167,12 @@ function autoTrim(stick, data, weight, memory, dt, tuning) {
       memory.holdingPath = true;
       memory.pathHold = data.flightPath;
     }
+    // Hands off the hold never trims past the neutral load band: in a steep bank the path gives way
+    // (it is recaptured where the load is back inside) instead of the trim pulling a hard turn.
+    const excess = Math.max(0, data.gLoad - tuning.handsOffMaxLoad) + Math.min(0, data.gLoad - tuning.handsOffMinLoad);
+    if (excess !== 0) memory.pathHold = data.flightPath;
     const error = memory.pathHold - data.flightPath;
-    memory.trim += weight * scale * (tuning.trimHoldIntegral * error - tuning.trimHoldDamping * data.pitchRate) * dt;
+    memory.trim += weight * scale * (tuning.trimHoldIntegral * error - tuning.trimHoldDamping * data.pitchRate - tuning.trimHoldLoad * excess) * dt;
   }
   memory.trim = clamp(memory.trim, -tuning.trimLimit, tuning.trimLimit);
   return clamp(stick + memory.trim, -1, 1);

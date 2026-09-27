@@ -224,6 +224,10 @@ const simProfile = Object.freeze({
       trimIdleDelay: 0.25,
       trimHoldIntegral: 0.6,
       trimHoldDamping: 0.3,
+      // Hands off, the auto-trim's path hold stays inside this load band (g; trim per g s past it).
+      trimHoldLoad: 0.15,
+      handsOffMinLoad: 0.8,
+      handsOffMaxLoad: 1.15,
       trimLimit: 0.6,
       trimGroundDecaySeconds: 6,
       // Neutral stick's load band (g) around the 1 g load along the path (the trim's hands-off band).
