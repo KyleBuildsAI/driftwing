@@ -175,8 +175,17 @@ export function createCameraRig(ctx) {
   }
 
   // ---- Chase camera -------------------------------------------------------------------------
+  /**
+   * Speeds the pull-back, FOV stretch and speed shake are scaled to: v1's (CONFIG.SPEED), or a fast
+   * craft's own cameraRig.chase.speedRange { CRUISE, MAX, BOOST_MAX } (the jet).
+   */
+  function speedRange() {
+    const range = ctx.systems.flight?.getCameraRig?.()?.chase?.speedRange;
+    return range && Number.isFinite(range.CRUISE) && Number.isFinite(range.MAX) && Number.isFinite(range.BOOST_MAX) ? range : SPEED;
+  }
+
   function speedFraction() {
-    return clamp((player.speed - 30) / (SPEED.BOOST_MAX - 30), 0, 1);
+    return clamp((player.speed - 30) / (speedRange().BOOST_MAX - 30), 0, 1);
   }
 
   /** Returns false (targets unchanged) when neither attitude source is usable. */
@@ -234,7 +243,8 @@ export function createCameraRig(ctx) {
   }
 
   function targetFov() {
-    const overCruise = smooth01((player.speed - SPEED.CRUISE) / (SPEED.MAX - SPEED.CRUISE));
+    const speeds = speedRange();
+    const overCruise = smooth01((player.speed - speeds.CRUISE) / (speeds.MAX - speeds.CRUISE));
     const range = FOV_STRETCH;
     const boostExtra = player.boost.active ? 0.35 * range : 0;
     return framedFov(Math.min(baseFov + FOV_STRETCH, baseFov + range * 0.85 * overCruise + boostExtra));
@@ -328,7 +338,8 @@ export function createCameraRig(ctx) {
   }
 
   function applyShake() {
-    const overSpeed = smooth01((player.speed - SPEED.MAX * 0.85) / (SPEED.MAX * 0.15));
+    const topSpeed = speedRange().MAX;
+    const overSpeed = smooth01((player.speed - topSpeed * 0.85) / (topSpeed * 0.15));
     const ambient = 0.3 * overSpeed + (player.boost.active ? 0.35 : 0) + 0.25 * clamp(player.inCloud ?? 0, 0, 1);
     const eventShake = trauma * trauma;
     if (ambient <= 0 && eventShake <= 0) return;
