@@ -32,6 +32,10 @@ import { MathUtils, DEG, clamp, damp, isFiniteVector } from '../core/util.js';
  * - Every 0.25 s the cloud-shadow DataTexture is redrawn as soft ellipses cast
  *   along the sun direction; state.player.inCloud reports how deep the glider is
  *   inside a cluster.
+ * - Thermal caps: every thermal the wind field reports (wind.thermalsNear) wears a
+ *   small cumulus cap at the top of its leaning column, built from the same puff
+ *   template, drawn by the same mesh, shadowed and flown through like the rest.
+ *   Its fullness follows the thermal's strength (none at night).
  */
 export function createCloudSystem(ctx) {
   const { THREE: T, scene, camera, state, uniforms, textures, world, bus } = ctx;
@@ -170,10 +174,19 @@ export function createCloudSystem(ctx) {
     cluster.bandBase = BAND_BASE_MIN + BAND_BASE_SPAN * roll(416);
     // Tops stay inside the 380-650 m band over low ground.
     const height = Math.min(radius * (0.5 + 0.22 * roll(421)), BAND_TOP - cluster.bandBase);
-    cluster.radius = radius;
-    cluster.height = height;
     cluster.presenceRoll = roll(401);
     const puffCount = clamp(Math.round(MIN_PUFFS + (MAX_PUFFS - MIN_PUFFS) * (0.75 * Math.pow(sizeRoll, 0.45) + 0.25 * roll(415))), MIN_PUFFS, MAX_PUFFS);
+    shapeCluster(cluster, radius, height, puffCount);
+  }
+
+  /**
+   * Writes the puff template (core, skirt, towers) of a cluster with the given size, using the rolls
+   * of the current rollCellX / rollCellZ. Shared by the v1 field and the thermal caps, so both are
+   * built from exactly the same shapes.
+   */
+  function shapeCluster(cluster, radius, height, puffCount) {
+    cluster.radius = radius;
+    cluster.height = height;
     cluster.puffCount = puffCount;
     const aspect = 1 + 0.55 * roll(417);
     const axisAngle = roll(418) * Math.PI * 2;
@@ -303,6 +316,136 @@ export function createCloudSystem(ctx) {
     cluster.base = cluster.bandBase;
     clusterCache.set(key, cluster);
     return cluster;
+  }
+
+  /** Edge fade, size and sky fade of a cluster at its current growth (shared by the field and the caps). */
+  function applyVisibility(cluster) {
+    const offsetX = cluster.worldX - reference.x;
+    const offsetZ = cluster.worldZ - reference.z;
+    const distance = Math.sqrt(offsetX * offsetX + offsetZ * offsetZ);
+    const edgeVisibility = 1 - MathUtils.smoothstep(distance, EDGE_FADE_START, VIEW_RANGE);
+    cluster.visibleScale = cluster.growth * edgeVisibility;
+    cluster.sizeScale = (0.6 + 0.4 * cluster.growth) * (0.8 + 0.2 * edgeVisibility);
+    cluster.skyFade = Math.max(1 - edgeVisibility, 1 - MathUtils.smoothstep(cluster.growth, 0, 0.25));
+  }
+
+  // ---- Thermal caps --------------------------------------------------------------------------
+  // Every thermal the wind field reports (wind.thermalsNear) wears a small cumulus cap at the top of
+  // its column, built from the same puff template and drawn by the same mesh and material as the
+  // field, so caps look native. A cap's fullness follows its thermal's current strength through the
+  // same growth smoothing (puffs rise out of the base one by one and sink back into it), so caps grow
+  // as a thermal strengthens, dissolve as it dies and are gone at night. Each cap sits where the
+  // column leans to at its top and follows the lean as the wind changes. Caps are anchored to their
+  // thermals (and the ground that feeds them), not to the drifting cloud space.
+  const CAP_REFRESH_SECONDS = 0.5;
+  const CAP_REACH = VIEW_RANGE + 200;
+  /** Core strength (m/s) at which a cap starts to form, and from which it is full. */
+  const CAP_STRENGTH_START = 0.3;
+  const CAP_STRENGTH_FULL = 3.2;
+  const CAP_GROWTH_RATE = 0.2;
+  const CAP_FOLLOW_RATE = 0.5;
+  const CAP_RADIUS_MIN = 40;
+  const CAP_RADIUS_SHARE = 0.5;
+  const CAP_EXTRA_PUFFS = 4;
+  const CAP_TERRAIN_CLEARANCE = 120;
+  /** Offsets the template rolls away from the field's own cells, so caps never repeat a v1 cluster. */
+  const CAP_ROLL_OFFSET = 7919;
+
+  const capCache = new Map();
+  const capPool = [];
+  let capRefreshTimer = 0;
+  let capRefreshMark = 0;
+  const capStats = { thermals: 0, visible: 0, puffs: 0 };
+
+  function createCapRecord() {
+    const cap = createClusterRecord();
+    cap.thermalId = '';
+    cap.targetX = 0;
+    cap.targetZ = 0;
+    cap.strength = 0;
+    cap.refreshMark = 0;
+    return cap;
+  }
+
+  function capGrowthFor(strength) {
+    return MathUtils.smoothstep(strength, CAP_STRENGTH_START, CAP_STRENGTH_FULL);
+  }
+
+  /** Cap base: the top of the column, kept clear of the ground below the cap. */
+  function capBaseFor(thermal) {
+    return Math.max(thermal.top, world.heightAt(thermal.capX, thermal.capZ) + CAP_TERRAIN_CLEARANCE);
+  }
+
+  function activateCap(thermal) {
+    const cap = capPool.pop() ?? createCapRecord();
+    rollCellX = Math.floor(thermal.x) + CAP_ROLL_OFFSET;
+    rollCellZ = Math.floor(thermal.z) - CAP_ROLL_OFFSET;
+    const radius = CAP_RADIUS_MIN + CAP_RADIUS_SHARE * thermal.radius;
+    const height = radius * (0.6 + 0.25 * roll(421));
+    const puffCount = clamp(MIN_PUFFS + Math.round(CAP_EXTRA_PUFFS * roll(415)), MIN_PUFFS, MAX_PUFFS);
+    shapeCluster(cap, radius, height, puffCount);
+    cap.thermalId = thermal.id;
+    cap.worldX = thermal.capX;
+    cap.worldZ = thermal.capZ;
+    cap.targetX = thermal.capX;
+    cap.targetZ = thermal.capZ;
+    cap.strength = thermal.strength;
+    // Like the field's clusters, a cap first appears at its current fullness (at the far edge of the
+    // view, or behind the loading fade) and only then grows and shrinks smoothly.
+    cap.growthTarget = capGrowthFor(thermal.strength);
+    cap.growth = cap.growthTarget;
+    cap.baseTarget = capBaseFor(thermal);
+    cap.base = cap.baseTarget;
+    cap.groundReference = Math.max(CONFIG.WATER_LEVEL, thermal.ground);
+    cap.groundSampled = true;
+    capCache.set(thermal.id, cap);
+    return cap;
+  }
+
+  function visitThermal(thermal) {
+    capStats.thermals++;
+    const cap = capCache.get(thermal.id) ?? activateCap(thermal);
+    cap.refreshMark = capRefreshMark;
+    cap.targetX = thermal.capX;
+    cap.targetZ = thermal.capZ;
+    cap.strength = thermal.strength;
+    cap.growthTarget = capGrowthFor(thermal.strength);
+    cap.baseTarget = capBaseFor(thermal);
+  }
+
+  /** Re-reads the thermals around the camera; caps whose thermal left the reach are recycled. */
+  function refreshCaps() {
+    capRefreshMark++;
+    capStats.thermals = 0;
+    const wind = ctx.wind;
+    if (wind && typeof wind.thermalsNear === 'function') wind.thermalsNear(reference.x, reference.z, CAP_REACH, visitThermal);
+    for (const cap of capCache.values()) {
+      if (cap.refreshMark === capRefreshMark) continue;
+      // Beyond the reach the edge fade has already dissolved it into the sky.
+      capCache.delete(cap.thermalId);
+      capPool.push(cap);
+    }
+  }
+
+  /** Advances every cap (growth, base, lean) and writes the visible ones after the field's puffs. */
+  function writeCaps(dt, startIndex) {
+    let index = startIndex;
+    capStats.visible = 0;
+    for (const cap of capCache.values()) {
+      if (dt > 0) {
+        cap.growth = damp(cap.growth, cap.growthTarget, CAP_GROWTH_RATE, dt);
+        cap.base = damp(cap.base, cap.baseTarget, BASE_RATE, dt);
+        cap.worldX = damp(cap.worldX, cap.targetX, CAP_FOLLOW_RATE, dt);
+        cap.worldZ = damp(cap.worldZ, cap.targetZ, CAP_FOLLOW_RATE, dt);
+      }
+      applyVisibility(cap);
+      cap.lastSeenFrame = frameCounter;
+      if (cap.visibleScale < MIN_VISIBLE_SCALE || index >= CAPACITY) continue;
+      capStats.visible++;
+      index = writeCluster(cap, index);
+    }
+    capStats.puffs = index - startIndex;
+    return index;
   }
 
   function advanceCluster(cluster, dt, elapsed) {
@@ -459,6 +602,7 @@ export function createCloudSystem(ctx) {
   let anchorX = 0;
   let anchorZ = 0;
   let visibleClusters = 0;
+  let fieldPuffs = 0;
   let playerCloud = 0;
   let cameraCloud = 0;
 
@@ -511,18 +655,14 @@ export function createCloudSystem(ctx) {
         advanceCluster(cluster, dt, elapsed);
         cluster.worldX = cluster.centerX + drift.x;
         cluster.worldZ = cluster.centerZ + drift.z;
-        const offsetX = cluster.worldX - reference.x;
-        const offsetZ = cluster.worldZ - reference.z;
-        const distance = Math.sqrt(offsetX * offsetX + offsetZ * offsetZ);
-        const edgeVisibility = 1 - MathUtils.smoothstep(distance, EDGE_FADE_START, VIEW_RANGE);
-        cluster.visibleScale = cluster.growth * edgeVisibility;
-        cluster.sizeScale = (0.6 + 0.4 * cluster.growth) * (0.8 + 0.2 * edgeVisibility);
-        cluster.skyFade = Math.max(1 - edgeVisibility, 1 - MathUtils.smoothstep(cluster.growth, 0, 0.25));
+        applyVisibility(cluster);
         if (cluster.visibleScale < MIN_VISIBLE_SCALE || instanceCount >= CAPACITY) continue;
         visibleClusters++;
         instanceCount = writeCluster(cluster, instanceCount);
       }
     }
+    fieldPuffs = instanceCount;
+    instanceCount = writeCaps(dt, instanceCount);
     mesh.count = Math.min(instanceCount, CAPACITY);
     // Upload only the live instances, not the whole 2048-instance capacity every frame.
     uploadLiveRange(mesh.instanceMatrix, 16);
@@ -546,6 +686,23 @@ export function createCloudSystem(ctx) {
   }
 
   // ---- Inside-cloud measure (0 outside .. 1 deep inside) ---------------------------------------
+  /** Smallest squared ellipsoid distance from (x, y, z) to a visible cluster's puffs (Infinity when far). */
+  function nearestPuffDistance(cluster, x, y, z, nearest) {
+    if (cluster.visibleScale < MIN_VISIBLE_SCALE) return nearest;
+    if (y < cluster.base - 6) return nearest;
+    const reach = cluster.radius * 1.3 + 60;
+    if (Math.abs(x - cluster.worldX) > reach || Math.abs(z - cluster.worldZ) > reach) return nearest;
+    let closest = nearest;
+    for (let puff = 0; puff < cluster.puffCount; puff++) {
+      if (!resolvePuff(cluster, puff, puffScratch)) continue;
+      const dx = (x - puffScratch.x) / puffScratch.radius;
+      const dy = (y - puffScratch.y) / puffScratch.halfHeight;
+      const dz = (z - puffScratch.z) / puffScratch.radius;
+      closest = Math.min(closest, dx * dx + dy * dy + dz * dz);
+    }
+    return closest;
+  }
+
   function insideMeasure(x, y, z) {
     const cloudX = x - drift.x;
     const cloudZ = z - drift.z;
@@ -555,19 +712,10 @@ export function createCloudSystem(ctx) {
     for (let offsetZ = -1; offsetZ <= 1; offsetZ++) {
       for (let offsetX = -1; offsetX <= 1; offsetX++) {
         const cluster = clusterCache.get(clusterKey(cellX + offsetX, cellZ + offsetZ));
-        if (!cluster || cluster.visibleScale < MIN_VISIBLE_SCALE) continue;
-        if (y < cluster.base - 6) continue;
-        const reach = cluster.radius * 1.3 + 60;
-        if (Math.abs(x - cluster.worldX) > reach || Math.abs(z - cluster.worldZ) > reach) continue;
-        for (let puff = 0; puff < cluster.puffCount; puff++) {
-          if (!resolvePuff(cluster, puff, puffScratch)) continue;
-          const dx = (x - puffScratch.x) / puffScratch.radius;
-          const dy = (y - puffScratch.y) / puffScratch.halfHeight;
-          const dz = (z - puffScratch.z) / puffScratch.radius;
-          nearest = Math.min(nearest, dx * dx + dy * dy + dz * dz);
-        }
+        if (cluster) nearest = nearestPuffDistance(cluster, x, y, z, nearest);
       }
     }
+    for (const cap of capCache.values()) nearest = nearestPuffDistance(cap, x, y, z, nearest);
     if (nearest === Infinity) return 0;
     return 1 - MathUtils.smoothstep(Math.sqrt(nearest), 0.72, 1.12);
   }
@@ -629,12 +777,12 @@ export function createCloudSystem(ctx) {
       const projection = horizontalLength / Math.max(sun.y, 0.2);
       const stretch = Math.min(2.2, 1 / Math.max(sun.y, 0.05));
       const reach = worldSize / 2 + MAX_CLUSTER_RADIUS * stretch + 100;
-      for (const cluster of clusterCache.values()) {
-        if (cluster.visibleScale < MIN_VISIBLE_SCALE || cluster.lastSeenFrame !== frameCounter) continue;
+      const splatCluster = (cluster) => {
+        if (cluster.visibleScale < MIN_VISIBLE_SCALE || cluster.lastSeenFrame !== frameCounter) return;
         const clusterHeight = Math.max(30, cluster.base + 0.5 * cluster.height - cluster.groundReference);
         const shadowX = cluster.worldX - directionX * projection * clusterHeight - centerX;
         const shadowZ = cluster.worldZ - directionZ * projection * clusterHeight - centerZ;
-        if (Math.abs(shadowX) > reach || Math.abs(shadowZ) > reach) continue;
+        if (Math.abs(shadowX) > reach || Math.abs(shadowZ) > reach) return;
         // Clusters dissolving into the sky at the field edge cast correspondingly lighter shadows.
         const presence = 1 - cluster.skyFade;
         for (let puff = 0; puff < cluster.puffCount; puff++) {
@@ -646,7 +794,9 @@ export function createCloudSystem(ctx) {
           const localZ = puffScratch.z - directionZ * projection * puffHeight - centerZ;
           if (splatEllipse(localX, localZ, radius * stretch, radius, directionX, directionZ, texelSize)) splatted++;
         }
-      }
+      };
+      for (const cluster of clusterCache.values()) splatCluster(cluster);
+      for (const cap of capCache.values()) splatCluster(cap);
     }
     let maxValue = 0;
     let sum = 0;
@@ -766,15 +916,27 @@ export function createCloudSystem(ctx) {
           cluster.worldZ = cluster.centerZ + drift.z;
           cluster.base = cluster.bandBase;
         }
-        if (cluster.growth < MIN_VISIBLE_SCALE) continue;
-        for (let puff = 0; puff < cluster.puffCount; puff++) {
-          if (!resolvePuff(cluster, puff, puffScratch)) continue;
-          const distance = Math.hypot(x - puffScratch.x, z - puffScratch.z);
-          coverage = Math.max(coverage, 1 - MathUtils.smoothstep(distance / puffScratch.radius, 0.55, 1));
-        }
+        coverage = clusterCoverage(cluster, x, z, coverage);
       }
     }
+    for (const cap of capCache.values()) {
+      const reach = cap.radius * 1.3 + 60;
+      if (Math.abs(x - cap.worldX) > reach || Math.abs(z - cap.worldZ) > reach) continue;
+      coverage = clusterCoverage(cap, x, z, coverage);
+    }
     return coverage;
+  }
+
+  /** Largest overhead coverage (0..1) of a cluster's puffs at (x, z), at least `coverage`. */
+  function clusterCoverage(cluster, x, z, coverage) {
+    if (cluster.growth < MIN_VISIBLE_SCALE) return coverage;
+    let result = coverage;
+    for (let puff = 0; puff < cluster.puffCount; puff++) {
+      if (!resolvePuff(cluster, puff, puffScratch)) continue;
+      const distance = Math.hypot(x - puffScratch.x, z - puffScratch.z);
+      result = Math.max(result, 1 - MathUtils.smoothstep(distance / puffScratch.radius, 0.55, 1));
+    }
+    return result;
   }
 
   function refreshReference() {
@@ -793,6 +955,7 @@ export function createCloudSystem(ctx) {
   state.player.inCloud = 0;
   refreshReference();
   updateWind(state.time.elapsed);
+  refreshCaps();
   rebuildInstances(0, state.time.elapsed);
   redrawShadows();
   updateLook(1);
@@ -808,6 +971,11 @@ export function createCloudSystem(ctx) {
       drift.x += wind.x * speed * dt;
       drift.z += wind.y * speed * dt;
       refreshReference();
+      capRefreshTimer -= realDt;
+      if (capRefreshTimer <= 0) {
+        capRefreshTimer = CAP_REFRESH_SECONDS;
+        refreshCaps();
+      }
       rebuildInstances(dt, elapsed);
       if (frameCounter % EVICT_INTERVAL_FRAMES === 0) evictDistantClusters();
       const player = state.player.position;
@@ -824,12 +992,28 @@ export function createCloudSystem(ctx) {
     getCoverageAt(x, z) {
       return coverageAt(x, z);
     },
+    /** The thermal caps around the camera: where they stand, their base and how full they are. */
+    getCaps() {
+      return [...capCache.values()].map((cap) => ({
+        thermalId: cap.thermalId,
+        x: cap.worldX,
+        z: cap.worldZ,
+        base: cap.base,
+        top: cap.base + cap.height * cap.sizeScale,
+        radius: cap.radius * cap.sizeScale,
+        strength: cap.strength,
+        growth: cap.growth,
+        visible: cap.visibleScale >= MIN_VISIBLE_SCALE,
+      }));
+    },
     getStats() {
       return {
         clusters: visibleClusters,
         cached: clusterCache.size,
         puffs: mesh.count,
+        fieldPuffs,
         capacity: CAPACITY,
+        caps: { thermals: capStats.thermals, active: capCache.size, visible: capStats.visible, puffs: capStats.puffs },
         inCloud: Math.round(playerCloud * 100) / 100,
         coverageHere: Math.round(coverageAt(state.player.position.x, state.player.position.z) * 100) / 100,
         drift: { x: Math.round(drift.x), z: Math.round(drift.z) },
