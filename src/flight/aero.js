@@ -13,8 +13,12 @@ export { airDensity, speedOfSound, SEA_LEVEL_DENSITY };
 
 export const GRAVITY = 9.81;
 
-/** Flat-plate lift peak (at 45 degrees) and drag (at 90 degrees) for the deep-stall regime. */
-const FLAT_PLATE = Object.freeze({ LIFT: 1.05, DRAG: 1.25 });
+/**
+ * Deep-stall regime: the flat-plate lift peak (at 45 degrees). Once the flow has separated the
+ * section loses its leading-edge suction, so the force acts normal to the chord: the drag rises to
+ * CL * tan(alpha) (plus skin friction), capped at a finite wing's drag at 90 degrees.
+ */
+const FLAT_PLATE = Object.freeze({ LIFT: 1.05, MAX_DRAG: 1.3, FRICTION: 0.02 });
 
 export function smoothstep(edge0, edge1, value) {
   const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
@@ -138,9 +142,9 @@ export function surfaceForce(surface, localVelocity, rho, input, result) {
   evaluateLift(surface.curve, alpha, input.deltaCl, input.deltaClMax, liftResult);
   const cl = liftResult.cl;
   const induced = surface.inducedFactor * cl * cl * input.inducedScale;
-  const sine = Math.sin(alpha);
-  const plateDrag = FLAT_PLATE.DRAG * sine * sine;
-  const cd = induced + liftResult.stall * Math.max(0, plateDrag - induced) + input.extraDrag;
+  const cosine = Math.cos(alpha);
+  const separated = Math.min(FLAT_PLATE.MAX_DRAG, Math.abs((cl * Math.sin(alpha)) / Math.max(Math.abs(cosine), 0.05)) + FLAT_PLATE.FRICTION);
+  const cd = induced + liftResult.stall * Math.max(0, separated - induced) + input.extraDrag;
   const dynamicPressure = 0.5 * rho * speedSquared;
   const load = dynamicPressure * surface.area;
   // Lift is perpendicular to the airflow and the span; drag acts along the relative wind.

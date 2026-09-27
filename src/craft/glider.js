@@ -107,48 +107,52 @@ const simProfile = Object.freeze({
     stallSpeed: 18.06, // m/s = 65 km/h clean
     vne: 75, // m/s = 270 km/h
   }),
-  // 330 kg dry (31 kg/m^2); the wing tanks add up to 60 kg, so the glider meets the targets from
-  // empty (stall about 63 km/h) to full (about 68 km/h), with the best-glide speed rising with the load.
+  // 330 kg dry (31 kg/m^2); the wing tanks add up to 50 kg, so the glider meets the targets from
+  // empty (stall about 65 km/h) to full (about 70 km/h), with the best-glide speed rising with the load.
   mass: Object.freeze({ empty: 245, pilot: 85 }),
   // craftState.ballast is the fill fraction (0..1); the water sits about 2.4 m out along each wing.
-  ballast: Object.freeze({ capacity: 60, dumpSeconds: 60, arm: 2.4 }),
+  ballast: Object.freeze({ capacity: 50, dumpSeconds: 60, arm: 2.4 }),
   // kg m^2 about body x (pitch), y (yaw) and z (roll); yawRoll is the y-z product of inertia.
   inertia: Object.freeze({ pitch: 850, yaw: 2900, roll: 2400, yawRoll: 0 }),
-  centerOfMass: Object.freeze([0, 0.05, 0.0]),
+  // Mid-range centre of gravity: the stall and spin stay within reach of the elevator, and the
+  // phugoid (lightly damped in any long-tailed glider) does not grow.
+  centerOfMass: Object.freeze([0, 0.05, -0.17]),
   wing: Object.freeze({
     span: 15,
     area: 10.5,
     taper: 0.42,
-    oswald: 0.9,
+    oswald: 0.98,
     incidence: 1.5,
-    dihedral: 3.2,
+    dihedral: 8.5, // 3.2 built in plus the flex of a loaded 15 m wing
     washout: 1.5,
     aerodynamicCenter: Object.freeze([0, 0.35, -0.13]),
     cm0: -0.1,
   }),
   aero: Object.freeze({
-    cd0: 0.0092, // whole-airframe parasitic drag on the wing area: L/D about 40
+    cd0: 0.008, // whole-airframe parasitic drag on the wing area: L/D about 40
+    dragCenter: Object.freeze([0, 0.3, -0.1]), // mostly wing profile drag, at wing height
     clAlpha: 5.6, // per rad (AR 21)
-    clMax: 1.62,
+    clMax: 1.72,
     clMin: -0.9,
     alphaCritical: 15, // wing angle of attack at CLmax, then a post-stall drop
-    postStallClDrop: 0.45,
-    stallDropWidth: 4,
+    postStallClDrop: 0.7, // thin laminar section: a sharp break
+    stallDropWidth: 3,
     stallBlendWidth: 16,
   }),
   fuselage: Object.freeze({ sideArea: 2.4, sideForceSlope: 0.35, sideForceZ: -1.4, crossflowStations: Object.freeze([-1.9, 3.3]) }),
   tail: Object.freeze({
     // T-tail above the wake: about 60 % of the wing's downwash reaches it.
-    horizontal: Object.freeze({ position: Object.freeze([0, 1.72, 4.2]), area: 0.95, aspectRatio: 6.5, incidence: -4.6, downwash: 0.6 }),
-    vertical: Object.freeze({ position: Object.freeze([0, 0.95, 3.85]), area: 1.15, aspectRatio: 1.7, offset: 0 }),
+    horizontal: Object.freeze({ position: Object.freeze([0, 1.72, 4.2]), area: 0.95, aspectRatio: 6.5, incidence: -6.6, downwash: 0.6 }),
+    vertical: Object.freeze({ position: Object.freeze([0, 0.95, 3.85]), area: 0.95, aspectRatio: 1.7, offset: 0 }),
   }),
-  // Max deflections (deg, matching the mesh), how much angle of attack a full deflection adds to its
-  // surface (share of the deflection), the trim tab's range (share of full elevator) and servo speed (1/s).
+  // Max deflections (deg; aileron and rudder match the mesh, the tailplane is all-moving), how much
+  // angle of attack a full deflection adds to its surface (share of the deflection), the trim's range
+  // (share of full elevator) and servo speed (1/s).
   controls: Object.freeze({
     aileron: 20,
-    elevator: 18,
+    elevator: 24,
     rudder: 22,
-    effectiveness: Object.freeze({ aileron: 0.42, elevator: 0.6, rudder: 0.55 }),
+    effectiveness: Object.freeze({ aileron: 0.42, elevator: 1, rudder: 0.6 }),
     trimRange: 0.5,
     servoRate: 5,
   }),

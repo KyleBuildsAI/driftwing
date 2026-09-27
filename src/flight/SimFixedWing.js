@@ -39,6 +39,9 @@ const DEFAULT_SERVO_RATE = 5;
 const TAIL_CL_MAX = 1.1;
 const FIN_END_PLATE = 1.55;
 const CROSSFLOW_DRAG = 1.1;
+/** The fin starts to sit in the stabilizer's wake past this body angle of attack, fully by the second. */
+const FIN_SHADOW_START = 14 * DEG;
+const FIN_SHADOW_FULL = 32 * DEG;
 /** Flap lever: a move this large picks a notch; notch changes need half a notch plus this hysteresis. */
 const LEVER_MOVE = 0.03;
 const LEVER_HYSTERESIS = 0.3;
@@ -125,6 +128,8 @@ function buildAirframe(profile) {
     input: createSurfaceInput(),
     result: createSurfaceResult(),
     downwash: Number.isFinite(horizontal.downwash) ? horizontal.downwash : 1,
+    /** Share of dynamic pressure lost in a fully stalled wing's wake. */
+    wake: Number.isFinite(horizontal.wake) ? horizontal.wake : 0.4,
   };
   const vertical = tail.vertical;
   const finAspect = vertical.aspectRatio * FIN_END_PLATE;
@@ -143,11 +148,15 @@ function buildAirframe(profile) {
     }),
     input: createSurfaceInput(),
     result: createSurfaceResult(),
+    /** Share of dynamic pressure the stabilizer's wake takes from the fin at high angles of attack. */
+    shadow: Number.isFinite(vertical.shadow) ? vertical.shadow : 0.4,
   };
 
   const crossflowStations = fuselage.crossflowStations.map((z) => ({ position: new THREE.Vector3(0, 0, z).sub(centerOfMass), area: fuselage.sideArea / fuselage.crossflowStations.length }));
   return {
     centerOfMass,
+    /** Where the parasitic drag acts (relative to the centre of mass); the centre of mass by default. */
+    dragCenter: aero.dragCenter ? new THREE.Vector3().fromArray(aero.dragCenter).sub(centerOfMass) : new THREE.Vector3(),
     aspectRatio,
     inducedFactor,
     curve,
@@ -266,6 +275,8 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     aoa: 0,
     aoaCritical: airframe.curve.alphaZero + airframe.curve.clMax / airframe.curve.clAlpha - wingIncidence,
     stallMargin: 0,
+    /** Smallest stall margin (rad) of any wing panel: sideslip, roll rate and ailerons included. */
+    panelMargin: 0,
     sideslip: 0,
     bank: 0,
     pitch: 0,
@@ -532,36 +543,45 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     const wingCl = aeroState.wingLift / wingArea;
     aeroState.stallDepth /= wingArea;
     aeroState.aoaCritical = innerStallAngle - wingIncidence;
+    const bodyAoa = Math.atan2(-bodyAir.y, -bodyAir.z);
 
-    // Horizontal tail: downwash from the wing's lift, elevator (nose up lowers the tail's angle).
+    // Horizontal tail: downwash from the wing's lift, elevator (nose up lowers the tail's angle). A
+    // stalled wing's wake robs it of dynamic pressure (scaling the local velocity by sqrt(share)
+    // scales its force by the share and keeps its angle of attack).
     const horizontal = airframe.horizontalTail;
     pointAirVelocity(horizontal.surface.position, localVelocity);
     if (engine) localVelocity.z -= slipstream.speed * engine.slipstreamTail;
+    localVelocity.multiplyScalar(Math.sqrt(1 - horizontal.wake * aeroState.stallDepth));
     const downwash = (2 * wingCl * horizontal.downwash) / (Math.PI * airframe.aspectRatio);
     horizontal.input.alphaOffset = -downwash - surfacesActual.elevator * elevatorShift;
     horizontal.input.inducedScale = 1;
     surfaceForce(horizontal.surface, localVelocity, rho, horizontal.input, horizontal.result);
     addSurface(horizontal);
 
-    // Fin: rudder right lowers its angle (force to the left, nose right); slipstream swirl on prop craft.
+    // Fin: rudder right lowers its angle (force to the left, nose right); slipstream swirl on prop
+    // craft. At high angles of attack the stabilizer's wake shadows part of it (spins).
     const fin = airframe.fin;
     pointAirVelocity(fin.surface.position, localVelocity);
     if (engine) {
       localVelocity.z -= slipstream.speed * engine.slipstreamTail;
       localVelocity.x -= slipstream.swirl;
     }
+    localVelocity.multiplyScalar(Math.sqrt(1 - fin.shadow * smoothstep(FIN_SHADOW_START, FIN_SHADOW_FULL, Math.abs(bodyAoa))));
     fin.input.alphaOffset = -surfacesActual.rudder * rudderShift;
     fin.input.inducedScale = 1;
     surfaceForce(fin.surface, localVelocity, rho, fin.input, fin.result);
     addSurface(fin);
 
-    // Fuselage: parasitic drag at the centre of mass, slender-body side force, cross-flow drag.
+    // Parasitic drag at the drag centre (the wing's and fuselage's share together), slender-body
+    // side force, cross-flow drag.
     const airspeed = bodyAir.length();
     if (airspeed > 0.1) {
       const dynamicPressure = 0.5 * rho * airspeed * airspeed;
       const gearDrag = gearProfile.retractable ? (gearProfile.cdIncrement ?? 0) * systems.gearPosition : 0;
       const parasitic = dynamicPressure * wingArea * (profile.aero.cd0 + gearDrag);
-      forceBody.addScaledVector(bodyAir, -parasitic / airspeed);
+      lever.copy(bodyAir).multiplyScalar(-parasitic / airspeed);
+      forceBody.add(lever);
+      momentBody.add(spin.crossVectors(airframe.dragCenter, lever));
       const side = airframe.sideForce;
       pointAirVelocity(side.position, localVelocity);
       const sideForce = -0.5 * rho * localVelocity.length() * localVelocity.x * side.area * side.slope;
@@ -709,6 +729,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     flightData.sideslip = airspeed > 0.5 ? Math.asin(clamp(bodyAir.x / airspeed, -1, 1)) : 0;
     flightData.aoaCritical = aeroState.aoaCritical;
     flightData.stallMargin = stallMargin;
+    flightData.panelMargin = aeroState.minMargin;
     flightData.verticalSpeed = state.velocity.y;
     const groundSpeed = Math.hypot(state.velocity.x, state.velocity.z);
     flightData.flightPath = Math.atan2(state.velocity.y, Math.max(groundSpeed, 0.1));

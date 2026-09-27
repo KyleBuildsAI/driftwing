@@ -18,8 +18,12 @@ const DEFAULTS = Object.freeze({
   SKID: Object.freeze({ spring: 40000, damping: 3000, friction: 0.45 }),
   BODY: Object.freeze({ spring: 90000, damping: 6000, friction: 0.6 }),
 });
-/** Speeds (m/s) below which Coulomb friction turns viscous, which keeps a resting craft stable at 120 Hz. */
-const ROLLING_SLIP = 0.25;
+/**
+ * Speeds (m/s) below which Coulomb friction turns viscous, which keeps a resting craft stable at
+ * 120 Hz. The rolling band is narrow so rolling resistance and brakes hold like static friction
+ * (idle thrust does not creep a parked craft).
+ */
+const ROLLING_SLIP = 0.03;
 const SIDE_SLIP = 0.8;
 const SLIDE_SLIP = 0.35;
 /** A touchdown counts after this long without any gear contact (shorter gaps are bounces). */

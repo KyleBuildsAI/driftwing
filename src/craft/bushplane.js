@@ -94,6 +94,7 @@ const simProfile = Object.freeze({
   model: 'fixedWing',
   targets: Object.freeze({
     stallSpeedFullFlaps: 15.28, // m/s = 55 km/h, power off
+    stallSpeedClean: 19.17, // m/s = 69 km/h, power off (follows from the wing, not a spec target)
     cruiseSpeed: 47.2, // m/s = 170 km/h at 75 % power
     climbRate: 5, // m/s at full power, best climb speed
     vne: 68, // m/s = 245 km/h
@@ -101,7 +102,7 @@ const simProfile = Object.freeze({
   mass: Object.freeze({ empty: 500, pilot: 90, fuel: 60 }), // 650 kg, 39 kg/m^2
   // kg m^2 about body x (pitch), y (yaw) and z (roll); yawRoll is the y-z product of inertia.
   inertia: Object.freeze({ pitch: 1300, yaw: 2100, roll: 1150, yawRoll: 60 }),
-  centerOfMass: Object.freeze([0, 0.1, -0.72]),
+  centerOfMass: Object.freeze([0, 0.1, -0.62]),
   wing: Object.freeze({
     span: 10.73,
     area: 16.6, // constant 1.6 m chord, rounded tips
@@ -126,9 +127,9 @@ const simProfile = Object.freeze({
   }),
   fuselage: Object.freeze({ sideArea: 4.2, sideForceSlope: 0.4, sideForceZ: -1.3, crossflowStations: Object.freeze([-1.6, 2.6]) }),
   tail: Object.freeze({
-    horizontal: Object.freeze({ position: Object.freeze([0, 0.44, 3.48]), area: 2.7, aspectRatio: 3.8, incidence: 1.5, downwash: 1 }),
+    horizontal: Object.freeze({ position: Object.freeze([0, 0.44, 3.48]), area: 2.7, aspectRatio: 3.8, incidence: 1.5, downwash: 1, wake: 0.75 }),
     // Offset a little to the left so the slipstream swirl is trimmed out at cruise power.
-    vertical: Object.freeze({ position: Object.freeze([0, 0.95, 3.72]), area: 1.25, aspectRatio: 1.3, offset: -1 }),
+    vertical: Object.freeze({ position: Object.freeze([0, 0.95, 3.72]), area: 1.25, aspectRatio: 1.3, offset: -1, shadow: 0.6 }),
   }),
   // Max deflections (deg, matching the mesh), how much angle of attack a full deflection adds to its
   // surface (share of the deflection), the trim's range (share of full elevator) and servo speed (1/s).
@@ -136,7 +137,7 @@ const simProfile = Object.freeze({
     aileron: 20,
     elevator: 25,
     rudder: 25,
-    effectiveness: Object.freeze({ aileron: 0.45, elevator: 0.55, rudder: 0.55 }),
+    effectiveness: Object.freeze({ aileron: 0.45, elevator: 0.9, rudder: 0.6 }),
     trimRange: 0.45,
     servoRate: 5,
   }),
@@ -148,7 +149,7 @@ const simProfile = Object.freeze({
   engine: Object.freeze({
     kind: 'piston',
     powerKw: 112, // 150 hp at 2700 rpm
-    idlePower: 0.06,
+    idlePower: 0.04,
     idleRpm: 700,
     maxRpm: 2700,
     propDiameter: 1.93,
@@ -170,9 +171,9 @@ const simProfile = Object.freeze({
     windmillDrag: 0.08,
   }),
   contacts: Object.freeze([
-    Object.freeze({ id: 'leftMain', kind: 'wheel', gear: true, position: Object.freeze([-1.02, -1.4, -1]), spring: 42000, damping: 3600, rollingFriction: 0.04, sideFriction: 0.85, brake: true }),
-    Object.freeze({ id: 'rightMain', kind: 'wheel', gear: true, position: Object.freeze([1.02, -1.4, -1]), spring: 42000, damping: 3600, rollingFriction: 0.04, sideFriction: 0.85, brake: true }),
-    Object.freeze({ id: 'tailWheel', kind: 'wheel', gear: true, position: Object.freeze([0, -0.19, 4.32]), spring: 16000, damping: 1300, rollingFriction: 0.05, sideFriction: 0.7, steerable: true }),
+    Object.freeze({ id: 'leftMain', kind: 'wheel', gear: true, position: Object.freeze([-1.02, -1.4, -1]), spring: 42000, damping: 3600, rollingFriction: 0.07, sideFriction: 0.85, brake: true }),
+    Object.freeze({ id: 'rightMain', kind: 'wheel', gear: true, position: Object.freeze([1.02, -1.4, -1]), spring: 42000, damping: 3600, rollingFriction: 0.07, sideFriction: 0.85, brake: true }),
+    Object.freeze({ id: 'tailWheel', kind: 'wheel', gear: true, position: Object.freeze([0, -0.19, 4.32]), spring: 16000, damping: 1300, rollingFriction: 0.08, sideFriction: 0.7, steerable: true }),
     Object.freeze({ id: 'leftWingtip', kind: 'body', gear: false, position: Object.freeze([-5.36, 0.86, -0.25]) }),
     Object.freeze({ id: 'rightWingtip', kind: 'body', gear: false, position: Object.freeze([5.36, 0.86, -0.25]) }),
     Object.freeze({ id: 'nose', kind: 'body', gear: false, position: Object.freeze([0, 0.02, -2.55]) }),

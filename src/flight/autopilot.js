@@ -41,6 +41,8 @@ const FIXED_WING = Object.freeze({
   /** Engineless craft trade height for speed: flight-path rate (rad/s) per m/s of speed error and per m/s^2. */
   GLIDE_SPEED_GAIN: 0.02,
   GLIDE_ACCELERATION_GAIN: 0.06,
+  GLIDE_PATH_MAX: 12 * DEG,
+  GLIDE_PATH_MIN: -25 * DEG,
   THROTTLE_P: 0.06,
   THROTTLE_I: 0.03,
   THROTTLE_SLEW: 0.6,
@@ -50,6 +52,9 @@ const FIXED_WING = Object.freeze({
   YAW_SIDESLIP_GAIN: 4,
   YAW_LIMIT: 0.6,
   OUTPUT_SLEW: 2.5,
+  SCHEDULE_REFERENCE: 1.5,
+  SCHEDULE_MIN: 0.12,
+  SCHEDULE_MAX: 2,
   GROUND_STEER_GAIN: 0.05,
   // Terrain look-ahead (seconds of flight ahead) and clearance above ground or water.
   LOOKAHEAD_SECONDS: Object.freeze([0, 4, 8, 14, 22, 32, 45]),
@@ -246,12 +251,18 @@ const fixedWingAutopilot = Object.freeze({
     const headingTarget = target.heading + memory.evadeOffset;
     const altitudeTarget = Math.max(target.altitude, memory.terrainFloor);
 
+    // Gain schedule: the stick's authority grows with dynamic pressure, so the loop gains shrink as the
+    // speed rises (they are tuned at 1.5 x the stall speed).
+    const referenceSpeed = Math.max(data.stallSpeed * FIXED_WING.SCHEDULE_REFERENCE, 5);
+    const pitchSchedule = clamp((referenceSpeed * referenceSpeed) / (speed * speed), FIXED_WING.SCHEDULE_MIN, FIXED_WING.SCHEDULE_MAX);
+    const rollSchedule = clamp(referenceSpeed / speed, Math.sqrt(FIXED_WING.SCHEDULE_MIN), Math.sqrt(FIXED_WING.SCHEDULE_MAX));
+
     // ---- Lateral: heading -> bank -> aileron; rudder coordinates ------------------------------------------
     const maxBank = target.ring ? FIXED_WING.RING_MAX_BANK : FIXED_WING.MAX_BANK;
     const headingError = wrapSigned(headingTarget - data.heading);
     const desiredBank = clamp(headingError * FIXED_WING.BANK_PER_HEADING * DEG, -maxBank, maxBank);
     memory.bankCommand = moveToward(memory.bankCommand, desiredBank, FIXED_WING.BANK_SLEW * dt);
-    const rollTarget = clamp(FIXED_WING.BANK_GAIN * (memory.bankCommand - data.bank) - FIXED_WING.ROLL_RATE_GAIN * data.rollRate, -FIXED_WING.ROLL_LIMIT, FIXED_WING.ROLL_LIMIT);
+    const rollTarget = clamp(rollSchedule * (FIXED_WING.BANK_GAIN * (memory.bankCommand - data.bank) - FIXED_WING.ROLL_RATE_GAIN * data.rollRate), -FIXED_WING.ROLL_LIMIT, FIXED_WING.ROLL_LIMIT);
     memory.roll = moveToward(memory.roll, rollTarget, FIXED_WING.OUTPUT_SLEW * dt);
     const yawTarget = clamp(FIXED_WING.YAW_SIDESLIP_GAIN * data.sideslip, -FIXED_WING.YAW_LIMIT, FIXED_WING.YAW_LIMIT);
     memory.yaw = moveToward(memory.yaw, yawTarget, FIXED_WING.OUTPUT_SLEW * dt);
@@ -276,13 +287,16 @@ const fixedWingAutopilot = Object.freeze({
       // it, damped by the acceleration so the phugoid settles.
       const acceleration = Number.isFinite(memory.lastSpeed) ? clamp((speed - memory.lastSpeed) / dt, -8, 8) : 0;
       flightPathRate = FIXED_WING.GLIDE_SPEED_GAIN * (speed - targetSpeed) + FIXED_WING.GLIDE_ACCELERATION_GAIN * acceleration;
+      // Bleed off excess speed in a gentle zoom, and give speed back in a moderate dive at most.
+      if (data.flightPath > FIXED_WING.GLIDE_PATH_MAX) flightPathRate = Math.min(flightPathRate, FIXED_WING.FLIGHT_PATH_GAIN * (FIXED_WING.GLIDE_PATH_MAX - data.flightPath));
+      if (data.flightPath < FIXED_WING.GLIDE_PATH_MIN) flightPathRate = Math.max(flightPathRate, FIXED_WING.FLIGHT_PATH_GAIN * (FIXED_WING.GLIDE_PATH_MIN - data.flightPath));
     }
     memory.lastSpeed = speed;
     const loadTarget = clamp((Math.cos(data.flightPath) + (speed * flightPathRate) / GRAVITY) / cosBank, FIXED_WING.LOAD_MIN, FIXED_WING.LOAD_MAX);
     const loadError = loadTarget - data.gLoad;
-    const pitchUnclamped = memory.loadIntegral + FIXED_WING.LOAD_P * loadError - FIXED_WING.PITCH_DAMPING * data.pitchRate;
+    const pitchUnclamped = memory.loadIntegral + pitchSchedule * (FIXED_WING.LOAD_P * loadError - FIXED_WING.PITCH_DAMPING * data.pitchRate);
     const saturated = (pitchUnclamped >= FIXED_WING.PITCH_LIMIT && loadError > 0) || (pitchUnclamped <= -FIXED_WING.PITCH_LIMIT && loadError < 0);
-    if (!saturated) memory.loadIntegral = clamp(memory.loadIntegral + FIXED_WING.LOAD_I * loadError * dt, -FIXED_WING.PITCH_LIMIT, FIXED_WING.PITCH_LIMIT);
+    if (!saturated) memory.loadIntegral = clamp(memory.loadIntegral + pitchSchedule * FIXED_WING.LOAD_I * loadError * dt, -FIXED_WING.PITCH_LIMIT, FIXED_WING.PITCH_LIMIT);
     memory.pitch = moveToward(memory.pitch, clamp(pitchUnclamped, -FIXED_WING.PITCH_LIMIT, FIXED_WING.PITCH_LIMIT), FIXED_WING.OUTPUT_SLEW * dt);
 
     // ---- Speed -> throttle (powered) ------------------------------------------------------------------------
