@@ -117,11 +117,11 @@ const FIXED_WING = Object.freeze({
     AOA_MARGIN: 2 * DEG,
     /** The limiter acts inside this band below the limit, predicting the angle of attack LEAD seconds ahead. */
     AOA_BAND: 5 * DEG,
-    AOA_LEAD: 0.25,
+    AOA_LEAD: 0.35,
     AOA_GAIN: 7,
-    /** Past the limit the elevator also comes back at once in proportion (stick per rad, per g). */
-    AOA_P: 2.5,
-    G_P: 0.12,
+    /** Past the limit the elevator comes back faster (stick per second per rad, per g of overshoot). */
+    AOA_OVERSHOOT_GAIN: 60,
+    G_OVERSHOOT_GAIN: 4,
     NEGATIVE_AOA: -8 * DEG,
     G_SHARE: 0.9,
     NEGATIVE_G_SHARE: 0.4,
@@ -210,15 +210,15 @@ function applyLimiters(controls, data, weights, memory, dt, gLimit) {
     const aoaLimit = data.aoaCritical - tuning.AOA_MARGIN;
     const panelMargin = Number.isFinite(data.panelMargin) ? data.panelMargin - tuning.AOA_MARGIN - tuning.AOA_LEAD * memory.aoaRate : Infinity;
     const margin = Math.min(aoaLimit - predicted, panelMargin);
-    if (margin < tuning.AOA_BAND) ceiling = Math.min(ceiling, memory.lastPitch + tuning.AOA_GAIN * margin * dt + tuning.AOA_P * Math.min(margin, 0));
+    if (margin < tuning.AOA_BAND) ceiling = Math.min(ceiling, memory.lastPitch + (tuning.AOA_GAIN * margin + tuning.AOA_OVERSHOOT_GAIN * Math.min(margin, 0)) * dt);
     const negativeMargin = predicted - tuning.NEGATIVE_AOA;
-    if (negativeMargin < tuning.AOA_BAND) floor = Math.max(floor, memory.lastPitch - tuning.AOA_GAIN * negativeMargin * dt - tuning.AOA_P * Math.min(negativeMargin, 0));
+    if (negativeMargin < tuning.AOA_BAND) floor = Math.max(floor, memory.lastPitch - (tuning.AOA_GAIN * negativeMargin + tuning.AOA_OVERSHOOT_GAIN * Math.min(negativeMargin, 0)) * dt);
   }
   if (weights.gLimiter > 0) {
     const positiveMargin = tuning.G_SHARE * gLimit - data.gLoad;
-    if (positiveMargin < tuning.G_BAND) ceiling = Math.min(ceiling, memory.lastPitch + tuning.G_GAIN * positiveMargin * dt + tuning.G_P * Math.min(positiveMargin, 0));
+    if (positiveMargin < tuning.G_BAND) ceiling = Math.min(ceiling, memory.lastPitch + (tuning.G_GAIN * positiveMargin + tuning.G_OVERSHOOT_GAIN * Math.min(positiveMargin, 0)) * dt);
     const negativeMargin = data.gLoad + tuning.NEGATIVE_G_SHARE * gLimit;
-    if (negativeMargin < tuning.G_BAND) floor = Math.max(floor, memory.lastPitch - tuning.G_GAIN * negativeMargin * dt - tuning.G_P * Math.min(negativeMargin, 0));
+    if (negativeMargin < tuning.G_BAND) floor = Math.max(floor, memory.lastPitch - (tuning.G_GAIN * negativeMargin + tuning.G_OVERSHOOT_GAIN * Math.min(negativeMargin, 0)) * dt);
   }
   const limited = clamp(desired, Math.min(floor, ceiling), ceiling);
   const weight = Math.max(weights.aoaLimiter, weights.gLimiter);
