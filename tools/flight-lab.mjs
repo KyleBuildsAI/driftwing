@@ -1374,12 +1374,13 @@ function handlingTests(name, craft) {
   const trimHold = autoTrimHold(craft);
   record(name, '50 %: auto-trim hold after a pull', trimHold.maxLoad, 1.3, { unit: 'g', compare: trimHold.maxLoad <= 1.3 && !trimHold.stalled, decimals: 2, note: `${trimHold.minLoad.toFixed(2)}..${trimHold.maxLoad.toFixed(2)} g after release; speed ${(trimHold.speed * KMH).toFixed(0)} km/h, phugoid swing ${(trimHold.speedSwing * KMH).toFixed(1)} km/h in 30-40 s (AoA hold, as at 0 %)` });
 
-  for (const assists of [1, 0.5]) {
+  for (const assists of [1, 0.75, 0.5]) {
     const rows = conversionMatrix(craft, assists);
     for (const row of rows) {
       const { watch, before } = row;
       // 50 % has no auto-level or speed protection (a banked switch spirals as the pilot left it); what
-      // it promises is that the auto-trim never trims the converted state into more than 1.3 g.
+      // it promises is that the auto-trim never trims the converted state into more than 1.3 g. 75 %
+      // blends the two and is held to the 50 % promise.
       const pass = assists === 1 ? calmFlight(watch) : watch.maxLoad <= 1.3 && !watch.stalled;
       const from = `${(before.speed * KMH).toFixed(0)} km/h, pitch ${before.pitch.toFixed(0)}, bank ${before.roll.toFixed(0)}`;
       record(name, `CLASSIC -> SIM ${Math.round(assists * 100)} %, ${row.state}`, describeLoads(watch), assists === 1 ? '0.8..1.3 g' : '<= 1.3 g', { compare: pass, note: `from ${from}: ${(watch.minSpeed * KMH).toFixed(0)}..${(watch.maxSpeed * KMH).toFixed(0)} km/h, ${watch.stalled ? 'STALL' : 'no stall'}, ${watch.zoom ? 'ZOOM' : 'no zoom'} (max vs ${watch.maxVertical.toFixed(1)} m/s), max ${watch.maxFrameRotation.toFixed(1)} deg/frame` });
