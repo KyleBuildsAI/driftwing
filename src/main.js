@@ -8,7 +8,7 @@ import { createBirdSystem } from './render/birds.js';
 import { createCameraRig } from './camera/chase.js';
 import { createCloudSystem } from './render/clouds.js';
 import { createCopilotSystem } from './copilot/copilot.js';
-import { createFlightSystem } from './flight/arcadeFlight.js';
+import { createFlightController } from './flight/FlightController.js';
 import { createFxSystem } from './render/fx.js';
 import { createInputSystem } from './input/InputManager.js';
 import { createJournal } from './gameplay/journal.js';
@@ -27,9 +27,10 @@ import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, be
 import { EventBus } from './core/eventBus.js';
 import { attachTypedEvents } from './core/events.js';
 import { createWindField } from './env/WindField.js';
-import { craftRegistry } from './craft/registry.js';
+import { craftRegistry } from './craft/index.js';
+import { flightModels } from './flight/models.js';
 import { createControlState } from './input/controlState.js';
-import { createFlightTelemetry, airDensity, speedOfSound } from './flight/telemetry.js';
+import { createFlightTelemetry } from './flight/telemetry.js';
 import { storage } from './core/storage.js';
 import { findSpawn } from './world/spawn.js';
 import { resolveSeed } from './core/seed.js';
@@ -206,6 +207,7 @@ async function boot() {
     controls: createControlState(),
     craftRegistry,
     perf: null,
+    flightModels,
     uniforms,
     textures: { cloudShadow: cloudShadowTexture },
     quality: {},
@@ -319,7 +321,7 @@ async function boot() {
     ['landmarks', createLandmarkSystem],
     ['waypoints', createWaypointSystem],
     ['rings', createRingCourseSystem],
-    ['flight', createFlightSystem],
+    ['flight', createFlightController],
     ['camera', createCameraRig],
     ['fx', createFxSystem],
     ['copilot', createCopilotSystem],
@@ -461,6 +463,10 @@ async function boot() {
   window.addEventListener('resize', onResize);
 
   // ---- Safety net: NaN attitude, terrain clamp, altitude ceiling -------------------------
+  // CLASSIC keeps v1's clamp (terrain and water clearance, 2600 m ceiling). SIM flight has real ground
+  // contact, so here it only keeps the last-resort guard: sinking more than 1 m into the shared height
+  // function is a soft crash. The ceiling comes from the flight controller (SIM: 15000 m).
+  const SIM_PENETRATION_LIMIT = 1;
   const lastGood = {
     position: state.player.position.clone(),
     quaternion: state.player.quaternion.clone(),
@@ -480,14 +486,20 @@ async function boot() {
     } else {
       player.quaternion.normalize();
     }
+    const flight = ctx.systems.flight;
     const ground = world.groundHeight(player.position.x, player.position.z);
-    const floor = Math.max(ground + CONFIG.GROUND_CLEARANCE, CONFIG.WATER_LEVEL + CONFIG.WATER_CLEARANCE);
-    if (player.position.y < floor) {
-      player.position.y = floor;
-      if (player.velocity.y < 0) player.velocity.y = 0;
+    if (flight.getMode?.() === 'sim') {
+      if (player.position.y < ground - SIM_PENETRATION_LIMIT) flight.triggerSoftCrash?.('terrain');
+    } else {
+      const floor = Math.max(ground + CONFIG.GROUND_CLEARANCE, CONFIG.WATER_LEVEL + CONFIG.WATER_CLEARANCE);
+      if (player.position.y < floor) {
+        player.position.y = floor;
+        if (player.velocity.y < 0) player.velocity.y = 0;
+      }
     }
-    if (player.position.y > CONFIG.MAX_ALTITUDE) {
-      player.position.y = CONFIG.MAX_ALTITUDE;
+    const ceiling = flight.getCeiling?.() ?? CONFIG.MAX_ALTITUDE;
+    if (player.position.y > ceiling) {
+      player.position.y = ceiling;
       if (player.velocity.y > 0) player.velocity.y = 0;
     }
     player.groundHeight = ground;
@@ -497,42 +509,6 @@ async function boot() {
     lastGood.quaternion.copy(player.quaternion);
     lastGood.velocity.copy(player.velocity);
     if (Number.isFinite(player.heading)) lastGood.heading = player.heading;
-  }
-
-  // ---- Bridge from the v1 arcade flight state to the v2 telemetry contract --------------------
-  // state.flight (telemetry) is what v2 systems read; the input system writes ctx.controls itself.
-  const windSample = { vel: new THREE.Vector3(), turbulence: 0 };
-  function writeLegacyTelemetry() {
-    const player = state.player;
-    const flight = state.flight;
-    flight.position.copy(player.position);
-    flight.velocity.copy(player.velocity);
-    flight.quaternion.copy(player.quaternion);
-    ctx.wind.sample(player.position, state.time.elapsed, windSample);
-    flight.wind.copy(windSample.vel);
-    flight.turbulence = windSample.turbulence;
-    flight.airVelocity.copy(player.velocity).sub(windSample.vel);
-    flight.airspeed = flight.airVelocity.length();
-    flight.indicatedAirspeed = flight.airspeed * Math.sqrt(airDensity(player.altitude) / 1.225);
-    flight.groundSpeed = Math.hypot(player.velocity.x, player.velocity.z);
-    flight.mach = flight.airspeed / speedOfSound(player.altitude);
-    flight.altitude = player.altitude;
-    flight.agl = player.agl;
-    flight.radarAltitude = player.agl;
-    flight.verticalSpeed = player.verticalSpeed;
-    flight.vario = player.verticalSpeed;
-    flight.heading = player.heading;
-    flight.pitch = player.pitch;
-    flight.roll = player.roll;
-    flight.gLoad = player.gForce;
-    flight.throttle = player.throttle;
-    flight.rpm = player.throttle;
-    flight.stall.stalled = player.stalled;
-    flight.stall.warning = player.stalled;
-    flight.autopilot.enabled = player.autopilot.enabled;
-    flight.autopilot.heading = player.autopilot.heading;
-    flight.autopilot.altitude = player.autopilot.altitude;
-    flight.glideRatio = player.verticalSpeed < -0.1 ? flight.groundSpeed / -player.verticalSpeed : 0;
   }
 
   // ---- Biome tracking ----------------------------------------------------------------------------
@@ -584,7 +560,8 @@ async function boot() {
       }
       if (name === 'flight') {
         enforceSafety();
-        writeLegacyTelemetry();
+        // state.flight is written from the final (safety-checked) pose.
+        if (!disabledSystems.has('flight')) ctx.systems.flight.publishTelemetry?.();
       }
     }
     if (!state.paused) trackBiome(simDt);
