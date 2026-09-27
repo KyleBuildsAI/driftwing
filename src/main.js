@@ -58,27 +58,47 @@ async function boot() {
   }
 
   // ---- Renderer: WebGPU first, WebGL2 fallback ---------------------------------
+  // The probe creates (and releases) a real device: an adapter alone does not prove WebGPU works,
+  // since device creation can still fail (for example when the GPU is out of memory).
   let webgpuAvailable = false;
   if (params.get('renderer') !== 'webgl' && navigator.gpu) {
     try {
-      webgpuAvailable = (await navigator.gpu.requestAdapter({ featureLevel: 'compatibility' })) !== null;
+      const adapter = await navigator.gpu.requestAdapter({ featureLevel: 'compatibility' });
+      if (adapter) {
+        const device = await adapter.requestDevice();
+        device.destroy();
+        webgpuAvailable = true;
+      }
     } catch (error) {
       webgpuAvailable = false;
     }
   }
-  // Reversed depth only on WebGPU: on WebGL2 it needs EXT_clip_control (warns otherwise).
-  const renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: !webgpuAvailable, reversedDepthBuffer: webgpuAvailable });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
-  renderer.shadowMap.enabled = true;
-  renderer.domElement.id = 'view';
-  renderer.domElement.setAttribute('tabindex', '0');
-  renderer.domElement.setAttribute('aria-label', 'DRIFTWING flight view');
-  renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
+  function createRenderer(useWebGPU) {
+    // Reversed depth only on WebGPU: on WebGL2 it needs EXT_clip_control (warns otherwise).
+    const created = new THREE.WebGPURenderer({ antialias: true, forceWebGL: !useWebGPU, reversedDepthBuffer: useWebGPU });
+    created.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    created.setSize(window.innerWidth, window.innerHeight);
+    created.toneMapping = THREE.ACESFilmicToneMapping;
+    created.toneMappingExposure = 1.0;
+    created.shadowMap.enabled = true;
+    created.domElement.id = 'view';
+    created.domElement.setAttribute('tabindex', '0');
+    created.domElement.setAttribute('aria-label', 'DRIFTWING flight view');
+    created.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
+    return created;
+  }
+  let renderer = createRenderer(webgpuAvailable);
   document.body.prepend(renderer.domElement);
   await renderer.init();
+  if (webgpuAvailable && !renderer.backend.isWebGPUBackend) {
+    // three.js fell back to WebGL2 on its own after a late WebGPU failure; rebuild the renderer
+    // for WebGL2 so no WebGPU-only option (reversed depth) is left on.
+    renderer.domElement.remove();
+    renderer.dispose();
+    renderer = createRenderer(false);
+    document.body.prepend(renderer.domElement);
+    await renderer.init();
+  }
   const backend = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2';
   if (params.get('debug') === '1') console.info(`[DRIFTWING] backend=${backend} three r${THREE.REVISION} seed=${seed}`);
 
