@@ -1,12 +1,14 @@
 import { storage } from '../core/storage.js';
+import { LANDING_GRADES, isBetterLanding } from '../flight/landing.js';
 
 /**
  * JOURNAL: the per-seed discovery log. Records biomes visited, landmarks found,
- * distance flown, highest altitude, flight time and ring-course results (best
- * clean time, best streak, the best result including misses and the last run), and
+ * distance flown, highest altitude, flight time, ring-course results (best
+ * clean time, best streak, the best result including misses and the last run) and
+ * graded SIM landings (count, last and best, from the typed 'landed' event), and
  * persists them with `storage` under `driftwing.journal.<seed>`.
  * Saves are throttled (every ~5 s while flying), immediate on discoveries,
- * biome firsts and finished ring courses, and flushed when the page hides.
+ * biome firsts, finished ring courses and new best landings, and flushed when the page hides.
  */
 export function createJournal(ctx) {
   const { bus, state, world } = ctx;
@@ -15,6 +17,7 @@ export function createJournal(ctx) {
   const STATS_EVENT_INTERVAL_SECONDS = 2;
   const MAX_LANDMARK_ENTRIES = 5000;
   const MAX_NAME_LENGTH = 80;
+  const MAX_CRAFT_ID_LENGTH = 32;
   const VALID_BIOMES = new Set(world.BIOMES.map((biome) => biome.key));
   const VALID_TYPES = new Set(world.LANDMARK_TYPES);
 
@@ -38,6 +41,26 @@ export function createJournal(ctx) {
       maxAltitude: 0,
       flightTime: 0,
       ringCourses: { completed: 0, bestStreak: 0, bestTime: null, bestResult: null, lastResult: null },
+      landings: { count: 0, best: null, last: null },
+    };
+  }
+
+  /**
+   * One graded landing as stored: { grade, sinkRate (m/s), groundSpeed (m/s), craft, at (ms epoch) },
+   * or null when the values are unusable. Used for fresh landings and for repairing stored ones.
+   */
+  function sanitizeLanding(landing) {
+    if (!landing || typeof landing !== 'object') return null;
+    if (!LANDING_GRADES.includes(landing.grade)) return null;
+    const sinkRate = finiteNumber(landing.sinkRate, NaN);
+    if (!(sinkRate >= 0)) return null;
+    const craft = typeof landing.craft === 'string' && landing.craft.length > 0 ? landing.craft.slice(0, MAX_CRAFT_ID_LENGTH) : 'unknown';
+    return {
+      grade: landing.grade,
+      sinkRate: roundTo(sinkRate, 2),
+      groundSpeed: roundTo(nonNegative(landing.groundSpeed), 1),
+      craft,
+      at: nonNegative(landing.at),
     };
   }
 
@@ -112,6 +135,12 @@ export function createJournal(ctx) {
       bestResult: sanitizeCourseResult(rings.bestResult),
       lastResult: sanitizeCourseResult(rings.lastResult),
     };
+    const landings = stored.landings && typeof stored.landings === 'object' ? stored.landings : {};
+    data.landings = {
+      count: Math.floor(nonNegative(landings.count)),
+      best: sanitizeLanding(landings.best),
+      last: sanitizeLanding(landings.last),
+    };
     return data;
   }
 
@@ -137,6 +166,11 @@ export function createJournal(ctx) {
         ...data.ringCourses,
         bestResult: data.ringCourses.bestResult ? { ...data.ringCourses.bestResult } : null,
         lastResult: data.ringCourses.lastResult ? { ...data.ringCourses.lastResult } : null,
+      },
+      landings: {
+        count: data.landings.count,
+        best: data.landings.best ? { ...data.landings.best } : null,
+        last: data.landings.last ? { ...data.landings.last } : null,
       },
     };
   }
@@ -184,12 +218,30 @@ export function createJournal(ctx) {
     }
   }
 
+  /**
+   * Records a graded landing (the typed 'landed' payload). The best one (better grade, then the
+   * lower sink rate) is saved at once. Returns { count, best, last, isBest } or null when unusable.
+   */
+  function recordLanding(landing) {
+    const entry = sanitizeLanding({ ...landing, at: Date.now() });
+    if (!entry) return null;
+    const landings = data.landings;
+    landings.count += 1;
+    landings.last = entry;
+    const isBest = isBetterLanding(entry, landings.best);
+    if (isBest) landings.best = { ...entry };
+    markChanged('landing');
+    if (isBest) save();
+    return { count: landings.count, best: landings.best ? { ...landings.best } : null, last: { ...entry }, isBest };
+  }
+
   function flushOnHide() {
     if (document.visibilityState === 'hidden') save();
   }
   document.addEventListener('visibilitychange', flushOnHide);
   window.addEventListener('pagehide', () => save());
   bus.on('biome:changed', (payload) => visitBiome(payload?.biome?.key));
+  bus.on('landed', (landing) => recordLanding(landing));
   visitBiome(state.player.biome?.key);
 
   return {
@@ -215,6 +267,8 @@ export function createJournal(ctx) {
     hasFound(id) {
       return foundIds.has(id);
     },
+
+    recordLanding,
 
     /** Records a discovered landmark. Returns true only the first time. */
     recordLandmark(site, name) {

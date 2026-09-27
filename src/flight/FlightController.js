@@ -60,7 +60,7 @@ const FLIGHT_ACTIONS = new Set([
 /** Flight actions the SIM model itself handles (passed to it in the tick's controls.actions). */
 const MODEL_ACTIONS = new Set(['gearToggle', 'flapsUp', 'flapsDown', 'airbrake', 'engineToggle', 'chuteDeploy']);
 /** Telemetry fields a model owns; reset to defaults when the model changes so nothing stale shows. */
-const MODEL_TELEMETRY_FIELDS = Object.freeze(['aoa', 'sideslip', 'throttle', 'afterburner', 'engineOn', 'rpm', 'rotorRpm', 'torque', 'flaps', 'flapNotch', 'gear', 'airbrake', 'brakes', 'trim', 'stall', 'activeAssists']);
+const MODEL_TELEMETRY_FIELDS = Object.freeze(['aoa', 'sideslip', 'throttle', 'afterburner', 'engineOn', 'rpm', 'rotorRpm', 'torque', 'flaps', 'flapNotch', 'gear', 'airbrake', 'brakes', 'trim', 'stall', 'overspeed', 'activeAssists']);
 const LANDING_RANK = Object.freeze({ butter: 0, smooth: 1, firm: 2, hard: 3 });
 
 export function createFlightController(ctx) {
@@ -116,7 +116,8 @@ export function createFlightController(ctx) {
   let lastGoodSnapshot = null;
   let nanReported = false;
   const counters = { nanRestores: 0, softCrashes: 0, relaunches: 0, modeSwitches: 0, craftSwitches: 0, maxTicksPerFrame: 0 };
-  const stageContext = { dt: 0, model: null, craft: null, craftId: null, env, autopilot: player.autopilot, assists: 1, handsOff: false, telemetry, activeAssists: [] };
+  // game: the shared state (ring course, waypoint) the SIM autopilot follows.
+  const stageContext = { dt: 0, model: null, craft: null, craftId: null, env, autopilot: player.autopilot, assists: 1, handsOff: false, telemetry, activeAssists: [], game: state };
 
   // ---- Visual blend, crash, relaunch, hot-plug -----------------------------------------------------
   const blend = {
@@ -1182,7 +1183,7 @@ export function createFlightController(ctx) {
     }
   }
 
-  const simVisual = { aileron: 0, elevator: 0, rudder: 0, flaps: 0, throttle: 0, boost: false, propSpeed: NaN, engineOn: true, onGround: false, gearDown: true, airbrake: 0, time: state.time };
+  const simVisual = { aileron: 0, elevator: 0, rudder: 0, flaps: 0, throttle: 0, boost: false, propSpeed: NaN, engineOn: true, onGround: false, gearDown: true, airbrake: 0, groundSpeed: 0, time: state.time };
 
   /** Control-surface deflections for the mesh: the model's own when it reports them, else the stick. */
   function writeSimVisual() {
@@ -1197,6 +1198,7 @@ export function createFlightController(ctx) {
     simVisual.onGround = Boolean(sim.contact && sim.contact.onGround);
     simVisual.gearDown = telemetry.gear ? telemetry.gear.down !== false : true;
     simVisual.airbrake = Number.isFinite(telemetry.airbrake) ? telemetry.airbrake : 0;
+    simVisual.groundSpeed = surfaces && Number.isFinite(surfaces.groundSpeed) ? surfaces.groundSpeed : 0;
     simVisual.boost = false;
     simVisual.time = state.time;
   }

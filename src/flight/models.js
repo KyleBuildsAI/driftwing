@@ -10,7 +10,13 @@
 //
 // The registry is exposed as ctx.flightModels, so tests can register a kinematic model at runtime.
 // While a craft's SIM kind is not registered the controller refuses SIM for that craft.
+//
+// Registered here: 'arcade' (CLASSIC) and 'fixedWing' (SimFixedWing: glider, bush plane), plus the
+// SIM control stages every tick runs through: the PID autopilot (order 20) and the assists (order 40).
 import { createArcadeModel } from './ArcadeModel.js';
+import { createSimFixedWingModel } from './SimFixedWing.js';
+import { createAutopilotStage } from './autopilot.js';
+import { createAssistStage } from './assists.js';
 
 export const MODEL_KINDS = Object.freeze(['arcade', 'fixedWing', 'helicopter', 'wingsuit', 'quad']);
 
@@ -112,3 +118,6 @@ function createFlightModelRegistry() {
 export const flightModels = createFlightModelRegistry();
 
 flightModels.register('arcade', createArcadeModel);
+flightModels.register('fixedWing', createSimFixedWingModel);
+flightModels.registerControlStage(createAutopilotStage());
+flightModels.registerControlStage(createAssistStage());

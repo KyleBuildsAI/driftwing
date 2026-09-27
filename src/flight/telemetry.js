@@ -73,6 +73,8 @@ export function createFlightTelemetry() {
     onGround: false,
     contacts: 0,
     stall: { warning: false, stalled: false, buffet: 0 },
+    /** Airspeed above the craft's Vne (SIM): flutter shakes the airframe until it slows down. */
+    overspeed: false,
     assists: 1,
     activeAssists: [],
     autopilot: { enabled: false, heading: 0, altitude: 0, speed: 0 },
