@@ -23,12 +23,21 @@
 //                  a HOTAS lever lights it past the detent; the click state and notices
 //   autopilot      heading, altitude and speed hold through the flight control system
 //   limits         overspeed past 410 m/s equivalent or Mach 1.7
+//   protection     100 % assists: an afterburner dive stays inside the limit (speed brakes, power limit)
+//   controller     the FlightController headless: SIM boot at cruise and 60 s hands off, CLASSIC -> SIM
+//                  conversions from cruise, slow, fast, boost, climbing, diving and banked (trim.js),
+//                  SIM -> CLASSIC, the afterburner across a mode switch, soft-crash respawn, relaunch
+//                  (airstart), craft switches with the bush plane in flight, and a start on the ground
 //
 // Usage: node tools/lab/jet.mjs [--verbose]
 // Prints a table (measured vs target, tolerance about 10 %) and exits non-zero if any check fails.
 import * as THREE from 'three/webgpu';
+import * as TSL from 'three/tsl';
 import jet from '../../src/craft/jet.js';
+import bushplane from '../../src/craft/bushplane.js';
+import { craftRegistry } from '../../src/craft/index.js';
 import { flightModels } from '../../src/flight/models.js';
+import { createFlightController } from '../../src/flight/FlightController.js';
 import { createControlState, copyControlState } from '../../src/input/controlState.js';
 import { createFlightTelemetry, airDensity, speedOfSound } from '../../src/flight/telemetry.js';
 import { waveDrag, thrustFactor } from '../../src/flight/jetAero.js';
@@ -36,7 +45,7 @@ import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
 import { groundPose } from '../../src/flight/placement.js';
 import { neutralLoad } from '../../src/flight/trim.js';
-import { DEG, clamp } from '../../src/core/util.js';
+import { DEG, clamp, vectorFromHeading } from '../../src/core/util.js';
 
 const DT = 1 / 120;
 const KMH = 3.6;
@@ -760,6 +769,382 @@ function testLimits() {
   record('Vne: 410 m/s EAS or Mach 1.7', ok ? 'yes' : 'no', 'yes', { compare: ok, note: `M1.72@10km over ${machOver}, M1.6@10km inside ${highInside}, 380 m/s SL inside ${inside}, 420 m/s SL over ${easOver}` });
 }
 
+/** How close to the limit: the larger of equivalent airspeed / Vne and Mach / the Mach limit. */
+function limitRatio(data) {
+  const equivalent = Math.sqrt((2 * data.dynamicPressure) / 1.225);
+  return Math.max(equivalent / data.vne, data.mach / jet.limits.vneMach);
+}
+
+/**
+ * An afterburner dive from Mach 1.4 at 9 km, 25 degrees nose down, hands off in pitch: at 100 % the
+ * overspeed protection (speed brakes, power limit) keeps it inside the limit; at 0 % nothing does.
+ */
+function overspeedDive(assists) {
+  const rig = createRig({ assists });
+  rig.setAssists(assists);
+  rig.airborne({ speed: 1.4 * speedOfSound(9000), altitude: 9000, throttle: 1, pitch: -25 });
+  rig.afterburner();
+  const lateral = createLateralPilot();
+  let maxRatio = 0;
+  let maxBrakes = 0;
+  let minLimit = 1;
+  rig.run(40, (lab) => {
+    lateral.fly(lab);
+    lab.pilot.pitch = 0;
+    maxRatio = Math.max(maxRatio, limitRatio(lab.data));
+    maxBrakes = Math.max(maxBrakes, lab.writeTelemetry().airbrake);
+    if (Number.isFinite(lab.controls.powerLimit)) minLimit = Math.min(minLimit, lab.controls.powerLimit);
+    return lab.model.state.position.y < 2500;
+  });
+  return { maxRatio, maxBrakes, minLimit, abDetent: rig.craftState.abDetent };
+}
+
+function testOverspeedProtection() {
+  const guarded = overspeedDive(1);
+  record('100 %: afterburner dive stays inside the limit', guarded.maxRatio, 1.01, { compare: 'max', decimals: 3, note: `speed brakes ${guarded.maxBrakes.toFixed(2)}, power limit down to ${guarded.minLimit.toFixed(2)}, lever still past the detent ${guarded.abDetent}` });
+  const raw = overspeedDive(0);
+  record('0 %: the same dive goes past it', raw.maxRatio, 1.01, { compare: 'min', decimals: 3, note: 'no protection at 0 %' });
+}
+
+// ============================================================================================
+// CONTROLLER: the FlightController headless (mode switches, spawns, respawn, relaunch, craft switches)
+// ============================================================================================
+const CONTROLLER_GROUND = 200;
+const FRAME = 1 / 60;
+
+/** The soft-crash fade draws a DOM overlay; headless it gets a stand-in element. */
+function ensureDocumentStandIn() {
+  if (typeof globalThis.document !== 'undefined') return;
+  const element = { style: {}, setAttribute() {} };
+  globalThis.document = { body: { appendChild() {} }, getElementById: () => null, createElement: () => element };
+}
+
+/**
+ * The FlightController over flat ground at CONTROLLER_GROUND m in calm air, fed like the game (the
+ * v1 input struct for CLASSIC, the ControlState for SIM, 60 Hz frames). The craft starts at
+ * `altitude`, heading 30, at its CLASSIC cruise (the controller boots SIM at the craft's SIM cruise).
+ */
+function createControllerRig({ craft = 'jet', mode = 'classic', assists = 1, altitude = 1500, startOnGround = false } = {}) {
+  ensureDocumentStandIn();
+  const world = { groundHeight: () => CONTROLLER_GROUND, heightAt: () => CONTROLLER_GROUND, WATER_LEVEL: 0 };
+  const bus = attachTypedEvents(new EventBus(), { validate: true });
+  const events = { notify: [], stall: 0, softCrash: [], relaunched: [], landed: [] };
+  bus.on('notify', (payload) => events.notify.push(payload.text));
+  bus.on('stall', () => events.stall++);
+  bus.onTyped('softCrash', (payload) => events.softCrash.push(payload));
+  bus.onTyped('relaunched', (payload) => events.relaunched.push(payload));
+  bus.onTyped('landed', (payload) => events.landed.push(payload));
+  const heading = 30;
+  const cruise = craftRegistry.get(craft).arcadeProfile.SPEED.CRUISE;
+  const player = {
+    position: new THREE.Vector3(0, altitude, 0),
+    velocity: vectorFromHeading(heading).multiplyScalar(cruise),
+    quaternion: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -heading * DEG),
+    forward: vectorFromHeading(heading),
+    up: new THREE.Vector3(0, 1, 0),
+    right: new THREE.Vector3(1, 0, 0),
+    speed: cruise,
+    throttle: 0.55,
+    heading,
+    pitch: 0,
+    roll: 0,
+    yawRate: 0,
+    verticalSpeed: 0,
+    gForce: 1,
+    altitude,
+    groundHeight: CONTROLLER_GROUND,
+    agl: altitude - CONTROLLER_GROUND,
+    stalled: false,
+    boost: { active: false, remaining: 0, cooldown: 0, cooldownTotal: 6 },
+    barrelRoll: { active: false, direction: 0, progress: 0 },
+    autopilot: { enabled: false, heading, altitude, followWaypoint: false },
+    inCloud: 0,
+  };
+  const state = {
+    frame: 0,
+    paused: false,
+    photoMode: false,
+    seed: 'LAB',
+    time: { elapsed: 0, realElapsed: 0, frameDt: 0, nightFactor: 0, sunElevation: 14 },
+    player,
+    flight: createFlightTelemetry(),
+    waypoint: null,
+    ringCourse: { active: false, total: 0, passed: 0, streak: 0, bestStreak: 0, elapsed: 0, nextIndex: 0 },
+  };
+  const input = { pitch: 0, roll: 0, yaw: 0, throttleDelta: 0, throttleTarget: null, boost: false, fineControl: false, mouseActive: false, lastActivity: 0, touch: { active: false, x: 0, y: 0, throttle: null, boost: false } };
+  const settingsValues = { mode, craft, startOnGround, assists: { glider: assists, bushplane: assists, jet: assists } };
+  const controls = createControlState();
+  controls.sources.throttle = 'keyboard';
+  const { uniform } = TSL;
+  const ctx = {
+    THREE,
+    TSL,
+    scene: new THREE.Scene(),
+    state,
+    input,
+    controls,
+    bus,
+    world,
+    uniforms: { time: uniform(0), sunDirection: uniform(new THREE.Vector3(0, 1, 0)), sunColor: uniform(new THREE.Color(1, 1, 1)), skyHorizonColor: uniform(new THREE.Color(1, 1, 1)), skyZenithColor: uniform(new THREE.Color(1, 1, 1)), nightFactor: uniform(0) },
+    craftRegistry,
+    flightModels,
+    settings: {
+      get: (key) => settingsValues[key],
+      set(key, value) {
+        settingsValues[key] = value;
+        bus.emit('settings:changed', { key, value, settings: { ...settingsValues } });
+        return true;
+      },
+    },
+    wind: {
+      sample(pos, t, out = { vel: new THREE.Vector3(), turbulence: 0 }) {
+        out.vel.set(0, 0, 0);
+        out.turbulence = 0;
+        return out;
+      },
+      ambientAt: () => ({ speed: 0, fromDegrees: 0 }),
+      lastLayers: { gust: new THREE.Vector3() },
+    },
+    systems: { camera: { snap() {} } },
+    registerPrewarm() {},
+  };
+  const flight = createFlightController(ctx);
+  ctx.systems.flight = flight;
+  const rig = { flight, state, input, controls, settings: settingsValues, events, telemetry: state.flight, time: 0 };
+  rig.frame = () => {
+    state.frame++;
+    state.time.elapsed += FRAME;
+    state.time.frameDt = FRAME;
+    flight.update(FRAME, FRAME);
+    flight.publishTelemetry(FRAME);
+    rig.time += FRAME;
+  };
+  /** Runs `seconds` of frames, calling script(rig) before each; stops early when it returns true. */
+  rig.run = (seconds, script) => {
+    const frames = Math.round(seconds / FRAME);
+    for (let frame = 0; frame < frames; frame++) {
+      if (script && script(rig) === true) return true;
+      rig.frame();
+    }
+    return false;
+  };
+  rig.handsOff = () => {
+    Object.assign(input, { pitch: 0, roll: 0, yaw: 0 });
+    Object.assign(controls, { pitch: 0, roll: 0, yaw: 0 });
+  };
+  /** Presses an action for one frame (the controller consumes ControlState.actions). */
+  rig.press = (id) => {
+    controls.actions.add(id);
+    rig.frame();
+  };
+  rig.model = () => flight.getModel();
+  return rig;
+}
+
+/**
+ * Watches a SIM stretch hands off: load factor range (after `settle` s), stall (flag or the critical
+ * angle of attack), the speed range and the limit ratio (after `speedSettle` s), the altitude change
+ * and the largest per-frame rotation of the rendered craft (the switch blend keeps it smooth).
+ */
+function watchSim(rig, seconds, { settle = 0.1, speedSettle = 0.6 } = {}) {
+  const telemetry = rig.telemetry;
+  const startAltitude = rig.state.player.position.y;
+  const result = { minLoad: Infinity, maxLoad: -Infinity, stalled: false, minSpeed: Infinity, maxSpeed: 0, maxRatio: 0, maxFrameRotation: 0, altitudeChange: 0, minAoaMargin: Infinity };
+  const previous = rig.flight.planeMesh.quaternion.clone();
+  const start = rig.time;
+  rig.run(seconds, (lab) => {
+    lab.handsOff();
+    const data = lab.model().flightData;
+    const since = lab.time - start;
+    const root = lab.flight.planeMesh;
+    result.maxFrameRotation = Math.max(result.maxFrameRotation, previous.angleTo(root.quaternion) / DEG);
+    previous.copy(root.quaternion);
+    if (since < settle || !data) return false;
+    result.minLoad = Math.min(result.minLoad, telemetry.gLoad);
+    result.maxLoad = Math.max(result.maxLoad, telemetry.gLoad);
+    result.minAoaMargin = Math.min(result.minAoaMargin, (data.aoaCritical - data.aoa) / DEG);
+    if (data.stalled || data.aoa >= data.aoaCritical) result.stalled = true;
+    if (since < speedSettle) return false;
+    result.minSpeed = Math.min(result.minSpeed, data.airspeed);
+    result.maxSpeed = Math.max(result.maxSpeed, data.airspeed);
+    if (Number.isFinite(data.mach)) result.maxRatio = Math.max(result.maxRatio, limitRatio(data));
+    return false;
+  });
+  result.altitudeChange = rig.state.player.position.y - startAltitude;
+  return result;
+}
+
+function describeWatch(watch) {
+  return `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g, ${(watch.minSpeed * KMH).toFixed(0)}..${(watch.maxSpeed * KMH).toFixed(0)} km/h, AoA margin ${watch.minAoaMargin.toFixed(1)} deg, ${watch.altitudeChange.toFixed(0)} m, max ${watch.maxFrameRotation.toFixed(2)} deg/frame`;
+}
+
+/** Hands off after a switch or spawn: loads inside the comfort band, no stall, inside the limit. */
+function calm(watch, { minLoad = 0.8, maxLoad = 1.3 } = {}) {
+  return watch.minLoad >= minLoad && watch.maxLoad <= maxLoad && !watch.stalled && watch.maxRatio <= 0.95;
+}
+
+/** CLASSIC states to switch from: scripted v1 inputs from the jet's CLASSIC cruise. */
+const CLASSIC_STATES = Object.freeze([
+  { id: 'cruise', fly: (rig) => rig.run(3) },
+  { id: 'slow', fly: (rig) => { rig.input.throttleTarget = 0; rig.run(25); } },
+  { id: 'fast', fly: (rig) => { rig.input.throttleTarget = 1; rig.run(25); } },
+  { id: 'boost', fly: (rig) => { rig.input.throttleTarget = 1; rig.run(20); rig.input.boost = true; rig.run(2.5); rig.input.boost = false; } },
+  { id: 'climbing', fly: (rig) => { rig.run(2); rig.input.pitch = 0.35; rig.run(0.8); rig.input.pitch = 0; rig.run(0.3); } },
+  { id: 'diving', fly: (rig) => { rig.run(2); rig.input.pitch = -0.35; rig.run(0.8); rig.input.pitch = 0; rig.run(0.3); } },
+  { id: 'banked', fly: (rig) => { rig.run(2); rig.input.roll = 0.8; rig.run(2.5); } },
+]);
+
+function testConversions() {
+  for (const assists of [1, 0.5]) {
+    for (const classicState of CLASSIC_STATES) {
+      const rig = createControllerRig({ assists });
+      classicState.fly(rig);
+      const before = { speed: rig.telemetry.airspeed, pitch: rig.telemetry.pitch, roll: rig.telemetry.roll };
+      rig.input.throttleTarget = null;
+      rig.controls.throttle = jet.spawn.cruiseThrottle;
+      rig.handsOff();
+      rig.flight.setMode('sim');
+      const watch = watchSim(rig, 15);
+      log(`  CLASSIC ${classicState.id} (${(before.speed * KMH).toFixed(0)} km/h, pitch ${before.pitch.toFixed(1)}, bank ${before.roll.toFixed(1)}) -> SIM ${assists * 100} %: ${describeWatch(watch)}`);
+      record(`CLASSIC -> SIM ${assists * 100} %, ${classicState.id}`, `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g`, '0.8..1.3 g, calm', { compare: calm(watch) && watch.maxFrameRotation <= 3, note: `from ${(before.speed * KMH).toFixed(0)} km/h, pitch ${before.pitch.toFixed(0)}, bank ${before.roll.toFixed(0)}: ${describeWatch(watch)}` });
+    }
+  }
+}
+
+function testToClassic() {
+  const rig = createControllerRig({ mode: 'sim' });
+  rig.controls.throttle = jet.spawn.cruiseThrottle;
+  rig.run(5, (lab) => lab.handsOff());
+  const before = rig.telemetry.airspeed;
+  rig.flight.setMode('classic');
+  const previous = rig.flight.planeMesh.quaternion.clone();
+  let maxRotation = 0;
+  let stalled = false;
+  rig.run(3, (lab) => {
+    lab.handsOff();
+    maxRotation = Math.max(maxRotation, previous.angleTo(lab.flight.planeMesh.quaternion) / DEG);
+    previous.copy(lab.flight.planeMesh.quaternion);
+    if (lab.state.player.stalled) stalled = true;
+  });
+  record('SIM -> CLASSIC at SIM cruise', maxRotation, 3, { unit: 'deg/frame', compare: maxRotation <= 3 && !stalled && rig.events.stall === 0, decimals: 2, note: `${(before * KMH).toFixed(0)} -> ${(rig.state.player.speed * KMH).toFixed(0)} km/h, ${stalled ? 'ARCADE STALL' : 'no arcade stall'}` });
+}
+
+/** SIM boot at cruise, 60 s hands off at 100 %; the afterburner lit, then a round trip through CLASSIC. */
+function testSimBoot() {
+  const rig = createControllerRig({ mode: 'sim' });
+  rig.controls.throttle = jet.spawn.cruiseThrottle;
+  const bootSpeed = rig.model().flightData.airspeed;
+  record('SIM boot speed', bootSpeed * KMH, jet.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.03, note: 'spawn.cruise (about 800 km/h)' });
+  rig.run(1, (lab) => lab.handsOff());
+  const watch = watchSim(rig, 60, { settle: 0 });
+  record('100 % hands off 60 s: altitude change', Math.abs(watch.altitudeChange), 30, { unit: 'm', compare: Math.abs(watch.altitudeChange) <= 30 && calm(watch), note: describeWatch(watch) });
+
+  rig.controls.throttle = 1;
+  rig.press('craftAbility');
+  rig.run(4, (lab) => lab.handsOff());
+  const lit = rig.telemetry.afterburner === true && rig.telemetry.craftState.abDetent === true;
+  rig.flight.setMode('classic');
+  rig.run(1);
+  rig.flight.setMode('sim');
+  rig.controls.throttle = jet.spawn.cruiseThrottle;
+  const after = watchSim(rig, 5);
+  const cleared = rig.telemetry.afterburner === false && rig.telemetry.craftState.abDetent === false;
+  record('afterburner across SIM -> CLASSIC -> SIM', lit && cleared ? 'yes' : 'no', 'yes', { compare: lit && cleared && calm(after), note: `lit before ${lit}, cleared after ${cleared}; ${describeWatch(after)}` });
+}
+
+function testRespawn() {
+  const rig = createControllerRig({ mode: 'sim' });
+  rig.controls.throttle = jet.spawn.cruiseThrottle;
+  rig.run(2, (lab) => lab.handsOff());
+  rig.flight.triggerSoftCrash('lab');
+  rig.run(0.45, (lab) => lab.handsOff());
+  const speed = rig.model().flightData.airspeed;
+  const agl = rig.state.player.position.y - CONTROLLER_GROUND;
+  rig.run(0.5, (lab) => lab.handsOff());
+  const watch = watchSim(rig, 10);
+  record('SIM respawn after a soft crash', speed * KMH, jet.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.03, note: `${agl.toFixed(0)} m AGL, ${rig.events.softCrash.length} soft crash` });
+  record('SIM respawn: hands off 10 s', `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g`, '0.8..1.3 g, calm', { compare: calm(watch) && Math.abs(agl - 300) < 30, note: describeWatch(watch) });
+}
+
+function testRelaunch() {
+  const rig = createControllerRig({ mode: 'sim', altitude: CONTROLLER_GROUND + 400 });
+  rig.controls.throttle = jet.spawn.cruiseThrottle;
+  rig.run(1, (lab) => lab.handsOff());
+  rig.flight.relaunch();
+  rig.run(3, (lab) => {
+    lab.handsOff();
+    return lab.events.relaunched.length > 0;
+  });
+  const method = rig.events.relaunched[0] ? rig.events.relaunched[0].method : 'none';
+  const speed = rig.model().flightData.airspeed;
+  const watch = watchSim(rig, 10);
+  record('SIM relaunch (airstart)', speed * KMH, jet.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.05, note: `method ${method}` });
+  record('SIM relaunch: hands off 10 s', method, 'airstart, calm', { compare: method === 'airstart' && calm(watch), note: describeWatch(watch) });
+}
+
+/** SIM craft switches in flight at 100 %: bush plane -> jet -> bush plane, 10 s hands off after each. */
+function testCraftSwitch() {
+  const rig = createControllerRig({ craft: 'bushplane', mode: 'sim' });
+  rig.controls.throttle = bushplane.spawn.cruiseThrottle;
+  rig.run(3, (lab) => lab.handsOff());
+  rig.flight.setCraft('jet');
+  rig.controls.throttle = jet.spawn.cruiseThrottle;
+  const toJet = { speed: rig.model().flightData.airspeed, kind: rig.model().kind };
+  toJet.watch = watchSim(rig, 10);
+  record('SIM craft switch bush plane -> jet', toJet.speed * KMH, jet.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.03, note: `model ${toJet.kind}` });
+  record('SIM craft switch bush plane -> jet: calm', toJet.kind, 'jet, calm', { compare: toJet.kind === 'jet' && calm(toJet.watch), note: describeWatch(toJet.watch) });
+  rig.flight.setCraft('bushplane');
+  rig.controls.throttle = bushplane.spawn.cruiseThrottle;
+  const toBush = { speed: rig.model().flightData.airspeed };
+  toBush.watch = watchSim(rig, 10);
+  record('SIM craft switch jet -> bush plane', toBush.speed * KMH, bushplane.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.03, note: `10 s hands off: ${describeWatch(toBush.watch)}` });
+}
+
+/** One step of the take-off pilot's angle-of-attack hold (12 degrees) through the fly-by-wire. */
+function holdTakeoffAoa(pid, data) {
+  return pid.update((12 - data.aoa / DEG) * DEG, FRAME, NaN) - 0.3 * data.pitchRate;
+}
+
+/**
+ * Start on ground at 100 %: half flaps, afterburner, 12 degrees of angle of attack from 270 km/h,
+ * gear and flaps up 60 m above the ground, then hands off 15 s.
+ */
+function testGroundStart() {
+  const rig = createControllerRig({ mode: 'sim', startOnGround: true });
+  const startedOnGround = rig.model().contact.onGround;
+  rig.run(0.2);
+  const gearDown = rig.telemetry.gear.down === true;
+  rig.press('flapsDown');
+  rig.controls.throttle = 1;
+  rig.press('craftAbility');
+  const aoaPid = createPid(1.5, 2.5, 0);
+  let liftOff = NaN;
+  let cleanedUp = NaN;
+  let strike = null;
+  rig.run(60, (lab) => {
+    const data = lab.model().flightData;
+    lab.controls.roll = 0;
+    lab.controls.yaw = 0;
+    if (lab.model().contact.bodyStrike) strike = lab.model().contact.bodyStrike.part;
+    if (Number.isFinite(cleanedUp)) {
+      lab.controls.pitch = 0;
+      return lab.time - cleanedUp > 15;
+    }
+    lab.controls.pitch = data.airspeed > 270 / KMH ? clamp(holdTakeoffAoa(aoaPid, data), -1, 1) : 0;
+    if (!data.onGround && !Number.isFinite(liftOff)) liftOff = data.airspeed;
+    if (Number.isFinite(liftOff) && data.agl > 60) {
+      cleanedUp = lab.time;
+      lab.controls.actions.add('gearToggle');
+      lab.controls.actions.add('flapsUp');
+      lab.controls.throttle = 0.6;
+    }
+    return false;
+  });
+  const watch = watchSim(rig, 5);
+  record('start on ground: lift-off at 100 %', liftOff * KMH, 290, { unit: 'km/h', decimals: 0, note: `started on the ground ${startedOnGround}, gear down ${gearDown}, ${strike ? `strike: ${strike}` : 'no strikes'}, ${rig.events.softCrash.length} soft crashes` });
+  record('start on ground: gear up, then hands off', rig.telemetry.gear.down ? 'down' : 'up', 'up, calm', { compare: startedOnGround && gearDown && !rig.telemetry.gear.down && !strike && rig.events.softCrash.length === 0 && calm(watch, { maxLoad: 1.5 }), note: describeWatch(watch) });
+}
+
 // ============================================================================================
 // RUN
 // ============================================================================================
@@ -784,7 +1169,7 @@ function printTable() {
 
 const started = Date.now();
 const only = process.argv.find((argument) => argument.startsWith('--only='));
-const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGround, testGear, testSpeedBrake, testDetent, testAutopilot, testLimits };
+const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGround, testGear, testSpeedBrake, testDetent, testAutopilot, testLimits, testOverspeedProtection, testSimBoot, testConversions, testToClassic, testRespawn, testRelaunch, testCraftSwitch, testGroundStart };
 for (const [name, test] of Object.entries(tests)) {
   if (only && !name.toLowerCase().includes(only.slice(7).toLowerCase())) continue;
   test();
