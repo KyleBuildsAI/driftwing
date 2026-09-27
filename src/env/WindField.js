@@ -9,7 +9,8 @@
 //   ridge       the wind component blowing into a slope rises with it (lift on the windward face,
 //               sink in the lee), from the gradient of the shared height function
 //   thermals    seeded columns over sunny land: strongest at midday, off at night, each living a
-//               few minutes, leaning downwind, with a sinking ring around the core. The cloud system
+//               few minutes, leaning downwind, with a sinking ring around the core. The rising core
+//               carries its own air, so the ambient wind is mostly shut out of it. The cloud system
 //               draws a small cumulus cap on top of each one (thermalsNear)
 //   turbulence  gusts from smooth space-time noise, scaled by wind speed and low height above the
 //               ground, plus lee rotor and thermal-edge chop
@@ -17,6 +18,7 @@
 //               hash. Phase 1 proves the path with a dev-only debug updraft (createDebugUpdraft)
 //
 // Craft compute airspeed as velocity - sample(pos, t).vel. CLASSIC scales the result down itself.
+// probe(pos, t, out?) is the same query without touching lastLayers (overlays, many-point probes).
 import * as THREE from 'three/webgpu';
 import { headingFromVector, wrapDegrees } from '../core/util.js';
 
@@ -32,6 +34,19 @@ const THERMAL_CLIMB_FOR_LEAN = 2.5;
 const THERMAL_LEAN_SHARE = 0.35;
 const THERMAL_LEAN_LIMIT = 260;
 const THERMAL_RING = 2.2;
+// Core size and strength: a glider circling at about 40 deg of bank (60 m radius) inside a mature
+// thermal at midday climbs about 1-3 m/s.
+const THERMAL_RADIUS_MIN = 100;
+const THERMAL_RADIUS_SPAN = 90;
+const THERMAL_PEAK_MIN = 3;
+const THERMAL_PEAK_SPAN = 2.6;
+// The rising core carries its own air along the leaning column, so the ambient wind is mostly
+// shut out of it (at most this share, reached once the core rises at THERMAL_SHELTER_CLIMB m/s):
+// a glider circling in the core drifts out slowly instead of at the full wind speed.
+const THERMAL_SHELTER = 0.9;
+const THERMAL_SHELTER_CLIMB = 1.2;
+/** The shelter is whole out to this fraction of the core radius and fades to nothing at its edge. */
+const THERMAL_SHELTER_EDGE = 0.55;
 /** Chance of a thermal per cell, by biome: bright dry ground triggers the best thermals. */
 const THERMAL_BIOME_CHANCE = Object.freeze({ dunes: 0.85, meadows: 0.8, pine: 0.45, archipelago: 0.35, snow: 0.15 });
 
@@ -147,8 +162,8 @@ export function createWindField({ world, uniforms, state, bus }) {
       x,
       z,
       ground,
-      radius: 70 + 90 * roll(904),
-      peak: 1.8 + 2.7 * roll(905),
+      radius: THERMAL_RADIUS_MIN + THERMAL_RADIUS_SPAN * roll(904),
+      peak: THERMAL_PEAK_MIN + THERMAL_PEAK_SPAN * roll(905),
       top: ground + 650 + 700 * roll(906),
       phase: roll(907),
       period: 900 + 600 * roll(908),
@@ -185,6 +200,7 @@ export function createWindField({ world, uniforms, state, bus }) {
   function thermalAt(x, y, z, time, windX, windZ, result) {
     result.lift = 0;
     result.edge = 0;
+    result.shelter = 0;
     if (solarFactor() <= 0) return result;
     const centerCellX = Math.floor(x / THERMAL_CELL);
     const centerCellZ = Math.floor(z / THERMAL_CELL);
@@ -200,8 +216,10 @@ export function createWindField({ world, uniforms, state, bus }) {
         const vertical = thermalStrength(thermal, time) * thermalProfile(normalizedHeight);
         if (vertical <= 0) continue;
         if (ratio < 1) {
-          result.lift += vertical * (1 - ratio * ratio);
+          const core = 1 - ratio * ratio;
+          result.lift += vertical * core;
           result.edge = Math.max(result.edge, smoothstep(0.55, 1, ratio) * vertical);
+          result.shelter = Math.max(result.shelter, THERMAL_SHELTER * (1 - smoothstep(THERMAL_SHELTER_EDGE, 1, ratio)) * smoothstep(0, THERMAL_SHELTER_CLIMB, vertical));
         } else {
           const ring = Math.sin(Math.PI * Math.min(1, (ratio - 1) / THERMAL_RING));
           result.lift -= 0.28 * vertical * ring;
@@ -285,40 +303,61 @@ export function createWindField({ world, uniforms, state, bus }) {
 
   // ---- Public sample ---------------------------------------------------------------------------
   const ridgeResult = { lift: 0, lee: 0 };
-  const thermalResult = { lift: 0, edge: 0 };
+  const thermalResult = { lift: 0, edge: 0, shelter: 0 };
+  const layerAmbient = new THREE.Vector3();
+  const layerGust = new THREE.Vector3();
 
-  function sample(pos, t = state.time.elapsed, out = { vel: new THREE.Vector3(), turbulence: 0 }) {
+  /**
+   * The whole field at pos. record = true publishes the per-layer values in lastLayers (the craft's
+   * own sample); probes for visualisation pass false so they never overwrite the craft's layers.
+   */
+  function sampleField(pos, t, out, record) {
     const { x, y, z } = pos;
     const surface = Math.max(world.groundHeight(x, z), world.WATER_LEVEL);
     const heightAboveGround = y - surface;
 
-    ambientAt(heightAboveGround, lastLayers.ambient);
-    out.vel.copy(lastLayers.ambient);
-    const windX = lastLayers.ambient.x;
-    const windZ = lastLayers.ambient.z;
+    ambientAt(heightAboveGround, layerAmbient);
+    out.vel.copy(layerAmbient);
+    const windX = layerAmbient.x;
+    const windZ = layerAmbient.z;
     const windSpeed = Math.hypot(windX, windZ);
 
     ridgeLift(x, z, surface, heightAboveGround, windX, windZ, ridgeResult);
     thermalAt(x, y, z, t, windX, windZ, thermalResult);
     out.vel.y += ridgeResult.lift + thermalResult.lift;
-    lastLayers.ridge = ridgeResult.lift;
-    lastLayers.thermal = thermalResult.lift;
+    if (thermalResult.shelter > 0 && windSpeed > 1e-3) {
+      // Inside a core the air moves with the column: it rises and drifts only as fast as the lean.
+      const columnDrift = Math.max(0, thermalResult.lift) * (THERMAL_LEAN_SHARE / THERMAL_CLIMB_FOR_LEAN) * Math.min(1, windSpeed / 6);
+      const horizontal = (1 - thermalResult.shelter) + thermalResult.shelter * columnDrift / windSpeed;
+      out.vel.x *= horizontal;
+      out.vel.z *= horizontal;
+    }
 
     // Turbulence intensity (m/s): mechanical near the ground, lee rotor, thermal edges, light chop.
     const mechanical = 0.16 * windSpeed * Math.exp(-Math.max(heightAboveGround, 0) / 260);
     const sigma = Math.hypot(mechanical, 0.9 * ridgeResult.lee, 0.45 * thermalResult.edge, 0.2);
-    lastLayers.gust.set(sigma * gust(0, t, x, z), sigma * 0.6 * gust(1, t, z, x), sigma * gust(2, t, x + 311, z - 173));
-    out.vel.add(lastLayers.gust);
+    layerGust.set(sigma * gust(0, t, x, z), sigma * 0.6 * gust(1, t, z, x), sigma * gust(2, t, x + 311, z - 173));
+    out.vel.add(layerGust);
 
     let fromSources = 0;
     if (sources.size > 0) {
       samplePosition.set(x, y, z);
       fromSources = applySources(samplePosition, t, out);
     }
-    lastLayers.sources = sources.size;
     out.turbulence = Math.min(1, Math.max(sigma / 3, fromSources));
-    lastLayers.turbulence = out.turbulence;
+    if (record) {
+      lastLayers.ambient.copy(layerAmbient);
+      lastLayers.ridge = ridgeResult.lift;
+      lastLayers.thermal = thermalResult.lift;
+      lastLayers.gust.copy(layerGust);
+      lastLayers.sources = sources.size;
+      lastLayers.turbulence = out.turbulence;
+    }
     return out;
+  }
+
+  function sample(pos, t = state.time.elapsed, out = { vel: new THREE.Vector3(), turbulence: 0 }) {
+    return sampleField(pos, t, out, true);
   }
 
   /**
@@ -344,6 +383,14 @@ export function createWindField({ world, uniforms, state, bus }) {
   return {
     sample,
     thermalsNear,
+
+    /**
+     * Same result as sample(), but leaves lastLayers untouched: for visualisation and other
+     * many-point queries that must not disturb the craft's own per-layer reading.
+     */
+    probe(pos, t = state.time.elapsed, out = { vel: new THREE.Vector3(), turbulence: 0 }) {
+      return sampleField(pos, t, out, false);
+    },
 
     /**
      * Adds a wind source: { id, bounds, sample(pos, t), kind? }. bounds is { min, max } (world-space
