@@ -2142,27 +2142,28 @@ export function createUISystem(ctx) {
   }
 
   // ---------------------------------------------------------------------------
-  // Hotkeys
+  // Hotkeys and input actions
   // ---------------------------------------------------------------------------
-  const PHOTO_MODE_HOTKEYS = new Set(['photo', 'escape', 'capture', 'time', 'fps', 'voice', 'mic']);
+  // Named, rebindable actions (photo mode, journal, settings, time of day, ring course, waypoints,
+  // autopilot) arrive as 'input:action' presses from the input system on any device. The keys
+  // below stay UI-only: M mic, Enter and / command (C too in CLASSIC; SIM uses C for the view),
+  // H and ? help, Escape, X clear waypoint, K capture, I fps, Shift+V voice, Tab HUD. A key the
+  // player has bound to an action belongs to that action (input.consumesKey).
+  const PHOTO_MODE_HOTKEYS = new Set(['escape', 'capture', 'fps', 'voice', 'mic']);
+  const PHOTO_MODE_ACTIONS = new Set(['photoMode', 'timeForward', 'timeBack']);
+  const TIME_PRESET_SUN = { dawn: [-4, false], golden: [8, true], night: [-35, true] };
   function resolveHotkey(event) {
     switch (event.code) {
-      case 'KeyP': return 'photo';
       case 'KeyM': return 'mic';
-      case 'KeyC': return 'command';
+      case 'KeyC': return settings.get('mode') === 'classic' ? 'command' : null;
       case 'Enter':
       case 'NumpadEnter': return 'command';
-      case 'KeyJ': return 'journal';
       case 'KeyH': return 'help';
       case 'Escape': return 'escape';
-      case 'KeyT': return 'time';
-      case 'KeyR': return 'rings';
-      case 'KeyG': return 'waypoint';
       case 'KeyX': return 'clearWaypoint';
-      case 'KeyO': return 'autopilot';
       case 'KeyK': return 'capture';
       case 'KeyI': return 'fps';
-      case 'KeyV': return 'voice';
+      case 'KeyV': return event.shiftKey ? 'voice' : null;
       case 'Tab': return 'hud';
       default: break;
     }
@@ -2178,20 +2179,14 @@ export function createUISystem(ctx) {
   }
   function runHotkey(hotkey) {
     switch (hotkey) {
-      case 'photo': togglePhotoMode(!state.photoMode); break;
       case 'mic': toggleMic(); break;
       case 'command':
         if (!commandOpen) openCommandBar();
         else dom.commandInput.focus({ preventScroll: true });
         break;
-      case 'journal': togglePanel('journal'); break;
       case 'help': togglePanel('help'); break;
       case 'escape': handleEscape(); break;
-      case 'time': cycleTimePreset(); break;
-      case 'rings': toggleRingCourse(); break;
-      case 'waypoint': setWaypointAhead(); break;
       case 'clearWaypoint': clearWaypoint(); break;
-      case 'autopilot': toggleAutopilot(); break;
       case 'capture': captureScreenshot(); break;
       case 'fps': toggleFpsBadge(); break;
       case 'voice': toggleVoice(); break;
@@ -2204,6 +2199,7 @@ export function createUISystem(ctx) {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (isTypingTarget(event.target)) return;
     if (event.target instanceof HTMLButtonElement && root.contains(event.target) && (event.key === 'Enter' || event.key === ' ')) return;
+    if (ctx.systems.input?.consumesKey?.(event)) return;
     const hotkey = resolveHotkey(event);
     if (!hotkey) return;
     if (photoActive && !PHOTO_MODE_HOTKEYS.has(hotkey)) return;
@@ -2211,6 +2207,57 @@ export function createUISystem(ctx) {
     if (event.repeat) return;
     runHotkey(hotkey);
   }
+
+  /** Day time of a TIME_CYCLE preset (the copilot's preset definitions). */
+  function presetDayTime(preset) {
+    const sun = TIME_PRESET_SUN[preset];
+    return sun ? ctx.util.dayTimeForSunElevation(sun[0], sun[1]) : 0.5;
+  }
+  /** Time of day one preset back: the previous preset in a chain, else the last one passed today. */
+  function cycleTimePresetBack() {
+    let nextIndex;
+    if (lastTimePreset && uiClock - lastTimePresetAt < 8) {
+      nextIndex = (TIME_CYCLE.indexOf(lastTimePreset) + TIME_CYCLE.length - 1) % TIME_CYCLE.length;
+    } else {
+      const dayTime = ((Number(state.time.dayTime) % 1) + 1) % 1;
+      let smallestGap = Infinity;
+      nextIndex = 0;
+      TIME_CYCLE.forEach((preset, presetIndex) => {
+        const gap = (((dayTime - presetDayTime(preset) - 0.01) % 1) + 1) % 1;
+        if (gap < smallestGap) {
+          smallestGap = gap;
+          nextIndex = presetIndex;
+        }
+      });
+    }
+    lastTimePreset = TIME_CYCLE[nextIndex];
+    lastTimePresetAt = uiClock;
+    runAction({ type: 'time', preset: lastTimePreset });
+  }
+  function setWaypointNearest() {
+    runAction({ type: 'find', target: 'landmark' });
+  }
+  function runInputAction(actionId) {
+    switch (actionId) {
+      case 'photoMode': togglePhotoMode(!state.photoMode); break;
+      case 'journal': togglePanel('journal'); break;
+      case 'settings': togglePanel('settings'); break;
+      case 'timeForward': cycleTimePreset(); break;
+      case 'timeBack': cycleTimePresetBack(); break;
+      case 'ringCourse': toggleRingCourse(); break;
+      case 'waypointAhead': setWaypointAhead(); break;
+      case 'waypointNearest': setWaypointNearest(); break;
+      case 'autopilotToggle': toggleAutopilot(); break;
+      default: break;
+    }
+  }
+  function onInputAction(payload) {
+    if (!payload || payload.phase !== 'press') return;
+    if (photoActive && !PHOTO_MODE_ACTIONS.has(payload.id)) return;
+    markActivity();
+    runInputAction(payload.id);
+  }
+  bus.on('input:action', onInputAction);
 
   dom.commandInput.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {

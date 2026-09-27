@@ -5,12 +5,17 @@
 //   roll, pitch, yaw         -1..1   (right, nose up, nose right positive)
 //   throttle, collective      0..1
 //   brakeL, brakeR            0..1
-//   flaps                     0..1   (commanded setting; craft quantize to their notches)
-//   trim                     -1..1   (pitch trim position)
-//   lookX, lookY             -1..1   (free-look rate)
-// Discrete actions arrive as a Set of action ids that fired since the previous physics tick.
+//   flaps                     0..1   (axis-commanded setting; craft quantize to their notches)
+//   trim                     -1..1   (pitch trim position, nose up positive)
+//   lookX, lookY             -1..1   (free-look deflection as a fraction of the view's maximum look
+//                                     angle, right / up positive; 0 = centred, releasing returns to 0)
+//   antenna                   0..1   (HOTAS antenna slider; the craft inputProfile turns it into
+//                                     flaps with notch hysteresis or FOV zoom)
+// plus afterburnerDetent (0.8..1, from settings) and afterburner (throttle at or past the detent).
+// Discrete actions arrive as a Set of action ids that fired since the flight controller last
+// consumed them; the flight controller clears it.
 
-export const AXES = Object.freeze(['roll', 'pitch', 'yaw', 'throttle', 'collective', 'brakeL', 'brakeR', 'flaps', 'trim', 'lookX', 'lookY']);
+export const AXES = Object.freeze(['roll', 'pitch', 'yaw', 'throttle', 'collective', 'brakeL', 'brakeR', 'flaps', 'trim', 'lookX', 'lookY', 'antenna']);
 
 /**
  * Every rebindable discrete action, with the label shown in the controls panel. Order is the order
@@ -21,15 +26,22 @@ export const ACTIONS = Object.freeze({
   craftAbility: 'Craft ability',
   boost: 'Boost (CLASSIC)',
   waypointNearest: 'Waypoint to nearest landmark',
+  waypointAhead: 'Waypoint ahead',
   photoMode: 'Photo mode',
   viewCycle: 'Cycle view',
-  viewForward: 'Look forward',
-  viewBack: 'Look back',
-  viewLeft: 'Look left',
-  viewRight: 'Look right',
+  viewForward: 'View forward (cockpit)',
+  viewBack: 'View back (chase)',
+  viewLeft: 'Look left 90 deg',
+  viewRight: 'Look right 90 deg',
   recenterView: 'Recenter view',
   craftNext: 'Next craft',
   craftPrev: 'Previous craft',
+  craftSelect1: 'Glider',
+  craftSelect2: 'Bush plane',
+  craftSelect3: 'Jet',
+  craftSelect4: 'Helicopter',
+  craftSelect5: 'Wingsuit',
+  craftSelect6: 'FPV drone',
   modeToggle: 'CLASSIC / SIM',
   gearToggle: 'Landing gear',
   flapsUp: 'Flaps up',
@@ -61,7 +73,12 @@ export function createControlState() {
     trim: 0,
     lookX: 0,
     lookY: 0,
-    /** Action ids pressed since the last physics tick consumed them. */
+    antenna: 0,
+    /** Throttle position of the afterburner detent (settings.afterburnerDetent). */
+    afterburnerDetent: 0.95,
+    /** True while the throttle sits at or beyond the afterburner detent. */
+    afterburner: false,
+    /** Action ids pressed since the flight controller last consumed them. */
     actions: new Set(),
     /** Action ids currently held (for hold-type actions such as airbrake and PTT). */
     held: new Set(),
@@ -73,6 +90,8 @@ export function createControlState() {
 /** Copies axis values and action sets from source into target (used for tick snapshots). */
 export function copyControlState(target, source) {
   for (const axis of AXES) target[axis] = source[axis];
+  target.afterburnerDetent = source.afterburnerDetent;
+  target.afterburner = source.afterburner;
   target.actions.clear();
   for (const action of source.actions) target.actions.add(action);
   target.held.clear();
