@@ -13,10 +13,13 @@
 //                 wing drop that follows sideslip, and spin autorotation all emerge from the panels.
 //                 Ailerons shift the outboard panels' angle of attack; flaps and spoilers add lift,
 //                 lift-limit and drag increments across the wing (spoilers across the inboard panels)
-//   h. tail       downwash from the wing's lift, elevator plus pitch trim; pitch stability and damping
-//   fin           rudder; weathervane stability and yaw damping; slipstream swirl on prop craft
-//   fuselage      parasitic drag (cd0 plus gear, spoilers, windmilling prop), a slender-body side force
-//                 and cross-flow drag at two stations (strong damping in spins and deep stalls)
+//                 Past the stall a section loses its leading-edge suction (force normal to the chord)
+//   h. tail       downwash from the wing's lift, elevator plus pitch trim; pitch stability and damping;
+//                 a stalled wing's wake takes some of its dynamic pressure
+//   fin           rudder; weathervane stability and yaw damping; slipstream swirl on prop craft; the
+//                 stabilizer's wake shadows part of it at high angles of attack (spins)
+//   fuselage      parasitic drag (cd0 plus retractable gear) at the profile's drag centre, a
+//                 slender-body side force and cross-flow drag at two stations (damping in spins)
 //   propeller     thrust from engine power and efficiency against airspeed, torque roll, P-factor,
 //                 gyroscopic precession and a slipstream over the tail and wing roots
 //   ground        spring-damper gear, brakes and steering against the shared height function
@@ -267,7 +270,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
   let time = 0;
   let resetCount = 0;
   let smoothedLoad = 1;
-  let lastTelemetryStall = 0;
+  let wingStallDepth = 0;
 
   // ---- Live flight data (control stages and telemetry read it; SI, radians) ---------------------------
   const flightData = {
@@ -749,7 +752,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     flightData.pitchCommand = systems.pitchCommand;
     flightData.elevator = surfacesActual.elevator;
     flightData.dynamicPressure = dynamicPressure;
-    lastTelemetryStall = aeroState.stallDepth;
+    wingStallDepth = aeroState.stallDepth;
 
     surfaces.aileron = surfacesActual.aileron;
     surfaces.elevator = surfacesActual.elevator;
@@ -894,7 +897,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     },
     /** Stall depth of the wing last tick (0..1, area weighted). */
     get stallDepth() {
-      return lastTelemetryStall;
+      return wingStallDepth;
     },
     /** Centre of mass (world). */
     get centerOfMass() {

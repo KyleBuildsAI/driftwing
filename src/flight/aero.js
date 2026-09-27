@@ -25,12 +25,10 @@ export function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t);
 }
 
-/** Wraps an angle to (-PI, PI]. */
+/** Wraps an angle to [-PI, PI) (no loops: a non-finite angle comes back NaN for the model's guard). */
 export function wrapAngle(angle) {
-  let wrapped = angle;
-  while (wrapped > Math.PI) wrapped -= Math.PI * 2;
-  while (wrapped <= -Math.PI) wrapped += Math.PI * 2;
-  return wrapped;
+  const turn = Math.PI * 2;
+  return ((((angle + Math.PI) % turn) + turn) % turn) - Math.PI;
 }
 
 /** 3D lift-curve slope (per rad) of a surface of aspect ratio `aspectRatio` (Helmbold). */
