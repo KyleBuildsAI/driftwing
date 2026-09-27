@@ -32,7 +32,8 @@ const PILL_DELAY_SECONDS = 5;
 const PILL_DEBOUNCE_SECONDS = 0.4;
 const SPEECH_START_GRACE = 0.8;
 const INTERIOR_VIEWS = new Set(['cockpit', 'fpv']);
-const GAMEPAD_SOURCES = new Set(['gamepad', 'hotas']);
+// Input sources whose presses reach the page as real DOM events (and so unlock audio themselves).
+const DOM_SOURCES = new Set(['keyboard', 'mouse', 'touch']);
 const VARIO_STORAGE_KEY = 'audio.vario';
 export const VARIO_MODES = Object.freeze(['auto', 'on', 'off']);
 
@@ -61,7 +62,8 @@ export function createAudioSystem(ctx) {
   let debugFlight = null;
   let lastProfile = null;
   let lastMode = null;
-  let varioMode = VARIO_MODES.includes(storage.read(VARIO_STORAGE_KEY, 'auto')) ? storage.read(VARIO_STORAGE_KEY, 'auto') : 'auto';
+  const storedVarioMode = storage.read(VARIO_STORAGE_KEY, 'auto');
+  let varioMode = VARIO_MODES.includes(storedVarioMode) ? storedVarioMode : 'auto';
 
   function noteIssue(error) {
     lastIssue = error && error.message ? error.message : String(error);
@@ -200,10 +202,11 @@ export function createAudioSystem(ctx) {
     if (document.hidden) audioContext.suspend().catch(noteIssue);
     else resumeIfSuspended();
   });
-  // Gamepad and HOTAS buttons: Chrome may not count them as a user activation. When it does not,
-  // the refusal is remembered and the sound pill offers a click instead.
+  // Gamepad and HOTAS buttons (any input:action source that is not a DOM device): Chrome may not
+  // count them as a user activation. When it does not, the refusal is remembered and the sound
+  // pill offers a click instead.
   bus.on('input:action', (payload) => {
-    if (!payload || payload.phase !== 'press' || !GAMEPAD_SOURCES.has(payload.source) || isRunning()) return;
+    if (!payload || payload.phase !== 'press' || DOM_SOURCES.has(payload.source) || isRunning()) return;
     if (!unlock()) gamepadRefused = true;
   });
 
