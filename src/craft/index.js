@@ -3,10 +3,12 @@
 import { craftRegistry } from './registry.js';
 import glider from './glider.js';
 import bushplane from './bushplane.js';
+import helicopter from './helicopter.js';
 import jet from './jet.js';
 
 craftRegistry.register(glider);
 craftRegistry.register(bushplane);
+craftRegistry.register(helicopter);
 craftRegistry.register(jet);
 
 export { craftRegistry };

@@ -21,6 +21,8 @@ import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, be
  * deflections, throttle, boost) plus the v1 wobble and barrel-roll corkscrew offset.
  */
 export function createArcadeModel({ profile, world, bus, state, input: initialInput }) {
+  // Rotorcraft (arcadeProfile.hover) fly the hover extension below; everything else is v1's model.
+  if (profile.hover) return createHoverArcadeModel({ profile, world, bus, state, input: initialInput });
   const player = state.player;
   const SPEED = profile.SPEED;
 
@@ -1064,6 +1066,611 @@ export function createArcadeModel({ profile, world, bus, state, input: initialIn
         baseBank: Math.round(frame.bank / DEG),
         turnRate: Math.round((rates.turn / DEG) * 10) / 10,
         barrelRoll: barrel.active,
+      };
+    },
+  };
+}
+
+// ============================================================================================
+// HOVER EXTENSION: CLASSIC flight for rotorcraft (helicopter, FPV drone)
+// ============================================================================================
+/**
+ * v1's forgiving rules for craft that hover, enabled by arcadeProfile.hover. There is no stall and the
+ * attitude is always within the bank and pitch limits, so it never tumbles; the ground and water
+ * cushion it at a hover floor. Controls (the v1 input struct):
+ *   throttle      0.5 holds the height (within a small deadband); higher climbs up to CLIMB_RATE,
+ *                 lower descends up to DESCENT_RATE. W / S move it exactly as in v1 (throttleDelta,
+ *                 throttleTarget from the wheel, slider or a HOTAS lever).
+ *   pitch         stick forward accelerates (the nose goes down), back brakes and then reverses slowly;
+ *                 centred, the speed holds (below SETTLE_SPEED it settles into a hover)
+ *   roll          banks and turns (a coordinated turn at speed); at low speed it also slides sideways
+ *   yaw           Q / E turn the nose at up to YAW_RATE
+ *   boost         the v1 space boost raises the top speed to SPEED.BOOST_MAX for BOOST_DURATION
+ * The autopilot (v1 options: heading, altitude, waypoint and ring following) cruises at
+ * AUTOPILOT.CRUISE_SPEED with a terrain look-ahead; stick input overrides it like v1.
+ *
+ * arcadeProfile fields read here: SPEED { CRUISE, MAX, BOOST_MAX } (the dial and the boost), GRAVITY,
+ * BOOST_DURATION, BOOST_COOLDOWN, AUTOPILOT { CRUISE_THROTTLE, CRUISE_SPEED, MIN_ALTITUDE, CLEARANCE,
+ * OVERRIDE_INPUT, OVERRIDE_SECONDS, LOOKAHEAD_SECONDS }, and hover:
+ *   MAX_FORWARD_SPEED, MAX_REVERSE_SPEED, MAX_SIDE_SPEED (m/s); ACCELERATION, BRAKING (m/s^2);
+ *   CLIMB_RATE, DESCENT_RATE (m/s); VERTICAL_RESPONSE, ATTITUDE_RESPONSE (1/s); THROTTLE_DEADBAND,
+ *   THROTTLE_RATE (share per s); YAW_RATE, TURN_RATE (rad/s); TURN_REFERENCE_SPEED (m/s);
+ *   TURN_GAIN (optional, default 1: the v1-style multiplier on the coordinated turn rate);
+ *   MAX_BANK, MAX_PITCH, CRUISE_PITCH (rad); MIN_AGL, CUSHION_HEIGHT (m); SETTLE_SPEED (m/s);
+ *   ROTOR_SPEED (rad/s, the rotor or motor speed the mesh animates, visual.propSpeed);
+ *   DISC_TILT (disc tilt shown as a share of full cyclic for full commands, visual.aileron / elevator).
+ * The FlightModel surface matches the v1 model (reset, resetTo, setAutopilot, boost, barrelRoll which
+ * rotorcraft refuse, getBaseQuaternion, getPath, getStats, visual, corkscrewOffset, wobbleQuaternion).
+ */
+function createHoverArcadeModel({ profile, world, bus, state, input: initialInput }) {
+  const player = state.player;
+  const HOVER = profile.hover;
+  const SPEED = profile.SPEED;
+  const GRAVITY = Number.isFinite(profile.GRAVITY) ? profile.GRAVITY : 9.81;
+  const AUTOPILOT = profile.AUTOPILOT;
+  const BOOST_DURATION = Number.isFinite(profile.BOOST_DURATION) ? profile.BOOST_DURATION : 2;
+  const BOOST_COOLDOWN = Number.isFinite(profile.BOOST_COOLDOWN) ? profile.BOOST_COOLDOWN : 6;
+  const turnGain = Number.isFinite(HOVER.TURN_GAIN) ? HOVER.TURN_GAIN : 1;
+  const FINE_SCALE = 0.45;
+  const OVERSPEED_DECAY = 1.4;
+  const COAST_DRAG = 0.01;
+  const TERRAIN_MARGIN = 6;
+  const CEILING_BAND = 150;
+
+  const attitude = new THREE.Quaternion();
+  const attitudeEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+  const direction = new THREE.Vector3();
+  const rightDirection = new THREE.Vector3();
+  const corkscrewOffset = new THREE.Vector3();
+  const wobbleQuaternion = new THREE.Quaternion();
+  const wobbleEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+  const lastFinitePosition = player.position.clone();
+
+  let input = initialInput;
+  let heading = Number.isFinite(player.heading) ? player.heading : 0;
+  let forwardSpeed = 0;
+  let sideSpeed = 0;
+  let verticalSpeed = 0;
+  let pitch = 0;
+  let bank = 0;
+  let yawRate = 0;
+  let turnRate = 0;
+  let acceleration = 0;
+  let accelerationCommand = 0;
+  let smoothedYawRate = 0;
+  let smoothedGForce = 1;
+  let throttleGoal = null;
+  let lastThrottleTarget = input.throttleTarget;
+  const autopilotState = { overrideSeconds: 0, throttleOverride: false, lookaheadAge: Infinity, floor: -Infinity };
+  const visual = {
+    aileron: 0,
+    elevator: 0,
+    rudder: 0,
+    flaps: 0,
+    throttle: 0.5,
+    boost: false,
+    propSpeed: HOVER.ROTOR_SPEED,
+    engineOn: true,
+    onGround: false,
+    time: state.time,
+  };
+  const modelState = { position: player.position, velocity: player.velocity, quaternion: player.quaternion, angularVelocity: new THREE.Vector3() };
+  const contact = Object.freeze({ onGround: false, touchdown: null, bodyStrike: null, water: false, penetration: 0 });
+
+  player.boost.cooldownTotal = BOOST_COOLDOWN;
+
+  function axisValue(value) {
+    return Number.isFinite(value) ? clamp(value, -1, 1) : 0;
+  }
+  function smooth01(value) {
+    const t = clamp(value, 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+  function wrapSignedDegrees(degrees) {
+    return ((((degrees + 180) % 360) + 360) % 360) - 180;
+  }
+  function surfaceAt(x, z) {
+    return Math.max(world.groundHeight(x, z), CONFIG.WATER_LEVEL);
+  }
+
+  /** Repairs a non-finite shared position (core may also have clamped it) and the internal state. */
+  function syncFromState() {
+    if (isFiniteVector(player.position)) lastFinitePosition.copy(player.position);
+    else player.position.copy(lastFinitePosition);
+    const sum = heading + forwardSpeed + sideSpeed + verticalSpeed + pitch + bank + yawRate + turnRate + acceleration + smoothedYawRate + smoothedGForce;
+    if (!Number.isFinite(sum)) resetMotion(Number.isFinite(player.heading) ? player.heading : 0);
+  }
+
+  function resetMotion(newHeading) {
+    heading = wrapDegrees(newHeading);
+    forwardSpeed = 0;
+    sideSpeed = 0;
+    verticalSpeed = 0;
+    pitch = 0;
+    bank = 0;
+    yawRate = 0;
+    turnRate = 0;
+    acceleration = 0;
+    accelerationCommand = 0;
+    smoothedYawRate = 0;
+    smoothedGForce = 1;
+    autopilotState.overrideSeconds = 0;
+    autopilotState.lookaheadAge = Infinity;
+    corkscrewOffset.set(0, 0, 0);
+  }
+
+  /** v1's throttle: rate keys, wheel / slider / lever targets, the autopilot's cruise setting. */
+  function updateThrottle(step) {
+    if (input.throttleTarget !== lastThrottleTarget) {
+      lastThrottleTarget = input.throttleTarget;
+      if (input.throttleTarget !== null && Number.isFinite(input.throttleTarget)) {
+        throttleGoal = clamp(input.throttleTarget, 0, 1);
+        autopilotState.throttleOverride = true;
+      }
+    }
+    let throttle = Number.isFinite(player.throttle) ? player.throttle : AUTOPILOT.CRUISE_THROTTLE;
+    const throttleDelta = axisValue(input.throttleDelta);
+    if (throttleDelta !== 0) {
+      throttleGoal = null;
+      throttle += throttleDelta * HOVER.THROTTLE_RATE * step;
+      autopilotState.throttleOverride = true;
+    } else if (throttleGoal !== null) {
+      throttle = damp(throttle, throttleGoal, 5, step);
+      if (Math.abs(throttle - throttleGoal) < 0.003) {
+        throttle = throttleGoal;
+        throttleGoal = null;
+      }
+    } else if (player.autopilot.enabled && !autopilotState.throttleOverride) {
+      throttle = damp(throttle, AUTOPILOT.CRUISE_THROTTLE, 0.8, step);
+    }
+    player.throttle = clamp(throttle, 0, 1);
+  }
+
+  function updateBoost(step) {
+    const boostState = player.boost;
+    if (boostState.active) {
+      boostState.remaining = Math.max(0, boostState.remaining - step);
+      if (boostState.remaining <= 0) boostState.active = false;
+    } else if (boostState.cooldown > 0) {
+      boostState.cooldown = Math.max(0, boostState.cooldown - step);
+    }
+  }
+
+  function updateAutopilotOverride(step) {
+    if (!player.autopilot.enabled) {
+      autopilotState.overrideSeconds = 0;
+      return;
+    }
+    const manual = Math.max(Math.abs(axisValue(input.pitch)), Math.abs(axisValue(input.roll)), Math.abs(axisValue(input.yaw)));
+    if (manual > AUTOPILOT.OVERRIDE_INPUT) {
+      autopilotState.overrideSeconds += step;
+      if (autopilotState.overrideSeconds >= AUTOPILOT.OVERRIDE_SECONDS) setAutopilot({ enabled: false, reason: 'manual override' });
+    } else {
+      autopilotState.overrideSeconds = 0;
+    }
+  }
+
+  /** Vertical speed the throttle asks for: 0.5 holds, the ends climb and descend at full rate. */
+  function throttleVerticalSpeed() {
+    const offset = player.throttle - 0.5;
+    const deadband = HOVER.THROTTLE_DEADBAND;
+    if (Math.abs(offset) <= deadband) return 0;
+    const span = 0.5 - deadband;
+    return offset > 0 ? ((offset - deadband) / span) * HOVER.CLIMB_RATE : ((offset + deadband) / span) * HOVER.DESCENT_RATE;
+  }
+
+  /** Highest surface along the track over the next few seconds (cached, refreshed twice a second). */
+  function terrainFloorAhead(step) {
+    autopilotState.lookaheadAge += step;
+    if (autopilotState.lookaheadAge < 0.5) return autopilotState.floor;
+    autopilotState.lookaheadAge = 0;
+    const position = player.position;
+    const horizontal = Math.hypot(player.velocity.x, player.velocity.z);
+    const unitX = horizontal > 1 ? player.velocity.x / horizontal : 0;
+    const unitZ = horizontal > 1 ? player.velocity.z / horizontal : 0;
+    let floor = surfaceAt(position.x, position.z);
+    for (const seconds of AUTOPILOT.LOOKAHEAD_SECONDS) {
+      const distance = horizontal * seconds;
+      floor = Math.max(floor, surfaceAt(position.x + unitX * distance, position.z + unitZ * distance));
+    }
+    autopilotState.floor = floor;
+    return floor;
+  }
+
+  /** The autopilot's heading and altitude (v1's waypoint and ring following). */
+  function autopilotTargets() {
+    const autopilot = player.autopilot;
+    let targetAltitude = autopilot.altitude;
+    if (autopilot.followWaypoint) {
+      const course = state.ringCourse;
+      const ring = course && course.active ? course.nextRingPosition : null;
+      const waypoint = state.waypoint;
+      if (ring && Number.isFinite(ring.x) && Number.isFinite(ring.z)) {
+        autopilot.heading = bearingTo(player.position.x, player.position.z, ring.x, ring.z);
+        if (Number.isFinite(ring.y)) targetAltitude = ring.y;
+      } else if (waypoint && Number.isFinite(waypoint.x) && Number.isFinite(waypoint.z)) {
+        autopilot.heading = bearingTo(player.position.x, player.position.z, waypoint.x, waypoint.z);
+      }
+    }
+    return targetAltitude;
+  }
+
+  function step(dt, controls) {
+    if (!(dt > 0)) return;
+    if (controls) input = controls;
+    const step = Math.min(dt, 0.05);
+    syncFromState();
+    updateThrottle(step);
+    if (input.boost) boost();
+    updateBoost(step);
+    updateAutopilotOverride(step);
+
+    const fine = input.fineControl ? FINE_SCALE : 1;
+    const position = player.position;
+    const surface = surfaceAt(position.x, position.z);
+    const agl = position.y - surface;
+    const floorAhead = terrainFloorAhead(step);
+    const maxForward = player.boost.active ? SPEED.BOOST_MAX : HOVER.MAX_FORWARD_SPEED;
+
+    // ---- Commands: the stick, or the autopilot ------------------------------------------------------
+    let rollCommand;
+    let yawCommand;
+    let verticalTarget;
+    if (player.autopilot.enabled) {
+      const targetAltitude = Math.max(autopilotTargets(), floorAhead + AUTOPILOT.CLEARANCE);
+      const headingError = wrapSignedDegrees(player.autopilot.heading - heading);
+      rollCommand = clamp(headingError / 30, -1, 1) * (Math.abs(forwardSpeed) > HOVER.TURN_REFERENCE_SPEED * 0.5 ? 1 : 0);
+      yawCommand = Math.abs(forwardSpeed) > HOVER.TURN_REFERENCE_SPEED * 0.5 ? 0 : clamp(headingError / 20, -1, 1);
+      const aligned = Math.abs(headingError) < 40 || Math.abs(forwardSpeed) > HOVER.TURN_REFERENCE_SPEED;
+      accelerationCommand = clamp(((aligned ? AUTOPILOT.CRUISE_SPEED : 0) - forwardSpeed) * 0.2, -1, 1);
+      verticalTarget = clamp((targetAltitude - position.y) * 0.25, -HOVER.DESCENT_RATE, HOVER.CLIMB_RATE);
+    } else {
+      accelerationCommand = -axisValue(input.pitch) * fine;
+      rollCommand = axisValue(input.roll) * fine;
+      yawCommand = axisValue(input.yaw) * fine;
+      verticalTarget = throttleVerticalSpeed();
+    }
+    // The boost drives forward even with the stick centred.
+    if (player.boost.active) accelerationCommand = Math.max(accelerationCommand, 1);
+
+    // ---- Horizontal: accelerate / brake along the heading, slide sideways when slow ------------------
+    if (accelerationCommand > 0.05) {
+      const rate = HOVER.ACCELERATION * (player.boost.active ? 1.6 : 1) * accelerationCommand;
+      if (forwardSpeed < maxForward) forwardSpeed = Math.min(maxForward, forwardSpeed + rate * step);
+    } else if (accelerationCommand < -0.05) {
+      // Brake, then reverse slowly: the speed moves toward the stick's reverse speed.
+      const reverseTarget = HOVER.MAX_REVERSE_SPEED * accelerationCommand;
+      const change = HOVER.BRAKING * -accelerationCommand * step;
+      forwardSpeed = forwardSpeed > reverseTarget ? Math.max(reverseTarget, forwardSpeed - change) : Math.min(reverseTarget, forwardSpeed + change);
+    } else if (Math.abs(forwardSpeed) < HOVER.SETTLE_SPEED) {
+      forwardSpeed = Math.sign(forwardSpeed) * Math.max(0, Math.abs(forwardSpeed) - HOVER.BRAKING * 0.5 * step);
+    } else {
+      forwardSpeed -= forwardSpeed * COAST_DRAG * step;
+    }
+    if (forwardSpeed > maxForward) forwardSpeed = damp(forwardSpeed, maxForward, OVERSPEED_DECAY, step);
+    const slow = 1 - smooth01(Math.abs(forwardSpeed) / HOVER.TURN_REFERENCE_SPEED);
+    sideSpeed = damp(sideSpeed, rollCommand * HOVER.MAX_SIDE_SPEED * slow, 2.5, step);
+
+    // ---- Heading: bank-to-turn (coordinated at speed) plus the pedals ------------------------------
+    const bankTarget = rollCommand * HOVER.MAX_BANK;
+    turnRate = clamp((turnGain * GRAVITY * Math.tan(bank)) / Math.max(Math.abs(forwardSpeed), HOVER.TURN_REFERENCE_SPEED), -HOVER.TURN_RATE, HOVER.TURN_RATE);
+    yawRate = damp(yawRate, yawCommand * HOVER.YAW_RATE, 4, step);
+    heading = wrapDegrees(heading + ((turnRate + yawRate) * step) / DEG);
+
+    // ---- Vertical: throttle command, terrain look-ahead, cushion, ceiling ------------------------------
+    const requiredAltitude = floorAhead + HOVER.MIN_AGL + TERRAIN_MARGIN;
+    if (position.y < requiredAltitude && Math.hypot(forwardSpeed, sideSpeed) > 2) {
+      verticalTarget = Math.max(verticalTarget, clamp((requiredAltitude - position.y) * 0.8, 0, HOVER.CLIMB_RATE * 1.3));
+    }
+    const cushionLimit = -(0.3 + Math.max(0, agl - HOVER.MIN_AGL) * (HOVER.DESCENT_RATE / HOVER.CUSHION_HEIGHT) * 2);
+    verticalTarget = Math.max(verticalTarget, cushionLimit);
+    const ceiling = CONFIG.MAX_ALTITUDE - 10;
+    if (position.y > ceiling - CEILING_BAND) verticalTarget = Math.min(verticalTarget, (ceiling - position.y) * 0.5);
+    verticalSpeed = damp(verticalSpeed, verticalTarget, HOVER.VERTICAL_RESPONSE, step);
+
+    // ---- Integrate ------------------------------------------------------------------------------------
+    vectorFromHeading(heading, direction);
+    rightDirection.set(-direction.z, 0, direction.x);
+    player.velocity.copy(direction).multiplyScalar(forwardSpeed).addScaledVector(rightDirection, sideSpeed);
+    player.velocity.y = verticalSpeed;
+    position.addScaledVector(player.velocity, step);
+    const floor = surfaceAt(position.x, position.z) + HOVER.MIN_AGL;
+    if (position.y < floor) {
+      position.y = floor;
+      if (verticalSpeed < 0) verticalSpeed = 0;
+      player.velocity.y = verticalSpeed;
+    }
+    if (isFiniteVector(position)) lastFinitePosition.copy(position);
+
+    // ---- Attitude: nose down to accelerate and in cruise, bank into turns; always within the limits ----
+    acceleration = damp(acceleration, accelerationCommand > 0.05 && forwardSpeed < maxForward ? HOVER.ACCELERATION * accelerationCommand : accelerationCommand < -0.05 ? HOVER.BRAKING * accelerationCommand : 0, 3, step);
+    const cruiseShare = clamp(forwardSpeed / HOVER.MAX_FORWARD_SPEED, -0.3, 1.2);
+    const pitchTarget = clamp(-Math.atan2(acceleration, GRAVITY) - HOVER.CRUISE_PITCH * cruiseShare, -HOVER.MAX_PITCH, HOVER.MAX_PITCH);
+    pitch = damp(pitch, pitchTarget, HOVER.ATTITUDE_RESPONSE, step);
+    bank = damp(bank, bankTarget + clamp(Math.atan2(rollCommand * HOVER.MAX_SIDE_SPEED * slow - sideSpeed, 4 * GRAVITY), -0.1, 0.1), HOVER.ATTITUDE_RESPONSE, step);
+    bank = clamp(bank, -HOVER.MAX_BANK, HOVER.MAX_BANK);
+    writeDerivedState(step);
+    animate(step, rollCommand, yawCommand);
+  }
+
+  function writeDerivedState(step) {
+    attitudeEuler.set(pitch, -heading * DEG, -bank, 'YXZ');
+    attitude.setFromEuler(attitudeEuler);
+    player.quaternion.copy(attitude);
+    player.forward.set(0, 0, -1).applyQuaternion(attitude);
+    player.up.set(0, 1, 0).applyQuaternion(attitude);
+    player.right.set(1, 0, 0).applyQuaternion(attitude);
+    player.speed = player.velocity.length();
+    player.heading = heading;
+    player.pitch = pitch / DEG;
+    player.roll = bank / DEG;
+    player.verticalSpeed = player.velocity.y;
+    player.stalled = false;
+    if (step > 0) {
+      smoothedYawRate = damp(smoothedYawRate, (turnRate + yawRate) / DEG, 10, step);
+      smoothedGForce = damp(smoothedGForce, 1 / Math.max(Math.cos(bank), 0.3), 5, step);
+    }
+    player.yawRate = smoothedYawRate;
+    player.gForce = smoothedGForce;
+  }
+
+  /** Disc tilt with the acceleration and bank commands, the rotor speed, and a gentle hover bob. */
+  function animate(step, rollCommand, yawCommand) {
+    const tilt = HOVER.DISC_TILT;
+    visual.elevator = damp(visual.elevator, clamp(-accelerationCommand * tilt, -1, 1), 8, step);
+    visual.aileron = damp(visual.aileron, clamp(rollCommand * tilt, -1, 1), 8, step);
+    visual.rudder = damp(visual.rudder, yawCommand, 8, step);
+    visual.throttle = clamp(0.5 + (verticalSpeed / HOVER.CLIMB_RATE) * 0.35 + 0.1 * Math.abs(accelerationCommand), 0, 1);
+    visual.boost = player.boost.active;
+    visual.propSpeed = HOVER.ROTOR_SPEED;
+    visual.time = state.time;
+    const elapsed = state.time.elapsed;
+    const calm = 1 - 0.5 * smooth01(Math.abs(forwardSpeed) / 20);
+    wobbleEuler.set(
+      (Math.sin(elapsed * 1.13) * 0.6 + Math.sin(elapsed * 2.37 + 0.8) * 0.4) * 0.35 * DEG * calm,
+      Math.sin(elapsed * 0.71 + 0.4) * 0.25 * DEG * calm,
+      (Math.sin(elapsed * 0.93 + 2.1) * 0.6 + Math.sin(elapsed * 1.91) * 0.4) * 0.45 * DEG * calm,
+      'YXZ',
+    );
+    wobbleQuaternion.setFromEuler(wobbleEuler);
+  }
+
+  // ---- Public actions -------------------------------------------------------------------------------
+  function boost() {
+    const boostState = player.boost;
+    if (state.photoMode || boostState.active || boostState.cooldown > 0) return false;
+    boostState.active = true;
+    boostState.remaining = BOOST_DURATION;
+    boostState.cooldown = BOOST_COOLDOWN;
+    boostState.cooldownTotal = BOOST_COOLDOWN;
+    bus.emit('boost', {});
+    return true;
+  }
+
+  /** Rotorcraft do not barrel-roll in CLASSIC (they never tumble). */
+  function barrelRoll() {
+    return false;
+  }
+
+  function setAutopilot(options = {}) {
+    const autopilot = player.autopilot;
+    const wasEnabled = autopilot.enabled;
+    if (typeof options.enabled === 'boolean') autopilot.enabled = options.enabled;
+    const engaging = autopilot.enabled && !wasEnabled;
+    if (Number.isFinite(options.heading)) autopilot.heading = wrapDegrees(options.heading);
+    else if (engaging) autopilot.heading = heading;
+    if (Number.isFinite(options.altitude)) autopilot.altitude = clamp(options.altitude, AUTOPILOT.MIN_ALTITUDE, CONFIG.MAX_ALTITUDE - 150);
+    else if (engaging) autopilot.altitude = clamp(player.position.y, AUTOPILOT.MIN_ALTITUDE, CONFIG.MAX_ALTITUDE - 150);
+    if (typeof options.followWaypoint === 'boolean') autopilot.followWaypoint = options.followWaypoint;
+    if (engaging) {
+      autopilotState.throttleOverride = false;
+      autopilotState.overrideSeconds = 0;
+      autopilotState.lookaheadAge = Infinity;
+    }
+    const reason = typeof options.reason === 'string' && options.reason ? options.reason : 'command';
+    bus.emit('autopilot:changed', {
+      enabled: autopilot.enabled,
+      heading: autopilot.heading,
+      altitude: autopilot.altitude,
+      followWaypoint: autopilot.followWaypoint,
+      reason,
+    });
+    return { ...autopilot };
+  }
+
+  /** Hovering at (x, y, z); also core's recovery path after a non-finite pose. */
+  function resetTo(target = {}) {
+    const { x, y, z } = target;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return false;
+    const newHeading = Number.isFinite(target.heading) ? target.heading : Number.isFinite(player.heading) ? player.heading : heading;
+    player.position.set(x, y, z);
+    lastFinitePosition.set(x, y, z);
+    resetMotion(newHeading);
+    player.velocity.set(0, 0, 0);
+    player.boost.active = false;
+    player.boost.remaining = 0;
+    player.boost.cooldown = 0;
+    if (player.autopilot.enabled) {
+      player.autopilot.heading = heading;
+      player.autopilot.altitude = clamp(y, AUTOPILOT.MIN_ALTITUDE, CONFIG.MAX_ALTITUDE - 150);
+    }
+    writeDerivedState(0);
+    animate(0, 0, 0);
+    return true;
+  }
+
+  /**
+   * Takes over a pose from another model: position and heading carry over; the velocity is split into
+   * the forward, sideways and vertical speeds (clamped to this profile's ranges); the attitude starts
+   * level-ish (bank and pitch within the limits), so there is no pop the blend cannot hide.
+   */
+  function reset(pose = {}) {
+    const position = pose.position ?? player.position;
+    if (!isFiniteVector(position)) return false;
+    player.position.copy(position);
+    lastFinitePosition.copy(position);
+    let newHeading = heading;
+    if (pose.quaternion && isFiniteQuaternion(pose.quaternion)) {
+      direction.set(0, 0, -1).applyQuaternion(pose.quaternion);
+      if (Math.hypot(direction.x, direction.z) > 0.05) newHeading = headingFromVector(direction.x, direction.z);
+      attitudeEuler.setFromQuaternion(pose.quaternion, 'YXZ');
+    } else {
+      attitudeEuler.set(0, 0, 0, 'YXZ');
+    }
+    resetMotion(newHeading);
+    pitch = clamp(Number.isFinite(attitudeEuler.x) ? attitudeEuler.x : 0, -HOVER.MAX_PITCH, HOVER.MAX_PITCH);
+    bank = clamp(Number.isFinite(attitudeEuler.z) ? -attitudeEuler.z : 0, -HOVER.MAX_BANK, HOVER.MAX_BANK);
+    const velocity = pose.velocity && isFiniteVector(pose.velocity) ? pose.velocity : null;
+    if (velocity) {
+      vectorFromHeading(heading, direction);
+      forwardSpeed = clamp(velocity.x * direction.x + velocity.z * direction.z, -HOVER.MAX_REVERSE_SPEED, SPEED.BOOST_MAX);
+      sideSpeed = clamp(velocity.x * -direction.z + velocity.z * direction.x, -HOVER.MAX_SIDE_SPEED, HOVER.MAX_SIDE_SPEED);
+      verticalSpeed = clamp(velocity.y, -HOVER.DESCENT_RATE, HOVER.CLIMB_RATE);
+    }
+    if (Number.isFinite(pose.throttle)) player.throttle = clamp(pose.throttle, 0, 1);
+    throttleGoal = null;
+    lastThrottleTarget = input.throttleTarget;
+    player.boost.active = false;
+    player.boost.remaining = 0;
+    vectorFromHeading(heading, direction);
+    rightDirection.set(-direction.z, 0, direction.x);
+    player.velocity.copy(direction).multiplyScalar(forwardSpeed).addScaledVector(rightDirection, sideSpeed);
+    player.velocity.y = verticalSpeed;
+    writeDerivedState(0);
+    animate(0, 0, 0);
+    return true;
+  }
+
+  // ---- Telemetry and snapshots ---------------------------------------------------------------------------
+  /** Fills the state.flight fields this model knows: a governed rotor, torque from the demand, no stall. */
+  function writeTelemetry(flight) {
+    const speed = player.velocity.length();
+    flight.aoa = 0;
+    flight.sideslip = speed > 1 ? Math.asin(clamp(sideSpeed / speed, -1, 1)) / DEG : 0;
+    flight.gLoad = smoothedGForce;
+    flight.throttle = player.throttle;
+    flight.rpm = 1;
+    flight.rotorRpm = 1;
+    const cruise = clamp(Math.abs(forwardSpeed) / HOVER.MAX_FORWARD_SPEED, 0, 1.2);
+    flight.torque = clamp(0.72 - 0.25 * Math.sin(Math.min(cruise, 0.5) * Math.PI) + 0.35 * cruise * cruise + 0.25 * (verticalSpeed / HOVER.CLIMB_RATE), 0.1, 1.05);
+    flight.engineOn = true;
+    flight.afterburner = player.boost.active;
+    flight.flaps = 0;
+    flight.flapNotch = 0;
+    flight.airbrake = 0;
+    flight.brakes = 0;
+    flight.trim = 0;
+    flight.onGround = false;
+    flight.contacts = 0;
+    flight.stall.stalled = false;
+    flight.stall.warning = false;
+    flight.stall.buffet = 0;
+  }
+
+  function snapshot() {
+    return {
+      kind: 'arcade',
+      hover: true,
+      heading,
+      forwardSpeed,
+      sideSpeed,
+      verticalSpeed,
+      pitch,
+      bank,
+      yawRate,
+      turnRate,
+      acceleration,
+      accelerationCommand,
+      smoothedYawRate,
+      smoothedGForce,
+      throttleGoal,
+      lastThrottleTarget,
+      lastFinitePosition: lastFinitePosition.toArray(),
+      autopilotState: { ...autopilotState },
+      visual: { aileron: visual.aileron, elevator: visual.elevator, rudder: visual.rudder, throttle: visual.throttle },
+      player: {
+        position: player.position.toArray(),
+        velocity: player.velocity.toArray(),
+        quaternion: player.quaternion.toArray(),
+        speed: player.speed,
+        throttle: player.throttle,
+        heading: player.heading,
+        boost: { ...player.boost },
+      },
+    };
+  }
+
+  function restore(data) {
+    if (!data || data.kind !== 'arcade' || data.hover !== true) return false;
+    heading = data.heading;
+    forwardSpeed = data.forwardSpeed;
+    sideSpeed = data.sideSpeed;
+    verticalSpeed = data.verticalSpeed;
+    pitch = data.pitch;
+    bank = data.bank;
+    yawRate = data.yawRate;
+    turnRate = data.turnRate;
+    acceleration = data.acceleration;
+    accelerationCommand = data.accelerationCommand;
+    smoothedYawRate = data.smoothedYawRate;
+    smoothedGForce = data.smoothedGForce;
+    throttleGoal = data.throttleGoal;
+    lastThrottleTarget = data.lastThrottleTarget;
+    lastFinitePosition.fromArray(data.lastFinitePosition);
+    Object.assign(autopilotState, data.autopilotState);
+    Object.assign(visual, data.visual);
+    player.position.fromArray(data.player.position);
+    player.velocity.fromArray(data.player.velocity);
+    player.quaternion.fromArray(data.player.quaternion);
+    player.speed = data.player.speed;
+    player.throttle = data.player.throttle;
+    player.heading = data.player.heading;
+    Object.assign(player.boost, data.player.boost);
+    attitudeEuler.set(pitch, -heading * DEG, -bank, 'YXZ');
+    attitude.setFromEuler(attitudeEuler);
+    return true;
+  }
+
+  reset({ position: player.position, quaternion: player.quaternion, velocity: player.velocity, throttle: player.throttle });
+
+  return {
+    kind: 'arcade',
+    profile,
+    state: modelState,
+    contact,
+    visual,
+    corkscrewOffset,
+    wobbleQuaternion,
+    step,
+    reset,
+    resetTo,
+    setAutopilot,
+    barrelRoll,
+    boost,
+    writeTelemetry,
+    snapshot,
+    restore,
+
+    /** Attitude without the hover bob (keeps the chase camera steady). */
+    getBaseQuaternion() {
+      return attitude;
+    },
+
+    /** The velocity (m/s, world): what a mode switch converts. */
+    getPath(target = new THREE.Vector3()) {
+      return target.copy(player.velocity);
+    },
+
+    getStats() {
+      return {
+        stalled: false,
+        hover: true,
+        forwardSpeed: Math.round(forwardSpeed * 10) / 10,
+        sideSpeed: Math.round(sideSpeed * 10) / 10,
+        verticalSpeed: Math.round(verticalSpeed * 10) / 10,
+        baseBank: Math.round(bank / DEG),
+        turnRate: Math.round(((turnRate + yawRate) / DEG) * 10) / 10,
+        barrelRoll: false,
       };
     },
   };

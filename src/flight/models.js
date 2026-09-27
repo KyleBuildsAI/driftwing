@@ -15,6 +15,7 @@
 // SIM control stages every tick runs through: the PID autopilot (order 20) and the assists (order 40).
 import { createArcadeModel } from './ArcadeModel.js';
 import { createSimFixedWingModel } from './SimFixedWing.js';
+import { createSimHelicopterModel } from './SimHelicopter.js';
 import { createAutopilotStage } from './autopilot.js';
 import { createAssistStage } from './assists.js';
 
@@ -119,6 +120,7 @@ export const flightModels = createFlightModelRegistry();
 
 flightModels.register('arcade', createArcadeModel);
 flightModels.register('fixedWing', createSimFixedWingModel);
+flightModels.register('helicopter', createSimHelicopterModel);
 flightModels.register('jet', createSimFixedWingModel);
 flightModels.registerControlStage(createAutopilotStage());
 flightModels.registerControlStage(createAssistStage());
