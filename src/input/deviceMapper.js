@@ -22,6 +22,8 @@ const AXIS_PRESS_ON = 0.6;
 const AXIS_PRESS_OFF = 0.4;
 /** Change that counts as a lever being moved (takes the target over). */
 const POSITION_MOVE = 0.02;
+/** Deflection from rest that keeps an axis latched after a bind-by-listening session. */
+const LATCH_AXIS_TRAVEL = 0.3;
 /** Change of a pedal rudder axis (from where it first rested) that marks the pedals as in use. */
 const RUDDER_MOVE = 0.3;
 /** Change on any output that counts as player activity (keeps the HUD awake). */
@@ -66,7 +68,15 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
   function stateFor(deviceKey) {
     let entry = deviceStates.get(deviceKey);
     if (!entry) {
-      entry = { filters: new Map(), levers: new Map(), rawPressed: new Map(), rudderRest: new Map(), lastOutputs: new Map(), hats: [] };
+      entry = {
+        filters: new Map(),
+        levers: new Map(),
+        rawPressed: new Map(),
+        rudderRest: new Map(),
+        lastOutputs: new Map(),
+        hats: [],
+        latched: { buttons: new Set(), hats: [], axes: new Set() },
+      };
       deviceStates.set(deviceKey, entry);
     }
     return entry;
@@ -105,6 +115,31 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
     let value = shapeAxis(raw, range, axisCalibration, ref, idleFallback);
     if (axisCalibration?.reversed && range === 'bipolar') value = -value;
     return { value, range };
+  }
+
+  function axisDeflected(device, axisIndex) {
+    const raw = device.axes[axisIndex];
+    const rest = device.restAxes[axisIndex];
+    return Number.isFinite(raw) && Math.abs(raw - (Number.isFinite(rest) ? rest : 0)) > LATCH_AXIS_TRAVEL;
+  }
+
+  /** Forgets latched inputs that have been released since the latch. */
+  function releaseLatches(device, entry, hats) {
+    const latched = entry.latched;
+    for (const buttonIndex of latched.buttons) if (!device.buttons[buttonIndex]?.pressed) latched.buttons.delete(buttonIndex);
+    for (let hatIndex = 0; hatIndex < latched.hats.length; hatIndex++) {
+      if (latched.hats[hatIndex] && hats[hatIndex] !== latched.hats[hatIndex]) latched.hats[hatIndex] = null;
+    }
+    for (const axisIndex of latched.axes) if (!axisDeflected(device, axisIndex)) latched.axes.delete(axisIndex);
+  }
+
+  /** True while an action reference's input is still held from a finished bind-by-listening session. */
+  function isLatched(entry, ref) {
+    const latched = entry.latched;
+    if (ref.type === 'button') return latched.buttons.has(ref.index);
+    if (ref.type === 'hat') return Boolean(latched.hats[ref.hat]) && latched.hats[ref.hat] === ref.direction;
+    if (ref.type === 'axisPress') return latched.axes.has(ref.axis);
+    return false;
   }
 
   /** Raw press state of an action reference this frame. */
@@ -149,7 +184,7 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
         const holderKey = `${device.deviceKey}|${actionId}|${refIndex}`;
         visited.add(holderKey);
         const active = context.actionsEnabled && (!ref.mode || ref.mode === context.mode);
-        const pressed = active && refPressed(device, entry, ref, hats, holderKey, actionId);
+        const pressed = active && !isLatched(entry, ref) && refPressed(device, entry, ref, hats, holderKey, actionId);
         const wasPressed = entry.rawPressed.get(holderKey) === true;
         entry.rawPressed.set(holderKey, pressed);
         if (pressed && !wasPressed) {
@@ -241,9 +276,26 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
     evaluate(device, context) {
       const entry = stateFor(device.deviceKey);
       const hats = decodeHats(device, entry);
+      releaseLatches(device, entry, hats);
       const effective = bindings.getEffective(device.bindingDevice, context.craft);
       routeActions(device, entry, effective, hats, context);
       if (context.axesEnabled) routeAxes(device, entry, effective, context);
+    },
+
+    /**
+     * Latches every button, hat direction and deflected axis a device holds right now: they fire no
+     * action until released. Called when a bind-by-listening session ends, so the input that was
+     * just bound (still held) does not also trigger its new action.
+     */
+    latchHeld(device) {
+      const entry = stateFor(device.deviceKey);
+      device.buttons.forEach((button, buttonIndex) => {
+        if (button.pressed) entry.latched.buttons.add(buttonIndex);
+      });
+      entry.latched.hats = entry.hats.slice();
+      device.axes.forEach((raw, axisIndex) => {
+        if (axisDeflected(device, axisIndex)) entry.latched.axes.add(axisIndex);
+      });
     },
 
     /** Latest decoded hat directions of a device (for the controls panel). */
