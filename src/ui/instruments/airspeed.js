@@ -37,11 +37,11 @@ export default Object.freeze({
     const labelStep = maximum / major > 8 ? major * 2 : major;
     for (let value = 0; value <= maximum + 1e-6; value += labelStep) labels.push(value);
     numerals(g, labels, { toAngle, radius: 58, size: 16, color: theme.text });
-    title(g, 'AIRSPEED', theme, 70);
-    label(g, units.speed.dial, CENTER, 132, { size: 12, color: theme.textDim, weight: 650, spacing: 1.2 });
+    title(g, 'AIRSPEED', theme, 66);
+    label(g, units.speed.dial, CENTER, 80, { size: 11, color: theme.textDim, weight: 650, spacing: 1.2 });
     const airspeed = mode === 'sim' ? flight.indicatedAirspeed : flight.airspeed;
     const shown = clamp(Number.isFinite(airspeed) ? airspeed * factor : 0, 0, maximum);
-    if (theme.id === 'glass') digital(g, String(Math.round(shown)), CENTER - 30, 144, 60, 24, theme);
+    if (theme.id === 'glass') digital(g, String(Math.round(shown)), CENTER - 26, 112, 52, 22, theme, { size: 15 });
     needle(g, toAngle(shown), { length: 80, color: theme.needle });
     drawGlare(g, theme);
   },

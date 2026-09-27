@@ -92,7 +92,7 @@ export default Object.freeze({
     drawAircraft(g, theme);
     if (theme.id === 'glass') {
       const rounded = Math.round(heading) % 360;
-      digital(g, `${String(rounded).padStart(3, '0')}°`, CENTER - 28, 128, 56, 22, theme, { size: 15 });
+      digital(g, `${String(rounded).padStart(3, '0')}°`, CENTER - 24, 126, 48, 18, theme, { size: 13 });
     }
     drawGlare(g, theme);
   },

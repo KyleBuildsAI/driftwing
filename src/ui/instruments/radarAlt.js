@@ -26,7 +26,7 @@ export default Object.freeze({
     title(g, 'RAD ALT', theme, 72);
     label(g, units.altitude.dial, CENTER, 86, { size: 10, color: theme.textDim, weight: 650, spacing: 1.2 });
     if (inRange) {
-      digital(g, grouped(Math.round(height)), CENTER - 30, 124, 60, 22, theme, { size: 14 });
+      digital(g, grouped(Math.round(height)), CENTER - 26, 118, 52, 22, theme, { size: 14 });
       needle(g, toAngle(height), { length: 80, color: theme.needle });
     } else {
       g.fillStyle = theme.red;

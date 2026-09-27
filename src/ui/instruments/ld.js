@@ -7,9 +7,10 @@ import { CENTER, drawPlate, label, digital, roundRect, clamp } from './gaugeKit.
 const AVERAGE_SECONDS = 15;
 const MAX_SHOWN = 99;
 
-/** Glide ratio as text ('--' while climbing or level, capped at 99). */
+/** Glide ratio as text ('--' while climbing or level, one decimal below 10, capped at 99). */
 function ratioText(ratio) {
   if (!(ratio > 0) || !Number.isFinite(ratio)) return '--';
+  if (ratio < 9.95) return ratio.toFixed(1);
   return String(Math.round(Math.min(ratio, MAX_SHOWN)));
 }
 

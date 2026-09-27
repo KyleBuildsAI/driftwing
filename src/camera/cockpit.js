@@ -202,7 +202,8 @@ function buildSeat(builder, spec) {
   const half = spec.width / 2;
   const seatY = spec.floor + (spec.sill - spec.floor) * 0.35;
   box(builder, [0, seatY, 0.18], [half * 1.1, 0.06, 0.42], 0, TINT.seat);
-  box(builder, [0, seatY + 0.3, 0.42], [half * 1.1, 0.6, 0.07], -0.25, TINT.seat);
+  // Shoulder-high back: looking over the shoulder shows the rear bow and the tail, not a headrest.
+  box(builder, [0, seatY + 0.2, 0.4], [half * 1.1, 0.36, 0.07], -0.25, TINT.seat);
   box(builder, [0, seatY + 0.045, 0.16], [half * 0.9, 0.035, 0.34], 0, TINT.cushion);
 }
 
