@@ -656,6 +656,7 @@ async function boot() {
           frameTarget: state.perf.frameTarget,
           targetHz: state.perf.targetHz,
           targetMs: state.perf.targetMs === null ? null : Math.round(state.perf.targetMs * 100) / 100,
+          controlFrameMs: Math.round(state.perf.controlFrameMs * 10) / 10,
           renderScale: state.perf.renderScale,
           dynamicResolution: state.perf.dynamicResolution,
           quality: state.perf.quality,

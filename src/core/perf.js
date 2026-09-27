@@ -117,6 +117,12 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
   let displayIntervalMs = 1000 / 60;
   let levelIndex = 3;
   let emaMs = 16.7;
+  /**
+   * What both stages hold against the target: the same average, but each frame counts for at most
+   * twice the target. A lone hitch (a pipeline compile, a GC pause) cannot be fixed by rendering
+   * fewer pixels, so it must not push the scale down; sustained slow frames still do.
+   */
+  let controlEmaMs = 16.7;
   let cpuEmaMs = 4;
   let readySince = null;
   let lastFrameMs = 0;
@@ -195,7 +201,7 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
     scaleHold = stepUp ? HOLD_AFTER_UP : HOLD_AFTER_DOWN;
     if (stepUp) lastUpStepAt = clockSeconds;
     applyRenderScale();
-    scaleHistory.push({ time: Math.round(clockSeconds * 100) / 100, scale: renderScale(), reason, frameMs: Math.round(emaMs * 10) / 10 });
+    scaleHistory.push({ time: Math.round(clockSeconds * 100) / 100, scale: renderScale(), reason, frameMs: Math.round(controlEmaMs * 10) / 10 });
     if (scaleHistory.length > SCALE_HISTORY_LIMIT) scaleHistory.shift();
     bus.emit('perf:renderScale', { scale: renderScale(), reason });
   }
@@ -246,8 +252,8 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
       scaleHold -= realDt;
       return;
     }
-    const over = emaMs > controlMs * DOWN_THRESHOLD;
-    const under = emaMs < controlMs * UP_THRESHOLD;
+    const over = controlEmaMs > controlMs * DOWN_THRESHOLD;
+    const under = controlEmaMs < controlMs * UP_THRESHOLD;
     scaleOverSeconds = over ? scaleOverSeconds + realDt : 0;
     scaleUnderSeconds = under ? scaleUnderSeconds + realDt : 0;
     if (scaleOverSeconds >= DOWN_DWELL && scaleIndex < RENDER_SCALE_STEPS.length - 1) {
@@ -266,8 +272,8 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
   function updateQualityGovernor(realDt, controlMs) {
     if (settings.get('quality') !== 'auto') return;
     const dynamic = Boolean(settings.get('dynamicResolution'));
-    const struggling = emaMs > controlMs * 1.1 || cpuEmaMs > controlMs * 0.85;
-    const comfortable = emaMs < controlMs * 1.03 && cpuEmaMs < controlMs * 0.5;
+    const struggling = controlEmaMs > controlMs * 1.1 || cpuEmaMs > controlMs * 0.85;
+    const comfortable = controlEmaMs < controlMs * 1.03 && cpuEmaMs < controlMs * 0.5;
     // With dynamic resolution the levels only move once the render scale has run out of room.
     const mayDegrade = !dynamic || scaleIndex === RENDER_SCALE_STEPS.length - 1;
     const mayUpgrade = !dynamic || scaleIndex === 0;
@@ -314,6 +320,7 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
   Object.assign(state.perf, {
     fps: 60,
     frameMs: 16.7,
+    controlFrameMs: 16.7,
     cpuMs: 4,
     lastFrameMs: 0,
     displayIntervalMs,
@@ -358,6 +365,8 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
       const sampleMs = simulatedLoad ? simulatedLoad.baseMs + simulatedLoad.scaledMs * renderScale() * renderScale() : frameMs;
       lastFrameMs = sampleMs;
       emaMs += (sampleMs - emaMs) * 0.08;
+      const controlMs = resolveTarget();
+      controlEmaMs += (Math.min(sampleMs, controlMs * 2) - controlEmaMs) * 0.08;
       cpuEmaMs += (cpuMs - cpuEmaMs) * 0.08;
       recentFrameMs[recentCursor] = frameMs;
       recentCursor = (recentCursor + 1) % recentFrameMs.length;
@@ -370,10 +379,10 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
       }
       state.perf.fps = 1000 / emaMs;
       state.perf.frameMs = emaMs;
+      state.perf.controlFrameMs = controlEmaMs;
       state.perf.cpuMs = cpuEmaMs;
       state.perf.lastFrameMs = lastFrameMs;
       state.perf.displayIntervalMs = displayIntervalMs;
-      const controlMs = resolveTarget();
       if (state.photoMode || !state.ready) return;
       if (readySince === null) readySince = clockSeconds;
       if (clockSeconds - readySince < SETTLE_SECONDS && !simulatedLoad) {
@@ -425,6 +434,7 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
       }
       state.perf.simulatedLoad = Boolean(simulatedLoad);
       emaMs = simulatedLoad ? simulatedLoad.baseMs + simulatedLoad.scaledMs * renderScale() * renderScale() : emaMs;
+      controlEmaMs = emaMs;
       scaleOverSeconds = 0;
       scaleUnderSeconds = 0;
       return state.perf.renderScale;
