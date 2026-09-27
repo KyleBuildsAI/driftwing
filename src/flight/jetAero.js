@@ -81,7 +81,7 @@ export function createJetExtension({ profile, bus, craftState = {}, limits = {},
   const vneMach = Number.isFinite(limits.vneMach) ? limits.vneMach : Infinity;
   /** Height of the thrust line above the centre of mass (m): below it, thrust pitches the nose up. */
   const thrustLineHeight = engine.position[1] - (profile.centerOfMass ? profile.centerOfMass[1] : 0);
-  const dryIncrement = engine.abThrust - engine.dryThrust;
+  const burnerIncrement = engine.abThrust - engine.dryThrust;
 
   // ---- Engine state ----------------------------------------------------------------------------
   const spool = {
@@ -201,7 +201,7 @@ export function createJetExtension({ profile, bus, craftState = {}, limits = {},
       const running = tick.systems.running;
       const factor = thrustFactor(engine, tick.rho, air.mach);
       const dry = running ? engine.dryThrust * dryShare() : 0;
-      const burner = running ? dryIncrement * spool.abLevel * (engine.abMinimum + (1 - engine.abMinimum) * spool.abCommand) : 0;
+      const burner = running ? burnerIncrement * spool.abLevel * (engine.abMinimum + (1 - engine.abMinimum) * spool.abCommand) : 0;
       const thrust = (dry + burner) * factor;
       spool.thrust = thrust;
       forceBody.z -= thrust;
