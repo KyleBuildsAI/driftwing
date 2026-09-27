@@ -123,12 +123,12 @@ function quickLook(world, x, z) {
   return { center, slope: Math.max(east, west, south, north) / radius };
 }
 
-/** Largest rise or dip along the take-off run (m), and whether the run stays dry. */
-function runway(world, x, z, heading, center, waterLevel) {
+/** Largest rise or dip along a take-off run of `length` metres, and whether the run stays dry. */
+function runway(world, x, z, heading, center, waterLevel, length = FLAT.RUNWAY_LENGTH) {
   const direction = vectorFromHeading(heading);
   let deviation = 0;
   let dry = true;
-  for (let distance = FLAT.RUNWAY_STEP; distance <= FLAT.RUNWAY_LENGTH; distance += FLAT.RUNWAY_STEP) {
+  for (let distance = FLAT.RUNWAY_STEP; distance <= length; distance += FLAT.RUNWAY_STEP) {
     const height = world.groundHeight(x + direction.x * distance, z + direction.z * distance);
     deviation = Math.max(deviation, Math.abs(height - center));
     if (height < waterLevel + FLAT.MIN_DRY_HEIGHT) dry = false;
@@ -138,16 +138,16 @@ function runway(world, x, z, heading, center, waterLevel) {
 
 /**
  * Clearance a craft needs from vegetation, from its contact points (body axes, m): the parking circle
- * reaches past its farthest point, the take-off corridor past its wingtips.
+ * reaches past its farthest point, the take-off corridor (runwayLength metres) past its wingtips.
  */
-export function vegetationClearance(contacts, margin = 2) {
+export function vegetationClearance(contacts, margin = 2, runwayLength = FLAT.RUNWAY_LENGTH) {
   let radius = 0;
   let halfWidth = 0;
   for (const contact of contacts) {
     radius = Math.max(radius, Math.hypot(contact.position[0], contact.position[2]));
     halfWidth = Math.max(halfWidth, Math.abs(contact.position[0]));
   }
-  return { radius: radius + margin, halfWidth: halfWidth + margin, length: FLAT.RUNWAY_LENGTH };
+  return { radius: radius + margin, halfWidth: halfWidth + margin, length: runwayLength };
 }
 
 /**
@@ -156,8 +156,11 @@ export function vegetationClearance(contacts, margin = 2) {
  * vegetationClearance) the spot and its run must also be clear of trees, cacti and rocks. Falls back
  * to the flattest dry spot seen when nothing within MAX_RADIUS passes. Returns { x, z, ground, slope,
  * runwayDeviation, flat, clearOfVegetation } (clearOfVegetation is null when it was not checked).
+ * runwayLength (m, default 180) is the take-off run a craft needs (the jet asks for a long strip); the
+ * rise or dip it allows grows with the square root of the length.
  */
-export function findFlatSpot(world, x, z, { waterLevel = 0, headingFor = () => 0, clearance = null } = {}) {
+export function findFlatSpot(world, x, z, { waterLevel = 0, headingFor = () => 0, clearance = null, runwayLength = FLAT.RUNWAY_LENGTH } = {}) {
+  const maxDeviation = FLAT.RUNWAY_MAX_DEVIATION * Math.sqrt(Math.max(runwayLength, FLAT.RUNWAY_LENGTH) / FLAT.RUNWAY_LENGTH);
   const vegetation = clearance && typeof world.scatterChunk === 'function' ? createVegetationProbe(world) : null;
   let fallback = null;
   let gentlest = null;
@@ -182,8 +185,8 @@ export function findFlatSpot(world, x, z, { waterLevel = 0, headingFor = () => 0
         continue;
       }
       const heading = headingFor(candidateX, candidateZ);
-      const run = runway(world, candidateX, candidateZ, heading, foot.center, waterLevel);
-      const candidate = { x: candidateX, z: candidateZ, heading, ground: foot.center, slope: foot.slope, runwayDeviation: run.deviation, flat: run.dry && run.deviation <= FLAT.RUNWAY_MAX_DEVIATION, clearOfVegetation: null, score: score + run.deviation / FLAT.RUNWAY_LENGTH };
+      const run = runway(world, candidateX, candidateZ, heading, foot.center, waterLevel, runwayLength);
+      const candidate = { x: candidateX, z: candidateZ, heading, ground: foot.center, slope: foot.slope, runwayDeviation: run.deviation, flat: run.dry && run.deviation <= maxDeviation, clearOfVegetation: null, score: score + run.deviation / runwayLength };
       if (candidate.flat) flatInRing.push(candidate);
       if (!fallback || candidate.score < fallback.score) fallback = candidate;
     }
