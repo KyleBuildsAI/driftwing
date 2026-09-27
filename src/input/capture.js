@@ -56,8 +56,10 @@ export function createInputCapture({ registry, calibration, mapper }) {
     emit();
   }
 
+  /** session.device is null (any device), one binding device, or a list of them. */
   function accepts(device) {
-    return !session.device || session.device === device;
+    if (!session.device) return true;
+    return Array.isArray(session.device) ? session.device.includes(device) : session.device === device;
   }
 
   function isLever(target) {
@@ -169,7 +171,7 @@ export function createInputCapture({ registry, calibration, mapper }) {
 
     /**
      * Starts listening for target. device limits the search to one binding device ('keyboard',
-     * 'mouse', 'gamepad' or a HOTAS device key); null accepts any. Resolves with
+     * 'mouse', 'gamepad' or a HOTAS device key) or a list of them; null accepts any. Resolves with
      * { ok: true, device, ref } or { ok: false, reason: 'cancelled' | 'timeout' | 'replaced' }.
      */
     start({ target, device = null, timeoutMs = 10000 }) {
