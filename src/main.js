@@ -5,7 +5,7 @@ import * as TSL from 'three/tsl';
 import { CONFIG, WORLD_OPTIONS } from './core/config.js';
 import { createAudioSystem } from './audio/AudioEngine.js';
 import { createBirdSystem } from './render/birds.js';
-import { createCameraRig } from './camera/chase.js';
+import { createCameraSystem } from './camera/cameraManager.js';
 import { createCloudSystem } from './render/clouds.js';
 import { createCopilotSystem } from './copilot/copilot.js';
 import { createFlightController } from './flight/FlightController.js';
@@ -322,7 +322,7 @@ async function boot() {
     ['waypoints', createWaypointSystem],
     ['rings', createRingCourseSystem],
     ['flight', createFlightController],
-    ['camera', createCameraRig],
+    ['camera', createCameraSystem],
     ['fx', createFxSystem],
     ['copilot', createCopilotSystem],
   ];
