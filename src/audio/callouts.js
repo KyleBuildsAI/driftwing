@@ -22,6 +22,8 @@ const THRESHOLDS = Object.freeze([
 const FEET_PER_METRE = 3.28084;
 const MIN_DESCENT_RATE = 0.3;
 const PENDING_TTL_SECONDS = 1.6;
+// Some speech engines never fire 'end' for an utterance; after this long it no longer blocks.
+const STALE_UTTERANCE_SECONDS = 4;
 const CALLOUT_PITCH = 0.72;
 const CALLOUT_RATE = 1.18;
 
@@ -41,9 +43,11 @@ export function createCallouts({ settings, getUserActivated, getCopilotVoiceName
   let voiceFor;
   let clockSeconds = 0;
   let current = null;
+  let currentStartedAt = 0;
   let pending = null;
   let lastAltitude = null;
   let spoken = 0;
+  const skipped = { copilot: 0, muted: 0 };
   let lastWord = null;
   let active = false;
 
@@ -94,13 +98,21 @@ export function createCallouts({ settings, getUserActivated, getCopilotVoiceName
   function speak(word, realTime) {
     if (!synth || typeof UtteranceClass !== 'function' || !getUserActivated()) return false;
     const level = volume();
-    if (level < 0.01) return false;
+    if (level < 0.01) {
+      skipped.muted++;
+      return false;
+    }
+    if (current && realTime - currentStartedAt > STALE_UTTERANCE_SECONDS) current = null;
     if (current) {
       // Never overlap a callout: the newest call waits for the current one to finish.
       pending = { word, at: realTime };
       return true;
     }
-    if (synth.speaking || synth.pending) return false;
+    if (synth.speaking || synth.pending) {
+      // The copilot is talking: a late altitude call would only be noise.
+      skipped.copilot++;
+      return false;
+    }
     try {
       const utterance = new UtteranceClass(word);
       const chosen = chooseVoice();
@@ -118,7 +130,7 @@ export function createCallouts({ settings, getUserActivated, getCopilotVoiceName
         if (pending && clockSeconds - pending.at < PENDING_TTL_SECONDS && active) {
           const next = pending;
           pending = null;
-          speak(next.word, next.at);
+          speak(next.word, clockSeconds);
         } else {
           pending = null;
         }
@@ -130,6 +142,7 @@ export function createCallouts({ settings, getUserActivated, getCopilotVoiceName
         finish();
       };
       current = utterance;
+      currentStartedAt = realTime;
       synth.speak(utterance);
       spoken++;
       lastWord = word;
@@ -218,6 +231,7 @@ export function createCallouts({ settings, getUserActivated, getCopilotVoiceName
         pending: pending ? pending.word : null,
         armed: [...armed].sort((first, second) => second - first),
         spoken,
+        skipped: { ...skipped },
         lastWord,
         voice: voice ? voice.name : null,
         available: Boolean(synth),
