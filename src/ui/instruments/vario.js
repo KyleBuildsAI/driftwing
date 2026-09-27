@@ -27,13 +27,13 @@ export default Object.freeze({
     }
     memory.average += (vario - memory.average) * (1 - Math.exp(-dt / AVERAGE_SECONDS));
   },
-  draw(g, source, theme, memory) {
+  draw(pen, source, theme, memory) {
     const { flight, units } = source;
     const aviation = units.system === 'aviation';
     const factor = units.vertical.factor;
     const value = Number.isFinite(flight.vario) ? flight.vario * factor : 0;
     const average = memory.average * factor;
-    const toAngle = drawVerticalDial(g, theme, {
+    const toAngle = drawVerticalDial(pen, theme, {
       value,
       maximum: aviation ? 1000 : 5,
       knee: null,
@@ -51,13 +51,13 @@ export default Object.freeze({
     const [tipX, tipY] = polar(angle, 70);
     const [leftX, leftY] = polar(angle - 0.08, 86);
     const [rightX, rightY] = polar(angle + 0.08, 86);
-    g.beginPath();
-    g.moveTo(tipX, tipY);
-    g.lineTo(leftX, leftY);
-    g.lineTo(rightX, rightY);
-    g.closePath();
-    g.lineWidth = 2;
-    g.strokeStyle = theme.teal;
-    g.stroke();
+    pen.beginPath();
+    pen.moveTo(tipX, tipY);
+    pen.lineTo(leftX, leftY);
+    pen.lineTo(rightX, rightY);
+    pen.closePath();
+    pen.lineWidth = 2;
+    pen.strokeStyle = theme.teal;
+    pen.stroke();
   },
 });

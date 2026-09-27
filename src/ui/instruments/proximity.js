@@ -39,34 +39,34 @@ export default Object.freeze({
     memory.clearance = clearance;
     memory.impactSeconds = impactSeconds;
   },
-  draw(g, source, theme, memory) {
+  draw(pen, source, theme, memory) {
     const { flight, units } = source;
     const factor = units.altitude.factor;
     const height = Number.isFinite(flight.agl) ? flight.agl : 0;
     const band = height < 50 ? theme.red : height < 150 ? theme.yellow : theme.green;
-    drawPlate(g, theme);
-    label(g, 'PROXIMITY', CENTER, 30, { size: 11, color: theme.textDim, weight: 650, spacing: 1.6 });
-    digital(g, grouped(Math.max(0, height) * factor), CENTER - 56, 42, 112, 44, theme, { size: 30, color: band });
-    label(g, `AGL ${units.altitude.label}`, CENTER, 96, { size: 10, color: theme.textDim, weight: 650, spacing: 1 });
+    drawPlate(pen, theme);
+    label(pen, 'PROXIMITY', CENTER, 30, { size: 11, color: theme.textDim, weight: 650, spacing: 1.6 });
+    digital(pen, grouped(Math.max(0, height) * factor), CENTER - 56, 42, 112, 44, theme, { size: 30, color: band });
+    label(pen, `AGL ${units.altitude.label}`, CENTER, 96, { size: 10, color: theme.textDim, weight: 650, spacing: 1 });
     const clearance = memory.clearance;
     const fraction = Number.isFinite(clearance) ? clamp(clearance / 200, 0, 1) : 1;
-    g.fillStyle = theme.id === 'panel' ? '#050607' : 'rgba(8, 6, 12, 0.34)';
-    roundRect(g, 22, 112, 156, 12, 5);
-    g.fill();
-    g.fillStyle = clearance < 20 ? theme.red : clearance < 60 ? theme.yellow : theme.teal;
-    roundRect(g, 22, 112, Math.max(8, 156 * fraction), 12, 5);
-    g.fill();
+    pen.fillStyle = theme.id === 'panel' ? '#050607' : 'rgba(8, 6, 12, 0.34)';
+    roundRect(pen, 22, 112, 156, 12, 5);
+    pen.fill();
+    pen.fillStyle = clearance < 20 ? theme.red : clearance < 60 ? theme.yellow : theme.teal;
+    roundRect(pen, 22, 112, Math.max(8, 156 * fraction), 12, 5);
+    pen.fill();
     const aheadText = Number.isFinite(clearance) ? `${grouped(Math.max(0, clearance) * factor)} ${units.altitude.label}` : '--';
-    label(g, 'PATH 5 S', 22, 138, { size: 10, color: theme.textDim, weight: 650, align: 'left', spacing: 1 });
-    label(g, aheadText, 178, 138, { size: 12, color: theme.text, weight: 650, align: 'right' });
+    label(pen, 'PATH 5 S', 22, 138, { size: 10, color: theme.textDim, weight: 650, align: 'left', spacing: 1 });
+    label(pen, aheadText, 178, 138, { size: 12, color: theme.text, weight: 650, align: 'right' });
     const warning = memory.impactSeconds <= PULL_UP_SECONDS;
     if (warning && memory.blink < 0.6) {
-      g.fillStyle = theme.red;
-      roundRect(g, 34, 152, 132, 30, 6);
-      g.fill();
-      label(g, 'PULL UP', CENTER, 168, { size: 17, color: '#fff7ee', weight: 800, spacing: 2 });
+      pen.fillStyle = theme.red;
+      roundRect(pen, 34, 152, 132, 30, 6);
+      pen.fill();
+      label(pen, 'PULL UP', CENTER, 168, { size: 17, color: '#fff7ee', weight: 800, spacing: 2 });
     } else if (!warning) {
-      label(g, Number.isFinite(memory.impactSeconds) ? `IMPACT ${memory.impactSeconds.toFixed(1)} S` : 'PATH CLEAR', CENTER, 168, { size: 11, color: theme.textDim, weight: 700, spacing: 1.4 });
+      label(pen, Number.isFinite(memory.impactSeconds) ? `IMPACT ${memory.impactSeconds.toFixed(1)} S` : 'PATH CLEAR', CENTER, 168, { size: 11, color: theme.textDim, weight: 700, spacing: 1.4 });
     }
   },
 });

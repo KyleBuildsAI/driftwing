@@ -49,5 +49,5 @@ export function signed(value, digits = 1) {
 export function grouped(value) {
   const rounded = Math.round(value);
   const sign = rounded < 0 ? '-' : '';
-  return sign + String(Math.abs(rounded)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return sign + String(Math.abs(rounded)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u2009');
 }

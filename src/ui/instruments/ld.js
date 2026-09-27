@@ -38,28 +38,28 @@ export default Object.freeze({
     memory.distance = memory.distance * keep + flight.groundSpeed * dt;
     memory.height = memory.height * keep - flight.verticalSpeed * dt;
   },
-  draw(g, source, theme, memory) {
+  draw(pen, source, theme, memory) {
     const { flight, craft } = source;
     const targets = craft.simProfile && craft.simProfile.targets;
     const best = targets && Number.isFinite(targets.liftToDrag) ? targets.liftToDrag : 40;
     const air = airGlideRatio(flight);
-    drawPlate(g, theme);
-    label(g, 'GLIDE  L/D', CENTER, 30, { size: 11, color: theme.textDim, weight: 650, spacing: 1.6 });
-    digital(g, ratioText(air), CENTER - 46, 44, 92, 50, theme, { size: 38 });
+    drawPlate(pen, theme);
+    label(pen, 'GLIDE  L/D', CENTER, 30, { size: 11, color: theme.textDim, weight: 650, spacing: 1.6 });
+    digital(pen, ratioText(air), CENTER - 46, 44, 92, 50, theme, { size: 38 });
     // Bar against the best glide ratio.
     const fraction = clamp(air / best, 0, 1);
-    g.fillStyle = theme.id === 'panel' ? '#050607' : 'rgba(8, 6, 12, 0.34)';
-    roundRect(g, 30, 104, 140, 10, 5);
-    g.fill();
-    g.fillStyle = fraction > 0.85 ? theme.green : theme.yellow;
-    roundRect(g, 30, 104, Math.max(10, 140 * fraction), 10, 5);
-    g.fill();
-    label(g, `BEST ${best}`, 170, 124, { size: 10, color: theme.textDim, weight: 650, align: 'right' });
-    label(g, 'AIR', 30, 124, { size: 10, color: theme.textDim, weight: 650, align: 'left' });
-    label(g, 'GROUND', 44, 146, { size: 10, color: theme.textDim, weight: 650, spacing: 1 });
-    label(g, 'AVG', 132, 146, { size: 10, color: theme.textDim, weight: 650, spacing: 1 });
-    digital(g, ratioText(flight.glideRatio), 18, 156, 54, 26, theme, { size: 17 });
+    pen.fillStyle = theme.id === 'panel' ? '#050607' : 'rgba(8, 6, 12, 0.34)';
+    roundRect(pen, 30, 104, 140, 10, 5);
+    pen.fill();
+    pen.fillStyle = fraction > 0.85 ? theme.green : theme.yellow;
+    roundRect(pen, 30, 104, Math.max(10, 140 * fraction), 10, 5);
+    pen.fill();
+    label(pen, `BEST ${best}`, 170, 124, { size: 10, color: theme.textDim, weight: 650, align: 'right' });
+    label(pen, 'AIR', 30, 124, { size: 10, color: theme.textDim, weight: 650, align: 'left' });
+    label(pen, 'GROUND', 44, 146, { size: 10, color: theme.textDim, weight: 650, spacing: 1 });
+    label(pen, 'AVG', 132, 146, { size: 10, color: theme.textDim, weight: 650, spacing: 1 });
+    digital(pen, ratioText(flight.glideRatio), 18, 156, 54, 26, theme, { size: 17 });
     const average = memory.height > 1 ? memory.distance / memory.height : 0;
-    digital(g, ratioText(average), 104, 156, 54, 26, theme, { size: 17 });
+    digital(pen, ratioText(average), 104, 156, 54, 26, theme, { size: 17 });
   },
 });

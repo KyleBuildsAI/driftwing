@@ -422,8 +422,8 @@ export function createCameraSystem(ctx) {
     return true;
   }
 
-  function easeInOutCubic(t) {
-    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  function easeInOutCubic(progress) {
+    return progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
   }
 
   /** The eased return from the photo camera to a non-chase view. */

@@ -13,31 +13,31 @@ function droneModeOf(flight) {
 export default Object.freeze({
   id: 'droneMode',
   label: 'Flight mode',
-  draw(g, source, theme) {
+  draw(pen, source, theme) {
     const { flight } = source;
     const mode = droneModeOf(flight);
     const craftState = flight.craftState || {};
-    drawPlate(g, theme);
-    label(g, 'FLIGHT MODE', CENTER, 30, { size: 11, color: theme.textDim, weight: 650, spacing: 1.6 });
+    drawPlate(pen, theme);
+    label(pen, 'FLIGHT MODE', CENTER, 30, { size: 11, color: theme.textDim, weight: 650, spacing: 1.6 });
     const colour = mode === 'angle' ? theme.teal : theme.accent;
-    g.fillStyle = theme.id === 'panel' ? '#050607' : 'rgba(8, 6, 12, 0.34)';
-    roundRect(g, 22, 44, 156, 46, 6);
-    g.fill();
-    label(g, mode === 'angle' ? 'ANGLE' : 'RATE', CENTER, 68, { size: 30, color: colour, weight: 750, spacing: 2 });
+    pen.fillStyle = theme.id === 'panel' ? '#050607' : 'rgba(8, 6, 12, 0.34)';
+    roundRect(pen, 22, 44, 156, 46, 6);
+    pen.fill();
+    label(pen, mode === 'angle' ? 'ANGLE' : 'RATE', CENTER, 68, { size: 30, color: colour, weight: 750, spacing: 2 });
     const altitudeHold = mode === 'angle' && craftState.altitudeHold === true;
-    lamp(g, 36, 106, 6, altitudeHold, theme.teal, theme);
-    label(g, 'ALT HOLD', 48, 106, { size: 10.5, color: altitudeHold ? theme.teal : theme.textDim, weight: 700, align: 'left' });
+    lamp(pen, 36, 106, 6, altitudeHold, theme.teal, theme);
+    label(pen, 'ALT HOLD', 48, 106, { size: 10.5, color: altitudeHold ? theme.teal : theme.textDim, weight: 700, align: 'left' });
     const armed = flight.engineOn !== false;
-    lamp(g, 122, 106, 6, !armed, theme.red, theme);
-    label(g, 'DISARM', 134, 106, { size: 10.5, color: armed ? theme.textDim : theme.red, weight: 700, align: 'left' });
+    lamp(pen, 122, 106, 6, !armed, theme.red, theme);
+    label(pen, 'DISARM', 134, 106, { size: 10.5, color: armed ? theme.textDim : theme.red, weight: 700, align: 'left' });
     const throttle = clamp(Number.isFinite(flight.throttle) ? flight.throttle : 0, 0, 1);
-    label(g, 'THR', 22, 140, { size: 10.5, color: theme.textDim, weight: 650, align: 'left', spacing: 1 });
-    g.fillStyle = theme.id === 'panel' ? '#050607' : 'rgba(8, 6, 12, 0.34)';
-    roundRect(g, 22, 150, 110, 16, 5);
-    g.fill();
-    g.fillStyle = theme.yellow;
-    roundRect(g, 22, 150, Math.max(8, 110 * throttle), 16, 5);
-    g.fill();
-    digital(g, `${Math.round(throttle * 100)}%`, 138, 146, 44, 24, theme, { size: 14 });
+    label(pen, 'THR', 22, 140, { size: 10.5, color: theme.textDim, weight: 650, align: 'left', spacing: 1 });
+    pen.fillStyle = theme.id === 'panel' ? '#050607' : 'rgba(8, 6, 12, 0.34)';
+    roundRect(pen, 22, 150, 110, 16, 5);
+    pen.fill();
+    pen.fillStyle = theme.yellow;
+    roundRect(pen, 22, 150, Math.max(8, 110 * throttle), 16, 5);
+    pen.fill();
+    digital(pen, `${Math.round(throttle * 100)}%`, 138, 146, 44, 24, theme, { size: 14 });
   },
 });

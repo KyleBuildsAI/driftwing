@@ -20,29 +20,29 @@ function envelope(craft, mode) {
 export default Object.freeze({
   id: 'airspeed',
   label: 'Airspeed',
-  draw(g, source, theme) {
+  draw(pen, source, theme) {
     const { flight, craft, mode, units } = source;
     const factor = units.speed.factor;
     const speeds = envelope(craft, mode);
     const major = niceStep((speeds.top * 1.12 * factor) / 8);
     const maximum = ceilTo(speeds.top * 1.12 * factor, major);
     const toAngle = linearDial(0, maximum, 18, 324);
-    drawCase(g, theme);
-    arcBand(g, { from: speeds.stall * factor, to: speeds.caution * factor, toAngle, radius: 80, width: 7, color: theme.green });
-    arcBand(g, { from: speeds.caution * factor, to: speeds.never * factor, toAngle, radius: 80, width: 7, color: theme.yellow });
-    radial(g, toAngle(speeds.never * factor), 73, 88, theme.red, 4);
-    ticks(g, { from: 0, to: maximum, step: major / 2, toAngle, inner: 78, outer: 88, width: 1.6, color: theme.tick });
-    ticks(g, { from: 0, to: maximum, step: major, toAngle, inner: 72, outer: 88, width: 3, color: theme.tick });
+    drawCase(pen, theme);
+    arcBand(pen, { from: speeds.stall * factor, to: speeds.caution * factor, toAngle, radius: 80, width: 7, color: theme.green });
+    arcBand(pen, { from: speeds.caution * factor, to: speeds.never * factor, toAngle, radius: 80, width: 7, color: theme.yellow });
+    radial(pen, toAngle(speeds.never * factor), 73, 88, theme.red, 4);
+    ticks(pen, { from: 0, to: maximum, step: major / 2, toAngle, inner: 78, outer: 88, width: 1.6, color: theme.tick });
+    ticks(pen, { from: 0, to: maximum, step: major, toAngle, inner: 72, outer: 88, width: 3, color: theme.tick });
     const labels = [];
     const labelStep = maximum / major > 8 ? major * 2 : major;
     for (let value = 0; value <= maximum + 1e-6; value += labelStep) labels.push(value);
-    numerals(g, labels, { toAngle, radius: 58, size: 16, color: theme.text });
-    title(g, 'AIRSPEED', theme, 66);
-    label(g, units.speed.dial, CENTER, 80, { size: 11, color: theme.textDim, weight: 650, spacing: 1.2 });
+    numerals(pen, labels, { toAngle, radius: 58, size: 16, color: theme.text });
+    title(pen, 'AIRSPEED', theme, 66);
+    label(pen, units.speed.dial, CENTER, 80, { size: 11, color: theme.textDim, weight: 650, spacing: 1.2 });
     const airspeed = mode === 'sim' ? flight.indicatedAirspeed : flight.airspeed;
     const shown = clamp(Number.isFinite(airspeed) ? airspeed * factor : 0, 0, maximum);
-    if (theme.id === 'glass') digital(g, String(Math.round(shown)), CENTER - 26, 112, 52, 22, theme, { size: 15 });
-    needle(g, toAngle(shown), { length: 80, color: theme.needle });
-    drawGlare(g, theme);
+    if (theme.id === 'glass') digital(pen, String(Math.round(shown)), CENTER - 26, 112, 52, 22, theme, { size: 15 });
+    needle(pen, toAngle(shown), { length: 80, color: theme.needle });
+    drawGlare(pen, theme);
   },
 });

@@ -1,7 +1,7 @@
 // Instrument registry and the shared instrument set.
 //
 // Every instrument id a craft may list in craft.instruments has a renderer here. A renderer is
-// { id, label, draw(g, source, theme, memory), createMemory?(), update?(memory, dt, source),
+// { id, label, draw(pen, source, theme, memory), createMemory?(), update?(memory, dt, source),
 // reset?(memory) } and draws in a 200 x 200 design box (see gaugeKit.js). The instrument set owns
 // the per-instrument memory (G tell-tales, vario averager, glide averages, terrain look-ahead) so
 // the cockpit panel and the HUD overlay show the same state, and builds the `source` every
@@ -111,17 +111,17 @@ export function createInstrumentSet(ctx) {
     refresh: refreshSource,
 
     /**
-     * Draws one instrument into g at (x, y) with the given size in canvas pixels, in the 'panel' or
+     * Draws one instrument into pen at (x, y) with the given size in canvas pixels, in the 'panel' or
      * 'glass' theme.
      */
-    draw(id, g, x, y, size, themeId) {
+    draw(id, pen, x, y, size, themeId) {
       const instrument = INSTRUMENTS[id];
       if (!instrument || !activeCraft) return;
-      g.save();
-      g.translate(x, y);
-      g.scale(size / DESIGN_SIZE, size / DESIGN_SIZE);
-      instrument.draw(g, source, THEMES[themeId] || THEMES.panel, memories.get(id));
-      g.restore();
+      pen.save();
+      pen.translate(x, y);
+      pen.scale(size / DESIGN_SIZE, size / DESIGN_SIZE);
+      instrument.draw(pen, source, THEMES[themeId] || THEMES.panel, memories.get(id));
+      pen.restore();
     },
   };
 }

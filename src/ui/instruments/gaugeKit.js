@@ -91,198 +91,198 @@ export function font(size, weight = 600) {
 }
 
 /** Text centred (or aligned) at x, y. */
-export function label(g, text, x, y, { size = 14, color = '#fff', weight = 600, align = 'center', baseline = 'middle', spacing = 0 } = {}) {
-  g.font = font(size, weight);
-  g.fillStyle = color;
-  g.textAlign = align;
-  g.textBaseline = baseline;
-  if ('letterSpacing' in g) g.letterSpacing = `${spacing}px`;
-  g.fillText(text, x, y);
-  if ('letterSpacing' in g) g.letterSpacing = '0px';
+export function label(pen, text, x, y, { size = 14, color = '#fff', weight = 600, align = 'center', baseline = 'middle', spacing = 0 } = {}) {
+  pen.font = font(size, weight);
+  pen.fillStyle = color;
+  pen.textAlign = align;
+  pen.textBaseline = baseline;
+  if ('letterSpacing' in pen) pen.letterSpacing = `${spacing}px`;
+  pen.fillText(text, x, y);
+  if ('letterSpacing' in pen) pen.letterSpacing = '0px';
 }
 
 /**
  * Gauge case: panel theme draws the square mounting plate screws, the bezel ring and the black
  * face; glass theme a hairline ring on a faint tint. radius is the face radius.
  */
-export function drawCase(g, theme, radius = 90) {
+export function drawCase(pen, theme, radius = 90) {
   if (theme.bezel) {
     for (const [x, y] of [[14, 14], [186, 14], [14, 186], [186, 186]]) {
-      g.beginPath();
-      g.arc(x, y, 6, 0, Math.PI * 2);
-      g.fillStyle = theme.screw;
-      g.fill();
-      g.strokeStyle = theme.bezelDark;
-      g.lineWidth = 1.6;
-      g.beginPath();
-      g.moveTo(x - 4, y - 1.5);
-      g.lineTo(x + 4, y + 1.5);
-      g.stroke();
+      pen.beginPath();
+      pen.arc(x, y, 6, 0, Math.PI * 2);
+      pen.fillStyle = theme.screw;
+      pen.fill();
+      pen.strokeStyle = theme.bezelDark;
+      pen.lineWidth = 1.6;
+      pen.beginPath();
+      pen.moveTo(x - 4, y - 1.5);
+      pen.lineTo(x + 4, y + 1.5);
+      pen.stroke();
     }
-    const ring = g.createLinearGradient(0, 4, 0, 196);
+    const ring = pen.createLinearGradient(0, 4, 0, 196);
     ring.addColorStop(0, theme.bezelLight);
     ring.addColorStop(0.5, theme.bezel);
     ring.addColorStop(1, theme.bezelDark);
-    g.beginPath();
-    g.arc(CENTER, CENTER, radius + 8, 0, Math.PI * 2);
-    g.fillStyle = ring;
-    g.fill();
-    const face = g.createRadialGradient(CENTER, CENTER - 20, radius * 0.2, CENTER, CENTER, radius);
+    pen.beginPath();
+    pen.arc(CENTER, CENTER, radius + 8, 0, Math.PI * 2);
+    pen.fillStyle = ring;
+    pen.fill();
+    const face = pen.createRadialGradient(CENTER, CENTER - 20, radius * 0.2, CENTER, CENTER, radius);
     face.addColorStop(0, theme.face);
     face.addColorStop(1, theme.faceEdge);
-    g.beginPath();
-    g.arc(CENTER, CENTER, radius, 0, Math.PI * 2);
-    g.fillStyle = face;
-    g.fill();
+    pen.beginPath();
+    pen.arc(CENTER, CENTER, radius, 0, Math.PI * 2);
+    pen.fillStyle = face;
+    pen.fill();
     return;
   }
-  g.beginPath();
-  g.arc(CENTER, CENTER, radius, 0, Math.PI * 2);
-  g.fillStyle = theme.face;
-  g.fill();
-  g.lineWidth = 1.5;
-  g.strokeStyle = theme.faceEdge;
-  g.stroke();
+  pen.beginPath();
+  pen.arc(CENTER, CENTER, radius, 0, Math.PI * 2);
+  pen.fillStyle = theme.face;
+  pen.fill();
+  pen.lineWidth = 1.5;
+  pen.strokeStyle = theme.faceEdge;
+  pen.stroke();
 }
 
 /** Glass glare over a panel gauge (a soft highlight along the upper-left of the cover glass). */
-export function drawGlare(g, theme, radius = 90) {
+export function drawGlare(pen, theme, radius = 90) {
   if (!theme.glare) return;
-  g.save();
-  g.beginPath();
-  g.arc(CENTER, CENTER, radius, 0, Math.PI * 2);
-  g.clip();
-  const glare = g.createLinearGradient(30, 20, 120, 120);
+  pen.save();
+  pen.beginPath();
+  pen.arc(CENTER, CENTER, radius, 0, Math.PI * 2);
+  pen.clip();
+  const glare = pen.createLinearGradient(30, 20, 120, 120);
   glare.addColorStop(0, 'rgba(255, 255, 255, 0.10)');
   glare.addColorStop(0.45, 'rgba(255, 255, 255, 0.03)');
   glare.addColorStop(0.46, 'rgba(255, 255, 255, 0)');
-  g.fillStyle = glare;
-  g.fillRect(0, 0, DESIGN_SIZE, DESIGN_SIZE);
-  g.restore();
+  pen.fillStyle = glare;
+  pen.fillRect(0, 0, DESIGN_SIZE, DESIGN_SIZE);
+  pen.restore();
 }
 
 /** Radial tick marks for every step between from and to (value -> angle through toAngle). */
-export function ticks(g, { from, to, step, toAngle, inner, outer, width = 2, color }) {
-  g.strokeStyle = color;
-  g.lineWidth = width;
-  g.lineCap = 'butt';
-  g.beginPath();
+export function ticks(pen, { from, to, step, toAngle, inner, outer, width = 2, color }) {
+  pen.strokeStyle = color;
+  pen.lineWidth = width;
+  pen.lineCap = 'butt';
+  pen.beginPath();
   const count = Math.round((to - from) / step);
   for (let index = 0; index <= count; index++) {
     const angle = toAngle(from + index * step);
     const [x0, y0] = polar(angle, inner);
     const [x1, y1] = polar(angle, outer);
-    g.moveTo(x0, y0);
-    g.lineTo(x1, y1);
+    pen.moveTo(x0, y0);
+    pen.lineTo(x1, y1);
   }
-  g.stroke();
+  pen.stroke();
 }
 
 /** Numerals at the given values, upright, on a circle of radius. */
-export function numerals(g, values, { toAngle, radius, size = 16, color, format = String, weight = 600 }) {
-  g.font = font(size, weight);
-  g.fillStyle = color;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
+export function numerals(pen, values, { toAngle, radius, size = 16, color, format = String, weight = 600 }) {
+  pen.font = font(size, weight);
+  pen.fillStyle = color;
+  pen.textAlign = 'center';
+  pen.textBaseline = 'middle';
   for (const value of values) {
     const [x, y] = polar(toAngle(value), radius);
-    g.fillText(format(value), x, y + 0.5);
+    pen.fillText(format(value), x, y + 0.5);
   }
 }
 
 /** A coloured band along the dial between two values. */
-export function arcBand(g, { from, to, toAngle, radius, width, color }) {
+export function arcBand(pen, { from, to, toAngle, radius, width, color }) {
   if (!(to > from)) return;
-  g.beginPath();
-  g.arc(CENTER, CENTER, radius, toAngle(from), toAngle(to), false);
-  g.strokeStyle = color;
-  g.lineWidth = width;
-  g.lineCap = 'butt';
-  g.stroke();
+  pen.beginPath();
+  pen.arc(CENTER, CENTER, radius, toAngle(from), toAngle(to), false);
+  pen.strokeStyle = color;
+  pen.lineWidth = width;
+  pen.lineCap = 'butt';
+  pen.stroke();
 }
 
 /** A radial line across the band (red line, limit marks). */
-export function radial(g, angle, inner, outer, color, width = 3) {
+export function radial(pen, angle, inner, outer, color, width = 3) {
   const [x0, y0] = polar(angle, inner);
   const [x1, y1] = polar(angle, outer);
-  g.beginPath();
-  g.moveTo(x0, y0);
-  g.lineTo(x1, y1);
-  g.strokeStyle = color;
-  g.lineWidth = width;
-  g.lineCap = 'butt';
-  g.stroke();
+  pen.beginPath();
+  pen.moveTo(x0, y0);
+  pen.lineTo(x1, y1);
+  pen.strokeStyle = color;
+  pen.lineWidth = width;
+  pen.lineCap = 'butt';
+  pen.stroke();
 }
 
 /** A tapered needle from the hub, with a short counterweight tail and a hub cap. */
-export function needle(g, angle, { length = 78, tail = 16, width = 5, color, hub = 8, hubColor = null }) {
-  g.save();
-  g.translate(CENTER, CENTER);
-  g.rotate(angle);
-  g.beginPath();
-  g.moveTo(-tail, -width * 0.6);
-  g.lineTo(length - 6, -width * 0.32);
-  g.lineTo(length, 0);
-  g.lineTo(length - 6, width * 0.32);
-  g.lineTo(-tail, width * 0.6);
-  g.closePath();
-  g.fillStyle = color;
-  g.shadowColor = 'rgba(0, 0, 0, 0.45)';
-  g.shadowBlur = 3;
-  g.shadowOffsetY = 1.5;
-  g.fill();
-  g.restore();
+export function needle(pen, angle, { length = 78, tail = 16, width = 5, color, hub = 8, hubColor = null }) {
+  pen.save();
+  pen.translate(CENTER, CENTER);
+  pen.rotate(angle);
+  pen.beginPath();
+  pen.moveTo(-tail, -width * 0.6);
+  pen.lineTo(length - 6, -width * 0.32);
+  pen.lineTo(length, 0);
+  pen.lineTo(length - 6, width * 0.32);
+  pen.lineTo(-tail, width * 0.6);
+  pen.closePath();
+  pen.fillStyle = color;
+  pen.shadowColor = 'rgba(0, 0, 0, 0.45)';
+  pen.shadowBlur = 3;
+  pen.shadowOffsetY = 1.5;
+  pen.fill();
+  pen.restore();
   if (hub > 0) {
-    g.beginPath();
-    g.arc(CENTER, CENTER, hub, 0, Math.PI * 2);
-    g.fillStyle = hubColor || '#2b2d33';
-    g.fill();
+    pen.beginPath();
+    pen.arc(CENTER, CENTER, hub, 0, Math.PI * 2);
+    pen.fillStyle = hubColor || '#2b2d33';
+    pen.fill();
   }
 }
 
 /** A small digital readout window with centred (or left / right aligned) text. */
-export function digital(g, text, x, y, width, height, theme, { color = null, size = null, align = 'center' } = {}) {
-  g.fillStyle = theme.digitalBack;
-  roundRect(g, x, y, width, height, 4);
-  g.fill();
+export function digital(pen, text, x, y, width, height, theme, { color = null, size = null, align = 'center' } = {}) {
+  pen.fillStyle = theme.digitalBack;
+  roundRect(pen, x, y, width, height, 4);
+  pen.fill();
   if (theme.id === 'panel') {
-    g.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-    g.lineWidth = 1;
-    g.stroke();
+    pen.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    pen.lineWidth = 1;
+    pen.stroke();
   }
   const textSize = size || Math.round(height * 0.72);
   const textX = align === 'right' ? x + width - 5 : align === 'left' ? x + 5 : x + width / 2;
-  label(g, text, textX, y + height / 2 + 1, { size: textSize, color: color || theme.digitalText, weight: 650, align });
+  label(pen, text, textX, y + height / 2 + 1, { size: textSize, color: color || theme.digitalText, weight: 650, align });
 }
 
-export function roundRect(g, x, y, width, height, radius) {
-  g.beginPath();
-  g.moveTo(x + radius, y);
-  g.lineTo(x + width - radius, y);
-  g.arcTo(x + width, y, x + width, y + radius, radius);
-  g.lineTo(x + width, y + height - radius);
-  g.arcTo(x + width, y + height, x + width - radius, y + height, radius);
-  g.lineTo(x + radius, y + height);
-  g.arcTo(x, y + height, x, y + height - radius, radius);
-  g.lineTo(x, y + radius);
-  g.arcTo(x, y, x + radius, y, radius);
-  g.closePath();
+export function roundRect(pen, x, y, width, height, radius) {
+  pen.beginPath();
+  pen.moveTo(x + radius, y);
+  pen.lineTo(x + width - radius, y);
+  pen.arcTo(x + width, y, x + width, y + radius, radius);
+  pen.lineTo(x + width, y + height - radius);
+  pen.arcTo(x + width, y + height, x + width - radius, y + height, radius);
+  pen.lineTo(x + radius, y + height);
+  pen.arcTo(x, y + height, x, y + height - radius, radius);
+  pen.lineTo(x, y + radius);
+  pen.arcTo(x, y, x + radius, y, radius);
+  pen.closePath();
 }
 
 /** A round indicator lamp (lit colour or the theme's dark lens). */
-export function lamp(g, x, y, radius, lit, colour, theme) {
-  g.beginPath();
-  g.arc(x, y, radius, 0, Math.PI * 2);
-  g.fillStyle = lit ? colour : theme.lampOff;
+export function lamp(pen, x, y, radius, lit, colour, theme) {
+  pen.beginPath();
+  pen.arc(x, y, radius, 0, Math.PI * 2);
+  pen.fillStyle = lit ? colour : theme.lampOff;
   if (lit) {
-    g.shadowColor = colour;
-    g.shadowBlur = theme.id === 'panel' ? 8 : 6;
+    pen.shadowColor = colour;
+    pen.shadowBlur = theme.id === 'panel' ? 8 : 6;
   }
-  g.fill();
-  g.shadowBlur = 0;
-  g.lineWidth = 1.2;
-  g.strokeStyle = theme.id === 'panel' ? '#000' : 'rgba(255, 240, 220, 0.2)';
-  g.stroke();
+  pen.fill();
+  pen.shadowBlur = 0;
+  pen.lineWidth = 1.2;
+  pen.strokeStyle = theme.id === 'panel' ? '#000' : 'rgba(255, 240, 220, 0.2)';
+  pen.stroke();
 }
 
 /**
@@ -290,28 +290,28 @@ export function lamp(g, x, y, radius, lit, colour, theme) {
  * digital computers). Panel theme: screwed plate with a recessed black face; glass: nothing, the
  * HUD tile is the plate.
  */
-export function drawPlate(g, theme) {
+export function drawPlate(pen, theme) {
   if (theme.id !== 'panel') return;
-  g.fillStyle = theme.plate;
-  roundRect(g, 4, 4, 192, 192, 10);
-  g.fill();
-  g.fillStyle = theme.face;
-  roundRect(g, 14, 14, 172, 172, 7);
-  g.fill();
-  g.strokeStyle = 'rgba(0, 0, 0, 0.8)';
-  g.lineWidth = 2;
-  g.stroke();
+  pen.fillStyle = theme.plate;
+  roundRect(pen, 4, 4, 192, 192, 10);
+  pen.fill();
+  pen.fillStyle = theme.face;
+  roundRect(pen, 14, 14, 172, 172, 7);
+  pen.fill();
+  pen.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+  pen.lineWidth = 2;
+  pen.stroke();
   for (const [x, y] of [[9, 9], [191, 9], [9, 191], [191, 191]]) {
-    g.beginPath();
-    g.arc(x, y, 3.2, 0, Math.PI * 2);
-    g.fillStyle = theme.screw;
-    g.fill();
+    pen.beginPath();
+    pen.arc(x, y, 3.2, 0, Math.PI * 2);
+    pen.fillStyle = theme.screw;
+    pen.fill();
   }
 }
 
 /** Instrument title along the top of the face (small caps, spaced). */
-export function title(g, text, theme, y = 56) {
-  label(g, text, CENTER, y, { size: 11, color: theme.textDim, weight: 650, spacing: 1.6 });
+export function title(pen, text, theme, y = 56) {
+  label(pen, text, CENTER, y, { size: 11, color: theme.textDim, weight: 650, spacing: 1.6 });
 }
 
 /** A value mapped linearly onto a dial sweep: returns value -> canvas angle. */
