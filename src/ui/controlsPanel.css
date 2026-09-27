@@ -1,0 +1,557 @@
+  /* ==========================================================================
+     DRIFTWING controls panel and calibration wizard (controlsPanel.js,
+     calibrationWizard.js). Same warm glass tokens as ui.css, scoped under
+     #ui-root. Loaded after ui.css (index.html).
+     ========================================================================== */
+  #dw-controls-root [hidden] { display: none !important; }
+
+  /* ---- Panel frame: a wide centred panel instead of the right-hand column ---- */
+  #ui-root .dw-panel.dw-controls {
+    left: max(var(--dw-left), calc(50% - 470px));
+    right: max(var(--dw-right), calc(50% - 470px));
+    width: auto;
+    transform: translateY(16px);
+  }
+  #ui-root .dw-panel.dw-controls.dw-open { transform: none; }
+  #ui-root .dw-controls-root {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  #ui-root .dw-controls-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #ui-root .dw-controls-file { display: none; }
+
+  /* ---- Toolbar, scope, notices ------------------------------------------------ */
+  #ui-root .dw-controls-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    padding: 12px 22px 0;
+  }
+  #ui-root .dw-controls-scope { width: min(320px, 100%); }
+  #ui-root .dw-controls-scope button { padding: 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #ui-root .dw-controls-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  #ui-root .dw-controls-actions .dw-text-button,
+  #ui-root .dw-controls-device-actions .dw-text-button { height: 32px; padding: 0 12px; font-size: 12.5px; }
+  #ui-root .dw-text-button:disabled { opacity: 0.45; cursor: default; }
+  #ui-root .dw-text-button.dw-danger { background: rgba(242, 163, 126, 0.2); border-color: rgba(242, 163, 126, 0.5); color: #ffd9c7; }
+  #ui-root .dw-text-button.dw-danger:hover { background: rgba(242, 163, 126, 0.3); }
+  #ui-root .dw-text-button:focus-visible,
+  #ui-root .dw-controls-tab:focus-visible,
+  #ui-root .dw-controls-scope button:focus-visible,
+  #ui-root .dw-bind-main:focus-visible,
+  #ui-root .dw-controls-root .dw-icon-button:focus-visible,
+  #ui-root .dw-controls-root .dw-switch:focus-visible { outline: 2px solid rgba(243, 199, 122, 0.75); outline-offset: 2px; }
+  #ui-root .dw-controls-scope-note { margin: 6px 22px 0; }
+  #ui-root .dw-controls-notices { display: flex; flex-direction: column; gap: 6px; margin: 8px 22px 0; }
+  #ui-root .dw-controls-notices:empty { display: none; }
+  #ui-root .dw-controls-notice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    margin: 0;
+    padding: 8px 12px;
+    border-radius: 11px;
+    border: 1px solid var(--dw-hairline);
+    background: rgba(255, 240, 220, 0.05);
+    font-size: 12.5px;
+    color: var(--dw-text-dim);
+  }
+  #ui-root .dw-controls-prompt { border-color: rgba(243, 199, 122, 0.36); background: rgba(243, 199, 122, 0.08); }
+  #ui-root .dw-controls-prompt strong { font-weight: 600; color: var(--dw-gold); }
+  #ui-root .dw-controls-chips { display: inline-flex; gap: 6px; }
+  #ui-root .dw-controls-chip {
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--dw-hairline);
+    font-size: 11px;
+    color: var(--dw-text-faint);
+    white-space: nowrap;
+  }
+  #ui-root .dw-controls-chip.dw-on { color: #b8e6b0; border-color: rgba(184, 230, 176, 0.42); }
+  #ui-root .dw-controls-pedal-note { flex-basis: 100%; margin: 0; font-size: 11.5px; color: var(--dw-text-faint); }
+  #ui-root .dw-controls-live > .dw-controls-pedal-note { margin-top: 12px; }
+  #ui-root .dw-controls-faint { font-size: 12px; color: var(--dw-text-faint); }
+  #ui-root .dw-warn-text { color: var(--dw-warn); }
+
+  /* ---- Device tabs -------------------------------------------------------------- */
+  #ui-root .dw-controls-tabs {
+    flex: none;
+    display: flex;
+    gap: 2px;
+    margin: 10px 22px 0;
+    padding: 3px;
+    border-radius: 12px;
+    border: 1px solid var(--dw-hairline);
+    background: rgba(10, 8, 14, 0.3);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  #ui-root .dw-controls-tabs::-webkit-scrollbar { display: none; }
+  #ui-root .dw-controls-tab {
+    flex: 1 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    padding: 4px 14px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--dw-text-dim);
+    white-space: nowrap;
+    transition: background-color 0.18s ease, color 0.18s ease;
+  }
+  #ui-root .dw-controls-tab:hover { color: var(--dw-text); background: rgba(255, 240, 220, 0.06); }
+  #ui-root .dw-controls-tab[aria-selected="true"] { background: rgba(243, 199, 122, 0.22); color: var(--dw-gold); box-shadow: inset 0 0 0 1px rgba(243, 199, 122, 0.3); }
+  #ui-root .dw-controls-tab-state { font-size: 9px; font-weight: 650; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dw-text-faint); }
+  #ui-root .dw-controls-tab .dw-controls-tab-state.dw-warn-text { color: var(--dw-warn); }
+
+  /* ---- Alerts and status line ----------------------------------------------------- */
+  #ui-root .dw-controls-alert {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 8px 22px 0;
+    padding: 8px 8px 8px 12px;
+    border-radius: 11px;
+    border: 1px solid rgba(242, 163, 126, 0.55);
+    background: rgba(242, 163, 126, 0.12);
+    font-size: 12.5px;
+    color: #ffd9c7;
+  }
+  #ui-root .dw-controls-alert .dw-text-button { height: 28px; padding: 0 10px; font-size: 12px; flex: none; }
+  #ui-root .dw-controls-status {
+    flex: none;
+    min-height: 34px;
+    margin: 0;
+    padding: 8px 22px 10px;
+    border-top: 1px solid var(--dw-hairline);
+    font-size: 12px;
+    color: var(--dw-text-faint);
+  }
+  #ui-root .dw-controls-status[data-kind="success"] { color: #b8e6b0; }
+  #ui-root .dw-controls-status[data-kind="warning"] { color: var(--dw-warn); }
+
+  /* ---- Body: live column beside the binding list ------------------------------------ */
+  #ui-root .dw-controls-body {
+    display: grid;
+    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+    align-items: start;
+    gap: 0 24px;
+    padding-top: 14px;
+    outline: none;
+  }
+  #ui-root .dw-controls-live { position: sticky; top: 0; }
+  #ui-root .dw-controls-device {
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid var(--dw-hairline);
+    background: rgba(255, 240, 220, 0.04);
+  }
+  #ui-root .dw-controls-device-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #ui-root .dw-controls-device-name { margin: 0; font-size: 16px; font-weight: 450; color: #fffaf1; }
+  #ui-root .dw-controls-device-meta { margin: 4px 0 0; font-size: 12px; line-height: 1.5; color: var(--dw-text-faint); }
+  #ui-root .dw-controls-device-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  #ui-root .dw-controls-badge {
+    flex: none;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--dw-hairline);
+    font-size: 9.5px;
+    font-weight: 650;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dw-text-dim);
+    white-space: nowrap;
+  }
+  #ui-root .dw-controls-badge.dw-ok { color: #b8e6b0; border-color: rgba(184, 230, 176, 0.42); }
+  #ui-root .dw-controls-badge.dw-warn { color: var(--dw-warn); border-color: rgba(242, 163, 126, 0.5); }
+  #ui-root .dw-controls-live-group { margin-top: 14px; }
+  #ui-root .dw-controls-live-group > h4 { margin: 0 0 6px; }
+
+  /* Live axis bars, button lights, hat compasses */
+  #ui-root .dw-controls-axis {
+    display: grid;
+    grid-template-columns: 104px minmax(0, 1fr) 54px;
+    align-items: center;
+    gap: 10px;
+    min-height: 24px;
+    font-size: 12.5px;
+  }
+  #ui-root .dw-controls-axis-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dw-text-dim); }
+  #ui-root .dw-controls-bar { position: relative; height: 8px; border-radius: 4px; background: rgba(255, 240, 220, 0.1); }
+  #ui-root .dw-controls-bar::before { content: ''; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: rgba(255, 240, 220, 0.34); }
+  #ui-root .dw-controls-bar.dw-unipolar::before { display: none; }
+  #ui-root .dw-controls-bar-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 0;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #e9b865, var(--dw-gold));
+    box-shadow: 0 0 8px rgba(243, 199, 122, 0.35);
+  }
+  #ui-root .dw-controls-axis-value { text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--dw-text); }
+  #ui-root .dw-hat-axis .dw-controls-bar { opacity: 0.3; }
+  #ui-root .dw-hat-axis .dw-controls-axis-value { color: var(--dw-text-faint); font-size: 11px; }
+  #ui-root .dw-controls-buttons { display: grid; grid-template-columns: repeat(auto-fill, minmax(28px, 1fr)); gap: 5px; }
+  #ui-root .dw-controls-light {
+    display: grid;
+    place-items: center;
+    height: 26px;
+    border-radius: 8px;
+    border: 1px solid var(--dw-hairline);
+    background: rgba(10, 8, 14, 0.3);
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--dw-text-faint);
+    font-variant-numeric: tabular-nums;
+    transition: background-color 0.08s ease, color 0.08s ease, box-shadow 0.08s ease;
+  }
+  #ui-root .dw-controls-light.dw-on { background: rgba(243, 199, 122, 0.88); border-color: rgba(243, 199, 122, 0.95); color: #2a1d10; box-shadow: 0 0 10px rgba(243, 199, 122, 0.5); }
+  #ui-root .dw-controls-hats { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  #ui-root .dw-controls-hat { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--dw-text-dim); }
+  #ui-root .dw-controls-hat-grid { display: grid; grid-template-columns: repeat(3, 14px); grid-template-rows: repeat(3, 14px); gap: 3px; }
+  #ui-root .dw-controls-hat-cell { border-radius: 4px; background: rgba(255, 240, 220, 0.1); transition: background-color 0.08s ease, box-shadow 0.08s ease; }
+  #ui-root .dw-controls-hat-cell.dw-center { border-radius: 50%; transform: scale(0.7); }
+  #ui-root .dw-controls-hat-cell.dw-on { background: var(--dw-gold); box-shadow: 0 0 8px rgba(243, 199, 122, 0.6); }
+  #ui-root .dw-controls-hat-grid.dw-unlearned { opacity: 0.4; }
+
+  /* Keyboard and mouse live view */
+  #ui-root .dw-controls-held { display: flex; flex-wrap: wrap; gap: 4px; min-height: 22px; align-items: center; }
+  #ui-root .dw-controls-stick-row { display: flex; align-items: center; gap: 14px; }
+  #ui-root .dw-controls-stick-box {
+    position: relative;
+    flex: none;
+    width: 84px;
+    height: 84px;
+    border-radius: 14px;
+    border: 1px solid var(--dw-hairline);
+    background: rgba(10, 8, 14, 0.3);
+  }
+  #ui-root .dw-controls-stick-cross {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(rgba(255, 240, 220, 0.18), rgba(255, 240, 220, 0.18)) center / 1px 100% no-repeat,
+      linear-gradient(rgba(255, 240, 220, 0.18), rgba(255, 240, 220, 0.18)) center / 100% 1px no-repeat;
+  }
+  #ui-root .dw-controls-stick-dot {
+    position: absolute;
+    left: 37px;
+    top: 37px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--dw-gold);
+    box-shadow: 0 0 8px rgba(243, 199, 122, 0.7);
+  }
+  #ui-root .dw-controls-stick-text { margin: 0; font-size: 12px; line-height: 1.5; color: var(--dw-text-faint); }
+
+  /* ---- Binding list ------------------------------------------------------------------ */
+  #ui-root .dw-controls-bindings-head { margin-bottom: 2px; }
+  #ui-root .dw-controls-bindings-head h3 { margin: 0; }
+  #ui-root .dw-controls-conflicts { margin: 4px 0 0; font-size: 12px; line-height: 1.5; color: var(--dw-text-faint); }
+  #ui-root .dw-controls-conflicts.dw-has-conflicts { color: var(--dw-warn); }
+  #ui-root .dw-bind-group { margin-top: 14px; }
+  #ui-root .dw-bind-group > h4 { margin: 0 0 4px; }
+  #ui-root .dw-bind-list { display: flex; flex-direction: column; gap: 2px; }
+  #ui-root .dw-bind-row { display: flex; align-items: center; gap: 6px; min-height: 40px; }
+  #ui-root .dw-bind-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 36px;
+    padding: 5px 10px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    text-align: left;
+    transition: background-color 0.16s ease, border-color 0.16s ease;
+  }
+  #ui-root .dw-bind-main:hover { background: rgba(255, 240, 220, 0.06); border-color: var(--dw-hairline); }
+  #ui-root .dw-bind-name { flex: 0 1 auto; min-width: 0; font-size: 13.5px; color: var(--dw-text); }
+  #ui-root .dw-bind-refs { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; min-width: 0; }
+  #ui-root .dw-bind-chip {
+    padding: 2px 8px;
+    border-radius: 7px;
+    border: 1px solid var(--dw-hairline-strong);
+    background: rgba(255, 240, 220, 0.08);
+    font-size: 11.5px;
+    color: var(--dw-text);
+    white-space: nowrap;
+  }
+  #ui-root .dw-bind-none { font-size: 12px; font-style: italic; color: var(--dw-text-faint); }
+  #ui-root .dw-inherited .dw-bind-name,
+  #ui-root .dw-inherited .dw-bind-chip { opacity: 0.58; }
+  #ui-root .dw-conflicted .dw-bind-main { border-color: rgba(242, 163, 126, 0.32); }
+  #ui-root .dw-listening .dw-bind-main { border-color: rgba(143, 211, 214, 0.6); background: rgba(143, 211, 214, 0.1); }
+  #ui-root .dw-bind-listen { font-size: 12px; color: var(--dw-teal); animation: dw-bind-listen 1.4s ease-in-out infinite; }
+  #ui-root .dw-bind-countdown { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--dw-text-faint); }
+  #ui-root .dw-bind-side { flex: none; display: flex; align-items: center; gap: 2px; }
+  #ui-root .dw-bind-source {
+    min-width: 62px;
+    margin-right: 4px;
+    font-size: 9px;
+    font-weight: 650;
+    letter-spacing: 0.12em;
+    text-align: right;
+    text-transform: uppercase;
+    color: var(--dw-text-faint);
+  }
+  #ui-root .dw-bind-source.dw-source-global { color: var(--dw-gold); }
+  #ui-root .dw-bind-source.dw-source-craft { color: var(--dw-teal); }
+  #ui-root .dw-bind-warn {
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(242, 163, 126, 0.22);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--dw-warn);
+  }
+  #ui-root .dw-text-button.dw-small-text { height: 28px; padding: 0 10px; font-size: 12px; }
+  #ui-root .dw-bind-side .dw-icon-button.dw-small .dw-icon { width: 15px; height: 15px; }
+
+  #ui-root .dw-bind-conflict {
+    margin: 4px 0 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(242, 163, 126, 0.5);
+    background: rgba(242, 163, 126, 0.1);
+  }
+  #ui-root .dw-bind-conflict-text { margin: 0; font-size: 13px; line-height: 1.5; color: #ffe3d6; }
+  #ui-root .dw-bind-conflict-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  #ui-root .dw-bind-conflict-actions .dw-text-button { height: 30px; padding: 0 12px; font-size: 12.5px; }
+
+  /* Per-axis tuning with the response curve */
+  #ui-root .dw-bind-tuning {
+    margin: 4px 0 10px;
+    padding: 8px 12px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--dw-hairline);
+    background: rgba(10, 8, 14, 0.24);
+  }
+  #ui-root .dw-bind-tune + .dw-bind-tune { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--dw-hairline); }
+  #ui-root .dw-bind-tune-name { font-size: 12.5px; font-weight: 600; color: var(--dw-text); }
+  #ui-root .dw-bind-tune-invert { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--dw-text-dim); }
+  #ui-root .dw-bind-tune-grid { display: grid; grid-template-columns: minmax(0, 1fr) 132px; align-items: center; gap: 16px; }
+  #ui-root .dw-bind-tune-sliders .dw-field { padding: 0 0 2px; }
+  #ui-root .dw-bind-tune-sliders .dw-row { min-height: 22px; font-size: 12.5px; }
+  #ui-root .dw-bind-curve { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+  #ui-root .dw-bind-curve svg { display: block; width: 100%; aspect-ratio: 1; border-radius: 10px; background: rgba(10, 8, 14, 0.34); }
+  #ui-root .dw-bind-curve figcaption { font-size: 10.5px; line-height: 1.35; }
+  #ui-root .dw-curve-grid { fill: none; stroke: rgba(255, 240, 220, 0.16); stroke-width: 0.8; }
+  #ui-root .dw-curve-linear { fill: none; stroke: rgba(255, 240, 220, 0.2); stroke-width: 0.8; stroke-dasharray: 3 3; }
+  #ui-root .dw-curve-line { fill: none; stroke: var(--dw-gold); stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+  #ui-root .dw-curve-dot { fill: var(--dw-teal); stroke: #10161a; stroke-width: 1; }
+
+  /* ---- Confirmation ------------------------------------------------------------------- */
+  #ui-root .dw-controls-confirm {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    border-radius: 0 0 20px 20px;
+    background: rgba(10, 8, 14, 0.5);
+  }
+  #ui-root .dw-controls-confirm-box { width: min(400px, 100%); padding: 18px 18px 16px; border-radius: 16px; background: linear-gradient(180deg, rgba(40, 31, 48, 0.94), rgba(24, 19, 30, 0.94)); }
+  #ui-root .dw-controls-confirm-title { margin: 0; font-size: 16px; font-weight: 500; color: #fffaf1; }
+  #ui-root .dw-controls-confirm-text { margin: 8px 0 0; font-size: 13px; line-height: 1.55; color: var(--dw-text-dim); }
+  #ui-root .dw-controls-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  #ui-root .dw-controls-confirm-actions .dw-text-button { height: 34px; padding: 0 14px; }
+
+  /* ---- Calibration wizard --------------------------------------------------------------- */
+  #ui-root .dw-wizard { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-top: 12px; }
+  #ui-root .dw-wizard-head { display: flex; flex-direction: column; gap: 8px; padding: 0 22px; }
+  #ui-root .dw-wizard-steps { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin: 0; padding: 0; list-style: none; }
+  #ui-root .dw-wizard-step,
+  #ui-root .dw-wizard-substep {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 5px 8px;
+    border-radius: 10px;
+    border: 1px solid var(--dw-hairline);
+    font-size: 12px;
+    color: var(--dw-text-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #ui-root .dw-wizard-step-number {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(255, 240, 220, 0.1);
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+  #ui-root .dw-wizard-step.dw-done,
+  #ui-root .dw-wizard-substep.dw-done { color: var(--dw-text-dim); }
+  #ui-root .dw-wizard-step.dw-done .dw-wizard-step-number { background: rgba(143, 211, 214, 0.35); color: #e8fbfb; }
+  #ui-root .dw-wizard-step.dw-current,
+  #ui-root .dw-wizard-substep.dw-current { border-color: rgba(243, 199, 122, 0.5); background: rgba(243, 199, 122, 0.1); color: var(--dw-gold); }
+  #ui-root .dw-wizard-step.dw-current .dw-wizard-step-number { background: var(--dw-gold); color: #2a1d10; }
+  #ui-root .dw-wizard-note {
+    margin: 10px 22px 0;
+    padding: 8px 12px;
+    border-radius: 11px;
+    border: 1px solid rgba(143, 211, 214, 0.32);
+    background: rgba(143, 211, 214, 0.08);
+    font-size: 12.5px;
+    color: #cfeef0;
+  }
+  #ui-root .dw-wizard-title { margin: 14px 22px 0; font-size: 20px; font-weight: 400; color: #fffaf1; outline: none; }
+  #ui-root .dw-wizard-prompt { margin: 4px 22px 0; font-size: 13.5px; line-height: 1.5; color: var(--dw-text-dim); }
+  #ui-root .dw-wizard-content { padding-top: 4px; }
+  #ui-root .dw-wizard-device { margin-top: 14px; }
+  #ui-root .dw-wizard-device > h4 { margin: 0 0 6px; }
+  #ui-root .dw-wizard-axis {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr) 112px 44px;
+    align-items: center;
+    gap: 10px;
+    min-height: 26px;
+    font-size: 12.5px;
+  }
+  #ui-root .dw-wizard-axis.dw-hat-axis { grid-template-columns: 120px minmax(0, 1fr); }
+  #ui-root .dw-wizard-axis-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dw-text-dim); }
+  #ui-root .dw-wizard-track { position: relative; height: 10px; border-radius: 5px; background: rgba(255, 240, 220, 0.08); }
+  #ui-root .dw-wizard-mid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: rgba(255, 240, 220, 0.3); }
+  #ui-root .dw-wizard-span { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; border-radius: 5px; background: rgba(243, 199, 122, 0.45); }
+  #ui-root .dw-wizard-marker {
+    position: absolute;
+    top: -3px;
+    left: 50%;
+    width: 4px;
+    height: 16px;
+    margin-left: -2px;
+    border-radius: 2px;
+    background: #fffaf0;
+    box-shadow: 0 0 6px rgba(255, 250, 240, 0.6);
+  }
+  #ui-root .dw-wizard-axis-value { text-align: right; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--dw-text-dim); }
+  #ui-root .dw-wizard-check { font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: transparent; }
+  #ui-root .dw-wizard-check.dw-on { color: #b8e6b0; }
+  #ui-root .dw-wizard-substeps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 12px 0 0; padding: 0; list-style: none; }
+  #ui-root .dw-wizard-ready { margin: 10px 0 0; font-size: 13px; color: var(--dw-text-dim); }
+  #ui-root .dw-wizard-ready.dw-on { color: #b8e6b0; }
+  #ui-root .dw-wizard-hat { display: flex; align-items: center; gap: 22px; margin-top: 16px; }
+  #ui-root .dw-wizard-compass { grid-template-columns: repeat(3, 34px); grid-template-rows: repeat(3, 34px); gap: 6px; }
+  #ui-root .dw-wizard-compass .dw-controls-hat-cell { border-radius: 9px; }
+  #ui-root .dw-wizard-compass .dw-controls-hat-cell.dw-learned { background: rgba(143, 211, 214, 0.55); }
+  #ui-root .dw-wizard-compass .dw-controls-hat-cell.dw-target { background: rgba(243, 199, 122, 0.9); animation: dw-bind-listen 1.1s ease-in-out infinite; }
+  #ui-root .dw-wizard-hat-detail { display: flex; flex-direction: column; gap: 4px; }
+  #ui-root .dw-wizard-hat-target { font-size: 22px; font-weight: 500; letter-spacing: 0.1em; color: var(--dw-gold); }
+  #ui-root .dw-wizard-release { font-size: 12.5px; color: var(--dw-text-dim); }
+  #ui-root .dw-wizard-results { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: 12.5px; }
+  #ui-root .dw-wizard-results dt { color: var(--dw-text-dim); }
+  #ui-root .dw-wizard-results dd { margin: 0; font-variant-numeric: tabular-nums; color: var(--dw-text); }
+  #ui-root .dw-wizard-result-note { margin: 6px 0 0; font-size: 12px; color: var(--dw-warn); }
+  #ui-root .dw-wizard-actions { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 22px 16px; border-top: 1px solid var(--dw-hairline); }
+  #ui-root .dw-wizard-actions .dw-text-button { height: 34px; padding: 0 14px; }
+  #ui-root .dw-wizard-spacer { flex: 1; }
+
+  /* ---- Journal: best landing ---------------------------------------------------------------- */
+  #ui-root .dw-landing-best {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--dw-hairline);
+    background: rgba(255, 240, 220, 0.05);
+  }
+  #ui-root .dw-landing-grade { font-size: 22px; font-weight: 350; color: #fffaf1; }
+  #ui-root .dw-landing-best.dw-grade-butter .dw-landing-grade { color: var(--dw-gold); }
+  #ui-root .dw-landing-best.dw-grade-smooth .dw-landing-grade { color: var(--dw-teal); }
+  #ui-root .dw-landing-best.dw-grade-hard .dw-landing-grade { color: var(--dw-warn); }
+  #ui-root .dw-landing-detail { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: var(--dw-text-dim); }
+  #ui-root .dw-landing-meta { font-size: 11.5px; color: var(--dw-text-faint); }
+  #ui-root .dw-landing-bests { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
+  #ui-root .dw-landing-bests .dw-stat-value { font-size: 18px; }
+
+  /* ---- Settings, Controls tab ---------------------------------------------------------------- */
+  #ui-root .dw-text-button.dw-wide.dw-tight { margin-top: 6px; }
+
+  /* ---- Help: mode variants ------------------------------------------------------------------ */
+  #ui-root.dw-sim .dw-mode-classic,
+  #ui-root:not(.dw-sim) .dw-mode-sim { display: none; }
+  #ui-root .dw-key-sep { font-size: 11px; color: var(--dw-text-faint); margin: 0 2px; }
+  #ui-root .dw-key-group { display: inline-flex; gap: 3px; white-space: nowrap; }
+  #ui-root .dw-hint-item .dw-key-group { gap: 0; }
+  #ui-root .dw-help-mode { margin: 14px 0 0; padding: 8px 12px; border-radius: 11px; border: 1px solid rgba(143, 211, 214, 0.3); background: rgba(143, 211, 214, 0.07); font-size: 12.5px; line-height: 1.5; color: var(--dw-text-dim); }
+  #ui-root .dw-help-mode strong { color: var(--dw-teal); font-weight: 600; }
+
+  @keyframes dw-bind-listen { 50% { opacity: 0.55; } }
+
+  /* ---- Responsive -------------------------------------------------------------------------- */
+  @media (max-width: 900px) {
+    #ui-root .dw-controls-body { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+    #ui-root .dw-controls-live { position: static; }
+  }
+  @media (max-width: 600px) {
+    #ui-root .dw-controls-toolbar,
+    #ui-root .dw-wizard-head { padding-left: 14px; padding-right: 14px; }
+    #ui-root .dw-controls-scope-note,
+    #ui-root .dw-controls-notices,
+    #ui-root .dw-controls-tabs,
+    #ui-root .dw-controls-alert,
+    #ui-root .dw-wizard-note,
+    #ui-root .dw-wizard-title,
+    #ui-root .dw-wizard-prompt { margin-left: 14px; margin-right: 14px; }
+    #ui-root .dw-controls-status,
+    #ui-root .dw-wizard-actions { padding-left: 14px; padding-right: 14px; }
+    #ui-root .dw-controls-body,
+    #ui-root .dw-wizard-content { padding-left: 14px; padding-right: 14px; }
+    #ui-root .dw-controls-scope { width: 100%; }
+    #ui-root .dw-controls-tabs { flex-wrap: wrap; overflow-x: visible; }
+    #ui-root .dw-controls-tab { flex: 1 1 auto; white-space: normal; text-align: center; }
+    #ui-root .dw-bind-row { flex-wrap: wrap; row-gap: 0; }
+    #ui-root .dw-bind-main { flex-basis: 100%; }
+    #ui-root .dw-bind-side { margin-left: auto; }
+    #ui-root .dw-bind-tune-grid { grid-template-columns: minmax(0, 1fr); }
+    #ui-root .dw-bind-curve { max-width: 180px; }
+    #ui-root .dw-wizard-steps { grid-template-columns: repeat(3, 1fr); }
+    #ui-root .dw-wizard-substeps { grid-template-columns: repeat(2, 1fr); }
+    #ui-root .dw-wizard-axis { grid-template-columns: 84px minmax(0, 1fr) 76px 36px; gap: 8px; }
+    #ui-root .dw-wizard-axis.dw-hat-axis { grid-template-columns: 84px minmax(0, 1fr); }
+    #ui-root .dw-controls-axis { grid-template-columns: 90px minmax(0, 1fr) 46px; }
+  }
+  /* Short screens: the whole view scrolls instead of squeezing the list. */
+  @media (max-height: 560px) {
+    #ui-root .dw-controls-main,
+    #ui-root .dw-wizard { overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
+    #ui-root .dw-controls-body,
+    #ui-root .dw-wizard-content { flex: none; overflow: visible; }
+    #ui-root .dw-controls-live { position: static; }
+  }
+  /* Touch layouts: the controls panel takes the whole screen. */
+  #ui-root.dw-touch .dw-panel.dw-controls { top: 8px; left: 8px; right: 8px; bottom: 8px; width: auto; height: auto; }
+  @media (prefers-reduced-motion: reduce) {
+    #ui-root .dw-panel.dw-controls { transform: none !important; }
+  }

@@ -63,6 +63,7 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
     endpointInput: requireWithin('#dw-set-endpoint'),
     seedForm: requireWithin('#dw-seed-form'),
     seedInput: requireWithin('#dw-seed-input'),
+    controllersNote: requireWithin('#dw-controllers-note'),
   };
   const switches = Array.from(panel.querySelectorAll('.dw-switch[data-setting]'));
   const ranges = Array.from(panel.querySelectorAll('.dw-range[data-setting]'));
@@ -71,6 +72,7 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
   let activeTab = dom.tabs[0]?.dataset.tab ?? null;
   let liveTimer = 0;
   let assistText = '';
+  let controllersText = '';
 
   // ---- Setting paths ------------------------------------------------------------------------
   function resolvePath(path) {
@@ -172,6 +174,17 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
     assistText = text;
     dom.assistTip.textContent = text;
   }
+  /** Controls tab: which controllers are connected and whether they are calibrated. */
+  function syncControllersNote() {
+    const input = ctx.systems.input;
+    const devices = input ? input.getDevices() : [];
+    let text;
+    if (devices.length === 0) text = 'No controllers connected. Press any button on a gamepad, stick or throttle to connect it.';
+    else text = `Connected: ${devices.map((device) => `${device.name}${device.hotas ? (device.needsCalibration ? ' (needs calibration)' : ' (calibrated)') : ''}`).join(', ')}.`;
+    if (text === controllersText) return;
+    controllersText = text;
+    dom.controllersNote.textContent = text;
+  }
   function syncEndpoint() {
     if (document.activeElement === dom.endpointInput) return;
     dom.endpointInput.value = settings.get('remoteEndpoint');
@@ -195,6 +208,7 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
     for (const key of Object.keys(settings.all())) syncKey(key);
     syncAssistTip();
     syncPerfNotes();
+    syncControllersNote();
   }
 
   // ---- Remote endpoint and seed (v1) ----------------------------------------------------------
@@ -333,6 +347,7 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
       liveTimer = LIVE_NOTE_SECONDS;
       syncPerfNotes();
       syncAssistTip();
+      syncControllersNote();
     },
   };
 }

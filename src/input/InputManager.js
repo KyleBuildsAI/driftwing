@@ -90,6 +90,12 @@ export function createInputManager(ctx) {
   });
   const mapper = createDeviceMapper({ bindings, calibration, router, canPress });
   const capture = createInputCapture({ registry, calibration, mapper });
+  // Whatever a controller still holds when a listen ends (the input just bound) stays silent until
+  // it is released, so binding a button does not also fire its new action.
+  capture.onChange((listenState) => {
+    if (listenState.active) return;
+    for (const device of registry.live()) mapper.latchHeld(device);
+  });
   const keyboardMouse = createKeyboardMouse(ctx, { bindings, router, canPress, capture, getMode, getCraft });
   const touch = createTouchInput({ input, router, markActivity });
 

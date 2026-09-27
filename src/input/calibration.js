@@ -508,7 +508,7 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
       const step = currentStep();
       const devices = readDevices().map((device) => {
         const entry = deviceState(device);
-        return { deviceKey: device.deviceKey, name: device.name, axes: axisReadout(device, entry) };
+        return { deviceKey: device.deviceKey, name: device.name, axes: axisReadout(device, entry), roles: roleAxes(device.deviceKey) };
       });
       const state = {
         step,
@@ -539,7 +539,21 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
         const target = hatQueue[hatIndex];
         if (target) {
           const direction = HAT_DIRECTIONS[hatDirectionIndex];
-          state.hat = { deviceKey: target.deviceKey, label: target.label, index: hatIndex, total: hatQueue.length, direction, directionIndex: hatDirectionIndex, waitingForRelease: hatAwaitRelease };
+          const learnedHat = learned.get(target.deviceKey)?.hats[target.index] ?? null;
+          const learnedDirections = learnedHat
+            ? HAT_DIRECTIONS.filter((candidate) => (learnedHat.form === 'axis' ? Number.isFinite(learnedHat.values[candidate]) : Array.isArray(learnedHat.combos[candidate])))
+            : [];
+          state.hat = {
+            deviceKey: target.deviceKey,
+            label: target.label,
+            index: hatIndex,
+            total: hatQueue.length,
+            direction,
+            directionIndex: hatDirectionIndex,
+            waitingForRelease: hatAwaitRelease,
+            form: learnedHat?.form ?? null,
+            learned: learnedDirections,
+          };
           state.prompt = `${target.label}: press ${HAT_DIRECTION_LABELS[direction].toUpperCase()}, then release.`;
         }
       }

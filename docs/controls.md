@@ -77,8 +77,10 @@ the arrows, Shift, the mouse and the wheel drive the free camera (v1).
 
 ## Touch
 
-On-screen joystick (pitch / roll), throttle slider and the boost button (craft ability in SIM),
-exactly as v1.
+On-screen joystick (pitch / roll), throttle slider, and the boost and barrel-roll buttons, exactly
+as v1. The boost and barrel-roll buttons are CLASSIC only: SIM hides them (as it disables boost and
+the barrel roll everywhere), and the menu opens the settings, where the Controls tab leads to the
+controls panel.
 
 ## Standard gamepad (Xbox-style, "standard" mapping)
 

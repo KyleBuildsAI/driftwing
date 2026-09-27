@@ -523,6 +523,47 @@ export function createBindingStore({ storage }) {
       return true;
     },
 
+    /**
+     * Frees the inputs ref occupies from every other target on device (the "replace" answer to a
+     * conflict warning), in the global layer or craft's override layer. A plain key reference that
+     * only answers the Shift variant as a fallback is narrowed to plain presses (shift: false)
+     * instead of being removed. Returns the targets that changed.
+     */
+    releaseInputs({ device, target, ref, craft = null }) {
+      if (!TARGET_IDS.includes(target) || !DEVICE_PATTERN.test(device)) return [];
+      const clean = sanitizeRef(ref, target);
+      if (!clean) return [];
+      const wanted = new Set(refInputs(clean));
+      const changedTargets = [];
+      for (const other of TARGET_IDS) {
+        if (other === target) continue;
+        let modified = false;
+        const kept = [];
+        for (const existing of getRefs(device, other, craft)) {
+          if (refInputs(existing).some((input) => wanted.has(input))) {
+            modified = true;
+            continue;
+          }
+          if (existing.type === 'key' && existing.shift === undefined) {
+            const shiftInputs = (existing.mode ? [existing.mode] : MODES).map((mode) => `${mode}|key:${existing.code}|shift`);
+            if (shiftInputs.some((input) => wanted.has(input))) {
+              kept.push({ ...existing, shift: false });
+              modified = true;
+              continue;
+            }
+          }
+          kept.push({ ...existing });
+        }
+        if (!modified) continue;
+        const layer = layerFor(craft, true);
+        layer[device] ??= {};
+        layer[device][other] = kept;
+        changedTargets.push(other);
+      }
+      if (changedTargets.length > 0) changed('release');
+      return changedTargets;
+    },
+
     /** Drops an override so the target inherits again (craft -> global -> default). */
     clearOverride({ device, target, craft = null }) {
       const layer = layerFor(craft, false);

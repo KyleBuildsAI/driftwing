@@ -81,6 +81,7 @@
   #boot-error p { max-width: 460px; margin: 0 auto; opacity: 0.8; }
 </style>
 <link rel="stylesheet" href="/src/ui/ui.css">
+<link rel="stylesheet" href="/src/ui/controlsPanel.css">
 </head>
 <body>
 <div id="fade" role="status" aria-live="polite">
@@ -441,6 +442,13 @@
 
       <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-controls" aria-labelledby="dw-tab-controls" data-tabpanel="controls" hidden>
         <div class="dw-group">
+          <h3 class="dw-micro">Bindings and calibration</h3>
+          <p class="dw-note dw-live-note" id="dw-controllers-note">No controllers connected.</p>
+          <button type="button" class="dw-text-button dw-solid dw-wide" data-action="open-controls"><span>Open the controls panel</span></button>
+          <button type="button" class="dw-text-button dw-wide dw-tight" data-action="calibrate-controls"><span>Calibrate controllers</span></button>
+          <p class="dw-note">Rebind every action on the keyboard, mouse, gamepads and HOTAS, per craft if you like, tune each axis and export or import your profile. Shortcut: <kbd>.</kbd></p>
+        </div>
+        <div class="dw-group">
           <h3 class="dw-micro">Mouse</h3>
           <div class="dw-field">
             <div class="dw-row"><label for="dw-set-mouse">Mouse sensitivity</label><span class="dw-row-value" data-value-for="mouseSensitivity">1.00x</span></div>
@@ -515,6 +523,14 @@
     </div>
   </section>
 
+  <section class="dw-panel glass dw-controls" id="dw-panel-controls" data-panel="controls" role="dialog" aria-labelledby="dw-controls-title" aria-hidden="true">
+    <header class="dw-panel-head">
+      <div><div class="dw-micro">Bindings and calibration</div><h2 id="dw-controls-title">Controls</h2></div>
+      <button type="button" class="dw-icon-button" data-action="close-panel" aria-label="Close controls"><svg class="dw-icon"><use href="#dw-i-close"/></svg></button>
+    </header>
+    <div class="dw-controls-root" id="dw-controls-root"></div>
+  </section>
+
   <section class="dw-panel glass" id="dw-panel-help" data-panel="help" role="dialog" aria-labelledby="dw-help-title" aria-hidden="true">
     <header class="dw-panel-head">
       <div><div class="dw-micro">Flight notes</div><h2 id="dw-help-title">Help</h2></div>
@@ -522,25 +538,22 @@
     </header>
     <div class="dw-panel-body">
       <p class="dw-lede">Drift anywhere. There is nothing to crash into and nowhere you need to be. WREN rides along and can steer, find places and change the sky for you.</p>
+      <p class="dw-help-mode" id="dw-help-mode"></p>
       <div class="dw-group">
         <h3 class="dw-micro">Keyboard</h3>
-        <dl class="dw-keys">
-          <dt><kbd>W</kbd><kbd>S</kbd></dt><dd>Throttle up / down</dd>
-          <dt><kbd>A</kbd><kbd>D</kbd></dt><dd>Hold to bank and turn; double tap for a barrel roll</dd>
-          <dt><kbd>&larr;</kbd><kbd>&rarr;</kbd></dt><dd>Bank and turn (no barrel roll)</dd>
-          <dt><kbd>&uarr;</kbd><kbd>&darr;</kbd></dt><dd>Nose up / down (Invert pitch in Settings)</dd>
-          <dt><kbd>Q</kbd><kbd>E</kbd></dt><dd>Rudder: a gentle yaw left / right</dd>
-          <dt><kbd>Space</kbd></dt><dd>Boost</dd>
-          <dt><kbd>Shift</kbd></dt><dd>Hold for fine control</dd>
-        </dl>
-        <p class="dw-note">Let go and the wings level by themselves; the nose follows a moment later.</p>
+        <dl class="dw-keys" id="dw-help-flight"></dl>
+        <p class="dw-note dw-mode-classic">Let go and the wings level by themselves; the nose follows a moment later.</p>
+        <p class="dw-note dw-mode-sim">SIM flies the real flight model: nothing levels itself unless assists are on (Settings, Flight). Keys follow your bindings in the controls panel.</p>
       </div>
       <div class="dw-group">
         <h3 class="dw-micro">Mouse</h3>
         <dl class="dw-keys">
-          <dt><span class="dw-key-word">Click</span></dt><dd>Capture the mouse to steer: sideways banks, up and down pitches. <kbd>Esc</kbd> releases it</dd>
+          <dt><span class="dw-key-word">Click</span></dt><dd class="dw-mode-classic">Capture the mouse to steer: sideways banks, up and down pitches. <kbd>Esc</kbd> releases it</dd>
+          <dd class="dw-mode-sim">Capture the mouse as a virtual stick that stays where you leave it: its offset from the centre is the deflection. <kbd>Esc</kbd> releases it</dd>
           <dt><span class="dw-key-word">Drag</span></dt><dd>Steer without capturing the pointer</dd>
-          <dt><span class="dw-key-word">Wheel</span></dt><dd>Throttle (scroll up for more)</dd>
+          <dt><span class="dw-key-word">Wheel</span></dt><dd><span class="dw-mode-classic">Throttle (scroll up for more)</span><span class="dw-mode-sim">Throttle lever in 5% steps (scroll up for more)</span></dd>
+          <dt><span class="dw-key-word">Right-drag</span></dt><dd>Free look; let go to look ahead again</dd>
+          <dt><span class="dw-key-word">Middle click</span></dt><dd>Recenter the view</dd>
         </dl>
       </div>
       <div class="dw-group dw-help-touch">
@@ -548,7 +561,7 @@
         <dl class="dw-keys">
           <dt><span class="dw-key-word">Left side</span></dt><dd>Drag anywhere to bank and pitch</dd>
           <dt><span class="dw-key-word">Right slider</span></dt><dd>Throttle</dd>
-          <dt><span class="dw-key-word">Buttons</span></dt><dd>Boost, barrel rolls, WREN and the menu</dd>
+          <dt><span class="dw-key-word">Buttons</span></dt><dd><span class="dw-mode-classic">Boost, barrel rolls, WREN and the menu</span><span class="dw-mode-sim">WREN and the menu (boost and barrel rolls are CLASSIC only)</span></dd>
         </dl>
       </div>
       <div class="dw-group">
@@ -565,21 +578,7 @@
       </div>
       <div class="dw-group">
         <h3 class="dw-micro">Shortcuts</h3>
-        <dl class="dw-keys">
-          <dt><kbd>C</kbd><kbd>Enter</kbd><kbd>/</kbd></dt><dd>Ask WREN</dd>
-          <dt><kbd>M</kbd></dt><dd>Talk to WREN</dd>
-          <dt><kbd>P</kbd></dt><dd>Photo mode (<kbd>K</kbd> captures)</dd>
-          <dt><kbd>J</kbd></dt><dd>Journal</dd>
-          <dt><kbd>H</kbd><kbd>?</kbd></dt><dd>This help</dd>
-          <dt><kbd>T</kbd></dt><dd>Next time of day</dd>
-          <dt><kbd>G</kbd><kbd>X</kbd></dt><dd>Waypoint ahead / clear it</dd>
-          <dt><kbd>O</kbd></dt><dd>Autopilot</dd>
-          <dt><kbd>R</kbd></dt><dd>Ring course start / cancel</dd>
-          <dt><kbd>Shift</kbd><kbd>V</kbd></dt><dd>WREN voice on / off</dd>
-          <dt><kbd>I</kbd></dt><dd>FPS and stats</dd>
-          <dt><kbd>Tab</kbd></dt><dd>Hide or show the HUD</dd>
-          <dt><kbd>Esc</kbd></dt><dd>Close a panel or leave photo mode</dd>
-        </dl>
+        <dl class="dw-keys" id="dw-help-shortcuts"></dl>
       </div>
       <div class="dw-group">
         <h3 class="dw-micro">Things to ask WREN</h3>
