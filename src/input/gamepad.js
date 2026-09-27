@@ -23,7 +23,6 @@ export function createGamepadRegistry({ bus, debug = false, onConnect = null, on
   /** slot -> deviceKey for the devices present in the last poll. */
   const slots = new Map();
   const loggedIds = new Set();
-  let pollRequested = true;
 
   function readPads() {
     if (!supported) return [];
@@ -104,41 +103,55 @@ export function createGamepadRegistry({ bus, debug = false, onConnect = null, on
     device.buttons.length = buttons.length;
   }
 
-  /** Reads every pad, connecting, refreshing and disconnecting devices. */
+  /**
+   * Reads every pad, connecting, refreshing and disconnecting devices. A device that shows up in a
+   * different slot with the same id (the browser renumbered its pads) keeps its device key, so its
+   * bindings, calibration and held inputs carry on without a disconnect / connect pair.
+   */
   function poll() {
-    const pads = readPads();
-    const seenSlots = new Set();
+    const pads = readPads().filter((gamepad) => gamepad && gamepad.connected !== false);
+    const unmatchedPads = [];
+    const matchedKeys = new Set();
     for (const gamepad of pads) {
-      if (!gamepad || gamepad.connected === false) continue;
-      seenSlots.add(gamepad.index);
       const knownKey = slots.get(gamepad.index);
       const known = knownKey ? devices.get(knownKey) : null;
-      if (known && known.id === gamepad.id) {
+      if (known && known.id === gamepad.id && !matchedKeys.has(knownKey)) {
         refresh(known, gamepad);
+        matchedKeys.add(knownKey);
+      } else {
+        unmatchedPads.push(gamepad);
+      }
+    }
+    const pendingPads = [];
+    for (const gamepad of unmatchedPads) {
+      const moved = [...devices.values()].find((device) => !matchedKeys.has(device.deviceKey) && device.id === gamepad.id);
+      if (!moved) {
+        pendingPads.push(gamepad);
         continue;
       }
-      if (known) disconnect(knownKey);
-      connect(gamepad);
+      if (slots.get(moved.slot) === moved.deviceKey) slots.delete(moved.slot);
+      moved.slot = gamepad.index;
+      slots.set(gamepad.index, moved.deviceKey);
+      refresh(moved, gamepad);
+      matchedKeys.add(moved.deviceKey);
     }
-    for (const [slot, deviceKey] of [...slots]) {
-      if (!seenSlots.has(slot)) disconnect(deviceKey);
+    for (const deviceKey of [...devices.keys()]) {
+      if (!matchedKeys.has(deviceKey)) disconnect(deviceKey);
     }
-    pollRequested = false;
+    for (const gamepad of pendingPads) connect(gamepad);
   }
 
   if (supported) {
-    window.addEventListener('gamepadconnected', () => { pollRequested = true; });
+    window.addEventListener('gamepadconnected', poll);
     window.addEventListener('gamepaddisconnected', (event) => {
       const deviceKey = slots.get(event.gamepad?.index);
-      if (deviceKey) disconnect(deviceKey);
-      pollRequested = true;
+      if (deviceKey && devices.get(deviceKey)?.id === event.gamepad?.id) disconnect(deviceKey);
     });
   }
 
   return {
     supported,
     poll,
-    get pollRequested() { return pollRequested; },
 
     /** Live device records (do not mutate). */
     live() {
@@ -147,12 +160,6 @@ export function createGamepadRegistry({ bus, debug = false, onConnect = null, on
 
     get(deviceKey) {
       return devices.get(deviceKey) ?? null;
-    },
-
-    /** True while at least one connected device has this kind. */
-    hasKind(kind) {
-      for (const device of devices.values()) if (device.kind === kind) return true;
-      return false;
     },
 
     /** Public summaries of the connected devices, ordered HOTAS first. */
