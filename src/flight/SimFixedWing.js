@@ -31,7 +31,7 @@
 //
 // Craft extension (optional): profile.extension({ profile, craft, bus, craftState, limits, flightData })
 // returns hooks for physics the generic airframe does not cover (the jet: turbofan, transonic drag,
-// flight control system). Every hook is optional and receives the live `tick` (see createTick):
+// flight control system). Every hook is optional and receives the live `tick` object (below):
 //   shapeControls(controls, tick)             before the actuators (gain schedules, detents)
 //   engine: { update(controls, tick), forces(tick, forceBody, momentBody), reset(pose, systems) }
 //                                             replaces the propeller engine (spool, thrust, telemetry)
