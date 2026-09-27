@@ -9,6 +9,11 @@ import { DEG, clamp, damp, isFiniteVector, isFiniteQuaternion } from '../core/ut
  * Narrow / portrait screens widen the lens and pull the chase back so the whole wingspan
  * fits, and shift the frame so the glider sits above the bottom UI band. Any non-finite
  * chase state re-seats the camera at once, so a bad frame never reaches the renderer.
+ *
+ * The camera system (cameraManager.js) wraps this rig. The chase base FOV comes from
+ * settings.fov.chase (v1's FOV_BASE by default, with v1's speed stretch kept around it). While
+ * another view is active the rig is detached: it keeps its chase state current but does not
+ * write the camera, except in photo mode, which always runs here.
  */
 export function createCameraRig(ctx) {
   const { THREE: T, camera, state, world, bus, settings, input } = ctx;
@@ -63,6 +68,13 @@ export function createCameraRig(ctx) {
     LIFT_FULL_ASPECT: 0.55,
   });
   const WORLD_UP = new T.Vector3(0, 1, 0);
+  // Chase FOV range from the settings (v1: FOV_BASE .. FOV_MAX); the stretch keeps v1's width.
+  const FOV_STRETCH = CAMERA_CONFIG.FOV_MAX - CAMERA_CONFIG.FOV_BASE;
+  let baseFov = readBaseFov();
+  // tan(fov / 2) scale applied on top of the chase FOV (antenna zoom); 1 keeps v1's lens.
+  let zoomTanScale = 1;
+  // Detached: another view owns the camera, the chase keeps integrating without writing it.
+  let detached = false;
 
   // ---- Chase state --------------------------------------------------------------------
   const chase = {
@@ -134,6 +146,10 @@ export function createCameraRig(ctx) {
   function vectorSum(vector) {
     return vector.x + vector.y + vector.z;
   }
+  function readBaseFov() {
+    const fov = settings.get('fov');
+    return fov && Number.isFinite(fov.chase) ? fov.chase : CAMERA_CONFIG.FOV_BASE;
+  }
 
   // ---- Portrait / narrow-screen framing (recomputed only when the aspect changes) ---------------
   function updateFraming() {
@@ -141,7 +157,7 @@ export function createCameraRig(ctx) {
     if (aspect === framing.aspect) return;
     framing.aspect = aspect;
     const validAspect = Number.isFinite(aspect) && aspect > 0;
-    const baseTan = Math.tan((CAMERA_CONFIG.FOV_BASE * DEG) / 2);
+    const baseTan = Math.tan((baseFov * DEG) / 2);
     const requiredTan = FRAMING.HALF_WIDTH / CHASE.DISTANCE;
     const deficit = validAspect ? Math.max(1, requiredTan / (baseTan * aspect)) : 1;
     const maxTanScale = Math.tan((FRAMING.MAX_FOV * DEG) / 2) / baseTan;
@@ -219,9 +235,15 @@ export function createCameraRig(ctx) {
 
   function targetFov() {
     const overCruise = smooth01((player.speed - SPEED.CRUISE) / (SPEED.MAX - SPEED.CRUISE));
-    const range = CAMERA_CONFIG.FOV_MAX - CAMERA_CONFIG.FOV_BASE;
+    const range = FOV_STRETCH;
     const boostExtra = player.boost.active ? 0.35 * range : 0;
-    return framedFov(Math.min(CAMERA_CONFIG.FOV_MAX, CAMERA_CONFIG.FOV_BASE + range * 0.85 * overCruise + boostExtra));
+    return framedFov(Math.min(baseFov + FOV_STRETCH, baseFov + range * 0.85 * overCruise + boostExtra));
+  }
+
+  /** The chase FOV with the antenna zoom applied (unchanged at zoom 1). */
+  function zoomedFov(fov) {
+    if (zoomTanScale === 1) return fov;
+    return (2 * Math.atan(Math.tan((fov * DEG) / 2) * zoomTanScale)) / DEG;
   }
 
   /** True when every chase integrator is finite (NaN / Infinity propagate through the sum). */
@@ -409,7 +431,7 @@ export function createCameraRig(ctx) {
     const blend = easeInOutCubic(clamp(transition.elapsed / PHOTO.RETURN_SECONDS, 0, 1));
     camera.position.lerpVectors(transition.fromPosition, chase.position, blend);
     camera.quaternion.slerpQuaternions(transition.fromQuaternion, chase.quaternion, blend);
-    const fov = transition.fromFov + (chase.fov - transition.fromFov) * blend;
+    const fov = transition.fromFov + (zoomedFov(chase.fov) - transition.fromFov) * blend;
     applyProjection(fov, transition.fromLift + (framing.lift - transition.fromLift) * blend);
     if (blend >= 1) mode = 'chase';
   }
@@ -436,7 +458,7 @@ export function createCameraRig(ctx) {
     if (!isFiniteVector(chase.position) || !isFiniteQuaternion(chase.quaternion)) return;
     camera.position.copy(chase.position);
     camera.quaternion.copy(chase.quaternion);
-    applyProjection(chase.fov, framing.lift);
+    applyProjection(zoomedFov(chase.fov), framing.lift);
   }
 
   bus.on('boost', () => {
@@ -444,6 +466,12 @@ export function createCameraRig(ctx) {
   });
   bus.on('stall', () => {
     trauma = Math.min(1, trauma + 0.25);
+  });
+  bus.on('settings:changed', ({ key }) => {
+    if (key !== 'fov') return;
+    baseFov = readBaseFov();
+    // Portrait framing depends on the base lens: recompute it on the next update.
+    framing.aspect = NaN;
   });
 
   snap();
@@ -456,12 +484,43 @@ export function createCameraRig(ctx) {
       updateChase(dt);
       if (mode === 'photo') updateFreeCamera(realDt);
       else if (mode === 'returning') applyReturnTransition(realDt);
-      else applyChase();
+      else if (!detached) applyChase();
     },
 
-    setPhotoMode(active) {
+    /**
+     * Photo mode on / off. With handoff (another view is active), leaving photo mode skips the
+     * return flight to the chase pose: the camera system blends back to its own view instead.
+     */
+    setPhotoMode(active, { handoff = false } = {}) {
       if (active && mode !== 'photo') enterPhotoMode();
-      else if (!active && mode === 'photo') exitPhotoMode();
+      else if (!active && mode === 'photo') {
+        if (handoff) mode = 'chase';
+        else exitPhotoMode();
+      }
+    },
+
+    /** Another view owns the camera while detached; re-attaching re-applies the chase lens. */
+    setDetached(value) {
+      const next = Boolean(value);
+      if (next === detached) return;
+      detached = next;
+      if (detached && mode === 'returning') mode = 'chase';
+      projection.fov = NaN;
+    },
+
+    /** Forces the next chase frame to re-apply its projection (another view changed the lens). */
+    invalidateProjection() {
+      projection.fov = NaN;
+    },
+
+    /** Antenna zoom: tan(fov / 2) scale on the chase lens (1 = none). */
+    setZoom(tanScale) {
+      zoomTanScale = Number.isFinite(tanScale) && tanScale > 0 ? clamp(tanScale, 0.2, 1) : 1;
+    },
+
+    /** The current chase pose (live references; read, do not modify). */
+    getPose() {
+      return { position: chase.position, quaternion: chase.quaternion, fov: zoomedFov(chase.fov), lift: framing.lift };
     },
 
     shake(amount) {
@@ -471,7 +530,7 @@ export function createCameraRig(ctx) {
     /** Re-seat the chase camera immediately (teleports / resets). */
     snap() {
       snap();
-      if (mode === 'chase') applyChase();
+      if (mode === 'chase' && !detached) applyChase();
     },
 
     getMode() {
