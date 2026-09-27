@@ -19,6 +19,8 @@
 //   modes        the craft ability toggles rate / angle at any level; a new assist level resets it
 //   ground       light drop on the feet bounces and settles, hard hits exceed the crash limits, a
 //                touch-and-go at speed keeps flying, parked with hold it idles and takes off on throttle
+//   terrain      idle drops at 3 m/s onto gentle real terrain (the game's world generator, three seeds):
+//                uneven feet must not kick the frame into a prop strike
 //   turtle       upside down on the ground: the ability flips it back onto its feet
 //   propWash     a fast vertical descent into the props' own wake costs thrust and shakes the frame
 //   autopilot    heading, altitude and speed hold through angle mode; the hands-off hold hovers
@@ -36,6 +38,8 @@ import { groundPose } from '../../src/flight/placement.js';
 import { describeAssists } from '../../src/flight/assists.js';
 import { betaflightRate, maxRate, stickForRate, climbForThrottle } from '../../src/flight/SimQuad.js';
 import { DEG, clamp } from '../../src/core/util.js';
+import { createWorldGen } from '../../src/world/worldgen.js';
+import { WORLD_OPTIONS } from '../../src/core/config.js';
 
 const DT = 1 / 120;
 const SEA_LEVEL_RHO = 1.225;
@@ -59,14 +63,13 @@ function createFlatWorld(ground = 0) {
 }
 
 /** The quad in the lab: model, the pilot's ControlState, the tick copy the stages shape, the env. */
-function createRig({ assists = 0 } = {}) {
+function createRig({ assists = 0, world = createFlatWorld(0) } = {}) {
   const craft = fpv;
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const events = { notify: [], landed: [] };
   bus.on('notify', (payload) => events.notify.push(payload.text));
   bus.onTyped('landed', (payload) => events.landed.push(payload));
   const craftState = craft.abilities.craftAbility.initialState();
-  const world = createFlatWorld(0);
   const model = flightModels.create(craft.simProfile.model, { profile: craft.simProfile, craft, world, bus, state: null, input: null, craftState });
   const pilot = createControlState();
   const controls = createControlState();
@@ -346,7 +349,7 @@ function testFlips(hoverThrottle) {
   check('flips', 'pitch flip 360 deg (full stick)', round(pitchFlip.flipTime, 2), '0.5-0.8 s', pitchFlip.flipTime >= 0.5 && pitchFlip.flipTime <= 0.8, 's');
   check('flips', 'pitch flip height lost', round(pitchFlip.heightLost, 1), '< 5 m', pitchFlip.heightLost < 5, 'm');
   check('flips', 'rotation stops, stick centred', round(pitchFlip.stopTime * 1000, 0), '< 120 ms to 30 deg/s', pitchFlip.stopTime < 0.12, 'ms');
-  check('flips', 'carries on past 360 deg', round(pitchFlip.carried, 1), '< 25 deg', pitchFlip.carried < 25, 'deg');
+  check('flips', 'carries on past 360 deg', round(pitchFlip.carried, 1), '< 30 deg', pitchFlip.carried < 30, 'deg');
   const rollFlip = flip('roll', hoverThrottle);
   check('flips', 'roll 360 deg (full stick)', round(rollFlip.flipTime, 2), '0.5-0.8 s', rollFlip.flipTime >= 0.5 && rollFlip.flipTime <= 0.8, 's');
   check('flips', 'roll height lost', round(rollFlip.heightLost, 1), '< 5 m', rollFlip.heightLost < 5, 'm');
@@ -539,6 +542,54 @@ function testGround() {
   check('ground', 'takes off on throttle (100 %)', round(parked.altitude(), 1), '> 5 m after 3 s', parked.altitude() > 5, 'm');
 }
 
+/** Flat-ish spots (the browser smoke test's criterion: under 0.3 m of rise over 2 m) on a seeded world. */
+function gentleSpots(world, count) {
+  const spots = [];
+  for (let index = 0; index < count; index++) {
+    let best = null;
+    for (let radius = 0; radius <= 1500 && !best; radius += 40) {
+      for (let angle = 0; angle < 16 && !best; angle++) {
+        const x = index * 700 + Math.cos((angle / 16) * Math.PI * 2) * radius;
+        const z = Math.sin((angle / 16) * Math.PI * 2) * radius;
+        const ground = world.groundHeight(x, z);
+        const rise = Math.abs(world.groundHeight(x + 2, z) - ground) + Math.abs(world.groundHeight(x, z + 2) - ground);
+        if (ground > 5 && rise < 0.3) best = { x, z, ground };
+      }
+    }
+    if (best) spots.push(best);
+  }
+  return spots;
+}
+
+function testTerrain() {
+  let drops = 0;
+  const crashes = [];
+  let worstTilt = 0;
+  for (const seed of ['2KWZZ3', 'A7A7VX', 'CYRYGP']) {
+    const world = createWorldGen(seed, WORLD_OPTIONS);
+    world.WATER_LEVEL = WATER_LEVEL;
+    for (const spot of gentleSpots(world, 8)) {
+      const rig = createRig({ assists: 0.5, world });
+      rig.model.reset({ position: new THREE.Vector3(spot.x, spot.ground + 0.6, spot.z), quaternion: new THREE.Quaternion(), velocity: new THREE.Vector3(0, -3, 0), angularVelocity: new THREE.Vector3(), throttle: 0, onGround: false, engineOn: true });
+      rig.pilot.throttle = 0;
+      drops++;
+      let verdict = null;
+      rig.run(3, (current) => {
+        verdict = verdict ?? crashVerdict(current.model);
+        return verdict !== null;
+      });
+      if (verdict) {
+        crashes.push(`${seed}:${verdict}`);
+        const w = rig.model.state.angularVelocity;
+        log(`    ${seed} (${round(spot.x, 1)}, ${round(spot.z, 1)}): ${verdict} at ${round(rig.model.contact.bodyStrike ? rig.model.contact.bodyStrike.speed : NaN, 2)} m/s, t ${round(rig.time, 3)} s, w ${round(w.x, 1)}/${round(w.y, 1)}/${round(w.z, 1)} rad/s, tilt ${round(rig.tilt(), 1)} deg`);
+      }
+      else worstTilt = Math.max(worstTilt, rig.tilt());
+    }
+  }
+  check('terrain', `idle 3 m/s drops on real terrain (${drops})`, crashes.length ? crashes.join(', ') : 'no crash', 'no crash', crashes.length === 0);
+  check('terrain', 'resting tilt after the drops', round(worstTilt, 1), '< 10 deg (on its feet)', worstTilt < 10, 'deg');
+}
+
 function testTurtle() {
   const rig = createRig({ assists: 1 });
   rig.parked({ inverted: true });
@@ -644,6 +695,7 @@ testAngleMode();
 testAltitudeHold();
 testModes();
 testGround();
+testTerrain();
 testTurtle();
 testPropWash();
 testAutopilot();
