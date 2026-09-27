@@ -605,10 +605,19 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
      * The mouse virtual stick, x right / y down in -1..1 (a disc). mode 'spring' (CLASSIC and the
      * drag fallback: returns to centre) or 'free' (SIM with the pointer locked: the stick stays
      * where it is put, so the UI can draw a virtual cursor at that offset from the screen centre).
+     * fullDeflectionPixels is the mouse travel for full deflection at the current sensitivity: the
+     * virtual cursor sits at (x, y) * fullDeflectionPixels from the centre.
      */
     getStick() {
       const locked = isPointerLocked();
-      return { x: stick.x, y: stick.y, locked, dragging: drag.active, mode: getMode() === 'sim' && locked ? 'free' : 'spring' };
+      return {
+        x: stick.x,
+        y: stick.y,
+        locked,
+        dragging: drag.active,
+        mode: getMode() === 'sim' && locked ? 'free' : 'spring',
+        fullDeflectionPixels: STICK_FULL_PIXELS / clamp(settings.get('mouseSensitivity'), 0.2, 3),
+      };
     },
 
     /** Centres the mouse virtual stick (SIM recenter). */
