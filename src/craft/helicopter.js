@@ -594,7 +594,7 @@ export default Object.freeze({
     eye: EYE,
     chase: Object.freeze({ distance: 14.5, height: 4.4, lookAhead: 10 }),
     // A tail-boom camera looking forward along the cabin, under the rotor.
-    wing: Object.freeze({ position: Object.freeze([0.9, 1.0, 4.2]), target: Object.freeze([0, 0.6, -1.2]) }),
+    wing: Object.freeze({ position: Object.freeze([1.25, 1.35, 4.8]), target: Object.freeze([0, 0.55, -1.6]) }),
     fpv: null,
     // Bubble cabin: low sills, a centre spine and door bows, and a centre console with the flight and
     // engine instruments under the glareshield; the cyclic between the knees.
