@@ -10,7 +10,8 @@ import { CONFIG } from './config.js';
 // refresh ('auto') or an explicit rate, never more than the display can show; 'uncapped' holds no
 // target and only defends a 30 fps floor. Stage one steps the render scale between 0.6 and 1.0 to
 // hold the target: down quickly when frames run long, up slowly when they meet it, and an up-step
-// that fails is blocked for a growing time so the scale never oscillates. Stage two is v1's
+// that fails is blocked for a growing time so the scale never oscillates (unless the load has
+// dropped so far that the larger scale clearly fits again). Stage two is v1's
 // governor (view distance, densities, pixel ratio): it only degrades once the scale is pinned at
 // 0.6 and only upgrades at 1.0 with headroom.
 // ============================================================================
@@ -24,6 +25,13 @@ const FALLBACK_REFRESH_HZ = 60;
 
 /** How close (fraction) a measured rate must be to a common display rate to snap to it. */
 const SNAP_TOLERANCE = 0.06;
+/**
+ * Startup measurements outside this range (Hz) are not a display refresh: a busy boot (a cold
+ * shader cache, a loaded machine) stretches the frame intervals, and adopting such a reading would
+ * set a frame target far below the display. The running estimate takes over instead.
+ */
+const PLAUSIBLE_REFRESH_MIN_HZ = 45;
+const PLAUSIBLE_REFRESH_MAX_HZ = 360;
 /** Stage one: frames this much over the target for DOWN_DWELL seconds step the scale down. */
 const DOWN_THRESHOLD = 1.12;
 const DOWN_DWELL = 0.5;
@@ -37,6 +45,8 @@ const HOLD_AFTER_UP = 1.5;
 const FAILED_UP_WINDOW = 4;
 const BLOCK_SECONDS_FIRST = 8;
 const BLOCK_SECONDS_MAX = 64;
+/** A blocked up-step is allowed early when the predicted frame at the larger scale is under this share of the target. */
+const CLEAR_BLOCK_FRACTION = 0.8;
 /** Frames behind the loading fade are slow by design, and the first seconds after it settle caches. */
 const SETTLE_SECONDS = 4;
 const SCALE_HISTORY_LIMIT = 40;
@@ -69,7 +79,7 @@ function medianInterval(timestamps) {
  * Measures the display refresh from requestAnimationFrame timestamps during an idle window (boot
  * awaits storage and the GPU adapter meanwhile, so the main thread is quiet). Resolves
  * { hz, measuredHz, intervalMs, samples } or null when too few frames arrived before the timeout
- * (a hidden tab gets no animation frames).
+ * (a hidden tab gets no animation frames). hz is null when the reading is implausible for a display.
  */
 export function measureDisplayRefresh({ frames = 40, timeoutMs = 1500 } = {}) {
   return new Promise((resolve) => {
@@ -88,7 +98,8 @@ export function measureDisplayRefresh({ frames = 40, timeoutMs = 1500 } = {}) {
         return;
       }
       const measuredHz = 1000 / intervalMs;
-      resolve({ hz: snapRefreshRate(measuredHz), measuredHz, intervalMs, samples: timestamps.length - 1 });
+      const plausible = measuredHz >= PLAUSIBLE_REFRESH_MIN_HZ && measuredHz <= PLAUSIBLE_REFRESH_MAX_HZ;
+      resolve({ hz: plausible ? snapRefreshRate(measuredHz) : null, measuredHz, intervalMs, samples: timestamps.length - 1 });
     }
     function onFrame(time) {
       timestamps.push(time);
@@ -242,6 +253,16 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
     }
   }
 
+  /**
+   * True when the next larger scale would still fit well inside the target even if the whole
+   * frame cost grew with the pixel count. The load has then fallen since that scale failed, so its
+   * block is lifted; a scale that failed under the current load never passes this test.
+   */
+  function fitsNextScale(controlMs) {
+    const growth = (RENDER_SCALE_STEPS[scaleIndex - 1] / renderScale()) ** 2;
+    return controlEmaMs * growth < controlMs * CLEAR_BLOCK_FRACTION;
+  }
+
   function updateDynamicResolution(realDt, controlMs) {
     if (!settings.get('dynamicResolution')) {
       if (scaleIndex !== 0) setScaleIndex(0, 'disabled');
@@ -264,7 +285,7 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
         upBlockSeconds[scaleIndex] = Math.min(upBlockSeconds[scaleIndex] * 2, BLOCK_SECONDS_MAX);
       }
       setScaleIndex(scaleIndex + 1, 'over target');
-    } else if (scaleUnderSeconds >= UP_DWELL && scaleIndex > 0 && now >= upBlockedUntil[scaleIndex - 1]) {
+    } else if (scaleUnderSeconds >= UP_DWELL && scaleIndex > 0 && (now >= upBlockedUntil[scaleIndex - 1] || fitsNextScale(controlMs))) {
       setScaleIndex(scaleIndex - 1, 'headroom');
     }
   }
@@ -296,13 +317,18 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
 
   /** Adopts a result of measureDisplayRefresh() (null when it failed) as the display refresh. */
   function setMeasuredRefresh(result) {
+    if (result && result.measuredHz > 0) {
+      refresh.measuredHz = result.measuredHz;
+      refresh.samples = result.samples;
+      state.perf.refreshMeasuredHz = Math.round(result.measuredHz * 10) / 10;
+      state.perf.refreshSamples = result.samples;
+    }
     if (!result || !(result.hz > 0)) {
-      refresh.source = refresh.hz === null ? 'unmeasured' : refresh.source;
+      // No reading, or one no display produces: keep the fallback until frames prove the rate.
+      if (refresh.hz === null) refresh.source = result ? 'implausible' : 'unmeasured';
       state.perf.refreshSource = refresh.source;
       return;
     }
-    refresh.measuredHz = result.measuredHz;
-    refresh.samples = result.samples;
     if (automated) {
       refresh.hz = FALLBACK_REFRESH_HZ;
       refresh.source = 'automation';
@@ -311,8 +337,6 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
       refresh.source = 'measured';
     }
     state.perf.refreshHz = refresh.hz;
-    state.perf.refreshMeasuredHz = Math.round(result.measuredHz * 10) / 10;
-    state.perf.refreshSamples = result.samples;
     state.perf.refreshSource = refresh.source;
     resolveTarget();
   }
@@ -417,6 +441,8 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
     },
 
     snapRefreshRate,
+    /** Runs a new display refresh measurement (resolves like measureDisplayRefresh). */
+    measureDisplayRefresh,
 
     /**
      * Dev hook: replaces the measured frame time with baseMs + scaledMs * scale^2 (pixel cost
