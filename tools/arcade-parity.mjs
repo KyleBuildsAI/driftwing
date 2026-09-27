@@ -525,6 +525,7 @@ function createControllerSide(seed, spawn) {
     side.state.time.frameDt = dt;
     side.flight.update(dt, dt);
     side.safety();
+    side.flight.publishTelemetry(dt);
     side.flight.syncVisual();
   };
   return side;
