@@ -1,6 +1,7 @@
 // Airspeed indicator: indicated airspeed on a 320 degree dial with the craft's operating arcs.
 // SIM: green from the stall speed to 80 % of Vne, yellow caution to Vne, red line at Vne (from
 // craft.limits and the SIM profile). CLASSIC: the arcade envelope (stall to max dive speed).
+// Craft with a Mach limit (craft.limits.vneMach: jets) get a Mach window under the hub.
 import { CENTER, drawCase, drawGlare, ticks, numerals, arcBand, radial, needle, label, digital, title, linearDial, clamp } from './gaugeKit.js';
 import { niceStep, ceilTo } from './units.js';
 
@@ -42,6 +43,10 @@ export default Object.freeze({
     const airspeed = mode === 'sim' ? flight.indicatedAirspeed : flight.airspeed;
     const shown = clamp(Number.isFinite(airspeed) ? airspeed * factor : 0, 0, maximum);
     if (theme.id === 'glass') digital(pen, String(Math.round(shown)), CENTER - 26, 112, 52, 22, theme, { size: 15 });
+    if (craft.limits && Number.isFinite(craft.limits.vneMach)) {
+      const mach = Number.isFinite(flight.mach) ? flight.mach : 0;
+      digital(pen, `M ${mach.toFixed(2)}`, CENTER - 30, theme.id === 'glass' ? 138 : 120, 60, 20, theme, { size: 13 });
+    }
     needle(pen, toAngle(shown), { length: 80, color: theme.needle });
     drawGlare(pen, theme);
   },
