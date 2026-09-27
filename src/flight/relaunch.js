@@ -117,7 +117,12 @@ const TOW = Object.freeze({
   MAX_SPEED: 150,
   CLEARANCE: 25,
   /** How steeply the path may rise to get over terrain ahead (m per m). */
-  OBSTACLE_SLOPE: 0.9,
+  OBSTACLE_SLOPE: 0.75,
+  SMOOTHING_PASSES: 6,
+  /** From the ground (below this height) the pair rolls and lifts off before the climb starts. */
+  GROUND_START_AGL: 12,
+  TAKEOFF_SECONDS: 1.4,
+  ATTITUDE_BLEND_SECONDS: 0.7,
   ROPE_LENGTH: 45,
   ROPE_SAG: 0.9,
   ROPE_RADIUS: 0.1,
@@ -161,13 +166,18 @@ function plateau(u, rampIn, rampOut) {
 
 /**
  * Plans the tow path along a heading: horizontal speed ramps from the start speed to a brisk peak
- * and down to the release speed; the climb rate ramps in and out so the path starts and ends level;
- * terrain ahead lifts the path early enough to clear it by TOW.CLEARANCE. Returns sampled arrays.
+ * and down to the release speed; the climb rate ramps in and out so the path starts and ends level
+ * (from the ground it first rolls and lifts off). The path never descends, and terrain ahead raises
+ * it early enough to clear it by TOW.CLEARANCE, rising no steeper than TOW.OBSTACLE_SLOPE.
+ * Returns sampled arrays plus how much the terrain forced it up (lower is a clearer heading).
  */
 function planTowPath(world, waterLevel, start, heading, startSpeed, releaseSpeed, releaseAgl) {
   const direction = vectorFromHeading(heading);
   const surface = (x, z) => Math.max(world.groundHeight(x, z), waterLevel);
-  // Duration and climb: iterate once so the release ground is where the path actually ends.
+  const startAgl = Math.max(0, start.y - surface(start.x, start.z));
+  const takeoff = startAgl < TOW.GROUND_START_AGL ? TOW.TAKEOFF_SECONDS : 0;
+  const climbShare = 1 - 0.5 * TOW.RAMP_IN - 0.5 * TOW.RAMP_OUT;
+  // Duration and climb: iterate so the release ground is where the path actually ends.
   let duration = TOW.MAX_SECONDS;
   let climb = 0;
   let horizontalPeak = TOW.MIN_SPEED;
@@ -175,10 +185,10 @@ function planTowPath(world, waterLevel, start, heading, startSpeed, releaseSpeed
   for (let iteration = 0; iteration < 3; iteration++) {
     const releaseGround = surface(start.x + direction.x * distance, start.z + direction.z * distance);
     climb = Math.max(0, releaseGround + releaseAgl - start.y);
-    duration = clamp(TOW.BASE_SECONDS + climb * TOW.SECONDS_PER_METRE, TOW.MIN_SECONDS, TOW.MAX_SECONDS);
-    const verticalPeak = climb / (duration * (1 - 0.5 * TOW.RAMP_IN - 0.5 * TOW.RAMP_OUT));
+    duration = clamp(TOW.BASE_SECONDS + takeoff + climb * TOW.SECONDS_PER_METRE, TOW.MIN_SECONDS, TOW.MAX_SECONDS);
+    const verticalPeak = climb / ((duration - takeoff) * climbShare);
     horizontalPeak = clamp(verticalPeak / Math.tan(TOW.CLIMB_ANGLE), TOW.MIN_SPEED, TOW.MAX_SPEED);
-    distance = horizontalPeak * duration * (1 - 0.5 * TOW.RAMP_IN - 0.5 * TOW.RAMP_OUT) + 0.5 * (startSpeed * TOW.RAMP_IN + releaseSpeed * TOW.RAMP_OUT) * duration;
+    distance = horizontalPeak * duration * climbShare + 0.5 * (startSpeed * TOW.RAMP_IN + releaseSpeed * TOW.RAMP_OUT) * duration;
   }
   const count = TOW.SAMPLES + 1;
   const time = new Float64Array(count);
@@ -186,6 +196,7 @@ function planTowPath(world, waterLevel, start, heading, startSpeed, releaseSpeed
   const height = new Float64Array(count);
   const horizontal = new Float64Array(count);
   const vertical = new Float64Array(count);
+  const climbShape = new Float64Array(count);
   const step = duration / TOW.SAMPLES;
   let distanceSoFar = 0;
   let rise = 0;
@@ -195,60 +206,60 @@ function planTowPath(world, waterLevel, start, heading, startSpeed, releaseSpeed
     if (u < TOW.RAMP_IN) speed = startSpeed + (horizontalPeak - startSpeed) * smooth01(u / TOW.RAMP_IN);
     else if (u > 1 - TOW.RAMP_OUT) speed = horizontalPeak + (releaseSpeed - horizontalPeak) * smooth01((u - (1 - TOW.RAMP_OUT)) / TOW.RAMP_OUT);
     else speed = horizontalPeak;
-    const climbShape = plateau(u, TOW.RAMP_IN, TOW.RAMP_OUT);
+    const climbTime = (index * step - takeoff) / (duration - takeoff);
+    climbShape[index] = climbTime <= 0 ? 0 : plateau(climbTime, TOW.RAMP_IN, TOW.RAMP_OUT);
     if (index > 0) {
       distanceSoFar += 0.5 * (speed + horizontal[index - 1]) * step;
-      rise += 0.5 * (climbShape + vertical[index - 1]) * step;
+      rise += 0.5 * (climbShape[index] + climbShape[index - 1]) * step;
     }
     time[index] = index * step;
     along[index] = distanceSoFar;
     horizontal[index] = speed;
-    vertical[index] = climbShape;
   }
-  // Scale the climb shape so the path rises by exactly `climb`.
+  // Scale the climb shape so the nominal path rises by exactly `climb`.
   const climbScale = rise > 0 ? climb / rise : 0;
+  const nominal = new Float64Array(count);
   let accumulated = 0;
   for (let index = 0; index < count; index++) {
-    if (index > 0) accumulated += 0.5 * (vertical[index] + vertical[index - 1]) * step * climbScale;
-    height[index] = start.y + accumulated;
-    vertical[index] *= climbScale;
+    if (index > 0) accumulated += 0.5 * (climbShape[index] + climbShape[index - 1]) * step * climbScale;
+    nominal[index] = start.y + accumulated;
   }
-  // Terrain ahead: lift the path so it clears every sample, rising no steeper than OBSTACLE_SLOPE.
-  const lift = new Float64Array(count);
+  // Terrain: the clearance needed at each sample (from the start height above ground up to
+  // TOW.CLEARANCE over the first two seconds), carried back along the path at OBSTACLE_SLOPE so the
+  // climb starts early; the path takes the higher of that and the nominal climb, and never sinks.
+  const required = new Float64Array(count);
   for (let index = 0; index < count; index++) {
     const ground = surface(start.x + direction.x * along[index], start.z + direction.z * along[index]);
-    const deficit = ground + TOW.CLEARANCE - height[index];
-    if (deficit <= 0) continue;
-    for (let back = index; back >= 0; back--) {
-      const needed = deficit - (along[index] - along[back]) * TOW.OBSTACLE_SLOPE;
-      if (needed <= 0) break;
-      lift[back] = Math.max(lift[back], needed);
-    }
-    for (let ahead = index + 1; ahead < count; ahead++) lift[ahead] = Math.max(lift[ahead], deficit);
+    const clearance = startAgl >= TOW.CLEARANCE ? TOW.CLEARANCE : startAgl + (TOW.CLEARANCE - startAgl) * smooth01(time[index] / 2);
+    required[index] = ground + clearance;
   }
-  let maxDeficitAtStart = 0;
+  let envelope = -Infinity;
+  for (let index = count - 1; index >= 0; index--) {
+    const back = index < count - 1 ? (along[index + 1] - along[index]) * TOW.OBSTACLE_SLOPE : 0;
+    envelope = Math.max(required[index], envelope - back);
+    height[index] = Math.max(nominal[index], envelope);
+  }
+  height[0] = start.y;
+  for (let index = 1; index < count; index++) height[index] = Math.max(height[index], height[index - 1]);
+  // Soften the corners the envelope leaves (the start and end stay put).
+  const scratch = new Float64Array(count);
+  for (let pass = 0; pass < TOW.SMOOTHING_PASSES; pass++) {
+    scratch.set(height);
+    for (let index = 1; index < count - 1; index++) height[index] = Math.max(required[index] - TOW.CLEARANCE * 0.4, (scratch[index - 1] + scratch[index] + scratch[index + 1]) / 3);
+  }
+  let forcedUp = 0;
   for (let index = 0; index < count; index++) {
-    // The start is where the craft is: blend the lift in over the first second.
-    const blendIn = smooth01(time[index] / 1.0);
-    if (index === 0) maxDeficitAtStart = lift[0];
-    height[index] += lift[index] * blendIn;
+    forcedUp += Math.max(0, height[index] - nominal[index]) * step * (1 + 3 * (1 - index / TOW.SAMPLES));
   }
   for (let index = 1; index < count; index++) vertical[index] = (height[index] - height[index - 1]) / step;
   vertical[0] = 0;
-  return { direction, heading, duration, step, time, along, height, horizontal, vertical, count, startDeficit: maxDeficitAtStart, releaseSpeed };
+  return { direction, heading, duration, step, time, along, height, horizontal, vertical, count, forcedUp, releaseSpeed };
 }
 
-/** Terrain the nominal path would hit along a heading (0 when clear): the tow picks the clearest. */
+/** A tow path along a heading and how hard the terrain pushed it up: the tow picks the clearest. */
 function pathObstruction(world, waterLevel, start, heading, startSpeed, releaseSpeed, releaseAgl) {
   const path = planTowPath(world, waterLevel, start, heading, startSpeed, releaseSpeed, releaseAgl);
-  let obstruction = path.startDeficit * 4;
-  for (let index = 0; index < path.count; index++) {
-    const x = start.x + path.direction.x * path.along[index];
-    const z = start.z + path.direction.z * path.along[index];
-    const clearance = path.height[index] - Math.max(world.groundHeight(x, z), waterLevel);
-    if (clearance < TOW.CLEARANCE * 0.5) obstruction += TOW.CLEARANCE * 0.5 - clearance;
-  }
-  return { path, obstruction };
+  return { path, obstruction: path.forcedUp };
 }
 
 /**
@@ -257,8 +268,10 @@ function pathObstruction(world, waterLevel, start, heading, startSpeed, releaseS
  * released is true exactly once, on the frame the rope lets go (then the craft flies on its own and
  * the tug keeps animating until finished).
  */
-export function createAerotow({ scene, world, waterLevel = 0, start, heading, startSpeed, releaseSpeed, releaseAgl, tug, gliderHook, ropeMaterial, time }) {
+export function createAerotow({ scene, world, waterLevel = 0, start, startQuaternion, heading, startSpeed, releaseSpeed, releaseAgl, tug, gliderHook, ropeMaterial, time }) {
   const origin = start.clone();
+  const initialAttitude = startQuaternion ? startQuaternion.clone() : null;
+  const pathAttitude = new THREE.Quaternion();
   const initialSpeed = clamp(Number.isFinite(startSpeed) ? startSpeed : 0, 0, TOW.MAX_SPEED);
   let chosen = null;
   for (const offset of TOW.HEADING_CANDIDATES) {
@@ -453,6 +466,11 @@ export function createAerotow({ scene, world, waterLevel = 0, start, heading, st
         elapsed = Math.min(path.duration, elapsed + step);
         sampleAtDistance(distanceAtTime(elapsed), status.position, status.velocity);
         attitudeAlong(status.velocity, 0, status.quaternion);
+        // Ease from the craft's own attitude (resting nose-high, or banked) onto the tow line.
+        if (initialAttitude && elapsed < TOW.ATTITUDE_BLEND_SECONDS) {
+          pathAttitude.copy(status.quaternion);
+          status.quaternion.slerpQuaternions(initialAttitude, pathAttitude, smooth01(elapsed / TOW.ATTITUDE_BLEND_SECONDS));
+        }
         hookWorld.copy(gliderHook).applyQuaternion(status.quaternion).add(status.position);
         placeTug(step);
         if (elapsed >= path.duration) {

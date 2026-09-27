@@ -748,6 +748,7 @@ export function createFlightController(ctx) {
       world,
       waterLevel: CONFIG.WATER_LEVEL,
       start: pose.position,
+      startQuaternion: pose.quaternion,
       heading,
       startSpeed: Math.hypot(pose.velocity.x, pose.velocity.z),
       releaseSpeed,
