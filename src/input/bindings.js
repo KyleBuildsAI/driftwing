@@ -121,6 +121,10 @@ export function sanitizeRef(raw, target) {
         if (!isUnit(raw[field], max)) return null;
         ref[field] = raw[field];
       }
+      if (raw.rate !== undefined) {
+        if (!isUnit(raw.rate, 5) || raw.rate === 0) return null;
+        ref.rate = raw.rate;
+      }
       if (raw.suppressedBy !== undefined) {
         if (!DEVICE_KINDS.includes(raw.suppressedBy)) return null;
         ref.suppressedBy = raw.suppressedBy;
@@ -166,7 +170,7 @@ export function describeRef(ref, device = null) {
     case 'button': return `${buttonName(ref.index)}${layer}`;
     case 'hat': return `Hat ${ref.hat + 1} ${HAT_DIRECTION_LABELS[ref.direction]}${layer}`;
     case 'axisPress': return `Axis ${ref.axis + 1} ${ref.direction > 0 ? '+' : '-'}${layer}`;
-    case 'axis': return `Axis ${ref.axis + 1}${ref.invert ? ' (inverted)' : ''}${layer}`;
+    case 'axis': return `${device?.axisLabels?.[ref.axis] ?? `Axis ${ref.axis + 1}`}${ref.invert ? ' (inverted)' : ''}${ref.rate ? ' (rate)' : ''}${layer}`;
     case 'buttonAxis':
     case 'buttonRate': return `${buttonName(ref.positive)} / ${buttonName(ref.negative)}${layer}`;
     default: return ref.type;

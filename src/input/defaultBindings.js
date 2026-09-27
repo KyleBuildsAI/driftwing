@@ -10,7 +10,7 @@
 //   HOTAS      { type: 'hat', hat, direction }                            action
 //              { type: 'axisPress', axis, direction: 1 | -1 }             action (axis pushed past 60%)
 //              { type: 'axis', axis, range?, role?, invert?, deadzone?, saturation?, expo?,
-//                smoothing?, suppressedBy? }                              axis
+//                smoothing?, rate?, suppressedBy? }                       axis
 //              { type: 'buttonAxis', positive, negative }                 axis (spring, -1..1)
 //              { type: 'buttonRate', positive, negative, rate }           axis (moves a position)
 //
@@ -20,7 +20,9 @@
 // keys refs without rate are spring axes (-1..1 while held); with rate they move a position axis
 // at rate units per second. role marks special axes: 'twist' (yields to the pedals), 'rudder'
 // (pedal rudder), 'stickThrottle' (the stick's own slider). suppressedBy: a device kind whose
-// presence disables the reference (the stick slider is ignored while a TWCS is connected).
+// presence disables the reference (the stick slider is ignored while a TWCS is connected). An axis
+// reference with rate is a spring-centred rate input: its deflection moves a position target at
+// rate units per second (the TWCS rocker trims the pitch trim this way).
 
 /**
  * Axis targets: how contributions from several references combine, and the value range.
@@ -45,7 +47,7 @@ export const AXIS_TARGET_IDS = Object.freeze(Object.keys(AXIS_TARGETS));
 
 const key = (code, extra = {}) => ({ type: 'key', code, ...extra });
 const keys = (positive, negative, extra = {}) => ({ type: 'keys', positive, negative, ...extra });
-const button = (index) => ({ type: 'button', index });
+const button = (index, extra = {}) => ({ type: 'button', index, ...extra });
 const hat = (hatIndex, direction) => ({ type: 'hat', hat: hatIndex, direction });
 const axis = (index, extra = {}) => ({ type: 'axis', axis: index, ...extra });
 
@@ -113,7 +115,8 @@ const MOUSE = {
 /** Standard-mapping (Xbox-style) gamepads. */
 const STANDARD_GAMEPAD = {
   actions: {
-    craftAbility: [button(0)],
+    craftAbility: [button(0, { mode: 'sim' })],
+    boost: [button(0, { mode: 'classic' })],
     airbrake: [button(1)],
     gearToggle: [button(2)],
     viewCycle: [button(3)],
@@ -143,7 +146,8 @@ const STANDARD_GAMEPAD = {
 const T16000M = {
   actions: {
     copilotPTT: [button(0)],
-    craftAbility: [button(1)],
+    craftAbility: [button(1, { mode: 'sim' })],
+    boost: [button(1, { mode: 'classic' })],
     waypointNearest: [button(2)],
     photoMode: [button(3)],
     gearToggle: [button(4)],
@@ -191,7 +195,7 @@ const TWCS = {
     throttle: [axis(2, { range: 'unipolar', deadzone: 0.01, saturation: 0.01 })],
     brakeL: [axis(3, { range: 'unipolar', deadzone: 0.05 })],
     brakeR: [axis(4, { range: 'unipolar', deadzone: 0.05 })],
-    trim: [axis(5, { deadzone: 0.05 })],
+    trim: [axis(5, { deadzone: 0.08, rate: 0.5 })],
     antenna: [axis(6, { range: 'unipolar', deadzone: 0.01, saturation: 0.01 })],
     yaw: [axis(7, { role: 'rudder', deadzone: 0.05, expo: 0.15 })],
   },

@@ -10,7 +10,7 @@ import { createCloudSystem } from './render/clouds.js';
 import { createCopilotSystem } from './copilot/copilot.js';
 import { createFlightSystem } from './flight/arcadeFlight.js';
 import { createFxSystem } from './render/fx.js';
-import { createInputSystem } from './input/input.js';
+import { createInputSystem } from './input/InputManager.js';
 import { createJournal } from './gameplay/journal.js';
 import { createLandmarkSystem } from './world/landmarks.js';
 import { createPerfGovernor } from './core/perf.js';
@@ -482,16 +482,9 @@ async function boot() {
     if (Number.isFinite(player.heading)) lastGood.heading = player.heading;
   }
 
-  // ---- Bridges from the v1 arcade flight and input state to the v2 contracts -----------------
-  // ctx.controls (ControlState) and state.flight (telemetry) are what v2 systems read.
+  // ---- Bridge from the v1 arcade flight state to the v2 telemetry contract --------------------
+  // state.flight (telemetry) is what v2 systems read; the input system writes ctx.controls itself.
   const windSample = { vel: new THREE.Vector3(), turbulence: 0 };
-  function bridgeLegacyControls() {
-    const controls = ctx.controls;
-    controls.pitch = input.pitch;
-    controls.roll = input.roll;
-    controls.yaw = input.yaw;
-    controls.throttle = state.player.throttle;
-  }
   function writeLegacyTelemetry() {
     const player = state.player;
     const flight = state.flight;
@@ -572,7 +565,6 @@ async function boot() {
         disabledSystems.add(name);
         console.error(`[DRIFTWING] system "${name}" crashed and was disabled`, error);
       }
-      if (name === 'input') bridgeLegacyControls();
       if (name === 'flight') {
         enforceSafety();
         writeLegacyTelemetry();
