@@ -185,7 +185,8 @@ function testHover() {
     collective.push(lab.data.collective);
     torque.push(lab.data.torque);
   });
-  record('hover OGE collective', average(collective), targets.hoverCollective, { tolerance: 0.1, note: 'lever share, sea level, 1250 kg' });
+  const mass = Object.values(helicopter.simProfile.mass).reduce((sum, value) => sum + value, 0);
+  record('hover OGE collective', average(collective), targets.hoverCollective, { tolerance: 0.1, note: `lever share, sea level, ${mass} kg` });
   record('hover OGE torque', average(torque) * 100, targets.hoverTorque * 100, { unit: '%', tolerance: 0.1, decimals: 1 });
   return { collective: average(collective), torque: average(torque) };
 }
