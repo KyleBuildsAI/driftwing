@@ -1055,11 +1055,11 @@ function ensureDocumentStandIn() {
 }
 
 /**
- * The FlightController on flat ground at CONTROLLER_GROUND m (no wind), fed like the game: the v1
+ * The FlightController on flat ground at CONTROLLER_GROUND m (calm, or a steady `wind` vector), fed like the game: the v1
  * input struct for CLASSIC, the ControlState for SIM, 60 Hz frames. The craft start at `altitude`
  * heading 30 at CLASSIC cruise (the controller boots SIM at the craft's SIM cruise).
  */
-function createControllerRig({ craft = 'glider', mode = 'classic', assists = 1, altitude = 1500, startOnGround = false } = {}) {
+function createControllerRig({ craft = 'glider', mode = 'classic', assists = 1, altitude = 1500, startOnGround = false, wind = null } = {}) {
   ensureDocumentStandIn();
   const world = { groundHeight: () => CONTROLLER_GROUND, heightAt: () => CONTROLLER_GROUND, WATER_LEVEL: 0 };
   const bus = attachTypedEvents(new EventBus(), { validate: true });
@@ -1130,7 +1130,8 @@ function createControllerRig({ craft = 'glider', mode = 'classic', assists = 1, 
     },
     wind: {
       sample(pos, t, out = { vel: new THREE.Vector3(), turbulence: 0 }) {
-        out.vel.set(0, 0, 0);
+        if (wind) out.vel.copy(wind);
+        else out.vel.set(0, 0, 0);
         out.turbulence = 0;
         return out;
       },
@@ -1271,9 +1272,9 @@ function pathHold(craft) {
   return { bootSpeed, watch };
 }
 
-/** Soft crash respawn in SIM: speed and height after the fade, then 10 s hands off. */
-function respawn(craft) {
-  const rig = createControllerRig({ craft: craft.id, mode: 'sim' });
+/** Soft crash respawn in SIM (optionally in a steady wind): airspeed and height after the fade, then 10 s hands off. */
+function respawn(craft, wind = null) {
+  const rig = createControllerRig({ craft: craft.id, mode: 'sim', wind });
   if (craft.inputProfile.throttle !== 'none') rig.controls.throttle = craft.spawn.cruiseThrottle;
   rig.run(2, (lab) => lab.handsOff());
   rig.flight.triggerSoftCrash('lab');
@@ -1397,8 +1398,10 @@ function handlingTests(name, craft) {
   const again = respawn(craft);
   record(name, 'SIM respawn after a soft crash', again.speed * KMH, cruiseKmh, { unit: 'km/h', tolerance: 0.03, note: `${again.agl.toFixed(0)} m AGL; next 10 s ${describeLoads(again.watch)}, ${calmFlight(again.watch) ? 'calm' : 'NOT CALM'}` });
   record(name, 'SIM respawn: hands off 10 s', describeLoads(again.watch), '0.8..1.3 g', { compare: again.crashes === 1 && Math.abs(again.agl - 300) < 5 && calmFlight(again.watch), note: `${again.crashes} soft crash` });
+  const windy = respawn(craft, new THREE.Vector3(6, 0, 5));
+  record(name, 'SIM respawn in a 7.8 m/s wind: airspeed', windy.speed * KMH, `${cruiseKmh.toFixed(0)} km/h +/-3%`, { unit: 'km/h', compare: Math.abs(windy.speed - craft.spawn.cruise) <= craft.spawn.cruise * 0.03 && calmFlight(windy.watch), note: `cruise is an airspeed; next 10 s ${describeLoads(windy.watch)}` });
   const relaunched = relaunchTest(craft);
-  record(name, `SIM relaunch (${relaunched.method})`, relaunched.speed * KMH, cruiseKmh, { unit: 'km/h', tolerance: 0.05, compare: relaunched.released && Math.abs(relaunched.speed - craft.spawn.cruise) <= craft.spawn.cruise * 0.05 && calmFlight(relaunched.watch), note: `then 10 s hands off: ${describeLoads(relaunched.watch)}, ${relaunched.watch.stalled ? 'STALL' : 'no stall'}` });
+  record(name, `SIM relaunch (${relaunched.method})`, relaunched.speed * KMH, `${cruiseKmh.toFixed(0)} km/h +/-5%`, { unit: 'km/h', compare: relaunched.released && Math.abs(relaunched.speed - craft.spawn.cruise) <= craft.spawn.cruise * 0.05 && calmFlight(relaunched.watch), note: `then 10 s hands off: ${describeLoads(relaunched.watch)}, ${relaunched.watch.stalled ? 'STALL' : 'no stall'}` });
 }
 
 // ============================================================================================
@@ -1471,8 +1474,8 @@ function runBushplane() {
 function runShared() {
   const name = 'both';
   const swap = craftSwitch();
-  record(name, 'SIM craft switch glider -> bush plane', swap.toBush.speed * KMH, bushplane.spawn.cruise * KMH, { unit: 'km/h', compare: calmFlight(swap.toBush.watch), note: `10 s hands off: ${describeLoads(swap.toBush.watch)}, ${swap.toBush.watch.stalled ? 'STALL' : 'no stall'}` });
-  record(name, 'SIM craft switch bush plane -> glider', swap.toGlider.speed * KMH, glider.spawn.cruise * KMH, { unit: 'km/h', compare: calmFlight(swap.toGlider.watch), note: `10 s hands off: ${describeLoads(swap.toGlider.watch)}, ${swap.toGlider.watch.stalled ? 'STALL' : 'no stall'}` });
+  record(name, 'SIM craft switch glider -> bush plane', swap.toBush.speed * KMH, `${(bushplane.spawn.cruise * KMH).toFixed(0)} km/h, calm`, { unit: 'km/h', compare: calmFlight(swap.toBush.watch), note: `10 s hands off: ${describeLoads(swap.toBush.watch)}, ${swap.toBush.watch.stalled ? 'STALL' : 'no stall'}` });
+  record(name, 'SIM craft switch bush plane -> glider', swap.toGlider.speed * KMH, `${(glider.spawn.cruise * KMH).toFixed(0)} km/h, calm`, { unit: 'km/h', compare: calmFlight(swap.toGlider.watch), note: `10 s hands off: ${describeLoads(swap.toGlider.watch)}, ${swap.toGlider.watch.stalled ? 'STALL' : 'no stall'}` });
 }
 
 function commonTests(name, craft) {
