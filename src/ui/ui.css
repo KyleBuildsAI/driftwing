@@ -1597,8 +1597,13 @@
     #ui-root.dw-touch .dw-stick { width: 124px; height: 124px; }
     #ui-root.dw-touch .dw-panel { top: 8px; bottom: 8px; }
     #ui-root.dw-touch .dw-banner-title { font-size: 28px; }
-    #ui-root.dw-touch .dw-devbadge { top: calc(var(--dw-top) + 44px); bottom: auto; }
+    /* Short landscape phones: a smaller badge without the draw and chunk lines, above the throttle. */
+    #ui-root.dw-touch .dw-devbadge { top: calc(var(--dw-top) + 44px); bottom: auto; transform: scale(0.8); transform-origin: top right; }
+    #ui-root.dw-touch .dw-devbadge [data-field="draws"],
+    #ui-root.dw-touch .dw-devbadge [data-field="chunks"] { display: none; }
   }
+  /* On touch the badge never takes a tap meant for the controls under it. */
+  #ui-root.dw-touch .dw-devbadge { pointer-events: none; }
 
   /* Touch: controls help leads with the touch section; photo chrome without key hints. */
   #ui-root.dw-touch #dw-panel-help .dw-panel-body { display: flex; flex-direction: column; }
