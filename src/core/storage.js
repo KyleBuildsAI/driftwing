@@ -15,6 +15,11 @@
 // IndexedDB is scoped to the origin INCLUDING the port, which is why the dev server is pinned to
 // 127.0.0.1:5199. When IndexedDB is unavailable (some private modes), storage falls back to
 // localStorage, and if that is blocked too, to memory for the session.
+//
+// The dev verification harnesses (?test=1, ?test=hotas) pass their own database name to init(), so
+// their settings, bindings and calibration never touch the player's. Such an isolated database
+// skips the v1 localStorage import and falls back to memory only (never to the player's
+// localStorage keys).
 
 const DB_NAME = 'driftwing';
 const STORE = 'kv';
@@ -68,6 +73,7 @@ function createStorage() {
   let pending = Promise.resolve();
   let pendingCount = 0;
   let writeFailureReported = false;
+  let databaseName = DB_NAME;
 
   function openDatabase() {
     return new Promise((resolve, reject) => {
@@ -75,7 +81,7 @@ function createStorage() {
         reject(new Error('IndexedDB is not available'));
         return;
       }
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      const request = indexedDB.open(databaseName, DB_VERSION);
       request.onupgradeneeded = (event) => {
         const database = request.result;
         for (let version = event.oldVersion; version < DB_VERSION; version++) STRUCTURE_MIGRATIONS[version](database);
@@ -163,19 +169,28 @@ function createStorage() {
     /** 'indexeddb' | 'localstorage' | 'memory' (after init). */
     get backend() { return backend; },
     get available() { return backend !== 'memory'; },
+    /** Name of the IndexedDB database in use ('driftwing', or a test harness's isolated one). */
+    get databaseName() { return databaseName; },
 
-    /** Opens the database, runs migrations and fills the cache. Safe to call more than once. */
-    init() {
+    /**
+     * Opens the database, runs migrations and fills the cache. Safe to call more than once (the
+     * first call's options win). options.databaseName opens an isolated database instead of the
+     * player's (dev test harnesses).
+     */
+    init(options = {}) {
       if (!initPromise) {
+        if (typeof options.databaseName === 'string' && options.databaseName) databaseName = options.databaseName;
+        const isolated = databaseName !== DB_NAME;
         initPromise = (async () => {
           try {
             db = await openDatabase();
             backend = 'indexeddb';
             await loadAll();
-            runDataMigrations();
+            if (!isolated) runDataMigrations();
           } catch (error) {
             db = null;
-            loadFromLocalStorage();
+            if (isolated) backend = 'memory';
+            else loadFromLocalStorage();
           }
           return backend;
         })();
