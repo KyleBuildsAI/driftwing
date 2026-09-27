@@ -1276,7 +1276,9 @@ export function createUISystem(ctx) {
   function keyGroupsHtml(groups) {
     const separated = groups.length > 1 && groups.some((names) => names.length > 1);
     const parts = groups.map((names) => names.map((name) => `<kbd>${escapeHtml(name)}</kbd>`).join(''));
-    return parts.join(separated ? '<span class="dw-key-sep">/</span>' : '');
+    if (!separated) return parts.join('');
+    // Each combination or pair stays on one line when the list wraps.
+    return parts.map((part) => `<span class="dw-key-group">${part}</span>`).join('<span class="dw-key-sep">/</span>');
   }
   /** The six craft keys, as "1-6" when they are the digit row. */
   function craftKeysHtml(mode) {
