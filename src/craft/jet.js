@@ -116,6 +116,8 @@ const simProfile = Object.freeze({
   // A fast jet: the speed guard sits above Mach 2 at altitude, Vne is an equivalent airspeed.
   maxSpeed: 700,
   vneBasis: 'equivalent',
+  // Gray-out, tunnel vision and red-out in the post stack (src/render/post.js, SIM).
+  gEffects: true,
   wing: Object.freeze({
     span: 9.96,
     area: 27.87,
@@ -857,7 +859,8 @@ export default Object.freeze({
   capabilities: Object.freeze({ engine: true, chute: false }),
   cameraRig: Object.freeze({
     eye: EYE,
-    chase: Object.freeze({ distance: 19, height: 4.4, lookAhead: 22 }),
+    // The chase camera's pull-back, FOV stretch and speed shake scale to the jet's speeds.
+    chase: Object.freeze({ distance: 19, height: 4.4, lookAhead: 22, speedRange: arcadeProfile.SPEED }),
     wing: Object.freeze({ position: Object.freeze([5.6, 0.9, 3.4]), target: Object.freeze([0.6, 0.2, -3]) }),
     fpv: null,
     // Fighter cockpit under the bubble canopy: a narrow tub with high sills, a low glareshield and a
