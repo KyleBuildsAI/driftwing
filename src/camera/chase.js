@@ -182,12 +182,20 @@ export function createCameraRig(ctx) {
     return true;
   }
 
+  /** The active craft's chase distance / height / look-ahead (the glider's are v1's CHASE values). */
+  const DEFAULT_RIG = Object.freeze({ distance: CHASE.DISTANCE, height: CHASE.HEIGHT, lookAhead: CHASE.AHEAD });
+  function chaseRig() {
+    const rig = ctx.systems.flight?.getCameraRig?.()?.chase;
+    return rig && Number.isFinite(rig.distance) && Number.isFinite(rig.height) && Number.isFinite(rig.lookAhead) ? rig : DEFAULT_RIG;
+  }
+
   function desiredShape() {
     const fraction = speedFraction();
     const pullback = framing.distanceScale;
-    shapeTarget.distance = (CHASE.DISTANCE + CHASE.DISTANCE_RANGE * fraction) * pullback + clamp(chase.acceleration * CHASE.ACCEL_PULLBACK, -1.5, 3.5);
-    shapeTarget.height = (CHASE.HEIGHT + CHASE.HEIGHT_RANGE * fraction) * pullback;
-    shapeTarget.ahead = CHASE.AHEAD + CHASE.AHEAD_RANGE * fraction;
+    const rig = chaseRig();
+    shapeTarget.distance = (rig.distance + CHASE.DISTANCE_RANGE * fraction) * pullback + clamp(chase.acceleration * CHASE.ACCEL_PULLBACK, -1.5, 3.5);
+    shapeTarget.height = (rig.height + CHASE.HEIGHT_RANGE * fraction) * pullback;
+    shapeTarget.ahead = rig.lookAhead + CHASE.AHEAD_RANGE * fraction;
     return shapeTarget;
   }
 
