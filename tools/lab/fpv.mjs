@@ -17,7 +17,8 @@
 //   altitudeHold 100 % assists: holds through a full-tilt dash, climbs and descends on the throttle,
 //                ignores a lever left off-centre at spawn, and lands gently on a pulled throttle
 //   modes        the craft ability toggles rate / angle at any level; a new assist level resets it
-//   ground       light drop on the feet bounces and settles, hard hits exceed the crash limits
+//   ground       light drop on the feet bounces and settles, hard hits exceed the crash limits, a
+//                touch-and-go at speed keeps flying, parked with hold it idles and takes off on throttle
 //   turtle       upside down on the ground: the ability flips it back onto its feet
 //   propWash     a fast vertical descent into the props' own wake costs thrust and shakes the frame
 //   autopilot    heading, altitude and speed hold through angle mode; the hands-off hold hovers
@@ -516,6 +517,18 @@ function testGround() {
   check('ground', 'inverted hit (7 m/s)', invertedHit.verdict ?? 'no crash', 'soft crash (strike)', invertedHit.verdict !== null && invertedHit.verdict.includes('strike'));
   const graze = drop({ sinkRate: 1.5, inverted: true });
   check('ground', 'light inverted touch (1.5 m/s)', graze.verdict ?? 'no crash', 'no crash', graze.verdict === null);
+  // Skimming: a foot brushes the ground at 8 m/s with altitude hold on; the motors keep flying.
+  const skim = createRig({ assists: 1 });
+  skim.airborne({ altitude: 0.1, velocity: [0, -1.5, -8], throttle: fpv.spawn.cruiseThrottle });
+  skim.pilot.throttle = 0.5;
+  let brushed = false;
+  let lowestMotor = Infinity;
+  skim.run(1.5, (current) => {
+    if (current.model.contact.onGround) brushed = true;
+    if (brushed) lowestMotor = Math.min(lowestMotor, current.data.motorSpeed);
+    return false;
+  });
+  check('ground', 'touch-and-go at 8 m/s (100 %)', `${brushed ? 'brushed' : 'missed'}, ${round(skim.altitude(), 2)} m`, 'brushes, flies on (motors > 0.2)', brushed && lowestMotor > 0.2 && !skim.data.onGround, 'up');
   const parked = createRig({ assists: 1 });
   parked.parked();
   parked.pilot.throttle = 0.5;

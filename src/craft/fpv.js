@@ -101,7 +101,7 @@ const arcadeProfile = Object.freeze({
 const MOTOR_X = 0.08;
 const MOTOR_Z = 0.078;
 const PROP_RADIUS = 0.0635;
-const PROP_Y = 0.024;
+const PROP_Y = 0.028;
 
 const simProfile = Object.freeze({
   model: 'quad',
@@ -183,8 +183,8 @@ const simProfile = Object.freeze({
       landingHeight: 4,
     }),
   }),
-  // Four feet under the motors (gear: a quad lands on them) and body points: battery top, camera,
-  // antenna and the prop tips. Springs are soft for a 650 g craft so light touches bounce.
+  // Four feet under the motors (gear: a quad lands on them) and body points: battery top, antenna
+  // and the prop tips (the front tip covers the camera, which sits inside the frame). Springs are soft for a 650 g craft so light touches bounce.
   contacts: Object.freeze([
     Object.freeze({ id: 'footRearRight', kind: 'skid', gear: true, position: Object.freeze([MOTOR_X, -0.009, MOTOR_Z]), spring: 1200, damping: 8, friction: 0.6 }),
     Object.freeze({ id: 'footFrontRight', kind: 'skid', gear: true, position: Object.freeze([MOTOR_X, -0.009, -MOTOR_Z]), spring: 1200, damping: 8, friction: 0.6 }),
@@ -194,7 +194,6 @@ const simProfile = Object.freeze({
     Object.freeze({ id: 'batteryFrontRight', kind: 'body', gear: false, position: Object.freeze([0.019, 0.07, -0.038]), spring: 900, damping: 5, friction: 0.5 }),
     Object.freeze({ id: 'batteryRearLeft', kind: 'body', gear: false, position: Object.freeze([-0.019, 0.07, 0.038]), spring: 900, damping: 5, friction: 0.5 }),
     Object.freeze({ id: 'batteryRearRight', kind: 'body', gear: false, position: Object.freeze([0.019, 0.07, 0.038]), spring: 900, damping: 5, friction: 0.5 }),
-    Object.freeze({ id: 'camera', kind: 'body', gear: false, position: Object.freeze([0, 0.03, -0.08]), spring: 900, damping: 5, friction: 0.5 }),
     Object.freeze({ id: 'antenna', kind: 'body', gear: false, position: Object.freeze([0, 0.08, 0.1]), spring: 600, damping: 3, friction: 0.5 }),
     Object.freeze({ id: 'propFront', kind: 'body', gear: false, position: Object.freeze([0, PROP_Y, -MOTOR_Z - PROP_RADIUS]), spring: 900, damping: 5, friction: 0.5 }),
     Object.freeze({ id: 'propRear', kind: 'body', gear: false, position: Object.freeze([0, PROP_Y, MOTOR_Z + PROP_RADIUS]), spring: 900, damping: 5, friction: 0.5 }),
@@ -419,6 +418,8 @@ const MOTOR_LAYOUT = simProfile.motors.map((motor) => ({
 const IDLE = simProfile.motor.idle;
 /** Visual prop speed (rad/s) for a motor speed (0..1): kit prop discs blur from about 8 rad/s. */
 const visualPropSpeed = (motorSpeed) => (motorSpeed > 0.01 ? 4 + 28 * motorSpeed : 0);
+/** Above this motor speed the blades are a blur: only the disc shows (as in real FPV footage). */
+const BLADE_BLUR_SPEED = 0.2;
 
 /**
  * Builds the quad. update(visual, dt) spins each prop at its motor's speed: in SIM visual.propSpeed
@@ -454,13 +455,13 @@ function buildMesh(ctx) {
   const props = MOTOR_LAYOUT.map((motor) => {
     const group = new THREE.Group();
     group.position.set(motor.x, PROP_Y, motor.z);
-    addSolid(group, motor.spin > 0 ? propGeometry.cw : propGeometry.ccw, bodyMaterial);
+    const blades = addSolid(group, motor.spin > 0 ? propGeometry.cw : propGeometry.ccw, bodyMaterial);
     const disc = createPropDisc(PROP_RADIUS);
     disc.mesh.rotation.x = -Math.PI / 2;
     disc.mesh.position.y = 0.0015;
     group.add(disc.mesh);
     root.add(group);
-    return { ...motor, group, disc, angle: Math.random() * Math.PI * 2, speed: 0 };
+    return { ...motor, group, blades, disc, angle: (motor.front * 0.7 + motor.side * 0.4 + 1.2) % (Math.PI * 2), speed: 0 };
   });
 
   // LED strips under the rear arms.
@@ -535,6 +536,7 @@ function buildMesh(ctx) {
         prop.angle = (prop.angle - prop.spin * direction * prop.speed * dt) % (Math.PI * 2);
         if (!Number.isFinite(prop.angle)) prop.angle = 0;
         prop.group.rotation.y = prop.angle;
+        prop.blades.visible = motorSpeeds[index] < BLADE_BLUR_SPEED;
         prop.disc.setSpeed(prop.speed);
       }
       updateLeds(visual);
@@ -599,7 +601,9 @@ export default Object.freeze({
   audioProfile: Object.freeze({ engine: 'drone', motors: 4, idleHz: 170, maxHz: 820, airflowSpeed: 42, classicAirflowSpeed: 45, touchdown: 'body', callouts: false }),
   cameraRig: Object.freeze({
     eye: FPV_CAMERA.POSITION,
-    chase: Object.freeze({ distance: 2.4, height: 0.35, lookAhead: 7 }),
+    // Close behind and aimed low: the chase camera keeps 3 m above the ground, so a short look-ahead
+    // keeps a landed quad in frame.
+    chase: Object.freeze({ distance: 3, height: 0.6, lookAhead: 2 }),
     wing: Object.freeze({ position: Object.freeze([0.2, 0.09, 0.32]), target: Object.freeze([0, 0.02, -0.3]) }),
     // The first-person slot becomes the FPV camera: locked to the frame, tilted up, settings.fov.fpv.
     fpv: Object.freeze({ position: FPV_CAMERA.POSITION, uptilt: FPV_CAMERA.UPTILT, near: FPV_CAMERA.NEAR }),

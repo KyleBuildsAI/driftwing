@@ -54,6 +54,9 @@ const TURTLE_MAX_AGL = 0.6;
 const TURTLE_SETTLE_DEPTH = 0.3;
 /** Upside down on the ground: body up pointing below this. */
 const INVERTED_UP = -0.3;
+/** Altitude hold counts the quad as landed after resting this long (s) slower than LANDED_SPEED (m/s). */
+const LANDED_SECONDS = 0.25;
+const LANDED_SPEED = 0.6;
 /** The throttle below which the quad counts as idling on the ground (airmode and I-term held off). */
 const GROUND_IDLE_THROTTLE = 0.08;
 /** Mesh prop animation: visual prop speed (rad/s) at full motor speed. */
@@ -232,7 +235,7 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {} }) {
     setpointLowPass: new THREE.Vector3(),
     primed: false,
   };
-  const altitude = { engaged: false, target: 0, integral: 0, latched: false, latchValue: 0.5, landed: false, guided: false };
+  const altitude = { engaged: false, target: 0, integral: 0, latched: false, latchValue: 0.5, landed: false, guided: false, groundSeconds: 0 };
   const systems = {
     armed: true,
     throttle: 0,
@@ -453,8 +456,11 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {} }) {
     altitude.guided = guided;
     if (altitude.latched && (Math.abs(lever - altitude.latchValue) > hold.latchMove || climbForThrottle(lever, hold) === 0)) altitude.latched = false;
     const commanded = altitude.latched ? 0 : climbForThrottle(lever, hold);
-    // Landed: the motors idle until the stick asks for a climb (hold never lifts off by itself).
-    altitude.landed = contactReport.onGround && commanded <= 0 && verticalSpeed < 0.5;
+    // Landed (resting on the ground for a moment, not a touch-and-go): the motors idle until the stick
+    // asks for a climb, so hold never lifts off by itself.
+    altitude.groundSeconds = contactReport.onGround ? altitude.groundSeconds + dt : 0;
+    const settled = altitude.groundSeconds >= LANDED_SECONDS && Math.abs(verticalSpeed) < LANDED_SPEED && Math.hypot(state.velocity.x, state.velocity.z) < LANDED_SPEED;
+    altitude.landed = contactReport.onGround && commanded <= 0 && (altitude.landed || settled);
     if (altitude.landed) {
       altitude.target = centerPosition.y;
       altitude.integral = 0;
@@ -482,6 +488,7 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {} }) {
     altitude.latched = false;
     altitude.landed = false;
     altitude.guided = false;
+    altitude.groundSeconds = 0;
   }
 
   /**
