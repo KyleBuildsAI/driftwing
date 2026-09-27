@@ -273,17 +273,21 @@ function buildCabinFrame(builder, spec, glare, tint) {
 
 function buildBubbleFrame(builder, spec, tint) {
   const half = spec.width / 2;
-  // Centre spine over the head and the door bows on each side.
-  polyline(builder, [[0, spec.sill + 0.05, spec.front * 0.9], [0, spec.roof * 0.7, spec.front * 0.55], [0, spec.roof + 0.06, -0.1], [0, spec.roof + 0.04, spec.back * 0.8]], 0.04, tint);
+  // Centre spine from just ahead of the head to the rear (the bubble ahead stays clear), and the
+  // door bows on each side.
+  polyline(builder, [[0, spec.roof, -0.32], [0, spec.roof + 0.06, -0.05], [0, spec.roof + 0.04, spec.back * 0.8]], 0.04, tint);
   polyline(builder, bow(spec.back * 0.2, half * 1.05, spec.sill, spec.roof + 0.05), 0.045, tint);
   polyline(builder, bow(spec.back * 0.9, half * 1.05, spec.sill, spec.roof + 0.03), 0.045, tint);
 }
 
 function buildOpenFrame(builder, spec, glare, tint) {
   const half = spec.width / 2;
-  // Padded coaming around the opening and a small windscreen frame ahead of the glareshield.
-  const coaming = [[-half, spec.sill, spec.back], [-half, spec.sill, 0], [-half * 0.8, spec.sill + 0.02, glare.lipZ + 0.06], [0, spec.sill + 0.04, glare.lipZ], [half * 0.8, spec.sill + 0.02, glare.lipZ + 0.06], [half, spec.sill, 0], [half, spec.sill, spec.back]];
-  polyline(builder, coaming, 0.07, TINT.seat);
+  // Padded coaming along the sides and behind the pilot (the glareshield closes it at the front),
+  // and a small windscreen frame ahead of the glareshield.
+  for (const side of [-1, 1]) {
+    polyline(builder, [[side * glare.halfWidth, glare.lipY - 0.02, glare.lipZ + 0.02], [side * half, spec.sill, glare.lipZ + 0.2], [side * half, spec.sill, spec.back]], 0.07, TINT.seat);
+  }
+  bar(builder, [-half, spec.sill, spec.back], [half, spec.sill, spec.back], 0.07, TINT.seat);
   polyline(builder, bow(glare.lipZ - 0.1, glare.halfWidth * 0.85, glare.lipY - 0.01, glare.lipY + 0.16, 5), 0.025, tint);
 }
 
