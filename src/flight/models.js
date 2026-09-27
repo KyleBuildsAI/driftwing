@@ -28,6 +28,8 @@ const MODEL_INTERFACE = Object.freeze({
 function createFlightModelRegistry() {
   const factories = new Map();
   const listeners = new Set();
+  const stages = new Map();
+  let sortedStages = [];
 
   function notify(kind, registered) {
     for (const listener of [...listeners]) listener({ kind, registered });
@@ -76,6 +78,33 @@ function createFlightModelRegistry() {
     onChange(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+
+    /**
+     * Registers a SIM control stage: { id, order = 50, apply(controls, context) }. Every physics tick
+     * the controller copies ControlState, applies the craft input profile, zeroes the stick while a
+     * disconnected device's hands-off hold is active, then runs the stages in ascending order before
+     * model.step. context: { dt, model, craft, craftId, env, autopilot, assists (0..1, forced to 1 by
+     * the hands-off hold), handsOff, telemetry, activeAssists (push the names of assists acting this
+     * tick; they appear in state.flight.activeAssists) }. Assists and the PID autopilot plug in here.
+     */
+    registerControlStage(stage) {
+      if (!stage || typeof stage.id !== 'string' || !stage.id) throw new TypeError('control stage needs an id');
+      if (typeof stage.apply !== 'function') throw new TypeError(`control stage "${stage.id}" needs apply(controls, context)`);
+      stages.set(stage.id, { id: stage.id, order: Number.isFinite(stage.order) ? stage.order : 50, apply: stage.apply });
+      sortedStages = [...stages.values()].sort((first, second) => first.order - second.order);
+      return stage.id;
+    },
+
+    unregisterControlStage(id) {
+      const removed = stages.delete(id);
+      if (removed) sortedStages = [...stages.values()].sort((first, second) => first.order - second.order);
+      return removed;
+    },
+
+    /** The registered control stages in the order they run. */
+    controlStages() {
+      return sortedStages;
     },
   };
 }
