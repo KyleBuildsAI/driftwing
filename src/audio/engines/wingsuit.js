@@ -5,6 +5,8 @@
 //   rush      the wind tearing past the helmet, rising with airspeed and sharply with terrain
 //             proximity (state.flight.agl inside proximityRange metres)
 //   ground    a low roar of air compressed between suit and terrain when skimming it
+//   warning   an audible-altimeter style chirp while the SIM terrain proximity warning is on
+//             (state.flight.craftState.proximityWarning, an assist that is off at 0 %)
 // With a canopy open (state.flight.craftState.canopy) the flutter becomes the slow luffing of the
 // parachute and the rush falls away with the speed.
 import { clamp } from '../../core/util.js';
@@ -58,10 +60,19 @@ export function createWingsuitSynth(kit, profile) {
   groundFilter.connect(groundLevel);
   groundLevel.connect(synth.output);
 
+  const warningTone = synth.oscillator('square', 2100);
+  const warningFilter = synth.filter('lowpass', 3200, 0.7);
+  const warningGate = synth.modulated(0.5, 0.5, 7.5, 'square');
+  const warningLevel = synth.gain(0);
+  warningTone.connect(warningFilter);
+  warningFilter.connect(warningGate.carrier);
+  warningGate.carrier.connect(warningLevel);
+  warningLevel.connect(synth.output);
+
   synth.start(context.currentTime + 0.02);
   let proximity = 0;
   let rateJitter = 0;
-  const readout = { speedRatio: 0, proximity: 0, flutterRate: 0, canopy: false, level: 0 };
+  const readout = { speedRatio: 0, proximity: 0, flutterRate: 0, canopy: false, warning: false, level: 0 };
 
   return {
     family: 'wingsuit',
@@ -89,6 +100,8 @@ export function createWingsuitSynth(kit, profile) {
       glide(rushLevel.gain, moving * (0.12 + 0.5 * speedRatio * speedRatio) * (1 + 2.2 * proximity), time, 0.1);
       glide(groundLevel.gain, 0.6 * proximity * clamp(speedRatio, 0, 1.5), time, 0.1);
       glide(groundFilter.frequency, (260 + 420 * proximity) * pitch, time, 0.15);
+      const warning = Boolean(flight.craftState && flight.craftState.proximityWarning === true);
+      glide(warningLevel.gain, warning ? 0.5 : 0, time, 0.03);
 
       const level = 0.12 * profile.level;
       glide(synth.output.gain, level, time, 0.2);
@@ -96,6 +109,7 @@ export function createWingsuitSynth(kit, profile) {
       readout.proximity = proximity;
       readout.flutterRate = flutterRate;
       readout.canopy = canopy;
+      readout.warning = warning;
       readout.level = level;
     },
     stop(time) {
@@ -107,7 +121,7 @@ export function createWingsuitSynth(kit, profile) {
         target: { ...readout },
         level: synth.output.gain.value,
         frequencies: { flutter: flutter.lfo.frequency.value },
-        layers: { flutter: flutterLevel.gain.value, rush: rushLevel.gain.value, ground: groundLevel.gain.value },
+        layers: { flutter: flutterLevel.gain.value, rush: rushLevel.gain.value, ground: groundLevel.gain.value, warning: warningLevel.gain.value },
       };
     },
   };
