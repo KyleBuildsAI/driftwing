@@ -3,8 +3,10 @@
 import { craftRegistry } from './registry.js';
 import glider from './glider.js';
 import bushplane from './bushplane.js';
+import fpv from './fpv.js';
 
 craftRegistry.register(glider);
 craftRegistry.register(bushplane);
+craftRegistry.register(fpv);
 
 export { craftRegistry };
