@@ -481,10 +481,10 @@ export function createFlightController(ctx) {
     refreshClassicWindTarget(pose.position);
     classicWind.copy(classicWindTarget);
     pose.velocity.sub(classicWind);
-    const speed = pose.velocity.length();
     const arcadeSpeed = craft.arcadeProfile.SPEED;
-    if (onGround || speed < arcadeSpeed.STALL) {
-      // CLASSIC cannot sit on the ground or hang below its stall: level off at cruise, a little higher.
+    if (onGround) {
+      // CLASSIC cannot sit on the ground: level off at cruise a little higher (the blend hides the lift).
+      // In the air the velocity carries over; the arcade model clamps it to its own speed range.
       const heading = headingOfQuaternion(pose.quaternion, currentHeading());
       const floor = surfaceHeight(pose.position.x, pose.position.z) + 30;
       pose.position.y = Math.max(pose.position.y, floor);
@@ -546,6 +546,7 @@ export function createFlightController(ctx) {
       }
       if (modeFellBack) {
         mode = 'classic';
+        releaseOverride('mode change', { silent: true });
         resetModelTelemetry();
         notify(`SIM flight for the ${craftLabel(nextId)} is not available yet, so it flies in CLASSIC.`, 'warning');
       }
