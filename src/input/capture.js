@@ -7,8 +7,9 @@
 // axis moved past half travel, or two inputs in turn: a positive then a negative key (keys) or
 // button (buttonAxis for spring axes, buttonRate for levers such as the throttle).
 //
-// Baselines are taken the first time each device is sampled after the session starts, so a stick
-// resting off-centre or a button already held does not bind itself. Escape cancels.
+// Baselines are taken from the latest readings when the session starts (and when a device first
+// appears during it), so a stick resting off-centre or a button already held does not bind
+// itself. Escape cancels.
 
 import { AXIS_TARGETS } from './defaultBindings.js';
 import { isAxisTarget } from './bindings.js';
@@ -96,16 +97,20 @@ export function createInputCapture({ registry, calibration, mapper }) {
     return buttons;
   }
 
+  function takeBaseline(device) {
+    session.baselines.set(device.deviceKey, {
+      axes: device.axes.slice(),
+      buttons: device.buttons.map((button) => button.pressed),
+      hats: mapper.hatDirections(device.deviceKey),
+    });
+  }
+
   function sampleDevice(device) {
     const bindingDevice = device.bindingDevice;
     if (!accepts(bindingDevice)) return;
-    let baseline = session.baselines.get(device.deviceKey);
+    const baseline = session.baselines.get(device.deviceKey);
     if (!baseline) {
-      session.baselines.set(device.deviceKey, {
-        axes: device.axes.slice(),
-        buttons: device.buttons.map((button) => button.pressed),
-        hats: mapper.hatDirections(device.deviceKey),
-      });
+      takeBaseline(device);
       return;
     }
     const target = session.target;
@@ -180,6 +185,7 @@ export function createInputCapture({ registry, calibration, mapper }) {
           first: null,
           resolve,
         };
+        for (const device of registry.live()) if (accepts(device.bindingDevice)) takeBaseline(device);
         emit();
       });
     },
