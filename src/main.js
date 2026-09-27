@@ -8,6 +8,7 @@ import { createBirdSystem } from './render/birds.js';
 import { createCameraRig } from './camera/chase.js';
 import { createCloudSystem } from './render/clouds.js';
 import { createCopilotSystem } from './copilot/copilot.js';
+import { createDebugWindSystem } from './dev/debugWind.js';
 import { createFlightController } from './flight/FlightController.js';
 import { createFxSystem } from './render/fx.js';
 import { createInputSystem } from './input/InputManager.js';
@@ -22,6 +23,7 @@ import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
 import { createWaterSystem } from './render/water.js';
 import { createWaypointSystem } from './gameplay/waypoints.js';
+import { createWindOverlaySystem } from './dev/windOverlay.js';
 import { createWorldGen } from './world/worldgen.js';
 import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName, isFiniteVector, isFiniteQuaternion } from './core/util.js';
 import { EventBus } from './core/eventBus.js';
@@ -325,6 +327,9 @@ async function boot() {
     ['camera', createCameraRig],
     ['fx', createFxSystem],
     ['copilot', createCopilotSystem],
+    ['windOverlay', createWindOverlaySystem],
+    // Dev-only: the debug wind source that proves the Phase 2 wind writer path.
+    ...(devHooks ? [['debugWind', createDebugWindSystem]] : []),
   ];
   for (const [name, factory] of factories) {
     try {
@@ -351,7 +356,8 @@ async function boot() {
   beginPrewarm();
   const fadeStatus = document.getElementById('fade-status');
   if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
-  const UPDATE_ORDER = ['input', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'copilot', 'audio', 'ui'];
+  const UPDATE_ORDER = ['input', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind']
+    .filter((name) => ctx.systems[name]);
 
   // ---- Flight-state snapshot for the copilot (local or remote brain) -----------------
   ctx.getFlightState = () => {
