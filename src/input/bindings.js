@@ -486,6 +486,31 @@ export function createBindingStore({ storage }) {
       return { ok: true, ref: clean, conflicts };
     },
 
+    /**
+     * Changes fields of one reference of a target (axis tuning: invert, deadzone, saturation, expo,
+     * smoothing, rate; or a key's shift / mode) in the global layer or craft's override layer. The
+     * target's effective references are copied into that layer first, so tuning an inherited
+     * binding creates the override. A patch value of null removes that field. Returns { ok, ref }
+     * or { ok: false, error }.
+     */
+    updateRef({ device, target, index, patch, craft = null }) {
+      if (!TARGET_IDS.includes(target)) return { ok: false, error: `unknown target ${target}` };
+      if (!DEVICE_PATTERN.test(device)) return { ok: false, error: `bad device ${device}` };
+      if (!isPlainObject(patch)) return { ok: false, error: 'patch must be an object' };
+      const current = copyRefs(getRefs(device, target, craft));
+      if (!Number.isInteger(index) || index < 0 || index >= current.length) return { ok: false, error: `no reference ${index}` };
+      const merged = { ...current[index], ...patch };
+      for (const [field, value] of Object.entries(patch)) if (value === null) delete merged[field];
+      const clean = sanitizeRef(merged, target);
+      if (!clean) return { ok: false, error: 'invalid reference for this target' };
+      current[index] = clean;
+      const layer = layerFor(craft, true);
+      layer[device] ??= {};
+      layer[device][target] = current;
+      changed('tune');
+      return { ok: true, ref: { ...clean } };
+    },
+
     /** Removes one reference (or all when ref is omitted, leaving the target deliberately unbound). */
     unbind({ device, target, craft = null, ref = null }) {
       if (!TARGET_IDS.includes(target)) return false;
