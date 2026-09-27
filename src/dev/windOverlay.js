@@ -23,6 +23,8 @@ const TERRAIN_AGL = 45;
 const ALTITUDE_STEP = 10;
 const ALTITUDE_LAYER_CLEARANCE = 30;
 const SAMPLE_HZ = 5;
+/** Arrows whose sample point is this close to the camera are left out, so none fills the view. */
+const CAMERA_CLEARANCE = 55;
 const LENGTH_PER_METRE_PER_SECOND = 4.5;
 const MIN_LENGTH = 6;
 const MAX_LENGTH = 56;
@@ -145,9 +147,10 @@ export function createWindOverlaySystem(ctx) {
     );
   }
 
-  /** Samples the field at (x, y, z) and writes one arrow centred there; false when the air is still. */
+  /** Samples the field at (x, y, z) and writes one arrow centred there; false when hidden (still air, at the camera). */
   function writeArrow(index, x, y, z) {
     probePoint.set(x, y, z);
+    if (probePoint.distanceToSquared(ctx.camera.position) < CAMERA_CLEARANCE * CAMERA_CLEARANCE) return false;
     ctx.wind.probe(probePoint, state.time.elapsed, windSample);
     const velocity = windSample.vel;
     const speed = velocity.length();
