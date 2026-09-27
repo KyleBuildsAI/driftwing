@@ -864,7 +864,7 @@ export default Object.freeze({
     eye: EYE,
     // The chase camera's pull-back, FOV stretch and speed shake scale to the jet's speeds.
     chase: Object.freeze({ distance: 19, height: 4.4, lookAhead: 22, speedRange: arcadeProfile.SPEED }),
-    wing: Object.freeze({ position: Object.freeze([5.6, 0.9, 3.4]), target: Object.freeze([0.6, 0.2, -3]) }),
+    wing: Object.freeze({ position: Object.freeze([3.9, 1.4, 5.6]), target: Object.freeze([0.4, 0.2, -4]) }),
     fpv: null,
     // Fighter cockpit under the bubble canopy: a narrow tub with high sills, a low glareshield and a
     // wide, shallow panel (flight instruments centre, engine and gear right).
