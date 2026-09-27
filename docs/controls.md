@@ -180,7 +180,11 @@ again, in any slot.
 
 Every controller axis goes through: calibration (centre, range, direction) -> invert -> centre
 deadzone -> edge saturation -> expo curve -> light low-pass smoothing. Each binding can override
-invert, deadzone, saturation, expo and smoothing.
+invert, deadzone, saturation, expo and smoothing. The "Invert pitch" setting applies to the
+keyboard, mouse and touch (as in v1); controllers use the per-binding invert instead.
+
+A controller keeps its bindings and calibration when the browser gives it a different slot, even
+mid-flight: devices are matched by id, and a slot change is not a disconnect.
 
 ## Actions
 
@@ -189,3 +193,26 @@ viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, 
 modeToggle, gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack,
 ringCourse, journal, settings, controlsPanel, relaunch, engineToggle, chuteDeploy`. Each press and
 release is published as `input:action { id, phase, source, device }`.
+
+## For developers: the input system API
+
+`ctx.systems.input` (src/input/InputManager.js) is what the controls panel, calibration wizard,
+dev badge and HOTAS prompt build on:
+
+| member | what |
+| --- | --- |
+| `getDevices()` | connected controllers: `{ deviceKey, kind, name, profile, vendor, product, known, confirmed, slot, id, axisCount, buttonCount, bindingDevice, hotas, calibrated, needsCalibration }` |
+| `getConnectionState()` | `{ supported, devices, hotas: { stick, throttle, pedals, complete }, prompt, pedalNote }`; `prompt` is "Press any button on your stick and throttle" until both are seen |
+| `readDevice(deviceKey)` | live readings for the panel: every axis (`raw`, calibrated `value`, `range`, `hat`), button (`pressed`, `value`) and hat (`learned`, decoded `direction`) with the device's own labels |
+| `readKeyboard()`, `getStick()` | held key codes; the mouse virtual stick `{ x, y, locked, dragging, mode: 'spring' \| 'free', fullDeflectionPixels }` |
+| `getThrottleReading()`, `getTwistState()` | throttle with `afterburnerDetent` / `afterburner`; twist-yaw setting and pedal state |
+| `bindings` | the binding store: `getRefs`, `sourceOf` ('craft' \| 'global' \| 'default'), `getEffective`, `getDefaultRefs`, `bind`, `unbind`, `updateRef` (axis tuning), `clearOverride`, `resetToDefaults`, `findConflicts`, `conflictsFor`, `findAllConflicts`, `listDevices`, `exportJSON`, `importJSON`, `onChange` |
+| `describeRef(ref, bindingDevice)` | short label of a binding ("Shift+F", "Trigger", "Hat 1 up") |
+| `listen({ target, device })`, `bindByListening({ target, craft, device, replace })`, `cancelListen()`, `getListenState()`, `onListenChange()` | bind by listening: the next key, mouse button, controller button, learned hat direction or axis moved past half travel; Escape cancels |
+| `startCalibration({ deviceKeys })`, `getCalibrationWizard()` | the wizard step machine: `getState()`, `next()`, `skip()`, `back()`, `cancel()`, `finish()`, `onChange()` |
+| `calibration` | per-device records: `get`, `save`, `reset`, `keys`, `onChange` (stored as `input.calibration.<deviceKey>`) |
+| `consumesKey(event)` | true when a keydown belongs to an input action (the UI leaves it alone) |
+| `mock` | with `?test=hotas`: the scriptable mock devices from `src/dev/mockGamepads.js` (`plug`, `unplug`, `moveToSlot`, `setAxis`, `press`, `release`, `setButton`, `setHat`, `restAxes`, `get`, `list`) |
+
+Craft input profiles can use `createNotchQuantizer({ notches, hysteresis })` from
+`src/input/axisPipeline.js` to turn `ControlState.antenna` into flap notches with hysteresis.
