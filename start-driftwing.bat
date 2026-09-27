@@ -15,7 +15,23 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-for /f "tokens=1 delims=v." %%v in ('node -v') do set NODE_MAJOR=%%v
+rem The major version from "v22.11.0". An empty or unreadable answer (a broken install, a wrapper
+rem that prints something else) counts as unknown: 0, which asks for the LTS install below.
+set "NODE_MAJOR="
+for /f "tokens=1 delims=v." %%v in ('node -v 2^>nul') do if not defined NODE_MAJOR set "NODE_MAJOR=%%v"
+if not defined NODE_MAJOR set "NODE_MAJOR=0"
+for /f "delims=0123456789" %%c in ("%NODE_MAJOR%") do set "NODE_MAJOR=0"
+if "%NODE_MAJOR%"=="0" (
+  echo.
+  echo   DRIFTWING could not read your Node.js version.
+  echo   Install the LTS version from https://nodejs.org/en/download
+  echo   then double-click start-driftwing.bat again.
+  echo.
+  start "" "https://nodejs.org/en/download"
+  pause
+  exit /b 1
+)
+rem NODE_MAJOR is digits only here, so the comparison below is numeric.
 if %NODE_MAJOR% LSS 20 (
   echo.
   echo   DRIFTWING needs Node.js 20 or newer ^(found version %NODE_MAJOR%^).
