@@ -52,6 +52,7 @@ const FIXED_WING = Object.freeze({
   YAW_SIDESLIP_GAIN: 4,
   YAW_LIMIT: 0.6,
   OUTPUT_SLEW: 2.5,
+  /** Gains are tuned at this multiple of the stall speed and scaled by dynamic pressure elsewhere (clamped). */
   SCHEDULE_REFERENCE: 1.5,
   SCHEDULE_MIN: 0.12,
   SCHEDULE_MAX: 2,
