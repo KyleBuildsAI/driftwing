@@ -104,7 +104,7 @@ const simProfile = Object.freeze({
   targets: Object.freeze({
     topSpeedSeaLevel: 361, // m/s = 1300 km/h, afterburner
     topMachAltitude: 1.6, // at 10 km, afterburner
-    stallSpeed: 64, // m/s = 230 km/h clean at 25 degrees angle of attack
+    stallSpeed: 60, // m/s = 218 km/h clean at 25 degrees angle of attack
     liftOffSpeed: 80, // m/s = 290 km/h, half flaps
     touchdownSpeed: 74, // m/s = 265 km/h, full flaps, 13 degrees
     gLimit: 9,
@@ -131,8 +131,8 @@ const simProfile = Object.freeze({
   aero: Object.freeze({
     cd0: 0.021, // subsonic, clean
     dragCenter: Object.freeze([0, -0.05, 1.3]),
-    clAlpha: 3.6, // per rad: low aspect ratio plus the strakes' vortex lift
-    clMax: 1.6,
+    clAlpha: 4.2, // per rad: low aspect ratio plus the strakes' vortex lift
+    clMax: 1.8,
     clMin: -1.0,
     alphaCritical: 25,
     postStallClDrop: 0.3, // vortex lift fades gently
@@ -194,14 +194,19 @@ const simProfile = Object.freeze({
     fcs: Object.freeze({
       minAirspeed: 40,
       referencePressure: 30000,
-      maxScale: 4,
-      feedForward: 0.05,
-      gain: 0.04,
+      maxScale: 10,
+      feedForward: 0.06,
+      gain: 0.3,
       integral: 0.4,
+      // The integrator is scaled by sqrt(q_ref / q): full 1 / q makes it lag at approach speeds.
+      integralExponent: 0.5,
       rateDamping: 1.5,
+      rateWashoutSeconds: 1.2,
       negativeShare: 0.4,
       aoaMargin: 2,
-      aoaLead: 0.15,
+      aoaLead: 0.25,
+      aoaFeedback: 6,
+      aoaBleed: 40,
       aoaRateSmoothing: 18,
       negativeAoa: -10,
       coordinationGain: 4,
@@ -221,11 +226,13 @@ const simProfile = Object.freeze({
       trimGroundDecaySeconds: 6,
     }),
     handling: Object.freeze({
-      // Above this dynamic pressure (Pa, about corner speed) the stabilator's authority falls as 1 / q,
-      // so full aft stick without the flight control system stays near 10-11 g at any speed.
-      pitchAuthorityPressure: 18000,
-      pitchAuthorityFloor: 0.12,
-      wingRock: Object.freeze({ from: 19, full: 23, fadeFrom: 34, fadeTo: 42, gain: 0.55, rateLimit: 0.9, seed: 0.002, seedFrequency: 0.45 }),
+      // Above this dynamic pressure (Pa) the stabilator's authority falls as 1 / q, so full aft stick
+      // without the flight control system stays near 11 g at any speed past corner speed.
+      pitchAuthorityPressure: 15000,
+      pitchAuthorityFloor: 0.1,
+      // Extra pitch damping (Cm_q of the wing, strakes and body, per rad of q c / 2V).
+      pitchDamping: 8,
+      wingRock: Object.freeze({ from: 19, full: 23, fadeFrom: 34, fadeTo: 42, gain: 0.8, rateLimit: 0.5, seed: 0.002, seedFrequency: 0.45 }),
       negativeShare: 0.4,
       overGBuffetRange: 1.5,
       machBuffet: 0.35,

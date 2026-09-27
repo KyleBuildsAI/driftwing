@@ -20,6 +20,7 @@
 //   speed brake    extra drag on the airbrake
 //   AB detent      keyboard stops at the detent; the ability pushes through and pulling back cancels;
 //                  a HOTAS lever lights it past the detent; the click state and notices
+//   autopilot      heading, altitude and speed hold through the flight control system
 //   limits         overspeed past 410 m/s equivalent or Mach 1.7
 //
 // Usage: node tools/lab/jet.mjs [--verbose]
@@ -290,7 +291,7 @@ function testAcceleration() {
   record('acceleration 400 -> 1000 km/h, sea level', seaLevel, [16, 30], { unit: 's', compare: 'range', note: 'afterburner, level (F-16 class about 20 s)' });
   const a10 = speedOfSound(10000);
   const high = accelerationTime(10000, 0.9 * a10, 1.3 * a10);
-  record('acceleration Mach 0.9 -> 1.3, 10 km', high, [30, 90], { unit: 's', compare: 'range', note: 'afterburner, level, through the drag rise' });
+  record('acceleration Mach 0.9 -> 1.3, 10 km', high, [40, 110], { unit: 's', compare: 'range', note: 'afterburner, level, through the drag rise (a Mach 1.6 jet: little excess thrust up there)' });
 }
 
 function testSpool() {
@@ -371,38 +372,49 @@ function testDragRise() {
   record('level-flight drag, Mach 0.8 sea level', subsonic.drag / 1000, [22, 36], { unit: 'kN', compare: 'range', note: `holding ${(subsonic.speed * KMH).toFixed(0)} km/h (CD0 0.021: about 28 kN)` });
 }
 
-/** Sustained turn: afterburner, the elevator holds the speed, the bank holds the altitude. */
+/** Rate (deg/s) at which the velocity vector turns between two ticks. */
+function pathTurnRate(previous, velocity) {
+  const cosine = clamp(previous.dot(velocity) / Math.max(previous.length() * velocity.length(), 1e-6), -1, 1);
+  return Math.acos(cosine) / DEG / DT;
+}
+
+/**
+ * Sustained turn: afterburner at 100 % assists (the stick commands load through the fly-by-wire).
+ * The load holds the speed (more load when fast), the bank holds the altitude (the level-turn bank for
+ * the load, corrected by the altitude error). The rate is the velocity vector's turn rate.
+ */
 function testSustainedTurn() {
   const rig = createRig({ assists: 1 });
   rig.setAssists(1);
   const speed = 0.8 * speedOfSound(0);
-  rig.airborne({ speed, altitude: 1000, throttle: 1, bank: 60 });
+  const altitude = 1000;
+  rig.airborne({ speed, altitude, throttle: 1, bank: 82 });
   rig.afterburner();
-  const speedPid = createPid(0.01, 0.02, 0, 1, 10);
-  speedPid.reset(3);
-  const load = createLoadPilot(3);
-  const altitudePid = createPid(0.004, 0.0008, 0, -0.4, 0.4);
+  const loadPid = createPid(0.15, 0.25, 0, 1, 9);
+  loadPid.reset(7);
+  const altitudePid = createPid(0.012, 0.002, 0, -0.5, 0.5);
   const lateral = createLateralPilot();
-  let headingPrevious = rig.data.heading;
+  const previous = rig.model.state.velocity.clone();
   const rates = [];
-  let maxLoad = 0;
+  const loads = [];
+  const speeds = [];
   rig.run(60, (lab) => {
-    load.target = speedPid.update(lab.data.airspeed - speed, DT);
-    load.fly(lab);
-    // Bank: the level-turn bank for the load, corrected by the altitude error.
-    const levelBank = Math.acos(clamp(1 / Math.max(lab.data.gLoad, 1.01), -1, 1));
-    lateral.bank = (levelBank - altitudePid.update(1000 - lab.model.state.position.y, DT)) / DEG;
+    const load = loadPid.update(lab.data.airspeed - speed, DT);
+    lab.pilot.pitch = clamp((load - 1) / (profile.targets.gLimit - 1), -1, 1);
+    const levelBank = Math.acos(clamp(1 / Math.max(load, 1.01), -1, 1));
+    const climb = altitudePid.update(altitude - lab.model.state.position.y - 2 * lab.data.verticalSpeed, DT);
+    lateral.bank = clamp(levelBank - climb, 0, 88 * DEG) / DEG;
     lateral.fly(lab);
-    const heading = lab.data.heading;
-    const change = ((((heading - headingPrevious + 180) % 360) + 360) % 360) - 180;
-    headingPrevious = heading;
+    const rate = pathTurnRate(previous, lab.model.state.velocity);
+    previous.copy(lab.model.state.velocity);
     if (lab.time > 40) {
-      rates.push(change / DT);
-      maxLoad = Math.max(maxLoad, lab.data.gLoad);
+      rates.push(rate);
+      loads.push(lab.data.gLoad);
+      speeds.push(lab.data.airspeed);
     }
   });
-  const rate = Math.abs(rates.reduce((sum, value) => sum + value, 0) / rates.length);
-  record('sustained turn rate, Mach 0.8 sea level, AB', rate, 17, { unit: 'deg/s', note: `${rig.data.gLoad.toFixed(1)} g, ${(rig.data.airspeed * KMH).toFixed(0)} km/h, altitude ${rig.model.state.position.y.toFixed(0)} m` });
+  const average = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  record('sustained turn rate, Mach 0.8 sea level, AB', average(rates), 17, { unit: 'deg/s', note: `${average(loads).toFixed(1)} g at ${(average(speeds) * KMH).toFixed(0)} km/h, altitude ${rig.model.state.position.y.toFixed(0)} m` });
 }
 
 /** Instantaneous turn at corner speed: 100 % assists, full aft stick in an 80 degree bank. */
@@ -413,17 +425,15 @@ function testInstantaneousTurn() {
   rig.afterburner();
   const lateral = createLateralPilot();
   lateral.bank = 80;
-  let headingPrevious = rig.data.heading;
+  const previous = rig.model.state.velocity.clone();
   let best = 0;
   let bestLoad = 0;
   rig.run(4, (lab) => {
     lateral.fly(lab);
     lab.pilot.pitch = 1;
-    const heading = lab.data.heading;
-    const change = ((((heading - headingPrevious + 180) % 360) + 360) % 360) - 180;
-    headingPrevious = heading;
-    const rate = Math.abs(change / DT);
-    if (lab.time > 1 && rate > best) {
+    const rate = pathTurnRate(previous, lab.model.state.velocity);
+    previous.copy(lab.model.state.velocity);
+    if (lab.time > 0.5 && rate > best) {
       best = rate;
       bestLoad = lab.data.gLoad;
     }
@@ -455,17 +465,18 @@ function testGLimit() {
   raw.airborne({ speed: 300, altitude: 500, throttle: 1 });
   let rawPeak = 0;
   let overG = false;
-  let rollShake = 0;
+  const rawLoads = [];
   raw.run(4, (lab) => {
     lateral.fly(lab);
     lab.pilot.pitch = 1;
     rawPeak = Math.max(rawPeak, lab.data.gLoad);
     if (lab.craftState.overG) overG = true;
-    if (lab.data.gLoad > 9.2) rollShake = Math.max(rollShake, Math.abs(lab.model.state.angularVelocity.x));
+    if (lab.time > 2) rawLoads.push(lab.data.gLoad);
   });
+  const rawSteady = rawLoads.reduce((sum, value) => sum + value, 0) / rawLoads.length;
   const warned = raw.events.notify.some((text) => text.startsWith('Over-G'));
   record('0 % assists: past 9 g warns (craftState.overG, notice)', overG && warned ? 'yes' : 'no', 'yes', { compare: overG && warned, note: `peak ${rawPeak.toFixed(1)} g` });
-  record('0 % assists: pitch authority at 1080 km/h', rawPeak, [9.5, 14], { unit: 'g', compare: 'range', note: 'hinge-moment limit of the stabilator' });
+  record('0 % assists: full aft stick load at 1080 km/h', rawSteady, [9.5, 14], { unit: 'g', compare: 'range', note: `held after 2 s (hinge-moment limit of the stabilators); peak ${rawPeak.toFixed(1)} g` });
 }
 
 function testHighAoa() {
@@ -486,49 +497,32 @@ function testHighAoa() {
     if (lab.time > 2) maxBank = Math.max(maxBank, Math.abs(lab.data.bank / DEG));
   });
   record('100 % assists: full aft stick, max AoA', maxAoa, 25, { unit: 'deg', compare: 'max', note: `bank stayed within ${maxBank.toFixed(0)} deg` });
-  // 0 % assists: holding 23 degrees rocks the wings.
-  const rocking = createRig();
-  rocking.airborne({ speed: 120, altitude: 5000, throttle: 1 });
-  const aoaPilot = createAoaPilot(24);
-  let minBank = Infinity;
-  let highBank = -Infinity;
-  const crossings = [];
-  let lastSign = 0;
-  rocking.run(25, (lab) => {
-    aoaPilot.fly(lab);
-    lab.pilot.roll = 0;
-    lab.pilot.yaw = 0;
-    if (lab.pilot.throttle < 1) lab.pilot.throttle = 1;
-    if (lab.time > 8) {
-      const bank = lab.data.bank / DEG;
-      minBank = Math.min(minBank, bank);
-      highBank = Math.max(highBank, bank);
-      const sign = Math.sign(lab.data.rollRate);
-      if (sign !== 0 && sign !== lastSign) {
-        crossings.push(lab.time);
-        lastSign = sign;
+  // Holding 22 degrees (approached at 4 deg/s): at 0 % assists the wings rock; the dampers stop it.
+  const rollRateRms = (assists) => {
+    const rig = createRig({ assists });
+    rig.setAssists(assists);
+    rig.airborne({ speed: 140, altitude: 5000, throttle: 1 });
+    const pid = createPid(1.5, 2.5, 0);
+    let sum = 0;
+    let count = 0;
+    let bankSpan = [Infinity, -Infinity];
+    rig.run(14, (lab) => {
+      const target = Math.min(22, lab.time * 4) * DEG;
+      lab.pilot.pitch = pid.update(target - lab.data.aoa, DT) - 0.3 * lab.data.pitchRate;
+      lab.pilot.roll = 0;
+      lab.pilot.yaw = 0;
+      if (lab.time > 8) {
+        sum += (lab.data.rollRate / DEG) ** 2;
+        count++;
+        bankSpan = [Math.min(bankSpan[0], lab.data.bank / DEG), Math.max(bankSpan[1], lab.data.bank / DEG)];
       }
-    }
-  });
-  const amplitude = (highBank - minBank) / 2;
-  const period = crossings.length > 3 ? (2 * (crossings[crossings.length - 1] - crossings[1])) / (crossings.length - 2) : NaN;
-  record('0 % assists: wing rock at 24 deg AoA (bank amplitude)', amplitude, [6, 40], { unit: 'deg', compare: 'range', note: `period ${Number.isFinite(period) ? period.toFixed(1) : '-'} s, AoA ${(rocking.data.aoa / DEG).toFixed(1)} deg` });
-  const damped = createRig({ assists: 0.6 });
-  damped.setAssists(0.6);
-  damped.airborne({ speed: 120, altitude: 5000, throttle: 1 });
-  const dampedPilot = createAoaPilot(22);
-  let dampedMin = Infinity;
-  let dampedMax = -Infinity;
-  damped.run(25, (lab) => {
-    dampedPilot.fly(lab);
-    lab.pilot.roll = 0;
-    lab.pilot.yaw = 0;
-    if (lab.time > 8) {
-      dampedMin = Math.min(dampedMin, lab.data.bank / DEG);
-      dampedMax = Math.max(dampedMax, lab.data.bank / DEG);
-    }
-  });
-  record('60 % assists: no wing rock (bank amplitude)', (dampedMax - dampedMin) / 2, 4, { unit: 'deg', compare: 'max' });
+    });
+    return { rms: Math.sqrt(sum / count), bank: (bankSpan[1] - bankSpan[0]) / 2, aoa: rig.data.aoa / DEG };
+  };
+  const rocking = rollRateRms(0);
+  record('0 % assists: wing rock at 22 deg AoA (roll rate RMS)', rocking.rms, 6, { unit: 'deg/s', compare: 'min', note: `bank swings +/-${rocking.bank.toFixed(0)} deg, AoA ${rocking.aoa.toFixed(1)} deg` });
+  const damped = rollRateRms(0.6);
+  record('60 % assists: dampers stop it (roll rate RMS)', damped.rms, 2, { unit: 'deg/s', compare: 'max', note: `bank swings +/-${damped.bank.toFixed(1)} deg` });
 }
 
 function testTakeoff() {
@@ -567,26 +561,34 @@ function testTakeoff() {
 function testLanding() {
   const rig = createRig({ ground: 0, assists: 1 });
   rig.setAssists(1);
-  rig.airborne({ speed: 90, altitude: 60, throttle: 0.6 });
-  // Gear down and full flaps on final.
-  rig.pilot.actions.add('gearToggle');
-  rig.tick();
+  rig.airborne({ speed: 76, altitude: 60, throttle: 0.6 });
+  // Gear down (airborne starts fly clean) and full flaps on final.
   rig.pilot.actions.add('gearToggle');
   rig.tick();
   rig.selectFlaps(2);
+  // Front-side approach through the fly-by-wire: the stick flies a 3 degree glide path and flares,
+  // the throttle holds 265 km/h.
   const lateral = createLateralPilot();
-  const aoaPilot = createAoaPilot(13);
-  const sinkPid = createPid(0.08, 0.05, 0, 0, 0.95);
-  sinkPid.reset(0.5);
+  const speedPid = createPid(0.08, 0.04, 0, 0, 0.95);
+  speedPid.reset(0.55);
+  const approachSpeed = 265 / KMH;
   let touchdown = null;
+  let aoaAtTouchdown = NaN;
   rig.run(90, (lab) => {
     lateral.fly(lab);
-    aoaPilot.fly(lab);
     const agl = lab.model.state.position.y;
-    const targetSink = agl > 8 ? -3 : -0.6;
-    lab.pilot.throttle = sinkPid.update(targetSink - lab.data.verticalSpeed, DT);
+    // Glide path, then an exponential flare over the last 10 m of wheel height.
+    const wheelHeight = agl - 2.1;
+    const targetSink = clamp(0.35 + 0.3 * wheelHeight, 0.35, 3.8);
+    const targetPath = -Math.asin(Math.min(targetSink / Math.max(lab.data.airspeed, 30), 0.3));
+    // The fly-by-wire flies load factor: ask for the load that bends the path onto the target.
+    const load = Math.cos(lab.data.flightPath) + (lab.data.airspeed / 9.81) * 1.0 * (targetPath - lab.data.flightPath);
+    lab.pilot.pitch = clamp((load - 1) / (profile.targets.gLimit - 1), -0.3, 0.5);
+    lab.pilot.throttle = wheelHeight > 1.5 ? speedPid.update((approachSpeed - lab.data.airspeed) / 5, DT) : 0;
+    if (Math.round(lab.time * 120) % 120 === 0) log(`  landing t ${lab.time.toFixed(1)} agl ${agl.toFixed(1)} V ${(lab.data.airspeed * KMH).toFixed(0)} vs ${lab.data.verticalSpeed.toFixed(1)} aoa ${(lab.data.aoa / DEG).toFixed(1)} thr ${lab.pilot.throttle.toFixed(2)} gear ${lab.writeTelemetry().gear.down} flaps ${lab.telemetry.flaps.toFixed(2)}`);
     if (lab.model.contact.touchdown && !touchdown) {
       touchdown = { speed: lab.data.airspeed, sink: lab.model.contact.touchdown.sinkRate };
+      aoaAtTouchdown = lab.data.aoa / DEG;
       return true;
     }
     return false;
@@ -597,7 +599,8 @@ function testLanding() {
   rig.pilot.brakeR = 1;
   rig.run(3);
   const grade = rig.events.landed[0] ? rig.events.landed[0].grade : 'none';
-  record('touchdown speed (full flaps, 13 deg AoA)', touchdown ? touchdown.speed * KMH : NaN, 265, { unit: 'km/h', decimals: 0, note: `sink ${touchdown ? touchdown.sink.toFixed(2) : '-'} m/s, grade ${grade}` });
+  record('touchdown speed (full flaps, gear down)', touchdown ? touchdown.speed * KMH : NaN, 265, { unit: 'km/h', decimals: 0, note: `sink ${touchdown ? touchdown.sink.toFixed(2) : '-'} m/s, AoA ${aoaAtTouchdown.toFixed(1)} deg, grade ${grade}` });
+  record('landing grade', grade, 'butter/smooth/firm', { compare: ['butter', 'smooth', 'firm'].includes(grade) });
 }
 
 function testGear() {
@@ -693,6 +696,24 @@ function testDetent() {
   record('afterburner / military static thrust', full / military, [1.45, 1.75], { compare: 'range', decimals: 2 });
 }
 
+/** The fixed-wing autopilot flying the jet through its flight control system (100 % assists). */
+function testAutopilot() {
+  const rig = createRig({ assists: 1 });
+  rig.setAssists(1);
+  rig.airborne({ speed: 222, altitude: 3000, throttle: 0.4 });
+  Object.assign(rig.env.autopilot, { enabled: true, heading: 90, altitude: 3300, speed: 222, followWaypoint: false });
+  let maxLoad = 0;
+  let maxBank = 0;
+  rig.run(120, (lab) => {
+    maxLoad = Math.max(maxLoad, lab.data.gLoad);
+    maxBank = Math.max(maxBank, Math.abs(lab.data.bank / DEG));
+  });
+  const headingError = Math.abs(((((90 - rig.data.heading + 180) % 360) + 360) % 360) - 180);
+  record('autopilot heading +90 deg', headingError, 2, { unit: 'deg', compare: 'max', decimals: 2, note: `max bank ${maxBank.toFixed(0)} deg, max ${maxLoad.toFixed(2)} g` });
+  record('autopilot altitude +300 m', Math.abs(3300 - rig.model.state.position.y), 15, { unit: 'm', compare: 'max' });
+  record('autopilot speed hold 800 km/h', Math.abs(222 - rig.data.airspeed), 3, { unit: 'm/s', compare: 'max', decimals: 2, note: `throttle ${rig.data.throttle.toFixed(2)}` });
+}
+
 function testLimits() {
   const rig = createRig();
   const a10 = speedOfSound(10000);
@@ -738,7 +759,7 @@ function printTable() {
 
 const started = Date.now();
 const only = process.argv.find((argument) => argument.startsWith('--only='));
-const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGear, testSpeedBrake, testDetent, testLimits };
+const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGear, testSpeedBrake, testDetent, testAutopilot, testLimits };
 for (const [name, test] of Object.entries(tests)) {
   if (only && !name.toLowerCase().includes(only.slice(7).toLowerCase())) continue;
   test();

@@ -255,6 +255,9 @@ export function createJetExtension({ profile, bus, craftState = {}, limits = {},
     const aoa = tick.aoa;
     const rates = tick.angularVelocity;
 
+    // Pitch damping of the wing, strakes and fuselage (the tail's share comes from the airframe model).
+    momentBody.x -= qS * tick.meanChord * handling.pitchDamping * ((rates.x * tick.meanChord) / (2 * airspeed));
+
     // Aerodynamic centre moving aft through the transonic band: more nose-down moment per unit lift.
     const shift = transonic.acShift * smoothstep(transonic.acShiftFrom, transonic.acShiftFull, air.mach);
     momentBody.x -= qS * tick.meanChord * shift * tick.wingCl;

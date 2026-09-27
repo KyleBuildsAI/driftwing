@@ -43,6 +43,7 @@ function createMemory() {
     aoaRate: 0,
     lastSideslip: NaN,
     command: 1,
+    steadyRate: 0,
   };
 }
 
@@ -107,10 +108,13 @@ function flyByWire(stick, data, weights, memory, dt, tuning) {
   // G limiter: past the limit the command itself never goes (it blends in with its weight).
   const gCap = gLimit + (1 - weights.gLimiter) * gLimit;
   command = clamp(command, negativeLimit * (1 + (1 - weights.gLimiter)), gCap);
-  // AoA limiter: the load available at the AoA limit, from the lift slope through zero lift.
+  // AoA limiter: the load available at the AoA limit, from the lift slope through zero lift, and past
+  // the limit a direct push on the stabilators (below, aoaExcess).
+  let aoaExcess = 0;
   if (weights.aoaLimiter > 0) {
     const predicted = data.aoa + tuning.aoaLead * memory.aoaRate;
     const limit = data.aoaCritical - tuning.aoaMargin * DEG;
+    aoaExcess = weights.aoaLimiter * (Math.max(0, predicted - limit) + Math.min(0, predicted - tuning.negativeAoa * DEG));
     if (predicted > 4 * DEG) {
       const available = Math.max(data.gLoad, 0.2) * (limit / predicted);
       command = Math.min(command, command + weights.aoaLimiter * (available - command));
@@ -126,10 +130,14 @@ function flyByWire(stick, data, weights, memory, dt, tuning) {
   const scale = clamp(tuning.referencePressure / Math.max(data.dynamicPressure, 500), 0.05, tuning.maxScale);
   const feedForward = tuning.feedForward * scale * (command - 1);
   const proportional = tuning.gain * scale * error;
-  const output = memory.integral + feedForward + proportional;
+  // Pitch-rate damping through a washout: it damps the short period without fighting a steady pull.
+  memory.steadyRate += (data.pitchRate - memory.steadyRate) * (1 - Math.exp(-dt / tuning.rateWashoutSeconds));
+  const damping = tuning.rateDamping * scale * (data.pitchRate - memory.steadyRate);
+  const protection = tuning.aoaFeedback * scale * aoaExcess;
+  const output = memory.integral + feedForward + proportional - damping - protection;
   const saturated = (output >= 1 && error > 0) || (output <= -1 && error < 0);
-  if (!saturated) memory.integral = clamp(memory.integral + tuning.integral * scale * error * dt, -1, 1);
-  return clamp(memory.integral + feedForward + proportional - tuning.rateDamping * scale * data.pitchRate, -1, 1);
+  if (!saturated) memory.integral = clamp(memory.integral + tuning.integral * Math.pow(scale, tuning.integralExponent) * (error - tuning.aoaBleed * aoaExcess) * dt, -1, 1);
+  return clamp(memory.integral + feedForward + proportional - damping - protection, -1, 1);
 }
 
 registerAssistHandler(JET_MODEL_KIND, Object.freeze({
@@ -157,7 +165,9 @@ registerAssistHandler(JET_MODEL_KIND, Object.freeze({
     if (weights.dampers > 0) damp(controls, data, weights.dampers, tuning);
 
     const stick = clamp(Number.isFinite(controls.pitch) ? controls.pitch : 0, -1, 1);
-    const fbw = weights.flyByWire;
+    // The autopilot's loops are tuned for direct stabilators (they close their own load loop), so it
+    // flies with the direct law and the dampers.
+    const fbw = autopilotFlying ? 0 : weights.flyByWire;
     const direct = weights.autoTrim > 0 && !autopilotFlying ? autoTrim(stick, data, weights.autoTrim * (1 - fbw), memory, dt, tuning) : stick;
     if (fbw > 0) {
       const stabilator = flyByWire(stick, data, weights, memory, dt, tuning);
