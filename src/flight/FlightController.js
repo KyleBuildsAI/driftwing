@@ -586,6 +586,12 @@ export function createFlightController(ctx) {
       levelQuaternion(heading, pose.quaternion);
       vectorFromHeading(heading, pose.velocity).multiplyScalar(arcadeSpeed.CRUISE);
     }
+    // In the air the velocity carries over, but never below the arcade's soft-stall exit speed: a SIM
+    // craft flying slower than CLASSIC can (the glider's SIM cruise is under the arcade stall) would
+    // otherwise drop its nose the moment it switched. The rendered pose blends as always.
+    const classicFloor = arcadeSpeed.STALL + CLASSIC_STALL_MARGIN;
+    const carried = pose.velocity.length();
+    if (!onGround && carried > 1 && carried < classicFloor) pose.velocity.multiplyScalar(classicFloor / carried);
     // Craft without an engine in SIM (throttle 'none') and craft taking off from the ground cruise.
     if (onGround || craft.inputProfile?.throttle === 'none' || !Number.isFinite(pose.throttle)) pose.throttle = craft.arcadeProfile.AUTOPILOT.CRUISE_THROTTLE;
     // A SIM altitude hold may sit above the CLASSIC ceiling; hold what CLASSIC can reach instead.
