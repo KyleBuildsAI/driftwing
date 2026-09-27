@@ -20,6 +20,10 @@
 //   crosswind    bush plane: taxi 30 s in a 6 m/s crosswind with rudder and differential brakes
 //   autopilot    heading, altitude and speed hold through the flight model; engagement from a dive
 //   rest         parked on its gear for 10 s: settles without bouncing, creeping or striking
+//   systems      glider: spoilers on both toe brakes / the airbrake action, no-flaps and no-engine
+//                notices; bush plane: flap notches and travel, the flap lever with hysteresis, engine
+//                off (windmilling) and restart, and a retractable-gear variant of its profile (the
+//                path the jet takes: stays down on the ground, transit, drag, wheels-up belly strike)
 //
 // Usage: node tools/flight-lab.mjs [--craft glider|bushplane|all] [--verbose]
 // Prints a table (measured vs target, tolerance about 10 %) and exits non-zero if any check fails.
@@ -750,6 +754,130 @@ function rest(craft) {
   return { moved: rig.model.state.position.distanceTo(start), maxVertical, strike, contacts: rig.model.contact.contacts, onGround: rig.data.onGround };
 }
 
+/**
+ * Bush plane systems: three flapsDown presses select notch 3 and the flaps travel there in their
+ * deploy time; the flap lever picks notches with hysteresis; the engine switch cuts the power
+ * (the prop windmills) and restarts it.
+ */
+function bushSystems() {
+  const rig = createRig(bushplane);
+  rig.airborne({ speed: 30, altitude: 900, throttle: 0.6 });
+  const lateral = createLateralPilot();
+  const speed = createSpeedPilot(30);
+  const fly = (lab) => {
+    lateral.fly(lab);
+    speed.fly(lab);
+    lab.pilot.throttle = 0.6;
+  };
+  const telemetry = () => {
+    rig.model.writeTelemetry(rig.telemetry);
+    return rig.telemetry;
+  };
+  for (let press = 0; press < 3; press++) {
+    rig.pilot.actions.add('flapsDown');
+    rig.tick();
+  }
+  const notch = telemetry().flapNotch;
+  rig.run(1.5, fly);
+  const halfway = telemetry().flaps;
+  rig.run(2, fly);
+  const deployed = telemetry().flaps;
+  // Flap lever: a baseline reading, then positions near, between and past the notches.
+  const lever = [];
+  for (const position of [1, 0.36, 0.45, 0.62, 0.02]) {
+    rig.pilot.flaps = position;
+    rig.run(0.1, fly);
+    lever.push(telemetry().flapNotch);
+  }
+  rig.pilot.actions.add('engineToggle');
+  rig.run(4, fly);
+  const off = { running: telemetry().engineOn, rpm: telemetry().rpm, notify: rig.events.notify.includes('Engine off.') };
+  rig.pilot.actions.add('engineToggle');
+  rig.run(3, fly);
+  const on = { running: telemetry().engineOn, rpm: telemetry().rpm };
+  return { notch, halfway, deployed, lever, off, on };
+}
+
+/** Glider systems: spoilers on the airbrake action and on both toe brakes in the air (not one). */
+function gliderSystems() {
+  const rig = createRig(glider);
+  rig.airborne({ speed: 28, altitude: 900 });
+  const lateral = createLateralPilot();
+  const telemetry = () => {
+    rig.model.writeTelemetry(rig.telemetry);
+    return rig.telemetry.airbrake;
+  };
+  rig.pilot.brakeL = 1;
+  rig.run(1, (lab) => lateral.fly(lab));
+  const oneToe = telemetry();
+  rig.pilot.brakeR = 1;
+  rig.run(1, (lab) => lateral.fly(lab));
+  const bothToes = telemetry();
+  rig.pilot.brakeL = 0;
+  rig.pilot.brakeR = 0;
+  rig.run(1.5, (lab) => lateral.fly(lab));
+  const released = telemetry();
+  rig.pilot.held.add('airbrake');
+  rig.run(1, (lab) => lateral.fly(lab));
+  const held = telemetry();
+  rig.pilot.held.clear();
+  rig.pilot.actions.add('flapsDown');
+  rig.pilot.actions.add('engineToggle');
+  rig.tick();
+  return { oneToe, bothToes, released, held, notices: rig.events.notify.slice(-2) };
+}
+
+/**
+ * Retractable gear, the path the jet will take: the bush plane's profile with retracting wheels. The
+ * gear stays down on the ground, travels in its transit time in the air, lowers the drag, and a
+ * wheels-up touchdown is a body strike.
+ */
+function retractableGear() {
+  const base = bushplane.simProfile;
+  const profile = { ...base, gear: { retractable: true, transitSeconds: 4, cdIncrement: 0.02 }, contacts: base.contacts.map((contact) => (contact.gear ? { ...contact, retracts: true } : contact)) };
+  const craft = { ...bushplane, simProfile: profile };
+  const rig = createRig(craft);
+  const gear = () => {
+    rig.model.writeTelemetry(rig.telemetry);
+    return { ...rig.telemetry.gear };
+  };
+  rig.parked();
+  rig.run(1, () => false);
+  rig.pilot.actions.add('gearToggle');
+  rig.run(1, () => false);
+  const onGround = { gear: gear(), refused: rig.events.notify.includes('The gear stays down on the ground.') };
+  rig.airborne({ speed: 45, altitude: 600, throttle: 0.7 });
+  const lateral = createLateralPilot();
+  const altitude = createAltitudePilot(600);
+  const fly = (lab) => {
+    lateral.fly(lab);
+    altitude.fly(lab);
+    lab.pilot.throttle = 0.7;
+  };
+  rig.run(20, fly);
+  const speedDown = rig.data.airspeed;
+  rig.pilot.actions.add('gearToggle');
+  rig.run(2, fly);
+  const inTransit = gear();
+  rig.run(3, fly);
+  const retracted = gear();
+  rig.run(40, fly);
+  const speedUp = rig.data.airspeed;
+  // Wheels-up touchdown: settle onto flat ground at about 1 m/s sink.
+  rig.airborne({ speed: 25, altitude: 4, throttle: 0 });
+  const sink = createSinkPilot();
+  sink.target = -1;
+  let strike = null;
+  rig.run(8, (lab) => {
+    lateral.fly(lab);
+    sink.fly(lab);
+    lab.pilot.throttle = 0;
+    strike = strongestStrike(strike, lab.model.contact.bodyStrike);
+    return strike !== null;
+  });
+  return { onGround, inTransit, retracted, speedDown, speedUp, strike };
+}
+
 // ============================================================================================
 // SUITES
 // ============================================================================================
@@ -775,6 +903,9 @@ function runGlider() {
   record(name, 'Vne: 45 deg dive, clean', clean.top * KMH, targets.vne * KMH, { unit: 'km/h', compare: clean.overspeed && clean.telemetryOverspeed, note: `exceeds Vne ${(targets.vne * KMH).toFixed(0)} km/h -> overspeed warning ${clean.overspeed ? 'on' : 'off'}, flutter buffet` });
   const braked = dive(glider, { pitch: -45, spoilers: 1 });
   record(name, 'Vne: 45 deg dive, spoilers out', braked.top * KMH, targets.vne * KMH, { unit: 'km/h', compare: 'max', note: 'spoilers hold it below Vne' });
+  const systems = gliderSystems();
+  record(name, 'spoilers: both toe brakes in the air', systems.bothToes, 'one toe 0, both 1, released 0, airbrake 1', { decimals: 2, compare: systems.oneToe === 0 && systems.bothToes > 0.99 && systems.released === 0 && systems.held > 0.99, note: `one toe ${systems.oneToe}, released ${systems.released}, airbrake held ${systems.held.toFixed(2)}` });
+  record(name, 'no flaps / no engine notices', systems.notices.length, 2, { decimals: 0, compare: systems.notices.length === 2, note: systems.notices.join(' | ') });
   commonTests(name, glider);
 }
 
@@ -796,6 +927,12 @@ function runBushplane() {
   record(name, 'climb, full power', best.climb, targets.climbRate, { unit: 'm/s', decimals: 2, note: `best at ${(best.speed * KMH).toFixed(0)} km/h` });
   const diveResult = dive(bushplane, { pitch: -35 });
   record(name, 'Vne: 35 deg dive, idle', diveResult.top * KMH, targets.vne * KMH, { unit: 'km/h', compare: diveResult.overspeed, note: `overspeed warning ${diveResult.overspeed ? 'on' : 'off'} past ${(targets.vne * KMH).toFixed(0)} km/h` });
+  const systems = bushSystems();
+  record(name, 'flaps: 3 presses -> notch 3, travel', systems.deployed, 1, { decimals: 2, compare: systems.notch === 3 && systems.halfway > 0.3 && systems.halfway < 0.7 && systems.deployed > 0.99, note: `notch ${systems.notch}, ${systems.halfway.toFixed(2)} after 1.5 s, ${systems.deployed.toFixed(2)} after 3.5 s (3 s travel)` });
+  record(name, 'flap lever with notch hysteresis', systems.lever.join(' '), '3 1 1 2 0', { compare: systems.lever.join(' ') === '3 1 1 2 0', note: 'lever at 1, 0.36, 0.45 (held), 0.62, 0.02' });
+  record(name, 'engine off / restart', systems.on.rpm, 'off: windmill, on: power', { decimals: 2, compare: !systems.off.running && systems.off.rpm < 0.4 && systems.off.notify && systems.on.running && systems.on.rpm > 0.6, note: `off: rpm ${systems.off.rpm.toFixed(2)} (windmilling), on: rpm ${systems.on.rpm.toFixed(2)}` });
+  const retract = retractableGear();
+  record(name, 'retractable gear variant: transit, drag, belly', retract.speedUp * KMH, 'faster with the gear up', { unit: 'km/h', compare: retract.onGround.gear.down && retract.onGround.refused && retract.inTransit.transit > 0.5 && !retract.retracted.down && retract.retracted.transit === 0 && retract.speedUp > retract.speedDown && retract.strike !== null, note: `stays down on the ground; ${retract.inTransit.transit.toFixed(2)} transit at 2 s, up at 5 s; cruise ${(retract.speedDown * KMH).toFixed(0)} -> ${(retract.speedUp * KMH).toFixed(0)} km/h; wheels-up: ${describeStrike(retract.strike)}` });
   const departure = takeoff();
   record(name, 'take-off ground roll (flaps 1)', departure.liftoff ? departure.liftoff.distance : Infinity, 130, { unit: 'm', compare: 'max', decimals: 0, note: departure.liftoff ? `lift-off at ${(departure.liftoff.speed * KMH).toFixed(0)} km/h` : 'no lift-off' });
   record(name, 'take-off distance to 15 m', departure.clear ? departure.clear.distance : Infinity, 300, { unit: 'm', compare: 'max', decimals: 0, note: describeStrike(departure.strike) });
