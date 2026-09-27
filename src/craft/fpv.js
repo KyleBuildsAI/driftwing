@@ -114,7 +114,7 @@ const simProfile = Object.freeze({
   mass: 0.65, // kg all-up: frame, four 2207 motors, 6S 1100 mAh pack, camera, VTX
   thrustToWeight: 8,
   // kg m^2 about body x (pitch), y (yaw) and z (roll).
-  inertia: Object.freeze({ pitch: 0.0021, yaw: 0.0036, roll: 0.0018 }),
+  inertia: Object.freeze({ pitch: 0.003, yaw: 0.0052, roll: 0.0028 }),
   // The battery on top lifts the centre of mass above the frame plate.
   centerOfMass: Object.freeze([0, 0.016, 0]),
   // Betaflight motor order (props in): 1 rear right CW, 2 front right CCW, 3 rear left CCW, 4 front left CW.
@@ -142,7 +142,7 @@ const simProfile = Object.freeze({
   }),
   aero: Object.freeze({
     // Drag area (Cd x A, m^2) along body x (side), y (top: props and plates) and z (front).
-    dragArea: Object.freeze([0.014, 0.028, 0.012]),
+    dragArea: Object.freeze([0.014, 0.031, 0.012]),
     // Rotor in-plane drag (N per m/s of air across the discs) at full motor speed.
     rotorDrag: 0.06,
     // N m s about x, y, z.
@@ -186,10 +186,11 @@ const simProfile = Object.freeze({
   // Four feet under the motors (gear: a quad lands on them) and body points: battery top, antenna
   // and the prop tips (the front tip covers the camera, which sits inside the frame). Springs are soft for a 650 g craft so light touches bounce.
   contacts: Object.freeze([
-    Object.freeze({ id: 'footRearRight', kind: 'skid', gear: true, position: Object.freeze([MOTOR_X, -0.009, MOTOR_Z]), spring: 1200, damping: 8, friction: 0.6 }),
-    Object.freeze({ id: 'footFrontRight', kind: 'skid', gear: true, position: Object.freeze([MOTOR_X, -0.009, -MOTOR_Z]), spring: 1200, damping: 8, friction: 0.6 }),
-    Object.freeze({ id: 'footRearLeft', kind: 'skid', gear: true, position: Object.freeze([-MOTOR_X, -0.009, MOTOR_Z]), spring: 1200, damping: 8, friction: 0.6 }),
-    Object.freeze({ id: 'footFrontLeft', kind: 'skid', gear: true, position: Object.freeze([-MOTOR_X, -0.009, -MOTOR_Z]), spring: 1200, damping: 8, friction: 0.6 }),
+    Object.freeze({ id: 'footRearRight', kind: 'skid', gear: true, position: Object.freeze([MOTOR_X, -0.009, MOTOR_Z]), spring: 1200, damping: 4.5, friction: 0.6 }),
+    Object.freeze({ id: 'footFrontRight', kind: 'skid', gear: true, position: Object.freeze([MOTOR_X, -0.009, -MOTOR_Z]), spring: 1200, damping: 4.5, friction: 0.6 }),
+    Object.freeze({ id: 'footRearLeft', kind: 'skid', gear: true, position: Object.freeze([-MOTOR_X, -0.009, MOTOR_Z]), spring: 1200, damping: 4.5, friction: 0.6 }),
+    Object.freeze({ id: 'footFrontLeft', kind: 'skid', gear: true, position: Object.freeze([-MOTOR_X, -0.009, -MOTOR_Z]), spring: 1200, damping: 4.5, friction: 0.6 }),
+    Object.freeze({ id: 'belly', kind: 'skid', gear: true, position: Object.freeze([0, -0.007, 0]), spring: 1500, damping: 12, friction: 0.6 }),
     Object.freeze({ id: 'batteryFrontLeft', kind: 'body', gear: false, position: Object.freeze([-0.019, 0.07, -0.038]), spring: 900, damping: 5, friction: 0.5 }),
     Object.freeze({ id: 'batteryFrontRight', kind: 'body', gear: false, position: Object.freeze([0.019, 0.07, -0.038]), spring: 900, damping: 5, friction: 0.5 }),
     Object.freeze({ id: 'batteryRearLeft', kind: 'body', gear: false, position: Object.freeze([-0.019, 0.07, 0.038]), spring: 900, damping: 5, friction: 0.5 }),
