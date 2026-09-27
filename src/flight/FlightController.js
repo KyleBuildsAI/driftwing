@@ -417,12 +417,16 @@ export function createFlightController(ctx) {
     if (progress >= 1 || !result) speedBlend.active = false;
   }
 
-  /** Puts the active model at pose (both modes) and refreshes everything derived from it. */
-  function resetActiveModel(pose, { trim = true } = {}) {
+  /**
+   * Puts the active model at pose (both modes) and refreshes everything derived from it. An airborne
+   * SIM pose is trimmed (spawns, respawns, airstarts, tow release, craft switches: level flight at the
+   * craft's SIM cruise, or the tow's velocity, with the attitude and elevator for 1 g).
+   */
+  function resetActiveModel(pose) {
     if (mode === 'sim' && sim) {
       speedBlend.active = false;
       sim.reset(pose);
-      if (trim && !pose.onGround) startSpeedBlend(trimSim());
+      if (!pose.onGround) startSpeedBlend(trimSim());
       resetInterpolationFromModel();
       writePlayerFromSim();
     } else {
