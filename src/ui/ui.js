@@ -1,14 +1,20 @@
 import * as THREE from 'three/webgpu';
 import { clamp, wrapDegrees, vectorFromHeading, bearingTo, isFiniteVector, isFiniteQuaternion } from '../core/util.js';
 import { CONFIG } from '../core/config.js';
-import { Copilot, RemoteCopilot } from '../copilot/copilot.js';
+import { Copilot } from '../copilot/copilot.js';
 import { storage } from '../core/storage.js';
+import { createCraftPicker } from './craftPicker.js';
+import { createHotasPrompt } from './hotasPrompt.js';
+import { createModePill } from './modePill.js';
+import { createSettingsPanel } from './settingsPanel.js';
+import { createStatusBadge } from '../dev/statusBadge.js';
 
 /**
  * UI: warm glass HUD (compass tape, flight instruments, waypoint / ring marker,
- * status chips), WREN subtitles + live transcript, command bar, toasts and
- * banners, Journal / Settings / Help / Menu panels, touch controls, photo-mode
- * chrome, first-run hint, idle auto-hide and every UI hotkey.
+ * status chips, CLASSIC | SIM pill and craft picker), WREN subtitles + live
+ * transcript, command bar, toasts, the HOTAS prompt and banners, Journal /
+ * Settings / Help / Menu panels, touch controls, photo-mode chrome, the dev
+ * status badge, first-run hint, idle auto-hide and every UI hotkey.
  * DOM writes happen only when a displayed value changes; positions use
  * compositor-only transforms; nothing is allocated per frame except the short
  * strings for values that actually changed.
@@ -47,7 +53,6 @@ export function createUISystem(ctx) {
     error: 'Voice input hit a snag. Tap to try again',
   };
   const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-  const SEED_PATTERN = /^[A-Za-z0-9-]{1,24}$/;
   const SEED_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const FIRST_RUN_KEY = 'driftwing.ui.firstRunHintSeen';
   const MAX_TOASTS = 2;
@@ -160,10 +165,8 @@ export function createUISystem(ctx) {
     journalSeed: requireElement('dw-journal-seed'),
     journalBody: requireElement('dw-journal-body'),
     menuSeed: requireElement('dw-menu-seed'),
-    qualityNote: requireElement('dw-quality-note'),
-    endpointInput: requireElement('dw-set-endpoint'),
-    seedForm: requireElement('dw-seed-form'),
-    seedInput: requireElement('dw-seed-input'),
+    modePill: requireElement('dw-mode-pill'),
+    craftPicker: requireElement('dw-craft-picker'),
     touchControls: requireElement('dw-touch-controls'),
     stickZone: requireElement('dw-stick-zone'),
     stick: requireElement('dw-stick'),
@@ -855,7 +858,8 @@ export function createUISystem(ctx) {
     dom.debugDraws.textContent = `${drawCalls} draws · ${formatCount(info.triangles)} tris`;
   }
   function updateDebugBadge(realDt) {
-    if (!isDebugVisible() || photoActive) return;
+    // The dev status badge shows everything this one does and takes its place while visible.
+    if (!isDebugVisible() || photoActive || statusBadge.isVisible()) return;
     debugTimer -= realDt;
     if (debugTimer > 0) return;
     debugTimer = 0.5;
@@ -1021,6 +1025,38 @@ export function createUISystem(ctx) {
         toasts.splice(index, 1);
       }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Mode pill, craft picker, HOTAS prompt, dev status badge
+  // ---------------------------------------------------------------------------
+  function onModebarChoice() {
+    playBlip();
+    wake();
+  }
+  const modePill = createModePill({ element: dom.modePill, settings, bus, onToggle: onModebarChoice });
+  const craftPicker = createCraftPicker({ element: dom.craftPicker, settings, bus, craftRegistry: ctx.craftRegistry, onSelect: onModebarChoice });
+  const hotasPrompt = createHotasPrompt({
+    container: dom.toasts,
+    settings,
+    bus,
+    toast,
+    isPhotoMode: () => photoActive,
+    onAnswer: () => {
+      playBlip();
+      wake();
+    },
+  });
+  const statusBadge = createStatusBadge({ ctx, root, forced: params.get('debug') === '1' });
+
+  /** The mode the flight controller is flying (settings.mode until it reports one). */
+  function activeFlightMode() {
+    const mode = ctx.systems.flight?.getMode?.();
+    return mode === 'sim' || mode === 'classic' ? mode : settings.get('mode');
+  }
+  /** SIM hides the CLASSIC-only chrome (boost, barrel-roll buttons); see ui.css. */
+  function applyFlightMode() {
+    setRootClass('dw-sim', activeFlightMode() === 'sim');
   }
 
   // ---------------------------------------------------------------------------
@@ -1711,7 +1747,7 @@ export function createUISystem(ctx) {
       if (touchMode && commandOpen) closeCommandBar();
       releasePointerLock();
       if (next === 'journal') renderJournal();
-      if (next === 'settings') syncAllSettings();
+      if (next === 'settings') settingsPanel.syncAll();
       if (next === 'menu') dom.menuSeed.textContent = `Seed ${state.seed}`;
       journalStatsTimer = 2;
       playBlip();
@@ -1819,140 +1855,7 @@ export function createUISystem(ctx) {
   }
 
   // ---- Settings -------------------------------------------------------------------
-  const settingSwitches = Array.from(root.querySelectorAll('.dw-switch[data-setting]'));
-  const settingRanges = Array.from(root.querySelectorAll('.dw-range[data-setting]'));
-  const qualityButtons = Array.from(root.querySelectorAll('.dw-segmented[data-setting="quality"] button[data-value]'));
-  const settingValueLabels = new Map();
-  for (const label of root.querySelectorAll('[data-value-for]')) settingValueLabels.set(label.dataset.valueFor, label);
-
-  function rangeToSetting(kind, value) {
-    return kind === 'minutes' ? Math.round(value) * 60 : value;
-  }
-  function settingToRange(kind, value) {
-    return kind === 'minutes' ? clamp(Math.round((Number(value) || 360) / 60), 2, 30) : Number(value) || 0;
-  }
-  function formatSettingValue(kind, value) {
-    if (kind === 'minutes') return `${Math.round(value / 60)} min`;
-    if (kind === 'factor') return `${Number(value).toFixed(2)}×`;
-    if (kind === 'percent') return `${Math.round(Number(value) * 100)}%`;
-    return String(value);
-  }
-  function syncRange(range) {
-    const key = range.dataset.setting;
-    const kind = range.dataset.kind;
-    const value = settings.get(key);
-    const sliderValue = settingToRange(kind, value);
-    if (Number(range.value) !== sliderValue) range.value = String(sliderValue);
-    const min = Number(range.min);
-    const max = Number(range.max);
-    const fill = max > min ? ((Number(range.value) - min) / (max - min)) * 100 : 0;
-    range.style.setProperty('--dw-fill', `${fill.toFixed(1)}%`);
-    const label = settingValueLabels.get(key);
-    if (label) label.textContent = formatSettingValue(kind, value);
-  }
-  function syncQualityNote() {
-    const preference = settings.get('quality');
-    const running = ctx.quality && ctx.quality.name ? capitalize(ctx.quality.name) : '';
-    dom.qualityNote.textContent = preference === 'auto' ? `Auto, running at ${running || 'High'}` : capitalize(preference);
-  }
-  function syncSetting(key) {
-    for (const control of settingSwitches) {
-      if (control.dataset.setting === key) control.setAttribute('aria-checked', String(Boolean(settings.get(key))));
-    }
-    for (const range of settingRanges) if (range.dataset.setting === key) syncRange(range);
-    if (key === 'quality') {
-      const preference = settings.get('quality');
-      for (const button of qualityButtons) button.setAttribute('aria-checked', String(button.dataset.value === preference));
-      syncQualityNote();
-    }
-    if (key === 'remoteEndpoint' && document.activeElement !== dom.endpointInput) {
-      dom.endpointInput.value = settings.get('remoteEndpoint');
-      setEndpointInvalid(false);
-    }
-  }
-  function syncAllSettings() {
-    for (const key of Object.keys(settings.all())) syncSetting(key);
-  }
-  /** Same rule the remote brain applies: an absolute http(s) URL, or null. */
-  function validateEndpoint(value) {
-    const text = String(value || '').trim();
-    return text ? RemoteCopilot.validEndpoint(text) : null;
-  }
-  function setEndpointInvalid(invalid) {
-    dom.endpointInput.classList.toggle('dw-invalid', invalid);
-    dom.endpointInput.setAttribute('aria-invalid', String(invalid));
-  }
-  function commitEndpoint() {
-    const endpoint = validateEndpoint(dom.endpointInput.value);
-    if (!endpoint) {
-      setEndpointInvalid(true);
-      return false;
-    }
-    setEndpointInvalid(false);
-    dom.endpointInput.value = endpoint;
-    settings.set('remoteEndpoint', endpoint);
-    return true;
-  }
-
-  for (const control of settingSwitches) {
-    control.addEventListener('click', () => {
-      const key = control.dataset.setting;
-      const next = !settings.get(key);
-      if (key === 'remoteCopilot' && next && !commitEndpoint()) {
-        toast('Add a valid endpoint address first.', { kind: 'warning' });
-        return;
-      }
-      settings.set(key, next);
-      syncSetting(key);
-    });
-  }
-  for (const range of settingRanges) {
-    range.addEventListener('input', () => {
-      const key = range.dataset.setting;
-      const value = rangeToSetting(range.dataset.kind, Number(range.value));
-      if (Number.isFinite(value)) settings.set(key, value);
-      syncRange(range);
-    });
-  }
-  for (const button of qualityButtons) {
-    button.addEventListener('click', () => {
-      settings.set('quality', button.dataset.value);
-      syncSetting('quality');
-    });
-  }
-  dom.endpointInput.addEventListener('change', commitEndpoint);
-  dom.endpointInput.addEventListener('input', () => setEndpointInvalid(false));
-  dom.endpointInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      if (commitEndpoint()) dom.endpointInput.blur();
-    } else if (event.key === 'Escape') {
-      event.preventDefault();
-      dom.endpointInput.value = settings.get('remoteEndpoint');
-      setEndpointInvalid(false);
-      dom.endpointInput.blur();
-    }
-  });
-  dom.seedForm.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const seed = dom.seedInput.value.trim();
-    const valid = SEED_PATTERN.test(seed);
-    dom.seedInput.classList.toggle('dw-invalid', !valid);
-    dom.seedForm.classList.toggle('dw-invalid', !valid);
-    dom.seedInput.setAttribute('aria-invalid', String(!valid));
-    if (valid) navigateToSeed(seed);
-  });
-  dom.seedInput.addEventListener('input', () => {
-    dom.seedInput.classList.remove('dw-invalid');
-    dom.seedForm.classList.remove('dw-invalid');
-    dom.seedInput.setAttribute('aria-invalid', 'false');
-  });
-  dom.seedInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      dom.seedInput.blur();
-    }
-  });
+  const settingsPanel = createSettingsPanel({ panel: panels.settings, ctx, toast, navigateToSeed });
 
   // ---------------------------------------------------------------------------
   // Photo mode chrome
@@ -2499,12 +2402,12 @@ export function createUISystem(ctx) {
   });
   bus.on('settings:changed', (payload) => {
     if (!payload || !payload.key) return;
-    syncSetting(payload.key);
     if (payload.key === 'showFps') applyDebugVisibility();
     if (payload.key === 'hudAutoHide' && !payload.value) wake();
+    if (payload.key === 'mode') applyFlightMode();
   });
+  bus.onTyped('modeChanged', applyFlightMode);
   bus.on('quality:changed', () => {
-    syncQualityNote();
     debugTimer = 0;
   });
   bus.on('resize', measureLayout);
@@ -2522,7 +2425,7 @@ export function createUISystem(ctx) {
   if (params.get('touch') === '1' || coarsePointerQuery.matches) enableTouchMode();
   measureLayout();
   applyDebugVisibility();
-  syncAllSettings();
+  applyFlightMode();
   renderHint();
   updateTimeChip();
 
@@ -2611,8 +2514,16 @@ export function createUISystem(ctx) {
     if (hintState.visible || hintState.dodging) updateHintDodge(markerShown && targetState.kind !== null);
     if (touchMode && sliderState.pointerId === null) renderSlider(clamp(Number(state.player.throttle) || 0, 0, 1));
     updateDebugBadge(step);
+    statusBadge.update(step, photoActive);
+    craftPicker.update(step);
+    hotasPrompt.update(step);
     if (activePanel === 'journal') updateJournalStats(step);
+    if (activePanel === 'settings') settingsPanel.update(step);
   }
 
-  return { update, toast, setSubtitle, setMicState, showPanel, setPhotoMode, wake };
+  return {
+    update, toast, setSubtitle, setMicState, showPanel, setPhotoMode, wake,
+    /** v2 chrome for tests and other systems: the pill, picker, HOTAS prompt and settings tabs. */
+    modePill, craftPicker, hotasPrompt, settingsPanel, statusBadge,
+  };
 }
