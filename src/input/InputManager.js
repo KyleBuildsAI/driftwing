@@ -31,6 +31,8 @@ const LEVER_TARGETS = Object.freeze(['collective', 'flaps', 'trim', 'antenna']);
 /** Smallest lever change forwarded to CLASSIC's throttle target (avoids re-sending noise). */
 const LEVER_SEND_STEP = 0.002;
 const HOTAS_PROMPT = 'Press any button on your stick and throttle';
+/** Lever owners that are not a physical lever: rate inputs (keys, buttons), the wheel, touch, pointer. */
+const SOFT_LEVER_OWNERS = new Set(['rate', 'wheel', 'touch', 'pointer']);
 
 export function createInputManager(ctx) {
   const { state, settings, bus, input, controls, storage } = ctx;
@@ -424,6 +426,21 @@ export function createInputManager(ctx) {
     /** Live keyboard state for the controls panel (held key codes). */
     readKeyboard() {
       return { held: keyboardMouse.heldKeys() };
+    },
+
+    /**
+     * Ground start: a throttle (and collective) no physical lever holds, set by keys, the wheel or
+     * touch (or by a lever whose device has gone), goes to idle. A connected device lever keeps its
+     * position, since software cannot move it (the flight controller's parking brake covers that).
+     * Returns true when the throttle was reset.
+     */
+    idleThrottle() {
+      const soft = (lever) => SOFT_LEVER_OWNERS.has(lever.owner) || !deviceFrame.positions.some((candidate) => candidate.key === lever.owner);
+      if (soft(levers.collective)) controls.collective = 0;
+      if (!soft(levers.throttle)) return false;
+      controls.throttle = 0;
+      controls.afterburner = false;
+      return true;
     },
 
     /** Throttle as SIM sees it, with the afterburner detent from settings. */

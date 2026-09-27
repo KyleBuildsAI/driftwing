@@ -1,7 +1,7 @@
 // Flaps and gear panel. Left: the flap position on a notched scale (UP, 1, 2, ...) from the SIM
 // profile's notches, or, on craft without flaps, the spoiler / airbrake extension. Right: the
 // landing gear as three lamps (green down and locked, red in transit, dark up) or a FIXED plaque.
-// Bottom: BRAKE and airbrake lamps.
+// Bottom: BRAKE (PARK while the parking brake holds) and airbrake lamps.
 import { drawPlate, label, roundRect, lamp, clamp } from './gaugeKit.js';
 
 const SCALE = Object.freeze({ x: 48, top: 48, bottom: 150 });
@@ -74,10 +74,11 @@ export default Object.freeze({
       drawScale(pen, theme, [0, 0.5, 1], ['IN', '½', 'OUT'], Number.isFinite(flight.airbrake) ? flight.airbrake : 0, 'SPOILER');
     }
     drawGear(pen, theme, flight.gear);
-    const braking = Number.isFinite(flight.brakes) && flight.brakes > 0.05;
+    const parked = flight.parkingBrake === true;
+    const braking = parked || (Number.isFinite(flight.brakes) && flight.brakes > 0.05);
     const airbrake = Number.isFinite(flight.airbrake) && flight.airbrake > 0.05;
-    lamp(pen, 116, 150, 6, braking, theme.yellow, theme);
-    label(pen, 'BRAKE', 128, 150, { size: 10.5, color: braking ? theme.yellow : theme.textDim, weight: 700, align: 'left' });
+    lamp(pen, 116, 150, 6, braking, parked ? theme.red : theme.yellow, theme);
+    label(pen, parked ? 'PARK' : 'BRAKE', 128, 150, { size: 10.5, color: parked ? theme.red : braking ? theme.yellow : theme.textDim, weight: 700, align: 'left' });
     lamp(pen, 116, 172, 6, airbrake, theme.yellow, theme);
     label(pen, notches ? 'AIRBRK' : 'SPLR', 128, 172, { size: 10.5, color: airbrake ? theme.yellow : theme.textDim, weight: 700, align: 'left' });
     if (notches) label(pen, `NOTCH ${flight.flapNotch || 0}`, SCALE.x, 172, { size: 10, color: theme.textDim, weight: 650 });

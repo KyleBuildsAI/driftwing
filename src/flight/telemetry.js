@@ -68,6 +68,8 @@ export function createFlightTelemetry() {
     gear: { retractable: false, down: true, transit: 0 },
     airbrake: 0,
     brakes: 0,
+    /** SIM: the parking brake holds the wheels at idle after a ground start (parkingBrake.js). */
+    parkingBrake: false,
     trim: 0,
 
     onGround: false,
