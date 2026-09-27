@@ -436,14 +436,22 @@ export function createFlightController(ctx) {
     telemetryPrimed = false;
   }
 
-  /** Level flight at cruise (or a hover) at a point, heading kept: spawns, respawns, airstarts. */
+  /**
+   * Level flight at cruise (or a hover) at a point, heading kept: spawns, respawns, airstarts. In SIM
+   * the cruise is an airspeed, so the air's own motion at the point is added to the velocity.
+   */
   function airbornePose(position, heading) {
     const quaternion = levelQuaternion(heading);
     const speed = craft.spawn.hover ? 0 : mode === 'sim' ? simCruise() : arcadeCruise();
+    const velocity = vectorFromHeading(heading).multiplyScalar(speed);
+    if (mode === 'sim' && speed > 0 && ctx.wind && typeof ctx.wind.sample === 'function') {
+      ctx.wind.sample(position, state.time.elapsed, windSample);
+      if (isFiniteVector(windSample.vel)) velocity.add(windSample.vel);
+    }
     return {
       position: position.clone(),
       quaternion,
-      velocity: vectorFromHeading(heading).multiplyScalar(speed),
+      velocity,
       angularVelocity: new THREE.Vector3(),
       throttle: cruiseThrottle(),
       onGround: false,
