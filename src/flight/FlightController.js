@@ -5,6 +5,8 @@ import { createFixedStepClock } from '../core/clock.js';
 import { createControlState, copyControlState } from '../input/controlState.js';
 import { airDensity, speedOfSound, createFlightTelemetry, SEA_LEVEL_DENSITY } from './telemetry.js';
 import { flightModels as defaultFlightModels } from './models.js';
+import { trimModel } from './trim.js';
+import { primeAssists } from './assists.js';
 import { createCrashFade } from './crashFade.js';
 import { createAerotow, createRopeMaterial, createRopeStandIn, findNearestPeak, planPeakLaunch } from './relaunch.js';
 import { findFlatSpot, groundPose, vegetationClearance } from './placement.js';
@@ -48,6 +50,12 @@ const OVERRIDE_INPUT = 0.35;
 const OVERRIDE_SECONDS = 0.25;
 const AUTOPILOT_MIN_ALTITUDE = 60;
 const GRAVITY = 9.81;
+/** A CLASSIC -> SIM switch keeps the roll within the SIM bank protection. */
+const CONVERSION_MAX_BANK = 66 * DEG;
+/** Speed changes smaller than this (m/s) after a conversion are not worth a speed blend. */
+const SPEED_BLEND_MIN_CHANGE = 0.5;
+/** SIM -> CLASSIC: the arcade model starts at least this far (m/s) above its soft-stall speed. */
+const CLASSIC_STALL_MARGIN = 4;
 /** CLASSIC feels the wind field only as a gentle drift: shares of the calm (gust-free) air motion. */
 const CLASSIC_WIND = Object.freeze({ HORIZONTAL_SHARE: 0.25, VERTICAL_SHARE: 0.3, LAMBDA: 0.8 });
 
@@ -129,6 +137,8 @@ export function createFlightController(ctx) {
     rotation: new THREE.Quaternion(),
     base: new THREE.Quaternion(),
   };
+  /** After a conversion outside the craft's safe speed range: the airspeed eases into it over the blend. */
+  const speedBlend = { active: false, elapsed: 0, from: 0, to: 0, bank: 0 };
   const crash = { active: false, phase: 'idle', elapsed: 0, reason: '' };
   let crashFade = null;
   let tow = null;
@@ -237,6 +247,7 @@ export function createFlightController(ctx) {
   function disposeSim() {
     if (sim && typeof sim.dispose === 'function') sim.dispose();
     sim = null;
+    speedBlend.active = false;
   }
 
   function createSimModel(kind) {
@@ -349,10 +360,69 @@ export function createFlightController(ctx) {
     lastGoodSnapshot = sim.snapshot();
   }
 
+  /** The throttle the SIM model will see on its next tick (the craft input profile applied). */
+  function pilotThrottle() {
+    if (craft.inputProfile?.throttle === 'none') return 0;
+    return Number.isFinite(liveControls.throttle) ? liveControls.throttle : 0;
+  }
+
+  /**
+   * Trims the SIM model after an airborne reset: at its position and velocity, with the given bank
+   * (the model's own by default), the attitude and elevator for the 1 g load along its path (see
+   * trim.js); then primes the assists from the trimmed state. Model kinds without a trim handler
+   * stay as reset. Returns the trim result or null.
+   */
+  function trimSim(bank) {
+    if (!sim || (sim.contact && sim.contact.onGround)) return null;
+    sampleEnvironment(state.time.elapsed);
+    const result = trimModel(sim, {
+      env,
+      dt: clock.stepSeconds,
+      throttle: pilotThrottle(),
+      trim: Number.isFinite(liveControls.trim) ? liveControls.trim : 0,
+      bank,
+    });
+    if (!result) return null;
+    primeAssists(sim, result);
+    return result;
+  }
+
+  /**
+   * A switch keeps the velocity, but a speed outside the craft's safe range (from 1.25 x its stall
+   * speed up to 0.9 x its Vne) eases into the range over the 0.5 s blend: each tick until then the
+   * airspeed moves along its path toward the range and the model is re-trimmed at the new speed.
+   */
+  function startSpeedBlend(result) {
+    speedBlend.active = false;
+    if (!result || !result.safeSpeed) return;
+    const target = clamp(result.speed, result.safeSpeed.min, result.safeSpeed.max);
+    if (!Number.isFinite(target) || Math.abs(target - result.speed) < SPEED_BLEND_MIN_CHANGE) return;
+    speedBlend.active = true;
+    speedBlend.elapsed = 0;
+    speedBlend.from = result.speed;
+    speedBlend.to = target;
+    speedBlend.bank = result.bank;
+  }
+
+  function applySpeedBlend(dt) {
+    if (!speedBlend.active) return;
+    speedBlend.elapsed += dt;
+    const progress = smoothstep01(speedBlend.elapsed / BLEND_SECONDS);
+    const speed = speedBlend.from + (speedBlend.to - speedBlend.from) * progress;
+    const velocity = sim.state.velocity;
+    const airVelocity = scratchVector.copy(velocity).sub(env.wind.vel);
+    const airspeed = airVelocity.length();
+    if (airspeed > 1) velocity.copy(env.wind.vel).addScaledVector(airVelocity, speed / airspeed);
+    const result = trimSim(speedBlend.bank);
+    if (progress >= 1 || !result) speedBlend.active = false;
+  }
+
   /** Puts the active model at pose (both modes) and refreshes everything derived from it. */
-  function resetActiveModel(pose) {
+  function resetActiveModel(pose, { trim = true } = {}) {
     if (mode === 'sim' && sim) {
+      speedBlend.active = false;
       sim.reset(pose);
+      if (trim && !pose.onGround) startSpeedBlend(trimSim());
       resetInterpolationFromModel();
       writePlayerFromSim();
     } else {
@@ -435,7 +505,21 @@ export function createFlightController(ctx) {
     }
   }
 
-  /** CLASSIC -> SIM. Returns false (and says why) when this craft has no SIM model yet. */
+  /**
+   * CLASSIC -> SIM. Returns false (and says why) when this craft has no SIM model yet.
+   *
+   * A switch mid-flight keeps the position, the velocity vector and the heading, and gives the SIM
+   * model a consistent trimmed state (trim.js): the attitude is the flight path plus the 1 g angle of
+   * attack for the airspeed and craft (clamped to the stall margin), the roll is kept within the bank
+   * protection, the rates are those of a steady turn at that bank, the elevator sits at its trimmed
+   * deflection and the assists start from that trim with the path and speed holds captured. The
+   * CLASSIC attitude (which has no angle of attack of its own) differs from that by a few degrees; the
+   * 0.5 s visual blend hides the difference. A speed outside the craft's safe range eases into it over
+   * the same 0.5 s (startSpeedBlend).
+   *
+   * At boot (initial) there is no CLASSIC flight to carry over: the craft starts at its SIM cruise
+   * speed, level at the spawn point (or on the ground with "Start on ground").
+   */
   function enterSim({ initial = false } = {}) {
     if (!simAvailable()) {
       notify(`SIM flight for the ${craftLabel(craftId)} is not available yet, so we're staying in CLASSIC.`, 'warning');
@@ -457,9 +541,15 @@ export function createFlightController(ctx) {
     mode = 'sim';
     resetModelTelemetry();
     if (initial && shouldStartOnGround()) placeOnGround(player.position.x, player.position.z);
+    else if (initial) resetActiveModel(airbornePose(pose.position, headingOfQuaternion(pose.quaternion, currentHeading())));
     else {
       pose.engineOn = true;
+      speedBlend.active = false;
       sim.reset(pose);
+      if (!pose.onGround) {
+        const bank = clamp(sim.flightData ? sim.flightData.bank : 0, -CONVERSION_MAX_BANK, CONVERSION_MAX_BANK);
+        startSpeedBlend(trimSim(Number.isFinite(bank) ? bank : 0));
+      }
       resetInterpolationFromModel();
     }
     writePlayerFromSim();
@@ -1128,6 +1218,7 @@ export function createFlightController(ctx) {
     if (!modelIsFinite(sim)) {
       const position = isFiniteVector(interpolation.position) ? interpolation.position : player.position;
       sim.reset(airbornePose(position, currentHeading()));
+      trimSim();
     }
     resetInterpolationFromModel();
     return false;
@@ -1153,6 +1244,7 @@ export function createFlightController(ctx) {
     counters.maxTicksPerFrame = Math.max(counters.maxTicksPerFrame, ticks);
     const stepSeconds = clock.stepSeconds;
     for (let tick = 0; tick < ticks; tick++) {
+      applySpeedBlend(stepSeconds);
       interpolation.previousPosition.copy(sim.state.position);
       interpolation.previousQuaternion.copy(sim.state.quaternion);
       interpolation.previousVelocity.copy(sim.state.velocity);
