@@ -147,7 +147,7 @@ function describeProgress(state) {
 }
 
 function flightTable(report) {
-  const lines = ['  #  seed        craft       mode     fps  p99ms  maxms  >50  NaN  pen  crash  err/warn  heapMB  script  result'];
+  const lines = ['  #  seed        craft       mode     fps  p99ms  maxms  >50  sys/main/delay  NaN  pen  crash  err/warn  heapMB  script  result'];
   for (const run of report.runs) {
     const checks = run.script.checks;
     lines.push([
@@ -159,6 +159,7 @@ function flightTable(report) {
       String(run.p99Ms).padStart(6),
       String(run.maxMs).padStart(6),
       String(run.slowFrames).padStart(4),
+      `${run.slowByCause.systems}/${run.slowByCause.mainThread}/${run.slowByCause.delayed}`.padStart(15),
       String(run.nanEvents).padStart(4),
       String(run.penetrations).padStart(4),
       String(run.softCrashes).padStart(6),
@@ -169,7 +170,7 @@ function flightTable(report) {
     ].join(' '));
   }
   const totals = report.totals;
-  lines.push(`  totals: ${totals.runs} runs, ${totals.measuredSeconds} s measured, avg ${totals.avgFps} fps, worst p99 ${totals.worstP99Ms} ms, max ${totals.maxFrameMs} ms, >50 ms ${totals.slowFrames}, NaN ${totals.nanEvents}, penetrations ${totals.penetrations}, soft crashes ${totals.softCrashes}, console ${totals.consoleErrors}/${totals.consoleWarnings}, max heap growth ${totals.maxHeapGrowthMB} MB, script ${totals.scriptChecks}`);
+  lines.push(`  totals: ${totals.runs} runs, ${totals.measuredSeconds} s measured, avg ${totals.avgFps} fps, worst p99 ${totals.worstP99Ms} ms, max ${totals.maxFrameMs} ms, >50 ms ${totals.slowFrames} (systems ${totals.slowByCause.systems}, main thread ${totals.slowByCause.mainThread}, delayed ${totals.slowByCause.delayed}), NaN ${totals.nanEvents}, penetrations ${totals.penetrations}, soft crashes ${totals.softCrashes}, console ${totals.consoleErrors}/${totals.consoleWarnings}, max heap growth ${totals.maxHeapGrowthMB} MB, script ${totals.scriptChecks}`);
   for (const world of report.worlds) lines.push(`  world ${world.seed} (${world.backend}): load ${world.loadSeconds} s, heap ${world.heapBaselineMB} -> ${world.heapFinalMB} MB (growth ${world.heapGrowthMB} MB)`);
   return lines.join('\n');
 }

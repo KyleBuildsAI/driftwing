@@ -19,9 +19,10 @@ export function percentile(sorted, p) {
 
 /**
  * Records frame intervals (ms) for one measurement window. slowLimitMs: frames above it are listed
- * with their time into the window (at most maxSlowListed of them; the count keeps going).
+ * with their time into the window and the caller's detail (at most maxSlowListed of them; the count
+ * keeps going).
  */
-export function createFrameRecorder({ slowLimitMs = 50, maxSlowListed = 40 } = {}) {
+export function createFrameRecorder({ slowLimitMs = 50, maxSlowListed = 2000 } = {}) {
   let samples = new Float64Array(4096);
   let count = 0;
   let totalMs = 0;
@@ -29,8 +30,8 @@ export function createFrameRecorder({ slowLimitMs = 50, maxSlowListed = 40 } = {
   const slowFrames = [];
 
   return {
-    /** Adds one frame interval; at is the window time (s) the frame ended at. */
-    push(frameMs, at) {
+    /** Adds one frame interval; at is the window time (s) the frame ended at; detail is kept for slow frames. */
+    push(frameMs, at, detail = null) {
       if (count === samples.length) {
         const grown = new Float64Array(samples.length * 2);
         grown.set(samples);
@@ -40,7 +41,7 @@ export function createFrameRecorder({ slowLimitMs = 50, maxSlowListed = 40 } = {
       totalMs += frameMs;
       if (frameMs > slowLimitMs) {
         slowCount++;
-        if (slowFrames.length < maxSlowListed) slowFrames.push({ at: round(at, 2), ms: round(frameMs, 1) });
+        if (slowFrames.length < maxSlowListed) slowFrames.push({ at: round(at, 2), ms: round(frameMs, 1), ...detail });
       }
     },
 

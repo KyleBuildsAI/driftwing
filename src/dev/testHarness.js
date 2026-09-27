@@ -10,7 +10,10 @@
 //
 // Measured per run and in total:
 //   - frame time: every frame interval (ms). Average fps, p50 / p99 / max frame time and the frames
-//     over FRAME_LIMIT_MS are taken AFTER WARMUP (see below).
+//     over FRAME_LIMIT_MS are taken AFTER WARMUP (see below). Every slow frame is attributed
+//     (testFrameProfiler.js): 'systems' (the game's systems ran most of it), 'mainThread' (a long
+//     animation frame outside the systems: render submission, GC) or 'delayed' (the main thread was
+//     mostly idle: GPU, compositor or OS scheduling, the signature of a loaded machine).
 //   - NaN events: frames whose craft pose (state.player position, velocity, attitude) or telemetry
 //     is non-finite as sampled by the harness, plus every restore by the flight guards (the SIM
 //     model's per-tick guard, FlightController getStats().nanRestores, and core's frame guard, the
@@ -44,6 +47,7 @@
 // window.DRIFTWING.testReport for automation (tools/run-harness.mjs).
 import { installConsoleCapture } from './testConsole.js';
 import { flightScriptFor, SCRIPTED_CRAFT } from './testFlightScripts.js';
+import { createFrameProfiler } from './testFrameProfiler.js';
 import { createTestPanel } from './testPanel.js';
 import { createFrameRecorder, delay, gcAvailable, heapAvailable, readHeapMB, readSession, round, writeSession } from './testStats.js';
 import { clamp, isFiniteQuaternion, isFiniteVector, wrapDegrees } from '../core/util.js';
@@ -68,6 +72,9 @@ const CEILING_MARGIN = 200;
 const PROGRESS_HZ = 4;
 const MAX_CONSOLE_ENTRIES = 300;
 const MAX_EVENT_DETAILS = 20;
+/** Slow frames listed per run in the report (the slowest; every one is counted and attributed). */
+const MAX_SLOW_LISTED = 25;
+const SLOW_CAUSES = Object.freeze(['systems', 'mainThread', 'delayed']);
 
 /** Reads the URL options; unknown craft or modes are dropped (and reported). */
 function readConfig(params) {
@@ -267,12 +274,11 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
   let worldClosed = false;
   let lastFrameMs = null;
   let lastProgressMs = 0;
-  let coreNanEvents = 0;
   let penetrationEpisode = null;
+  const profiler = createFrameProfiler(ctx, { exclude: ['test'] });
   const pilotHold = { roll: null, pitch: null, yaw: null, throttle: null, brakes: null };
 
   bus.on('safety:nonFinite', () => {
-    coreNanEvents++;
     const bucket = activeRun ? activeRun.bucket : worldRecord.outside;
     bucket.nanGuardEvents++;
     if (bucket.nanDetails.length < MAX_EVENT_DETAILS) bucket.nanDetails.push({ at: runTime(), source: 'core frame guard' });
@@ -287,6 +293,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     if (activeRun) activeRun.seen.relaunches++;
   });
   bus.on('game:ready', () => {
+    profiler.instrument();
     worldReadyMs = performance.now();
     // performance.now() counts from the navigation, so this is the page load until the fade lifts.
     worldRecord.loadSeconds = round(worldReadyMs / 1000, 2);
@@ -498,6 +505,11 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     run.bucket.nanGuardEvents += guardRestores;
     if (guardRestores > 0 && run.bucket.nanDetails.length < MAX_EVENT_DETAILS) run.bucket.nanDetails.push({ at: null, source: `SIM model guard restored ${guardRestores} tick(s)` });
     const frames = run.recorder.summary();
+    const slowAttributed = frames.slowFrameList.map((frame) => {
+      const { startMs, endMs, systemsMs, top, ...kept } = frame;
+      return { ...kept, ...profiler.attribute({ startMs, endMs, ms: frame.ms, systemsMs, top }) };
+    });
+    const slowByCause = Object.fromEntries(SLOW_CAUSES.map((cause) => [cause, slowAttributed.filter((frame) => frame.cause === cause).length]));
     const heapEndMB = readHeapMB();
     const seen = run.seen;
     const checks = (run.script ? run.script.checks : []).map((check) => ({ id: check.id, label: check.label, passed: Boolean(check.test(seen, run.durationSeconds)) }));
@@ -518,7 +530,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
       p99Ms: frames.p99Ms,
       maxMs: frames.maxMs,
       slowFrames: frames.slowFrames,
-      slowFrameList: frames.slowFrameList,
+      slowByCause,
+      slowFrameList: slowAttributed.slice().sort((first, second) => second.ms - first.ms).slice(0, MAX_SLOW_LISTED),
       warmupFrames: run.warmupFrames,
       warmupMaxMs: round(run.warmupMaxMs, 1),
       nanEvents,
@@ -681,6 +694,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
         worstP99Ms: sortedP99.length > 0 ? Math.max(...sortedP99) : null,
         maxFrameMs: runs.length > 0 ? Math.max(...runs.map((run) => run.maxMs ?? 0)) : null,
         slowFrames,
+        slowByCause: Object.fromEntries(SLOW_CAUSES.map((cause) => [cause, runs.reduce((total, run) => total + (run.slowByCause?.[cause] ?? 0), 0)])),
         nanEvents,
         penetrations,
         softCrashes,
@@ -717,6 +731,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
       p99: run.p99Ms,
       max: run.maxMs,
       slow: countCell(run.slowFrames),
+      causes: { text: run.slowFrames === 0 ? '-' : `${run.slowByCause.systems} / ${run.slowByCause.mainThread} / ${run.slowByCause.delayed}`, status: run.slowFrames === 0 ? 'muted' : null },
       nan: countCell(run.nanEvents),
       penetrations: countCell(run.penetrations),
       crashes: { text: run.softCrashes, status: run.softCrashes === 0 ? 'muted' : null, title: run.softCrashDetails.map((crash) => `${crash.at} s ${crash.reason}`).join(', ') },
@@ -729,6 +744,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     const footer = {
       index: '', seed: 'All', craft: `${totals.runs} runs`, mode: `${totals.measuredSeconds} s`,
       fps: totals.avgFps, p99: totals.worstP99Ms, max: totals.maxFrameMs, slow: countCell(totals.slowFrames),
+      causes: `${totals.slowByCause.systems} / ${totals.slowByCause.mainThread} / ${totals.slowByCause.delayed}`,
       nan: countCell(totals.nanEvents), penetrations: countCell(totals.penetrations), crashes: totals.softCrashes,
       console: `${totals.consoleErrors} / ${totals.consoleWarnings}`, heap: totals.maxHeapGrowthMB === null ? 'n/a' : `max ${totals.maxHeapGrowthMB}`,
       script: totals.scriptChecks, result: statusCell(report.result === 'PASS'),
@@ -745,6 +761,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
           { key: 'p99', label: 'p99 ms', numeric: true },
           { key: 'max', label: 'Max ms', numeric: true },
           { key: 'slow', label: `>${FRAME_LIMIT_MS} ms`, numeric: true },
+          { key: 'causes', label: 'Sys / main / delayed', numeric: true, title: 'Slow frames by cause: game systems, other main-thread work, delayed while the main thread was idle' },
           { key: 'nan', label: 'NaN', numeric: true },
           { key: 'penetrations', label: 'Pen.', numeric: true, title: 'Terrain penetrations' },
           { key: 'crashes', label: 'Soft crash', numeric: true },
@@ -780,7 +797,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
         })),
       },
     });
-    const slowList = report.runs.flatMap((run) => run.slowFrameList.map((frame) => `Run ${run.index + 1} (${run.craft} ${run.mode.toUpperCase()}, ${run.seed}): ${frame.ms} ms at ${frame.at} s after warmup`));
+    const slowList = report.runs.flatMap((run) => run.slowFrameList.map((frame) => `Run ${run.index + 1} (${run.craft} ${run.mode.toUpperCase()}, ${run.seed}): ${frame.ms} ms at ${frame.at} s after warmup, ${frame.cause} (systems ${frame.systemsMs} ms${frame.topSystems ? `: ${frame.topSystems}` : ''}${frame.loaf ? `; long frame ${frame.loaf.durationMs} ms, scripts ${frame.loaf.scriptsMs} ms` : ''})`));
     if (slowList.length > 0) sections.push({ title: `Frames over ${FRAME_LIMIT_MS} ms`, notes: slowList.slice(0, 40) });
     const eventList = report.runs.flatMap((run) => [
       ...run.penetrationDetails.map((detail) => `Run ${run.index + 1} (${run.craft} ${run.mode.toUpperCase()}, ${run.seed}): penetration ${detail.depth} m below ${detail.surface} at ${detail.at} s for ${detail.frames} frame(s)`),
@@ -835,6 +852,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
   // ---- Frame -------------------------------------------------------------------------------------------
   function step(realDt) {
     const now = performance.now();
+    const frameWork = profiler.takeFrame();
     const frameMs = lastFrameMs === null ? null : now - lastFrameMs;
     lastFrameMs = now;
     if (phase === 'navigating') {
@@ -859,7 +877,10 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     const run = activeRun;
     const elapsed = (now - run.startMs) / 1000;
     if (frameMs !== null) {
-      if (elapsed > config.runWarmupSeconds) run.recorder.push(frameMs, elapsed - config.runWarmupSeconds);
+      if (elapsed > config.runWarmupSeconds) {
+        const detail = frameMs > config.frameLimitMs ? { startMs: now - frameMs, endMs: now, systemsMs: frameWork.systemsMs, top: frameWork.top } : null;
+        run.recorder.push(frameMs, elapsed - config.runWarmupSeconds, detail);
+      }
       else {
         run.warmupFrames++;
         run.warmupMaxMs = Math.max(run.warmupMaxMs, frameMs);
