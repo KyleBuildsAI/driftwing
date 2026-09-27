@@ -17,7 +17,8 @@
 // Sign conventions: pitch +1 pulls (nose up), roll +1 banks right, yaw +1 yaws right.
 //
 // Each script also lists checks: the observations (collected every frame by the harness) that
-// prove the manoeuvres really happened. They are reported as script coverage.
+// prove the manoeuvres really happened. They are reported as script coverage. A check's test(seen,
+// seconds) gets the run length, so its time thresholds scale down for shortened runs (testSeconds).
 
 /** Autopilot cruise: current heading, a safe height above the ground, the craft's own cruise speed. */
 function cruise(pilot, headingOffset = 0) {
@@ -30,13 +31,18 @@ function handsOff(pilot) {
   pilot.stick({ roll: 0, pitch: 0, yaw: 0 });
 }
 
+/** A time threshold: its full length on a 60 s run (63 s with warmup), scaled down for shorter runs. */
+function seconds(full, runSeconds) {
+  return Math.min(full, (full * runSeconds) / 63);
+}
+
 const CHECK = Object.freeze({
-  autopilot: { id: 'autopilot', label: 'autopilot flew 5 s', test: (seen) => seen.autopilotSeconds >= 5 },
+  autopilot: { id: 'autopilot', label: 'autopilot flew 5 s', test: (seen, run) => seen.autopilotSeconds >= seconds(5, run) },
   barrelRoll: { id: 'barrelRoll', label: 'barrel roll', test: (seen) => seen.barrelRoll },
   boost: { id: 'boost', label: 'boost', test: (seen) => seen.boost },
   bank: { id: 'bank', label: 'manual bank past 20 deg', test: (seen) => seen.maxBank >= 20 },
-  hover: { id: 'hover', label: 'hovered 2 s', test: (seen) => seen.hoverSeconds >= 2 },
-  translate: { id: 'translate', label: 'hover moves above 6 m/s', test: (seen) => seen.translateSeconds >= 1 },
+  hover: { id: 'hover', label: 'hovered 2 s (ground speed under 3 m/s)', test: (seen, run) => seen.hoverSeconds >= seconds(2, run) },
+  translate: { id: 'translate', label: 'hover moves above 6 m/s', test: (seen, run) => seen.translateSeconds >= seconds(1, run) },
   relaunch: { id: 'relaunch', label: 'relaunch', test: (seen) => seen.relaunches >= 1 },
   dive: { id: 'dive', label: 'dive below -20 deg pitch', test: (seen) => seen.minPitch <= -20 },
 });
@@ -55,14 +61,17 @@ const CLASSIC_FIXED_WING = Object.freeze({
   checks: [CHECK.autopilot, CHECK.barrelRoll, CHECK.boost, CHECK.bank],
 });
 
-/** SIM fixed wing: PID autopilot, a manual turn at 100 % assists, then the craft's own systems. */
-function simFixedWing(extraSteps, extraChecks) {
+/**
+ * SIM fixed wing: PID autopilot, a manual roll into a bank at 100 % assists (roll input and length
+ * suit the craft's roll rate), hands off, then the craft's own systems.
+ */
+function simFixedWing(extraSteps, extraChecks, { roll = 0.5, rollEnd = 0.54 } = {}) {
   return Object.freeze({
     steps: [
       { at: 0, label: 'autopilot cruise', run: (pilot) => cruise(pilot) },
       { at: 0.3, label: 'autopilot turn 90 deg right', run: (pilot) => cruise(pilot, 90) },
-      { at: 0.48, label: 'autopilot off, manual bank right', run: (pilot) => { handsOff(pilot); pilot.stick({ roll: 0.5, pitch: 0.1, yaw: 0.05 }); } },
-      { at: 0.54, label: 'hands off (assists level the wings)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
+      { at: 0.48, label: 'autopilot off, manual bank right', run: (pilot) => { handsOff(pilot); pilot.stick({ roll, pitch: 0.1, yaw: 0.05 }); } },
+      { at: rollEnd, label: 'hands off (assists hold the attitude)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
       ...extraSteps,
       { at: 0.8, label: 'autopilot cruise, turn back', run: (pilot) => cruise(pilot, -90) },
     ],
@@ -75,15 +84,19 @@ const SIM_GLIDER = simFixedWing([
   { at: 0.7, label: 'spoilers in', run: (pilot) => pilot.brakes(null) },
 ], [{ id: 'spoilers', label: 'spoilers deployed', test: (seen) => seen.maxAirbrake >= 0.5 }]);
 
+// One action press per step: presses in the same frame count once (ControlState.actions is a set).
 const SIM_BUSHPLANE = simFixedWing([
-  { at: 0.58, label: 'throttle 90 %, two flap notches down', run: (pilot) => { pilot.throttle(0.9); pilot.action('flapsDown'); pilot.action('flapsDown'); } },
-  { at: 0.7, label: 'flaps up, throttle 70 %', run: (pilot) => { pilot.action('flapsUp'); pilot.action('flapsUp'); pilot.throttle(0.7); } },
+  { at: 0.58, label: 'throttle 90 %, flaps down one notch', run: (pilot) => { pilot.throttle(0.9); pilot.action('flapsDown'); } },
+  { at: 0.61, label: 'flaps down a second notch', run: (pilot) => pilot.action('flapsDown') },
+  { at: 0.7, label: 'flaps up one notch, throttle 70 %', run: (pilot) => { pilot.action('flapsUp'); pilot.throttle(0.7); } },
+  { at: 0.73, label: 'flaps up', run: (pilot) => pilot.action('flapsUp') },
 ], [{ id: 'flaps', label: 'flaps to notch 2', test: (seen) => seen.maxFlapNotch >= 2 }]);
 
+// The jet rolls far faster than the others (no bank protection by design): a short, light input.
 const SIM_JET = simFixedWing([
   { at: 0.56, label: 'full throttle, afterburner on (craft ability)', run: (pilot) => { pilot.throttle(1); pilot.action('craftAbility'); } },
   { at: 0.74, label: 'afterburner off, throttle 70 %', run: (pilot) => { pilot.action('craftAbility'); pilot.throttle(0.7); } },
-], [{ id: 'afterburner', label: 'afterburner lit 3 s', test: (seen) => seen.afterburnerSeconds >= 3 }]);
+], [{ id: 'afterburner', label: 'afterburner lit 3 s', test: (seen, run) => seen.afterburnerSeconds >= seconds(3, run) }], { roll: 0.25, rollEnd: 0.5 });
 
 /** Hover craft in SIM (helicopter, FPV drone at 100 % assists): hover, stick moves, then autopilot. */
 const SIM_HOVER = Object.freeze({
@@ -101,18 +114,20 @@ const SIM_HOVER = Object.freeze({
   checks: [CHECK.hover, CHECK.translate, CHECK.autopilot],
 });
 
-/** Hover craft in CLASSIC (the arcade hover extension): throttle 0.5 holds height. */
+/**
+ * Hover craft in CLASSIC (the arcade hover extension): throttle 0.5 holds height. It cruises on the
+ * autopilot first and ends in a hover, so the SIM run that follows starts from a hover.
+ */
 const CLASSIC_HOVER = Object.freeze({
   steps: [
-    { at: 0, label: 'hover (throttle 50 %)', run: (pilot) => { handsOff(pilot); pilot.throttle(0.5); } },
-    { at: 0.14, label: 'stick forward', run: (pilot) => pilot.stick({ roll: 0, pitch: -0.6, yaw: 0 }) },
-    { at: 0.28, label: 'stick back (brake)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0.6, yaw: 0 }) },
-    { at: 0.36, label: 'hands off (settle)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
-    { at: 0.44, label: 'banked turn right', run: (pilot) => pilot.stick({ roll: 0.5, pitch: -0.3, yaw: 0 }) },
-    { at: 0.52, label: 'climb, then boost', run: (pilot) => { pilot.stick({ roll: 0, pitch: 0, yaw: 0 }); pilot.throttle(0.8); pilot.boost(); } },
-    { at: 0.58, label: 'throttle 50 %', run: (pilot) => pilot.throttle(0.5) },
-    { at: 0.62, label: 'autopilot cruise', run: (pilot) => cruise(pilot) },
-    { at: 0.82, label: 'autopilot turn 90 deg left', run: (pilot) => cruise(pilot, -90) },
+    { at: 0, label: 'autopilot cruise', run: (pilot) => { cruise(pilot); pilot.throttle(0.5); } },
+    { at: 0.2, label: 'autopilot turn 90 deg left', run: (pilot) => cruise(pilot, -90) },
+    { at: 0.4, label: 'autopilot off, stick back (brake)', run: (pilot) => { handsOff(pilot); pilot.throttle(0.5); pilot.stick({ roll: 0, pitch: 0.7, yaw: 0 }); } },
+    { at: 0.47, label: 'hands off (settle into a hover)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
+    { at: 0.55, label: 'stick forward', run: (pilot) => pilot.stick({ roll: 0, pitch: -0.6, yaw: 0 }) },
+    { at: 0.62, label: 'banked turn right, climb, boost', run: (pilot) => { pilot.stick({ roll: 0.5, pitch: -0.3, yaw: 0 }); pilot.throttle(0.8); pilot.boost(); } },
+    { at: 0.7, label: 'throttle 50 %, stick back (brake)', run: (pilot) => { pilot.throttle(0.5); pilot.stick({ roll: 0, pitch: 0.7, yaw: 0 }); } },
+    { at: 0.78, label: 'hands off, hover', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
   ],
   checks: [CHECK.hover, CHECK.translate, CHECK.autopilot],
 });

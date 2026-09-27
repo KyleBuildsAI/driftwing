@@ -142,8 +142,8 @@ function describeProgress(state) {
     const now = current ? `, flying run ${current.index + 1}: ${current.craft} ${String(current.mode).toUpperCase()} (${current.seed}) ${Math.round(current.seconds ?? 0)} s` : '';
     return `${completedRuns}/${totalRuns} runs done${now}`;
   }
-  const { done, total, step } = state.progress;
-  return `${done}/${total} checks${step ? `, ${step}` : ''}`;
+  const { done, phase, step } = state.progress;
+  return `${done} checks (${phase})${step ? `, ${step}` : ''}`;
 }
 
 function flightTable(report) {
@@ -296,6 +296,19 @@ async function main() {
     await page.setViewport({ width: options.width, height: Math.max(options.height, options.test === '1' ? 1640 : 1400) });
     await sleep(1500);
     await page.screenshot({ path: join(options.out, 'summary-full.png') });
+    // Every page of the scrolled summary body, so the whole table can be read from the images.
+    const pages = await page.evaluate(() => {
+      const body = document.querySelector('.dw-test-summary .dw-test-body');
+      return body ? Math.min(12, Math.ceil(body.scrollHeight / Math.max(body.clientHeight, 1))) : 0;
+    });
+    for (let pageIndex = 1; pageIndex < pages; pageIndex++) {
+      await page.evaluate((index) => {
+        const body = document.querySelector('.dw-test-summary .dw-test-body');
+        body.scrollTop = index * (body.clientHeight - 40);
+      }, pageIndex);
+      await sleep(300);
+      await page.screenshot({ path: join(options.out, `summary-page-${pageIndex + 1}.png`) });
+    }
   } catch (error) {
     runner.problems.push(error.message);
   } finally {

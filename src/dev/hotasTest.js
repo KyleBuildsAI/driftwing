@@ -543,8 +543,13 @@ function createHotasTestSystem(ctx, { capture }) {
       await waitFrames(5);
     }
     wizardState = wizard.getState();
-    const unmoved = wizardState.devices.flatMap((device) => device.axes.filter((axis) => !axis.hat && !axis.done).map((axis) => `${device.deviceKey} ${axis.label}`));
-    check('calibration', 'every axis reached both ends', wizardState.step === 'axes' && unmoved.length === 0, unmoved.length === 0 ? 'all axes done' : `not done: ${unmoved.join(', ')}`, 'all axes done');
+    // The axes the script moved lock to lock (a real device's unused axes never move).
+    const unmoved = wizardState.devices.flatMap((device) => {
+      const moved = CALIBRATION_SCRIPT[device.deviceKey === STICK_KEY ? 'stick' : 'throttle'].low;
+      return device.axes.filter((axis) => String(axis.index) in moved && !axis.done).map((axis) => `${device.deviceKey} ${axis.label}`);
+    });
+    const movedCount = Object.keys(CALIBRATION_SCRIPT.stick.low).length + Object.keys(CALIBRATION_SCRIPT.throttle.low).length;
+    check('calibration', 'the wizard saw every moved axis reach both ends', wizardState.step === 'axes' && unmoved.length === 0, unmoved.length === 0 ? `${movedCount} axes done` : `not done: ${unmoved.join(', ')}`, `${movedCount} axes done`);
     wizard.next();
     step('calibration: throttle forward');
     wizardState = wizard.getState();
@@ -783,6 +788,21 @@ function createHotasTestSystem(ctx, { capture }) {
       return `${group}: ${inGroup.filter((entry) => entry.passed).length}/${inGroup.length}`;
     });
     const sections = [{
+      title: 'Groups',
+      table: {
+        columns: [
+          { key: 'group', label: 'Group' },
+          { key: 'checks', label: 'Checks', numeric: true },
+          { key: 'passed', label: 'Passed', numeric: true },
+          { key: 'result', label: 'Result' },
+        ],
+        rows: groups.map((group) => {
+          const inGroup = session.checks.filter((entry) => entry.group === group);
+          const passedInGroup = inGroup.filter((entry) => entry.passed).length;
+          return { group, checks: inGroup.length, passed: passedInGroup, result: { text: passedInGroup === inGroup.length ? 'PASS' : 'FAIL', status: passedInGroup === inGroup.length ? 'pass' : 'fail' } };
+        }),
+      },
+    }, {
       title: 'Checks',
       table: {
         columns: [

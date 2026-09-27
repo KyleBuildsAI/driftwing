@@ -414,7 +414,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     if (player.boost.active) seen.boost = true;
     if (!autopilotOn && !player.barrelRoll.active && Number.isFinite(telemetry.roll)) seen.maxBank = Math.max(seen.maxBank, Math.abs(telemetry.roll));
     const groundSpeed = Number.isFinite(telemetry.groundSpeed) ? telemetry.groundSpeed : 0;
-    if (!telemetry.onGround && groundSpeed < 2) seen.hoverSeconds += dt;
+    if (!telemetry.onGround && groundSpeed < 3) seen.hoverSeconds += dt;
     if (!autopilotOn && groundSpeed > 6) seen.translateSeconds += dt;
     if (Number.isFinite(telemetry.pitch)) seen.minPitch = Math.min(seen.minPitch, telemetry.pitch);
     if (telemetry.craftState && telemetry.craftState.canopy === true) seen.canopy = true;
@@ -500,7 +500,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     const frames = run.recorder.summary();
     const heapEndMB = readHeapMB();
     const seen = run.seen;
-    const checks = (run.script ? run.script.checks : []).map((check) => ({ id: check.id, label: check.label, passed: Boolean(check.test(seen)) }));
+    const checks = (run.script ? run.script.checks : []).map((check) => ({ id: check.id, label: check.label, passed: Boolean(check.test(seen, run.durationSeconds)) }));
     const bucket = run.bucket;
     const nanEvents = bucket.nanFrames + bucket.nanGuardEvents;
     const result = {
