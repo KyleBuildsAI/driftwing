@@ -190,25 +190,34 @@ function testHover() {
   return { collective: average(collective), torque: average(torque) };
 }
 
-/** Full collective, zero airspeed (position held by the assists): the steady vertical climb rate. */
+/** A lab pilot's collective that holds the torque at `target` (share of rated). */
+function createTorquePilot(target, start) {
+  const pid = createPid(0.3, 0.6, 0, 0, 1);
+  pid.reset(start);
+  return (controls, lab) => {
+    controls.collective = pid.update(target - lab.data.torque, DT);
+  };
+}
+
+/**
+ * Climb at 100 % torque (the pilot's collective limit), zero airspeed with the position held by the
+ * assists' cyclic, then at 30 m/s held by the autopilot. Full collective past the power available
+ * droops the rotor (the low rpm horn); at 100 % assists the engine protection holds it back.
+ */
 function testClimb() {
   const rig = createRig({ assists: 1 });
   rig.airborne({ altitude: 300 });
   rig.run(8);
-  rig.override = (controls) => {
-    controls.collective = 1;
-  };
-  rig.run(12);
+  rig.override = createTorquePilot(1, rig.data.collective);
+  rig.run(14);
   const climbs = [];
   const rpm = [];
   rig.run(6, (lab) => {
     climbs.push(lab.data.verticalSpeed);
     rpm.push(lab.data.rotorRpm);
   });
-  record('vertical climb, full collective', average(climbs), targets.verticalClimb, { unit: 'm/s', tolerance: 0.25, note: `rotor ${(average(rpm) * 100).toFixed(1)} % (governor droops past the power available)` });
-  record('rotor rpm droop under full collective', average(rpm) * 100, [88, 99.5], { unit: '%', compare: 'range', decimals: 1 });
+  record('vertical climb at 100 % torque', average(climbs), targets.verticalClimb, { unit: 'm/s', tolerance: 0.25, note: `rotor ${(average(rpm) * 100).toFixed(1)} %, collective ${rig.data.collective.toFixed(2)}` });
 
-  // Best climb: 30 m/s held by the autopilot's speed loop, collective full.
   const forward = createRig({ assists: 1 });
   forward.airborne({ altitude: 300, speed: 30 });
   forward.autopilot.enabled = true;
@@ -216,17 +225,75 @@ function testClimb() {
   forward.autopilot.altitude = 300;
   forward.autopilot.speed = 30;
   forward.run(10);
-  forward.override = (controls) => {
-    controls.collective = 1;
-  };
-  forward.run(10);
+  forward.override = createTorquePilot(1, forward.data.collective);
+  forward.run(12);
   const forwardClimbs = [];
   const speeds = [];
   forward.run(6, (lab) => {
     forwardClimbs.push(lab.data.verticalSpeed);
     speeds.push(lab.data.airspeed);
   });
-  record('best climb at 30 m/s, full collective', average(forwardClimbs), targets.maxClimb, { unit: 'm/s', tolerance: 0.25, note: `at ${average(speeds).toFixed(1)} m/s airspeed` });
+  record('best climb at 30 m/s, 100 % torque', average(forwardClimbs), targets.maxClimb, { unit: 'm/s', tolerance: 0.25, note: `at ${average(speeds).toFixed(1)} m/s airspeed` });
+
+  // Over-pitching: full collective demands more than the engine has, the rotor droops.
+  const overpitch = createRig({ assists: 0.5 });
+  overpitch.airborne({ altitude: 600 });
+  overpitch.run(2);
+  overpitch.override = (controls) => {
+    controls.collective = 1;
+  };
+  let hornAt = NaN;
+  overpitch.run(6, (lab) => {
+    lab.model.writeTelemetry(lab.telemetry);
+    if (!Number.isFinite(hornAt) && lab.telemetry.stall.warning) hornAt = lab.time - 2;
+  });
+  record('full collective over-pitches: rotor rpm droops', overpitch.data.rotorRpm * 100, 92, { unit: '%', compare: 'max', decimals: 1, note: Number.isFinite(hornAt) ? `low rpm horn after ${hornAt.toFixed(1)} s, torque ${(overpitch.data.torque * 100).toFixed(0)} %` : 'no horn' });
+
+  // 100 %: lever full up, the engine protection keeps the rpm and torque in their limits.
+  const protectedRig = createRig({ assists: 1 });
+  protectedRig.airborne({ altitude: 300 });
+  protectedRig.run(3);
+  protectedRig.pilot.throttle = 1;
+  let minRpm = Infinity;
+  let maxTorque = 0;
+  protectedRig.run(15, (lab) => {
+    if (lab.time > 5) {
+      minRpm = Math.min(minRpm, lab.data.rotorRpm);
+      maxTorque = Math.max(maxTorque, lab.data.torque);
+    }
+  });
+  record('100 % lever full up: engine protection holds the rpm', minRpm * 100, 95, { unit: '%', compare: 'min', decimals: 1, note: `max torque ${(maxTorque * 100).toFixed(0)} %, climbing ${protectedRig.data.verticalSpeed.toFixed(1)} m/s` });
+}
+
+/**
+ * A lab pilot for 0 % assists: holds a forward groundspeed (fly.forwardTarget, 0 = hover) and no
+ * sideways drift with the cyclic (velocity -> attitude -> stick); with fly.holdHeading also the heading
+ * with the pedals.
+ */
+function createHoverPilot(rig) {
+  const pitchPid = createPid(2.4, 0.9, 1);
+  const rollPid = createPid(2.4, 0.9, 0.7);
+  pitchPid.reset(rig.data.hoverCyclicPitch);
+  rollPid.reset(rig.data.hoverCyclicRoll);
+  const heading0 = rig.data.heading;
+  const fly = (lab) => {
+    const data = lab.data;
+    const heading = data.heading * DEG;
+    const velocity = lab.model.state.velocity;
+    const forward = velocity.x * Math.sin(heading) - velocity.z * Math.cos(heading);
+    const right = velocity.x * Math.cos(heading) + velocity.z * Math.sin(heading);
+    const pitchTarget = clamp(0.05 * (forward - fly.forwardTarget), -0.2, 0.15);
+    const bankTarget = clamp(-0.05 * right, -0.15, 0.15);
+    lab.pilot.pitch = pitchPid.update(pitchTarget - data.pitch, DT, data.pitchRate);
+    lab.pilot.roll = rollPid.update(bankTarget - data.bank, DT, data.rollRate);
+    if (fly.holdHeading) {
+      const error = ((((heading0 - data.heading + 180) % 360) + 360) % 360) - 180;
+      lab.pilot.yaw = clamp(data.antiTorquePedal + 0.03 * error - 0.8 * data.yawRate, -1, 1);
+    }
+  };
+  fly.forwardTarget = 0;
+  fly.holdHeading = false;
+  return fly;
 }
 
 /** Level-flight power (torque) from the hover to 20 m/s; translational lift onset where it has dropped 10 %. */
@@ -292,16 +359,9 @@ function testGroundEffect(hoverOge) {
 function testTorque() {
   const rig = createRig({ assists: 0 });
   rig.airborne({ altitude: 600 });
-  const attitude = createPid(2.4, 0.8, 1);
-  const bank = createPid(2.2, 0.8, 0.7);
   rig.pilot.throttle = 0.5;
-  // Level attitude held by the lab pilot, pedals centred and then the anti-torque pedal.
-  const holdLevel = (lab) => {
-    lab.pilot.pitch = attitude.update(0.01 - lab.data.pitch, DT, lab.data.pitchRate);
-    lab.pilot.roll = bank.update(-0.03 - lab.data.bank, DT, lab.data.rollRate);
-  };
-  attitude.reset(rig.data.hoverCyclicPitch);
-  bank.reset(rig.data.hoverCyclicRoll);
+  // The lab pilot holds the hover with the cyclic; pedals centred, then the anti-torque pedal.
+  const holdLevel = createHoverPilot(rig);
   rig.run(3, holdLevel);
   const rates = [];
   rig.run(3, (lab) => {
@@ -331,38 +391,38 @@ function testTorque() {
  * cyclic (the autopilot accelerating to 20 m/s) with full collective: recovery.
  */
 function testVortexRing() {
-  const rig = createRig({ assists: 1 });
+  const rig = createRig({ assists: 0 });
   rig.airborne({ altitude: 1200 });
-  rig.run(6);
+  const pilot = createHoverPilot(rig);
+  pilot.holdHeading = true;
+  rig.run(4, pilot);
   const hoverInduced = rig.data.hoverInduced;
   const descent = 0.75 * hoverInduced;
   const sink = createPid(0.05, 0.05, 0, 0, 1);
   sink.reset(rig.data.collective);
-  rig.override = (controls, lab) => {
-    controls.collective = sink.update(-descent - lab.data.verticalSpeed, DT);
-  };
-  rig.run(10);
+  rig.run(10, (lab) => {
+    pilot(lab);
+    lab.pilot.throttle = sink.update(-descent - lab.data.verticalSpeed, DT);
+  });
   const enteredDescent = -rig.data.verticalSpeed;
   const enteredRing = rig.data.vortexRing;
-  rig.override = (controls) => {
-    controls.collective = 1;
-  };
+  rig.pilot.throttle = 1;
   const altitudeStart = rig.position().y;
   let worst = 0;
   rig.run(5, (lab) => {
+    pilot(lab);
     worst = Math.max(worst, -lab.data.verticalSpeed);
   });
   const settledDescent = -rig.data.verticalSpeed;
   record('VRS entry: descent at 0.75 vh with zero airspeed', enteredRing, 0.5, { compare: 'min', note: `descending ${enteredDescent.toFixed(1)} m/s (vh ${hoverInduced.toFixed(1)} m/s)` });
-  record('VRS: full collective does not arrest the descent', settledDescent, 2.5, { unit: 'm/s', compare: 'min', note: `after 5 s at full collective; worst ${worst.toFixed(1)} m/s, ${(altitudeStart - rig.position().y).toFixed(0)} m lost` });
-  // Recovery: forward cyclic (the autopilot flying 20 m/s), full collective.
-  rig.autopilot.enabled = true;
-  rig.autopilot.heading = rig.data.heading;
-  rig.autopilot.altitude = rig.position().y;
-  rig.autopilot.speed = 20;
+  record('VRS: full collective does not arrest the descent', settledDescent, 2.5, { unit: 'm/s', compare: 'min', note: `after 5 s at full collective; worst ${worst.toFixed(1)} m/s, ${(altitudeStart - rig.position().y).toFixed(0)} m lost, rotor ${(rig.data.rotorRpm * 100).toFixed(0)} %` });
+  // Recovery: forward cyclic to 15 m/s, collective back to the hover setting.
+  pilot.forwardTarget = 15;
+  rig.pilot.throttle = 0.55;
   const recoveryStart = rig.position().y;
   let recoveredAt = NaN;
   rig.run(15, (lab) => {
+    pilot(lab);
     if (!Number.isFinite(recoveredAt) && lab.data.verticalSpeed > -1 && lab.data.vortexRing < 0.05) recoveredAt = lab.time;
   });
   const recoverySeconds = recoveredAt - (rig.time - 15);
@@ -422,36 +482,48 @@ function testAutorotation() {
   record('lower collective: rpm recovers in autorotation', raw.data.rotorRpm * 100, [95, 112], { unit: '%', compare: 'range', decimals: 1, note: `descending ${(-raw.data.verticalSpeed).toFixed(1)} m/s` });
 }
 
-/** Retreating blade stall near Vne: none at 80 %, clear at Vne with a nose-up / roll-left tendency. */
+/**
+ * Retreating blade stall near Vne: none at 80 %, clear at Vne with a nose-up / roll-left tendency.
+ * A lab pilot (0 % assists) holds a shallow descent at 4 m/s with the collective, the airspeed with
+ * the pitch attitude and the wings level; the trim stick at each speed shows the stall's moments.
+ */
 function testVne() {
   const measure = (speed) => {
-    const rig = createRig({ assists: 0.5 });
-    rig.airborne({ altitude: 1500, speed, lever: 0.62 });
-    // Trim the stick for level attitude with the lab pilot, then read the stall and its moments.
-    const pitchPid = createPid(1.4, 1.2, 0.8);
-    const rollPid = createPid(1.4, 1.2, 0.5);
-    pitchPid.reset(-0.5);
+    const rig = createRig({ assists: 0 });
+    rig.airborne({ altitude: 2500, speed, lever: 0.5 });
+    const pitchPid = createPid(2, 1.2, 1);
+    const rollPid = createPid(2, 1.2, 0.6);
+    const collectivePid = createPid(0.06, 0.08, 0, 0, 1);
+    const speedPid = createPid(0.03, 0.01, 0, -0.35, 0.2);
+    pitchPid.reset(-0.4);
+    collectivePid.reset(0.55);
+    speedPid.reset(-0.1);
     let stall = 0;
     let buffet = 0;
-    rig.run(1.5, (lab) => {
-      lab.pilot.pitch = pitchPid.update(-0.12 - lab.data.pitch, DT, lab.data.pitchRate);
+    const fly = (lab) => {
+      const pitchTarget = -speedPid.update(speed - lab.data.airspeed, DT) - 0.05;
+      lab.pilot.pitch = pitchPid.update(pitchTarget - lab.data.pitch, DT, lab.data.pitchRate);
       lab.pilot.roll = rollPid.update(-lab.data.bank, DT, lab.data.rollRate);
-    });
-    const stickPitch = rig.pilot.pitch;
-    const stickRoll = rig.pilot.roll;
-    rig.run(1, (lab) => {
-      lab.pilot.pitch = pitchPid.update(-0.12 - lab.data.pitch, DT, lab.data.pitchRate);
-      lab.pilot.roll = rollPid.update(-lab.data.bank, DT, lab.data.rollRate);
+      lab.pilot.throttle = collectivePid.update(-4 - lab.data.verticalSpeed, DT);
+      lab.pilot.yaw = clamp(1.6 * lab.data.sideslip + lab.data.antiTorquePedal, -1, 1);
+    };
+    rig.run(20, fly);
+    const sticks = { pitch: [], roll: [] };
+    rig.run(4, (lab) => {
+      fly(lab);
+      sticks.pitch.push(lab.pilot.pitch);
+      sticks.roll.push(lab.pilot.roll);
       stall = Math.max(stall, lab.data.bladeStall);
       lab.model.writeTelemetry(lab.telemetry);
       buffet = Math.max(buffet, lab.telemetry.stall.buffet);
     });
-    return { stall, buffet, stickPitch, stickRoll, overspeed: rig.data.overspeed };
+    return { stall, buffet, stickPitch: average(sticks.pitch), stickRoll: average(sticks.roll), overspeed: rig.data.overspeed, airspeed: rig.data.airspeed };
   };
   const cruise = measure(limits.vne * 0.8);
   const atVne = measure(limits.vne * 1.02);
-  record('retreating blade stall at 0.8 Vne', cruise.stall, 0.05, { compare: 'max', note: `${(limits.vne * 0.8 * KMH).toFixed(0)} km/h` });
-  record('retreating blade stall at Vne', atVne.stall, 0.3, { compare: 'min', note: `${(limits.vne * 1.02 * KMH).toFixed(0)} km/h, buffet ${atVne.buffet.toFixed(2)}, overspeed ${atVne.overspeed}` });
+  log('Vne', JSON.stringify(cruise), JSON.stringify(atVne));
+  record('retreating blade stall at 0.8 Vne', cruise.stall, 0.05, { compare: 'max', note: `${(cruise.airspeed * KMH).toFixed(0)} km/h` });
+  record('retreating blade stall at Vne', atVne.stall, 0.3, { compare: 'min', note: `${(atVne.airspeed * KMH).toFixed(0)} km/h, buffet ${atVne.buffet.toFixed(2)}, overspeed ${atVne.overspeed}` });
   record('blade stall: forward stick to hold the nose (pitch-up)', atVne.stickPitch - cruise.stickPitch, -0.03, { compare: 'max', note: `trim stick ${cruise.stickPitch.toFixed(2)} -> ${atVne.stickPitch.toFixed(2)}` });
   record('blade stall: right stick to hold the wings (roll left)', atVne.stickRoll - cruise.stickRoll, 0.02, { compare: 'min', note: `trim stick ${cruise.stickRoll.toFixed(2)} -> ${atVne.stickRoll.toFixed(2)}` });
 }
@@ -573,8 +645,8 @@ function testStrikes() {
   });
   record('rotor strike: 40 deg bank at 3 m', part === 'main rotor' ? 1 : 0, 1, { compare: part === 'main rotor', note: `${part || 'none'} at ${speed.toFixed(0)} m/s (limit ${limits.bodyStrikeSpeed} m/s -> soft crash)` });
   const tail = createRig({ assists: 0 });
-  const nosed = new THREE.Quaternion().setFromEuler(new THREE.Euler(22 * DEG, 0, 0, 'YXZ'));
-  tail.model.reset({ position: new THREE.Vector3(0, 2.2, 0), quaternion: nosed, velocity: new THREE.Vector3(0, -3, -6), angularVelocity: new THREE.Vector3(), throttle: 0.3, onGround: false, engineOn: true });
+  const nosed = new THREE.Quaternion().setFromEuler(new THREE.Euler(12 * DEG, 0, 0, 'YXZ'));
+  tail.model.reset({ position: new THREE.Vector3(0, 2.2, 0), quaternion: nosed, velocity: new THREE.Vector3(0, -4, 3), angularVelocity: new THREE.Vector3(), throttle: 0.3, onGround: false, engineOn: true });
   let tailPart = '';
   let tailSpeed = 0;
   tail.run(1.5, (lab) => {
@@ -584,7 +656,8 @@ function testStrikes() {
       tailSpeed = strike.speed;
     }
   });
-  record('tail strike: flaring 22 deg nose-up into the ground', tailSpeed > limits.bodyStrikeSpeed ? 1 : 0, 1, { compare: tailSpeed > limits.bodyStrikeSpeed, note: `${tailPart || 'none'} at ${tailSpeed.toFixed(1)} m/s` });
+  const tailStruck = tailPart === 'tailStinger' && tailSpeed > limits.bodyStrikeSpeed;
+  record('tail strike: backing down 12 deg nose-up', tailStruck ? 1 : 0, 1, { compare: tailStruck, note: `${tailPart || 'none'} at ${tailSpeed.toFixed(1)} m/s (limit ${limits.bodyStrikeSpeed} m/s)` });
 }
 
 /** Engine off on the ground, the rotor runs down; engine start spins it back to governed. */

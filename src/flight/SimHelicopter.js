@@ -100,15 +100,34 @@ export function forwardInflowRatio(m) {
 }
 
 /**
- * Ground effect (Cheeseman-Bennett) as the share of induced velocity removed at hub height `height`
- * over the surface for a rotor of radius `radius`, weakened by edgewise flow (ratio of airspeed to the
- * induced velocity) and faded to nothing at one rotor diameter.
+ * Glauert's momentum solution vi = vh^2 / sqrt(V^2 + (Vc + vi)^2) for edgewise speed `edgewise` and
+ * axial speed `climb` (all m/s), by bisection on [0, 2 vh]: valid once the edgewise flow sweeps the
+ * wake away (edgewise >= 0.6 vh keeps the bracket's upper end positive).
+ */
+export function glauertInflow(hoverInduced, edgewise, climb) {
+  const target = hoverInduced * hoverInduced;
+  let low = 0;
+  let high = 2 * hoverInduced;
+  for (let iteration = 0; iteration < 18; iteration++) {
+    const middle = (low + high) / 2;
+    const axial = climb + middle;
+    if (middle * Math.sqrt(edgewise * edgewise + axial * axial) > target) high = middle;
+    else low = middle;
+  }
+  return (low + high) / 2;
+}
+
+/**
+ * Ground effect as the share of induced power (and velocity) removed at hub height `height` over the
+ * surface for a rotor of radius `radius`: Hayden's empirical fit P_IGE / P_OGE = 1 / (0.9926 + 0.0379
+ * (2R / z)^2), weakened by edgewise flow (ratio of airspeed to the induced velocity, which blows the
+ * wake away) and faded to nothing at one rotor diameter.
  */
 export function groundEffectShare(height, radius, edgewiseRatio) {
   if (!Number.isFinite(height) || height > radius * 2) return 0;
-  const ratio = radius / (4 * Math.max(height, radius * 0.3));
-  const share = (ratio * ratio) / (1 + edgewiseRatio * edgewiseRatio);
-  return Math.min(0.35, share) * (1 - smoothstep(radius * 1.6, radius * 2, height));
+  const diameterRatio = (2 * radius) / Math.max(height, radius * 0.3);
+  const share = 1 - 1 / (0.9926 + 0.0379 * diameterRatio * diameterRatio);
+  return clamp(share / (1 + edgewiseRatio * edgewiseRatio), 0, 0.4) * (1 - smoothstep(radius * 1.6, radius * 2, height));
 }
 
 /** Rotor, tail rotor, engine and airframe constants from a simProfile (body axes, relative to the CG). */
@@ -256,6 +275,8 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
     thrust: weight,
     coning: heli.coningPerLoad,
     angle: 0,
+    /** Vortex ring intensity (0..1), a state: it builds and clears with time. */
+    vortexRing: 0,
   };
   const engine = {
     /** 'running' | 'starting' | 'off' */
@@ -463,7 +484,12 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
     const axialRatio = climb / hoverInduced;
     const edgewiseRatio = edgewise / hoverInduced;
     const groundShare = groundEffectShare(hubHeight, heli.radius, edgewiseRatio);
-    const targetInduced = hoverInduced * axialInflowRatio(axialRatio) * forwardInflowRatio(edgewiseRatio) * (1 - groundShare);
+    // Near the hover the empirical axial curve (vortex ring, turbulent wake) scaled by Glauert's
+    // forward-flight reduction; with edgewise flow, Glauert's full momentum solution.
+    let freeInduced = hoverInduced * axialInflowRatio(axialRatio) * forwardInflowRatio(edgewiseRatio);
+    const sweptWake = smoothstep(0.6, 1.6, edgewiseRatio);
+    if (sweptWake > 0) freeInduced += (glauertInflow(hoverInduced, edgewise, climb) - freeInduced) * sweptWake;
+    const targetInduced = freeInduced * (1 - groundShare);
     rotor.induced += (targetInduced - rotor.induced) * (1 - Math.exp(-dt / INFLOW_SECONDS));
     const inducedSigned = rotor.thrust >= 0 ? rotor.induced : -rotor.induced;
     const advance = edgewise / Math.max(tip, 1);
@@ -471,10 +497,21 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
     const pitch = heli.collectiveMin + controlsActual.collective * (heli.collectiveMax - heli.collectiveMin);
     let thrustCoefficient = heli.thrustSlope * (pitch * (1 / 3 + (advance * advance) / 2) - inflow / 2);
 
-    // Vortex ring state: descending into the rotor's own wake with little edgewise flow.
+    // Vortex ring state: descending into the rotor's own wake with little edgewise flow. The ring
+    // builds up over a moment and persists until the airflow sweeps it away (edgewise flow clears it
+    // faster), so a quick burst of collective cannot bounce the rotor out of it.
     const descentRatio = -axialRatio;
     const vrs = heli.vrs;
-    const vortexRing = bump(descentRatio, vrs.start, vrs.full, vrs.fade, vrs.end) * (1 - smoothstep(vrs.clearSpeed * 0.4, vrs.clearSpeed, edgewiseRatio));
+    const ringTarget = bump(descentRatio, vrs.start, vrs.full, vrs.fade, vrs.end) * (1 - smoothstep(vrs.clearSpeed * 0.4, vrs.clearSpeed, edgewiseRatio));
+    const ringSeconds = ringTarget > rotor.vortexRing ? vrs.buildSeconds : vrs.clearSeconds / (1 + 3 * edgewiseRatio);
+    rotor.vortexRing += (ringTarget - rotor.vortexRing) * (1 - Math.exp(-dt / ringSeconds));
+    const vortexRing = rotor.vortexRing;
+    // In the ring more collective mostly feeds the recirculating wake: pitch above the ideal hover
+    // pitch for this weight is largely lost ("settling with power").
+    const hoverCoefficient = weight / thrustScale;
+    const hoverPitch = 3 * (hoverCoefficient / heli.thrustSlope + Math.sqrt(hoverCoefficient / 2) / 2);
+    const effectivePitch = pitch - vortexRing * vrs.collectiveLoss * Math.max(0, pitch - hoverPitch);
+    thrustCoefficient = heli.thrustSlope * (effectivePitch * (1 / 3 + (advance * advance) / 2) - inflow / 2);
     // Retreating blade stall: onset advance ratio falls as the blade loading rises.
     const stall = heli.bladeStall;
     const bladeLoading = Math.abs(rotor.thrust) / thrustScale / heli.solidity;
@@ -900,6 +937,7 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
     engine.speed = engineOn ? 1 : 0;
     rotor.speed = engineOn || !onGround ? heli.governedSpeed : 0;
     rotor.thrust = onGround ? 0 : weight;
+    rotor.vortexRing = 0;
     tailState.thrust = onGround ? 0 : heli.tail.thrustNeutral;
     updateHoverCyclic();
     // Airborne, the disc starts level (in hover trim); on the ground it rests on the shaft.

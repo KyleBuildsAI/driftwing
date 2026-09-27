@@ -49,6 +49,7 @@ const arcadeProfile = Object.freeze({
     YAW_RATE: 55 * DEG,
     TURN_RATE: 32 * DEG,
     TURN_REFERENCE_SPEED: 16,
+    TURN_GAIN: 2.2,
     MAX_BANK: 32 * DEG,
     MAX_PITCH: 16 * DEG,
     CRUISE_PITCH: 7 * DEG,
@@ -73,32 +74,32 @@ const simProfile = Object.freeze({
   targets: Object.freeze({
     stallSpeed: 0,
     hoverCollective: 0.5, // lever share for an out-of-ground-effect hover at sea level
-    hoverTorque: 0.8, // share of rated torque in that hover
-    verticalClimb: 5, // m/s, full power, no airspeed
-    maxClimb: 7, // m/s at the best climb speed
+    hoverTorque: 0.83, // share of rated torque in that hover
+    verticalClimb: 5, // m/s at 100 % torque, no airspeed
+    maxClimb: 7.5, // m/s at 100 % torque and the best climb speed
     translationalLift: 7.8, // m/s = 28 km/h, where translational lift sets in
     vne: 69.4, // m/s = 250 km/h
     autorotationDescent: 8, // m/s at the best autorotation speed
   }),
-  mass: Object.freeze({ empty: 900, pilot: 90, fuel: 160, payload: 100 }), // 1250 kg
+  mass: Object.freeze({ empty: 950, pilot: 90, fuel: 200, payload: 160 }), // 1400 kg, near max gross
   // kg m^2 about body x (pitch), y (yaw) and z (roll).
-  inertia: Object.freeze({ pitch: 2600, yaw: 2200, roll: 1100 }),
+  inertia: Object.freeze({ pitch: 2800, yaw: 2400, roll: 1200 }),
   centerOfMass: Object.freeze([0, 0, 0.1]),
   rotor: Object.freeze({
     radius: 5.08,
     blades: 2,
     chord: 0.33,
     liftSlope: 5.7,
-    profileDrag: 0.011,
+    profileDrag: 0.009,
     rpm: 394,
     inertia: 700, // kg m^2: about 600 kJ stored at 100 %
     hub: Object.freeze([0, 1.62, 0.1]),
     shaftTilt: 4,
-    collectivePitch: Object.freeze([-0.5, 15.5]), // blade pitch at 3/4 radius over the lever's travel
-    cyclic: Object.freeze({ longitudinal: 11, lateral: 8, trim: 0.3 }),
+    collectivePitch: Object.freeze([-0.5, 16.9]), // blade pitch at 3/4 radius over the lever's travel
+    cyclic: Object.freeze({ longitudinal: 12, lateral: 8, trim: 0.3 }),
     flapLag: 0.08, // s: the disc follows the cyclic this fast
     flapDamping: 0.078, // s: disc tilt per body rate (rotor damping)
-    flapback: 0.7, // share of the theoretical blowback with airspeed
+    flapback: 0.5, // share of the theoretical blowback with airspeed
     hubStiffness: 8000, // N m per rad of disc tilt (effective hinge offset)
     inducedPowerFactor: 1.15,
     coning: 3.5, // degrees at 1 g
@@ -111,8 +112,8 @@ const simProfile = Object.freeze({
     ratio: 6.1,
     thrustNeutral: 560, // N at centred pedals, governed rpm, sea level
     thrustRange: 1000, // N per full pedal (left pedal adds thrust)
-    inflowDamping: 120, // N per m/s of tail motion along the thrust line
-    profilePowerKw: 3,
+    inflowDamping: 70, // N per m/s of tail motion along the thrust line
+    profilePowerKw: 2,
   }),
   engine: Object.freeze({
     kind: 'turboshaft',
@@ -123,7 +124,7 @@ const simProfile = Object.freeze({
     governorGain: 3,
     governorIntegral: 2.5,
     densityLapse: 0.8,
-    accessoryKw: 6,
+    accessoryKw: 4,
   }),
   fuselage: Object.freeze({
     // Flat-plate drag areas (m^2) broadside, from above and head-on.
@@ -138,11 +139,12 @@ const simProfile = Object.freeze({
     vertical: Object.freeze({ position: Object.freeze([0, 0.8, 6.1]), area: 0.8, aspectRatio: 1.4, offset: 4 }),
   }),
   // Vortex ring state: descent rate in hover-induced velocities (start, full, fade, end), the edgewise
-  // ratio that clears it, the thrust lost and the roughness (share of the weight).
-  vortexRing: Object.freeze({ start: 0.25, full: 0.6, fade: 1.2, end: 1.75, clearSpeed: 1.1, thrustLoss: 0.3, roughness: 0.06 }),
-  // Retreating blade stall: onset advance ratio at the reference blade loading (CT / sigma), its width,
-  // how much a heavier loading brings it forward, and its effects.
-  bladeStall: Object.freeze({ onsetAdvance: 0.29, width: 0.05, referenceLoading: 0.07, loadingSensitivity: 1.2, thrustLoss: 0.12, pitchMoment: 0.04, rollMoment: 0.05 }),
+  // ratio that clears it, how fast the ring builds and clears (s), the thrust lost, the share of
+  // collective above the hover pitch that is lost in it, and the roughness (share of the weight).
+  vortexRing: Object.freeze({ start: 0.25, full: 0.6, fade: 1.2, end: 1.75, clearSpeed: 1.1, buildSeconds: 0.6, clearSeconds: 2.5, thrustLoss: 0.3, collectiveLoss: 0.85, roughness: 0.06 }),
+  // Retreating blade stall: onset advance ratio at the reference blade loading (CT / sigma, the 1 g
+  // loading here), its width, how much a heavier loading brings it forward, and its effects.
+  bladeStall: Object.freeze({ onsetAdvance: 0.29, width: 0.05, referenceLoading: 0.078, loadingSensitivity: 1.2, thrustLoss: 0.12, pitchMoment: 0.04, rollMoment: 0.05 }),
   contacts: Object.freeze([
     Object.freeze({ id: 'leftSkidFront', kind: 'skid', gear: true, position: Object.freeze([-1.12, -1.52, -1.3]), spring: 45000, damping: 5000, friction: 0.45 }),
     Object.freeze({ id: 'leftSkidRear', kind: 'skid', gear: true, position: Object.freeze([-1.12, -1.52, 1.1]), spring: 45000, damping: 5000, friction: 0.45 }),

@@ -60,6 +60,8 @@ export const HELI_TUNING = Object.freeze({
     /** The position is captured once the groundspeed falls below this (m/s). */
     CAPTURE_SPEED: 1.5,
     MAX_RECOVERY_SPEED: 6,
+    /** Forward groundspeed (m/s) the auto-hover flies to clear a vortex ring. */
+    RING_ESCAPE_SPEED: 12,
   }),
   VERTICAL: Object.freeze({
     DETENT: 0.5,
@@ -76,9 +78,41 @@ export const HELI_TUNING = Object.freeze({
     LAND_SLOPE: 0.35,
     /** On the ground with the lever at or below the detent the collective runs down at this rate (1/s). */
     GROUND_RUNDOWN: 0.45,
+    /** Engine protection: the collective is held back above this torque or below this rotor rpm. */
+    TORQUE_LIMIT: 1,
+    RPM_FLOOR: 0.975,
+    LIMITER_GAIN: 3,
+    LIMITER_RECOVERY: 0.25,
+    /** Collective slew in the air and lifting off the ground (share per s). */
+    COLLECTIVE_RATE: 1.2,
+    GROUND_RATE: 0.6,
+    /** At low airspeed the descent is limited to this share of the hover induced velocity. */
+    RING_SAFE_SHARE: 0.2,
   }),
-  HEADING: Object.freeze({ P: 1.4, I: 0.5, D: 0.45, RATE_P: 0.8, MAX_RATE: 45 * DEG, INTEGRAL_LIMIT: 0.8, COORDINATION_SPEEDS: Object.freeze([14, 24]), SIDESLIP_GAIN: 1.6 }),
-  AUTOROTATION: Object.freeze({ RPM_P: 2.2, RPM_I: 1.2, GLIDE_SPEED: 28, FLARE_AGL: 28, LEVEL_AGL: 4, FLARE_TILT: 20 * DEG }),
+  HEADING: Object.freeze({ P: 1.3, I: 0.45, D: 0.7, RATE_P: 0.9, MAX_RATE: 45 * DEG, INTEGRAL_LIMIT: 0.8, COORDINATION_SPEEDS: Object.freeze([14, 24]), SIDESLIP_GAIN: 1.6 }),
+  /**
+   * Engine-off assist: glide at GLIDE_SPEED holding the rotor rpm with the collective; flare nose-up
+   * below FLARE_BASE + FLARE_PER_DESCENT * descent rate (m); level and cushion below LEVEL_AGL.
+   */
+  AUTOROTATION: Object.freeze({
+    RPM_P: 1.2,
+    RPM_I: 0.5,
+    /** The collective moves at most this fast (1/s) while it holds the rpm. */
+    COLLECTIVE_RATE: 0.35,
+    GLIDE_SPEED: 28,
+    GLIDE_TILT: 8 * DEG,
+    FLARE_BASE: 6,
+    FLARE_PER_DESCENT: 1.6,
+    FLARE_PITCH: 25 * DEG,
+    /** Flare pitch (rad): a base plus a gain per m/s of descent above FLARE_DESCENT_PER_METRE x height. */
+    FLARE_BASE_PITCH: 6 * DEG,
+    FLARE_PITCH_GAIN: 4 * DEG,
+    FLARE_DESCENT_PER_METRE: 0.3,
+    FLARE_RPM: 1.05,
+    LEVEL_AGL: 3.5,
+    LEVEL_PITCH: 4 * DEG,
+    CUSHION_P: 0.12,
+  }),
   HOVER_HOLD: Object.freeze({ STICK_SPEED: 5, LEVER_RATE: 2.5, PEDAL_RATE: 25 * DEG }),
   PICKUP: Object.freeze({ MOVE: 0.03, SLEW: 0.6 }),
 });
@@ -126,8 +160,11 @@ export function createLoopMemory() {
     altitudeCaptured: false,
     verticalIntegral: 0,
     collective: 0.5,
+    collectiveCeiling: 1,
     autoCollective: 0.5,
     autoIntegral: 0,
+    flaring: false,
+    ringEscape: false,
     pickupArmed: true,
     pickupReference: NaN,
     pickupValue: 0.5,
@@ -241,6 +278,25 @@ function velocityToAttitude(memory, data, position, targetForward, targetRight, 
 }
 const velocityScratch = { forward: 0, right: 0 };
 
+/**
+ * Engine protection: a collective ceiling that closes while the torque is over the limit or the rotor
+ * rpm droops below the floor (over-pitching), and reopens slowly once they recover.
+ */
+function updateCollectiveCeiling(memory, data, dt) {
+  const tuning = HELI_TUNING.VERTICAL;
+  if (!data.engineRunning) {
+    memory.collectiveCeiling = 1;
+    return 1;
+  }
+  const over = Math.max(data.torque - tuning.TORQUE_LIMIT, (tuning.RPM_FLOOR - data.rotorRpm) * 3);
+  if (over > 0) memory.collectiveCeiling = Math.min(memory.collectiveCeiling, data.collective + 0.02) - over * tuning.LIMITER_GAIN * dt;
+  else memory.collectiveCeiling += tuning.LIMITER_RECOVERY * dt;
+  // It never closes below what holds the height (short of a real shortage of power, which then sinks slowly).
+  const floor = data.onGround ? 0 : Math.min(data.trimCollective - 0.03, 0.9);
+  memory.collectiveCeiling = clamp(memory.collectiveCeiling, Math.max(0, floor), 1);
+  return memory.collectiveCeiling;
+}
+
 /** Vertical speed command (m/s) -> collective, with the model's trim collective as feed-forward. */
 function verticalSpeedToCollective(memory, data, verticalSpeedTarget, dt) {
   const tuning = HELI_TUNING.VERTICAL;
@@ -250,15 +306,27 @@ function verticalSpeedToCollective(memory, data, verticalSpeedTarget, dt) {
     memory.collective = moveToward(memory.collective, 0, tuning.GROUND_RUNDOWN * dt);
     return memory.collective;
   }
+  const ceiling = updateCollectiveCeiling(memory, data, dt);
   const error = verticalSpeedTarget - data.verticalSpeed;
   const unclamped = data.trimCollective + tuning.P * error + memory.verticalIntegral;
-  if ((unclamped < 1 || error < 0) && (unclamped > 0 || error > 0)) {
+  if ((unclamped < ceiling || error < 0) && (unclamped > 0 || error > 0)) {
     memory.verticalIntegral = clamp(memory.verticalIntegral + tuning.I * error * dt, -tuning.INTEGRAL_LIMIT, tuning.INTEGRAL_LIMIT);
   }
-  // Leaving the ground the collective comes up smoothly from where it rests.
-  const target = clamp(unclamped, 0, 1);
-  memory.collective = data.onGround ? moveToward(memory.collective, target, 0.6 * dt) : target;
+  // The collective moves smoothly (no yank that droops the rotor), from where it rests on the ground.
+  const target = clamp(unclamped, 0, ceiling);
+  memory.collective = moveToward(memory.collective, target, (data.onGround ? tuning.GROUND_RATE : tuning.COLLECTIVE_RATE) * dt);
   return memory.collective;
+}
+
+/**
+ * Descent limit at low airspeed (m/s, negative): the auto-hover never descends into its own wake
+ * fast enough to settle into the vortex ring; with airspeed the full descent rate returns.
+ */
+function ringSafeDescent(data) {
+  const tuning = HELI_TUNING.VERTICAL;
+  const induced = Math.max(data.hoverInduced, 1);
+  const slow = tuning.RING_SAFE_SHARE * induced;
+  return -(slow + (tuning.MAX_DESCENT - slow) * smooth01(data.airspeed / (1.5 * induced)));
 }
 
 /** Descent limit near the ground (m/s, negative): touchdowns are cushioned. */
@@ -343,35 +411,52 @@ function pickupLever(memory, lever, data, dt) {
 const attitudeOut = { pitch: 0, roll: 0 };
 const tiltOut = { pitch: 0, bank: 0 };
 
-/** Engine off at full assists: rpm held with the collective, best-glide speed, flare and cushion. */
+/**
+ * Engine off at full assists, three phases: glide at the best autorotation speed with the rotor rpm
+ * held by the collective; the flare (nose up) turns the forward speed into rotor thrust and rpm; then
+ * level the skids and cushion the touchdown with the rotor's stored energy.
+ */
 function autorotationAssist(memory, data, position, dt, cyclicIdle, controls, out) {
   const tuning = HELI_TUNING.AUTOROTATION;
   const height = Number.isFinite(data.agl) ? data.agl : Infinity;
-  const rpmError = data.rotorRpm - 1;
+  const descent = Math.max(0, -data.verticalSpeed);
+  const flareHeight = tuning.FLARE_BASE + tuning.FLARE_PER_DESCENT * descent;
+  const levelling = height < tuning.LEVEL_AGL || data.onGround;
+  // The flare latches once started (it slows the descent, which would otherwise lower the gate).
+  if (!memory.flaring && height < flareHeight) memory.flaring = true;
+  else if (memory.flaring && height > flareHeight + 25) memory.flaring = false;
+  const flaring = !levelling && memory.flaring;
+  const rpmTarget = flaring ? tuning.FLARE_RPM : 1;
+  const rpmError = data.rotorRpm - rpmTarget;
   memory.autoIntegral = clamp(memory.autoIntegral + tuning.RPM_I * rpmError * dt, -0.6, 0.6);
-  let collective = clamp(0.35 + memory.autoIntegral + tuning.RPM_P * rpmError, 0, 1);
-  if (height < tuning.LEVEL_AGL + 1.5 || data.onGround) {
-    // Cushion: the stored rotor energy buys a soft touchdown.
-    const cushion = verticalSpeedToCollective(memory, data, Math.max(landingDescentLimit(data), -1.2), dt);
-    collective = Math.max(collective, cushion);
-  } else {
-    memory.collective = collective;
+  let collective = moveToward(memory.collective, clamp(0.2 + memory.autoIntegral + tuning.RPM_P * rpmError, 0, 1), tuning.COLLECTIVE_RATE * dt);
+  if (levelling) {
+    // Cushion: trade the rotor's stored energy for a soft touchdown.
+    const cushionTarget = landingDescentLimit(data);
+    collective = Math.max(collective, clamp(data.trimCollective + tuning.CUSHION_P * (cushionTarget - data.verticalSpeed), 0, 1));
+    if (data.onGround) collective = moveToward(memory.collective, 0, HELI_TUNING.VERTICAL.GROUND_RUNDOWN * dt);
   }
+  memory.collective = collective;
   let pitchTarget;
   let bankTarget = 0;
   if (!cyclicIdle) {
     pitchTarget = controls.pitch * HELI_TUNING.ATTITUDE.PITCH_LIMIT;
     bankTarget = controls.roll * bankLimit(data);
-  } else if (height > tuning.FLARE_AGL) {
-    velocityToAttitude(memory, data, position, tuning.GLIDE_SPEED, 0, dt, tiltOut);
-    pitchTarget = tiltOut.pitch;
-    bankTarget = tiltOut.bank;
-  } else if (height > tuning.LEVEL_AGL) {
-    velocityToAttitude(memory, data, position, 0, 0, dt, tiltOut, tuning.FLARE_TILT);
-    pitchTarget = tiltOut.pitch;
-    bankTarget = tiltOut.bank;
+  } else if (levelling) {
+    // On the skids the cyclic stays neutral; just above them the skids come level.
+    pitchTarget = data.onGround ? data.pitch : tuning.LEVEL_PITCH;
+    bankTarget = data.onGround ? data.bank : 0;
+  } else if (flaring) {
+    // The nose comes up as far as it takes to bring the descent down with the height (no balloon),
+    // and eases as the forward speed runs out.
+    const descentTarget = tuning.FLARE_DESCENT_PER_METRE * height;
+    const flare = tuning.FLARE_BASE_PITCH + tuning.FLARE_PITCH_GAIN * (descent - descentTarget);
+    pitchTarget = clamp(flare, 0, tuning.FLARE_PITCH) * smooth01(data.groundSpeed / 8);
+    memory.positionCaptured = false;
   } else {
-    pitchTarget = 2 * DEG;
+    velocityToAttitude(memory, data, position, tuning.GLIDE_SPEED, 0, dt, tiltOut, tuning.GLIDE_TILT);
+    pitchTarget = tiltOut.pitch;
+    bankTarget = tiltOut.bank;
   }
   attitudeToCyclic(memory, data, pitchTarget, bankTarget, dt, attitudeOut);
   out.pitch = attitudeOut.pitch;
@@ -454,7 +539,7 @@ const helicopterAssistHandler = Object.freeze({
     const cyclicIdle = memory.cyclicIdle >= tuning.IDLE_DELAY;
 
     // ---- Engine off at full assists: autorotation assist ----------------------------------------------
-    if (!data.engineRunning && hover > 0 && !data.onGround) {
+    if (!data.engineRunning && hover > 0 && (!data.onGround || data.rotorRpm > 0.3)) {
       autorotationAssist(memory, data, position, dt, cyclicIdle, controls, autorotationOut);
       controls.pitch = clamp(controls.pitch + (autorotationOut.pitch - controls.pitch) * hover, -1, 1);
       controls.roll = clamp(controls.roll + (autorotationOut.roll - controls.roll) * hover, -1, 1);
@@ -492,7 +577,10 @@ const helicopterAssistHandler = Object.freeze({
       let pitchTarget;
       let bankTarget;
       if (cyclicIdle && hover > 0) {
-        velocityToAttitude(memory, data, position, 0, 0, dt, tiltOut);
+        // Hands off: hover. Caught in the vortex ring, fly forward out of it first.
+        if (data.vortexRing > 0.5) memory.ringEscape = true;
+        else if (data.vortexRing < 0.05) memory.ringEscape = false;
+        velocityToAttitude(memory, data, position, memory.ringEscape ? tuning.HOVER.RING_ESCAPE_SPEED : 0, 0, dt, tiltOut);
         memory.hoverActive = true;
         pitchTarget = tiltOut.pitch * hover;
         bankTarget = tiltOut.bank * hover;
@@ -529,7 +617,7 @@ const helicopterAssistHandler = Object.freeze({
       } else {
         memory.altitudeCaptured = false;
       }
-      verticalTarget = Math.max(verticalTarget, landingDescentLimit(data));
+      verticalTarget = Math.max(verticalTarget, landingDescentLimit(data), ringSafeDescent(data));
       const collective = verticalSpeedToCollective(memory, data, verticalTarget, dt);
       controls.collective = lever + (collective - lever) * hover;
     } else {
