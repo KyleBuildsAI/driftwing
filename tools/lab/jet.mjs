@@ -185,17 +185,6 @@ function createAltitudePilot(target) {
   };
 }
 
-/** Holds a load factor with the elevator (turn tests). */
-function createLoadPilot(target) {
-  const pid = createPid(0.02, 0.6, 0);
-  return {
-    target,
-    fly(rig) {
-      rig.pilot.pitch = pid.update(this.target - rig.data.gLoad, DT);
-    },
-  };
-}
-
 /** Holds an angle of attack (degrees) with the elevator. */
 function createAoaPilot(target) {
   const pid = createPid(1.5, 2.5, 0);
@@ -487,7 +476,6 @@ function testHighAoa() {
   const guarded = createRig({ assists: 1 });
   guarded.setAssists(1);
   guarded.airborne({ speed: 110, altitude: 5000, throttle: 1 });
-  const lateral = createLateralPilot();
   let maxAoa = 0;
   let maxBank = 0;
   guarded.run(15, (lab) => {

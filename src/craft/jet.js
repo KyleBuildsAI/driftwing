@@ -7,8 +7,8 @@
 // Effects (src/render/jetEffects.js): afterburner flame, vapor cones, wingtip vapour.
 // CLASSIC flies it with v1's forgiving arcade rules at jet speeds; the SIM profile describes the real
 // thing (about 1300 km/h at sea level and Mach 1.6 at 10 km in afterburner, 9 g, 25 degree critical
-// angle of attack, lift-off and touchdown near 270-290 km/h) through SimFixedWing and its jet
-// extension (src/flight/jetAero.js).
+// angle of attack, lift-off near 300 km/h and touchdown near 250 km/h) through SimFixedWing, its jet
+// extension (src/flight/jetAero.js) and its flight control system (src/flight/jetFcs.js).
 import * as THREE from 'three/webgpu';
 import { DEG, clamp, damp } from '../core/util.js';
 import { createJetExtension } from '../flight/jetAero.js';
@@ -878,7 +878,7 @@ export default Object.freeze({
       roof: 0.3,
       panel: Object.freeze({
         width: 0.6,
-        center: Object.freeze([0, -0.3, -0.56]),
+        center: Object.freeze([0, -0.27, -0.55]),
         layout: Object.freeze([
           Object.freeze(['aoa', 'airspeed', 'attitude', 'altitude', 'vsi']),
           Object.freeze(['g', 'heading', 'throttle', 'flapsGear']),
