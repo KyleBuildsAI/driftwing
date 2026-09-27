@@ -287,6 +287,8 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
     /** N2 speed as a share of governed (the tachometer's E needle). */
     speed: 1,
     integral: 0,
+    /** False while a copilot-started engine spools up: the copilot announces it, not a toast. */
+    announceRunning: true,
   };
   const controlsActual = { collective: 0.5, pitch: 0, roll: 0, pedal: 0, trim: 0 };
   /** Deflections for the mesh: disc tilt (-1..1) as aileron / elevator, pedals as rudder, rotor speed (rad/s). */
@@ -382,20 +384,24 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
   // ============================================================================================
   // PILOT INPUTS -> ACTUATORS
   // ============================================================================================
-  function handleActions(actions) {
+  /** quiet: actions the copilot pressed (it confirms them aloud, so no toast). */
+  function handleActions(actions, quiet) {
     if (!actions || actions.size === 0) return;
     for (const action of actions) {
       switch (action) {
-        case 'engineToggle':
+        case 'engineToggle': {
+          const announce = !quiet || !quiet.has(action);
           if (engine.mode === 'off') {
             engine.mode = 'starting';
             engine.startElapsed = 0;
-            notify('Engine start: turbine spooling up.', 'info');
+            engine.announceRunning = announce;
+            if (announce) notify('Engine start: turbine spooling up.', 'info');
           } else {
             engine.mode = 'off';
-            notify('Engine off: lower the collective and hold the rotor rpm.', 'warning');
+            if (announce) notify('Engine off: lower the collective and hold the rotor rpm.', 'warning');
           }
           break;
+        }
         case 'gearToggle':
           notify(`The ${craftName} lands on fixed skids.`);
           break;
@@ -413,7 +419,7 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
   }
 
   function updateActuators(controls, dt) {
-    handleActions(controls.actions);
+    handleActions(controls.actions, controls.quietActions);
     const collective = clamp(Number.isFinite(controls.collective) ? controls.collective : controlsActual.collective, 0, 1);
     controlsActual.collective = moveToward(controlsActual.collective, collective, COLLECTIVE_SERVO * dt);
     controlsActual.trim = clamp(Number.isFinite(controls.trim) ? controls.trim : 0, -1, 1);
@@ -647,7 +653,7 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
       available *= progress;
       if (progress >= 1) {
         engine.mode = 'running';
-        notify('Engine running: rotor rpm governed.', 'success');
+        if (engine.announceRunning) notify('Engine running: rotor rpm governed.', 'success');
       }
     } else if (engine.mode === 'off') {
       available = 0;
@@ -940,6 +946,7 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
     const engineOn = pose.engineOn !== false;
     engine.mode = engineOn ? 'running' : 'off';
     engine.startElapsed = 0;
+    engine.announceRunning = true;
     engine.integral = 0;
     engine.speed = engineOn ? 1 : 0;
     rotor.speed = engineOn || !onGround ? heli.governedSpeed : 0;

@@ -381,13 +381,14 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {}, setti
   // ============================================================================================
   // PILOT ACTIONS
   // ============================================================================================
-  function handleActions(actions) {
+  /** quiet: actions the copilot pressed (it confirms them aloud, so no toast). */
+  function handleActions(actions, quiet) {
     if (!actions || actions.size === 0) return;
     for (const action of actions) {
       switch (action) {
         case 'engineToggle':
           systems.armed = !systems.armed;
-          notify(systems.armed ? 'Armed: motors spinning.' : 'Disarmed: motors stopped.', systems.armed ? 'success' : 'warning');
+          if (!quiet || !quiet.has(action)) notify(systems.armed ? 'Armed: motors spinning.' : 'Disarmed: motors stopped.', systems.armed ? 'success' : 'warning');
           break;
         case 'gearToggle':
           notify(`The ${craftName.toLowerCase()} has no retractable gear.`);
@@ -696,7 +697,7 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {}, setti
   function step(dt, controls, env) {
     if (!(dt > 0)) return;
     time += dt;
-    handleActions(controls.actions);
+    handleActions(controls.actions, controls.quietActions);
     const rho = Number.isFinite(env.rho) ? env.rho : SEA_LEVEL_DENSITY;
     updateWorldUp();
 

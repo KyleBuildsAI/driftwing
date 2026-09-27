@@ -100,6 +100,11 @@ export function createFlightController(ctx) {
   // ---- SIM fixed-step state ----------------------------------------------------------------------
   const clock = createFixedStepClock();
   const tickControls = createControlState();
+  /**
+   * Model actions whose press came only from the copilot this tick (tickControls.quietActions). The
+   * copilot speaks its own confirmation, so the model skips its toast for them.
+   */
+  tickControls.quietActions = new Set();
   const env = {
     time: 0,
     wind: { vel: new THREE.Vector3(), turbulence: 0 },
@@ -163,6 +168,9 @@ export function createFlightController(ctx) {
   // ---- Actions ------------------------------------------------------------------------------------------
   const pendingActions = new Set();
   const modelActions = new Set();
+  /** Pending flight actions pressed by the copilot alone, and the model actions they became. */
+  const copilotActions = new Set();
+  const quietModelActions = new Set();
 
   const trails = createTrailSystem(ctx);
 
@@ -1080,7 +1088,11 @@ export function createFlightController(ctx) {
   // ACTIONS
   // ============================================================================================
   bus.on('input:action', (action) => {
-    if (action && action.phase === 'press' && FLIGHT_ACTIONS.has(action.id)) pendingActions.add(action.id);
+    if (!action || action.phase !== 'press' || !FLIGHT_ACTIONS.has(action.id)) return;
+    // A press from a device in the same frame keeps the model's toast: the pilot did it too.
+    if (action.source === 'copilot' && !pendingActions.has(action.id)) copilotActions.add(action.id);
+    else copilotActions.delete(action.id);
+    pendingActions.add(action.id);
   });
 
   /** Flight-owned ids from ControlState.actions and input:action events (a press counts once per frame). */
@@ -1088,6 +1100,7 @@ export function createFlightController(ctx) {
     for (const id of liveControls.actions) {
       if (!FLIGHT_ACTIONS.has(id)) continue;
       pendingActions.add(id);
+      copilotActions.delete(id);
       liveControls.actions.delete(id);
     }
   }
@@ -1095,10 +1108,16 @@ export function createFlightController(ctx) {
   function performActions() {
     if (pendingActions.size === 0) return;
     const actions = [...pendingActions];
+    const fromCopilot = new Set(copilotActions);
     pendingActions.clear();
+    copilotActions.clear();
     for (const id of actions) {
       if (MODEL_ACTIONS.has(id)) {
-        if (mode === 'sim') modelActions.add(id);
+        if (mode === 'sim') {
+          modelActions.add(id);
+          if (fromCopilot.has(id)) quietModelActions.add(id);
+          else quietModelActions.delete(id);
+        }
         continue;
       }
       performAction(id);
@@ -1219,9 +1238,12 @@ export function createFlightController(ctx) {
   function prepareTickControls(firstTick) {
     copyControlState(tickControls, liveControls);
     tickControls.actions.clear();
+    tickControls.quietActions.clear();
     if (firstTick) {
       for (const id of modelActions) tickControls.actions.add(id);
+      for (const id of quietModelActions) tickControls.quietActions.add(id);
       modelActions.clear();
+      quietModelActions.clear();
     }
     applyInputProfile(tickControls);
     env.assists = override.active ? 1 : assistLevel;
