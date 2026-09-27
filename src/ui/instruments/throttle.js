@@ -1,6 +1,7 @@
 // Throttle quadrant: the lever in its slot with the power fill, the throttle percentage, engine
 // rpm (state.flight.rpm times the engine's rated rpm when the craft gives one), an ENGINE OFF lamp,
-// and for afterburning engines the detent line (ControlState.afterburnerDetent) and an AB lamp.
+// and for afterburning engines the afterburner range past the detent line
+// (ControlState.afterburnerDetent) and an AB lamp.
 import { CENTER, drawPlate, label, digital, roundRect, lamp, clamp } from './gaugeKit.js';
 
 const SLOT = Object.freeze({ x: 58, top: 40, bottom: 164, width: 14 });
@@ -55,6 +56,10 @@ export default Object.freeze({
     if (afterburning) {
       const detent = clamp(Number.isFinite(controls.afterburnerDetent) ? controls.afterburnerDetent : 0.95, 0.5, 1);
       const y = SLOT.bottom - detent * height;
+      // The afterburner range: the slot above the detent, tinted, with its label.
+      pen.fillStyle = 'rgba(224, 112, 58, 0.32)';
+      pen.fillRect(SLOT.x - SLOT.width / 2 - 3, SLOT.top, SLOT.width + 6, y - SLOT.top);
+      label(pen, 'AB', SLOT.x - 30, (SLOT.top + y) / 2, { size: 9.5, color: theme.red, weight: 700 });
       pen.strokeStyle = theme.red;
       pen.lineWidth = 2.5;
       pen.beginPath();

@@ -475,7 +475,8 @@ export function createFlightController(ctx) {
     const spot = findFlatSpot(world, x, z, {
       waterLevel: CONFIG.WATER_LEVEL,
       headingFor: (spotX, spotZ) => windHeadingAt(spotX, spotZ),
-      clearance: vegetationClearance(craft.simProfile.contacts),
+      clearance: vegetationClearance(craft.simProfile.contacts, undefined, craft.spawn.runwayLength),
+      runwayLength: craft.spawn.runwayLength,
     });
     const heading = windHeadingAt(spot.x, spot.z);
     const pose = groundPose(world, craft.simProfile.contacts, spot.x, spot.z, heading, craft.simProfile.centerOfMass?.[2] ?? 0);

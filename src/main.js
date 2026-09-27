@@ -15,7 +15,7 @@ import { createInputSystem } from './input/InputManager.js';
 import { createJournal } from './gameplay/journal.js';
 import { createLandmarkSystem } from './world/landmarks.js';
 import { createPerfGovernor, measureDisplayRefresh } from './core/perf.js';
-import { createPostStack } from './render/post.js';
+import { createGEffectsSystem, createPostStack } from './render/post.js';
 import { createRingCourseSystem } from './gameplay/rings.js';
 import { createSettings } from './core/settings.js';
 import { createSkySystem } from './render/sky.js';
@@ -346,6 +346,7 @@ async function boot() {
     ['flight', createFlightController],
     ['camera', createCameraSystem],
     ['fx', createFxSystem],
+    ['gEffects', createGEffectsSystem],
     ['copilot', createCopilotSystem],
     ['windOverlay', createWindOverlaySystem],
     // Dev-only: the debug wind source that proves the Phase 2 wind writer path.
@@ -376,7 +377,7 @@ async function boot() {
   beginPrewarm();
   const fadeStatus = document.getElementById('fade-status');
   if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
-  const UPDATE_ORDER = ['input', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind']
+  const UPDATE_ORDER = ['input', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind']
     .filter((name) => ctx.systems[name]);
 
   // ---- Flight-state snapshot for the copilot (local or remote brain) -----------------

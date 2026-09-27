@@ -125,5 +125,6 @@ flightModels.register('fixedWing', createSimFixedWingModel);
 flightModels.register('helicopter', createSimHelicopterModel);
 flightModels.register('wingsuit', createSimWingsuitModel);
 flightModels.register('quad', createSimQuadModel);
+flightModels.register('jet', createSimFixedWingModel);
 flightModels.registerControlStage(createAutopilotStage());
 flightModels.registerControlStage(createAssistStage());

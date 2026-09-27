@@ -28,6 +28,20 @@
 // FlightModel contract (docs/architecture.md): reset(pose), step(dt, controls, env), state,
 // contact, writeTelemetry(flight), snapshot(), restore(snapshot), plus surfaces (mesh animation),
 // flightData (read by the assist and autopilot control stages) and dispose().
+//
+// Craft extension (optional): profile.extension({ profile, craft, bus, craftState, limits, flightData })
+// returns hooks for physics the generic airframe does not cover (the jet: turbofan, transonic drag and
+// handling). Every hook is optional and receives the live `tick` object (below):
+//   shapeControls(controls, tick)             before the actuators (gain schedules, detents)
+//   engine: { update(controls, tick), forces(tick, forceBody, momentBody), reset(pose, systems) }
+//                                             replaces the propeller engine (spool, thrust, telemetry)
+//   dragCoefficient(tick) -> number           added to cd0 (wave drag)
+//   moments(tick, momentBody)                 extra body moments (dampers, buffet, wing rock)
+//   afterStep(tick)                           after flightData is written
+//   reset(pose, systems), writeTelemetry(flight), snapshot(), restore(data)
+// profile.vneBasis 'equivalent' compares equivalent airspeed with Vne; profile.maxSpeed raises the
+// speed guard for fast craft. The model's kind is profile.model, so an airframe registered under its
+// own kind (flightModels.register('jet', createSimFixedWingModel)) gets its own assists and autopilot.
 import * as THREE from 'three/webgpu';
 import { DEG, clamp, headingFromVector } from '../core/util.js';
 import {
@@ -226,6 +240,10 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
   const elevatorShift = controlLimits.elevator * DEG * effectiveness.elevator;
   const rudderShift = controlLimits.rudder * DEG * effectiveness.rudder;
   const wingIncidence = profile.wing.incidence * DEG;
+  const maxSpeed = Number.isFinite(profile.maxSpeed) ? profile.maxSpeed : MAX_SPEED;
+  /** The model kind: 'fixedWing', or the profile's own kind for an airframe with its own assists (the jet). */
+  const modelKind = typeof profile.model === 'string' && profile.model ? profile.model : 'fixedWing';
+  const equivalentVne = profile.vneBasis === 'equivalent';
 
   // ---- Rigid-body state (centre of mass) --------------------------------------------------------------
   const centerPosition = new THREE.Vector3();
@@ -313,6 +331,15 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     resetCount: 0,
   };
 
+  // ---- Craft extension (see the header) -------------------------------------------------------------------
+  const extension = typeof profile.extension === 'function' ? profile.extension({ profile, craft, bus, craftState, limits, flightData }) : null;
+  const extensionEngine = extension && extension.engine ? extension.engine : null;
+  /** Any engine at all: the propeller engine or an extension's (thrust, throttle, engine toggle). */
+  const powered = Boolean(engine || extensionEngine);
+  systems.running = powered;
+  flightData.hasEngine = powered;
+  flightData.engineRunning = powered;
+
   // ---- Scratch -------------------------------------------------------------------------------------------
   const inverseQuaternion = new THREE.Quaternion();
   const airVelocityWorld = new THREE.Vector3();
@@ -336,6 +363,35 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
   const nonGravity = new THREE.Vector3();
   const contactBody = { position: centerPosition, velocity: state.velocity, quaternion: state.quaternion, angularVelocity: state.angularVelocity };
   const contactInputs = { brakeLeft: 0, brakeRight: 0, steering: 0, gearDown: true };
+  /**
+   * What an extension sees each tick (live, reused): SI units, radians. Air data is this tick's once
+   * the forces run and last tick's in shapeControls / engine.update; wingCl is last tick's.
+   */
+  const tick = {
+    dt: 0,
+    time: 0,
+    controls: null,
+    env: null,
+    assists: 1,
+    rho: SEA_LEVEL_DENSITY,
+    altitude: 0,
+    airspeed: 0,
+    dynamicPressure: 0,
+    aoa: 0,
+    sideslip: 0,
+    wingCl: 0,
+    gLoad: 1,
+    onGround: false,
+    mass: dryMass,
+    wingArea,
+    wingSpan,
+    meanChord,
+    bodyAir,
+    angularVelocity: state.angularVelocity,
+    systems,
+    surfaces: surfacesActual,
+    flightData,
+  };
 
   function notify(text, kind = 'info') {
     bus.emit('notify', { text, kind });
@@ -415,7 +471,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
           }
           break;
         case 'engineToggle':
-          if (engine) {
+          if (powered) {
             systems.running = !systems.running;
             notify(systems.running ? 'Engine running.' : 'Engine off.', systems.running ? 'success' : 'warning');
           } else {
@@ -432,6 +488,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
   }
 
   function updateActuators(controls, dt) {
+    if (extension && extension.shapeControls) extension.shapeControls(controls, tick);
     handleActions(controls.actions);
     readFlapLever(controls.flaps, 'flapLever');
     readFlapLever(controls.antenna, 'antennaLever');
@@ -469,8 +526,9 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     }
 
     // Throttle and engine spool.
-    systems.throttle = engine ? clamp(Number.isFinite(controls.throttle) ? controls.throttle : 0, 0, 1) : 0;
-    if (engine) {
+    systems.throttle = powered ? clamp(Number.isFinite(controls.throttle) ? controls.throttle : 0, 0, 1) : 0;
+    if (extensionEngine) extensionEngine.update(controls, tick);
+    else if (engine) {
       const target = systems.running ? engine.idleShare + (1 - engine.idleShare) * systems.throttle : 0;
       const spool = 1 - Math.exp(-dt / engine.spoolSeconds);
       systems.powerShare += (target - systems.powerShare) * spool;
@@ -583,7 +641,8 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     if (airspeed > 0.1) {
       const dynamicPressure = 0.5 * rho * airspeed * airspeed;
       const gearDrag = gearProfile.retractable ? (gearProfile.cdIncrement ?? 0) * systems.gearPosition : 0;
-      const parasitic = dynamicPressure * wingArea * (profile.aero.cd0 + gearDrag);
+      const extraDrag = extension && extension.dragCoefficient ? extension.dragCoefficient(tick) : 0;
+      const parasitic = dynamicPressure * wingArea * (profile.aero.cd0 + gearDrag + extraDrag);
       lever.copy(bodyAir).multiplyScalar(-parasitic / airspeed);
       forceBody.add(lever);
       momentBody.add(spin.crossVectors(airframe.dragCenter, lever));
@@ -612,6 +671,10 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     slipstreamState.speed = 0;
     slipstreamState.swirl = 0;
     slipstreamState.thrust = 0;
+    if (extensionEngine) {
+      slipstreamState.thrust = extensionEngine.forces(tick, forceBody, momentBody);
+      return slipstreamState;
+    }
     if (!engine) return slipstreamState;
     const axial = -bodyAir.z;
     const power = engine.ratedPower * pistonPowerLapse(rho) * systems.powerShare;
@@ -658,13 +721,25 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     if (!(dt > 0)) return;
     time += dt;
     updateMass();
-    updateActuators(controls, dt);
     const rho = Number.isFinite(env.rho) ? env.rho : SEA_LEVEL_DENSITY;
+    tick.dt = dt;
+    tick.time = time;
+    tick.controls = controls;
+    tick.env = env;
+    tick.assists = Number.isFinite(env.assists) ? env.assists : 1;
+    tick.rho = rho;
+    tick.mass = mass;
+    updateActuators(controls, dt);
 
     inverseQuaternion.copy(state.quaternion).invert();
     airVelocityWorld.copy(state.velocity);
     if (env.wind && env.wind.vel) airVelocityWorld.sub(env.wind.vel);
     bodyAir.copy(airVelocityWorld).applyQuaternion(inverseQuaternion);
+    tick.airspeed = bodyAir.length();
+    tick.dynamicPressure = 0.5 * rho * tick.airspeed * tick.airspeed;
+    tick.altitude = centerPosition.y;
+    tick.aoa = Math.atan2(-bodyAir.y, -bodyAir.z);
+    tick.sideslip = tick.airspeed > 0.5 ? Math.asin(clamp(bodyAir.x / tick.airspeed, -1, 1)) : 0;
 
     const surfaceHeight = Math.max(env.groundHeight(centerPosition.x, centerPosition.z), env.waterLevel);
     const wingAgl = centerPosition.y + airframe.wingHeight - surfaceHeight;
@@ -674,13 +749,16 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     momentBody.set(0, 0, 0);
     const slipstream = engineForces(rho);
     aeroForces(rho, groundEffect, slipstream);
+    tick.wingCl = aeroState.wingLift / wingArea;
 
     // Buffet near the stall, flutter past Vne and turbulence: small shaking moments that scale with q.
     const airspeed = bodyAir.length();
     const dynamicPressure = 0.5 * rho * airspeed * airspeed;
     const stallMargin = aeroState.aoaCritical - Math.atan2(-bodyAir.y, -bodyAir.z);
     const buffet = airspeed > 5 ? Math.max(smoothstep(BUFFET_ONSET, 0, stallMargin), aeroState.maxStall) : 0;
-    const flutter = smoothstep(vne, vne * 1.15, airspeed);
+    // Vne as true airspeed, or as equivalent airspeed for craft that fly high (the jet).
+    const limitSpeed = equivalentVne ? airspeed * Math.sqrt(rho / SEA_LEVEL_DENSITY) : airspeed;
+    const flutter = smoothstep(vne, vne * 1.15, limitSpeed);
     const turbulence = env.wind && Number.isFinite(env.wind.turbulence) ? env.wind.turbulence : 0;
     const shake = dynamicPressure * wingArea * meanChord;
     if (shake > 0 && (buffet > 0 || flutter > 0 || turbulence > 0)) {
@@ -690,6 +768,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
       momentBody.y += buffetScale * 0.5 * noise(time, 2.1, 6) + turbulenceScale * 0.6 * noise(time, 2.9, 0.7);
       momentBody.z += buffetScale * noise(time, 4.2, 8) + turbulenceScale * 1.4 * noise(time, 3.7, 1.1);
     }
+    if (extension && extension.moments) extension.moments(tick, momentBody);
 
     // Ground contact against the shared height function (world force, body moment).
     groundForce.set(0, 0, 0);
@@ -716,7 +795,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
 
     // Semi-implicit Euler: velocities first, then positions and attitude from the new velocities.
     state.velocity.addScaledVector(forceWorld, dt / mass);
-    if (state.velocity.lengthSq() > MAX_SPEED * MAX_SPEED) state.velocity.setLength(MAX_SPEED);
+    if (state.velocity.lengthSq() > maxSpeed * maxSpeed) state.velocity.setLength(maxSpeed);
     state.angularVelocity.addScaledVector(angularAcceleration, dt);
     if (state.angularVelocity.lengthSq() > MAX_ANGULAR_SPEED * MAX_ANGULAR_SPEED) state.angularVelocity.setLength(MAX_ANGULAR_SPEED);
     centerPosition.addScaledVector(state.velocity, dt);
@@ -748,9 +827,9 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     flightData.stallSpeed = Math.sqrt((2 * mass * GRAVITY) / (rho * wingArea * Math.max(clMaxNow, 0.3)));
     flightData.stalled = aeroState.stallDepth > STALLED_DEPTH || aeroState.maxStall > 0.85;
     flightData.buffet = buffet;
-    flightData.overspeed = airspeed > vne;
+    flightData.overspeed = limitSpeed > vne;
     flightData.throttle = systems.throttle;
-    flightData.engineRunning = Boolean(engine) && systems.running;
+    flightData.engineRunning = powered && systems.running;
     flightData.pitchCommand = systems.pitchCommand;
     flightData.elevator = surfacesActual.elevator;
     flightData.dynamicPressure = dynamicPressure;
@@ -761,6 +840,9 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     surfaces.rudder = surfacesActual.rudder;
     surfaces.propSpeed = engine && systems.rpmShare > 0.02 ? 6 + 27 * systems.rpmShare : 0;
     surfaces.groundSpeed = contactReport.onGround ? contactReport.wheelSpeed : 0;
+    tick.gLoad = smoothedLoad;
+    tick.onGround = contactReport.onGround;
+    if (extension && extension.afterStep) extension.afterStep(tick);
 
     landing.observe(contactReport, { dt, agl: flightData.agl, position: state.position });
   }
@@ -786,8 +868,8 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     else state.angularVelocity.set(0, 0, 0);
     syncOrigin();
     const onGround = pose.onGround === true;
-    systems.throttle = engine && Number.isFinite(pose.throttle) ? clamp(pose.throttle, 0, 1) : 0;
-    systems.running = Boolean(engine) && pose.engineOn !== false;
+    systems.throttle = powered && Number.isFinite(pose.throttle) ? clamp(pose.throttle, 0, 1) : 0;
+    systems.running = powered && pose.engineOn !== false;
     systems.powerShare = engine && systems.running ? (onGround ? engine.idleShare : engine.idleShare + (1 - engine.idleShare) * systems.throttle) : 0;
     systems.flapNotch = 0;
     systems.flapPosition = 0;
@@ -798,6 +880,8 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     surfacesActual.elevator = 0;
     surfacesActual.rudder = 0;
     smoothedLoad = 1;
+    if (extensionEngine) extensionEngine.reset(pose, systems);
+    if (extension && extension.reset) extension.reset(pose, systems);
     contact.reset(onGround);
     landing.reset(onGround);
     contactReport.onGround = onGround;
@@ -817,8 +901,8 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     flight.gLoad = flightData.gLoad;
     flight.throttle = systems.throttle;
     flight.afterburner = false;
-    flight.engineOn = Boolean(engine) && systems.running;
-    flight.rpm = engine ? systems.rpmShare : 0;
+    flight.engineOn = powered && systems.running;
+    flight.rpm = powered ? systems.rpmShare : 0;
     flight.flaps = systems.flapPosition;
     flight.flapNotch = systems.flapNotch;
     flight.gear.retractable = gearProfile.retractable === true;
@@ -832,11 +916,12 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     flight.stall.buffet = Math.round(flightData.buffet * 1000) / 1000;
     flight.stall.warning = stallWarningActive(flight.assists, flightData.stallMargin, flightData.stalled, flightData.onGround || flightData.airspeed < 5);
     flight.overspeed = flightData.overspeed;
+    if (extension && extension.writeTelemetry) extension.writeTelemetry(flight);
   }
 
   function snapshot() {
     return {
-      kind: 'fixedWing',
+      kind: modelKind,
       center: [centerPosition.x, centerPosition.y, centerPosition.z],
       velocity: [state.velocity.x, state.velocity.y, state.velocity.z],
       quaternion: [state.quaternion.x, state.quaternion.y, state.quaternion.z, state.quaternion.w],
@@ -858,11 +943,12 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
       time,
       contact: contact.snapshot(),
       landing: landing.snapshot(),
+      extension: extension && extension.snapshot ? extension.snapshot() : null,
     };
   }
 
   function restore(data) {
-    if (!data || data.kind !== 'fixedWing') return false;
+    if (!data || data.kind !== modelKind) return false;
     centerPosition.fromArray(data.center);
     state.velocity.fromArray(data.velocity);
     state.quaternion.fromArray(data.quaternion).normalize();
@@ -873,6 +959,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     time = Number.isFinite(data.time) ? data.time : time;
     contact.restore(data.contact);
     landing.restore(data.landing);
+    if (extension && extension.restore && data.extension) extension.restore(data.extension);
     syncOrigin();
     computeAttitude();
     return true;
@@ -881,7 +968,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
   updateMass();
 
   return {
-    kind: 'fixedWing',
+    kind: modelKind,
     profile,
     state,
     contact: contactReport,

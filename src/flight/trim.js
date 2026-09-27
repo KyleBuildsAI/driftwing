@@ -36,6 +36,11 @@ export function hasTrimHandler(kind) {
   return handlers.has(kind);
 }
 
+/** The trim handler registered for a model kind, or null (a model kind may wrap another kind's trim). */
+export function trimHandlerFor(kind) {
+  return handlers.get(kind) ?? null;
+}
+
 /**
  * Trims a model at its current position and velocity. request: { env (the controller's tick env:
  * rho, wind, groundHeight, waterLevel), dt, throttle, trim (the pilot's pitch trim axis), bank

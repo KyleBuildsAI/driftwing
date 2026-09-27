@@ -46,6 +46,13 @@ export function createSkySystem(ctx) {
   const FOG_EDGE_START = 0.7;
   const DOME_RADIUS_FRACTION = 0.82;
   const CAMERA_FAR_MARGIN = 2500;
+  // High altitude (SIM only; CLASSIC never gets here): from this height above the ground to the next
+  // the far plane reaches down to the terrain below, and the haze counts vertical distance less, so the
+  // loaded terrain fades into haze at its rim instead of ending. Below it nothing changes.
+  const HIGH_ALTITUDE_START = 3000;
+  const HIGH_ALTITUDE_FULL = 6000;
+  const HIGH_FOG_VERTICAL_SCALE = 0.16;
+  const FAR_STEP = 100;
   // Clock speed by sun elevation (relative; normalised so a full loop still lasts dayLength). The
   // golden band (-3..14 deg) runs slowest, so the golden-hour start keeps ~60 s of low warm sun
   // before sunset; blue hour runs a little faster and night fastest.
@@ -237,6 +244,7 @@ export function createSkySystem(ctx) {
     auroraGlow: uniform(new THREE.Color(0, 0, 0)),
     fogNear: uniform(400),
     fogFar: uniform(2400),
+    fogVerticalScale: uniform(FOG_VERTICAL_SCALE),
   };
 
   const auroraLayerCount = uniform(AURORA_LAYERS, 'int');
@@ -457,7 +465,7 @@ export function createSkySystem(ctx) {
   // ---- Fog: same sky function, horizontally weighted distance so the world edge always melts away ----
   const viewDirectionWorld = positionView.transformDirection(cameraViewMatrix);
   const worldOffset = viewDirectionWorld.mul(length(positionView));
-  const hazeDistance = length(vec3(worldOffset.x, worldOffset.y.mul(FOG_VERTICAL_SCALE), worldOffset.z));
+  const hazeDistance = length(vec3(worldOffset.x, worldOffset.y.mul(sky.fogVerticalScale), worldOffset.z));
   // Low haze is densest near the ground under the glider: attenuate it by the view ray's mid height
   // so looking down from altitude stays clear. The edge term ignores height, so the world edge always
   // melts into the sky.
@@ -645,9 +653,14 @@ export function createSkySystem(ctx) {
     // Above the low haze layer the air clears up; the far edge stays put so the world edge never shows.
     const agl = Number.isFinite(state.player.agl) ? state.player.agl : 0;
     const clearAir = 0.1 * smoothRange(250, 1400, agl);
-    const targetFar = viewDistance * 0.95;
-    const targetNear = Math.min(Math.max(FOG_NEAR_FLOOR, viewDistance * (0.3 - 0.15 * haze + clearAir)), targetFar * 0.8);
     const groundBelow = Math.max(Number.isFinite(state.player.groundHeight) ? state.player.groundHeight : 0, config.WATER_LEVEL);
+    // High altitude (SIM): the fog's far edge follows the rim of the loaded terrain seen from above.
+    const cameraHeight = Math.max(0, camera.position.y - groundBelow);
+    const high = state.flight && state.flight.mode === 'sim' ? smoothRange(HIGH_ALTITUDE_START, HIGH_ALTITUDE_FULL, cameraHeight) : 0;
+    const verticalScale = FOG_VERTICAL_SCALE + (HIGH_FOG_VERTICAL_SCALE - FOG_VERTICAL_SCALE) * high;
+    sky.fogVerticalScale.value = verticalScale;
+    const targetFar = high > 0 ? Math.hypot(viewDistance * 0.95, verticalScale * cameraHeight * high) : viewDistance * 0.95;
+    const targetNear = Math.min(Math.max(FOG_NEAR_FLOOR, viewDistance * (0.3 - 0.15 * haze + clearAir)), targetFar * 0.8);
     sky.fogLayerBase.value = sky.fogLayerBase.value === 0 ? groundBelow : damp(sky.fogLayerBase.value, groundBelow, 0.6, realDt);
     if (fogFarCurrent < 0) {
       fogFarCurrent = targetFar;
@@ -660,7 +673,8 @@ export function createSkySystem(ctx) {
     sky.fogFar.value = fogFarCurrent;
     scene.fog.near = fogNearCurrent;
     scene.fog.far = fogFarCurrent;
-    const desiredFar = Math.round(viewDistance + CAMERA_FAR_MARGIN);
+    // The far plane reaches the ground below and the terrain's rim from high up (100 m steps).
+    const desiredFar = high > 0 ? Math.ceil((viewDistance + CAMERA_FAR_MARGIN + cameraHeight * high) / FAR_STEP) * FAR_STEP : Math.round(viewDistance + CAMERA_FAR_MARGIN);
     if (desiredFar !== appliedFar) {
       appliedFar = desiredFar;
       camera.far = desiredFar;
