@@ -529,6 +529,8 @@
     #ui-root .dw-controls-body,
     #ui-root .dw-wizard-content { padding-left: 14px; padding-right: 14px; }
     #ui-root .dw-controls-scope { width: 100%; }
+    #ui-root .dw-controls-tabs { flex-wrap: wrap; overflow-x: visible; }
+    #ui-root .dw-controls-tab { flex: 1 1 auto; white-space: normal; text-align: center; }
     #ui-root .dw-bind-row { flex-wrap: wrap; row-gap: 0; }
     #ui-root .dw-bind-main { flex-basis: 100%; }
     #ui-root .dw-bind-side { margin-left: auto; }
