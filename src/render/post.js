@@ -100,7 +100,6 @@ export function createPostStack(renderer, scene, camera, uniforms) {
   };
 }
 
-
 // ============================================================================
 // G EFFECTS: what the pilot's eyes do under load (the 'gEffects' system).
 // ============================================================================
