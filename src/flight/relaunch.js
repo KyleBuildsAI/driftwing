@@ -18,6 +18,13 @@ const PEAK = Object.freeze({
   CLIMB_ITERATIONS: 80,
   LAUNCH_HEIGHT: 35,
   DOWNHILL_PROBE: 180,
+  /** Dive launches: the edge is where the ground has dropped EDGE_DROP below the summit (within EDGE_MAX). */
+  EDGE_STEP: 10,
+  EDGE_MAX: 140,
+  EDGE_DROP: 12,
+  DIVE_PROBE_STEP: 20,
+  DIVE_PROBE_DISTANCE: 400,
+  DIVE_CLEARANCE: 25,
 });
 
 /** Walks uphill on heightAt from (x, z) to the local summit. */
@@ -81,8 +88,13 @@ export function findNearestPeak(world, x, z, options = {}) {
   return highest && highest.height > startGround + 100 ? highest : null;
 }
 
-/** Launch pose over a summit: just above it, facing the steepest way down. */
-export function planPeakLaunch(world, peak) {
+/**
+ * Launch pose over a summit: just above it, facing the steepest way down. With options.diveAngle
+ * (degrees) the launch moves out to the edge of the summit (where the ground has started to fall
+ * away) and also returns `pitch` (degrees, negative = nose down): the dive angle, made shallower where
+ * the slope below would not clear a straight dive by DIVE_CLEARANCE.
+ */
+export function planPeakLaunch(world, peak, options = {}) {
   let heading = 0;
   let lowest = Infinity;
   for (let direction = 0; direction < 16; direction++) {
@@ -95,7 +107,29 @@ export function planPeakLaunch(world, peak) {
     }
   }
   const ground = Math.max(world.groundHeight(peak.x, peak.z), peak.height);
-  return { position: new THREE.Vector3(peak.x, ground + PEAK.LAUNCH_HEIGHT, peak.z), heading };
+  if (!Number.isFinite(options.diveAngle)) return { position: new THREE.Vector3(peak.x, ground + PEAK.LAUNCH_HEIGHT, peak.z), heading };
+  return planDive(world, peak, heading, ground, options.diveAngle);
+}
+
+/** The edge of the summit along `heading` and the steepest dive (up to diveAngle) that clears the slope. */
+function planDive(world, peak, heading, summitGround, diveAngle) {
+  const forward = vectorFromHeading(heading);
+  let edge = 0;
+  for (let distance = PEAK.EDGE_STEP; distance <= PEAK.EDGE_MAX; distance += PEAK.EDGE_STEP) {
+    edge = distance;
+    if (world.heightAt(peak.x + forward.x * distance, peak.z + forward.z * distance) < summitGround - PEAK.EDGE_DROP) break;
+  }
+  const x = peak.x + forward.x * edge;
+  const z = peak.z + forward.z * edge;
+  const startY = Math.max(world.groundHeight(x, z), world.WATER_LEVEL ?? -Infinity) + PEAK.LAUNCH_HEIGHT;
+  // Steepest straight path that stays DIVE_CLEARANCE above the ground ahead.
+  let slope = Math.tan(diveAngle * DEG);
+  for (let distance = PEAK.DIVE_PROBE_STEP; distance <= PEAK.DIVE_PROBE_DISTANCE; distance += PEAK.DIVE_PROBE_STEP) {
+    const ground = Math.max(world.groundHeight(x + forward.x * distance, z + forward.z * distance), world.WATER_LEVEL ?? -Infinity);
+    slope = Math.min(slope, (startY - ground - PEAK.DIVE_CLEARANCE) / distance);
+  }
+  const pitch = -Math.atan(Math.max(0, slope)) / DEG;
+  return { position: new THREE.Vector3(x, startY, z), heading, pitch };
 }
 
 // ============================================================================================
