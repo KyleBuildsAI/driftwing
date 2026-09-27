@@ -4,8 +4,8 @@
 // speed, a battery on top under an orange strap, the FPV camera in an orange TPU cage tilted up at the
 // camera's uptilt, a rear antenna and LED strips under the rear arms that show the flight mode (teal
 // angle, orange rate, red blink when disarmed).
-// CLASSIC flies it with v1's forgiving arcade rules at quad speeds (arcadeProfile.hover describes the
-// hover handling); SIM flies SimQuad (src/flight/SimQuad.js): thrust-to-weight 8:1, about 150 km/h
+// CLASSIC flies it with the hover-capable arcade rules (ArcadeModel's hover extension, forgiving,
+// never tumbles); SIM flies SimQuad (src/flight/SimQuad.js): thrust-to-weight 8:1, about 150 km/h
 // flat out, Betaflight rates (670 deg/s at full stick, expo 0.3), angle mode and altitude hold.
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
@@ -18,78 +18,54 @@ import { DEFAULT_QUAD_RATES, QUAD_VISUAL_PROP_SPEED } from '../flight/SimQuad.js
 const { uniform } = TSL;
 
 // ============================================================================================
-// CLASSIC: v1's arcade rules at quad speeds. `hover` describes the hovering handling for the arcade
-// model's hover extension (m/s, degrees): full forward stick flies at maxSpeed, full throttle climbs
-// at climbRate, the stick yaws at yawRate and tilts up to bankLimit / pitchLimit.
+// CLASSIC: the hover-capable arcade rules (ArcadeModel's hover extension, the same one the
+// helicopter uses) tuned quad-quick: it hovers where it is left, the stick tilts it into a sprint,
+// throttle above the middle climbs and below it sinks, and it never tumbles.
 // ============================================================================================
 const arcadeProfile = Object.freeze({
-  // m/s: a lazy 30 km/h, cruise about 80 km/h, flat out about 140 km/h, boosted about 170 km/h.
-  SPEED: Object.freeze({ MIN: 8, STALL: 10, CRUISE: 22, MAX: 39, BOOST_MAX: 47 }),
+  // m/s. The dial shows the arcade envelope; the hover model reads hover.MAX_FORWARD_SPEED.
+  SPEED: Object.freeze({ MIN: 0, STALL: 0, CRUISE: 22, MAX: 39, BOOST_MAX: 47 }),
   GRAVITY: 9.81,
-  // Snappy: plenty of drag and thrust per m/s, so the throttle bites at once.
-  DRAG_COEFFICIENT: 0.012,
-  THROTTLE_SPEED_EXPONENT: 1,
-  THROTTLE_RATE: 1.4,
-  INDUCED_DRAG: 0.2,
-  INDUCED_MAX_EXTRA_G: 4,
-  MAX_PITCH_RATE: 120 * DEG,
-  MAX_ROLL_RATE: 240 * DEG,
-  MAX_YAW_RATE: 90 * DEG,
-  MAX_BANK: 70 * DEG,
-  BANK_GAIN: 4.5,
-  FINE_BANK_SCALE: 0.5,
-  YAW_BANK: 14 * DEG,
-  PITCH_LIMIT_START: 55 * DEG,
-  PITCH_LIMIT_RANGE: 25 * DEG,
-  TURN_GAIN: 2.4,
-  MAX_TURN_RATE: 110 * DEG,
-  BANK_NOSE_DROP: 3 * DEG,
-  BANK_SETTLE_PITCH: 3 * DEG,
-  FINE_CONTROL_SCALE: 0.45,
-  AUTO_LEVEL_DELAY: 0.8,
-  STALL_EXIT_MARGIN: 2,
-  STALL_NOSE_TARGET: -12 * DEG,
-  HIGH_SPEED_PITCH_START: 32,
-  CUSHION_HEIGHT: 8,
-  IMPACT_WARNING_SECONDS: 1.8,
-  IMPACT_FULL_SECONDS: 0.5,
-  CUSHION_PULL_RATE: 90 * DEG,
-  GUARD_PROBE_SECONDS: Object.freeze([0.8, 1.6, 2.6]),
-  GUARD_MARGIN: 8,
-  GUARD_MIN_SPEED: 8,
-  GUARD_EVADE_GRADIENT: Math.tan(35 * DEG),
-  GUARD_EVADE_BANK: 60 * DEG,
-  CEILING_BAND: 260,
   BOOST_DURATION: 1.6,
   BOOST_COOLDOWN: 5,
-  BARREL_ROLL_DURATION: 0.7,
-  BARREL_ROLL_RADIUS: 0.4,
   AUTOPILOT: Object.freeze({
-    MAX_BANK: 35 * DEG,
-    MAX_PITCH: 10 * DEG,
-    TERRAIN_PITCH: 15 * DEG,
-    CLEARANCE: 50,
-    RING_CLEARANCE: 25,
+    // Throttle 0.5 holds the height: spawns and respawns hover there.
+    CRUISE_THROTTLE: 0.5,
     MIN_ALTITUDE: 40,
-    CRUISE_THROTTLE: 0.55,
+    CLEARANCE: 40,
+    CRUISE_SPEED: 22,
     OVERRIDE_INPUT: 0.35,
     OVERRIDE_SECONDS: 0.25,
-    TERRAIN_MAX_PITCH: 25 * DEG,
-    LOOKAHEAD_DISTANCES: Object.freeze([0, 30, 60, 100, 160, 240, 340, 480]),
-    PATH_LOOKAHEAD_DISTANCES: Object.freeze([50, 120, 220]),
-    WAYPOINT_STEERING: Object.freeze({ BANK_PER_DEGREE: 1.4, MAX_BANK: 35 * DEG, DAMPING: 2, MAX_ROLL_RATE: 60 * DEG }),
-    RING_STEERING: Object.freeze({ BANK_PER_DEGREE: 2.2, MAX_BANK: 45 * DEG, DAMPING: 3.2, MAX_ROLL_RATE: 80 * DEG }),
-    RING_MAX_PITCH: 15 * DEG,
-    RING_MIN_TIME_TO_RING: 1,
-    RING_VERTICAL_SPEED_GAIN: 0.03,
-    RING_LOOKAHEAD_MARGIN: 80,
-    RING_TRACK_LEAD_SECONDS: 1.8,
-    RING_TRACK_LEAD_MIN: 30,
-    RING_TRACK_LEAD_MAX: 70,
+    LOOKAHEAD_SECONDS: Object.freeze([0, 1, 2, 4, 6]),
   }),
-  LOAD: Object.freeze({ PULL_SHARE: 0.25, KNEE: 4, CAP: 6, MIN: -1.5, SMOOTHING: 7, MIN_BANK_COS: 0.2, BARREL_ROLL_EXTRA: 1 }),
-  SURFACE_TURN_SHARE: 0.2,
-  hover: Object.freeze({ maxSpeed: 30, climbRate: 10, yawRate: 180, bankLimit: 45, pitchLimit: 45 }),
+  hover: Object.freeze({
+    MAX_FORWARD_SPEED: 39,
+    MAX_REVERSE_SPEED: 12,
+    MAX_SIDE_SPEED: 12,
+    ACCELERATION: 12,
+    BRAKING: 14,
+    CLIMB_RATE: 12,
+    DESCENT_RATE: 9,
+    VERTICAL_RESPONSE: 3,
+    THROTTLE_DEADBAND: 0.04,
+    THROTTLE_RATE: 1.2,
+    YAW_RATE: 180 * DEG,
+    TURN_RATE: 70 * DEG,
+    TURN_REFERENCE_SPEED: 12,
+    TURN_GAIN: 2.5,
+    MAX_BANK: 45 * DEG,
+    MAX_PITCH: 35 * DEG,
+    CRUISE_PITCH: 20 * DEG,
+    ATTITUDE_RESPONSE: 6,
+    /** Hovering floor above the ground or water (m, mesh origin) and the cushion band above it. */
+    MIN_AGL: 1.5,
+    CUSHION_HEIGHT: 10,
+    /** Below this groundspeed a centred stick lets the quad settle into a hover (m/s). */
+    SETTLE_SPEED: 6,
+    ROTOR_SPEED: QUAD_VISUAL_PROP_SPEED,
+    /** Frame tilt shown for full acceleration / bank commands (the mesh reads it through visual). */
+    DISC_TILT: 0.8,
+  }),
 });
 
 // ============================================================================================
