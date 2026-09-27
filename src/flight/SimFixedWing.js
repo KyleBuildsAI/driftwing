@@ -221,6 +221,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
   const vne = Number.isFinite(limits.vne) ? limits.vne : profile.targets?.vne ?? 80;
   const gLimit = Number.isFinite(limits.gLimit) ? limits.gLimit : 4;
   const flapNotches = flapsProfile ? flapsProfile.notches : [0];
+  const notchSpacing = flapNotches.length > 1 ? (flapNotches[flapNotches.length - 1] - flapNotches[0]) / (flapNotches.length - 1) : 1;
   const tiltedAileron = controlLimits.aileron * DEG * effectiveness.aileron;
   const elevatorShift = controlLimits.elevator * DEG * effectiveness.elevator;
   const rudderShift = controlLimits.rudder * DEG * effectiveness.rudder;
@@ -388,8 +389,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     if (!flapsProfile) return;
     const target = nearestNotchIndex(value);
     const current = systems.flapNotch;
-    const spacing = flapNotches.length > 1 ? Math.abs(flapNotches[Math.min(current + 1, flapNotches.length - 1)] - flapNotches[Math.max(current - 1, 0)]) / 2 : 1;
-    if (target !== current && Math.abs(value - flapNotches[current]) > spacing * (0.5 + LEVER_HYSTERESIS)) systems.flapNotch = target;
+    if (target !== current && Math.abs(value - flapNotches[current]) > notchSpacing * (0.5 + LEVER_HYSTERESIS)) systems.flapNotch = target;
   }
 
   function handleActions(actions) {
