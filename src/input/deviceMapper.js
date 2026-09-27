@@ -137,28 +137,32 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
     }
   }
 
-  /** Routes the device's action references; blocked presses stay blocked until released. */
+  /**
+   * Routes the device's action references; blocked presses stay blocked until released. Holders
+   * whose reference no longer exists (rebound while held) are released.
+   */
   function routeActions(device, entry, effective, hats, context) {
     const source = HOTAS_KINDS.includes(device.kind) ? 'hotas' : 'gamepad';
+    const visited = new Set();
     for (const [actionId, refs] of effective.actions) {
       refs.forEach((ref, refIndex) => {
         const holderKey = `${device.deviceKey}|${actionId}|${refIndex}`;
+        visited.add(holderKey);
         const active = context.actionsEnabled && (!ref.mode || ref.mode === context.mode);
         const pressed = active && refPressed(device, entry, ref, hats, holderKey, actionId);
         const wasPressed = entry.rawPressed.get(holderKey) === true;
         entry.rawPressed.set(holderKey, pressed);
         if (pressed && !wasPressed) {
-          frameActivity(context);
+          context.frame.activity = true;
           if (canPress(actionId, source)) router.press(actionId, holderKey, source, device.deviceKey);
         } else if (!pressed && router.isHolding(actionId, holderKey)) {
           router.release(actionId, holderKey);
         }
       });
     }
-  }
-
-  function frameActivity(context) {
-    context.frame.activity = true;
+    for (const [actionId, holderKey] of router.heldBy(`${device.deviceKey}|`)) {
+      if (!visited.has(holderKey)) router.release(actionId, holderKey);
+    }
   }
 
   /** Adds the device's axis references to the frame. */
