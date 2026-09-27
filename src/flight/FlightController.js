@@ -7,7 +7,7 @@ import { airDensity, speedOfSound, createFlightTelemetry, SEA_LEVEL_DENSITY } fr
 import { flightModels as defaultFlightModels } from './models.js';
 import { createCrashFade } from './crashFade.js';
 import { createAerotow, createRopeMaterial, createRopeStandIn, findNearestPeak, planPeakLaunch } from './relaunch.js';
-import { findFlatSpot, groundPose } from './placement.js';
+import { findFlatSpot, groundPose, vegetationClearance } from './placement.js';
 import { createTrailSystem } from './trails.js';
 import { countTriangles } from '../craft/kit.js';
 
@@ -387,9 +387,13 @@ export function createFlightController(ctx) {
     return mode === 'sim' && settings.get('startOnGround') === true && craft.spawn.canStartOnGround === true;
   }
 
-  /** At rest on the gear on nearby flat, dry ground, nose into the wind. */
+  /** At rest on the gear on nearby flat, dry ground clear of trees and rocks, nose into the wind. */
   function placeOnGround(x, z) {
-    const spot = findFlatSpot(world, x, z, { waterLevel: CONFIG.WATER_LEVEL, headingFor: (spotX, spotZ) => windHeadingAt(spotX, spotZ) });
+    const spot = findFlatSpot(world, x, z, {
+      waterLevel: CONFIG.WATER_LEVEL,
+      headingFor: (spotX, spotZ) => windHeadingAt(spotX, spotZ),
+      clearance: vegetationClearance(craft.simProfile.contacts),
+    });
     const heading = windHeadingAt(spot.x, spot.z);
     const pose = groundPose(world, craft.simProfile.contacts, spot.x, spot.z, heading, craft.simProfile.centerOfMass?.[2] ?? 0);
     resetActiveModel({
@@ -493,6 +497,9 @@ export function createFlightController(ctx) {
     }
     // Craft without an engine in SIM (throttle 'none') and craft taking off from the ground cruise.
     if (onGround || craft.inputProfile?.throttle === 'none' || !Number.isFinite(pose.throttle)) pose.throttle = craft.arcadeProfile.AUTOPILOT.CRUISE_THROTTLE;
+    // A SIM altitude hold may sit above the CLASSIC ceiling; hold what CLASSIC can reach instead.
+    const autopilot = player.autopilot;
+    if (autopilot.enabled) autopilot.altitude = clamp(autopilot.altitude, AUTOPILOT_MIN_ALTITUDE, CONFIG.MAX_ALTITUDE - 150);
     arcade.reset(pose);
     clock.reset();
     startBlend(displayed);
@@ -679,7 +686,9 @@ export function createFlightController(ctx) {
     }
     if (contact.water && !limits.floats) return { reason: 'water', impactSpeed: model.state.velocity.length() };
     if (Number.isFinite(contact.penetration) && contact.penetration > PENETRATION_LIMIT) return { reason: 'terrain', impactSpeed: model.state.velocity.length() };
+    // Last-resort guards on the shared height function and the sea, whatever the model reported.
     if (position.y < world.groundHeight(position.x, position.z) - PENETRATION_LIMIT) return { reason: 'terrain', impactSpeed: model.state.velocity.length() };
+    if (!limits.floats && position.y < CONFIG.WATER_LEVEL - PENETRATION_LIMIT) return { reason: 'water', impactSpeed: model.state.velocity.length() };
     return null;
   }
 
