@@ -72,9 +72,10 @@ function createFlame(ctx, spec) {
     const fade = pow(float(1).sub(along), float(1.3)).mul(smoothstep(float(0), float(0.06), along));
     return core.add(diamonds.mul(core)).mul(fade).mul(flicker).mul(strength);
   })();
-  const hot = vec3(0.75, 0.82, 1.0);
-  const warm = vec3(1.0, 0.55, 0.2);
-  material.colorNode = mix(hot, warm, smoothstep(float(0.05), float(0.7), along)).mul(intensity).mul(heat.mul(2.2).add(1.4));
+  // Blue-white at the nozzle, orange toward the tail; bright enough to bloom without washing out.
+  const hot = vec3(0.5, 0.62, 1.0);
+  const warm = vec3(1.0, 0.42, 0.1);
+  material.colorNode = mix(hot, warm, smoothstep(float(0.08), float(0.55), along)).mul(intensity).mul(heat.mul(0.9).add(0.7));
   material.opacityNode = saturate(intensity);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'afterburner-flame';
@@ -112,7 +113,7 @@ function createVaporCone(ctx, spec) {
     const shell = smoothstep(float(0.2), float(0.88), along).mul(float(1).sub(smoothstep(float(0.93), float(1), along)));
     const rim = pow(float(1).sub(facing), float(2)).mul(0.75).add(0.25);
     const streaks = sin(around.mul(Math.PI * 2 * 11).add(along.mul(3)).add(uniforms.time.mul(23))).mul(sin(around.mul(Math.PI * 2 * 6).sub(uniforms.time.mul(17)))).mul(0.3).add(0.7);
-    return saturate(shell.mul(rim).mul(streaks).mul(strength).mul(0.75));
+    return saturate(shell.mul(rim).mul(streaks).mul(strength).mul(0.85));
   })();
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'vapor-cone';
@@ -133,15 +134,16 @@ function createVaporCone(ctx, spec) {
   const seedAttribute = new THREE.InstancedBufferAttribute(seeds, 4);
   const seed = instancedBufferAttribute(seedAttribute, 'vec4');
   const life = fract(seed.y.add(uniforms.time.mul(seed.z).mul(2.2)));
-  const startZ = spec.apexZ + length * 0.55;
-  const radiusStart = spec.apexRadius + (spec.baseRadius - spec.apexRadius) * 0.55;
-  const radius = mix(float(radiusStart), float(spec.baseRadius * 1.3), life);
+  // Puffs are born on the shell just ahead of its rear shock edge and peel off aft, widening a little.
+  const startZ = spec.apexZ + length * 0.78;
+  const radiusStart = spec.apexRadius + (spec.baseRadius - spec.apexRadius) * 0.78;
+  const radius = mix(float(radiusStart), float(spec.baseRadius * 1.12), life).mul(seed.w.mul(0.25).add(0.8));
   const particleMaterial = new THREE.PointsNodeMaterial({ transparent: true, depthWrite: false, sizeAttenuation: true });
-  particleMaterial.positionNode = vec3(cos(seed.x).mul(radius), sin(seed.x).mul(radius).add(spec.y), mix(float(startZ), float(spec.baseZ + 7), life));
-  particleMaterial.sizeNode = mix(float(0.5), float(2.2), life).mul(seed.w);
-  const puff = pow(saturate(float(1).sub(uv().sub(0.5).length().mul(2))), float(1.6));
+  particleMaterial.positionNode = vec3(cos(seed.x).mul(radius), sin(seed.x).mul(radius).add(spec.y), mix(float(startZ), float(spec.baseZ + 4.5), life));
+  particleMaterial.sizeNode = mix(float(0.3), float(1.0), life).mul(seed.w);
+  const puff = pow(saturate(float(1).sub(uv().sub(0.5).length().mul(2))), float(2));
   particleMaterial.colorNode = vaporColor(uniforms);
-  particleMaterial.opacityNode = saturate(puff.mul(sin(life.mul(Math.PI))).mul(strength).mul(0.55));
+  particleMaterial.opacityNode = saturate(puff.mul(sin(life.mul(Math.PI))).mul(strength).mul(0.4));
   const particles = new THREE.Sprite(particleMaterial);
   particles.count = VAPOR.PARTICLES;
   particles.name = 'vapor-particles';
