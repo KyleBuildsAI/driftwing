@@ -995,12 +995,12 @@ export function createFlightController(ctx) {
     get telemetry() { return telemetry; },
     get player() { return player; },
     notify,
-    /** Emits a particle trail ('smoke' | 'spray') from one of the mesh's named anchors. */
+    /** Emits a particle trail ('smoke' | 'spray') from one of the mesh's named anchors; it drifts with the wind. */
     emitTrail(kind, anchorName, dt) {
       const anchor = mesh && mesh.anchors ? mesh.anchors[anchorName] : null;
       if (!anchor) return false;
       scratchVector.copy(anchor).applyQuaternion(mesh.root.quaternion).add(mesh.root.position);
-      trails.emit(kind, scratchVector, telemetry.velocity, dt);
+      trails.emit(kind, scratchVector, telemetry.velocity, dt, telemetry.wind);
       return true;
     },
   };

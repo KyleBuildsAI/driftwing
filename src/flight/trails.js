@@ -1,22 +1,25 @@
 // Craft trails: light particle trails emitted from a craft's anchors (the bush plane's smoke, the
 // glider's ballast spray). Same technique as v1's bursts (one Sprite drawn instanced with a
 // PointsNodeMaterial, camera-relative float32 offsets), but soft, sunlit and alpha-blended instead
-// of additive: vapour that billows out, drifts and fades.
+// of additive: vapour that streams from the nozzle, billows out, drifts off with the wind and fades.
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { clamp } from '../core/util.js';
 
-const CAPACITY = 640;
+const CAPACITY = 720;
 /**
  * Per-kind emission: rate (puffs/s), life (s), size range at birth and at death (m), how much of the
- * craft's velocity a puff keeps, spread (m/s), rise (m/s^2), drag (1/s), peak opacity and colour.
+ * craft's velocity a puff keeps, spread (m/s), rise (m/s^2), drag toward the wind (1/s), fade-in (s),
+ * peak opacity and colour. Puffs start small and dense right at the nozzle (visible from the chase
+ * camera behind the craft) and grow into a plume that the wind carries away.
  */
 const STYLES = Object.freeze({
-  smoke: Object.freeze({ rate: 36, life: [3.6, 5.2], birthSize: [0.9, 1.4], deathSize: [5.5, 8], inherit: 0.08, spread: 1.4, rise: 0.35, drag: 1.6, opacity: 0.55, tint: Object.freeze([0.96, 0.95, 0.93]) }),
-  spray: Object.freeze({ rate: 55, life: [0.9, 1.5], birthSize: [0.25, 0.4], deathSize: [1.8, 2.8], inherit: 0.25, spread: 2.2, rise: -2.5, drag: 2.4, opacity: 0.35, tint: Object.freeze([0.86, 0.92, 0.98]) }),
+  smoke: Object.freeze({ rate: 64, life: [3.8, 5.4], birthSize: [0.7, 1], deathSize: [10, 14], inherit: 0.12, spread: 1.1, rise: 0.3, drag: 1.3, fadeIn: 0.05, opacity: 0.62, tint: Object.freeze([0.96, 0.95, 0.93]) }),
+  spray: Object.freeze({ rate: 55, life: [0.9, 1.5], birthSize: [0.25, 0.4], deathSize: [1.8, 2.8], inherit: 0.25, spread: 2.2, rise: -2.5, drag: 2.4, fadeIn: 0.08, opacity: 0.35, tint: Object.freeze([0.86, 0.92, 0.98]) }),
 });
 const NEAR_FADE_START = 2;
 const NEAR_FADE_RANGE = 8;
+const ZERO = Object.freeze({ x: 0, y: 0, z: 0 });
 
 function smooth01(value) {
   const t = clamp(value, 0, 1);
@@ -69,12 +72,16 @@ export function createTrailSystem(ctx) {
   const velocityX = new Float32Array(CAPACITY);
   const velocityY = new Float32Array(CAPACITY);
   const velocityZ = new Float32Array(CAPACITY);
+  const windX = new Float32Array(CAPACITY);
+  const windY = new Float32Array(CAPACITY);
+  const windZ = new Float32Array(CAPACITY);
   const age = new Float32Array(CAPACITY);
   const life = new Float32Array(CAPACITY);
   const birthSize = new Float32Array(CAPACITY);
   const deathSize = new Float32Array(CAPACITY);
   const rise = new Float32Array(CAPACITY);
   const drag = new Float32Array(CAPACITY);
+  const fadeIn = new Float32Array(CAPACITY);
   const peakOpacity = new Float32Array(CAPACITY);
   const red = new Float32Array(CAPACITY);
   const green = new Float32Array(CAPACITY);
@@ -97,21 +104,26 @@ export function createTrailSystem(ctx) {
     return index;
   }
 
-  function spawn(style, x, y, z, craftVelocity) {
+  /** One puff; `age` is how long ago within this frame it left the nozzle (keeps the stream even). */
+  function spawn(style, x, y, z, craftVelocity, wind, startAge) {
     const index = claim();
     const shade = 0.94 + Math.random() * 0.06;
     positionX[index] = x;
     positionY[index] = y;
     positionZ[index] = z;
-    velocityX[index] = craftVelocity.x * style.inherit + (Math.random() * 2 - 1) * style.spread;
-    velocityY[index] = craftVelocity.y * style.inherit + (Math.random() * 2 - 1) * style.spread;
-    velocityZ[index] = craftVelocity.z * style.inherit + (Math.random() * 2 - 1) * style.spread;
-    age[index] = 0;
+    windX[index] = wind.x;
+    windY[index] = wind.y;
+    windZ[index] = wind.z;
+    velocityX[index] = wind.x + (craftVelocity.x - wind.x) * style.inherit + (Math.random() * 2 - 1) * style.spread;
+    velocityY[index] = wind.y + (craftVelocity.y - wind.y) * style.inherit + (Math.random() * 2 - 1) * style.spread;
+    velocityZ[index] = wind.z + (craftVelocity.z - wind.z) * style.inherit + (Math.random() * 2 - 1) * style.spread;
+    age[index] = startAge;
     life[index] = randomRange(style.life);
     birthSize[index] = randomRange(style.birthSize);
     deathSize[index] = randomRange(style.deathSize);
     rise[index] = style.rise;
     drag[index] = style.drag;
+    fadeIn[index] = style.fadeIn;
     peakOpacity[index] = style.opacity;
     red[index] = style.tint[0] * shade;
     green[index] = style.tint[1] * shade;
@@ -123,10 +135,12 @@ export function createTrailSystem(ctx) {
     get count() { return live; },
 
     /**
-     * Emits kind ('smoke' | 'spray') at a world position for dt seconds of flight; puffs are spread
-     * along the segment since the previous emission so fast craft leave a continuous trail.
+     * Emits kind ('smoke' | 'spray') at a world position for dt seconds of flight. Puffs are spread
+     * along the segment since the previous frame's emitter position (each aged by when it left the
+     * nozzle) so fast craft leave a continuous trail; they relax toward `wind` (m/s, the air mass the
+     * craft flies in) so the trail drifts downwind.
      */
-    emit(kind, position, craftVelocity, dt) {
+    emit(kind, position, craftVelocity, dt, wind = ZERO) {
       const style = STYLES[kind];
       if (!style || !(dt > 0)) return;
       emitDebt[kind] += style.rate * dt;
@@ -134,8 +148,8 @@ export function createTrailSystem(ctx) {
       emitDebt[kind] -= count;
       const from = hasLastEmit[kind] ? lastEmit[kind] : position;
       for (let puff = 0; puff < count; puff++) {
-        const t = count > 1 ? (puff + 1) / count : 1;
-        spawn(style, from.x + (position.x - from.x) * t, from.y + (position.y - from.y) * t, from.z + (position.z - from.z) * t, craftVelocity);
+        const t = (puff + 1) / count;
+        spawn(style, from.x + (position.x - from.x) * t, from.y + (position.y - from.y) * t, from.z + (position.z - from.z) * t, craftVelocity, wind, (1 - t) * dt);
       }
       lastEmit[kind].copy(position);
       hasLastEmit[kind] = true;
@@ -171,10 +185,11 @@ export function createTrailSystem(ctx) {
             life[index] = 0;
             continue;
           }
+          // Drag pulls each puff toward the wind it was released into; buoyancy (or weight) on top.
           const dragFactor = Math.exp(-drag[index] * dt);
-          velocityX[index] *= dragFactor;
-          velocityY[index] = velocityY[index] * dragFactor + rise[index] * dt;
-          velocityZ[index] *= dragFactor;
+          velocityX[index] = windX[index] + (velocityX[index] - windX[index]) * dragFactor;
+          velocityY[index] = windY[index] + (velocityY[index] - windY[index]) * dragFactor + rise[index] * dt;
+          velocityZ[index] = windZ[index] + (velocityZ[index] - windZ[index]) * dragFactor;
           positionX[index] += velocityX[index] * dt;
           positionY[index] += velocityY[index] * dt;
           positionZ[index] += velocityZ[index] * dt;
@@ -184,8 +199,8 @@ export function createTrailSystem(ctx) {
         const offsetZ = positionZ[index] - cameraPosition.z;
         const distance = Math.sqrt(offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
         const lifeRatio = age[index] / life[index];
-        const fadeIn = smooth01(age[index] / 0.25);
-        const alpha = peakOpacity[index] * fadeIn * Math.pow(1 - lifeRatio, 1.4) * smooth01((distance - NEAR_FADE_START) / NEAR_FADE_RANGE);
+        const appear = smooth01(age[index] / fadeIn[index]);
+        const alpha = peakOpacity[index] * appear * Math.pow(1 - lifeRatio, 1.4) * smooth01((distance - NEAR_FADE_START) / NEAR_FADE_RANGE);
         offsets[written * 3] = offsetX;
         offsets[written * 3 + 1] = offsetY;
         offsets[written * 3 + 2] = offsetZ;
