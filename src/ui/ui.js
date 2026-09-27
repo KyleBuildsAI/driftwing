@@ -2522,7 +2522,7 @@ export function createUISystem(ctx) {
   }
 
   return {
-    update, toast, setSubtitle, setMicState, showPanel, setPhotoMode, wake,
+    update, toast, setSubtitle, setMicState, showPanel, togglePanel, setPhotoMode, wake,
     /** v2 chrome for tests and other systems: the pill, picker, HOTAS prompt and settings tabs. */
     modePill, craftPicker, hotasPrompt, settingsPanel, statusBadge,
   };
