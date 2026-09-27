@@ -179,6 +179,10 @@ const FIXED_WING = Object.freeze({
     LOW_SPAN: 15 * DEG,
     MAX_OFFSET: 0.8,
     GROUND_DECAY_SECONDS: 6,
+    COMFORT_MARGIN: 0.1,
+    DIVE_ALLOWANCE: 1,
+    DIVE_FROM: 20 * DEG,
+    DIVE_FULL: 45 * DEG,
   }),
   LOAD_LAW: Object.freeze({
     PULL_LOAD: 2.5,
@@ -220,7 +224,9 @@ const FIXED_WING = Object.freeze({
     PITCH_UP_LIMIT: 30 * DEG,
     PITCH_DOWN_LIMIT: -20 * DEG,
     PITCH_RATE_GAIN: 0.5,
-    PUSH_MARGIN: 0.2,
+    /** The attitude is predicted this far ahead from its rate (the loop's lag). */
+    LEAD: 0.4,
+    PUSH_MARGIN: 0.1,
   }),
   LIMITER: Object.freeze({
     AOA_MARGIN: 2 * DEG,
@@ -237,10 +243,6 @@ const FIXED_WING = Object.freeze({
     G_BAND: 0.9,
     G_GAIN: 0.9,
     RATE_SMOOTHING: 18,
-    /** Direct law, hands off: the comfort ceiling, a narrower band below HANDS_OFF_MAX_LOAD. */
-    COMFORT_BAND: 0.25,
-    COMFORT_GAIN: 1.2,
-    COMFORT_OVERSHOOT_GAIN: 2,
     /** Direct law: the pitch attitude protection as an elevator limit, predicted PITCH_LEAD seconds ahead. */
     PITCH_BAND: 6 * DEG,
     PITCH_LEAD: 0.6,
@@ -302,6 +304,13 @@ function primeFixedWingMemory(memory, trim) {
   memory.lastSideslip = NaN;
 }
 
+/** Load factor per rad of angle of attack at the current dynamic pressure (at least 1 g per 20 degrees). */
+function loadPerAoa(data) {
+  const slope = Number.isFinite(data.liftSlope) ? data.liftSlope : 5.5;
+  const perAoa = (data.dynamicPressure * data.wingArea * slope) / (Math.max(data.mass, 1) * GRAVITY);
+  return Number.isFinite(perAoa) ? Math.max(perAoa, 1 / (20 * DEG)) : 1 / (20 * DEG);
+}
+
 /** Smoothed rates the loops read: airspeed change (m/s^2) and pitch attitude change (rad/s). */
 function updateRates(data, memory, dt) {
   const speedRate = Number.isFinite(memory.lastSpeed) ? clamp((data.airspeed - memory.lastSpeed) / dt, -15, 15) : 0;
@@ -334,18 +343,19 @@ function protectedPath(data, memory) {
 /**
  * Bounds of the load law's command: the pitch attitude protection (the attitude may approach
  * PITCH_UP_LIMIT / PITCH_DOWN_LIMIT at PITCH_RATE_GAIN x the margin left, and comes back past them),
- * weighted by its assist weight; hands off, then the comfort band. In climbs steeper than about 35
- * degrees 0.8 g would still curve the path up, so there the floor sits PUSH_MARGIN below the 1 g path
- * load instead: the nose comes down without a zoom.
+ * weighted by its assist weight; hands off, then the comfort band. In climbs steeper than about 25
+ * degrees the band's floor would still curve the path up, so the floor sits PUSH_MARGIN below the
+ * 1 g path load instead: the nose comes down without a zoom.
  */
-function protectLoad(loadCommand, data, speed, weight, handsOff) {
+function protectLoad(loadCommand, data, speed, weight, handsOff, memory) {
   const tuning = FIXED_WING.PITCH_PROTECTION;
   let command = loadCommand;
   if (weight > 0) {
     const cosBank = Math.max(Math.cos(data.bank), 0.3);
     const pathLoad = Math.cos(data.flightPath);
-    const upper = (pathLoad + (speed * tuning.PITCH_RATE_GAIN * (tuning.PITCH_UP_LIMIT - data.pitch)) / GRAVITY) / cosBank;
-    const lower = (pathLoad + (speed * tuning.PITCH_RATE_GAIN * (tuning.PITCH_DOWN_LIMIT - data.pitch)) / GRAVITY) / cosBank;
+    const attitude = data.pitch + tuning.LEAD * memory.attitudeRate;
+    const upper = (pathLoad + (speed * tuning.PITCH_RATE_GAIN * (tuning.PITCH_UP_LIMIT - attitude)) / GRAVITY) / cosBank;
+    const lower = (pathLoad + (speed * tuning.PITCH_RATE_GAIN * (tuning.PITCH_DOWN_LIMIT - attitude)) / GRAVITY) / cosBank;
     const bounded = clamp(command, Math.min(lower, upper), upper);
     command += weight * (bounded - command);
   }
@@ -384,7 +394,13 @@ function applyPitchAssist(controls, data, trimWeight, fbw, pitchProtection, memo
       memory.holding = true;
       memory.holdAoa = clamp(data.aoa, data.aoaCritical - autoTrim.LOW_SPAN, highest);
     }
-    const error = memory.holdAoa - data.aoa;
+    // Never trim into more than HANDS_OFF_MAX_LOAD: from COMFORT_MARGIN below it the loop steers to
+    // the angle of attack that sheds the excess load (the load per rad of angle of attack grows with
+    // the dynamic pressure) instead of the hold. In a steep dive (a phugoid the pilot started) the cap
+    // rises by up to DIVE_ALLOWANCE so the hold can still pull out before the speed runs away.
+    const diveAllowance = autoTrim.DIVE_ALLOWANCE * smoothstep(autoTrim.DIVE_FROM, autoTrim.DIVE_FULL, -data.flightPath);
+    const capLoad = FIXED_WING.HANDS_OFF_MAX_LOAD - autoTrim.COMFORT_MARGIN + diveAllowance;
+    const error = Math.min(memory.holdAoa - data.aoa, (capLoad - data.gLoad) / loadPerAoa(data));
     directRate = trimWeight * autoTrim.HOLD_I * error;
     directOffset = trimWeight * autoTrim.HOLD_P * error;
   }
@@ -401,7 +417,7 @@ function applyPitchAssist(controls, data, trimWeight, fbw, pitchProtection, memo
     if (!idle) {
       memory.pathHolding = false;
       memory.handsOffLoad = NaN;
-      loadCommand = protectLoad(neutral + stick * (stick > 0 ? law.PULL_LOAD : law.PUSH_LOAD), data, speed, pitchProtection, false);
+      loadCommand = protectLoad(neutral + stick * (stick > 0 ? law.PULL_LOAD : law.PUSH_LOAD), data, speed, pitchProtection, false, memory);
     } else {
       // The path is tracked until the stick has been idle for IDLE_DELAY, then held.
       if (!memory.pathHolding) {
@@ -409,7 +425,7 @@ function applyPitchAssist(controls, data, trimWeight, fbw, pitchProtection, memo
         if (settled) memory.pathHolding = true;
       }
       const pathError = protectedPath(data, memory) - data.flightPath;
-      const target = protectLoad(neutral + (speed * FIXED_WING.PATH_HOLD.PATH_GAIN * pathError) / GRAVITY, data, speed, pitchProtection, true);
+      const target = protectLoad(neutral + (speed * FIXED_WING.PATH_HOLD.PATH_GAIN * pathError) / GRAVITY, data, speed, pitchProtection, true, memory);
       // Hands off the command moves at most HANDS_OFF_SLEW (from the load flown at release), so a
       // new hold eases in instead of stepping the elevator.
       if (!Number.isFinite(memory.handsOffLoad)) memory.handsOffLoad = clamp(data.gLoad, FIXED_WING.HANDS_OFF_MIN_LOAD, FIXED_WING.HANDS_OFF_MAX_LOAD);
@@ -492,10 +508,9 @@ function limitStep(memory, margin, band, gain, overshoot, dt, upper) {
 
 /**
  * Limiters on the final elevator: AoA, G, and for the direct law's share (1 - fbw) the pitch attitude
- * protection and, hands off (directHandsOff: the auto-trim weight while its hold flies), the comfort
- * ceiling; each weighted. Returns the elevator change they made (for the anti-windup).
+ * protection; each weighted. Returns the elevator change they made (for the anti-windup).
  */
-function applyLimiters(controls, data, weights, memory, dt, fbw, directHandsOff) {
+function applyLimiters(controls, data, weights, memory, dt, fbw) {
   const tuning = FIXED_WING.LIMITER;
   const rawRate = Number.isFinite(memory.lastAoa) ? (data.aoa - memory.lastAoa) / dt : 0;
   memory.lastAoa = data.aoa;
@@ -528,10 +543,6 @@ function applyLimiters(controls, data, weights, memory, dt, fbw, directHandsOff)
     const predictedPitch = data.pitch + tuning.PITCH_LEAD * memory.attitudeRate;
     weigh(limitStep(memory, limits.PITCH_UP_LIMIT - predictedPitch, tuning.PITCH_BAND, tuning.PITCH_GAIN, tuning.PITCH_OVERSHOOT_GAIN, dt, true), directPitchProtection, true);
     weigh(limitStep(memory, predictedPitch - limits.PITCH_DOWN_LIMIT, tuning.PITCH_BAND, tuning.PITCH_GAIN, tuning.PITCH_OVERSHOOT_GAIN, dt, false), directPitchProtection, false);
-  }
-  const comfort = directHandsOff * (1 - fbw);
-  if (comfort > 0) {
-    weigh(limitStep(memory, FIXED_WING.HANDS_OFF_MAX_LOAD - data.gLoad, tuning.COMFORT_BAND, tuning.COMFORT_GAIN, tuning.COMFORT_OVERSHOOT_GAIN, dt, true), comfort, true);
   }
   const limited = clamp(desired, Math.min(floor, ceiling), ceiling);
   controls.pitch = clamp(limited, -1, 1);
@@ -581,15 +592,13 @@ const fixedWingHandler = Object.freeze({
     }
     if (weights.bankProtection > 0) applyBankProtection(controls, data, weights.bankProtection);
     if (weights.overspeedProtection > 0) applyOverspeedProtection(controls, data, weights.overspeedProtection, memory);
-    const limiting = weights.aoaLimiter > 0 || weights.gLimiter > 0 || weights.pitchProtection > 0 || handsOff > 0;
+    const limiting = weights.aoaLimiter > 0 || weights.gLimiter > 0 || weights.pitchProtection > 0;
     if (limiting) {
-      const change = applyLimiters(controls, data, weights, memory, dt, pitchAssisted ? fbw : 0, handsOff);
+      const change = applyLimiters(controls, data, weights, memory, dt, pitchAssisted ? fbw : 0);
       if (pitchAssisted && change !== 0) {
         // Anti-windup: the integrator follows a limited elevator (all of it hands off, the load law's
-        // share with the stick held), and a hold that a ceiling stops lowers its angle of attack
-        // instead of pulling harder.
+        // share with the stick held).
         memory.trimBase += (handsOff > 0 ? 1 : fbw) * change;
-        if (handsOff > 0 && change < 0 && memory.holding) memory.holdAoa = Math.min(memory.holdAoa, data.aoa);
       }
     } else {
       memory.lastAoa = data.aoa;
