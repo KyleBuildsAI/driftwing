@@ -85,60 +85,89 @@ const arcadeProfile = Object.freeze({
 });
 
 // ============================================================================================
-// SIM: targets first, then the physical parameters that meet them (derivations in the comments),
-// then contact points in body axes (x right, y up, z aft; m, relative to the mesh origin).
+// SIM: a Super Cub style bush plane for SimFixedWing (src/flight/SimFixedWing.js). Targets first,
+// then the physical parameters that meet them, then the contact points. Positions are body axes
+// relative to the mesh origin (x right, y up, z aft; m); angles in degrees. tools/flight-lab.mjs
+// measures the targets in flight.
 // ============================================================================================
 const simProfile = Object.freeze({
   model: 'fixedWing',
   targets: Object.freeze({
-    stallSpeedFullFlaps: 15.3, // m/s = 55 km/h: CLmax 2.7 at 650 kg
-    stallSpeedClean: 19.2, // m/s = 69 km/h: CLmax 1.7
-    cruiseSpeed: 47.2, // m/s = 170 km/h at about 75 % power
-    climbRate: 5, // m/s at about 30 m/s (best climb), full power
+    stallSpeedFullFlaps: 15.28, // m/s = 55 km/h, power off
+    cruiseSpeed: 47.2, // m/s = 170 km/h at 75 % power
+    climbRate: 5, // m/s at full power, best climb speed
     vne: 68, // m/s = 245 km/h
   }),
-  mass: Object.freeze({ empty: 500, pilot: 90, fuel: 60 }), // kg; 650 kg, wing loading 39 kg/m^2
-  inertia: Object.freeze({ pitch: 1400, yaw: 2000, roll: 1100 }), // kg m^2 about body x, y, z
-  centerOfMass: Object.freeze([0, 0.1, -0.5]),
+  mass: Object.freeze({ empty: 500, pilot: 90, fuel: 60 }), // 650 kg, 39 kg/m^2
+  // kg m^2 about body x (pitch), y (yaw) and z (roll); yawRoll is the y-z product of inertia.
+  inertia: Object.freeze({ pitch: 1300, yaw: 2100, roll: 1150, yawRoll: 60 }),
+  centerOfMass: Object.freeze([0, 0.1, -0.72]),
   wing: Object.freeze({
     span: 10.73,
-    area: 16.6, // m^2 (constant 1.6 m chord, rounded tips)
-    aspectRatio: 6.94,
-    meanChord: 1.55,
+    area: 16.6, // constant 1.6 m chord, rounded tips
+    taper: 1,
     oswald: 0.75,
-    incidence: 1, // deg
-    dihedral: 1, // deg
+    incidence: 1,
+    // 1 degree of geometric dihedral plus the high wing's keel effect.
+    dihedral: 3.5,
+    washout: 0,
     aerodynamicCenter: Object.freeze([0, 0.9, -0.65]),
+    cm0: -0.08, // thick, cambered USA-35B section
   }),
   aero: Object.freeze({
-    cd0: 0.034, // struts, big tires and fabric: cruise drag 1.2 kN at 47 m/s (CL 0.56)
-    clAlpha: 4.9, // per rad
-    cl0: 0.25,
-    clMax: 1.7, // thick USA-35B section, stall 19.2 m/s clean
-    alphaCritical: 15, // deg, then a post-stall drop
+    cd0: 0.05, // struts, wires, tundra tires and fabric
+    clAlpha: 4.8, // per rad (AR 6.9)
+    clMax: 1.72,
+    clMin: -1,
+    alphaCritical: 15,
     postStallClDrop: 0.5,
-    sideForcePerRad: 1.1,
+    stallDropWidth: 4,
+    stallBlendWidth: 16,
   }),
-  tail: Object.freeze({ arm: 4.4, horizontalArea: 2.7, verticalArea: 1.1 }),
-  controls: Object.freeze({ aileron: 20, elevator: 25, rudder: 25 }), // max deflection, deg (matches the mesh)
-  // Three notches past up (13, 27 and 40 degrees); full flaps add 1.0 to CLmax -> stall 15.3 m/s.
-  flaps: Object.freeze({ notches: Object.freeze([0, 1 / 3, 2 / 3, 1]), maxDeflection: 40, clMaxIncrement: 1.0, clIncrement: 0.55, cdIncrement: 0.07, pitchMoment: -0.06, deploySeconds: 3 }),
+  fuselage: Object.freeze({ sideArea: 4.2, sideForceSlope: 0.4, sideForceZ: -1.3, crossflowStations: Object.freeze([-1.6, 2.6]) }),
+  tail: Object.freeze({
+    horizontal: Object.freeze({ position: Object.freeze([0, 0.44, 3.48]), area: 2.7, aspectRatio: 3.8, incidence: 1.5, downwash: 1 }),
+    // Offset a little to the left so the slipstream swirl is trimmed out at cruise power.
+    vertical: Object.freeze({ position: Object.freeze([0, 0.95, 3.72]), area: 1.25, aspectRatio: 1.3, offset: -1 }),
+  }),
+  // Max deflections (deg, matching the mesh), how much angle of attack a full deflection adds to its
+  // surface (share of the deflection), the trim's range (share of full elevator) and servo speed (1/s).
+  controls: Object.freeze({
+    aileron: 20,
+    elevator: 25,
+    rudder: 25,
+    effectiveness: Object.freeze({ aileron: 0.45, elevator: 0.55, rudder: 0.55 }),
+    trimRange: 0.45,
+    servoRate: 5,
+  }),
+  // Three notches past up (13, 27 and 40 degrees). The increments act across the wing (big slotted
+  // flaps with drooping ailerons, STOL-kit style): full flaps add 1.0 to CLmax -> about 55 km/h.
+  flaps: Object.freeze({ notches: Object.freeze([0, 1 / 3, 2 / 3, 1]), maxDeflection: 40, clMaxIncrement: 1.0, clIncrement: 0.85, cdIncrement: 0.06, pitchMoment: -0.14, deploySeconds: 3 }),
   spoilers: null,
   gear: Object.freeze({ retractable: false }),
   engine: Object.freeze({
     kind: 'piston',
-    powerKw: 112, // 150 hp: 71 kW needed at cruise with an 80 % prop; 36 kW spare at 30 m/s -> 5.6 m/s climb
+    powerKw: 112, // 150 hp at 2700 rpm
+    idlePower: 0.06,
     idleRpm: 700,
     maxRpm: 2700,
     propDiameter: 1.93,
+    // Cruise-pitched fixed prop: 82 % efficient from 52 m/s; about 50 % at the 31 m/s climb speed.
     propEfficiency: 0.8,
+    designSpeed: 52,
     staticThrustN: 2900,
+    staticFade: 10,
     spoolSeconds: 0.9,
-    // Strong torque and P-factor: the nose swings left at full power and low speed; right rudder holds it.
-    torqueRoll: 0.09,
-    pFactorYaw: 0.07,
-    slipstreamRudder: 0.35,
+    position: Object.freeze([0, 0.02, -2.34]),
+    // Strong left-turning tendencies (right-hand prop): torque roll, P-factor, slipstream swirl on the
+    // fin and gyroscopic yaw when the tail comes up; right rudder holds them.
     rotation: 'clockwise-from-cockpit',
+    propInertia: 1.6,
+    pFactorArm: 0.22,
+    swirl: 0.12,
+    slipstreamTail: 0.65,
+    slipstreamWing: 0.25,
+    windmillDrag: 0.08,
   }),
   contacts: Object.freeze([
     Object.freeze({ id: 'leftMain', kind: 'wheel', gear: true, position: Object.freeze([-1.02, -1.4, -1]), spring: 42000, damping: 3600, rollingFriction: 0.04, sideFriction: 0.85, brake: true }),

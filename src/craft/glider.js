@@ -94,47 +94,67 @@ const arcadeProfile = Object.freeze({
 });
 
 // ============================================================================================
-// SIM: a 15 m class sailplane. Targets first, then the physical parameters that meet them
-// (derivations in the comments), then contact points in body axes (x right, y up, z aft; m).
+// SIM: a 15 m class sailplane for SimFixedWing (src/flight/SimFixedWing.js). Targets first, then the
+// physical parameters that meet them, then the contact points. Positions are body axes relative to
+// the mesh origin (x right, y up, z aft; m); angles in degrees. tools/flight-lab.mjs measures the
+// targets in flight (dry and with full ballast).
 // ============================================================================================
 const simProfile = Object.freeze({
   model: 'fixedWing',
   targets: Object.freeze({
     liftToDrag: 40,
-    minSink: 0.6, // m/s at about 20.5 m/s (CL 1.31)
-    stallSpeed: 18.1, // m/s = 65 km/h dry, clean
-    bestGlideSpeed: 27, // m/s (CL 0.76)
-    cruiseSpeed: 30,
+    minSink: 0.6, // m/s
+    stallSpeed: 18.06, // m/s = 65 km/h clean
     vne: 75, // m/s = 270 km/h
   }),
-  mass: Object.freeze({ empty: 270, pilot: 90 }), // kg; 360 kg dry, wing loading 34 kg/m^2
-  // Water ballast in the wings; craftState.ballast is the fill fraction (0..1) the SIM model adds
-  // to the mass: 150 kg full raises the stall to about 77 km/h and the best-glide speed with it.
-  ballast: Object.freeze({ capacity: 150, dumpSeconds: 60 }),
-  inertia: Object.freeze({ pitch: 900, yaw: 3300, roll: 2600 }), // kg m^2 about body x, y, z
-  centerOfMass: Object.freeze([0, 0, -0.3]),
+  // 330 kg dry (31 kg/m^2); the wing tanks add up to 60 kg, so the glider meets the targets from
+  // empty (stall about 63 km/h) to full (about 68 km/h), with the best-glide speed rising with the load.
+  mass: Object.freeze({ empty: 245, pilot: 85 }),
+  // craftState.ballast is the fill fraction (0..1); the water sits about 2.4 m out along each wing.
+  ballast: Object.freeze({ capacity: 60, dumpSeconds: 60, arm: 2.4 }),
+  // kg m^2 about body x (pitch), y (yaw) and z (roll); yawRoll is the y-z product of inertia.
+  inertia: Object.freeze({ pitch: 850, yaw: 2900, roll: 2400, yawRoll: 0 }),
+  centerOfMass: Object.freeze([0, 0.05, 0.0]),
   wing: Object.freeze({
     span: 15,
-    area: 10.5, // m^2
-    aspectRatio: 21.4,
-    meanChord: 0.72,
+    area: 10.5,
+    taper: 0.42,
     oswald: 0.9,
-    incidence: 1.5, // deg
-    dihedral: 3.2, // deg
-    aerodynamicCenter: Object.freeze([0, 0.35, -0.2]),
+    incidence: 1.5,
+    dihedral: 3.2,
+    washout: 1.5,
+    aerodynamicCenter: Object.freeze([0, 0.35, -0.13]),
+    cm0: -0.1,
   }),
   aero: Object.freeze({
-    cd0: 0.0095, // L/Dmax = 0.5 * sqrt(pi * e * AR / cd0) = 40
-    clAlpha: 5.6, // per rad
-    cl0: 0.35,
-    clMax: 1.65, // stall 18.1 m/s dry
-    alphaCritical: 15, // deg, then a post-stall drop
+    cd0: 0.0092, // whole-airframe parasitic drag on the wing area: L/D about 40
+    clAlpha: 5.6, // per rad (AR 21)
+    clMax: 1.62,
+    clMin: -0.9,
+    alphaCritical: 15, // wing angle of attack at CLmax, then a post-stall drop
     postStallClDrop: 0.45,
-    sideForcePerRad: 0.9,
+    stallDropWidth: 4,
+    stallBlendWidth: 16,
   }),
-  tail: Object.freeze({ arm: 4.5, horizontalArea: 1.1, verticalArea: 0.95 }),
-  controls: Object.freeze({ aileron: 20, elevator: 18, rudder: 22 }), // max deflection, deg (matches the mesh)
-  spoilers: Object.freeze({ cdIncrement: 0.03, clLoss: 0.25, deploySeconds: 0.8 }),
+  fuselage: Object.freeze({ sideArea: 2.4, sideForceSlope: 0.35, sideForceZ: -1.4, crossflowStations: Object.freeze([-1.9, 3.3]) }),
+  tail: Object.freeze({
+    // T-tail above the wake: about 60 % of the wing's downwash reaches it.
+    horizontal: Object.freeze({ position: Object.freeze([0, 1.72, 4.2]), area: 0.95, aspectRatio: 6.5, incidence: -4.6, downwash: 0.6 }),
+    vertical: Object.freeze({ position: Object.freeze([0, 0.95, 3.85]), area: 1.15, aspectRatio: 1.7, offset: 0 }),
+  }),
+  // Max deflections (deg, matching the mesh), how much angle of attack a full deflection adds to its
+  // surface (share of the deflection), the trim tab's range (share of full elevator) and servo speed (1/s).
+  controls: Object.freeze({
+    aileron: 20,
+    elevator: 18,
+    rudder: 22,
+    effectiveness: Object.freeze({ aileron: 0.42, elevator: 0.6, rudder: 0.55 }),
+    trimRange: 0.5,
+    servoRate: 5,
+  }),
+  // Spoilers (airbrake action, or both toe brakes in the air): L/D falls to about 8 and a 45 degree
+  // dive stays below Vne with them out.
+  spoilers: Object.freeze({ cdIncrement: 0.065, clLoss: 0.18, deploySeconds: 0.8 }),
   flaps: null,
   gear: Object.freeze({ retractable: false }),
   engine: null,
