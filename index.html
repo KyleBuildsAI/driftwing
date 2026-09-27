@@ -147,6 +147,12 @@
       <div class="dw-compass-readout"><span class="dw-heading" id="dw-heading">000</span><span class="dw-heading-deg">&deg;</span><span class="dw-heading-name" id="dw-heading-name">N</span></div>
     </div>
 
+    <!-- CLASSIC | SIM pill and craft picker (filled by modePill.js and craftPicker.js) -->
+    <div class="dw-modebar dw-fade" id="dw-modebar">
+      <button type="button" class="glass" id="dw-mode-pill" data-tip-pos="bottom"></button>
+      <div class="glass" id="dw-craft-picker"></div>
+    </div>
+
     <div class="dw-chips" id="dw-chips">
       <div class="dw-chip glass dw-fade dw-time-chip" id="dw-time-chip" title="Time of day (T cycles presets)">
         <svg class="dw-icon dw-time-icon dw-time-sun"><use href="#dw-i-sun"/></svg>
@@ -309,73 +315,202 @@
     <div class="dw-panel-body" id="dw-journal-body"></div>
   </section>
 
-  <section class="dw-panel glass" id="dw-panel-settings" data-panel="settings" role="dialog" aria-labelledby="dw-settings-title" aria-hidden="true">
+  <section class="dw-panel glass dw-settings" id="dw-panel-settings" data-panel="settings" role="dialog" aria-labelledby="dw-settings-title" aria-hidden="true">
     <header class="dw-panel-head">
       <div><div class="dw-micro">Preferences</div><h2 id="dw-settings-title">Settings</h2></div>
       <button type="button" class="dw-icon-button" data-action="close-panel" aria-label="Close settings"><svg class="dw-icon"><use href="#dw-i-close"/></svg></button>
     </header>
-    <div class="dw-panel-body">
-      <div class="dw-group">
-        <h3 class="dw-micro">Time</h3>
-        <div class="dw-field">
-          <div class="dw-row"><label for="dw-set-day-length">Day length</label><span class="dw-row-value" data-value-for="dayLength">6 min</span></div>
-          <input class="dw-range" id="dw-set-day-length" type="range" min="2" max="30" step="1" data-setting="dayLength" data-kind="minutes">
+    <div class="dw-tabs" role="tablist" aria-label="Settings sections" id="dw-settings-tabs">
+      <button type="button" role="tab" id="dw-tab-flight" aria-controls="dw-tabpanel-flight" aria-selected="true" data-tab="flight">Flight</button>
+      <button type="button" role="tab" id="dw-tab-graphics" aria-controls="dw-tabpanel-graphics" aria-selected="false" tabindex="-1" data-tab="graphics">Graphics</button>
+      <button type="button" role="tab" id="dw-tab-sound" aria-controls="dw-tabpanel-sound" aria-selected="false" tabindex="-1" data-tab="sound">Sound</button>
+      <button type="button" role="tab" id="dw-tab-controls" aria-controls="dw-tabpanel-controls" aria-selected="false" tabindex="-1" data-tab="controls">Controls</button>
+      <button type="button" role="tab" id="dw-tab-general" aria-controls="dw-tabpanel-general" aria-selected="false" tabindex="-1" data-tab="general">General</button>
+    </div>
+    <div class="dw-panel-body" id="dw-settings-body">
+      <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-flight" aria-labelledby="dw-tab-flight" data-tabpanel="flight">
+        <div class="dw-group">
+          <h3 class="dw-micro">Assists</h3>
+          <div class="dw-field dw-assist-field">
+            <div class="dw-row"><label for="dw-set-assists" id="dw-assist-label">Glider assists</label><span class="dw-row-value" data-value-for="assists.@craft">100%</span></div>
+            <input class="dw-range" id="dw-set-assists" type="range" min="0" max="1" step="0.05" data-setting="assists.@craft" data-kind="percent" aria-describedby="dw-assist-tip">
+            <div class="dw-tooltip" role="tooltip" id="dw-assist-tip">No assists active</div>
+            <p class="dw-note">0% is raw physics. 50% keeps coordination, trim and a stall warning. 100% adds the stall and G limiters, auto-level and hover holds. Each craft remembers its own setting; assists shape SIM flight.</p>
+          </div>
+          <div class="dw-row"><span>Start on the ground</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Start on the ground" data-setting="startOnGround"><span></span></button></div>
         </div>
-        <div class="dw-row"><span>Freeze time</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Freeze time" data-setting="timeFrozen"><span></span></button></div>
-      </div>
-      <div class="dw-group">
-        <h3 class="dw-micro">Graphics</h3>
-        <div class="dw-field">
-          <div class="dw-row"><span>Quality</span><span class="dw-row-value" id="dw-quality-note">Auto</span></div>
-          <div class="dw-segmented" role="radiogroup" aria-label="Quality" data-setting="quality">
-            <button type="button" role="radio" data-value="auto">Auto</button>
-            <button type="button" role="radio" data-value="minimal">Min</button>
-            <button type="button" role="radio" data-value="low">Low</button>
-            <button type="button" role="radio" data-value="medium">Med</button>
-            <button type="button" role="radio" data-value="high">High</button>
-            <button type="button" role="radio" data-value="ultra">Ultra</button>
+        <div class="dw-group">
+          <h3 class="dw-micro">Units</h3>
+          <div class="dw-segmented dw-segmented-2" role="radiogroup" aria-label="Units" data-setting="units">
+            <button type="button" role="radio" data-value="metric">km/h · m</button>
+            <button type="button" role="radio" data-value="aviation">knots · ft</button>
           </div>
         </div>
-        <div class="dw-row"><span>Show FPS and stats</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Show FPS and stats" data-setting="showFps"><span></span></button></div>
-        <div class="dw-row"><span>Hide HUD when idle</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="Hide HUD when idle" data-setting="hudAutoHide"><span></span></button></div>
-      </div>
-      <div class="dw-group">
-        <h3 class="dw-micro">Controls</h3>
-        <div class="dw-field">
-          <div class="dw-row"><label for="dw-set-mouse">Mouse sensitivity</label><span class="dw-row-value" data-value-for="mouseSensitivity">1.00x</span></div>
-          <input class="dw-range" id="dw-set-mouse" type="range" min="0.25" max="3" step="0.05" data-setting="mouseSensitivity" data-kind="factor">
-        </div>
-        <div class="dw-row"><span>Invert pitch</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Invert pitch" data-setting="invertPitch"><span></span></button></div>
-      </div>
-      <div class="dw-group">
-        <h3 class="dw-micro">Sound</h3>
-        <div class="dw-field">
-          <div class="dw-row"><label for="dw-set-volume">Master volume</label><span class="dw-row-value" data-value-for="masterVolume">70%</span></div>
-          <input class="dw-range" id="dw-set-volume" type="range" min="0" max="1" step="0.01" data-setting="masterVolume" data-kind="percent">
+        <div class="dw-group">
+          <h3 class="dw-micro">HUD</h3>
+          <div class="dw-row"><span>Instrument HUD overlay</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Instrument HUD overlay" data-setting="hud.overlay"><span></span></button></div>
+          <div class="dw-row"><span>Landing callouts</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Landing callouts" data-setting="hud.landingCallouts"><span></span></button></div>
+          <div class="dw-row"><span>Hide HUD when idle</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="Hide HUD when idle" data-setting="hudAutoHide"><span></span></button></div>
         </div>
       </div>
-      <div class="dw-group">
-        <h3 class="dw-micro">Copilot</h3>
-        <div class="dw-row"><span>WREN voice</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="WREN voice" data-setting="copilotVoice"><span></span></button></div>
-        <div class="dw-row"><span>WREN chatter</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="WREN chatter" data-setting="copilotChatter"><span></span></button></div>
-        <div class="dw-row"><span>Remote brain</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Remote copilot brain" data-setting="remoteCopilot"><span></span></button></div>
-        <div class="dw-field">
-          <label class="dw-field-label" for="dw-set-endpoint">Endpoint</label>
-          <input class="dw-text-input" id="dw-set-endpoint" type="url" spellcheck="false" autocomplete="off" data-setting="remoteEndpoint">
-          <p class="dw-field-error" id="dw-endpoint-error">Enter a full http:// or https:// address.</p>
-          <p class="dw-note">Run <code>npm run copilot-server</code> to give WREN a remote brain (it can use Claude when <code>ANTHROPIC_API_KEY</code> is set). If the server is unreachable, WREN quietly falls back to the built-in brain.</p>
-        </div>
-      </div>
-      <div class="dw-group">
-        <h3 class="dw-micro">World</h3>
-        <form class="dw-field dw-seed-form" id="dw-seed-form" autocomplete="off">
-          <label class="dw-field-label" for="dw-seed-input">Fly a specific seed</label>
-          <div class="dw-inline">
-            <input class="dw-text-input" id="dw-seed-input" type="text" maxlength="24" spellcheck="false" placeholder="Seed, for example ARCH1" aria-describedby="dw-seed-error">
-            <button type="submit" class="dw-text-button dw-solid">Fly</button>
+
+      <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-graphics" aria-labelledby="dw-tab-graphics" data-tabpanel="graphics" hidden>
+        <div class="dw-group">
+          <h3 class="dw-micro">Graphics</h3>
+          <div class="dw-field">
+            <div class="dw-row"><span>Preset</span><span class="dw-row-value" id="dw-quality-note">Auto</span></div>
+            <div class="dw-segmented" role="radiogroup" aria-label="Graphics preset" data-setting="quality">
+              <button type="button" role="radio" data-value="auto">Auto</button>
+              <button type="button" role="radio" data-value="minimal">Min</button>
+              <button type="button" role="radio" data-value="low">Low</button>
+              <button type="button" role="radio" data-value="medium">Med</button>
+              <button type="button" role="radio" data-value="high">High</button>
+              <button type="button" role="radio" data-value="ultra">Ultra</button>
+            </div>
           </div>
-          <p class="dw-field-error" id="dw-seed-error">Use up to 24 letters, digits or dashes.</p>
-        </form>
+          <div class="dw-field">
+            <div class="dw-row"><span>Frame target</span><span class="dw-row-value" id="dw-frame-note">Auto</span></div>
+            <div class="dw-segmented" role="radiogroup" aria-label="Frame target" data-setting="frameTarget">
+              <button type="button" role="radio" data-value="auto">Auto</button>
+              <button type="button" role="radio" data-value="60">60</button>
+              <button type="button" role="radio" data-value="120">120</button>
+              <button type="button" role="radio" data-value="144">144</button>
+              <button type="button" role="radio" data-value="240">240</button>
+              <button type="button" role="radio" data-value="uncapped" aria-label="Uncapped">Uncap</button>
+            </div>
+          </div>
+          <div class="dw-row"><span>Dynamic resolution</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="Dynamic resolution" data-setting="dynamicResolution"><span></span></button></div>
+          <p class="dw-note dw-live-note" id="dw-scale-note">Rendering at full resolution.</p>
+          <div class="dw-row"><span>Show FPS and stats</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Show FPS and stats" data-setting="showFps"><span></span></button></div>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">Field of view</h3>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fov-chase">Chase</label><span class="dw-row-value" data-value-for="fov.chase">60°</span></div>
+            <input class="dw-range" id="dw-set-fov-chase" type="range" min="40" max="100" step="1" data-setting="fov.chase" data-kind="degrees">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fov-cockpit">Cockpit</label><span class="dw-row-value" data-value-for="fov.cockpit">74°</span></div>
+            <input class="dw-range" id="dw-set-fov-cockpit" type="range" min="50" max="110" step="1" data-setting="fov.cockpit" data-kind="degrees">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fov-wing">Wing</label><span class="dw-row-value" data-value-for="fov.wing">68°</span></div>
+            <input class="dw-range" id="dw-set-fov-wing" type="range" min="40" max="110" step="1" data-setting="fov.wing" data-kind="degrees">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fov-flyby">Flyby</label><span class="dw-row-value" data-value-for="fov.flyby">50°</span></div>
+            <input class="dw-range" id="dw-set-fov-flyby" type="range" min="20" max="90" step="1" data-setting="fov.flyby" data-kind="degrees">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fov-fpv">FPV drone</label><span class="dw-row-value" data-value-for="fov.fpv">120°</span></div>
+            <input class="dw-range" id="dw-set-fov-fpv" type="range" min="90" max="150" step="1" data-setting="fov.fpv" data-kind="degrees">
+          </div>
+        </div>
+      </div>
+
+      <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-sound" aria-labelledby="dw-tab-sound" data-tabpanel="sound" hidden>
+        <div class="dw-group">
+          <h3 class="dw-micro">Mixer</h3>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-volume">Master</label><span class="dw-row-value" data-value-for="mixer.master">70%</span></div>
+            <input class="dw-range" id="dw-set-volume" type="range" min="0" max="1" step="0.01" data-setting="mixer.master" data-kind="percent">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mix-engine">Engine</label><span class="dw-row-value" data-value-for="mixer.engine">90%</span></div>
+            <input class="dw-range" id="dw-set-mix-engine" type="range" min="0" max="1" step="0.01" data-setting="mixer.engine" data-kind="percent">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mix-environment">Environment</label><span class="dw-row-value" data-value-for="mixer.environment">85%</span></div>
+            <input class="dw-range" id="dw-set-mix-environment" type="range" min="0" max="1" step="0.01" data-setting="mixer.environment" data-kind="percent">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mix-ui">Interface</label><span class="dw-row-value" data-value-for="mixer.ui">80%</span></div>
+            <input class="dw-range" id="dw-set-mix-ui" type="range" min="0" max="1" step="0.01" data-setting="mixer.ui" data-kind="percent">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mix-copilot">Copilot</label><span class="dw-row-value" data-value-for="mixer.copilot">100%</span></div>
+            <input class="dw-range" id="dw-set-mix-copilot" type="range" min="0" max="1" step="0.01" data-setting="mixer.copilot" data-kind="percent">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mix-music">Music</label><span class="dw-row-value" data-value-for="mixer.music">70%</span></div>
+            <input class="dw-range" id="dw-set-mix-music" type="range" min="0" max="1" step="0.01" data-setting="mixer.music" data-kind="percent">
+          </div>
+          <p class="dw-note">Everything else ducks while WREN speaks.</p>
+        </div>
+      </div>
+
+      <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-controls" aria-labelledby="dw-tab-controls" data-tabpanel="controls" hidden>
+        <div class="dw-group">
+          <h3 class="dw-micro">Mouse</h3>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mouse">Mouse sensitivity</label><span class="dw-row-value" data-value-for="mouseSensitivity">1.00x</span></div>
+            <input class="dw-range" id="dw-set-mouse" type="range" min="0.25" max="3" step="0.05" data-setting="mouseSensitivity" data-kind="factor">
+          </div>
+          <div class="dw-row"><span>Invert pitch</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Invert pitch" data-setting="invertPitch"><span></span></button></div>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">HOTAS</h3>
+          <div class="dw-field">
+            <div class="dw-row"><span>Stick twist yaw</span></div>
+            <div class="dw-segmented dw-segmented-3" role="radiogroup" aria-label="Stick twist yaw" data-setting="twistYaw">
+              <button type="button" role="radio" data-value="auto">Auto</button>
+              <button type="button" role="radio" data-value="on">On</button>
+              <button type="button" role="radio" data-value="off">Off</button>
+            </div>
+            <p class="dw-note">Auto turns twist yaw off once the pedal rudder axis moves.</p>
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-detent">Afterburner detent</label><span class="dw-row-value" data-value-for="afterburnerDetent">95%</span></div>
+            <input class="dw-range" id="dw-set-detent" type="range" min="0.8" max="1" step="0.01" data-setting="afterburnerDetent" data-kind="percent">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><span>When a HOTAS connects in CLASSIC</span></div>
+            <div class="dw-segmented dw-segmented-3" role="radiogroup" aria-label="When a HOTAS connects in CLASSIC" data-setting="hotasPrompt">
+              <button type="button" role="radio" data-value="ask">Ask</button>
+              <button type="button" role="radio" data-value="always">Switch to SIM</button>
+              <button type="button" role="radio" data-value="never">Stay</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-general" aria-labelledby="dw-tab-general" data-tabpanel="general" hidden>
+        <div class="dw-group">
+          <h3 class="dw-micro">Time</h3>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-day-length">Day length</label><span class="dw-row-value" data-value-for="dayLength">6 min</span></div>
+            <input class="dw-range" id="dw-set-day-length" type="range" min="2" max="30" step="1" data-setting="dayLength" data-kind="minutes">
+          </div>
+          <div class="dw-row"><span>Freeze time</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Freeze time" data-setting="timeFrozen"><span></span></button></div>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">Copilot</h3>
+          <div class="dw-row"><span>WREN voice</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="WREN voice" data-setting="copilotVoice"><span></span></button></div>
+          <div class="dw-row"><span>WREN chatter</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="WREN chatter" data-setting="copilotChatter"><span></span></button></div>
+          <div class="dw-row"><span>Remote brain</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Remote copilot brain" data-setting="remoteCopilot"><span></span></button></div>
+          <div class="dw-field">
+            <label class="dw-field-label" for="dw-set-endpoint">Endpoint</label>
+            <input class="dw-text-input" id="dw-set-endpoint" type="url" spellcheck="false" autocomplete="off" data-setting="remoteEndpoint">
+            <p class="dw-field-error" id="dw-endpoint-error">Enter a full http:// or https:// address.</p>
+            <p class="dw-note">Run <code>npm run copilot-server</code> to give WREN a remote brain (it can use Claude when <code>ANTHROPIC_API_KEY</code> is set). If the server is unreachable, WREN quietly falls back to the built-in brain.</p>
+          </div>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">World</h3>
+          <form class="dw-field dw-seed-form" id="dw-seed-form" autocomplete="off">
+            <label class="dw-field-label" for="dw-seed-input">Fly a specific seed</label>
+            <div class="dw-inline">
+              <input class="dw-text-input" id="dw-seed-input" type="text" maxlength="24" spellcheck="false" placeholder="Seed, for example ARCH1" aria-describedby="dw-seed-error">
+              <button type="submit" class="dw-text-button dw-solid">Fly</button>
+            </div>
+            <p class="dw-field-error" id="dw-seed-error">Use up to 24 letters, digits or dashes.</p>
+          </form>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">Developer</h3>
+          <div class="dw-row"><span>Status badge</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Developer status badge" data-setting="devBadge"><span></span></button></div>
+          <p class="dw-note">Backend, frame times against the target, render scale and connected controllers.</p>
+        </div>
       </div>
     </div>
   </section>

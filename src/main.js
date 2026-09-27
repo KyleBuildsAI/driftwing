@@ -13,7 +13,7 @@ import { createFxSystem } from './render/fx.js';
 import { createInputSystem } from './input/input.js';
 import { createJournal } from './gameplay/journal.js';
 import { createLandmarkSystem } from './world/landmarks.js';
-import { createPerfGovernor } from './core/perf.js';
+import { createPerfGovernor, measureDisplayRefresh } from './core/perf.js';
 import { createPostStack } from './render/post.js';
 import { createRingCourseSystem } from './gameplay/rings.js';
 import { createSettings } from './core/settings.js';
@@ -41,8 +41,12 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
 // ============================================================================
 async function boot() {
   const params = new URLSearchParams(window.location.search);
+  const devHooks = import.meta.env.DEV || params.get('debug') === '1';
+  // The display refresh is measured while boot waits on storage and the GPU (an idle window);
+  // the result becomes the default frame target.
+  const refreshProbe = measureDisplayRefresh();
   await storage.init();
-  const bus = attachTypedEvents(new EventBus(), { validate: import.meta.env.DEV || params.get('debug') === '1' });
+  const bus = attachTypedEvents(new EventBus(), { validate: devHooks });
   const settings = createSettings(bus);
   const seed = resolveSeed(params);
   if (params.get('seed') !== seed) {
@@ -165,7 +169,7 @@ async function boot() {
     flight: createFlightTelemetry(),
     waypoint: null,
     ringCourse: { active: false, total: 0, passed: 0, streak: 0, bestStreak: 0, elapsed: 0, nextIndex: 0 },
-    perf: { fps: 60, frameMs: 16.7 },
+    perf: { fps: 60, frameMs: 16.7, renderScale: 1 },
   };
   state.player.right.set(1, 0, 0).applyQuaternion(state.player.quaternion);
 
@@ -201,6 +205,7 @@ async function boot() {
     input,
     controls: createControlState(),
     craftRegistry,
+    perf: null,
     uniforms,
     textures: { cloudShadow: cloudShadowTexture },
     quality: {},
@@ -231,7 +236,15 @@ async function boot() {
 
   ctx.wind = createWindField({ world, uniforms, state, bus });
 
-  const perf = createPerfGovernor(ctx);
+  const perf = createPerfGovernor(ctx, { devHooks });
+  ctx.perf = perf;
+  refreshProbe.then(
+    (result) => perf.setMeasuredRefresh(result),
+    (error) => {
+      console.error('[DRIFTWING] display refresh measurement failed', error);
+      perf.setMeasuredRefresh(null);
+    },
+  );
 
   // ---- Pipeline prewarm ----------------------------------------------------------------------
   // Systems register objects that first appear long after boot (ring courses, beacons, bursts,
@@ -419,6 +432,8 @@ async function boot() {
   } catch (error) {
     console.error('[DRIFTWING] post stack unavailable, rendering directly', error);
   }
+  // Dynamic resolution moves onto the scene pass now that the pipeline exists.
+  perf.refreshRenderScale();
   function render() {
     if (post) {
       try {
@@ -427,6 +442,8 @@ async function boot() {
       } catch (error) {
         console.error('[DRIFTWING] post stack failed, rendering directly', error);
         post = null;
+        ctx.post = null;
+        perf.refreshRenderScale();
       }
     }
     renderer.render(scene, camera);
@@ -579,19 +596,18 @@ async function boot() {
       }
     }
     if (!state.paused) trackBiome(simDt);
-    perf.update(realDt, lastCpuMs);
+    // The governor gets the real, unclamped frame interval: it holds the frame target, so a
+    // clamped value would hide exactly the slow frames it has to react to.
+    perf.update({ frameMs: rawFrameMs, cpuMs: lastCpuMs });
     const shot = screenshotRequest;
     screenshotRequest = null;
-    let restorePixelRatio = 0;
-    if (shot && shot.scale !== 1) {
-      restorePixelRatio = renderer.getPixelRatio();
-      renderer.setPixelRatio(Math.min(restorePixelRatio * shot.scale, 4096 / Math.max(1, window.innerWidth)));
-    }
+    // A capture renders at full render scale (and the raised pixel ratio) for this one frame.
+    const endCapture = shot ? perf.beginCapture(shot.scale, 4096 / Math.max(1, window.innerWidth)) : null;
     if (!fadeStarted) forcePrewarmDrawable();
     render();
     lastCpuMs = performance.now() - cpuStart;
     if (shot) captureScreenshot();
-    if (restorePixelRatio) renderer.setPixelRatio(restorePixelRatio);
+    if (endCapture) endCapture();
 
     // The fade lifts once the ground is built AND frames arrive steadily (pipeline
     // compiles finished), so it never reveals a frozen canvas; 8 s safety cap.
@@ -629,6 +645,25 @@ async function boot() {
         seed,
         fps: Math.round(state.perf.fps),
         frameMs: Math.round(state.perf.frameMs * 10) / 10,
+        renderScale: state.perf.renderScale,
+        frameTarget: state.perf.frameTarget,
+        targetHz: state.perf.targetHz,
+        perf: {
+          refreshHz: state.perf.refreshHz,
+          refreshMeasuredHz: state.perf.refreshMeasuredHz,
+          refreshSource: state.perf.refreshSource,
+          displayHz: state.perf.displayHz,
+          frameTarget: state.perf.frameTarget,
+          targetHz: state.perf.targetHz,
+          targetMs: state.perf.targetMs === null ? null : Math.round(state.perf.targetMs * 100) / 100,
+          controlFrameMs: Math.round(state.perf.controlFrameMs * 10) / 10,
+          renderScale: state.perf.renderScale,
+          dynamicResolution: state.perf.dynamicResolution,
+          quality: state.perf.quality,
+          qualityIndex: state.perf.qualityIndex,
+          simulatedLoad: state.perf.simulatedLoad,
+          scaleHistory: state.perf.scaleHistory.map((entry) => ({ ...entry })),
+        },
         drawCalls: info.render.drawCalls ?? info.render.calls,
         triangles: info.render.triangles,
         quality: ctx.quality.name,

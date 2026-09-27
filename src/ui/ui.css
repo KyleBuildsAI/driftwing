@@ -300,10 +300,98 @@
   #ui-root .dw-heading-deg { font-size: 12px; color: var(--dw-text-dim); margin-right: 6px; }
   #ui-root .dw-heading-name { font-size: 10.5px; font-weight: 600; letter-spacing: 0.16em; color: var(--dw-gold); }
 
-  /* Status chips (top-left) */
-  #ui-root .dw-chips {
+  /* CLASSIC | SIM pill and craft picker (top-left), status chips below them */
+  #ui-root .dw-modebar {
     position: absolute;
     top: var(--dw-top);
+    left: var(--dw-left);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #ui-root .dw-mode-pill {
+    pointer-events: auto;
+    position: relative;
+    display: inline-grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+    height: 34px;
+    padding: 3px;
+    border-radius: 999px;
+    color: var(--dw-text-dim);
+    text-shadow: 0 1px 2px rgba(8, 6, 12, 0.3);
+  }
+  #ui-root .dw-mode-thumb {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 3px;
+    width: calc(50% - 3px);
+    border-radius: 999px;
+    background: rgba(243, 199, 122, 0.22);
+    box-shadow: inset 0 0 0 1px rgba(243, 199, 122, 0.34);
+    transition: transform 0.32s var(--dw-ease);
+  }
+  #ui-root .dw-mode-pill[data-mode="sim"] .dw-mode-thumb { transform: translateX(100%); }
+  #ui-root .dw-mode-option {
+    position: relative;
+    padding: 0 8px 0 calc(8px + 0.16em);
+    font-size: 10.5px;
+    font-weight: 650;
+    line-height: 28px;
+    letter-spacing: 0.16em;
+    text-align: center;
+    transition: color 0.2s ease;
+  }
+  #ui-root .dw-mode-pill:hover { border-color: var(--dw-hairline-strong); }
+  #ui-root .dw-mode-pill:hover .dw-mode-option { color: var(--dw-text); }
+  #ui-root .dw-mode-pill[data-mode="classic"] .dw-mode-option[data-mode="classic"],
+  #ui-root .dw-mode-pill[data-mode="sim"] .dw-mode-option[data-mode="sim"] { color: var(--dw-gold); }
+  #ui-root .dw-craft-picker {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    height: 34px;
+    padding: 2px 3px;
+    border-radius: 999px;
+  }
+  #ui-root .dw-craft-button {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--dw-text-dim);
+    transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s var(--dw-ease);
+  }
+  #ui-root .dw-craft-button:hover { background: rgba(255, 240, 220, 0.09); color: var(--dw-text); }
+  #ui-root .dw-craft-button:active { transform: scale(0.94); }
+  #ui-root .dw-craft-button[aria-pressed="true"] { background: rgba(243, 199, 122, 0.22); color: var(--dw-gold); box-shadow: inset 0 0 0 1px rgba(243, 199, 122, 0.3); }
+  #ui-root .dw-craft-icon { width: 19px; height: 19px; overflow: visible; filter: drop-shadow(0 1px 1px rgba(8, 6, 12, 0.35)); }
+  #ui-root .dw-craft-key {
+    position: absolute;
+    right: 3px;
+    bottom: 1px;
+    font-size: 8.5px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--dw-text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  #ui-root .dw-craft-button[aria-pressed="true"] .dw-craft-key { color: rgba(243, 199, 122, 0.8); }
+  #ui-root .dw-craft-button.dw-unavailable { color: rgba(246, 239, 228, 0.3); cursor: not-allowed; }
+  #ui-root .dw-craft-button.dw-unavailable:hover { background: transparent; color: rgba(246, 239, 228, 0.42); }
+  #ui-root .dw-craft-button.dw-unavailable .dw-craft-icon { filter: none; }
+
+  /* Status chips (top-left, under the pill) */
+  #ui-root .dw-chips {
+    position: absolute;
+    top: calc(var(--dw-top) + 46px);
     left: var(--dw-left);
     display: flex;
     flex-direction: column;
@@ -1281,6 +1369,120 @@
   #ui-root .dw-shutter:active { transform: scale(0.92); }
   #ui-root .dw-flash { position: absolute; inset: 0; z-index: 60; background: #fffaf2; opacity: 0; pointer-events: none; }
 
+  /* ---- SIM mode: CLASSIC-only chrome (boost, barrel rolls) does nothing there --------------- */
+  #ui-root.dw-sim .dw-touch-boost,
+  #ui-root.dw-sim .dw-roll-left,
+  #ui-root.dw-sim .dw-roll-right,
+  #ui-root.dw-sim .dw-flight .dw-boost,
+  #ui-root.dw-sim .dw-quick[data-command="barrel roll"] { display: none; }
+
+  /* ---- HOTAS prompt (lives in the toast stack) ------------------------------------------------ */
+  #ui-root .dw-prompt {
+    pointer-events: auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px 12px;
+    max-width: 100%;
+    padding: 7px 8px 7px 14px;
+    border-radius: 20px;
+    background: rgba(10, 8, 14, 0.46);
+    font-size: 15px;
+    color: var(--dw-text);
+    animation: dw-toast-in 0.35s var(--dw-ease);
+  }
+  #ui-root .dw-prompt[hidden] { display: none; }
+  #ui-root .dw-prompt .dw-toast-dot { background: var(--dw-gold); box-shadow: 0 0 8px rgba(243, 199, 122, 0.85); }
+  #ui-root .dw-prompt-text { font-weight: 500; }
+  #ui-root .dw-prompt-actions { display: inline-flex; gap: 6px; }
+
+  /* ---- Settings tabs and the assists tooltip ---------------------------------------------------- */
+  #ui-root .dw-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 2px;
+    margin: 12px 18px 0;
+    padding: 3px;
+    border-radius: 12px;
+    border: 1px solid var(--dw-hairline);
+    background: rgba(10, 8, 14, 0.3);
+  }
+  #ui-root .dw-tabs button {
+    height: 30px;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--dw-text-dim);
+    transition: background-color 0.18s ease, color 0.18s ease;
+  }
+  #ui-root .dw-tabs button:hover { color: var(--dw-text); background: rgba(255, 240, 220, 0.06); }
+  #ui-root .dw-tabs button[aria-selected="true"] { background: rgba(243, 199, 122, 0.22); color: var(--dw-gold); box-shadow: inset 0 0 0 1px rgba(243, 199, 122, 0.3); }
+  #ui-root .dw-segmented.dw-segmented-2 { grid-template-columns: repeat(2, 1fr); }
+  #ui-root .dw-segmented.dw-segmented-3 { grid-template-columns: repeat(3, 1fr); }
+  #ui-root .dw-live-note { min-height: 1.55em; }
+  #ui-root .dw-assist-field { position: relative; }
+  #ui-root .dw-tooltip {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 62px;
+    z-index: 5;
+    padding: 7px 10px 8px;
+    border-radius: 10px;
+    background: rgba(18, 14, 22, 0.94);
+    border: 1px solid var(--dw-hairline-strong);
+    box-shadow: var(--dw-shadow);
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--dw-text);
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-3px);
+    transition: opacity 0.16s ease, transform 0.16s ease, visibility 0s linear 0.16s;
+  }
+  #ui-root .dw-assist-field:hover .dw-tooltip,
+  #ui-root .dw-assist-field:focus-within .dw-tooltip { opacity: 1; visibility: visible; transform: none; transition: opacity 0.16s ease 0.2s, transform 0.16s ease 0.2s, visibility 0s; }
+
+  /* ---- Dev status badge ----------------------------------------------------------------------- */
+  #ui-root .dw-devbadge {
+    display: none;
+    position: absolute;
+    z-index: 12;
+    top: calc(var(--dw-top) + 52px);
+    right: var(--dw-right);
+    width: 244px;
+    padding: 9px 12px 10px;
+    border-radius: 12px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    line-height: 1.55;
+    color: var(--dw-text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  #ui-root.dw-devbadge-on:not(.dw-photo-on) .dw-devbadge { display: block; }
+  #ui-root.dw-devbadge-on .dw-debug { display: none; }
+  #ui-root .dw-devbadge-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  #ui-root .dw-devbadge-backend { color: var(--dw-text); white-space: nowrap; }
+  #ui-root .dw-devbadge-fps { display: flex; align-items: baseline; gap: 5px; margin: 2px 0 4px; color: var(--dw-text); }
+  #ui-root .dw-devbadge-fps > span:first-child { font-size: 17px; font-weight: 600; color: #b8e6b0; }
+  #ui-root .dw-devbadge.dw-fps-ok .dw-devbadge-fps > span:first-child { color: var(--dw-gold); }
+  #ui-root .dw-devbadge.dw-fps-low .dw-devbadge-fps > span:first-child { color: var(--dw-warn); }
+  #ui-root .dw-devbadge-ms { margin-left: auto; color: var(--dw-text-faint); }
+  #ui-root .dw-devbadge-graph { display: block; width: 216px; height: 46px; border-radius: 6px; background: rgba(10, 8, 14, 0.34); }
+  #ui-root .dw-devbadge-legend { display: flex; justify-content: space-between; gap: 8px; margin: 2px 0 4px; font-size: 9.5px; color: var(--dw-text-faint); white-space: nowrap; }
+  #ui-root .dw-devbadge-devices { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--dw-hairline); }
+  #ui-root .dw-devbadge-devices .dw-micro { font-family: var(--font-ui); font-size: 9px; margin-bottom: 3px; }
+  #ui-root .dw-devbadge-devices ul { margin: 0; padding: 0; list-style: none; }
+  #ui-root .dw-devbadge-devices li { display: flex; gap: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #ui-root .dw-devbadge-kind { flex: none; color: var(--dw-teal); }
+  #ui-root .dw-devbadge-name { overflow: hidden; text-overflow: ellipsis; color: var(--dw-text); }
+  #ui-root .dw-devbadge-empty { color: var(--dw-text-faint); }
+
   /* ---- Keyframes ------------------------------------------------------------------------ */
   @keyframes dw-toast-in { from { opacity: 0; transform: translateY(-8px) scale(0.97); } to { opacity: 1; transform: none; } }
   @keyframes dw-toast-out {
@@ -1296,6 +1498,12 @@
   @keyframes dw-nudge { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(-3px); } 65% { transform: translateX(3px); } }
 
   /* ---- Responsive -------------------------------------------------------------------------- */
+  /* Below 1280 px the pill and picker no longer fit beside the compass; they drop under it. */
+  @media (max-width: 1279px) {
+    #ui-root .dw-modebar { top: calc(var(--dw-top) + 74px); }
+    #ui-root .dw-chips { top: calc(var(--dw-top) + 120px); }
+    #ui-root .dw-toasts { top: calc(var(--dw-top) + 128px); }
+  }
   @media (max-width: 1140px) {
     #ui-root .dw-speech { bottom: calc(var(--dw-bottom) + 96px); width: min(600px, calc(100vw - 48px)); }
     #ui-root .dw-command { bottom: calc(var(--dw-bottom) + 96px); }
@@ -1303,10 +1511,11 @@
   }
   @media (max-width: 760px) {
     #ui-root { --dw-compass-width: min(340px, calc(100vw - 32px)); --dw-left: calc(env(safe-area-inset-left, 0px) + 12px); --dw-right: calc(env(safe-area-inset-right, 0px) + 12px); }
-    #ui-root .dw-chips { top: calc(var(--dw-top) + 74px); }
+    #ui-root .dw-chips { top: calc(var(--dw-top) + 120px); }
     #ui-root .dw-topbar { top: calc(var(--dw-top) + 74px); }
-    #ui-root .dw-debug { top: calc(var(--dw-top) + 122px); }
-    #ui-root .dw-toasts { top: calc(var(--dw-top) + 124px); }
+    #ui-root .dw-debug,
+    #ui-root .dw-devbadge { top: calc(var(--dw-top) + 122px); }
+    #ui-root .dw-toasts { top: calc(var(--dw-top) + 166px); }
     #ui-root .dw-flight { padding: 10px 14px 11px 12px; gap: 10px; }
     #ui-root .dw-value > span:first-child { font-size: 24px; }
     #ui-root .dw-readout { min-width: 80px; }
@@ -1332,8 +1541,13 @@
       justify-content: space-between;
       padding: 9px 14px 10px;
     }
+    #ui-root.dw-touch .dw-modebar {
+      top: calc(var(--dw-top) + 162px);
+      left: 50%;
+      transform: translateX(-50%);
+    }
     #ui-root.dw-touch .dw-chips {
-      top: calc(var(--dw-top) + 156px);
+      top: calc(var(--dw-top) + 206px);
       left: 50%;
       transform: translateX(-50%);
       width: calc(100vw - 24px);
@@ -1344,9 +1558,10 @@
       align-items: center;
     }
     #ui-root.dw-touch .dw-ring-chip { grid-column: 1 / -1; }
-    #ui-root.dw-touch .dw-debug { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 300px); right: var(--dw-right); }
-    #ui-root.dw-touch .dw-toasts { top: calc(var(--dw-top) + 206px); }
-    #ui-root.dw-touch.dw-ring-active .dw-toasts { top: calc(var(--dw-top) + 268px); }
+    #ui-root.dw-touch .dw-debug,
+    #ui-root.dw-touch .dw-devbadge { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 300px); right: var(--dw-right); }
+    #ui-root.dw-touch .dw-toasts { top: calc(var(--dw-top) + 256px); }
+    #ui-root.dw-touch.dw-ring-active .dw-toasts { top: calc(var(--dw-top) + 318px); }
     #ui-root.dw-touch .dw-banner { top: var(--dw-banner-top, 42vh); }
     #ui-root.dw-touch .dw-speech { bottom: var(--dw-speech-bottom, calc(env(safe-area-inset-bottom, 0px) + 236px)); width: calc(100vw - 32px); }
     #ui-root.dw-touch.dw-speech-top .dw-speech { top: var(--dw-speech-top, 200px); bottom: auto; }
@@ -1363,14 +1578,17 @@
     #ui-root.dw-touch .dw-flight .dw-value > span:first-child { font-size: 22px; }
     #ui-root.dw-touch .dw-readout { min-width: 74px; gap: 3px; }
     #ui-root.dw-touch .dw-throttle-track { width: 46px; }
+    #ui-root.dw-touch .dw-modebar { top: calc(var(--dw-top) + 78px); }
     #ui-root.dw-touch .dw-chips { top: var(--dw-top); left: auto; right: var(--dw-right); align-items: flex-end; }
-    #ui-root.dw-touch .dw-debug { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 240px); }
-    #ui-root.dw-touch .dw-toasts { top: calc(var(--dw-top) + 72px); width: min(420px, calc(100vw - 420px)); }
+    #ui-root.dw-touch .dw-debug,
+    #ui-root.dw-touch .dw-devbadge { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 240px); }
+    #ui-root.dw-touch .dw-toasts { top: calc(var(--dw-top) + 120px); width: min(420px, calc(100vw - 420px)); }
     #ui-root.dw-touch .dw-speech { bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); width: min(460px, calc(100vw - 470px)); }
     #ui-root.dw-touch .dw-subtitle-text { font-size: 14.5px; }
     #ui-root.dw-touch .dw-banner { top: var(--dw-banner-top, max(120px, 30vh)); }
     #ui-root.dw-touch .dw-command { bottom: auto; top: var(--dw-top); max-height: calc(100vh - 24px); }
-    #ui-root.dw-touch .dw-stick-zone { height: 78vh; }
+    /* The steering zone stops short of the pill and picker under the flight card. */
+    #ui-root.dw-touch .dw-stick-zone { height: min(78vh, calc(100vh - var(--dw-top) - 122px)); }
   }
   @media (orientation: landscape) and (max-height: 460px) {
     #ui-root.dw-touch .dw-throttle-slider { height: 168px; }
@@ -1379,6 +1597,7 @@
     #ui-root.dw-touch .dw-stick { width: 124px; height: 124px; }
     #ui-root.dw-touch .dw-panel { top: 8px; bottom: 8px; }
     #ui-root.dw-touch .dw-banner-title { font-size: 28px; }
+    #ui-root.dw-touch .dw-devbadge { top: calc(var(--dw-top) + 44px); bottom: auto; }
   }
 
   /* Touch: controls help leads with the touch section; photo chrome without key hints. */

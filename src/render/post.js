@@ -6,6 +6,9 @@ import * as TSL from 'three/tsl';
 // ============================================================================
 // POST-PROCESSING: bloom + warm grade + vignette + grain (degrades to direct).
 // ============================================================================
+// Dynamic resolution scales only the scene pass (the expensive geometry render); bloom, grade
+// and grain run on the full-resolution output, so the HUD-facing image stays sharp-edged and
+// the canvas never resizes when the scale steps.
 // Grade and vignette run in linear HDR. The pipeline's automatic colour transform is
 // off: renderOutput() applies ACES + sRGB, then grain is added in display space
 // (grain added before the tone curve is crushed to nothing in highlights).
@@ -45,6 +48,14 @@ export function createPostStack(renderer, scene, camera, uniforms) {
     pipeline,
     controls,
     bloomNode,
+    /** Scene render resolution relative to the canvas (0.6..1); applied from the next frame. */
+    setRenderScale(scale) {
+      const next = Math.min(Math.max(Number(scale) || 1, 0.25), 1);
+      if (scenePass.getResolutionScale() !== next) scenePass.setResolutionScale(next);
+    },
+    getRenderScale() {
+      return scenePass.getResolutionScale();
+    },
     setBloomEnabled(enabled) {
       if (bloomEnabled === enabled) return;
       bloomEnabled = enabled;
