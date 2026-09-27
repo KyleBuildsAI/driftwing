@@ -10,7 +10,8 @@ import { CONFIG } from './config.js';
 // refresh ('auto') or an explicit rate, never more than the display can show; 'uncapped' holds no
 // target and only defends a 30 fps floor. Stage one steps the render scale between 0.6 and 1.0 to
 // hold the target: down quickly when frames run long, up slowly when they meet it, and an up-step
-// that fails is blocked for a growing time so the scale never oscillates. Stage two is v1's
+// that fails is blocked for a growing time so the scale never oscillates (unless the load has
+// dropped so far that the larger scale clearly fits again). Stage two is v1's
 // governor (view distance, densities, pixel ratio): it only degrades once the scale is pinned at
 // 0.6 and only upgrades at 1.0 with headroom.
 // ============================================================================
@@ -44,6 +45,8 @@ const HOLD_AFTER_UP = 1.5;
 const FAILED_UP_WINDOW = 4;
 const BLOCK_SECONDS_FIRST = 8;
 const BLOCK_SECONDS_MAX = 64;
+/** A blocked up-step is allowed early when the predicted frame at the larger scale is under this share of the target. */
+const CLEAR_BLOCK_FRACTION = 0.8;
 /** Frames behind the loading fade are slow by design, and the first seconds after it settle caches. */
 const SETTLE_SECONDS = 4;
 const SCALE_HISTORY_LIMIT = 40;
@@ -250,6 +253,16 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
     }
   }
 
+  /**
+   * True when the next larger scale would still fit well inside the target even if the whole
+   * frame cost grew with the pixel count. The load has then fallen since that scale failed, so its
+   * block is lifted; a scale that failed under the current load never passes this test.
+   */
+  function fitsNextScale(controlMs) {
+    const growth = (RENDER_SCALE_STEPS[scaleIndex - 1] / renderScale()) ** 2;
+    return controlEmaMs * growth < controlMs * CLEAR_BLOCK_FRACTION;
+  }
+
   function updateDynamicResolution(realDt, controlMs) {
     if (!settings.get('dynamicResolution')) {
       if (scaleIndex !== 0) setScaleIndex(0, 'disabled');
@@ -272,7 +285,7 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
         upBlockSeconds[scaleIndex] = Math.min(upBlockSeconds[scaleIndex] * 2, BLOCK_SECONDS_MAX);
       }
       setScaleIndex(scaleIndex + 1, 'over target');
-    } else if (scaleUnderSeconds >= UP_DWELL && scaleIndex > 0 && now >= upBlockedUntil[scaleIndex - 1]) {
+    } else if (scaleUnderSeconds >= UP_DWELL && scaleIndex > 0 && (now >= upBlockedUntil[scaleIndex - 1] || fitsNextScale(controlMs))) {
       setScaleIndex(scaleIndex - 1, 'headroom');
     }
   }
