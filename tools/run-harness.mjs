@@ -11,6 +11,10 @@
 //     [--crafts glider,jet] [--modes classic,sim] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>]
 //
+// The runner also samples the whole machine's CPU load every 2 s (machine-load.json) and adds each
+// run's average / peak load to report.json (runs[].machineLoad), as evidence when frame spikes come
+// from other processes on a shared machine.
+//
 // Exit code: 0 when the harness reports PASS, the requested backend really ran and the browser
 // console stayed free of errors and warnings; 1 on FAIL; 2 when the run itself could not complete.
 // Chrome runs with --enable-precise-memory-info and --js-flags=--expose-gc so the heap readings are
@@ -18,7 +22,7 @@
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
-import { tmpdir } from 'node:os';
+import { cpus, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -31,6 +35,8 @@ const RESERVED_PORT = 5199;
 /** Ports Chrome refuses to load (net::ERR_UNSAFE_PORT) in the range the OS may hand out. */
 const CHROME_UNSAFE_PORTS = new Set([5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080]);
 const POLL_MS = 3000;
+/** Whole-machine CPU load is sampled this often, as evidence for frame spikes caused by other processes. */
+const LOAD_SAMPLE_MS = 2000;
 /** Chrome's own close can hang for minutes on a loaded machine; after this the runner kills it. */
 const CLOSE_TIMEOUT_MS = 30000;
 const EXPECTED_BACKEND = Object.freeze({ webgpu: 'WebGPU', webgl: 'WebGL2' });
@@ -101,6 +107,45 @@ async function closeBrowser(browser, problems) {
   return 'killed after the close timed out';
 }
 
+/** Summed CPU times of every logical core (ms): { busy, total }. */
+function cpuTimes() {
+  let busy = 0;
+  let total = 0;
+  for (const core of cpus()) {
+    const { user, nice, sys, idle, irq } = core.times;
+    busy += user + nice + sys + irq;
+    total += user + nice + sys + idle + irq;
+  }
+  return { busy, total };
+}
+
+/** Samples the whole machine's CPU load (all processes, all cores) until stop() is called. */
+function startLoadSampler() {
+  const samples = [];
+  let previous = cpuTimes();
+  const timer = setInterval(() => {
+    const current = cpuTimes();
+    const total = current.total - previous.total;
+    if (total > 0) samples.push({ time: Date.now(), busyPct: Math.round(((current.busy - previous.busy) / total) * 1000) / 10 });
+    previous = current;
+  }, LOAD_SAMPLE_MS);
+  return {
+    samples,
+    stop() {
+      clearInterval(timer);
+    },
+    /** Average and peak machine load (%) between two ISO times, or null without samples there. */
+    between(startIso, endIso) {
+      const start = Date.parse(startIso);
+      const end = Date.parse(endIso);
+      const inside = samples.filter((sample) => sample.time >= start && sample.time <= end + LOAD_SAMPLE_MS);
+      if (inside.length === 0) return null;
+      const average = inside.reduce((sum, sample) => sum + sample.busyPct, 0) / inside.length;
+      return { averagePct: Math.round(average * 10) / 10, peakPct: Math.max(...inside.map((sample) => sample.busyPct)), samples: inside.length };
+    },
+  };
+}
+
 /** A free TCP port on 127.0.0.1 that Chrome will load and that is not the player's port. */
 async function findFreePort() {
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -168,7 +213,7 @@ function describeProgress(state) {
 }
 
 function flightTable(report) {
-  const lines = ['  #  seed        craft       mode     fps  p99ms  maxms  >50  sys/main/delay  NaN  pen  crash  err/warn  heapMB  script  result'];
+  const lines = ['  #  seed        craft       mode     fps  p99ms  maxms  >50  sys/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak'];
   for (const run of report.runs) {
     const checks = run.script.checks;
     lines.push([
@@ -188,6 +233,7 @@ function flightTable(report) {
       String(run.heapDeltaMB).padStart(7),
       `${checks.filter((check) => check.passed).length}/${checks.length}`.padStart(7),
       run.passed ? '  PASS' : '  FAIL',
+      run.machineLoad ? `  ${run.machineLoad.averagePct}/${run.machineLoad.peakPct}` : '  n/a',
     ].join(' '));
   }
   const totals = report.totals;
@@ -239,6 +285,7 @@ async function main() {
   };
   const consoleLines = [];
   const started = Date.now();
+  const load = startLoadSampler();
   let report = null;
 
   try {
@@ -345,7 +392,13 @@ async function main() {
     }
   }
 
+  load.stop();
   runner.finishedAt = new Date().toISOString();
+  runner.machineLoad = load.between(runner.startedAt, runner.finishedAt);
+  if (report && Array.isArray(report.runs)) {
+    // Evidence for the frame statistics: how busy the whole machine was while each run flew.
+    for (const run of report.runs) run.machineLoad = run.startedAt ? load.between(run.startedAt, run.endedAt) : null;
+  }
   runner.durationSeconds = Math.round((Date.now() - started) / 1000);
   const expected = EXPECTED_BACKEND[options.backend];
   if (runner.backend && !(runner.backend.length === 1 && runner.backend[0] === expected)) {
@@ -355,6 +408,7 @@ async function main() {
   if (report) writeFileSync(join(options.out, 'report.json'), JSON.stringify(report, null, 2));
   writeFileSync(join(options.out, 'runner.json'), JSON.stringify(runner, null, 2));
   writeFileSync(join(options.out, 'console.log'), `${consoleLines.join('\n')}\n`);
+  writeFileSync(join(options.out, 'machine-load.json'), JSON.stringify(load.samples, null, 2));
 
   if (report) process.stdout.write(`${options.test === '1' ? flightTable(report) : hotasTable(report)}\n`);
   process.stdout.write(`run-harness: ${runner.passed ? 'PASS' : 'FAIL'} (harness ${report ? report.result : 'no report'}, backend ${runner.backend ? runner.backend.join(', ') : 'unknown'}, browser console ${runner.errors.length} errors / ${runner.warnings.length} warnings, ${runner.durationSeconds} s)\n`);

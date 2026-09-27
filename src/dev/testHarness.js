@@ -462,6 +462,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     const heapStartMB = worldRecord.runs.length > 0 ? worldRecord.runs[worldRecord.runs.length - 1].heapEndMB : worldRecord.heapBaselineMB;
     activeRun = {
       entry,
+      startedAt: new Date().toISOString(),
       startMs: performance.now(),
       durationSeconds: config.runWarmupSeconds + config.runSeconds,
       script,
@@ -521,6 +522,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
       craft: run.entry.craft,
       mode: run.entry.mode,
       backend: ctx.backend,
+      startedAt: run.startedAt,
+      endedAt: new Date().toISOString(),
       setupOk: run.setupOk,
       setupNotes: run.setupNotes,
       measuredSeconds: frames.seconds,
