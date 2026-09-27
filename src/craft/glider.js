@@ -390,7 +390,9 @@ function buildMesh(ctx) {
   buildWingHalf(airframeBuilder, -1);
   buildTail(airframeBuilder);
   addSolid(planeMesh, airframeBuilder.toGeometry(null), bodyMaterial);
-  addSolid(planeMesh, buildCanopyGeometry(), materials.canopy);
+  // The canopy would sit over the pilot's eye: the cockpit view hides it (camera/cockpit.js).
+  const canopy = addSolid(planeMesh, buildCanopyGeometry(), materials.canopy);
+  canopy.userData.hideInCockpit = true;
   const aileronRight = addPivot(planeMesh, buildAileron(1), bodyMaterial);
   const aileronLeft = addPivot(planeMesh, buildAileron(-1), bodyMaterial);
   const elevator = addPivot(planeMesh, buildElevator(), bodyMaterial);
@@ -501,6 +503,26 @@ export default Object.freeze({
     chase: Object.freeze({ distance: 17.5, height: 4.2, lookAhead: 16 }),
     wing: Object.freeze({ position: Object.freeze([3.4, 0.95, 1.5]), target: Object.freeze([0, 0.45, -1.8]) }),
     fpv: null,
+    // Sailplane tub under a one-piece canopy: sill rails, rear bow, a glareshield over a five-wide
+    // panel (flight instruments left, vario and glide computer right). See camera/cockpit.js.
+    cockpit: Object.freeze({
+      style: 'canopy',
+      width: 0.6,
+      sill: -0.1,
+      floor: -0.6,
+      front: -1.0,
+      back: 0.55,
+      roof: 0.3,
+      panel: Object.freeze({
+        width: 0.54,
+        center: Object.freeze([0, -0.2, -0.6]),
+        layout: Object.freeze([
+          Object.freeze(['airspeed', 'attitude', 'altitude', 'vario', 'ld']),
+          Object.freeze(['aoa', 'heading', 'vsi', 'g', 'flapsGear']),
+        ]),
+      }),
+      frameColor: 0x2c2f38,
+    }),
   }),
   instruments: Object.freeze(['airspeed', 'altitude', 'attitude', 'heading', 'vsi', 'aoa', 'g', 'flapsGear', 'vario', 'ld']),
   abilities: Object.freeze({ craftAbility }),

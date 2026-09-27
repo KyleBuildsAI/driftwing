@@ -107,6 +107,9 @@ export function createInstrumentSet(ctx) {
     /** Clears tell-tales and averages (craft change, soft crash, relaunch). */
     reset: resetMemories,
 
+    /** Re-reads the active craft, mode and units now (the camera calls it before building a cockpit). */
+    refresh: refreshSource,
+
     /**
      * Draws one instrument into g at (x, y) with the given size in canvas pixels, in the 'panel' or
      * 'glass' theme.

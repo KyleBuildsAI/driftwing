@@ -458,7 +458,9 @@ function buildMesh(ctx) {
   buildStruts(airframe);
   buildGear(airframe);
   addSolid(root, airframe.toGeometry(null), bodyMaterial);
-  addSolid(root, buildWindows(sections), materials.canopy);
+  // The window panes would sit around the pilot's head: the cockpit view hides them.
+  const windows = addSolid(root, buildWindows(sections), materials.canopy);
+  windows.userData.hideInCockpit = true;
 
   const aileronRight = addPivot(root, buildWingSurface(AILERON_SPAN[0], AILERON_SPAN[1], 1, true), bodyMaterial);
   const aileronLeft = addPivot(root, buildWingSurface(AILERON_SPAN[0], AILERON_SPAN[1], -1, true), bodyMaterial);
@@ -594,6 +596,26 @@ export default Object.freeze({
     chase: Object.freeze({ distance: 14.5, height: 3.6, lookAhead: 14 }),
     wing: Object.freeze({ position: Object.freeze([2.6, 1.25, 0.9]), target: Object.freeze([0, 0.5, -1.6]) }),
     fpv: null,
+    // Enclosed cabin under the high wing: windshield pillars, door frames and roof rails around a
+    // skylight (the wing's underside shows through it), and a six-pack panel with the throttle.
+    cockpit: Object.freeze({
+      style: 'cabin',
+      width: 0.8,
+      sill: -0.2,
+      floor: -0.68,
+      front: -0.95,
+      back: 0.75,
+      roof: 0.25,
+      panel: Object.freeze({
+        width: 0.62,
+        center: Object.freeze([0, -0.2, -0.6]),
+        layout: Object.freeze([
+          Object.freeze(['airspeed', 'attitude', 'altitude', 'vsi', 'throttle']),
+          Object.freeze(['aoa', 'heading', 'g', 'flapsGear']),
+        ]),
+      }),
+      frameColor: 0x2c2f38,
+    }),
   }),
   instruments: Object.freeze(['airspeed', 'altitude', 'attitude', 'heading', 'vsi', 'aoa', 'g', 'throttle', 'flapsGear']),
   abilities: Object.freeze({ craftAbility }),
