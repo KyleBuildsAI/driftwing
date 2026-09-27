@@ -662,7 +662,8 @@ export default Object.freeze({
   }),
   instruments: Object.freeze(['airspeed', 'altitude', 'heading', 'vsi', 'glide', 'proximity']),
   abilities: Object.freeze({ craftAbility }),
-  // Starts from a peak: diving off the edge at a sensible speed (SIM and CLASSIC).
-  spawn: Object.freeze({ cruise: 50, hover: false, relaunch: 'peak', canStartOnGround: false, peakDive: Object.freeze({ angle: 30, speed: 38, classicSpeed: 42 }) }),
+  // Starts from a peak: diving off the edge at a sensible speed (SIM and CLASSIC); a soft crash also
+  // restarts from a peak (a flyer that cannot climb, respawned over water or low ground, would sink again).
+  spawn: Object.freeze({ cruise: 50, hover: false, relaunch: 'peak', respawn: 'peak', canStartOnGround: false, peakDive: Object.freeze({ angle: 30, speed: 38, classicSpeed: 42 }) }),
   limits: Object.freeze({ vne: 85, gLimit: 5, crashSinkRate: 7, bodyStrikeSpeed: 8, floats: false }),
 });

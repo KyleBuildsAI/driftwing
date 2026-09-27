@@ -630,6 +630,11 @@ export function createFlightController(ctx) {
 
   function respawnAfterCrash() {
     const position = sim ? sim.state.position : player.position;
+    // Craft that cannot climb (spawn.respawn 'peak': the wingsuit) start again from the nearest peak.
+    if (craft.spawn.respawn === 'peak' && isFiniteVector(position)) {
+      launchFromPeak();
+      return;
+    }
     const heading = sim ? headingOfQuaternion(sim.state.quaternion, currentHeading()) : currentHeading();
     const x = Number.isFinite(position.x) ? position.x : player.position.x;
     const z = Number.isFinite(position.z) ? position.z : player.position.z;
