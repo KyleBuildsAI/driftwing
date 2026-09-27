@@ -26,19 +26,38 @@
 //                off (windmilling) and restart, and a retractable-gear variant of its profile (the
 //                path the jet takes: stays down on the ground, transit, drag, wheels-up belly strike)
 //
+// Handling at 100 % / 50 % assists (from trimmed states, see src/flight/trim.js):
+//   protections  100 %: full aileron held (bank protection about 65 deg, springs back to 30 or less on
+//                release), full aft and forward stick (pitch protection +30 / -20, no stall)
+//   autoTrim     50 %: after a pull and release, the hold never trims into more than 1.3 g
+// Through the FlightController itself (headless, flat ground, calm air, 60 Hz frames):
+//   conversions  CLASSIC -> SIM from cruise, slow, fast, climbing, diving and banked CLASSIC states,
+//                20 s hands off: 0.8-1.3 g at 100 % (<= 1.3 g at 50 %), no stall, no zoom, no Vne
+//   toClassic    SIM -> CLASSIC at SIM cruise: smooth rendered pose, no arcade stall
+//   pathHold     SIM boot at the craft's SIM cruise, 60 s hands off at 100 %: small altitude change
+//   respawn      soft crash -> 300 m AGL at SIM cruise, then calm hands-off flight
+//   relaunch     glider aerotow to release / bush plane airstart at SIM cruise, then calm flight
+//   craftSwitch  SIM glider -> bush plane -> glider mid-flight, calm hands-off flight after each
+//   groundStart  bush plane "Start on ground" take-off at 100 %: no pitch-up or stall after lift-off
+//
 // Usage: node tools/flight-lab.mjs [--craft glider|bushplane|all] [--verbose]
 // Prints a table (measured vs target, tolerance about 10 %) and exits non-zero if any check fails.
 import * as THREE from 'three/webgpu';
+import * as TSL from 'three/tsl';
 import glider from '../src/craft/glider.js';
 import bushplane from '../src/craft/bushplane.js';
+import { craftRegistry } from '../src/craft/index.js';
 import { flightModels } from '../src/flight/models.js';
+import { createFlightController } from '../src/flight/FlightController.js';
 import { createControlState, copyControlState } from '../src/input/controlState.js';
 import { createFlightTelemetry } from '../src/flight/telemetry.js';
 import { EventBus } from '../src/core/eventBus.js';
 import { attachTypedEvents } from '../src/core/events.js';
 import { groundPose, restPitch } from '../src/flight/placement.js';
-import { describeAssists } from '../src/flight/assists.js';
-import { DEG, clamp } from '../src/core/util.js';
+import { describeAssists, primeAssists } from '../src/flight/assists.js';
+import { trimModel } from '../src/flight/trim.js';
+import { CONFIG } from '../src/core/config.js';
+import { DEG, clamp, vectorFromHeading } from '../src/core/util.js';
 
 const DT = 1 / 120;
 const SEA_LEVEL_RHO = 1.225;
@@ -909,6 +928,479 @@ function retractableGear() {
 }
 
 // ============================================================================================
+// HANDLING AT 100 % / 50 % (model rig, started from a trimmed state)
+// ============================================================================================
+/** Level flight at `speed`, trimmed (trim.js) with the assists primed, as the controller spawns it. */
+function trimmedRig(craft, { speed, assists = 1, throttle = 0, altitude = 1500 }) {
+  const rig = createRig(craft, { assists });
+  rig.airborne({ speed, altitude, throttle });
+  const trim = trimModel(rig.model, { env: rig.env, dt: DT, throttle, trim: 0 });
+  primeAssists(rig.model, trim);
+  rig.pilot.throttle = throttle;
+  return rig;
+}
+
+function neutralStick(rig) {
+  rig.pilot.roll = 0;
+  rig.pilot.pitch = 0;
+  rig.pilot.yaw = 0;
+}
+
+/**
+ * 100 % protections from trimmed cruise: full aileron held 4 s (bank protection), then released 8 s
+ * (springs back); full aft stick 8 s and full forward stick 6 s (pitch attitude protection, AoA and G
+ * limiters: no stall).
+ */
+function protections(craft) {
+  const powered = craft === bushplane;
+  const cruise = craft.spawn.cruise;
+  const throttle = powered ? craft.spawn.cruiseThrottle : 0;
+  const rig = trimmedRig(craft, { speed: cruise, throttle });
+  rig.run(3, neutralStick);
+  let maxBank = 0;
+  let bankAt1500 = 0;
+  const rollStart = rig.time;
+  rig.run(4, (lab) => {
+    lab.pilot.roll = 1;
+    lab.pilot.pitch = 0;
+    maxBank = Math.max(maxBank, Math.abs(lab.data.bank / DEG));
+    if (lab.time - rollStart <= 1.5) bankAt1500 = Math.abs(lab.data.bank / DEG);
+  });
+  const heldBank = Math.abs(rig.data.bank / DEG);
+  let springBack = NaN;
+  const releaseStart = rig.time;
+  rig.run(8, (lab) => {
+    neutralStick(lab);
+    if (!Number.isFinite(springBack) && Math.abs(lab.data.bank) <= 30 * DEG) springBack = lab.time - releaseStart;
+  });
+  const bankAfter = Math.abs(rig.data.bank / DEG);
+
+  const pull = trimmedRig(craft, { speed: cruise, throttle });
+  pull.run(2, neutralStick);
+  let maxPitch = -Infinity;
+  let maxAoaMargin = Infinity;
+  let pullStalled = false;
+  let maxLoad = 0;
+  pull.run(8, (lab) => {
+    lab.pilot.pitch = 1;
+    lab.pilot.roll = 0;
+    maxPitch = Math.max(maxPitch, lab.data.pitch / DEG);
+    maxAoaMargin = Math.min(maxAoaMargin, (lab.data.aoaCritical - lab.data.aoa) / DEG);
+    maxLoad = Math.max(maxLoad, lab.data.gLoad);
+    if (lab.data.stalled) pullStalled = true;
+  });
+  const push = trimmedRig(craft, { speed: cruise, throttle });
+  push.run(2, neutralStick);
+  let minPitch = Infinity;
+  let minLoad = Infinity;
+  push.run(6, (lab) => {
+    lab.pilot.pitch = -1;
+    lab.pilot.roll = 0;
+    minPitch = Math.min(minPitch, lab.data.pitch / DEG);
+    minLoad = Math.min(minLoad, lab.data.gLoad);
+  });
+  return { maxBank, bankAt1500, heldBank, springBack, bankAfter, maxPitch, maxAoaMargin, pullStalled, maxLoad, minPitch, minLoad };
+}
+
+/**
+ * 50 % auto-trim: from trimmed cruise, a 1 s pull at 12 % stick (a gentle pitch change), then hands
+ * off for 40 s. The hold keeps the angle of attack at release and never trims into more than 1.3 g.
+ */
+function autoTrimHold(craft) {
+  const powered = craft === bushplane;
+  const throttle = powered ? craft.spawn.cruiseThrottle : 0;
+  const rig = trimmedRig(craft, { speed: craft.spawn.cruise, assists: 0.5, throttle });
+  rig.run(3, neutralStick);
+  rig.run(1, (lab) => {
+    neutralStick(lab);
+    lab.pilot.pitch = 0.12;
+  });
+  let maxLoad = 0;
+  let minLoad = Infinity;
+  const window = { low: Infinity, high: -Infinity };
+  const releaseStart = rig.time;
+  let traceTimer = 0;
+  rig.run(40, (lab) => {
+    neutralStick(lab);
+    const since = lab.time - releaseStart;
+    traceTimer -= DT;
+    if (traceTimer <= 0) {
+      traceTimer = 0.5;
+      log(`  ${craft.id} 50 % hold t=${since.toFixed(1)} ias=${(lab.data.airspeed * KMH).toFixed(0)} aoa=${(lab.data.aoa / DEG).toFixed(2)} g=${lab.data.gLoad.toFixed(2)} pitch=${(lab.data.pitch / DEG).toFixed(1)} elevator=${lab.data.elevator.toFixed(3)}`);
+    }
+    // From 1 s after the release (before that it is the pull itself dying away).
+    if (since > 1) {
+      maxLoad = Math.max(maxLoad, lab.data.gLoad);
+      minLoad = Math.min(minLoad, lab.data.gLoad);
+    }
+    if (since > 30) {
+      window.low = Math.min(window.low, lab.data.airspeed);
+      window.high = Math.max(window.high, lab.data.airspeed);
+    }
+  });
+  return { maxLoad, minLoad, speedSwing: window.high - window.low, speed: rig.data.airspeed, stalled: rig.data.stalled };
+}
+
+// ============================================================================================
+// CONTROLLER RIG: the FlightController headless (mode switches, spawns, respawn, relaunch)
+// ============================================================================================
+const CONTROLLER_GROUND = 200;
+const FRAME = 1 / 60;
+
+/** The soft-crash fade draws a DOM overlay; headless it gets a stand-in element. */
+function ensureDocumentStandIn() {
+  if (typeof globalThis.document !== 'undefined') return;
+  const element = { style: {}, setAttribute() {} };
+  globalThis.document = { body: { appendChild() {} }, getElementById: () => null, createElement: () => element };
+}
+
+/**
+ * The FlightController on flat ground at CONTROLLER_GROUND m (no wind), fed like the game: the v1
+ * input struct for CLASSIC, the ControlState for SIM, 60 Hz frames. The craft start at `altitude`
+ * heading 30 at CLASSIC cruise (the controller boots SIM at the craft's SIM cruise).
+ */
+function createControllerRig({ craft = 'glider', mode = 'classic', assists = 1, altitude = 1500, startOnGround = false } = {}) {
+  ensureDocumentStandIn();
+  const world = { groundHeight: () => CONTROLLER_GROUND, heightAt: () => CONTROLLER_GROUND, WATER_LEVEL: 0 };
+  const bus = attachTypedEvents(new EventBus(), { validate: true });
+  const events = { notify: [], stall: 0, softCrash: [], relaunched: [] };
+  bus.on('notify', (payload) => events.notify.push(payload.text));
+  bus.on('stall', () => events.stall++);
+  bus.onTyped('softCrash', (payload) => events.softCrash.push(payload));
+  bus.onTyped('relaunched', (payload) => events.relaunched.push(payload));
+  const heading = 30;
+  const player = {
+    position: new THREE.Vector3(0, altitude, 0),
+    velocity: vectorFromHeading(heading).multiplyScalar(CONFIG.SPEED.CRUISE),
+    quaternion: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -heading * DEG),
+    forward: vectorFromHeading(heading),
+    up: new THREE.Vector3(0, 1, 0),
+    right: new THREE.Vector3(1, 0, 0),
+    speed: CONFIG.SPEED.CRUISE,
+    throttle: 0.55,
+    heading,
+    pitch: 0,
+    roll: 0,
+    yawRate: 0,
+    verticalSpeed: 0,
+    gForce: 1,
+    altitude,
+    groundHeight: CONTROLLER_GROUND,
+    agl: altitude - CONTROLLER_GROUND,
+    stalled: false,
+    boost: { active: false, remaining: 0, cooldown: 0, cooldownTotal: 6 },
+    barrelRoll: { active: false, direction: 0, progress: 0 },
+    autopilot: { enabled: false, heading, altitude, followWaypoint: false },
+    inCloud: 0,
+  };
+  const state = {
+    frame: 0,
+    paused: false,
+    photoMode: false,
+    seed: 'LAB',
+    time: { elapsed: 0, realElapsed: 0, frameDt: 0, nightFactor: 0, sunElevation: 14 },
+    player,
+    flight: createFlightTelemetry(),
+    waypoint: null,
+    ringCourse: { active: false, total: 0, passed: 0, streak: 0, bestStreak: 0, elapsed: 0, nextIndex: 0 },
+  };
+  const input = { pitch: 0, roll: 0, yaw: 0, throttleDelta: 0, throttleTarget: null, boost: false, fineControl: false, mouseActive: false, lastActivity: 0, touch: { active: false, x: 0, y: 0, throttle: null, boost: false } };
+  const settingsValues = { mode, craft, startOnGround, assists: { glider: assists, bushplane: assists } };
+  const controls = createControlState();
+  const { uniform } = TSL;
+  const ctx = {
+    THREE,
+    TSL,
+    scene: new THREE.Scene(),
+    state,
+    input,
+    controls,
+    bus,
+    world,
+    uniforms: { time: uniform(0), sunDirection: uniform(new THREE.Vector3(0, 1, 0)), sunColor: uniform(new THREE.Color(1, 1, 1)), skyHorizonColor: uniform(new THREE.Color(1, 1, 1)), skyZenithColor: uniform(new THREE.Color(1, 1, 1)), nightFactor: uniform(0) },
+    craftRegistry,
+    flightModels,
+    settings: {
+      get: (key) => settingsValues[key],
+      set(key, value) {
+        settingsValues[key] = value;
+        bus.emit('settings:changed', { key, value, settings: { ...settingsValues } });
+        return true;
+      },
+    },
+    wind: {
+      sample(pos, t, out = { vel: new THREE.Vector3(), turbulence: 0 }) {
+        out.vel.set(0, 0, 0);
+        out.turbulence = 0;
+        return out;
+      },
+      ambientAt: () => ({ speed: 0, fromDegrees: 0 }),
+      lastLayers: { gust: new THREE.Vector3() },
+    },
+    systems: { camera: { snap() {} } },
+    registerPrewarm() {},
+  };
+  const flight = createFlightController(ctx);
+  ctx.systems.flight = flight;
+  const telemetry = state.flight;
+  const rig = { flight, state, input, controls, settings: settingsValues, events, telemetry, time: 0 };
+  rig.frame = () => {
+    state.frame++;
+    state.time.elapsed += FRAME;
+    state.time.frameDt = FRAME;
+    flight.update(FRAME, FRAME);
+    flight.publishTelemetry(FRAME);
+    rig.time += FRAME;
+  };
+  /** Runs `seconds` of frames, calling script(rig) before each; stops early when it returns true. */
+  rig.run = (seconds, script) => {
+    const frames = Math.round(seconds / FRAME);
+    for (let frame = 0; frame < frames; frame++) {
+      if (script && script(rig) === true) return true;
+      rig.frame();
+    }
+    return false;
+  };
+  rig.handsOff = () => {
+    Object.assign(input, { pitch: 0, roll: 0, yaw: 0 });
+    Object.assign(controls, { pitch: 0, roll: 0, yaw: 0 });
+  };
+  rig.model = () => flight.getModel();
+  return rig;
+}
+
+/**
+ * Watches a SIM stretch after a switch or spawn: load factor range (after `settle` s), stall (flag
+ * or the angle of attack at the critical angle), zoom (vertical speed rising more than 3 m/s above
+ * its value at the start, or above 3 m/s when it started descending), overspeed past Vne and the
+ * speed range (after `speedSettle` s), and the largest per-frame rotation of the rendered craft (the
+ * blend keeps it smooth).
+ */
+function watchSim(rig, seconds, { settle = 0.1, speedSettle = 0.6 } = {}) {
+  const telemetry = rig.telemetry;
+  const startVertical = telemetry.verticalSpeed;
+  const startAltitude = rig.state.player.position.y;
+  const result = { minLoad: Infinity, maxLoad: -Infinity, stalled: false, zoom: false, maxVertical: -Infinity, maxSpeed: 0, minSpeed: Infinity, overspeed: false, maxFrameRotation: 0, altitudeChange: 0, minAoaMargin: Infinity };
+  const previous = rig.flight.planeMesh.quaternion.clone();
+  const start = rig.time;
+  rig.run(seconds, (lab) => {
+    lab.handsOff();
+    const model = lab.model();
+    const data = model.flightData;
+    const since = lab.time - start;
+    const root = lab.flight.planeMesh;
+    result.maxFrameRotation = Math.max(result.maxFrameRotation, previous.angleTo(root.quaternion) / DEG);
+    previous.copy(root.quaternion);
+    if (since < settle || !data) return false;
+    result.minLoad = Math.min(result.minLoad, telemetry.gLoad);
+    result.maxLoad = Math.max(result.maxLoad, telemetry.gLoad);
+    result.minAoaMargin = Math.min(result.minAoaMargin, (data.aoaCritical - data.aoa) / DEG);
+    if (data.stalled || data.aoa >= data.aoaCritical) result.stalled = true;
+    result.maxVertical = Math.max(result.maxVertical, telemetry.verticalSpeed);
+    if (telemetry.verticalSpeed > Math.max(startVertical, 0) + 3) result.zoom = true;
+    // Speeds from after the 0.5 s blend (a conversion eases an out-of-range speed during it).
+    if (since < speedSettle) return false;
+    result.maxSpeed = Math.max(result.maxSpeed, telemetry.airspeed);
+    result.minSpeed = Math.min(result.minSpeed, telemetry.airspeed);
+    if (telemetry.airspeed > data.vne * 1.02) result.overspeed = true;
+    return false;
+  });
+  result.altitudeChange = rig.state.player.position.y - startAltitude;
+  result.startVertical = startVertical;
+  return result;
+}
+
+/** CLASSIC states to switch from: scripted v1 inputs from CLASSIC cruise. */
+const CLASSIC_STATES = Object.freeze([
+  { id: 'cruise', fly: (rig) => rig.run(3) },
+  { id: 'slow', fly: (rig) => { rig.input.throttleTarget = 0; rig.run(25); } },
+  { id: 'fast', fly: (rig) => { rig.input.throttleTarget = 1; rig.run(25); } },
+  { id: 'climbing', fly: (rig) => { rig.run(2); rig.input.pitch = 0.35; rig.run(0.6); rig.input.pitch = 0; rig.run(0.3); } },
+  { id: 'diving', fly: (rig) => { rig.run(2); rig.input.pitch = -0.35; rig.run(0.6); rig.input.pitch = 0; rig.run(0.3); } },
+  { id: 'banked', fly: (rig) => { rig.run(2); rig.input.roll = 0.8; rig.run(2.5); } },
+]);
+
+/** CLASSIC -> SIM from each CLASSIC state, hands off for 20 s at an assist level. */
+function conversionMatrix(craft, assists) {
+  const rows = [];
+  for (const classicState of CLASSIC_STATES) {
+    const rig = createControllerRig({ craft: craft.id, assists });
+    classicState.fly(rig);
+    const before = { speed: rig.telemetry.airspeed, pitch: rig.telemetry.pitch, roll: rig.telemetry.roll, vertical: rig.telemetry.verticalSpeed };
+    rig.input.throttleTarget = null;
+    rig.handsOff();
+    rig.flight.setMode('sim');
+    const watch = watchSim(rig, 20);
+    log(`  ${craft.id} ${classicState.id} (${(before.speed * KMH).toFixed(0)} km/h, pitch ${before.pitch.toFixed(1)}, bank ${before.roll.toFixed(1)}, vs ${before.vertical.toFixed(1)}) -> SIM ${Math.round(assists * 100)} %: ${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g, ${(watch.minSpeed * KMH).toFixed(0)}..${(watch.maxSpeed * KMH).toFixed(0)} km/h, max vs ${watch.maxVertical.toFixed(1)}, aoa margin ${watch.minAoaMargin.toFixed(1)} deg, frame rotation ${watch.maxFrameRotation.toFixed(2)} deg, ${watch.altitudeChange.toFixed(0)} m`);
+    rows.push({ state: classicState.id, before, watch });
+  }
+  return rows;
+}
+
+/** SIM (booted at cruise) -> CLASSIC: no arcade stall, smooth rendered pose, speed in the arcade range. */
+function toClassic(craft) {
+  const rig = createControllerRig({ craft: craft.id, mode: 'sim' });
+  if (craft.inputProfile.throttle !== 'none') rig.controls.throttle = craft.spawn.cruiseThrottle ?? 0.6;
+  rig.run(5, (lab) => lab.handsOff());
+  const before = rig.telemetry.airspeed;
+  rig.flight.setMode('classic');
+  const previous = rig.flight.planeMesh.quaternion.clone();
+  const previousPosition = rig.flight.planeMesh.position.clone();
+  let maxRotation = 0;
+  let maxStep = 0;
+  let stalled = false;
+  rig.run(3, (lab) => {
+    lab.handsOff();
+    const root = lab.flight.planeMesh;
+    maxRotation = Math.max(maxRotation, previous.angleTo(root.quaternion) / DEG);
+    maxStep = Math.max(maxStep, root.position.distanceTo(previousPosition));
+    previous.copy(root.quaternion);
+    previousPosition.copy(root.position);
+    if (lab.state.player.stalled) stalled = true;
+  });
+  return { before, after: rig.state.player.speed, stalled: stalled || rig.events.stall > 0, maxRotation, maxStep };
+}
+
+/** 100 %, SIM boot at cruise, hands off 60 s in calm air: altitude change, zooms, speed. */
+function pathHold(craft) {
+  const rig = createControllerRig({ craft: craft.id, mode: 'sim' });
+  if (craft.inputProfile.throttle !== 'none') rig.controls.throttle = craft.spawn.cruiseThrottle;
+  const bootSpeed = rig.telemetry.airspeed || rig.model().flightData.airspeed;
+  rig.run(1, (lab) => lab.handsOff());
+  const watch = watchSim(rig, 60, { settle: 0 });
+  return { bootSpeed, watch };
+}
+
+/** Soft crash respawn in SIM: speed and height after the fade, then 10 s hands off. */
+function respawn(craft) {
+  const rig = createControllerRig({ craft: craft.id, mode: 'sim' });
+  if (craft.inputProfile.throttle !== 'none') rig.controls.throttle = craft.spawn.cruiseThrottle;
+  rig.run(2, (lab) => lab.handsOff());
+  rig.flight.triggerSoftCrash('lab');
+  rig.run(0.45, (lab) => lab.handsOff());
+  const speed = rig.model().flightData.airspeed;
+  const agl = rig.state.player.position.y - CONTROLLER_GROUND;
+  rig.run(0.5, (lab) => lab.handsOff());
+  const watch = watchSim(rig, 10);
+  return { speed, agl, watch, crashes: rig.events.softCrash.length };
+}
+
+/** Relaunch in SIM: the glider's aerotow to release, the bush plane's airstart; then 10 s hands off. */
+function relaunchTest(craft) {
+  const rig = createControllerRig({ craft: craft.id, mode: 'sim', altitude: CONTROLLER_GROUND + 400 });
+  if (craft.inputProfile.throttle !== 'none') rig.controls.throttle = craft.spawn.cruiseThrottle;
+  rig.run(1, (lab) => lab.handsOff());
+  rig.flight.relaunch();
+  let released = false;
+  rig.run(600, (lab) => {
+    lab.handsOff();
+    released = lab.events.relaunched.length > 0 && !lab.flight.isTowing();
+    return released;
+  });
+  const speed = rig.model().flightData.airspeed;
+  const method = rig.events.relaunched[0] ? rig.events.relaunched[0].method : 'none';
+  const watch = watchSim(rig, 10);
+  return { released, method, speed, watch };
+}
+
+/** SIM craft switch mid-flight at 100 %: glider -> bush plane -> glider, 10 s hands off after each. */
+function craftSwitch() {
+  const rig = createControllerRig({ craft: 'glider', mode: 'sim' });
+  rig.controls.throttle = bushplane.spawn.cruiseThrottle;
+  rig.run(3, (lab) => lab.handsOff());
+  rig.flight.setCraft('bushplane');
+  const toBush = { speed: rig.model().flightData.airspeed, watch: watchSim(rig, 10) };
+  rig.flight.setCraft('glider');
+  const toGlider = { speed: rig.model().flightData.airspeed, watch: watchSim(rig, 10) };
+  return { toBush, toGlider };
+}
+
+/**
+ * Start on ground at 100 %: full power, stick neutral to 24 m/s, 30 % aft stick until 30 m above
+ * the ground, then hands off 15 s. Load, pitch and angle of attack from lift-off on.
+ */
+function groundTakeoff() {
+  const rig = createControllerRig({ craft: 'bushplane', mode: 'sim', startOnGround: true });
+  const model = rig.model();
+  const startedOnGround = model.contact.onGround;
+  let liftoff = NaN;
+  let maxPitch = -Infinity;
+  let maxLoad = 0;
+  let minMargin = Infinity;
+  let maxPitchRate = 0;
+  let stalled = false;
+  let released = NaN;
+  let traceTimer = 0;
+  rig.run(60, (lab) => {
+    const data = lab.model().flightData;
+    traceTimer -= FRAME;
+    if (traceTimer <= 0) {
+      traceTimer = 1;
+      log(`  bushplane ground start t=${lab.time.toFixed(1)} onGround=${data.onGround} ias=${(data.airspeed * KMH).toFixed(0)} agl=${data.agl.toFixed(1)} pitch=${(data.pitch / DEG).toFixed(1)} g=${data.gLoad.toFixed(2)} stick=${lab.controls.pitch.toFixed(2)}`);
+    }
+    lab.controls.throttle = 1;
+    lab.controls.roll = 0;
+    lab.controls.yaw = 0;
+    if (Number.isFinite(released)) lab.controls.pitch = 0;
+    else lab.controls.pitch = data.airspeed > 24 ? 0.3 : 0;
+    if (!data.onGround && !Number.isFinite(liftoff)) liftoff = lab.time;
+    if (Number.isFinite(liftoff)) {
+      maxPitch = Math.max(maxPitch, data.pitch / DEG);
+      maxLoad = Math.max(maxLoad, data.gLoad);
+      minMargin = Math.min(minMargin, (data.aoaCritical - data.aoa) / DEG);
+      maxPitchRate = Math.max(maxPitchRate, Math.abs(data.pitchRate / DEG));
+      if (data.stalled) stalled = true;
+    }
+    if (!Number.isFinite(released) && Number.isFinite(liftoff) && data.agl > 30) released = lab.time;
+    return Number.isFinite(released) && lab.time - released > 15;
+  });
+  return { startedOnGround, liftoff, released, maxPitch, maxLoad, minMargin, maxPitchRate, stalled, crashes: rig.events.softCrash.length };
+}
+
+function describeLoads(watch) {
+  return `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g`;
+}
+
+function calmFlight(watch, { minLoad = 0.8, maxLoad = 1.3 } = {}) {
+  return watch.minLoad >= minLoad && watch.maxLoad <= maxLoad && !watch.stalled && !watch.zoom && !watch.overspeed;
+}
+
+function handlingTests(name, craft) {
+  const guard = protections(craft);
+  record(name, '100 %: full aileron 4 s (bank protection)', guard.maxBank, 67, { unit: 'deg', compare: guard.maxBank <= 67 && guard.maxBank >= 55, note: `${guard.bankAt1500.toFixed(0)} deg after 1.5 s, holds ${guard.heldBank.toFixed(0)} deg` });
+  record(name, '100 %: aileron released: springs back', guard.springBack, 4, { unit: 's', compare: 'max', note: `to 30 deg or less; ${guard.bankAfter.toFixed(1)} deg after 8 s` });
+  record(name, '100 %: full aft stick 8 s (pitch protection)', guard.maxPitch, 31, { unit: 'deg', compare: guard.maxPitch <= 31 && !guard.pullStalled && guard.maxAoaMargin > 0, note: `max ${guard.maxLoad.toFixed(2)} g, AoA margin ${guard.maxAoaMargin.toFixed(1)} deg, ${guard.pullStalled ? 'STALLED' : 'no stall'}` });
+  record(name, '100 %: full forward stick 6 s', guard.minPitch, -21, { unit: 'deg', compare: 'min', note: `min ${guard.minLoad.toFixed(2)} g` });
+  const trimHold = autoTrimHold(craft);
+  record(name, '50 %: auto-trim hold after a pull', trimHold.maxLoad, 1.3, { unit: 'g', compare: trimHold.maxLoad <= 1.3 && !trimHold.stalled, decimals: 2, note: `${trimHold.minLoad.toFixed(2)}..${trimHold.maxLoad.toFixed(2)} g after release; speed ${(trimHold.speed * KMH).toFixed(0)} km/h, phugoid swing ${(trimHold.speedSwing * KMH).toFixed(1)} km/h in 30-40 s (AoA hold, as at 0 %)` });
+
+  for (const assists of [1, 0.5]) {
+    const rows = conversionMatrix(craft, assists);
+    for (const row of rows) {
+      const { watch, before } = row;
+      // 50 % has no auto-level or speed protection (a banked switch spirals as the pilot left it); what
+      // it promises is that the auto-trim never trims the converted state into more than 1.3 g.
+      const pass = assists === 1 ? calmFlight(watch) : watch.maxLoad <= 1.3 && !watch.stalled;
+      const from = `${(before.speed * KMH).toFixed(0)} km/h, pitch ${before.pitch.toFixed(0)}, bank ${before.roll.toFixed(0)}`;
+      record(name, `CLASSIC -> SIM ${Math.round(assists * 100)} %, ${row.state}`, describeLoads(watch), assists === 1 ? '0.8..1.3 g' : '<= 1.3 g', { compare: pass, note: `from ${from}: ${(watch.minSpeed * KMH).toFixed(0)}..${(watch.maxSpeed * KMH).toFixed(0)} km/h, ${watch.stalled ? 'STALL' : 'no stall'}, ${watch.zoom ? 'ZOOM' : 'no zoom'} (max vs ${watch.maxVertical.toFixed(1)} m/s), max ${watch.maxFrameRotation.toFixed(1)} deg/frame` });
+    }
+  }
+  const back = toClassic(craft);
+  record(name, 'SIM -> CLASSIC at SIM cruise', back.maxRotation, 3, { unit: 'deg/frame', compare: back.maxRotation <= 3 && !back.stalled, decimals: 2, note: `${(back.before * KMH).toFixed(0)} -> ${(back.after * KMH).toFixed(0)} km/h, ${back.stalled ? 'arcade STALL' : 'no arcade stall'}, max step ${back.maxStep.toFixed(2)} m/frame` });
+
+  const hold = pathHold(craft);
+  const cruiseKmh = craft.spawn.cruise * KMH;
+  record(name, 'SIM boot speed', hold.bootSpeed * KMH, cruiseKmh, { unit: 'km/h', tolerance: 0.03, note: 'spawn.cruise, not CLASSIC 223 km/h' });
+  const altitudeLimit = craft === glider ? 45 : 15;
+  record(name, '100 % hands off 60 s: altitude change', Math.abs(hold.watch.altitudeChange), altitudeLimit, { unit: 'm', compare: Math.abs(hold.watch.altitudeChange) <= altitudeLimit && calmFlight(hold.watch), note: `${hold.watch.altitudeChange.toFixed(1)} m, ${describeLoads(hold.watch)}, max vs ${hold.watch.maxVertical.toFixed(2)} m/s, ${(hold.watch.minSpeed * KMH).toFixed(0)}..${(hold.watch.maxSpeed * KMH).toFixed(0)} km/h` });
+  const again = respawn(craft);
+  record(name, 'SIM respawn after a soft crash', again.speed * KMH, cruiseKmh, { unit: 'km/h', tolerance: 0.03, note: `${again.agl.toFixed(0)} m AGL; next 10 s ${describeLoads(again.watch)}, ${calmFlight(again.watch) ? 'calm' : 'NOT CALM'}` });
+  record(name, 'SIM respawn: hands off 10 s', describeLoads(again.watch), '0.8..1.3 g', { compare: again.crashes === 1 && Math.abs(again.agl - 300) < 5 && calmFlight(again.watch), note: `${again.crashes} soft crash` });
+  const relaunched = relaunchTest(craft);
+  record(name, `SIM relaunch (${relaunched.method})`, relaunched.speed * KMH, cruiseKmh, { unit: 'km/h', tolerance: 0.05, compare: relaunched.released && Math.abs(relaunched.speed - craft.spawn.cruise) <= craft.spawn.cruise * 0.05 && calmFlight(relaunched.watch), note: `then 10 s hands off: ${describeLoads(relaunched.watch)}, ${relaunched.watch.stalled ? 'STALL' : 'no stall'}` });
+}
+
+// ============================================================================================
 // SUITES
 // ============================================================================================
 function runGlider() {
@@ -937,6 +1429,7 @@ function runGlider() {
   record(name, 'spoilers: both toe brakes in the air', systems.bothToes, 'one toe 0, both 1, released 0, airbrake 1', { decimals: 2, compare: systems.oneToe === 0 && systems.bothToes > 0.99 && systems.released === 0 && systems.held > 0.99, note: `one toe ${systems.oneToe}, released ${systems.released}, airbrake held ${systems.held.toFixed(2)}` });
   record(name, 'no flaps / no engine notices', systems.notices.length, 2, { decimals: 0, compare: systems.notices.length === 2, note: systems.notices.join(' | ') });
   commonTests(name, glider);
+  handlingTests(name, glider);
 }
 
 function runBushplane() {
@@ -969,6 +1462,16 @@ function runBushplane() {
   const taxi = crosswindTaxi();
   record(name, 'crosswind taxi, 6 m/s from the right', taxi.maxError, 5, { unit: 'deg', compare: 'max', note: `rudder + differential brakes, ${describeStrike(taxi.strike)}, ${taxi.speed.toFixed(1)} m/s` });
   commonTests(name, bushplane);
+  handlingTests(name, bushplane);
+  const start = groundTakeoff();
+  record(name, 'start on ground, 100 %: take-off', start.maxPitch, 30.5, { unit: 'deg', compare: start.startedOnGround && Number.isFinite(start.liftoff) && start.maxPitch <= 30.5 && start.maxLoad <= 2 && !start.stalled && start.minMargin > 0 && start.crashes === 0, note: `lift-off at ${start.liftoff.toFixed(1)} s; after it max ${start.maxLoad.toFixed(2)} g, pitch rate ${start.maxPitchRate.toFixed(1)} deg/s, AoA margin ${start.minMargin.toFixed(1)} deg, ${start.stalled ? 'STALL' : 'no stall'}` });
+}
+
+function runShared() {
+  const name = 'both';
+  const swap = craftSwitch();
+  record(name, 'SIM craft switch glider -> bush plane', swap.toBush.speed * KMH, bushplane.spawn.cruise * KMH, { unit: 'km/h', compare: calmFlight(swap.toBush.watch), note: `10 s hands off: ${describeLoads(swap.toBush.watch)}, ${swap.toBush.watch.stalled ? 'STALL' : 'no stall'}` });
+  record(name, 'SIM craft switch bush plane -> glider', swap.toGlider.speed * KMH, glider.spawn.cruise * KMH, { unit: 'km/h', compare: calmFlight(swap.toGlider.watch), note: `10 s hands off: ${describeLoads(swap.toGlider.watch)}, ${swap.toGlider.watch.stalled ? 'STALL' : 'no stall'}` });
 }
 
 function commonTests(name, craft) {
@@ -1023,6 +1526,7 @@ function printTable() {
 const started = performance.now();
 if (OPTIONS.craft === 'all' || OPTIONS.craft === 'glider') runGlider();
 if (OPTIONS.craft === 'all' || OPTIONS.craft === 'bushplane') runBushplane();
+if (OPTIONS.craft === 'all') runShared();
 const passed = printTable();
 process.stdout.write(`(${((performance.now() - started) / 1000).toFixed(1)} s)\n`);
 process.exit(passed ? 0 : 1);
