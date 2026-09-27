@@ -4,9 +4,11 @@ import { craftRegistry } from './registry.js';
 import glider from './glider.js';
 import bushplane from './bushplane.js';
 import helicopter from './helicopter.js';
+import wingsuit from './wingsuit.js';
 
 craftRegistry.register(glider);
 craftRegistry.register(bushplane);
 craftRegistry.register(helicopter);
+craftRegistry.register(wingsuit);
 
 export { craftRegistry };

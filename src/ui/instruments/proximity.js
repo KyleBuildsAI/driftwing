@@ -1,7 +1,8 @@
 // Ground proximity (wingsuit): height above the ground or water, coloured by band, the lowest
 // clearance along the next five seconds of the flight path (the shared height function, sampled
 // every half second along the current velocity), and a flashing PULL UP when that path meets the
-// terrain within three seconds.
+// terrain within three seconds (or, when the craft state carries a boolean proximityWarning, when that
+// warning is on).
 import { CENTER, drawPlate, label, digital, roundRect, clamp } from './gaugeKit.js';
 import { grouped } from './units.js';
 
@@ -59,7 +60,9 @@ export default Object.freeze({
     const aheadText = Number.isFinite(clearance) ? `${grouped(Math.max(0, clearance) * factor)} ${units.altitude.label}` : '--';
     label(pen, 'PATH 5 S', 22, 138, { size: 10, color: theme.textDim, weight: 650, align: 'left', spacing: 1 });
     label(pen, aheadText, 178, 138, { size: 12, color: theme.text, weight: 650, align: 'right' });
-    const warning = memory.impactSeconds <= PULL_UP_SECONDS;
+    // A model that runs its own terrain warning (the SIM wingsuit's assist, off at 0 %) decides; else the path.
+    const assistWarning = flight.craftState ? flight.craftState.proximityWarning : null;
+    const warning = typeof assistWarning === 'boolean' ? assistWarning : memory.impactSeconds <= PULL_UP_SECONDS;
     if (warning && memory.blink < 0.6) {
       pen.fillStyle = theme.red;
       roundRect(pen, 34, 152, 132, 30, 6);
