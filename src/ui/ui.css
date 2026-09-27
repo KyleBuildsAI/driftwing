@@ -1310,6 +1310,8 @@
   #ui-root.dw-touch .dw-hud { transition: opacity 0.25s ease; }
   #ui-root.dw-photo-on .dw-throttle-slider,
   #ui-root.dw-photo-on .dw-action-cluster { opacity: 0; visibility: hidden; }
+  #ui-root.dw-no-throttle .dw-flight .dw-throttle { display: none; }
+  #ui-root.dw-no-throttle .dw-throttle-slider { visibility: hidden; pointer-events: none; }
   #ui-root.dw-photo-on .dw-stick { bottom: calc(var(--dw-letterbox) + 22px); }
   #ui-root.dw-hud-off .dw-touch-controls { opacity: 0.25; }
 

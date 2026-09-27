@@ -1146,19 +1146,20 @@ export function createUISystem(ctx) {
    * rudder, gear / flaps / airbrake, view cycle and the craft ability) from the keyboard bindings.
    */
   function renderHint() {
+    const throttle = craftHasThrottle();
     if (touchMode) {
-      dom.hint.innerHTML = '<span class="dw-hint-item">Drag on the left to steer</span><span class="dw-hint-item">Slide right for throttle</span><span class="dw-hint-item">Tap the mic for WREN</span>';
+      dom.hint.innerHTML = `<span class="dw-hint-item">Drag on the left to steer</span>${throttle ? '<span class="dw-hint-item">Slide right for throttle</span>' : ''}<span class="dw-hint-item">Tap the mic for WREN</span>`;
     } else if (activeFlightMode() === 'sim') {
       dom.hint.innerHTML = [
         '<span class="dw-hint-item"><kbd>Click</kbd> virtual stick</span>',
-        hintItem(['throttle'], 'throttle lever'),
+        throttle ? hintItem(['throttle'], 'throttle lever') : '',
         hintItem(['yaw'], 'rudder', 'negative'),
         hintItem(['gearToggle', 'flapsDown', 'airbrake'], 'gear, flaps, airbrake'),
         hintItem(['viewCycle'], 'view'),
         hintItem(['craftAbility'], abilityLabel().toLowerCase()),
       ].join('');
     } else {
-      dom.hint.innerHTML = '<span class="dw-hint-item"><kbd>Click</kbd> steer with the mouse</span><span class="dw-hint-item"><kbd>W</kbd><kbd>S</kbd> throttle</span><span class="dw-hint-item"><kbd>Space</kbd> boost</span><span class="dw-hint-item"><kbd>C</kbd> ask WREN</span>';
+      dom.hint.innerHTML = `<span class="dw-hint-item"><kbd>Click</kbd> steer with the mouse</span>${throttle ? '<span class="dw-hint-item"><kbd>W</kbd><kbd>S</kbd> throttle</span>' : ''}<span class="dw-hint-item"><kbd>Space</kbd> boost</span><span class="dw-hint-item"><kbd>C</kbd> ask WREN</span>`;
     }
     if (hintState.visible) measureHint();
   }
@@ -1241,6 +1242,14 @@ export function createUISystem(ctx) {
     { keys: [['Esc']], text: 'Close a panel or leave photo mode' },
   ];
 
+  /** Engineless craft (the wingsuit) have no throttle: it leaves the hints, the help and the HUD. */
+  function craftHasThrottle() {
+    const module = ctx.craftRegistry.get(settings.get('craft'));
+    return module?.arcadeProfile?.ENGINE !== false;
+  }
+  function applyThrottleVisibility() {
+    setRootClass('dw-no-throttle', !craftHasThrottle());
+  }
   function abilityLabel() {
     const module = ctx.craftRegistry.get(settings.get('craft'));
     return module?.abilities?.craftAbility?.label ?? 'Craft ability';
@@ -1303,7 +1312,8 @@ export function createUISystem(ctx) {
     dom.helpMode.innerHTML = mode === 'sim'
       ? `<strong>SIM</strong> flies the full flight model with its own key layer: gear, flaps, airbrake, view cycle and the craft ability; waypoint ahead moves to ${waypointKey}. ${modeToggle} returns to CLASSIC.`
       : `<strong>CLASSIC</strong> is the original arcade flight: forgiving handling, boost and barrel rolls. ${modeToggle} switches to SIM.`;
-    dom.helpFlight.innerHTML = HELP_FLIGHT[mode].map((entry) => helpRowHtml(entry, mode)).join('');
+    const throttle = craftHasThrottle();
+    dom.helpFlight.innerHTML = HELP_FLIGHT[mode].filter((entry) => throttle || !(entry.targets && entry.targets.includes('throttle'))).map((entry) => helpRowHtml(entry, mode)).join('');
     dom.helpShortcuts.innerHTML = HELP_SHORTCUTS.map((entry) => helpRowHtml(entry, mode)).join('');
   }
   let helpBindingsWired = false;
@@ -2703,6 +2713,7 @@ export function createUISystem(ctx) {
     if (payload && payload.mode === 'sim') scheduleSimHint();
   });
   bus.onTyped('craftChanged', () => {
+    applyThrottleVisibility();
     if (activePanel === 'help') renderHelp();
     if (hintState.visible) renderHint();
   });
@@ -2726,6 +2737,7 @@ export function createUISystem(ctx) {
   measureLayout();
   applyDebugVisibility();
   applyFlightMode();
+  applyThrottleVisibility();
   renderHint();
   updateTimeChip();
 
