@@ -119,5 +119,6 @@ export const flightModels = createFlightModelRegistry();
 
 flightModels.register('arcade', createArcadeModel);
 flightModels.register('fixedWing', createSimFixedWingModel);
+flightModels.register('jet', createSimFixedWingModel);
 flightModels.registerControlStage(createAutopilotStage());
 flightModels.registerControlStage(createAssistStage());

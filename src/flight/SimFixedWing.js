@@ -40,7 +40,8 @@
 //   afterStep(tick)                           after flightData is written
 //   reset(pose, systems), writeTelemetry(flight), snapshot(), restore(data)
 // profile.vneBasis 'equivalent' compares equivalent airspeed with Vne; profile.maxSpeed raises the
-// speed guard for fast craft.
+// speed guard for fast craft. The model's kind is profile.model, so an airframe registered under its
+// own kind (flightModels.register('jet', createSimFixedWingModel)) gets its own assists and autopilot.
 import * as THREE from 'three/webgpu';
 import { DEG, clamp, headingFromVector } from '../core/util.js';
 import {
@@ -240,6 +241,8 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
   const rudderShift = controlLimits.rudder * DEG * effectiveness.rudder;
   const wingIncidence = profile.wing.incidence * DEG;
   const maxSpeed = Number.isFinite(profile.maxSpeed) ? profile.maxSpeed : MAX_SPEED;
+  /** The model kind: 'fixedWing', or the profile's own kind for an airframe with its own assists (the jet). */
+  const modelKind = typeof profile.model === 'string' && profile.model ? profile.model : 'fixedWing';
   const equivalentVne = profile.vneBasis === 'equivalent';
 
   // ---- Rigid-body state (centre of mass) --------------------------------------------------------------
@@ -916,7 +919,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
 
   function snapshot() {
     return {
-      kind: 'fixedWing',
+      kind: modelKind,
       center: [centerPosition.x, centerPosition.y, centerPosition.z],
       velocity: [state.velocity.x, state.velocity.y, state.velocity.z],
       quaternion: [state.quaternion.x, state.quaternion.y, state.quaternion.z, state.quaternion.w],
@@ -943,7 +946,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
   }
 
   function restore(data) {
-    if (!data || data.kind !== 'fixedWing') return false;
+    if (!data || data.kind !== modelKind) return false;
     centerPosition.fromArray(data.center);
     state.velocity.fromArray(data.velocity);
     state.quaternion.fromArray(data.quaternion).normalize();
@@ -963,7 +966,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
   updateMass();
 
   return {
-    kind: 'fixedWing',
+    kind: modelKind,
     profile,
     state,
     contact: contactReport,

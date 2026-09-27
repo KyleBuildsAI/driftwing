@@ -320,6 +320,11 @@ const fixedWingAutopilot = Object.freeze({
 
 const handlers = new Map([['fixedWing', fixedWingAutopilot]]);
 
+/** The autopilot registered for a model kind, or null (a model kind may fly another kind's autopilot). */
+export function autopilotHandlerFor(kind) {
+  return handlers.get(kind) ?? null;
+}
+
 /** Registers the autopilot of another model kind: { createMemory(), apply(controls, context, memory) -> flying }. */
 export function registerAutopilotHandler(kind, handler) {
   if (!handler || typeof handler.apply !== 'function') throw new TypeError(`autopilot handler for "${kind}" needs apply()`);
