@@ -65,9 +65,10 @@ const FIXED_WING = Object.freeze({
   RING_CLEARANCE: 45,
   CLIMB_GRADIENT_POWERED: 0.1,
   EVADE_HEADING: 55,
-  RING_LEAD_SECONDS: 2.4,
-  RING_LEAD_MIN: 80,
-  RING_LEAD_MAX: 200,
+  /** Ring following aims at a point on the ring axis this far ahead (longer than v1: SIM turns are wider). */
+  RING_LEAD_SECONDS: 5,
+  RING_LEAD_MIN: 150,
+  RING_LEAD_MAX: 400,
   RING_LOOKAHEAD_MARGIN: 150,
   RING_MIN_TIME: 1.5,
 });
