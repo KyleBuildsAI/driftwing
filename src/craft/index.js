@@ -5,10 +5,12 @@ import glider from './glider.js';
 import bushplane from './bushplane.js';
 import helicopter from './helicopter.js';
 import wingsuit from './wingsuit.js';
+import fpv from './fpv.js';
 
 craftRegistry.register(glider);
 craftRegistry.register(bushplane);
 craftRegistry.register(helicopter);
 craftRegistry.register(wingsuit);
+craftRegistry.register(fpv);
 
 export { craftRegistry };
