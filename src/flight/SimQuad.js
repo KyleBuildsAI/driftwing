@@ -59,6 +59,11 @@ const LANDED_SECONDS = 0.25;
 const LANDED_SPEED = 0.6;
 /** The throttle below which the quad counts as idling on the ground (airmode and I-term held off). */
 const GROUND_IDLE_THROTTLE = 0.08;
+/**
+ * Ground-contact substeps: near the ground (within the craft's reach plus a tick of travel and MARGIN
+ * m) a tick is split so no contact point moves more than TRAVEL m per substep, at most MAX substeps.
+ */
+const CONTACT_SUBSTEPS = Object.freeze({ TRAVEL: 0.006, MAX: 8, MARGIN: 0.3 });
 /** Mesh prop animation: visual prop speed (rad/s) at full motor speed. */
 export const QUAD_VISUAL_PROP_SPEED = 30;
 
@@ -222,7 +227,13 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {} }) {
 
   const contact = createGroundContact(profile.contacts, { centerOfMass: frame.centerOfMass, floats: limits.floats === true, mass });
   const landing = createLandingMonitor({ bus, craftId, limits });
-  const contactReport = contact.report;
+  /**
+   * Contact report the controller reads (FlightModel.contact): the substeps of a tick merged into one
+   * (any contact, the first touchdown, the fastest strike, the deepest penetration).
+   */
+  const contactReport = { onGround: false, touchdown: null, bodyStrike: null, water: false, penetration: 0, contacts: 0, gearContacts: 0, wheelSpeed: 0 };
+  const mergedTouchdown = { sinkRate: 0, part: '', groundSpeed: 0 };
+  const mergedStrike = { part: '', speed: 0 };
 
   // ---- Flight controller and motors --------------------------------------------------------------------
   const motorSpeeds = frame.motors.map(() => 0);
@@ -306,6 +317,7 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {} }) {
   const forceWorld = new THREE.Vector3();
   const groundForce = new THREE.Vector3();
   const groundMoment = new THREE.Vector3();
+  const totalMoment = new THREE.Vector3();
   const lever = new THREE.Vector3();
   const pointForce = new THREE.Vector3();
   const angularMomentum = new THREE.Vector3();
@@ -733,37 +745,12 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {} }) {
       momentBody.z += washShake * noise(time, 4.1, 13) + gustShake * noise(time, 3.9, 2.4);
     }
 
-    // Ground contact against the shared height function (world force, body moment).
-    groundForce.set(0, 0, 0);
-    groundMoment.set(0, 0, 0);
-    contact.evaluate(contactBody, contactInputs, env, dt, groundForce, groundMoment);
-    momentBody.add(groundMoment);
-
-    forceWorld.copy(forceBody).applyQuaternion(state.quaternion).add(groundForce);
-    nonGravity.copy(forceWorld);
-    forceWorld.y -= mass * GRAVITY;
-    bodyAxis.set(0, 1, 0).applyQuaternion(state.quaternion);
-    const load = nonGravity.dot(bodyAxis) / (mass * GRAVITY);
-    smoothedLoad += (load - smoothedLoad) * (1 - Math.exp(-LOAD_SMOOTHING * dt));
-
-    // Euler's equations (principal axes): I w' = M - w x (I w).
-    angularMomentum.set(state.angularVelocity.x * inertia.x, state.angularVelocity.y * inertia.y, state.angularVelocity.z * inertia.z);
-    gyro.crossVectors(state.angularVelocity, angularMomentum);
-    angularAcceleration.copy(momentBody).sub(gyro);
-    angularAcceleration.set(angularAcceleration.x / inertia.x, angularAcceleration.y / inertia.y, angularAcceleration.z / inertia.z);
-
-    // Semi-implicit Euler: velocities first, then positions and attitude from the new velocities.
-    state.velocity.addScaledVector(forceWorld, dt / mass);
-    if (state.velocity.lengthSq() > MAX_SPEED * MAX_SPEED) state.velocity.setLength(MAX_SPEED);
-    state.angularVelocity.addScaledVector(angularAcceleration, dt);
-    if (state.angularVelocity.lengthSq() > MAX_ANGULAR_SPEED * MAX_ANGULAR_SPEED) state.angularVelocity.setLength(MAX_ANGULAR_SPEED);
-    centerPosition.addScaledVector(state.velocity, dt);
-    const rate = state.angularVelocity.length();
-    if (rate > 1e-9) {
-      axis.copy(state.angularVelocity).divideScalar(rate);
-      state.quaternion.multiply(rotationStep.setFromAxisAngle(axis, rate * dt)).normalize();
-    }
-    syncOrigin();
+    // Near the ground the contact and the integration run in substeps: a 650 g quad falling a few m/s
+    // covers the few centimetres between its feet and its prop tips in one 120 Hz tick.
+    const substeps = contactSubsteps(agl, dt);
+    const substep = dt / substeps;
+    beginContactReport();
+    for (let index = 0; index < substeps; index++) integrate(substep, env);
 
     // Flight data for the control stages and telemetry.
     computeAttitude();
@@ -826,6 +813,73 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {} }) {
     notify('Upside down: use the craft ability for turtle mode to flip back over.', 'info');
   }
 
+  /** Substeps for this tick: 1 in the air, up to CONTACT_SUBSTEPS.MAX near the ground at speed. */
+  function contactSubsteps(agl, dt) {
+    const reach = contact.boundingRadius + state.velocity.length() * dt + CONTACT_SUBSTEPS.MARGIN;
+    if (!(agl < reach)) return 1;
+    const travel = (state.velocity.length() + state.angularVelocity.length() * contact.boundingRadius) * dt;
+    return clamp(Math.ceil(travel / CONTACT_SUBSTEPS.TRAVEL), 1, CONTACT_SUBSTEPS.MAX);
+  }
+
+  /** Clears the tick's merged contact report (substeps merge into it). */
+  function beginContactReport() {
+    contactReport.onGround = false;
+    contactReport.touchdown = null;
+    contactReport.bodyStrike = null;
+    contactReport.water = false;
+    contactReport.penetration = 0;
+    contactReport.contacts = 0;
+    contactReport.gearContacts = 0;
+    contactReport.wheelSpeed = 0;
+  }
+
+  /** Merges one substep's contact result into the tick's report (worst case of each field). */
+  function mergeContactReport(result) {
+    contactReport.onGround = contactReport.onGround || result.onGround;
+    contactReport.water = contactReport.water || result.water;
+    contactReport.penetration = Math.max(contactReport.penetration, result.penetration);
+    contactReport.contacts = Math.max(contactReport.contacts, result.contacts);
+    contactReport.gearContacts = Math.max(contactReport.gearContacts, result.gearContacts);
+    if (result.touchdown && !contactReport.touchdown) contactReport.touchdown = Object.assign(mergedTouchdown, result.touchdown);
+    if (result.bodyStrike && (!contactReport.bodyStrike || result.bodyStrike.speed > contactReport.bodyStrike.speed)) {
+      contactReport.bodyStrike = Object.assign(mergedStrike, result.bodyStrike);
+    }
+  }
+
+  /** One integration step of `dt`: ground contact, then semi-implicit Euler on the rigid body. */
+  function integrate(dt, env) {
+    groundForce.set(0, 0, 0);
+    groundMoment.set(0, 0, 0);
+    mergeContactReport(contact.evaluate(contactBody, contactInputs, env, dt, groundForce, groundMoment));
+    totalMoment.copy(momentBody).add(groundMoment);
+
+    forceWorld.copy(forceBody).applyQuaternion(state.quaternion).add(groundForce);
+    nonGravity.copy(forceWorld);
+    forceWorld.y -= mass * GRAVITY;
+    bodyAxis.set(0, 1, 0).applyQuaternion(state.quaternion);
+    const load = nonGravity.dot(bodyAxis) / (mass * GRAVITY);
+    smoothedLoad += (load - smoothedLoad) * (1 - Math.exp(-LOAD_SMOOTHING * dt));
+
+    // Euler's equations (principal axes): I w' = M - w x (I w).
+    angularMomentum.set(state.angularVelocity.x * inertia.x, state.angularVelocity.y * inertia.y, state.angularVelocity.z * inertia.z);
+    gyro.crossVectors(state.angularVelocity, angularMomentum);
+    angularAcceleration.copy(totalMoment).sub(gyro);
+    angularAcceleration.set(angularAcceleration.x / inertia.x, angularAcceleration.y / inertia.y, angularAcceleration.z / inertia.z);
+
+    // Semi-implicit Euler: velocities first, then positions and attitude from the new velocities.
+    state.velocity.addScaledVector(forceWorld, dt / mass);
+    if (state.velocity.lengthSq() > MAX_SPEED * MAX_SPEED) state.velocity.setLength(MAX_SPEED);
+    state.angularVelocity.addScaledVector(angularAcceleration, dt);
+    if (state.angularVelocity.lengthSq() > MAX_ANGULAR_SPEED * MAX_ANGULAR_SPEED) state.angularVelocity.setLength(MAX_ANGULAR_SPEED);
+    centerPosition.addScaledVector(state.velocity, dt);
+    const rate = state.angularVelocity.length();
+    if (rate > 1e-9) {
+      axis.copy(state.angularVelocity).divideScalar(rate);
+      state.quaternion.multiply(rotationStep.setFromAxisAngle(axis, rate * dt)).normalize();
+    }
+    syncOrigin();
+  }
+
   /** The mesh origin from the centre of mass. */
   function syncOrigin() {
     originOffset.copy(frame.centerOfMass).applyQuaternion(state.quaternion);
@@ -871,6 +925,7 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {} }) {
     smoothedLoad = 1;
     contact.reset(onGround);
     landing.reset(onGround);
+    beginContactReport();
     contactReport.onGround = onGround;
     flightData.onGround = onGround;
     resetCount++;
