@@ -594,7 +594,7 @@ export default Object.freeze({
   cameraRig: Object.freeze({
     eye: EYE,
     chase: Object.freeze({ distance: 14.5, height: 3.6, lookAhead: 14 }),
-    wing: Object.freeze({ position: Object.freeze([2.6, 1.25, 0.9]), target: Object.freeze([0, 0.5, -1.6]) }),
+    wing: Object.freeze({ position: Object.freeze([4.3, 1.3, 1.5]), target: Object.freeze([0.4, 0.6, -2.6]) }),
     fpv: null,
     // Enclosed cabin under the high wing: windshield pillars, door frames and roof rails around a
     // skylight (the wing's underside shows through it), and a six-pack panel with the throttle.

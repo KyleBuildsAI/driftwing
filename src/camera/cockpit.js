@@ -286,12 +286,15 @@ function buildOpenFrame(builder, spec, glare, tint) {
   polyline(builder, bow(glare.lipZ - 0.1, glare.halfWidth * 0.85, glare.lipY - 0.01, glare.lipY + 0.16, 5), 0.025, tint);
 }
 
-/** A control stick on a pivot at the floor; animate(pitch, roll) swings the grip. */
+/**
+ * A control stick on a pivot at the floor between the pilot's knees, short enough that the grip stays
+ * below the line of sight to the panel; animate(pitch, roll) swings it.
+ */
 function buildStick(spec, material) {
   const pivot = new THREE.Group();
-  pivot.position.set(0, spec.floor + 0.02, -0.34);
+  pivot.position.set(0, spec.floor + 0.02, -0.14);
   const builder = createMeshBuilder();
-  const length = Math.max(0.3, (spec.sill - spec.floor) * 0.72);
+  const length = Math.max(0.16, (spec.sill - spec.floor) * 0.4);
   bar(builder, [0, 0, 0], [0, length, 0], 0.025, TINT.grip);
   box(builder, [0, length + 0.05, 0], [0.04, 0.11, 0.045], 0.2, TINT.grip);
   box(builder, [0, length + 0.1, -0.01], [0.012, 0.02, 0.012], 0, TINT.cushion);
