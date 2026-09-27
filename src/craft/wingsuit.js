@@ -169,10 +169,10 @@ const simProfile = Object.freeze({
       Object.freeze({ id: 'container', kind: 'body', gear: false, position: Object.freeze([0, 0.22, -0.25]) }),
     ]),
     // Under the canopy the pilot hangs from the shoulders: the feet are the gear (running out the
-    // landing on a grippy skid), the hips a body point.
+    // landing on a grippy skid) and the hips slide (a sit-down on a steep slope, not a strike).
     canopy: Object.freeze([
       Object.freeze({ id: 'feet', kind: 'skid', gear: true, position: Object.freeze([0, -1.55, -0.66]), spring: 9000, damping: 1500, friction: 1.1 }),
-      Object.freeze({ id: 'hips', kind: 'body', gear: false, position: Object.freeze([0, -0.72, -0.62]), spring: 20000, damping: 2500, friction: 0.9 }),
+      Object.freeze({ id: 'hips', kind: 'skid', gear: true, position: Object.freeze([0, -0.72, -0.62]), spring: 20000, damping: 2500, friction: 0.9 }),
     ]),
   }),
 });
@@ -665,7 +665,8 @@ export default Object.freeze({
   // Starts from a peak: diving off the edge at a sensible speed (SIM and CLASSIC); a soft crash also
   // restarts from a peak (a flyer that cannot climb, respawned over water or low ground, would sink again).
   spawn: Object.freeze({ cruise: 50, hover: false, relaunch: 'peak', respawn: 'peak', canStartOnGround: false, peakDive: Object.freeze({ angle: 30, speed: 38, classicSpeed: 42 }) }),
-  // Under the canopy the legs take a firm landing (a parachute landing fall); a downhill touchdown adds to
-  // the sink along the ground normal, so the crash limit sits well above an unflared descent.
-  limits: Object.freeze({ vne: 85, gLimit: 5, crashSinkRate: 8, bodyStrikeSpeed: 8, floats: false }),
+  // Under the canopy the legs take a firm landing (a parachute landing fall). The sink is measured along
+  // the ground normal, so a touchdown into rising ground adds the forward speed to it: the crash limit
+  // sits well above an unflared descent into a slope (still graded hard, never a crash).
+  limits: Object.freeze({ vne: 85, gLimit: 5, crashSinkRate: 11, bodyStrikeSpeed: 8, floats: false }),
 });
