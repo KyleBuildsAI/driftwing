@@ -1154,7 +1154,7 @@ export function createUISystem(ctx) {
         '<span class="dw-hint-item"><kbd>Click</kbd> virtual stick</span>',
         throttle ? hintItem(['throttle'], 'throttle lever') : '',
         hintItem(['yaw'], 'rudder', 'negative'),
-        hintItem(['gearToggle', 'flapsDown', 'airbrake'], 'gear, flaps, airbrake'),
+        throttle ? hintItem(['gearToggle', 'flapsDown', 'airbrake'], 'gear, flaps, airbrake') : '',
         hintItem(['viewCycle'], 'view'),
         hintItem(['craftAbility'], abilityLabel().toLowerCase()),
       ].join('');

@@ -665,5 +665,7 @@ export default Object.freeze({
   // Starts from a peak: diving off the edge at a sensible speed (SIM and CLASSIC); a soft crash also
   // restarts from a peak (a flyer that cannot climb, respawned over water or low ground, would sink again).
   spawn: Object.freeze({ cruise: 50, hover: false, relaunch: 'peak', respawn: 'peak', canStartOnGround: false, peakDive: Object.freeze({ angle: 30, speed: 38, classicSpeed: 42 }) }),
-  limits: Object.freeze({ vne: 85, gLimit: 5, crashSinkRate: 7, bodyStrikeSpeed: 8, floats: false }),
+  // Under the canopy the legs take a firm landing (a parachute landing fall); a downhill touchdown adds to
+  // the sink along the ground normal, so the crash limit sits well above an unflared descent.
+  limits: Object.freeze({ vne: 85, gLimit: 5, crashSinkRate: 8, bodyStrikeSpeed: 8, floats: false }),
 });
