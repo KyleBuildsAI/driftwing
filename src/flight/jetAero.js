@@ -275,7 +275,7 @@ export function createJetExtension({ profile, bus, craftState = {}, limits = {},
     }
 
     // Over-G and transonic (Mach) buffet: short shaking moments that grow with the exceedance.
-    const overG = smoothstep(0, handling.overGBuffetRange, Math.abs(tick.gLoad) - (tick.gLoad >= 0 ? gLimit : gLimit * handling.negativeShare));
+    const overG = smoothstep(handling.overGTolerance, handling.overGTolerance + handling.overGBuffetRange, Math.abs(tick.gLoad) - (tick.gLoad >= 0 ? gLimit : gLimit * handling.negativeShare));
     const machBuffet = handling.machBuffet * smoothstep(0.93, 0.99, air.mach) * (1 - smoothstep(1.02, 1.08, air.mach));
     const overspeed = smoothstep(vneMach, vneMach + 0.1, air.mach);
     const buffet = Math.max(overG, machBuffet, overspeed);
@@ -293,7 +293,7 @@ export function createJetExtension({ profile, bus, craftState = {}, limits = {},
     flightData.mach = air.mach;
     if (air.mach > vneMach) flightData.overspeed = true;
     const load = tick.gLoad;
-    const exceeded = load > gLimit + 0.05 || load < -gLimit * handling.negativeShare - 0.05;
+    const exceeded = load > gLimit + handling.overGTolerance || load < -gLimit * handling.negativeShare - handling.overGTolerance;
     air.overGSeconds = exceeded ? air.overGSeconds + tick.dt : 0;
     const overG = air.overG ? load > gLimit - 0.3 || load < -gLimit * handling.negativeShare + 0.3 : exceeded;
     air.overG = overG;

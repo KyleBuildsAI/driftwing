@@ -236,6 +236,8 @@ const simProfile = Object.freeze({
       pitchDamping: 8,
       wingRock: Object.freeze({ from: 19, full: 23, fadeFrom: 34, fadeTo: 42, gain: 0.8, rateLimit: 0.5, seed: 0.002, seedFrequency: 0.45 }),
       negativeShare: 0.4,
+      // Past the limit by more than the tolerance (g) the airframe buffets and the warning shows.
+      overGTolerance: 0.4,
       overGBuffetRange: 1.5,
       machBuffet: 0.35,
       buffetMoment: 0.012,

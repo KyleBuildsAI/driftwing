@@ -16,7 +16,7 @@ import { clamp, damp } from '../core/util.js';
 
 const { Fn, uniform, float, vec3, uv, sin, cos, fract, pow, abs, mix, saturate, smoothstep, dot, normalize, normalView, positionView, instancedBufferAttribute } = TSL;
 
-const FLAME = Object.freeze({ MIN_LENGTH: 1.6, MAX_LENGTH: 5.2, SEGMENTS: 16, DIAMONDS: 4.5 });
+const FLAME = Object.freeze({ MIN_LENGTH: 1.8, MAX_LENGTH: 6.5, SEGMENTS: 20, DIAMONDS: 5 });
 const VAPOR = Object.freeze({ PARTICLES: 96, HUMID_FULL: 1500, HUMID_NONE: 3000, FADE: 6 });
 const TIP_VAPOR = Object.freeze({ LENGTH: 18, WIDTH: 0.34, FROM_G: 4.5, FULL_G: 7, FADE: 5 });
 /** Updates that keep every effect drawn right after the build (pipeline warm-up). */
@@ -67,7 +67,7 @@ function createFlame(ctx, spec) {
   const facing = abs(dot(normalView, normalize(positionView.negate())));
   const intensity = Fn(() => {
     const core = pow(facing, float(1.4));
-    const diamonds = pow(cos(along.mul(FLAME.DIAMONDS * Math.PI * 2).sub(0.6)).mul(0.5).add(0.5), float(6)).mul(float(1).sub(along)).mul(0.9);
+    const diamonds = pow(cos(along.mul(FLAME.DIAMONDS * Math.PI * 2).sub(0.6)).mul(0.5).add(0.5), float(4)).mul(float(1).sub(along)).mul(1.3);
     const flicker = sin(uniforms.time.mul(47).add(along.mul(13))).mul(sin(uniforms.time.mul(31).sub(along.mul(7)))).mul(0.18).add(0.9);
     const fade = pow(float(1).sub(along), float(1.3)).mul(smoothstep(float(0), float(0.06), along));
     return core.add(diamonds.mul(core)).mul(fade).mul(flicker).mul(strength);

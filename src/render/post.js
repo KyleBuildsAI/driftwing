@@ -113,8 +113,9 @@ const G_EFFECTS = Object.freeze({
   GRAYOUT_HEAVY: 8,
   GRAYOUT_FULL: 9.5,
   HEAVY_LEVEL: 0.8,
-  TUNNEL_LOAD: 9,
-  TUNNEL_RELEASE: 8.7,
+  // "9 g": the fly-by-wire holds 9 g within a tenth, so the clock runs from 8.9 g.
+  TUNNEL_LOAD: 8.9,
+  TUNNEL_RELEASE: 8.5,
   TUNNEL_AFTER: 3,
   TUNNEL_BUILD: 1.5,
   REDOUT_FROM: -2,
