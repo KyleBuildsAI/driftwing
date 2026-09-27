@@ -1,22 +1,32 @@
 import { CONFIG } from '../core/config.js';
 import { dayTimeForSunElevation } from '../core/sun.js';
 import { DEG, clamp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName } from '../core/util.js';
+import { FLIGHT_ACTION_TYPES, createFlightGrammar, describeAirspeed, sanitizeFlightAction } from './grammar.js';
+import { buildFlightFields } from './flightState.js';
+import { createFlightActionHandlers, createOutcomeWaiter, helpLine, keyFor } from './flightActions.js';
+import { createFlightChatter } from './flightChatter.js';
+import { createCommandChips } from './commandChips.js';
 
 /**
  * COPILOT "WREN".
  * - Copilot: the default local brain, a tolerant keyword grammar that turns a
- *   transcript into { speech, action } using only the flight-state snapshot.
+ *   transcript into { speech, action } using only the flight-state snapshot. The v2
+ *   aircraft grammar (craft, CLASSIC | SIM, assists, views, chute, engine, relaunch,
+ *   calibration, airspeed, landings) lives in grammar.js.
  * - RemoteCopilot: POSTs { flightState, transcript } to an HTTP brain with an
  *   800 ms budget, validates the reply, and falls back to the local grammar
  *   ('local-fallback') on any timeout, network error, bad JSON or bad shape.
  * - createCopilotSystem: the action executor (ctx.executeAction), speech out
- *   (speechSynthesis after a user gesture), speech in (Web Speech API), the
- *   ui:command / ui:action / mic:toggle pipeline, and gentle chatter.
+ *   (speechSynthesis after a user gesture), speech in (Web Speech API: the v1 mic
+ *   toggle, and hold-to-talk on the copilotPTT action), the ui:command / ui:action /
+ *   mic:toggle pipeline, and gentle chatter (flightChatter.js adds the v2 events).
+ * docs/copilot-api.md is the remote contract: request, flightState and every action.
  */
 export class Copilot {
   static ACTION_TYPES = Object.freeze([
     'waypoint', 'clearWaypoint', 'autopilot', 'time', 'ringCourse', 'cancelRingCourse',
     'barrelRoll', 'boost', 'find', 'describe', 'photoMode', 'journal', 'none',
+    ...FLIGHT_ACTION_TYPES,
   ]);
 
   static FIND_TARGETS = Object.freeze([
@@ -186,7 +196,7 @@ export class Copilot {
         return action;
       }
       default:
-        return action;
+        return FLIGHT_ACTION_TYPES.includes(type) ? sanitizeFlightAction(raw) : action;
     }
   }
 
@@ -514,8 +524,11 @@ export class Copilot {
     this.ctx = ctx;
     this.name = 'local';
     this.phraseMemory = new Map();
+    const pick = (key, options) => this.pick(key, options);
+    const flightGrammar = createFlightGrammar({ pick, helpLine: () => helpLine(ctx, pick) });
+    // Help first, then the v2 aircraft commands, then v1's grammar unchanged.
     this.matchers = [
-      this.matchHelp, this.matchCancelCourse, this.matchAutopilotOff, this.matchClearWaypoint,
+      flightGrammar.matchHelp, ...flightGrammar.matchers, this.matchCancelCourse, this.matchAutopilotOff, this.matchClearWaypoint,
       this.matchPhotoMode, this.matchJournal, this.matchRingCourse, this.matchBarrelRoll, this.matchBoost,
       this.matchHome, this.matchFind, this.matchFlyToWaypoint, this.matchSetWaypoint, this.matchHeading,
       this.matchAltitude, this.matchAutopilotOn, this.matchStatus, this.matchGreeting, this.matchTime,
@@ -574,18 +587,6 @@ export class Copilot {
         settings.set('copilotChatter', false);
         return { speech: this.pick('chatterOff', ["Understood. I'll only speak when you ask.", "Got it. I'll stay quiet unless you need me."]), action: null };
     }
-  }
-
-  matchHelp(text) {
-    if (!/\b(help|what can you do|what do you do|what can i (say|ask)|commands|how does (this|it) work|instructions|options|capabilities)\b/.test(text)) return null;
-    return {
-      speech: this.pick('help', [
-        "I can find places, drop waypoints, fly the autopilot, change the time of day and set up ring courses. Try 'find the ocean', 'make it night' or 'ring course'.",
-        "Ask me where we are, to find mountains, ocean, desert, forest, meadows or a landmark, to set a waypoint, turn on autopilot, change the time, or start a ring course.",
-        "Try 'where am I', 'find a landmark and take us there', 'dawn', 'barrel roll' or 'ring course'. I'm listening.",
-      ]),
-      action: null,
-    };
   }
 
   matchCancelCourse(text) {
@@ -806,9 +807,8 @@ export class Copilot {
       const agl = Math.round(flight.altitudeAboveGround ?? 0);
       return { speech: `We're at ${altitude} metres, ${agl} above the ${overWater ? 'water' : 'ground'}.`, action: null };
     }
-    if (/\b(how fast|speed|airspeed|velocity|throttle)\b/.test(text)) {
-      const throttle = Math.round((flight.throttle ?? 0) * 100);
-      return { speech: `${Math.round(flight.speedKmh ?? 0)} km/h, throttle at ${throttle} percent.`, action: null };
+    if (/\b(how fast|speed|air ?speed|ground ?speed|velocity|throttle|mach|knots)\b/.test(text)) {
+      return { speech: describeAirspeed(flight), action: null };
     }
     if (/\b(what time|time is it|the time|clock|what hour)\b/.test(text)) {
       const clock = Copilot.clockFromDayTime(flight.dayTime);
@@ -1059,18 +1059,24 @@ export function createCopilotSystem(ctx) {
 
   // ---- Speech in ------------------------------------------------------------------------------------------
   const voiceInput = (() => {
-    const RecognitionClass = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition || null : null;
+    // Resolved when a session starts (not once at boot), so a recognizer the page gains later counts.
+    const recognitionClass = () => (typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition || null : null);
     let recognition = null;
     let listening = false;
     let finalTranscript = '';
     let errored = false;
     let errorTimer = 0;
     let lastError = null;
+    // Hold-to-talk: the copilotPTT action holds the session open until it is released.
+    let holding = false;
+    let sessionIsHold = false;
     // Built on demand so the hint matches the device (key or chat button).
     const ERROR_LINES = {
       'not-allowed': () => typeInsteadLine("I can't use the microphone. Check the browser's permission, or"),
       'service-not-allowed': () => typeInsteadLine('Voice input is blocked here.'),
-      'no-speech': () => "I didn't hear anything. Tap the mic and try again.",
+      'no-speech': () => (sessionIsHold
+        ? `I didn't hear anything. Hold ${keyFor(ctx, 'copilotPTT', '`')} while you talk and try again.`
+        : "I didn't hear anything. Tap the mic and try again."),
       'audio-capture': () => typeInsteadLine("I can't find a microphone."),
       network: () => typeInsteadLine('Voice recognition needs a network connection.'),
       'language-not-supported': () => typeInsteadLine("Voice input isn't available in this language."),
@@ -1106,6 +1112,7 @@ export function createCopilotSystem(ctx) {
     function handleEnd() {
       listening = false;
       recognition = null;
+      holding = false;
       const heard = finalTranscript.trim();
       finalTranscript = '';
       if (heard) {
@@ -1116,7 +1123,9 @@ export function createCopilotSystem(ctx) {
       }
     }
 
-    function start() {
+    /** Starts a session; hold keeps it open (continuous) until holdEnd() stops it. */
+    function start(hold = false) {
+      const RecognitionClass = recognitionClass();
       if (!RecognitionClass) {
         setState('unsupported', unsupportedLine());
         say(unsupportedLine(), 'system');
@@ -1126,11 +1135,12 @@ export function createCopilotSystem(ctx) {
       voiceOutput.cancel();
       finalTranscript = '';
       errored = false;
+      sessionIsHold = hold;
       try {
         const session = new RecognitionClass();
         session.lang = /^en\b/i.test(navigator.language || '') ? navigator.language : 'en-US';
         session.interimResults = true;
-        session.continuous = false;
+        session.continuous = hold;
         session.maxAlternatives = 1;
         session.onstart = () => setState('listening');
         session.onresult = handleResult;
@@ -1151,6 +1161,7 @@ export function createCopilotSystem(ctx) {
       } catch (error) {
         listening = false;
         recognition = null;
+        holding = false;
         reportError(error?.name === 'NotAllowedError' ? 'not-allowed' : 'unknown');
         return false;
       }
@@ -1170,15 +1181,38 @@ export function createCopilotSystem(ctx) {
     }
 
     return {
-      supported: Boolean(RecognitionClass),
+      get supported() {
+        return Boolean(recognitionClass());
+      },
       toggle() {
         if (listening) {
+          holding = false;
           endSession('stop');
           return false;
         }
-        return start();
+        return start(false);
       },
-      abort: () => endSession('abort'),
+      /** Push-to-talk pressed: listen until release (a session the mic toggle opened is adopted). */
+      holdStart() {
+        if (holding) return listening;
+        holding = true;
+        if (listening) return true;
+        const started = start(true);
+        if (!started) holding = false;
+        return started;
+      },
+      /** Push-to-talk released: stop listening and answer what was heard. */
+      holdEnd() {
+        if (!holding) return false;
+        holding = false;
+        if (listening) endSession('stop');
+        return true;
+      },
+      isHolding: () => holding,
+      abort: () => {
+        holding = false;
+        endSession('abort');
+      },
       isListening: () => listening,
       getLastError: () => lastError,
       update(realDt) {
@@ -1187,7 +1221,7 @@ export function createCopilotSystem(ctx) {
         if (errorTimer <= 0 && !listening) setState('idle');
       },
       announceSupport() {
-        if (!RecognitionClass) setState('unsupported', unsupportedLine());
+        if (!recognitionClass()) setState('unsupported', unsupportedLine());
       },
     };
   })();
@@ -1222,12 +1256,30 @@ export function createCopilotSystem(ctx) {
     return Copilot.describePlace(world, player.position.x, player.position.z, player.groundHeight, player.heading);
   }
 
-  /** The core snapshot plus the visually honest place phrase, for both brains. */
+  // The camera's last reported view (typed 'viewChanged'); serial counts the changes.
+  let currentView = null;
+  let viewSerial = 0;
+  bus.onTyped('viewChanged', (payload) => {
+    if (!payload || typeof payload.view !== 'string') return;
+    viewSerial++;
+    currentView = { view: payload.view, serial: viewSerial };
+  });
+
+  let flightFieldsFailed = false;
+  /** The core snapshot plus the visually honest place phrase and the v2 flight fields, for both brains. */
   function flightSnapshot() {
     const snapshot = ctx.getFlightState ? ctx.getFlightState() : {};
     const place = currentPlace();
     snapshot.place = place.phrase;
     snapshot.overWater = place.overWater;
+    try {
+      Object.assign(snapshot, buildFlightFields(ctx, { view: currentView ? currentView.view : null, landingCount: flightChatter.landingCount }));
+    } catch (error) {
+      if (!flightFieldsFailed) {
+        flightFieldsFailed = true;
+        console.error('[DRIFTWING] WREN could not read the v2 flight state', error);
+      }
+    }
     return snapshot;
   }
 
@@ -1469,19 +1521,39 @@ export function createCopilotSystem(ctx) {
     },
   };
 
-  /** Validates and dispatches one action; returns { ok, text, informative }. */
+  // v2 aircraft actions (flightActions.js). Outcomes that land on a later frame resolve through the waiter.
+  const outcomeWaiter = createOutcomeWaiter();
+  Object.assign(handlers, createFlightActionHandlers(ctx, {
+    succeed,
+    fail,
+    pick,
+    waiter: outcomeWaiter,
+    noteCopilotChange: (kind) => flightChatter.noteCopilotChange(kind),
+    getView: () => currentView,
+  }));
+
+  const actionFailed = (type, error) => {
+    console.error(`[DRIFTWING] WREN action "${type}" failed`, error);
+    return fail('Something went wrong there. Try again?');
+  };
+
+  /** Validates and dispatches one action; returns { ok, text, informative } or a promise of it. */
   function runAction(rawAction) {
     const action = Copilot.sanitizeAction(rawAction);
     if (!action) return fail("I can't do that one, sorry.");
     try {
-      return handlers[action.type](action);
+      const result = handlers[action.type](action);
+      if (result && typeof result.then === 'function') return result.catch((error) => actionFailed(action.type, error));
+      return result;
     } catch (error) {
-      console.error(`[DRIFTWING] WREN action "${action.type}" failed`, error);
-      return fail('Something went wrong there. Try again?');
+      return actionFailed(action.type, error);
     }
   }
 
-  ctx.executeAction = (action) => runAction(action).text;
+  ctx.executeAction = (action) => {
+    const result = runAction(action);
+    return result && typeof result.then === 'function' ? result.then((resolved) => resolved.text) : result.text;
+  };
 
   function composeSpeech(brainSpeech, result) {
     if (!result) return brainSpeech;
@@ -1520,7 +1592,7 @@ export function createCopilotSystem(ctx) {
     const reply = await activeBrain.respond(flightSnapshot(), text);
     const source = reply.source || (isRemote ? 'remote' : 'local');
     noteRemoteResult(source, activeBrain);
-    const result = reply.action ? runAction(reply.action) : null;
+    const result = reply.action ? await runAction(reply.action) : null;
     const speech = composeSpeech(reply.speech, result) || pick('fallbackLine', ["I'm here.", 'Listening.']);
     if (isRemote || inputSource === 'voice') bus.emit('copilot:listening', { state: 'idle' });
     say(speech, source);
@@ -1569,8 +1641,11 @@ export function createCopilotSystem(ctx) {
     return now - chatter.lastUnsolicitedAt >= MIN_CHATTER_GAP && now - lastLineAt >= QUIET_AFTER_ANY_LINE;
   }
 
-  /** Speaks now if the chatter gap allows, otherwise keeps the line (priority-ordered) for a little while. */
-  function offerChatter(text, priority) {
+  /**
+   * Speaks now if the chatter gap allows, otherwise keeps the line (priority-ordered) for ttl seconds.
+   * Lines that only make sense right away (a landing, a soft crash) pass a short ttl.
+   */
+  function offerChatter(text, priority, ttl = PENDING_CHATTER_TTL) {
     if (!text) return;
     if (chatterAllowed()) {
       chatter.lastUnsolicitedAt = state.time.realElapsed;
@@ -1580,9 +1655,12 @@ export function createCopilotSystem(ctx) {
     }
     if (!settings.get('copilotChatter')) return;
     if (!chatter.pending || priority >= chatter.pending.priority) {
-      chatter.pending = { text, priority, expiresAt: state.time.realElapsed + PENDING_CHATTER_TTL };
+      chatter.pending = { text, priority, expiresAt: state.time.realElapsed + ttl };
     }
   }
+
+  const flightChatter = createFlightChatter(ctx, { offerChatter, pick });
+  const commandChips = createCommandChips(ctx);
 
   function flushPendingChatter() {
     const pending = chatter.pending;
@@ -1704,10 +1782,18 @@ export function createCopilotSystem(ctx) {
     if (text.trim()) ask(text, 'text');
   });
   bus.on('ui:action', (payload) => {
-    const result = runAction(payload?.action);
-    say(result.text || pick('uiAck', ['Done.', 'All set.']), 'local');
+    Promise.resolve(runAction(payload?.action)).then(
+      (result) => say(result.text || pick('uiAck', ['Done.', 'All set.']), 'local'),
+      (error) => console.error('[DRIFTWING] WREN ui action failed', error),
+    );
   });
   bus.on('mic:toggle', () => voiceInput.toggle());
+  // Hold-to-talk: copilotPTT (HOTAS trigger, ` on the keyboard) listens while held, answers on release.
+  bus.on('input:action', (payload) => {
+    if (!payload || payload.id !== 'copilotPTT') return;
+    if (payload.phase === 'press') voiceInput.holdStart();
+    else if (payload.phase === 'release') voiceInput.holdEnd();
+  });
   bus.on('settings:changed', ({ key, value }) => {
     if (key === 'remoteCopilot' || key === 'remoteEndpoint') {
       brain = createBrain();
@@ -1725,13 +1811,17 @@ export function createCopilotSystem(ctx) {
   return {
     update(dt, realDt) {
       voiceInput.update(realDt);
+      outcomeWaiter.update();
       if (!state.ready) return;
       watchSky();
+      flightChatter.update(realDt);
       flushPendingChatter();
     },
     ask,
     toggleMic: () => voiceInput.toggle(),
     isListening: () => voiceInput.isListening(),
+    /** Hold-to-talk, as the copilotPTT action drives it. */
+    pushToTalk: (held) => (held ? voiceInput.holdStart() : voiceInput.holdEnd()),
     speak(text) {
       return say(text, 'system');
     },
@@ -1747,6 +1837,11 @@ export function createCopilotSystem(ctx) {
         voice: voiceOutput.getVoiceName(),
         lastVoiceError: voiceOutput.getLastError(),
         chatterPending: chatter.pending ? chatter.pending.text : null,
+        pushToTalk: voiceInput.isHolding(),
+        view: currentView ? currentView.view : null,
+        pendingOutcomes: outcomeWaiter.pending,
+        flight: flightChatter.getStats(),
+        quickChips: commandChips.getStats(),
       };
     },
   };
