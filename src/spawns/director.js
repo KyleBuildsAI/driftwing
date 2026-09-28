@@ -7,21 +7,27 @@
 // active (the SpawnManager, section 4 of the Phase 2 contracts) and the perf headroom.
 //
 // Rules, in the order they are applied:
-//   pacing     something notable (a new site in view, a discovery or an event) within 60-90 s of
-//              flight. When nothing notable has happened for the drought threshold (a seeded 60-85 s
-//              per drought), the best eligible candidate AHEAD of the heading, 3-8 km out, is
-//              activated; from 80 s any rarity tier but legendary may fill it
+//   pacing     something notable within 60-90 s of flight. The drought clock counts the time with
+//              nothing notable going on: it restarts when a site comes into view, on a discovery,
+//              on an activation, and on every tick while a spawn the director started is in view
+//              (the player is watching it or flying toward it). When it reaches the drought
+//              threshold (a seeded 60-70 s per drought, leaving time to find one), the best eligible candidate AHEAD of the
+//              heading, 3-8 km out, is activated: a common one or one of a due tier, from 75 s an
+//              uncommon one too, and from 80 s a rare one or one up to 60 degrees off the heading
 //   rarity     each tier has a due time drawn from its period (common 2.5-5 min, uncommon 10-15 min,
 //              rare 30-60 min, legendary 1-2 h of flight); a due tier activates its best eligible
 //              candidate ahead, and any activation of a tier draws its next due time
 //   cooldowns  per preset (by rarity, or the preset's own cooldown), and the same preset never runs
 //              twice in a row
-//   budgets    at most 2 heavy spawns, per-engine instance and particle caps and a real-light cap
-//              (checked against the SpawnManager's stats; the manager refuses over-budget
-//              activations as well)
+//   budgets    at most 2 heavy spawns, per-engine instance and particle caps and a real-light cap,
+//              checked against the SpawnManager's stats with headroom for the new spawn's share
+//              (the director does not know a preset's exact cost; the manager, which does, refuses
+//              an activation that would still break a budget, and that candidate then waits for
+//              its next bucket)
 //   filters    per preset: biome, time of day, altitude band (player MSL), weather state at the
 //              candidate, surface (land, water, coast), distance band
-//   ahead      every director activation lies within 60 degrees of the heading and inside the
+//   ahead      every director activation lies within 45 degrees of the heading (60 for a drought
+//              past 80 s) and inside the
 //              preset's distance band; nothing is ever started behind the player
 //   lifetimes  events end naturally (the engine sets instance.ended) or after their seeded duration
 //              plus a grace period; beyond despawn.distance + hysteresis and out of view for
@@ -65,16 +71,33 @@ export const RARITY_PERIODS = Object.freeze({
   legendary: Object.freeze([3600, 7200]),
 });
 /** Default per-preset cooldown (s) by rarity; a preset may set its own `cooldown`. */
-export const RARITY_COOLDOWNS = Object.freeze({ common: 240, uncommon: 1200, rare: 2700, legendary: 5400 });
+export const RARITY_COOLDOWNS = Object.freeze({ common: 150, uncommon: 1200, rare: 2700, legendary: 5400 });
 /** The pacing window: a drought ends at a seeded threshold in [DROUGHT_MIN, DROUGHT_MIN + DROUGHT_SPREAD). */
 export const DROUGHT_MIN = 60;
-const DROUGHT_SPREAD = 25;
-/** From this drought length every tier but legendary may fill it. */
-const DROUGHT_RELAX = 80;
+/** The end of the pacing window (s): something notable should come by then. */
+export const PACING_WINDOW_MAX = 90;
+const DROUGHT_SPREAD = 10;
+/** From this drought length an uncommon candidate may fill it too. */
+const DROUGHT_RELAX = 75;
 /** Drought fills sit in this band ahead (m), intersected with the preset's own band. */
 export const DROUGHT_BAND = Object.freeze({ min: 3000, max: 8000 });
-/** Largest angle (degrees) off the heading for any director activation. */
-export const MAX_OFF_AXIS = 60;
+/** Largest angle (degrees) off the heading for a director activation: inside the view ahead. */
+export const MAX_OFF_AXIS = 45;
+/**
+ * A drought this long (s) widens the search: up to MAX_OFF_AXIS_WIDE off the heading (still well
+ * ahead, never behind) and rare candidates too, so the 90 s window holds where content is thin.
+ */
+const DROUGHT_WIDEN = 80;
+export const MAX_OFF_AXIS_WIDE = 60;
+/**
+ * Budget headroom: an engine counts as full once its particles reach this share of the cap, and a
+ * preset with lights needs this many real lights free (the director does not know exact costs).
+ */
+const PARTICLE_HEADROOM = 0.85;
+const LIGHTS_PER_SPAWN = 2;
+const COMMON_BIT = 1 << RARITY_TIERS.indexOf('common');
+const UNCOMMON_BIT = 1 << RARITY_TIERS.indexOf('uncommon');
+const RARE_BIT = 1 << RARITY_TIERS.indexOf('rare');
 /** Default distance band (m) for a preset whose filters leave it out. */
 const DEFAULT_BAND = Object.freeze({ min: 3000, max: 8000 });
 /** Candidates are gathered out to the largest preset band, capped here (m). */
@@ -272,6 +295,8 @@ export function createDirector({
   let droughtThreshold = DROUGHT_MIN;
   let droughtFills = 0;
   let longestDrought = 0;
+  let fillableDroughts = 0;
+  let droughtsInWindow = 0;
   let lastPresetIndex = -1;
   let shedLevel = 0;
   let headroomMissing = false;
@@ -296,9 +321,22 @@ export function createDirector({
   droughtThreshold = drawDroughtThreshold();
 
   /** Something notable happened at `now` (the tick time for the director's own activations). */
-  function markNotable(kind, now = getTime()) {
-    longestDrought = Math.max(longestDrought, now - lastNotableAt);
+  /**
+   * Ends the running drought at `now`. Droughts that reached DROUGHT_MIN are the ones the fill had to
+   * answer; the share of them that ended inside the pacing window is the pacing record in getState.
+   */
+  function endDrought(now) {
+    const gap = now - lastNotableAt;
+    longestDrought = Math.max(longestDrought, gap);
+    if (gap >= DROUGHT_MIN) {
+      fillableDroughts++;
+      if (gap <= PACING_WINDOW_MAX) droughtsInWindow++;
+    }
     lastNotableAt = now;
+  }
+
+  function markNotable(kind, now = getTime()) {
+    endDrought(now);
     lastNotableKind = kind;
     notableCount++;
     if (firstNotableAt === null) firstNotableAt = now;
@@ -309,6 +347,11 @@ export function createDirector({
   // discovery mark those sites 'discovered' in getNearby (isDiscovered, when given, is asked too: the
   // journal remembers discoveries across flights).
   const discovered = new Set();
+  /** A spawn the director started is in view at the current tick: the drought clock restarts. */
+  function noteOngoing() {
+    endDrought(time);
+  }
+
   const unsubscribers = [];
   if (bus) {
     unsubscribers.push(bus.onTyped('discovery', (payload) => {
@@ -413,8 +456,8 @@ export function createDirector({
       const cap = caps[name];
       if (!cap || !perEngine || !perEngine[name]) continue;
       const used = perEngine[name];
-      if ((used.instances || 0) >= cap.instances) return true;
-      if (cap.particles > 0 && (used.particles || 0) >= cap.particles) return true;
+      if ((used.instances || 0) + 1 > cap.instances) return true;
+      if (cap.particles > 0 && (used.particles || 0) >= cap.particles * PARTICLE_HEADROOM) return true;
     }
     return false;
   }
@@ -428,8 +471,8 @@ export function createDirector({
       if (shedLevel >= 1 || headroomMissing) return REJECT.deferred;
     }
     if (engineAtCap(info)) return REJECT.engineBudget;
-    if (info.usesLights && lightsActive >= budgets.maxRealLights) return REJECT.lightBudget;
-    if (record.offAxis > MAX_OFF_AXIS || record.distance < info.band.min || record.distance > info.band.max) return REJECT.notAhead;
+    if (info.usesLights && lightsActive + LIGHTS_PER_SPAWN > budgets.maxRealLights) return REJECT.lightBudget;
+    if (record.offAxis > MAX_OFF_AXIS_WIDE || record.distance < info.band.min || record.distance > info.band.max) return REJECT.notAhead;
     return '';
   }
 
@@ -507,7 +550,7 @@ export function createDirector({
       if (rule) { record.rejection = rule; continue; }
       record.eligible = true;
       record.rejection = '';
-      record.score = aheadScore(record.distance, record.offAxis, { minDistance: info.band.min, maxDistance: info.band.max, maxOffAxis: MAX_OFF_AXIS });
+      record.score = aheadScore(record.distance, record.offAxis, { minDistance: info.band.min, maxDistance: info.band.max, maxOffAxis: MAX_OFF_AXIS_WIDE });
     }
   }
 
@@ -518,17 +561,18 @@ export function createDirector({
   }
 
   /**
-   * The best eligible candidate for a choice: tierMask admits rarity tiers (bit per tier); drought
-   * fills also keep to DROUGHT_BAND. Due tiers outrank the rest, rarer due tiers first, then the
-   * ahead score decides, with the candidate's own roll as a small seeded preference.
+   * The best eligible candidate for a choice: tierMask admits rarity tiers (bit per tier), maxOffAxis
+   * bounds the angle off the heading, and drought fills also keep to DROUGHT_BAND. Due tiers outrank
+   * the rest, rarer due tiers first, then the ahead score decides, with the candidate's own roll as a
+   * small seeded preference.
    */
-  function pickBest(tierMask, droughtFill) {
+  function pickBest(tierMask, maxOffAxis, droughtFill) {
     let best = null;
     for (let index = 0; index < pool.count; index++) {
       const record = pool.records[index];
       if (!record.eligible) continue;
       const info = infos[record.presetIndex];
-      if ((tierMask & (1 << info.tier)) === 0) continue;
+      if ((tierMask & (1 << info.tier)) === 0 || record.offAxis > maxOffAxis) continue;
       if (droughtFill && (record.distance < DROUGHT_BAND.min || record.distance > DROUGHT_BAND.max)) continue;
       const due = time >= tierDue[info.tier];
       record.rank = (due ? 10 + info.tier : 0) + record.score + (1 - record.roll) * 0.01;
@@ -609,19 +653,20 @@ export function createDirector({
 
   function decide() {
     const drought = time - lastNotableAt;
-    const allTiers = (1 << RARITY_TIERS.length) - 1;
-    const legendaryBit = 1 << RARITY_TIERS.indexOf('legendary');
     let dueMask = 0;
     for (let tier = 0; tier < RARITY_TIERS.length; tier++) if (time >= tierDue[tier]) dueMask |= 1 << tier;
     if (drought >= droughtThreshold) {
-      const fillMask = drought >= DROUGHT_RELAX ? (allTiers & ~legendaryBit) | dueMask : dueMask | 1;
-      const best = pickBest(fillMask, true);
+      // Common candidates and those of a due tier fill a drought; from DROUGHT_RELAX uncommon ones
+      // too, and from DROUGHT_WIDEN rare ones, in the wider cone ahead.
+      const widened = drought >= DROUGHT_WIDEN;
+      const fillMask = dueMask | COMMON_BIT | (drought >= DROUGHT_RELAX ? UNCOMMON_BIT : 0) | (widened ? RARE_BIT : 0);
+      const best = pickBest(fillMask, widened ? MAX_OFF_AXIS_WIDE : MAX_OFF_AXIS, true);
       if (best && activateCandidate(best, 'drought')) return;
     }
     // Scheduled rarity: the rarest due tier with an eligible candidate ahead.
     for (let tier = RARITY_TIERS.length - 1; tier >= 0; tier--) {
       if ((dueMask & (1 << tier)) === 0) continue;
-      const best = pickBest(1 << tier, false);
+      const best = pickBest(1 << tier, MAX_OFF_AXIS, false);
       if (best && activateCandidate(best, 'schedule')) return;
     }
   }
@@ -646,12 +691,16 @@ export function createDirector({
         removeActivation(index);
         continue;
       }
-      const rule = record.info.despawn;
-      if (!rule || !instance.anchor) continue;
+      if (!instance.anchor) continue;
       const anchor = instance.anchor;
+      const inView = isInView(anchor.x, anchor.y, anchor.z, instance.radius || 0);
+      // A spawn in view is something notable going on: no drought while the player can see it.
+      if (inView) noteOngoing();
+      const rule = record.info.despawn;
+      if (!rule) continue;
       const distance = Math.hypot(anchor.x - player.x, anchor.z - player.z);
       if (distance > rule.distance + rule.hysteresis) {
-        if (isInView(anchor.x, anchor.y, anchor.z, instance.radius || 0)) record.outOfView = 0;
+        if (inView) record.outOfView = 0;
         else record.outOfView += DIRECTOR_TICK_SECONDS;
         if (record.outOfView >= rule.outOfViewSeconds) {
           spawnManager.deactivate(record.id, 'despawn');
@@ -784,6 +833,7 @@ export function createDirector({
         firstNotableAt,
         notables: notableCount,
         droughtFills,
+        pacing: { droughts: fillableDroughts, withinWindow: droughtsInWindow },
         weather: weather.stateAt(player.x, player.z, time),
         heavyCount: heavyActive,
         budgets: { maxHeavy: budgets.maxHeavy, maxRealLights: budgets.maxRealLights, lights: lightsActive, engines },
