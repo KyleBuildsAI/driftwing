@@ -7,8 +7,8 @@
 //   spring    roll, pitch, yaw, lookX, lookY: summed, -1..1
 //   max       brakeL, brakeR: strongest wins, 0..1
 //   positions absolute levers (throttle, antenna, flaps, collective, trim when bound absolute):
-//             { target, key, value, moved } candidates; the manager gives the target to the last
-//             lever that moved
+//             { target, key, value, moved, source, deviceKey } candidates; the manager gives
+//             the target to the last lever that moved
 //   rates     rate references (buttonRate, axis with rate): units per second into a position
 // Actions go straight to the action router on press / release edges.
 
@@ -36,6 +36,8 @@ export function createFrameAccumulator() {
     positions: [],
     rates: {},
     sources: {},
+    /** The deviceKey behind each entry in sources (the controller that drove the target). */
+    sourceDevices: {},
     throttleDirection: 0,
     rudderMoved: false,
     rudderPresent: false,
@@ -50,6 +52,7 @@ export function resetFrameAccumulator(frame) {
   frame.positions.length = 0;
   frame.rates = {};
   frame.sources = {};
+  frame.sourceDevices = {};
   frame.throttleDirection = 0;
   frame.rudderMoved = false;
   frame.rudderPresent = false;
@@ -222,7 +225,7 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
           if (ref.role === 'rudder') trackRudder(entry, refKey, filtered, frame);
           if (ref.rate) {
             frame.rates[target] = (frame.rates[target] ?? 0) + filtered * ref.rate;
-            if (filtered !== 0) frame.sources[target] = source;
+            if (filtered !== 0) noteDevice(frame, target, source, device.deviceKey);
             if (target === 'throttle') frame.throttleDirection += filtered;
             return;
           }
@@ -234,7 +237,7 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
           const direction = buttonValue(device, ref.positive) - buttonValue(device, ref.negative);
           if (direction !== 0) {
             frame.rates[target] = (frame.rates[target] ?? 0) + direction * ref.rate;
-            frame.sources[target] = source;
+            noteDevice(frame, target, source, device.deviceKey);
             frame.activity = true;
             if (target === 'throttle') frame.throttleDirection += direction;
           }
@@ -243,21 +246,27 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
     }
   }
 
+  /** Records which kind of source and which controller drove a target this frame. */
+  function noteDevice(frame, target, source, deviceKey) {
+    frame.sources[target] = source;
+    frame.sourceDevices[target] = deviceKey;
+  }
+
   function addValue(entry, frame, target, spec, refKey, value, source, deviceKey) {
     if (spec.combine === 'sum') {
       frame.spring[target] += value;
-      if (value !== 0) frame.sources[target] = source;
+      if (value !== 0) noteDevice(frame, target, source, deviceKey);
     } else if (spec.combine === 'max') {
       if (value > frame.max[target]) {
         frame.max[target] = value;
-        frame.sources[target] = source;
+        noteDevice(frame, target, source, deviceKey);
       }
     } else {
       const leverKey = `${deviceKey}|${refKey}`;
       const baseline = entry.levers.get(refKey);
       const moved = baseline === undefined || Math.abs(value - baseline) > POSITION_MOVE;
       if (moved) entry.levers.set(refKey, value);
-      frame.positions.push({ target, key: leverKey, value, moved, source });
+      frame.positions.push({ target, key: leverKey, value, moved, source, deviceKey });
     }
   }
 

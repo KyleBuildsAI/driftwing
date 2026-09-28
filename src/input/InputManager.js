@@ -179,6 +179,7 @@ export function createInputManager(ctx) {
       if (lever.owner !== candidate.key) continue;
       controls[target] = clamp(candidate.value, low, 1);
       controls.sources[target] = candidate.source;
+      controls.sourceDevices[target] = candidate.deviceKey;
       driven = true;
     }
     const keyRate = keys.rates[target] ?? 0;
@@ -187,6 +188,7 @@ export function createInputManager(ctx) {
       lever.owner = 'rate';
       controls[target] = clamp(controls[target] + (keyRate + deviceRate) * seconds, low, 1);
       controls.sources[target] = keyRate !== 0 ? 'keyboard' : deviceFrame.sources[target];
+      controls.sourceDevices[target] = keyRate !== 0 ? null : deviceFrame.sourceDevices[target] ?? null;
       driven = true;
     }
     return driven;
@@ -219,6 +221,7 @@ export function createInputManager(ctx) {
         input.throttleTarget = clamp(leverCandidate.value, 0, 1);
         lastLeverSent = leverCandidate.value;
         controls.sources.throttle = leverCandidate.source;
+        controls.sourceDevices.throttle = leverCandidate.deviceKey;
       }
       const deviceDirection = state.photoMode ? 0 : deviceFrame.throttleDirection;
       input.throttleDelta = clamp(keys.throttleDelta + deviceDirection, -1, 1);
@@ -235,27 +238,36 @@ export function createInputManager(ctx) {
     if (touchFrame.throttle !== null) {
       controls.throttle = touchFrame.throttle;
       controls.sources.throttle = 'touch';
+      controls.sourceDevices.throttle = null;
       lever.owner = 'touch';
     }
     if (keys.wheelNotches !== 0) {
       controls.throttle = clamp(controls.throttle - keys.wheelNotches * WHEEL_THROTTLE_STEP, 0, 1);
       controls.sources.throttle = 'mouse';
+      controls.sourceDevices.throttle = null;
       lever.owner = 'wheel';
     }
     lastThrottleTarget = input.throttleTarget;
   }
 
-  /** Records which source contributed most to an axis this frame (kept when nothing moved it). */
+  /**
+   * Records which source (and which controller, by deviceKey, or null for keyboard, mouse and touch)
+   * contributed most to an axis this frame; both are kept when nothing moved it.
+   */
   function noteSource(axis, contributions) {
     let best = null;
+    let bestDevice = null;
     let bestMagnitude = 0;
-    for (const [source, value] of contributions) {
+    for (const [source, value, deviceKey = null] of contributions) {
       if (Math.abs(value) > bestMagnitude) {
         bestMagnitude = Math.abs(value);
         best = source;
+        bestDevice = deviceKey;
       }
     }
-    if (best) controls.sources[axis] = best;
+    if (!best) return;
+    controls.sources[axis] = best;
+    controls.sourceDevices[axis] = bestDevice;
   }
 
   // ---- Frame ---------------------------------------------------------------------------------------
@@ -271,6 +283,7 @@ export function createInputManager(ctx) {
     updateControllers(seconds, mode, craft);
     const pad = deviceFrame.spring;
     const padSource = deviceFrame.sources;
+    const padDevice = deviceFrame.sourceDevices;
 
     input.pitch = clamp(keys.pitch + keys.stickPitch + touchFrame.pitch + pad.pitch, -1, 1);
     input.roll = clamp(keys.roll + keys.stickRoll + touchFrame.roll + pad.roll, -1, 1);
@@ -283,22 +296,25 @@ export function createInputManager(ctx) {
     controls.pitch = input.pitch;
     controls.roll = input.roll;
     controls.yaw = input.yaw;
-    noteSource('pitch', [['keyboard', keys.pitch], ['mouse', keys.stickPitch], ['touch', touchFrame.pitch], [padSource.pitch, pad.pitch]]);
-    noteSource('roll', [['keyboard', keys.roll], ['mouse', keys.stickRoll], ['touch', touchFrame.roll], [padSource.roll, pad.roll]]);
-    noteSource('yaw', [['keyboard', keys.yaw], [padSource.yaw, pad.yaw]]);
+    noteSource('pitch', [['keyboard', keys.pitch], ['mouse', keys.stickPitch], ['touch', touchFrame.pitch], [padSource.pitch, pad.pitch, padDevice.pitch]]);
+    noteSource('roll', [['keyboard', keys.roll], ['mouse', keys.stickRoll], ['touch', touchFrame.roll], [padSource.roll, pad.roll, padDevice.roll]]);
+    noteSource('yaw', [['keyboard', keys.yaw], [padSource.yaw, pad.yaw, padDevice.yaw]]);
     controls.lookX = clamp(keys.lookX + pad.lookX, -1, 1);
     controls.lookY = clamp(keys.lookY + pad.lookY, -1, 1);
-    noteSource('lookX', [['mouse', keys.lookX], [padSource.lookX, pad.lookX]]);
-    noteSource('lookY', [['mouse', keys.lookY], [padSource.lookY, pad.lookY]]);
+    noteSource('lookX', [['mouse', keys.lookX], [padSource.lookX, pad.lookX, padDevice.lookX]]);
+    noteSource('lookY', [['mouse', keys.lookY], [padSource.lookY, pad.lookY, padDevice.lookY]]);
     controls.brakeL = clamp(Math.max(keys.brakeL, deviceFrame.max.brakeL), 0, 1);
     controls.brakeR = clamp(Math.max(keys.brakeR, deviceFrame.max.brakeR), 0, 1);
-    noteSource('brakeL', [['keyboard', keys.brakeL], [padSource.brakeL, deviceFrame.max.brakeL]]);
-    noteSource('brakeR', [['keyboard', keys.brakeR], [padSource.brakeR, deviceFrame.max.brakeR]]);
+    noteSource('brakeL', [['keyboard', keys.brakeL], [padSource.brakeL, deviceFrame.max.brakeL, padDevice.brakeL]]);
+    noteSource('brakeR', [['keyboard', keys.brakeR], [padSource.brakeR, deviceFrame.max.brakeR, padDevice.brakeR]]);
     for (const target of LEVER_TARGETS) {
       const driven = updateLever(target, keys, seconds);
       if (target === 'collective' && !driven && levers.collective.owner === null) {
         controls.collective = controls.throttle;
-        if (controls.sources.throttle) controls.sources.collective = controls.sources.throttle;
+        if (controls.sources.throttle) {
+          controls.sources.collective = controls.sources.throttle;
+          controls.sourceDevices.collective = controls.sourceDevices.throttle ?? null;
+        }
       }
     }
     controls.afterburnerDetent = settings.get('afterburnerDetent');

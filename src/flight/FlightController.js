@@ -1007,15 +1007,14 @@ export function createFlightController(ctx) {
   // ============================================================================================
   // HOT-PLUG: hands-off assists while a disconnected device was flying (SIM)
   // ============================================================================================
-  function sourceMatches(source, device) {
-    if (!source) return false;
-    if (typeof source === 'string') return source === device.deviceKey || source === device.kind;
-    return source.deviceKey === device.deviceKey || source.device === device.deviceKey;
-  }
-
+  /**
+   * True when the disconnected controller was the last one to move a flight axis. The match is by
+   * deviceKey (ControlState.sourceDevices), so a HOTAS stick is recognised and another gamepad that
+   * was not flying is not.
+   */
   function deviceDrivesAxes(device) {
-    const sources = liveControls.sources || {};
-    return ['roll', 'pitch', 'yaw', 'throttle', 'collective'].some((axis) => sourceMatches(sources[axis], device));
+    const sourceDevices = liveControls.sourceDevices || {};
+    return Boolean(device.deviceKey) && ['roll', 'pitch', 'yaw', 'throttle', 'collective'].some((axis) => sourceDevices[axis] === device.deviceKey);
   }
 
   function engageOverride(device) {

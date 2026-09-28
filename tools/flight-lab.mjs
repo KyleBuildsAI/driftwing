@@ -1144,7 +1144,7 @@ function createControllerRig({ craft = 'glider', mode = 'classic', assists = 1, 
   const flight = createFlightController(ctx);
   ctx.systems.flight = flight;
   const telemetry = state.flight;
-  const rig = { flight, state, input, controls, settings: settingsValues, events, telemetry, time: 0 };
+  const rig = { flight, state, input, controls, settings: settingsValues, events, telemetry, bus, time: 0 };
   rig.frame = () => {
     state.frame++;
     state.time.elapsed += FRAME;
@@ -1358,6 +1358,45 @@ function groundTakeoff() {
   return { startedOnGround, liftoff, released, maxPitch, maxLoad, minMargin, maxPitchRate, stalled, crashes: rig.events.softCrash.length };
 }
 
+// ============================================================================================
+// HOT-PLUG: the hands-off hold engages for the controller that was flying, only in the air
+// ============================================================================================
+const STICK = Object.freeze({ deviceKey: '044f-b10a', kind: 'hotas-stick', name: 'T.16000M' });
+const THROTTLE_QUADRANT = Object.freeze({ deviceKey: '044f-b687', kind: 'hotas-throttle', name: 'TWCS Throttle' });
+const OTHER_PAD = Object.freeze({ deviceKey: '045e-028e', kind: 'gamepad', name: 'Xbox 360 Controller' });
+
+/** The live ControlState as the input system leaves it after a controller moved the axes. */
+function flyWith(controls, device, axes) {
+  const source = device.kind === 'gamepad' ? 'gamepad' : 'hotas';
+  for (const axis of axes) {
+    controls.sources[axis] = source;
+    controls.sourceDevices[axis] = device.deviceKey;
+  }
+}
+
+/**
+ * SIM bush plane in the air flown by a HOTAS (stick on roll / pitch / yaw, TWCS on the throttle): an
+ * unrelated gamepad dropping out changes nothing; the stick dropping out engages the hands-off hold,
+ * and its return releases it.
+ */
+function hotPlugInFlight() {
+  const rig = createControllerRig({ craft: 'bushplane', mode: 'sim' });
+  rig.controls.throttle = bushplane.spawn.cruiseThrottle;
+  flyWith(rig.controls, STICK, ['roll', 'pitch', 'yaw']);
+  flyWith(rig.controls, THROTTLE_QUADRANT, ['throttle']);
+  rig.run(2, (lab) => lab.handsOff());
+  rig.bus.emitTyped('deviceDisconnected', OTHER_PAD);
+  const otherPad = rig.flight.isAssistOverridden();
+  rig.bus.emitTyped('deviceDisconnected', STICK);
+  const engaged = rig.flight.isAssistOverridden();
+  const autopilot = { ...rig.state.player.autopilot };
+  rig.run(5, (lab) => lab.handsOff());
+  const holding = rig.flight.isAssistOverridden() && rig.state.player.autopilot.enabled;
+  rig.bus.emitTyped('deviceConnected', STICK);
+  const released = !rig.flight.isAssistOverridden() && !rig.state.player.autopilot.enabled;
+  return { otherPad, engaged, autopilot, holding, released };
+}
+
 function describeLoads(watch) {
   return `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g`;
 }
@@ -1473,6 +1512,8 @@ function runBushplane() {
 
 function runShared() {
   const name = 'both';
+  const plug = hotPlugInFlight();
+  record(name, 'hot-plug: HOTAS stick unplugged in flight', plug.engaged ? 'hold' : 'no hold', 'hold; other pad: no hold; release on reconnect', { compare: !plug.otherPad && plug.engaged && plug.holding && plug.released, note: `other gamepad ${plug.otherPad ? 'ENGAGED' : 'ignored'}, stick: ${plug.engaged ? 'hands-off hold' : 'NOTHING'}, ${plug.holding ? 'held 5 s' : 'NOT HELD'}, reconnect ${plug.released ? 'released' : 'NOT RELEASED'}` });
   const swap = craftSwitch();
   record(name, 'SIM craft switch glider -> bush plane', swap.toBush.speed * KMH, `${(bushplane.spawn.cruise * KMH).toFixed(0)} km/h, calm`, { unit: 'km/h', compare: calmFlight(swap.toBush.watch), note: `10 s hands off: ${describeLoads(swap.toBush.watch)}, ${swap.toBush.watch.stalled ? 'STALL' : 'no stall'}` });
   record(name, 'SIM craft switch bush plane -> glider', swap.toGlider.speed * KMH, `${(glider.spawn.cruise * KMH).toFixed(0)} km/h, calm`, { unit: 'km/h', compare: calmFlight(swap.toGlider.watch), note: `10 s hands off: ${describeLoads(swap.toGlider.watch)}, ${swap.toGlider.watch.stalled ? 'STALL' : 'no stall'}` });
