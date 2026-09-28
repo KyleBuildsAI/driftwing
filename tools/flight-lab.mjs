@@ -1215,7 +1215,7 @@ function pathHold(craft) {
   return { bootSpeed, watch };
 }
 
-/** Soft crash respawn in SIM (optionally in a steady wind): airspeed and height after the fade, then 10 s hands off. */
+/** Soft crash respawn (optionally in a steady wind): airspeed and height after the fade, then 10 s hands off. */
 function respawn(craft, wind = null) {
   const rig = createControllerRig({ craft: craft.id, wind });
   if (craft.inputProfile.throttle !== 'none') rig.controls.throttle = craft.spawn.cruiseThrottle;
@@ -1229,7 +1229,7 @@ function respawn(craft, wind = null) {
   return { speed, agl, watch, crashes: rig.events.softCrash.length };
 }
 
-/** Relaunch in SIM: the glider's aerotow to release, the bush plane's airstart; then 10 s hands off. */
+/** Relaunch: the glider's aerotow to release, the bush plane's airstart; then 10 s hands off. */
 function relaunchTest(craft) {
   const rig = createControllerRig({ craft: craft.id, altitude: CONTROLLER_GROUND + 400 });
   if (craft.inputProfile.throttle !== 'none') rig.controls.throttle = craft.spawn.cruiseThrottle;
@@ -1247,7 +1247,7 @@ function relaunchTest(craft) {
   return { released, method, speed, watch };
 }
 
-/** SIM craft switch mid-flight at 100 %: glider -> bush plane -> glider, 10 s hands off after each. */
+/** Craft switch mid-flight at 100 %: glider -> bush plane -> glider, 10 s hands off after each. */
 function craftSwitch() {
   const rig = createControllerRig({ craft: 'glider' });
   rig.controls.throttle = bushplane.spawn.cruiseThrottle;
@@ -1318,7 +1318,7 @@ function flyWith(controls, device, axes) {
 }
 
 /**
- * SIM bush plane in the air flown by a HOTAS (stick on roll / pitch / yaw, TWCS on the throttle), at
+ * The bush plane in the air flown by a HOTAS (stick on roll / pitch / yaw, TWCS on the throttle), at
  * full power so it flies faster than its cruise: an unrelated gamepad dropping out changes nothing;
  * the stick dropping out engages the hands-off hold at the speed flown, and its return releases it.
  * Then with the pilot's own autopilot on: the hold and its release keep the pilot's speed target.
@@ -1351,7 +1351,7 @@ function hotPlugInFlight() {
 }
 
 /**
- * SIM craft started on the ground and taxiing (or sitting) with the TWCS lever at `lever`: the stick
+ * A craft started on the ground and taxiing (or sitting) with the TWCS lever at `lever`: the stick
  * dropping out must not engage the autopilot (which would release the brake or lift off); the lever
  * above idle sets the parking brake instead, and the craft is still on the ground `seconds` later.
  */
@@ -1422,12 +1422,12 @@ function handlingTests(name, craft) {
   const altitudeLimit = craft === glider ? 45 : 15;
   record(name, '100 % hands off 60 s: altitude change', Math.abs(hold.watch.altitudeChange), altitudeLimit, { unit: 'm', compare: Math.abs(hold.watch.altitudeChange) <= altitudeLimit && calmFlight(hold.watch), note: `${hold.watch.altitudeChange.toFixed(1)} m, ${describeLoads(hold.watch)}, max vs ${hold.watch.maxVertical.toFixed(2)} m/s, ${(hold.watch.minSpeed * KMH).toFixed(0)}..${(hold.watch.maxSpeed * KMH).toFixed(0)} km/h` });
   const again = respawn(craft);
-  record(name, 'SIM respawn after a soft crash', again.speed * KMH, cruiseKmh, { unit: 'km/h', tolerance: 0.03, note: `${again.agl.toFixed(0)} m AGL; next 10 s ${describeLoads(again.watch)}, ${calmFlight(again.watch) ? 'calm' : 'NOT CALM'}` });
-  record(name, 'SIM respawn: hands off 10 s', describeLoads(again.watch), '0.8..1.3 g', { compare: again.crashes === 1 && Math.abs(again.agl - 300) < 5 && calmFlight(again.watch), note: `${again.crashes} soft crash` });
+  record(name, 'respawn after a soft crash', again.speed * KMH, cruiseKmh, { unit: 'km/h', tolerance: 0.03, note: `${again.agl.toFixed(0)} m AGL; next 10 s ${describeLoads(again.watch)}, ${calmFlight(again.watch) ? 'calm' : 'NOT CALM'}` });
+  record(name, 'respawn: hands off 10 s', describeLoads(again.watch), '0.8..1.3 g', { compare: again.crashes === 1 && Math.abs(again.agl - 300) < 5 && calmFlight(again.watch), note: `${again.crashes} soft crash` });
   const windy = respawn(craft, new THREE.Vector3(6, 0, 5));
-  record(name, 'SIM respawn in a 7.8 m/s wind: airspeed', windy.speed * KMH, `${cruiseKmh.toFixed(0)} km/h +/-3%`, { unit: 'km/h', compare: Math.abs(windy.speed - craft.spawn.cruise) <= craft.spawn.cruise * 0.03 && calmFlight(windy.watch), note: `cruise is an airspeed; next 10 s ${describeLoads(windy.watch)}` });
+  record(name, 'respawn in a 7.8 m/s wind: airspeed', windy.speed * KMH, `${cruiseKmh.toFixed(0)} km/h +/-3%`, { unit: 'km/h', compare: Math.abs(windy.speed - craft.spawn.cruise) <= craft.spawn.cruise * 0.03 && calmFlight(windy.watch), note: `cruise is an airspeed; next 10 s ${describeLoads(windy.watch)}` });
   const relaunched = relaunchTest(craft);
-  record(name, `SIM relaunch (${relaunched.method})`, relaunched.speed * KMH, `${cruiseKmh.toFixed(0)} km/h +/-5%`, { unit: 'km/h', compare: relaunched.released && Math.abs(relaunched.speed - craft.spawn.cruise) <= craft.spawn.cruise * 0.05 && calmFlight(relaunched.watch), note: `then 10 s hands off: ${describeLoads(relaunched.watch)}, ${relaunched.watch.stalled ? 'STALL' : 'no stall'}` });
+  record(name, `relaunch (${relaunched.method})`, relaunched.speed * KMH, `${cruiseKmh.toFixed(0)} km/h +/-5%`, { unit: 'km/h', compare: relaunched.released && Math.abs(relaunched.speed - craft.spawn.cruise) <= craft.spawn.cruise * 0.05 && calmFlight(relaunched.watch), note: `then 10 s hands off: ${describeLoads(relaunched.watch)}, ${relaunched.watch.stalled ? 'STALL' : 'no stall'}` });
 }
 
 // ============================================================================================
@@ -1509,8 +1509,8 @@ function runShared() {
   record(name, 'hot-plug hold: speed target', plug.holdSpeed * KMH, `${(plug.speedBefore * KMH).toFixed(1)} km/h +/-1%, pilot's kept`, { unit: 'km/h', note: `flying ${(plug.speedBefore * KMH).toFixed(0)} km/h (cruise ${(plug.cruise * KMH).toFixed(0)}); the pilot's own autopilot speed ${plug.restored ? 'kept' : 'LOST'} after a hold`, compare: Math.abs(plug.holdSpeed - plug.speedBefore) <= plug.speedBefore * 0.01 && plug.restored });
   record(name, 'hot-plug: HOTAS stick unplugged in flight', plug.engaged ? 'hold' : 'no hold', 'hold; other pad: no hold; release on reconnect', { compare: !plug.otherPad && plug.engaged && plug.holding && plug.released, note: `other gamepad ${plug.otherPad ? 'ENGAGED' : 'ignored'}, stick: ${plug.engaged ? 'hands-off hold' : 'NOTHING'}, ${plug.holding ? 'held 5 s' : 'NOT HELD'}, reconnect ${plug.released ? 'released' : 'NOT RELEASED'}` });
   const swap = craftSwitch();
-  record(name, 'SIM craft switch glider -> bush plane', swap.toBush.speed * KMH, `${(bushplane.spawn.cruise * KMH).toFixed(0)} km/h, calm`, { unit: 'km/h', compare: calmFlight(swap.toBush.watch), note: `10 s hands off: ${describeLoads(swap.toBush.watch)}, ${swap.toBush.watch.stalled ? 'STALL' : 'no stall'}` });
-  record(name, 'SIM craft switch bush plane -> glider', swap.toGlider.speed * KMH, `${(glider.spawn.cruise * KMH).toFixed(0)} km/h, calm`, { unit: 'km/h', compare: calmFlight(swap.toGlider.watch), note: `10 s hands off: ${describeLoads(swap.toGlider.watch)}, ${swap.toGlider.watch.stalled ? 'STALL' : 'no stall'}` });
+  record(name, 'craft switch glider -> bush plane', swap.toBush.speed * KMH, `${(bushplane.spawn.cruise * KMH).toFixed(0)} km/h, calm`, { unit: 'km/h', compare: calmFlight(swap.toBush.watch), note: `10 s hands off: ${describeLoads(swap.toBush.watch)}, ${swap.toBush.watch.stalled ? 'STALL' : 'no stall'}` });
+  record(name, 'craft switch bush plane -> glider', swap.toGlider.speed * KMH, `${(glider.spawn.cruise * KMH).toFixed(0)} km/h, calm`, { unit: 'km/h', compare: calmFlight(swap.toGlider.watch), note: `10 s hands off: ${describeLoads(swap.toGlider.watch)}, ${swap.toGlider.watch.stalled ? 'STALL' : 'no stall'}` });
 }
 
 function commonTests(name, craft) {

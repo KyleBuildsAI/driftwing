@@ -33,7 +33,7 @@
 //
 // Reusable step files live in tools/steps/; their checks call console.error on a failure, so
 // the run fails. hotplug.json (run with --query test=hotas) unplugs and replugs the mock T.16000M
-// and TWCS in SIM flight: sources by deviceKey, the hands-off hold, the throttle kept on a TWCS
+// and TWCS in flight: sources by deviceKey, the hands-off hold, the throttle kept on a TWCS
 // dropout, and the release on reconnect.
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

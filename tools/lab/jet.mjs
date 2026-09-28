@@ -1,4 +1,4 @@
-// Jet flight lab: flies the jet's SIM model (SimFixedWing plus the jet extension) headless in node
+// Jet flight lab: flies the jet's flight model (SimFixedWing plus the jet extension) headless in node
 // with scripted controls through the same control stages the game runs every physics tick (the PID
 // autopilot and the assists), and prints its measured performance against the spec.
 //
@@ -1088,8 +1088,8 @@ function testRespawn() {
   const agl = rig.state.player.position.y - CONTROLLER_GROUND;
   rig.run(0.5, (lab) => lab.handsOff());
   const watch = watchSim(rig, 10);
-  record('SIM respawn after a soft crash', speed * KMH, jet.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.03, note: `${agl.toFixed(0)} m AGL, ${rig.events.softCrash.length} soft crash` });
-  record('SIM respawn: hands off 10 s', `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g`, '0.8..1.3 g, calm', { compare: calm(watch) && Math.abs(agl - 300) < 30, note: describeWatch(watch) });
+  record('respawn after a soft crash', speed * KMH, jet.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.03, note: `${agl.toFixed(0)} m AGL, ${rig.events.softCrash.length} soft crash` });
+  record('respawn: hands off 10 s', `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g`, '0.8..1.3 g, calm', { compare: calm(watch) && Math.abs(agl - 300) < 30, note: describeWatch(watch) });
 }
 
 function testRelaunch() {
@@ -1104,11 +1104,11 @@ function testRelaunch() {
   const method = rig.events.relaunched[0] ? rig.events.relaunched[0].method : 'none';
   const speed = rig.model().flightData.airspeed;
   const watch = watchSim(rig, 10);
-  record('SIM relaunch (airstart)', speed * KMH, jet.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.05, note: `method ${method}` });
-  record('SIM relaunch: hands off 10 s', method, 'airstart, calm', { compare: method === 'airstart' && calm(watch), note: describeWatch(watch) });
+  record('relaunch (airstart)', speed * KMH, jet.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.05, note: `method ${method}` });
+  record('relaunch: hands off 10 s', method, 'airstart, calm', { compare: method === 'airstart' && calm(watch), note: describeWatch(watch) });
 }
 
-/** SIM craft switches in flight at 100 %: bush plane -> jet -> bush plane, 10 s hands off after each. */
+/** Craft switches in flight at 100 %: bush plane -> jet -> bush plane, 10 s hands off after each. */
 function testCraftSwitch() {
   const rig = createControllerRig({ craft: 'bushplane' });
   rig.controls.throttle = bushplane.spawn.cruiseThrottle;
@@ -1117,13 +1117,13 @@ function testCraftSwitch() {
   rig.controls.throttle = jet.spawn.cruiseThrottle;
   const toJet = { speed: rig.model().flightData.airspeed, kind: rig.model().kind };
   toJet.watch = watchSim(rig, 10);
-  record('SIM craft switch bush plane -> jet', toJet.speed * KMH, jet.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.03, note: `model ${toJet.kind}` });
-  record('SIM craft switch bush plane -> jet: calm', toJet.kind, 'jet, calm', { compare: toJet.kind === 'jet' && calm(toJet.watch), note: describeWatch(toJet.watch) });
+  record('craft switch bush plane -> jet', toJet.speed * KMH, jet.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.03, note: `model ${toJet.kind}` });
+  record('craft switch bush plane -> jet: calm', toJet.kind, 'jet, calm', { compare: toJet.kind === 'jet' && calm(toJet.watch), note: describeWatch(toJet.watch) });
   rig.flight.setCraft('bushplane');
   rig.controls.throttle = bushplane.spawn.cruiseThrottle;
   const toBush = { speed: rig.model().flightData.airspeed };
   toBush.watch = watchSim(rig, 10);
-  record('SIM craft switch jet -> bush plane', toBush.speed * KMH, bushplane.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.03, note: `10 s hands off: ${describeWatch(toBush.watch)}` });
+  record('craft switch jet -> bush plane', toBush.speed * KMH, bushplane.spawn.cruise * KMH, { unit: 'km/h', tolerance: 0.03, note: `10 s hands off: ${describeWatch(toBush.watch)}` });
 }
 
 /** One step of the take-off pilot's angle-of-attack hold (12 degrees) through the fly-by-wire. */
