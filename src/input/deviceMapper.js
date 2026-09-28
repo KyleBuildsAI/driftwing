@@ -7,8 +7,9 @@
 //   spring    roll, pitch, yaw, lookX, lookY: summed, -1..1
 //   max       brakeL, brakeR: strongest wins, 0..1
 //   positions absolute levers (throttle, antenna, flaps, collective, trim when bound absolute):
-//             { target, key, value, moved, source, deviceKey } candidates; the manager gives
-//             the target to the last lever that moved
+//             { target, key, value, moved, fresh, source, deviceKey } candidates; the manager gives
+//             the target to the last lever that moved (a fresh lever, seen for the first time, only
+//             takes a target nothing has driven yet)
 //   rates     rate references (buttonRate, axis with rate): units per second into a position
 // Actions go straight to the action router on press / release edges.
 
@@ -264,9 +265,12 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
     } else {
       const leverKey = `${deviceKey}|${refKey}`;
       const baseline = entry.levers.get(refKey);
-      const moved = baseline === undefined || Math.abs(value - baseline) > POSITION_MOVE;
-      if (moved) entry.levers.set(refKey, value);
-      frame.positions.push({ target, key: leverKey, value, moved, source, deviceKey });
+      // The first reading only sets the baseline: a lever that starts counting (a device plugged in,
+      // or the stick's slider once the TWCS is gone) has not been moved by the pilot.
+      const fresh = baseline === undefined;
+      const moved = !fresh && Math.abs(value - baseline) > POSITION_MOVE;
+      if (fresh || moved) entry.levers.set(refKey, value);
+      frame.positions.push({ target, key: leverKey, value, moved, fresh, source, deviceKey });
     }
   }
 

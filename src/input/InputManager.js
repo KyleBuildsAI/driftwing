@@ -165,6 +165,15 @@ export function createInputManager(ctx) {
 
   // ---- Levers -----------------------------------------------------------------------------------
   /**
+   * True when a lever candidate takes its target: it moved, or it is seen for the first time and
+   * nothing has driven the target yet (a controller connected at the start). A lever that merely
+   * starts counting later, such as the stick's slider once the TWCS drops out, waits to be moved.
+   */
+  function claimsLever(candidate, lever) {
+    return candidate.moved || (candidate.fresh && lever.owner === null);
+  }
+
+  /**
    * Applies absolute levers and rate inputs to one position target. The last lever that moved owns
    * the target; a rate input (keys, buttons, the rocker) takes it over while it is used.
    * Returns true when anything drove the target this frame.
@@ -175,7 +184,7 @@ export function createInputManager(ctx) {
     let driven = false;
     for (const candidate of deviceFrame.positions) {
       if (candidate.target !== target) continue;
-      if (candidate.moved) lever.owner = candidate.key;
+      if (claimsLever(candidate, lever)) lever.owner = candidate.key;
       if (lever.owner !== candidate.key) continue;
       controls[target] = clamp(candidate.value, low, 1);
       controls.sources[target] = candidate.source;
@@ -207,7 +216,7 @@ export function createInputManager(ctx) {
       let leverCandidate = null;
       for (const candidate of deviceFrame.positions) {
         if (candidate.target !== 'throttle') continue;
-        if (candidate.moved && lever.owner !== candidate.key) {
+        if (claimsLever(candidate, lever) && lever.owner !== candidate.key) {
           lever.owner = candidate.key;
           lastLeverSent = -1;
         }
