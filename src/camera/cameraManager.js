@@ -97,7 +97,7 @@ export function createCameraSystem(ctx) {
   let zoomTan = 1;
   const redrawTimes = [];
   // panelDrawMs / hudDrawMs: smoothed CPU time of one 30 Hz repaint.
-  const counters = { panelRedraws: 0, hudTicks: 0, instrumentTicks: 0, viewChanges: 0, returnFlights: 0, panelDrawMs: 0, hudDrawMs: 0 };
+  const counters = { panelRedraws: 0, hudTicks: 0, instrumentTicks: 0, viewChanges: 0, returnFlights: 0, snaps: 0, panelDrawMs: 0, hudDrawMs: 0 };
 
   // ---- Context helpers ------------------------------------------------------------------------------
   function flightSystem() {
@@ -577,8 +577,17 @@ export function createCameraSystem(ctx) {
 
     /** Re-seat the cameras immediately (teleports / resets). */
     snap() {
+      counters.snaps++;
       chaseRig.snap();
       views.flyby.reset();
+    },
+
+    /**
+     * Counts the camera's cuts: view changes, flyby relocations and re-seats. The audio doppler
+     * reads it so a jump of the camera is not taken for motion.
+     */
+    getCutCount() {
+      return counters.viewChanges + counters.snaps + views.flyby.placements;
     },
 
     /** v1 camera mode: 'chase' | 'photo' | 'returning' (photo-mode state of the rig). */

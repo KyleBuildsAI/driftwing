@@ -53,6 +53,7 @@ export function createAudioSystem(ctx) {
   let parameterTimer = 0;
   let masterTimeConstant = 0.9;
   let view = 'chase';
+  let lastCameraCuts = null;
   let readyAt = null;
   let gamepadRefused = false;
   let notRunningFor = 0;
@@ -307,6 +308,7 @@ export function createAudioSystem(ctx) {
     classic: true,
     paused: false,
     interior: false,
+    cameraAttached: true,
     view,
     player: state.player,
     flight: state.flight,
@@ -327,6 +329,7 @@ export function createAudioSystem(ctx) {
     frame.paused = state.paused === true;
     frame.view = view;
     frame.interior = INTERIOR_VIEWS.has(view);
+    frame.cameraAttached = !state.photoMode && view !== 'flyby';
     frame.player = player;
     frame.flight = flight;
     frame.controls = ctx.controls;
@@ -345,6 +348,12 @@ export function createAudioSystem(ctx) {
     if (lastMode !== null && lastMode !== frame.classic) graph.flightCues.reset(time);
     lastMode = frame.classic;
     ensureEngine(frame.profile, time);
+    // A camera cut (view change, flyby relocation, re-seat) is not listener motion for the doppler.
+    const cameraCuts = ctx.systems.camera?.getCutCount?.() ?? null;
+    if (cameraCuts !== lastCameraCuts) {
+      lastCameraCuts = cameraCuts;
+      graph.spatializer.cut();
+    }
     const pitch = graph.spatializer.update(frame);
     graph.engine.update(frame, pitch);
     graph.airflow.update(frame);
