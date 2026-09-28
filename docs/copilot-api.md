@@ -87,15 +87,15 @@ invalid.
 
 The game runs the action and composes the final line:
 
-- **The action failed** (for example there is no chute on the glider, or the engine was asked
-  to stop in CLASSIC): WREN says the game's own explanation. Your speech is dropped, so the pilot never hears a
+- **The action failed** (for example there is no chute on the glider, or the switch to version one
+  was asked for from a page that is not the DRIFTWING launcher): WREN says the game's own explanation. Your speech is dropped, so the pilot never hears a
   success you could not confirm.
 - **An informative action succeeded** (`describe`, `find`, `waypoint`, `journal`, `ringCourse`,
   `setAssists`): your speech comes first, then the game's precise facts (distances, the new assist
   level and what it does). Keep your speech to a short lead-in, or leave it empty.
 - **Any other action succeeded**: your speech is used. If it is empty, WREN says the game's own
   confirmation. For aircraft actions an empty speech is usually best, because the game reports the
-  real outcome ("Engine off.", "We're already in SIM.").
+  real outcome ("Engine off.", "We're already flying the bush plane.").
 
 The line appears as a subtitle, is spoken if voice is on, and is published on the bus as
 `copilot:speech { text, source }` with source `remote`, `local` or `local-fallback`.
@@ -114,7 +114,7 @@ Numbers are rounded as shown, and a value that cannot be read is sent as `0` or 
 | `position` | `{ x, y, z }` m, integers | craft position |
 | `altitude` | m, integer | height above sea level |
 | `altitudeAboveGround` | m, integer | height above the ground or the sea surface (same as `agl`) |
-| `speed` | m/s, integer | speed along the flight path (CLASSIC: the arcade speed) |
+| `speed` | m/s, integer | airspeed along the flight path |
 | `speedKmh` | km/h, integer | `speed` in km/h |
 | `heading` | deg, integer | compass heading |
 | `headingName` | string | `north`, `north-east`, ... |
@@ -137,20 +137,18 @@ Numbers are rounded as shown, and a value that cannot be read is sent as `0` or 
 
 | field | type | meaning |
 | --- | --- | --- |
-| `mode` | `'classic'` \| `'sim'` | flight model. CLASSIC is v1's forgiving arcade flight. SIM is the real flight model, with assists, stalls and ground contact |
 | `craft` | string | active craft id: `glider`, `bushplane`, `jet`, `helicopter`, `wingsuit` or `fpv` |
 | `craftName` | string | display name, for example `Bush plane` |
 | `availableCraft` | string[] | the craft installed in this build (all six in Phase 1). `setCraft` to anything else is refused |
 | `units` | `'metric'` \| `'aviation'` | the pilot's units. Metric is km/h and metres; aviation is knots and feet. Speak in them |
 | `view` | string or `null` | last camera view the game reported (`chase`, `cockpit`, `wing`, `flyby`, `fpv`). `null` until the first view change |
-| `capabilities` | `{ engine, chute, flaps, throttle }` booleans | what the craft has. In CLASSIC `throttle` is always true |
-| `assists` | object | SIM flight assists for the active craft, below |
+| `capabilities` | `{ engine, chute, flaps, throttle }` booleans | what the craft has |
+| `assists` | object | flight assists for the active craft (the only difficulty control; every craft flies the real flight model), below |
 | `assists.level` | 0..1, 2 decimals | effective level (1 while the hands-off hold of a disconnected controller is active) |
 | `assists.percent` | integer 0..100 | `level` as a percentage |
 | `assists.configured` | 0..1 | the level the pilot set for this craft |
 | `assists.overridden` | boolean | the hands-off hold is forcing 100 % |
 | `assists.active` | string[] | the assists active at this level, for example `["auto-coordination", "auto-trim", "stall warning"]` |
-| `assists.appliesInMode` | boolean | true in SIM. CLASSIC ignores assists |
 | `airspeed` | object | speeds, below |
 | `airspeed.trueMs` | m/s, 1 decimal | true airspeed, relative to the air mass |
 | `airspeed.indicatedMs` | m/s, 1 decimal | indicated airspeed (true airspeed x sqrt(rho / 1.225)). Quote this as "airspeed" |
@@ -161,7 +159,7 @@ Numbers are rounded as shown, and a value that cannot be read is sent as `0` or 
 | `aoa` | deg, 1 decimal | angle of attack |
 | `gLoad` | g, 2 decimals | load factor (1 in level flight) |
 | `agl` | m, integer | height above the ground or the sea surface |
-| `windAtCraft` | object | the air motion at the craft, from the wind field (ambient wind, ridge lift, thermals, gusts). In CLASSIC the craft only feels a gentle share of it |
+| `windAtCraft` | object | the air motion at the craft, from the wind field (ambient wind, ridge lift, thermals, gusts) |
 | `windAtCraft.x`, `.y`, `.z` | m/s, 2 decimals | wind vector (world axes; +y is rising air) |
 | `windAtCraft.speed` | m/s, 1 decimal | horizontal wind speed |
 | `windAtCraft.fromDegrees` | deg or `null` | compass direction the wind blows FROM (`null` in calm air) |
@@ -170,8 +168,8 @@ Numbers are rounded as shown, and a value that cannot be read is sent as `0` or 
 | `windAtCraft.turbulence` | 0..1 | turbulence intensity |
 | `gear` | `{ retractable, down }` booleans | landing gear |
 | `flaps` | `{ position: 0..1, notch: integer }` | flaps |
-| `onGround` | boolean | wheels or skids on the ground (always false in CLASSIC) |
-| `engineOn` | boolean | engine or motors running (always true in CLASSIC) |
+| `onGround` | boolean | wheels or skids on the ground |
+| `engineOn` | boolean | engine or motors running |
 | `stall` | `{ warning, stalled }` booleans | stall warning and stall |
 | `lastLandingGrade` | `'butter'` \| `'smooth'` \| `'firm'` \| `'hard'` \| `null` | grade of the last landing this session |
 | `lastLanding` | `{ grade, sinkRate, groundSpeed, craft }` or `null` | sink rate at touchdown in m/s (2 decimals), ground speed in m/s |
@@ -196,12 +194,10 @@ instead. Optional parameters may be omitted or `null`. Extra unknown keys are ig
 | --- | --- | --- |
 | `waypoint` | `x`, `z` (numbers, both or neither, abs <= 1e7); `bearing` (number, wrapped to 0..360); `distance` (number, clamped 50..40000 m); `label` (string, cleaned, max 48 chars); `autopilot` (boolean) | places the waypoint beacon at `x, z`, or `distance` along `bearing` (default: 1500 m along the heading). `autopilot: true` also engages the autopilot to follow it |
 | `clearWaypoint` | none | removes the waypoint |
-| `autopilot` | `enabled` (boolean, required); `heading` (number, wrapped); `altitude` (number, clamped 40..2600 m); `followWaypoint` (boolean) | autopilot on or off. `followWaypoint` follows the waypoint or the next ring. In SIM it flies through the flight model |
+| `autopilot` | `enabled` (boolean, required); `heading` (number, wrapped); `altitude` (number, clamped 40..2600 m); `followWaypoint` (boolean) | autopilot on or off. `followWaypoint` follows the waypoint or the next ring. It flies through the flight model |
 | `time` | `preset` (one of `dawn sunrise morning noon golden sunset dusk night midnight`) or `dayTime` (number, wrapped to 0..1) | moves the clock |
 | `ringCourse` | `count` (number, rounded, clamped 3..24; default 10) | starts a ring course |
 | `cancelRingCourse` | none | stops the course |
-| `barrelRoll` | `direction` (`left` \| `right`) | CLASSIC only; refused in SIM |
-| `boost` | none | CLASSIC only; refused in SIM or while recharging |
 | `find` | `target` (one of `mountains snow ocean archipelago islands desert dunes forest pine meadows flowers landmark arch monoliths lighthouse balloons`); `autopilot` (boolean) | finds the nearest such place, sets a waypoint and reports it |
 | `describe` | none | the game describes where we are |
 | `photoMode` | `enabled` (boolean; omitted toggles) | photo mode on or off |
@@ -212,14 +208,14 @@ instead. Optional parameters may be omitted or `null`. Extra unknown keys are ig
 
 | type | parameters | validation | effect and outcome |
 | --- | --- | --- | --- |
-| `setCraft` | `craft`: `glider` \| `bushplane` \| `jet` \| `helicopter` \| `wingsuit` \| `fpv` (case-insensitive) | any other value is invalid | writes the `craft` setting. The flight controller applies it or refuses it. A craft that is not in `availableCraft` is refused with a friendly line that names the installed craft. If SIM is not available for the new craft, it flies in CLASSIC and WREN says so |
-| `setMode` | `mode`: `classic` \| `sim` | any other value is invalid | writes the `mode` setting. WREN reports whether the controller accepted it ("SIM mode. Real aerodynamics now...") or kept CLASSIC |
-| `setAssists` | exactly one of: `level` (number 0..1, rounded to 0.01) or `change` (`up` \| `down` \| `full` \| `off`) | both or neither, a level outside 0..1, or an unknown change is invalid | sets the assists of the active craft. `up` and `down` move to the next 25 % step, `full` is 100 % and `off` is 0 %. WREN reports the new level and what is active ("auto-coordination, auto-trim and stall warning, with AoA limiter at part strength"). In CLASSIC it adds that assists apply in SIM |
+| `setCraft` | `craft`: `glider` \| `bushplane` \| `jet` \| `helicopter` \| `wingsuit` \| `fpv` (case-insensitive) | any other value is invalid | writes the `craft` setting. The flight controller applies it or refuses it. A craft that is not in `availableCraft` is refused with a friendly line that names the installed craft |
+| `setAssists` | exactly one of: `level` (number 0..1, rounded to 0.01) or `change` (`up` \| `down` \| `full` \| `off`) | both or neither, a level outside 0..1, or an unknown change is invalid | sets the assists of the active craft. `up` and `down` move to the next 25 % step, `full` is 100 % and `off` is 0 %. WREN reports the new level and what is active ("auto-coordination, auto-trim and stall warning, with AoA limiter at part strength"). It counts as the pilot's own choice, so the one-time HOTAS default (50 %) leaves that craft alone |
 | `setView` | `view`: `cockpit` \| `chase` | any other value is invalid | sends the `viewForward` or `viewBack` input action (`input:action`, source `copilot`), then waits up to 1.2 s for the camera to confirm the change. On the FPV drone the first-person view is its FPV camera (`view: 'fpv'`), which counts as the cockpit. If the camera does not switch, WREN says so |
-| `deployChute` | none | | refused with "No chute on the ..." when the craft has no chute. Otherwise sends `chuteDeploy` and confirms only when the canopy is open (`craftState.canopy`). The chute works in SIM |
-| `engine` | `enabled` (boolean, required) | a missing or non-boolean value is invalid | refused on craft without an engine, and in CLASSIC (where the engine always runs). If the engine is already in that state, WREN says so. Otherwise sends `engineToggle` and confirms only when `engineOn` changes (up to 1.2 s) |
+| `deployChute` | none | | refused with "No chute on the ..." when the craft has no chute. Otherwise sends `chuteDeploy` and confirms only when the canopy is open (`craftState.canopy`) |
+| `engine` | `enabled` (boolean, required) | a missing or non-boolean value is invalid | refused on craft without an engine. If the engine is already in that state, WREN says so. Otherwise sends `engineToggle` and confirms only when `engineOn` changes (up to 1.2 s) |
 | `relaunch` | none | | the craft's relaunch: aerotow to 1000 m above the ground for the glider (refused from 950 m above the ground, or while on tow), a dive from the nearest high peak for the wingsuit, or an airstart 300 m up for the others (the helicopter and the drone come back hovering). Refused during a soft-crash reset |
 | `calibrate` | `calibrate` (boolean, optional; the wizard always opens) | a non-boolean value is invalid | opens the controls panel with the calibration wizard (`ui:openControls { calibrate: true }`). It is refused honestly when this build has no controls panel |
+| `switchVersion` | `version`: `v1` (required, case-insensitive) | a missing version or any other value (`v2` included) is invalid | switches to version one, the original DRIFTWING, by sending the `versionToggle` input action (source `copilot`). Inside the launcher shell (`/`) the shell switches; V2 opened on its own at `/v2/` opens the shell with `?v=1`. On a page that is not the launcher it is refused ("Switching to version one works from the DRIFTWING launcher page."). The confirmation is spoken as the switch starts; this game is version two, so there is nothing to switch back to from here |
 
 Everything the local grammar says maps onto these same actions, so a remote brain can do
 everything the local one can.
@@ -242,7 +238,7 @@ unknown path, `405` for anything but POST on `/copilot`, and `413` for a body ov
 Switch craft (the game confirms or refuses):
 
 ```json
-request  { "transcript": "let's take the cub", "flightState": { "mode": "sim", "craft": "glider", "availableCraft": ["glider", "bushplane", "jet", "helicopter", "wingsuit", "fpv"], "...": "..." } }
+request  { "transcript": "let's take the cub", "flightState": { "craft": "glider", "availableCraft": ["glider", "bushplane", "jet", "helicopter", "wingsuit", "fpv"], "...": "..." } }
 response { "speech": "", "action": { "type": "setCraft", "craft": "bushplane" } }
 heard    "Bush plane it is."
 ```
@@ -265,6 +261,13 @@ response { "speech": "Easing off the training wheels.", "action": { "type": "set
 heard    "Easing off the training wheels. Assists at 75 percent for the bush plane: auto-coordination, auto-trim and stall warning, with AoA limiter, G limiter, auto-level, flight-path hold, bank protection, pitch protection and overspeed protection at part strength."
 ```
 
+Version one (the game switches as soon as it confirms):
+
+```json
+response { "speech": "", "action": { "type": "switchVersion", "version": "v1" } }
+heard    "Switching to version one, the original game."
+```
+
 A question the endpoint answers from flightState:
 
 ```json
@@ -272,7 +275,7 @@ request  { "transcript": "how was my landing", "flightState": { "units": "aviati
 response { "speech": "A butter landing, 60 feet a minute at touchdown.", "action": null }
 ```
 
-Engine off in SIM:
+Engine off:
 
 ```json
 response { "speech": "", "action": { "type": "engine", "enabled": false } }
@@ -297,7 +300,7 @@ do". The keys shown are the defaults, and WREN reads the live bindings:
 | command | equivalent |
 | --- | --- |
 | switch to [craft] | keys 1-6, `[` / `]`, the craft picker |
-| sim mode / classic mode | V, the CLASSIC \| SIM pill |
+| switch to version one ("version one", "v1", "play the original") | F8, T.16000M base button 10, the launcher's V1 \| V2 pill |
 | assists up / down / full / off | the assists slider in Settings (`,`) |
 | cockpit view / chase view | Numpad 8 / Numpad 2, the stick hat up / down |
 | deploy chute | U |
@@ -306,4 +309,4 @@ do". The keys shown are the defaults, and WREN reads the live bindings:
 | calibrate controls | `.` (controls panel) |
 | push-to-talk | hold `` ` `` or the HOTAS trigger (the `copilotPTT` action); M or the mic button toggles the mic |
 
-In SIM the command bar also shows an "Aircraft" row of quick chips for these commands.
+The command bar also shows an "Aircraft" row of quick chips for these commands.

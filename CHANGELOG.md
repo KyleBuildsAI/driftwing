@@ -6,6 +6,46 @@ All notable changes to DRIFTWING are documented here. The format is based on
 `2.0.0-phase.1`; Phases 2-4 (the event director and spawns, more craft, then Spotify, VR, replay
 and a multiplayer wingman) follow as later pre-releases of 2.0.0.
 
+## [Unreleased]
+
+The structure correction: DRIFTWING is two separate games behind one toggle, V1 (frozen) and V2.
+
+### Removed
+
+- CLASSIC mode from V2: the CLASSIC | SIM pill, the `modeToggle` action and its bindings on every
+  device, `src/flight/ArcadeModel.js` (and its hover extension), every craft's `arcadeProfile`,
+  the CLASSIC wind drift and mode switching in the flight controller, the `modeChanged` event, the
+  `mode` telemetry and copilot fields, and the `setMode` copilot action.
+- The CLASSIC boost (Space), the double-tap barrel roll, their touch buttons, HUD ring, sounds,
+  camera shake and particle burst, and the `boost` / `barrelRoll` copilot actions.
+- The "HOTAS detected - switch to SIM?" prompt and its `hotasPrompt` setting.
+- The legacy `ctx.input` struct; the Shift fine-control modifier (CLASSIC only).
+- `tools/arcade-parity.mjs` and `tools/parity/`, and the CLASSIC conversion checks in the labs and
+  the flight-test harness (which now flies each craft once per seed).
+
+### Changed
+
+- V2 boots straight into the real flight model. The assists slider (0-100 % per craft) is the only
+  difficulty control: 100 % by default, and the first HOTAS device sets 50 % on every craft whose
+  assists the player never set, once, with a toast.
+- One keyboard layer: G gear, N waypoint ahead, C view cycle, Space craft ability; Enter and /
+  open the command bar; plain V is free.
+- The touch virtual stick and throttle slider feed ControlState through `ctx.systems.input.touch`.
+- `versionToggle` moved to T.16000M base button 10 (it was TWCS button 8).
+- Settings version 4: `mode`, `views` and `hotasPrompt` are dropped (the SIM view becomes `view`),
+  and `assistsSetByPlayer` / `hotasAssistsApplied` are added. Stored bindings for the retired
+  actions and Phase 1's CLASSIC-only key references are dropped quietly.
+- The variometer audio is `on` or `off` (Phase 1's `auto` reads as `on`).
+
+### Added
+
+- WREN: "switch to version one" (also "version one", "v1", "switch to v1", "play the original"),
+  the `switchVersion` remote action (`version: 'v1'`, strictly validated) and its rule in
+  `tools/copilot-server.mjs`.
+- `tools/lab/settings.mjs` (settings migrations, the HOTAS assist default) and
+  `tools/lab/copilot.mjs` (WREN's grammar and the `switchVersion` schema); the HOTAS harness checks
+  the assist default across a reload.
+
 ## [2.0.0-phase.1] - 2026-09-27
 
 Phase 1 of v2: the sim core, HOTAS support, the six wave-1 craft, the cockpit and procedural audio.

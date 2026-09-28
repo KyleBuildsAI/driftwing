@@ -32,18 +32,18 @@ a ring course.
 *The bush plane's cockpit, the jet at golden hour, the helicopter in a hover, and the controls panel
 with a Thrustmaster stick connected.*
 
-- **Two ways to fly.** **CLASSIC** is the v1 game, exactly as it was: forgiving, and it never
-  stalls into a spin. **SIM** is a real flight model, with lift, drag, stalls, wind, ground contact
-  and landings. An assists slider (0-100 %) decides how much help you get. Switch at any time with
-  the pill in the top left or the **V** key, even mid-flight.
+- **A real flight model.** Lift, drag, stalls, wind, ground contact and landings, for every craft.
+  An assists slider (0-100 % per craft) is the only difficulty setting: 100 % by default, and the
+  first HOTAS you connect sets 50 % on every craft you have not set yourself. V1, the original
+  game, is still one click away: the launcher's **V1 | V2** pill, **F8**, or ask WREN to "switch to
+  version one".
 - **Six aircraft**, keys **1-6**:
-  1. the glider (the v1 plane, a real sailplane in SIM);
+  1. the glider (the v1 plane, flown as a real sailplane);
   2. a bush plane;
   3. a supersonic jet;
   4. a helicopter;
   5. a wingsuit with a parachute;
   6. an FPV racing drone.
-  Every one flies in both modes.
 - **Joysticks and HOTAS.** Xbox-style gamepads work out of the box, and so does the Thrustmaster
   T.16000M FCS Flight Pack (stick, throttle and rudder pedals). There is a controls panel to rebind
   anything, and a calibration wizard.
@@ -51,7 +51,7 @@ with a Thrustmaster stick connected.*
   wing, flyby and FPV cameras.
 - **Procedural sound.** Engines, rotors, wind, a stall horn, a variometer and touchdowns, all
   generated live, with no audio files.
-- **Wind you can use.** Thermals, ridge lift and gusts in SIM, so the glider can climb for real.
+- **Wind you can use.** Thermals, ridge lift and gusts, so the glider can climb for real.
 
 ## Play it
 
@@ -74,7 +74,7 @@ On macOS or Linux, run `npm install` once and then `npm run dev` in this folder,
 
 ### Online
 
-The version on GitHub Pages is v1, which is what CLASSIC mode plays:
+The version on GitHub Pages is v1, the original game (the launcher opens the same game at `/?v=1`):
 <https://kylebuildsai.github.io/driftwing/>. Share a world by copying the URL; it always carries
 the seed, for example <https://kylebuildsai.github.io/driftwing/?seed=K7Q2ZD>.
 
@@ -83,41 +83,40 @@ the seed, for example <https://kylebuildsai.github.io/driftwing/?seed=K7Q2ZD>.
 The full list, including every gamepad and HOTAS button, is in [docs/controls.md](docs/controls.md).
 Everything can be rebound in the controls panel (`.`).
 
-| action | CLASSIC | SIM |
-| --- | --- | --- |
-| Pitch and bank | mouse (click the view to capture it), arrow keys, A / D | the same; the mouse is a virtual stick that stays where you leave it |
-| Rudder | Q / E | Q / E |
-| Throttle | W / S, mouse wheel | W / S move the throttle lever, mouse wheel |
-| Boost / barrel roll | Space / double-tap A or D | (off in SIM) |
-| Craft ability | | Space (water ballast, smoke, afterburner, hover hold, parachute, drone flight mode) |
-| Gear / flaps / airbrake | | G / F and Shift+F / hold B |
-| Switch CLASSIC / SIM | V | V |
-| Pick a craft | 1-6, or [ and ] | 1-6, or [ and ] |
-| Change view | Numpad 8 cockpit, Numpad 2 chase | C cycles views; Numpad 8 / 2 as well |
-| Waypoint ahead | G | N |
-| Relaunch, engine, parachute | Backspace, Z, U | Backspace, Z, U |
-| Talk to WREN | M (mic), hold ` (push to talk), Enter or / to type | the same |
-| WREN's voice on / off | Shift+V | Shift+V |
-| Photo mode, journal, help | P, J, H | P, J, H |
-| Settings, controls panel | `,` and `.` | `,` and `.` |
+| action | keys |
+| --- | --- |
+| Pitch and bank | mouse (click the view to capture it: a virtual stick that stays where you leave it), arrow keys, A / D |
+| Rudder | Q / E |
+| Throttle | W / S move the throttle lever, mouse wheel |
+| Craft ability | Space (water ballast, smoke, afterburner, hover hold, parachute, drone flight mode) |
+| Gear / flaps / airbrake | G / F and Shift+F / hold B |
+| Pick a craft | 1-6, or [ and ] |
+| Change view | C cycles views; Numpad 8 cockpit, Numpad 2 chase |
+| Waypoint ahead | N |
+| Relaunch, engine, parachute | Backspace, Z, U |
+| Switch to V1, the original game | F8 |
+| Talk to WREN | M (mic), hold ` (push to talk), Enter or / to type |
+| WREN's voice on / off | Shift+V |
+| Photo mode, journal, help | P, J, H |
+| Settings, controls panel | `,` and `.` |
 
 - **Mouse:** right-drag looks around, and a middle click recenters the view.
-- **Touch:** the on-screen joystick and throttle slider work in both modes.
+- **Touch:** the on-screen virtual stick and throttle slider fly every craft.
 - **Gamepad** (Xbox-style): left stick flies, triggers are the throttle, bumpers the rudder, A is
-  boost or the craft ability, and the right stick looks around.
+  the craft ability, and the right stick looks around.
 - **HOTAS** (T.16000M + TWCS + TFRP):
   - the stick flies, and its twist is the rudder until the pedals move;
   - the throttle lever is the throttle (the collective on the helicopter);
   - the pedals and toe brakes steer and brake;
   - the rocker trims, the antenna slider sets flaps or zoom, and the mini-stick looks around;
-  - the trigger is push-to-talk, and the stick hat snaps the view.
+  - the trigger is push-to-talk, the stick hat snaps the view, and base button 10 switches to V1.
 
 ## Settings
 
 Open Settings with `,` or the gear icon. There are five tabs:
 
 - **Flight**:
-  - the assists slider for the current craft;
+  - the assists slider for the current craft (the only difficulty control);
   - start on the ground (for take-off practice);
   - units (km/h and metres, or knots and feet);
   - the instrument HUD overlay and landing callouts;
@@ -127,7 +126,7 @@ Open Settings with `,` or the gear icon. There are five tabs:
 - **Sound**: master volume and a mixer for engine, environment, interface, WREN and music.
 - **Controls**:
   - mouse sensitivity and invert pitch;
-  - HOTAS options: twist yaw, the afterburner detent, and what to do when a HOTAS connects;
+  - HOTAS options: twist yaw and the afterburner detent;
   - buttons that open the controls panel and the calibration wizard.
 - **General**:
   - day length and freezing time;
@@ -145,8 +144,8 @@ the command bar. Things to try:
 
 - "Where am I?", "Find mountains", "Take us there", "Set a waypoint", "Autopilot on", "Head west"
 - "Make it night", "Golden hour", "Ring course", "Photo mode", "Journal"
-- "Switch to the helicopter", "Sim mode", "Assists down", "Cockpit view", "Deploy chute",
-  "Engine off", "Relaunch", "Calibrate controls", "Airspeed", "How was my landing?"
+- "Switch to the helicopter", "Assists down", "Cockpit view", "Deploy chute", "Engine off",
+  "Relaunch", "Calibrate controls", "Airspeed", "How was my landing?", "Switch to version one"
 
 **Remote brain.** `RemoteCopilot` can send each request to your own HTTP endpoint (for example one
 backed by a language model) and falls back to the local grammar after 800 ms. A reference server
@@ -231,17 +230,17 @@ src/main.js              composition root: boot, systems, frame loop
 src/core/                config, storage (IndexedDB), settings, events, fixed-step clock, frame loop, perf
 src/render/              renderer boot, post stack, sky, clouds, water, birds, effects
 src/world/               world generator (shared height function), terrain worker and chunks, landmarks
-src/flight/              flight controller, arcade and SIM models, assists, autopilot, trim, ground contact
+src/flight/              flight controller, flight models, assists and their defaults, autopilot, trim, ground contact
 src/craft/               craft registry and the six craft modules
 src/input/               InputManager, keyboard / mouse / touch, gamepad and HOTAS, bindings, calibration
 src/camera/              camera manager, chase rig, cockpit, wing, flyby and FPV views
 src/audio/               AudioEngine, mixer, engine synths, cues, callouts
 src/env/                 WindField
-src/ui/                  glass UI, pill, picker, settings, controls panel, instruments
+src/ui/                  glass UI, craft picker, settings, controls panel, instruments
 src/copilot/             WREN: local grammar, remote brain, aircraft actions
 src/gameplay/            journal, ring courses, waypoints
 src/dev/                 dev badge, wind overlay, debug wind source, mock gamepads, test harnesses
-tools/                   smoke test, harness runner, parity proof, flight labs, copilot server, static server
+tools/                   smoke test, harness runner, flight and system labs, copilot server, static server
 public/v1/index.html     the original single-file v1 game, frozen byte-for-byte
 docs/                    architecture, controls, copilot API, screenshots
 start-driftwing.bat      one-click start for Windows
@@ -258,17 +257,16 @@ start-driftwing.bat      one-click start for Windows
   step file: WREN's start view, the seeded wind, doppler across a view cut, leaving photo mode into
   a chase view chosen meanwhile, and the jet's contrails in level cruise (read the `evals` in the
   report).
-- **CLASSIC parity.** `node tools/arcade-parity.mjs --suite all` checks that CLASSIC flies
-  bit-for-bit like v1.
 - **Flight labs.** `node tools/flight-lab.mjs` covers the glider and bush plane, and
   `node tools/lab/jet.mjs` (also `helicopter.mjs`, `wingsuit.mjs`, `fpv.mjs`) the others. They fly
-  the SIM models headless and check them against their targets. `node tools/lab/storage.mjs`
-  checks saved data against a hung or closed IndexedDB, and `node tools/lab/copilot-server.mjs`
-  which origins the copilot server accepts.
+  the flight models headless and check them against their targets. `node tools/lab/storage.mjs`
+  checks saved data against a hung or closed IndexedDB, `node tools/lab/settings.mjs` the settings
+  migrations and the one-time HOTAS assist default, `node tools/lab/copilot.mjs` WREN's grammar,
+  and `node tools/lab/copilot-server.mjs` which origins the copilot server accepts.
 - **Test harnesses** (dev server only).
-  - `?test=1` flies all six craft in both modes across three seeds and reports fps, frame times,
+  - `?test=1` flies all six craft across three seeds and reports fps, frame times,
     NaN events, terrain penetrations, soft crashes and heap growth.
-  - `?test=hotas` checks the HOTAS pipeline with mock devices.
+  - `?test=hotas` checks the HOTAS pipeline and the HOTAS assist default with mock devices.
   - `node tools/run-harness.mjs --test 1|hotas` runs either one headlessly.
 
 ### Documentation
@@ -318,9 +316,11 @@ repository, GitHub Pages, the release, the topics, the v1 screenshots and this n
 3. **Phase 3**: more craft.
 4. **Phase 4**: Spotify, WebXR VR, a flight recorder with replay, and a multiplayer wingman.
 
-For Phase 1, Opus 5.5 turned the single file into a Vite project with a proof that CLASSIC still
-matches v1 bit for bit. It then built the new systems with parallel sub-agents in separate git
-worktrees, one merge per milestone, and reviewed and verified each wave. The Phase 1 screenshots
+For Phase 1, Opus 5.5 turned the single file into a Vite project and built the new systems with
+parallel sub-agents in separate git worktrees, one merge per milestone, and reviewed and verified
+each wave. A structure correction then made DRIFTWING two separate games behind one toggle: V1
+frozen byte-for-byte, and V2 flying only the real flight model (Phase 1's CLASSIC mode, a port of
+v1's arcade flight inside V2, was removed). The Phase 1 screenshots
 above were captured from the single-file build with the headless smoke-test tool.
 
 <details>
