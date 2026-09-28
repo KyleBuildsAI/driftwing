@@ -87,7 +87,7 @@ function createBiomeTracker(ctx) {
  *   prewarm         { forceDrawable(), finish() }: forceDrawable runs before every render until the
  *                   fade lifts; finish runs once as it lifts (end the systems' prewarm, restore proxies)
  *   captureScreenshot()  saves the canvas; called right after a render that a screenshot request raised
- * Returns { frame(timeMs), requestScreenshot(options), disabledSystems, readyMs }.
+ * Returns { frame(timeMs), resetTiming(), requestScreenshot(options), disabledSystems, readyMs }.
  */
 export function createFrameLoop(ctx, { updateOrder, render, spawnHeading, prewarm, captureScreenshot }) {
   const { state, bus, uniforms } = ctx;
@@ -180,6 +180,13 @@ export function createFrameLoop(ctx, { updateOrder, render, spawnHeading, prewar
 
   return {
     frame,
+    /**
+     * Forgets the last frame time, so the next frame starts the timing afresh (realDt 1/60 s and no
+     * physics time). Used when frames are driven by hand (the dev frame stepper in main.js).
+     */
+    resetTiming() {
+      lastTimeMs = null;
+    },
     /** Asks for a screenshot on the next frame (scale: pixel ratio multiplier, default 1.5). */
     requestScreenshot(options = {}) {
       screenshotRequest = { scale: options.scale ?? 1.5 };

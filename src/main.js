@@ -522,6 +522,42 @@ async function boot() {
       };
     },
   };
+  // Dev hooks only (dev builds, ?debug=1, ?test): scripted checks can stop the animation loop and
+  // step frames by hand at a fixed frame time, so two runs see the same frame and physics timing
+  // (tools/steps/view-physics.json flies the same inputs in different views this way).
+  if (import.meta.env.DEV || params.get('debug') === '1' || params.has('test')) {
+    const stepper = { paused: false, timeMs: 0 };
+    debugHandle.debug = {
+      /** Stops the animation loop; frames then run only through stepFrames(). */
+      pauseLoop() {
+        if (stepper.paused) return;
+        stepper.paused = true;
+        renderer.setAnimationLoop(null);
+        stepper.timeMs = performance.now();
+        loop.resetTiming();
+      },
+      /** Restarts the next stepped frame's timing (its frame carries no physics time). */
+      resetTiming() {
+        loop.resetTiming();
+      },
+      /** Runs count frames of frameMs each (the loop must be paused); returns state.frame. */
+      stepFrames(count = 1, frameMs = 1000 / 60) {
+        if (!stepper.paused) throw new Error('DRIFTWING.debug.stepFrames: call pauseLoop() first');
+        for (let index = 0; index < count; index++) {
+          stepper.timeMs += frameMs;
+          loop.frame(stepper.timeMs);
+        }
+        return state.frame;
+      },
+      /** Hands the frames back to the animation loop. */
+      resumeLoop() {
+        if (!stepper.paused) return;
+        stepper.paused = false;
+        loop.resetTiming();
+        renderer.setAnimationLoop(loop.frame);
+      },
+    };
+  }
   window.DRIFTWING = debugHandle;
   bus.on('game:ready', () => { debugHandle.ready = true; });
 
