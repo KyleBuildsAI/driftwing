@@ -312,7 +312,9 @@ start-driftwing.bat      one-click start for Windows
   - `?test=hotas` checks the HOTAS pipeline, persistence across a reload and the HOTAS assist
     default with mock devices.
   - `node tools/run-harness.mjs --test 1|hotas [--backend webgl] [--views first,third]` runs
-    either one headlessly.
+    either one headlessly. For every frame over 50 ms it also records what the rest of the
+    machine was doing at that moment: other programs' CPU and GPU load against the harness's own
+    (named per program on Windows), the whole machine's CPU and the GPU's utilisation.
 
 ### Documentation
 
@@ -332,6 +334,10 @@ start-driftwing.bat      one-click start for Windows
   0.1 s on some machines, so a single frame may stutter at that moment.
 - The WebGL2 fallback takes a few seconds longer to start than WebGPU, because WebGL compiles its
   shaders synchronously.
+- When the auto-hidden HUD fades back in (a toast, the autopilot switching, the chute opening),
+  Chrome rasterizes it on its GPU process's main thread, the thread that also runs WebGPU: about
+  20-40 ms of work spread over a few frames. On an idle machine the slowest of those frames
+  measured 18-38 ms; on a machine busy with other programs one of them can pass 50 ms.
 - The Thrustmaster product ids and button numbers are the published ones and have been tested with
   mock devices. The first session with the real hardware should follow the checklist in
   [docs/controls.md](docs/controls.md#hotas-hardware-checklist). Every binding can be changed in
