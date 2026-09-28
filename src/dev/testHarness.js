@@ -7,6 +7,8 @@
 // harness reloads the page with the seed in the URL and carries its progress, results and console
 // log across reloads in sessionStorage (key SESSION_KEY). Its settings live in an isolated IndexedDB
 // database (TEST_DATABASE), so the player's own settings, bindings and calibration are never touched.
+// The scripted pilot is the only input: real gamepads on the machine are hidden behind an empty
+// Gamepad API mock for the whole test (listed in the report as environment.hiddenGamepads).
 //
 // Measured per run and in total:
 //   - frame time: every frame interval (ms). Average fps, p50 / p99 / max frame time and the frames
@@ -55,6 +57,7 @@
 import { installConsoleCapture } from './testConsole.js';
 import { flightScriptFor, SCRIPTED_CRAFT } from './testFlightScripts.js';
 import { createFrameProfiler } from './testFrameProfiler.js';
+import { installMockGamepads } from './mockGamepads.js';
 import { createTestPanel } from './testPanel.js';
 import { createFrameRecorder, delay, gcAvailable, heapAvailable, readHeapMB, readSession, round, writeSession } from './testStats.js';
 import { clamp, isFiniteQuaternion, isFiniteVector, wrapDegrees } from '../core/util.js';
@@ -158,13 +161,37 @@ function createBucket() {
 export function prepareFlightTest({ params }) {
   const listeners = { entry: null };
   const capture = installConsoleCapture({ onEntry: (entry) => listeners.entry?.(entry) });
+  const hiddenGamepads = hideRealGamepads();
   return {
     databaseName: TEST_DATABASE,
-    createSystem: (ctx) => createFlightTestSystem(ctx, { params, capture, listeners }),
+    createSystem: (ctx) => createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepads }),
   };
 }
 
-function createFlightTestSystem(ctx, { params, capture, listeners }) {
+/**
+ * The scripted pilot must be the only input. A real stick, throttle or pedals on the test machine
+ * would otherwise fly along (an uncalibrated pedal resting off centre overrides the autopilot), so
+ * navigator.getGamepads is replaced by an empty mock (mockGamepads.js, no devices plugged) before
+ * the input system starts. Returns listHidden(): the ids of the real devices seen so far, read
+ * through the browser's own Navigator.prototype.getGamepads (Chrome lists a device only after one
+ * of its buttons was pressed, so the list can grow during the test).
+ */
+function hideRealGamepads() {
+  const realGetGamepads = typeof Navigator !== 'undefined' ? Navigator.prototype.getGamepads : null;
+  const seen = new Set();
+  installMockGamepads();
+  return function listHidden() {
+    if (typeof realGetGamepads !== 'function') return [...seen];
+    try {
+      for (const pad of realGetGamepads.call(navigator)) if (pad) seen.add(pad.id);
+    } catch (error) {
+      seen.add(`unreadable: ${error.message}`);
+    }
+    return [...seen];
+  };
+}
+
+function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepads }) {
   const { state, bus, settings, world, CONFIG } = ctx;
   const panel = createTestPanel({ title: 'Flight test' });
   /** The run being flown (null between runs); console entries and events are booked to it. */
@@ -306,6 +333,15 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
   });
   bus.onTyped('relaunched', () => {
     if (activeRun) activeRun.seen.relaunches++;
+  });
+  // Every autopilot engage / disengage in a run, with its reason (a disengage the script did not ask
+  // for, such as a manual override, shows up here).
+  bus.on('autopilot:changed', (payload) => {
+    if (!activeRun || !payload) return;
+    const changes = activeRun.autopilotChanges;
+    const last = changes[changes.length - 1];
+    if (last && last.enabled === payload.enabled && last.reason === payload.reason) return;
+    if (changes.length < MAX_EVENT_DETAILS) changes.push({ at: runTime(), enabled: Boolean(payload.enabled), reason: payload.reason ?? null });
   });
   bus.on('game:ready', () => {
     profiler.instrument();
@@ -533,6 +569,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
       script,
       stepIndex: 0,
       stepLog: [],
+      autopilotChanges: [],
       setupOk,
       setupNotes,
       bucket: createBucket(),
@@ -614,7 +651,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
       heapStartMB: run.heapStartMB,
       heapEndMB,
       heapDeltaMB: Number.isFinite(run.heapStartMB) && Number.isFinite(heapEndMB) ? round(heapEndMB - run.heapStartMB, 2) : null,
-      script: { checks, steps: run.stepLog },
+      script: { checks, steps: run.stepLog, autopilotChanges: run.autopilotChanges },
       observed: {
         autopilotSeconds: round(seen.autopilotSeconds, 1),
         barrelRoll: seen.barrelRoll,
@@ -750,6 +787,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
         hardwareConcurrency: navigator.hardwareConcurrency ?? null,
         heap: heapMeasured ? (gcAvailable() ? 'performance.memory after a forced GC' : 'performance.memory (no forced GC: start Chrome with --js-flags=--expose-gc for exact readings)') : 'unavailable',
         database: ctx.storage.databaseName,
+        hiddenGamepads: hiddenGamepads(),
       },
       config,
       definitions: {
@@ -899,6 +937,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
         ['Runs', `${report.totals.runs} x ${config.runSeconds} s`],
         ['Warmup', `${config.worldWarmupSeconds} s + a ${config.warmupLapSeconds} s lap per craft and mode per world, ${config.runWarmupSeconds} s per run`],
         ['Heap', report.environment.heap],
+        ['Input', report.environment.hiddenGamepads.length > 0 ? `scripted only (${report.environment.hiddenGamepads.length} real gamepad(s) hidden)` : 'scripted only'],
         ['Finished', report.finishedAt ? new Date(report.finishedAt).toLocaleString() : '-'],
       ],
       criteria: report.criteria,
