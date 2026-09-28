@@ -103,6 +103,11 @@ function createRecord() {
     bearing: 0,
     offAxis: 0,
     score: 0,
+    /** The director's ranking for one choice (due tier, ahead score and roll). */
+    rank: 0,
+    /** Its environment filters admit it now (the director lists it as dormant). */
+    viable: false,
+    /** The director may activate it now. */
     eligible: false,
     /** Why the director passed it over ('' when eligible). */
     rejection: '',
@@ -126,9 +131,11 @@ export function createCandidatePool(initialCapacity = 64) {
       if (pool.count === records.length) records.push(createRecord());
       const record = records[pool.count++];
       record.siteIndex = -1;
+      record.viable = false;
       record.eligible = false;
       record.rejection = '';
       record.score = 0;
+      record.rank = 0;
       return record;
     },
   };
