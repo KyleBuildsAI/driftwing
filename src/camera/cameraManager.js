@@ -72,6 +72,8 @@ export function createCameraSystem(ctx) {
 
   let view = 'chase';
   let photo = false;
+  // A view change during photo mode (a voice mode or craft switch) skips enterView; photo exit runs it.
+  let enterPendingAfterPhoto = false;
   let fovSettings = readFovSettings();
   const look = { yaw: 0, pitch: 0, snapYaw: 0 };
   const pose = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion(), fov: CONFIG.CAMERA.FOV_BASE, near: CONFIG.CAMERA.NEAR };
@@ -296,6 +298,7 @@ export function createCameraSystem(ctx) {
       look.snapYaw = 0;
       view = next;
       if (!photo) enterView(next);
+      else enterPendingAfterPhoto = true;
       counters.viewChanges++;
       emitViewChanged();
     }
@@ -445,16 +448,23 @@ export function createCameraSystem(ctx) {
     if (next === photo) return;
     photo = next;
     if (photo) {
+      enterPendingAfterPhoto = false;
       returnFlight.active = false;
       setInterior(false);
       restoreChaseLens();
       chaseRig.setPhotoMode(true);
       return;
     }
+    const viewChangedInPhoto = enterPendingAfterPhoto;
+    enterPendingAfterPhoto = false;
     if (view === 'chase') {
+      // Re-attaches the rig when chase was chosen during photo mode, so its return flight ends on
+      // the live chase camera instead of a detached rig that no longer writes the camera.
+      if (viewChangedInPhoto) enterView('chase');
       chaseRig.setPhotoMode(false);
       return;
     }
+    if (viewChangedInPhoto && view === 'flyby') views.flyby.reset();
     returnFlight.fromPosition.copy(camera.position);
     returnFlight.fromQuaternion.copy(camera.quaternion);
     returnFlight.fromFov = camera.fov;
