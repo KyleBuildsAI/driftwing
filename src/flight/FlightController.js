@@ -60,6 +60,8 @@ const CONVERSION_MAX_BANK = 66 * DEG;
 const SPEED_BLEND_MIN_CHANGE = 0.5;
 /** SIM -> CLASSIC: the arcade model starts at least this far (m/s) above its soft-stall speed. */
 const CLASSIC_STALL_MARGIN = 4;
+/** SIM -> CLASSIC for a landed hover craft: it starts this far (m) above its CLASSIC hover floor. */
+const CLASSIC_HOVER_LIFT = 1;
 /** CLASSIC feels the wind field only as a gentle drift: shares of the calm (gust-free) air motion. */
 const CLASSIC_WIND = Object.freeze({ HORIZONTAL_SHARE: 0.25, VERTICAL_SHARE: 0.3, LAMBDA: 0.8 });
 
@@ -261,6 +263,13 @@ export function createFlightController(ctx) {
     if (sim && typeof sim.dispose === 'function') sim.dispose();
     sim = null;
     speedBlend.active = false;
+    clearModelActions();
+  }
+
+  /** Drops queued model actions: they belong to the model (and moment) they were pressed for. */
+  function clearModelActions() {
+    modelActions.clear();
+    quietModelActions.clear();
   }
 
   function createSimModel(kind) {
@@ -614,7 +623,10 @@ export function createFlightController(ctx) {
     return true;
   }
 
-  /** SIM -> CLASSIC: velocity vector -> arcade speed and path, bank limited, lifted off the ground. */
+  /**
+   * SIM -> CLASSIC: velocity vector -> arcade speed and path, bank limited, lifted off the ground.
+   * Hover craft keep hovering: throttle 0.5 (hold height), and a landed one lifts to its hover floor.
+   */
   function enterClassic() {
     if (crash.active) finishCrash();
     releaseTow('mode change');
@@ -630,7 +642,18 @@ export function createFlightController(ctx) {
     classicWind.copy(classicWindTarget);
     pose.velocity.sub(classicWind);
     const arcadeSpeed = craft.arcadeProfile.SPEED;
-    if (onGround) {
+    const hover = craft.arcadeProfile.hover;
+    if (hover) {
+      // Rotorcraft: the hover model holds its height at throttle 0.5 (a SIM throttle is a motor or
+      // collective command, not that), and a landed craft lifts to its hover floor and hovers there.
+      if (onGround) {
+        const heading = headingOfQuaternion(pose.quaternion, currentHeading());
+        pose.position.y = Math.max(pose.position.y, surfaceHeight(pose.position.x, pose.position.z) + hover.MIN_AGL + CLASSIC_HOVER_LIFT);
+        levelQuaternion(heading, pose.quaternion);
+        pose.velocity.set(0, 0, 0);
+      }
+      pose.throttle = craft.arcadeProfile.AUTOPILOT.CRUISE_THROTTLE;
+    } else if (onGround) {
       // CLASSIC cannot sit on the ground: level off at cruise a little higher (the blend hides the lift).
       // In the air the velocity carries over; the arcade model clamps it to its own speed range.
       const heading = headingOfQuaternion(pose.quaternion, currentHeading());
@@ -641,10 +664,11 @@ export function createFlightController(ctx) {
     }
     // In the air the velocity carries over, but never below the arcade's soft-stall exit speed: a SIM
     // craft flying slower than CLASSIC can (the glider's SIM cruise is under the arcade stall) would
-    // otherwise drop its nose the moment it switched. The rendered pose blends as always.
+    // otherwise drop its nose the moment it switched. The rendered pose blends as always. Hover craft
+    // have no stall, so a slow drift stays a slow drift.
     const classicFloor = arcadeSpeed.STALL + CLASSIC_STALL_MARGIN;
     const carried = pose.velocity.length();
-    if (!onGround && carried > 1 && carried < classicFloor) pose.velocity.multiplyScalar(classicFloor / carried);
+    if (!hover && !onGround && carried > 1 && carried < classicFloor) pose.velocity.multiplyScalar(classicFloor / carried);
     // Craft without an engine in SIM (throttle 'none') and craft taking off from the ground cruise.
     if (onGround || craft.inputProfile?.throttle === 'none' || !Number.isFinite(pose.throttle)) pose.throttle = craft.arcadeProfile.AUTOPILOT.CRUISE_THROTTLE;
     // A SIM altitude hold may sit above the CLASSIC ceiling; hold what CLASSIC can reach instead.
@@ -797,6 +821,7 @@ export function createFlightController(ctx) {
   }
 
   function respawnAfterCrash() {
+    clearModelActions();
     const position = sim ? sim.state.position : player.position;
     // Craft that cannot climb (spawn.respawn 'peak': the wingsuit) start again from the nearest peak.
     if (craft.spawn.respawn === 'peak' && isFiniteVector(position)) {
@@ -1007,15 +1032,14 @@ export function createFlightController(ctx) {
   // ============================================================================================
   // HOT-PLUG: hands-off assists while a disconnected device was flying (SIM)
   // ============================================================================================
-  function sourceMatches(source, device) {
-    if (!source) return false;
-    if (typeof source === 'string') return source === device.deviceKey || source === device.kind;
-    return source.deviceKey === device.deviceKey || source.device === device.deviceKey;
-  }
-
+  /**
+   * True when the disconnected controller was the last one to move a flight axis. The match is by
+   * deviceKey (ControlState.sourceDevices), so a HOTAS stick is recognised and another gamepad that
+   * was not flying is not.
+   */
   function deviceDrivesAxes(device) {
-    const sources = liveControls.sources || {};
-    return ['roll', 'pitch', 'yaw', 'throttle', 'collective'].some((axis) => sourceMatches(sources[axis], device));
+    const sourceDevices = liveControls.sourceDevices || {};
+    return Boolean(device.deviceKey) && ['roll', 'pitch', 'yaw', 'throttle', 'collective'].some((axis) => sourceDevices[axis] === device.deviceKey);
   }
 
   function engageOverride(device) {
@@ -1025,7 +1049,9 @@ export function createFlightController(ctx) {
     override.name = device.name || 'Controller';
     override.manualSeconds = 0;
     override.savedAutopilot = { ...player.autopilot };
-    setAutopilot({ enabled: true, heading: player.heading, altitude: player.position.y, followWaypoint: false, reason: 'device disconnected' });
+    // Hold the speed flown now, not the craft's cruise: the hold promises wings level and altitude only.
+    const speed = Number.isFinite(telemetry.airspeed) && telemetry.airspeed > 0 ? telemetry.airspeed : player.speed;
+    setAutopilot({ enabled: true, heading: player.heading, altitude: player.position.y, speed, followWaypoint: false, reason: 'device disconnected' });
     notify(`${override.name} disconnected: assists are holding wings level and altitude.`, 'warning');
     bus.emit('flight:assistOverride', { active: true, reason: 'deviceDisconnected', deviceKey: override.deviceKey });
   }
@@ -1035,14 +1061,36 @@ export function createFlightController(ctx) {
     override.active = false;
     const saved = override.savedAutopilot;
     override.savedAutopilot = null;
-    if (saved) setAutopilot({ enabled: saved.enabled, heading: saved.heading, altitude: saved.altitude, followWaypoint: saved.followWaypoint, reason });
+    if (saved) setAutopilot({ enabled: saved.enabled, heading: saved.heading, altitude: saved.altitude, speed: saved.speed, followWaypoint: saved.followWaypoint, reason });
     if (!silent) notify(reason === 'device reconnected' ? `${override.name} reconnected: you have control.` : 'You have control.', 'success');
     bus.emit('flight:assistOverride', { active: false, reason });
   }
 
+  /**
+   * A controller lost on the ground: no autopilot (it would release the parking brake, and a
+   * helicopter or drone would lift off by itself). A throttle no lever holds any more goes to idle and
+   * a lever still above idle sets the parking brake, as on a ground start.
+   */
+  function holdOnGround(device) {
+    const name = device.name || 'Controller';
+    if (craft.inputProfile?.throttle === 'none') {
+      notify(`${name} disconnected.`, 'warning');
+      return;
+    }
+    ctx.systems.input?.idleThrottle?.();
+    const braked = parkingBrake.engage(pilotThrottle());
+    notify(braked ? `${name} disconnected: parking brake set - move the throttle to taxi.` : `${name} disconnected: throttle at idle.`, 'warning');
+  }
+
+  function isOnGround() {
+    return Boolean(sim && sim.contact && sim.contact.onGround);
+  }
+
   bus.onTyped('deviceDisconnected', (device) => {
-    if (mode !== 'sim' || override.active || !device) return;
-    if (deviceDrivesAxes(device)) engageOverride(device);
+    if (mode !== 'sim' || override.active || !device || !deviceDrivesAxes(device)) return;
+    // Mid-flight only: the hold flies the autopilot, which must never take off on its own.
+    if (isOnGround()) holdOnGround(device);
+    else engageOverride(device);
   });
   bus.onTyped('deviceConnected', (device) => {
     if (!override.active || !device) return;
@@ -1137,6 +1185,15 @@ export function createFlightController(ctx) {
     }
   }
 
+  /**
+   * True while the SIM model takes actions on its next tick. During the crash fade (no ticks until the
+   * respawn) and an aerotow (the tow flies the craft) a model action would fire later, on a different
+   * pose, so it is dropped.
+   */
+  function modelAcceptsActions() {
+    return mode === 'sim' && !tow && !(crash.active && crash.phase === 'fadeIn');
+  }
+
   function performActions() {
     if (pendingActions.size === 0) return;
     const actions = [...pendingActions];
@@ -1145,7 +1202,7 @@ export function createFlightController(ctx) {
     copilotActions.clear();
     for (const id of actions) {
       if (MODEL_ACTIONS.has(id)) {
-        if (mode === 'sim') {
+        if (modelAcceptsActions()) {
           modelActions.add(id);
           if (fromCopilot.has(id)) quietModelActions.add(id);
           else quietModelActions.delete(id);

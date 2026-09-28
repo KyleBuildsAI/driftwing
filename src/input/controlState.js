@@ -84,6 +84,11 @@ export function createControlState() {
     held: new Set(),
     /** Which source last moved each axis: 'keyboard' | 'mouse' | 'touch' | 'gamepad' | 'hotas'. */
     sources: {},
+    /**
+     * The controller (deviceKey) that last moved each axis, or null when a keyboard, mouse or touch
+     * source did (the hot-plug hold engages only for the device that was really flying).
+     */
+    sourceDevices: {},
   };
 }
 
@@ -97,5 +102,6 @@ export function copyControlState(target, source) {
   target.held.clear();
   for (const action of source.held) target.held.add(action);
   Object.assign(target.sources, source.sources);
+  Object.assign(target.sourceDevices, source.sourceDevices);
   return target;
 }

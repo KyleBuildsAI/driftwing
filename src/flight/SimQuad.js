@@ -60,6 +60,12 @@ const LANDED_SPEED = 0.6;
 /** The throttle below which the quad counts as idling on the ground (airmode and I-term held off). */
 const GROUND_IDLE_THROTTLE = 0.08;
 /**
+ * Throttle pickup after an airborne reset (spawn, respawn, craft switch): the lever may sit anywhere,
+ * so the motors stay at the reset throttle until the lever moves more than MOVE, then follow it at
+ * SLEW per second until they meet it.
+ */
+const THROTTLE_PICKUP = Object.freeze({ MOVE: 0.03, SLEW: 1.2 });
+/**
  * Ground-contact substeps: near the ground (within the craft's reach plus a tick of travel and MARGIN
  * m) a tick is split so no contact point moves more than TRAVEL m per substep, at most MAX substeps.
  */
@@ -288,6 +294,8 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {}, setti
     primed: false,
   };
   const altitude = { engaged: false, target: 0, integral: 0, latched: false, latchValue: 0.5, landed: false, guided: false, groundSeconds: 0 };
+  /** Throttle pickup (THROTTLE_PICKUP): the lever when first seen, the throttle flown, and its phase. */
+  const pickup = { reference: NaN, value: 0, armed: false, done: true };
   const systems = {
     armed: true,
     throttle: 0,
@@ -536,6 +544,29 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {}, setti
     return clamp((mass * (GRAVITY + acceleration)) / tilt, 0, available);
   }
 
+  /**
+   * The throttle lever as the motors see it outside altitude hold: until the pilot moves the lever
+   * after an airborne reset, the reset's throttle (the pose's hover); then a short slew to the lever.
+   */
+  function pickupLever(lever, dt) {
+    if (pickup.done) return lever;
+    if (!Number.isFinite(pickup.reference)) {
+      pickup.reference = lever;
+      pickup.armed = Math.abs(lever - pickup.value) > THROTTLE_PICKUP.MOVE;
+      if (!pickup.armed) {
+        pickup.done = true;
+        return lever;
+      }
+    }
+    if (pickup.armed) {
+      if (Math.abs(lever - pickup.reference) <= THROTTLE_PICKUP.MOVE) return pickup.value;
+      pickup.armed = false;
+    }
+    pickup.value = moveToward(pickup.value, lever, THROTTLE_PICKUP.SLEW * dt);
+    if (pickup.value === lever) pickup.done = true;
+    return pickup.value;
+  }
+
   function releaseAltitudeHold() {
     altitude.engaged = false;
     altitude.integral = 0;
@@ -723,6 +754,10 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {}, setti
 
     // Throttle and collective.
     const lever = clamp(Number.isFinite(controls.throttle) ? controls.throttle : 0, 0, 1);
+    const holding = holdWanted && systems.armed && !turtleActive;
+    // Altitude hold latches the lever itself; outside it a stale lever waits for the pickup.
+    if (holding) pickup.done = true;
+    const flownLever = holding ? lever : pickupLever(lever, dt);
     if (systems.turtleEnded) {
       systems.turtleEnded = false;
       if (holdWanted) {
@@ -737,7 +772,7 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {}, setti
     const onGround = contactReport.onGround;
     const peak = frame.maxThrust * systems.inflowFactor * (rho / SEA_LEVEL_DENSITY) * (1 - aero.propWash.loss * systems.propWash);
     let collective;
-    if (holdWanted && systems.armed && !turtleActive) {
+    if (holding) {
       collective = altitudeHoldThrust(controls, dt, agl, peak * frame.motors.length, Boolean(env.autopilot && env.autopilot.enabled));
       systems.holding = true;
       const perMotor = collective / frame.motors.length;
@@ -746,14 +781,14 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {}, setti
     } else {
       if (systems.holding) releaseAltitudeHold();
       systems.holding = false;
-      systems.throttle = lever;
-      systems.baseCommand = idle + (1 - idle) * lever;
+      systems.throttle = flownLever;
+      systems.baseCommand = idle + (1 - idle) * flownLever;
       collective = peak * systems.baseCommand * systems.baseCommand * frame.motors.length;
     }
     if (!holdWanted && altitude.engaged) releaseAltitudeHold();
 
     // Rate PID and mixer; on the ground at idle the I-term and airmode stay off.
-    const groundIdle = onGround && (systems.holding ? altitude.landed : lever < GROUND_IDLE_THROTTLE);
+    const groundIdle = onGround && (systems.holding ? altitude.landed : flownLever < GROUND_IDLE_THROTTLE);
     systems.airmode = systems.armed && !groundIdle;
     computeSetpoint(controls, setpoint);
     ratePid(dt, groundIdle || !systems.armed);
@@ -964,6 +999,10 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {}, setti
     pid.setpointLowPass.set(0, 0, 0);
     pid.primed = false;
     releaseAltitudeHold();
+    pickup.reference = NaN;
+    pickup.value = systems.throttle;
+    pickup.armed = false;
+    pickup.done = onGround;
     smoothedLoad = 1;
     contact.reset(onGround);
     landing.reset(onGround);
@@ -1018,6 +1057,7 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {}, setti
         primed: pid.primed,
       },
       altitude: { ...altitude },
+      pickup: { ...pickup },
       systems: {
         armed: systems.armed,
         throttle: systems.throttle,
@@ -1046,6 +1086,7 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {}, setti
     pid.setpointLowPass.fromArray(data.pid.setpointLowPass);
     pid.primed = data.pid.primed === true;
     Object.assign(altitude, data.altitude);
+    if (data.pickup) Object.assign(pickup, data.pickup);
     Object.assign(systems, data.systems);
     smoothedLoad = Number.isFinite(data.load) ? data.load : 1;
     time = Number.isFinite(data.time) ? data.time : time;
@@ -1127,7 +1168,9 @@ const quadAssistHandler = Object.freeze({
     const craftState = context.model && context.model.craftState;
     if (!craftState) return;
     const level = clamp(Number.isFinite(context.assists) ? context.assists : 1, 0, 1);
-    if (craftState.assistLevel !== level) {
+    // The hands-off hold forces the level to 100 % for a moment; only the pilot's own level change
+    // resets the rate / angle choice.
+    if (context.handsOff !== true && craftState.assistLevel !== level) {
       craftState.assistLevel = level;
       craftState.modeOverride = null;
     }

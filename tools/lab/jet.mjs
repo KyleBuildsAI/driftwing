@@ -21,7 +21,8 @@
 //   speed brake    extra drag on the airbrake
 //   AB detent      keyboard stops at the detent; the ability pushes through and pulling back cancels;
 //                  a HOTAS lever lights it past the detent; the click state and notices
-//   autopilot      heading, altitude and speed hold through the flight control system
+//   autopilot      heading, altitude and speed hold through the flight control system; with a HOTAS
+//                  throttle it still stops at the detent, and it engages from the pilot's lever
 //   limits         overspeed past 410 m/s equivalent or Mach 1.7
 //   protection     100 % assists: an afterburner dive stays inside the limit (speed brakes, power limit)
 //   controller     the FlightController headless: SIM boot at cruise and 60 s hands off, CLASSIC -> SIM
@@ -748,6 +749,38 @@ function testAutopilot() {
   record('autopilot speed hold 800 km/h', Math.abs(222 - rig.data.airspeed), 3, { unit: 'm/s', compare: 'max', decimals: 2, note: `throttle ${rig.data.throttle.toFixed(2)}` });
 }
 
+/**
+ * The autopilot (and so the hands-off hold) with a HOTAS lever as the last throttle source: its
+ * command stops at the detent like every soft lever, so a speed target far above the jet's speed
+ * never lights the burner. Engaging starts the throttle from the pilot's lever, not from the jet's
+ * effective (detent-scaled) throttle.
+ */
+function testAutopilotDetent() {
+  const rig = createRig({ assists: 1 });
+  rig.setAssists(1);
+  rig.airborne({ speed: 200, altitude: 3000, throttle: 0.9 });
+  rig.pilot.sources.throttle = 'hotas';
+  Object.assign(rig.env.autopilot, { enabled: true, heading: 0, altitude: 3000, speed: 330, followWaypoint: false });
+  let lit = false;
+  let maxThrottle = 0;
+  rig.run(30, (lab) => {
+    if (lab.craftState.abDetent || lab.model.snapshot().extension.spool.abCommand > 0) lit = true;
+    maxThrottle = Math.max(maxThrottle, lab.data.throttle);
+  });
+  const notice = rig.events.notify.includes('Afterburner.');
+  record('autopilot with a HOTAS throttle: no burner', lit || notice ? 'burner' : 'dry', 'dry (stops at the detent)', { compare: !lit && !notice, note: `speed target 330 m/s from 200; max effective throttle ${maxThrottle.toFixed(3)}` });
+
+  const seed = createRig({ assists: 1 });
+  seed.setAssists(1);
+  seed.airborne({ speed: 222, altitude: 3000, throttle: 0.8 });
+  seed.run(2);
+  const lever = seed.pilot.throttle;
+  Object.assign(seed.env.autopilot, { enabled: true, heading: seed.data.heading, altitude: seed.model.state.position.y, speed: seed.data.airspeed, followWaypoint: false });
+  seed.tick();
+  const detent = seed.controls.afterburnerDetent;
+  record('autopilot engages from the pilot lever', seed.data.throttle, lever * detent, { decimals: 3, tolerance: 0.01, note: `lever ${lever}, effective ${(lever * detent).toFixed(3)} before and ${seed.data.throttle.toFixed(3)} after engaging` });
+}
+
 function testLimits() {
   const rig = createRig();
   const a10 = speedOfSound(10000);
@@ -1169,7 +1202,7 @@ function printTable() {
 
 const started = Date.now();
 const only = process.argv.find((argument) => argument.startsWith('--only='));
-const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGround, testGear, testSpeedBrake, testDetent, testAutopilot, testLimits, testOverspeedProtection, testSimBoot, testConversions, testToClassic, testRespawn, testRelaunch, testCraftSwitch, testGroundStart };
+const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGround, testGear, testSpeedBrake, testDetent, testAutopilot, testAutopilotDetent, testLimits, testOverspeedProtection, testSimBoot, testConversions, testToClassic, testRespawn, testRelaunch, testCraftSwitch, testGroundStart };
 for (const [name, test] of Object.entries(tests)) {
   if (only && !name.toLowerCase().includes(only.slice(7).toLowerCase())) continue;
   test();
