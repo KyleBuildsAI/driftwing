@@ -35,9 +35,10 @@ const PILL_SCAN_STEP = 8;
 const PILL_CLEARANCE = 8;
 /**
  * HUD elements the pill must not cover, in either game (V1's ids are frozen with V1; V2's top-left
- * stack is .dw-modebar and #dw-chips). Selectors a game lacks match nothing.
+ * stack is .dw-modebar and #dw-chips, and on touch screens its flight card sits there too).
+ * Selectors a game lacks match nothing.
  */
-const HUD_SELECTOR = ['.dw-modebar', '#dw-chips > *', '#dw-compass', '.dw-topbar', '.dw-debug', '.dw-devbadge'].join(', ');
+const HUD_SELECTOR = ['.dw-modebar', '#dw-chips > *', '#dw-compass', '#dw-flight', '.dw-topbar', '.dw-debug', '.dw-devbadge'].join(', ');
 const SWITCH_REQUEST_KEYS = Object.freeze(['source', 'to', 'type']);
 
 const frame = document.getElementById('dw-shell-frame');
