@@ -17,6 +17,8 @@ launcher shell.
 | 2026-09-27 | in the shell, `/?v=1` on the Vite dev server | WebGPU | 0 | 0 | 0 |
 | 2026-09-27 | in the shell, `/?v=1&renderer=webgl` on the Vite dev server | WebGL2 | 0 | 0 | 0 |
 | 2026-09-27 | in the shell, switched to and from V2 (`tools/shell-check.mjs`, dev server and `dist-single/`, both backends) | both | 0 | 0 | 0 |
+| 2026-09-28 | in the shell, 21 loads in 20 round trips with V2 (`tools/shell-test.mjs`, dev server and `dist-single/`) | WebGPU | 0 | 0 | 0 |
+| 2026-09-28 | the same, `--backend webgl` | WebGL2 | 0 | 0 | 0 |
 
 Test commands (headless Chrome; the smoke test flies 10 s and fails on any console error or
 warning, the shell check records V1's console separately):
@@ -27,6 +29,7 @@ node tools/smoke-test.mjs --file public/v1/index.html --query renderer=webgl --s
 node tools/smoke-test.mjs --url http://127.0.0.1:<port>/ --query v=1 --seconds 10 --out <dir>
 node tools/smoke-test.mjs --url http://127.0.0.1:<port>/ --query "v=1&renderer=webgl" --seconds 10 --out <dir>
 node tools/shell-check.mjs --url http://127.0.0.1:<port>/ [--backend webgl] --out <dir>
+node tools/shell-test.mjs [--backend webgl] --out <dir>
 ```
 
 ## When the GPU cannot create a WebGPU device
