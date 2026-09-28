@@ -7,13 +7,17 @@
 //                with a reversed calibration; the bound action then fires when the axis is pushed
 //   import       importing a bindings file without the connected HOTAS devices keeps them registered,
 //                so their default bindings stay live
+//   wizardLate   a throttle that first appears after the Center step keeps its saved calibration
+//                (throttle idle / full, learned hat) and is listed as joined late
+//   wizardBack   Back on the results screen returns to the last step that has something to learn
+//                when no hats are queued (a standard gamepad only)
 //
 // Usage: node tools/lab/input.mjs [--verbose]
 // Prints one line per check and exits non-zero if any check fails.
 import { EventBus } from '../../src/core/eventBus.js';
 import { createActionRouter } from '../../src/input/actions.js';
 import { createBindingStore } from '../../src/input/bindings.js';
-import { createCalibrationStore } from '../../src/input/calibration.js';
+import { createCalibrationStore, createCalibrationWizard } from '../../src/input/calibration.js';
 import { createInputCapture } from '../../src/input/capture.js';
 import { createControlState } from '../../src/input/controlState.js';
 import { createDeviceMapper, createFrameAccumulator, resetFrameAccumulator } from '../../src/input/deviceMapper.js';
@@ -188,8 +192,90 @@ function testImport() {
   check('import', 'stored profile lists the devices', Object.keys(rig.bindings.getProfile().devices).sort().join(',') === '044f-b10a,044f-b687');
 }
 
+// ---- calibration wizard ----------------------------------------------------------------------------
+/** InputManager's roleAxesFor: which axes of a device play which role under its bindings. */
+function roleAxesFrom(bindings, devices) {
+  return (deviceKey) => {
+    const device = devices().find((candidate) => candidate.deviceKey === deviceKey);
+    const roles = { throttle: [], rudder: [], brakeL: [], brakeR: [], unipolar: [] };
+    if (!device) return roles;
+    for (const axis of DEVICE_PROFILES[device.profile].axes) if (axis.range === 'unipolar') roles.unipolar.push(axis.index);
+    for (const [target, refs] of bindings.getEffective(device.bindingDevice, 'glider').axes) {
+      for (const ref of refs) {
+        if (ref.type !== 'axis') continue;
+        if ((target === 'throttle' || target === 'collective') && !ref.rate) roles.throttle.push(ref.axis);
+        if (ref.role === 'rudder') roles.rudder.push(ref.axis);
+        if (target === 'brakeL') roles.brakeL.push(ref.axis);
+        if (target === 'brakeR') roles.brakeR.push(ref.axis);
+      }
+    }
+    for (const role of Object.keys(roles)) roles[role] = [...new Set(roles[role])];
+    return roles;
+  };
+}
+
+/** InputManager's wizardDevices: plain snapshots of the live devices. */
+function wizardReadings(devices) {
+  return () => devices().map((device) => ({ deviceKey: device.deviceKey, profile: device.profile, name: device.name, axes: device.axes, buttons: device.buttons.map((button) => button.pressed) }));
+}
+
+function testWizardLate() {
+  const stick = makeDevice('t16000m', '044f-b10a', restAxes('t16000m'));
+  const throttle = makeDevice('twcs', '044f-b687', restAxes('twcs'));
+  const live = [stick];
+  const rig = createRig([stick, throttle]);
+  const saved = rig.calibration.save(throttle.deviceKey, {
+    deviceKey: throttle.deviceKey,
+    profile: 'twcs',
+    name: throttle.name,
+    calibratedAt: new Date(0).toISOString(),
+    axes: { 2: { idle: 0.98, full: -0.97 } },
+    hats: [{ form: 'buttons', buttons: [12, 13, 14, 15], combos: { up: [12], upRight: [12, 13], right: [13], downRight: [13, 14], down: [14], downLeft: [14, 15], left: [15], upLeft: [12, 15] } }],
+    notes: [],
+  });
+  const wizard = createCalibrationWizard({ readDevices: wizardReadings(() => live), roleAxes: roleAxesFrom(rig.bindings, () => live), store: rig.calibration });
+  for (let frame = 0; frame < 10; frame++) wizard.sample(1 / 60);
+  wizard.next();
+  // The TWCS shows up only now (Chrome exposes it after a button press), during the Axes step.
+  live.push(throttle);
+  for (const raw of [-1, 1, 0]) {
+    stick.axes[0] = raw;
+    stick.axes[1] = raw;
+    throttle.axes[2] = raw;
+    wizard.sample(1 / 60);
+  }
+  let state = wizard.getState();
+  check('wizardLate', 'late throttle listed', state.lateDevices?.some((device) => device.deviceKey === throttle.deviceKey), JSON.stringify(state.lateDevices));
+  check('wizardLate', 'late throttle not in this run', !state.devices.some((device) => device.deviceKey === throttle.deviceKey));
+  for (let guard = 0; guard < 40 && state.step !== 'done'; guard++) state = wizard.skip();
+  check('wizardLate', 'reached the results', state.step === 'done', state.step);
+  check('wizardLate', 'results leave the late throttle out', state.results?.every((result) => result.deviceKey !== throttle.deviceKey), (state.results ?? []).map((result) => result.deviceKey).join(','));
+  const written = wizard.finish().map((record) => record.deviceKey);
+  check('wizardLate', 'stick saved', written.includes(stick.deviceKey), written.join(','));
+  const after = rig.calibration.peek(throttle.deviceKey);
+  check('wizardLate', 'throttle record kept', JSON.stringify(after?.axes) === JSON.stringify(saved.axes) && after?.hats?.[0]?.form === 'buttons', JSON.stringify(after?.axes));
+}
+
+function testWizardBack() {
+  const pad = makeDevice('standard', 'gamepad-1', restAxes('standard'), 17);
+  pad.bindingDevice = 'gamepad';
+  const live = [pad];
+  const rig = createRig(live);
+  const wizard = createCalibrationWizard({ readDevices: wizardReadings(() => live), roleAxes: roleAxesFrom(rig.bindings, () => live), store: rig.calibration });
+  wizard.sample(1 / 60);
+  wizard.next();
+  let state = wizard.next();
+  check('wizardBack', 'gamepad goes from Axes to the results', state.step === 'done', state.step);
+  state = wizard.back();
+  check('wizardBack', 'Back from the results reaches Axes', state.step === 'axes', state.step);
+  state = wizard.back();
+  check('wizardBack', 'Back again reaches Center', state.step === 'center', state.step);
+}
+
 await testAxisPress();
 testImport();
+testWizardLate();
+testWizardBack();
 
 const failures = results.filter((result) => !result.pass);
 process.stdout.write(`\n${results.length - failures.length}/${results.length} checks passed${failures.length ? `; ${failures.length} FAILED` : ''}\n`);
