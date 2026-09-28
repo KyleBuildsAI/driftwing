@@ -528,7 +528,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     releasePilot();
     flightSystem.setAutopilot({ enabled: false, reason: 'flight test' });
     settings.update('assists', { [entry.craft]: 1 });
-    if (flightSystem.getCraft() !== entry.craft) settings.set('craft', entry.craft);
+    const switched = flightSystem.getCraft() !== entry.craft;
+    if (switched) settings.set('craft', entry.craft);
     settings.update('views', { [entry.craft]: VIEW_SLOTS[entry.view] });
     const craftOk = flightSystem.getCraft() === entry.craft;
     if (!craftOk) notes.push(`asked for ${entry.craft}, flying ${flightSystem.getCraft()}`);
@@ -542,6 +543,11 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     if (onGround || agl < MIN_START_AGL) {
       flightSystem.resetTo({ x: position.x, y: surfaceAt(position.x, position.z) + START_AGL, z: position.z, heading: state.player.heading });
       notes.push(`started ${onGround ? 'on the ground' : `${Math.round(agl)} m above the ground`}: lifted to ${START_AGL} m`);
+    } else if (!switched) {
+      // The same craft as the last run (its other view): restart it where it is, level at cruise
+      // (hovering craft hover), as a craft switch would, so every run starts from the same kind of
+      // pose instead of the last run's final manoeuvre.
+      flightSystem.resetTo({ x: position.x, y: position.y, z: position.z, heading: state.player.heading });
     }
     return { setupOk, notes };
   }
