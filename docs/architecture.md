@@ -1,242 +1,875 @@
 # DRIFTWING v2 architecture
 
-This is the module map and the contracts between systems. Phase 1 builds everything here; the
-"Phase 2-4 plug points" section lists where later phases attach without rewrites.
+This is the architecture of DRIFTWING v2 as of Phase 1 (`2.0.0-phase.1`): the module map, the
+runtime and frame loop, and the contracts between systems. The last section lists where Phases 2-4
+attach without rewrites. The code is the source of truth; every contract here names the file that
+implements it.
 
-Units are SI everywhere in code (m, m/s, kg, N, s, rad/s internally; degrees only where a field name
-or comment says so). World axes: +x east, +y up, -z north. Craft body axes: +x right wing, +y up,
--z nose. Headings are compass degrees (0 north, 90 east).
+Units are SI everywhere in code: m, m/s, kg, N and s, with rad and rad/s inside the physics. Degrees
+appear only where a field name or comment says so (telemetry angles, headings, FOVs). World axes are
++x east, +y up and -z north. Craft body axes are +x right wing, +y up and +z aft (the nose is -z).
+Headings are compass degrees (0 north, 90 east).
+
+## Module map
+
+`src/main.js` is the composition root: it boots storage, settings, the renderer, the world and every
+system, and then starts the frame loop.
+
+### `src/core`: services every system shares
+
+| file | what |
+| --- | --- |
+| `config.js` | `CONFIG` tuning constants (v1's, plus `VERSION`) and the world generator options |
+| `storage.js` | IndexedDB key-value store with versioned structure and data migrations, a synchronous cache, and localStorage then memory fallbacks |
+| `settings.js` | the validated, versioned settings schema persisted through storage; emits `settings:changed` |
+| `eventBus.js` | the `EventBus` (`on`, `off`, `emit`) |
+| `events.js` | typed events: payload shapes, `emitTyped` / `onTyped`, validation in dev and with `?debug=1` |
+| `clock.js` | `createFixedStepClock()`: 120 Hz ticks, accumulator, interpolation `alpha`, 0.1 s frame clamp |
+| `loop.js` | the frame loop (`createFrameLoop(ctx, options)`): timing, the fade gate, the system update order, the safety net and telemetry calls, render |
+| `perf.js` | display refresh measurement, the frame target, dynamic resolution (stage one) and v1's quality governor (stage two) |
+| `seed.js` | resolves the world seed from the URL (or a new random one) |
+| `sun.js` | sun and moon directions for a time of day, and the inverse |
+| `util.js` | `clamp`, `damp`, heading helpers, `compassName`, finite checks |
+
+### `src/render`: renderer, post stack and the atmosphere
+
+| file | what |
+| --- | --- |
+| `renderer.js` | renderer boot (`createRenderer(params)` returning `{ renderer, backend }`): WebGPU device probe, `WebGPURenderer` creation, WebGL2 fallback and the rebuild after a late fallback |
+| `post.js` | the post stack (bloom, warm grade, vignette, grain, render scale) and the `gEffects` system (gray-out, tunnel vision, red-out) |
+| `sky.js` | sky dome, sun, moon, stars, aurora, god rays, fog colour and the day / night cycle (v1) |
+| `clouds.js` | instanced drifting clouds, cloud shadows (v1), plus a cumulus cap over every thermal |
+| `water.js` | animated water, sun glint and shoreline foam (v1) |
+| `birds.js` | boid flocks that scatter (v1) |
+| `fx.js` | contrails, wind streaks, bursts (v1) |
+| `jetEffects.js` | afterburner flame, vapor cones (Mach 0.9-1.05, low altitude) and wingtip vapour, attached to the jet mesh |
+| `wingsuitEffects.js` | the wingsuit's ram-air canopy, lines and pilot chute, with the deployment animation |
+
+### `src/world`: the deterministic world
+
+| file | what |
+| --- | --- |
+| `worldgen.js` | `createWorldGen(seed)`: seeded noise, biomes, the SHARED height function (`heightAt`, `groundHeight`), vegetation scatter and landmark sites. Imported by the main thread and the worker |
+| `terrain.worker.js` | the terrain Web Worker (Vite `?worker&inline`, so it also works in the single-file build) |
+| `chunkBuilder.js` | chunk meshes and vegetation scatter, in the worker or time-sliced on the main thread |
+| `terrain.js` | the chunk manager: ring LOD with skirts, pooled meshes, the worker queue (v1) |
+| `landmarks.js` | arches, monolith circles, lighthouses and balloons (v1) |
+| `spawn.js` | the golden-hour opening spawn (v1) |
+
+### `src/flight`: flight models and the controller
+
+| file | what |
+| --- | --- |
+| `FlightController.js` | `ctx.systems.flight`: active craft, mode, models, fixed-step SIM loop, blends, soft crash, relaunch, telemetry |
+| `models.js` | the model registry (`ctx.flightModels`) and the control-stage registry |
+| `ArcadeModel.js` | v1's arcade flight, parameterised by `arcadeProfile`; the `hover` extension for rotorcraft in CLASSIC |
+| `SimFixedWing.js` | SIM fixed-wing model (glider, bush plane, and the jet under kind `jet`), with the extension hooks |
+| `SimHelicopter.js` | SIM single-main-rotor helicopter |
+| `SimWingsuit.js` | SIM wingsuit and its canopy mode |
+| `SimQuad.js` | SIM multirotor with its flight-controller firmware (rates, angle mode, altitude hold) |
+| `aero.js` | atmosphere, lift and drag curves past the stall, surface forces, ground effect, propeller |
+| `jetAero.js` | the jet's SimFixedWing extension: turbofan with afterburner and detent, transonic drag, wing rock, buffet |
+| `jetFcs.js` | the jet's flight control system: its assist catalog and handler, autopilot and trim handler |
+| `assists.js` | the assists control stage, assist catalogs and handlers per model kind, the fixed-wing handler |
+| `helicopterAssists.js` | helicopter assists (auto-hover, heading hold, attitude limits, torque and engine protection, autorotation) and autopilot |
+| `autopilot.js` | the PID autopilot control stage and the fixed-wing autopilot |
+| `trim.js` | the trim solver run after every airborne SIM reset, with handlers per model kind |
+| `groundContact.js` | contact points against the shared height function: spring-damper, friction, brakes, steering |
+| `landing.js` | landing grades and the `landed` event |
+| `placement.js` | "Start on ground" spot search (slope, vegetation, runway length) and resting pose |
+| `relaunch.js` | nearest peak, peak launch, and the aerotow with its tug and rope |
+| `crashFade.js` | the soft-crash fade overlay |
+| `trails.js` | smoke and ballast-spray particle trails from craft anchors |
+| `telemetry.js` | `state.flight`: the one read-only description of the craft, plus atmosphere helpers |
+
+### `src/craft`: the six craft
+
+| file | what |
+| --- | --- |
+| `registry.js` | `CRAFT_CATALOG` (id, name, role, hotkey, picker silhouette) and `craftRegistry` |
+| `index.js` | registers every craft module |
+| `kit.js` | the procedural mesh kit and shared materials (v1 palette, nav lights, prop disc) |
+| `glider.js`, `bushplane.js`, `jet.js`, `helicopter.js`, `wingsuit.js`, `fpv.js` | one craft module each (schema below) |
+
+### `src/input`: every input device
+
+| file | what |
+| --- | --- |
+| `InputManager.js` | the `input` system: writes `ctx.input` (v1 struct) and `ctx.controls` (ControlState), routes actions |
+| `controlState.js` | `AXES`, `ACTIONS`, `createControlState`, `copyControlState` |
+| `actions.js` | the action router: holders, press / release pairs, `input:action` events |
+| `defaultBindings.js` | default bindings per device profile, axis targets, UI-reserved keys |
+| `bindings.js` | the binding store: global profile plus per-craft overrides, conflicts, export / import |
+| `keyboardMouse.js` | keyboard and mouse: v1 flying, pointer-lock stick, drag, wheel, SIM free stick, photo routing |
+| `touch.js` | the on-screen joystick, throttle slider and boost button (v1) |
+| `gamepad.js` | Gamepad API polling, identification and hot-plug |
+| `hotas/devices.js` | device identification by vendor / product id or name, device profiles |
+| `deviceMapper.js` | applies bindings to live controller readings (axes, hats, buttons) |
+| `axisPipeline.js` | calibration, invert, deadzone, saturation, expo, smoothing |
+| `hats.js` | hat decoding from what calibration learned (axis form or button form) |
+| `calibration.js` | calibration records per device and the calibration wizard step machine |
+| `capture.js` | bind-by-listening |
+
+### `src/camera`: views and lenses
+
+| file | what |
+| --- | --- |
+| `cameraManager.js` | `ctx.systems.camera`: views, free look, lenses, photo mode, the instrument clock |
+| `chase.js` | v1's chase rig and photo mode, extended with detach, zoom and a settings-driven base FOV |
+| `cockpit.js` | the cockpit interior and instrument panel generated from `cameraRig.cockpit` |
+| `views/cockpitView.js`, `views/wingView.js`, `views/flybyView.js`, `views/fpvView.js` | the four non-chase views |
+
+### `src/audio`: procedural Web Audio (no audio files)
+
+| file | what |
+| --- | --- |
+| `AudioEngine.js` | the `audio` system: unlock, mixer, engine family, airflow, cues, callouts, spatialisation |
+| `mixer.js` | buses `master, engine, environment, ui, copilot, music`, ducking, reverb, muffle, compressor |
+| `engines/index.js` | engine families and `resolveAudioProfile` |
+| `engines/glider.js`, `prop.js`, `jet.js`, `heli.js`, `drone.js`, `wingsuit.js` | one synth per family |
+| `airflow.js` | wind beds, buffet, ground roll, cockpit interior low-pass |
+| `flightCues.js` | stall horn, variometer, gear and flap motors, touchdown, afterburner detent click, crash |
+| `callouts.js` | radar-altitude landing callouts in a voice distinct from the copilot |
+| `eventCues.js`, `voices.js` | v1's chimes, whoosh, blips, flutter and shutter |
+| `spatial.js` | HRTF panner at the craft and doppler in external views |
+| `synthKit.js`, `buffers.js` | Web Audio building blocks and procedural noise / reverb buffers |
+
+### `src/env`
+
+| file | what |
+| --- | --- |
+| `WindField.js` | the wind field (ambient, ridge lift, thermals, turbulence, sources) and `createDebugUpdraft` |
+
+### `src/ui`: glass UI
+
+| file | what |
+| --- | --- |
+| `ui.js`, `ui.css` | the v1 glass UI (HUD, compass, panels, toasts, command bar, help, journal) and the v2 chrome wiring |
+| `modePill.js` | the CLASSIC \| SIM pill |
+| `craftPicker.js` | the craft picker strip (keys 1-6) |
+| `hotasPrompt.js` | "HOTAS detected - switch to SIM?" (Yes / No / Always) |
+| `settingsPanel.js` | the tabbed settings panel (Flight, Graphics, Sound, Controls, General) |
+| `controlsPanel.js`, `controlsPanel.css` | the controls panel: device tabs, live readings, bindings, tuning, export / import |
+| `calibrationWizard.js` | the calibration wizard screens |
+| `instruments/` | 17 instrument renderers (`index.js` registry, `gaugeKit.js`, `units.js`) |
+| `instrumentHud.js`, `instrumentHud.css` | the optional glass instrument HUD overlay |
+| `stickReticle.js`, `stickReticle.css` | the SIM virtual-stick reticle |
+| `soundPill.js`, `soundPill.css` | the "Sound off - click to enable" pill |
+
+### `src/copilot`: WREN
+
+| file | what |
+| --- | --- |
+| `copilot.js` | `Copilot` (local grammar brain), `RemoteCopilot` (HTTP brain with fallback), the `copilot` system |
+| `grammar.js` | the v2 aircraft grammar and the shared action validator `sanitizeFlightAction` |
+| `flightActions.js` | the executor for aircraft actions, reporting real outcomes |
+| `flightState.js` | the v2 half of the flight-state snapshot and craft capabilities |
+| `flightChatter.js` | chatter for landings, soft crashes, mode and craft changes, lift hints |
+| `commandChips.js` | the SIM "Aircraft" quick-chip row |
+
+### `src/gameplay`
+
+`journal.js` (discoveries, biomes, distance, best landings), `rings.js` (ring courses) and
+`waypoints.js` (waypoint beacon and arrow), all from v1.
+
+### `src/dev`: developer tools (never player features)
+
+| file | what |
+| --- | --- |
+| `statusBadge.js` | the dev badge: version, backend, three.js revision, fps, frame-time graph, render scale, input devices |
+| `windOverlay.js` | the wind-arrow overlay (`settings.windOverlay`) and the badge's Wind row |
+| `debugWind.js` | dev-only debug updraft wind source (key L), proving the Phase 2 wind writer path |
+| `mockGamepads.js` | scriptable mock T.16000M, TWCS and standard gamepad devices |
+| `testHarness.js` | the flight-test harness at `?test=1` (dev builds only) |
+| `hotasTest.js` | the HOTAS pipeline test at `?test=hotas` (dev builds only) |
+
+### `tools`
+
+| file | what |
+| --- | --- |
+| `smoke-test.mjs` | headless Chrome check: console errors and warnings fail it; scripted steps and screenshots |
+| `run-harness.mjs` | runs the `?test=1` / `?test=hotas` harnesses headlessly on a spare port and saves the report |
+| `arcade-parity.mjs` + `parity/v1/` | bit-exact CLASSIC parity against a verbatim copy of v1's flight code |
+| `flight-lab.mjs` | headless SIM lab for the glider and bush plane (handling, conversions, spawns) |
+| `lab/jet.mjs`, `lab/helicopter.mjs`, `lab/wingsuit.mjs`, `lab/fpv.mjs` | headless SIM labs per craft |
+| `copilot-server.mjs` | the reference remote copilot brain (see `docs/copilot-api.md`) |
+| `serve.mjs` | zero-dependency static server (`npm run serve:single`) |
 
 ## Runtime
 
-`src/main.js` boots in this order: storage (`await storage.init()`), typed event bus, settings,
-renderer (WebGPU first, WebGL2 fallback; never blocks the WebGL2 backend because WebXR in Phase 4
-runs on it), scene, world generator, shared state, wind field, systems, prewarm, frame loop
-(`renderer.setAnimationLoop`).
+### Boot
+
+`main.js` boots in this order:
+
+1. The display refresh measurement starts (it runs while boot waits).
+2. `await storage.init()`.
+3. The typed event bus (`attachTypedEvents(new EventBus(), { validate })`), the settings and the
+   seed, which is written back into the URL.
+4. The renderer (`src/render/renderer.js`): WebGPU first, WebGL2 fallback. WebGPU is chosen only
+   when a real device can be created, since an adapter alone does not prove it works. If three.js
+   falls back to WebGL2 on its own later, the renderer is rebuilt for WebGL2 so no WebGPU-only
+   option (reversed depth) stays on. `?renderer=webgl` forces WebGL2. The boot never hard-blocks
+   the WebGL2 backend, because WebXR in Phase 4 runs on it.
+5. The scene, camera and shared TSL uniforms; the world generator and the opening spawn; the shared
+   `state`, the v1 `input` struct and the `ctx` object.
+6. The wind field, then the perf governor (`ctx.perf`).
+7. Every system, created in this order: audio, ui, input, sky, terrain, water, clouds, birds,
+   journal, landmarks, waypoints, rings, flight, camera, fx, gEffects, copilot, windOverlay, and
+   debugWind (dev builds and `?debug=1` only). A factory that throws is logged and replaced by an
+   inert system, so one failure never stops the game.
+8. `prewarm()` hooks and the pipeline prewarm: objects that first appear later (rings, beacons,
+   landmarks) are drawn once behind the loading fade so their pipelines compile before play.
+9. The post stack (in `try` / `catch`; it degrades to direct rendering), resize handling and
+   `window.DRIFTWING`.
+10. The frame loop starts with `renderer.setAnimationLoop` (uncapped).
+
+A harness started by `?test=1` or `?test=hotas` hooks in once, after the systems are created.
+
+### Frame loop (`src/core/loop.js`)
+
+Every frame:
+
+1. **Timing.** `realDt` is the frame interval clamped to 1/20 s (1/60 after a stall over 0.25 s).
+   `simDt` is `realDt`, or 0 while paused (photo mode). `state.time.frameDt` is the unclamped real
+   frame time capped at 0.1 s: the fixed-step physics clock consumes it.
+2. **Systems.** Each system in `UPDATE_ORDER` runs `update(simDt, realDt)`: input, flight, camera,
+   terrain, sky, water, clouds, birds, landmarks, journal, waypoints, rings, fx, gEffects, copilot,
+   audio, ui, windOverlay, debugWind. A system that throws is disabled and logged; the rest carry on.
+3. **Safety net, right after flight.** A non-finite pose is restored from the last good one and the
+   model is reset from it. CLASSIC keeps v1's terrain and water clamp. SIM only keeps the
+   last-resort guard: more than 1 m below the shared height function is a soft crash. The altitude
+   ceiling comes from the controller (CLASSIC 2600 m, SIM 15000 m).
+4. **Telemetry.** `flight.publishTelemetry()` writes `state.flight` from the final, safety-checked
+   pose.
+5. **Biome tracking** (`biome:changed`), then `perf.update({ frameMs, cpuMs })` with the real,
+   unclamped frame interval.
+6. **Render** through the post pipeline (screenshot capture raises the pixel ratio for that one
+   frame).
+7. **Fade gate.** The loading fade lifts once the ground around the spawn is built and frames arrive
+   steadily (8 s cap). Then `state.ready` is set, `endPrewarm()` hooks run and `game:ready` fires.
+
+### SIM physics inside the flight update
+
+In SIM the flight controller advances a fixed-step clock (`src/core/clock.js`, 120 Hz) by
+`state.time.frameDt`. For each tick it:
+
+1. copies the live ControlState;
+2. applies the craft `inputProfile` (for example `throttle: 'none'` zeroes it, `'collective'`
+   copies it to the collective);
+3. zeroes the stick while the hands-off hold of a disconnected controller is active;
+4. runs the control stages (autopilot, then assists);
+5. samples the wind (`ctx.wind.sample`) and the air density `rho = 1.225 * exp(-altitude / 8500)`
+   at the craft;
+6. calls `model.step(dt, controls, env)`, guarding every tick against NaN / Infinity (it restores
+   the last good snapshot and logs once).
+
+The rendered pose is interpolated between the last two ticks with `alpha`. CLASSIC runs one v1
+variable step per frame (bit-exact with v1, proven by `tools/arcade-parity.mjs`) plus a subtle,
+gust-free share of the wind.
+
+### `window.DRIFTWING`
+
+`{ ready, backend, revision, seed, frame, readyMs, ctx, state, getStats() }`. `getStats()` returns
+the backend, revision, fps, frame time, render scale, the frame target and a `perf` block, draw
+calls, quality, time of day, the copilot flight state, terrain, cloud, bird and landmark stats, and
+the disabled systems. The smoke test and the harnesses script the game through it.
+
+## Contracts
 
 ### ctx
 
-Every system factory is `createXSystem(ctx)` and returns an object with `update(simDt, realDt)`
-plus optional `prewarm()` / `endPrewarm()` hooks. `ctx` carries:
+Every system factory is `createXSystem(ctx)` and returns an object with `update(simDt, realDt)`,
+plus optional `prewarm()` / `endPrewarm()` hooks and whatever API it offers. `ctx` carries:
 
 | field | what |
 | --- | --- |
-| `THREE`, `TSL`, `addons` | the one three.js r184 WebGPU build (`three/webgpu`) |
-| `renderer`, `backend`, `scene`, `camera`, `post` | rendering |
-| `bus` | EventBus with typed events (`emitTyped` / `onTyped`) |
-| `settings`, `storage` | persisted settings (IndexedDB) and raw storage |
+| `THREE`, `TSL`, `addons` | the one three.js r184 build (`three/webgpu`, `three/tsl`, `addons.BufferGeometryUtils`) |
+| `CONFIG`, `worldOptions` | tuning constants and the world generator options |
+| `renderer`, `backend` (`'WebGPU'` \| `'WebGL2'`), `scene`, `camera`, `post` | rendering |
+| `bus` | the EventBus with typed events (`emitTyped` / `onTyped`) |
+| `settings`, `storage` | persisted settings and the raw key-value storage |
 | `world` | the shared deterministic world generator (`heightAt`, `groundHeight`, `biomeAt`, ...) |
 | `wind` | the WindField |
+| `perf` | the perf governor |
 | `craftRegistry` | craft catalog and registered craft modules |
-| `state` | shared mutable game state (below) |
-| `input` | v1 arcade input struct (pitch, roll, yaw, throttleDelta, throttleTarget, boost, fineControl, ...) |
-| `controls` | the v2 ControlState (below) |
+| `flightModels` | the flight model and control-stage registry |
+| `state` | shared mutable game state (`frame`, `ready`, `paused`, `photoMode`, `seed`, `spawn`, `time`, `player`, `flight`, `waypoint`, `ringCourse`, `perf`) |
+| `input` | the v1 arcade input struct (pitch, roll, yaw, throttleDelta, throttleTarget, boost, fineControl, mouseActive, lastActivity, touch) |
+| `controls` | the v2 ControlState |
 | `systems` | every system by name |
-| `uniforms`, `textures`, `quality`, `util` | shared render uniforms, textures, quality level, helpers |
+| `uniforms`, `textures`, `quality`, `util` | shared TSL uniforms, textures (cloud shadow), the current quality level, helpers |
+| `registerPrewarm(object)` | registers a lazily shown object for the pipeline prewarm |
+| `executeAction`, `getFlightState`, `setPhotoMode`, `requestScreenshot`, `userHasInteracted` | v1 hooks shared by the UI, copilot and camera |
 
-### Frame loop
+`state.player` keeps v1's fields (position, velocity, quaternion, forward / up / right, speed,
+throttle, heading, pitch, roll, verticalSpeed, gForce, altitude, agl, stalled, boost, barrelRoll,
+autopilot, biome) current in both modes, so every v1 system keeps working. `state.flight` is the v2
+telemetry (below).
 
-Per frame: `simDt` (0 while paused) and `realDt` (clamped), then every system in UPDATE_ORDER
-(input, flight, camera, terrain, sky, water, clouds, birds, landmarks, journal, waypoints, rings,
-fx, copilot, audio, ui), then render. `state.time.frameDt` is the unclamped real frame time capped at
-0.1 s, which the fixed-step physics clock consumes.
+### Storage (`src/core/storage.js`)
 
-## Core services (`src/core`)
+The IndexedDB database is `driftwing`, with one object store, `kv`. `init()` loads everything into a
+cache, so `read(key, fallback)` is synchronous. `write(key, value)` updates the cache and persists in
+the background, returning false only when nothing can persist. The API also has `remove`,
+`keys(prefix)`, `flush()` (resolves when every write has landed), `backend` (`'indexeddb'` \|
+`'localstorage'` \| `'memory'`) and `available`. Structure migrations run in `onupgradeneeded` and
+data migrations after load; new steps are only appended. The first data migration imports v1's
+`driftwing.*` localStorage keys.
 
-- **storage.js**: IndexedDB database `driftwing`, store `kv`, versioned structure and data
-  migrations, synchronous cache (`read`, `write`, `remove`, `keys`, `flush`), localStorage then
-  memory fallback. v1 localStorage keys migrate once.
-- **settings.js**: validated schema, `get`, `set`, `update(key, patch)` for object keys, `reset`,
-  `all`. Emits `settings:changed { key, value, settings }`. Keys: `mode`, `craft`,
-  `assists{craftId: 0..1}`, `startOnGround`, `units` (`metric` | `aviation`), `views{classic, sim}`,
-  `fov{chase, cockpit, wing, flyby, fpv}`, `hud{overlay, landingCallouts}`, `twistYaw`
-  (`auto` | `on` | `off`), `afterburnerDetent`, `hotasPrompt` (`ask` | `always` | `never`),
-  `frameTarget` (`auto` | 60 | 120 | 144 | 240 | `uncapped`), `dynamicResolution`,
-  `mixer{master, engine, environment, ui, copilot, music}`, `devBadge`, `windOverlay`, plus every v1
-  key (`masterVolume` is an alias of `mixer.master`).
-- **events.js**: typed events with payload shapes, validated in dev and with `?debug=1`.
-- **clock.js**: `createFixedStepClock()`: 120 Hz ticks, accumulator, `alpha` for interpolation,
-  0.1 s frame clamp.
-- **perf.js**: frame target and dynamic resolution (see Performance).
+| key | what |
+| --- | --- |
+| `driftwing.settings` | settings (migrated from v1's `driftwing.settings.v1`) |
+| `driftwing.journal.<seed>` | the per-world journal |
+| `driftwing.ui.firstRunHintSeen`, `driftwing.ui.simHintSeen` | first-run hint flags |
+| `input.bindings` | the binding profile `{ version, devices, global: { device: { target: Ref[] } }, crafts: { craftId: {...} } }` |
+| `input.calibration.<deviceKey>` | calibration per device |
+| `audio.vario` | the variometer mode (`auto` \| `on` \| `off`) |
 
-### Events
+IndexedDB is scoped to the origin including the port. That is why the dev server is pinned to
+`127.0.0.1:5199` (`vite.config.js`: `strictPort`), and why `npm run serve:single` serves the
+single-file build on the same address.
 
-Typed (`bus.emitTyped(name, payload)`, `bus.onTyped(name, listener)`):
+### Settings (`src/core/settings.js`)
+
+The API is `get(key)` (object values come back as copies), `set(key, value)` (whole value; returns
+false when invalid), `update(key, patch)` (merges into an object key), `reset(key?)` and `all()`.
+Every change emits `settings:changed { key, value, settings }`. The record is versioned
+(`SETTINGS_VERSION` 2) and migrated. Unknown fields are dropped, and an invalid field falls back to
+its default.
+
+| key | default | values |
+| --- | --- | --- |
+| `dayLength`, `timeFrozen` | 360, false | seconds 60-3600; boolean (v1) |
+| `quality` | `auto` | `auto` \| `minimal` \| `low` \| `medium` \| `high` \| `ultra` (v1) |
+| `mouseSensitivity`, `invertPitch` | 1, false | 0.2-4; boolean (v1) |
+| `copilotVoice`, `copilotChatter` | true, true | boolean (v1) |
+| `remoteCopilot`, `remoteEndpoint` | false, `http://localhost:3000/copilot` | boolean; http(s) URL (v1) |
+| `showFps`, `hudAutoHide` | false, true | boolean (v1) |
+| `mode` | `classic` | `classic` \| `sim` |
+| `craft` | `glider` | `glider` \| `bushplane` \| `jet` \| `helicopter` \| `wingsuit` \| `fpv` |
+| `assists` | 1 for every craft | `{ craftId: 0..1 }` |
+| `startOnGround` | false | boolean (SIM) |
+| `units` | `metric` | `metric` (km/h, m, m/s) \| `aviation` (kt, ft, fpm) |
+| `views` | `{ classic: 'chase', sim: 'cockpit' }` | per mode: `chase` \| `cockpit` \| `wing` \| `flyby` (the FPV camera is stored as `cockpit`, the first-person slot) |
+| `fov` | `{ chase: 60, cockpit: 74, wing: 68, flyby: 50, fpv: 120 }` | degrees; ranges 40-100, 50-110, 40-110, 20-90, 90-150 |
+| `fpv` | `{ uptilt: 25, expo: 0.3, rate: 670 }` | FPV drone: camera uptilt 0-40 deg, stick expo 0-1, maximum rate in deg/s |
+| `hud` | `{ overlay: false, landingCallouts: false }` | booleans |
+| `twistYaw` | `auto` | `auto` \| `on` \| `off` |
+| `afterburnerDetent` | 0.95 | 0.8-1 |
+| `hotasPrompt` | `ask` | `ask` \| `always` \| `never` |
+| `frameTarget` | `auto` | `auto` \| 60 \| 120 \| 144 \| 240 \| `uncapped` |
+| `dynamicResolution` | true | boolean |
+| `mixer` | `{ master: 0.7, engine: 0.9, environment: 0.85, ui: 0.8, copilot: 1, music: 0.7 }` | 0..1 per bus |
+| `devBadge`, `windOverlay` | false, false | booleans |
+
+`masterVolume` is an alias of `mixer.master`, kept for v1-era callers. Bindings and calibration are
+not settings: they live in their own storage keys, so a device profile can be exported on its own.
+
+**Command channel for mode and craft.** The persisted settings `mode` and `craft` are the source of
+truth. Any UI, input action or copilot command changes them with `settings.set`. The flight
+controller listens, applies the change (or refuses it and writes the previous value back), then
+emits `modeChanged` / `craftChanged`. The pill and the picker follow both, so a refused switch
+reverts on screen too.
+
+### Events (`src/core/events.js`)
+
+Typed events are emitted with `bus.emitTyped(name, payload)` and heard with
+`bus.onTyped(name, listener)`. An unknown name throws. Payloads are validated in dev builds and with
+`?debug=1`, and a bad payload is reported once per type and still delivered.
+
+| event | payload | emitted by |
+| --- | --- | --- |
+| `modeChanged` | `{ mode, previous }` (`classic` \| `sim`) | flight controller |
+| `craftChanged` | `{ craft, previous }` | flight controller |
+| `landed` | `{ grade: butter\|smooth\|firm\|hard, craft, sinkRate, groundSpeed, position }` | landing monitor (SIM) |
+| `softCrash` | `{ craft, reason, impactSpeed, position }` | flight controller |
+| `discovery` | `{ id, name, kind, position }` (bridged from `landmark:discovered`) | events.js |
+| `windSourceAdded` / `windSourceRemoved` | `{ id, kind, position, radius }` / `{ id, kind }` | WindField |
+| `viewChanged` | `{ view: chase\|cockpit\|wing\|flyby\|fpv, craft, mode }` (also at start and on craft change) | camera |
+| `deviceConnected` / `deviceDisconnected` | `{ deviceKey, kind, name }`; kind `gamepad` \| `hotas-stick` \| `hotas-throttle` \| `hotas-pedals` | gamepad registry |
+| `relaunched` | `{ craft, method, position }` | flight controller |
+
+Landing grades come from the sink rate at touchdown: butter up to 0.5 m/s, smooth up to 1.2 m/s,
+firm up to 2.2 m/s, and hard above that.
+
+Untyped events keep v1's `namespace:verb` names:
+
+- `notify { text, kind }`;
+- `settings:changed`, `user:gesture`, `game:ready`, `resize`;
+- `photo:changed`, `screenshot:taken`;
+- `quality:changed`, `time:changed`, `biome:changed`;
+- `boost`, `barrelroll`, `stall`, `autopilot:changed`;
+- `rings:started`, `rings:finished`, `rings:cancelled`;
+- `waypoint:set`, `waypoint:reached`, `waypoint:cleared`;
+- `landmark:discovered`, `landmark:threaded`, `journal:changed`, `birds:scattered`;
+- `copilot:speech { text, source }`, `copilot:listening`, `copilot:transcript`, `mic:toggle`;
+- `ui:command`, `ui:action`.
+
+v2 adds these untyped events:
 
 | event | payload |
 | --- | --- |
-| `modeChanged` | `{ mode, previous }` |
-| `craftChanged` | `{ craft, previous }` |
-| `landed` | `{ grade: butter\|smooth\|firm\|hard, craft, sinkRate, groundSpeed, position }` |
-| `softCrash` | `{ craft, reason, impactSpeed, position }` |
-| `discovery` | `{ id, name, kind, position }` (bridged from `landmark:discovered`) |
-| `windSourceAdded` / `windSourceRemoved` | `{ id, kind, position, radius }` / `{ id, kind }` |
-| `viewChanged` | `{ view, craft, mode }` |
-| `deviceConnected` / `deviceDisconnected` | `{ deviceKey, kind, name }` |
-| `relaunched` | `{ craft, method, position }` |
+| `input:action` | `{ id, phase: 'press' \| 'release', source: 'keyboard' \| 'mouse' \| 'touch' \| 'gamepad' \| 'hotas' \| 'copilot', device }`; `device` is `keyboard`, `mouse`, `touch`, `copilot` or a controller's deviceKey |
+| `flight:assistOverride` | `{ active, reason: 'deviceDisconnected' \| 'device reconnected' \| 'manual input' \| 'mode change', deviceKey? }` |
+| `ui:openControls` | `{ calibrate?: boolean }`: opens the controls panel, and with `calibrate` starts the wizard |
+| `perf:renderScale` | the dynamic-resolution scale changed |
+| `audio:started` | `{ context }`, once, when the AudioContext is created |
 
-Untyped v1 events keep their names (`notify`, `settings:changed`, `user:gesture`, `game:ready`,
-`photo:changed`, `copilot:speech`, `ui:command`, `rings:*`, `waypoint:*`, ...). v2 adds
-`input:action { id, phase: 'press'|'release', source, device }` and `flight:assistOverride
-{ active, reason }`.
+### Input actions and owners (`src/input/controlState.js`)
 
-**Command channel for mode and craft:** the persisted settings `mode` and `craft` are the source of
-truth. Any UI, input action or copilot command changes them with `settings.set`; the flight
-controller listens, applies the change (or rejects it and writes the previous value back), then
-emits `modeChanged` / `craftChanged`.
+Every action is rebindable on every device:
 
-## Input (`src/input`)
+`copilotPTT, craftAbility, boost, waypointNearest, waypointAhead, photoMode, viewCycle,
+viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, craftSelect1` ..
+`craftSelect6, modeToggle, gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward,
+timeBack, ringCourse, journal, settings, controlsPanel, relaunch, engineToggle, chuteDeploy`.
 
-`InputManager` (the `input` system) reads keyboard, mouse, touch, standard gamepads and
-Thrustmaster HOTAS devices and writes, every frame:
-
-- `ctx.input`: the v1 arcade struct, exactly as v1 did for keyboard/mouse/touch, plus gamepad and
-  HOTAS contributions. CLASSIC flight reads only this.
-- `ctx.controls`: the **ControlState** (`src/input/controlState.js`): `roll, pitch, yaw` (-1..1),
-  `throttle, collective` (0..1), `brakeL, brakeR, flaps` (0..1), `trim` (-1..1), `lookX, lookY`
-  (-1..1), `actions` (Set of action ids pressed since the flight controller last consumed them),
-  `held` (Set of held action ids), `sources` (which device last moved each axis). SIM flight reads
-  this once per physics tick.
-- `input:action` bus events for every press and release.
-
-Actions (all rebindable on every device): `copilotPTT, craftAbility, boost, waypointNearest,
-photoMode, viewCycle, viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext,
-craftPrev, modeToggle, gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward,
-timeBack, ringCourse, journal, settings, controlsPanel, relaunch, engineToggle, chuteDeploy`, plus
-`craftSelect1` .. `craftSelect6` for the number keys.
-
-Each action has exactly one owner that performs it:
+Each press and release is published as `input:action`. Each action has exactly one owner that
+performs it:
 
 | owner | actions |
 | --- | --- |
-| flight | craftAbility, boost, craftNext, craftPrev, craftSelect1-6, modeToggle, gearToggle, flapsUp, flapsDown, airbrake (held), relaunch, engineToggle, chuteDeploy |
-| camera | viewCycle, viewForward, viewBack, viewLeft, viewRight, recenterView |
-| ui | waypointNearest, photoMode, autopilotToggle, timeForward, timeBack, ringCourse, journal, settings, controlsPanel |
-| copilot | copilotPTT (held) |
+| flight (`FlightController.js`) | craftAbility, boost, craftNext, craftPrev, craftSelect1-6, modeToggle, gearToggle, flapsUp, flapsDown, airbrake (held), relaunch, engineToggle, chuteDeploy. The SIM model itself handles gearToggle, flapsUp, flapsDown, airbrake, engineToggle and chuteDeploy (they reach it in `controls.actions` on the frame's first tick, and held ones in `controls.held`) |
+| camera (`cameraManager.js`) | viewCycle, viewForward, viewBack, viewLeft, viewRight, recenterView |
+| ui (`ui.js`) | waypointAhead, waypointNearest, photoMode, autopilotToggle, timeForward, timeBack, ringCourse, journal, settings, controlsPanel |
+| copilot (`copilot.js`) | copilotPTT (held) |
 
-Bindings (`input.bindings` in storage) are a global profile plus per-craft overrides, per device
-kind (keyboard, mouse, gamepad) and per HOTAS device key. Calibration is stored per device key
-(`input.calibration.<deviceKey>`). Devices are identified by vendor/product id parsed from
-`gamepad.id` (Thrustmaster vendor `044f`), falling back to name substrings, never by slot index.
+In photo mode only photoMode, timeForward, timeBack and copilotPTT pass. Default bindings are
+listed in `docs/controls.md`.
 
-## Flight (`src/flight`)
+### ControlState (`src/input/controlState.js`)
 
-The **FlightController** is `ctx.systems.flight`. It owns the active craft, the mode, the models,
-the fixed-step loop for SIM, interpolation, the mode-switch blend, soft crash and respawn,
-relaunch, ground contact outcomes and `state.flight` telemetry. It also keeps `state.player`
-(the v1 fields) current in both modes so v1 systems keep working.
+`ctx.controls` is the one device-independent description of what the pilot asks for. SIM flight
+reads it once per physics tick, and cameras and UI read it every frame.
 
-API (v1 methods keep their v1 meaning):
+| field | range | meaning |
+| --- | --- | --- |
+| `roll`, `pitch`, `yaw` | -1..1 | right, nose up, nose right positive |
+| `throttle`, `collective` | 0..1 | lever positions |
+| `brakeL`, `brakeR` | 0..1 | toe brakes |
+| `flaps` | 0..1 | axis-commanded flap setting |
+| `trim` | -1..1 | pitch trim, nose up positive |
+| `lookX`, `lookY` | -1..1 | free look as a fraction of the view's maximum; 0 is centred |
+| `antenna` | 0..1 | HOTAS antenna; the craft maps it to flap notches or zoom |
+| `afterburnerDetent` | 0.8..1 | from settings |
+| `afterburner` | boolean | throttle at or past the detent |
+| `actions` | Set | action ids pressed since the flight controller last consumed them |
+| `held` | Set | action ids currently held |
+| `sources` | object | which device last moved each axis |
 
-| method | notes |
+`ctx.input` is the v1 arcade struct, written exactly as v1 did from keyboard, mouse and touch, plus
+the controllers' stick, rudder and throttle. CLASSIC flies on it.
+
+Axis combination per target (`AXIS_TARGETS` in `defaultBindings.js`): `sum` for roll, pitch, yaw
+and look; `max` for the toe brakes; `position` for throttle, collective, flaps, trim and antenna.
+With `position`, an absolute axis takes over when it moves, and rate references move the value.
+
+### Devices, bindings and calibration
+
+- **Identification.** Devices are identified by the vendor / product id parsed from `gamepad.id`
+  (Thrustmaster `044f`: T.16000M `b10a`, TWCS `b687`, TFRP `b679`), falling back to name
+  substrings, and never by slot index. The deviceKey is `vvvv-pppp`; a second identical device gets
+  `#2`, and a device with no parseable id gets `name-...`. A device that moves to another slot keeps
+  its key. `?debug=1` logs each observed id once.
+- **Bindings.** A global profile plus per-craft overrides, per binding device: `keyboard`, `mouse`,
+  `gamepad` (every standard-mapping pad), or a HOTAS deviceKey. The reference shapes are documented
+  at the top of `defaultBindings.js`.
+- **Calibration.** Stored per deviceKey. It learns centres and ranges, throttle and brake
+  directions, and each hat's form (axis or buttons) with the value of every direction and of
+  centre.
+- **Axis pipeline.** calibration, invert, deadzone, saturation, expo, smoothing
+  (`axisPipeline.js`).
+- **Special axes.** Twist yaw yields to the pedal rudder once the pedals move (`twistYaw`). The
+  stick's own slider is ignored while a TWCS is connected. The TWCS rocker is a rate input that
+  moves the trim.
+
+The input system API (`ctx.systems.input`) is listed in `docs/controls.md`.
+
+### FlightController (`ctx.systems.flight`)
+
+v1 methods keep their v1 meaning.
+
+| member | notes |
 | --- | --- |
-| `update(simDt, realDt)` | CLASSIC: one variable step exactly like v1. SIM: fixed 120 Hz ticks, then interpolate |
+| `update(simDt, realDt)` | CLASSIC: one v1 variable step. SIM: fixed 120 Hz ticks, then interpolation |
 | `planeMesh` | the active craft's root Object3D |
-| `setAutopilot(options)` | v1 options; in SIM the autopilot flies through PID on the control surfaces |
+| `setAutopilot(options)` | v1 options `{ enabled, heading, altitude, followWaypoint }` plus `speed`; in SIM the PID autopilot flies through the controls |
 | `barrelRoll(direction)`, `boost()` | CLASSIC only; return false in SIM |
 | `getWingtips()` | world-space wingtip points (contrails) |
 | `resetTo({ x, y, z, heading })`, `syncVisual()`, `getBaseQuaternion()`, `getStats()` | v1 |
-| `getMode()`, `setMode(mode)` | also driven by `settings.mode` |
-| `getCraft()`, `setCraft(id)` | also driven by `settings.craft` |
-| `relaunch()` | craft relaunch (aerotow, peak launch, airstart) |
-| `triggerSoftCrash(reason)` | fade, respawn 300 m AGL, level, at cruise (hover for rotorcraft) |
+| `publishTelemetry()` | writes `state.flight`; the frame loop calls it after the safety net |
+| `getMode()`, `setMode(mode)` | `setMode` goes through the settings channel and returns whether the mode is now active |
+| `getCraft()`, `setCraft(id)` | the same for the craft |
+| `getCraftModule()`, `getCameraRig()`, `getEyeAnchor()` | the active craft module, its `cameraRig`, and the mesh eye anchor |
+| `getModel()` | the active FlightModel (the arcade model in CLASSIC) |
+| `getCeiling()` | 2600 m in CLASSIC, 15000 m in SIM (`SIM_CEILING`) |
+| `isTowing()`, `isAssistOverridden()` | aerotow in progress; hands-off hold active |
+| `relaunch()` | the craft's relaunch: aerotow to 1000 m AGL (glider), a dive from the nearest peak (wingsuit), or a 300 m airstart (hovering for rotorcraft) |
+| `triggerSoftCrash(reason)` | 0.4 s fade, respawn 300 m AGL at the same XZ and heading, level, at cruise (hovering for rotorcraft; the wingsuit restarts from a peak) |
+| `runAbility()` | the craft ability (in CLASSIC, craft without a CLASSIC ability boost) |
 
-### Models
+Mode switches keep the position, velocity vector, attitude, seed and craft. They convert the state
+between models and blend the rendered pose over 0.5 s. A switch into SIM trims the model and eases
+the speed into `[1.25 x stall, 0.9 x Vne]`. A switch into CLASSIC starts at least 4 m/s above the
+arcade stall. Craft switches rebuild the mesh and respawn at the same place with a sensible state:
+the helicopter and drone hover, and a wingsuit below 300 m AGL relaunches from a peak. A craft whose
+SIM model kind is not registered is refused in SIM with a notice, and `settings.mode` is written
+back. On a controller disconnect in SIM, the hands-off hold forces assists to 100 % and holds
+heading and altitude. It releases on reconnect, or when another device holds the stick past 35 %
+for 0.25 s.
 
-A FlightModel is created by a factory `createXModel({ profile, world, bus })` and exposes:
+### FlightModel interface (`src/flight/models.js`)
 
-- `kind`: `arcade` | `fixedWing` | `helicopter` | `wingsuit` | `quad`
-- `reset(pose)`: pose `{ position, velocity, quaternion, angularVelocity, throttle, onGround, engineOn }`
-- `step(dt, controls, env)`: one tick. `env` = `{ time, wind: { vel, turbulence }, groundHeight(x, z),
-  waterLevel, rho }`. Controls have already been shaped by the craft input profile, assists and the
-  autopilot.
-- `state`: `{ position, velocity, quaternion, angularVelocity }` (live, SI, world frame except
-  angular velocity which is body frame)
-- `contact`: result of the last tick's ground contact `{ onGround, touchdown, bodyStrike, water,
-  penetration }`
-- `writeTelemetry(flight)`: fills `state.flight` fields it owns
-- `snapshot()` / `restore(snapshot)`: plain, serializable state (NaN restore, mode conversion,
-  Phase 4 replay)
+A model is created by a factory registered per kind: `flightModels.register(kind, factory)`. It is
+called with `{ profile, craft, world, bus, state, input, craftState }`, where `profile` is the
+`simProfile` (whose `model` field names the kind), or the `arcadeProfile` for `arcade`. Registered
+kinds are `arcade`, `fixedWing`, `jet` (SimFixedWing with the jet's own assists), `helicopter`,
+`wingsuit` and `quad`. `create()` checks this interface:
 
-`ArcadeModel` is the v1 flight model extracted without behaviour change and parameterised by a
-craft's `arcadeProfile` (the glider's profile is v1's constants). SIM models: `SimFixedWing`
-(glider, bush plane, jet), `SimHelicopter`, `SimWingsuit`, `SimQuad`. Shared pieces: `aero.js`
-(atmosphere, coefficient curves), `assists.js`, `autopilot.js` (PID), `groundContact.js`
-(contact points against the shared height function, spring-damper, friction, brakes, steering),
-`telemetry.js`.
+| member | contract |
+| --- | --- |
+| `kind` | the model kind |
+| `reset(pose)` | `pose = { position, velocity, quaternion, angularVelocity, throttle, onGround, engineOn }` |
+| `step(dt, controls, env)` | one tick. `controls` is the shaped ControlState copy (plus `powerLimit` 0..1 for the jet). `env = { time, wind: { vel, turbulence }, groundHeight(x, z), waterLevel, rho, world, craftState, assists, handsOff, autopilot, telemetry }` |
+| `state` | `{ position, velocity, quaternion, angularVelocity }`: live and SI; world frame, except the angular velocity, which is in body axes |
+| `contact` | the last tick's ground contact: `{ onGround, touchdown: { sinkRate } \| null, bodyStrike: { part, speed } \| null, water, penetration }` |
+| `writeTelemetry(flight)` | fills the `state.flight` fields the model owns |
+| `snapshot()` / `restore(snapshot)` | plain, serializable state (NaN restore, trim probes, mode conversion, replay) |
+| optional `surfaces` | `{ aileron, elevator, rudder, propSpeed, ... }` for the mesh animation (otherwise the stick is shown) |
+| optional `flightData` | model-specific values read by the assists and autopilot (airspeed, aoa, load, stall margin, ...) |
+| optional `dispose()` | releases model resources |
 
-### Telemetry (`state.flight`)
+A soft crash triggers when:
 
-Written once per frame from the interpolated pose; see `src/flight/telemetry.js` for every field.
-Consumers read it and never write it.
+- `bodyStrike.speed` exceeds `limits.bodyStrikeSpeed` (default 5 m/s);
+- `touchdown.sinkRate` exceeds `limits.crashSinkRate`;
+- a craft that cannot float touches water;
+- the penetration exceeds 1 m.
 
-## Craft (`src/craft`)
+`SimFixedWing` also takes an optional `profile.extension({ profile, craft, bus, craftState, limits,
+flightData })`. Its hooks are `shapeControls`, `engine { update, forces, reset }`,
+`dragCoefficient`, `moments`, `afterStep`, `reset`, `writeTelemetry`, `snapshot` and `restore`. The
+jet flies on it (`jetAero.js`). `profile.vneBasis: 'equivalent'` and `profile.maxSpeed` suit fast
+craft.
 
-`registry.js` holds the catalog (id, name, role, number key, picker silhouette). Each craft file
-`src/craft/<id>.js` default-exports a module and `src/craft/index.js` registers them all. A module
-provides:
+### Control stages, assists, autopilot and trim
+
+**Control stages.** `flightModels.registerControlStage({ id, order = 50, apply(controls, context) })`
+(also `unregisterControlStage`, `controlStages()`). Stages run in ascending order every SIM tick,
+before `model.step`. The context is `{ dt, model, craft, craftId, env, autopilot, assists (0..1,
+forced to 1 by the hands-off hold), handsOff, telemetry, activeAssists }`. Push the names of assists
+acting this tick into `activeAssists`; they appear in `state.flight.activeAssists`. Registered
+stages:
+
+- the PID autopilot, order 20 (`autopilot.js`);
+- the assists, order 40 (`assists.js`), so the limiters also protect autopilot commands.
+
+**Assists** (`assists.js`). The level is 0..1 per craft (`settings.assists`). Every assist has a
+weight that ramps with the level.
+
+- API: `registerAssistCatalog(kind, entries)`, where entries are `{ key, name, from, full }`;
+  `registerAssistHandler(kind, { createMemory(), apply(controls, context, weights, memory),
+  prime?(memory, trim) })`; `assistWeights(level, kind)`, `describeAssists(level, kind)` and
+  `primeAssists(model, trim)`.
+- Catalogs per kind:
+
+| kind | 50 % (and ramping in from 0) | toward 100 % |
+| --- | --- | --- |
+| fixedWing | auto-coordination, auto-trim, stall warning | AoA limiter, G limiter, auto-level, flight-path hold, bank protection, pitch protection, overspeed protection |
+| jet (`jetFcs.js`) | auto-coordination, yaw and roll dampers, auto-trim, stall warning | fly-by-wire G command, AoA limiter, G limiter, auto-level, overspeed protection (no attitude limits, so loops and rolls stay possible) |
+| helicopter (`helicopterAssists.js`) | trim and stability augmentation, heading hold | attitude limits, torque auto-compensation, auto-hover (plus engine protection, vortex-ring avoidance and autorotation) |
+| wingsuit (`SimWingsuit.js`) | stability, terrain proximity warning | auto-level, stall protection |
+| quad (`SimQuad.js`) | angle mode (above 35 %) | altitude hold (above 85 %); 0 % is rate (acro) mode |
+
+- At 100 % hands off, fixed-wing craft hold the air-mass flight path within 0.85-1.25 g.
+
+**Autopilot** (`autopilot.js`). It flies through the controls and never sets the attitude. It holds
+heading, altitude and speed with PID loops, follows waypoints and rings, and uses a terrain
+look-ahead. Other kinds register theirs with `registerAutopilotHandler(kind, { createMemory(),
+apply(controls, context, memory) })`. `autopilotHandlerFor(kind)` lets a kind reuse another's (the
+jet flies the fixed-wing autopilot). The helicopter, wingsuit and quad have their own.
+
+**Trim** (`trim.js`). After every airborne SIM reset (mode switch, boot, respawn, airstart, craft
+switch, tow release, NaN fallback), the controller calls `trimModel(model, request)`, where
+`request = { env, dt, throttle, trim, bank?, load? }`. The result is `{ aoa, elevator, load,
+targetLoad, flightPath, bank, speed, stallSpeed, vne, safeSpeed: { min, max }, aoaLimited }`. Then it
+calls `primeAssists`. Handlers are registered with `registerTrimHandler(kind, { trim(model,
+request) })` (also `hasTrimHandler`, `trimHandlerFor`, `neutralLoad(flightPath, bank)`). The
+`fixedWing` and `jet` kinds have trim handlers; other kinds are left as reset.
+
+### Telemetry (`state.flight`, `src/flight/telemetry.js`)
+
+The controller writes it once per rendered frame from the interpolated, safety-checked pose.
+Consumers (HUD, instruments, audio, camera, copilot, the harness, and later replay and multiplayer)
+read it and never write it.
+
+| group | fields |
+| --- | --- |
+| identity | `mode`, `craft`, `tick`, `alpha` |
+| pose | `position`, `velocity`, `airVelocity`, `wind`, `turbulence`, `quaternion`, `angularVelocity` (body rad/s) |
+| air data | `airspeed` (true), `indicatedAirspeed`, `groundSpeed`, `mach`, `altitude`, `agl`, `radarAltitude`, `verticalSpeed`, `vario` (total energy), `heading`, `pitch`, `roll`, `aoa`, `sideslip`, `gLoad`, `glideRatio` |
+| engine | `throttle`, `afterburner`, `engineOn`, `rpm` (0..1 of rated), `rotorRpm` (1 = governed), `torque` (1 = rated) |
+| configuration | `flaps`, `flapNotch`, `gear { retractable, down, transit }`, `airbrake`, `brakes`, `trim` |
+| state | `onGround`, `contacts`, `stall { warning, stalled, buffet }`, `overspeed`, `crash { active, reason, progress }` |
+| assists | `assists`, `activeAssists[]`, `autopilot { enabled, heading, altitude, speed }` |
+| landings | `lastLanding`, `bestLanding` (from the `landed` event) |
+| craft | `craftState` (below) |
+
+For helicopters, `throttle` is the collective and `rpm` the engine N2; `radarAltitude` is the skid
+height; `stall.warning` is the low-rotor-rpm horn. In CLASSIC, `velocity` includes the subtle wind
+drift and `airVelocity` is the arcade path velocity.
+
+`craftState` is shared by the ability, the mesh, audio, instruments and the copilot:
+
+- glider: `ballast`, `dumping`;
+- jet: `abDetent`, `abRequest`, `afterburner`, `nozzle`, `spool`, `mach`, `overG`, `thrust`;
+- helicopter: `hoverHold`;
+- wingsuit: `canopy`, `phase` (`flight` \| `deploying` \| `canopy` \| `landed`), `deploy`,
+  `brakeLeft` / `brakeRight`, `proximityWarning`, `proximity`, `clearance`, `impactSeconds`,
+  `windStreaks`, ...;
+- FPV drone: `droneMode` (`rate` \| `angle`), `altitudeHold`, `modeOverride`, `turtle`.
+
+A deployed chute is `craftState.canopy === true`.
+
+### Craft modules (`src/craft/<id>.js`)
+
+Each craft file default-exports a frozen module, and `src/craft/index.js` registers it.
+`craftRegistry.register()` checks the required fields (`buildMesh`, `simProfile`, `arcadeProfile`,
+`inputProfile`, `audioProfile`, `cameraRig`, `instruments`, `abilities`, `spawn`, `limits`). The
+registry API is `catalog`, `register`, `get`, `has`, `list()` (with `available`) and
+`step(id, direction)`.
 
 | field | contents |
 | --- | --- |
-| `id`, `name` | as in the catalog |
-| `buildMesh(ctx)` | returns `{ root, update(visual, dt), wingtips, eyeAnchor, dispose() }`: low-poly flat-shaded mesh in the v1 palette with animated control surfaces, prop disc, rotor, gear. `visual` carries telemetry plus control-surface deflections |
-| `simProfile` | `{ model, ...parameters }` for the SIM model |
-| `arcadeProfile` | CLASSIC tuning (v1's forgiving rules) |
-| `inputProfile` | how ControlState axes map for this craft (for example throttle to collective) |
-| `audioProfile` | `{ engine: 'glider'\|'prop'\|'jet'\|'heli'\|'drone'\|'wingsuit', ...parameters }` |
-| `cameraRig` | `{ eye, chase: { distance, height, lookAhead }, wing, fpv }` |
-| `instruments` | ordered instrument ids for the panel and HUD |
-| `abilities` | `{ craftAbility: { label, run(flight) } }` |
-| `spawn` | `{ cruise, hover, relaunch: 'aerotow'\|'peak'\|'airstart', canStartOnGround }` |
-| `limits` | `{ vne, gLimit, crashSinkRate, floats }` |
+| `id`, `name` | as in `CRAFT_CATALOG` |
+| `buildMesh(ctx)` | returns `{ root, update(visual, dt), wingtips, eyeAnchor, anchors, dispose() }`. The mesh is procedural, low-poly and flat-shaded in the v1 palette, with animated surfaces, prop disc, rotor and gear. `visual = { aileron, elevator, rudder, flaps, throttle, boost, propSpeed, engineOn, onGround, gearDown, airbrake, groundSpeed, time }`. `anchors` are named local points (`towHook`, `smoke`, `tail`, ...). Parts with `userData.hideInCockpit` hide in the cockpit view |
+| `simProfile` | `{ model, targets, mass, inertia, centerOfMass, contacts, ... }` plus the model's own blocks: fixedWing `wing, aero, fuselage, tail, controls, flaps, spoilers, gear, engine, ballast`; jet adds `jet, extension, maxSpeed, vneBasis, gEffects`; helicopter `rotor, tailRotor, engine, fuselage, stabilizers, vortexRing, bladeStall`; wingsuit `suit, pitch, roll, yaw, canopy, deploy, radarOffset`; quad `thrustToWeight, motors, motor, aero, controller` |
+| `arcadeProfile` | CLASSIC tuning with v1's constants and forgiving rules (the glider's is exactly v1's). Options: `ENGINE: false` (no thrust; the wingsuit), `LEVEL_PITCH`, and `hover` for rotorcraft (below) |
+| `inputProfile` | `{ throttle: 'throttle' \| 'none' \| 'collective' \| 'thrust', antenna?: 'zoom', flapNotches, toeBrakes: 'wheels' \| 'wheelsAndSpoilers' \| 'canopyToggles' \| 'none', spoilers?, rudderSteersTailwheel?, afterburnerDetent?, rates? }` (`rates`: Betaflight `{ rcRate, superRate, expo }` per axis for the quad) |
+| `audioProfile` | `{ engine: family, ...parameters }` (below) |
+| `cameraRig` | `{ eye, chase, wing, fpv, cockpit }` (below) |
+| `instruments` | ordered instrument ids for the panel and HUD (below) |
+| `abilities` | `{ craftAbility: { label, modes?: ['sim'], initialState?(), run(api), update?(api, dt) } }`. `api = { craftState, mode, craft, telemetry, player, notify(text), relaunch(), emitTrail(kind, anchor, dt) }` |
+| `spawn` | `{ cruise (SIM airspeed, m/s), cruiseThrottle?, hover, relaunch: 'aerotow' \| 'peak' \| 'airstart', respawn?: 'peak', canStartOnGround, runwayLength?, peakDive?: { angle, speed, classicSpeed } }` |
+| `limits` | `{ vne, vneMach?, gLimit, crashSinkRate, bodyStrikeSpeed?, floats }` |
+| `capabilities` (optional) | `{ engine?, chute? }`; otherwise inferred from the profiles (copilot, UI) |
 
-## Wind (`src/env/WindField.js`)
+**`arcadeProfile.hover`.** When it is set, `createArcadeModel` returns the hover model: throttle 0.5
+holds the height, the stick flies forward and sideways, and it never stalls or tumbles. Fields:
 
-`sample(pos, t, out?) -> { vel: Vector3, turbulence: 0..1 }` layers ambient wind, ridge lift,
-seeded thermals and turbulence, plus registered sources. `thermalsNear(x, z, radius, visit)` lets
-the cloud system draw each thermal's cumulus cap. Phase 2 writers use `addSource({ id, bounds,
-sample(pos, t) })`, `setSourceBounds(id, bounds)` and `removeSource(id)`; bounds are `{ min, max }`
-or `{ center, radius }` and sources are found through a spatial hash. CLASSIC applies a scaled,
-subtle share of the field; SIM applies all of it.
+- speeds (m/s): `MAX_FORWARD_SPEED`, `MAX_REVERSE_SPEED`, `MAX_SIDE_SPEED`, `SETTLE_SPEED`,
+  `TURN_REFERENCE_SPEED`;
+- accelerations: `ACCELERATION`, `BRAKING`;
+- vertical rates: `CLIMB_RATE`, `DESCENT_RATE`;
+- responses: `VERTICAL_RESPONSE`, `ATTITUDE_RESPONSE`;
+- throttle: `THROTTLE_DEADBAND`, `THROTTLE_RATE`;
+- rates: `YAW_RATE`, `TURN_RATE`, `TURN_GAIN`;
+- attitudes: `MAX_BANK`, `MAX_PITCH`, `CRUISE_PITCH`;
+- heights: `MIN_AGL`, `CUSHION_HEIGHT`;
+- visuals: `ROTOR_SPEED`, `DISC_TILT`.
 
-## Cameras (`src/camera`)
+The profile's top level also carries `SPEED`, `GRAVITY`, `BOOST_*` and `AUTOPILOT`.
 
-The `camera` system manages views `chase` (the v1 rig, unchanged), `cockpit` (per-craft eye point,
-canopy frame and instrument panel), `wing` and `flyby`, free look (ControlState `lookX/lookY`,
-view snaps), per-view FOV from `settings.fov`, and photo mode (v1). CLASSIC defaults to chase and
-SIM to cockpit (`settings.views`).
+**`cameraRig`.**
 
-## Audio (`src/audio`)
+- `eye`: `[x, y, z]` body axes.
+- `chase`: `{ distance, height, lookAhead, speedRange?: { CRUISE, MAX, BOOST_MAX } }`. It may be an
+  object with getters; the wingsuit's widens under the canopy.
+- `wing`: `{ position, target }` in body axes. Without it the mount is derived from the right
+  wingtip.
+- `fpv`: `{ position, uptilt (0-40, default 25), near }`. Its presence makes the first-person slot
+  the FPV view.
+- `cockpit`: `{ style: 'canopy' \| 'cabin' \| 'bubble' \| 'open' \| 'none', width, sill, floor,
+  front, back, roof, panel: { width, center, tilt, layout: [[ids], ...] }, frameColor, stick,
+  near }`. All fields are optional, in metres relative to the eye. A craft with an eye but no
+  cockpit gets style `none`.
 
-`AudioEngine` (the `audio` system) owns the AudioContext, the mixer buses `master, engine,
-environment, ui, copilot, music` (volumes from `settings.mixer`), ducking while the copilot speaks,
-and procedural modules driven by `state.flight` and the craft `audioProfile`. The music bus is
-exposed as `ctx.systems.audio.getBus('music')` for Phase 4.
+**`audioProfile`** (`src/audio/engines/index.js`). Missing parameters take the family defaults, so
+`{ engine: 'jet' }` is enough.
 
-## UI (`src/ui`)
+- Common parameters: `airflowSpeed`, `classicAirflowSpeed`, `interiorCutoff` (0 means an open
+  cockpit), `spatial`, `stallHorn`, `stallAoa`, `stallHornStyle` (`horn` \| `beep`), `touchdown`
+  (`wheels` \| `skids` \| `body`), `callouts`, `vario`, `varioLift`, `varioSink`, `motorPitch` and
+  `level`.
+- Families:
+  - `glider`: v1's hum, silent in SIM;
+  - `prop`: `cylinders`, `blades`, `maxRpm`, `idleRpm`;
+  - `jet`: `whineHz`, `rumbleHz`, `idleSpool`, `spoolUp`, `spoolDown`, `afterburnerRoar`;
+  - `heli`: `blades`, `rotorRpm`, `tailBlades`, `tailRatio`, `turbineHz`;
+  - `drone`: `motors`, `idleHz`, `maxHz`;
+  - `wingsuit`: `flutterHz`, `proximityRange`.
 
-Glass UI from v1 plus the CLASSIC | SIM pill, craft picker, HOTAS prompt, settings panel, controls
-panel with calibration wizard, instrument HUD overlay and the sound-off pill.
+**Instruments** (`src/ui/instruments/index.js`). There are 17 ids: `airspeed, altitude, attitude,
+heading, vsi, aoa, g, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide,
+proximity`. A renderer is `{ id, label, draw(pen, source, theme, memory), createMemory?,
+update?(memory, dt, source), reset? }`. It draws in a 200 x 200 design box in a `panel` theme (steam
+gauge on the cockpit CanvasTexture) and a `glass` theme (HUD tile). Units follow `settings.units`.
+Unknown ids are skipped and reported in the camera stats.
 
-## Performance
+| craft | model kind | instruments |
+| --- | --- | --- |
+| glider | fixedWing | airspeed, altitude, attitude, heading, vsi, aoa, g, flapsGear, vario, ld |
+| bushplane | fixedWing | airspeed, altitude, attitude, heading, vsi, aoa, g, throttle, flapsGear |
+| jet | jet | airspeed (with the Mach window), altitude, attitude, heading, vsi, aoa, g, throttle (with the afterburner range), flapsGear |
+| helicopter | helicopter | airspeed, altitude, attitude, heading, vsi, rotorRpm, torque, radarAlt, throttle |
+| wingsuit | wingsuit | airspeed, altitude, heading, vsi, glide, proximity |
+| fpv | quad | throttle, droneMode, airspeed, altitude, attitude, heading, vsi |
 
-Uncapped `setAnimationLoop`. The frame target defaults to the measured display refresh. Dynamic
-resolution steps render scale between 0.6 and 1.0 with hysteresis to hold the target; v1's quality
-levels (view distance and density) are the second stage.
+### Camera (`ctx.systems.camera`)
 
-## Dev (`src/dev`)
+It keeps v1's API: `update`, `setPhotoMode`, `shake`, `snap`, `getMode()` (`chase` \| `photo` \|
+`returning`) and `setFreeCameraPose`. It adds:
 
-Status badge (backend, revision, fps, frametime graph, input devices), the flight-test harness
-(`?test=1`) and the HOTAS pipeline test (`?test=hotas`).
+- `getView()`: `chase` \| `cockpit` \| `wing` \| `flyby` \| `fpv`.
+- `setView(slot)`: `chase` \| `cockpit` \| `wing` \| `flyby`. `cockpit` is the first-person slot,
+  which becomes `fpv` when the craft has `cameraRig.fpv`. The choice is saved per mode in
+  `settings.views`.
+- `cycleView(direction)` and `listViews()`.
+- `getLook()`: `{ yaw, pitch, snapYaw }` in degrees.
+- `getStats()`: view, lens, zoom, FPV uptilt, hidden parts, cockpit, HUD, reticle, flyby and
+  instrument timings.
+- `debug.previewCockpit(descriptor)`: dev builds, `?debug=1` or `?test` only.
+
+Behaviour:
+
+- CLASSIC defaults to chase and SIM to cockpit. A mode switch moves to that mode's saved view.
+- Free look reads `lookX` / `lookY`: head pan in the cockpit, an orbit in chase and a small offset
+  elsewhere.
+- Each view takes its FOV from `settings.fov`. The chase view keeps v1's speed stretch and is
+  exactly v1 at the default 60.
+- An `inputProfile.antenna` of `'zoom'` narrows the lens by up to 3x.
+- The instruments redraw at 30 Hz, onto the cockpit panel texture and the optional glass HUD.
+- The FPV view reads its uptilt, and SimQuad its rate curve, from `settings.fpv` live, over the
+  craft profile values.
+
+### Audio (`ctx.systems.audio`)
+
+- **v1 API**: `update`, `unlock`, `chime`, `whoosh`, `blip`, `flutter`, `getStats`.
+- **v2 additions**:
+  - `getBus(name)`: the input GainNode of `master`, `engine`, `environment`, `ui`, `copilot` or
+    `music`, or null before audio starts;
+  - `getContext()`;
+  - `setVarioMode('auto' \| 'on' \| 'off')` and `getVarioMode()`;
+  - `debug` (dev builds, `?debug=1` or `?test` only): `setProfile`, `drive`, `cue`, `refresh`.
+- **Unlock.** The AudioContext is created only inside a real user activation (the first key,
+  pointer press or touch). A gamepad press also tries. If audio stays suspended, the sound pill
+  offers a click to enable it.
+- **Mixing.** Every bus except the copilot ducks while WREN speaks. Photo mode dips the master, as in
+  v1, and the soft crash muffles it.
+- **Sources.** Engine synths follow the craft `audioProfile` and `state.flight`. External views are
+  spatialised with doppler; cockpit and FPV views get the interior low-pass.
+- **Typed events consumed**: `viewChanged`, `craftChanged`, `modeChanged`, `landed` and
+  `softCrash`.
+
+### WindField (`ctx.wind`, `src/env/WindField.js`)
+
+| member | what |
+| --- | --- |
+| `sample(pos, t, out?)` | `{ vel: Vector3 (m/s), turbulence: 0..1 }`: ambient wind (seeded, veering with height), ridge lift from the shared height gradient, seeded thermals (midday-strong, off at night, leaning downwind, with a sinking ring), turbulence (wind speed and low AGL), plus registered sources. Craft compute airspeed as `velocity - vel` |
+| `probe(pos, t?, out?)` | the same query without touching `lastLayers` (overlays, many-point probes) |
+| `addSource({ id, bounds, sample(pos, t), kind? })` | Phase 2 writers. `bounds` is `{ min, max }` or `{ center, radius }`. `sample` returns `{ vel?, turbulence? }` or null. Velocities add; turbulence takes the maximum. Sources are found through a spatial hash. Emits `windSourceAdded` |
+| `setSourceBounds(id, bounds)`, `removeSource(id)` | moves a source, or removes it (emits `windSourceRemoved`) |
+| `sourceCount`, `listSources()` | registered sources |
+| `thermalsNear(x, z, radius, visit, t?)`, `nearestThermal(pos, minStrength?)` | thermal queries (cloud caps, copilot lift hints) |
+| `ambientAt(pos)` | `{ speed, fromDegrees }` |
+| `lastLayers` | per-layer values from the craft's last sample |
+
+CLASSIC applies a gust-free share of the field (25 % horizontal, 30 % vertical, damped); SIM
+applies all of it. `createDebugUpdraft({ id, center, radius, strength })` builds the dev source
+that `src/dev/debugWind.js` drops with the L key.
+
+### Performance (`ctx.perf`, `src/core/perf.js`)
+
+- **Frame loop.** Rendering is uncapped through `setAnimationLoop`.
+- **Frame target.** On `auto` it is the measured display refresh; readings outside 45-360 Hz are
+  recorded but not adopted, and 60 Hz holds until the running vsync estimate proves the rate. It
+  is explicit on 60 / 120 / 144 / 240. `uncapped` only defends 30 fps.
+- **Stage one, dynamic resolution.** It steps the scene pass through `1, 0.9, 0.8, 0.7, 0.6` with
+  asymmetric thresholds, dwell times and growing blocks after a failed up-step. The block lifts
+  early once the load has clearly dropped. Bloom, grade and grain stay at full resolution.
+- **Stage two.** v1's quality governor (view distance, densities, pixel ratio) acts only when the
+  scale is pinned.
+- **API**: `update`, `setMeasuredRefresh`, `measureDisplayRefresh`, `refreshRenderScale`,
+  `getRenderScale`, `getBasePixelRatio`, `beginCapture` and `snapRefreshRate`. The post stack adds
+  `setRenderScale` / `getRenderScale`.
+- **State.** `state.perf` holds fps, frame times, the target and refresh values, render scale and
+  quality. `perf:renderScale` fires on each scale step.
+
+### UI (`ctx.systems.ui`)
+
+The UI system offers `update`, `toast`, `setSubtitle`, `setMicState`, `showPanel`,
+`togglePanel(id)` (panels include `settings`, `journal`, `help` and `controls`), `setPhotoMode`,
+`wake` and `openControls({ calibrate })`. It also exposes the v2 chrome objects `modePill`,
+`craftPicker`, `hotasPrompt`, `settingsPanel`, `controlsPanel` and `statusBadge`.
+
+- Root classes: `dw-sim` in SIM, `dw-devbadge-on`, and `dw-no-throttle` for craft with
+  `arcadeProfile.ENGINE === false`.
+- `.dw-mode-classic` / `.dw-mode-sim` show content in one mode only.
+- The CLASSIC HUD, hints and help rows are v1's exactly.
+
+### Copilot (`ctx.systems.copilot`)
+
+The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTalk(held)`, `speak`,
+`getBrainName` and `getStats`.
+
+- `ctx.executeAction(action)` returns the reply text or a promise of it.
+- The remote brain contract (request, flight state, action schema, validation, fallbacks) is
+  `docs/copilot-api.md`. The shared validator is `sanitizeFlightAction` in `grammar.js`.
+- Aircraft actions only use the public channels: settings for mode, craft and assists;
+  `input:action` with source `copilot` for views, engine and chute; `flight.relaunch()`; and
+  `ui:openControls` for calibration.
+
+### Dev tools and test entry points
+
+| entry | what |
+| --- | --- |
+| `?debug=1` | the dev badge, typed-event validation, `console.info` of the backend and of every gamepad id, the debug updraft (L), audio and camera `debug` hooks |
+| `?renderer=webgl` | force the WebGL2 backend |
+| `?seed=...`, `?time=0..1`, `?touch=1` | world seed, start time of day, force touch controls (v1) |
+| `?test=hotas` | installs the mock gamepads (`ctx.systems.input.mock`) and, in dev builds, runs the HOTAS pipeline test (`src/dev/hotasTest.js`): bindings and hat decoding in both hat forms, calibration results, twist auto-disable, and persistence across a reload |
+| `?test=1` | dev builds: the flight-test harness (`src/dev/testHarness.js`). It flies each of the six craft for 60 s in both modes across 3 seeds, and logs average fps, p99 frame time, NaN events, terrain penetrations, soft crashes, heap growth and console errors. It shows an on-screen summary and offers a JSON report (`window.DRIFTWING.testReport`) |
+| `tools/run-harness.mjs` | runs either harness headlessly on a spare port (`--test 1\|hotas`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--out`) and exits 0 on PASS |
+| `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |
+| labs | `node tools/arcade-parity.mjs --suite all`, `node tools/flight-lab.mjs`, `node tools/lab/<craft>.mjs` |
 
 ## Phase 2-4 plug points
 
-- **Event director and spawns (Phase 2)**: subscribe to typed events, register wind sources with
-  `ctx.wind.addSource`, place meshes in the scene; nothing in the flight models changes because
-  they already fly through `WindField.sample`.
-- **More craft (Phase 3)**: append to `CRAFT_CATALOG`, add `src/craft/<id>.js`, register it in
-  `src/craft/index.js`; reuse or add a model in `src/flight`.
-- **Music (Phase 4)**: connect to the `music` bus; the throttle hat is left unbound for it.
-- **WebXR (Phase 4)**: the renderer boot keeps the WebGL2 backend available.
-- **Replay and multiplayer (Phase 4)**: SIM runs in fixed ticks from ControlState, models expose
-  `snapshot()` / `restore()`, and every gameplay outcome is a typed event.
+- **Event director and spawns (Phase 2).**
+  - Subscribe to the typed events: `discovery`, `landed`, `softCrash`, `modeChanged`,
+    `craftChanged`, `viewChanged` and `relaunched`.
+  - Register wind sources with `ctx.wind.addSource({ id, kind, bounds, sample })` and move them
+    with `setSourceBounds`. Their `windSourceAdded` / `windSourceRemoved` events come for free.
+  - Place meshes in `ctx.scene`, and register lazily shown ones with `ctx.registerPrewarm`.
+  - Nothing in the flight models changes, because every SIM tick (and CLASSIC's subtle share)
+    already flies through `WindField.sample`.
+  - New typed events go into `EVENT_TYPES` in `src/core/events.js` with their payload shapes.
+- **More craft (Phase 3).**
+  - Append an entry to `CRAFT_CATALOG` (id, name, role, hotkey, silhouette), add
+    `src/craft/<id>.js` with the module schema above, and register it in `src/craft/index.js`.
+  - Add the id to `CRAFT_IDS` in `settings.js`.
+  - Reuse a model kind, or add one: `flightModels.register(kind, factory)`, plus optional
+    `registerAssistCatalog` / `registerAssistHandler`, `registerAutopilotHandler` and
+    `registerTrimHandler` for that kind.
+  - The picker, the copilot (`availableCraft`, capabilities), the instruments, the audio families
+    and the cameras all read the module, so none of them change.
+- **Spotify and music (Phase 4).**
+  - Connect the player to `ctx.systems.audio.getBus('music')`. It already has a mixer slider
+    (`settings.mixer.music`) and ducks under the copilot.
+  - The TWCS throttle hat is deliberately left unbound for its controls.
+  - The fixed `127.0.0.1:5199` origin is also what Spotify's redirect URI needs.
+- **WebXR (Phase 4).** `src/render/renderer.js` keeps the WebGL2 backend available (never
+  hard-blocked, and forceable with `?renderer=webgl`), and WebXR runs on it. Views are camera-system
+  slots, so a VR view is one more slot.
+- **Flight recorder and replay (Phase 4).**
+  - SIM advances in fixed 120 Hz ticks from ControlState alone, and `copyControlState` makes the
+    per-tick snapshot, so recording the ControlState stream is enough to re-drive a flight.
+  - Every model has plain `snapshot()` / `restore()` (the trim and the NaN guard already rely on
+    them) for keyframes.
+  - The wind field is a pure function of position, time and seed.
+  - Gameplay outcomes are typed events, which can be recorded and replayed as they are.
+- **Multiplayer wingman (Phase 4).**
+  - Send `state.flight` pose and telemetry, or ControlState plus periodic model snapshots, and the
+    typed events.
+  - Remote craft can be built from the same craft modules (`buildMesh` plus the `visual` fields)
+    and driven by interpolated snapshots. The deterministic world and wind (same seed) mean both
+    peers fly the same terrain and air.
