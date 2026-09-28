@@ -45,6 +45,8 @@
   background: linear-gradient(180deg, rgba(36, 28, 44, 0.84), rgba(20, 16, 26, 0.8));
 }
 #ui-root .dw-test-summary[hidden] { display: none; }
+/* The sound pill lives outside #ui-root above its layer; it would cover the table's right columns. */
+body:has(#ui-root .dw-test-summary:not([hidden])) .dw-sound-pill { visibility: hidden; }
 #ui-root .dw-test-head {
   display: flex;
   align-items: center;
