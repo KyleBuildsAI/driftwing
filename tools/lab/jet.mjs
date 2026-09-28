@@ -21,7 +21,8 @@
 //   speed brake    extra drag on the airbrake
 //   AB detent      keyboard stops at the detent; the ability pushes through and pulling back cancels;
 //                  a HOTAS lever lights it past the detent; the click state and notices
-//   autopilot      heading, altitude and speed hold through the flight control system
+//   autopilot      heading, altitude and speed hold through the flight control system; terrain: at
+//                  cruise it climbs over a 7 % slope ahead instead of flying into it
 //   limits         overspeed past 410 m/s equivalent or Mach 1.7
 //   protection     100 % assists: an afterburner dive stays inside the limit (speed brakes, power limit)
 //   controller     the FlightController headless: SIM boot at cruise and 60 s hands off, CLASSIC -> SIM
@@ -731,6 +732,29 @@ function testDetent() {
 }
 
 /** The fixed-wing autopilot flying the jet through its flight control system (100 % assists). */
+/**
+ * The autopilot at cruise toward rising ground: flat at sea level, then a 7 % slope 3 km ahead (north)
+ * up to a 1500 m plateau. The terrain look-ahead judges 10 % climbable for a powered craft, so the
+ * autopilot must climb over it (the flight test harness saw it fly into such slopes at jet speed).
+ */
+function testAutopilotTerrain() {
+  const rig = createRig({ assists: 1 });
+  rig.setAssists(1);
+  const slope = (x, z) => clamp((-z - 3000) * 0.07, 0, 1500);
+  const world = { groundHeight: slope, heightAt: slope };
+  rig.env.world = world;
+  rig.env.groundHeight = slope;
+  rig.env.waterLevel = -100;
+  rig.airborne({ speed: 222, altitude: 400, throttle: 0.4, heading: 0 });
+  Object.assign(rig.env.autopilot, { enabled: true, heading: 0, altitude: 400, speed: 222, followWaypoint: false });
+  let minClearance = Infinity;
+  rig.run(60, (lab) => {
+    const position = lab.model.state.position;
+    minClearance = Math.min(minClearance, position.y - slope(position.x, position.z));
+  });
+  record('autopilot clears a 7 % slope at 800 km/h', minClearance, 60, { unit: 'm', compare: 'min', note: `min height above the slope; ${(-rig.model.state.position.z / 1000).toFixed(1)} km flown` });
+}
+
 function testAutopilot() {
   const rig = createRig({ assists: 1 });
   rig.setAssists(1);
@@ -1169,7 +1193,7 @@ function printTable() {
 
 const started = Date.now();
 const only = process.argv.find((argument) => argument.startsWith('--only='));
-const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGround, testGear, testSpeedBrake, testDetent, testAutopilot, testLimits, testOverspeedProtection, testSimBoot, testConversions, testToClassic, testRespawn, testRelaunch, testCraftSwitch, testGroundStart };
+const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGround, testGear, testSpeedBrake, testDetent, testAutopilot, testAutopilotTerrain, testLimits, testOverspeedProtection, testSimBoot, testConversions, testToClassic, testRespawn, testRelaunch, testCraftSwitch, testGroundStart };
 for (const [name, test] of Object.entries(tests)) {
   if (only && !name.toLowerCase().includes(only.slice(7).toLowerCase())) continue;
   test();
