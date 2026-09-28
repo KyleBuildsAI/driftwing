@@ -173,12 +173,14 @@ npm run build:single
 npm run serve:single
 ```
 
-The first command writes one self-contained file, `dist-single/index.html`, with everything
-inlined, including the terrain worker. The second serves it at <http://127.0.0.1:5199>, the same
-address as the game, so it uses the same saved settings. Stop the dev server first, since both use
-port 5199. Serve the file from a local web server rather than opening it directly: the game is
-tested that way. It can also be copied to any static web host, but bindings saved there belong to
-that site.
+The first command writes `dist-single/`: the launcher shell as one self-contained `index.html`,
+V1 copied byte-for-byte to `v1/index.html` (its SHA-256 is checked against `tests/v1.sha256`), and
+V2 as one self-contained `v2/index.html` with everything inlined, including the terrain worker
+(`tools/build-single.mjs` runs one build per page). The second serves it at
+<http://127.0.0.1:5199>, the same address as the game, so it uses the same saved settings. Stop the
+dev server first, since both use port 5199. Serve the files from a local web server rather than
+opening them directly: the shell loads the games from /v1/ and /v2/. The folder can also be copied
+to any static web host, but bindings saved there belong to that site.
 
 ## URL parameters
 
@@ -210,12 +212,13 @@ that site.
 | command | what |
 | --- | --- |
 | `npm run dev` | Vite dev server at <http://127.0.0.1:5199> (strict port) |
-| `npm run build` | production build into `dist/` |
-| `npm run build:single` | one self-contained `dist-single/index.html` |
+| `npm run build` | production build into `dist/`: the shell `index.html`, `v1/index.html` (copied untouched) and `v2/index.html` |
+| `npm run build:single` | `dist-single/`: the shell, `v1/` and `v2/`, each one self-contained file |
 | `npm run preview` | serves `dist/` at <http://127.0.0.1:5199> |
 | `npm run serve:single` | serves `dist-single/` at <http://127.0.0.1:5199> (`tools/serve.mjs`, no dependencies) |
 | `npm run copilot-server` | the reference remote brain for WREN |
-| `npm test` | builds the single file and runs the headless smoke test on it |
+| `npm test` | checks the V1 freeze, builds `dist-single/` and runs the headless smoke test on the shell |
+| `npm run test:v1` | fails if `public/v1/index.html` differs from `tests/v1.sha256` or from `git show v1-final:index.html` |
 
 three.js is pinned to exactly `0.184.0` and imported only as `three/webgpu`, `three/tsl` and
 `three/addons/...`, so there is one copy. Vite `7.3.6` and `vite-plugin-singlefile` build it.
