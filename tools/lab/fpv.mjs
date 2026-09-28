@@ -16,6 +16,8 @@
 //   angleMode    50 % assists: self-levelling from 60 degrees and from inverted, the 55 degree tilt limit
 //   altitudeHold 100 % assists: holds through a full-tilt dash, climbs and descends on the throttle,
 //                ignores a lever left off-centre at spawn, and lands gently on a pulled throttle
+//   hover        spawn hover at 100 %, and below the hold level (50 % angle, 0 % rate) the throttle
+//                pickup ignores a stale lever until it moves
 //   modes        the craft ability toggles rate / angle at any level; a new assist level resets it
 //   ground       light drop on the feet bounces and settles, hard hits exceed the crash limits, a
 //                touch-and-go at speed keeps flying, parked with hold it idles and takes off on throttle
@@ -186,10 +188,13 @@ function testThrust() {
   const spoolRig = createRig({ assists: 0 });
   spoolRig.airborne({ altitude: 100, throttle: 0 });
   spoolRig.tether = new THREE.Vector3(0, 100, 0);
+  // One tick with the lever where the reset left it (the throttle pickup meets it there), then slam it.
+  spoolRig.tick();
   spoolRig.pilot.throttle = 1;
+  const slammed = spoolRig.time;
   let spoolTime = NaN;
   spoolRig.run(0.5, (rig) => {
-    if (!Number.isFinite(spoolTime) && rig.data.motorSpeed >= 0.9) spoolTime = rig.time;
+    if (!Number.isFinite(spoolTime) && rig.data.motorSpeed >= 0.9) spoolTime = rig.time - slammed;
   });
   check('thrust', 'spool idle -> 90 % speed', round(spoolTime * 1000, 0), '40-120 ms', spoolTime >= 0.04 && spoolTime <= 0.12, 'ms');
 }
@@ -617,6 +622,7 @@ function testPropWash() {
   let wash = 0;
   let thrustShare = Infinity;
   let shake = 0;
+  rig.tick();
   rig.pilot.throttle = 0.6;
   rig.run(1.2, (current) => {
     wash = Math.max(wash, current.data.propWash);
@@ -665,6 +671,27 @@ function testSpawnHover() {
   rig.run(10);
   const position = rig.model.state.position;
   check('hover', 'spawn hover at 100 % (lever 75 %), 10 s', `${round(rig.altitude() - start, 2)} m / ${round(Math.hypot(position.x, position.z), 2)} m`, '|dh| < 0.5, drift < 0.5 m', Math.abs(rig.altitude() - start) < 0.5 && Math.hypot(position.x, position.z) < 0.5);
+}
+
+/**
+ * Below the altitude-hold level (angle mode at 50 %, rate mode at 0 %) an airborne reset still hovers:
+ * a lever left elsewhere by the previous craft waits for the pickup; once the pilot moves it, the
+ * throttle follows it.
+ */
+function testSpawnPickup() {
+  for (const [assists, lever] of [[0.5, 0.75], [0.5, 0], [0, 0.75]]) {
+    const rig = createRig({ assists });
+    rig.airborne({ altitude: 300, throttle: fpv.spawn.cruiseThrottle });
+    rig.pilot.throttle = lever;
+    const start = rig.altitude();
+    rig.run(2);
+    const drift = rig.altitude() - start;
+    check('hover', `spawn at ${Math.round(assists * 100)} %, lever ${lever}: 2 s`, round(drift, 2), '|dh| < 1 m', Math.abs(drift) < 1, 'm');
+    if (lever === 0) continue;
+    rig.pilot.throttle = lever + 0.05;
+    rig.run(1);
+    check('hover', `spawn at ${Math.round(assists * 100)} %: lever moved, followed`, round(rig.data.throttle, 3), `${lever + 0.05} (the lever)`, Math.abs(rig.data.throttle - (lever + 0.05)) < 1e-9);
+  }
 }
 
 function testSnapshot() {
@@ -732,6 +759,7 @@ function testSettings() {
 testThrust();
 const hoverThrottle = testHover();
 testSpawnHover();
+testSpawnPickup();
 testAcroThrottle();
 testTopSpeed();
 testRates();
