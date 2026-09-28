@@ -1,9 +1,13 @@
 // Flight-test harness (?test=1, dev builds only; main.js never loads it in production).
 //
-// A scripted pilot flies every craft for runSeconds (60 s) on each world seed (3 by default):
-// 6 craft x 3 seeds = 18 runs. Each run switches craft through the settings command channel
-// (exactly as the picker does) and flies the craft's script
-// from testFlightScripts.js through the real control paths. A new seed needs a new world, so the
+// A scripted pilot flies every craft for runSeconds (60 s) in first person and in third person on
+// each world seed (3 by default): 6 craft x 2 views x 3 seeds = 36 runs. Each run switches craft
+// through the settings command channel (exactly as the picker does), picks the view the same way
+// WREN does (settings.views: 'cockpit' for first person, 'chase' for third person; the camera
+// follows the active craft's entry) and flies the craft's script from testFlightScripts.js through
+// the real control paths. The flight model is the same in every view; the view dimension proves
+// the harness criteria hold with each view's own rendering cost (the cockpit and its instrument
+// panel, or the chase camera, glass HUD and flight path marker). A new seed needs a new world, so the
 // harness reloads the page with the seed in the URL and carries its progress, results and console
 // log across reloads in sessionStorage (key SESSION_KEY). Its settings live in an isolated IndexedDB
 // database (TEST_DATABASE), so the player's own settings, bindings and calibration are never touched.
@@ -35,10 +39,10 @@
 // penetration, crash and console checks cover every frame):
 //   - world warmup: the first WORLD_WARMUP_SECONDS after the game reports ready on each page load
 //     (every seed), while the first chunks, pipelines and caches settle, followed by the warmup
-//     lap: every craft this world will fly, switched to in plan order and flown for
+//     lap: every craft and view this world will fly, switched to in plan order and flown for
 //     WARMUP_LAP_SECONDS each on the autopilot, so every craft module, mesh, cockpit, flight model and
 //     pipeline exists once before anything is measured;
-//   - run warmup: the first RUN_WARMUP_SECONDS after each run's craft switch (the switch
+//   - run warmup: the first RUN_WARMUP_SECONDS after each run's craft and view switch (the switch
 //     itself: mesh, cockpit, instruments and their pipelines).
 // Heap growth is judged per world load, from the end of the warmup lap to the end of that world's
 // last run: once every craft has been built, growth means memory that is never given back. The
@@ -48,10 +52,10 @@
 //
 // Pass criteria: 0 NaN events, 0 penetrations, 0 console errors and 0 warnings, heap growth under
 // HEAP_LIMIT_MB on every world, no frame over FRAME_LIMIT_MS after warmup; plus two validity checks
-// on the harness itself: every run flew its planned craft, and every scripted manoeuvre
-// was observed.
+// on the harness itself: every run flew its planned craft in its planned view (checked every
+// frame of the run), and every scripted manoeuvre was observed.
 //
-// URL options: testSeeds=A,B,C  testSeconds=60  testCraft=glider,jet.
+// URL options: testSeeds=A,B,C  testSeconds=60  testCraft=glider,jet  testViews=first,third.
 // Output: the on-screen summary panel (per-run table, overall PASS / FAIL, JSON download) and
 // window.DRIFTWING.testReport for automation (tools/run-harness.mjs).
 import { installConsoleCapture } from './testConsole.js';
@@ -65,8 +69,12 @@ import { clamp, isFiniteQuaternion, isFiniteVector, wrapDegrees } from '../core/
 export const TEST_DATABASE = 'driftwing-v2-test';
 const SESSION_KEY = 'driftwing-v2.test.flight';
 const REPORT_KIND = 'driftwing-flight-test';
-const REPORT_VERSION = 1;
+const REPORT_VERSION = 2;
 const DEFAULT_SEEDS = Object.freeze(['HARNESS-1', 'HARNESS-2', 'HARNESS-3']);
+/** The view dimension, in plan order: third person (chase) and first person (cockpit or FPV). */
+const VIEWS = Object.freeze(['third', 'first']);
+/** The settings.views slot each view is flown from. */
+const VIEW_SLOTS = Object.freeze({ third: 'chase', first: 'cockpit' });
 const DEFAULT_RUN_SECONDS = 60;
 const RUN_WARMUP_SECONDS = 3;
 const WORLD_WARMUP_SECONDS = 5;
@@ -86,7 +94,7 @@ const MAX_EVENT_DETAILS = 20;
 const MAX_SLOW_LISTED = 25;
 const SLOW_CAUSES = Object.freeze(['systems', 'gc', 'mainThread', 'delayed']);
 
-/** Reads the URL options; unknown craft are dropped (and reported). */
+/** Reads the URL options; unknown craft and views are dropped (and reported). */
 function readConfig(params) {
   const notes = [];
   const listParam = (name) => (params.get(name) ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
@@ -98,12 +106,19 @@ function readConfig(params) {
     return known;
   });
   if (crafts.length === 0) crafts = SCRIPTED_CRAFT.slice();
+  let views = listParam('testViews').filter((view) => {
+    const known = VIEWS.includes(view);
+    if (!known) notes.push(`testViews "${view}" is not a view (first or third) and was ignored`);
+    return known;
+  });
+  if (views.length === 0) views = VIEWS.slice();
   const requestedSeconds = Number.parseFloat(params.get('testSeconds'));
   const runSeconds = Number.isFinite(requestedSeconds) && requestedSeconds >= 5 ? Math.min(requestedSeconds, 600) : DEFAULT_RUN_SECONDS;
   if (params.has('testSeconds') && runSeconds !== requestedSeconds) notes.push(`testSeconds ${params.get('testSeconds')} is outside 5-600 s; using ${runSeconds} s`);
   return {
     seeds,
     crafts: SCRIPTED_CRAFT.filter((craft) => crafts.includes(craft)),
+    views: VIEWS.filter((view) => views.includes(view)),
     runSeconds,
     runWarmupSeconds: RUN_WARMUP_SECONDS,
     worldWarmupSeconds: WORLD_WARMUP_SECONDS,
@@ -118,7 +133,9 @@ function readConfig(params) {
 function buildPlan(config) {
   const plan = [];
   for (const seed of config.seeds) {
-    for (const craft of config.crafts) plan.push({ index: plan.length, seed, craft });
+    for (const craft of config.crafts) {
+      for (const view of config.views) plan.push({ index: plan.length, seed, craft, view });
+    }
   }
   return plan;
 }
@@ -348,6 +365,12 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
 
   // ---- Pilot: the scripts' interface to the controls ---------------------------------------------
   const flight = () => ctx.systems.flight;
+  const camera = () => ctx.systems.camera;
+
+  /** True while the camera shows the entry's view: first person (cockpit or FPV) or third person. */
+  function inPlannedView(entry) {
+    return camera().isFirstPerson() === (entry.view === 'first');
+  }
 
   function surfaceAt(x, z) {
     return Math.max(world.groundHeight(x, z), CONFIG.WATER_LEVEL);
@@ -467,14 +490,15 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
   // ---- Warmup lap -----------------------------------------------------------------------------------
   const lap = { queue: [], index: 0, stepStartMs: 0 };
 
-  /** Every craft this world still flies, once each, in plan order. */
+  /** Every craft and view this world still flies, once each, in plan order. */
   function startWarmupLap(now) {
     const seen = new Set();
     lap.queue = [];
     for (const entry of plan.slice(session.nextRun)) {
       if (entry.seed !== state.seed) break;
-      if (!seen.has(entry.craft)) {
-        seen.add(entry.craft);
+      const key = `${entry.craft} ${entry.view}`;
+      if (!seen.has(key)) {
+        seen.add(key);
         lap.queue.push(entry);
       }
     }
@@ -489,13 +513,14 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     const entry = lap.queue[index];
     const setup = setUpCraft(entry);
     pilot.autopilot({ enabled: true });
-    worldRecord.lap.push({ craft: entry.craft, setupOk: setup.setupOk, notes: setup.notes });
+    worldRecord.lap.push({ craft: entry.craft, view: entry.view, setupOk: setup.setupOk, notes: setup.notes });
   }
 
   // ---- Runs -------------------------------------------------------------------------------------------
   /**
-   * Switches to the entry's craft through the settings channel at 100 % assists, lifting a
-   * craft that came down on the ground to a clean airborne start. Returns { setupOk, notes }.
+   * Switches to the entry's craft through the settings channel at 100 % assists, then to its view
+   * through settings.views (the camera follows the active craft's entry), lifting a craft that came
+   * down on the ground to a clean airborne start. Returns { setupOk, notes }.
    */
   function setUpCraft(entry) {
     const flightSystem = flight();
@@ -504,8 +529,12 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     flightSystem.setAutopilot({ enabled: false, reason: 'flight test' });
     settings.update('assists', { [entry.craft]: 1 });
     if (flightSystem.getCraft() !== entry.craft) settings.set('craft', entry.craft);
-    const setupOk = flightSystem.getCraft() === entry.craft;
-    if (!setupOk) notes.push(`asked for ${entry.craft}, flying ${flightSystem.getCraft()}`);
+    settings.update('views', { [entry.craft]: VIEW_SLOTS[entry.view] });
+    const craftOk = flightSystem.getCraft() === entry.craft;
+    if (!craftOk) notes.push(`asked for ${entry.craft}, flying ${flightSystem.getCraft()}`);
+    const viewOk = inPlannedView(entry);
+    if (!viewOk) notes.push(`asked for the ${entry.view}-person view, the camera shows ${camera().getView()}`);
+    const setupOk = craftOk && viewOk;
     const model = flightSystem.getModel();
     const position = model && model.state ? model.state.position : state.player.position;
     const agl = position.y - surfaceAt(position.x, position.z);
@@ -534,6 +563,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       autopilotChanges: [],
       setupOk,
       setupNotes,
+      cameraViews: new Set([camera().getView()]),
+      viewMismatchFrames: 0,
       bucket: createBucket(),
       recorder: createFrameRecorder({ slowLimitMs: config.frameLimitMs }),
       warmupFrames: 0,
@@ -548,7 +579,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       flight: { distance: 0, lastX: null, lastZ: null, maxAirspeed: 0, minAgl: Infinity, maxAltitude: -Infinity },
     };
     penetrationEpisode = null;
-    capture.setContext(`run ${entry.index + 1}: ${entry.craft} (seed ${entry.seed})`);
+    capture.setContext(`run ${entry.index + 1}: ${entry.craft}, ${entry.view} person (seed ${entry.seed})`);
   }
 
   function runScript(run, elapsed) {
@@ -584,6 +615,9 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       index: run.entry.index,
       seed: run.entry.seed,
       craft: run.entry.craft,
+      view: run.entry.view,
+      cameraViews: [...run.cameraViews],
+      viewMismatchFrames: run.viewMismatchFrames,
       backend: ctx.backend,
       startedAt: run.startedAt,
       endedAt: new Date().toISOString(),
@@ -632,7 +666,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         maxAltitude: round(run.flight.maxAltitude, 0),
       },
     };
-    result.passed = result.setupOk && nanEvents === 0 && result.penetrations === 0 && result.consoleErrors === 0 && result.consoleWarnings === 0
+    result.passed = result.setupOk && result.viewMismatchFrames === 0 && nanEvents === 0 && result.penetrations === 0 && result.consoleErrors === 0 && result.consoleWarnings === 0
       && result.slowFrames === 0 && checks.every((check) => check.passed);
     worldRecord.runs.push(result);
     session.runs.push(result);
@@ -710,7 +744,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     const consoleWarnings = session.consoleCounts.warnings + (pendingConsole.length - pendingErrors);
     const heapGrowths = worlds.map((entry) => entry.heapGrowthMB).filter(Number.isFinite);
     const maxHeapGrowth = heapGrowths.length > 0 ? Math.max(...heapGrowths) : null;
-    const setupFailures = runs.filter((run) => !run.setupOk).length;
+    const setupFailures = runs.filter((run) => !run.setupOk || run.viewMismatchFrames > 0).length;
     const scriptChecks = runs.flatMap((run) => run.script.checks);
     const scriptPassed = scriptChecks.filter((check) => check.passed).length;
     const complete = session.status === 'complete';
@@ -723,7 +757,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         ? criterion('heap', `Heap growth after warmup (< ${HEAP_LIMIT_MB} MB)`, maxHeapGrowth === null ? 'pending' : `${maxHeapGrowth} MB max`, maxHeapGrowth === null ? (complete ? 'fail' : 'muted') : maxHeapGrowth < HEAP_LIMIT_MB ? 'pass' : 'fail')
         : criterion('heap', `Heap growth after warmup (< ${HEAP_LIMIT_MB} MB)`, 'unavailable', 'muted', 'performance.memory is not available in this browser'),
       criterion('frames', `Frames over ${FRAME_LIMIT_MS} ms after warmup`, String(slowFrames), slowFrames === 0 ? 'pass' : 'fail'),
-      criterion('plan', 'Runs flown as planned', `${runs.length - setupFailures} / ${plan.length}`, setupFailures === 0 && (!complete || runs.length === plan.length) ? 'pass' : 'fail'),
+      criterion('plan', 'Runs flown as planned (craft and view)', `${runs.length - setupFailures} / ${plan.length}`, setupFailures === 0 && (!complete || runs.length === plan.length) ? 'pass' : 'fail'),
       criterion('script', 'Scripted manoeuvres observed', `${scriptPassed} / ${scriptChecks.length}`, scriptPassed === scriptChecks.length ? 'pass' : 'fail'),
     ];
     const failed = criteria.some((entry) => entry.status === 'fail') || session.harnessErrors.length > 0;
@@ -750,7 +784,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       },
       config,
       definitions: {
-        warmup: `The first ${config.worldWarmupSeconds} s after the game reports ready on every page load, then a warmup lap through every craft that world flies (${config.warmupLapSeconds} s each on the autopilot, so every craft module, mesh, cockpit, flight model and pipeline exists once), and the first ${config.runWarmupSeconds} s after each run's craft switch. Frame statistics and the slow-frame criterion start after warmup; NaN, penetration, crash and console checks cover every frame, the lap included.`,
+        warmup: `The first ${config.worldWarmupSeconds} s after the game reports ready on every page load, then a warmup lap through every craft and view that world flies (${config.warmupLapSeconds} s each on the autopilot, so every craft module, mesh, cockpit, flight model and pipeline exists once), and the first ${config.runWarmupSeconds} s after each run's craft and view switch. Frame statistics and the slow-frame criterion start after warmup; NaN, penetration, crash and console checks cover every frame, the lap included.`,
+        view: 'First person is the settings.views slot cockpit (the cockpit, or the FPV camera and the wingsuit helmet view); third person is chase. The camera view is checked every frame of a run: a run that leaves its planned view was not flown as planned.',
         frameTime: 'Interval between consecutive frames (ms), measured by the harness system each frame (performance.now).',
         nanEvents: 'Frames with a non-finite craft pose or telemetry sampled by the harness, plus every restore by the flight model guard (per tick) and core\'s frame guard.',
         penetration: `The craft reference point (state.player.position) more than ${PENETRATION_LIMIT_M} m below the shared height function (world.groundHeight) or the water surface, sampled every frame; one continuous episode counts once.`,
@@ -797,6 +832,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       index: run.index + 1,
       seed: run.seed,
       craft: craftNames[run.craft] ?? run.craft,
+      view: { text: `${run.view === 'first' ? '1st' : '3rd'} (${run.cameraViews.join(', ')})`, status: run.viewMismatchFrames === 0 ? null : 'fail', title: `${run.viewMismatchFrames} frame(s) outside the planned view` },
       fps: run.avgFps,
       p99: run.p99Ms,
       max: run.maxMs,
@@ -812,7 +848,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     }));
     const totals = report.totals;
     const footer = {
-      index: '', seed: 'All', craft: `${totals.runs} runs, ${totals.measuredSeconds} s`,
+      index: '', seed: 'All', craft: `${totals.runs} runs, ${totals.measuredSeconds} s`, view: config.views.join(' / '),
       fps: totals.avgFps, p99: totals.worstP99Ms, max: totals.maxFrameMs, slow: countCell(totals.slowFrames),
       causes: `${totals.slowByCause.systems} / ${totals.slowByCause.gc} / ${totals.slowByCause.mainThread} / ${totals.slowByCause.delayed}`,
       nan: countCell(totals.nanEvents), penetrations: countCell(totals.penetrations), crashes: totals.softCrashes,
@@ -826,6 +862,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
           { key: 'index', label: '#', numeric: true },
           { key: 'seed', label: 'Seed' },
           { key: 'craft', label: 'Craft' },
+          { key: 'view', label: 'View' },
           { key: 'fps', label: 'Avg fps', numeric: true },
           { key: 'p99', label: 'p99 ms', numeric: true },
           { key: 'max', label: 'Max ms', numeric: true },
@@ -870,14 +907,14 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         })),
       },
     });
-    const slowList = report.runs.flatMap((run) => run.slowFrameList.map((frame) => `Run ${run.index + 1} (${run.craft}, ${run.seed}): ${frame.ms} ms at ${frame.at} s after warmup, ${frame.cause} (systems ${frame.systemsMs} ms${frame.topSystems ? `: ${frame.topSystems}` : ''}${Number.isFinite(frame.heapDeltaMB) ? `; heap ${frame.heapDeltaMB} MB` : ''}${frame.loaf ? `; long frame ${frame.loaf.durationMs} ms, scripts ${frame.loaf.scriptsMs} ms` : ''})`));
+    const slowList = report.runs.flatMap((run) => run.slowFrameList.map((frame) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): ${frame.ms} ms at ${frame.at} s after warmup, ${frame.cause} (systems ${frame.systemsMs} ms${frame.topSystems ? `: ${frame.topSystems}` : ''}${Number.isFinite(frame.heapDeltaMB) ? `; heap ${frame.heapDeltaMB} MB` : ''}${frame.loaf ? `; long frame ${frame.loaf.durationMs} ms, scripts ${frame.loaf.scriptsMs} ms` : ''})`));
     if (slowList.length > 0) sections.push({ title: `Frames over ${FRAME_LIMIT_MS} ms`, notes: slowList.slice(0, 40) });
     const eventList = report.runs.flatMap((run) => [
-      ...run.penetrationDetails.map((detail) => `Run ${run.index + 1} (${run.craft}, ${run.seed}): penetration ${detail.depth} m below ${detail.surface} at ${detail.at} s for ${detail.frames} frame(s)`),
-      ...run.nanDetails.map((detail) => `Run ${run.index + 1} (${run.craft}, ${run.seed}): non-finite state (${detail.source})${detail.at === null ? '' : ` at ${detail.at} s`}`),
-      ...run.softCrashDetails.map((crash) => `Run ${run.index + 1} (${run.craft}, ${run.seed}): soft crash "${crash.reason}" at ${crash.at} s, ${crash.impactSpeed} m/s`),
-      ...run.setupNotes.map((note) => `Run ${run.index + 1} (${run.craft}, ${run.seed}): ${note}`),
-      ...run.script.checks.filter((check) => !check.passed).map((check) => `Run ${run.index + 1} (${run.craft}, ${run.seed}): scripted manoeuvre not observed: ${check.label}`),
+      ...run.penetrationDetails.map((detail) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): penetration ${detail.depth} m below ${detail.surface} at ${detail.at} s for ${detail.frames} frame(s)`),
+      ...run.nanDetails.map((detail) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): non-finite state (${detail.source})${detail.at === null ? '' : ` at ${detail.at} s`}`),
+      ...run.softCrashDetails.map((crash) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): soft crash "${crash.reason}" at ${crash.at} s, ${crash.impactSpeed} m/s`),
+      ...run.setupNotes.map((note) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): ${note}`),
+      ...run.script.checks.filter((check) => !check.passed).map((check) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): scripted manoeuvre not observed: ${check.label}`),
     ]);
     if (eventList.length > 0) sections.push({ title: 'Events', notes: eventList.slice(0, 60) });
     if (report.console.length > 0) sections.push({ title: 'Console errors and warnings', notes: report.console.slice(0, 30).map((entry) => `[${entry.level}] ${entry.context}: ${entry.text}`) });
@@ -892,7 +929,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         ['three.js', `r${report.environment.revision}`],
         ['Seeds', config.seeds.join(', ')],
         ['Runs', `${report.totals.runs} x ${config.runSeconds} s`],
-        ['Warmup', `${config.worldWarmupSeconds} s + a ${config.warmupLapSeconds} s lap per craft per world, ${config.runWarmupSeconds} s per run`],
+        ['Views', config.views.map((view) => `${view} person`).join(', ')],
+        ['Warmup', `${config.worldWarmupSeconds} s + a ${config.warmupLapSeconds} s lap per craft and view per world, ${config.runWarmupSeconds} s per run`],
         ['Heap', report.environment.heap],
         ['Input', report.environment.hiddenGamepads.length > 0 ? `scripted only (${report.environment.hiddenGamepads.length} real gamepad(s) hidden)` : 'scripted only'],
         ['Finished', report.finishedAt ? new Date(report.finishedAt).toLocaleString() : '-'],
@@ -916,7 +954,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       const entry = activeRun.entry;
       const step = activeRun.stepLog.length > 0 ? activeRun.stepLog[activeRun.stepLog.length - 1].step : 'starting';
       panel.setProgress({
-        label: `Run ${entry.index + 1} of ${plan.length}: ${entry.craft}`,
+        label: `Run ${entry.index + 1} of ${plan.length}: ${entry.craft}, ${entry.view} person`,
         detail: `Seed ${entry.seed} · ${Math.floor(elapsed)} of ${activeRun.durationSeconds} s${elapsed < config.runWarmupSeconds ? ' (warmup)' : ''} · ${step}`,
         fraction: (entry.index + Math.min(elapsed / activeRun.durationSeconds, 1)) / total,
       });
@@ -924,7 +962,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       panel.setProgress({ label: `World ${state.seed}: warming up`, detail: `${config.worldWarmupSeconds} s after load, then the warmup lap`, fraction: session.nextRun / total });
     } else if (phase === 'warmupLap') {
       const entry = lap.queue[lap.index];
-      panel.setProgress({ label: `World ${state.seed}: warmup lap ${lap.index + 1} of ${lap.queue.length}`, detail: `${entry.craft} for ${config.warmupLapSeconds} s (not measured)`, fraction: session.nextRun / total });
+      panel.setProgress({ label: `World ${state.seed}: warmup lap ${lap.index + 1} of ${lap.queue.length}`, detail: `${entry.craft}, ${entry.view} person, for ${config.warmupLapSeconds} s (not measured)`, fraction: session.nextRun / total });
     }
   }
 
@@ -981,6 +1019,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       }
     }
     observe(run, Math.min(Math.max(realDt, 0), 0.1));
+    run.cameraViews.add(camera().getView());
+    if (!inPlannedView(run.entry)) run.viewMismatchFrames++;
     if (elapsed >= run.durationSeconds) {
       finishRun(run);
       const next = plan[session.nextRun];
@@ -1019,7 +1059,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     // A reload of a finished session shows its summary again once the UI is up.
     delay(0).then(() => showSummary(), (error) => abort(error));
   } else {
-    panel.setProgress({ label: 'Flight test starting', detail: `${plan.length} runs of ${config.runSeconds} s on ${config.seeds.length} seed(s)`, fraction: session.nextRun / Math.max(plan.length, 1) });
+    panel.setProgress({ label: 'Flight test starting', detail: `${plan.length} runs of ${config.runSeconds} s on ${config.seeds.length} seed(s), ${config.views.map((view) => `${view} person`).join(' and ')}`, fraction: session.nextRun / Math.max(plan.length, 1) });
   }
 
   return {

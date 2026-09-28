@@ -8,8 +8,11 @@
 //
 // Usage:
 //   node tools/run-harness.mjs --test 1|hotas [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
-//     [--crafts glider,jet] [--out <dir>] [--timeout-minutes N]
+//     [--crafts glider,jet] [--views first,third] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
+//
+// The flight test flies every craft in first person (the cockpit or FPV view) and in third person
+// (chase) by default; --views first or --views third flies one of them.
 //
 // --alloc-profile N (diagnostic): once the first flight-test run is flying, samples every JS
 // allocation for N seconds with the sampling heap profiler (collected objects included, so it is
@@ -62,6 +65,7 @@ function parseArgs(argv) {
     seeds: null,
     seconds: null,
     crafts: null,
+    views: null,
     out: null,
     timeoutMinutes: null,
     width: 1280,
@@ -83,6 +87,7 @@ function parseArgs(argv) {
       case '--seeds': options.seeds = next(); break;
       case '--seconds': options.seconds = Number(next()); break;
       case '--crafts': options.crafts = next(); break;
+      case '--views': options.views = next(); break;
       case '--out': options.out = next(); break;
       case '--timeout-minutes': options.timeoutMinutes = Number(next()); break;
       case '--width': options.width = Number(next()); break;
@@ -284,6 +289,7 @@ function harnessUrl(port, options) {
     if (options.seeds) url.searchParams.set('testSeeds', options.seeds);
     if (options.seconds) url.searchParams.set('testSeconds', String(options.seconds));
     if (options.crafts) url.searchParams.set('testCraft', options.crafts);
+    if (options.views) url.searchParams.set('testViews', options.views);
   }
   return url.href;
 }
@@ -294,8 +300,9 @@ function timeLimitMs(options) {
   if (options.test === 'hotas') return 8 * 60000;
   const seeds = options.seeds ? options.seeds.split(',').filter(Boolean).length : 3;
   const crafts = options.crafts ? options.crafts.split(',').filter(Boolean).length : 6;
+  const views = options.views ? options.views.split(',').filter(Boolean).length : 2;
   const seconds = options.seconds ?? 60;
-  const plannedSeconds = seeds * crafts * (seconds + 3) + (seeds + 1) * 90;
+  const plannedSeconds = seeds * crafts * views * (seconds + 3 + 3) + (seeds + 1) * 90;
   return Math.max(10 * 60000, plannedSeconds * 1500);
 }
 
@@ -338,7 +345,7 @@ function describeProgress(state) {
   if (!state || !state.progress) return state ? state.status : 'loading';
   const { completedRuns, totalRuns, current } = state.progress;
   if (Number.isFinite(completedRuns)) {
-    const now = current ? `, flying run ${current.index + 1}: ${current.craft} (${current.seed}) ${Math.round(current.seconds ?? 0)} s` : '';
+    const now = current ? `, flying run ${current.index + 1}: ${current.craft}, ${current.view} person (${current.seed}) ${Math.round(current.seconds ?? 0)} s` : '';
     return `${completedRuns}/${totalRuns} runs done${now}`;
   }
   const { done, phase, step } = state.progress;
@@ -346,13 +353,14 @@ function describeProgress(state) {
 }
 
 function flightTable(report) {
-  const lines = ['  #  seed        craft       fps  p99ms  maxms  >50  sys/gc/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak  GPU%avg/peak  mainThread busy%/cpuShare%'];
+  const lines = ['  #  seed        craft       view   fps  p99ms  maxms  >50  sys/gc/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak  GPU%avg/peak  mainThread busy%/cpuShare%'];
   for (const run of report.runs) {
     const checks = run.script.checks;
     lines.push([
       String(run.index + 1).padStart(3),
       run.seed.padEnd(11),
       run.craft.padEnd(11),
+      `${run.view}${run.viewMismatchFrames > 0 ? '!' : ''}`.padEnd(6),
       String(run.avgFps).padStart(5),
       String(run.p99Ms).padStart(6),
       String(run.maxMs).padStart(6),
@@ -373,6 +381,35 @@ function flightTable(report) {
   const totals = report.totals;
   lines.push(`  totals: ${totals.runs} runs, ${totals.measuredSeconds} s measured, avg ${totals.avgFps} fps, worst p99 ${totals.worstP99Ms} ms, max ${totals.maxFrameMs} ms, >50 ms ${totals.slowFrames} (systems ${totals.slowByCause.systems}, gc ${totals.slowByCause.gc}, main thread ${totals.slowByCause.mainThread}, delayed ${totals.slowByCause.delayed}), NaN ${totals.nanEvents}, penetrations ${totals.penetrations}, soft crashes ${totals.softCrashes}, console ${totals.consoleErrors}/${totals.consoleWarnings}, max heap growth ${totals.maxHeapGrowthMB} MB, script ${totals.scriptChecks}`);
   for (const world of report.worlds) lines.push(`  world ${world.seed} (${world.backend}): load ${world.loadSeconds} s, heap at load ${world.heapAtLoadMB} MB, after the warmup lap ${world.heapBaselineMB} MB, at the end ${world.heapFinalMB} MB (growth ${world.heapGrowthMB} MB after the lap, ${world.heapGrowthFromLoadMB} MB from load)`);
+  return lines.join('\n');
+}
+
+/** One line per craft and view over every seed: runs passed, worst frame, NaN, penetrations. */
+function craftViewTable(report) {
+  const groups = new Map();
+  for (const run of report.runs) {
+    const key = `${run.craft} ${run.view}`;
+    if (!groups.has(key)) groups.set(key, { craft: run.craft, view: run.view, runs: [] });
+    groups.get(key).runs.push(run);
+  }
+  const lines = ['  per craft and view (all seeds):', '    craft       view   runs  passed  worst p99ms  max ms  >50  NaN  pen  err/warn  camera views'];
+  for (const group of groups.values()) {
+    const sum = (field) => group.runs.reduce((total, run) => total + (Number.isFinite(run[field]) ? run[field] : 0), 0);
+    const cameraViews = [...new Set(group.runs.flatMap((run) => run.cameraViews ?? []))].join(', ');
+    lines.push([
+      `    ${group.craft.padEnd(11)}`,
+      group.view.padEnd(6),
+      String(group.runs.length).padStart(4),
+      String(group.runs.filter((run) => run.passed).length).padStart(7),
+      String(Math.max(...group.runs.map((run) => run.p99Ms ?? 0))).padStart(12),
+      String(Math.max(...group.runs.map((run) => run.maxMs ?? 0))).padStart(7),
+      String(sum('slowFrames')).padStart(4),
+      String(sum('nanEvents')).padStart(4),
+      String(sum('penetrations')).padStart(4),
+      `${sum('consoleErrors')}/${sum('consoleWarnings')}`.padStart(9),
+      ` ${cameraViews}`,
+    ].join(' '));
+  }
   return lines.join('\n');
 }
 
@@ -574,7 +611,7 @@ async function main() {
   writeFileSync(join(options.out, 'machine-load.json'), JSON.stringify(load.samples, null, 2));
   writeFileSync(join(options.out, 'gpu-load.json'), JSON.stringify(gpuLoad.samples, null, 2));
 
-  if (report) process.stdout.write(`${options.test === '1' ? flightTable(report) : hotasTable(report)}\n`);
+  if (report) process.stdout.write(`${options.test === '1' ? `${flightTable(report)}\n${craftViewTable(report)}` : hotasTable(report)}\n`);
   process.stdout.write(`run-harness: ${runner.passed ? 'PASS' : 'FAIL'} (harness ${report ? report.result : 'no report'}, backend ${runner.backend ? runner.backend.join(', ') : 'unknown'}, browser console ${runner.errors.length} errors / ${runner.warnings.length} warnings, ${runner.durationSeconds} s)\n`);
   for (const problem of runner.problems) process.stdout.write(`run-harness: problem: ${problem}\n`);
   for (const note of runner.notes) process.stdout.write(`run-harness: note: ${note}\n`);
