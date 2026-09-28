@@ -60,36 +60,37 @@ const EXPECTED_BACKEND = Object.freeze({ webgpu: 'WebGPU', webgl: 'WebGL2' });
 const GAME_PERMISSIONS = 'gamepad; microphone; camera; fullscreen; autoplay; xr-spatial-tracking; encrypted-media; clipboard-write';
 /**
  * How far the last reading of a game may rise above its first load, per metric: a relative share
- * of the first reading, or an absolute allowance, whichever is larger. Each allowance sits below
- * what ONE retained game would add, and a leak across ROUND_TRIPS loads would add many times it.
- * Measured at 1280x720 on WebGPU (docs/architecture.md, Testing): the page (shell and running
- * game) holds about 26 MB of JS heap with V2 and 15 MB with V1, 2 documents, about 2,200 / 1,700
- * nodes, and Chrome's GPU process 330-400 MB of working set and of dedicated GPU memory.
- *   - JS heap: 15 % or 12 MB. The terrain streams on worker threads (their heaps are not in this
- *     reading) and the world around the craft is never exactly the same SETTLE_SECONDS after load,
- *     so a MB or two either way is normal; a retained V2 would add about 20 MB, V1 about 10 MB.
+ * of the first reading, or an absolute allowance, whichever is larger. Measured at 1280x720 on
+ * both backends (the report lists each game's footprint over a blank tab next to each allowance):
+ * one running game adds 13-26 MB of JS heap, 1 document, about 1,700 (V1) or 2,200 (V2) nodes and
+ * 90-160 listeners to the page, and 55-160 MB to each GPU-process figure; between two loads of the
+ * same game the GPU figures move by up to about 60 MB up and 110 MB down.
+ *   - JS heap: 10 % or 8 MB, below one game's heap, so one retained game fails it. The terrain
+ *     streams on worker threads (their heaps are not in this reading) and the world around the
+ *     craft is never exactly the same SETTLE_SECONDS after load, so a MB either way is normal.
  *   - Documents: none more. After a full GC only the shell and the running game remain; one
- *     unloaded game kept alive adds a document.
+ *     unloaded game kept alive adds a document. This is the exact test for a retained game.
  *   - Nodes: 10 % or 400. The games build their HUD and panels from the same markup every load;
- *     toasts and hint strips up at the moment of the reading vary it; a retained game adds 1,500+.
- *   - JS event listeners: 10 % or 60, for the same reason (a retained game adds 90-160).
- *   - GPU process working set and private bytes: 25 % or 160 MB. Chrome's GPU process keeps
- *     shader and pipeline caches and pooled staging memory across page loads by design (they
- *     speed up the next load and are trimmed under memory pressure), and the D3D12 driver pools
- *     allocations, so readings move by tens of MB between loads; a retained WebGPU device keeps
- *     its swap chain, render targets, post-processing chain and terrain buffers, a few hundred MB.
- *   - GPU memory (Windows GPU Process Memory counters, dedicated and shared): 25 % or 160 MB, for
- *     the same reason.
+ *     toasts and hint strips up at the moment of the reading vary it; a retained game adds 1,600+.
+ *   - JS event listeners: 10 % or 60, for the same reason (a retained game adds 90+).
+ *   - GPU process working set, private bytes, and (Windows GPU Process Memory counters) dedicated
+ *     and shared GPU memory: 15 % or 100 MB. Chrome's GPU process keeps shader and pipeline caches
+ *     and pooled staging memory across page loads by design (they speed up the next load and are
+ *     trimmed under memory pressure), and the driver pools allocations, so one load can sit about
+ *     60 MB above another. A single retained WebGL2 game can hide in that noise (the document and
+ *     heap checks catch it); what this allowance catches is GPU memory that grows with every load:
+ *     5 MB or more per load over ROUND_TRIPS loads, and any retained WebGPU device (its swap chain,
+ *     render targets and terrain buffers).
  */
 const MEMORY_TOLERANCE = Object.freeze({
-  jsHeapMB: { share: 0.15, absolute: 12 },
+  jsHeapMB: { share: 0.1, absolute: 8 },
   documents: { share: 0, absolute: 0 },
   nodes: { share: 0.1, absolute: 400 },
   jsEventListeners: { share: 0.1, absolute: 60 },
-  gpuWorkingSetMB: { share: 0.25, absolute: 160 },
-  gpuPrivateMB: { share: 0.25, absolute: 160 },
-  gpuDedicatedMB: { share: 0.25, absolute: 160 },
-  gpuSharedMB: { share: 0.25, absolute: 160 },
+  gpuWorkingSetMB: { share: 0.15, absolute: 100 },
+  gpuPrivateMB: { share: 0.15, absolute: 100 },
+  gpuDedicatedMB: { share: 0.15, absolute: 100 },
+  gpuSharedMB: { share: 0.15, absolute: 100 },
 });
 /** Foreign test page 1: shown inside the shell's iframe, it posts a well-formed switch request to the shell. */
 const FOREIGN_CHILD_PAGE = `<!DOCTYPE html>

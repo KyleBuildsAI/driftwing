@@ -1023,12 +1023,17 @@ the JS heap (`Performance.getMetrics` `JSHeapUsedSize`), the documents, nodes an
 (`Memory.getDOMCounters`), and Chrome's GPU process (the `--type=gpu-process` child of the launched
 browser: working set and private bytes, and on Windows the dedicated and shared GPU memory from
 the `GPU Process Memory` performance counters). The reading after each game's 20th load is
-compared with its first load. The tolerances, and why, are in `MEMORY_TOLERANCE` at the top of the
-tool: JS heap 15 % or 12 MB, documents none, nodes 10 % or 400, listeners 10 % or 60, and every GPU
-figure 25 % or 160 MB (Chrome's GPU process keeps shader and pipeline caches and pooled staging
-memory across loads by design, so it moves by tens of MB either way; a retained WebGPU device would
-keep its swap chain, render targets and terrain buffers, a few hundred MB). The report lists each
-game's footprint over a blank tab next to each allowance.
+compared with its first load, and may rise by at most (the larger of a share and an amount):
+
+| metric | allowance | why |
+| --- | --- | --- |
+| JS heap | 10 % or 8 MB | one running game holds 13-26 MB of heap, so one retained game fails it; normal variation is about 1 MB |
+| documents | none | a retained game is a retained document: this is the exact check |
+| nodes, listeners | 10 % or 400; 10 % or 60 | a retained game adds 1,600+ nodes and 90+ listeners; toasts and hints on screen vary them slightly |
+| GPU process working set, private bytes, dedicated and shared GPU memory | 15 % or 100 MB | Chrome's GPU process keeps shader and pipeline caches and pooled staging memory across loads by design, so one load can sit about 60 MB above another; the allowance catches GPU memory that grows by 5 MB or more per load over the 20 loads |
+
+The tool's `MEMORY_TOLERANCE` comment has the measurements behind these, and the JSON report lists
+each game's footprint over a blank tab next to each allowance.
 
 ## Phase 2-4 plug points
 
