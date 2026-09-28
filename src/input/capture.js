@@ -107,6 +107,21 @@ export function createInputCapture({ registry, calibration, mapper }) {
     });
   }
 
+  /**
+   * Direction of an axis press in the terms the device mapper tests it: the calibrated, normalized
+   * reading, not the raw travel. A one-sided axis (throttle, antenna, slider: 0 at idle, 1 at full)
+   * reads 0..1, so it can only press toward full, whichever way its raw value runs. A bipolar axis
+   * takes the sign of its normalized change, so a reversed calibration (pedal rudder) flips with it.
+   */
+  function pressDirection(device, baseline, axisIndex, travel) {
+    const reading = mapper.readAxis(device, axisIndex);
+    if (reading.range === 'unipolar') return 1;
+    const rest = mapper.readAxis({ ...device, axes: baseline.axes }, axisIndex);
+    const change = reading.value - rest.value;
+    if (change !== 0) return change > 0 ? 1 : -1;
+    return travel > 0 ? 1 : -1;
+  }
+
   function sampleDevice(device) {
     const bindingDevice = device.bindingDevice;
     if (!accepts(bindingDevice)) return;
@@ -147,7 +162,7 @@ export function createInputCapture({ registry, calibration, mapper }) {
       const travel = device.axes[axisIndex] - (baseline.axes[axisIndex] ?? 0);
       if (!(Math.abs(travel) > AXIS_CAPTURE_TRAVEL)) continue;
       if (session.expects === 'action') {
-        finish({ ok: true, device: bindingDevice, ref: { type: 'axisPress', axis: axisIndex, direction: travel > 0 ? 1 : -1 } });
+        finish({ ok: true, device: bindingDevice, ref: { type: 'axisPress', axis: axisIndex, direction: pressDirection(device, baseline, axisIndex, travel) } });
         return;
       }
       if (session.first) return;
