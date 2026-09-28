@@ -73,9 +73,9 @@ export default Object.freeze({
         const strength = option(options, 'strength', 1, 0, 1.5);
         const slot = slots[booms % BOOM_SLOTS];
         booms++;
-        strike(slot.thumpGain.gain, time, 0.55 * strength, 0.008, 1.6);
+        strike(slot.thumpGain.gain, time, 0.32 * strength, 0.008, 1.6);
         sweep(slot.thump.frequency, time, 85, 24, 1.2);
-        strike(slot.burstGain.gain, time, 1.3 * strength, 0.012, 3.2);
+        strike(slot.burstGain.gain, time, 0.75 * strength, 0.012, 3.2);
         sweep(slot.burst.filter.frequency, time, 1400, 160, 1.6);
         // The tephra patter starts as the bombs come down.
         strike(slot.tephra.level.gain, time + 1.4, 1.6 * strength, 0.5, 4.5);

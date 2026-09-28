@@ -44,15 +44,15 @@ export default Object.freeze({
       setIntensity(value, time, immediate = false) {
         intensity = value;
         const timeConstant = immediate ? 0.01 : 0.4;
-        glide(rush.gain.gain, 0.5 * value, time, timeConstant);
-        glide(whoosh.gain.gain, 0.3 * value, time, timeConstant);
-        glide(chatter.level.gain, 2.2 * value, time, timeConstant);
+        glide(rush.gain.gain, 1.5 * value, time, timeConstant);
+        glide(whoosh.gain.gain, 0.9 * value, time, timeConstant);
+        glide(chatter.level.gain, 6 * value, time, timeConstant);
       },
       trigger(name, options, time) {
         if (name !== 'scatter') return false;
         const strength = option(options, 'strength', 1, 0, 1.5);
         scatters++;
-        swell(flurry.level.gain, time, 3 * strength, 0.08, 0.35, 2.4);
+        swell(flurry.level.gain, time, 8 * strength, 0.08, 0.35, 2.4);
         return true;
       },
       describe() {

@@ -51,7 +51,7 @@ export default Object.freeze({
       glide(roar.filter.frequency, 95 + 120 * strength, time, timeConstant);
       glide(growl.gain.gain, 0.7 * strength, time, timeConstant);
       glide(howl.gain.gain, 0.22 * strength * strength, time, timeConstant);
-      glide(sub.gain, 0.12 * strength, time, timeConstant);
+      glide(sub.gain, 0.07 * strength, time, timeConstant);
       glide(rattle.level.gain, 1.6 * strength, time, timeConstant);
       glide(rattle.crackle.drive.gain, 1.3 + 1.5 * strength, time, timeConstant);
       glide(thuds.level.gain, 1.4 * strength, time, timeConstant);

@@ -29,6 +29,8 @@ const PENTATONIC = Object.freeze([0, 2, 4, 7, 9, 12, 14, 16]);
 const CHIME_SLOTS = 4;
 const CHIME_OCTAVE = 4;
 const MAX_MODE_FREQUENCY = 16000;
+const HUM_LEVEL = 0.2;
+const CHIME_LEVEL = 0.1;
 
 /** The hum's fundamental (Hz) for an approach intensity. */
 export function crystalPitch(intensity, baseHz = 196, rangeSemitones = 12) {
@@ -89,7 +91,7 @@ export default Object.freeze({
     function applyHum(time, timeConstant) {
       fundamental = crystalPitch(intensity, baseHz, rangeSemitones);
       glide(pitch.offset, fundamental, time, timeConstant);
-      const loudness = 0.35 + 0.65 * intensity;
+      const loudness = HUM_LEVEL * (0.35 + 0.65 * intensity);
       for (let index = 0; index < HUM_PARTIALS.length; index++) {
         const partial = HUM_PARTIALS[index];
         glide(partialLevels[index].gain, loudness * (partial.gain + partial.bright * intensity), time, timeConstant);
@@ -104,7 +106,7 @@ export default Object.freeze({
         // Modes above the audible band would alias; the bar simply has fewer of them up there.
         if (modeFrequency > MAX_MODE_FREQUENCY) continue;
         oscillator.frequency.setValueAtTime(modeFrequency, time);
-        strike(envelope.gain, time, 0.16 * strength * mode.gain, 0.003, mode.decay);
+        strike(envelope.gain, time, CHIME_LEVEL * strength * mode.gain, 0.003, mode.decay);
       }
     }
 

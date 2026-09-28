@@ -71,7 +71,7 @@ export default Object.freeze({
       setIntensity(value, time, immediate = false) {
         intensity = value;
         const timeConstant = immediate ? 0.01 : 1.2;
-        glide(level.gain, 0.9 * value, time, timeConstant);
+        glide(level.gain, 0.28 * value, time, timeConstant);
         glide(air.gain.gain, 0.02 * value, time, timeConstant);
       },
       trigger() {

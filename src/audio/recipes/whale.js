@@ -176,7 +176,7 @@ export const skyWhale = createSongRecipe({
   spatial: { distanceModel: 'inverse', refDistance: 450, rolloffFactor: 0.9, panningModel: 'equalpower', size: 260, reverb: 0.85 },
   level: 0.09,
   voice: {
-    pitchScale: 0.42, durationScale: 1.8, formantScale: 0.62, sub: 0.75, body: 0.35, breath: 0.5,
+    pitchScale: 0.42, durationScale: 1.8, formantScale: 0.62, sub: 0.45, body: 0.22, breath: 0.4,
     vibratoCents: 6, vibratoRate: 1.4, unitGap: [0.6, 2], phrasePause: [7, 16],
   },
 });

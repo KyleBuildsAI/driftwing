@@ -40,7 +40,7 @@ export default Object.freeze({
     const splatter = crackleBand(kit, { rate: 1, type: 'bandpass', frequency: 1800, q: 0.7, crackleRate: 0.2, cutoff: 45, drive: 2.6 });
 
     function apply(time, timeConstant) {
-      glide(gurgle.level.gain, 3 * (0.25 + 0.75 * intensity), time, timeConstant);
+      glide(gurgle.level.gain, 1.4 * (0.25 + 0.75 * intensity), time, timeConstant);
       glide(gurgle.crackle.drive.gain, 1.3 + 0.8 * intensity, time, timeConstant);
       glide(steam.gain.gain, 0.03 * intensity, time, timeConstant);
     }
@@ -55,7 +55,7 @@ export default Object.freeze({
         const duration = option(options, 'duration', 4, 0.5, 30);
         const strength = option(options, 'strength', 1, 0, 1.5);
         bursts++;
-        swell(burstGain.gain, time, 0.9 * strength, 0.35, duration, 2.8);
+        swell(burstGain.gain, time, 1.3 * strength, 0.35, duration, 2.8);
         sweep(hiss.filter.frequency, time, 700, 2600, 0.45);
         sweep(roar.filter.frequency, time, 260, 520, 0.6);
         swell(splatter.level.gain, time + duration * 0.6, 2.4 * strength, 0.8, duration * 0.4, 3.5);

@@ -66,7 +66,7 @@ export default Object.freeze({
           glide(rotors[index].swish.lfo.frequency, Math.max(bladePass * rotors[index].rotor.rate, 0.01), time, inertia);
         }
         const turning = smoothstep(0, 0.15, value);
-        glide(whoosh.gain, 0.95 * turning * (0.3 + 0.7 * value), time, inertia);
+        glide(whoosh.gain, 1.6 * turning * (0.3 + 0.7 * value), time, inertia);
         glide(gearbox.gain, 0.022 * turning, time, inertia);
         glide(hum.frequency, 28 + 70 * value, time, inertia);
         glide(humOvertone.frequency, 2 * (28 + 70 * value), time, inertia);
