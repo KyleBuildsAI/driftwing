@@ -14,6 +14,13 @@ import { CONFIG } from './config.js';
 // dropped so far that the larger scale clearly fits again). Stage two is v1's
 // governor (view distance, densities, pixel ratio): it only degrades once the scale is pinned at
 // 0.6 and only upgrades at 1.0 with headroom.
+//
+// Load shedders (Phase 2) come before stage one. While frames miss the target, each step down
+// first asks the registered shedders, in registration order, to shed one level of load (the event
+// director defers heavy activations, then demotes far LODs); the render scale only steps down when
+// none of them can shed more. With headroom the order reverses: the scale climbs back to 1 first,
+// then the shedders are restored one level at a time, last shed first. With no shedder registered
+// stage one behaves exactly as in Phase 1.
 // ============================================================================
 
 export const COMMON_REFRESH_RATES = Object.freeze([60, 75, 90, 120, 144, 165, 240]);
@@ -50,6 +57,7 @@ const CLEAR_BLOCK_FRACTION = 0.8;
 /** Frames behind the loading fade are slow by design, and the first seconds after it settle caches. */
 const SETTLE_SECONDS = 4;
 const SCALE_HISTORY_LIMIT = 40;
+const SHED_HISTORY_LIMIT = 40;
 
 /**
  * Snaps a measured refresh rate (Hz) to the nearest common display rate when within 6 %, else
@@ -155,6 +163,19 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
   const upBlockedUntil = new Array(RENDER_SCALE_STEPS.length).fill(0);
   const upBlockSeconds = new Array(RENDER_SCALE_STEPS.length).fill(BLOCK_SECONDS_FIRST);
   const scaleHistory = [];
+
+  // Load shedders: { id, shed, restore } in registration order, and the stack of levels shed so far
+  // (one entry per successful shed(), restored last first). A restore that has to be shed again
+  // within FAILED_UP_WINDOW is blocked like a failed scale up-step.
+  const shedders = [];
+  const shedStack = [];
+  const shedHistory = [];
+  let lastRestoreAt = -Infinity;
+  let restoreBlockedUntil = 0;
+  let restoreBlockSeconds = BLOCK_SECONDS_FIRST;
+  /** getHeadroom()'s record, reused (read it, do not keep it). */
+  const headroom = { missing: false, ratio: 1, shedDepth: 0 };
+  let lastControlMs = 1000 / FALLBACK_REFRESH_HZ;
 
   // Stage two: v1 quality levels.
   let slowSeconds = 0;
@@ -263,10 +284,71 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
     return controlEmaMs * growth < controlMs * CLEAR_BLOCK_FRACTION;
   }
 
-  function updateDynamicResolution(realDt, controlMs) {
-    if (!settings.get('dynamicResolution')) {
-      if (scaleIndex !== 0) setScaleIndex(0, 'disabled');
+  function recordShed(action, id) {
+    shedHistory.push({ time: Math.round(clockSeconds * 100) / 100, action, id, depth: shedStack.length, frameMs: Math.round(controlEmaMs * 10) / 10 });
+    if (shedHistory.length > SHED_HISTORY_LIMIT) shedHistory.shift();
+    state.perf.shedDepth = shedStack.length;
+    bus.emit('perf:loadShed', { action, id, depth: shedStack.length });
+  }
+
+  /** Drops a shedder that threw: it is logged and never consulted again. */
+  function dropFaultyShedder(shedder, phase, error) {
+    console.error(`[DRIFTWING] load shedder "${shedder.id}" failed in ${phase}() and was removed`, error);
+    removeLoadShedder(shedder.id);
+  }
+
+  /** Asks the shedders, in registration order, to shed one level. Returns true when one did. */
+  function shedLoad() {
+    let index = 0;
+    while (index < shedders.length) {
+      const shedder = shedders[index];
+      let didShed = false;
+      try {
+        didShed = shedder.shed() === true;
+      } catch (error) {
+        dropFaultyShedder(shedder, 'shed', error);
+        continue;
+      }
+      index++;
+      if (!didShed) continue;
+      shedStack.push(shedder);
+      // Shedding again right after a restore: that restore was not sustainable, so restores are
+      // blocked for a while, twice as long each time it happens again.
+      if (clockSeconds - lastRestoreAt < FAILED_UP_WINDOW) {
+        restoreBlockedUntil = clockSeconds + restoreBlockSeconds;
+        restoreBlockSeconds = Math.min(restoreBlockSeconds * 2, BLOCK_SECONDS_MAX);
+      }
+      scaleOverSeconds = 0;
+      scaleUnderSeconds = 0;
+      scaleHold = HOLD_AFTER_DOWN;
+      recordShed('shed', shedder.id);
+      return true;
+    }
+    return false;
+  }
+
+  /** Restores the level shed last. */
+  function restoreLoad() {
+    const shedder = shedStack.pop();
+    lastRestoreAt = clockSeconds;
+    scaleOverSeconds = 0;
+    scaleUnderSeconds = 0;
+    scaleHold = HOLD_AFTER_UP;
+    try {
+      shedder.restore();
+    } catch (error) {
+      dropFaultyShedder(shedder, 'restore', error);
       return;
+    }
+    recordShed('restore', shedder.id);
+  }
+
+  function updateDynamicResolution(realDt, controlMs) {
+    const dynamic = Boolean(settings.get('dynamicResolution'));
+    if (!dynamic) {
+      if (scaleIndex !== 0) setScaleIndex(0, 'disabled');
+      // Without dynamic resolution only the shedders act here (stage two does the rest).
+      if (shedders.length === 0 && shedStack.length === 0) return;
     }
     const now = clockSeconds;
     if (scaleHold > 0) {
@@ -277,6 +359,12 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
     const under = controlEmaMs < controlMs * UP_THRESHOLD;
     scaleOverSeconds = over ? scaleOverSeconds + realDt : 0;
     scaleUnderSeconds = under ? scaleUnderSeconds + realDt : 0;
+    // The shedders are consulted before the render scale drops.
+    if (scaleOverSeconds >= DOWN_DWELL && shedders.length > 0 && shedLoad()) return;
+    if (!dynamic) {
+      if (scaleUnderSeconds >= UP_DWELL && shedStack.length > 0 && now >= restoreBlockedUntil) restoreLoad();
+      return;
+    }
     if (scaleOverSeconds >= DOWN_DWELL && scaleIndex < RENDER_SCALE_STEPS.length - 1) {
       // Undoing an up-step that just happened: that scale is not sustainable, so block it for a
       // while, twice as long each time it fails again.
@@ -287,7 +375,36 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
       setScaleIndex(scaleIndex + 1, 'over target');
     } else if (scaleUnderSeconds >= UP_DWELL && scaleIndex > 0 && (now >= upBlockedUntil[scaleIndex - 1] || fitsNextScale(controlMs))) {
       setScaleIndex(scaleIndex - 1, 'headroom');
+    } else if (scaleUnderSeconds >= UP_DWELL && scaleIndex === 0 && shedStack.length > 0 && now >= restoreBlockedUntil) {
+      // Full resolution is back: restore the shed load, last level first.
+      restoreLoad();
     }
+  }
+
+  /**
+   * Registers a load shedder { id, shed() -> boolean, restore() }. shed() drops one level of load
+   * and returns true, or returns false when it has nothing left to shed; restore() brings back the
+   * level it shed last. Returns { remove() }.
+   */
+  function addLoadShedder(shedder) {
+    if (!shedder || typeof shedder.id !== 'string' || !shedder.id) throw new TypeError('addLoadShedder expects { id: string, shed(), restore() }');
+    if (typeof shedder.shed !== 'function' || typeof shedder.restore !== 'function') throw new TypeError(`load shedder "${shedder.id}" needs shed() and restore() functions`);
+    if (shedders.some((entry) => entry.id === shedder.id)) throw new Error(`load shedder "${shedder.id}" is already registered`);
+    const entry = { id: shedder.id, shed: shedder.shed, restore: shedder.restore };
+    shedders.push(entry);
+    return { remove: () => removeLoadShedder(entry.id) };
+  }
+
+  /** Unregisters a shedder. Its shed levels are dropped without a restore (it is going away). */
+  function removeLoadShedder(id) {
+    const index = shedders.findIndex((entry) => entry.id === id);
+    if (index < 0) return false;
+    shedders.splice(index, 1);
+    for (let stackIndex = shedStack.length - 1; stackIndex >= 0; stackIndex--) {
+      if (shedStack[stackIndex].id === id) shedStack.splice(stackIndex, 1);
+    }
+    state.perf.shedDepth = shedStack.length;
+    return true;
   }
 
   function updateQualityGovernor(realDt, controlMs) {
@@ -361,6 +478,8 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
     quality: levels[levelIndex].name,
     qualityIndex: levelIndex,
     scaleHistory,
+    shedDepth: 0,
+    shedHistory,
     simulatedLoad: false,
   });
   bus.on('settings:changed', ({ key }) => {
@@ -374,6 +493,8 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
       }
       scaleOverSeconds = 0;
       scaleUnderSeconds = 0;
+      restoreBlockedUntil = 0;
+      restoreBlockSeconds = BLOCK_SECONDS_FIRST;
       resolveTarget();
     }
   });
@@ -390,6 +511,7 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
       lastFrameMs = sampleMs;
       emaMs += (sampleMs - emaMs) * 0.08;
       const controlMs = resolveTarget();
+      lastControlMs = controlMs;
       controlEmaMs += (Math.min(sampleMs, controlMs * 2) - controlEmaMs) * 0.08;
       cpuEmaMs += (cpuMs - cpuEmaMs) * 0.08;
       recentFrameMs[recentCursor] = frameMs;
@@ -419,6 +541,21 @@ export function createPerfGovernor(ctx, { devHooks = false } = {}) {
     },
 
     setMeasuredRefresh,
+
+    addLoadShedder,
+    removeLoadShedder,
+    /**
+     * { missing, ratio, shedDepth }: missing is true while the control frame time is over the
+     * target by the step-down threshold (only while the game runs: never behind the loading fade or
+     * in photo mode); ratio is controlFrameMs / targetMs; shedDepth counts the levels shed. The
+     * record is reused, so read it and do not keep it.
+     */
+    getHeadroom() {
+      headroom.ratio = controlEmaMs / lastControlMs;
+      headroom.missing = state.ready && !state.photoMode && controlEmaMs > lastControlMs * DOWN_THRESHOLD;
+      headroom.shedDepth = shedStack.length;
+      return headroom;
+    },
 
     /** Re-applies the render scale (the post pipeline appeared or failed). */
     refreshRenderScale: applyRenderScale,
