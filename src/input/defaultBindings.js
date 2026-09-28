@@ -52,7 +52,8 @@ const axis = (index, extra = {}) => ({ type: 'axis', axis: index, ...extra });
 /**
  * Keyboard: one layer. v1's keys stay where v1 had them (P, J, T, R, O; M, Enter, /, H, ?, Esc, X,
  * K, I, Tab stay UI keys in ui.js), except that G is the gear (the waypoint moves to N), C cycles
- * the view and Space runs the craft ability. Plain V is left free; Shift+V is the WREN voice toggle.
+ * the view and Space runs the craft ability. Plain V swaps first and third person; Shift+V stays
+ * the WREN voice toggle.
  */
 const KEYBOARD = {
   actions: {
@@ -62,6 +63,7 @@ const KEYBOARD = {
     waypointAhead: [key('KeyN', { shift: false })],
     photoMode: [key('KeyP')],
     viewCycle: [key('KeyC')],
+    viewToggle1P3P: [key('KeyV', { shift: false })],
     viewForward: [key('Numpad8')],
     viewBack: [key('Numpad2')],
     viewLeft: [key('Numpad4')],
@@ -109,13 +111,14 @@ const MOUSE = {
   axes: {},
 };
 
-/** Standard-mapping (Xbox-style) gamepads. */
+/** Standard-mapping (Xbox-style) gamepads. View (back, button 8) swaps first and third person. */
 const STANDARD_GAMEPAD = {
   actions: {
     craftAbility: [button(0)],
     airbrake: [button(1)],
     gearToggle: [button(2)],
     viewCycle: [button(3)],
+    viewToggle1P3P: [button(8)],
     settings: [button(9)],
     waypointNearest: [button(10)],
     recenterView: [button(11)],
@@ -171,8 +174,9 @@ const T16000M = {
 };
 
 /**
- * Thrustmaster TWCS throttle (with the TFRP pedals on its RJ12 port). The throttle hat is left
- * unbound on purpose: it is reserved for the Phase 4 music controls.
+ * Thrustmaster TWCS throttle (with the TFRP pedals on its RJ12 port). Button 8 (index 7), beside
+ * the view cycle on button 3, swaps first and third person. The throttle hat is left unbound on
+ * purpose: it is reserved for the Phase 4 music controls.
  */
 const TWCS = {
   actions: {
@@ -183,6 +187,7 @@ const TWCS = {
     engineToggle: [button(4)],
     chuteDeploy: [button(5)],
     controlsPanel: [button(6)],
+    viewToggle1P3P: [button(7)],
   },
   axes: {
     lookX: [axis(0, { deadzone: 0.12, smoothing: 0.15 })],

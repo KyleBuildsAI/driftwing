@@ -59,7 +59,7 @@ const SPEC_BUTTONS = Object.freeze({
     7: ['craftPrev'], 8: ['craftNext'], 9: ['versionToggle'], 10: ['autopilotToggle'], 11: ['timeForward'], 12: ['timeBack'], 13: ['ringCourse'], 14: ['journal'], 15: ['settings'],
   },
   [THROTTLE_KEY]: {
-    0: ['recenterView'], 1: ['airbrake'], 2: ['viewCycle'], 3: ['relaunch'], 4: ['engineToggle'], 5: ['chuteDeploy'], 6: ['controlsPanel'],
+    0: ['recenterView'], 1: ['airbrake'], 2: ['viewCycle'], 3: ['relaunch'], 4: ['engineToggle'], 5: ['chuteDeploy'], 6: ['controlsPanel'], 7: ['viewToggle1P3P'],
   },
 });
 const SPEC_STICK_HAT = Object.freeze({ up: 'viewForward', down: 'viewBack', left: 'viewLeft', right: 'viewRight' });
@@ -455,6 +455,15 @@ function createHotasTestSystem(ctx, { capture }) {
     mock().release('throttle', 1);
     await waitFrames(4);
     check('buttons', 'throttle button 1 holds airbrake while pressed', airbrakeHeld && !controls.held.has('airbrake'), `held ${airbrakeHeld}, after release ${controls.held.has('airbrake')}`, 'held true, after release false');
+    const cameraSystem = ctx.systems.camera;
+    const viewBefore = cameraSystem.getView();
+    await checkButtonAction('buttons', 'throttle', THROTTLE_KEY, 7, 'viewToggle1P3P');
+    await settle();
+    const viewSwapped = cameraSystem.getView();
+    await tapButton('throttle', 7);
+    await settle();
+    const viewAfter = cameraSystem.getView();
+    check('buttons', 'viewToggle1P3P swaps first / third person and back', viewSwapped !== viewBefore && viewAfter === viewBefore, `${viewBefore} -> ${viewSwapped} -> ${viewAfter}`, `${viewBefore} -> the other person -> ${viewBefore}`);
 
     // 5. Hats before calibration: nothing is decoded until the wizard has learned them.
     step('hats before calibration');

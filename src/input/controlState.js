@@ -28,6 +28,7 @@ export const ACTIONS = Object.freeze({
   waypointAhead: 'Waypoint ahead',
   photoMode: 'Photo mode',
   viewCycle: 'Cycle view',
+  viewToggle1P3P: 'First / third person',
   viewForward: 'View forward (cockpit)',
   viewBack: 'View back (chase)',
   viewLeft: 'Look left 90 deg',

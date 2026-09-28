@@ -1054,7 +1054,8 @@ export function createUISystem(ctx) {
 
   /**
    * The first-run hint strip: the virtual stick, throttle lever, rudder, gear / flaps / airbrake,
-   * view cycle and the craft ability, from the keyboard bindings (touch: the on-screen controls).
+   * view cycle, the first / third person swap and the craft ability, from the keyboard bindings
+   * (touch: the on-screen controls).
    */
   function renderHint() {
     const throttle = craftHasThrottle();
@@ -1067,6 +1068,7 @@ export function createUISystem(ctx) {
         hintItem(['yaw'], 'rudder', 'negative'),
         throttle ? hintItem(['gearToggle', 'flapsDown', 'airbrake'], 'gear, flaps, airbrake') : '',
         hintItem(['viewCycle'], 'view'),
+        hintItem(['viewToggle1P3P'], 'cockpit / outside'),
         hintItem(['craftAbility'], abilityLabel().toLowerCase()),
       ].join('');
     }
@@ -1096,7 +1098,8 @@ export function createUISystem(ctx) {
     { targets: ['gearToggle'], text: 'Landing gear up / down' },
     { targets: ['flapsDown', 'flapsUp'], text: 'Flaps down / up' },
     { targets: ['airbrake'], text: 'Airbrake or spoilers (hold); wheel brakes on the ground' },
-    { targets: ['viewCycle'], text: 'Cycle the view' },
+    { targets: ['viewCycle'], text: 'Cycle the view: chase, cockpit, wing, flyby' },
+    { targets: ['viewToggle1P3P'], text: 'Swap between the cockpit and your last outside view' },
     { targets: ['craftAbility'], text: () => `Craft ability: ${abilityLabel()}` },
   ];
   const HELP_SHORTCUTS = [
@@ -1192,7 +1195,9 @@ export function createUISystem(ctx) {
   /** Fills the help panel's key lists from the current bindings. */
   function renderHelp() {
     const versionKey = keyGroupsHtml(targetKeyGroups(['versionToggle'])) || 'The V1 | V2 pill';
-    dom.helpMode.innerHTML = `Every craft flies the full flight model. The assists (Settings) steady it as much as you like, from 100% down to raw physics. ${versionKey} switches to V1, the original game.`;
+    const cycleKey = keyGroupsHtml(targetKeyGroups(['viewCycle'])) || 'Cycle view (unbound)';
+    const swapKey = keyGroupsHtml(targetKeyGroups(['viewToggle1P3P'])) || 'First / third person (unbound)';
+    dom.helpMode.innerHTML = `Every craft flies the full flight model. The assists (Settings) steady it as much as you like, from 100% down to raw physics. Fly from outside (chase, wing and flyby) or from the cockpit: ${cycleKey} cycles the views and ${swapKey} swaps at once between the cockpit and your last outside view. Each craft remembers its own view, and the view never changes how it flies. ${versionKey} switches to V1, the original game.`;
     const throttle = craftHasThrottle();
     dom.helpFlight.innerHTML = HELP_FLIGHT.filter((entry) => throttle || !(entry.targets && entry.targets.includes('throttle'))).map((entry) => helpRowHtml(entry)).join('');
     dom.helpShortcuts.innerHTML = HELP_SHORTCUTS.map((entry) => helpRowHtml(entry)).join('');
