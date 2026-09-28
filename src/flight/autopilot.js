@@ -204,8 +204,11 @@ function engage(memory, controls, data) {
   memory.pitch = memory.loadIntegral;
   memory.roll = clamp(controls.roll, -1, 1);
   memory.yaw = clamp(controls.yaw, -1, 1);
-  memory.throttle = data.throttle;
-  memory.throttleIntegral = data.throttle;
+  // The throttle loops start from the pilot's lever (the model's own throttle may already be shaped:
+  // the jet reports its effective lever, scaled below the afterburner detent).
+  const lever = clamp(Number.isFinite(controls.throttle) ? controls.throttle : data.throttle, 0, 1);
+  memory.throttle = lever;
+  memory.throttleIntegral = lever;
   memory.lookaheadAge = Infinity;
   memory.evadeOffset = 0;
   memory.lastSpeed = NaN;

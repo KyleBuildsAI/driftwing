@@ -120,13 +120,17 @@ export function createJetExtension({ profile, bus, craftState = {}, limits = {},
   /**
    * Reads the lever and the ability's request; returns the dry command (0..1 of military power) and
    * sets the afterburner command. Writes the effective lever (the instrument's throttle, after the
-   * flight control system's controls.powerLimit) to systems.
+   * flight control system's controls.powerLimit) to systems. env: the tick's environment (its
+   * autopilot).
    */
-  function readLever(controls, systems) {
+  function readLever(controls, systems, env) {
     const detent = clamp(Number.isFinite(controls.afterburnerDetent) ? controls.afterburnerDetent : 0.95, 0.8, 1);
     const position = clamp(Number.isFinite(controls.throttle) ? controls.throttle : 0, 0, 1);
     const source = controls.sources ? controls.sources.throttle : null;
-    const physicalLever = source === 'hotas';
+    // While the autopilot flies (the hands-off hold included) the throttle is its command, which stops
+    // at the detent like every soft lever, even when a HOTAS lever last moved the throttle.
+    const autopilotFlying = Boolean(env && env.autopilot && env.autopilot.enabled);
+    const physicalLever = source === 'hotas' && !autopilotFlying;
     const running = systems.running;
 
     const request = craftState.abRequest;
@@ -199,7 +203,7 @@ export function createJetExtension({ profile, bus, craftState = {}, limits = {},
     update(controls, tick) {
       clock = tick.time;
       const systems = tick.systems;
-      const dry = readLever(controls, systems);
+      const dry = readLever(controls, systems, tick.env);
       updateSpool(dry, systems.running, air.mach, tick.dt);
       systems.rpmShare = spool.speed;
       systems.powerShare = systems.running ? dryShare() : 0;
