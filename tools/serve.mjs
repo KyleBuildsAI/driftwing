@@ -59,7 +59,7 @@ export function startStaticServer({ port = 8080, root = process.cwd(), quiet = f
     server.once('error', rejectPromise);
     server.listen(port, '127.0.0.1', () => {
       const actualPort = server.address().port;
-      if (!quiet) process.stdout.write(`DRIFTWING serving ${rootDir} at http://localhost:${actualPort}/\n`);
+      if (!quiet) process.stdout.write(`DRIFTWING serving ${rootDir} at http://127.0.0.1:${actualPort}/\n`);
       resolvePromise({ server, port: actualPort });
     });
   });
