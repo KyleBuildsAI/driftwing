@@ -1478,6 +1478,32 @@ function abilityToClassic(craftId, flag, seconds = 3) {
   return { onInSim, offInClassic, staysOff: craftState[flag] === false, ballastKept: ballastBefore === undefined || craftState.ballast >= ballastBefore - 1e-9 };
 }
 
+// ============================================================================================
+// QUEUED MODEL ACTIONS: a press during the crash fade does not fire after the respawn or later
+// ============================================================================================
+function pressAction(rig, id) {
+  rig.bus.emit('input:action', { id, phase: 'press', source: 'keyboard', device: 'keyboard' });
+  rig.bus.emit('input:action', { id, phase: 'release', source: 'keyboard', device: 'keyboard' });
+}
+
+/** engineToggle pressed during the soft-crash fade; `thenClassic` switches to CLASSIC during the fade and back later. */
+function actionDuringFade({ thenClassic = false } = {}) {
+  const rig = createControllerRig({ craft: 'bushplane', mode: 'sim' });
+  rig.controls.throttle = bushplane.spawn.cruiseThrottle;
+  rig.run(1, (lab) => lab.handsOff());
+  rig.flight.triggerSoftCrash('lab');
+  rig.run(0.1, (lab) => lab.handsOff());
+  pressAction(rig, 'engineToggle');
+  rig.run(0.1, (lab) => lab.handsOff());
+  if (thenClassic) {
+    rig.flight.setMode('classic');
+    rig.run(3, (lab) => lab.handsOff());
+    rig.flight.setMode('sim');
+  }
+  rig.run(2, (lab) => lab.handsOff());
+  return { engineOn: rig.telemetry.engineOn !== false, crashes: rig.events.softCrash.length };
+}
+
 function describeLoads(watch) {
   return `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g`;
 }
@@ -1606,6 +1632,9 @@ function runShared() {
     const ability = abilityToClassic(craftId, flag);
     record(name, `${craftId} ${flag} across SIM -> CLASSIC`, ability.offInClassic ? 'off' : 'ON', 'on in SIM, off in CLASSIC', { compare: ability.onInSim && ability.offInClassic && ability.staysOff && ability.ballastKept, note: `SIM ${ability.onInSim ? 'on' : 'NOT ON'}; CLASSIC ${ability.offInClassic ? 'off' : 'STILL ON'}, after the CLASSIC button ${ability.staysOff ? 'off' : 'ON'}; ${ability.ballastKept ? 'no drain in CLASSIC' : 'DRAINED IN CLASSIC'}` });
   }
+  const afterFade = actionDuringFade();
+  const afterSwitch = actionDuringFade({ thenClassic: true });
+  record(name, 'engine toggle pressed during a crash fade', afterFade.engineOn && afterSwitch.engineOn ? 'dropped' : 'FIRED LATER', 'dropped', { compare: afterFade.engineOn && afterSwitch.engineOn && afterFade.crashes === 1, note: `after the respawn: engine ${afterFade.engineOn ? 'on' : 'CUT'}; after CLASSIC and back to SIM: engine ${afterSwitch.engineOn ? 'on' : 'CUT'}` });
   record(name, 'hot-plug hold: speed target', plug.holdSpeed * KMH, `${(plug.speedBefore * KMH).toFixed(1)} km/h +/-1%, pilot's kept`, { unit: 'km/h', note: `flying ${(plug.speedBefore * KMH).toFixed(0)} km/h (cruise ${(plug.cruise * KMH).toFixed(0)}); the pilot's own autopilot speed ${plug.restored ? 'kept' : 'LOST'} after a hold`, compare: Math.abs(plug.holdSpeed - plug.speedBefore) <= plug.speedBefore * 0.01 && plug.restored });
   record(name, 'hot-plug: HOTAS stick unplugged in flight', plug.engaged ? 'hold' : 'no hold', 'hold; other pad: no hold; release on reconnect', { compare: !plug.otherPad && plug.engaged && plug.holding && plug.released, note: `other gamepad ${plug.otherPad ? 'ENGAGED' : 'ignored'}, stick: ${plug.engaged ? 'hands-off hold' : 'NOTHING'}, ${plug.holding ? 'held 5 s' : 'NOT HELD'}, reconnect ${plug.released ? 'released' : 'NOT RELEASED'}` });
   const swap = craftSwitch();

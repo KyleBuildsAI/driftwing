@@ -263,6 +263,13 @@ export function createFlightController(ctx) {
     if (sim && typeof sim.dispose === 'function') sim.dispose();
     sim = null;
     speedBlend.active = false;
+    clearModelActions();
+  }
+
+  /** Drops queued model actions: they belong to the model (and moment) they were pressed for. */
+  function clearModelActions() {
+    modelActions.clear();
+    quietModelActions.clear();
   }
 
   function createSimModel(kind) {
@@ -814,6 +821,7 @@ export function createFlightController(ctx) {
   }
 
   function respawnAfterCrash() {
+    clearModelActions();
     const position = sim ? sim.state.position : player.position;
     // Craft that cannot climb (spawn.respawn 'peak': the wingsuit) start again from the nearest peak.
     if (craft.spawn.respawn === 'peak' && isFiniteVector(position)) {
@@ -1177,6 +1185,15 @@ export function createFlightController(ctx) {
     }
   }
 
+  /**
+   * True while the SIM model takes actions on its next tick. During the crash fade (no ticks until the
+   * respawn) and an aerotow (the tow flies the craft) a model action would fire later, on a different
+   * pose, so it is dropped.
+   */
+  function modelAcceptsActions() {
+    return mode === 'sim' && !tow && !(crash.active && crash.phase === 'fadeIn');
+  }
+
   function performActions() {
     if (pendingActions.size === 0) return;
     const actions = [...pendingActions];
@@ -1185,7 +1202,7 @@ export function createFlightController(ctx) {
     copilotActions.clear();
     for (const id of actions) {
       if (MODEL_ACTIONS.has(id)) {
-        if (mode === 'sim') {
+        if (modelAcceptsActions()) {
           modelActions.add(id);
           if (fromCopilot.has(id)) quietModelActions.add(id);
           else quietModelActions.delete(id);
