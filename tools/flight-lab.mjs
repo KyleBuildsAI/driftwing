@@ -1436,6 +1436,26 @@ function hotPlugOnGround(craftId, lever, seconds = 15) {
   return { onGroundBefore, taxiSpeed, overridden, autopilot, braked, maxAgl, onGround: rig.telemetry.onGround, groundSpeed: rig.telemetry.groundSpeed };
 }
 
+// ============================================================================================
+// HOVER CRAFT SIM -> CLASSIC: the CLASSIC hover model keeps hovering
+// ============================================================================================
+/** A hovering (or landed) SIM rotorcraft switched to CLASSIC: height change and speed over `seconds`. */
+function hoverToClassic(craftId, { startOnGround = false, seconds = 5 } = {}) {
+  const rig = createControllerRig({ craft: craftId, mode: 'sim', startOnGround });
+  rig.run(3, (lab) => lab.handsOff());
+  const simThrottle = rig.telemetry.throttle;
+  rig.flight.setMode('classic');
+  rig.run(0.6, (lab) => lab.handsOff());
+  const start = rig.state.player.position.y;
+  let maxSpeed = 0;
+  rig.run(seconds, (lab) => {
+    lab.handsOff();
+    maxSpeed = Math.max(maxSpeed, lab.state.player.velocity.length());
+  });
+  const hover = craftRegistry.get(craftId).arcadeProfile.hover;
+  return { simThrottle, classicThrottle: rig.state.player.throttle, heightChange: rig.state.player.position.y - start, maxSpeed, agl: rig.state.player.position.y - CONTROLLER_GROUND, minAgl: hover.MIN_AGL };
+}
+
 function describeLoads(watch) {
   return `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g`;
 }
@@ -1556,6 +1576,10 @@ function runShared() {
     const parked = hotPlugOnGround(craftId, lever);
     record(name, `hot-plug on the ground: ${craftId}, lever ${lever}`, parked.overridden || parked.autopilot ? 'autopilot' : parked.braked ? 'parking brake' : 'no brake', 'parking brake, stays down', { compare: parked.onGroundBefore && !parked.overridden && !parked.autopilot && parked.braked && parked.onGround && parked.maxAgl < 1 && parked.groundSpeed < 1, note: `taxiing at ${parked.taxiSpeed.toFixed(1)} m/s; 15 s later: ${parked.onGround ? 'on the ground' : 'AIRBORNE'}, rose ${parked.maxAgl.toFixed(2)} m, ${parked.groundSpeed.toFixed(1)} m/s` });
   }
+  const fpvHover = hoverToClassic('fpv');
+  record(name, 'SIM -> CLASSIC: FPV hovering', Math.abs(fpvHover.heightChange), 1, { unit: 'm', compare: 'max', decimals: 2, note: `SIM motor throttle ${fpvHover.simThrottle.toFixed(2)} -> CLASSIC ${fpvHover.classicThrottle.toFixed(2)}; ${fpvHover.heightChange.toFixed(2)} m in 5 s, max ${fpvHover.maxSpeed.toFixed(1)} m/s` });
+  const heliParked = hoverToClassic('helicopter', { startOnGround: true });
+  record(name, 'SIM -> CLASSIC: helicopter on the ground', heliParked.maxSpeed, '<= 1 m/s, near the hover floor', { unit: 'm/s', compare: heliParked.maxSpeed <= 1 && heliParked.agl >= heliParked.minAgl && heliParked.agl <= heliParked.minAgl + 3, decimals: 2, note: `hovers ${heliParked.agl.toFixed(1)} m above the ground (floor ${heliParked.minAgl} m), max ${heliParked.maxSpeed.toFixed(2)} m/s` });
   record(name, 'hot-plug hold: speed target', plug.holdSpeed * KMH, `${(plug.speedBefore * KMH).toFixed(1)} km/h +/-1%, pilot's kept`, { unit: 'km/h', note: `flying ${(plug.speedBefore * KMH).toFixed(0)} km/h (cruise ${(plug.cruise * KMH).toFixed(0)}); the pilot's own autopilot speed ${plug.restored ? 'kept' : 'LOST'} after a hold`, compare: Math.abs(plug.holdSpeed - plug.speedBefore) <= plug.speedBefore * 0.01 && plug.restored });
   record(name, 'hot-plug: HOTAS stick unplugged in flight', plug.engaged ? 'hold' : 'no hold', 'hold; other pad: no hold; release on reconnect', { compare: !plug.otherPad && plug.engaged && plug.holding && plug.released, note: `other gamepad ${plug.otherPad ? 'ENGAGED' : 'ignored'}, stick: ${plug.engaged ? 'hands-off hold' : 'NOTHING'}, ${plug.holding ? 'held 5 s' : 'NOT HELD'}, reconnect ${plug.released ? 'released' : 'NOT RELEASED'}` });
   const swap = craftSwitch();

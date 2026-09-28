@@ -60,6 +60,8 @@ const CONVERSION_MAX_BANK = 66 * DEG;
 const SPEED_BLEND_MIN_CHANGE = 0.5;
 /** SIM -> CLASSIC: the arcade model starts at least this far (m/s) above its soft-stall speed. */
 const CLASSIC_STALL_MARGIN = 4;
+/** SIM -> CLASSIC for a landed hover craft: it starts this far (m) above its CLASSIC hover floor. */
+const CLASSIC_HOVER_LIFT = 1;
 /** CLASSIC feels the wind field only as a gentle drift: shares of the calm (gust-free) air motion. */
 const CLASSIC_WIND = Object.freeze({ HORIZONTAL_SHARE: 0.25, VERTICAL_SHARE: 0.3, LAMBDA: 0.8 });
 
@@ -614,7 +616,10 @@ export function createFlightController(ctx) {
     return true;
   }
 
-  /** SIM -> CLASSIC: velocity vector -> arcade speed and path, bank limited, lifted off the ground. */
+  /**
+   * SIM -> CLASSIC: velocity vector -> arcade speed and path, bank limited, lifted off the ground.
+   * Hover craft keep hovering: throttle 0.5 (hold height), and a landed one lifts to its hover floor.
+   */
   function enterClassic() {
     if (crash.active) finishCrash();
     releaseTow('mode change');
@@ -630,7 +635,18 @@ export function createFlightController(ctx) {
     classicWind.copy(classicWindTarget);
     pose.velocity.sub(classicWind);
     const arcadeSpeed = craft.arcadeProfile.SPEED;
-    if (onGround) {
+    const hover = craft.arcadeProfile.hover;
+    if (hover) {
+      // Rotorcraft: the hover model holds its height at throttle 0.5 (a SIM throttle is a motor or
+      // collective command, not that), and a landed craft lifts to its hover floor and hovers there.
+      if (onGround) {
+        const heading = headingOfQuaternion(pose.quaternion, currentHeading());
+        pose.position.y = Math.max(pose.position.y, surfaceHeight(pose.position.x, pose.position.z) + hover.MIN_AGL + CLASSIC_HOVER_LIFT);
+        levelQuaternion(heading, pose.quaternion);
+        pose.velocity.set(0, 0, 0);
+      }
+      pose.throttle = craft.arcadeProfile.AUTOPILOT.CRUISE_THROTTLE;
+    } else if (onGround) {
       // CLASSIC cannot sit on the ground: level off at cruise a little higher (the blend hides the lift).
       // In the air the velocity carries over; the arcade model clamps it to its own speed range.
       const heading = headingOfQuaternion(pose.quaternion, currentHeading());
@@ -641,10 +657,11 @@ export function createFlightController(ctx) {
     }
     // In the air the velocity carries over, but never below the arcade's soft-stall exit speed: a SIM
     // craft flying slower than CLASSIC can (the glider's SIM cruise is under the arcade stall) would
-    // otherwise drop its nose the moment it switched. The rendered pose blends as always.
+    // otherwise drop its nose the moment it switched. The rendered pose blends as always. Hover craft
+    // have no stall, so a slow drift stays a slow drift.
     const classicFloor = arcadeSpeed.STALL + CLASSIC_STALL_MARGIN;
     const carried = pose.velocity.length();
-    if (!onGround && carried > 1 && carried < classicFloor) pose.velocity.multiplyScalar(classicFloor / carried);
+    if (!hover && !onGround && carried > 1 && carried < classicFloor) pose.velocity.multiplyScalar(classicFloor / carried);
     // Craft without an engine in SIM (throttle 'none') and craft taking off from the ground cruise.
     if (onGround || craft.inputProfile?.throttle === 'none' || !Number.isFinite(pose.throttle)) pose.throttle = craft.arcadeProfile.AUTOPILOT.CRUISE_THROTTLE;
     // A SIM altitude hold may sit above the CLASSIC ceiling; hold what CLASSIC can reach instead.
