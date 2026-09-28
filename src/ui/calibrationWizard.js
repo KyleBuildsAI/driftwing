@@ -80,6 +80,7 @@ export function createCalibrationWizardView({ container, getInput, announce, onE
       state.hat ? `${state.hat.index}:${state.hat.directionIndex}` : '',
       state.finished ? 'finished' : '',
       state.devices.map((device) => device.deviceKey).join(','),
+      (state.lateDevices ?? []).map((device) => device.deviceKey).join(','),
     ].join('|');
   }
 
@@ -241,6 +242,14 @@ export function createCalibrationWizardView({ container, getInput, announce, onE
     }
   }
 
+  /** Devices that connected after the Center step: this run leaves their saved calibration alone. */
+  function renderLateDevices(state) {
+    const late = state.lateDevices ?? [];
+    if (late.length === 0 || state.finished) return;
+    const names = late.map((device) => device.name).join(' and ');
+    content.append(element('p', 'dw-note', `${names} connected after the Center step, so this run does not calibrate it and its saved calibration stays as it is. Go back to Center (or run the wizard again) to include it.`));
+  }
+
   function renderActions(state) {
     const done = state.step === 'done';
     backButton.hidden = state.finished;
@@ -264,6 +273,7 @@ export function createCalibrationWizardView({ container, getInput, announce, onE
     title.textContent = state.devices.length === 0 ? 'No controllers connected' : state.title;
     prompt.textContent = state.devices.length === 0 ? 'Press any button on your stick and throttle (or gamepad) to connect it.' : state.prompt;
     content.replaceChildren();
+    renderLateDevices(state);
     if (state.devices.length > 0) {
       if (state.step === 'center') renderCenter(state);
       else if (state.step === 'axes') renderAxes(state);

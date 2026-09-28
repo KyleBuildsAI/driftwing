@@ -622,9 +622,9 @@ export function createBindingStore({ storage }) {
     },
 
     /**
-     * Replaces the profile with an exported one. Returns { ok, errors }: ok is false (nothing
-     * changed) when the text is not a DRIFTWING binding export; invalid entries are dropped and
-     * listed in errors.
+     * Replaces the profile with an exported one; devices already known here stay registered.
+     * Returns { ok, errors }: ok is false (nothing changed) when the text is not a DRIFTWING binding
+     * export; invalid entries are dropped and listed in errors.
      */
     importJSON(text) {
       let parsed;
@@ -640,7 +640,9 @@ export function createBindingStore({ storage }) {
         return { ok: false, errors: [`unsupported bindings version ${parsed.version}`] };
       }
       const result = sanitizeProfile(parsed.profile);
-      profile = result.profile;
+      // Devices registered here (the connected controllers) stay known even when the file lacks
+      // them: registerDevice only runs on connect, so dropping one would unbind it until a replug.
+      profile = { ...result.profile, devices: { ...result.profile.devices, ...profile.devices } };
       changed('import');
       return { ok: true, errors: result.errors };
     },

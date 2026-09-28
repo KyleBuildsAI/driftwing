@@ -9,7 +9,7 @@
 //
 // Baselines are taken from the latest readings when the session starts (and when a device first
 // appears during it), so a stick resting off-centre or a button already held does not bind
-// itself. Escape cancels.
+// itself. Escape cancels. Tab is never captured: it stays the key that moves focus through panels.
 
 import { AXIS_TARGETS } from './defaultBindings.js';
 import { isAxisTarget } from './bindings.js';
@@ -20,7 +20,8 @@ const AXIS_CAPTURE_TRAVEL = 0.5;
 const HAT_REST_THRESHOLD = 1.01;
 const KEY_RATE = 0.5;
 const BUTTON_RATE = 0.6;
-const IGNORED_KEYS = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight']);
+/** Keys a listen lets through: modifiers (combined with the next key) and Tab (moves focus on). */
+const IGNORED_KEYS = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight', 'Tab']);
 
 /**
  * registry: gamepad registry; calibration: calibration store (learned hats); mapper: device
@@ -107,6 +108,21 @@ export function createInputCapture({ registry, calibration, mapper }) {
     });
   }
 
+  /**
+   * Direction of an axis press in the terms the device mapper tests it: the calibrated, normalized
+   * reading, not the raw travel. A one-sided axis (throttle, antenna, slider: 0 at idle, 1 at full)
+   * reads 0..1, so it can only press toward full, whichever way its raw value runs. A bipolar axis
+   * takes the sign of its normalized change, so a reversed calibration (pedal rudder) flips with it.
+   */
+  function pressDirection(device, baseline, axisIndex, travel) {
+    const reading = mapper.readAxis(device, axisIndex);
+    if (reading.range === 'unipolar') return 1;
+    const rest = mapper.readAxis({ ...device, axes: baseline.axes }, axisIndex);
+    const change = reading.value - rest.value;
+    if (change !== 0) return change > 0 ? 1 : -1;
+    return travel > 0 ? 1 : -1;
+  }
+
   function sampleDevice(device) {
     const bindingDevice = device.bindingDevice;
     if (!accepts(bindingDevice)) return;
@@ -147,7 +163,7 @@ export function createInputCapture({ registry, calibration, mapper }) {
       const travel = device.axes[axisIndex] - (baseline.axes[axisIndex] ?? 0);
       if (!(Math.abs(travel) > AXIS_CAPTURE_TRAVEL)) continue;
       if (session.expects === 'action') {
-        finish({ ok: true, device: bindingDevice, ref: { type: 'axisPress', axis: axisIndex, direction: travel > 0 ? 1 : -1 } });
+        finish({ ok: true, device: bindingDevice, ref: { type: 'axisPress', axis: axisIndex, direction: pressDirection(device, baseline, axisIndex, travel) } });
         return;
       }
       if (session.first) return;

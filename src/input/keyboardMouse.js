@@ -9,7 +9,14 @@
 // deflection. Right-drag is free look in both modes (releasing returns the view to centre).
 //
 // Actions are pressed on keydown / mousedown (so UI actions run in the same event as v1's hotkeys)
-// and released on keyup / mouseup through the action router.
+// and released on keyup / mouseup through the action router. A button pressed or released while
+// another is held arrives as a pointermove (Pointer Events chording); the buttons mask of those
+// events presses and releases it too.
+//
+// While a bind-by-listening session runs, a non-left mouse button anywhere on the page (the pointer
+// is usually over the controls panel) is offered to it, and the browser's own response to that
+// button (context menu, autoscroll, back / forward navigation) is cancelled until it is released.
+// Back and forward are also kept from navigating the page away while a binding uses them.
 
 import { clamp } from '../core/util.js';
 import { AXIS_TARGETS } from './defaultBindings.js';
@@ -39,6 +46,12 @@ const LOCK_RETRY_MS = 1200;
 /** Right-drag free look: pixels (as a fraction of the shorter screen side) for full deflection. */
 const LOOK_FULL_FRACTION = 0.35;
 const MOUSE_BUTTON_NAMES = Object.freeze(['left', 'middle', 'right', 'back', 'forward']);
+/** Pointer Events `buttons` bit of each button above (left, middle, right, back, forward). */
+const MOUSE_BUTTON_BITS = Object.freeze([1, 4, 2, 8, 16]);
+/** Browser defaults of a button a listen took stay cancelled this long after its release. */
+const SWALLOW_AFTER_RELEASE_MS = 500;
+/** Buttons whose release navigates history in Chrome (back, forward). */
+const NAVIGATION_BUTTONS = new Set([3, 4]);
 
 /**
  * ctx: the game context. bindings: binding store. router: action router. canPress(actionId,
@@ -73,6 +86,10 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
   const keyActions = new Map();
   /** Mouse button -> action ids its mousedown pressed. */
   const mouseActions = new Map();
+  /** Mouse buttons last seen down (a Pointer Events buttons mask), for chorded presses. */
+  let knownButtons = 0;
+  /** Button -> time until which its browser defaults are cancelled (Infinity while held). */
+  const swallowedButtons = new Map();
   let pendingWheelNotches = 0;
   let lastWheelTime = -Infinity;
   let lockRetryAfter = 0;
@@ -147,6 +164,11 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   }
 
+  /** Tab inside a panel or dialog moves focus there, even when a binding uses Tab. */
+  function isFocusNavigation(code, target) {
+    return code === 'Tab' && target instanceof Element && target.closest('[role="dialog"]') !== null;
+  }
+
   function isActivatableTarget(target) {
     if (!target || !target.tagName) return false;
     const tag = target.tagName;
@@ -210,6 +232,7 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
     if (event.isComposing || isTypingTarget(event.target)) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const code = event.code;
+    if (isFocusNavigation(code, event.target)) return;
     const shiftHeld = event.shiftKey || isShiftHeld();
     if (capture.active && !event.repeat && capture.offerKey(code, shiftHeld)) {
       event.preventDefault();
@@ -260,6 +283,7 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
 
   /** True when a keydown would trigger an input action (the UI then leaves the key alone). */
   function consumesKey(event) {
+    if (isFocusNavigation(event.code, event.target)) return false;
     if (capture.active) return true;
     if (event.ctrlKey || event.metaKey || event.altKey) return false;
     return actionsForKey(event.code, event.shiftKey || isShiftHeld(), getMode()).length > 0;
@@ -326,12 +350,15 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
 
   /** Middle / right / side buttons: bound actions, and right-drag free look. */
   function onOtherButtonDown(event) {
-    const button = event.button;
-    if (button < 0 || button >= MOUSE_BUTTON_NAMES.length) return;
-    if (capture.active && capture.offerMouseButton(button)) return;
+    pressOtherButton(event.button, event.pointerId);
+  }
+
+  function pressOtherButton(button, pointerId) {
+    if (button <= 0 || button >= MOUSE_BUTTON_NAMES.length) return;
+    if (capture.active && offerToCapture(button)) return;
     if (button === 2 && !state.photoMode && !look.active) {
       look.active = true;
-      look.pointerId = event.pointerId;
+      look.pointerId = pointerId;
       look.x = 0;
       look.y = 0;
     }
@@ -364,7 +391,81 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
     }
   }
 
+  // ---- Pointer: chorded buttons, the listen's buttons and browser defaults ------------------------
+  /** Offers a button to the bind-by-listening session; a consumed button is swallowed until released. */
+  function offerToCapture(button) {
+    if (!capture.offerMouseButton(button)) return false;
+    swallowedButtons.set(button, Infinity);
+    return true;
+  }
+
+  function isSwallowed(button) {
+    const until = swallowedButtons.get(button);
+    if (until === undefined) return false;
+    if (until > performance.now()) return true;
+    swallowedButtons.delete(button);
+    return false;
+  }
+
+  /** A swallowed button was released: its click, context menu or navigation may still follow. */
+  function releaseSwallowed(button) {
+    if (swallowedButtons.get(button) === Infinity) swallowedButtons.set(button, performance.now() + SWALLOW_AFTER_RELEASE_MS);
+  }
+
+  function isBoundMouseButton(button) {
+    return bindings.getEffective('mouse', getCraft()).actions.some(([, refs]) => refs.some((ref) => ref.type === 'mouseButton' && ref.button === button));
+  }
+
+  /**
+   * Window, capture phase: a non-left button pressed anywhere while listening goes to the listen
+   * (and nowhere else), and the button mask is tracked for chording.
+   */
+  function onWindowPointerDown(event) {
+    if (event.pointerType === 'mouse') knownButtons = event.buttons;
+    if (!capture.active || event.button <= 0 || event.button >= MOUSE_BUTTON_NAMES.length) return;
+    if (!offerToCapture(event.button)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function onWindowPointerUp(event) {
+    if (event.pointerType === 'mouse') knownButtons = event.buttons;
+    if (NAVIGATION_BUTTONS.has(event.button) && (isSwallowed(event.button) || isBoundMouseButton(event.button))) event.preventDefault();
+    releaseSwallowed(event.button);
+  }
+
+  /**
+   * mousedown, mouseup, auxclick and contextmenu: cancels the browser's response (autoscroll,
+   * context menu, back / forward) to a button the listen took, and navigation by a bound back or
+   * forward button.
+   */
+  function onMouseDefault(event) {
+    const button = event.button;
+    if (isSwallowed(button) || (NAVIGATION_BUTTONS.has(button) && event.type !== 'mousedown' && isBoundMouseButton(button))) event.preventDefault();
+  }
+
+  /**
+   * A mouse button pressed or released while another is held changes event.buttons on a
+   * pointermove instead of firing pointerdown / pointerup: press and release it from the mask.
+   */
+  function syncChordedButtons(event) {
+    if (event.pointerType !== 'mouse') return;
+    const previous = knownButtons;
+    knownButtons = event.buttons;
+    for (let button = 1; button < MOUSE_BUTTON_BITS.length; button++) {
+      const bit = MOUSE_BUTTON_BITS[button];
+      const down = (event.buttons & bit) !== 0;
+      if (!down) {
+        if (mouseActions.has(button)) releaseMouseActions(button);
+        if (previous & bit) releaseSwallowed(button);
+      } else if ((previous & bit) === 0 && event.target === canvas) {
+        pressOtherButton(button, event.pointerId);
+      }
+    }
+  }
+
   function onPointerMove(event) {
+    syncChordedButtons(event);
     if (look.active && (event.buttons & 2) === 0) endLook();
     if (isPointerLocked()) {
       const moveX = clamp(event.movementX || 0, -MAX_MOVEMENT_PER_EVENT, MAX_MOVEMENT_PER_EVENT);
@@ -496,6 +597,9 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) clearHeldState();
   });
+  window.addEventListener('pointerdown', onWindowPointerDown, true);
+  window.addEventListener('pointerup', onWindowPointerUp, true);
+  for (const type of ['mousedown', 'mouseup', 'auxclick', 'contextmenu']) window.addEventListener(type, onMouseDefault, true);
   canvas.addEventListener('pointerdown', onPointerDown);
   document.addEventListener('pointermove', onPointerMove);
   document.addEventListener('pointerup', onPointerUp);
