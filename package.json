@@ -15,7 +15,12 @@
     "serve:single": "node tools/serve.mjs 5199 dist-single",
     "copilot-server": "node tools/copilot-server.mjs",
     "test": "npm run test:v1 && npm run build:single && node tools/smoke-test.mjs --file dist-single/index.html",
-    "test:v1": "node --test tests/v1-checksum.test.mjs"
+    "test:v1": "node --test tests/v1-checksum.test.mjs",
+    "test:shell": "npm run build:single && node tools/shell-test.mjs",
+    "test:flight": "node tools/run-harness.mjs --test 1",
+    "test:flight:webgl": "node tools/run-harness.mjs --test 1 --backend webgl",
+    "test:hotas": "node tools/run-harness.mjs --test hotas",
+    "test:hotas:webgl": "node tools/run-harness.mjs --test hotas --backend webgl"
   },
   "dependencies": {
     "three": "0.184.0"
