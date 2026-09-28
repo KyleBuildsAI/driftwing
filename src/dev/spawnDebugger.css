@@ -1,0 +1,102 @@
+/* ==========================================================================
+   Dev spawn debugger (F9): presets, force spawns, teleports, time of day,
+   director state and engine stats, in the v1 glass style. Dev builds, or a
+   production build opened with ?dev=1; never shown otherwise.
+   ========================================================================== */
+#ui-root .dw-spawndbg {
+  pointer-events: auto;
+  position: absolute;
+  z-index: 45;
+  top: calc(var(--dw-top) + 64px);
+  left: var(--dw-left);
+  width: min(408px, calc(100vw - 32px));
+  max-height: calc(100vh - var(--dw-top) - 230px);
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(36, 28, 44, 0.78), rgba(20, 16, 26, 0.72));
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-18px);
+  transition: opacity 0.2s ease, transform 0.32s var(--dw-ease), visibility 0s linear 0.32s;
+}
+#ui-root .dw-spawndbg.dw-open { opacity: 1; visibility: visible; transform: none; transition: opacity 0.2s ease, transform 0.36s var(--dw-ease), visibility 0s; }
+#ui-root .dw-spawndbg-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px 10px 16px;
+  border-bottom: 1px solid var(--dw-hairline);
+}
+#ui-root .dw-spawndbg-head h2 { margin: 2px 0 0; font-size: 18px; font-weight: 350; color: #fffaf1; }
+#ui-root .dw-spawndbg-head .dw-spawndbg-close { margin-left: auto; }
+#ui-root .dw-spawndbg-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 16px 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 240, 220, 0.2) transparent;
+}
+#ui-root .dw-spawndbg-section { padding: 10px 0 8px; border-bottom: 1px solid var(--dw-hairline); }
+#ui-root .dw-spawndbg-section:last-child { border-bottom: 0; }
+#ui-root .dw-spawndbg-section > .dw-micro { margin-bottom: 7px; }
+#ui-root .dw-spawndbg-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+#ui-root .dw-spawndbg-row + .dw-spawndbg-row { margin-top: 6px; }
+#ui-root .dw-spawndbg-label { font-size: 11.5px; color: var(--dw-text-dim); }
+#ui-root .dw-spawndbg .dw-text-button { height: 26px; padding: 0 10px; font-size: 11.5px; }
+#ui-root .dw-spawndbg .dw-text-button:disabled { opacity: 0.38; cursor: default; }
+#ui-root .dw-spawndbg-select {
+  pointer-events: auto;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 26px;
+  padding: 0 24px 0 9px;
+  border-radius: 8px;
+  border: 1px solid var(--dw-hairline);
+  background:
+    linear-gradient(45deg, transparent 50%, var(--dw-text-dim) 50%) calc(100% - 12px) 11px / 4px 4px no-repeat,
+    linear-gradient(135deg, var(--dw-text-dim) 50%, transparent 50%) calc(100% - 8px) 11px / 4px 4px no-repeat,
+    rgba(255, 240, 220, 0.06);
+  color: var(--dw-text);
+  font: 500 11.5px/1 var(--font-ui);
+  cursor: pointer;
+}
+#ui-root .dw-spawndbg-select:hover { border-color: var(--dw-hairline-strong); }
+#ui-root .dw-spawndbg-select:focus-visible { outline: 2px solid rgba(243, 199, 122, 0.7); outline-offset: 1px; }
+#ui-root .dw-spawndbg-select option { background: #231b2a; color: var(--dw-text); }
+#ui-root .dw-spawndbg-filters { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+#ui-root .dw-spawndbg-filters .dw-spawndbg-select { width: 100%; }
+#ui-root .dw-spawndbg-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+#ui-root .dw-spawndbg-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(255, 240, 220, 0.04);
+  border: 1px solid transparent;
+}
+#ui-root .dw-spawndbg-item:hover { border-color: var(--dw-hairline); }
+#ui-root .dw-spawndbg-item-text { flex: 1; min-width: 0; }
+#ui-root .dw-spawndbg-item-name { font-size: 12.5px; color: var(--dw-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ui-root .dw-spawndbg-item-meta { font-size: 10.5px; color: var(--dw-text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ui-root .dw-spawndbg-heavy { color: var(--dw-gold); }
+#ui-root .dw-spawndbg-empty { margin: 6px 0 2px; font-size: 12px; color: var(--dw-text-faint); }
+#ui-root .dw-spawndbg-clock { min-width: 86px; font-size: 12px; color: var(--dw-text); }
+#ui-root .dw-spawndbg .dw-range { flex: 1; min-width: 140px; }
+#ui-root .dw-spawndbg-kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-size: 11.5px; }
+#ui-root .dw-spawndbg-kv dt { color: var(--dw-text-dim); white-space: nowrap; }
+#ui-root .dw-spawndbg-kv dd { margin: 0; color: var(--dw-text); overflow-wrap: anywhere; }
+#ui-root .dw-spawndbg-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+#ui-root .dw-spawndbg-table th { text-align: left; font-weight: 600; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dw-text-faint); padding: 0 0 4px; }
+#ui-root .dw-spawndbg-table td { padding: 2px 0; color: var(--dw-text); border-top: 1px solid rgba(255, 240, 220, 0.06); }
+#ui-root .dw-spawndbg-table .dw-spawndbg-num { text-align: right; padding-left: 8px; }
+#ui-root .dw-spawndbg-note { margin-top: 6px; font-size: 11px; color: var(--dw-text-faint); }
+#ui-root .dw-spawndbg-warn { color: var(--dw-warn); }
+@media (prefers-reduced-motion: reduce) {
+  #ui-root .dw-spawndbg,
+  #ui-root .dw-spawndbg.dw-open { transition: none; transform: none; }
+}
