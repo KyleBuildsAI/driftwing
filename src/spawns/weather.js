@@ -303,14 +303,16 @@ export function createWeatherSystem(ctx) {
     },
     /**
      * Dev only: holds the player's weather in a state at a progress (0..1), or hands it back to the
-     * model with null. The sky eases there as it would in flight.
+     * model with null. With snap (the default) the sky jumps there on the next frame; without it the
+     * sky eases there as it would in flight.
      */
-    forceState(name, progress = 0.5) {
+    forceState(name, progress = 0.5, { snap = true } = {}) {
       if (!devHooks) throw new Error('weather.forceState is only available in development builds or with ?debug=1');
       if (name !== null && !WEATHER_STATES.includes(name)) throw new RangeError(`unknown weather state "${name}"`);
       if (!Number.isFinite(progress)) throw new TypeError('weather.forceState progress must be a finite number');
       forced.state = name;
       forced.progress = Math.min(1, Math.max(0, progress));
+      if (snap) storminess = -1;
       return forced.state;
     },
     /** Removes the sky modifier; the sky returns to its unmodified path and updates stop. */
