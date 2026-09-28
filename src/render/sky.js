@@ -791,7 +791,8 @@ export function createSkySystem(ctx) {
     if (combined.active) {
       const clouded = 1 - combined.overcast;
       const lit = combined.sunIntensity * (1 - combined.darkness);
-      sky.sunDiscColor.value.multiplyScalar(lit * clouded);
+      // The disc fades faster than the light: even thin cloud hides its edge.
+      sky.sunDiscColor.value.multiplyScalar(lit * clouded * clouded);
       uniforms.sunColor.value.multiplyScalar(lit);
       sky.rayStrength.value *= Math.min(combined.sunIntensity, 1.5) * clouded;
       sky.moonStrength.value *= clouded;
