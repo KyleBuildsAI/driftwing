@@ -5,7 +5,7 @@
 // reset?(memory) } and draws in a 200 x 200 design box (see gaugeKit.js). The instrument set owns
 // the per-instrument memory (G tell-tales, vario averager, glide averages, terrain look-ahead) so
 // the cockpit panel and the HUD overlay show the same state, and builds the `source` every
-// renderer reads: { flight (state.flight), craft (module), mode, units, controls, world, waterLevel }.
+// renderer reads: { flight (state.flight), craft (module), units, controls, world, waterLevel }.
 import { CONFIG } from '../../core/config.js';
 import { THEMES, DESIGN_SIZE } from './gaugeKit.js';
 import { unitsFor } from './units.js';
@@ -48,7 +48,6 @@ export function createInstrumentSet(ctx) {
   const source = {
     flight: state.flight,
     craft: null,
-    mode: 'classic',
     units: unitsFor(settings.get('units')),
     controls: ctx.controls,
     world,
@@ -62,7 +61,6 @@ export function createInstrumentSet(ctx) {
     const flightSystem = ctx.systems.flight;
     const craft = flightSystem && typeof flightSystem.getCraftModule === 'function' ? flightSystem.getCraftModule() : null;
     source.flight = state.flight;
-    source.mode = state.flight.mode === 'sim' ? 'sim' : 'classic';
     source.units = unitsFor(settings.get('units'));
     if (craft !== activeCraft) {
       activeCraft = craft;
@@ -107,7 +105,7 @@ export function createInstrumentSet(ctx) {
     /** Clears tell-tales and averages (craft change, soft crash, relaunch). */
     reset: resetMemories,
 
-    /** Re-reads the active craft, mode and units now (the camera calls it before building a cockpit). */
+    /** Re-reads the active craft and units now (the camera calls it before building a cockpit). */
     refresh: refreshSource,
 
     /**

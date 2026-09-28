@@ -1,23 +1,21 @@
 /**
- * The "Aircraft" row of quick chips in the Ask WREN command bar, shown in SIM mode. It uses the
- * command bar's existing hook: any button inside #ui-root with a data-command attribute submits that
- * phrase exactly as if it had been typed (ui.js), so these chips need no UI code of their own. The row
- * stays hidden in CLASSIC, which keeps the v1 command bar unchanged there.
+ * The "Aircraft" row of quick chips in the Ask WREN command bar. It uses the command bar's existing
+ * hook: any button inside #ui-root with a data-command attribute submits that phrase exactly as if it
+ * had been typed (ui.js), so these chips need no UI code of their own.
  */
 
 const GROUP_ID = 'dw-quick-aircraft';
 
 /** [label, command] chips for the current state. */
-function chipsFor(mode, hasLanding) {
+function chipsFor(hasLanding) {
   const chips = [
-    ['CLASSIC mode', 'classic mode'],
     ['Assists up', 'assists up'],
     ['Assists down', 'assists down'],
     ['Airspeed', 'airspeed'],
   ];
   if (hasLanding) chips.push(['My landing', 'how was my landing']);
   chips.push(['Relaunch', 'relaunch']);
-  return mode === 'sim' ? chips : [];
+  return chips;
 }
 
 export function createCommandChips(ctx) {
@@ -40,8 +38,7 @@ export function createCommandChips(ctx) {
 
   let signature = '';
   function refresh() {
-    const mode = typeof ctx.systems.flight?.getMode === 'function' ? ctx.systems.flight.getMode() : state.flight.mode;
-    const chips = chipsFor(mode, Boolean(state.flight.lastLanding));
+    const chips = chipsFor(Boolean(state.flight.lastLanding));
     const next = chips.map(([text]) => text).join('|');
     // An inline display wins over the stylesheet's grid (the hidden attribute alone would not).
     group.style.display = chips.length === 0 ? 'none' : '';
@@ -57,7 +54,6 @@ export function createCommandChips(ctx) {
     }));
   }
 
-  bus.onTyped('modeChanged', refresh);
   bus.onTyped('craftChanged', refresh);
   bus.onTyped('landed', refresh);
   refresh();

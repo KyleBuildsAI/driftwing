@@ -498,9 +498,7 @@
   /* ---- Settings, Controls tab ---------------------------------------------------------------- */
   #ui-root .dw-text-button.dw-wide.dw-tight { margin-top: 6px; }
 
-  /* ---- Help: mode variants ------------------------------------------------------------------ */
-  #ui-root.dw-sim .dw-mode-classic,
-  #ui-root:not(.dw-sim) .dw-mode-sim { display: none; }
+  /* ---- Help: key lists ---------------------------------------------------------------------- */
   #ui-root .dw-key-sep { font-size: 11px; color: var(--dw-text-faint); margin: 0 2px; }
   #ui-root .dw-key-group { display: inline-flex; gap: 3px; white-space: nowrap; }
   #ui-root .dw-hint-item .dw-key-group { gap: 0; }

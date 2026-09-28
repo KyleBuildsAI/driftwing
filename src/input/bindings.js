@@ -20,7 +20,14 @@ import { CRAFT_IDS } from '../core/settings.js';
 export const BINDINGS_STORAGE_KEY = 'driftwing-v2.input.bindings';
 const PROFILE_VERSION = 1;
 const EXPORT_KIND = 'driftwing-bindings';
-const MODES = Object.freeze(['classic', 'sim']);
+/**
+ * Actions Phase 1 had and V2 no longer has (the CLASSIC | SIM toggle and the CLASSIC boost). A stored
+ * or imported binding for one is dropped quietly: it is a retired action, not a broken entry.
+ */
+const RETIRED_TARGETS = new Set(['modeToggle', 'boost']);
+/** Phase 1 keyboard references could be limited to one flight layer; 'classic' ones are retired. */
+const RETIRED_LAYER = 'classic';
+const LEGACY_LAYERS = Object.freeze(['classic', 'sim']);
 const RANGES = Object.freeze(['bipolar', 'unipolar']);
 const ROLES = Object.freeze(['twist', 'rudder', 'stickThrottle']);
 const DEVICE_KINDS = Object.freeze(['hotas-stick', 'hotas-throttle', 'hotas-pedals', 'gamepad']);
@@ -53,17 +60,23 @@ const isIndex = (value) => Number.isInteger(value) && value >= 0 && value < 64;
 const isUnit = (value, max = 1) => Number.isFinite(value) && value >= 0 && value <= max;
 
 /**
+ * True for a stored Phase 1 reference that only applied in CLASSIC (its layer is gone with it). A
+ * 'sim' layer reference is simply the one layer now; sanitizeRef drops the field.
+ */
+function isRetiredRef(raw) {
+  return isPlainObject(raw) && raw.mode === RETIRED_LAYER;
+}
+
+/**
  * Validates one reference for a target. Returns a clean copy (only known fields) or null.
- * Axis targets take axis-shaped references; actions take press-shaped ones.
+ * Axis targets take axis-shaped references; actions take press-shaped ones. The Phase 1 layer
+ * field (mode 'sim') and double-tap flag are read and dropped.
  */
 export function sanitizeRef(raw, target) {
   if (!isPlainObject(raw) || typeof raw.type !== 'string') return null;
+  if (raw.mode !== undefined && !LEGACY_LAYERS.includes(raw.mode)) return null;
   const axisTarget = isAxisTarget(target);
   const ref = { type: raw.type };
-  if (raw.mode !== undefined) {
-    if (!MODES.includes(raw.mode)) return null;
-    ref.mode = raw.mode;
-  }
   switch (raw.type) {
     case 'key':
       if (axisTarget || !CODE_PATTERN.test(raw.code ?? '')) return null;
@@ -81,7 +94,6 @@ export function sanitizeRef(raw, target) {
         if (!isUnit(raw.rate, 5) || raw.rate === 0) return null;
         ref.rate = raw.rate;
       }
-      if (raw.doubleTapRoll === true) ref.doubleTapRoll = true;
       return ref;
     case 'mouseButton':
       if (axisTarget || !isIndex(raw.button) || raw.button > 4) return null;
@@ -161,32 +173,30 @@ export function keyLabel(code) {
 
 /** Short label for a reference, for the controls panel ("Shift+F", "Button 3", "Hat 1 up"). */
 export function describeRef(ref, device = null) {
-  const layer = ref.mode ? ` (${ref.mode.toUpperCase()})` : '';
   const buttonName = (index) => device?.buttonLabels?.[index] ?? `Button ${index + 1}`;
   switch (ref.type) {
-    case 'key': return `${ref.shift ? 'Shift+' : ''}${keyLabel(ref.code)}${layer}`;
-    case 'keys': return `${keyLabel(ref.positive)} / ${keyLabel(ref.negative)}${layer}`;
-    case 'mouseButton': return ['Left mouse', 'Middle mouse', 'Right mouse', 'Mouse back', 'Mouse forward'][ref.button] + layer;
-    case 'button': return `${buttonName(ref.index)}${layer}`;
-    case 'hat': return `Hat ${ref.hat + 1} ${HAT_DIRECTION_LABELS[ref.direction]}${layer}`;
-    case 'axisPress': return `Axis ${ref.axis + 1} ${ref.direction > 0 ? '+' : '-'}${layer}`;
-    case 'axis': return `${device?.axisLabels?.[ref.axis] ?? `Axis ${ref.axis + 1}`}${ref.invert ? ' (inverted)' : ''}${ref.rate ? ' (rate)' : ''}${layer}`;
+    case 'key': return `${ref.shift ? 'Shift+' : ''}${keyLabel(ref.code)}`;
+    case 'keys': return `${keyLabel(ref.positive)} / ${keyLabel(ref.negative)}`;
+    case 'mouseButton': return ['Left mouse', 'Middle mouse', 'Right mouse', 'Mouse back', 'Mouse forward'][ref.button];
+    case 'button': return buttonName(ref.index);
+    case 'hat': return `Hat ${ref.hat + 1} ${HAT_DIRECTION_LABELS[ref.direction]}`;
+    case 'axisPress': return `Axis ${ref.axis + 1} ${ref.direction > 0 ? '+' : '-'}`;
+    case 'axis': return `${device?.axisLabels?.[ref.axis] ?? `Axis ${ref.axis + 1}`}${ref.invert ? ' (inverted)' : ''}${ref.rate ? ' (rate)' : ''}`;
     case 'buttonAxis':
-    case 'buttonRate': return `${buttonName(ref.positive)} / ${buttonName(ref.negative)}${layer}`;
+    case 'buttonRate': return `${buttonName(ref.positive)} / ${buttonName(ref.negative)}`;
     default: return ref.type;
   }
 }
 
 /**
- * The concrete inputs a reference occupies, as strings such as 'classic|key:KeyF|shift' or
- * 'sim|button:3'. Two references conflict when they occupy the same input. A key reference
- * without a shift preference occupies the Shift variant only when no Shift binding claims it
- * (see resolveKeyVariants), so it is expanded by the caller.
+ * The concrete inputs a reference occupies, as strings such as 'key:KeyF|shift' or 'button:3'. Two
+ * references conflict when they occupy the same input. A key reference without a shift preference
+ * occupies the Shift variant only when no Shift binding claims it (see occupiedInputs), so it is
+ * expanded by the caller.
  */
 function refInputs(ref) {
-  const modes = ref.mode ? [ref.mode] : MODES;
   const inputs = [];
-  const add = (name) => { for (const mode of modes) inputs.push(`${mode}|${name}`); };
+  const add = (name) => { inputs.push(name); };
   switch (ref.type) {
     case 'key':
       if (ref.shift !== true) add(`key:${ref.code}|plain`);
@@ -244,6 +254,7 @@ function sanitizeProfile(raw) {
         continue;
       }
       for (const [target, refs] of Object.entries(targets)) {
+        if (RETIRED_TARGETS.has(target)) continue;
         if (!ACTION_SET.has(target) && !AXIS_SET.has(target)) {
           errors.push(`${where}/${device}: unknown target ${target}`);
           continue;
@@ -254,6 +265,7 @@ function sanitizeProfile(raw) {
         }
         const clean = [];
         for (const ref of refs.slice(0, MAX_REFS_PER_TARGET)) {
+          if (isRetiredRef(ref)) continue;
           const sanitized = sanitizeRef(ref, target);
           if (sanitized) clean.push(sanitized);
           else errors.push(`${where}/${device}/${target}: dropped invalid reference ${JSON.stringify(ref)}`);
@@ -360,10 +372,8 @@ export function createBindingStore({ storage }) {
     for (const [target, refs] of effective.actions) {
       for (const ref of refs) {
         if (ref.type !== 'key' || ref.shift !== undefined) continue;
-        for (const mode of ref.mode ? [ref.mode] : MODES) {
-          const shiftInput = `${mode}|key:${ref.code}|shift`;
-          if (!shiftClaimed.has(shiftInput)) entries.push({ input: shiftInput, target, ref, fallback: true });
-        }
+        const shiftInput = `key:${ref.code}|shift`;
+        if (!shiftClaimed.has(shiftInput)) entries.push({ input: shiftInput, target, ref, fallback: true });
       }
     }
     return entries;
@@ -372,14 +382,11 @@ export function createBindingStore({ storage }) {
   function reservedKeyConflicts(entries) {
     const conflicts = [];
     for (const reserved of UI_RESERVED_KEYS) {
-      const modes = reserved.mode ? [reserved.mode] : MODES;
       const variants = reserved.shift === true ? ['shift'] : reserved.shift === false ? ['plain'] : ['plain', 'shift'];
-      for (const mode of modes) {
-        for (const variant of variants) {
-          const input = `${mode}|key:${reserved.code}|${variant}`;
-          const users = entries.filter((entry) => entry.input === input && !entry.fallback);
-          for (const entry of users) conflicts.push({ input, targets: [entry.target], reserved: reserved.label, kind: 'uiKey' });
-        }
+      for (const variant of variants) {
+        const input = `key:${reserved.code}|${variant}`;
+        const users = entries.filter((entry) => entry.input === input && !entry.fallback);
+        for (const entry of users) conflicts.push({ input, targets: [entry.target], reserved: reserved.label, kind: 'uiKey' });
       }
     }
     return conflicts;
@@ -418,7 +425,6 @@ export function createBindingStore({ storage }) {
     if (device === 'keyboard' && clean.type === 'key') {
       for (const reserved of UI_RESERVED_KEYS) {
         if (reserved.code !== clean.code) continue;
-        if (reserved.mode && clean.mode && reserved.mode !== clean.mode) continue;
         if (reserved.shift !== undefined && clean.shift !== undefined && reserved.shift !== clean.shift) continue;
         result.push({ target: null, label: reserved.label, kind: 'uiKey' });
       }
@@ -488,7 +494,7 @@ export function createBindingStore({ storage }) {
 
     /**
      * Changes fields of one reference of a target (axis tuning: invert, deadzone, saturation, expo,
-     * smoothing, rate; or a key's shift / mode) in the global layer or craft's override layer. The
+     * smoothing, rate; or a key's shift) in the global layer or craft's override layer. The
      * target's effective references are copied into that layer first, so tuning an inherited
      * binding creates the override. A patch value of null removes that field. Returns { ok, ref }
      * or { ok: false, error }.
@@ -545,8 +551,7 @@ export function createBindingStore({ storage }) {
             continue;
           }
           if (existing.type === 'key' && existing.shift === undefined) {
-            const shiftInputs = (existing.mode ? [existing.mode] : MODES).map((mode) => `${mode}|key:${existing.code}|shift`);
-            if (shiftInputs.some((input) => wanted.has(input))) {
+            if (wanted.has(`key:${existing.code}|shift`)) {
               kept.push({ ...existing, shift: false });
               modified = true;
               continue;

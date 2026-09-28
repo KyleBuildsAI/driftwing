@@ -8,8 +8,8 @@
 // consumes. A system that throws is disabled and logged once; the others keep running.
 import { isFiniteVector, isFiniteQuaternion } from './util.js';
 
-/** SIM: sinking this far (m) below the shared height function is a soft crash. */
-const SIM_PENETRATION_LIMIT = 1;
+/** Sinking this far (m) below the shared height function is a soft crash. */
+const PENETRATION_LIMIT = 1;
 /** Seconds between biome lookups. */
 const BIOME_INTERVAL = 0.4;
 /** The loading fade lifts after this many warm-up frames and steady frames, or after FADE_CAP_MS. */
@@ -19,10 +19,9 @@ const FADE_STABLE_FRAME_MS = 45;
 const FADE_CAP_MS = 8000;
 
 /**
- * Safety net: NaN attitude, terrain clamp, altitude ceiling. CLASSIC keeps v1's clamp (terrain and
- * water clearance, 2600 m ceiling). SIM flight has real ground contact, so here it only keeps the
- * last-resort guard: sinking more than 1 m into the shared height function is a soft crash. The
- * ceiling comes from the flight controller (SIM: 15000 m). Returns enforce().
+ * Safety net: NaN attitude, terrain, altitude ceiling. The flight model has real ground contact, so
+ * here it only keeps the last-resort guard: sinking more than 1 m into the shared height function is
+ * a soft crash. The ceiling comes from the flight controller (15000 m). Returns enforce().
  */
 function createSafetyNet(ctx, spawnHeading) {
   const { state, world, CONFIG } = ctx;
@@ -40,7 +39,7 @@ function createSafetyNet(ctx, spawnHeading) {
       player.quaternion.copy(lastGood.quaternion);
       player.velocity.copy(lastGood.velocity);
       player.speed = Math.max(CONFIG.SPEED.STALL, lastGood.velocity.length());
-      ctx.bus.emit('safety:nonFinite', { mode: ctx.systems.flight.getMode?.() ?? null });
+      ctx.bus.emit('safety:nonFinite', { craft: ctx.systems.flight.getCraft?.() ?? null });
       // Let the flight model rebuild its internal integrators (and snap the camera)
       // from the restored pose, otherwise NaN rates would re-poison it next frame.
       ctx.systems.flight.resetTo?.({ x: player.position.x, y: player.position.y, z: player.position.z, heading: lastGood.heading });
@@ -49,15 +48,7 @@ function createSafetyNet(ctx, spawnHeading) {
     }
     const flight = ctx.systems.flight;
     const ground = world.groundHeight(player.position.x, player.position.z);
-    if (flight.getMode?.() === 'sim') {
-      if (player.position.y < ground - SIM_PENETRATION_LIMIT) flight.triggerSoftCrash?.('terrain');
-    } else {
-      const floor = Math.max(ground + CONFIG.GROUND_CLEARANCE, CONFIG.WATER_LEVEL + CONFIG.WATER_CLEARANCE);
-      if (player.position.y < floor) {
-        player.position.y = floor;
-        if (player.velocity.y < 0) player.velocity.y = 0;
-      }
-    }
+    if (player.position.y < ground - PENETRATION_LIMIT) flight.triggerSoftCrash?.('terrain');
     const ceiling = flight.getCeiling?.() ?? CONFIG.MAX_ALTITUDE;
     if (player.position.y > ceiling) {
       player.position.y = ceiling;

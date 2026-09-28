@@ -7,8 +7,8 @@
 //      identified by vendor / product id (never by slot), and keep their key when their slot moves;
 //   2. bindings: the default HOTAS bindings match the spec; axes reach ControlState through the
 //      pipeline (deadzone, saturation, expo, unipolar ranges, the rocker's rate trim, the stick slider
-//      ignored while the TWCS is present); buttons fire their actions ('input:action', mode-specific
-//      bindings included); the throttle hat stays unbound;
+//      ignored while the TWCS is present); buttons fire their actions ('input:action'); the throttle
+//      hat stays unbound;
 //   3. hat decoding and calibration: hats do nothing until learned; the calibration wizard is run
 //      through the InputManager API with scripted movements (off-centre rests, short axis travel,
 //      throttle forward, pedals, each hat direction) and the learned ranges, centres, idle / full
@@ -49,11 +49,11 @@ const PROMPT = 'Press any button on your stick and throttle';
 /** Default binding set from the spec (Milestone D), by device: button index -> action ids. */
 const SPEC_BUTTONS = Object.freeze({
   [STICK_KEY]: {
-    0: ['copilotPTT'], 1: ['craftAbility', 'boost'], 2: ['waypointNearest'], 3: ['photoMode'], 4: ['gearToggle'], 5: ['flapsUp'], 6: ['flapsDown'],
-    7: ['craftPrev'], 8: ['craftNext'], 9: ['modeToggle'], 10: ['autopilotToggle'], 11: ['timeForward'], 12: ['timeBack'], 13: ['ringCourse'], 14: ['journal'], 15: ['settings'],
+    0: ['copilotPTT'], 1: ['craftAbility'], 2: ['waypointNearest'], 3: ['photoMode'], 4: ['gearToggle'], 5: ['flapsUp'], 6: ['flapsDown'],
+    7: ['craftPrev'], 8: ['craftNext'], 9: ['versionToggle'], 10: ['autopilotToggle'], 11: ['timeForward'], 12: ['timeBack'], 13: ['ringCourse'], 14: ['journal'], 15: ['settings'],
   },
   [THROTTLE_KEY]: {
-    0: ['recenterView'], 1: ['airbrake'], 2: ['viewCycle'], 3: ['relaunch'], 4: ['engineToggle'], 5: ['chuteDeploy'], 6: ['controlsPanel'], 7: ['versionToggle'],
+    0: ['recenterView'], 1: ['airbrake'], 2: ['viewCycle'], 3: ['relaunch'], 4: ['engineToggle'], 5: ['chuteDeploy'], 6: ['controlsPanel'],
   },
 });
 const SPEC_STICK_HAT = Object.freeze({ up: 'viewForward', down: 'viewBack', left: 'viewLeft', right: 'viewRight' });
@@ -252,17 +252,6 @@ function createHotasTestSystem(ctx, { capture }) {
     return events;
   }
 
-  /** Taps a button (press and release), used for an action whose effect is undone by a second tap. */
-  async function toggleTwice(group, handle, deviceKey, index, expectedId, verify) {
-    await checkButtonAction(group, handle, deviceKey, index, expectedId);
-    await settle();
-    const first = verify();
-    await tapButton(handle, index);
-    await settle();
-    const second = verify();
-    check(group, `${expectedId} toggles and toggles back`, first.changed && second.restored, `${first.text} then ${second.text}`, 'changed, then restored');
-  }
-
   async function plugAndExpose(handle, layout, slot, idFormat, button) {
     mock().plug(layout, { slot, idFormat, handle });
     await waitFrames(3);
@@ -281,7 +270,6 @@ function createHotasTestSystem(ctx, { capture }) {
     input().calibration.reset(THROTTLE_KEY);
     settings.set('twistYaw', 'auto');
     settings.set('craft', 'glider');
-    settings.set('mode', 'sim');
     await settle();
 
     // 1. Detection and identification.
@@ -404,25 +392,17 @@ function createHotasTestSystem(ctx, { capture }) {
     await settle();
     checkValue('axes', 'rocker centred -> trim holds', controls.trim, trimRest);
 
-    // 4. Buttons -> actions (every effect undone), mode-specific binding, throttle hat unbound.
+    // 4. Buttons -> actions (every effect undone), throttle hat unbound. Stick button 9
+    // (versionToggle) is checked in the binding table only: pressing it would leave V2.
     step('buttons');
     await checkButtonAction('buttons', 'stick', STICK_KEY, 4, 'gearToggle');
-    await checkButtonAction('buttons', 'stick', STICK_KEY, 1, 'craftAbility', 'stick button 1 in SIM -> craftAbility');
+    await checkButtonAction('buttons', 'stick', STICK_KEY, 1, 'craftAbility');
     await checkButtonAction('buttons', 'stick', STICK_KEY, 0, 'copilotPTT');
     await checkButtonAction('buttons', 'stick', STICK_KEY, 2, 'waypointNearest');
     await checkButtonAction('buttons', 'throttle', THROTTLE_KEY, 0, 'recenterView');
     await checkButtonAction('buttons', 'throttle', THROTTLE_KEY, 4, 'engineToggle');
     await checkButtonAction('buttons', 'throttle', THROTTLE_KEY, 5, 'chuteDeploy');
     const flight = ctx.systems.flight;
-    await toggleTwice('buttons', 'stick', STICK_KEY, 9, 'modeToggle', (() => {
-      let first = true;
-      return () => {
-        const mode = flight.getMode();
-        const result = first ? { changed: mode === 'classic', text: mode } : { restored: mode === 'sim', text: mode };
-        first = false;
-        return result;
-      };
-    })());
     await checkButtonAction('buttons', 'stick', STICK_KEY, 8, 'craftNext');
     await settle();
     await checkButtonAction('buttons', 'stick', STICK_KEY, 7, 'craftPrev');
@@ -451,11 +431,6 @@ function createHotasTestSystem(ctx, { capture }) {
     mock().release('throttle', 1);
     await waitFrames(4);
     check('buttons', 'throttle button 1 holds airbrake while pressed', airbrakeHeld && !controls.held.has('airbrake'), `held ${airbrakeHeld}, after release ${controls.held.has('airbrake')}`, 'held true, after release false');
-    settings.set('mode', 'classic');
-    await settle();
-    await checkButtonAction('buttons', 'stick', STICK_KEY, 1, 'boost', 'stick button 1 in CLASSIC -> boost (mode-specific binding)');
-    settings.set('mode', 'sim');
-    await settle();
 
     // 5. Hats before calibration: nothing is decoded until the wizard has learned them.
     step('hats before calibration');
@@ -698,7 +673,6 @@ function createHotasTestSystem(ctx, { capture }) {
     }
     step('re-plugging in other slots');
     settings.set('craft', 'glider');
-    settings.set('mode', 'sim');
     await settle();
     await plugAndExpose('stick', 't16000m', 0, 'prefix', 4);
     await plugAndExpose('throttle', 'twcs', 3, 'chrome', 12);

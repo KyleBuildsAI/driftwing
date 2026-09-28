@@ -18,7 +18,7 @@
 //   sources     Phase 2 writers: addSource({ id, bounds, sample(pos, t) }) found through a spatial
 //               hash. Phase 1 proves the path with a dev-only debug updraft (createDebugUpdraft)
 //
-// Craft compute airspeed as velocity - sample(pos, t).vel. CLASSIC scales the result down itself.
+// Craft compute airspeed as velocity - sample(pos, t).vel.
 // probe(pos, t, out?) is the same query without touching lastLayers (overlays, many-point probes).
 import * as THREE from 'three/webgpu';
 import { headingFromVector, wrapDegrees } from '../core/util.js';

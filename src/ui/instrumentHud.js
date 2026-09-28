@@ -1,11 +1,10 @@
 // Instrument HUD overlay: the active craft's instruments (craft.instruments) as glass tiles in the
-// v1 HUD style, for readability in any view. Off by default (settings.hud.overlay), so CLASSIC's v1
-// HUD is untouched unless the player turns it on.
+// v1 HUD style, for readability in any view. Off by default (settings.hud.overlay).
 //
 // The tiles form a grid on the right edge. Its band runs between whatever v1 HUD element sits above
 // it (top bar, stats or dev badge, touch chips) and below it (seed card, mic, touch controls),
 // measured from the live layout, and the tile size and column count are chosen to fit that band, so
-// it stays clear of the HUD cards, the mode pill and the craft picker from 1280 x 720 down to phones.
+// it stays clear of the HUD cards and the craft picker from 1280 x 720 down to phones.
 // It fades with the v1 HUD (.dw-fade) and redraws only when the camera system's 30 Hz instrument
 // clock says so.
 import './instrumentHud.css';

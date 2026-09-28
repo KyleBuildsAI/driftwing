@@ -46,7 +46,7 @@ export function createSkySystem(ctx) {
   const FOG_EDGE_START = 0.7;
   const DOME_RADIUS_FRACTION = 0.82;
   const CAMERA_FAR_MARGIN = 2500;
-  // High altitude (SIM only; CLASSIC never gets here): from this height above the ground to the next
+  // High altitude: from this height above the ground to the next
   // the far plane reaches down to the terrain below, and the haze counts vertical distance less, so the
   // loaded terrain fades into haze at its rim instead of ending. Below it nothing changes.
   const HIGH_ALTITUDE_START = 3000;
@@ -654,9 +654,9 @@ export function createSkySystem(ctx) {
     const agl = Number.isFinite(state.player.agl) ? state.player.agl : 0;
     const clearAir = 0.1 * smoothRange(250, 1400, agl);
     const groundBelow = Math.max(Number.isFinite(state.player.groundHeight) ? state.player.groundHeight : 0, config.WATER_LEVEL);
-    // High altitude (SIM): the fog's far edge follows the rim of the loaded terrain seen from above.
+    // High altitude: the fog's far edge follows the rim of the loaded terrain seen from above.
     const cameraHeight = Math.max(0, camera.position.y - groundBelow);
-    const high = state.flight && state.flight.mode === 'sim' ? smoothRange(HIGH_ALTITUDE_START, HIGH_ALTITUDE_FULL, cameraHeight) : 0;
+    const high = smoothRange(HIGH_ALTITUDE_START, HIGH_ALTITUDE_FULL, cameraHeight);
     const verticalScale = FOG_VERTICAL_SCALE + (HIGH_FOG_VERTICAL_SCALE - FOG_VERTICAL_SCALE) * high;
     sky.fogVerticalScale.value = verticalScale;
     const targetFar = high > 0 ? Math.hypot(viewDistance * 0.95, verticalScale * cameraHeight * high) : viewDistance * 0.95;

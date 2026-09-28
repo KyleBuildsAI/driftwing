@@ -3,9 +3,8 @@
 // on arched cross tubes, engine and transmission deck with the turbine exhaust, tail boom with a
 // stabilizer and fins, a two-blade teetering main rotor with its blur disc and coning, and a two-blade
 // tail rotor. The rotor turns with the rotor rpm and its disc tilts with the cyclic.
-// CLASSIC flies it with the hover-capable arcade rules (src/flight/ArcadeModel.js, arcadeProfile.hover:
-// forgiving, never tumbles); the SIM profile describes the real thing for SimHelicopter
-// (src/flight/SimHelicopter.js), measured by tools/lab/helicopter.mjs.
+// Its flight profile describes the real thing for SimHelicopter (src/flight/SimHelicopter.js),
+// measured by tools/lab/helicopter.mjs.
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { DEG, clamp } from '../core/util.js';
@@ -15,55 +14,6 @@ import {
 } from './kit.js';
 
 const { uniform, color, float, uv, length, smoothstep, mix } = TSL;
-
-// ============================================================================================
-// CLASSIC: the hover-capable arcade rules (ArcadeModel's hover extension).
-// ============================================================================================
-const arcadeProfile = Object.freeze({
-  // m/s. The dial shows the arcade envelope; the hover model reads hover.MAX_FORWARD_SPEED.
-  SPEED: Object.freeze({ MIN: 0, STALL: 0, CRUISE: 45, MAX: 62, BOOST_MAX: 74 }),
-  GRAVITY: 9.81,
-  BOOST_DURATION: 2.4,
-  BOOST_COOLDOWN: 6,
-  AUTOPILOT: Object.freeze({
-    // Throttle 0.5 holds the height: spawns and respawns hover there.
-    CRUISE_THROTTLE: 0.5,
-    MIN_ALTITUDE: 60,
-    CLEARANCE: 80,
-    CRUISE_SPEED: 45,
-    OVERRIDE_INPUT: 0.35,
-    OVERRIDE_SECONDS: 0.25,
-    LOOKAHEAD_SECONDS: Object.freeze([0, 2, 4, 7, 11]),
-  }),
-  hover: Object.freeze({
-    MAX_FORWARD_SPEED: 62,
-    MAX_REVERSE_SPEED: 8,
-    MAX_SIDE_SPEED: 7,
-    ACCELERATION: 5.5,
-    BRAKING: 7,
-    CLIMB_RATE: 8,
-    DESCENT_RATE: 6,
-    VERTICAL_RESPONSE: 1.6,
-    THROTTLE_DEADBAND: 0.04,
-    THROTTLE_RATE: 0.6,
-    YAW_RATE: 55 * DEG,
-    TURN_RATE: 32 * DEG,
-    TURN_REFERENCE_SPEED: 16,
-    TURN_GAIN: 2.2,
-    MAX_BANK: 32 * DEG,
-    MAX_PITCH: 16 * DEG,
-    CRUISE_PITCH: 7 * DEG,
-    ATTITUDE_RESPONSE: 3.5,
-    /** Hovering floor above the ground or water (m, mesh origin) and the cushion band above it. */
-    MIN_AGL: 5,
-    CUSHION_HEIGHT: 22,
-    /** Below this groundspeed a centred stick lets the helicopter settle into a hover (m/s). */
-    SETTLE_SPEED: 8,
-    ROTOR_SPEED: (394 * Math.PI) / 30,
-    /** Disc tilt shown for full acceleration / bank commands (the mesh reads it through visual). */
-    DISC_TILT: 0.8,
-  }),
-});
 
 // ============================================================================================
 // SIM: SimHelicopter parameters. Body axes relative to the mesh origin (x right, y up, z aft; m);
@@ -548,12 +498,11 @@ function buildMesh(ctx) {
 }
 
 // ============================================================================================
-// ABILITY: hover hold. Locks the current position, height and heading at any assist level (SIM);
-// the stick and pedals then move the hold point slowly. In CLASSIC the button boosts (v1).
+// ABILITY: hover hold. Locks the current position, height and heading at any assist level; the
+// stick and pedals then move the hold point slowly.
 // ============================================================================================
 const craftAbility = Object.freeze({
   label: 'Hover hold',
-  modes: Object.freeze(['sim']),
   initialState: () => ({ hoverHold: false }),
   run(flight) {
     const craftState = flight.craftState;
@@ -568,9 +517,9 @@ const craftAbility = Object.freeze({
   update(flight) {
     const craftState = flight.craftState;
     if (!craftState.hoverHold) return;
-    if (flight.mode !== 'sim' || flight.telemetry.engineOn === false) {
+    if (flight.telemetry.engineOn === false) {
       craftState.hoverHold = false;
-      flight.notify(flight.mode !== 'sim' ? 'Hover hold off.' : 'Hover hold off: the engine stopped.', 'warning');
+      flight.notify('Hover hold off: the engine stopped.', 'warning');
     }
   },
 });
@@ -579,7 +528,6 @@ export default Object.freeze({
   id: 'helicopter',
   name: 'Helicopter',
   buildMesh,
-  arcadeProfile,
   simProfile,
   /**
    * ControlState mapping: the throttle axis (W / S, the TWCS lever) is the collective; stick is the

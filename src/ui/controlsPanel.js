@@ -20,9 +20,9 @@ import { createCalibrationWizardView } from './calibrationWizard.js';
 /** Binding groups in list order. Axis functions first, then the discrete actions. */
 const BINDING_GROUPS = Object.freeze([
   { id: 'axes', label: 'Flight axes', targets: AXIS_TARGET_IDS },
-  { id: 'flight', label: 'Flight', targets: ['craftAbility', 'boost', 'gearToggle', 'flapsDown', 'flapsUp', 'airbrake', 'engineToggle', 'chuteDeploy', 'autopilotToggle'] },
+  { id: 'flight', label: 'Flight', targets: ['craftAbility', 'gearToggle', 'flapsDown', 'flapsUp', 'airbrake', 'engineToggle', 'chuteDeploy', 'autopilotToggle'] },
   { id: 'view', label: 'View', targets: ['viewCycle', 'viewForward', 'viewBack', 'viewLeft', 'viewRight', 'recenterView', 'photoMode'] },
-  { id: 'craft', label: 'Craft', targets: ['modeToggle', 'craftNext', 'craftPrev', 'craftSelect1', 'craftSelect2', 'craftSelect3', 'craftSelect4', 'craftSelect5', 'craftSelect6', 'relaunch'] },
+  { id: 'craft', label: 'Craft', targets: ['craftNext', 'craftPrev', 'craftSelect1', 'craftSelect2', 'craftSelect3', 'craftSelect4', 'craftSelect5', 'craftSelect6', 'relaunch'] },
   { id: 'gameplay', label: 'Gameplay', targets: ['copilotPTT', 'waypointAhead', 'waypointNearest', 'ringCourse', 'timeForward', 'timeBack'] },
   { id: 'ui', label: 'Interface', targets: ['journal', 'settings', 'controlsPanel', 'versionToggle'] },
 ]);
@@ -507,7 +507,7 @@ export function createControlsPanel({ panel, ctx }) {
     }
     const stick = input.getStick();
     live.stickDot.style.transform = `translate(${(stick.x * 34).toFixed(1)}px, ${(-stick.y * 34).toFixed(1)}px)`;
-    const modeText = stick.mode === 'free' ? 'SIM: the offset from the screen centre is the deflection.' : 'CLASSIC: springs back to centre.';
+    const modeText = stick.mode === 'free' ? 'The offset from the screen centre is the deflection.' : 'Springs back to centre.';
     const stateText = stick.locked ? 'Mouse captured.' : stick.dragging ? 'Drag steering.' : 'Click the view to capture the mouse.';
     const text = `${stateText} ${modeText}`;
     if (live.stickText.textContent !== text) live.stickText.textContent = text;

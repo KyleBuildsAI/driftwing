@@ -5,8 +5,7 @@
 // flaperons, leading-edge flaps (scheduled with angle of attack and Mach), stabilators (pitch and
 // roll), rudder, speed brakes, nozzle petals, gear and doors through their transit, rolling wheels.
 // Effects (src/render/jetEffects.js): afterburner flame, vapor cones, wingtip vapour.
-// CLASSIC flies it with v1's forgiving arcade rules at jet speeds; the SIM profile describes the real
-// thing (about 1300 km/h at sea level and Mach 1.6 at 10 km in afterburner, 9 g, 25 degree critical
+// Its flight profile describes the real thing (about 1300 km/h at sea level and Mach 1.6 at 10 km in afterburner, 9 g, 25 degree critical
 // angle of attack, lift-off near 300 km/h and touchdown near 250 km/h) through SimFixedWing, its jet
 // extension (src/flight/jetAero.js) and its flight control system (src/flight/jetFcs.js).
 import * as THREE from 'three/webgpu';
@@ -18,79 +17,6 @@ import {
   PALETTE, createMeshBuilder, profileSection, piecewise, mirrorPoint, ellipseRing, getCraftMaterials, addSolid,
   addPivot, createNavLights, disposeCraftMesh,
 } from './kit.js';
-
-// ============================================================================================
-// CLASSIC: v1's arcade rules at jet speeds: fast, punchy throttle, crisp roll.
-// ============================================================================================
-const arcadeProfile = Object.freeze({
-  // m/s: stall about 250 km/h, cruise about 680 km/h, top about 1080 km/h, boost about 1370 km/h.
-  SPEED: Object.freeze({ MIN: 55, STALL: 70, CRUISE: 190, MAX: 300, BOOST_MAX: 380 }),
-  GRAVITY: 9.81,
-  // Terminal speed = MAX * throttle^1.1; thrust minus drag gives about 1.5 g of push from cruise.
-  DRAG_COEFFICIENT: 0.00022,
-  THROTTLE_SPEED_EXPONENT: 1.1, // 190 m/s at 66 %
-  THROTTLE_RATE: 0.6,
-  INDUCED_DRAG: 1.2,
-  INDUCED_MAX_EXTRA_G: 6,
-  MAX_PITCH_RATE: 38 * DEG,
-  MAX_ROLL_RATE: 220 * DEG,
-  MAX_YAW_RATE: 10 * DEG,
-  MAX_BANK: 80 * DEG,
-  BANK_GAIN: 5.5,
-  FINE_BANK_SCALE: 0.5,
-  YAW_BANK: 10 * DEG,
-  PITCH_LIMIT_START: 55 * DEG,
-  PITCH_LIMIT_RANGE: 25 * DEG,
-  TURN_GAIN: 1.4,
-  MAX_TURN_RATE: 24 * DEG,
-  BANK_NOSE_DROP: 3 * DEG,
-  BANK_SETTLE_PITCH: 3 * DEG,
-  FINE_CONTROL_SCALE: 0.45,
-  AUTO_LEVEL_DELAY: 1.2,
-  STALL_EXIT_MARGIN: 10,
-  STALL_NOSE_TARGET: -20 * DEG,
-  HIGH_SPEED_PITCH_START: 220,
-  CUSHION_HEIGHT: 40,
-  IMPACT_WARNING_SECONDS: 2.5,
-  IMPACT_FULL_SECONDS: 0.7,
-  CUSHION_PULL_RATE: 60 * DEG,
-  GUARD_PROBE_SECONDS: Object.freeze([1.1, 2.2, 3.4]),
-  GUARD_MARGIN: 30,
-  GUARD_MIN_SPEED: 60,
-  GUARD_EVADE_GRADIENT: Math.tan(28 * DEG),
-  GUARD_EVADE_BANK: 60 * DEG,
-  CEILING_BAND: 400,
-  BOOST_DURATION: 3,
-  BOOST_COOLDOWN: 6,
-  BARREL_ROLL_DURATION: 0.9,
-  BARREL_ROLL_RADIUS: 2.5,
-  AUTOPILOT: Object.freeze({
-    MAX_BANK: 35 * DEG,
-    MAX_PITCH: 8 * DEG,
-    TERRAIN_PITCH: 12 * DEG,
-    CLEARANCE: 180,
-    RING_CLEARANCE: 60,
-    MIN_ALTITUDE: 90,
-    CRUISE_THROTTLE: 0.66,
-    OVERRIDE_INPUT: 0.35,
-    OVERRIDE_SECONDS: 0.25,
-    TERRAIN_MAX_PITCH: 20 * DEG,
-    LOOKAHEAD_DISTANCES: Object.freeze([0, 250, 500, 850, 1300, 1900, 2600, 3600]),
-    PATH_LOOKAHEAD_DISTANCES: Object.freeze([400, 1000, 1800]),
-    WAYPOINT_STEERING: Object.freeze({ BANK_PER_DEGREE: 1.2, MAX_BANK: 35 * DEG, DAMPING: 2.2, MAX_ROLL_RATE: 60 * DEG }),
-    RING_STEERING: Object.freeze({ BANK_PER_DEGREE: 2.0, MAX_BANK: 50 * DEG, DAMPING: 3.5, MAX_ROLL_RATE: 80 * DEG }),
-    RING_MAX_PITCH: 15 * DEG,
-    RING_MIN_TIME_TO_RING: 1.5,
-    RING_VERTICAL_SPEED_GAIN: 0.015,
-    RING_LOOKAHEAD_MARGIN: 300,
-    RING_TRACK_LEAD_SECONDS: 2.4,
-    RING_TRACK_LEAD_MIN: 200,
-    RING_TRACK_LEAD_MAX: 450,
-  }),
-  // Load factor shown to fx / audio / the G effects: fighters pull hard, so a higher knee and cap.
-  LOAD: Object.freeze({ PULL_SHARE: 0.35, KNEE: 6, CAP: 9, MIN: -2, SMOOTHING: 5, MIN_BANK_COS: 0.12, BARREL_ROLL_EXTRA: 1.2 }),
-  SURFACE_TURN_SHARE: 0.3,
-});
 
 // ============================================================================================
 // SIM: an F-16 class single-engine fighter for SimFixedWing plus the jet extension. Targets first,
@@ -659,8 +585,8 @@ const LEADING_FLAP = Object.freeze({ PER_DEGREE: 1.1, MAX: 25, TAKEOFF: 12 });
  * Builds the jet. update(visual, dt) animates flaperons (visual.aileron and visual.flaps),
  * stabilators (elevator plus differential roll), rudder, leading-edge flaps (angle of attack and
  * Mach from state.flight), speed brakes (visual.airbrake), the nozzle and the effects (throttle,
- * afterburner, state.flight.craftState), the gear and doors through their transit (visual.gearDown
- * in SIM; CLASSIC flies clean) and the wheels on the ground (visual.groundSpeed).
+ * afterburner, state.flight.craftState), the gear and doors through their transit (visual.gearDown)
+ * and the wheels on the ground (visual.groundSpeed).
  */
 function buildMesh(ctx) {
   const materials = getCraftMaterials(ctx);
@@ -788,7 +714,6 @@ function buildMesh(ctx) {
 
     update(visual, dt) {
       const step = Number.isFinite(dt) && dt > 0 ? dt : 0;
-      const sim = flight.mode === 'sim';
       const craftState = flight.craftState || {};
       const roll = clamp(Number.isFinite(visual.aileron) ? visual.aileron : 0, -1, 1);
       const pitch = clamp(Number.isFinite(visual.elevator) ? visual.elevator : 0, -1, 1);
@@ -809,7 +734,7 @@ function buildMesh(ctx) {
 
       // Leading-edge flaps: scheduled with angle of attack, retracted through the transonic band,
       // set for take-off on the ground.
-      const aoa = sim && Number.isFinite(flight.aoa) ? flight.aoa : 2 + Math.max(0, pitch) * 10;
+      const aoa = Number.isFinite(flight.aoa) ? flight.aoa : 2 + Math.max(0, pitch) * 10;
       const mach = Number.isFinite(flight.mach) ? flight.mach : 0;
       const scheduled = visual.onGround ? LEADING_FLAP.TAKEOFF * (flaps > 0 ? 1 : 0.5) : clamp((aoa - 2) * LEADING_FLAP.PER_DEGREE, 0, LEADING_FLAP.MAX) * (1 - clamp((mach - 0.85) / 0.2, 0, 1));
       leadingAngle = step > 0 ? damp(leadingAngle, scheduled, 4, step) : scheduled;
@@ -821,16 +746,16 @@ function buildMesh(ctx) {
       brakeAngle = airbrake * BRAKE.MAX_ANGLE * DEG;
       for (const brake of brakes) brake.pivot.quaternion.setFromAxisAngle(brake.pivot.userData.axis, brake.sign * brakeAngle);
 
-      // Nozzle: the SIM engine's own nozzle; CLASSIC opens it with the throttle and the boost.
+      // Nozzle: the engine's own nozzle (the throttle rule until the engine has reported one).
       const throttle = clamp(Number.isFinite(visual.throttle) ? visual.throttle : 0, 0, 1);
-      const burner = sim ? clamp(Number.isFinite(craftState.afterburner) ? craftState.afterburner : 0, 0, 1) : visual.boost ? 1 : 0;
-      const nozzleTarget = sim && Number.isFinite(craftState.nozzle) ? craftState.nozzle : 0.2 + 0.1 * (1 - throttle) + 0.7 * burner;
+      const burner = clamp(Number.isFinite(craftState.afterburner) ? craftState.afterburner : 0, 0, 1);
+      const nozzleTarget = Number.isFinite(craftState.nozzle) ? craftState.nozzle : 0.2 + 0.1 * (1 - throttle) + 0.7 * burner;
       nozzleOpening = step > 0 ? damp(nozzleOpening, nozzleTarget, 5, step) : nozzleTarget;
       const convergence = petalAngle(nozzleOpening);
       for (const petal of petals) petal.rotation.x = convergence;
 
-      // Gear: SIM follows the gear lever through the transit time; CLASSIC always flies clean.
-      const gearTarget = sim && visual.gearDown !== false ? 1 : 0;
+      // Gear: follows the gear lever through the transit time.
+      const gearTarget = visual.gearDown !== false ? 1 : 0;
       if (!Number.isFinite(gearPosition)) gearPosition = gearTarget;
       else if (step > 0) gearPosition = gearTarget > gearPosition ? Math.min(gearTarget, gearPosition + step / GEAR_TRANSIT_SECONDS) : Math.max(gearTarget, gearPosition - step / GEAR_TRANSIT_SECONDS);
       poseGear(gearPosition);
@@ -843,10 +768,9 @@ function buildMesh(ctx) {
       effects.update({
         dt: step,
         time: visual.time,
-        sim,
         throttle,
         burner,
-        spool: sim && Number.isFinite(craftState.spool) ? craftState.spool : 0.62 + 0.38 * throttle,
+        spool: Number.isFinite(craftState.spool) ? craftState.spool : 0.62 + 0.38 * throttle,
         engineOn: visual.engineOn !== false,
         nozzle: nozzleOpening,
         mach,
@@ -865,13 +789,11 @@ function buildMesh(ctx) {
 }
 
 // ============================================================================================
-// ABILITY: afterburner. Space (SIM) pushes the throttle through the detent to full afterburner, or
-// brings it back; a HOTAS throttle lights it by passing the detent itself. In CLASSIC the button is
-// v1's boost, which lights the burner too.
+// ABILITY: afterburner. Space pushes the throttle through the detent to full afterburner, or brings
+// it back; a HOTAS throttle lights it by passing the detent itself.
 // ============================================================================================
 const craftAbility = Object.freeze({
   label: 'Afterburner',
-  modes: Object.freeze(['sim']),
   initialState: () => ({ abDetent: false, abRequest: null, afterburner: 0, nozzle: 0.25, spool: 0, mach: 0, overG: false, thrust: 0 }),
   run(flight) {
     flight.craftState.abRequest = 'toggle';
@@ -883,7 +805,6 @@ export default Object.freeze({
   id: 'jet',
   name: 'Jet',
   buildMesh,
-  arcadeProfile,
   simProfile,
   /**
    * ControlState mapping: throttle is engine power up to the afterburner detent (a HOTAS lever passes
@@ -894,14 +815,14 @@ export default Object.freeze({
   inputProfile: Object.freeze({ throttle: 'throttle', flapNotches: 2, toeBrakes: 'wheels', rudderSteersTailwheel: true, afterburnerDetent: true }),
   audioProfile: Object.freeze({
     engine: 'jet', whineHz: 3300, rumbleHz: 40, idleSpool: 0.62, spoolUp: 0.4, spoolDown: 0.6, afterburnerRoar: 1.15,
-    airflowSpeed: 300, classicAirflowSpeed: 300, interiorCutoff: 650, stallHorn: true, stallHornStyle: 'beep', stallAoa: 24,
+    airflowSpeed: 300, interiorCutoff: 650, stallHorn: true, stallHornStyle: 'beep', stallAoa: 24,
     touchdown: 'wheels', callouts: true, motorPitch: 0.8, level: 1,
   }),
   capabilities: Object.freeze({ engine: true, chute: false }),
   cameraRig: Object.freeze({
     eye: EYE,
     // The chase camera's pull-back, FOV stretch and speed shake scale to the jet's speeds.
-    chase: Object.freeze({ distance: 19, height: 4.4, lookAhead: 22, speedRange: arcadeProfile.SPEED }),
+    chase: Object.freeze({ distance: 19, height: 4.4, lookAhead: 22, speedRange: Object.freeze({ CRUISE: 190, MAX: 300, TOP: 380 }) }),
     wing: Object.freeze({ position: Object.freeze([3.9, 1.4, 5.6]), target: Object.freeze([0.4, 0.2, -4]) }),
     fpv: null,
     // Fighter cockpit under the bubble canopy: a narrow tub with high sills, a low glareshield and a

@@ -39,7 +39,6 @@ export function createFrameAccumulator() {
     sources: {},
     /** The deviceKey behind each entry in sources (the controller that drove the target). */
     sourceDevices: {},
-    throttleDirection: 0,
     rudderMoved: false,
     rudderPresent: false,
     activity: false,
@@ -54,7 +53,6 @@ export function resetFrameAccumulator(frame) {
   frame.rates = {};
   frame.sources = {};
   frame.sourceDevices = {};
-  frame.throttleDirection = 0;
   frame.rudderMoved = false;
   frame.rudderPresent = false;
   frame.activity = false;
@@ -187,7 +185,7 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
       refs.forEach((ref, refIndex) => {
         const holderKey = `${device.deviceKey}|${actionId}|${refIndex}`;
         visited.add(holderKey);
-        const active = context.actionsEnabled && (!ref.mode || ref.mode === context.mode);
+        const active = context.actionsEnabled;
         const pressed = active && !isLatched(entry, ref) && refPressed(device, entry, ref, hats, holderKey, actionId);
         const wasPressed = entry.rawPressed.get(holderKey) === true;
         entry.rawPressed.set(holderKey, pressed);
@@ -206,13 +204,12 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
 
   /** Adds the device's axis references to the frame. */
   function routeAxes(device, entry, effective, context) {
-    const { frame, seconds, mode } = context;
+    const { frame, seconds } = context;
     const source = HOTAS_KINDS.includes(device.kind) ? 'hotas' : 'gamepad';
     for (const [target, refs] of effective.axes) {
       const spec = AXIS_TARGETS[target];
       refs.forEach((ref, refIndex) => {
         const refKey = `${target}|${refIndex}`;
-        if (ref.mode && ref.mode !== mode) return;
         if (ref.suppressedBy && context.connectedKinds.has(ref.suppressedBy)) return;
         if (ref.role === 'twist' && !context.twistEnabled) {
           entry.filters.get(refKey)?.reset();
@@ -227,7 +224,6 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
           if (ref.rate) {
             frame.rates[target] = (frame.rates[target] ?? 0) + filtered * ref.rate;
             if (filtered !== 0) noteDevice(frame, target, source, device.deviceKey);
-            if (target === 'throttle') frame.throttleDirection += filtered;
             return;
           }
           addValue(entry, frame, target, spec, refKey, filtered, source, device.deviceKey);
@@ -240,7 +236,6 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
             frame.rates[target] = (frame.rates[target] ?? 0) + direction * ref.rate;
             noteDevice(frame, target, source, device.deviceKey);
             frame.activity = true;
-            if (target === 'throttle') frame.throttleDirection += direction;
           }
         }
       });
@@ -283,7 +278,7 @@ export function createDeviceMapper({ bindings, calibration, router, canPress }) 
 
   return {
     /**
-     * Evaluates one connected device. context: { frame, craft, mode, seconds, twistEnabled,
+     * Evaluates one connected device. context: { frame, craft, seconds, twistEnabled,
      * connectedKinds (Set), actionsEnabled, axesEnabled }.
      */
     evaluate(device, context) {

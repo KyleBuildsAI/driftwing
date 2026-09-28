@@ -6,92 +6,11 @@
 // deploys from the container: the pilot swings from prone to hanging under a nine-cell ram-air canopy,
 // hands on the toggles, and stands up after landing.
 //
-// CLASSIC flies it with v1's forgiving arcade rules at wingsuit speeds and without an engine: it glides
-// down about 2.5 : 1, the stick trades glide for speed, the ground cushion keeps it off the terrain and
-// the relaunch (or running out of height) brings it back up to a peak. SIM flies SimWingsuit
-// (src/flight/SimWingsuit.js) with its canopy mode.
+// It flies SimWingsuit (src/flight/SimWingsuit.js) with its canopy mode.
 import * as THREE from 'three/webgpu';
 import { DEG, clamp, damp } from '../core/util.js';
 import { PALETTE, createMeshBuilder, getCraftMaterials, addSolid, createNavLights, disposeCraftMesh, smooth01 } from './kit.js';
 import { createCanopyRig } from '../render/wingsuitEffects.js';
-
-// ============================================================================================
-// CLASSIC: v1's arcade rules at wingsuit speeds. No engine: the throttle does nothing, the settled
-// attitude is the glide (LEVEL_PITCH), boost is a short dive burst that cannot power a climb.
-// ============================================================================================
-const GLIDE_PITCH = -Math.atan(1 / 2.5);
-const arcadeProfile = Object.freeze({
-  // m/s: stall about 120 km/h, glide about 180 km/h, dive limit about 245 km/h.
-  SPEED: Object.freeze({ MIN: 26, STALL: 33, CRUISE: 50, MAX: 68, BOOST_MAX: 78 }),
-  GRAVITY: 9.81,
-  ENGINE: false,
-  LEVEL_PITCH: GLIDE_PITCH,
-  // Drag that balances gravity along a 2.5 : 1 glide path at 50 m/s: g sin(21.8 deg) / 50^2.
-  DRAG_COEFFICIENT: (9.81 * Math.sin(-GLIDE_PITCH)) / (50 * 50),
-  THROTTLE_SPEED_EXPONENT: 1,
-  THROTTLE_RATE: 0,
-  INDUCED_DRAG: 0.6,
-  INDUCED_MAX_EXTRA_G: 3,
-  MAX_PITCH_RATE: 60 * DEG,
-  MAX_ROLL_RATE: 110 * DEG,
-  MAX_YAW_RATE: 20 * DEG,
-  MAX_BANK: 65 * DEG,
-  BANK_GAIN: 3.4,
-  FINE_BANK_SCALE: 0.55,
-  YAW_BANK: 10 * DEG,
-  // The nose cannot be held far above the horizon: a wingsuit only zooms briefly.
-  PITCH_LIMIT_START: 25 * DEG,
-  PITCH_LIMIT_RANGE: 25 * DEG,
-  TURN_GAIN: 1.5,
-  MAX_TURN_RATE: 42 * DEG,
-  BANK_NOSE_DROP: 5 * DEG,
-  BANK_SETTLE_PITCH: 6 * DEG,
-  FINE_CONTROL_SCALE: 0.45,
-  AUTO_LEVEL_DELAY: 1,
-  STALL_EXIT_MARGIN: 5,
-  STALL_NOSE_TARGET: -40 * DEG,
-  HIGH_SPEED_PITCH_START: 56,
-  // Proximity flying: the ground cushion lets it skim lower than the aircraft.
-  CUSHION_HEIGHT: 20,
-  IMPACT_WARNING_SECONDS: 2.2,
-  IMPACT_FULL_SECONDS: 0.7,
-  CUSHION_PULL_RATE: 65 * DEG,
-  GUARD_PROBE_SECONDS: Object.freeze([1, 2, 3.2]),
-  GUARD_MARGIN: 14,
-  GUARD_MIN_SPEED: 26,
-  GUARD_EVADE_GRADIENT: Math.tan(24 * DEG),
-  GUARD_EVADE_BANK: 55 * DEG,
-  CEILING_BAND: 260,
-  BOOST_DURATION: 1.6,
-  BOOST_COOLDOWN: 7,
-  BARREL_ROLL_DURATION: 1,
-  BARREL_ROLL_RADIUS: 1,
-  AUTOPILOT: Object.freeze({
-    MAX_BANK: 30 * DEG,
-    MAX_PITCH: 8 * DEG,
-    TERRAIN_PITCH: 12 * DEG,
-    CLEARANCE: 120,
-    RING_CLEARANCE: 45,
-    MIN_ALTITUDE: 60,
-    CRUISE_THROTTLE: 0,
-    OVERRIDE_INPUT: 0.35,
-    OVERRIDE_SECONDS: 0.25,
-    TERRAIN_MAX_PITCH: 20 * DEG,
-    LOOKAHEAD_DISTANCES: Object.freeze([0, 80, 160, 260, 400, 560, 780, 1100]),
-    PATH_LOOKAHEAD_DISTANCES: Object.freeze([120, 280, 520]),
-    WAYPOINT_STEERING: Object.freeze({ BANK_PER_DEGREE: 1.2, MAX_BANK: 30 * DEG, DAMPING: 2.2, MAX_ROLL_RATE: 45 * DEG }),
-    RING_STEERING: Object.freeze({ BANK_PER_DEGREE: 2.0, MAX_BANK: 40 * DEG, DAMPING: 3.5, MAX_ROLL_RATE: 60 * DEG }),
-    RING_MAX_PITCH: 12 * DEG,
-    RING_MIN_TIME_TO_RING: 1.5,
-    RING_VERTICAL_SPEED_GAIN: 0.015,
-    RING_LOOKAHEAD_MARGIN: 150,
-    RING_TRACK_LEAD_SECONDS: 2.4,
-    RING_TRACK_LEAD_MIN: 90,
-    RING_TRACK_LEAD_MAX: 180,
-  }),
-  LOAD: Object.freeze({ PULL_SHARE: 0.2, KNEE: 3.5, CAP: 5, MIN: -1, SMOOTHING: 5, MIN_BANK_COS: 0.2, BARREL_ROLL_EXTRA: 0.8 }),
-  SURFACE_TURN_SHARE: 0.3,
-});
 
 // ============================================================================================
 // SIM: SimWingsuit (src/flight/SimWingsuit.js). Targets first, then the parameters that meet them.
@@ -571,18 +490,15 @@ function buildMesh(ctx) {
 }
 
 // ============================================================================================
-// ABILITY: deploy the parachute (SIM; in CLASSIC the button boosts like v1). It also keeps the
-// wingsuit's speed and proximity cue (craftState.proximity, craftState.windStreaks for the wind
-// streaks) and brings the flyer back up: after a canopy landing (SIM) it relaunches from the nearest
-// peak after a short pause, and in CLASSIC once the flyer has run out of height and speed.
+// ABILITY: deploy the parachute. It also keeps the wingsuit's speed and proximity cue
+// (craftState.proximity, craftState.windStreaks for the wind streaks) and brings the flyer back up:
+// after a canopy landing it relaunches from the nearest peak after a short pause.
 // ============================================================================================
 const AUTO_RELAUNCH_SECONDS = 3;
-const CLASSIC_LOW = Object.freeze({ AGL: 60, SECONDS: 4 });
 const PROXIMITY_RANGE = 90;
 
 const craftAbility = Object.freeze({
   label: 'Deploy parachute',
-  modes: Object.freeze(['sim']),
   initialState: () => ({
     canopy: false,
     phase: 'flight',
@@ -598,7 +514,6 @@ const craftAbility = Object.freeze({
     impactSeconds: Infinity,
     proximity: 0,
     windStreaks: 0,
-    lowSeconds: 0,
   }),
   run(flight) {
     const craftState = flight.craftState;
@@ -609,7 +524,7 @@ const craftAbility = Object.freeze({
     craftState.deployRequested = true;
     return true;
   },
-  update(flight, dt) {
+  update(flight) {
     const craftState = flight.craftState;
     const telemetry = flight.telemetry;
     const agl = Number.isFinite(telemetry.agl) ? telemetry.agl : Infinity;
@@ -618,20 +533,8 @@ const craftAbility = Object.freeze({
     const proximity = flying ? Math.pow(clamp(1 - agl / PROXIMITY_RANGE, 0, 1), 1.4) * smooth01((airspeed - 20) / 20) : 0;
     craftState.proximity = proximity;
     craftState.windStreaks = flying ? clamp(smooth01((airspeed - 36) / 28) * 0.5 + proximity * 0.8, 0, 1) : 0;
-    if (flight.mode === 'sim') {
-      craftState.lowSeconds = 0;
-      if (craftState.phase === 'landed' && craftState.landedSeconds >= AUTO_RELAUNCH_SECONDS && typeof flight.relaunch === 'function') {
-        flight.notify('Packed up. Back to a peak.');
-        flight.relaunch();
-      }
-      return;
-    }
-    // CLASSIC: skimming the ground stalled means the glide is over; take the flyer back up.
-    const low = agl < CLASSIC_LOW.AGL && flight.player.stalled;
-    craftState.lowSeconds = low ? craftState.lowSeconds + dt : 0;
-    if (craftState.lowSeconds > CLASSIC_LOW.SECONDS && typeof flight.relaunch === 'function') {
-      craftState.lowSeconds = 0;
-      flight.notify('Out of height. Back up to a peak.');
+    if (craftState.phase === 'landed' && craftState.landedSeconds >= AUTO_RELAUNCH_SECONDS && typeof flight.relaunch === 'function') {
+      flight.notify('Packed up. Back to a peak.');
       flight.relaunch();
     }
   },
@@ -641,7 +544,6 @@ export default Object.freeze({
   id: 'wingsuit',
   name: 'Wingsuit',
   buildMesh,
-  arcadeProfile,
   simProfile,
   /**
    * ControlState mapping: no throttle (the axis is ignored and hidden in the hints); the HOTAS antenna
@@ -649,7 +551,7 @@ export default Object.freeze({
    * pulling the stick flares.
    */
   inputProfile: Object.freeze({ throttle: 'none', antenna: 'zoom', toeBrakes: 'canopyToggles', flapNotches: 0 }),
-  audioProfile: Object.freeze({ engine: 'wingsuit', flutterHz: 14, proximityRange: PROXIMITY_RANGE, airflowSpeed: 55, classicAirflowSpeed: 68 }),
+  audioProfile: Object.freeze({ engine: 'wingsuit', flutterHz: 14, proximityRange: PROXIMITY_RANGE, airflowSpeed: 55 }),
   capabilities: Object.freeze({ chute: true, engine: false }),
   cameraRig: Object.freeze({
     // First person from the helmet (hidden in that view): the arm wings in the corners of the view.
@@ -662,9 +564,9 @@ export default Object.freeze({
   }),
   instruments: Object.freeze(['airspeed', 'altitude', 'heading', 'vsi', 'glide', 'proximity']),
   abilities: Object.freeze({ craftAbility }),
-  // Starts from a peak: diving off the edge at a sensible speed (SIM and CLASSIC); a soft crash also
+  // Starts from a peak: diving off the edge at a sensible speed; a soft crash also
   // restarts from a peak (a flyer that cannot climb, respawned over water or low ground, would sink again).
-  spawn: Object.freeze({ cruise: 50, hover: false, relaunch: 'peak', respawn: 'peak', canStartOnGround: false, peakDive: Object.freeze({ angle: 30, speed: 38, classicSpeed: 42 }) }),
+  spawn: Object.freeze({ cruise: 50, hover: false, relaunch: 'peak', respawn: 'peak', canStartOnGround: false, peakDive: Object.freeze({ angle: 30, speed: 38 }) }),
   // Under the canopy the legs take a firm landing (a parachute landing fall). The sink is measured along
   // the ground normal, so a touchdown into rising ground adds the forward speed to it: the crash limit
   // sits well above an unflared descent into a slope (still graded hard, never a crash).

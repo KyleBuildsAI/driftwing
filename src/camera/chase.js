@@ -4,7 +4,7 @@ import { DEG, clamp, damp, isFiniteVector, isFiniteQuaternion } from '../core/ut
 
 /**
  * CAMERA RIG: chase camera (critically damped lag, partial bank, look-ahead, FOV stretch,
- * low-frequency speed / boost / event shake, terrain-safe) and the photo-mode free camera
+ * low-frequency speed / cloud / event shake, terrain-safe) and the photo-mode free camera
  * (WASD / QE move, mouse or touch look, wheel zoom, Shift fast) with a smooth return.
  * Narrow / portrait screens widen the lens and pull the chase back so the whole wingspan
  * fits, and shift the frame so the glider sits above the bottom UI band. Any non-finite
@@ -16,7 +16,7 @@ import { DEG, clamp, damp, isFiniteVector, isFiniteQuaternion } from '../core/ut
  * write the camera, except in photo mode, which always runs here.
  */
 export function createCameraRig(ctx) {
-  const { THREE: T, camera, state, world, bus, settings, input } = ctx;
+  const { THREE: T, camera, state, world, bus, settings } = ctx;
   const player = state.player;
   const SPEED = CONFIG.SPEED;
   const CAMERA_CONFIG = CONFIG.CAMERA;
@@ -177,21 +177,20 @@ export function createCameraRig(ctx) {
   // ---- Chase camera -------------------------------------------------------------------------
   /**
    * Speeds the pull-back, FOV stretch and speed shake are scaled to: v1's (CONFIG.SPEED), or a fast
-   * craft's own cameraRig.chase.speedRange { CRUISE, MAX, BOOST_MAX } (the jet).
+   * craft's own cameraRig.chase.speedRange { CRUISE, MAX, TOP } (the jet).
    */
   function speedRange() {
     const range = ctx.systems.flight?.getCameraRig?.()?.chase?.speedRange;
-    return range && Number.isFinite(range.CRUISE) && Number.isFinite(range.MAX) && Number.isFinite(range.BOOST_MAX) ? range : SPEED;
+    return range && Number.isFinite(range.CRUISE) && Number.isFinite(range.MAX) && Number.isFinite(range.TOP) ? range : SPEED;
   }
 
   function speedFraction() {
-    return clamp((player.speed - 30) / (speedRange().BOOST_MAX - 30), 0, 1);
+    return clamp((player.speed - 30) / (speedRange().TOP - 30), 0, 1);
   }
 
-  /** Returns false (targets unchanged) when neither attitude source is usable. */
+  /** Returns false (targets unchanged) when the craft's attitude is not usable. */
   function computeChaseTargets() {
-    let attitude = ctx.systems.flight?.getBaseQuaternion?.() ?? player.quaternion;
-    if (!isFiniteQuaternion(attitude)) attitude = player.quaternion;
+    const attitude = player.quaternion;
     if (!isFiniteQuaternion(attitude)) return false;
     planeForward.set(0, 0, -1).applyQuaternion(attitude);
     planeUp.set(0, 1, 0).applyQuaternion(attitude);
@@ -245,9 +244,7 @@ export function createCameraRig(ctx) {
   function targetFov() {
     const speeds = speedRange();
     const overCruise = smooth01((player.speed - speeds.CRUISE) / (speeds.MAX - speeds.CRUISE));
-    const range = FOV_STRETCH;
-    const boostExtra = player.boost.active ? 0.35 * range : 0;
-    return framedFov(Math.min(baseFov + FOV_STRETCH, baseFov + range * 0.85 * overCruise + boostExtra));
+    return framedFov(Math.min(baseFov + FOV_STRETCH, baseFov + FOV_STRETCH * 0.85 * overCruise));
   }
 
   /** The chase FOV with the antenna zoom applied (unchanged at zoom 1). */
@@ -327,7 +324,7 @@ export function createCameraRig(ctx) {
     applyShake();
   }
 
-  // ---- Shake: low-frequency ambient (max speed, boost, cloud) + event trauma ------------------
+  // ---- Shake: low-frequency ambient (max speed, cloud) + event trauma ------------------
   function updateShake(step) {
     shakeClock += step;
     trauma = Math.max(0, trauma - 1.1 * step);
@@ -340,7 +337,7 @@ export function createCameraRig(ctx) {
   function applyShake() {
     const topSpeed = speedRange().MAX;
     const overSpeed = smooth01((player.speed - topSpeed * 0.85) / (topSpeed * 0.15));
-    const ambient = 0.3 * overSpeed + (player.boost.active ? 0.35 : 0) + 0.25 * clamp(player.inCloud ?? 0, 0, 1);
+    const ambient = 0.3 * overSpeed + 0.25 * clamp(player.inCloud ?? 0, 0, 1);
     const eventShake = trauma * trauma;
     if (ambient <= 0 && eventShake <= 0) return;
     const time = shakeClock;
@@ -391,7 +388,7 @@ export function createCameraRig(ctx) {
     free.pitch -= controls.lookY * PHOTO.LOOK_RADIANS_PER_PIXEL * sensitivity * invert;
     free.yaw -= controls.lookYaw * PHOTO.KEY_LOOK_RATE * step;
     free.pitch += controls.lookPitch * PHOTO.KEY_LOOK_RATE * 0.8 * step * invert;
-    const touch = input.touch;
+    const touch = inputSystem?.touch?.readStick ? inputSystem.touch.readStick() : null;
     if (touch && touch.active) {
       free.yaw -= clamp(Number(touch.x) || 0, -1, 1) * PHOTO.TOUCH_LOOK_RATE * step;
       free.pitch += clamp(Number(touch.y) || 0, -1, 1) * PHOTO.TOUCH_LOOK_RATE * 0.75 * step * invert;
@@ -472,12 +469,6 @@ export function createCameraRig(ctx) {
     applyProjection(zoomedFov(chase.fov), framing.lift);
   }
 
-  bus.on('boost', () => {
-    trauma = Math.min(1, trauma + 0.45);
-  });
-  bus.on('stall', () => {
-    trauma = Math.min(1, trauma + 0.25);
-  });
   bus.on('settings:changed', ({ key }) => {
     if (key !== 'fov') return;
     baseFov = readBaseFov();

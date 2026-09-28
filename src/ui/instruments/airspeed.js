@@ -1,17 +1,13 @@
 // Airspeed indicator: indicated airspeed on a 320 degree dial with the craft's operating arcs.
-// SIM: green from the stall speed to 80 % of Vne, yellow caution to Vne, red line at Vne (from
-// craft.limits and the SIM profile). CLASSIC: the arcade envelope (stall to max dive speed).
+// Green from the stall speed to 80 % of Vne, yellow caution to Vne, red line at Vne (from
+// craft.limits and the flight profile's targets).
 // Craft with a Mach limit (craft.limits.vneMach: jets) get a Mach window under the hub.
 import { CENTER, drawCase, drawGlare, ticks, numerals, arcBand, radial, needle, label, digital, title, linearDial, clamp } from './gaugeKit.js';
 import { niceStep, ceilTo } from './units.js';
 
-/** The speed envelope in m/s for the active mode: { stall, caution, never, top }. */
-function envelope(craft, mode) {
-  const arcade = craft.arcadeProfile && craft.arcadeProfile.SPEED;
+/** The craft's speed envelope in m/s: { stall, caution, never, top }. */
+function envelope(craft) {
   const limits = craft.limits || {};
-  if (mode === 'classic' && arcade) {
-    return { stall: arcade.STALL, caution: arcade.CRUISE * 1.4, never: arcade.MAX, top: arcade.BOOST_MAX || arcade.MAX };
-  }
   const never = Number.isFinite(limits.vne) ? limits.vne : 80;
   const targets = craft.simProfile && craft.simProfile.targets;
   const stall = targets && Number.isFinite(targets.stallSpeed) ? targets.stallSpeed : never * 0.3;
@@ -22,9 +18,9 @@ export default Object.freeze({
   id: 'airspeed',
   label: 'Airspeed',
   draw(pen, source, theme) {
-    const { flight, craft, mode, units } = source;
+    const { flight, craft, units } = source;
     const factor = units.speed.factor;
-    const speeds = envelope(craft, mode);
+    const speeds = envelope(craft);
     const major = niceStep((speeds.top * 1.12 * factor) / 8);
     const maximum = ceilTo(speeds.top * 1.12 * factor, major);
     const toAngle = linearDial(0, maximum, 18, 324);
@@ -40,7 +36,7 @@ export default Object.freeze({
     numerals(pen, labels, { toAngle, radius: 58, size: 16, color: theme.text });
     title(pen, 'AIRSPEED', theme, 66);
     label(pen, units.speed.dial, CENTER, 80, { size: 11, color: theme.textDim, weight: 650, spacing: 1.2 });
-    const airspeed = mode === 'sim' ? flight.indicatedAirspeed : flight.airspeed;
+    const airspeed = flight.indicatedAirspeed;
     const shown = clamp(Number.isFinite(airspeed) ? airspeed * factor : 0, 0, maximum);
     if (theme.id === 'glass') digital(pen, String(Math.round(shown)), CENTER - 26, 112, 52, 22, theme, { size: 15 });
     if (craft.limits && Number.isFinite(craft.limits.vneMach)) {

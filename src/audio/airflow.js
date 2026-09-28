@@ -1,9 +1,9 @@
 // Airflow beds (environment bus): v1's two looping noise layers (a low body and a panned, brighter
-// rush of air) whose gain and cutoff follow airspeed, g-load, boost and cloud immersion with slow
-// gusts; plus, in SIM, a buffet rumble near the stall and a rolling rumble on the ground.
+// rush of air) whose gain and cutoff follow airspeed, g-load and cloud immersion with slow gusts;
+// plus a buffet rumble near the stall and a rolling rumble on the ground.
 //
-// CLASSIC drives the beds exactly like v1 (state.player speed over the v1 top speed). SIM drives
-// them from state.flight.airspeed over the craft's airflowSpeed, and turbulence widens the gusts.
+// state.flight.airspeed over the craft's airflowSpeed drives the beds, and turbulence widens the
+// gusts.
 // In the cockpit view of a closed cockpit everything crossfades to a low-passed interior mix.
 import { clamp } from '../core/util.js';
 import { glide, smoothstep } from './synthKit.js';
@@ -129,15 +129,12 @@ export function createAirflow(kit) {
   return {
     /** frame: see AudioEngine buildFrame(). Called at the parameter interval. */
     update(frame) {
-      const { time, interval, classic, player, flight, profile } = frame;
-      const speed = classic ? player.speed : flight.airspeed;
-      const reference = classic ? profile.classicAirflowSpeed : profile.airflowSpeed;
-      const speedRatio = clamp((Number.isFinite(speed) ? speed : 0) / reference, 0, 1.4);
-      const boosting = classic && player.boost && player.boost.active ? 1 : 0;
-      const gSource = classic ? player.gForce : flight.gLoad;
-      const gLoad = clamp(Math.abs((Number.isFinite(gSource) ? gSource : 1) - 1), 0, 3);
+      const { time, interval, player, flight, profile } = frame;
+      const speed = flight.airspeed;
+      const speedRatio = clamp((Number.isFinite(speed) ? speed : 0) / profile.airflowSpeed, 0, 1.4);
+      const gLoad = clamp(Math.abs((Number.isFinite(flight.gLoad) ? flight.gLoad : 1) - 1), 0, 3);
       const inCloud = clamp(Number.isFinite(player.inCloud) ? player.inCloud : 0, 0, 1);
-      const turbulence = classic ? 0 : clamp(Number.isFinite(flight.turbulence) ? flight.turbulence : 0, 0, 1);
+      const turbulence = clamp(Number.isFinite(flight.turbulence) ? flight.turbulence : 0, 0, 1);
 
       gustTimer -= interval;
       if (gustTimer <= 0) {
@@ -149,7 +146,7 @@ export function createAirflow(kit) {
 
       const bodyGain = (0.03 + 0.2 * speedRatio * speedRatio) * gustLevel * (1 + 0.25 * gLoad);
       const bodyCutoff = (200 + 950 * speedRatio) * (0.85 + 0.3 * gustLevel) * (1 - 0.3 * inCloud);
-      const airGain = (0.004 + 0.1 * speedRatio * speedRatio * speedRatio + 0.05 * boosting + 0.02 * gLoad) * (0.7 + 0.3 * gustLevel);
+      const airGain = (0.004 + 0.1 * speedRatio * speedRatio * speedRatio + 0.02 * gLoad) * (0.7 + 0.3 * gustLevel);
       const airFrequency = (850 + 2500 * speedRatio) * (1 - 0.35 * inCloud);
       glide(windBodyGain.gain, bodyGain, time, 0.18);
       glide(windBodyFilter.frequency, bodyCutoff, time, 0.25);
@@ -157,12 +154,12 @@ export function createAirflow(kit) {
       glide(windAirFilter.frequency, airFrequency, time, 0.25);
       glide(windPanner.pan, windPan, time, 0.4);
 
-      const buffet = classic ? 0 : buffetAmount(frame);
+      const buffet = buffetAmount(frame);
       glide(buffetGain.gain, 0.42 * Math.pow(buffet, 1.3), time, 0.08);
       glide(buffetLfo.frequency, 7 + 6 * Math.random(), time, 0.2);
 
       const groundSpeed = Number.isFinite(flight.groundSpeed) ? flight.groundSpeed : 0;
-      const rolling = !classic && flight.onGround && profile.touchdown !== 'body' ? clamp(groundSpeed / 30, 0, 1) : 0;
+      const rolling = flight.onGround && profile.touchdown !== 'body' ? clamp(groundSpeed / 30, 0, 1) : 0;
       glide(rollGain.gain, 0.12 * rolling * (profile.touchdown === 'skids' ? 1.3 : 1), time, 0.1);
       glide(rollFilter.frequency, 120 + 260 * rolling, time, 0.2);
 

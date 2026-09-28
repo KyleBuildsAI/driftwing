@@ -75,7 +75,6 @@ export const CRAFT_CATALOG = Object.freeze([
 const REQUIRED_FIELDS = Object.freeze({
   buildMesh: 'function',
   simProfile: 'object',
-  arcadeProfile: 'object',
   inputProfile: 'object',
   audioProfile: 'object',
   cameraRig: 'object',

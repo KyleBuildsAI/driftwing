@@ -4,7 +4,7 @@ import { craftCapabilities } from './flightState.js';
 
 /**
  * Executor for WREN's v2 aircraft actions. Every handler changes things only through the public
- * channels (settings for mode, craft and assists; 'input:action' events with source 'copilot' for
+ * channels (settings for craft and assists; 'input:action' events with source 'copilot' for
  * views, engine and chute; the flight controller's relaunch(); 'ui:openControls' for calibration)
  * and then reports what actually happened: it reads the outcome back, waiting a few frames where the
  * change lands on a later physics tick or camera update, and never claims a change it cannot see.
@@ -134,41 +134,11 @@ export function createFlightActionHandlers(ctx, helpers) {
           `Sorry, ${craftName(target)} hasn't arrived in this build.${offer}`,
         ]));
       }
-      const modeBefore = system.getMode();
       noteCopilotChange('craft');
       settings.set('craft', target);
       const now = system.getCraft();
       if (now !== target) return fail(`${capitalize(craftName(target))} didn't take, so we're still in ${craftName(now)}.`);
-      let text = pick(`craft-${target}`, [`${capitalize(craftName(target))} it is.`, `Switched to ${craftName(target)}.`]);
-      if (modeBefore === 'sim' && system.getMode() === 'classic') {
-        noteCopilotChange('mode');
-        text += ' SIM flight isn\'t ready for it yet, so it flies in CLASSIC.';
-      }
-      return succeed(text);
-    },
-
-    setMode(action) {
-      const system = flight();
-      if (typeof system?.getMode !== 'function') return fail("The flight controller isn't answering right now.");
-      const label = action.mode === 'sim' ? 'SIM' : 'CLASSIC';
-      if (system.getMode() === action.mode) return succeed(`We're already in ${label}.`);
-      noteCopilotChange('mode');
-      settings.set('mode', action.mode);
-      if (system.getMode() !== action.mode) {
-        return fail(`SIM flight isn't available for ${craftName(system.getCraft())} yet, so we stay in CLASSIC.`);
-      }
-      if (action.mode === 'sim') {
-        const level = settings.get('assists')?.[system.getCraft()];
-        const percent = Math.round((Number.isFinite(level) ? level : 1) * 100);
-        return succeed(pick('modeSim', [
-          `SIM mode. Real aerodynamics now, with assists at ${percent} percent.`,
-          `SIM it is: proper physics, assists at ${percent} percent. Mind your airspeed.`,
-        ]));
-      }
-      return succeed(pick('modeClassic', [
-        'CLASSIC mode. The forgiving flight is back: Space boosts, double-tap A or D to roll.',
-        'Back to CLASSIC. Easy flying, no stalls to worry about.',
-      ]));
+      return succeed(pick(`craft-${target}`, [`${capitalize(craftName(target))} it is.`, `Switched to ${craftName(target)}.`]));
     },
 
     setAssists(action) {
@@ -186,7 +156,6 @@ export function createFlightActionHandlers(ctx, helpers) {
       }
       if (!settings.update('assists', { [craft]: next })) return fail("I couldn't change the assists just now.");
       let text = `Assists at ${percent} percent for ${craftName(craft)}: ${assistSummary(next, modelKind)}.`;
-      if (system?.getMode?.() !== 'sim') text += ' They apply in SIM mode.';
       if (system?.isAssistOverridden?.()) text += ' A controller is disconnected, so the hands-off hold keeps them at 100 percent for now.';
       return succeed(text, true);
     },
@@ -216,7 +185,6 @@ export function createFlightActionHandlers(ctx, helpers) {
       if (canopyOpen()) return succeed('The canopy is already open.');
       emitInputAction('chuteDeploy');
       if (await waiter.wait(canopyOpen)) return succeed(pick('chuteOpen', ['Canopy open. Steer with the stick and flare before the ground.', 'Chute out, nice and square.']));
-      if (flight()?.getMode?.() !== 'sim') return fail("The chute works in SIM mode. Say 'sim mode' first.");
       return fail("I pulled the handle, but there's no canopy yet.");
     },
 
@@ -230,7 +198,6 @@ export function createFlightActionHandlers(ctx, helpers) {
       const running = () => state.flight.engineOn !== false;
       const word = action.enabled ? 'running' : 'off';
       if (running() === action.enabled) return succeed(`The engine's already ${word}.`);
-      if (system?.getMode?.() !== 'sim') return fail("In CLASSIC the engine always runs. Say 'sim mode' to work the engine.");
       emitInputAction('engineToggle');
       const done = await waiter.wait(() => running() === action.enabled);
       if (!done) return fail(`The engine didn't respond. It's still ${running() ? 'running' : 'off'}.`);
@@ -290,7 +257,7 @@ export function keyFor(ctx, actionId, fallback) {
 /** The "what can you do" answer, with the keys and UI that do the same thing. */
 export function helpLine(ctx, pick) {
   const key = (actionId, fallback) => keyFor(ctx, actionId, fallback);
-  const flying = `Aircraft: 'switch to the bush plane' (1-6, picker), 'sim mode' (${key('modeToggle', 'V')}, pill), 'assists up' (settings), 'cockpit view' (${key('viewForward', 'Num 8')}), 'engine off' (${key('engineToggle', 'Z')}), 'deploy chute' (${key('chuteDeploy', 'U')}), 'relaunch' (${key('relaunch', 'Backspace')}), 'calibrate controls' (${key('controlsPanel', '.')}), 'airspeed', 'how was my landing'. Hold ${key('copilotPTT', '`')} to talk.`;
+  const flying = `Aircraft: 'switch to the bush plane' (1-6, picker), 'assists up' (settings), 'cockpit view' (${key('viewForward', 'Num 8')}), 'engine off' (${key('engineToggle', 'Z')}), 'deploy chute' (${key('chuteDeploy', 'U')}), 'relaunch' (${key('relaunch', 'Backspace')}), 'calibrate controls' (${key('controlsPanel', '.')}), 'airspeed', 'how was my landing'. Hold ${key('copilotPTT', '`')} to talk.`;
   return pick('help', [
     `I find places, set waypoints, fly the autopilot, change the time and run ring courses. ${flying}`,
     `Try 'find mountains', 'set a waypoint' or 'make it dusk'. ${flying}`,

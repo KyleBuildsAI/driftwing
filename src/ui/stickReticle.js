@@ -1,4 +1,4 @@
-// SIM virtual-stick reticle. With the mouse captured in SIM, the mouse is a free virtual stick whose
+// Virtual-stick reticle. With the mouse captured, the mouse is a free virtual stick whose
 // offset from the screen centre is the deflection (ctx.systems.input.getStick(): x right / y down in
 // -1..1, the virtual cursor at (x, y) * fullDeflectionPixels from the centre). This draws that
 // cursor as a small gold dot with a hairline from the centre, inside a faint ring marking full
@@ -36,9 +36,7 @@ export function createStickReticle(ctx) {
   const stats = { visible: false, x: 0, y: 0, radius: 0, scale: 1 };
 
   function shouldShow(stick) {
-    const flight = ctx.systems.flight;
-    const sim = Boolean(flight && typeof flight.getMode === 'function' && flight.getMode() === 'sim');
-    return sim && Boolean(stick && stick.locked && stick.mode === 'free') && !ctx.state.photoMode;
+    return Boolean(stick && stick.locked && stick.mode === 'free') && !ctx.state.photoMode;
   }
 
   return {

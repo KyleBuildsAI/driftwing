@@ -4,9 +4,9 @@
 // Views: 'chase' (the v1 rig in chase.js, unchanged), 'cockpit' (the craft's eye point with its
 // cockpit and instrument panel), 'wing' (rigid wingtip mount), 'flyby' (fixed camera ahead on the
 // flight path) and 'fpv' (the frame-locked camera of an FPV craft, which takes the first-person slot
-// when the craft's cameraRig.fpv exists). settings.views remembers the player's view per mode
-// (CLASSIC defaults to chase, SIM to cockpit; the first-person slot is stored as 'cockpit') and a
-// mode switch moves to that mode's view. Every change, and the start, emits the typed viewChanged.
+// when the craft's cameraRig.fpv exists). settings.view remembers the player's view (cockpit by
+// default; the first-person slot is stored as 'cockpit'). Every change, and the start, emits the
+// typed viewChanged.
 //
 // Input: the camera owns viewCycle, viewForward (first person), viewBack (chase), viewLeft /
 // viewRight (look 90 degrees, press again to look ahead) and recenterView, from 'input:action'
@@ -103,10 +103,6 @@ export function createCameraSystem(ctx) {
   function flightSystem() {
     return ctx.systems.flight || null;
   }
-  function currentMode() {
-    const flight = flightSystem();
-    return flight && typeof flight.getMode === 'function' ? flight.getMode() : 'classic';
-  }
   function currentCraft() {
     const flight = flightSystem();
     return flight && typeof flight.getCraft === 'function' ? flight.getCraft() : 'glider';
@@ -171,7 +167,7 @@ export function createCameraSystem(ctx) {
   }
 
   function emitViewChanged() {
-    bus.emitTyped('viewChanged', { view, craft: currentCraft(), mode: currentMode() });
+    bus.emitTyped('viewChanged', { view, craft: currentCraft() });
   }
 
   // ---- Craft parts hidden in the cockpit ----------------------------------------------------------------
@@ -284,8 +280,8 @@ export function createCameraSystem(ctx) {
   }
 
   /**
-   * Switches to the view a slot resolves to. remember: store it as this mode's view in
-   * settings.views. force: re-enter even when unchanged (craft change).
+   * Switches to the view a slot resolves to. remember: store it as the player's view in
+   * settings.view. force: re-enter even when unchanged (craft change).
    */
   function setView(slot, { remember = true, force = false } = {}) {
     if (!VIEW_IDS.includes(slot)) return false;
@@ -302,11 +298,7 @@ export function createCameraSystem(ctx) {
       counters.viewChanges++;
       emitViewChanged();
     }
-    if (remember) {
-      const mode = currentMode();
-      const stored = settings.get('views');
-      if (stored && stored[mode] !== slotOf(next)) settings.update('views', { [mode]: slotOf(next) });
-    }
+    if (remember && settings.get('view') !== slotOf(next)) settings.set('view', slotOf(next));
     return true;
   }
 
@@ -317,10 +309,10 @@ export function createCameraSystem(ctx) {
     return setView(next);
   }
 
-  function modeView() {
-    const stored = settings.get('views');
-    const mode = currentMode();
-    return stored && VIEW_IDS.includes(stored[mode]) ? stored[mode] : mode === 'sim' ? 'cockpit' : 'chase';
+  /** The player's remembered view slot (cockpit when nothing usable is stored). */
+  function storedView() {
+    const stored = settings.get('view');
+    return VIEW_IDS.includes(stored) ? stored : 'cockpit';
   }
 
   // ---- Input actions --------------------------------------------------------------------------------------
@@ -349,9 +341,6 @@ export function createCameraSystem(ctx) {
     performAction(action.id);
   });
 
-  bus.onTyped('modeChanged', () => {
-    setView(modeView(), { remember: false });
-  });
   bus.onTyped('craftChanged', () => {
     syncRoot();
     setView(slotOf(view), { remember: false, force: true });
@@ -359,10 +348,7 @@ export function createCameraSystem(ctx) {
   bus.onTyped('softCrash', () => instruments.reset());
   bus.on('settings:changed', ({ key, value }) => {
     if (key === 'fov') fovSettings = readFovSettings();
-    else if (key === 'views' && value) {
-      const wanted = value[currentMode()];
-      if (VIEW_IDS.includes(wanted) && wanted !== slotOf(view)) setView(wanted, { remember: false });
-    }
+    else if (key === 'view' && VIEW_IDS.includes(value) && value !== slotOf(view)) setView(value, { remember: false });
   });
 
   // ---- Free look ------------------------------------------------------------------------------------------
@@ -478,7 +464,7 @@ export function createCameraSystem(ctx) {
   // ---- Instruments -----------------------------------------------------------------------------------------------
   function stickDeflection() {
     const flight = flightSystem();
-    const model = flight && currentMode() === 'sim' && typeof flight.getModel === 'function' ? flight.getModel() : null;
+    const model = flight && typeof flight.getModel === 'function' ? flight.getModel() : null;
     const surfaces = model && model.surfaces;
     const controls = ctx.controls;
     const pitch = surfaces && Number.isFinite(surfaces.elevator) ? surfaces.elevator : controls.pitch;
@@ -558,7 +544,7 @@ export function createCameraSystem(ctx) {
 
   // ---- Start -------------------------------------------------------------------------------------------------------
   attachedRoot = currentRoot();
-  view = resolveSlot(modeView());
+  view = resolveSlot(storedView());
   if (view !== 'chase') enterView(view);
   emitViewChanged();
 

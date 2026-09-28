@@ -1,4 +1,4 @@
-// Craft picker: a compact glass strip of low-poly craft silhouettes beside the mode pill.
+// Craft picker: a compact glass strip of low-poly craft silhouettes in the top-left corner.
 //
 // Icons come from craftRegistry.catalog (SVG parts filled or stroked with currentColor). The
 // selected craft is settings.craft; a click writes it through the settings command channel and the

@@ -1,6 +1,6 @@
 // v1 event cues: the audio system listens to flight, ring, waypoint, landmark, bird and UI events
 // itself. Cues are queued and flushed once per frame; when another module already played the same
-// kind of cue directly this moment (audio.chime() / whoosh() / blip() / flutter()), the event cue
+// kind of cue directly this moment (audio.chime() / blip() / flutter()), the event cue
 // is skipped so nothing doubles. A landmark threaded in the same frame as its discovery plays only
 // the threaded run.
 import { clamp } from '../core/util.js';
@@ -14,7 +14,7 @@ const MAX_PENDING = 24;
  */
 export function createEventCues({ bus, state, camera, THREE, isReady, voices }) {
   const pendingCues = [];
-  const lastDirectCue = { chime: -Infinity, whoosh: -Infinity, flutter: -Infinity, blip: -Infinity };
+  const lastDirectCue = { chime: -Infinity, flutter: -Infinity, blip: -Infinity };
   const listenerRight = new THREE.Vector3();
   const toSource = new THREE.Vector3();
 
@@ -66,8 +66,6 @@ export function createEventCues({ bus, state, camera, THREE, isReady, voices }) 
   }
 
   // ---- Wiring --------------------------------------------------------------------------------------
-  bus.on('boost', () => queueCue('whoosh', 'boost', (voiceSet) => voiceSet.playWhoosh(1, 1.8)));
-  bus.on('barrelroll', () => queueCue('whoosh', 'barrelroll', (voiceSet) => voiceSet.playWhoosh(0.45, 1.15)));
   bus.on('ring:passed', (payload) => {
     const streak = payload && Number.isFinite(payload.streak) ? payload.streak : 1;
     const step = 2 + clamp(Math.round(streak) - 1, 0, 10);

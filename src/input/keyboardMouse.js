@@ -1,12 +1,10 @@
-// Keyboard and mouse: v1's keyboard flying, pointer-lock virtual stick with a recentring spring,
-// drag-to-steer fallback, wheel throttle and photo-mode routing, now driven by the keyboard and
-// mouse binding profiles.
+// Keyboard and mouse: keyboard flying, the pointer-lock virtual stick, drag-to-steer fallback,
+// wheel throttle and photo-mode routing, driven by the keyboard and mouse binding profiles.
 //
-// CLASSIC keeps v1 exactly: the default keyboard layer is v1's keys, keyboard axes ease in and out
-// at v1's rates, the mouse stick springs back to centre and a double-tap on the roll keys fires a
-// barrel roll. SIM reuses the same code with the SIM keyboard layer; its mouse stick is a virtual
-// cursor that stays where it is put (no spring) so its offset from the screen centre is the stick
-// deflection. Right-drag is free look in both modes (releasing returns the view to centre).
+// Keyboard axes ease in and out at v1's rates. With the pointer locked the mouse stick is a virtual
+// cursor that stays where it is put (no spring), so its offset from the screen centre is the stick
+// deflection; the drag fallback springs back to centre. Right-drag is free look (releasing returns
+// the view to centre).
 //
 // Actions are pressed on keydown / mousedown (so UI actions run in the same event as v1's hotkeys)
 // and released on keyup / mouseup through the action router. A button pressed or released while
@@ -28,7 +26,6 @@ const LEGACY_KEYS = Object.freeze([
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'Space', 'ShiftLeft', 'ShiftRight',
 ]);
-const DOUBLE_TAP_MS = 300;
 const KEY_RISE_RATE = 7;
 const KEY_FALL_RATE = 14;
 const STICK_FULL_PIXELS = 260;
@@ -40,8 +37,6 @@ const DRAG_RADIUS_FRACTION = 0.22;
 const DRAG_DEADZONE = 0.05;
 const CLICK_MAX_TRAVEL = 6;
 const CLICK_MAX_MS = 350;
-const WHEEL_THROTTLE_STEP = 0.05;
-const WHEEL_CHAIN_MS = 450;
 const LOCK_RETRY_MS = 1200;
 /** Right-drag free look: pixels (as a fraction of the shorter screen side) for full deflection. */
 const LOOK_FULL_FRACTION = 0.35;
@@ -56,15 +51,14 @@ const NAVIGATION_BUTTONS = new Set([3, 4]);
 /**
  * ctx: the game context. bindings: binding store. router: action router. canPress(actionId,
  * source): the input manager's gate (photo-mode subset, listening, calibration). capture: the
- * bind-by-listening session (offerKey / offerMouseButton). getMode(): 'classic' | 'sim'.
- * getCraft(): active craft id.
+ * bind-by-listening session (offerKey / offerMouseButton). getCraft(): active craft id.
+ * markActivity(): wakes the HUD.
  */
-export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, getMode, getCraft }) {
-  const { renderer, state, settings, bus, input } = ctx;
+export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, getCraft, markActivity }) {
+  const { renderer, state, settings, bus } = ctx;
   const canvas = renderer.domElement;
 
   const heldKeys = new Set();
-  const lastTapTime = new Map();
   /** Keyboard spring axes after v1's ease in / out, by target. */
   const keyboardAxes = { pitch: 0, roll: 0, yaw: 0, lookX: 0, lookY: 0, brakeL: 0, brakeR: 0 };
   const stick = { x: 0, y: 0, restSeconds: 0 };
@@ -91,7 +85,6 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
   /** Button -> time until which its browser defaults are cancelled (Infinity while held). */
   const swallowedButtons = new Map();
   let pendingWheelNotches = 0;
-  let lastWheelTime = -Infinity;
   let lockRetryAfter = 0;
   let lockEverEngaged = false;
   let lockNoticeShown = false;
@@ -107,10 +100,8 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
     lookY: 0,
     brakeL: 0,
     brakeR: 0,
-    throttleDelta: 0,
     rates: {},
     wheelNotches: 0,
-    fineControl: false,
     active: { pitch: false, roll: false, yaw: false, look: false, mouse: false },
   };
 
@@ -139,11 +130,11 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
   }
 
   /**
-   * Action ids a key press triggers in a mode. A Shift reference wins while Shift is held;
-   * references without a Shift preference answer both.
+   * Action ids a key press triggers. A Shift reference wins while Shift is held; references without
+   * a Shift preference answer both.
    */
-  function actionsForKey(code, shiftHeld, mode) {
-    const entries = (currentIndex().actionsByCode.get(code) ?? []).filter((entry) => !entry.ref.mode || entry.ref.mode === mode);
+  function actionsForKey(code, shiftHeld) {
+    const entries = currentIndex().actionsByCode.get(code) ?? [];
     if (shiftHeld) {
       const exact = entries.filter((entry) => entry.ref.shift === true);
       const chosen = exact.length > 0 ? exact : entries.filter((entry) => entry.ref.shift === undefined);
@@ -153,10 +144,6 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
   }
 
   // ---- Helpers ---------------------------------------------------------------------
-  function markActivity() {
-    input.lastActivity = performance.now();
-  }
-
   function isTypingTarget(target) {
     if (!target || target === document.body || target === document.documentElement) return false;
     if (target.isContentEditable) return true;
@@ -238,8 +225,7 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
       event.preventDefault();
       return;
     }
-    const mode = getMode();
-    const actionIds = actionsForKey(code, shiftHeld, mode);
+    const actionIds = actionsForKey(code, shiftHeld);
     if (!currentIndex().tracked.has(code) && actionIds.length === 0) return;
     if ((code === 'Space' || code === 'Enter' || code === 'NumpadEnter') && isActivatableTarget(event.target)) return;
     event.preventDefault();
@@ -252,7 +238,6 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
       pressed.push(actionId);
     }
     if (pressed.length > 0) keyActions.set(code, pressed);
-    if (!state.photoMode && mode === 'classic') detectDoubleTap(code, event.timeStamp);
   }
 
   function onKeyUp(event) {
@@ -262,31 +247,12 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
     if (!isTypingTarget(event.target)) event.preventDefault();
   }
 
-  /** v1's double-tap barrel roll on the roll keys (the references flagged doubleTapRoll). */
-  function detectDoubleTap(code, timeStamp) {
-    let direction = 0;
-    for (const [target, refs] of currentIndex().axisRefs) {
-      if (target !== 'roll') continue;
-      for (const ref of refs) {
-        if (!ref.doubleTapRoll) continue;
-        if (ref.positive === code) direction = 1;
-        else if (ref.negative === code) direction = -1;
-      }
-    }
-    if (direction === 0) return;
-    const previous = lastTapTime.get(code) ?? -Infinity;
-    lastTapTime.set(code, timeStamp);
-    if (timeStamp - previous > DOUBLE_TAP_MS) return;
-    lastTapTime.set(code, -Infinity);
-    ctx.systems.flight?.barrelRoll?.(direction);
-  }
-
   /** True when a keydown would trigger an input action (the UI then leaves the key alone). */
   function consumesKey(event) {
     if (isFocusNavigation(event.code, event.target)) return false;
     if (capture.active) return true;
     if (event.ctrlKey || event.metaKey || event.altKey) return false;
-    return actionsForKey(event.code, event.shiftKey || isShiftHeld(), getMode()).length > 0;
+    return actionsForKey(event.code, event.shiftKey || isShiftHeld()).length > 0;
   }
 
   // ---- Pointer: lock, virtual stick and drag steering -------------------------------------
@@ -320,7 +286,6 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
   function onLockChange() {
     const locked = isPointerLocked();
     if (locked) lockEverEngaged = true;
-    input.mouseActive = locked;
     stick.x = 0;
     stick.y = 0;
     stick.restSeconds = 0;
@@ -364,9 +329,8 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
     }
     if (mouseActions.has(button)) return;
     const pressed = [];
-    const mode = getMode();
     for (const [actionId, refs] of bindings.getEffective('mouse', getCraft()).actions) {
-      if (!refs.some((ref) => ref.type === 'mouseButton' && ref.button === button && (!ref.mode || ref.mode === mode))) continue;
+      if (!refs.some((ref) => ref.type === 'mouseButton' && ref.button === button)) continue;
       if (!canPress(actionId, 'mouse')) continue;
       router.press(actionId, `mouse:${button}`, 'mouse', 'mouse');
       pressed.push(actionId);
@@ -579,15 +543,7 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
       photoLook.zoom += notches;
       return;
     }
-    if (getMode() === 'sim') {
-      pendingWheelNotches += notches;
-      return;
-    }
-    const now = performance.now();
-    const chained = input.throttleTarget !== null && now - lastWheelTime < WHEEL_CHAIN_MS;
-    const base = chained ? input.throttleTarget : state.player.throttle;
-    lastWheelTime = now;
-    input.throttleTarget = clamp(base - notches * WHEEL_THROTTLE_STEP, 0, 1);
+    pendingWheelNotches += notches;
   }
 
   // ---- Listeners ----------------------------------------------------------------------------
@@ -619,23 +575,20 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
 
   /**
    * Reads the keyboard and mouse for this frame. Returns the frame contributions (keyboard axes
-   * after the ease, the mouse stick after v1's response curve, free look, rate axes, the CLASSIC
-   * throttle direction and wheel notches for SIM).
+   * after the ease, the mouse stick after v1's response curve, free look, rate axes and wheel
+   * notches).
    */
-  function update(seconds, mode) {
+  function update(seconds) {
     const photoMode = state.photoMode;
     const invert = settings.get('invertPitch') ? -1 : 1;
     const { axisRefs } = currentIndex();
     const springTargets = { pitch: 0, roll: 0, yaw: 0, lookX: 0, lookY: 0, brakeL: 0, brakeR: 0 };
     frame.rates = {};
-    frame.throttleDelta = 0;
     for (const [target, refs] of axisRefs) {
       for (const ref of refs) {
-        if (ref.mode && ref.mode !== mode) continue;
         const direction = keyAxis(ref.positive, ref.negative);
         if (ref.rate) {
           frame.rates[target] = (frame.rates[target] ?? 0) + direction * ref.rate;
-          if (target === 'throttle') frame.throttleDelta += direction;
         } else if (target in springTargets) {
           springTargets[target] += direction;
         }
@@ -646,10 +599,9 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
       if (target === 'pitch') wanted *= invert;
       keyboardAxes[target] = rampAxis(keyboardAxes[target], wanted, seconds);
     }
-    frame.throttleDelta = photoMode ? 0 : clamp(frame.throttleDelta, -1, 1);
     if (photoMode) frame.rates = {};
 
-    const freeStick = mode === 'sim' && isPointerLocked();
+    const freeStick = isPointerLocked();
     if (drag.active && !photoMode && !isPointerLocked()) updateDragStick();
     else if (!freeStick) relaxStick(seconds);
     frame.stickRoll = photoMode ? 0 : shapeResponse(stick.x);
@@ -668,13 +620,11 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
     frame.brakeR = keyboardAxes.brakeR;
     frame.wheelNotches = photoMode ? 0 : pendingWheelNotches;
     pendingWheelNotches = 0;
-    frame.fineControl = !photoMode && isShiftHeld();
     frame.active.pitch = keyboardAxes.pitch !== 0;
     frame.active.roll = keyboardAxes.roll !== 0;
     frame.active.yaw = keyboardAxes.yaw !== 0;
     frame.active.mouse = frame.stickRoll !== 0 || frame.stickPitch !== 0;
     frame.active.look = look.active;
-    input.mouseActive = isPointerLocked();
     if (heldKeys.size > 0 || drag.active || look.active) markActivity();
     return frame;
   }
@@ -706,9 +656,9 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
     },
 
     /**
-     * The mouse virtual stick, x right / y down in -1..1 (a disc). mode 'spring' (CLASSIC and the
-     * drag fallback: returns to centre) or 'free' (SIM with the pointer locked: the stick stays
-     * where it is put, so the UI can draw a virtual cursor at that offset from the screen centre).
+     * The mouse virtual stick, x right / y down in -1..1 (a disc). mode 'spring' (the drag
+     * fallback: returns to centre) or 'free' (the pointer locked: the stick stays where it is put,
+     * so the UI can draw a virtual cursor at that offset from the screen centre).
      * fullDeflectionPixels is the mouse travel for full deflection at the current sensitivity: the
      * virtual cursor sits at (x, y) * fullDeflectionPixels from the centre.
      */
@@ -719,12 +669,12 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
         y: stick.y,
         locked,
         dragging: drag.active,
-        mode: getMode() === 'sim' && locked ? 'free' : 'spring',
+        mode: locked ? 'free' : 'spring',
         fullDeflectionPixels: STICK_FULL_PIXELS / clamp(settings.get('mouseSensitivity'), 0.2, 3),
       };
     },
 
-    /** Centres the mouse virtual stick (SIM recenter). */
+    /** Centres the mouse virtual stick (recenter). */
     centerStick() {
       stick.x = 0;
       stick.y = 0;

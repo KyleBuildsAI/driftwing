@@ -112,8 +112,6 @@
       <symbol id="dw-i-moon" viewBox="0 0 24 24"><path d="M18.8 14.6A7.4 7.4 0 0 1 9.4 5.2a7.4 7.4 0 1 0 9.4 9.4z"/></symbol>
       <symbol id="dw-i-autopilot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path fill="currentColor" stroke="none" d="M12 6.4l2.3 5.6-2.3 5.6-2.3-5.6z"/></symbol>
       <symbol id="dw-i-ring" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2"/></symbol>
-      <symbol id="dw-i-boost" viewBox="0 0 24 24"><path d="M5.5 6.5l5.5 5.5-5.5 5.5M12 6.5l5.5 5.5-5.5 5.5"/></symbol>
-      <symbol id="dw-i-roll" viewBox="0 0 24 24"><path d="M18.4 13.2a6.6 6.6 0 1 1-1.9-5.9"/><path d="M17.3 3.6v4.3H13"/></symbol>
       <symbol id="dw-i-menu" viewBox="0 0 24 24"><path d="M5 8h14M5 12h14M5 16h14"/></symbol>
       <symbol id="dw-i-diamond" viewBox="0 0 24 24"><path d="M12 3.5l6 8.5-6 8.5-6-8.5z"/></symbol>
       <symbol id="dw-i-chevron" viewBox="0 0 24 24"><path fill="currentColor" fill-opacity="0.28" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M4.5 4.2L21 12 4.5 19.8 8.4 12z"/></symbol>
@@ -148,9 +146,8 @@
       <div class="dw-compass-readout"><span class="dw-heading" id="dw-heading">000</span><span class="dw-heading-deg">&deg;</span><span class="dw-heading-name" id="dw-heading-name">N</span></div>
     </div>
 
-    <!-- CLASSIC | SIM pill and craft picker (filled by modePill.js and craftPicker.js) -->
+    <!-- Craft picker (filled by craftPicker.js) -->
     <div class="dw-modebar dw-fade" id="dw-modebar">
-      <button type="button" class="glass" id="dw-mode-pill" data-tip-pos="bottom"></button>
       <div class="glass" id="dw-craft-picker"></div>
     </div>
 
@@ -182,7 +179,7 @@
     </div>
 
     <div class="dw-topbar glass dw-fade" id="dw-topbar">
-      <button type="button" class="dw-icon-button" data-action="open-command" id="dw-command-button" aria-label="Ask WREN" data-tip="Ask WREN (C)" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-ask"/></svg></button>
+      <button type="button" class="dw-icon-button" data-action="open-command" id="dw-command-button" aria-label="Ask WREN" data-tip="Ask WREN (Enter)" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-ask"/></svg></button>
       <button type="button" class="dw-icon-button" data-action="toggle-journal" id="dw-journal-button" aria-label="Journal" data-tip="Journal (J)" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-journal"/></svg></button>
       <button type="button" class="dw-icon-button" data-action="toggle-settings" id="dw-settings-button" aria-label="Settings" data-tip="Settings" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-settings"/></svg></button>
       <button type="button" class="dw-icon-button" data-action="toggle-help" id="dw-help-button" aria-label="Help" data-tip="Help (H)" data-tip-pos="bottom-left"><svg class="dw-icon"><use href="#dw-i-help"/></svg></button>
@@ -203,10 +200,6 @@
           <div class="dw-throttle-track"><div class="dw-throttle-fill" id="dw-throttle-fill"></div></div>
           <span class="dw-throttle-value" id="dw-throttle-value">55%</span>
         </div>
-      </div>
-      <div class="dw-boost" id="dw-boost" title="Boost (Space)">
-        <svg class="dw-boost-ring" viewBox="0 0 40 40"><circle class="dw-boost-track" cx="20" cy="20" r="16"/><circle class="dw-boost-progress" id="dw-boost-progress" cx="20" cy="20" r="16"/></svg>
-        <svg class="dw-icon dw-boost-icon"><use href="#dw-i-boost"/></svg>
       </div>
       <div class="dw-flight-divider"></div>
       <div class="dw-readout dw-readout-alt">
@@ -278,7 +271,6 @@
           <button type="button" class="dw-quick" id="dw-quick-autopilot" data-command="autopilot on">Autopilot on</button>
           <button type="button" class="dw-quick" data-command="climb">Climb</button>
           <button type="button" class="dw-quick" data-command="descend">Descend</button>
-          <button type="button" class="dw-quick" data-command="barrel roll">Barrel roll</button>
           <button type="button" class="dw-quick" id="dw-quick-rings" data-command="start a ring course">Ring course</button>
         </div>
       </div>
@@ -336,7 +328,7 @@
             <div class="dw-row"><label for="dw-set-assists" id="dw-assist-label">Glider assists</label><span class="dw-row-value" data-value-for="assists.@craft">100%</span></div>
             <input class="dw-range" id="dw-set-assists" type="range" min="0" max="1" step="0.05" data-setting="assists.@craft" data-kind="percent" aria-describedby="dw-assist-tip">
             <div class="dw-tooltip" role="tooltip" id="dw-assist-tip">No assists active</div>
-            <p class="dw-note">0% is raw physics. 50% keeps coordination, trim and a stall warning. 100% adds the stall and G limiters, auto-level and hover holds. Each craft remembers its own setting; assists shape SIM flight.</p>
+            <p class="dw-note">0% is raw physics. 50% keeps coordination, trim and a stall warning. 100% adds the stall and G limiters, auto-level and hover holds. Each craft remembers its own setting.</p>
           </div>
           <div class="dw-row"><span>Start on the ground</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Start on the ground" data-setting="startOnGround"><span></span></button></div>
         </div>
@@ -367,7 +359,7 @@
             <div class="dw-row"><label for="dw-set-fpv-expo">Expo</label><span class="dw-row-value" data-value-for="fpv.expo">0.30</span></div>
             <input class="dw-range" id="dw-set-fpv-expo" type="range" min="0" max="1" step="0.05" data-setting="fpv.expo" data-kind="decimal">
           </div>
-          <p class="dw-note">These apply to the FPV drone: the camera tilt in every mode, and in SIM the rate curve (the rotation rate at full stick, and how soft the stick is around centre).</p>
+          <p class="dw-note">These apply to the FPV drone: the camera tilt, and the rate curve (the rotation rate at full stick, and how soft the stick is around centre).</p>
         </div>
       </div>
 
@@ -487,14 +479,6 @@
             <div class="dw-row"><label for="dw-set-detent">Afterburner detent</label><span class="dw-row-value" data-value-for="afterburnerDetent">95%</span></div>
             <input class="dw-range" id="dw-set-detent" type="range" min="0.8" max="1" step="0.01" data-setting="afterburnerDetent" data-kind="percent">
           </div>
-          <div class="dw-field">
-            <div class="dw-row"><span>When a HOTAS connects in CLASSIC</span></div>
-            <div class="dw-segmented dw-segmented-3" role="radiogroup" aria-label="When a HOTAS connects in CLASSIC" data-setting="hotasPrompt">
-              <button type="button" role="radio" data-value="ask">Ask</button>
-              <button type="button" role="radio" data-value="always">Switch to SIM</button>
-              <button type="button" role="radio" data-value="never">Stay</button>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -559,16 +543,14 @@
       <div class="dw-group">
         <h3 class="dw-micro">Keyboard</h3>
         <dl class="dw-keys" id="dw-help-flight"></dl>
-        <p class="dw-note dw-mode-classic">Let go and the wings level by themselves; the nose follows a moment later.</p>
-        <p class="dw-note dw-mode-sim">SIM flies the real flight model: nothing levels itself unless assists are on (Settings, Flight). Keys follow your bindings in the controls panel.</p>
+        <p class="dw-note">Nothing levels itself unless assists are on (Settings, Flight). Keys follow your bindings in the controls panel.</p>
       </div>
       <div class="dw-group">
         <h3 class="dw-micro">Mouse</h3>
         <dl class="dw-keys">
-          <dt><span class="dw-key-word">Click</span></dt><dd class="dw-mode-classic">Capture the mouse to steer: sideways banks, up and down pitches. <kbd>Esc</kbd> releases it</dd>
-          <dd class="dw-mode-sim">Capture the mouse as a virtual stick that stays where you leave it: its offset from the centre is the deflection. <kbd>Esc</kbd> releases it</dd>
+          <dt><span class="dw-key-word">Click</span></dt><dd>Capture the mouse as a virtual stick that stays where you leave it: its offset from the centre is the deflection. <kbd>Esc</kbd> releases it</dd>
           <dt><span class="dw-key-word">Drag</span></dt><dd>Steer without capturing the pointer</dd>
-          <dt><span class="dw-key-word">Wheel</span></dt><dd><span class="dw-mode-classic">Throttle (scroll up for more)</span><span class="dw-mode-sim">Throttle lever in 5% steps (scroll up for more)</span></dd>
+          <dt><span class="dw-key-word">Wheel</span></dt><dd>Throttle lever in 5% steps (scroll up for more)</dd>
           <dt><span class="dw-key-word">Right-drag</span></dt><dd>Free look; let go to look ahead again</dd>
           <dt><span class="dw-key-word">Middle click</span></dt><dd>Recenter the view</dd>
         </dl>
@@ -578,7 +560,7 @@
         <dl class="dw-keys">
           <dt><span class="dw-key-word">Left side</span></dt><dd>Drag anywhere to bank and pitch</dd>
           <dt><span class="dw-key-word">Right slider</span></dt><dd>Throttle</dd>
-          <dt><span class="dw-key-word">Buttons</span></dt><dd><span class="dw-mode-classic">Boost, barrel rolls, WREN and the menu</span><span class="dw-mode-sim">WREN and the menu (boost and barrel rolls are CLASSIC only)</span></dd>
+          <dt><span class="dw-key-word">Buttons</span></dt><dd>WREN and the menu</dd>
         </dl>
       </div>
       <div class="dw-group">
@@ -608,7 +590,6 @@
           <li>Climb / descend</li>
           <li>Make it night</li>
           <li>Start a ring course</li>
-          <li>Barrel roll left</li>
           <li>Photo mode</li>
         </ul>
       </div>
@@ -645,12 +626,6 @@
     </div>
     <div class="dw-action-cluster" id="dw-action-cluster">
       <button type="button" class="dw-touch-button glass dw-touch-menu" data-action="open-menu" aria-label="Menu"><svg class="dw-icon"><use href="#dw-i-menu"/></svg></button>
-      <button type="button" class="dw-touch-button glass dw-roll-left" id="dw-roll-left" aria-label="Barrel roll left"><svg class="dw-icon dw-mirror"><use href="#dw-i-roll"/></svg></button>
-      <button type="button" class="dw-touch-button glass dw-roll-right" id="dw-roll-right" aria-label="Barrel roll right"><svg class="dw-icon"><use href="#dw-i-roll"/></svg></button>
-      <button type="button" class="dw-touch-button glass dw-touch-boost" id="dw-touch-boost" aria-label="Boost">
-        <svg class="dw-boost-ring" viewBox="0 0 40 40"><circle class="dw-boost-track" cx="20" cy="20" r="17"/><circle class="dw-boost-progress" id="dw-touch-boost-progress" cx="20" cy="20" r="17"/></svg>
-        <svg class="dw-icon"><use href="#dw-i-boost"/></svg>
-      </button>
     </div>
   </div>
 

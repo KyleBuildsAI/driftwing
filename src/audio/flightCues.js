@@ -431,16 +431,16 @@ export function createFlightCues(kit) {
 
   return {
     /**
-     * frame fields used: time, realTime, classic, flight, profile, varioSetting ('auto'|'on'|'off').
+     * frame fields used: time, realTime, flight, profile, paused, varioSetting ('on'|'off').
      * Called at the parameter interval.
      */
     update(frame) {
-      const { time, realTime, classic, flight, profile } = frame;
-      const warning = !classic && profile.stallHorn && flight.stall?.warning === true && flight.onGround !== true;
+      const { time, realTime, flight, profile } = frame;
+      const warning = profile.stallHorn && flight.stall?.warning === true && flight.onGround !== true;
       setHorn(warning, profile.stallHornStyle === 'beep' ? 'beep' : 'horn', time);
       readout.horn = warning;
 
-      const varioAllowed = profile.vario && frame.varioSetting !== 'off' && (!classic || frame.varioSetting === 'on');
+      const varioAllowed = profile.vario && frame.varioSetting !== 'off';
       const climb = Number.isFinite(flight.vario) ? flight.vario : Number.isFinite(flight.verticalSpeed) ? flight.verticalSpeed : 0;
       if (varioAllowed && flight.onGround !== true && !frame.paused) updateVario(time, climb, profile);
       else stopVario(time);

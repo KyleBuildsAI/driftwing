@@ -11,7 +11,7 @@ import { createCommandChips } from './commandChips.js';
  * COPILOT "WREN".
  * - Copilot: the default local brain, a tolerant keyword grammar that turns a
  *   transcript into { speech, action } using only the flight-state snapshot. The v2
- *   aircraft grammar (craft, CLASSIC | SIM, assists, views, chute, engine, relaunch,
+ *   aircraft grammar (craft, assists, views, chute, engine, relaunch,
  *   calibration, airspeed, landings) lives in grammar.js.
  * - RemoteCopilot: POSTs { flightState, transcript } to an HTTP brain with an
  *   800 ms budget, validates the reply, and falls back to the local grammar
@@ -25,7 +25,7 @@ import { createCommandChips } from './commandChips.js';
 export class Copilot {
   static ACTION_TYPES = Object.freeze([
     'waypoint', 'clearWaypoint', 'autopilot', 'time', 'ringCourse', 'cancelRingCourse',
-    'barrelRoll', 'boost', 'find', 'describe', 'photoMode', 'journal', 'none',
+    'find', 'describe', 'photoMode', 'journal', 'none',
     ...FLIGHT_ACTION_TYPES,
   ]);
 
@@ -167,14 +167,6 @@ export class Copilot {
         if (present(raw.count)) {
           if (!finite(raw.count)) return null;
           action.count = clamp(Math.round(raw.count), Copilot.MIN_RINGS, Copilot.MAX_RINGS);
-        }
-        return action;
-      }
-      case 'barrelRoll': {
-        if (present(raw.direction)) {
-          const direction = typeof raw.direction === 'string' ? raw.direction.toLowerCase() : '';
-          if (direction !== 'left' && direction !== 'right') return null;
-          action.direction = direction;
         }
         return action;
       }
@@ -529,7 +521,7 @@ export class Copilot {
     // Help first, then the v2 aircraft commands, then v1's grammar unchanged.
     this.matchers = [
       flightGrammar.matchHelp, ...flightGrammar.matchers, this.matchCancelCourse, this.matchAutopilotOff, this.matchClearWaypoint,
-      this.matchPhotoMode, this.matchJournal, this.matchRingCourse, this.matchBarrelRoll, this.matchBoost,
+      this.matchPhotoMode, this.matchJournal, this.matchRingCourse,
       this.matchHome, this.matchFind, this.matchFlyToWaypoint, this.matchSetWaypoint, this.matchHeading,
       this.matchAltitude, this.matchAutopilotOn, this.matchStatus, this.matchGreeting, this.matchTime,
       this.matchThanks,
@@ -630,22 +622,6 @@ export class Copilot {
     else if (/\b(long|big|epic)\b/.test(text)) action.count = 16;
     else if (/\b(short|quick|small)\b/.test(text)) action.count = 6;
     return { speech: this.pick('ringCourse', ["Here's a course for you.", 'Rings are out.', 'Course is up. Nice and smooth.']), action };
-  }
-
-  matchBarrelRoll(text) {
-    if (!/\b(barrel ?roll|aileron roll|do a roll|roll (it|over|left|right)|do a flip|flip|loop|trick|spin)\b/.test(text)) return null;
-    const direction = /\bleft\b/.test(text) ? 'left' : /\bright\b/.test(text) ? 'right' : null;
-    const action = { type: 'barrelRoll' };
-    if (direction) action.direction = direction;
-    const speech = direction
-      ? this.pick(`roll-${direction}`, [`Rolling ${direction}. Hold on.`, `Here we go, ${direction} roll.`])
-      : this.pick('roll', ['Hold on.', 'Here we go.', 'One barrel roll, coming up.']);
-    return { speech, action };
-  }
-
-  matchBoost(text) {
-    if (!/\b(boost|speed up|faster|go fast|punch it|afterburners?|full (speed|throttle)|hit it|gun it|turbo)\b/.test(text)) return null;
-    return { speech: this.pick('boost', ['Boost!', 'Punching it.', 'Hang on, boosting.']), action: { type: 'boost' } };
   }
 
   matchHome(text) {
@@ -1438,24 +1414,6 @@ export function createCopilotSystem(ctx) {
       if (!rings?.isActive?.()) return fail("There's no ring course running.");
       rings.cancel();
       return succeed('Course cancelled.');
-    },
-    barrelRoll(action) {
-      const flight = ctx.systems.flight;
-      if (!flight?.barrelRoll) return fail("I can't roll us right now.");
-      const direction = action.direction ?? (Math.random() < 0.5 ? 'left' : 'right');
-      const rolled = flight.barrelRoll(direction === 'left' ? -1 : 1);
-      if (rolled === false) return fail("Let's finish this roll first.");
-      return succeed(`Rolling ${direction}.`);
-    },
-    boost() {
-      const flight = ctx.systems.flight;
-      if (!flight?.boost) return fail('Boost is offline.');
-      const fired = flight.boost();
-      if (fired === false) {
-        const remaining = Math.ceil(state.player.boost?.cooldown ?? 0);
-        return fail(remaining > 0 ? `Boost is recharging. About ${remaining} seconds.` : 'Boost is recharging.');
-      }
-      return succeed('Boost!');
     },
     find(action) {
       const spec = FIND_SPECS[action.target];

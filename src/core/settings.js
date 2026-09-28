@@ -1,8 +1,9 @@
 // Player settings: a versioned, validated schema persisted through core/storage (IndexedDB).
 //
 // Flat keys hold scalars; a few keys hold small objects (assists per craft, FOV per view, the audio
-// mixer, HUD preferences, default view per mode, the FPV drone's camera and rates). get/set work on whole keys; update(key, patch)
-// merges into an object key. Every change emits 'settings:changed' { key, value, settings }.
+// mixer, HUD preferences, the FPV drone's camera and rates). get/set work on whole keys;
+// update(key, patch) merges into an object key. Every change emits
+// 'settings:changed' { key, value, settings }.
 //
 // Bindings and calibration are not settings: the input system keeps them in their own storage keys
 // (driftwing-v2.input.bindings, driftwing-v2.input.calibration.<device>) so a device profile can be
@@ -10,11 +11,10 @@
 import { CONFIG } from './config.js';
 import { storage } from './storage.js';
 
-export const SETTINGS_VERSION = 3;
+export const SETTINGS_VERSION = 4;
 const STORAGE_KEY = 'driftwing-v2.settings';
 
 export const CRAFT_IDS = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv']);
-export const FLIGHT_MODES = Object.freeze(['classic', 'sim']);
 export const VIEW_IDS = Object.freeze(['chase', 'cockpit', 'wing', 'flyby']);
 export const UNIT_SYSTEMS = Object.freeze(['metric', 'aviation']);
 export const QUALITY_PREFERENCES = Object.freeze(['auto', 'minimal', 'low', 'medium', 'high', 'ultra']);
@@ -54,7 +54,6 @@ const SCHEMA = Object.freeze({
   hudAutoHide: { default: true, validate: isBoolean },
 
   // v2: flight.
-  mode: { default: 'classic', validate: oneOf(FLIGHT_MODES) },
   craft: { default: 'glider', validate: oneOf(CRAFT_IDS) },
   assists: { default: perCraft(1), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, unitRange(0, 1)])) },
   startOnGround: { default: false, validate: isBoolean },
@@ -64,11 +63,8 @@ const SCHEMA = Object.freeze({
   },
   units: { default: 'metric', validate: oneOf(UNIT_SYSTEMS) },
 
-  // v2: views and HUD.
-  views: {
-    default: Object.freeze({ classic: 'chase', sim: 'cockpit' }),
-    fields: { classic: oneOf(VIEW_IDS), sim: oneOf(VIEW_IDS) },
-  },
+  // v2: view (the camera slot the player last chose; the FPV camera is stored as 'cockpit') and HUD.
+  view: { default: 'cockpit', validate: oneOf(VIEW_IDS) },
   fov: {
     default: Object.freeze({ chase: CONFIG.CAMERA.FOV_BASE, cockpit: 74, wing: 68, flyby: 50, fpv: 120 }),
     fields: { chase: unitRange(40, 100), cockpit: unitRange(50, 110), wing: unitRange(40, 110), flyby: unitRange(20, 90), fpv: unitRange(90, 150) },
@@ -81,7 +77,6 @@ const SCHEMA = Object.freeze({
   // v2: input behaviour (bindings and calibration live in input storage keys).
   twistYaw: { default: 'auto', validate: oneOf(['auto', 'on', 'off']) },
   afterburnerDetent: { default: 0.95, validate: unitRange(0.8, 1) },
-  hotasPrompt: { default: 'ask', validate: oneOf(['ask', 'always', 'never']) },
 
   // v2: graphics and performance.
   frameTarget: { default: 'auto', validate: oneOf(FRAME_TARGETS) },
@@ -148,6 +143,17 @@ function migrate(stored) {
     // valid fields a newer build may already have written).
     if (!isPlainObject(record.fpv)) record.fpv = { ...SCHEMA.fpv.default };
     version = 3;
+  }
+  if (version < 4) {
+    // v4: V2 has no CLASSIC | SIM mode. The mode, the per-mode views and the "HOTAS connected in
+    // CLASSIC" prompt answer go (the Phase 1 import already dropped mode from imported records);
+    // the SIM view becomes the one remembered view.
+    const views = isPlainObject(record.views) ? record.views : null;
+    if (views && VIEW_IDS.includes(views.sim)) record.view = views.sim;
+    delete record.mode;
+    delete record.views;
+    delete record.hotasPrompt;
+    version = 4;
   }
   record.version = version;
   return record;

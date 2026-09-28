@@ -2,14 +2,13 @@
 //
 // A craft's audioProfile is { engine: family, ...parameters }. resolveAudioProfile() fills every
 // parameter the craft leaves out from its family's defaults, so a profile can be as small as
-// { engine: 'jet' }. Unknown families fall back to 'glider' (v1's sound).
+// { engine: 'jet' }. Unknown families fall back to 'glider' (no engine voice).
 //
 // Parameters every family understands:
-//   airflowSpeed         m/s   SIM airspeed at which the airflow beds reach full rush
-//   classicAirflowSpeed  m/s   the same for CLASSIC (v1: the arcade top speed, 135)
+//   airflowSpeed         m/s   airspeed at which the airflow beds reach full rush
 //   interiorCutoff       Hz    cockpit-view low-pass for a closed cockpit; 0 or null = open (no filter)
 //   spatial              bool  false keeps the engine centred and unpositioned in external views
-//   stallHorn            bool  sound the stall horn on state.flight.stall.warning (SIM)
+//   stallHorn            bool  sound the stall horn on state.flight.stall.warning
 //   stallAoa             deg   AoA where buffet peaks when the model reports no stall.buffet; null = off
 //   stallHornStyle       'horn' (continuous reed horn, light aircraft) | 'beep' (pulsed tone, jets)
 //   touchdown            'wheels' (thump and tire chirp) | 'skids' (thump and scrape) | 'body' (soft thump)
@@ -19,7 +18,6 @@
 //   varioSink            m/s   vario sink tone below this (negative) climb rate
 //   motorPitch           0.5..2 pitch of the gear and flap motors (small craft whine higher)
 //   level                0..2  overall engine loudness trim
-import { CONFIG } from '../../core/config.js';
 import { createDroneSynth } from './drone.js';
 import { createGliderSynth } from './glider.js';
 import { createHeliSynth } from './heli.js';
@@ -29,7 +27,6 @@ import { createWingsuitSynth } from './wingsuit.js';
 
 const COMMON_DEFAULTS = Object.freeze({
   airflowSpeed: 60,
-  classicAirflowSpeed: CONFIG.SPEED.MAX,
   interiorCutoff: 1000,
   spatial: true,
   stallHorn: false,
@@ -60,7 +57,7 @@ export const ENGINE_FAMILIES = Object.freeze({
     // spoolUp / spoolDown (time constants, s), afterburnerRoar (0..2 roar level).
     defaults: {
       whineHz: 3100, rumbleHz: 46, idleSpool: 0.62, spoolUp: 1.1, spoolDown: 1.8, afterburnerRoar: 1,
-      airflowSpeed: 280, classicAirflowSpeed: 300, interiorCutoff: 700, stallHorn: true, stallAoa: 25,
+      airflowSpeed: 280, interiorCutoff: 700, stallHorn: true, stallAoa: 25,
       stallHornStyle: 'beep', motorPitch: 0.8,
     },
   },

@@ -3,8 +3,8 @@ import { craftCapabilities } from './flightState.js';
 import { formatSinkRate } from './grammar.js';
 
 /**
- * WREN's v2 chatter: short, rare lines about landings, soft crashes, mode and craft changes, and a
- * lift hint for gliders in SIM (the nearest working thermal, or ridge lift we are already in). All of
+ * WREN's v2 chatter: short, rare lines about landings, soft crashes and craft changes, and a lift
+ * hint for gliders (the nearest working thermal, or ridge lift we are already in). All of
  * it goes through the v1 chatter gate (offerChatter), so settings.copilotChatter, photo mode and the
  * v1 pacing (one unsolicited line per 30 s, quiet 10 s after any line) still hold. Lines that only
  * make sense right away carry a short time-to-live and are dropped if the gate stays closed.
@@ -28,12 +28,12 @@ const THERMAL_MAX_DISTANCE = 3200;
 const RIDGE_MIN_RISE = 0.8;
 const RIDGE_SECONDS = 6;
 const RIDGE_MAX_AGL = 450;
-/** A mode or craft change the copilot made itself is not narrated a second time. */
+/** A craft change the copilot made itself is not narrated a second time. */
 const OWN_CHANGE_WINDOW = 3;
 
 export function createFlightChatter(ctx, { offerChatter, pick }) {
   const { bus, state, settings } = ctx;
-  const ownChanges = { mode: -Infinity, craft: -Infinity };
+  const ownChanges = { craft: -Infinity };
   const lift = { timer: 0, sinkSeconds: 0, riseSeconds: 0, lastHintAt: -Infinity };
   let landingCount = 0;
   let lastCrashLineAt = -Infinity;
@@ -88,15 +88,7 @@ export function createFlightChatter(ctx, { offerChatter, pick }) {
     ]), 4, CRASH_TTL);
   });
 
-  // ---- Mode and craft changes made elsewhere (pill, picker, keys, HOTAS) ------------------------------
-  bus.onTyped('modeChanged', ({ mode }) => {
-    if (recentlyChangedByCopilot('mode')) return;
-    const line = mode === 'sim'
-      ? pick('modeSimChatter', ['SIM mode. Real physics now; watch the airspeed.', 'SIM it is. Fly her gently until she settles.'])
-      : pick('modeClassicChatter', ['CLASSIC mode. Easy flying again.', 'Back to CLASSIC. Relax.']);
-    offerChatter(line, 2, CHANGE_TTL);
-  });
-
+  // ---- Craft changes made elsewhere (picker, keys, HOTAS) ------------------------------------------------
   bus.onTyped('craftChanged', ({ craft }) => {
     lift.sinkSeconds = 0;
     lift.riseSeconds = 0;
@@ -104,10 +96,10 @@ export function createFlightChatter(ctx, { offerChatter, pick }) {
     offerChatter(pick('craftChatter', [`The ${craftName(craft)}. Let's see what she can do.`, `${craftName(craft).charAt(0).toUpperCase()}${craftName(craft).slice(1)} ready.`]), 2, CHANGE_TTL);
   });
 
-  // ---- Lift hint for gliders in SIM ---------------------------------------------------------------------
-  function gliderInSim() {
+  // ---- Lift hint for gliders ----------------------------------------------------------------------------
+  function gliderFlying() {
     const flight = ctx.systems.flight;
-    if (flight?.getMode?.() !== 'sim' || flight.isTowing?.()) return false;
+    if (!flight || flight.isTowing?.()) return false;
     const module = flight.getCraftModule?.();
     return Boolean(module) && !craftCapabilities(module).engine && module.simProfile?.model === 'fixedWing';
   }
@@ -115,7 +107,7 @@ export function createFlightChatter(ctx, { offerChatter, pick }) {
   function checkLift(dt) {
     lift.timer -= dt;
     const telemetry = state.flight;
-    if (!gliderInSim() || telemetry.onGround || telemetry.crash?.active) {
+    if (!gliderFlying() || telemetry.onGround || telemetry.crash?.active) {
       lift.sinkSeconds = 0;
       lift.riseSeconds = 0;
       return;

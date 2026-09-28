@@ -2,7 +2,7 @@
 // sets and 'input:action' bus events.
 //
 // Several inputs can hold the same action at once (a key and a stick button, say). Each input is a
-// "holder" with a stable key ('key:KeyG', '044f-b10a|gearToggle|0', 'touch:boost', ...). The action
+// "holder" with a stable key ('key:KeyG', '044f-b10a|gearToggle|0', 'mouse:1', ...). The action
 // is pressed when its first holder presses and released when its last holder lets go, so
 // 'input:action' always alternates press / release per action id and hold-type actions (airbrake,
 // copilotPTT) stay held for exactly as long as any input holds them.
@@ -12,11 +12,8 @@
 
 import { ACTIONS } from './controlState.js';
 
-/**
- * Creates the router. bus: EventBus; controls: the ControlState it writes; onPress(id, source)
- * runs after each press is emitted (the input manager uses it for the CLASSIC boost latch).
- */
-export function createActionRouter({ bus, controls, onPress = null }) {
+/** Creates the router. bus: EventBus; controls: the ControlState it writes. */
+export function createActionRouter({ bus, controls }) {
   /** actionId -> Map(holderKey -> { source, device }) */
   const holders = new Map();
 
@@ -42,7 +39,6 @@ export function createActionRouter({ bus, controls, onPress = null }) {
     controls.actions.add(actionId);
     controls.held.add(actionId);
     bus.emit('input:action', { id: actionId, phase: 'press', source, device });
-    if (onPress) onPress(actionId, source, device);
     return true;
   }
 

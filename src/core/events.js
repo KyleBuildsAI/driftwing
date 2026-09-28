@@ -21,8 +21,6 @@ export const LANDING_GRADES = Object.freeze(['butter', 'smooth', 'firm', 'hard']
  * an object { type, optional: true }.
  */
 export const EVENT_TYPES = Object.freeze({
-  /** Flight model switched between CLASSIC and SIM. */
-  modeChanged: { mode: ['classic', 'sim'], previous: ['classic', 'sim'] },
   /** A different craft is now flying. */
   craftChanged: { craft: 'string', previous: 'string' },
   /** Touchdown graded by sink rate (m/s, positive down) and side load. */
@@ -35,7 +33,7 @@ export const EVENT_TYPES = Object.freeze({
   windSourceAdded: { id: 'string', kind: 'string', position: 'vector3', radius: 'number' },
   windSourceRemoved: { id: 'string', kind: 'string' },
   /** Camera view changed. */
-  viewChanged: { view: 'string', craft: 'string', mode: ['classic', 'sim'] },
+  viewChanged: { view: 'string', craft: 'string' },
   /** An input device connected or disconnected (identified by vendor/product, never slot). */
   deviceConnected: { deviceKey: 'string', kind: 'string', name: 'string' },
   deviceDisconnected: { deviceKey: 'string', kind: 'string', name: 'string' },

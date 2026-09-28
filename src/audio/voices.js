@@ -1,6 +1,5 @@
 // One-shot voices from v1, unchanged in sound: bell-like pentatonic chimes (sine partials into the
-// convolution reverb), the boost whoosh (noise sweep plus a low thump), bird wing flutter, UI blips
-// and the camera shutter. Each voice picks a mixer bus; at the default mix every bus is unity, so
+// convolution reverb), bird wing flutter, UI blips and the camera shutter. Each voice picks a mixer bus; at the default mix every bus is unity, so
 // the levels are v1's. The voice pool caps simultaneous one-shots (sim cues share it).
 import { clamp } from '../core/util.js';
 
@@ -104,50 +103,6 @@ export function createVoices(kit) {
       return false;
     }
     track(nodes, longestOscillator);
-    return true;
-  }
-
-  function playWhoosh(intensity, duration, busName = 'environment') {
-    if (!canStart()) return false;
-    const level = clamp(Number.isFinite(intensity) ? intensity : 1, 0.05, 1.5);
-    const length = clamp(Number.isFinite(duration) ? duration : 1.7, 0.4, 4);
-    const start = context.currentTime + 0.01;
-    const source = context.createBufferSource();
-    source.buffer = noise;
-    const filter = context.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.Q.value = 0.9;
-    filter.frequency.setValueAtTime(240, start);
-    filter.frequency.exponentialRampToValueAtTime(2600, start + length * 0.32);
-    filter.frequency.exponentialRampToValueAtTime(520, start + length);
-    const gain = context.createGain();
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.4 * level, start + length * 0.25);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + length);
-    const panner = context.createStereoPanner();
-    panner.pan.setValueAtTime(-0.45, start);
-    panner.pan.linearRampToValueAtTime(0.45, start + length);
-    source.connect(filter);
-    filter.connect(gain);
-    gain.connect(panner);
-    const thump = context.createOscillator();
-    thump.type = 'sine';
-    thump.frequency.setValueAtTime(105, start);
-    thump.frequency.exponentialRampToValueAtTime(38, start + 0.55);
-    const thumpGain = context.createGain();
-    thumpGain.gain.setValueAtTime(0, start);
-    thumpGain.gain.linearRampToValueAtTime(0.28 * level, start + 0.015);
-    thumpGain.gain.exponentialRampToValueAtTime(0.0001, start + 0.6);
-    thump.connect(thumpGain);
-    thumpGain.connect(mixer.input(busName));
-    const nodes = [source, filter, gain, panner, thump, thumpGain];
-    route(panner, busName, 0.3, nodes);
-    const offset = Math.random() * Math.max(0, noise.duration - length - 0.1);
-    source.start(start, offset);
-    source.stop(start + length + 0.05);
-    thump.start(start);
-    thump.stop(start + 0.65);
-    track(nodes, source);
     return true;
   }
 
@@ -261,7 +216,6 @@ export function createVoices(kit) {
     track,
     route,
     playChime,
-    playWhoosh,
     playFlutter,
     playBlip,
     playShutter,

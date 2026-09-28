@@ -1,97 +1,13 @@
 // GLIDER: the v1 motor-glider. Its mesh is the v1 model moved verbatim (15 m span, upturned
-// winglets, T-tail, bubble canopy, nose prop, nav lights and strobe); its CLASSIC tuning is v1's
-// arcade constants exactly; its SIM profile describes a 15 m class sailplane (L/D about 40,
-// min sink about 0.6 m/s, stall about 65 km/h, Vne about 270 km/h) with spoilers and water ballast.
+// winglets, T-tail, bubble canopy, nose prop, nav lights and strobe); its flight profile describes a
+// 15 m class sailplane (L/D about 40, min sink about 0.6 m/s, stall about 65 km/h, Vne about
+// 270 km/h) with spoilers and water ballast.
 import * as THREE from 'three/webgpu';
-import { CONFIG } from '../core/config.js';
 import { DEG } from '../core/util.js';
 import {
   PALETTE, createMeshBuilder, profileSection, piecewise, mirrorPoint, getCraftMaterials, addSolid, addPivot,
   createPropDisc, createNavLights, disposeCraftMesh,
 } from './kit.js';
-
-// ============================================================================================
-// CLASSIC: v1's arcade constants, unchanged (ArcadeModel reads them by these names).
-// ============================================================================================
-const arcadeProfile = Object.freeze({
-  SPEED: CONFIG.SPEED,
-  GRAVITY: 9.81,
-  DRAG_COEFFICIENT: 0.0011,
-  THROTTLE_SPEED_EXPONENT: 1.3, // terminal speed = MAX * throttle^1.3 -> 62 m/s at 55 %
-  THROTTLE_RATE: 0.42,
-  INDUCED_DRAG: 0.5,
-  INDUCED_MAX_EXTRA_G: 3,
-  MAX_PITCH_RATE: 70 * DEG,
-  MAX_ROLL_RATE: 130 * DEG,
-  MAX_YAW_RATE: 18 * DEG,
-  // Bank-to-turn: the roll axis commands a bank ANGLE (full input = MAX_BANK); releasing it
-  // rolls back to level in about a second. Only the canned barrel roll goes past MAX_BANK.
-  MAX_BANK: 72 * DEG,
-  BANK_GAIN: 3.4,
-  FINE_BANK_SCALE: 0.55,
-  YAW_BANK: 10 * DEG,
-  // Soft attitude limit: pitch input fades out between 50 and 78 degrees of nose elevation,
-  // so the stick alone can never loop the glider onto its back.
-  PITCH_LIMIT_START: 50 * DEG,
-  PITCH_LIMIT_RANGE: 28 * DEG,
-  TURN_GAIN: 1.6,
-  MAX_TURN_RATE: 38 * DEG,
-  BANK_NOSE_DROP: 4 * DEG,
-  BANK_SETTLE_PITCH: 4 * DEG,
-  FINE_CONTROL_SCALE: 0.45,
-  AUTO_LEVEL_DELAY: 1.2,
-  STALL_EXIT_MARGIN: 4,
-  STALL_NOSE_TARGET: -20 * DEG,
-  // Pitch authority tapers above this speed (m/s) toward SPEED.MAX.
-  HIGH_SPEED_PITCH_START: 70,
-  CUSHION_HEIGHT: 25,
-  IMPACT_WARNING_SECONDS: 2.5,
-  IMPACT_FULL_SECONDS: 0.7,
-  CUSHION_PULL_RATE: 60 * DEG,
-  GUARD_PROBE_SECONDS: Object.freeze([1.1, 2.2, 3.4]),
-  GUARD_MARGIN: 18,
-  // Slowest horizontal speed (m/s) the terrain guard assumes when probing ahead.
-  GUARD_MIN_SPEED: 20,
-  GUARD_EVADE_GRADIENT: Math.tan(28 * DEG),
-  GUARD_EVADE_BANK: 55 * DEG,
-  CEILING_BAND: 260,
-  BOOST_DURATION: 2.2,
-  BOOST_COOLDOWN: 6,
-  BARREL_ROLL_DURATION: 1.1,
-  BARREL_ROLL_RADIUS: 1.8,
-  AUTOPILOT: Object.freeze({
-    MAX_BANK: 30 * DEG,
-    MAX_PITCH: 8 * DEG,
-    TERRAIN_PITCH: 12 * DEG,
-    CLEARANCE: 120,
-    RING_CLEARANCE: 45,
-    MIN_ALTITUDE: 60,
-    CRUISE_THROTTLE: 0.55,
-    OVERRIDE_INPUT: 0.35,
-    OVERRIDE_SECONDS: 0.25,
-    TERRAIN_MAX_PITCH: 20 * DEG,
-    LOOKAHEAD_DISTANCES: Object.freeze([0, 90, 180, 300, 450, 650, 900, 1300]),
-    PATH_LOOKAHEAD_DISTANCES: Object.freeze([150, 350, 650]),
-    // Heading hold / waypoint following: calm, wide turns.
-    WAYPOINT_STEERING: Object.freeze({ BANK_PER_DEGREE: 1.2, MAX_BANK: 30 * DEG, DAMPING: 2.2, MAX_ROLL_RATE: 45 * DEG }),
-    // Ring following threads 16 m rings: firmer banking toward a point on the ring's axis
-    // (cross-track correction), altitude timed to arrive at the ring's height, and terrain
-    // sampled only up to just past the ring (the course guarantees clearance there).
-    RING_STEERING: Object.freeze({ BANK_PER_DEGREE: 2.0, MAX_BANK: 40 * DEG, DAMPING: 3.5, MAX_ROLL_RATE: 60 * DEG }),
-    RING_MAX_PITCH: 12 * DEG,
-    RING_MIN_TIME_TO_RING: 1.5,
-    RING_VERTICAL_SPEED_GAIN: 0.015,
-    RING_LOOKAHEAD_MARGIN: 150,
-    RING_TRACK_LEAD_SECONDS: 2.4,
-    RING_TRACK_LEAD_MIN: 100,
-    RING_TRACK_LEAD_MAX: 200,
-  }),
-  // Load factor shown to fx / audio: ~1/cos(bank) in a level turn plus a modest share of
-  // the pitch-rate pull, soft-capped (the arcade turn and pitch rates would read ~9 g).
-  LOAD: Object.freeze({ PULL_SHARE: 0.2, KNEE: 3.5, CAP: 5, MIN: -1, SMOOTHING: 5, MIN_BANK_COS: 0.2, BARREL_ROLL_EXTRA: 0.8 }),
-  // Visual deflection scales (rate -> surface) used by the control-surface animation.
-  SURFACE_TURN_SHARE: 0.3,
-});
 
 // ============================================================================================
 // SIM: a 15 m class sailplane for SimFixedWing (src/flight/SimFixedWing.js). Targets first, then the
@@ -376,7 +292,7 @@ const EYE = Object.freeze([0, 0.52, -0.95]);
 /**
  * Builds the glider. update(visual, dt) animates ailerons / elevator / rudder from the normalized
  * deflections (visual.aileron, elevator, rudder in -1..1), spins the prop (visual.propSpeed in
- * rad/s, or v1's throttle / boost rule when absent) and runs the nav lights from visual.time.
+ * rad/s, or v1's throttle rule when absent: on the tow) and runs the nav lights from visual.time.
  */
 function buildMesh(ctx) {
   const materials = getCraftMaterials(ctx);
@@ -440,7 +356,7 @@ function buildMesh(ctx) {
       elevator.quaternion.setFromAxisAngle(elevator.userData.axis, -visual.elevator * 18 * DEG);
       rudder.quaternion.setFromAxisAngle(rudder.userData.axis, visual.rudder * 22 * DEG);
 
-      const propSpeed = Number.isFinite(visual.propSpeed) ? visual.propSpeed : 5 + 23 * visual.throttle + (visual.boost ? 8 : 0);
+      const propSpeed = Number.isFinite(visual.propSpeed) ? visual.propSpeed : 5 + 23 * visual.throttle;
       propAngle = (propAngle + propSpeed * dt) % (Math.PI * 2);
       if (!Number.isFinite(propAngle)) propAngle = 0;
       propeller.rotation.z = propAngle;
@@ -456,12 +372,11 @@ function buildMesh(ctx) {
 }
 
 // ============================================================================================
-// ABILITY: water ballast (SIM). Opening the dump valve drains the wing tanks over about a minute,
+// ABILITY: water ballast. Opening the dump valve drains the wing tanks over about a minute,
 // lowering the wing loading (slower stall and best-glide speed); fine spray trails from the outlets.
 // ============================================================================================
 const craftAbility = Object.freeze({
   label: 'Dump water ballast',
-  modes: Object.freeze(['sim']),
   initialState: () => ({ ballast: 1, dumping: false }),
   run(flight) {
     const craftState = flight.craftState;
@@ -476,12 +391,6 @@ const craftAbility = Object.freeze({
   update(flight, dt) {
     const craftState = flight.craftState;
     if (!craftState.dumping) return;
-    // SIM only: a switch to CLASSIC closes the valves (the button boosts there, so it could not).
-    if (flight.mode !== 'sim') {
-      craftState.dumping = false;
-      flight.notify('Ballast valves closed.');
-      return;
-    }
     craftState.ballast = Math.max(0, craftState.ballast - dt / simProfile.ballast.dumpSeconds);
     flight.emitTrail('spray', 'ballastLeft', dt);
     flight.emitTrail('spray', 'ballastRight', dt);
@@ -496,10 +405,9 @@ export default Object.freeze({
   id: 'glider',
   name: 'Glider',
   buildMesh,
-  arcadeProfile,
   simProfile,
   /**
-   * ControlState mapping: no engine, so the throttle axis is ignored in SIM; the airbrake action or
+   * ControlState mapping: no engine, so the throttle axis is ignored; the airbrake action or
    * both toe brakes in the air open the spoilers; toe brakes on the ground brake the main wheel.
    */
   inputProfile: Object.freeze({ throttle: 'none', spoilers: 'airbrake', toeBrakes: 'wheelsAndSpoilers', flapNotches: 0 }),

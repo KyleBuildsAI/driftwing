@@ -173,14 +173,14 @@ export function createCallouts({ settings, getUserActivated, getCopilotVoiceName
   }
 
   return {
-    /** frame fields used: realTime, classic, flight, profile. Called at the parameter interval. */
+    /** frame fields used: realTime, flight, profile, paused. Called at the parameter interval. */
     update(frame) {
       clockSeconds = frame.realTime;
-      const { classic, flight, profile } = frame;
+      const { flight, profile } = frame;
       const enabled = settings.get('hud').landingCallouts === true;
       const gearDown = flight.gear?.down !== false;
       const crashed = flight.crash?.active === true;
-      const eligible = enabled && !classic && profile.callouts && gearDown && !crashed && !frame.paused;
+      const eligible = enabled && profile.callouts && gearDown && !crashed && !frame.paused;
       if (!eligible) {
         if (active) cancel();
         active = false;

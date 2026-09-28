@@ -146,7 +146,7 @@ export function createGEffectsSystem(ctx) {
 
   function applies() {
     const flight = state.flight;
-    if (flight.mode !== 'sim' || state.photoMode || (flight.crash && flight.crash.active)) return false;
+    if (state.photoMode || (flight.crash && flight.crash.active)) return false;
     const craft = craftRegistry.get(flight.craft);
     return Boolean(craft && craft.simProfile && craft.simProfile.gEffects === true);
   }
@@ -161,7 +161,7 @@ export function createGEffectsSystem(ctx) {
       levels.load = load;
       const dt = simDt > 0 ? simDt : 0;
       if (!enabled) {
-        // Off (CLASSIC, other craft, photo mode, a soft crash): clear quickly, then stay at zero.
+        // Off (other craft, photo mode, a soft crash): clear quickly, then stay at zero.
         const fade = Math.exp(-(realDt > 0 ? realDt : 0) / G_EFFECTS.OFF_SECONDS);
         levels.grayout = levels.grayout * fade < 0.001 ? 0 : levels.grayout * fade;
         levels.tunnel = levels.tunnel * fade < 0.001 ? 0 : levels.tunnel * fade;

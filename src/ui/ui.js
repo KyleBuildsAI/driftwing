@@ -5,24 +5,21 @@ import { Copilot } from '../copilot/copilot.js';
 import { storage } from '../core/storage.js';
 import { createControlsPanel } from './controlsPanel.js';
 import { createCraftPicker } from './craftPicker.js';
-import { createHotasPrompt } from './hotasPrompt.js';
-import { createModePill } from './modePill.js';
 import { createSettingsPanel } from './settingsPanel.js';
 import { createStatusBadge } from '../dev/statusBadge.js';
 
 /**
  * UI: warm glass HUD (compass tape, flight instruments, waypoint / ring marker,
- * status chips, CLASSIC | SIM pill and craft picker), WREN subtitles + live
- * transcript, command bar, toasts, the HOTAS prompt and banners, Journal /
- * Settings / Controls / Help / Menu panels, touch controls, photo-mode chrome,
- * the dev status badge, the mode-aware first-run hint, idle auto-hide and every
- * UI hotkey.
+ * status chips and craft picker), WREN subtitles + live transcript, command bar,
+ * toasts and banners, Journal / Settings / Controls / Help / Menu panels, touch
+ * controls (virtual stick and throttle slider), photo-mode chrome, the dev status
+ * badge, the first-run hint, idle auto-hide and every UI hotkey.
  * DOM writes happen only when a displayed value changes; positions use
  * compositor-only transforms; nothing is allocated per frame except the short
  * strings for values that actually changed.
  */
 export function createUISystem(ctx) {
-  const { THREE: T, state, input, bus, settings, world, camera, renderer } = ctx;
+  const { THREE: T, state, bus, settings, world, camera, renderer } = ctx;
   const root = document.getElementById('ui-root');
   if (!root) throw new Error('DRIFTWING UI: the #ui-root element is missing from the page.');
 
@@ -45,7 +42,7 @@ export function createUISystem(ctx) {
     idle: 'Talk to WREN (M)',
     listening: 'Listening. Press M to stop',
     thinking: 'WREN is thinking',
-    unsupported: 'Voice input is not available in this browser. Press C to type to WREN',
+    unsupported: 'Voice input is not available in this browser. Press Enter to type to WREN',
     error: 'Voice input hit a snag. Press M to try again',
   };
   const MIC_TIPS_TOUCH = {
@@ -58,8 +55,6 @@ export function createUISystem(ctx) {
   const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   const SEED_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const FIRST_RUN_KEY = 'driftwing-v2.ui.firstRunHintSeen';
-  // The SIM key layer gets its own one-time hint the first time SIM is flown.
-  const SIM_HINT_KEY = 'driftwing-v2.ui.simHintSeen';
   const MAX_TOASTS = 2;
   // Toasts raised in photo mode wait for the exit; older ones are no longer news.
   const DEFERRED_TOAST_MAX_AGE = 45;
@@ -76,7 +71,6 @@ export function createUISystem(ctx) {
   const COMMAND_HISTORY_LIMIT = 16;
   const STICK_DEADZONE = 0.08;
   const SLIDER_PADDING = 12;
-  const BOOST_BURN_SECONDS = 2.2;
   const SUBTITLE_FADE_SECONDS = 0.62;
   // The intro banner waits until the biome under and ahead of the glider has settled;
   // biome banners then stay quiet for a while so the opening is not re-announced.
@@ -131,8 +125,6 @@ export function createUISystem(ctx) {
     speed: requireElement('dw-speed'),
     throttleFill: requireElement('dw-throttle-fill'),
     throttleValue: requireElement('dw-throttle-value'),
-    boost: requireElement('dw-boost'),
-    boostProgress: requireElement('dw-boost-progress'),
     altitude: requireElement('dw-altitude'),
     agl: requireElement('dw-agl'),
     vsi: requireElement('dw-vsi'),
@@ -173,7 +165,6 @@ export function createUISystem(ctx) {
     helpShortcuts: requireElement('dw-help-shortcuts'),
     journalBody: requireElement('dw-journal-body'),
     menuSeed: requireElement('dw-menu-seed'),
-    modePill: requireElement('dw-mode-pill'),
     craftPicker: requireElement('dw-craft-picker'),
     touchControls: requireElement('dw-touch-controls'),
     stickZone: requireElement('dw-stick-zone'),
@@ -185,10 +176,6 @@ export function createUISystem(ctx) {
     flightCard: requireElement('dw-flight'),
     sliderFill: requireElement('dw-slider-fill'),
     sliderThumb: requireElement('dw-slider-thumb'),
-    touchBoost: requireElement('dw-touch-boost'),
-    touchBoostProgress: requireElement('dw-touch-boost-progress'),
-    rollLeft: requireElement('dw-roll-left'),
-    rollRight: requireElement('dw-roll-right'),
     photo: requireElement('dw-photo'),
     photoMeta: requireElement('dw-photo-meta'),
     photoHint: requireElement('dw-photo-hint'),
@@ -242,8 +229,7 @@ export function createUISystem(ctx) {
   const compassState = { width: 440, half: 220, heading: NaN, headingWhole: -1 };
   const readouts = {
     speed: NaN, altitude: NaN, agl: NaN, vsiTenths: NaN, vsiTrend: '', throttle: NaN, throttlePercent: -1,
-    stalled: null, boostMode: '', boostProgress: NaN, boostWasActive: false, boostBurnTotal: BOOST_BURN_SECONDS,
-    boostNextMode: 'dw-boost-ready', boostNextProgress: 1,
+    stalled: null,
   };
   const chipState = { minute: -1, label: null, phase: '', ringIndex: -1, ringTotal: -1, ringTenths: -1, ringStreak: -1 };
   const targetState = {
@@ -502,51 +488,6 @@ export function createUISystem(ctx) {
   // ---------------------------------------------------------------------------
   // Flight instruments
   // ---------------------------------------------------------------------------
-  const boostCircumference = 2 * Math.PI * Number(dom.boostProgress.getAttribute('r'));
-  const touchBoostCircumference = 2 * Math.PI * Number(dom.touchBoostProgress.getAttribute('r'));
-  dom.boostProgress.style.strokeDasharray = boostCircumference.toFixed(2);
-  dom.touchBoostProgress.style.strokeDasharray = touchBoostCircumference.toFixed(2);
-
-  /** Writes the boost display mode + ring progress into readouts.boostNext*. */
-  function computeBoost() {
-    const boost = state.player.boost;
-    if (boost && boost.active) {
-      if (!readouts.boostWasActive) readouts.boostBurnTotal = Math.max(Number(boost.remaining) || BOOST_BURN_SECONDS, 0.1);
-      readouts.boostWasActive = true;
-      readouts.boostNextMode = 'dw-boost-active';
-      readouts.boostNextProgress = clamp((Number(boost.remaining) || 0) / readouts.boostBurnTotal, 0, 1);
-      return;
-    }
-    readouts.boostWasActive = false;
-    if (boost && boost.cooldown > 0) {
-      const total = Number(boost.cooldownTotal) > 0 ? Number(boost.cooldownTotal) : 6;
-      readouts.boostNextMode = 'dw-boost-cooling';
-      readouts.boostNextProgress = clamp(1 - boost.cooldown / total, 0, 1);
-      return;
-    }
-    readouts.boostNextMode = 'dw-boost-ready';
-    readouts.boostNextProgress = 1;
-  }
-
-  function updateBoostDisplays() {
-    computeBoost();
-    const mode = readouts.boostNextMode;
-    const progress = readouts.boostNextProgress;
-    if (mode !== readouts.boostMode) {
-      if (readouts.boostMode) {
-        dom.boost.classList.remove(readouts.boostMode);
-        dom.touchBoost.classList.remove(readouts.boostMode);
-      }
-      dom.boost.classList.add(mode);
-      dom.touchBoost.classList.add(mode);
-      readouts.boostMode = mode;
-    }
-    if (!(Math.abs(progress - readouts.boostProgress) <= 0.004)) {
-      readouts.boostProgress = progress;
-      dom.boostProgress.style.strokeDashoffset = ((1 - progress) * boostCircumference).toFixed(2);
-      if (touchMode) dom.touchBoostProgress.style.strokeDashoffset = ((1 - progress) * touchBoostCircumference).toFixed(2);
-    }
-  }
 
   function updateInstruments() {
     const player = state.player;
@@ -590,7 +531,6 @@ export function createUISystem(ctx) {
         dom.throttleValue.textContent = `${percent}%`;
       }
     }
-    updateBoostDisplays();
   }
 
   // ---------------------------------------------------------------------------
@@ -1037,43 +977,14 @@ export function createUISystem(ctx) {
   }
 
   // ---------------------------------------------------------------------------
-  // Mode pill, craft picker, HOTAS prompt, dev status badge
+  // Craft picker, dev status badge
   // ---------------------------------------------------------------------------
   function onModebarChoice() {
     playBlip();
     wake();
   }
-  const modePill = createModePill({ element: dom.modePill, settings, bus, onToggle: onModebarChoice });
   const craftPicker = createCraftPicker({ element: dom.craftPicker, settings, bus, craftRegistry: ctx.craftRegistry, onSelect: onModebarChoice });
-  const hotasPrompt = createHotasPrompt({
-    container: dom.toasts,
-    settings,
-    bus,
-    toast,
-    isPhotoMode: () => photoActive,
-    onAnswer: () => {
-      playBlip();
-      wake();
-    },
-  });
   const statusBadge = createStatusBadge({ ctx, root, forced: params.get('debug') === '1' });
-
-  /** The mode the flight controller is flying (settings.mode until it reports one). */
-  function activeFlightMode() {
-    const mode = ctx.systems.flight?.getMode?.();
-    return mode === 'sim' || mode === 'classic' ? mode : settings.get('mode');
-  }
-  /**
-   * SIM hides the CLASSIC-only chrome (boost, barrel-roll buttons) and swaps the help panel's
-   * mode variants (see ui.css and controlsPanel.css); a showing hint and the open help follow.
-   */
-  function applyFlightMode() {
-    const sim = activeFlightMode() === 'sim';
-    if (rootClassCache.get('dw-sim') === sim) return;
-    setRootClass('dw-sim', sim);
-    if (hintState.visible) renderHint();
-    if (activePanel === 'help') renderHelp();
-  }
 
   // ---------------------------------------------------------------------------
   // Subtitles, live transcript, first-run hint
@@ -1142,14 +1053,14 @@ export function createUISystem(ctx) {
   }
 
   /**
-   * The first-run hint strip. CLASSIC shows v1's keys; SIM shows its own layer (throttle lever,
-   * rudder, gear / flaps / airbrake, view cycle and the craft ability) from the keyboard bindings.
+   * The first-run hint strip: the virtual stick, throttle lever, rudder, gear / flaps / airbrake,
+   * view cycle and the craft ability, from the keyboard bindings (touch: the on-screen controls).
    */
   function renderHint() {
     const throttle = craftHasThrottle();
     if (touchMode) {
       dom.hint.innerHTML = `<span class="dw-hint-item">Drag on the left to steer</span>${throttle ? '<span class="dw-hint-item">Slide right for throttle</span>' : ''}<span class="dw-hint-item">Tap the mic for WREN</span>`;
-    } else if (activeFlightMode() === 'sim') {
+    } else {
       dom.hint.innerHTML = [
         '<span class="dw-hint-item"><kbd>Click</kbd> virtual stick</span>',
         throttle ? hintItem(['throttle'], 'throttle lever') : '',
@@ -1158,13 +1069,11 @@ export function createUISystem(ctx) {
         hintItem(['viewCycle'], 'view'),
         hintItem(['craftAbility'], abilityLabel().toLowerCase()),
       ].join('');
-    } else {
-      dom.hint.innerHTML = `<span class="dw-hint-item"><kbd>Click</kbd> steer with the mouse</span>${throttle ? '<span class="dw-hint-item"><kbd>W</kbd><kbd>S</kbd> throttle</span>' : ''}<span class="dw-hint-item"><kbd>Space</kbd> boost</span><span class="dw-hint-item"><kbd>C</kbd> ask WREN</span>`;
     }
     if (hintState.visible) measureHint();
   }
   function hintItem(targets, label, order = 'positive') {
-    const keys = keyGroupsHtml(targetKeyGroups(targets, 'sim', { order }));
+    const keys = keyGroupsHtml(targetKeyGroups(targets, { order }));
     return keys ? `<span class="dw-hint-item">${keys} ${escapeHtml(label)}</span>` : '';
   }
   function scheduleFirstRunHint() {
@@ -1172,53 +1081,29 @@ export function createUISystem(ctx) {
     // After the intro banner, so the opening view stays uncluttered.
     hintState.showAt = uiClock + 5.6;
   }
-  /** The first switch to SIM shows the SIM hint once (unless a hint is already on its way). */
-  function scheduleSimHint() {
-    if (!state.ready || storage.read(SIM_HINT_KEY, false) === true) return;
-    if (hintState.visible) {
-      renderHint();
-      hintState.hideAt = Math.max(hintState.hideAt, uiClock + 6.5);
-      storage.write(SIM_HINT_KEY, true);
-      return;
-    }
-    if (!Number.isFinite(hintState.showAt)) hintState.showAt = uiClock + 0.8;
-  }
 
   // ---------------------------------------------------------------------------
-  // Mode-aware key lists (first-run hint, help), read from the keyboard bindings
+  // Key lists (first-run hint, help), read from the keyboard bindings
   // ---------------------------------------------------------------------------
   const ARROW_GLYPHS = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→' };
   const CRAFT_SELECT_TARGETS = ['craftSelect1', 'craftSelect2', 'craftSelect3', 'craftSelect4', 'craftSelect5', 'craftSelect6'];
-  const FINE_CONTROL_ENTRY = { keys: [['Shift']], text: 'Hold for fine control' };
-  const HELP_FLIGHT = {
-    classic: [
-      { targets: ['throttle'], text: 'Throttle up / down' },
-      { targets: ['roll'], order: 'negative', filter: (ref) => Boolean(ref.doubleTapRoll), text: 'Hold to bank and turn; double tap for a barrel roll' },
-      { targets: ['roll'], order: 'negative', filter: (ref) => !ref.doubleTapRoll, text: 'Bank and turn (no barrel roll)' },
-      { targets: ['pitch'], text: 'Nose up / down (Invert pitch in Settings)' },
-      { targets: ['yaw'], order: 'negative', text: 'Rudder: a gentle yaw left / right' },
-      { targets: ['boost'], text: 'Boost' },
-      FINE_CONTROL_ENTRY,
-    ],
-    sim: [
-      { targets: ['throttle'], text: 'Throttle lever up / down' },
-      { targets: ['roll'], order: 'negative', text: 'Bank with the ailerons' },
-      { targets: ['pitch'], text: 'Nose up / down (Invert pitch in Settings)' },
-      { targets: ['yaw'], order: 'negative', text: 'Rudder left / right' },
-      { targets: ['trim'], text: 'Pitch trim nose up / down' },
-      { targets: ['gearToggle'], text: 'Landing gear up / down' },
-      { targets: ['flapsDown', 'flapsUp'], text: 'Flaps down / up' },
-      { targets: ['airbrake'], text: 'Airbrake or spoilers (hold); wheel brakes on the ground' },
-      { targets: ['viewCycle'], text: 'Cycle the view' },
-      { targets: ['craftAbility'], text: () => `Craft ability: ${abilityLabel()}` },
-      FINE_CONTROL_ENTRY,
-    ],
-  };
+  const HELP_FLIGHT = [
+    { targets: ['throttle'], text: 'Throttle lever up / down' },
+    { targets: ['roll'], order: 'negative', text: 'Bank with the ailerons' },
+    { targets: ['pitch'], text: 'Nose up / down (Invert pitch in Settings)' },
+    { targets: ['yaw'], order: 'negative', text: 'Rudder left / right' },
+    { targets: ['trim'], text: 'Pitch trim nose up / down' },
+    { targets: ['gearToggle'], text: 'Landing gear up / down' },
+    { targets: ['flapsDown', 'flapsUp'], text: 'Flaps down / up' },
+    { targets: ['airbrake'], text: 'Airbrake or spoilers (hold); wheel brakes on the ground' },
+    { targets: ['viewCycle'], text: 'Cycle the view' },
+    { targets: ['craftAbility'], text: () => `Craft ability: ${abilityLabel()}` },
+  ];
   const HELP_SHORTCUTS = [
-    { targets: ['modeToggle'], text: 'Switch CLASSIC / SIM' },
     { craftKeys: true, text: 'Glider, bush plane, jet, helicopter, wingsuit, FPV drone' },
     { targets: ['craftPrev', 'craftNext'], text: 'Previous / next craft' },
-    { keys: { classic: [['C'], ['Enter'], ['/']], sim: [['Enter'], ['/']] }, text: 'Ask WREN' },
+    { targets: ['versionToggle'], text: 'Switch to V1, the original game' },
+    { keys: [['Enter'], ['/']], text: 'Ask WREN' },
     { keys: [['M']], text: 'Talk to WREN' },
     { targets: ['copilotPTT'], text: 'Push to talk to WREN (hold)' },
     { targets: ['photoMode'], html: 'Photo mode (<kbd>K</kbd> captures)' },
@@ -1242,10 +1127,10 @@ export function createUISystem(ctx) {
     { keys: [['Esc']], text: 'Close a panel or leave photo mode' },
   ];
 
-  /** Engineless craft (the wingsuit) have no throttle: it leaves the hints, the help and the HUD. */
+  /** Craft without a throttle (the glider, the wingsuit): it leaves the hints, the help and the HUD. */
   function craftHasThrottle() {
     const module = ctx.craftRegistry.get(settings.get('craft'));
-    return module?.arcadeProfile?.ENGINE !== false;
+    return module?.inputProfile?.throttle !== 'none';
   }
   function applyThrottleVisibility() {
     setRootClass('dw-no-throttle', !craftHasThrottle());
@@ -1254,11 +1139,11 @@ export function createUISystem(ctx) {
     const module = ctx.craftRegistry.get(settings.get('craft'));
     return module?.abilities?.craftAbility?.label ?? 'Craft ability';
   }
-  /** Keyboard references of a target that apply in mode for the current craft (none before input starts). */
-  function keyboardRefs(target, mode) {
+  /** Keyboard references of a target for the current craft (none before input starts). */
+  function keyboardRefs(target) {
     const bindings = ctx.systems.input?.bindings;
     if (!bindings) return [];
-    return bindings.getRefs('keyboard', target, settings.get('craft')).filter((ref) => !ref.mode || ref.mode === mode);
+    return bindings.getRefs('keyboard', target, settings.get('craft'));
   }
   function keyName(code) {
     return ARROW_GLYPHS[code] ?? ctx.systems.input?.describeRef({ type: 'key', code }, 'keyboard') ?? code;
@@ -1269,11 +1154,11 @@ export function createUISystem(ctx) {
     if (ref.type === 'keys') return order === 'negative' ? [keyName(ref.negative), keyName(ref.positive)] : [keyName(ref.positive), keyName(ref.negative)];
     return [];
   }
-  /** Every key group ([names]) the keyboard binds to targets in mode. */
-  function targetKeyGroups(targets, mode, { order = 'positive', filter = null } = {}) {
+  /** Every key group ([names]) the keyboard binds to targets. */
+  function targetKeyGroups(targets, { order = 'positive', filter = null } = {}) {
     const groups = [];
     for (const target of targets) {
-      for (const ref of keyboardRefs(target, mode)) {
+      for (const ref of keyboardRefs(target)) {
         if (filter && !filter(ref)) continue;
         const names = refKeyNames(ref, order);
         if (names.length > 0) groups.push(names);
@@ -1290,31 +1175,27 @@ export function createUISystem(ctx) {
     return parts.map((part) => `<span class="dw-key-group">${part}</span>`).join('<span class="dw-key-sep">/</span>');
   }
   /** The six craft keys, as "1-6" when they are the digit row. */
-  function craftKeysHtml(mode) {
-    const groups = CRAFT_SELECT_TARGETS.map((target) => targetKeyGroups([target], mode)[0] ?? null);
+  function craftKeysHtml() {
+    const groups = CRAFT_SELECT_TARGETS.map((target) => targetKeyGroups([target])[0] ?? null);
     const digits = groups.every((names, index) => names && names.length === 1 && names[0] === String(index + 1));
     if (digits) return '<kbd>1</kbd><span class="dw-key-sep">-</span><kbd>6</kbd>';
     return keyGroupsHtml(groups.filter(Boolean));
   }
-  function helpRowHtml(entry, mode) {
+  function helpRowHtml(entry) {
     let keys;
-    if (entry.craftKeys) keys = craftKeysHtml(mode);
-    else if (entry.keys) keys = keyGroupsHtml(Array.isArray(entry.keys) ? entry.keys : entry.keys[mode]);
-    else keys = keyGroupsHtml([...targetKeyGroups(entry.targets, mode, entry), ...(entry.extraKeys ?? [])]);
+    if (entry.craftKeys) keys = craftKeysHtml();
+    else if (entry.keys) keys = keyGroupsHtml(entry.keys);
+    else keys = keyGroupsHtml([...targetKeyGroups(entry.targets, entry), ...(entry.extraKeys ?? [])]);
     const text = entry.html ?? escapeHtml(typeof entry.text === 'function' ? entry.text() : entry.text);
     return `<dt>${keys || '<span class="dw-key-word">Unbound</span>'}</dt><dd>${text}</dd>`;
   }
-  /** Fills the help panel's key lists for the mode being flown. */
+  /** Fills the help panel's key lists from the current bindings. */
   function renderHelp() {
-    const mode = activeFlightMode();
-    const modeToggle = keyGroupsHtml(targetKeyGroups(['modeToggle'], mode)) || 'The mode pill';
-    const waypointKey = keyGroupsHtml(targetKeyGroups(['waypointAhead'], 'sim')) || 'the controls panel';
-    dom.helpMode.innerHTML = mode === 'sim'
-      ? `<strong>SIM</strong> flies the full flight model with its own key layer: gear, flaps, airbrake, view cycle and the craft ability; waypoint ahead moves to ${waypointKey}. ${modeToggle} returns to CLASSIC.`
-      : `<strong>CLASSIC</strong> is the original arcade flight: forgiving handling, boost and barrel rolls. ${modeToggle} switches to SIM.`;
+    const versionKey = keyGroupsHtml(targetKeyGroups(['versionToggle'])) || 'The V1 | V2 pill';
+    dom.helpMode.innerHTML = `Every craft flies the full flight model. The assists (Settings) steady it as much as you like, from 100% down to raw physics. ${versionKey} switches to V1, the original game.`;
     const throttle = craftHasThrottle();
-    dom.helpFlight.innerHTML = HELP_FLIGHT[mode].filter((entry) => throttle || !(entry.targets && entry.targets.includes('throttle'))).map((entry) => helpRowHtml(entry, mode)).join('');
-    dom.helpShortcuts.innerHTML = HELP_SHORTCUTS.map((entry) => helpRowHtml(entry, mode)).join('');
+    dom.helpFlight.innerHTML = HELP_FLIGHT.filter((entry) => throttle || !(entry.targets && entry.targets.includes('throttle'))).map((entry) => helpRowHtml(entry)).join('');
+    dom.helpShortcuts.innerHTML = HELP_SHORTCUTS.map((entry) => helpRowHtml(entry)).join('');
   }
   let helpBindingsWired = false;
   /** Keeps the open help panel and a showing hint current when bindings change. */
@@ -2196,7 +2077,6 @@ export function createUISystem(ctx) {
     }
     sliderState.travel = Math.max(40, dom.throttleSlider.clientHeight - 24);
     sliderState.value = NaN;
-    readouts.boostProgress = NaN;
   }
   function enableTouchMode() {
     if (touchMode) return;
@@ -2228,16 +2108,11 @@ export function createUISystem(ctx) {
       axisX *= rescale;
       axisY *= rescale;
     }
-    input.touch.active = true;
-    input.touch.x = clamp(axisX, -1, 1);
-    input.touch.y = clamp(axisY, -1, 1);
-    input.lastActivity = performance.now();
+    ctx.systems.input?.touch?.setStick(axisX, axisY);
   }
   function releaseStick() {
     stickState.pointerId = null;
-    input.touch.active = false;
-    input.touch.x = 0;
-    input.touch.y = 0;
+    ctx.systems.input?.touch?.releaseStick();
     dom.stickKnob.style.transform = '';
     dom.stick.style.transform = '';
     setRootClass('dw-stick-active', false);
@@ -2278,14 +2153,12 @@ export function createUISystem(ctx) {
   }
   function setThrottleFromSlider(clientY) {
     const value = clamp(1 - (clientY - sliderState.top) / sliderState.span, 0, 1);
-    input.touch.throttle = value;
-    input.throttleTarget = value;
-    input.lastActivity = performance.now();
+    ctx.systems.input?.touch?.setThrottle(value);
     renderSlider(value);
   }
   function releaseSlider() {
     sliderState.pointerId = null;
-    input.touch.throttle = null;
+    ctx.systems.input?.touch?.releaseThrottle();
   }
   function onSliderDown(event) {
     if (sliderState.pointerId !== null) return;
@@ -2309,23 +2182,6 @@ export function createUISystem(ctx) {
   function onSliderLeave(event) {
     if (event.pointerId === sliderState.pointerId && !sliderState.captured) releaseSlider();
   }
-
-  function pressTouchButton(button, handler) {
-    button.addEventListener('pointerdown', (event) => {
-      event.preventDefault();
-      input.lastActivity = performance.now();
-      wake();
-      handler();
-    });
-  }
-  pressTouchButton(dom.touchBoost, () => {
-    const fired = ctx.systems.flight?.boost?.();
-    if (fired === false && !reducedMotionQuery.matches) {
-      dom.touchBoost.animate([{ translate: '0 0' }, { translate: '-3px 0' }, { translate: '3px 0' }, { translate: '0 0' }], { duration: 320, easing: 'ease-in-out' });
-    }
-  });
-  pressTouchButton(dom.rollLeft, () => ctx.systems.flight?.barrelRoll?.(-1));
-  pressTouchButton(dom.rollRight, () => ctx.systems.flight?.barrelRoll?.(1));
 
   dom.stickZone.addEventListener('pointerdown', onStickDown);
   dom.stickZone.addEventListener('pointermove', onStickMove);
@@ -2380,7 +2236,7 @@ export function createUISystem(ctx) {
     }
   }
   function updateAutoHide() {
-    const lastInput = Math.max(localActivity, Number(input.lastActivity) || 0);
+    const lastInput = Math.max(localActivity, Number(ctx.systems.input?.getLastActivity?.()) || 0);
     const eligible = Boolean(settings.get('hudAutoHide')) && state.ready && !commandOpen && !activePanel && !photoActive && !pointerOverUi && stickState.pointerId === null && sliderState.pointerId === null;
     const shouldIdle = eligible && performance.now() - lastInput > CONFIG.UI_IDLE_HIDE_MS;
     if (shouldIdle !== idle) {
@@ -2394,8 +2250,7 @@ export function createUISystem(ctx) {
   // ---------------------------------------------------------------------------
   // Named, rebindable actions (photo mode, journal, settings, time of day, ring course, waypoints,
   // autopilot) arrive as 'input:action' presses from the input system on any device. The keys
-  // below stay UI-only: M mic, Enter and / command (C too in CLASSIC; SIM uses C for the view),
-  // H and ? help, Escape, X clear waypoint, K capture, I fps, Shift+V voice, Tab HUD. A key the
+  // below stay UI-only: M mic, Enter and / command, H and ? help, Escape, X clear waypoint, K capture, I fps, Shift+V voice, Tab HUD. A key the
   // player has bound to an action belongs to that action (input.consumesKey).
   const PHOTO_MODE_HOTKEYS = new Set(['escape', 'capture', 'fps', 'voice', 'mic']);
   const PHOTO_MODE_ACTIONS = new Set(['photoMode', 'timeForward', 'timeBack']);
@@ -2403,7 +2258,6 @@ export function createUISystem(ctx) {
   function resolveHotkey(event) {
     switch (event.code) {
       case 'KeyM': return 'mic';
-      case 'KeyC': return settings.get('mode') === 'classic' ? 'command' : null;
       case 'Enter':
       case 'NumpadEnter': return 'command';
       case 'KeyH': return 'help';
@@ -2569,7 +2423,7 @@ export function createUISystem(ctx) {
     const actionElement = target.closest('[data-action]');
     if (actionElement && root.contains(actionElement)) runUiAction(actionElement.dataset.action);
   });
-  // Mouse clicks must not leave focus on HUD buttons: Space (boost) and Enter
+  // Mouse clicks must not leave focus on HUD buttons: Space (the craft ability) and Enter
   // would otherwise re-trigger the last clicked button.
   root.addEventListener('mousedown', (event) => {
     const target = event.target instanceof Element ? event.target : null;
@@ -2705,12 +2559,7 @@ export function createUISystem(ctx) {
     if (!payload || !payload.key) return;
     if (payload.key === 'showFps') applyDebugVisibility();
     if (payload.key === 'hudAutoHide' && !payload.value) wake();
-    if (payload.key === 'mode') applyFlightMode();
     if (payload.key === 'units' && activePanel === 'journal') renderJournal();
-  });
-  bus.onTyped('modeChanged', (payload) => {
-    applyFlightMode();
-    if (payload && payload.mode === 'sim') scheduleSimHint();
   });
   bus.onTyped('craftChanged', () => {
     applyThrottleVisibility();
@@ -2736,7 +2585,6 @@ export function createUISystem(ctx) {
   if (params.get('touch') === '1' || coarsePointerQuery.matches) enableTouchMode();
   measureLayout();
   applyDebugVisibility();
-  applyFlightMode();
   applyThrottleVisibility();
   renderHint();
   updateTimeChip();
@@ -2767,7 +2615,6 @@ export function createUISystem(ctx) {
       dom.hint.classList.add('dw-show');
       measureHint();
       storage.write(FIRST_RUN_KEY, true);
-      if (activeFlightMode() === 'sim') storage.write(SIM_HINT_KEY, true);
     } else if (uiClock >= hintState.hideAt) {
       hintState.hideAt = Infinity;
       hintState.visible = false;
@@ -2811,8 +2658,6 @@ export function createUISystem(ctx) {
       updateInstruments();
       updateTimeChip();
       updateAutopilotChip(step);
-    } else if (touchMode && !photoActive) {
-      updateBoostDisplays();
     }
     if (ringActive && !photoActive && !hudHiddenByUser) updateRingChip();
     if (markerShown) updateTargetMarker();
@@ -2829,7 +2674,6 @@ export function createUISystem(ctx) {
     updateDebugBadge(step);
     statusBadge.update(step, photoActive);
     craftPicker.update(step);
-    hotasPrompt.update(step);
     if (activePanel === 'journal') updateJournalStats(step);
     if (activePanel === 'settings') settingsPanel.update(step);
     if (activePanel === 'controls') controlsPanel.update(step);
@@ -2837,7 +2681,7 @@ export function createUISystem(ctx) {
 
   return {
     update, toast, setSubtitle, setMicState, showPanel, togglePanel, setPhotoMode, wake, openControls,
-    /** v2 chrome for tests and other systems: the pill, picker, HOTAS prompt, settings tabs and controls panel. */
-    modePill, craftPicker, hotasPrompt, settingsPanel, controlsPanel, statusBadge,
+    /** v2 chrome for tests and other systems: the craft picker, settings tabs and controls panel. */
+    craftPicker, settingsPanel, controlsPanel, statusBadge,
   };
 }

@@ -8,11 +8,11 @@ import { CONFIG } from '../core/config.js';
  * - Contrails: two fixed-capacity ring-buffer ribbons fed by flight.getWingtips() while banking hard,
  *   pulling g or flying fast; camera-facing width that spreads with age, soft wispy edges, 2.6 s fade.
  * - Wind streaks: world-anchored air motes around the flight path drawn as thin additive motion-blur
- *   quads; they appear above ~70% of max speed and thicken during boost, or as strongly as the craft
+ *   quads; they appear above ~70% of max speed, or as strongly as the craft
  *   asks through state.flight.craftState.windStreaks (0..1). Max speed is v1's, or a fast craft's
  *   chase speedRange (the jet), for the contrails too.
- * - Bursts: instanced additive glow sprites (Sprite + PointsNodeMaterial) for boost, ring, waypoint and
- *   discovery moments. Listens to 'boost', 'ring:passed', 'waypoint:reached', 'landmark:discovered';
+ * - Bursts: instanced additive glow sprites (Sprite + PointsNodeMaterial) for ring, waypoint and
+ *   discovery moments. Listens to 'ring:passed', 'waypoint:reached', 'landmark:discovered';
  *   direct burst() calls for the same moment are de-duplicated so nothing fires twice.
  * All vertex data is written relative to the camera each frame (float32-safe far from the origin).
  */
@@ -431,10 +431,9 @@ export function createFxSystem(ctx) {
 
   function updateStreaks(realDt) {
     const speedRatio = player.speed / effectsMaxSpeed();
-    const boosting = player.boost && player.boost.active ? 1 : 0;
     // A craft may ask for streaks below v1's speeds (the wingsuit: speed and terrain proximity cue).
     const craftCue = clamp(Number(state.flight?.craftState?.windStreaks) || 0, 0, 1);
-    const target = state.photoMode ? 0 : Math.min(1.25, Math.max(smooth01((speedRatio - 0.7) / 0.3) * 0.8, craftCue) + boosting * 0.55);
+    const target = state.photoMode ? 0 : Math.min(1.25, Math.max(smooth01((speedRatio - 0.7) / 0.3) * 0.8, craftCue));
     streakIntensity = damp(streakIntensity, target, 2.5, realDt);
     if (streakIntensity < 0.01) {
       streakMesh.visible = false;
@@ -575,15 +574,13 @@ export function createFxSystem(ctx) {
     cream: [1.0, 0.9, 0.72],
     teal: [0.3, 0.86, 0.9],
   };
-  // boost: a compact golden shock ring that expands around the tail and travels with the glider.
   const BURST_STYLES = {
-    boost: { count: 56, shape: 'ring', speed: [5, 11], back: [1, 3], inherit: 0.97, life: [0.5, 0.95], size: [0.45, 0.9], drag: 2.2, lift: 0.3, intensity: 1.5, colors: ['gold', 'amber', 'honey'] },
-    ring: { count: 84, shape: 'sphere', speed: [13, 27], back: [0, 0], inherit: 0, life: [0.9, 1.7], size: [2.2, 4.0], drag: 1.35, lift: 1.5, intensity: 1.5, colors: ['gold', 'amber', 'gold', 'honey'] },
-    waypoint: { count: 96, shape: 'fountain', speed: [14, 42], back: [0, 0], inherit: 0, life: [1.3, 2.4], size: [2.6, 4.6], drag: 0.8, lift: -7, intensity: 1.7, colors: ['gold', 'honey', 'amber'] },
-    discovery: { count: 120, shape: 'halo', speed: [2, 7], back: [0, 0], inherit: 0, life: [2.2, 3.6], size: [1.8, 3.6], drag: 0.45, lift: 3.5, intensity: 1.5, colors: ['gold', 'honey', 'cream', 'teal'] },
+    ring: { count: 84, shape: 'sphere', speed: [13, 27], inherit: 0, life: [0.9, 1.7], size: [2.2, 4.0], drag: 1.35, lift: 1.5, intensity: 1.5, colors: ['gold', 'amber', 'gold', 'honey'] },
+    waypoint: { count: 96, shape: 'fountain', speed: [14, 42], inherit: 0, life: [1.3, 2.4], size: [2.6, 4.6], drag: 0.8, lift: -7, intensity: 1.7, colors: ['gold', 'honey', 'amber'] },
+    discovery: { count: 120, shape: 'halo', speed: [2, 7], inherit: 0, life: [2.2, 3.6], size: [1.8, 3.6], drag: 0.45, lift: 3.5, intensity: 1.5, colors: ['gold', 'honey', 'cream', 'teal'] },
   };
   // Slow lingering sparkle layered under the ring flash (not a public burst type).
-  const RING_GLITTER = { count: 26, shape: 'sphere', speed: [2, 7], back: [0, 0], inherit: 0, life: [1.8, 2.8], size: [2.0, 3.2], drag: 0.6, lift: 2.2, intensity: 1.4, colors: ['gold', 'honey', 'amber'] };
+  const RING_GLITTER = { count: 26, shape: 'sphere', speed: [2, 7], inherit: 0, life: [1.8, 2.8], size: [2.0, 3.2], drag: 0.6, lift: 2.2, intensity: 1.4, colors: ['gold', 'honey', 'amber'] };
   // Sparks right in front of the lens shrink and fade instead of blooming into large blobs.
   const PARTICLE_NEAR_SHRINK_DISTANCE = 16;
   const PARTICLE_NEAR_FADE_START = 1.5;
@@ -637,26 +634,12 @@ export function createFxSystem(ctx) {
     const style = BURST_STYLES[type] || BURST_STYLES.ring;
     const inherit = options && Number.isFinite(options.inherit) ? options.inherit : style.inherit;
     const count = Math.round(style.count * (options && Number.isFinite(options.countScale) ? options.countScale : 1));
-    scratchDirection.copy(player.velocity);
-    if (scratchDirection.lengthSq() < 1) scratchDirection.copy(player.forward);
-    scratchDirection.normalize();
-    perpendicularBasis(scratchDirection, scratchBasisU, scratchBasisW);
     for (let particle = 0; particle < count; particle++) {
       const speed = randomRange(style.speed);
       let originX = x;
       let originY = y;
       let originZ = z;
-      if (style.shape === 'ring') {
-        const angle = (particle / count) * Math.PI * 2 + Math.random() * 0.2;
-        const cosine = Math.cos(angle);
-        const sine = Math.sin(angle);
-        const back = randomRange(style.back);
-        scratchPosition.set(
-          (scratchBasisU.x * cosine + scratchBasisW.x * sine) * speed - scratchDirection.x * back,
-          (scratchBasisU.y * cosine + scratchBasisW.y * sine) * speed - scratchDirection.y * back,
-          (scratchBasisU.z * cosine + scratchBasisW.z * sine) * speed - scratchDirection.z * back,
-        );
-      } else if (style.shape === 'fountain') {
+      if (style.shape === 'fountain') {
         const angle = Math.random() * Math.PI * 2;
         const spread = 3 + Math.random() * 8;
         scratchPosition.set(Math.cos(angle) * spread, speed, Math.sin(angle) * spread);
@@ -783,10 +766,6 @@ export function createFxSystem(ctx) {
 
   const burstPosition = new T.Vector3();
 
-  bus.on('boost', () => {
-    const tail = scratchPosition.copy(player.forward).multiplyScalar(-5).add(player.position);
-    queueEventBurst('boost', tail.x, tail.y, tail.z);
-  });
   bus.on('ring:passed', (payload) => {
     const position = resolvePosition(payload && payload.position, player.position, burstPosition);
     queueEventBurst('ring', position.x, position.y, position.z);

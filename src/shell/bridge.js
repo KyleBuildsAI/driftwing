@@ -1,7 +1,7 @@
 // Shell bridge: V2's side of the launcher shell (the root page, index.html + src/shell/shell.js).
 //
 // The shell runs one game at a time in a full-window iframe: V1 at /v1/, V2 at /v2/. The bindable
-// action versionToggle (F8, TWCS button 8) asks for V1:
+// action versionToggle (F8, T.16000M base button 10) asks for V1:
 //   - inside the shell, V2 posts { source: 'driftwing-v2', type: 'switch-version', to: 'v1' } to
 //     the parent, targeted at V2's own origin; the shell accepts it only from its own iframe;
 //   - standalone at /v2/, V2 navigates the tab to the shell with ?v=1;

@@ -60,7 +60,7 @@ export default Object.freeze({
     const aheadText = Number.isFinite(clearance) ? `${grouped(Math.max(0, clearance) * factor)} ${units.altitude.label}` : '--';
     label(pen, 'PATH 5 S', 22, 138, { size: 10, color: theme.textDim, weight: 650, align: 'left', spacing: 1 });
     label(pen, aheadText, 178, 138, { size: 12, color: theme.text, weight: 650, align: 'right' });
-    // A model that runs its own terrain warning (the SIM wingsuit's assist, off at 0 %) decides; else the path.
+    // A model that runs its own terrain warning (the wingsuit's assist, off at 0 %) decides; else the path.
     const assistWarning = flight.craftState ? flight.craftState.proximityWarning : null;
     const warning = typeof assistWarning === 'boolean' ? assistWarning : memory.impactSeconds <= PULL_UP_SECONDS;
     if (warning && memory.blink < 0.6) {

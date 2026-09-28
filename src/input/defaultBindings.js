@@ -3,8 +3,8 @@
 // A binding maps a target (an action id from controlState.ACTIONS, or an axis target from
 // AXIS_TARGETS) to a list of input references on one device. Reference shapes:
 //
-//   keyboard   { type: 'key', code, shift?, mode? }                       action
-//              { type: 'keys', positive, negative, rate?, doubleTapRoll?, mode? }   axis
+//   keyboard   { type: 'key', code, shift? }                              action
+//              { type: 'keys', positive, negative, rate? }                axis
 //   mouse      { type: 'mouseButton', button }                            action
 //   gamepad /  { type: 'button', index }                                  action
 //   HOTAS      { type: 'hat', hat, direction }                            action
@@ -15,9 +15,7 @@
 //              { type: 'buttonRate', positive, negative, rate }           axis (moves a position)
 //
 // key refs: shift true = only with Shift held, false = only without, absent = either (a Shift
-// binding on the same key wins while Shift is held). mode 'classic' | 'sim' limits a reference to
-// one flight mode; that is how the SIM keyboard layer reuses keys without touching the v1 layer.
-// keys refs without rate are spring axes (-1..1 while held); with rate they move a position axis
+// binding on the same key wins while Shift is held). keys refs without rate are spring axes (-1..1 while held); with rate they move a position axis
 // at rate units per second. role marks special axes: 'twist' (yields to the pedals), 'rudder'
 // (pedal rudder), 'stickThrottle' (the stick's own slider). suppressedBy: a device kind whose
 // presence disables the reference (the stick slider is ignored while a TWCS is connected). An axis
@@ -52,20 +50,18 @@ const hat = (hatIndex, direction) => ({ type: 'hat', hat: hatIndex, direction })
 const axis = (index, extra = {}) => ({ type: 'axis', axis: index, ...extra });
 
 /**
- * Keyboard. The CLASSIC layer is v1 exactly (P, J, T, R, G, O, Space; M, C, Enter, /, H, ?, Esc,
- * X, K, I, Tab stay UI keys in ui.js). The SIM layer reassigns G to gear (the waypoint moves to N),
- * C to view cycle and Space to the craft ability. V toggles CLASSIC / SIM in both modes; v1's
- * voice toggle moved to Shift+V.
+ * Keyboard: one layer. v1's keys stay where v1 had them (P, J, T, R, O; M, Enter, /, H, ?, Esc, X,
+ * K, I, Tab stay UI keys in ui.js), except that G is the gear (the waypoint moves to N), C cycles
+ * the view and Space runs the craft ability. Plain V is left free; Shift+V is the WREN voice toggle.
  */
 const KEYBOARD = {
   actions: {
     copilotPTT: [key('Backquote')],
-    craftAbility: [key('Space', { mode: 'sim' })],
-    boost: [key('Space', { mode: 'classic' })],
+    craftAbility: [key('Space')],
     waypointNearest: [key('KeyN', { shift: true })],
-    waypointAhead: [key('KeyG', { mode: 'classic' }), key('KeyN', { mode: 'sim', shift: false })],
+    waypointAhead: [key('KeyN', { shift: false })],
     photoMode: [key('KeyP')],
-    viewCycle: [key('KeyC', { mode: 'sim' })],
+    viewCycle: [key('KeyC')],
     viewForward: [key('Numpad8')],
     viewBack: [key('Numpad2')],
     viewLeft: [key('Numpad4')],
@@ -79,8 +75,7 @@ const KEYBOARD = {
     craftSelect4: [key('Digit4')],
     craftSelect5: [key('Digit5')],
     craftSelect6: [key('Digit6')],
-    modeToggle: [key('KeyV', { shift: false })],
-    gearToggle: [key('KeyG', { mode: 'sim' })],
+    gearToggle: [key('KeyG')],
     flapsUp: [key('KeyF', { shift: true })],
     flapsDown: [key('KeyF', { shift: false })],
     airbrake: [key('KeyB')],
@@ -98,7 +93,7 @@ const KEYBOARD = {
     versionToggle: [key('F8')],
   },
   axes: {
-    roll: [keys('KeyD', 'KeyA', { doubleTapRoll: true }), keys('ArrowRight', 'ArrowLeft')],
+    roll: [keys('KeyD', 'KeyA'), keys('ArrowRight', 'ArrowLeft')],
     pitch: [keys('ArrowUp', 'ArrowDown')],
     yaw: [keys('KeyE', 'KeyQ')],
     throttle: [keys('KeyW', 'KeyS', { rate: 0.5 })],
@@ -117,12 +112,10 @@ const MOUSE = {
 /** Standard-mapping (Xbox-style) gamepads. */
 const STANDARD_GAMEPAD = {
   actions: {
-    craftAbility: [button(0, { mode: 'sim' })],
-    boost: [button(0, { mode: 'classic' })],
+    craftAbility: [button(0)],
     airbrake: [button(1)],
     gearToggle: [button(2)],
     viewCycle: [button(3)],
-    modeToggle: [button(8)],
     settings: [button(9)],
     waypointNearest: [button(10)],
     recenterView: [button(11)],
@@ -143,13 +136,13 @@ const STANDARD_GAMEPAD = {
 
 /**
  * Thrustmaster T.16000M stick. Button 0 is the trigger, 1-3 the head buttons, 4-9 the left base
- * group and 10-15 the right base group (Windows button numbers 1-16).
+ * group and 10-15 the right base group (Windows button numbers 1-16). Base button 10 (index 9)
+ * switches to V1.
  */
 const T16000M = {
   actions: {
     copilotPTT: [button(0)],
-    craftAbility: [button(1, { mode: 'sim' })],
-    boost: [button(1, { mode: 'classic' })],
+    craftAbility: [button(1)],
     waypointNearest: [button(2)],
     photoMode: [button(3)],
     gearToggle: [button(4)],
@@ -157,7 +150,7 @@ const T16000M = {
     flapsDown: [button(6)],
     craftPrev: [button(7)],
     craftNext: [button(8)],
-    modeToggle: [button(9)],
+    versionToggle: [button(9)],
     autopilotToggle: [button(10)],
     timeForward: [button(11)],
     timeBack: [button(12)],
@@ -179,8 +172,7 @@ const T16000M = {
 
 /**
  * Thrustmaster TWCS throttle (with the TFRP pedals on its RJ12 port). The throttle hat is left
- * unbound on purpose: it is reserved for the Phase 4 music controls. Button 8 (index 7) switches to
- * V1: every T.16000M base button is taken, and button 8 is the first free TWCS button.
+ * unbound on purpose: it is reserved for the Phase 4 music controls.
  */
 const TWCS = {
   actions: {
@@ -191,7 +183,6 @@ const TWCS = {
     engineToggle: [button(4)],
     chuteDeploy: [button(5)],
     controlsPanel: [button(6)],
-    versionToggle: [button(7)],
   },
   axes: {
     lookX: [axis(0, { deadzone: 0.12, smoothing: 0.15 })],
@@ -243,7 +234,6 @@ export const UI_RESERVED_KEYS = Object.freeze([
   { code: 'Enter', label: 'Ask WREN' },
   { code: 'NumpadEnter', label: 'Ask WREN' },
   { code: 'Slash', label: 'Ask WREN / help' },
-  { code: 'KeyC', mode: 'classic', label: 'Ask WREN (CLASSIC)' },
   { code: 'KeyH', label: 'Help' },
   { code: 'Escape', label: 'Close / leave photo mode' },
   { code: 'KeyX', label: 'Clear waypoint' },

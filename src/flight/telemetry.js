@@ -21,9 +21,8 @@ export function speedOfSound(altitude) {
 
 export function createFlightTelemetry() {
   return {
-    mode: 'classic',
     craft: 'glider',
-    /** Fixed physics ticks run so far (SIM) and the interpolation fraction of this frame. */
+    /** Fixed physics ticks run so far and the interpolation fraction of this frame. */
     tick: 0,
     alpha: 0,
 
@@ -68,14 +67,14 @@ export function createFlightTelemetry() {
     gear: { retractable: false, down: true, transit: 0 },
     airbrake: 0,
     brakes: 0,
-    /** SIM: the parking brake holds the wheels at idle after a ground start (parkingBrake.js). */
+    /** The parking brake holds the wheels at idle after a ground start (parkingBrake.js). */
     parkingBrake: false,
     trim: 0,
 
     onGround: false,
     contacts: 0,
     stall: { warning: false, stalled: false, buffet: 0 },
-    /** Airspeed above the craft's Vne (SIM): flutter shakes the airframe until it slows down. */
+    /** Airspeed above the craft's Vne: flutter shakes the airframe until it slows down. */
     overspeed: false,
     assists: 1,
     activeAssists: [],

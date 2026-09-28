@@ -164,8 +164,6 @@ async function boot() {
       groundHeight: world.groundHeight(spawn.x, spawn.z),
       agl: spawn.y - world.groundHeight(spawn.x, spawn.z),
       stalled: false,
-      boost: { active: false, remaining: 0, cooldown: 0, cooldownTotal: 6 },
-      barrelRoll: { active: false, direction: 0, progress: 0 },
       autopilot: { enabled: false, heading: spawn.heading, altitude: spawn.y, followWaypoint: false },
       biome: world.biomeAt(spawn.x, spawn.z),
     },
@@ -175,19 +173,6 @@ async function boot() {
     perf: { fps: 60, frameMs: 16.7, renderScale: 1 },
   };
   state.player.right.set(1, 0, 0).applyQuaternion(state.player.quaternion);
-
-  const input = {
-    pitch: 0,
-    roll: 0,
-    yaw: 0,
-    throttleDelta: 0,
-    throttleTarget: null,
-    boost: false,
-    fineControl: false,
-    mouseActive: false,
-    lastActivity: 0,
-    touch: { active: false, x: 0, y: 0, throttle: null, boost: false },
-  };
 
   const ctx = {
     THREE,
@@ -205,7 +190,6 @@ async function boot() {
     wind: null,
     worldOptions: WORLD_OPTIONS,
     state,
-    input,
     controls: createControlState(),
     craftRegistry,
     perf: null,
@@ -345,7 +329,7 @@ async function boot() {
     }
   }
   // Optional lifecycle hooks: prewarm() right after creation (draw lazily-shown
-  // materials once behind the fade so the first ring course, beacon, boost or
+  // materials once behind the fade so the first ring course, beacon, burst or
   // landmark doesn't hitch on a pipeline compile), endPrewarm() when the fade starts.
   function callSystemHook(hookName) {
     for (const [name, system] of Object.entries(ctx.systems)) {

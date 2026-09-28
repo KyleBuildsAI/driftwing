@@ -1,9 +1,8 @@
 // InputManager: the 'input' system. Reads keyboard, mouse, touch, standard gamepads and
-// Thrustmaster HOTAS devices and writes, every frame:
-//   ctx.input     v1's arcade struct, exactly as v1 did for keyboard / mouse / touch (CLASSIC flies
-//                 on this), plus the controllers' stick, rudder and throttle
-//   ctx.controls  the ControlState (controlState.js) that SIM flight reads each physics tick
-// and emits 'input:action' { id, phase, source, device } for every action press and release.
+// Thrustmaster HOTAS devices, writes ctx.controls (the ControlState, controlState.js, that flight
+// reads each physics tick) every frame, and emits 'input:action' { id, phase, source, device } for
+// every action press and release. The UI's touch stick and slider report through the returned
+// touch API.
 //
 // It also owns the binding profile (bindings.js), per-device calibration (calibration.js), the
 // calibration wizard, bind-by-listening (capture.js) and hot-plug, and exposes all of it to the
@@ -24,18 +23,16 @@ import { createTouchInput } from './touch.js';
 
 /** Actions that still work in photo mode (v1's photo-mode hotkey subset, plus push-to-talk). */
 const PHOTO_MODE_ACTIONS = new Set(['photoMode', 'timeForward', 'timeBack', 'copilotPTT']);
-/** Throttle change per wheel notch in SIM (v1's CLASSIC wheel step). */
+/** Throttle change per wheel notch (v1's wheel step). */
 const WHEEL_THROTTLE_STEP = 0.05;
 /** Position targets other than the throttle: levers moved by absolute axes or rate inputs. */
 const LEVER_TARGETS = Object.freeze(['collective', 'flaps', 'trim', 'antenna']);
-/** Smallest lever change forwarded to CLASSIC's throttle target (avoids re-sending noise). */
-const LEVER_SEND_STEP = 0.002;
 const HOTAS_PROMPT = 'Press any button on your stick and throttle';
 /** Lever owners that are not a physical lever: rate inputs (keys, buttons), the wheel, touch, pointer. */
 const SOFT_LEVER_OWNERS = new Set(['rate', 'wheel', 'touch', 'pointer']);
 
 export function createInputManager(ctx) {
-  const { state, settings, bus, input, controls, storage } = ctx;
+  const { state, settings, bus, controls, storage } = ctx;
   const params = new URLSearchParams(window.location.search);
   const debug = params.get('debug') === '1';
   const mock = params.get('test') === 'hotas' ? installMockGamepads() : null;
@@ -46,29 +43,20 @@ export function createInputManager(ctx) {
     bus.emit('notify', { text: 'Some saved control bindings could not be read and were reset to defaults.', kind: 'warning' });
   }
 
-  let pendingBoost = false;
   let wizard = null;
   let pedalsMoved = false;
-  let lastThrottleTarget = input.throttleTarget;
-  let lastLeverSent = -1;
+  /** performance.now() of the last player input on any device (the HUD's auto-hide reads it). */
+  let lastActivity = 0;
   const levers = { throttle: { owner: null }, collective: { owner: null }, flaps: { owner: null }, trim: { owner: null }, antenna: { owner: null } };
   const previousButtons = new Map();
   const deviceFrame = createFrameAccumulator();
   const connectedKinds = new Set();
 
-  const getMode = () => settings.get('mode');
   const getCraft = () => settings.get('craft');
-  const markActivity = () => { input.lastActivity = performance.now(); };
+  const markActivity = () => { lastActivity = performance.now(); };
   const wizardActive = () => Boolean(wizard && !wizard.finished && !wizard.cancelled);
 
-  const router = createActionRouter({
-    bus,
-    controls,
-    onPress(actionId) {
-      // CLASSIC boost is v1's latched input.boost, whatever device pressed it.
-      if (actionId === 'boost' && getMode() === 'classic' && !state.photoMode) pendingBoost = true;
-    },
-  });
+  const router = createActionRouter({ bus, controls });
 
   /** Gate for new presses: nothing while binding or (for controllers) calibrating; photo subset. */
   function canPress(actionId, source) {
@@ -98,8 +86,8 @@ export function createInputManager(ctx) {
     if (listenState.active) return;
     for (const device of registry.live()) mapper.latchHeld(device);
   });
-  const keyboardMouse = createKeyboardMouse(ctx, { bindings, router, canPress, capture, getMode, getCraft });
-  const touch = createTouchInput({ input, router, markActivity });
+  const keyboardMouse = createKeyboardMouse(ctx, { bindings, router, canPress, capture, getCraft, markActivity });
+  const touch = createTouchInput({ markActivity });
 
   // ---- Controllers ---------------------------------------------------------------------------
   /** Twist yaw is used unless the player's pedals are in use (auto) or the setting forces it. */
@@ -133,7 +121,7 @@ export function createInputManager(ctx) {
     }
   }
 
-  function updateControllers(seconds, mode, craft) {
+  function updateControllers(seconds, craft) {
     if (registry.supported) registry.poll();
     resetFrameAccumulator(deviceFrame);
     connectedKinds.clear();
@@ -143,7 +131,6 @@ export function createInputManager(ctx) {
     const context = {
       frame: deviceFrame,
       craft,
-      mode,
       seconds,
       twistEnabled: twistEnabled(),
       connectedKinds,
@@ -204,45 +191,11 @@ export function createInputManager(ctx) {
   }
 
   /**
-   * Throttle. CLASSIC keeps v1's path (W / S as throttleDelta, wheel and slider as throttleTarget)
-   * and a moved HOTAS or gamepad lever sets throttleTarget too; ControlState mirrors the arcade
-   * throttle. SIM moves ControlState.throttle directly: levers, W / S and triggers at a rate, the
-   * wheel in v1's steps and the touch slider.
+   * Throttle: ControlState.throttle moves directly: levers, W / S and triggers at a rate, the wheel
+   * in v1's steps and the touch slider.
    */
-  function updateThrottle(mode, keys, touchFrame, seconds) {
+  function updateThrottle(keys, touchFrame, seconds) {
     const lever = levers.throttle;
-    if (mode === 'classic') {
-      if (input.throttleTarget !== lastThrottleTarget && input.throttleTarget !== null) lever.owner = 'pointer';
-      let leverCandidate = null;
-      for (const candidate of deviceFrame.positions) {
-        if (candidate.target !== 'throttle') continue;
-        if (claimsLever(candidate, lever) && lever.owner !== candidate.key) {
-          lever.owner = candidate.key;
-          lastLeverSent = -1;
-        }
-        if (lever.owner === candidate.key) leverCandidate = candidate;
-      }
-      if (touchFrame.throttle !== null) {
-        input.throttleTarget = touchFrame.throttle;
-        lever.owner = 'touch';
-      }
-      if (leverCandidate && lever.owner === leverCandidate.key && Math.abs(leverCandidate.value - lastLeverSent) > LEVER_SEND_STEP) {
-        input.throttleTarget = clamp(leverCandidate.value, 0, 1);
-        lastLeverSent = leverCandidate.value;
-        controls.sources.throttle = leverCandidate.source;
-        controls.sourceDevices.throttle = leverCandidate.deviceKey;
-      }
-      const deviceDirection = state.photoMode ? 0 : deviceFrame.throttleDirection;
-      input.throttleDelta = clamp(keys.throttleDelta + deviceDirection, -1, 1);
-      if (input.throttleDelta !== 0) {
-        input.throttleTarget = null;
-        lever.owner = 'rate';
-      }
-      lastThrottleTarget = input.throttleTarget;
-      controls.throttle = clamp(Number(state.player.throttle) || 0, 0, 1);
-      return;
-    }
-    input.throttleDelta = 0;
     updateLever('throttle', keys, seconds);
     if (touchFrame.throttle !== null) {
       controls.throttle = touchFrame.throttle;
@@ -256,7 +209,6 @@ export function createInputManager(ctx) {
       controls.sourceDevices.throttle = null;
       lever.owner = 'wheel';
     }
-    lastThrottleTarget = input.throttleTarget;
   }
 
   /**
@@ -282,29 +234,21 @@ export function createInputManager(ctx) {
   // ---- Frame ---------------------------------------------------------------------------------------
   function update(simDt, realDt) {
     const seconds = Math.min(Math.max(realDt, 0), 0.05);
-    const mode = getMode();
     const craft = getCraft();
     const photoMode = state.photoMode;
     const invert = settings.get('invertPitch') ? -1 : 1;
 
-    const keys = keyboardMouse.update(seconds, mode);
-    const touchFrame = touch.merge(invert, photoMode, mode);
-    updateControllers(seconds, mode, craft);
+    const keys = keyboardMouse.update(seconds);
+    const touchFrame = touch.merge(invert, photoMode);
+    updateControllers(seconds, craft);
     const pad = deviceFrame.spring;
     const padSource = deviceFrame.sources;
     const padDevice = deviceFrame.sourceDevices;
 
-    input.pitch = clamp(keys.pitch + keys.stickPitch + touchFrame.pitch + pad.pitch, -1, 1);
-    input.roll = clamp(keys.roll + keys.stickRoll + touchFrame.roll + pad.roll, -1, 1);
-    input.yaw = clamp(keys.yaw + pad.yaw, -1, 1);
-    updateThrottle(mode, keys, touchFrame, seconds);
-    input.boost = pendingBoost && !photoMode;
-    pendingBoost = false;
-    input.fineControl = keys.fineControl;
-
-    controls.pitch = input.pitch;
-    controls.roll = input.roll;
-    controls.yaw = input.yaw;
+    controls.pitch = clamp(keys.pitch + keys.stickPitch + touchFrame.pitch + pad.pitch, -1, 1);
+    controls.roll = clamp(keys.roll + keys.stickRoll + touchFrame.roll + pad.roll, -1, 1);
+    controls.yaw = clamp(keys.yaw + pad.yaw, -1, 1);
+    updateThrottle(keys, touchFrame, seconds);
     noteSource('pitch', [['keyboard', keys.pitch], ['mouse', keys.stickPitch], ['touch', touchFrame.pitch], [padSource.pitch, pad.pitch, padDevice.pitch]]);
     noteSource('roll', [['keyboard', keys.roll], ['mouse', keys.stickRoll], ['touch', touchFrame.roll], [padSource.roll, pad.roll, padDevice.roll]]);
     noteSource('yaw', [['keyboard', keys.yaw], [padSource.yaw, pad.yaw, padDevice.yaw]]);
@@ -444,6 +388,23 @@ export function createInputManager(ctx) {
     /** True when a keydown belongs to input (bound action or an active listen); the UI skips it. */
     consumesKey: keyboardMouse.consumesKey,
 
+    /**
+     * The on-screen touch controls: the UI reports the stick (setStick(x, y) / releaseStick()) and
+     * the throttle slider (setThrottle(value) / releaseThrottle()); readStick() returns the stick.
+     */
+    touch: {
+      setStick: touch.setStick,
+      releaseStick: touch.releaseStick,
+      setThrottle: touch.setThrottle,
+      releaseThrottle: touch.releaseThrottle,
+      readStick: touch.readStick,
+    },
+
+    /** performance.now() of the last player input on any device (0 before the first). */
+    getLastActivity() {
+      return lastActivity;
+    },
+
     getDevices,
     getConnectionState,
     readDevice,
@@ -468,7 +429,7 @@ export function createInputManager(ctx) {
       return true;
     },
 
-    /** Throttle as SIM sees it, with the afterburner detent from settings. */
+    /** Throttle as flight sees it, with the afterburner detent from settings. */
     getThrottleReading() {
       return {
         value: controls.throttle,

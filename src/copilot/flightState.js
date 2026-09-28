@@ -51,13 +51,11 @@ export function buildFlightFields(ctx, extras = {}) {
   const telemetry = state.flight;
   const flight = ctx.systems.flight;
   const registry = ctx.craftRegistry;
-  const mode = typeof flight?.getMode === 'function' ? flight.getMode() : telemetry.mode;
   const craft = typeof flight?.getCraft === 'function' ? flight.getCraft() : telemetry.craft;
   const module = typeof flight?.getCraftModule === 'function' ? flight.getCraftModule() : registry?.get?.(craft) ?? null;
   const catalogEntry = registry?.catalog?.find((entry) => entry.id === craft) ?? null;
   const units = settings.get('units') === 'aviation' ? 'aviation' : 'metric';
   const capabilities = craftCapabilities(module);
-  if (mode === 'classic') capabilities.throttle = true;
 
   const assistSetting = settings.get('assists');
   const configured = Number.isFinite(assistSetting?.[craft]) ? assistSetting[craft] : 1;
@@ -73,7 +71,6 @@ export function buildFlightFields(ctx, extras = {}) {
   const lastLanding = landingRecord(telemetry.lastLanding);
 
   return {
-    mode,
     craft,
     craftName: catalogEntry?.name ?? craft,
     availableCraft: registry?.list ? registry.list().filter((entry) => entry.available).map((entry) => entry.id) : [craft],
@@ -86,7 +83,6 @@ export function buildFlightFields(ctx, extras = {}) {
       configured: round(configured, 2),
       overridden,
       active: describeAssists(level, modelKind),
-      appliesInMode: mode === 'sim',
     },
     airspeed: {
       trueMs: round(telemetry.airspeed, 1),

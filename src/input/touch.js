@@ -1,9 +1,7 @@
-// Touch input: merges what the UI's on-screen joystick, throttle slider and boost button write into
-// ctx.input.touch (v1 behaviour, unchanged).
-//
-// The joystick feeds pitch / roll with v1's mild expo; a slider change sets the throttle target
-// once per change; the boost button presses the 'boost' action in CLASSIC and 'craftAbility' in
-// SIM through the action router.
+// Touch input: the on-screen virtual stick and throttle slider (drawn and tracked by the UI) feed
+// ControlState through the input system. The UI reports the stick deflection and the slider value
+// here; merge() turns them into this frame's contribution: roll and pitch from the stick with v1's
+// mild expo, and the throttle once per slider change.
 
 import { clamp } from '../core/util.js';
 
@@ -13,47 +11,65 @@ export function shapeResponse(value) {
 }
 
 /**
- * input: ctx.input (the UI writes input.touch); router: action router; markActivity(): wakes the
- * HUD. Returns { merge(invert, photoMode, mode), throttleChange }.
+ * markActivity(): wakes the HUD. Returns { merge(invert, photoMode), setStick(x, y), releaseStick(),
+ * setThrottle(value), releaseThrottle(), readStick() }.
  */
-export function createTouchInput({ input, router, markActivity }) {
+export function createTouchInput({ markActivity }) {
+  const stick = { active: false, x: 0, y: 0 };
   const contribution = { pitch: 0, roll: 0, throttle: null };
-  let previousBoost = false;
+  let sliderValue = null;
   let previousThrottle = null;
-  let boostAction = null;
 
   /**
-   * Reads input.touch for this frame. Returns { pitch, roll, throttle } where throttle is the new
-   * slider value when it changed this frame (null otherwise).
+   * This frame's touch contribution: { pitch, roll, throttle } where throttle is the new slider
+   * value when it changed this frame (null otherwise).
    */
-  function merge(invert, photoMode, mode) {
-    const touch = input.touch;
+  function merge(invert, photoMode) {
     contribution.pitch = 0;
     contribution.roll = 0;
     contribution.throttle = null;
-    if (!touch) return contribution;
-    if (touch.active && !photoMode) {
-      contribution.roll = shapeResponse(clamp(Number(touch.x) || 0, -1, 1));
-      contribution.pitch = shapeResponse(clamp(Number(touch.y) || 0, -1, 1)) * invert;
+    if (stick.active && !photoMode) {
+      contribution.roll = shapeResponse(stick.x);
+      contribution.pitch = shapeResponse(stick.y) * invert;
       markActivity();
     }
-    const touchThrottle = Number.isFinite(touch.throttle) ? clamp(touch.throttle, 0, 1) : null;
-    if (touchThrottle !== null && touchThrottle !== previousThrottle) {
-      contribution.throttle = touchThrottle;
+    if (sliderValue !== null && sliderValue !== previousThrottle) {
+      contribution.throttle = sliderValue;
       markActivity();
     }
-    previousThrottle = touchThrottle;
-    const touchBoost = Boolean(touch.boost);
-    if (touchBoost && !previousBoost && !photoMode) {
-      boostAction = mode === 'sim' ? 'craftAbility' : 'boost';
-      router.press(boostAction, 'touch:boost', 'touch', 'touch');
-    } else if (!touchBoost && previousBoost && boostAction) {
-      router.release(boostAction, 'touch:boost');
-      boostAction = null;
-    }
-    previousBoost = touchBoost;
+    previousThrottle = sliderValue;
     return contribution;
   }
 
-  return { merge };
+  return {
+    merge,
+
+    /** The stick is held at x right / y up, each -1..1 (after the UI's deadzone). */
+    setStick(x, y) {
+      stick.active = true;
+      stick.x = clamp(Number.isFinite(x) ? x : 0, -1, 1);
+      stick.y = clamp(Number.isFinite(y) ? y : 0, -1, 1);
+      markActivity();
+    },
+    releaseStick() {
+      stick.active = false;
+      stick.x = 0;
+      stick.y = 0;
+    },
+
+    /** The slider is held at value (0..1); the throttle follows it while it moves. */
+    setThrottle(value) {
+      if (!Number.isFinite(value)) return;
+      sliderValue = clamp(value, 0, 1);
+      markActivity();
+    },
+    releaseThrottle() {
+      sliderValue = null;
+    },
+
+    /** The stick as the UI last reported it: { active, x, y } (photo mode looks around with it). */
+    readStick() {
+      return { active: stick.active, x: stick.x, y: stick.y };
+    },
+  };
 }

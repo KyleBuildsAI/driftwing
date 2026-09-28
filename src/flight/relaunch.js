@@ -343,7 +343,7 @@ export function createAerotow({ scene, world, waterLevel = 0, start, startQuater
   rope.castShadow = true;
   scene.add(rope);
 
-  const tugVisual = { aileron: 0, elevator: 0, rudder: 0, flaps: 0, throttle: 1, boost: false, propSpeed: NaN, engineOn: true, onGround: false, gearDown: true, airbrake: 0, time: time ?? { elapsed: 0, nightFactor: 0, sunElevation: 30 } };
+  const tugVisual = { aileron: 0, elevator: 0, rudder: 0, flaps: 0, throttle: 1, propSpeed: NaN, engineOn: true, onGround: false, gearDown: true, airbrake: 0, time: time ?? { elapsed: 0, nightFactor: 0, sunElevation: 30 } };
   const status = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion(), velocity: new THREE.Vector3(), released: false };
   const tugState = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion(), velocity: new THREE.Vector3(), heading: path.heading, bank: 0, speed: 0 };
   const scratchForward = new THREE.Vector3();

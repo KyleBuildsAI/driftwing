@@ -12,8 +12,6 @@
 // - Airflow beds (airflow.js), the craft's engine family (engines/), spatialisation with doppler
 //   (spatial.js), flight cues (flightCues.js), v1 event cues and one-shot voices (eventCues.js,
 //   voices.js) and radar-altitude landing callouts (callouts.js).
-// - The CLASSIC glider sounds exactly like v1: the same beds, prop hum, chimes and levels.
-import { CONFIG } from '../core/config.js';
 import { clamp } from '../core/util.js';
 import { createSoundPill } from '../ui/soundPill.js';
 import { createAirflow } from './airflow.js';
@@ -35,7 +33,7 @@ const INTERIOR_VIEWS = new Set(['cockpit', 'fpv']);
 // Input sources whose presses reach the page as real DOM events (and so unlock audio themselves).
 const DOM_SOURCES = new Set(['keyboard', 'mouse', 'touch']);
 const VARIO_STORAGE_KEY = 'driftwing-v2.audio.vario';
-export const VARIO_MODES = Object.freeze(['auto', 'on', 'off']);
+export const VARIO_MODES = Object.freeze(['on', 'off']);
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) && !value.isVector3 && !value.isQuaternion;
@@ -62,9 +60,9 @@ export function createAudioSystem(ctx) {
   let debugProfile = null;
   let debugFlight = null;
   let lastProfile = null;
-  let lastMode = null;
-  const storedVarioMode = storage.read(VARIO_STORAGE_KEY, 'auto');
-  let varioMode = VARIO_MODES.includes(storedVarioMode) ? storedVarioMode : 'auto';
+  // A value no longer offered (Phase 1 also stored 'auto') reads as the default.
+  const storedVarioMode = storage.read(VARIO_STORAGE_KEY, 'on');
+  let varioMode = VARIO_MODES.includes(storedVarioMode) ? storedVarioMode : 'on';
 
   function noteIssue(error) {
     lastIssue = error && error.message ? error.message : String(error);
@@ -267,9 +265,6 @@ export function createAudioSystem(ctx) {
     callouts.cancel();
     parameterTimer = 0;
   });
-  bus.onTyped('modeChanged', () => {
-    parameterTimer = 0;
-  });
   bus.onTyped('landed', (payload) => {
     if (isReady()) graph.flightCues.landed(payload, state.time.realElapsed, currentProfile());
   });
@@ -305,7 +300,6 @@ export function createAudioSystem(ctx) {
     time: 0,
     realTime: 0,
     interval: PARAMETER_INTERVAL,
-    classic: true,
     paused: false,
     interior: false,
     cameraAttached: true,
@@ -316,7 +310,6 @@ export function createAudioSystem(ctx) {
     profile: null,
     camera,
     varioSetting: varioMode,
-    v1: { throttle: 0, speedRatio: 0, boosting: 0 },
   };
 
   function buildFrame(interval) {
@@ -325,7 +318,6 @@ export function createAudioSystem(ctx) {
     frame.time = audioContext ? audioContext.currentTime : 0;
     frame.realTime = state.time.realElapsed;
     frame.interval = interval;
-    frame.classic = flight.mode !== 'sim';
     frame.paused = state.paused === true;
     frame.view = view;
     frame.interior = INTERIOR_VIEWS.has(view);
@@ -335,18 +327,12 @@ export function createAudioSystem(ctx) {
     frame.controls = ctx.controls;
     frame.profile = resolveProfileFor(flight);
     frame.varioSetting = varioMode;
-    // v1's prop hum inputs, computed exactly as v1 did.
-    frame.v1.throttle = clamp(Number.isFinite(player.throttle) ? player.throttle : 0, 0, 1);
-    frame.v1.speedRatio = clamp(player.speed / CONFIG.SPEED.MAX, 0, 1.4);
-    frame.v1.boosting = player.boost && player.boost.active ? 1 : 0;
     lastProfile = frame.profile;
     return frame;
   }
 
   function updateSound() {
     const time = frame.time;
-    if (lastMode !== null && lastMode !== frame.classic) graph.flightCues.reset(time);
-    lastMode = frame.classic;
     ensureEngine(frame.profile, time);
     // A camera cut (view change, flyby relocation, re-seat) is not listener motion for the doppler.
     const cameraCuts = ctx.systems.camera?.getCutCount?.() ?? null;
@@ -415,7 +401,6 @@ export function createAudioSystem(ctx) {
       detent: (options) => graph.flightCues.audition.playDetentClick(options?.engaging !== false),
       crash: (options) => graph.flightCues.audition.playCrash(options?.impactSpeed),
       chime: (options) => graph.voices.playChime(options?.step ?? 0, options),
-      whoosh: (options) => graph.voices.playWhoosh(options?.intensity, options?.duration),
       blip: (options) => graph.voices.playBlip(options),
       flutter: (options) => graph.voices.playFlutter(options?.intensity, options?.pan),
       shutter: () => graph.voices.playShutter(),
@@ -469,10 +454,6 @@ export function createAudioSystem(ctx) {
       eventCues.markDirect('chime');
       return isReady() ? graph.voices.playChime(step, options) : false;
     },
-    whoosh(options) {
-      eventCues.markDirect('whoosh');
-      return isReady() ? graph.voices.playWhoosh(options && options.intensity, options && options.duration) : false;
-    },
     blip(options) {
       eventCues.markDirect('blip');
       return isReady() ? graph.voices.playBlip(options) : false;
@@ -493,7 +474,7 @@ export function createAudioSystem(ctx) {
       return audioContext;
     },
 
-    /** Variometer audio: 'auto' (SIM only), 'on' (also in CLASSIC) or 'off'. Persisted. */
+    /** Variometer audio: 'on' (craft with a vario) or 'off'. Persisted. */
     setVarioMode(mode) {
       if (!VARIO_MODES.includes(mode)) return false;
       varioMode = mode;

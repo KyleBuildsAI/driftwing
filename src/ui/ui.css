@@ -57,7 +57,6 @@
     stroke-linejoin: round;
     overflow: visible;
   }
-  #ui-root .dw-mirror { transform: scaleX(-1); }
 
   #ui-root .glass {
     background: linear-gradient(180deg, var(--dw-glass-top), var(--dw-glass-bottom));
@@ -307,7 +306,7 @@
      keep that corner free, and the shell places its pill clear of the HUD in every layout. */
   html.dw-embedded #ui-root { --dw-shell-inset: 46px; }
 
-  /* CLASSIC | SIM pill and craft picker (top-left), status chips below them */
+  /* Craft picker (top-left), status chips below it */
   #ui-root .dw-modebar {
     position: absolute;
     top: calc(var(--dw-top) + var(--dw-shell-inset));
@@ -316,44 +315,6 @@
     align-items: center;
     gap: 8px;
   }
-  #ui-root .dw-mode-pill {
-    pointer-events: auto;
-    position: relative;
-    display: inline-grid;
-    grid-template-columns: 1fr 1fr;
-    align-items: center;
-    height: 34px;
-    padding: 3px;
-    border-radius: 999px;
-    color: var(--dw-text-dim);
-    text-shadow: 0 1px 2px rgba(8, 6, 12, 0.3);
-  }
-  #ui-root .dw-mode-thumb {
-    position: absolute;
-    top: 3px;
-    bottom: 3px;
-    left: 3px;
-    width: calc(50% - 3px);
-    border-radius: 999px;
-    background: rgba(243, 199, 122, 0.22);
-    box-shadow: inset 0 0 0 1px rgba(243, 199, 122, 0.34);
-    transition: transform 0.32s var(--dw-ease);
-  }
-  #ui-root .dw-mode-pill[data-mode="sim"] .dw-mode-thumb { transform: translateX(100%); }
-  #ui-root .dw-mode-option {
-    position: relative;
-    padding: 0 8px 0 calc(8px + 0.16em);
-    font-size: 10.5px;
-    font-weight: 650;
-    line-height: 28px;
-    letter-spacing: 0.16em;
-    text-align: center;
-    transition: color 0.2s ease;
-  }
-  #ui-root .dw-mode-pill:hover { border-color: var(--dw-hairline-strong); }
-  #ui-root .dw-mode-pill:hover .dw-mode-option { color: var(--dw-text); }
-  #ui-root .dw-mode-pill[data-mode="classic"] .dw-mode-option[data-mode="classic"],
-  #ui-root .dw-mode-pill[data-mode="sim"] .dw-mode-option[data-mode="sim"] { color: var(--dw-gold); }
   #ui-root .dw-craft-picker {
     pointer-events: auto;
     display: inline-flex;
@@ -540,22 +501,6 @@
     will-change: transform;
   }
   #ui-root .dw-throttle-value { font-size: 11px; font-weight: 500; color: var(--dw-text-dim); font-variant-numeric: tabular-nums; min-width: 3.4ch; }
-  #ui-root .dw-boost { position: relative; width: 40px; height: 40px; display: grid; place-items: center; color: var(--dw-text-dim); }
-  #ui-root .dw-boost-ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
-  #ui-root .dw-boost-track { fill: none; stroke: rgba(255, 240, 220, 0.14); stroke-width: 2.2; }
-  #ui-root .dw-boost-progress {
-    fill: none;
-    stroke: var(--dw-gold);
-    stroke-width: 2.4;
-    stroke-linecap: round;
-    transition: stroke 0.3s ease;
-  }
-  #ui-root .dw-boost .dw-boost-icon { width: 16px; height: 16px; }
-  #ui-root .dw-boost.dw-boost-ready { color: var(--dw-gold); }
-  #ui-root .dw-boost.dw-boost-ready .dw-boost-progress { filter: drop-shadow(0 0 3px rgba(243, 199, 122, 0.7)); }
-  #ui-root .dw-boost.dw-boost-cooling .dw-boost-progress { stroke: rgba(246, 239, 228, 0.55); }
-  #ui-root .dw-boost.dw-boost-active { color: #fff3dc; }
-  #ui-root .dw-boost.dw-boost-active .dw-boost-progress { stroke: #ffe2a8; filter: drop-shadow(0 0 6px rgba(255, 214, 140, 0.95)); }
   #ui-root .dw-flight-divider { align-self: stretch; width: 1px; margin: 2px 2px; background: linear-gradient(180deg, transparent, var(--dw-hairline-strong), transparent); }
   #ui-root .dw-alt-sub { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--dw-text-dim); font-variant-numeric: tabular-nums; }
   #ui-root .dw-sub-label { font-size: 9.5px; font-weight: 650; letter-spacing: 0.16em; color: var(--dw-text-faint); }
@@ -1289,14 +1234,6 @@
   }
   #ui-root .dw-touch-button:active,
   #ui-root .dw-touch-button.dw-pressed { transform: scale(0.92); border-color: rgba(243, 199, 122, 0.6); }
-  #ui-root .dw-touch-boost { right: 0; bottom: 0; width: 74px; height: 74px; color: var(--dw-gold); }
-  #ui-root .dw-touch-boost .dw-icon { width: 26px; height: 26px; position: relative; }
-  #ui-root .dw-touch-boost .dw-boost-ring { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); transform: rotate(-90deg); }
-  #ui-root .dw-touch-boost.dw-boost-cooling { color: var(--dw-text-faint); }
-  #ui-root .dw-touch-boost.dw-boost-cooling .dw-boost-progress { stroke: rgba(246, 239, 228, 0.5); }
-  #ui-root .dw-touch-boost.dw-denied { animation: dw-nudge 0.35s ease; }
-  #ui-root .dw-roll-left { right: 84px; bottom: 14px; width: 46px; height: 46px; }
-  #ui-root .dw-roll-right { right: 14px; bottom: 84px; width: 46px; height: 46px; }
   #ui-root .dw-touch-menu { right: 17px; bottom: 146px; width: 40px; height: 40px; }
   #ui-root .dw-touch-button .dw-icon { width: 20px; height: 20px; }
   #ui-root.dw-touch .dw-mic {
@@ -1311,7 +1248,6 @@
   #ui-root.dw-touch .dw-corner,
   #ui-root.dw-touch .dw-topbar,
   #ui-root.dw-touch .dw-flight .dw-throttle,
-  #ui-root.dw-touch .dw-flight .dw-boost,
   #ui-root.dw-touch .dw-autopilot-chip .dw-chip-text { display: none; }
   #ui-root.dw-touch.dw-command-open .dw-hud { opacity: 0; visibility: hidden; transition: opacity 0.25s ease, visibility 0s linear 0.25s; }
   #ui-root.dw-touch .dw-hud { transition: opacity 0.25s ease; }
@@ -1377,34 +1313,6 @@
   #ui-root .dw-shutter:hover span { background: #fff; transform: scale(0.94); }
   #ui-root .dw-shutter:active { transform: scale(0.92); }
   #ui-root .dw-flash { position: absolute; inset: 0; z-index: 60; background: #fffaf2; opacity: 0; pointer-events: none; }
-
-  /* ---- SIM mode: CLASSIC-only chrome (boost, barrel rolls) does nothing there --------------- */
-  #ui-root.dw-sim .dw-touch-boost,
-  #ui-root.dw-sim .dw-roll-left,
-  #ui-root.dw-sim .dw-roll-right,
-  #ui-root.dw-sim .dw-flight .dw-boost,
-  #ui-root.dw-sim .dw-quick[data-command="barrel roll"] { display: none; }
-
-  /* ---- HOTAS prompt (lives in the toast stack) ------------------------------------------------ */
-  #ui-root .dw-prompt {
-    pointer-events: auto;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: 8px 12px;
-    max-width: 100%;
-    padding: 7px 8px 7px 14px;
-    border-radius: 20px;
-    background: rgba(10, 8, 14, 0.46);
-    font-size: 15px;
-    color: var(--dw-text);
-    animation: dw-toast-in 0.35s var(--dw-ease);
-  }
-  #ui-root .dw-prompt[hidden] { display: none; }
-  #ui-root .dw-prompt .dw-toast-dot { background: var(--dw-gold); box-shadow: 0 0 8px rgba(243, 199, 122, 0.85); }
-  #ui-root .dw-prompt-text { font-weight: 500; }
-  #ui-root .dw-prompt-actions { display: inline-flex; gap: 6px; }
 
   /* ---- Settings tabs and the assists tooltip ---------------------------------------------------- */
   #ui-root .dw-tabs {
@@ -1504,7 +1412,6 @@
   @keyframes dw-mic-pulse { 0% { transform: scale(1); opacity: 0.85; } 100% { transform: scale(1.55); opacity: 0; } }
   @keyframes dw-spin { to { transform: rotate(360deg); } }
   @keyframes dw-dot-bounce { 0%, 80%, 100% { transform: translateY(0); opacity: 0.45; } 40% { transform: translateY(-3px); opacity: 1; } }
-  @keyframes dw-nudge { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(-3px); } 65% { transform: translateX(3px); } }
 
   /* ---- Responsive -------------------------------------------------------------------------- */
   /* Below 1280 px the pill and picker no longer fit beside the compass; they drop under it. */

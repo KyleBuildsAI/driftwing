@@ -3,18 +3,18 @@
 //
 //   flightModels.register('fixedWing', createSimFixedWingModel);
 //
-// A factory is called as factory({ profile, craft, world, bus, state, input, craftState, settings })
-// (SIM models also get the craft's ability state and the settings store) and returns a
-// FlightModel (docs/architecture.md): { kind, reset(pose), step(dt, controls, env), state, contact,
-// writeTelemetry(flight), snapshot(), restore(snapshot) }. `profile` is the craft's simProfile for
-// SIM models (its `model` field names the kind) and its arcadeProfile for 'arcade'.
+// A factory is called as factory({ profile, craft, world, bus, state, craftState, settings }) (the
+// craft's ability state and the settings store included) and returns a FlightModel
+// (docs/architecture.md): { kind, reset(pose), step(dt, controls, env), state, contact,
+// writeTelemetry(flight), snapshot(), restore(snapshot) }. `profile` is the craft's simProfile (its
+// `model` field names the kind).
 //
 // The registry is exposed as ctx.flightModels, so tests can register a kinematic model at runtime.
-// While a craft's SIM kind is not registered the controller refuses SIM for that craft.
+// While a craft's model kind is not registered the controller refuses that craft.
 //
-// Registered here: 'arcade' (CLASSIC) and 'fixedWing' (SimFixedWing: glider, bush plane), plus the
-// SIM control stages every tick runs through: the PID autopilot (order 20) and the assists (order 40).
-import { createArcadeModel } from './ArcadeModel.js';
+// Registered here: 'fixedWing' (SimFixedWing: glider, bush plane), 'jet' (SimFixedWing with the
+// jet extension), 'helicopter', 'wingsuit' and 'quad', plus the control stages every tick runs
+// through: the PID autopilot (order 20) and the assists (order 40).
 import { createSimFixedWingModel } from './SimFixedWing.js';
 import { createSimHelicopterModel } from './SimHelicopter.js';
 import { createSimWingsuitModel } from './SimWingsuit.js';
@@ -22,7 +22,7 @@ import { createSimQuadModel } from './SimQuad.js';
 import { createAutopilotStage } from './autopilot.js';
 import { createAssistStage } from './assists.js';
 
-export const MODEL_KINDS = Object.freeze(['arcade', 'fixedWing', 'helicopter', 'wingsuit', 'quad']);
+export const MODEL_KINDS = Object.freeze(['fixedWing', 'jet', 'helicopter', 'wingsuit', 'quad']);
 
 /** Methods and fields every model must expose (checked when the controller creates one). */
 const MODEL_INTERFACE = Object.freeze({
@@ -91,7 +91,7 @@ function createFlightModelRegistry() {
     },
 
     /**
-     * Registers a SIM control stage: { id, order = 50, apply(controls, context) }. Every physics tick
+     * Registers a control stage: { id, order = 50, apply(controls, context) }. Every physics tick
      * the controller copies ControlState, applies the craft input profile, zeroes the stick while a
      * disconnected device's hands-off hold is active, then runs the stages in ascending order before
      * model.step. context: { dt, model, craft, craftId, env, autopilot, assists (0..1, forced to 1 by
@@ -121,7 +121,6 @@ function createFlightModelRegistry() {
 
 export const flightModels = createFlightModelRegistry();
 
-flightModels.register('arcade', createArcadeModel);
 flightModels.register('fixedWing', createSimFixedWingModel);
 flightModels.register('helicopter', createSimHelicopterModel);
 flightModels.register('wingsuit', createSimWingsuitModel);

@@ -176,7 +176,6 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
     const list = Array.isArray(flight.activeAssists) ? flight.activeAssists.map(describeAssist).filter(Boolean) : [];
     let text;
     if (list.length > 0) text = `Active now: ${list.join(', ')}`;
-    else if (settings.get('mode') === 'classic') text = 'CLASSIC flies with forgiving arcade handling. Assists apply in SIM';
     else text = 'No assists active: raw physics';
     if (text === assistText) return;
     assistText = text;
@@ -208,7 +207,7 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
     for (const group of segmentedGroups) if (pathDependsOn(group.dataset.setting, key)) syncSegmented(group);
     if (key === 'quality') syncQualityNote();
     if (key === 'craft') syncAssistLabel();
-    if (key === 'mode' || key === 'craft') assistText = '';
+    if (key === 'craft') assistText = '';
     if (key === 'frameTarget' || key === 'dynamicResolution') syncPerfNotes();
     if (key === 'remoteEndpoint') syncEndpoint();
   }
@@ -357,7 +356,6 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
   });
   bus.on('quality:changed', syncQualityNote);
   bus.onTyped('craftChanged', () => syncKey('craft'));
-  bus.onTyped('modeChanged', () => { assistText = ''; });
 
   syncAll();
 

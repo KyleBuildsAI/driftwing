@@ -4,9 +4,8 @@
 // speed, a battery on top under an orange strap, the FPV camera in an orange TPU cage tilted up at the
 // camera's uptilt, a rear antenna and LED strips under the rear arms that show the flight mode (teal
 // angle, orange rate, red blink when disarmed).
-// CLASSIC flies it with the hover-capable arcade rules (ArcadeModel's hover extension, forgiving,
-// never tumbles); SIM flies SimQuad (src/flight/SimQuad.js): thrust-to-weight 8:1, about 150 km/h
-// flat out, Betaflight rates (670 deg/s at full stick, expo 0.3), angle mode and altitude hold.
+// It flies SimQuad (src/flight/SimQuad.js): thrust-to-weight 8:1, about 150 km/h flat out,
+// Betaflight rates (670 deg/s at full stick, expo 0.3), angle mode and altitude hold.
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { DEG, clamp } from '../core/util.js';
@@ -16,57 +15,6 @@ import {
 import { DEFAULT_QUAD_RATES, QUAD_VISUAL_PROP_SPEED } from '../flight/SimQuad.js';
 
 const { uniform } = TSL;
-
-// ============================================================================================
-// CLASSIC: the hover-capable arcade rules (ArcadeModel's hover extension, the same one the
-// helicopter uses) tuned quad-quick: it hovers where it is left, the stick tilts it into a sprint,
-// throttle above the middle climbs and below it sinks, and it never tumbles.
-// ============================================================================================
-const arcadeProfile = Object.freeze({
-  // m/s. The dial shows the arcade envelope; the hover model reads hover.MAX_FORWARD_SPEED.
-  SPEED: Object.freeze({ MIN: 0, STALL: 0, CRUISE: 22, MAX: 39, BOOST_MAX: 47 }),
-  GRAVITY: 9.81,
-  BOOST_DURATION: 1.6,
-  BOOST_COOLDOWN: 5,
-  AUTOPILOT: Object.freeze({
-    // Throttle 0.5 holds the height: spawns and respawns hover there.
-    CRUISE_THROTTLE: 0.5,
-    MIN_ALTITUDE: 40,
-    CLEARANCE: 40,
-    CRUISE_SPEED: 22,
-    OVERRIDE_INPUT: 0.35,
-    OVERRIDE_SECONDS: 0.25,
-    LOOKAHEAD_SECONDS: Object.freeze([0, 1, 2, 4, 6]),
-  }),
-  hover: Object.freeze({
-    MAX_FORWARD_SPEED: 39,
-    MAX_REVERSE_SPEED: 12,
-    MAX_SIDE_SPEED: 12,
-    ACCELERATION: 12,
-    BRAKING: 14,
-    CLIMB_RATE: 12,
-    DESCENT_RATE: 9,
-    VERTICAL_RESPONSE: 3,
-    THROTTLE_DEADBAND: 0.04,
-    THROTTLE_RATE: 1.2,
-    YAW_RATE: 180 * DEG,
-    TURN_RATE: 70 * DEG,
-    TURN_REFERENCE_SPEED: 12,
-    TURN_GAIN: 2.5,
-    MAX_BANK: 45 * DEG,
-    MAX_PITCH: 35 * DEG,
-    CRUISE_PITCH: 20 * DEG,
-    ATTITUDE_RESPONSE: 6,
-    /** Hovering floor above the ground or water (m, mesh origin) and the cushion band above it. */
-    MIN_AGL: 1.5,
-    CUSHION_HEIGHT: 10,
-    /** Below this groundspeed a centred stick lets the quad settle into a hover (m/s). */
-    SETTLE_SPEED: 6,
-    ROTOR_SPEED: QUAD_VISUAL_PROP_SPEED,
-    /** Frame tilt shown for full acceleration / bank commands (the mesh reads it through visual). */
-    DISC_TILT: 0.8,
-  }),
-});
 
 // ============================================================================================
 // SIM: a 5-inch quad for SimQuad (src/flight/SimQuad.js). Targets first, then the physical
@@ -390,7 +338,7 @@ function createLedMaterial(colorUniform, intensityUniform) {
   return material;
 }
 
-const LED_COLORS = Object.freeze({ angle: new THREE.Color(0x3fd6c6), rate: new THREE.Color(0xe0703a), disarmed: new THREE.Color(0xff3524), classic: new THREE.Color(0xffc98a) });
+const LED_COLORS = Object.freeze({ angle: new THREE.Color(0x3fd6c6), rate: new THREE.Color(0xe0703a), disarmed: new THREE.Color(0xff3524), idle: new THREE.Color(0xffc98a) });
 const MOTOR_LAYOUT = simProfile.motors.map((motor) => ({
   id: motor.id,
   x: motor.position[0],
@@ -399,17 +347,18 @@ const MOTOR_LAYOUT = simProfile.motors.map((motor) => ({
   front: motor.position[2] <= 0 ? 1 : -1,
   spin: motor.spin === 'ccw' ? -1 : 1,
 }));
-const IDLE = simProfile.motor.idle;
+/** How far SimQuad's roll, pitch and yaw motor patterns move each motor from the mean. */
+const MOTOR_PATTERN_SPREAD = 0.5;
 /** Visual prop speed (rad/s) for a motor speed (0..1): kit prop discs blur from about 8 rad/s. */
 const visualPropSpeed = (motorSpeed) => (motorSpeed > 0.01 ? 4 + 28 * motorSpeed : 0);
 /** Above this motor speed the blades are a blur: only the disc shows (as in real FPV footage). */
 const BLADE_BLUR_SPEED = 0.2;
 
 /**
- * Builds the quad. update(visual, dt) spins each prop at its motor's speed: in SIM visual.propSpeed
- * is the mean motor speed (times QUAD_VISUAL_PROP_SPEED, negative in turtle mode) and visual.aileron
- * / elevator / rudder are the roll, pitch and yaw motor patterns (SimQuad writeSurfaces); in CLASSIC
- * the motors follow the throttle with the stick's differential. LEDs show the flight mode.
+ * Builds the quad. update(visual, dt) spins each prop at its motor's speed: visual.propSpeed is the
+ * mean motor speed (times QUAD_VISUAL_PROP_SPEED, negative in turtle mode) and visual.aileron /
+ * elevator / rudder are the roll, pitch and yaw motor patterns (SimQuad writeSurfaces). LEDs show the
+ * flight mode.
  */
 function buildMesh(ctx) {
   const materials = getCraftMaterials(ctx);
@@ -477,24 +426,18 @@ function buildMesh(ctx) {
   const flightState = ctx.state && ctx.state.flight ? ctx.state.flight : null;
   const motorSpeeds = MOTOR_LAYOUT.map(() => 0);
 
-  /** Each motor's speed (0..1) from the visual: SimQuad's patterns in SIM, throttle and stick in CLASSIC. */
+  /** Each motor's speed (0..1) from SimQuad's motor patterns; returns -1 while turtle mode spins them backwards. */
   function readMotorSpeeds(visual) {
-    const running = visual.engineOn !== false;
-    const simPatterns = Number.isFinite(visual.propSpeed);
-    const mean = simPatterns ? Math.abs(visual.propSpeed) / QUAD_VISUAL_PROP_SPEED : running ? IDLE + (1 - IDLE) * (0.25 + 0.5 * clamp(Number.isFinite(visual.throttle) ? visual.throttle : 0, 0, 1)) + (visual.boost ? 0.15 : 0) : 0;
-    const spread = simPatterns ? 0.5 : 0.08;
-    const roll = clamp(Number.isFinite(visual.aileron) ? visual.aileron : 0, -1, 1) * spread;
-    const pitch = clamp(Number.isFinite(visual.elevator) ? visual.elevator : 0, -1, 1) * spread;
-    const yaw = clamp(Number.isFinite(visual.rudder) ? visual.rudder : 0, -1, 1) * spread;
+    const propSpeed = Number.isFinite(visual.propSpeed) ? visual.propSpeed : 0;
+    const mean = Math.abs(propSpeed) / QUAD_VISUAL_PROP_SPEED;
+    const roll = clamp(Number.isFinite(visual.aileron) ? visual.aileron : 0, -1, 1) * MOTOR_PATTERN_SPREAD;
+    const pitch = clamp(Number.isFinite(visual.elevator) ? visual.elevator : 0, -1, 1) * MOTOR_PATTERN_SPREAD;
+    const yaw = clamp(Number.isFinite(visual.rudder) ? visual.rudder : 0, -1, 1) * MOTOR_PATTERN_SPREAD;
     for (let index = 0; index < MOTOR_LAYOUT.length; index++) {
       const motor = MOTOR_LAYOUT[index];
-      // In CLASSIC the stick is a request: right roll speeds up the left motors, pitch up the front ones.
-      const commanded = simPatterns
-        ? mean + roll * motor.side + pitch * motor.front + yaw * motor.spin
-        : mean - roll * motor.side + pitch * motor.front - yaw * motor.spin;
-      motorSpeeds[index] = running || simPatterns ? clamp(commanded, 0, 1) : 0;
+      motorSpeeds[index] = clamp(mean + roll * motor.side + pitch * motor.front + yaw * motor.spin, 0, 1);
     }
-    return simPatterns && visual.propSpeed < 0 ? -1 : 1;
+    return propSpeed < 0 ? -1 : 1;
   }
 
   function updateLeds(visual) {
@@ -505,9 +448,8 @@ function buildMesh(ctx) {
       ledIntensity.value = (Math.sin(time * 6) > 0 ? 2.6 : 0.3) * (1 + night);
       return;
     }
-    const sim = flightState && flightState.mode === 'sim';
-    const mode = sim && flightState.craftState ? flightState.craftState.droneMode : null;
-    ledColor.value.copy(mode === 'rate' ? LED_COLORS.rate : mode === 'angle' ? LED_COLORS.angle : LED_COLORS.classic);
+    const mode = flightState && flightState.craftState ? flightState.craftState.droneMode : null;
+    ledColor.value.copy(mode === 'rate' ? LED_COLORS.rate : mode === 'angle' ? LED_COLORS.angle : LED_COLORS.idle);
     ledIntensity.value = (2 + 0.5 * Math.sin(time * 2.4)) * (1 + 1.2 * night);
   }
 
@@ -559,7 +501,6 @@ function isUpsideDown(quaternion) {
 
 const craftAbility = Object.freeze({
   label: 'Rate / angle mode (turtle when upside down)',
-  modes: Object.freeze(['sim']),
   initialState: () => ({ droneMode: 'angle', altitudeHold: true, modeOverride: null, assistLevel: null, turtle: false }),
   run(flight) {
     const craftState = flight.craftState;
@@ -582,7 +523,6 @@ export default Object.freeze({
   id: 'fpv',
   name: 'FPV drone',
   buildMesh,
-  arcadeProfile,
   simProfile,
   /**
    * ControlState mapping: the throttle axis is thrust (in acro a centred stick is NOT a hover: it
@@ -596,7 +536,7 @@ export default Object.freeze({
     antenna: 'zoom',
     rates: Object.freeze({ roll: DEFAULT_QUAD_RATES, pitch: DEFAULT_QUAD_RATES, yaw: DEFAULT_QUAD_RATES }),
   }),
-  audioProfile: Object.freeze({ engine: 'drone', motors: 4, idleHz: 170, maxHz: 820, airflowSpeed: 42, classicAirflowSpeed: 45, touchdown: 'body', callouts: false }),
+  audioProfile: Object.freeze({ engine: 'drone', motors: 4, idleHz: 170, maxHz: 820, airflowSpeed: 42, touchdown: 'body', callouts: false }),
   cameraRig: Object.freeze({
     eye: FPV_CAMERA.POSITION,
     // Close behind and aimed low: the chase camera keeps 3 m above the ground, so a short look-ahead

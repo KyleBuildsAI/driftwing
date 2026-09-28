@@ -24,7 +24,6 @@ export const AXES = Object.freeze(['roll', 'pitch', 'yaw', 'throttle', 'collecti
 export const ACTIONS = Object.freeze({
   copilotPTT: 'Copilot push-to-talk',
   craftAbility: 'Craft ability',
-  boost: 'Boost (CLASSIC)',
   waypointNearest: 'Waypoint to nearest landmark',
   waypointAhead: 'Waypoint ahead',
   photoMode: 'Photo mode',
@@ -42,7 +41,6 @@ export const ACTIONS = Object.freeze({
   craftSelect4: 'Helicopter',
   craftSelect5: 'Wingsuit',
   craftSelect6: 'FPV drone',
-  modeToggle: 'CLASSIC / SIM',
   gearToggle: 'Landing gear',
   flapsUp: 'Flaps up',
   flapsDown: 'Flaps down',

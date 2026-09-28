@@ -2,8 +2,7 @@
 // (flat-shaded, vertex-coloured lofts in the v1 palette). High constant-chord wing on V lift struts,
 // boxy fabric fuselage with a glassy cabin, oversized tundra tires on spring gear, tail wheel,
 // two-blade prop with a blur disc, and animated ailerons, elevator, rudder and 3-notch flaps.
-// CLASSIC flies it with v1's forgiving arcade rules retuned to its speeds (slower, punchier throttle);
-// the SIM profile describes the real thing (stall about 55 km/h with full flaps, cruise about
+// Its flight profile describes the real thing (stall about 55 km/h with full flaps, cruise about
 // 170 km/h, climb about 5 m/s, strong prop torque).
 import * as THREE from 'three/webgpu';
 import { DEG, clamp, damp } from '../core/util.js';
@@ -11,78 +10,6 @@ import {
   PALETTE, createMeshBuilder, profileSection, mirrorPoint, getCraftMaterials, addSolid, addPivot,
   createPropDisc, createNavLights, disposeCraftMesh,
 } from './kit.js';
-
-// ============================================================================================
-// CLASSIC: v1's arcade rules, retuned for a slow, short-field taildragger.
-// ============================================================================================
-const arcadeProfile = Object.freeze({
-  // m/s: stall about 65 km/h clean, cruise about 165 km/h, arcade dive limit about 250 km/h.
-  SPEED: Object.freeze({ MIN: 14, STALL: 18, CRUISE: 46, MAX: 70, BOOST_MAX: 90 }),
-  GRAVITY: 9.81,
-  // Punchier than the glider: more drag and thrust per m/s, so throttle changes bite quickly.
-  DRAG_COEFFICIENT: 0.0035,
-  THROTTLE_SPEED_EXPONENT: 1.2, // terminal speed = MAX * throttle^1.2 -> 46 m/s at 70 %
-  THROTTLE_RATE: 0.8,
-  INDUCED_DRAG: 0.4,
-  INDUCED_MAX_EXTRA_G: 3,
-  MAX_PITCH_RATE: 60 * DEG,
-  MAX_ROLL_RATE: 95 * DEG,
-  MAX_YAW_RATE: 24 * DEG,
-  MAX_BANK: 60 * DEG,
-  BANK_GAIN: 3,
-  FINE_BANK_SCALE: 0.55,
-  YAW_BANK: 12 * DEG,
-  PITCH_LIMIT_START: 45 * DEG,
-  PITCH_LIMIT_RANGE: 28 * DEG,
-  TURN_GAIN: 1.5,
-  MAX_TURN_RATE: 45 * DEG,
-  BANK_NOSE_DROP: 4 * DEG,
-  BANK_SETTLE_PITCH: 4 * DEG,
-  FINE_CONTROL_SCALE: 0.45,
-  AUTO_LEVEL_DELAY: 1.2,
-  STALL_EXIT_MARGIN: 3,
-  STALL_NOSE_TARGET: -18 * DEG,
-  HIGH_SPEED_PITCH_START: 55,
-  CUSHION_HEIGHT: 25,
-  IMPACT_WARNING_SECONDS: 2.5,
-  IMPACT_FULL_SECONDS: 0.7,
-  CUSHION_PULL_RATE: 60 * DEG,
-  GUARD_PROBE_SECONDS: Object.freeze([1.1, 2.2, 3.4]),
-  GUARD_MARGIN: 18,
-  GUARD_MIN_SPEED: 14,
-  GUARD_EVADE_GRADIENT: Math.tan(28 * DEG),
-  GUARD_EVADE_BANK: 50 * DEG,
-  CEILING_BAND: 260,
-  BOOST_DURATION: 2.2,
-  BOOST_COOLDOWN: 6,
-  BARREL_ROLL_DURATION: 1.3,
-  BARREL_ROLL_RADIUS: 1.4,
-  AUTOPILOT: Object.freeze({
-    MAX_BANK: 30 * DEG,
-    MAX_PITCH: 8 * DEG,
-    TERRAIN_PITCH: 12 * DEG,
-    CLEARANCE: 120,
-    RING_CLEARANCE: 45,
-    MIN_ALTITUDE: 60,
-    CRUISE_THROTTLE: 0.7,
-    OVERRIDE_INPUT: 0.35,
-    OVERRIDE_SECONDS: 0.25,
-    TERRAIN_MAX_PITCH: 20 * DEG,
-    LOOKAHEAD_DISTANCES: Object.freeze([0, 70, 140, 230, 350, 500, 700, 1000]),
-    PATH_LOOKAHEAD_DISTANCES: Object.freeze([110, 260, 480]),
-    WAYPOINT_STEERING: Object.freeze({ BANK_PER_DEGREE: 1.2, MAX_BANK: 30 * DEG, DAMPING: 2.2, MAX_ROLL_RATE: 40 * DEG }),
-    RING_STEERING: Object.freeze({ BANK_PER_DEGREE: 2.0, MAX_BANK: 40 * DEG, DAMPING: 3.5, MAX_ROLL_RATE: 55 * DEG }),
-    RING_MAX_PITCH: 12 * DEG,
-    RING_MIN_TIME_TO_RING: 1.5,
-    RING_VERTICAL_SPEED_GAIN: 0.015,
-    RING_LOOKAHEAD_MARGIN: 150,
-    RING_TRACK_LEAD_SECONDS: 2.4,
-    RING_TRACK_LEAD_MIN: 80,
-    RING_TRACK_LEAD_MAX: 160,
-  }),
-  LOAD: Object.freeze({ PULL_SHARE: 0.2, KNEE: 3.5, CAP: 5, MIN: -1, SMOOTHING: 5, MIN_BANK_COS: 0.2, BARREL_ROLL_EXTRA: 0.8 }),
-  SURFACE_TURN_SHARE: 0.3,
-});
 
 // ============================================================================================
 // SIM: a Super Cub style bush plane for SimFixedWing (src/flight/SimFixedWing.js). Targets first,
@@ -538,7 +465,7 @@ function buildMesh(ctx) {
       rudder.quaternion.setFromAxisAngle(rudder.userData.axis, clamp(visual.rudder, -1, 1) * SURFACE_LIMITS.rudder * DEG);
 
       const throttle = Number.isFinite(visual.throttle) ? visual.throttle : 0;
-      const targetSpeed = Number.isFinite(visual.propSpeed) ? visual.propSpeed : visual.engineOn === false ? 0 : 9 + 24 * throttle + (visual.boost ? 8 : 0);
+      const targetSpeed = Number.isFinite(visual.propSpeed) ? visual.propSpeed : visual.engineOn === false ? 0 : 9 + 24 * throttle;
       propSpeed = dt > 0 ? damp(propSpeed, targetSpeed, visual.engineOn === false ? 1.2 : 6, dt) : propSpeed;
       propAngle = (propAngle + propSpeed * dt) % (Math.PI * 2);
       if (!Number.isFinite(propAngle)) propAngle = 0;
@@ -561,12 +488,10 @@ function buildMesh(ctx) {
 
 // ============================================================================================
 // ABILITY: smoke trail. A smoke generator in the tail lays a soft white trail for formation-style
-// flying and for marking the wind; it toggles on and off (SIM; in CLASSIC the button boosts, and a
-// switch to CLASSIC shuts the smoke off, since v1 has none).
+// flying and for marking the wind; it toggles on and off.
 // ============================================================================================
 const craftAbility = Object.freeze({
   label: 'Smoke trail',
-  modes: Object.freeze(['sim']),
   initialState: () => ({ smoke: false }),
   run(flight) {
     const craftState = flight.craftState;
@@ -577,11 +502,6 @@ const craftAbility = Object.freeze({
   update(flight, dt) {
     const craftState = flight.craftState;
     if (!craftState.smoke) return;
-    if (flight.mode !== 'sim') {
-      craftState.smoke = false;
-      flight.notify('Smoke off.');
-      return;
-    }
     flight.emitTrail('smoke', 'smoke', dt);
   },
 });
@@ -590,7 +510,6 @@ export default Object.freeze({
   id: 'bushplane',
   name: 'Bush plane',
   buildMesh,
-  arcadeProfile,
   simProfile,
   /**
    * ControlState mapping: throttle is engine power; flapsUp / flapsDown and the flap axis step through

@@ -1,16 +1,16 @@
 import { clamp } from '../core/util.js';
-import { CRAFT_IDS, FLIGHT_MODES } from '../core/settings.js';
+import { CRAFT_IDS } from '../core/settings.js';
 
 /**
- * WREN's v2 grammar: the aircraft commands (craft, CLASSIC | SIM, assists, views, chute, engine,
- * relaunch, calibration) and the flight questions (airspeed, landing), plus the strict schema of the
+ * WREN's v2 grammar: the aircraft commands (craft, assists, views, chute, engine, relaunch,
+ * calibration) and the flight questions (airspeed, landing), plus the strict schema of the
  * matching remote actions. Everything here is pure: the matchers turn a normalized transcript and
  * the flight-state snapshot into { speech, action }, and the executor (flightActions.js) carries the
  * actions out and reports what really happened.
  */
 
 export const FLIGHT_ACTION_TYPES = Object.freeze([
-  'setCraft', 'setMode', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate',
+  'setCraft', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate',
 ]);
 export const ASSIST_CHANGES = Object.freeze(['up', 'down', 'full', 'off']);
 export const VIEW_TARGETS = Object.freeze(['cockpit', 'chase']);
@@ -48,12 +48,6 @@ export function sanitizeFlightAction(raw) {
       const craft = typeof raw.craft === 'string' ? raw.craft.toLowerCase() : '';
       if (!CRAFT_IDS.includes(craft)) return null;
       action.craft = craft;
-      return action;
-    }
-    case 'setMode': {
-      const mode = typeof raw.mode === 'string' ? raw.mode.toLowerCase() : '';
-      if (!FLIGHT_MODES.includes(mode)) return null;
-      action.mode = mode;
       return action;
     }
     case 'setAssists': {
@@ -153,7 +147,6 @@ export function describeLanding(flight, pick) {
   const last = flight.lastLanding;
   const units = flight.units === 'aviation' ? 'aviation' : 'metric';
   if (!last || !(last.grade in LANDING_RANK)) {
-    if (flight.mode !== 'sim') return "No landings yet. CLASSIC never touches down; say 'sim mode', find a flat meadow and ease her on.";
     return "No landings yet this flight. Find a flat spot, slow down and keep the sink rate under half a metre a second for a butter.";
   }
   const sink = formatSinkRate(last.sinkRate, units);
@@ -222,22 +215,6 @@ export function createFlightGrammar({ pick, helpLine }) {
     return { speech: '', action: { type: 'setView', view: 'cockpit' } };
   }
 
-  function matchMode(text, flight, core) {
-    const simWord = /\b(sim|simulation|simulator|realistic|real physics)\b/;
-    const classicWord = /\b(classic|arcade|v1|casual)\b/;
-    const modeWord = /\b(mode|flight|physics|model|flying)\b/;
-    const verb = /\b(switch|go|change|put|set|turn on|enable|use|back to|to)\b/;
-    const short = core.length <= 3;
-    const sim = simWord.test(text) && (modeWord.test(text) || verb.test(text) || short);
-    const classic = classicWord.test(text) && (modeWord.test(text) || verb.test(text) || short);
-    if (sim && !classic) return { speech: '', action: { type: 'setMode', mode: 'sim' } };
-    if (classic && !sim) return { speech: '', action: { type: 'setMode', mode: 'classic' } };
-    if (/\b(toggle|switch|change|swap|other) (the )?(flight )?modes?\b/.test(text)) {
-      return { speech: '', action: { type: 'setMode', mode: flight.mode === 'sim' ? 'classic' : 'sim' } };
-    }
-    return null;
-  }
-
   function matchAssists(text, flight, core) {
     if (!/\b(assists?|assistance|flight aids?|aids|stability aids?|helpers)\b/.test(text)) return null;
     const percent = text.match(/\b(\d{1,3})\s*(percent|per cent|pct)?\b/);
@@ -262,7 +239,7 @@ export function createFlightGrammar({ pick, helpLine }) {
   return {
     matchHelp,
     /** In priority order; they run before the v1 matchers. */
-    matchers: [matchLanding, matchCalibrate, matchRelaunch, matchChute, matchEngine, matchView, matchMode, matchAssists, matchCraft],
+    matchers: [matchLanding, matchCalibrate, matchRelaunch, matchChute, matchEngine, matchView, matchAssists, matchCraft],
   };
 }
 
@@ -271,6 +248,5 @@ export function describeAssistLevel(flight) {
   const assists = flight.assists;
   if (!assists || typeof assists !== 'object') return "I can't read the assists right now.";
   const list = Array.isArray(assists.active) && assists.active.length ? assists.active.join(', ') : 'none: raw physics';
-  const note = flight.mode === 'sim' ? '' : " They apply in SIM mode; say 'sim mode' to feel them.";
-  return `Assists are at ${assists.percent} percent: ${list}.${note}`;
+  return `Assists are at ${assists.percent} percent: ${list}.`;
 }
