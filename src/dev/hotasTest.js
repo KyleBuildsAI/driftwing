@@ -31,8 +31,8 @@ import { installConsoleCapture } from './testConsole.js';
 import { createTestPanel } from './testPanel.js';
 import { readSession, removeSession, writeSession } from './testStats.js';
 
-export const TEST_DATABASE = 'driftwing-test-hotas';
-const SESSION_KEY = 'driftwing.test.hotas';
+export const TEST_DATABASE = 'driftwing-v2-test-hotas';
+const SESSION_KEY = 'driftwing-v2.test.hotas';
 const REPORT_KIND = 'driftwing-hotas-test';
 const REPORT_VERSION = 1;
 const STICK_KEY = '044f-b10a';

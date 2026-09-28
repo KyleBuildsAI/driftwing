@@ -4,31 +4,69 @@
 // (read/write keep the v1 call shape used across the game). Writes update the cache at once and
 // are persisted asynchronously; flush() resolves when every pending write has landed.
 //
-// Data lives in the "driftwing" database, object store "kv", keyed by strings:
-//   driftwing.settings               settings (see core/settings.js; migrated from v1's driftwing.settings.v1)
-//   driftwing.journal.<seed>         per-world discovery journal
-//   driftwing.ui.firstRunHintSeen    first-run hint flag
-//   input.bindings                   binding profile (global + per-craft overrides)
-//   input.calibration.<deviceKey>    per-device calibration (HOTAS, gamepads)
-//   input.prompts                    remembered answers to input prompts
-//   audio.vario                      variometer audio mode (AudioEngine)
+// V2 shares its origin with V1 (both run behind the launcher shell), so every piece of V2 storage is
+// prefixed 'driftwing-v2': the IndexedDB database is "driftwing-v2" and every key starts with
+// 'driftwing-v2.' (read, write and remove throw on any other key). V2 never reads or writes V1's
+// localStorage keys (driftwing.settings.v1, driftwing.journal.*, driftwing.ui.*).
+//
+// Data lives in the "driftwing-v2" database, object store "kv", keyed by strings:
+//   driftwing-v2.settings                        settings (see core/settings.js)
+//   driftwing-v2.journal.<seed>                  per-world discovery journal
+//   driftwing-v2.ui.firstRunHintSeen             first-run hint flag
+//   driftwing-v2.input.bindings                  binding profile (global + per-craft overrides)
+//   driftwing-v2.input.calibration.<deviceKey>   per-device calibration (HOTAS, gamepads)
+//   driftwing-v2.audio.vario                     variometer audio mode (AudioEngine)
 //
 // IndexedDB is scoped to the origin INCLUDING the port, which is why the dev server is pinned to
 // 127.0.0.1:5199. When IndexedDB is unavailable (some private modes), storage falls back to
-// localStorage, and if that is blocked too, to memory for the session.
+// localStorage (the same 'driftwing-v2.' keys), and if that is blocked too, to memory for the session.
+//
+// The Phase 1 build kept the same data, under unprefixed names, in the IndexedDB database
+// "driftwing". The first data migration copies it across once (see importPhaseOneDatabase).
 //
 // The dev verification harnesses (?test=1, ?test=hotas) pass their own database name to init(), so
 // their settings, bindings and calibration never touch the player's. Such an isolated database
-// skips the v1 localStorage import and falls back to memory only (never to the player's
-// localStorage keys).
+// skips the data migrations and falls back to memory only (never to the player's localStorage keys).
 
-const DB_NAME = 'driftwing';
+const DB_NAME = 'driftwing-v2';
 const STORE = 'kv';
 const META_KEY = '__schema';
-/** Every game key starts with one of these; the localStorage fallback reloads only these keys. */
-const OWNED_KEY_PREFIXES = Object.freeze(['driftwing.', 'input.', 'audio.']);
+/** Every V2 storage key (IndexedDB, localStorage and sessionStorage) starts with this. */
+export const STORAGE_KEY_PREFIX = 'driftwing-v2.';
+/** The Phase 1 database, imported once into DB_NAME and then deleted. */
+export const PHASE_ONE_DB_NAME = 'driftwing';
 /** Boot waits at most this long for IndexedDB to open before it takes the localStorage fallback. */
 const OPEN_TIMEOUT_MS = 4000;
+
+/** Throws on a key outside V2's namespace: V2 must never touch V1's (or anyone else's) keys. */
+function assertOwnedKey(key) {
+  if (typeof key !== 'string' || !key.startsWith(STORAGE_KEY_PREFIX)) {
+    throw new Error(`storage key "${key}" is outside V2's namespace (${STORAGE_KEY_PREFIX}*)`);
+  }
+}
+
+/**
+ * The new name of a Phase 1 key, or null for data V2 does not carry over. V2-owned data is the
+ * settings record, the input.* bindings and calibration, the audio.* keys and the journals;
+ * driftwing.settings.v1 (V1's own settings, once imported by Phase 1) and the driftwing.ui.* hint
+ * flags stay behind.
+ */
+export function phaseOneKeyToV2(key) {
+  if (key === 'driftwing.settings') return `${STORAGE_KEY_PREFIX}settings`;
+  if (key.startsWith('driftwing.journal.') && key.length > 'driftwing.journal.'.length) return `${STORAGE_KEY_PREFIX}${key.slice('driftwing.'.length)}`;
+  if (key.startsWith('input.') || key.startsWith('audio.')) return `${STORAGE_KEY_PREFIX}${key}`;
+  return null;
+}
+
+/**
+ * A Phase 1 value as V2 stores it. The settings record loses the CLASSIC | SIM 'mode' field: V2
+ * has no CLASSIC mode any more.
+ */
+function phaseOneValueToV2(key, value) {
+  if (key !== 'driftwing.settings' || value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+  const { mode, ...rest } = value;
+  return rest;
+}
 
 /**
  * Schema migrations, applied in order. Structural ones run in onupgradeneeded (the IndexedDB
@@ -41,26 +79,8 @@ const STRUCTURE_MIGRATIONS = [
   },
 ];
 const DATA_MIGRATIONS = [
-  // v1: import everything the single-file v1 kept in localStorage under its driftwing.* keys.
-  (context) => {
-    let localKeys = [];
-    try {
-      localKeys = Object.keys(window.localStorage).filter((key) => key.startsWith('driftwing.'));
-    } catch (error) {
-      // Blocked localStorage (a privacy setting): there is nothing v1 could have left to import.
-      context.report(`localStorage is blocked, so no v1 data was imported (${error && error.message ? error.message : error})`);
-      return;
-    }
-    for (const key of localKeys) {
-      if (context.cache.has(key)) continue;
-      try {
-        const raw = window.localStorage.getItem(key);
-        if (raw !== null) context.put(key, JSON.parse(raw));
-      } catch (error) {
-        context.report(`skipped unreadable legacy entry ${key}`);
-      }
-    }
-  },
+  // v1: import the Phase 1 database "driftwing" when this one is still empty.
+  (context) => importPhaseOneDatabase(context),
 ];
 const DB_VERSION = STRUCTURE_MIGRATIONS.length;
 const DATA_VERSION = DATA_MIGRATIONS.length;
@@ -70,6 +90,110 @@ function requestToPromise(request) {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+function describeError(error) {
+  return error && error.message ? error.message : String(error);
+}
+
+/**
+ * Opens a database only if it already exists. An open without a version would create a missing
+ * database, so the upgrade that would create it is aborted instead. Resolves the connection, or
+ * null when there is no such database; rejects on failure or after timeoutMs (a connection that
+ * arrives later is closed).
+ */
+function openExistingDatabase(name, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(name);
+    let settled = false;
+    let missing = false;
+    const timer = setTimeout(() => {
+      settled = true;
+      reject(new Error(`IndexedDB "${name}" did not open within ${timeoutMs} ms`));
+    }, timeoutMs);
+    function settle(finish) {
+      if (settled) return false;
+      settled = true;
+      clearTimeout(timer);
+      finish();
+      return true;
+    }
+    request.onupgradeneeded = () => {
+      missing = true;
+      request.transaction.abort();
+    };
+    request.onsuccess = () => {
+      const database = request.result;
+      if (!settle(() => resolve(database))) database.close();
+    };
+    request.onerror = () => settle(() => (missing ? resolve(null) : reject(request.error)));
+  });
+}
+
+/** Every [key, value] pair in database's key-value store. */
+async function readEntries(database) {
+  const transaction = database.transaction(STORE, 'readonly');
+  const store = transaction.objectStore(STORE);
+  const [keys, values] = await Promise.all([requestToPromise(store.getAllKeys()), requestToPromise(store.getAll())]);
+  return keys.map((key, index) => [key, values[index]]);
+}
+
+/**
+ * Deletes a database. Resolves 'deleted', or 'blocked' when another tab still holds it open: the
+ * browser then finishes the deletion once that tab lets go, so boot does not wait for it.
+ */
+function deleteDatabase(name) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = () => resolve('deleted');
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => resolve('blocked');
+  });
+}
+
+/**
+ * Data migration v1: when the "driftwing-v2" database is still empty and the Phase 1 database
+ * "driftwing" exists, copies V2's own records across under their new names (phaseOneKeyToV2), then
+ * deletes the old database once every copied record has landed. Runs once per database: the
+ * schema record marks it done even when there was nothing to import.
+ */
+async function importPhaseOneDatabase(context) {
+  if (context.keys().length > 0 || typeof indexedDB === 'undefined') return;
+  let legacy;
+  try {
+    legacy = await openExistingDatabase(PHASE_ONE_DB_NAME, context.openTimeoutMs);
+  } catch (error) {
+    context.report(`the Phase 1 database could not be opened, so nothing was imported (${describeError(error)})`);
+    return;
+  }
+  if (!legacy) return;
+  let entries;
+  try {
+    entries = await readEntries(legacy);
+  } catch (error) {
+    context.report(`the Phase 1 database could not be read, so nothing was imported (${describeError(error)})`);
+    return;
+  } finally {
+    legacy.close();
+  }
+  let imported = 0;
+  for (const [key, value] of entries) {
+    const newKey = typeof key === 'string' ? phaseOneKeyToV2(key) : null;
+    if (!newKey) continue;
+    context.put(newKey, phaseOneValueToV2(key, value));
+    imported++;
+  }
+  context.report(`imported ${imported} of ${entries.length} Phase 1 records`);
+  if (!(await context.writesLanded())) {
+    context.report('the Phase 1 database was kept because the imported records could not be saved');
+    return;
+  }
+  try {
+    const outcome = await deleteDatabase(PHASE_ONE_DB_NAME);
+    if (outcome === 'blocked') context.report('the Phase 1 database is still open in another tab; the browser deletes it once that tab closes');
+  } catch (error) {
+    context.report(`the Phase 1 database could not be deleted (${describeError(error)})`);
+  }
 }
 
 /**
@@ -219,18 +343,27 @@ export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
     return false;
   }
 
-  function runDataMigrations() {
+  async function runDataMigrations() {
     const meta = cache.get(META_KEY) || { dataVersion: 0 };
     const notes = [];
     const context = {
-      cache,
+      openTimeoutMs,
+      /** Stored game keys (the schema record excluded). */
+      keys() {
+        return [...cache.keys()].filter((key) => key !== META_KEY);
+      },
       put(key, value) {
         cache.set(key, value);
         persist(key, value);
       },
+      /** Waits for every queued write; true when they all landed in IndexedDB. */
+      async writesLanded() {
+        await pending;
+        return backend === 'indexeddb' && !writeFailureReported;
+      },
       report(note) { notes.push(note); },
     };
-    for (let version = meta.dataVersion; version < DATA_VERSION; version++) DATA_MIGRATIONS[version](context);
+    for (let version = meta.dataVersion; version < DATA_VERSION; version++) await DATA_MIGRATIONS[version](context);
     if (meta.dataVersion !== DATA_VERSION) {
       const updated = { dataVersion: DATA_VERSION, migratedAt: new Date().toISOString(), notes };
       cache.set(META_KEY, updated);
@@ -241,7 +374,7 @@ export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
   function loadFromLocalStorage() {
     try {
       for (const key of Object.keys(window.localStorage)) {
-        if (!OWNED_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) continue;
+        if (!key.startsWith(STORAGE_KEY_PREFIX)) continue;
         const raw = window.localStorage.getItem(key);
         if (raw !== null) cache.set(key, JSON.parse(raw));
       }
@@ -255,7 +388,7 @@ export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
     /** 'indexeddb' | 'localstorage' | 'memory' (after init). */
     get backend() { return backend; },
     get available() { return backend !== 'memory'; },
-    /** Name of the IndexedDB database in use ('driftwing', or a test harness's isolated one). */
+    /** Name of the IndexedDB database in use ('driftwing-v2', or a test harness's isolated one). */
     get databaseName() { return databaseName; },
 
     /**
@@ -272,7 +405,7 @@ export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
             attachConnection(await openDatabase());
             backend = 'indexeddb';
             await loadAll();
-            if (!isolated) runDataMigrations();
+            if (!isolated) await runDataMigrations();
           } catch (error) {
             db = null;
             if (isolated) backend = 'memory';
@@ -286,16 +419,19 @@ export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
 
     /** Synchronous read from the cache; returns fallback when the key is missing. */
     read(key, fallback) {
+      assertOwnedKey(key);
       return cache.has(key) ? cache.get(key) : fallback;
     },
 
     /** Updates the cache and persists in the background. Returns false only when nothing can persist. */
     write(key, value) {
+      assertOwnedKey(key);
       cache.set(key, value);
       return persist(key, value);
     },
 
     remove(key) {
+      assertOwnedKey(key);
       cache.delete(key);
       return persist(key, undefined, true);
     },

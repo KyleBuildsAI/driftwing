@@ -6,13 +6,13 @@ import { LANDING_GRADES, isBetterLanding } from '../flight/landing.js';
  * distance flown, highest altitude, flight time, ring-course results (best
  * clean time, best streak, the best result including misses and the last run) and
  * graded SIM landings (count, last and best, from the typed 'landed' event), and
- * persists them with `storage` under `driftwing.journal.<seed>`.
+ * persists them with `storage` under `driftwing-v2.journal.<seed>`.
  * Saves are throttled (every ~5 s while flying), immediate on discoveries,
  * biome firsts, finished ring courses and new best landings, and flushed when the page hides.
  */
 export function createJournal(ctx) {
   const { bus, state, world } = ctx;
-  const STORAGE_KEY = `driftwing.journal.${state.seed}`;
+  const STORAGE_KEY = `driftwing-v2.journal.${state.seed}`;
   const SAVE_INTERVAL_SECONDS = 5;
   const STATS_EVENT_INTERVAL_SECONDS = 2;
   const MAX_LANDMARK_ENTRIES = 5000;

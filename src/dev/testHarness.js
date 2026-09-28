@@ -62,8 +62,8 @@ import { createTestPanel } from './testPanel.js';
 import { createFrameRecorder, delay, gcAvailable, heapAvailable, readHeapMB, readSession, round, writeSession } from './testStats.js';
 import { clamp, isFiniteQuaternion, isFiniteVector, wrapDegrees } from '../core/util.js';
 
-export const TEST_DATABASE = 'driftwing-test';
-const SESSION_KEY = 'driftwing.test.flight';
+export const TEST_DATABASE = 'driftwing-v2-test';
+const SESSION_KEY = 'driftwing-v2.test.flight';
 const REPORT_KIND = 'driftwing-flight-test';
 const REPORT_VERSION = 1;
 const DEFAULT_SEEDS = Object.freeze(['HARNESS-1', 'HARNESS-2', 'HARNESS-3']);

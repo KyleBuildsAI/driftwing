@@ -5,13 +5,13 @@
 // merges into an object key. Every change emits 'settings:changed' { key, value, settings }.
 //
 // Bindings and calibration are not settings: the input system keeps them in their own storage keys
-// (input.bindings, input.calibration.<device>) so a device profile can be exported on its own.
+// (driftwing-v2.input.bindings, driftwing-v2.input.calibration.<device>) so a device profile can be
+// exported on its own.
 import { CONFIG } from './config.js';
 import { storage } from './storage.js';
 
 export const SETTINGS_VERSION = 3;
-const STORAGE_KEY = 'driftwing.settings';
-const LEGACY_STORAGE_KEY = 'driftwing.settings.v1';
+const STORAGE_KEY = 'driftwing-v2.settings';
 
 export const CRAFT_IDS = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv']);
 export const FLIGHT_MODES = Object.freeze(['classic', 'sim']);
@@ -154,9 +154,7 @@ function migrate(stored) {
 }
 
 function loadValues() {
-  let stored = storage.read(STORAGE_KEY, null);
-  if (!stored) stored = storage.read(LEGACY_STORAGE_KEY, null);
-  const record = migrate(stored);
+  const record = migrate(storage.read(STORAGE_KEY, null));
   const values = {};
   for (const key of Object.keys(SCHEMA)) {
     const sanitized = key in record ? sanitize(key, record[key]) : undefined;
@@ -208,7 +206,7 @@ export function createSettings(bus) {
     return copy;
   }
 
-  // Make sure a first run and a v1 import both land in the current format.
+  // Make sure a first run and an older record (a Phase 1 import included) land in the current format.
   if (storage.read(STORAGE_KEY, null)?.version !== SETTINGS_VERSION) save();
 
   return {

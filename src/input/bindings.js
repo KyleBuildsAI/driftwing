@@ -10,14 +10,14 @@
 //
 // Resolution for a target on a device while flying a craft: the craft override if present, else
 // the global override, else the profile default. An empty list is a deliberate "unbound".
-// Stored in IndexedDB under 'input.bindings'; exported / imported as JSON.
+// Stored in IndexedDB under 'driftwing-v2.input.bindings'; exported / imported as JSON.
 
 import { ACTION_IDS, ACTIONS } from './controlState.js';
 import { AXIS_TARGETS, AXIS_TARGET_IDS, DEFAULT_BINDINGS, UI_RESERVED_KEYS } from './defaultBindings.js';
 import { HAT_DIRECTIONS, HAT_DIRECTION_LABELS } from './hats.js';
 import { CRAFT_IDS } from '../core/settings.js';
 
-export const BINDINGS_STORAGE_KEY = 'input.bindings';
+export const BINDINGS_STORAGE_KEY = 'driftwing-v2.input.bindings';
 const PROFILE_VERSION = 1;
 const EXPORT_KIND = 'driftwing-bindings';
 const MODES = Object.freeze(['classic', 'sim']);

@@ -34,7 +34,7 @@ const SPEECH_START_GRACE = 0.8;
 const INTERIOR_VIEWS = new Set(['cockpit', 'fpv']);
 // Input sources whose presses reach the page as real DOM events (and so unlock audio themselves).
 const DOM_SOURCES = new Set(['keyboard', 'mouse', 'touch']);
-const VARIO_STORAGE_KEY = 'audio.vario';
+const VARIO_STORAGE_KEY = 'driftwing-v2.audio.vario';
 export const VARIO_MODES = Object.freeze(['auto', 'on', 'off']);
 
 function isPlainObject(value) {

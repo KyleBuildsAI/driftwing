@@ -1,4 +1,4 @@
-// Calibration data per device (IndexedDB 'input.calibration.<deviceKey>') and the calibration
+// Calibration data per device (IndexedDB 'driftwing-v2.input.calibration.<deviceKey>') and the calibration
 // wizard step machine the controls panel drives.
 //
 // A calibration record:
@@ -16,7 +16,7 @@
 import { HAT_DIRECTIONS, HAT_DIRECTION_LABELS, buttonSignature, compileHat } from './hats.js';
 import { DEVICE_PROFILES } from './hotas/devices.js';
 
-export const CALIBRATION_PREFIX = 'input.calibration.';
+export const CALIBRATION_PREFIX = 'driftwing-v2.input.calibration.';
 const RECORD_VERSION = 1;
 /** Raw values beyond this magnitude are not axis positions: an axis resting there is a hat. */
 const HAT_REST_THRESHOLD = 1.01;

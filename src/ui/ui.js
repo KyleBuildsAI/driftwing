@@ -57,9 +57,9 @@ export function createUISystem(ctx) {
   };
   const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   const SEED_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const FIRST_RUN_KEY = 'driftwing.ui.firstRunHintSeen';
+  const FIRST_RUN_KEY = 'driftwing-v2.ui.firstRunHintSeen';
   // The SIM key layer gets its own one-time hint the first time SIM is flown.
-  const SIM_HINT_KEY = 'driftwing.ui.simHintSeen';
+  const SIM_HINT_KEY = 'driftwing-v2.ui.simHintSeen';
   const MAX_TOASTS = 2;
   // Toasts raised in photo mode wait for the exit; older ones are no longer news.
   const DEFERRED_TOAST_MAX_AGE = 45;
