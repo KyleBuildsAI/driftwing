@@ -40,7 +40,8 @@
 //   craftSwitch  SIM glider -> bush plane -> glider mid-flight, calm hands-off flight after each
 //   groundStart  bush plane "Start on ground" take-off at 100 %: no pitch-up or stall after lift-off
 //
-// Usage: node tools/flight-lab.mjs [--craft glider|bushplane|all] [--verbose]
+// Usage: node tools/flight-lab.mjs [--craft glider|bushplane|shared|all] [--verbose]
+// (shared: only the tests through the FlightController that involve both craft or none in particular)
 // Prints a table (measured vs target, tolerance about 10 %) and exits non-zero if any check fails.
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
@@ -74,7 +75,7 @@ function parseArgs(argv) {
     else if (flag === '--verbose') options.verbose = true;
     else throw new Error(`Unknown flag ${flag}`);
   }
-  if (options.craft !== 'all' && !CRAFT[options.craft]) throw new Error(`Unknown craft ${options.craft}`);
+  if (options.craft !== 'all' && options.craft !== 'shared' && !CRAFT[options.craft]) throw new Error(`Unknown craft ${options.craft}`);
   return options;
 }
 const OPTIONS = parseArgs(process.argv);
@@ -1397,6 +1398,34 @@ function hotPlugInFlight() {
   return { otherPad, engaged, autopilot, holding, released };
 }
 
+/**
+ * SIM craft started on the ground and taxiing (or sitting) with the TWCS lever at `lever`: the stick
+ * dropping out must not engage the autopilot (which would release the brake or lift off); the lever
+ * above idle sets the parking brake instead, and the craft is still on the ground `seconds` later.
+ */
+function hotPlugOnGround(craftId, lever, seconds = 15) {
+  const rig = createControllerRig({ craft: craftId, mode: 'sim', startOnGround: true });
+  rig.controls.throttle = lever;
+  flyWith(rig.controls, STICK, ['roll', 'pitch', 'yaw']);
+  flyWith(rig.controls, THROTTLE_QUADRANT, ['throttle', 'collective']);
+  // Moving the lever off its boot position releases the brake set at the ground start.
+  rig.run(4, (lab) => lab.handsOff());
+  const onGroundBefore = rig.telemetry.onGround;
+  const taxiSpeed = rig.telemetry.groundSpeed;
+  const startAgl = rig.telemetry.agl;
+  rig.bus.emitTyped('deviceDisconnected', STICK);
+  rig.frame();
+  const overridden = rig.flight.isAssistOverridden();
+  const autopilot = rig.state.player.autopilot.enabled;
+  const braked = rig.telemetry.parkingBrake;
+  let maxAgl = 0;
+  rig.run(seconds, (lab) => {
+    lab.handsOff();
+    maxAgl = Math.max(maxAgl, lab.telemetry.agl - startAgl);
+  });
+  return { onGroundBefore, taxiSpeed, overridden, autopilot, braked, maxAgl, onGround: rig.telemetry.onGround, groundSpeed: rig.telemetry.groundSpeed };
+}
+
 function describeLoads(watch) {
   return `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g`;
 }
@@ -1513,6 +1542,10 @@ function runBushplane() {
 function runShared() {
   const name = 'both';
   const plug = hotPlugInFlight();
+  for (const [craftId, lever] of [['bushplane', 0.6], ['helicopter', 0.3]]) {
+    const parked = hotPlugOnGround(craftId, lever);
+    record(name, `hot-plug on the ground: ${craftId}, lever ${lever}`, parked.overridden || parked.autopilot ? 'autopilot' : parked.braked ? 'parking brake' : 'no brake', 'parking brake, stays down', { compare: parked.onGroundBefore && !parked.overridden && !parked.autopilot && parked.braked && parked.onGround && parked.maxAgl < 1 && parked.groundSpeed < 1, note: `taxiing at ${parked.taxiSpeed.toFixed(1)} m/s; 15 s later: ${parked.onGround ? 'on the ground' : 'AIRBORNE'}, rose ${parked.maxAgl.toFixed(2)} m, ${parked.groundSpeed.toFixed(1)} m/s` });
+  }
   record(name, 'hot-plug: HOTAS stick unplugged in flight', plug.engaged ? 'hold' : 'no hold', 'hold; other pad: no hold; release on reconnect', { compare: !plug.otherPad && plug.engaged && plug.holding && plug.released, note: `other gamepad ${plug.otherPad ? 'ENGAGED' : 'ignored'}, stick: ${plug.engaged ? 'hands-off hold' : 'NOTHING'}, ${plug.holding ? 'held 5 s' : 'NOT HELD'}, reconnect ${plug.released ? 'released' : 'NOT RELEASED'}` });
   const swap = craftSwitch();
   record(name, 'SIM craft switch glider -> bush plane', swap.toBush.speed * KMH, `${(bushplane.spawn.cruise * KMH).toFixed(0)} km/h, calm`, { unit: 'km/h', compare: calmFlight(swap.toBush.watch), note: `10 s hands off: ${describeLoads(swap.toBush.watch)}, ${swap.toBush.watch.stalled ? 'STALL' : 'no stall'}` });
@@ -1571,7 +1604,7 @@ function printTable() {
 const started = performance.now();
 if (OPTIONS.craft === 'all' || OPTIONS.craft === 'glider') runGlider();
 if (OPTIONS.craft === 'all' || OPTIONS.craft === 'bushplane') runBushplane();
-if (OPTIONS.craft === 'all') runShared();
+if (OPTIONS.craft === 'all' || OPTIONS.craft === 'shared') runShared();
 const passed = printTable();
 process.stdout.write(`(${((performance.now() - started) / 1000).toFixed(1)} s)\n`);
 process.exit(passed ? 0 : 1);

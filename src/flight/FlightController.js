@@ -1039,9 +1039,31 @@ export function createFlightController(ctx) {
     bus.emit('flight:assistOverride', { active: false, reason });
   }
 
+  /**
+   * A controller lost on the ground: no autopilot (it would release the parking brake, and a
+   * helicopter or drone would lift off by itself). A throttle no lever holds any more goes to idle and
+   * a lever still above idle sets the parking brake, as on a ground start.
+   */
+  function holdOnGround(device) {
+    const name = device.name || 'Controller';
+    if (craft.inputProfile?.throttle === 'none') {
+      notify(`${name} disconnected.`, 'warning');
+      return;
+    }
+    ctx.systems.input?.idleThrottle?.();
+    const braked = parkingBrake.engage(pilotThrottle());
+    notify(braked ? `${name} disconnected: parking brake set - move the throttle to taxi.` : `${name} disconnected: throttle at idle.`, 'warning');
+  }
+
+  function isOnGround() {
+    return Boolean(sim && sim.contact && sim.contact.onGround);
+  }
+
   bus.onTyped('deviceDisconnected', (device) => {
-    if (mode !== 'sim' || override.active || !device) return;
-    if (deviceDrivesAxes(device)) engageOverride(device);
+    if (mode !== 'sim' || override.active || !device || !deviceDrivesAxes(device)) return;
+    // Mid-flight only: the hold flies the autopilot, which must never take off on its own.
+    if (isOnGround()) holdOnGround(device);
+    else engageOverride(device);
   });
   bus.onTyped('deviceConnected', (device) => {
     if (!override.active || !device) return;
