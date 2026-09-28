@@ -1023,11 +1023,21 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 **The flight-test harness** passes with 0 NaN events, 0 terrain penetrations, 0 console errors and
 warnings, heap growth under 50 MB per world, no frame over 50 ms after warmup, every run flown in
 its planned craft and view, and every scripted manoeuvre observed. Its frame limit measures the
-whole machine, so `tools/run-harness.mjs` records, per run, the machine's CPU load, the GPU's
-utilisation (`nvidia-smi`) and the page main thread's CPU share, and every slow frame is attributed
-(game systems, GC, other main-thread work, or a delay while the thread was idle). A run whose slow
-frames coincide with another program saturating the CPU or GPU is rerun on a quiet machine; the
-50 ms limit is never loosened.
+whole machine, and the project's test machine is shared with other projects' builds that never
+stop. So `tools/run-harness.mjs` records the evidence to tell the two apart:
+
+- per run: the machine's CPU load, the GPU's utilisation (`nvidia-smi`), the page main thread's
+  CPU share, and on Windows the CPU and GPU load of every other process against the harness's own
+  Chrome and node (`tools/process-load.mjs`, from each process's processor time and Windows'
+  per-process GPU engine counters, with the busiest other programs named);
+- per slow frame: its cause (game systems, GC, other main-thread work, or a delay while the thread
+  was idle), its long-animation-frame script and blocking time, and all of the load figures above
+  at that moment (`slowFrameList[].load` in the report, and a table in the tool's output).
+
+A slow frame the game causes (its systems, its garbage, its main-thread work) is a bug to fix. A
+slow frame with no game work in it that lands in a burst of other programs' CPU or GPU load is
+reported as caused by the environment, with that evidence. The 50 ms limit is never loosened and
+no frame is left out.
 
 Warmup, which the frame statistics skip (NaN, penetration, crash and console checks cover every
 frame), is: 5 s after each page load; a UI warmup of about 15 s; a warmup lap that flies every
