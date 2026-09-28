@@ -36,6 +36,13 @@ const CANOPY = Object.freeze({
 const CANOPY_PROFILE_CUT = [[0.02, 0.36], [0.12, 0.62], [0.35, 0.68], [0.7, 0.4], [0.7, 0.16], [0.7, -0.08], [0.35, -0.14], [0.05, -0.2]];
 const FLAP_PROFILE = [[0.7, 0.4], [1, 0.02], [0.7, -0.08]];
 const FLAP_HINGE = [0.7, 0.16];
+/**
+ * Priming: the rig's first frames draw every part shrunk to a speck with frustum culling off, so its
+ * pipelines (the lines' own material, the shadow pass) compile when the flyer is built instead of
+ * stalling a frame at the first deployment. Nothing shows at this scale.
+ */
+const PRIME_FRAMES = 2;
+const PRIME_SCALE = 1e-4;
 const MOUTH_EDGE = 7;
 
 /** Arc angle and position of the rib at spanwise arc length s (canopy frame, origin at the top centre). */
@@ -174,6 +181,23 @@ export function createCanopyRig(materials) {
   const scratchEnd = new THREE.Vector3();
   const chutePosition = new THREE.Vector3();
 
+  const drawables = [lines];
+  group.traverse((node) => {
+    if (node.isMesh) drawables.push(node);
+  });
+  let primeFrames = PRIME_FRAMES;
+  let priming = false;
+
+  function setPriming(active) {
+    priming = active;
+    group.scale.setScalar(active ? PRIME_SCALE : 1);
+    lines.scale.setScalar(active ? PRIME_SCALE : 1);
+    for (const node of drawables) node.frustumCulled = !active;
+    if (active) {
+      for (const part of [group, lines, canopy, pilotChute, bag]) part.visible = true;
+    }
+  }
+
   function writeSegment(index, from, to) {
     const offset = index * 6;
     linePositions[offset] = from.x;
@@ -190,6 +214,12 @@ export function createCanopyRig(materials) {
 
     update(pose) {
       const deploy = clamp(pose.deploy, 0, 1);
+      if (primeFrames > 0 && deploy === 0) {
+        primeFrames--;
+        setPriming(true);
+        return;
+      }
+      if (priming) setPriming(false);
       const visible = deploy > 0;
       group.visible = visible;
       lines.visible = visible;
