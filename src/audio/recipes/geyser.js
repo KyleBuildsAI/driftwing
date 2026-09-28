@@ -10,7 +10,7 @@ import { crackleBand, noiseBand, option, swell, sweep } from './recipeKit.js';
 export default Object.freeze({
   name: 'geyser',
   summary: 'bubbling pool and hiss bursts',
-  spatial: Object.freeze({ distanceModel: 'exponential', refDistance: 50, rolloffFactor: 1.3, panningModel: 'HRTF', size: 30, reverb: 0.25 }),
+  spatial: Object.freeze({ distanceModel: 'exponential', refDistance: 50, rolloffFactor: 1.6, panningModel: 'HRTF', size: 30, reverb: 0.25 }),
   level: 0.1,
   floor: 0.35,
   triggers: Object.freeze(['burst']),

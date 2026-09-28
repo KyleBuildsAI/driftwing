@@ -24,7 +24,7 @@ function randomBetween(min, max) {
 export default Object.freeze({
   name: 'lantern',
   summary: 'soft ambient pad',
-  spatial: Object.freeze({ distanceModel: 'exponential', refDistance: 120, rolloffFactor: 1.1, panningModel: 'equalpower', size: 400, reverb: 0.8 }),
+  spatial: Object.freeze({ distanceModel: 'exponential', refDistance: 120, rolloffFactor: 1.5, panningModel: 'equalpower', size: 400, reverb: 0.8 }),
   level: 0.035,
   floor: 0,
   triggers: Object.freeze([]),

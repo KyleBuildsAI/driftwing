@@ -26,7 +26,7 @@ export function turbineBladePass(intensity) {
 export default Object.freeze({
   name: 'turbine',
   summary: 'rhythmic whoosh, rate driven by wind speed',
-  spatial: Object.freeze({ distanceModel: 'inverse', refDistance: 90, rolloffFactor: 1.2, panningModel: 'equalpower', size: 260, reverb: 0.2 }),
+  spatial: Object.freeze({ distanceModel: 'exponential', refDistance: 90, rolloffFactor: 1.4, panningModel: 'equalpower', size: 260, reverb: 0.2 }),
   level: 0.06,
   floor: 0.05,
   triggers: Object.freeze([]),

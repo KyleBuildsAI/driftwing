@@ -162,7 +162,7 @@ function createSongRecipe({ name, summary, spatial, level, voice }) {
 export const whale = createSongRecipe({
   name: 'whale',
   summary: 'humpback song: formant glides, slow and melancholic',
-  spatial: { distanceModel: 'inverse', refDistance: 150, rolloffFactor: 1.1, panningModel: 'HRTF', size: 80, reverb: 0.55 },
+  spatial: { distanceModel: 'exponential', refDistance: 150, rolloffFactor: 1.6, panningModel: 'HRTF', size: 80, reverb: 0.55 },
   level: 0.07,
   voice: {
     pitchScale: 1, durationScale: 1, formantScale: 1, sub: 0.25, body: 0.18, breath: 0.35,

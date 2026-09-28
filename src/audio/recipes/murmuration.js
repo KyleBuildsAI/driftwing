@@ -10,7 +10,7 @@ import { crackleBand, noiseBand, option, swell } from './recipeKit.js';
 export default Object.freeze({
   name: 'murmuration',
   summary: 'wing rush',
-  spatial: Object.freeze({ distanceModel: 'exponential', refDistance: 70, rolloffFactor: 1.3, panningModel: 'HRTF', size: 180, reverb: 0.15 }),
+  spatial: Object.freeze({ distanceModel: 'exponential', refDistance: 70, rolloffFactor: 1.5, panningModel: 'HRTF', size: 180, reverb: 0.15 }),
   level: 0.06,
   floor: 0,
   triggers: Object.freeze(['scatter']),

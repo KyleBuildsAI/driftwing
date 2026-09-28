@@ -203,6 +203,7 @@ export function createSpatializer({ context, destination, THREE }) {
         panningModel: panner.panningModel,
         gains: { direct: directGain.gain.value, external: externalGain.gain.value, interior: interiorGain.gain.value },
         source: { x: panner.positionX.value, y: panner.positionY.value, z: panner.positionZ.value },
+        listener: { x: listenerPosition.x, y: listenerPosition.y, z: listenerPosition.z },
         listenerVelocity: { x: listenerVelocity.x, y: listenerVelocity.y, z: listenerVelocity.z },
       };
     },

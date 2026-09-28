@@ -77,7 +77,7 @@ export function playDiscoveryChime(env, options) {
 export default Object.freeze({
   name: 'discovery',
   summary: 'discovery chime (pentatonic bell run and bloom)',
-  spatial: Object.freeze({ distanceModel: 'inverse', refDistance: 200, rolloffFactor: 1, panningModel: 'HRTF', size: 0, reverb: 0.6 }),
+  spatial: Object.freeze({ distanceModel: 'exponential', refDistance: 150, rolloffFactor: 1.4, panningModel: 'HRTF', size: 0, reverb: 0.6 }),
   level: 0.05,
   floor: 1,
   triggers: Object.freeze(['chime']),

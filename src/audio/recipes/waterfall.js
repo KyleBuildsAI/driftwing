@@ -8,7 +8,7 @@ import { noiseBand } from './recipeKit.js';
 export default Object.freeze({
   name: 'waterfall',
   summary: 'pink-noise roar',
-  spatial: Object.freeze({ distanceModel: 'inverse', refDistance: 130, rolloffFactor: 1, panningModel: 'equalpower', size: 160, reverb: 0.35 }),
+  spatial: Object.freeze({ distanceModel: 'exponential', refDistance: 150, rolloffFactor: 1.4, panningModel: 'equalpower', size: 160, reverb: 0.35 }),
   level: 0.1,
   floor: 0,
   triggers: Object.freeze([]),
