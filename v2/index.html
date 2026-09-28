@@ -137,7 +137,13 @@
 
   <!-- HUD layer: never captures pointer events except on its controls -->
   <div class="dw-hud" id="dw-hud">
-    <div class="dw-compass dw-fade" id="dw-compass">
+    <!-- Glass HUD flight path marker (glassHud.js): velocity vector and nose symbol, under the cards -->
+    <div class="dw-fpm dw-fade dw-glass" id="dw-fpm" aria-hidden="true">
+      <svg class="dw-fpm-nose" id="dw-fpm-nose" viewBox="-17 -4 34 14"><path d="M-16 0H-8L-4 6L0 0L4 6L8 0H16"/></svg>
+      <svg class="dw-fpm-marker" id="dw-fpm-marker" viewBox="-22 -22 44 44"><circle cx="0" cy="0" r="6.5"/><path d="M-6.5 0H-19M6.5 0H19M0 -6.5V-14"/></svg>
+    </div>
+
+    <div class="dw-compass dw-fade dw-glass" id="dw-compass">
       <div class="dw-compass-strip glass" id="dw-compass-strip">
         <div class="dw-compass-window"><div class="dw-compass-tape" id="dw-compass-tape"></div></div>
         <div class="dw-compass-markers" id="dw-compass-markers"></div>
@@ -192,10 +198,13 @@
       <div class="dw-debug-line" id="dw-debug-chunks">0 chunks</div>
     </div>
 
-    <div class="dw-flight glass dw-fade" id="dw-flight">
+    <div class="dw-flight glass dw-fade dw-glass" id="dw-flight">
+      <div class="dw-stall" id="dw-stall" role="status" aria-live="assertive" data-kind=""><span class="dw-stall-dot"></span><span id="dw-stall-text"></span></div>
+      <div class="dw-readout dw-readout-attitude glass" title="Attitude"><canvas class="dw-attitude" id="dw-attitude" width="96" height="96" aria-hidden="true"></canvas></div>
+      <div class="dw-flight-divider dw-attitude-divider"></div>
       <div class="dw-readout dw-readout-speed">
-        <div class="dw-micro">Speed</div>
-        <div class="dw-value"><span id="dw-speed">0</span><span class="dw-unit">km/h</span></div>
+        <div class="dw-micro">Airspeed</div>
+        <div class="dw-value"><span id="dw-speed">0</span><span class="dw-unit" id="dw-speed-unit">km/h</span></div>
         <div class="dw-throttle" title="Throttle (W / S)">
           <div class="dw-throttle-track"><div class="dw-throttle-fill" id="dw-throttle-fill"></div></div>
           <span class="dw-throttle-value" id="dw-throttle-value">55%</span>
@@ -204,7 +213,7 @@
       <div class="dw-flight-divider"></div>
       <div class="dw-readout dw-readout-alt">
         <div class="dw-micro">Altitude</div>
-        <div class="dw-value"><span id="dw-altitude">0</span><span class="dw-unit">m</span></div>
+        <div class="dw-value"><span id="dw-altitude">0</span><span class="dw-unit" id="dw-altitude-unit">m</span></div>
         <div class="dw-alt-sub">
           <span class="dw-agl"><span class="dw-sub-label">AGL</span> <span id="dw-agl">0</span></span>
           <span class="dw-vsi" id="dw-vsi"><svg class="dw-vsi-arrow" viewBox="0 0 10 10"><path d="M5 1.5L8.5 7h-7z"/></svg><span id="dw-vsi-value">0.0</span></span>
@@ -341,6 +350,9 @@
         </div>
         <div class="dw-group">
           <h3 class="dw-micro">HUD</h3>
+          <div class="dw-row"><span>Glass HUD in the cockpit</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Glass HUD in the cockpit" data-setting="hud.cockpitGlass"><span></span></button></div>
+          <div class="dw-row"><span>Flight path marker</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="Flight path marker" data-setting="hud.flightPathMarker"><span></span></button></div>
+          <p class="dw-note">Outside views always show the glass HUD: airspeed, altitude, heading, attitude, throttle and the stall warning. The flight path marker shows where the craft is really going, so sideslip and angle of attack read from outside. The drone's FPV camera and the wingsuit keep the glass HUD, as they have no instrument panel.</p>
           <div class="dw-row"><span>Instrument HUD overlay</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Instrument HUD overlay" data-setting="hud.overlay"><span></span></button></div>
           <div class="dw-row"><span>Landing callouts</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Landing callouts" data-setting="hud.landingCallouts"><span></span></button></div>
           <div class="dw-row"><span>Hide HUD when idle</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="Hide HUD when idle" data-setting="hudAutoHide"><span></span></button></div>

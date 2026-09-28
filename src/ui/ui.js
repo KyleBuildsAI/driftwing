@@ -7,9 +7,10 @@ import { createControlsPanel } from './controlsPanel.js';
 import { createCraftPicker } from './craftPicker.js';
 import { createSettingsPanel } from './settingsPanel.js';
 import { createStatusBadge } from '../dev/statusBadge.js';
+import { unitsFor } from './instruments/units.js';
 
 /**
- * UI: warm glass HUD (compass tape, flight instruments, waypoint / ring marker,
+ * UI: warm glass HUD (compass tape, flight instruments in settings.units, waypoint / ring marker,
  * status chips and craft picker), WREN subtitles + live transcript, command bar,
  * toasts and banners, Journal / Settings / Controls / Help / Menu panels, touch
  * controls (virtual stick and throttle slider), photo-mode chrome, the dev status
@@ -123,6 +124,8 @@ export function createUISystem(ctx) {
     debugDraws: requireElement('dw-debug-draws'),
     debugChunks: requireElement('dw-debug-chunks'),
     speed: requireElement('dw-speed'),
+    speedUnit: requireElement('dw-speed-unit'),
+    altitudeUnit: requireElement('dw-altitude-unit'),
     throttleFill: requireElement('dw-throttle-fill'),
     throttleValue: requireElement('dw-throttle-value'),
     altitude: requireElement('dw-altitude'),
@@ -228,9 +231,11 @@ export function createUISystem(ctx) {
 
   const compassState = { width: 440, half: 220, heading: NaN, headingWhole: -1 };
   const readouts = {
-    speed: NaN, altitude: NaN, agl: NaN, vsiTenths: NaN, vsiTrend: '', throttle: NaN, throttlePercent: -1,
-    stalled: null,
+    speed: NaN, altitude: NaN, agl: NaN, vsiStep: NaN, vsiTrend: '', throttle: NaN, throttlePercent: -1,
+    stalled: null, units: null,
   };
+  // The flight card's units (settings.units): metric km/h, m, m/s or aviation kt, ft, fpm.
+  let displayUnits = unitsFor(settings.get('units'));
   const chipState = { minute: -1, label: null, phase: '', ringIndex: -1, ringTotal: -1, ringTenths: -1, ringStreak: -1 };
   const targetState = {
     kind: null, shownKind: null, label: '', distance: 0, mode: '', x: NaN, y: NaN, angle: NaN, distanceKey: NaN, name: '', near: null,
@@ -486,12 +491,26 @@ export function createUISystem(ctx) {
   }
 
   // ---------------------------------------------------------------------------
-  // Flight instruments
+  // Flight instruments (the glass HUD's airspeed / altitude card, in settings.units)
   // ---------------------------------------------------------------------------
 
+  /** Writes the unit labels and forces every readout to refresh after a units change. */
+  function applyDisplayUnits() {
+    if (readouts.units === displayUnits.system) return;
+    readouts.units = displayUnits.system;
+    dom.speedUnit.textContent = displayUnits.speed.label;
+    dom.altitudeUnit.textContent = displayUnits.altitude.label;
+    readouts.speed = NaN;
+    readouts.altitude = NaN;
+    readouts.agl = NaN;
+    readouts.vsiStep = NaN;
+  }
+
   function updateInstruments() {
+    applyDisplayUnits();
     const player = state.player;
-    const speed = Math.round((Number(player.speed) || 0) * 3.6);
+    const units = displayUnits;
+    const speed = Math.round((Number(player.speed) || 0) * units.speed.factor);
     if (speed !== readouts.speed) {
       readouts.speed = speed;
       dom.speed.textContent = String(speed);
@@ -501,21 +520,24 @@ export function createUISystem(ctx) {
       readouts.stalled = stalled;
       dom.speed.style.color = stalled ? 'var(--dw-warn)' : '';
     }
-    const altitude = Math.round(Number(player.altitude) || 0);
+    const altitude = Math.round((Number(player.altitude) || 0) * units.altitude.factor);
     if (altitude !== readouts.altitude) {
       readouts.altitude = altitude;
       dom.altitude.textContent = String(altitude);
     }
-    const agl = Math.max(0, Math.round(Number(player.agl) || 0));
+    const agl = Math.max(0, Math.round((Number(player.agl) || 0) * units.altitude.factor));
     if (agl !== readouts.agl) {
       readouts.agl = agl;
-      dom.agl.textContent = `${agl} m`;
+      dom.agl.textContent = `${agl} ${units.altitude.label}`;
     }
-    const vsiTenths = Math.round((Number(player.verticalSpeed) || 0) * 10);
-    if (vsiTenths !== readouts.vsiTenths) {
-      readouts.vsiTenths = vsiTenths;
-      dom.vsiValue.textContent = `${(Math.abs(vsiTenths) / 10).toFixed(1)} m/s`;
-      const trend = vsiTenths >= 5 ? 'up' : vsiTenths <= -5 ? 'down' : 'level';
+    // Vertical speed: tenths of a m/s, or tens of feet per minute. The trend arrow turns at 0.5 m/s.
+    const verticalSpeed = Number(player.verticalSpeed) || 0;
+    const aviation = units.system === 'aviation';
+    const vsiStep = aviation ? Math.round((verticalSpeed * units.vertical.factor) / 10) : Math.round(verticalSpeed * 10);
+    if (vsiStep !== readouts.vsiStep) {
+      readouts.vsiStep = vsiStep;
+      dom.vsiValue.textContent = aviation ? `${Math.abs(vsiStep) * 10} ${units.vertical.label}` : `${(Math.abs(vsiStep) / 10).toFixed(1)} ${units.vertical.label}`;
+      const trend = verticalSpeed >= 0.5 ? 'up' : verticalSpeed <= -0.5 ? 'down' : 'level';
       if (trend !== readouts.vsiTrend) {
         readouts.vsiTrend = trend;
         dom.vsi.dataset.trend = trend;
@@ -2563,7 +2585,10 @@ export function createUISystem(ctx) {
     if (!payload || !payload.key) return;
     if (payload.key === 'showFps') applyDebugVisibility();
     if (payload.key === 'hudAutoHide' && !payload.value) wake();
-    if (payload.key === 'units' && activePanel === 'journal') renderJournal();
+    if (payload.key === 'units') {
+      displayUnits = unitsFor(payload.value);
+      if (activePanel === 'journal') renderJournal();
+    }
   });
   bus.onTyped('craftChanged', () => {
     applyThrottleVisibility();

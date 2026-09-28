@@ -1487,12 +1487,16 @@
     #ui-root.dw-touch .dw-panel.dw-open { transform: none; }
   }
 
-  /* Touch layout: landscape phones and tablets */
+  /* Touch layout: landscape phones and tablets. The flight card (with the glass HUD's attitude
+     indicator) takes the top-left corner, so the compass is centred in the room between the card
+     and the status chips on the right. */
   @media (orientation: landscape) {
-    #ui-root.dw-touch { --dw-compass-width: clamp(200px, calc(100vw - 540px), 320px); --dw-top: calc(env(safe-area-inset-top, 0px) + 10px); }
-    #ui-root.dw-touch .dw-flight { top: var(--dw-top); bottom: auto; padding: 8px 12px 9px 11px; gap: 10px; }
-    #ui-root.dw-touch .dw-flight .dw-value > span:first-child { font-size: 22px; }
-    #ui-root.dw-touch .dw-readout { min-width: 74px; gap: 3px; }
+    #ui-root.dw-touch { --dw-compass-width: clamp(150px, calc(100vw - 530px), 320px); --dw-top: calc(env(safe-area-inset-top, 0px) + 10px); }
+    #ui-root.dw-touch .dw-compass { left: calc(50% + 46px); }
+    #ui-root.dw-touch .dw-flight { top: var(--dw-top); bottom: auto; padding: 8px 11px 9px 10px; gap: 7px; }
+    #ui-root.dw-touch .dw-flight .dw-value > span:first-child { font-size: 20px; }
+    #ui-root.dw-touch .dw-readout { min-width: 64px; gap: 3px; }
+    #ui-root.dw-touch .dw-alt-sub { gap: 6px; font-size: 10.5px; }
     #ui-root.dw-touch .dw-throttle-track { width: 46px; }
     #ui-root.dw-touch .dw-modebar { top: calc(var(--dw-top) + 78px); }
     #ui-root.dw-touch .dw-chips { top: var(--dw-top); left: auto; right: var(--dw-right); align-items: flex-end; }

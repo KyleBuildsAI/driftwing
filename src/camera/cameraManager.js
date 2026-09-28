@@ -29,7 +29,10 @@
 // eased 0.9 s return, done here).
 //
 // Instruments: one 30 Hz clock drives the instrument memories, the cockpit panel texture (while the
-// cockpit is on screen) and the optional glass HUD overlay (settings.hud.overlay).
+// cockpit is on screen), the optional instrument overlay (settings.hud.overlay) and the glass HUD's
+// attitude indicator. The glass HUD (ui/glassHud.js) shows in every third-person view; a cockpit
+// with an instrument panel shows it only with settings.hud.cockpitGlass. It is updated after the
+// camera pose is final, so its flight path marker matches the frame.
 import * as THREE from 'three/webgpu';
 import { CONFIG } from '../core/config.js';
 import { VIEW_IDS, THIRD_PERSON_VIEW_IDS } from '../core/settings.js';
@@ -41,6 +44,7 @@ import { createFlybyView } from './views/flybyView.js';
 import { createFpvView } from './views/fpvView.js';
 import { createInstrumentSet } from '../ui/instruments/index.js';
 import { createInstrumentHud } from '../ui/instrumentHud.js';
+import { createGlassHud } from '../ui/glassHud.js';
 import { createStickReticle } from '../ui/stickReticle.js';
 
 const DEG = Math.PI / 180;
@@ -72,6 +76,7 @@ export function createCameraSystem(ctx) {
   };
   const instruments = createInstrumentSet(ctx);
   const hud = createInstrumentHud(ctx, instruments);
+  const glassHud = createGlassHud(ctx);
   const reticle = createStickReticle(ctx);
 
   let view = 'chase';
@@ -527,7 +532,10 @@ export function createCameraSystem(ctx) {
     return span > 0 ? (redrawTimes.length - 1) / span : 0;
   }
 
-  /** The 30 Hz instrument clock: memories, the cockpit panel (when on screen) and the HUD overlay. */
+  /**
+   * The 30 Hz instrument clock: memories, the cockpit panel (when on screen) and the HUD overlay.
+   * Returns true on a tick (the glass HUD redraws its attitude indicator then).
+   */
   function updateInstruments(realDt) {
     const step = Math.min(Math.max(realDt, 0), 0.1);
     instrumentClock += step;
@@ -555,6 +563,13 @@ export function createCameraSystem(ctx) {
     hud.update(realDt, tick && !photo);
     if (tick && hud.visible && !photo) counters.hudDrawMs += (performance.now() - hudStarted - counters.hudDrawMs) * 0.1;
     if (tick && hud.visible && !photo) counters.hudTicks++;
+    return tick;
+  }
+
+  /** True while a first-person view with an instrument panel (a cockpit, not the FPV camera) is active. */
+  function panelViewActive() {
+    const cockpit = views.cockpit.cockpit;
+    return view === 'cockpit' && Boolean(cockpit && cockpit.panel);
   }
 
   // ---- Frame update ---------------------------------------------------------------------------------------------
@@ -562,9 +577,14 @@ export function createCameraSystem(ctx) {
     chaseRig.update(dt, realDt);
     if (syncRoot()) setView(slotOf(view), { remember: false, force: true });
     updateZoom();
-    updateInstruments(realDt);
+    const instrumentTick = updateInstruments(realDt);
     reticle.update();
-    if (photo) return;
+    if (!photo) updatePose(realDt);
+    glassHud.update(realDt, { firstPersonPanel: panelViewActive(), photo, redraw: instrumentTick });
+  }
+
+  /** Writes this frame's camera pose for the active view (the chase rig already wrote its own). */
+  function updatePose(realDt) {
     updateLook(realDt);
     if (view === 'chase') {
       if (chaseRig.getMode() === 'chase') applyChaseOrbit();
@@ -694,6 +714,7 @@ export function createCameraSystem(ctx) {
           units: instruments.source.units.system,
         },
         hud: hud.getStats(),
+        glassHud: glassHud.getStats(),
         reticle: reticle.getStats(),
         flyby: { placements: views.flyby.placements, position: { x: views.flyby.cameraPosition.x, y: views.flyby.cameraPosition.y, z: views.flyby.cameraPosition.z } },
         viewChanges: counters.viewChanges,

@@ -1,0 +1,128 @@
+  /* Glass HUD (glassHud.js): the attitude indicator and stall / AoA warning on the v1 flight card,
+     and the flight path marker. Every piece carries .dw-glass: a first-person view with an
+     instrument panel hides them unless settings.hud.cockpitGlass is on (#ui-root.dw-glass-off).
+     They also fade with the v1 HUD (.dw-fade: idle, Tab, photo mode). */
+  #ui-root.dw-glass-off .dw-glass {
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.25s ease, visibility 0s linear 0.25s;
+  }
+
+  /* Attitude indicator: a round glass puck standing on the flight card's left end, so the v1 card
+     keeps its width (touch layouts fold it into the card, below). */
+  #ui-root .dw-flight .dw-readout-attitude {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 8px);
+    min-width: 0;
+    padding: 4px;
+    border-radius: 50%;
+  }
+  #ui-root .dw-attitude-divider { display: none; }
+  #ui-root .dw-attitude {
+    display: block;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+  }
+
+  /* Stall / AoA warning: a pill beside the attitude puck, shown only while it is on. */
+  #ui-root .dw-stall {
+    position: absolute;
+    left: 66px;
+    bottom: calc(100% + 25px);
+    display: none;
+    align-items: center;
+    gap: 6px;
+    height: 22px;
+    padding: 0 10px 0 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(243, 199, 122, 0.55);
+    background: rgba(56, 36, 18, 0.82);
+    color: var(--dw-gold);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    box-shadow: 0 4px 14px rgba(10, 7, 14, 0.3);
+  }
+  #ui-root .dw-stall.dw-on { display: inline-flex; }
+  #ui-root .dw-stall-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 8px currentColor;
+  }
+  #ui-root .dw-stall[data-kind="stalled"] {
+    border-color: rgba(242, 163, 126, 0.75);
+    background: rgba(74, 28, 20, 0.86);
+    color: var(--dw-warn);
+  }
+  #ui-root .dw-stall[data-kind="stalled"] .dw-stall-dot { animation: dw-stall-blink 0.8s steps(2, jump-none) infinite; }
+  @keyframes dw-stall-blink { from { opacity: 1; } to { opacity: 0.25; } }
+
+  /* Touch: the flight card sits at the top of the screen, so the attitude indicator becomes its
+     first section and the warning straddles a card edge: the bottom edge in landscape, the top
+     edge's right end in portrait (clear of the compass readout above and the craft picker below). */
+  #ui-root.dw-touch .dw-flight .dw-readout-attitude {
+    position: static;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  #ui-root.dw-touch .dw-attitude-divider { display: block; }
+  #ui-root.dw-touch .dw-attitude { width: 44px; height: 44px; }
+  #ui-root.dw-touch .dw-stall { left: 14px; bottom: -11px; }
+
+  /* Flight path marker: the velocity-vector symbol and the nose (waterline) symbol, placed by
+     transform at their projected points. Under the HUD cards, never taking pointer events. */
+  #ui-root .dw-fpm { position: absolute; inset: 0; pointer-events: none; }
+  #ui-root .dw-fpm-marker,
+  #ui-root .dw-fpm-nose {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: visible;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    visibility: hidden;
+    will-change: transform;
+    filter: drop-shadow(0 0 1.5px rgba(8, 6, 12, 0.85)) drop-shadow(0 1px 3px rgba(8, 6, 12, 0.45));
+  }
+  #ui-root .dw-fpm-marker {
+    width: 44px;
+    height: 44px;
+    margin: -22px 0 0 -22px;
+    stroke: var(--dw-text);
+    stroke-width: 2;
+    transition: opacity 0.2s ease;
+  }
+  #ui-root .dw-fpm-nose {
+    width: 34px;
+    height: 14px;
+    margin: -4px 0 0 -17px;
+    stroke: var(--dw-gold);
+    stroke-width: 1.8;
+    opacity: 0.9;
+  }
+  #ui-root .dw-fpm.dw-on .dw-fpm-marker,
+  #ui-root .dw-fpm.dw-on .dw-fpm-nose.dw-on { visibility: visible; }
+  #ui-root .dw-fpm-marker.dw-edge { opacity: 0.38; }
+
+  @media (orientation: landscape) {
+    #ui-root.dw-touch .dw-attitude { width: 36px; height: 36px; }
+  }
+  @media (orientation: portrait) {
+    #ui-root.dw-touch .dw-stall { left: auto; right: 14px; top: -11px; bottom: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #ui-root .dw-stall[data-kind="stalled"] .dw-stall-dot { animation: none; }
+  }
