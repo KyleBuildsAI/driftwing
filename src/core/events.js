@@ -15,6 +15,8 @@ const FIELD_CHECKS = Object.freeze({
 });
 
 export const LANDING_GRADES = Object.freeze(['butter', 'smooth', 'firm', 'hard']);
+/** The regional weather cycle, in order (src/spawns/weather.js). */
+export const WEATHER_STATES = Object.freeze(['clear', 'building', 'storm', 'clearing']);
 
 /**
  * Event name -> payload fields. A field is a FIELD_CHECKS type name, an array of allowed values, or
@@ -39,6 +41,8 @@ export const EVENT_TYPES = Object.freeze({
   deviceDisconnected: { deviceKey: 'string', kind: 'string', name: 'string' },
   /** The craft was put back into the air by a relaunch (aerotow, peak launch, respawn). */
   relaunched: { craft: 'string', method: 'string', position: 'vector3' },
+  /** The regional weather where the player flies changed state; region is the weather cell id "rx:rz". */
+  weatherChanged: { state: WEATHER_STATES, previous: WEATHER_STATES, region: 'string' },
 });
 
 function describeFailure(type, payload) {
