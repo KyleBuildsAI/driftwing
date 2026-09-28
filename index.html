@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1b1522">
+<meta name="description" content="DRIFTWING: an ambient infinite-flight exploration game. Two games behind one toggle: V1, the original, and V2 with real flight physics.">
+<title>DRIFTWING</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M4 38 L32 26 L60 38 L32 32 Z' fill='%23f3c77a'/%3E%3C/svg%3E">
+<style>
+  /* The launcher shell: one full-window game iframe and the V1 | V2 pill, in V1's glass style.
+     The iframe's allow list includes fullscreen; an allowfullscreen attribute next to it would
+     only make Chrome warn that the allow attribute takes precedence. */
+  :root {
+    --font-ui: "Inter", "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --dw-text: #f6efe4;
+    --dw-text-dim: rgba(246, 239, 228, 0.74);
+    --dw-gold: #f3c77a;
+    --dw-gold-soft: rgba(243, 199, 122, 0.18);
+    --dw-glass-top: rgba(34, 27, 40, 0.5);
+    --dw-glass-bottom: rgba(20, 16, 26, 0.4);
+    --dw-hairline: rgba(255, 240, 220, 0.14);
+    --dw-shadow: 0 10px 30px rgba(10, 7, 14, 0.24), 0 2px 6px rgba(10, 7, 14, 0.12);
+    --dw-inner: inset 0 1px 0 rgba(255, 246, 232, 0.07);
+    --dw-ease: cubic-bezier(0.22, 0.8, 0.26, 1);
+    --dw-fade-ms: 280ms;
+  }
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #0a0a0f;
+    color: var(--dw-text);
+    font-family: var(--font-ui);
+    -webkit-tap-highlight-color: transparent;
+  }
+  #dw-shell-frame {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #0a0a0f;
+  }
+  /* Covers the game while one is swapped for the other. */
+  #dw-shell-veil {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    background: #0a0a0f;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity var(--dw-fade-ms) ease;
+  }
+  #dw-shell-veil.dw-clear { opacity: 0; }
+  /* Thin strips along the top-left edges: pointer events inside the game never reach the shell,
+     so reaching for the corner here reveals the pill. They stay clear of both games' HUDs. */
+  .dw-shell-hot { position: fixed; top: 0; left: 0; z-index: 3; }
+  #dw-shell-hot-top { width: 260px; height: 10px; }
+  #dw-shell-hot-left { width: 10px; height: 200px; }
+  .dw-shell-pill {
+    position: fixed;
+    top: 14px;
+    left: 18px;
+    z-index: 4;
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    background: linear-gradient(180deg, var(--dw-glass-top), var(--dw-glass-bottom));
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid var(--dw-hairline);
+    border-radius: 999px;
+    box-shadow: var(--dw-shadow), var(--dw-inner);
+    opacity: 0;
+    transform: translateY(-6px);
+    pointer-events: none;
+    transition: opacity 220ms var(--dw-ease), transform 220ms var(--dw-ease);
+  }
+  .dw-shell-pill.dw-visible {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+  .dw-shell-pill button {
+    min-width: 40px;
+    height: 26px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--dw-text-dim);
+    font: 600 11px/1 var(--font-ui);
+    letter-spacing: 0.16em;
+    cursor: pointer;
+    transition: background 160ms ease, color 160ms ease;
+  }
+  .dw-shell-pill button:hover { color: var(--dw-text); background: rgba(255, 240, 220, 0.08); }
+  .dw-shell-pill button[aria-pressed="true"] { color: var(--dw-gold); background: var(--dw-gold-soft); }
+  .dw-shell-pill button:focus-visible { outline: 2px solid var(--dw-gold); outline-offset: 1px; }
+  .dw-shell-pill button:disabled { cursor: progress; }
+  .dw-shell-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :root { --dw-fade-ms: 0ms; }
+    .dw-shell-pill, .dw-shell-pill button { transition: none; }
+  }
+</style>
+</head>
+<body>
+<iframe id="dw-shell-frame" title="DRIFTWING" allow="gamepad; microphone; camera; fullscreen; autoplay; xr-spatial-tracking; encrypted-media; clipboard-write"></iframe>
+<div id="dw-shell-veil" aria-hidden="true"></div>
+<div class="dw-shell-hot" id="dw-shell-hot-top" aria-hidden="true"></div>
+<div class="dw-shell-hot" id="dw-shell-hot-left" aria-hidden="true"></div>
+<div class="dw-shell-pill" id="dw-shell-pill" role="group" aria-label="Game version">
+  <button type="button" data-version="v1" aria-pressed="false" aria-label="Play V1, the original game">V1</button>
+  <button type="button" data-version="v2" aria-pressed="false" aria-label="Play V2, with real flight physics">V2</button>
+</div>
+<div class="dw-shell-status" id="dw-shell-status" role="status" aria-live="polite"></div>
+<script type="module" src="/src/shell/shell.js"></script>
+</body>
+</html>

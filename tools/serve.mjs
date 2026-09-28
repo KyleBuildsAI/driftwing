@@ -1,5 +1,9 @@
 // Minimal zero-dependency static file server for local play and testing.
 // Usage: node tools/serve.mjs [port] [rootDir]
+//
+// A directory URL (/, /v1/, /v2/) serves that directory's index.html, and a directory requested
+// without its trailing slash (/v2) is redirected to it, so relative URLs inside the page resolve.
+// `npm run serve:single` serves dist-single/: the launcher shell at /, V1 at /v1/, V2 at /v2/.
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
@@ -27,7 +31,8 @@ export function startStaticServer({ port = 8080, root = process.cwd(), quiet = f
       return;
     }
     try {
-      const relativePath = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
+      const requestedPath = urlPath.replace(/^\/+/, '');
+      const relativePath = requestedPath === '' || requestedPath.endsWith('/') ? `${requestedPath}index.html` : requestedPath;
       const filePath = normalize(join(rootDir, relativePath));
       // Only the game's own files: no dotfiles (.git, .env) and no node_modules.
       const isPrivate = relativePath.split(/[\\/]+/).some((segment) => segment.startsWith('.') || segment === 'node_modules');
@@ -36,6 +41,11 @@ export function startStaticServer({ port = 8080, root = process.cwd(), quiet = f
         return;
       }
       const info = await stat(filePath).catch(() => null);
+      if (info && info.isDirectory()) {
+        const { pathname, search } = new URL(request.url, 'http://localhost');
+        response.writeHead(302, { Location: `${pathname}/${search}` }).end();
+        return;
+      }
       if (!info || !info.isFile()) {
         if (urlPath === '/favicon.ico') {
           response.writeHead(204).end();

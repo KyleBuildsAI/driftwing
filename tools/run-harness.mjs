@@ -1,8 +1,8 @@
 // Runs a dev verification harness headlessly and saves its report.
 //
 // Starts the Vite dev server (the harnesses exist only in dev builds) on a free port other than the
-// player's 5199, opens ?test=1 (flight test) or ?test=hotas (HOTAS pipeline test) in headless Chrome
-// with a fresh profile, follows the harness through its page reloads, waits for
+// player's 5199, opens V2's page /v2/?test=1 (flight test) or /v2/?test=hotas (HOTAS pipeline
+// test) in headless Chrome with a fresh profile, follows the harness through its reloads, waits for
 // window.DRIFTWING.testReport to complete, then saves the report, the browser console and
 // screenshots of the summary panel, and stops the browser and the server.
 //
@@ -278,7 +278,8 @@ async function findFreePort() {
 }
 
 function harnessUrl(port, options) {
-  const url = new URL(`http://127.0.0.1:${port}/`);
+  // The harnesses are V2's: they run on V2's own page, not inside the launcher shell.
+  const url = new URL(`http://127.0.0.1:${port}/v2/`);
   url.searchParams.set('test', options.test);
   if (options.backend === 'webgl') url.searchParams.set('renderer', 'webgl');
   if (options.test === '1') {
