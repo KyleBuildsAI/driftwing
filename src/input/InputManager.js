@@ -28,8 +28,8 @@ const WHEEL_THROTTLE_STEP = 0.05;
 /** Position targets other than the throttle: levers moved by absolute axes or rate inputs. */
 const LEVER_TARGETS = Object.freeze(['collective', 'flaps', 'trim', 'antenna']);
 const HOTAS_PROMPT = 'Press any button on your stick and throttle';
-/** Lever owners that are not a physical lever: rate inputs (keys, buttons), the wheel, touch, pointer. */
-const SOFT_LEVER_OWNERS = new Set(['rate', 'wheel', 'touch', 'pointer']);
+/** Lever owners that are not a physical lever: rate inputs (keys, buttons), the wheel and touch. */
+const SOFT_LEVER_OWNERS = new Set(['rate', 'wheel', 'touch']);
 
 export function createInputManager(ctx) {
   const { state, settings, bus, controls, storage } = ctx;
