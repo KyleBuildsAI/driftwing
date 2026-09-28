@@ -9,6 +9,11 @@
 // PannerNode no longer applies doppler, so the shift is computed here from the relative radial
 // velocity of craft and camera and handed back as a pitch factor the synth applies to its
 // oscillators and playback rates.
+//
+// The camera's velocity comes from its successive positions, so a camera cut (a view change, a
+// flyby relocation) would read as a burst of motion and swoop the pitch. cut() marks the next
+// update as a cut: the jump is skipped and the camera is taken to move with the craft (attached
+// views) or to stand still (flyby, photo mode).
 import { clamp } from '../core/util.js';
 import { glide } from './synthKit.js';
 
@@ -56,7 +61,9 @@ export function createSpatializer({ context, destination, THREE }) {
   const listenerQuaternion = new THREE.Quaternion();
   const toSource = new THREE.Vector3();
   const scratch = new THREE.Vector3();
+  const sourceVelocity = new THREE.Vector3();
   let hasLastListener = false;
+  let cutPending = false;
   let lastUpdateTime = 0;
   let route = 'direct';
   let doppler = 1;
@@ -85,10 +92,20 @@ export function createSpatializer({ context, destination, THREE }) {
     glide(panner.positionZ, position.z, time, timeConstant);
   }
 
-  /** Camera velocity from successive positions; a jump faster than any craft is a relocation. */
-  function trackListenerVelocity(realTime) {
+  /**
+   * Camera velocity from successive positions; a jump faster than any craft is a relocation. After
+   * a cut the camera restarts at cutVelocity (the craft's velocity for an attached view, else zero).
+   */
+  function trackListenerVelocity(realTime, cutVelocity) {
     const elapsed = realTime - lastUpdateTime;
     lastUpdateTime = realTime;
+    if (cutPending) {
+      cutPending = false;
+      hasLastListener = true;
+      lastListenerPosition.copy(listenerPosition);
+      listenerVelocity.copy(cutVelocity);
+      return;
+    }
     if (!hasLastListener || !(elapsed > 0)) {
       hasLastListener = true;
       lastListenerPosition.copy(listenerPosition);
@@ -102,13 +119,13 @@ export function createSpatializer({ context, destination, THREE }) {
   }
 
   /** f' = f (c + v_listener toward source) / (c - v_source toward listener), clamped and smoothed. */
-  function computeDoppler(sourcePosition, sourceVelocity) {
+  function computeDoppler(sourcePosition, velocity) {
     toSource.copy(sourcePosition).sub(listenerPosition);
     distance = toSource.length();
     if (distance < 0.5) return 1;
     toSource.divideScalar(distance);
     const listenerTowardSource = listenerVelocity.dot(toSource);
-    const sourceTowardListener = -sourceVelocity.dot(toSource);
+    const sourceTowardListener = -velocity.dot(toSource);
     const denominator = Math.max(SPEED_OF_SOUND - sourceTowardListener, SPEED_OF_SOUND * 0.25);
     return clamp((SPEED_OF_SOUND + listenerTowardSource) / denominator, DOPPLER_RANGE[0], DOPPLER_RANGE[1]);
   }
@@ -116,9 +133,15 @@ export function createSpatializer({ context, destination, THREE }) {
   return {
     input,
 
+    /** The camera cut since the last update (see the header): its jump is not motion. */
+    cut() {
+      cutPending = true;
+    },
+
     /**
      * frame fields used: time, realTime, interval, interior, profile, flight (position, velocity),
-     * paused, camera. Returns the doppler pitch factor for this update.
+     * paused, camera, cameraAttached (false for a camera that does not ride with the craft).
+     * Returns the doppler pitch factor for this update.
      */
     update(frame) {
       const { time, interval, profile, flight, camera } = frame;
@@ -134,16 +157,16 @@ export function createSpatializer({ context, destination, THREE }) {
       camera.getWorldQuaternion(listenerQuaternion);
       listenerForward.set(0, 0, -1).applyQuaternion(listenerQuaternion);
       listenerUp.set(0, 1, 0).applyQuaternion(listenerQuaternion);
-      trackListenerVelocity(frame.realTime);
+      sourceVelocity.copy(flight.velocity);
+      if (frame.paused || !Number.isFinite(sourceVelocity.x + sourceVelocity.y + sourceVelocity.z)) sourceVelocity.set(0, 0, 0);
+      trackListenerVelocity(frame.realTime, frame.cameraAttached === false ? scratch.set(0, 0, 0) : sourceVelocity);
       const positionConstant = interval / 3;
       placeListener(time, positionConstant);
       placeSource(flight.position, time, positionConstant);
 
       let target = 1;
       if (route === 'external') {
-        scratch.copy(flight.velocity);
-        if (frame.paused || !Number.isFinite(scratch.x + scratch.y + scratch.z)) scratch.set(0, 0, 0);
-        target = computeDoppler(flight.position, scratch);
+        target = computeDoppler(flight.position, sourceVelocity);
       } else {
         distance = 0;
       }

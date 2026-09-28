@@ -9,7 +9,8 @@ import { CONFIG } from '../core/config.js';
  *   pulling g or flying fast; camera-facing width that spreads with age, soft wispy edges, 2.6 s fade.
  * - Wind streaks: world-anchored air motes around the flight path drawn as thin additive motion-blur
  *   quads; they appear above ~70% of max speed and thicken during boost, or as strongly as the craft
- *   asks through state.flight.craftState.windStreaks (0..1).
+ *   asks through state.flight.craftState.windStreaks (0..1). Max speed is v1's, or a fast craft's
+ *   chase speedRange (the jet), for the contrails too.
  * - Bursts: instanced additive glow sprites (Sprite + PointsNodeMaterial) for boost, ring, waypoint and
  *   discovery moments. Listens to 'boost', 'ring:passed', 'waypoint:reached', 'landmark:discovered';
  *   direct burst() calls for the same moment are de-duplicated so nothing fires twice.
@@ -23,7 +24,6 @@ export function createFxSystem(ctx) {
   } = TSL;
 
   const player = state.player;
-  const MAX_SPEED = CONFIG.SPEED.MAX;
   const EVENT_GUARD_SECONDS = 0.35;
   const scratchTangent = new T.Vector3();
   const scratchToCamera = new T.Vector3();
@@ -36,6 +36,15 @@ export function createFxSystem(ctx) {
   function smooth01(value) {
     const t = clamp(value, 0, 1);
     return t * t * (3 - 2 * t);
+  }
+
+  /**
+   * The top speed the speed-driven effects scale to: v1's CONFIG.SPEED.MAX, or a fast craft's own
+   * cameraRig.chase.speedRange.MAX (the jet), the same range the chase camera's speed effects use.
+   */
+  function effectsMaxSpeed() {
+    const range = ctx.systems.flight?.getCameraRig?.()?.chase?.speedRange;
+    return range && Number.isFinite(range.MAX) && range.MAX > 0 ? range.MAX : CONFIG.SPEED.MAX;
   }
 
   /** Two unit vectors perpendicular to direction (and to each other). */
@@ -328,7 +337,8 @@ export function createFxSystem(ctx) {
   function contrailTargetStrength() {
     const bank = smooth01((Math.abs(player.roll) - 45) / 25);
     const pull = smooth01((player.gForce - 1.6) / 1.1);
-    const fast = smooth01((player.speed - 0.85 * MAX_SPEED) / (0.15 * MAX_SPEED));
+    const maxSpeed = effectsMaxSpeed();
+    const fast = smooth01((player.speed - 0.85 * maxSpeed) / (0.15 * maxSpeed));
     return Math.max(bank, pull, fast);
   }
 
@@ -420,7 +430,7 @@ export function createFxSystem(ctx) {
   }
 
   function updateStreaks(realDt) {
-    const speedRatio = player.speed / MAX_SPEED;
+    const speedRatio = player.speed / effectsMaxSpeed();
     const boosting = player.boost && player.boost.active ? 1 : 0;
     // A craft may ask for streaks below v1's speeds (the wingsuit: speed and terrain proximity cue).
     const craftCue = clamp(Number(state.flight?.craftState?.windStreaks) || 0, 0, 1);

@@ -32,7 +32,7 @@ import { createWorldGen } from './world/worldgen.js';
 import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName } from './core/util.js';
 import { EventBus } from './core/eventBus.js';
 import { attachTypedEvents } from './core/events.js';
-import { createWindField } from './env/WindField.js';
+import { createWindField, prevailingWindDirection } from './env/WindField.js';
 import { craftRegistry } from './craft/index.js';
 import { flightModels } from './flight/models.js';
 import { createControlState } from './input/controlState.js';
@@ -101,6 +101,8 @@ async function boot() {
 
   // ---- World + spawn ------------------------------------------------------------------
   const world = createWorldGen(seed, WORLD_OPTIONS);
+  // Every world has its own prevailing wind; set before any system reads the uniform.
+  prevailingWindDirection(world, uniforms.windDirection.value);
   const requestedTime = Number.parseFloat(params.get('time'));
   const startDayTime = Number.isFinite(requestedTime)
     ? ((requestedTime % 1) + 1) % 1

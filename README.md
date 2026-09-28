@@ -251,12 +251,17 @@ start-driftwing.bat      one-click start for Windows
   loads the game in headless Chrome or Edge (set `CHROME_PATH` if the browser is elsewhere). It
   fails on any console error or warning, runs scripted steps (`wait`, `press`, `down`, `up`,
   `click`, `move`, `eval`, `shot`), and saves screenshots. `window.DRIFTWING` exposes `ready`,
-  `ctx`, `state` and `getStats()` for scripted checks.
+  `ctx`, `state` and `getStats()` for scripted checks. `tools/steps/env-fixes.json` is a ready
+  step file: WREN's start view, the seeded wind, doppler across a view cut, leaving photo mode into
+  a chase view chosen meanwhile, and the jet's contrails in level cruise (read the `evals` in the
+  report).
 - **CLASSIC parity.** `node tools/arcade-parity.mjs --suite all` checks that CLASSIC flies
   bit-for-bit like v1.
 - **Flight labs.** `node tools/flight-lab.mjs` covers the glider and bush plane, and
   `node tools/lab/jet.mjs` (also `helicopter.mjs`, `wingsuit.mjs`, `fpv.mjs`) the others. They fly
-  the SIM models headless and check them against their targets.
+  the SIM models headless and check them against their targets. `node tools/lab/storage.mjs`
+  checks saved data against a hung or closed IndexedDB, and `node tools/lab/copilot-server.mjs`
+  which origins the copilot server accepts.
 - **Test harnesses** (dev server only).
   - `?test=1` flies all six craft in both modes across three seeds and reports fps, frame times,
     NaN events, terrain penetrations, soft crashes and heap growth.

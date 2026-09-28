@@ -72,6 +72,8 @@ export function createCameraSystem(ctx) {
 
   let view = 'chase';
   let photo = false;
+  // A view change during photo mode (a voice mode or craft switch) skips enterView; photo exit runs it.
+  let enterPendingAfterPhoto = false;
   let fovSettings = readFovSettings();
   const look = { yaw: 0, pitch: 0, snapYaw: 0 };
   const pose = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion(), fov: CONFIG.CAMERA.FOV_BASE, near: CONFIG.CAMERA.NEAR };
@@ -95,7 +97,7 @@ export function createCameraSystem(ctx) {
   let zoomTan = 1;
   const redrawTimes = [];
   // panelDrawMs / hudDrawMs: smoothed CPU time of one 30 Hz repaint.
-  const counters = { panelRedraws: 0, hudTicks: 0, instrumentTicks: 0, viewChanges: 0, returnFlights: 0, panelDrawMs: 0, hudDrawMs: 0 };
+  const counters = { panelRedraws: 0, hudTicks: 0, instrumentTicks: 0, viewChanges: 0, returnFlights: 0, snaps: 0, panelDrawMs: 0, hudDrawMs: 0 };
 
   // ---- Context helpers ------------------------------------------------------------------------------
   function flightSystem() {
@@ -296,6 +298,7 @@ export function createCameraSystem(ctx) {
       look.snapYaw = 0;
       view = next;
       if (!photo) enterView(next);
+      else enterPendingAfterPhoto = true;
       counters.viewChanges++;
       emitViewChanged();
     }
@@ -445,16 +448,23 @@ export function createCameraSystem(ctx) {
     if (next === photo) return;
     photo = next;
     if (photo) {
+      enterPendingAfterPhoto = false;
       returnFlight.active = false;
       setInterior(false);
       restoreChaseLens();
       chaseRig.setPhotoMode(true);
       return;
     }
+    const viewChangedInPhoto = enterPendingAfterPhoto;
+    enterPendingAfterPhoto = false;
     if (view === 'chase') {
+      // Re-attaches the rig when chase was chosen during photo mode, so its return flight ends on
+      // the live chase camera instead of a detached rig that no longer writes the camera.
+      if (viewChangedInPhoto) enterView('chase');
       chaseRig.setPhotoMode(false);
       return;
     }
+    if (viewChangedInPhoto && view === 'flyby') views.flyby.reset();
     returnFlight.fromPosition.copy(camera.position);
     returnFlight.fromQuaternion.copy(camera.quaternion);
     returnFlight.fromFov = camera.fov;
@@ -567,8 +577,17 @@ export function createCameraSystem(ctx) {
 
     /** Re-seat the cameras immediately (teleports / resets). */
     snap() {
+      counters.snaps++;
       chaseRig.snap();
       views.flyby.reset();
+    },
+
+    /**
+     * Counts the camera's cuts: view changes, flyby relocations and re-seats. The audio doppler
+     * reads it so a jump of the camera is not taken for motion.
+     */
+    getCutCount() {
+      return counters.viewChanges + counters.snaps + views.flyby.placements;
     },
 
     /** v1 camera mode: 'chase' | 'photo' | 'returning' (photo-mode state of the rig). */

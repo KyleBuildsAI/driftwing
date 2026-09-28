@@ -55,13 +55,16 @@ The game page calls your endpoint from the browser, so the endpoint must allow C
   `Access-Control-Allow-Methods: POST, OPTIONS` and `Access-Control-Allow-Headers: Content-Type`.
 - The page origins are `http://127.0.0.1:5199` (the dev server), the origin of any local server
   that hosts `dist-single/index.html`, and `null` when `index.html` is opened from a file.
+  Sandboxed iframes and `data:` documents on any website also send `null`, so treat it as
+  untrusted.
 - If the endpoint is on the loopback address and the page is not, Chrome also sends
   `Access-Control-Request-Private-Network: true`. Answer it with
   `Access-Control-Allow-Private-Network: true`.
-- Allow only origins you trust. The reference server accepts `null` and
-  `http(s)://localhost`, `127.0.0.1` and `[::1]` on any port. Add more with
-  `ALLOWED_ORIGINS=https://a.example,https://b.example`. Every other origin gets `403`, so an
-  unrelated website cannot spend your model key.
+- Allow only origins you trust. The reference server accepts `http(s)://localhost`,
+  `127.0.0.1` and `[::1]` on any port. Add more with
+  `ALLOWED_ORIGINS=https://a.example,https://b.example`. It refuses `null` unless you start it
+  with `ALLOW_FILE_ORIGIN=1` (only needed when the game is opened from a file). Every other origin
+  gets `403`, so an unrelated website cannot spend your model key.
 - Keep request bodies small. The reference server refuses bodies over 64 KiB with `413`.
 
 ## The response

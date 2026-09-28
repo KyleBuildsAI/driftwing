@@ -1256,8 +1256,10 @@ export function createCopilotSystem(ctx) {
     return Copilot.describePlace(world, player.position.x, player.position.z, player.groundHeight, player.heading);
   }
 
-  // The camera's last reported view (typed 'viewChanged'); serial counts the changes.
-  let currentView = null;
+  // The camera's last reported view (typed 'viewChanged'); serial counts the changes. The camera is
+  // built before WREN and reports its start view only once, so the start view is read from it here.
+  const startView = ctx.systems.camera?.getView?.();
+  let currentView = typeof startView === 'string' ? { view: startView, serial: 0 } : null;
   let viewSerial = 0;
   bus.onTyped('viewChanged', (payload) => {
     if (!payload || typeof payload.view !== 'string') return;
