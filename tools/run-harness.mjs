@@ -363,6 +363,7 @@ async function main() {
     result: null,
     passed: false,
     problems: [],
+    notes: [],
   };
   const consoleLines = [];
   const started = Date.now();
@@ -484,10 +485,12 @@ async function main() {
     if (browser) log(started, `browser ${await closeBrowser(browser, runner.problems)}`);
     await server.close().catch((error) => runner.problems.push(`dev server close failed: ${error.message}`));
     log(started, 'dev server stopped');
+    // A killed Chrome can hold its profile files for a moment; leftovers are housekeeping, not a result.
+    await sleep(2000);
     try {
-      rmSync(profileDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      rmSync(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     } catch (error) {
-      runner.problems.push(`could not remove the temporary profile ${profileDir}: ${error.message}`);
+      runner.notes.push(`could not remove the temporary profile ${profileDir}: ${error.message}`);
     }
   }
 
@@ -515,6 +518,7 @@ async function main() {
   if (report) process.stdout.write(`${options.test === '1' ? flightTable(report) : hotasTable(report)}\n`);
   process.stdout.write(`run-harness: ${runner.passed ? 'PASS' : 'FAIL'} (harness ${report ? report.result : 'no report'}, backend ${runner.backend ? runner.backend.join(', ') : 'unknown'}, browser console ${runner.errors.length} errors / ${runner.warnings.length} warnings, ${runner.durationSeconds} s)\n`);
   for (const problem of runner.problems) process.stdout.write(`run-harness: problem: ${problem}\n`);
+  for (const note of runner.notes) process.stdout.write(`run-harness: note: ${note}\n`);
   for (const error of runner.errors.slice(0, 20)) process.stdout.write(`run-harness: browser error: ${error}\n`);
   for (const warning of runner.warnings.slice(0, 20)) process.stdout.write(`run-harness: browser warning: ${warning}\n`);
   process.stdout.write(`run-harness: saved report.json, runner.json, console.log and summary screenshots in ${options.out}\n`);
