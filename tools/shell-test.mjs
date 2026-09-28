@@ -446,6 +446,10 @@ async function testTarget(target, options) {
     watch(page);
     const cdp = await page.createCDPSession();
     await cdp.send('Performance.enable');
+    // The browser with no game (a blank tab): what one game adds on top of it is its footprint.
+    const idle = await readMemory(cdp);
+    result.memory.readings['no game'] = idle;
+    process.stdout.write(`[${target}] memory no game (blank tab): heap ${idle.jsHeapMB} MB, documents ${idle.documents}, nodes ${idle.nodes}, GPU process working set ${idle.gpuWorkingSetMB} MB, private ${idle.gpuPrivateMB} MB, GPU dedicated ${idle.gpuDedicatedMB} MB, shared ${idle.gpuSharedMB} MB\n`);
     await page.goto(shellUrl('', `#seed=${HASH_SEED}`), { waitUntil: 'load', timeout: 60000 });
     const firstDocuments = {};
     const first = await verifySwitch(page, cdp, 'v2', 'first load', 0, firstDocuments);
@@ -492,7 +496,10 @@ async function testTarget(target, options) {
         }
         const allowed = Math.max(base * tolerance.share, tolerance.absolute);
         const delta = Math.round((last - base) * 10) / 10;
-        result.memory.comparisons.push({ game, metric, first: base, last, delta, allowed: Math.round(allowed * 10) / 10, pass: delta <= allowed });
+        // What one running copy of the game holds above a blank tab: a retained game would add about this much.
+        const idleValue = result.memory.readings['no game'][metric];
+        const footprint = Number.isFinite(idleValue) ? Math.round((base - idleValue) * 10) / 10 : null;
+        result.memory.comparisons.push({ game, metric, first: base, last, delta, allowed: Math.round(allowed * 10) / 10, footprint, pass: delta <= allowed });
       }
     }
     const measured = result.memory.comparisons.filter((entry) => entry.pass !== null);
@@ -585,9 +592,10 @@ function printTable(results) {
   process.stdout.write(`\n${'target'.padEnd(7)} ${'result'.padEnd(6)} check\n${'-'.repeat(7)} ${'-'.repeat(6)} ${'-'.repeat(width)}\n`);
   for (const row of rows) process.stdout.write(`${row.target.padEnd(7)} ${(row.pass ? 'PASS' : 'FAIL').padEnd(6)} ${row.name}\n`);
   for (const entry of results) {
-    process.stdout.write(`\nmemory, ${entry.target} (${entry.backend}): metric, first load -> last load, change (allowed)\n`);
+    process.stdout.write(`\nmemory, ${entry.target} (${entry.backend}): metric, first load -> last load, change (allowed; one game over a blank tab)\n`);
     for (const comparison of entry.memory.comparisons) {
-      process.stdout.write(`  ${comparison.game}  ${comparison.metric.padEnd(17)} ${String(comparison.first).padStart(8)} -> ${String(comparison.last).padStart(8)}  ${comparison.delta === null ? 'n/a' : `${comparison.delta >= 0 ? '+' : ''}${comparison.delta}`} (${comparison.allowed ?? comparison.note})  ${comparison.pass === null ? '' : comparison.pass ? 'PASS' : 'FAIL'}\n`);
+      const change = comparison.delta === null ? 'n/a' : `${comparison.delta >= 0 ? '+' : ''}${comparison.delta}`;
+      process.stdout.write(`  ${comparison.game}  ${comparison.metric.padEnd(17)} ${String(comparison.first).padStart(8)} -> ${String(comparison.last).padStart(8)}  ${change} (${comparison.allowed ?? comparison.note}; ${comparison.footprint ?? 'n/a'})  ${comparison.pass === null ? '' : comparison.pass ? 'PASS' : 'FAIL'}\n`);
     }
   }
 }
