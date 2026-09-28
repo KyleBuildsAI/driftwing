@@ -276,7 +276,9 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
   let lastProgressMs = 0;
   let penetrationEpisode = null;
   const profiler = createFrameProfiler(ctx, { exclude: ['test'] });
-  const pilotHold = { roll: null, pitch: null, yaw: null, throttle: null, brakes: null };
+  const pilotHold = { roll: null, pitch: null, yaw: null, throttle: null, brakes: null, brakeToHover: false };
+  /** brakeToHover: stick back this far while moving forward faster than the release speed (m/s). */
+  const HOVER_BRAKE = Object.freeze({ STICK: 0.8, RELEASE_SPEED: 1.5 });
 
   bus.on('safety:nonFinite', () => {
     const bucket = activeRun ? activeRun.bucket : worldRecord.outside;
@@ -328,6 +330,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
       flight().setAutopilot(options);
     },
     stick({ roll, pitch, yaw }) {
+      pilotHold.brakeToHover = false;
       pilotHold.roll = roll;
       pilotHold.pitch = pitch;
       pilotHold.yaw = yaw;
@@ -337,6 +340,11 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     },
     brakes(value) {
       pilotHold.brakes = value;
+    },
+    brakeToHover() {
+      pilotHold.brakeToHover = true;
+      pilotHold.roll = 0;
+      pilotHold.yaw = 0;
     },
     action(id) {
       ctx.controls.actions.add(id);
@@ -358,11 +366,17 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     pilotHold.yaw = null;
     pilotHold.throttle = null;
     pilotHold.brakes = null;
+    pilotHold.brakeToHover = false;
   }
 
   /** Writes the held deflections after the input system and before flight (UPDATE_ORDER). */
   function applyPilot(mode) {
     const target = mode === 'sim' ? ctx.controls : ctx.input;
+    if (pilotHold.brakeToHover) {
+      const player = state.player;
+      const forwardSpeed = player.velocity.x * player.forward.x + player.velocity.z * player.forward.z;
+      pilotHold.pitch = forwardSpeed > HOVER_BRAKE.RELEASE_SPEED ? HOVER_BRAKE.STICK : 0;
+    }
     if (pilotHold.roll !== null) target.roll = pilotHold.roll;
     if (pilotHold.pitch !== null) target.pitch = pilotHold.pitch;
     if (pilotHold.yaw !== null) target.yaw = pilotHold.yaw;

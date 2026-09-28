@@ -12,6 +12,8 @@
 //   pilot.stick({ roll, pitch, yaw })   deflections -1..1 held until changed (null releases an axis)
 //   pilot.throttle(value | null)        lever 0..1 (SIM ControlState.throttle, CLASSIC throttle target)
 //   pilot.brakes(value | null)          both toe brakes 0..1 (SIM: spoilers / airbrake in the air)
+//   pilot.brakeToHover()                hover craft: stick back while moving forward, centred once
+//                                       slow (closed loop, like a pilot stopping); any stick() ends it
 //   pilot.action(id)                    one press of a flight-owned action
 //   pilot.boost(), pilot.barrelRoll(direction), pilot.relaunch()   (v1 CLASSIC moves, relaunch any mode)
 // Sign conventions: pitch +1 pulls (nose up), roll +1 banks right, yaw +1 yaws right.
@@ -122,12 +124,10 @@ const CLASSIC_HOVER = Object.freeze({
   steps: [
     { at: 0, label: 'autopilot cruise', run: (pilot) => { cruise(pilot); pilot.throttle(0.5); } },
     { at: 0.2, label: 'autopilot turn 90 deg left', run: (pilot) => cruise(pilot, -90) },
-    { at: 0.4, label: 'autopilot off, stick back (brake)', run: (pilot) => { handsOff(pilot); pilot.throttle(0.5); pilot.stick({ roll: 0, pitch: 0.7, yaw: 0 }); } },
-    { at: 0.47, label: 'hands off (settle into a hover)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
+    { at: 0.4, label: 'autopilot off, brake to a hover', run: (pilot) => { handsOff(pilot); pilot.throttle(0.5); pilot.brakeToHover(); } },
     { at: 0.55, label: 'stick forward', run: (pilot) => pilot.stick({ roll: 0, pitch: -0.6, yaw: 0 }) },
     { at: 0.62, label: 'banked turn right, climb, boost', run: (pilot) => { pilot.stick({ roll: 0.5, pitch: -0.3, yaw: 0 }); pilot.throttle(0.8); pilot.boost(); } },
-    { at: 0.7, label: 'throttle 50 %, stick back (brake)', run: (pilot) => { pilot.throttle(0.5); pilot.stick({ roll: 0, pitch: 0.7, yaw: 0 }); } },
-    { at: 0.78, label: 'hands off, hover', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
+    { at: 0.7, label: 'throttle 50 %, brake to a hover', run: (pilot) => { pilot.throttle(0.5); pilot.brakeToHover(); } },
   ],
   checks: [CHECK.hover, CHECK.translate, CHECK.autopilot],
 });
@@ -137,7 +137,7 @@ const SIM_WINGSUIT = Object.freeze({
   steps: [
     { at: 0, label: 'autopilot glide', run: (pilot) => cruise(pilot) },
     { at: 0.22, label: 'autopilot off, dive (push)', run: (pilot) => { handsOff(pilot); pilot.stick({ roll: 0, pitch: -0.7, yaw: 0 }); } },
-    { at: 0.3, label: 'hands off (assists recover)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
+    { at: 0.26, label: 'hands off (assists recover)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
     { at: 0.4, label: 'relaunch from the nearest peak', run: (pilot) => pilot.action('relaunch') },
     { at: 0.46, label: 'autopilot glide', run: (pilot) => cruise(pilot) },
     { at: 0.68, label: 'autopilot off, deploy the chute', run: (pilot) => { handsOff(pilot); pilot.action('chuteDeploy'); } },
