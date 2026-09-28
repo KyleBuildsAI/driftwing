@@ -11,9 +11,13 @@
 //     [--crafts glider,jet] [--modes classic,sim] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>]
 //
-// The runner also samples the whole machine's CPU load every 2 s (machine-load.json) and adds each
-// run's average / peak load to report.json (runs[].machineLoad), as evidence when frame spikes come
-// from other processes on a shared machine.
+// The runner also records evidence for telling game cost from machine load, per flight-test run
+// (report.json runs[].machineLoad and runs[].mainThread, raw samples in machine-load.json):
+//   - the whole machine's CPU load (all processes, all cores), sampled every 2 s;
+//   - Chrome's own main-thread counters over CDP (Performance.getMetrics): TaskDuration (wall time
+//     the page's main thread spent in tasks) against ThreadTime (CPU time it was actually given).
+//     A CPU share well under 100 % means the thread was waiting or descheduled inside its tasks,
+//     which is what a saturated machine does to it; real game work shows up as CPU time.
 //
 // Exit code: 0 when the harness reports PASS, the requested backend really ran and the browser
 // console stayed free of errors and warnings; 1 on FAIL; 2 when the run itself could not complete.
@@ -119,18 +123,48 @@ function cpuTimes() {
   return { busy, total };
 }
 
-/** Samples the whole machine's CPU load (all processes, all cores) until stop() is called. */
+/** Main-thread counters from Chrome (seconds): task wall time, thread CPU time, script time. */
+async function readMainThread(cdp) {
+  const { metrics } = await cdp.send('Performance.getMetrics');
+  const value = (name) => metrics.find((metric) => metric.name === name)?.value ?? null;
+  return { taskSeconds: value('TaskDuration'), threadSeconds: value('ThreadTime'), scriptSeconds: value('ScriptDuration') };
+}
+
+/**
+ * Samples the whole machine's CPU load (all processes, all cores) and, once attach(cdp) is called,
+ * the page's main-thread counters, until stop() is called.
+ */
 function startLoadSampler() {
   const samples = [];
   let previous = cpuTimes();
+  let cdp = null;
+  let previousThread = null;
   const timer = setInterval(() => {
     const current = cpuTimes();
     const total = current.total - previous.total;
-    if (total > 0) samples.push({ time: Date.now(), busyPct: Math.round(((current.busy - previous.busy) / total) * 1000) / 10 });
+    const sample = { time: Date.now(), busyPct: total > 0 ? Math.round(((current.busy - previous.busy) / total) * 1000) / 10 : null };
+    samples.push(sample);
     previous = current;
+    if (!cdp) return;
+    readMainThread(cdp).then((thread) => {
+      // The counters restart with every page load (the harness reloads per seed): skip that interval.
+      if (previousThread && thread.taskSeconds >= previousThread.taskSeconds && thread.threadSeconds >= previousThread.threadSeconds) {
+        sample.taskMs = Math.round((thread.taskSeconds - previousThread.taskSeconds) * 1000);
+        sample.threadMs = Math.round((thread.threadSeconds - previousThread.threadSeconds) * 1000);
+        sample.scriptMs = Math.round((thread.scriptSeconds - previousThread.scriptSeconds) * 1000);
+      }
+      previousThread = thread;
+    }, (error) => {
+      // A page mid-reload has no metrics for a moment; the next sample starts a new baseline.
+      sample.threadError = error.message;
+      previousThread = null;
+    });
   }, LOAD_SAMPLE_MS);
   return {
     samples,
+    attach(session) {
+      cdp = session;
+    },
     stop() {
       clearInterval(timer);
     },
@@ -139,9 +173,27 @@ function startLoadSampler() {
       const start = Date.parse(startIso);
       const end = Date.parse(endIso);
       const inside = samples.filter((sample) => sample.time >= start && sample.time <= end + LOAD_SAMPLE_MS);
+      const loads = inside.filter((sample) => Number.isFinite(sample.busyPct));
+      if (loads.length === 0) return null;
+      const average = loads.reduce((sum, sample) => sum + sample.busyPct, 0) / loads.length;
+      return { averagePct: Math.round(average * 10) / 10, peakPct: Math.max(...loads.map((sample) => sample.busyPct)), samples: loads.length };
+    },
+    /** The page main thread between two ISO times: task wall time, the CPU it got, script time. */
+    mainThreadBetween(startIso, endIso) {
+      const start = Date.parse(startIso);
+      const end = Date.parse(endIso);
+      const inside = samples.filter((sample) => sample.time > start && sample.time <= end && Number.isFinite(sample.taskMs));
       if (inside.length === 0) return null;
-      const average = inside.reduce((sum, sample) => sum + sample.busyPct, 0) / inside.length;
-      return { averagePct: Math.round(average * 10) / 10, peakPct: Math.max(...inside.map((sample) => sample.busyPct)), samples: inside.length };
+      const taskMs = inside.reduce((sum, sample) => sum + sample.taskMs, 0);
+      const threadMs = inside.reduce((sum, sample) => sum + sample.threadMs, 0);
+      const scriptMs = inside.reduce((sum, sample) => sum + sample.scriptMs, 0);
+      const wallMs = inside.length * LOAD_SAMPLE_MS;
+      return {
+        taskBusyPct: Math.round((taskMs / wallMs) * 1000) / 10,
+        cpuSharePct: taskMs > 0 ? Math.round((threadMs / taskMs) * 1000) / 10 : null,
+        scriptBusyPct: Math.round((scriptMs / wallMs) * 1000) / 10,
+        samples: inside.length,
+      };
     },
   };
 }
@@ -213,7 +265,7 @@ function describeProgress(state) {
 }
 
 function flightTable(report) {
-  const lines = ['  #  seed        craft       mode     fps  p99ms  maxms  >50  sys/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak'];
+  const lines = ['  #  seed        craft       mode     fps  p99ms  maxms  >50  sys/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak  mainThread busy%/cpuShare%'];
   for (const run of report.runs) {
     const checks = run.script.checks;
     lines.push([
@@ -233,7 +285,8 @@ function flightTable(report) {
       String(run.heapDeltaMB).padStart(7),
       `${checks.filter((check) => check.passed).length}/${checks.length}`.padStart(7),
       run.passed ? '  PASS' : '  FAIL',
-      run.machineLoad ? `  ${run.machineLoad.averagePct}/${run.machineLoad.peakPct}` : '  n/a',
+      run.machineLoad ? `  ${run.machineLoad.averagePct}/${run.machineLoad.peakPct}`.padEnd(21) : '  n/a'.padEnd(21),
+      run.mainThread ? `${run.mainThread.taskBusyPct}/${run.mainThread.cpuSharePct}` : 'n/a',
     ].join(' '));
   }
   const totals = report.totals;
@@ -310,6 +363,9 @@ async function main() {
       defaultViewport: { width: options.width, height: options.height },
     });
     const page = await browser.newPage();
+    const cdp = await page.createCDPSession();
+    await cdp.send('Performance.enable');
+    load.attach(cdp);
     page.on('console', (message) => {
       const location = message.location();
       const where = location?.url ? ` (${location.url.split('/').pop()}:${location.lineNumber ?? '?'})` : '';
@@ -397,7 +453,10 @@ async function main() {
   runner.machineLoad = load.between(runner.startedAt, runner.finishedAt);
   if (report && Array.isArray(report.runs)) {
     // Evidence for the frame statistics: how busy the whole machine was while each run flew.
-    for (const run of report.runs) run.machineLoad = run.startedAt ? load.between(run.startedAt, run.endedAt) : null;
+    for (const run of report.runs) {
+      run.machineLoad = run.startedAt ? load.between(run.startedAt, run.endedAt) : null;
+      run.mainThread = run.startedAt ? load.mainThreadBetween(run.startedAt, run.endedAt) : null;
+    }
   }
   runner.durationSeconds = Math.round((Date.now() - started) / 1000);
   const expected = EXPECTED_BACKEND[options.backend];
