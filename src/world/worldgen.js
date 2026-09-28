@@ -2,7 +2,7 @@
 // height function used for collision, spawning and landmarks is exactly the one that builds the mesh.
 import { PRESETS } from '../spawns/presets/index.js';
 import { SITE_CELL, createPlacement } from './placement.js';
-import { STAMP_PAINTS, accumulateStampPaint, applyStampHeight } from './stamps.js';
+import { STAMP_HEIGHT, STAMP_PAINTS, accumulateStampPaintByKind } from './stamps.js';
 
 // ============================================================================
 // WORLD GENERATION: pure and deterministic from the seed.
@@ -373,38 +373,73 @@ export function createWorldGen(seedString, options) {
     presets: Array.isArray(options.presets) ? options.presets : PRESETS,
   });
   const hasStamps = placement.hasStamps;
+  // A direct-mapped cache in front of placement's per-cell stamp lists (the spatial hash): a toroidal
+  // 64 x 64 window of cells (128 km), so no two cells within 128 km ever share a slot. heightAt runs
+  // millions of times, mostly in runs inside one cell (chunk rows), so the last cell is kept too.
+  const STAMP_WINDOW = 64;
+  const stampSlotKeys = new Float64Array(STAMP_WINDOW * STAMP_WINDOW).fill(NaN);
+  const stampSlotLists = new Array(STAMP_WINDOW * STAMP_WINDOW).fill(null);
+  // Each cached cell keeps its stamps' bounds and kinds in typed arrays: the loops below then read
+  // one record shape, and each stamp object is only touched by its own type's function.
+  const EMPTY_STAMP_CELL = Object.freeze({ count: 0, stamps: Object.freeze([]), bounds: new Float64Array(0), kinds: new Uint8Array(0) });
   let lastStampKey = NaN;
-  let lastStamps = null;
+  let lastStamps = EMPTY_STAMP_CELL;
 
-  /** The spatial hash lookup: the stamps overlapping the SITE_CELL cell holding (x, z). */
+  function stampCell(stamps) {
+    if (stamps.length === 0) return EMPTY_STAMP_CELL;
+    const bounds = new Float64Array(stamps.length * 4);
+    const kinds = new Uint8Array(stamps.length);
+    stamps.forEach((stamp, index) => {
+      bounds[index * 4] = stamp.minX;
+      bounds[index * 4 + 1] = stamp.maxX;
+      bounds[index * 4 + 2] = stamp.minZ;
+      bounds[index * 4 + 3] = stamp.maxZ;
+      kinds[index] = stamp.kind;
+    });
+    return Object.freeze({ count: stamps.length, stamps, bounds, kinds });
+  }
+
+  /** The spatial hash lookup: the stamps overlapping the SITE_CELL cell holding (x, z), as a cell record. */
   function stampsAt(x, z) {
     const cellX = Math.floor(x / SITE_CELL);
     const cellZ = Math.floor(z / SITE_CELL);
-    const key = (cellX + 32768) * 65536 + (cellZ + 32768);
-    if (key !== lastStampKey) {
-      lastStamps = placement.stampsInCell(cellX, cellZ);
-      lastStampKey = key;
+    const key = cellX * 65536 + cellZ;
+    if (key === lastStampKey) return lastStamps;
+    const slot = ((cellX & (STAMP_WINDOW - 1)) << 6) | (cellZ & (STAMP_WINDOW - 1));
+    if (stampSlotKeys[slot] !== key) {
+      stampSlotLists[slot] = stampCell(placement.stampsInCell(cellX, cellZ));
+      stampSlotKeys[slot] = key;
     }
+    lastStampKey = key;
+    lastStamps = stampSlotLists[slot];
     return lastStamps;
   }
 
   /**
-   * Analytic terrain height at any world point (metres above sea level): the Phase 1 height, then
-   * every site stamp whose bounds hold the point, in their global order. With no stamped presets
-   * this is exactly the Phase 1 function.
+   * The Phase 1 height, then every site stamp whose bounds hold the point, in their global order.
+   * Stamp functions are called through a table by kind, so each sees one stamp shape and none of
+   * them is inlined here (keeping the Phase 1 part of the sample as fast as it was).
    */
-  function heightAt(x, z) {
+  function stampedHeightAt(x, z) {
     const height = unstampedHeightAt(x, z);
-    if (!hasStamps) return height;
-    const stamps = stampsAt(x, z);
+    const cell = stampsAt(x, z);
+    const count = cell.count;
+    if (count === 0) return height;
+    const bounds = cell.bounds;
     let stamped = height;
-    for (let index = 0; index < stamps.length; index++) {
-      const stamp = stamps[index];
-      if (x < stamp.minX || x > stamp.maxX || z < stamp.minZ || z > stamp.maxZ) continue;
-      stamped = applyStampHeight(stamp, x, z, stamped);
+    for (let index = 0; index < count; index++) {
+      const base = index * 4;
+      if (x < bounds[base] || x > bounds[base + 1] || z < bounds[base + 2] || z > bounds[base + 3]) continue;
+      stamped = STAMP_HEIGHT[cell.kinds[index]](cell.stamps[index], x, z, stamped);
     }
     return stamped;
   }
+
+  /**
+   * Analytic terrain height at any world point (metres above sea level). Without stamped site presets
+   * it IS the Phase 1 function (unstampedHeightAt); otherwise stampedHeightAt.
+   */
+  const heightAt = hasStamps ? stampedHeightAt : unstampedHeightAt;
 
   const paintScratch = { paintIndex: -1, weight: 0 };
   const influence = { paint: null, weight: 0 };
@@ -414,11 +449,12 @@ export function createWorldGen(seedString, options) {
     paintScratch.paintIndex = -1;
     paintScratch.weight = 0;
     if (!hasStamps) return paintScratch;
-    const stamps = stampsAt(x, z);
-    for (let index = 0; index < stamps.length; index++) {
-      const stamp = stamps[index];
-      if (x < stamp.minX || x > stamp.maxX || z < stamp.minZ || z > stamp.maxZ) continue;
-      accumulateStampPaint(stamp, x, z, paintScratch);
+    const cell = stampsAt(x, z);
+    const bounds = cell.bounds;
+    for (let index = 0; index < cell.count; index++) {
+      const base = index * 4;
+      if (x < bounds[base] || x > bounds[base + 1] || z < bounds[base + 2] || z > bounds[base + 3]) continue;
+      accumulateStampPaintByKind(cell.kinds[index], cell.stamps[index], x, z, paintScratch);
     }
     return paintScratch;
   }

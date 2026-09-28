@@ -7,7 +7,9 @@
 // skirts and the collision height (groundHeight) all see the same edited surface.
 //
 // Every stamp has a smooth falloff and changes nothing outside its bounds (an axis-aligned box that
-// placement's spatial hash uses), so the edit blends into the terrain around it.
+// placement's spatial hash uses), so the edit blends into the terrain around it. A resolved stamp whose
+// `fits` is false cannot shape the ground it landed on (a canyon path crossing a ridge far higher
+// than its rim), and placement drops that site.
 //
 // Pure: no imports and no DOM, so the terrain worker runs exactly this code too.
 // Axes: +x east, -z north. A stamp's `rotation` is a compass heading in radians (0 = north,
@@ -17,8 +19,8 @@
 //   common      offset { along, across } (m, in the site frame), rotation (radians, added to the
 //               site's), paint (see STAMP_PAINTS; each type has a default, null for none)
 //   cone        radius, height, craterRadius, craterDepth, gullies (count)            paint 'ash'
-//   carve       length (2-4 km), width (floor), depth, wallWidth, twist (meander, m),
-//               segments                                                          paint 'riverbed'
+//   carve       length (2-4 km), width (floor), depth, wallWidth, twist (meander, m), plateau (the
+//               mesa band beyond each wall), shoulder (its falloff), segments      paint 'riverbed'
 //   cliffStep   width (along the lip), drop, length (upstream + downstream), face, falloff,
 //               pool (plunge pool radius)                                         paint 'wetRock'
 //   gorge       length, width (top), depth, falloff (end taper), pad (anchor pads) paint 'riverbed'
@@ -31,11 +33,22 @@ export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac',
 const KIND = Object.freeze({ cone: 0, carve: 1, cliffStep: 2, gorge: 3, flatten: 4, islandBase: 5 });
 const PAINT_INDEX = Object.freeze({ ash: 0, basalt: 1, wetRock: 2, tarmac: 3, riverbed: 4 });
 const TAU = Math.PI * 2;
+/** A canyon may cut at most this many depths below the ground on its path, and lift it at most this many. */
+const MAX_CANYON_CUT = 3;
+const MAX_CANYON_LIFT = 1.2;
+/** The waterfall lip's largest wander (m) and the gorge wall's (m). */
+const LIP_AMPLITUDE = 7.5;
+const GORGE_WOBBLE = 6;
+/** The canyon's segment grid: cells of this size (m) list, as a bit mask, the segments near them. */
+const CARVE_GRID = 64;
+/** Per-segment scratch of the canyon's two passes (segments are validated to at most 32). */
+const carveCutFloor = new Float64Array(32);
+const carveCutShare = new Float64Array(32);
 
 /** Defaults per type: the sizes a preset may leave out. */
 const DEFAULTS = Object.freeze({
   cone: Object.freeze({ radius: [900, 1300], height: [320, 480], craterRadius: [150, 220], craterDepth: [70, 120], gullies: [6, 9], paint: 'ash' }),
-  carve: Object.freeze({ length: [2000, 4000], width: [34, 56], depth: [70, 120], wallWidth: [18, 30], twist: [180, 380], segments: 14, paint: 'riverbed' }),
+  carve: Object.freeze({ length: [2000, 3200], width: [34, 56], depth: [70, 120], wallWidth: [18, 30], twist: [180, 380], plateau: [40, 80], shoulder: [110, 170], segments: 14, paint: 'riverbed' }),
   cliffStep: Object.freeze({ width: [280, 420], drop: [80, 140], length: [420, 620], face: [8, 14], falloff: [120, 180], pool: [45, 70], paint: 'wetRock' }),
   gorge: Object.freeze({ length: [700, 1100], width: [80, 130], depth: [80, 120], falloff: [150, 220], pad: [60, 90], paint: 'riverbed' }),
   flatten: Object.freeze({ length: [1100, 1500], width: [40, 60], margin: [30, 55], shoulder: [100, 170], paint: 'tarmac' }),
@@ -45,7 +58,7 @@ const DEFAULTS = Object.freeze({
 /** Every size field per type, validated as a positive number or an ascending [min, max] range. */
 const SIZE_FIELDS = Object.freeze({
   cone: ['radius', 'height', 'craterRadius', 'craterDepth', 'gullies'],
-  carve: ['length', 'width', 'depth', 'wallWidth', 'twist'],
+  carve: ['length', 'width', 'depth', 'wallWidth', 'twist', 'plateau', 'shoulder'],
   cliffStep: ['width', 'drop', 'length', 'face', 'falloff', 'pool'],
   gorge: ['length', 'width', 'depth', 'falloff', 'pad'],
   flatten: ['length', 'width', 'margin', 'shoulder'],
@@ -56,6 +69,67 @@ function clamp01(value) { return value < 0 ? 0 : value > 1 ? 1 : value; }
 function smoothstep(edge0, edge1, value) {
   const t = clamp01((value - edge0) / (edge1 - edge0));
   return t * t * (3 - 2 * t);
+}
+
+/**
+ * sin(count * angle + phase) from the angle's cosine and sine (no atan2): the complex power
+ * (cos + i sin)^count rotated by the phase. count is a small whole number.
+ */
+function angularWave(cosAngle, sinAngle, count, cosPhase, sinPhase) {
+  let real = 1;
+  let imaginary = 0;
+  for (let step = 0; step < count; step++) {
+    const nextReal = real * cosAngle - imaginary * sinAngle;
+    imaginary = real * sinAngle + imaginary * cosAngle;
+    real = nextReal;
+  }
+  return imaginary * cosPhase + real * sinPhase;
+}
+
+/**
+ * A wave sampled every metre over [0, length] (plus one spare sample): a lookup table the hot path
+ * interpolates linearly instead of calling Math.sin per height sample. Linear interpolation keeps
+ * the height continuous.
+ */
+function buildWaveTable(length, wave) {
+  const table = new Float64Array(Math.ceil(length) + 2);
+  for (let index = 0; index < table.length; index++) table[index] = wave(index);
+  return table;
+}
+
+/** Linear lookup in a buildWaveTable table at `position` metres (clamped to the table). */
+function sampleWave(table, position) {
+  const last = table.length - 1;
+  if (position <= 0) return table[0];
+  if (position >= last) return table[last];
+  const index = Math.floor(position);
+  return table[index] + (table[index + 1] - table[index]) * (position - index);
+}
+
+/**
+ * The non-increasing sequence closest (least squares) to `values` (pool adjacent violators): a
+ * river floor that only runs downhill while following the terrain as closely as it can.
+ */
+function fitNonIncreasing(values) {
+  const levels = [];
+  const counts = [];
+  for (let index = values.length - 1; index >= 0; index--) {
+    levels.push(values[index]);
+    counts.push(1);
+    while (levels.length > 1 && levels[levels.length - 2] > levels[levels.length - 1]) {
+      const count = counts.pop();
+      const level = levels.pop();
+      const total = counts[counts.length - 1] + count;
+      levels[levels.length - 1] = (levels[levels.length - 1] * counts[counts.length - 1] + level * count) / total;
+      counts[counts.length - 1] = total;
+    }
+  }
+  const fitted = new Float64Array(values.length);
+  let index = values.length - 1;
+  for (let block = 0; block < levels.length; block++) {
+    for (let repeat = 0; repeat < counts[block]; repeat++) fitted[index--] = levels[block];
+  }
+  return fitted;
 }
 
 function isSize(value) {
@@ -113,7 +187,7 @@ export function stampReach(spec) {
       extent = maxOf(full.radius);
       break;
     case 'carve':
-      extent = maxOf(full.length) / 2 + maxOf(full.twist) + (maxOf(full.width) / 2) * 1.25 + maxOf(full.wallWidth) * 1.2 + 8;
+      extent = maxOf(full.length) / 2 + maxOf(full.twist) + (maxOf(full.width) / 2) * 1.25 + maxOf(full.wallWidth) * 1.2 + maxOf(full.plateau) + maxOf(full.shoulder) + 8;
       break;
     case 'cliffStep':
       extent = Math.hypot(maxOf(full.length) / 2 + maxOf(full.falloff), maxOf(full.width) / 2 + maxOf(full.falloff));
@@ -159,7 +233,9 @@ function resolveCone(stamp, spec, random, context) {
   stamp.craterRadius = craterRadius;
   stamp.craterDepth = craterDepth;
   stamp.gullies = Math.round(roll(spec.gullies, random));
-  stamp.gullyPhase = random() * TAU;
+  const gullyPhase = random() * TAU;
+  stamp.gullyCos = Math.cos(gullyPhase);
+  stamp.gullySin = Math.sin(gullyPhase);
   stamp.flowPhase = random() * TAU;
   stamp.baseY = baseY;
   stamp.peakY = baseY + height;
@@ -173,12 +249,22 @@ function resolveCone(stamp, spec, random, context) {
   ];
 }
 
+/**
+ * Slot canyon. A seeded meandering polyline; along it a rim profile fitted to the terrain that only
+ * runs downhill (so the river does too); a mesa band either side that lifts lower ground up to the
+ * rim (never cuts it), and the slot cut `depth` below the rim with twisting walls and a river channel.
+ * Where the path crosses higher ground the slot simply runs deeper. The stamp does not fit (placement
+ * drops the site) when that would cut deeper than MAX_CANYON_CUT depths or lift ground more than
+ * MAX_CANYON_LIFT depths.
+ */
 function resolveCarve(stamp, spec, random, context) {
   const length = roll(spec.length, random);
   const halfWidth = roll(spec.width, random) / 2;
   const depth = roll(spec.depth, random);
   const wallWidth = roll(spec.wallWidth, random);
   const twist = roll(spec.twist, random);
+  const plateau = roll(spec.plateau, random);
+  const shoulder = roll(spec.shoulder, random);
   const segments = spec.segments;
   const frequencyA = 0.8 + 0.6 * random();
   const frequencyB = 1.8 + 0.8 * random();
@@ -188,6 +274,7 @@ function resolveCarve(stamp, spec, random, context) {
   const pointX = new Float64Array(count);
   const pointZ = new Float64Array(count);
   const floor = new Float64Array(count);
+  const rim = new Float64Array(count);
   const halfWidths = new Float64Array(count);
   const wallWidths = new Float64Array(count);
   const rightX = -stamp.dirZ;
@@ -201,32 +288,44 @@ function resolveCarve(stamp, spec, random, context) {
     halfWidths[index] = halfWidth * (0.75 + 0.5 * random());
     wallWidths[index] = wallWidth * (0.8 + 0.4 * random());
   }
-  // The river floor only ever runs downhill from the first point to the last, and stays above the sea.
   const segmentLengths = new Float64Array(segments);
   const segmentStart = new Float64Array(segments);
+  const unitX = new Float64Array(segments);
+  const unitZ = new Float64Array(segments);
   let total = 0;
   for (let index = 0; index < segments; index++) {
     segmentLengths[index] = Math.hypot(pointX[index + 1] - pointX[index], pointZ[index + 1] - pointZ[index]);
     segmentStart[index] = total;
+    unitX[index] = (pointX[index + 1] - pointX[index]) / segmentLengths[index];
+    unitZ[index] = (pointZ[index + 1] - pointZ[index]) / segmentLengths[index];
     total += segmentLengths[index];
   }
+  // The rim (and with it the river floor) only runs downhill from the first point to the last,
+  // and the floor stays above the sea.
+  const ground = new Float64Array(count);
+  for (let index = 0; index < count; index++) ground[index] = context.baseHeight(pointX[index], pointZ[index]);
+  const fitted = fitNonIncreasing(ground);
   const floorLimit = context.waterLevel + 2;
+  let fits = true;
   for (let index = 0; index < count; index++) {
-    const own = context.baseHeight(pointX[index], pointZ[index]) - depth;
-    const previous = index === 0 ? Infinity : floor[index - 1] - segmentLengths[index - 1] * 0.004;
-    floor[index] = Math.max(Math.min(previous, own), floorLimit);
+    floor[index] = Math.max(fitted[index] - depth, floorLimit);
+    rim[index] = floor[index] + depth;
+    const inside = index > 0 && index < segments;
+    if (inside && (ground[index] - floor[index] > depth * MAX_CANYON_CUT || rim[index] - ground[index] > depth * MAX_CANYON_LIFT)) fits = false;
   }
+  stamp.fits = fits;
   let maxHalfWidth = 0;
   let maxWall = 0;
+  let minHalfWidth = Infinity;
   for (let index = 0; index < count; index++) {
     if (halfWidths[index] > maxHalfWidth) maxHalfWidth = halfWidths[index];
     if (wallWidths[index] > maxWall) maxWall = wallWidths[index];
+    if (halfWidths[index] < minHalfWidth) minHalfWidth = halfWidths[index];
   }
   // Wall wobble: the walls twist on their own, up to 30 % of the narrowest floor half-width.
-  let minHalfWidth = Infinity;
-  for (let index = 0; index < count; index++) if (halfWidths[index] < minHalfWidth) minHalfWidth = halfWidths[index];
   const wobble = Math.min(7, minHalfWidth * 0.3);
-  const reach = maxHalfWidth + maxWall + wobble + 1;
+  const corridor = Math.max(maxHalfWidth + maxWall + wobble, maxHalfWidth + maxWall + plateau + shoulder);
+  const reach = corridor + 1;
   const segmentBounds = new Float64Array(segments * 4);
   let minX = Infinity;
   let maxX = -Infinity;
@@ -252,13 +351,35 @@ function resolveCarve(stamp, spec, random, context) {
   stamp.maxZ = maxZ + 1;
   stamp.length = total;
   stamp.depth = depth;
+  stamp.plateau = plateau;
+  stamp.shoulder = shoulder;
   stamp.wobble = wobble;
-  stamp.wobblePhaseLeft = random() * TAU;
-  stamp.wobblePhaseRight = random() * TAU;
+  stamp.corridor = corridor;
+  const leftPhase = random() * TAU;
+  const rightPhase = random() * TAU;
+  const wobbleLeft = buildWaveTable(total, (metre) => 0.6 * Math.sin(metre * 0.021 + leftPhase) + 0.4 * Math.sin(metre * 0.057 + leftPhase * 1.7));
+  const wobbleRight = buildWaveTable(total, (metre) => 0.6 * Math.sin(metre * 0.021 + rightPhase) + 0.4 * Math.sin(metre * 0.057 + rightPhase * 1.7));
   stamp.endRamp = Math.min(total * 0.14, 450);
-  stamp.data = { pointX, pointZ, floor, halfWidths, wallWidths, segmentLengths, segmentStart, segmentBounds, segments };
+  // Segment grid over the stamp's bounds: each cell's bit mask names the segments whose bounds reach it.
+  const gridColumns = Math.max(1, Math.ceil((stamp.maxX - stamp.minX) / CARVE_GRID));
+  const gridRows = Math.max(1, Math.ceil((stamp.maxZ - stamp.minZ) / CARVE_GRID));
+  const gridMasks = new Uint32Array(gridColumns * gridRows);
+  for (let segment = 0; segment < segments; segment++) {
+    const base = segment * 4;
+    const firstColumn = Math.max(0, Math.floor((segmentBounds[base] - stamp.minX) / CARVE_GRID));
+    const lastColumn = Math.min(gridColumns - 1, Math.floor((segmentBounds[base + 1] - stamp.minX) / CARVE_GRID));
+    const firstRow = Math.max(0, Math.floor((segmentBounds[base + 2] - stamp.minZ) / CARVE_GRID));
+    const lastRow = Math.min(gridRows - 1, Math.floor((segmentBounds[base + 3] - stamp.minZ) / CARVE_GRID));
+    for (let row = firstRow; row <= lastRow; row++) {
+      for (let column = firstColumn; column <= lastColumn; column++) gridMasks[row * gridColumns + column] |= 1 << segment;
+    }
+  }
+  stamp.data = {
+    pointX, pointZ, unitX, unitZ, floor, rim, halfWidths, wallWidths, segmentLengths, segmentStart, segmentBounds, segments,
+    wobbleLeft, wobbleRight, gridColumns, gridRows, gridMasks,
+  };
   stamp.path = Array.from({ length: count }, (unused, index) => Object.freeze({
-    x: pointX[index], z: pointZ[index], floorY: floor[index], halfWidth: halfWidths[index], wallWidth: wallWidths[index],
+    x: pointX[index], z: pointZ[index], floorY: floor[index], rimY: rim[index], halfWidth: halfWidths[index], wallWidth: wallWidths[index],
   }));
   stamp.entry = stamp.path[0];
   stamp.exit = stamp.path[count - 1];
@@ -292,8 +413,14 @@ function resolveCliffStep(stamp, spec, random, context) {
   stamp.referenceY = centreHeight;
   stamp.topY = topY;
   stamp.bottomY = bottomY;
-  stamp.lipPhaseA = random() * TAU;
-  stamp.lipPhaseB = random() * TAU;
+  const lipPhaseA = random() * TAU;
+  const lipPhaseB = random() * TAU;
+  // The lip's wander across the cliff, tabled from its -across edge (see sampleWave).
+  stamp.lipOffset = width / 2 + falloff;
+  stamp.lipTable = buildWaveTable(2 * stamp.lipOffset, (metre) => {
+    const across = metre - stamp.lipOffset;
+    return 5 * Math.sin(across * 0.061 + lipPhaseA) + 2.5 * Math.sin(across * 0.173 + lipPhaseB);
+  });
   stamp.lipX = stamp.x;
   stamp.lipZ = stamp.z;
   stamp.poolX = stamp.x + stamp.dirX * stamp.poolAlong;
@@ -327,7 +454,12 @@ function resolveGorge(stamp, spec, random, context) {
   stamp.rimY = rimY;
   stamp.floorY = floorY;
   stamp.span = 2 * anchorOffset;
-  stamp.wallPhase = random() * TAU;
+  const wallPhase = random() * TAU;
+  // The walls' wander along the gorge, tabled from its -along end (see sampleWave).
+  stamp.wallTable = buildWaveTable(length, (metre) => {
+    const along = metre - length / 2;
+    return 4 * Math.sin(along * 0.037 + wallPhase) + 2 * Math.sin(along * 0.11 + wallPhase * 2.3);
+  });
   stamp.anchors = [Object.freeze({ ...anchorA, y: rimY }), Object.freeze({ ...anchorB, y: rimY })];
   rotatedBounds(stamp, length / 2, halfWidth * 1.35 + pad * 1.1 + 10);
   stamp.keyPoints = [{ x: stamp.x, z: stamp.z }, { x: anchorA.x, z: anchorA.z }, { x: stamp.x + stamp.dirX * length * 0.3, z: stamp.z + stamp.dirZ * length * 0.3 }];
@@ -366,7 +498,9 @@ function resolveIslandBase(stamp, spec, random, context) {
   stamp.falloff = falloff;
   stamp.seabedY = context.waterLevel - 14;
   stamp.topY = context.waterLevel + height;
-  stamp.ledgePhase = random() * TAU;
+  const ledgePhase = random() * TAU;
+  stamp.ledgeCos = Math.cos(ledgePhase);
+  stamp.ledgeSin = Math.sin(ledgePhase);
   circleBounds(stamp, radius + falloff);
   stamp.keyPoints = [{ x: stamp.x, z: stamp.z }, { x: stamp.x + stamp.dirX * radius, z: stamp.z + stamp.dirZ * radius }];
 }
@@ -388,7 +522,8 @@ const RESOLVERS = Object.freeze({
  *   context: { baseHeight(x, z) (the UNSTAMPED height), waterLevel }
  * The result carries type, kind, siteId, presetId, index, order (the global apply order), x, z,
  * rotation, dirX, dirZ, bounds (minX, maxX, minZ, maxZ), paint, paintIndex, keyPoints (the stamp's
- * characteristic places, for tests and structures) and the type's own sizes and reference heights
+ * characteristic places, for tests and structures), fits (false: the ground cannot take this stamp
+ * and placement drops the site) and the type's own sizes and reference heights
  * (cone: baseY, peakY, rimY, craterFloorY; carve: path, entry, exit, length; cliffStep: topY,
  * bottomY, lipX/Z, poolX/Z; gorge: rimY, floorY, span, anchors; flatten: y, thresholds;
  * islandBase: topY).
@@ -419,6 +554,7 @@ export function resolveStamp(spec, site, index, random, context) {
     maxZ: 0,
     paint,
     paintIndex: paint === null ? -1 : PAINT_INDEX[paint],
+    fits: true,
     keyPoints: [],
   };
   RESOLVERS[full.type](stamp, full, random, context);
@@ -429,12 +565,88 @@ export function resolveStamp(spec, site, index, random, context) {
   return Object.freeze(stamp);
 }
 
+// ---- Footprints (clearance between sites and from landmarks) ------------------------------------
+/** Distance (m) from (x, z) to the ground a rotated rectangle stamp touches; 0 inside. */
+function rectangleDistance(stamp, x, z, halfAlong, halfAcross) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const along = Math.abs(dx * stamp.dirX + dz * stamp.dirZ) - halfAlong;
+  const across = Math.abs(dx * -stamp.dirZ + dz * stamp.dirX) - halfAcross;
+  return Math.hypot(along > 0 ? along : 0, across > 0 ? across : 0);
+}
+
+/** Half extents (along, across) of the rectangle stamp types' footprints. */
+function rectangleExtents(stamp) {
+  if (stamp.kind === 2) return [stamp.length / 2 + stamp.falloff, stamp.width / 2 + stamp.falloff];
+  if (stamp.kind === 3) return [stamp.length / 2, stamp.halfWidth * 1.35 + stamp.pad * 1.1 + 10];
+  return [stamp.length / 2 + stamp.margin + stamp.shoulder, stamp.width / 2 + stamp.margin + stamp.shoulder];
+}
+
+/**
+ * Distance (m) from (x, z) to the nearest ground this resolved stamp can change (0 inside it). Placement
+ * measures landmark and site clearance with it, so a long thin canyon is judged by its real shape.
+ */
+export function stampFootprintDistance(stamp, x, z) {
+  if (stamp.kind === 0) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.radius);
+  if (stamp.kind === 5) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.radius - stamp.falloff);
+  if (stamp.kind === 1) {
+    const data = stamp.data;
+    let nearest = Infinity;
+    for (let segment = 0; segment < data.segments; segment++) {
+      const startX = data.pointX[segment];
+      const startZ = data.pointZ[segment];
+      const segmentLength = data.segmentLengths[segment];
+      const unitX = (data.pointX[segment + 1] - startX) / segmentLength;
+      const unitZ = (data.pointZ[segment + 1] - startZ) / segmentLength;
+      let along = (x - startX) * unitX + (z - startZ) * unitZ;
+      along = along < 0 ? 0 : along > segmentLength ? segmentLength : along;
+      const distance = Math.hypot(x - (startX + unitX * along), z - (startZ + unitZ * along));
+      if (distance < nearest) nearest = distance;
+    }
+    return Math.max(0, nearest - stamp.corridor);
+  }
+  const [halfAlong, halfAcross] = rectangleExtents(stamp);
+  return rectangleDistance(stamp, x, z, halfAlong, halfAcross);
+}
+
+/**
+ * Discs { x, z, radius } whose union covers the stamp's footprint (a conservative outline for the
+ * clearance between two sites: nothing the stamp touches lies outside them).
+ */
+export function stampFootprintDiscs(stamp) {
+  if (stamp.kind === 0) return [{ x: stamp.x, z: stamp.z, radius: stamp.radius }];
+  if (stamp.kind === 5) return [{ x: stamp.x, z: stamp.z, radius: stamp.radius + stamp.falloff }];
+  if (stamp.kind === 1) {
+    const data = stamp.data;
+    const discs = [];
+    for (let segment = 0; segment < data.segments; segment++) {
+      discs.push({
+        x: (data.pointX[segment] + data.pointX[segment + 1]) / 2,
+        z: (data.pointZ[segment] + data.pointZ[segment + 1]) / 2,
+        radius: data.segmentLengths[segment] / 2 + stamp.corridor,
+      });
+    }
+    return discs;
+  }
+  const [halfAlong, halfAcross] = rectangleExtents(stamp);
+  const count = Math.max(1, Math.ceil(halfAlong / halfAcross));
+  const spacing = (2 * halfAlong) / count;
+  const radius = Math.hypot(spacing / 2, halfAcross);
+  const discs = [];
+  for (let index = 0; index < count; index++) {
+    const along = -halfAlong + spacing * (index + 0.5);
+    discs.push({ x: stamp.x + stamp.dirX * along, z: stamp.z + stamp.dirZ * along, radius });
+  }
+  return discs;
+}
+
 /** Deterministic apply order of stamps that share cells (code-unit order of `order`). */
 export function compareStampOrder(first, second) {
   return first.order < second.order ? -1 : first.order > second.order ? 1 : 0;
 }
 
 // ---- Height ------------------------------------------------------------------------------------
+/** Cone elevation above its base: a crater bowl inside craterRadius, concave gullied flanks outside. */
 function coneElevation(stamp, distance, dx, dz) {
   if (distance < stamp.craterRadius) {
     const share = distance / stamp.craterRadius;
@@ -442,10 +654,11 @@ function coneElevation(stamp, distance, dx, dz) {
     return stamp.height - stamp.craterDepth * bowl * Math.sqrt(bowl);
   }
   const outward = (distance - stamp.craterRadius) / (stamp.radius - stamp.craterRadius);
-  const falloff = Math.pow(1 - outward, 1.7);
-  const angle = Math.atan2(dz, dx);
-  const gully = 1 + 0.07 * Math.sin(angle * stamp.gullies + stamp.gullyPhase + outward * 2.2) * outward * (1 - outward) * 4;
-  return stamp.height * falloff * gully;
+  const inward = 1 - outward;
+  // Steep near the rim, easing flat at the foot (zero slope at the edge).
+  const falloff = inward * inward * (1 + 0.3 * outward);
+  const wave = angularWave(dx / distance, dz / distance, stamp.gullies, stamp.gullyCos, stamp.gullySin);
+  return stamp.height * falloff * (1 + 0.28 * wave * outward * inward);
 }
 
 function coneHeight(stamp, x, z, height) {
@@ -463,48 +676,86 @@ function coneHeight(stamp, x, z, height) {
  * Slot canyon: the union of per-segment capsules, each carving down to the river floor with walls
  * over its wall width, so the canyon stays continuous where segments meet.
  */
+/** The bit mask of canyon segments near (x, z), from the stamp's segment grid. */
+function carveSegmentsNear(stamp, x, z) {
+  const data = stamp.data;
+  let column = Math.floor((x - stamp.minX) / CARVE_GRID);
+  let row = Math.floor((z - stamp.minZ) / CARVE_GRID);
+  if (column < 0) column = 0;
+  else if (column >= data.gridColumns) column = data.gridColumns - 1;
+  if (row < 0) row = 0;
+  else if (row >= data.gridRows) row = data.gridRows - 1;
+  return data.gridMasks[row * data.gridColumns + column];
+}
+
 function carveHeight(stamp, x, z, height) {
   const data = stamp.data;
   const bounds = data.segmentBounds;
-  let deepest = 0;
-  for (let segment = 0; segment < data.segments; segment++) {
+  const wobble = stamp.wobble;
+  let lift = 0;
+  let cuts = 0;
+  let mask = carveSegmentsNear(stamp, x, z);
+  while (mask !== 0) {
+    const lowest = mask & -mask;
+    const segment = 31 - Math.clz32(lowest);
+    mask ^= lowest;
     const base = segment * 4;
     if (x < bounds[base] || x > bounds[base + 1] || z < bounds[base + 2] || z > bounds[base + 3]) continue;
-    const startX = data.pointX[segment];
-    const startZ = data.pointZ[segment];
     const segmentLength = data.segmentLengths[segment];
-    const unitX = (data.pointX[segment + 1] - startX) / segmentLength;
-    const unitZ = (data.pointZ[segment + 1] - startZ) / segmentLength;
-    const offsetX = x - startX;
-    const offsetZ = z - startZ;
+    const unitX = data.unitX[segment];
+    const unitZ = data.unitZ[segment];
+    const offsetX = x - data.pointX[segment];
+    const offsetZ = z - data.pointZ[segment];
     let along = offsetX * unitX + offsetZ * unitZ;
     along = along < 0 ? 0 : along > segmentLength ? segmentLength : along;
+    const awayX = offsetX - unitX * along;
+    const awayZ = offsetZ - unitZ * along;
+    const distance = Math.sqrt(awayX * awayX + awayZ * awayZ);
     const share = along / segmentLength;
-    const nearestX = startX + unitX * along;
-    const nearestZ = startZ + unitZ * along;
-    const distance = Math.hypot(x - nearestX, z - nearestZ);
     const halfWidth = data.halfWidths[segment] + (data.halfWidths[segment + 1] - data.halfWidths[segment]) * share;
-    const wallWidth = data.wallWidths[segment] + (data.wallWidths[segment + 1] - data.wallWidths[segment]) * share;
+    const outer = halfWidth + data.wallWidths[segment] + (data.wallWidths[segment + 1] - data.wallWidths[segment]) * share;
+    const band = outer + stamp.plateau;
+    if (distance >= band + stamp.shoulder && distance - wobble >= outer) continue;
     const travelled = data.segmentStart[segment] + along;
-    // Each wall twists on its own; the two wobbles blend across the floor, where they change nothing.
-    const lateral = offsetX * -unitZ + offsetZ * unitX;
-    const right = stamp.wobblePhaseRight;
-    const left = stamp.wobblePhaseLeft;
-    const wobbleRight = 0.6 * Math.sin(travelled * 0.021 + right) + 0.4 * Math.sin(travelled * 0.057 + right * 1.7);
-    const wobbleLeft = 0.6 * Math.sin(travelled * 0.021 + left) + 0.4 * Math.sin(travelled * 0.057 + left * 1.7);
-    const side = smoothstep(-halfWidth * 0.5, halfWidth * 0.5, lateral);
-    const wall = distance + stamp.wobble * (wobbleLeft + (wobbleRight - wobbleLeft) * side);
-    if (wall >= halfWidth + wallWidth) continue;
-    const end = smoothstep(0, stamp.endRamp, travelled) * smoothstep(0, stamp.endRamp, stamp.length - travelled);
+    const end = travelled >= stamp.endRamp && travelled <= stamp.length - stamp.endRamp
+      ? 1
+      : smoothstep(0, stamp.endRamp, travelled) * smoothstep(0, stamp.endRamp, stamp.length - travelled);
     if (end <= 0) continue;
+    // Mesa band: lower ground rises to the rim (raise only), fading out over the shoulder.
+    const rimY = data.rim[segment] + (data.rim[segment + 1] - data.rim[segment]) * share;
+    if (rimY > height) {
+      const band01 = distance <= band ? 1 : 1 - smoothstep(band, band + stamp.shoulder, distance);
+      const raise = (rimY - height) * band01 * end;
+      if (raise > lift) lift = raise;
+    }
+    if (distance - wobble >= outer) continue;
+    let open = 1;
+    if (distance + wobble > halfWidth) {
+      // Each wall twists on its own; the two wobbles blend across the floor, where they change nothing.
+      const lateral = offsetX * -unitZ + offsetZ * unitX;
+      const wobbleRight = sampleWave(data.wobbleRight, travelled);
+      const wobbleLeft = sampleWave(data.wobbleLeft, travelled);
+      const side = smoothstep(-halfWidth * 0.5, halfWidth * 0.5, lateral);
+      const wall = distance + wobble * (wobbleLeft + (wobbleRight - wobbleLeft) * side);
+      if (wall >= outer) continue;
+      open = 1 - smoothstep(halfWidth, outer, wall);
+    }
     const floorY = data.floor[segment] + (data.floor[segment + 1] - data.floor[segment]) * share;
-    const channel = 1.8 * (1 - smoothstep(0, halfWidth * 0.45, distance));
-    const cut = height - (floorY - channel);
+    const channel = distance < halfWidth * 0.45 ? 1.8 * (1 - smoothstep(0, halfWidth * 0.45, distance)) : 0;
+    carveCutFloor[cuts] = floorY - channel;
+    carveCutShare[cuts] = open * end;
+    cuts++;
+  }
+  // The slot is cut into the lifted ground: the deepest of the segments' cuts wins.
+  const lifted = height + lift;
+  let deepest = 0;
+  for (let index = 0; index < cuts; index++) {
+    const cut = lifted - carveCutFloor[index];
     if (cut <= 0) continue;
-    const amount = cut * (1 - smoothstep(halfWidth, halfWidth + wallWidth, wall)) * end;
+    const amount = cut * carveCutShare[index];
     if (amount > deepest) deepest = amount;
   }
-  return height - deepest;
+  return lifted - deepest;
 }
 
 function cliffStepHeight(stamp, x, z, height) {
@@ -519,15 +770,29 @@ function cliffStepHeight(stamp, x, z, height) {
   if (absAcross >= halfWidth + stamp.falloff || absAlong >= halfLength + stamp.falloff) return height;
   const mask = (1 - smoothstep(halfWidth, halfWidth + stamp.falloff, absAcross)) * (1 - smoothstep(halfLength, halfLength + stamp.falloff, absAlong));
   if (mask <= 0) return height;
-  const lip = 5 * Math.sin(across * 0.061 + stamp.lipPhaseA) + 2.5 * Math.sin(across * 0.173 + stamp.lipPhaseB);
-  let target = stamp.topY - stamp.drop * smoothstep(-stamp.face / 2, stamp.face / 2, along - lip);
-  target += (height - stamp.referenceY) * 0.15;
-  const poolDistance = Math.hypot(along - stamp.poolAlong, across);
-  if (poolDistance < stamp.pool) {
-    const bowl = 1 - (poolDistance / stamp.pool) * (poolDistance / stamp.pool);
-    target -= stamp.poolDepth * bowl * bowl;
+  // The lip wanders at most LIP_AMPLITUDE either way, so beyond that the step is simply top or bottom.
+  const halfFace = stamp.face / 2;
+  let lip = 0;
+  let step;
+  if (along <= -halfFace - LIP_AMPLITUDE) step = 0;
+  else if (along >= halfFace + LIP_AMPLITUDE) step = 1;
+  else {
+    lip = sampleWave(stamp.lipTable, across + stamp.lipOffset);
+    step = smoothstep(-halfFace, halfFace, along - lip);
+  }
+  let target = stamp.topY - stamp.drop * step + (height - stamp.referenceY) * 0.15;
+  const poolAlong = along - stamp.poolAlong;
+  if (poolAlong > -stamp.pool && poolAlong < stamp.pool && absAcross < stamp.pool) {
+    const poolShareSq = (poolAlong * poolAlong + across * across) / (stamp.pool * stamp.pool);
+    if (poolShareSq < 1) {
+      const bowl = 1 - poolShareSq;
+      target -= stamp.poolDepth * bowl * bowl;
+    }
   }
   if (absAcross < stamp.channelWidth) {
+    if (lip === 0 && along > -halfFace - LIP_AMPLITUDE - stamp.face && along < LIP_AMPLITUDE) {
+      lip = sampleWave(stamp.lipTable, across + stamp.lipOffset);
+    }
     const channelShare = absAcross / stamp.channelWidth;
     const upstream = 1 - smoothstep(-stamp.face, 0, along - lip);
     const downstream = smoothstep(stamp.poolAlong, stamp.poolAlong + stamp.pool, along);
@@ -545,17 +810,22 @@ function gorgeHeight(stamp, x, z, height) {
   const absAcross = Math.abs(across);
   const halfLength = stamp.length / 2;
   if (absAlong >= halfLength || absAcross >= stamp.halfWidth * 1.35 + stamp.pad * 1.1 + 10) return height;
-  const wobble = 4 * Math.sin(along * 0.037 + stamp.wallPhase) + 2 * Math.sin(along * 0.11 + stamp.wallPhase * 2.3);
-  const share = Math.max(0, absAcross + wobble) / stamp.halfWidth;
-  const wallShare = share < 1 ? share : 1;
-  const channel = 2 * (1 - smoothstep(0, 0.3, share));
-  const target = stamp.floorY - channel + (stamp.rimY - stamp.floorY) * wallShare * wallShare * wallShare;
-  const edge = 1 - smoothstep(1, 1.35, share);
-  const end = 1 - smoothstep(halfLength - stamp.falloff, halfLength, absAlong);
   let result = height;
-  if (height > target) result = height - (height - target) * edge * end;
+  if (absAcross - GORGE_WOBBLE < stamp.halfWidth * 1.35) {
+    const wobble = sampleWave(stamp.wallTable, along + halfLength);
+    const share = Math.max(0, absAcross + wobble) / stamp.halfWidth;
+    const wallShare = share < 1 ? share : 1;
+    const channel = share < 0.3 ? 2 * (1 - smoothstep(0, 0.3, share)) : 0;
+    const target = stamp.floorY - channel + (stamp.rimY - stamp.floorY) * wallShare * wallShare * wallShare;
+    if (height > target && share < 1.35) {
+      const edge = 1 - smoothstep(1, 1.35, share);
+      const end = 1 - smoothstep(halfLength - stamp.falloff, halfLength, absAlong);
+      result = height - (height - target) * edge * end;
+    }
+  }
   // Anchor pads: level ground on both rims where the bridge's towers stand.
   const padAcross = Math.abs(absAcross - (stamp.halfWidth + stamp.pad / 2));
+  if (absAlong >= stamp.pad * 0.6 || padAcross >= stamp.pad * 0.6) return result;
   const padMask = (1 - smoothstep(stamp.pad * 0.3, stamp.pad * 0.6, absAlong)) * (1 - smoothstep(stamp.pad * 0.3, stamp.pad * 0.6, padAcross));
   return result + (stamp.rimY - result) * padMask;
 }
@@ -569,7 +839,9 @@ function flattenHeight(stamp, x, z, height) {
   const outsideAcross = across - stamp.width / 2 - stamp.margin;
   if (outsideAlong >= stamp.shoulder || outsideAcross >= stamp.shoulder) return height;
   if (outsideAlong <= 0 && outsideAcross <= 0) return stamp.y;
-  const distance = Math.hypot(outsideAlong > 0 ? outsideAlong : 0, outsideAcross > 0 ? outsideAcross : 0);
+  const overAlong = outsideAlong > 0 ? outsideAlong : 0;
+  const overAcross = outsideAcross > 0 ? outsideAcross : 0;
+  const distance = Math.sqrt(overAlong * overAlong + overAcross * overAcross);
   if (distance >= stamp.shoulder) return height;
   return height + (stamp.y - height) * (1 - smoothstep(0, stamp.shoulder, distance));
 }
@@ -582,7 +854,7 @@ function islandBaseHeight(stamp, x, z, height) {
   if (distanceSq >= outer * outer) return height;
   const distance = Math.sqrt(distanceSq);
   const profile = 1 - smoothstep(stamp.radius * 0.5, stamp.radius, distance);
-  const ledge = 1.5 * Math.sin(Math.atan2(dz, dx) * 5 + stamp.ledgePhase) * profile;
+  const ledge = distance > 0 && profile > 0 ? 1.5 * angularWave(dx / distance, dz / distance, 5, stamp.ledgeCos, stamp.ledgeSin) * profile : 0;
   const target = stamp.seabedY + (stamp.topY - stamp.seabedY) * Math.sqrt(profile) + ledge;
   if (target <= height) return height;
   return height + (target - height) * (1 - smoothstep(stamp.radius, outer, distance));
@@ -593,7 +865,19 @@ function islandBaseHeight(stamp, x, z, height) {
  * outside the stamp's bounds.
  */
 export function applyStampHeight(stamp, x, z, height) {
-  switch (stamp.kind) {
+  return stampHeightByKind(stamp.kind, stamp, x, z, height);
+}
+
+/**
+ * The height function of each stamp kind (STAMP_TYPES order), each (stamp, x, z, height) -> height.
+ * worldgen's hot path keeps the kinds in a typed array and calls through this table, so each type's
+ * function only ever sees stamps of one shape and its property reads stay monomorphic.
+ */
+export const STAMP_HEIGHT = Object.freeze([coneHeight, carveHeight, cliffStepHeight, gorgeHeight, flattenHeight, islandBaseHeight]);
+
+/** applyStampHeight with the stamp's kind passed in. */
+function stampHeightByKind(kind, stamp, x, z, height) {
+  switch (kind) {
     case 0: return coneHeight(stamp, x, z, height);
     case 1: return carveHeight(stamp, x, z, height);
     case 2: return cliffStepHeight(stamp, x, z, height);
@@ -628,14 +912,18 @@ function paintCone(stamp, x, z, out) {
 function paintCarve(stamp, x, z, out) {
   const data = stamp.data;
   const bounds = data.segmentBounds;
-  for (let segment = 0; segment < data.segments; segment++) {
+  let mask = carveSegmentsNear(stamp, x, z);
+  while (mask !== 0) {
+    const lowest = mask & -mask;
+    const segment = 31 - Math.clz32(lowest);
+    mask ^= lowest;
     const base = segment * 4;
     if (x < bounds[base] || x > bounds[base + 1] || z < bounds[base + 2] || z > bounds[base + 3]) continue;
     const startX = data.pointX[segment];
     const startZ = data.pointZ[segment];
     const segmentLength = data.segmentLengths[segment];
-    const unitX = (data.pointX[segment + 1] - startX) / segmentLength;
-    const unitZ = (data.pointZ[segment + 1] - startZ) / segmentLength;
+    const unitX = data.unitX[segment];
+    const unitZ = data.unitZ[segment];
     let along = (x - startX) * unitX + (z - startZ) * unitZ;
     along = along < 0 ? 0 : along > segmentLength ? segmentLength : along;
     const distance = Math.hypot(x - (startX + unitX * along), z - (startZ + unitZ * along));
@@ -708,8 +996,13 @@ function paintIslandBase(stamp, x, z, out) {
  * (weights 0..1). Stamps without a paint leave `out` alone.
  */
 export function accumulateStampPaint(stamp, x, z, out) {
+  accumulateStampPaintByKind(stamp.kind, stamp, x, z, out);
+}
+
+/** accumulateStampPaint with the stamp's kind passed in (see stampHeightByKind). */
+export function accumulateStampPaintByKind(kind, stamp, x, z, out) {
   if (stamp.paintIndex < 0) return;
-  switch (stamp.kind) {
+  switch (kind) {
     case 0: paintCone(stamp, x, z, out); return;
     case 1: paintCarve(stamp, x, z, out); return;
     case 2: paintCliffStep(stamp, x, z, out); return;

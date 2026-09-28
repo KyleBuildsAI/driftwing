@@ -10,12 +10,14 @@
 //                  a ring the size of the site's stamps;
 //   4. terrain     minHeight / maxHeight of the centre, and relief: 'peak' | 'valley' | 'flat' |
 //                  'ridge' | 'any', from a ring of samples RELIEF_RADIUS out;
-//   5. landmarks   placement.clearance metres between the site's stamp footprint and every Phase 1
-//                  landmark;
+//      stamps      every stamp must fit the ground it lands on (stamps.js `fits`: a canyon path that
+//                  crosses a ridge far above its rim does not);
+//   5. landmarks   placement.clearance metres between the site's stamp footprints (their real shapes:
+//                  a canyon is a corridor, a runway a rectangle) and every Phase 1 landmark;
 //   6. minSpacing  two sites of one preset closer than placement.minSpacing: the one with the higher
 //                  priority roll wins (ties go to the lower cell), checked against every neighbouring
 //                  cell in a fixed order, so the answer never depends on which cell was asked first;
-//   7. clearance   the same rule between different presets: two sites whose stamp footprints come
+//   7. clearance   the same rule between different sites: two sites whose stamp footprints come
 //                  closer than the larger of their clearances keep only the higher priority.
 // Rules 6 and 7 compare against the other sites' rule 1-6 results (never their final ones), so the
 // check is local, needs no recursion and gives the same answer from any starting cell.
@@ -25,7 +27,7 @@
 // per cell; the caches only save work, and clearing them never changes an answer.
 //
 // Pure: imports only stamps.js, no DOM, so the terrain worker runs exactly this code.
-import { compareStampOrder, resolveStamp, stampReach, validateStampSpec } from './stamps.js';
+import { compareStampOrder, resolveStamp, stampFootprintDiscs, stampFootprintDistance, stampReach, validateStampSpec } from './stamps.js';
 
 /** Site grid cell size (m); the stamp spatial hash uses the same cells. */
 export const SITE_CELL = 2000;
@@ -43,8 +45,9 @@ const RIDGE_ALONG = 40;
 const RIDGE_DROP = 35;
 /** Phase 1 landmarks without shaping (arches, balloons) still need this much room (m). */
 const LANDMARK_MIN_RADIUS = 150;
-const CELL_OFFSET = 32768;
-const CELL_SPAN = 65536;
+// Cell keys stay small integers (V8 Smis, fast Map keys) for cells within +-32,000 km of the origin.
+const CELL_OFFSET = 16384;
+const CELL_SPAN = 32768;
 const CANDIDATE_CACHE_LIMIT = 400000;
 const CELL_CACHE_LIMIT = 40000;
 const EMPTY = Object.freeze([]);
@@ -260,12 +263,44 @@ export function createPlacement({ seed, world, presets }) {
     return cellRandom(cellX, cellZ, entry.salt, 5) * Math.PI * 2;
   }
 
-  function landmarksClear(x, z, entry) {
-    const room = entry.reach + entry.clearance;
-    const landmarks = world.landmarkSitesNear(x, z, room + 400);
+  /** Distance (m) from (x, z) to the nearest ground the site's stamps change (to its centre without stamps). */
+  function footprintDistance(site, x, z) {
+    if (site.stamps.length === 0) return Math.hypot(site.x - x, site.z - z);
+    let nearest = Infinity;
+    for (const stamp of site.stamps) {
+      const distance = stampFootprintDistance(stamp, x, z);
+      if (distance < nearest) nearest = distance;
+    }
+    return nearest;
+  }
+
+  function landmarksClear(site, entry) {
+    const landmarks = world.landmarkSitesNear(site.x, site.z, entry.reach + entry.clearance + 400);
     for (const landmark of landmarks) {
       const radius = Math.max(landmark.shapingRadius || 0, LANDMARK_MIN_RADIUS);
-      if (Math.hypot(landmark.x - x, landmark.z - z) < room + radius) return false;
+      if (footprintDistance(site, landmark.x, landmark.z) < entry.clearance + radius) return false;
+    }
+    return true;
+  }
+
+  /** Discs covering a candidate's footprint (its centre alone without stamps), built once. */
+  function footprintDiscs(own) {
+    if (own.discs === null) {
+      own.discs = own.site.stamps.length === 0
+        ? [{ x: own.x, z: own.z, radius: 0 }]
+        : own.site.stamps.flatMap((stamp) => stampFootprintDiscs(stamp));
+    }
+    return own.discs;
+  }
+
+  /** True when the two candidates' footprints stay `room` metres apart (conservatively). */
+  function footprintsClear(own, other, room) {
+    const dx = other.x - own.x;
+    const dz = other.z - own.z;
+    const outer = own.entry.reach + other.entry.reach + room;
+    if (dx * dx + dz * dz >= outer * outer) return true;
+    for (const disc of footprintDiscs(own)) {
+      if (footprintDistance(other.site, disc.x, disc.z) - disc.radius < room) return false;
     }
     return true;
   }
@@ -292,12 +327,8 @@ export function createPlacement({ seed, world, presets }) {
     const relief = terrain ? terrain.relief ?? 'any' : 'any';
     if (relief !== 'any' || align !== 'random') sampleRing(x, z, RELIEF_RADIUS, ringHeights);
     if (!reliefMatches(relief, centre)) return null;
-    if (!landmarksClear(x, z, entry)) return null;
     const scaleRange = placement.scale ?? [0.85, 1.15];
-    return {
-      entry,
-      cellX,
-      cellZ,
+    const site = createSite(entry, cellX, cellZ, {
       x,
       z,
       groundY: centre,
@@ -305,7 +336,18 @@ export function createPlacement({ seed, world, presets }) {
       rotation: siteRotation(entry, cellX, cellZ, centre),
       scale: scaleRange[0] + (scaleRange[1] - scaleRange[0]) * cellRandom(cellX, cellZ, entry.salt, 4),
       seed: cellHash(cellX, cellZ, entry.salt, 8),
+    });
+    if (site.stamps.some((stamp) => !stamp.fits)) return null;
+    if (!landmarksClear(site, entry)) return null;
+    return {
+      entry,
+      site,
+      cellX,
+      cellZ,
+      x,
+      z,
       priority: cellRandom(cellX, cellZ, entry.salt, 3),
+      discs: null,
       spaced: undefined,
       placed: undefined,
     };
@@ -366,10 +408,7 @@ export function createPlacement({ seed, world, presets }) {
             if (entry === own.entry && offsetX === 0 && offsetZ === 0) continue;
             const other = candidate(own.cellX + offsetX, own.cellZ + offsetZ, entry);
             if (other === null || !beats(other, own) || !spaced(other)) continue;
-            const room = own.entry.reach + entry.reach + Math.max(own.entry.clearance, entry.clearance);
-            const dx = other.x - own.x;
-            const dz = other.z - own.z;
-            if (dx * dx + dz * dz < room * room) {
+            if (!footprintsClear(own, other, Math.max(own.entry.clearance, entry.clearance))) {
               result = false;
               break;
             }
@@ -381,26 +420,27 @@ export function createPlacement({ seed, world, presets }) {
     return result;
   }
 
-  function createSite(own) {
-    const preset = own.entry.preset;
+  /** The site record of a candidate, with its stamps resolved (frozen). */
+  function createSite(entry, cellX, cellZ, fields) {
+    const preset = entry.preset;
     const site = {
-      id: `${preset.id}:${own.cellX}:${own.cellZ}`,
+      id: `${preset.id}:${cellX}:${cellZ}`,
       presetId: preset.id,
-      cellX: own.cellX,
-      cellZ: own.cellZ,
-      x: own.x,
-      z: own.z,
-      groundY: own.groundY,
-      rotation: own.rotation,
-      scale: own.scale,
-      seed: own.seed,
-      biome: own.biome,
+      cellX,
+      cellZ,
+      x: fields.x,
+      z: fields.z,
+      groundY: fields.groundY,
+      rotation: fields.rotation,
+      scale: fields.scale,
+      seed: fields.seed,
+      biome: fields.biome,
       stamps: EMPTY,
     };
     const specs = preset.stamps ?? EMPTY;
     if (specs.length > 0) {
       const context = { baseHeight: world.heightAt, waterLevel };
-      site.stamps = Object.freeze(specs.map((spec, index) => resolveStamp(spec, site, index, mulberry32(mix32((own.seed ^ Math.imul(index + 1, 0x632be5ab)) >>> 0)), context)));
+      site.stamps = Object.freeze(specs.map((spec, index) => resolveStamp(spec, site, index, mulberry32(mix32((site.seed ^ Math.imul(index + 1, 0x632be5ab)) >>> 0)), context)));
     }
     return Object.freeze(site);
   }
@@ -417,7 +457,7 @@ export function createPlacement({ seed, world, presets }) {
         const own = candidate(cellX, cellZ, entries[index]);
         if (own === null || !placed(own)) continue;
         if (list === null) list = [];
-        list.push(createSite(own));
+        list.push(own.site);
       }
       sites = list === null ? EMPTY : Object.freeze(list);
       if (siteCellCache.size >= CELL_CACHE_LIMIT) siteCellCache.clear();
