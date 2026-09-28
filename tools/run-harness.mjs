@@ -9,7 +9,12 @@
 // Usage:
 //   node tools/run-harness.mjs --test 1|hotas [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
 //     [--crafts glider,jet] [--modes classic,sim] [--out <dir>] [--timeout-minutes N]
-//     [--width 1280] [--height 720] [--headful] [--browser <path>]
+//     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
+//
+// --alloc-profile N (diagnostic): once the first flight-test run is flying, samples every JS
+// allocation for N seconds with the sampling heap profiler (collected objects included, so it is
+// the allocation rate, not what survives) and saves the heaviest allocation sites to
+// alloc-profile.json (printed as well).
 //
 // The runner also records evidence for telling game cost from machine load, per flight-test run
 // (report.json runs[].machineLoad and runs[].mainThread, raw samples in machine-load.json):
@@ -59,6 +64,7 @@ function parseArgs(argv) {
     height: 720,
     headful: false,
     browser: null,
+    allocProfileSeconds: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -80,6 +86,7 @@ function parseArgs(argv) {
       case '--height': options.height = Number(next()); break;
       case '--headful': options.headful = true; break;
       case '--browser': options.browser = next(); break;
+      case '--alloc-profile': options.allocProfileSeconds = Number(next()); break;
       default: throw new Error(`Unknown flag ${flag}`);
     }
   }
@@ -237,6 +244,27 @@ function timeLimitMs(options) {
   const seconds = options.seconds ?? 60;
   const plannedSeconds = seeds * crafts * modes * (seconds + 3) + (seeds + 1) * 90;
   return Math.max(10 * 60000, plannedSeconds * 1500);
+}
+
+/** Adds up sampled allocation bytes per function (self size) from a sampling heap profile. */
+function summarizeAllocations(profile, seconds) {
+  const sites = new Map();
+  let totalBytes = 0;
+  const visit = (node) => {
+    const frame = node.callFrame;
+    const self = node.selfSize || 0;
+    totalBytes += self;
+    if (self > 0) {
+      const file = String(frame.url || '(native)').replace(/^https?:\/\/[^/]+/, '').replace(/\?.*$/, '');
+      const key = `${frame.functionName || '(anonymous)'} ${file}:${frame.lineNumber + 1}`;
+      sites.set(key, (sites.get(key) ?? 0) + self);
+    }
+    for (const child of node.children || []) visit(child);
+  };
+  visit(profile.head);
+  const top = [...sites.entries()].sort((first, second) => second[1] - first[1]).slice(0, 40)
+    .map(([site, bytes]) => ({ site, mb: Math.round((bytes / 1048576) * 100) / 100, mbPerSecond: Math.round((bytes / 1048576 / seconds) * 100) / 100, share: Math.round((bytes / Math.max(totalBytes, 1)) * 1000) / 10 }));
+  return { seconds, totalMB: Math.round((totalBytes / 1048576) * 10) / 10, mbPerSecond: Math.round((totalBytes / 1048576 / seconds) * 100) / 100, top };
 }
 
 /** Reads the harness state; null while the page is (re)loading or the report is not there yet. */
@@ -400,9 +428,24 @@ async function main() {
     const deadline = started + timeLimitMs(options);
     let lastLine = '';
     let state = null;
+    const allocation = { phase: options.allocProfileSeconds > 0 ? 'waiting' : 'off', startedMs: 0 };
     while (Date.now() < deadline) {
       await sleep(POLL_MS);
       state = await readProgress(page);
+      if (allocation.phase === 'waiting' && state?.progress?.current) {
+        await cdp.send('HeapProfiler.enable');
+        await cdp.send('HeapProfiler.startSampling', { samplingInterval: 16384, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
+        allocation.phase = 'sampling';
+        allocation.startedMs = Date.now();
+        log(started, `allocation profile: sampling for ${options.allocProfileSeconds} s`);
+      } else if (allocation.phase === 'sampling' && Date.now() - allocation.startedMs >= options.allocProfileSeconds * 1000) {
+        const { profile } = await cdp.send('HeapProfiler.stopSampling');
+        allocation.phase = 'done';
+        const summary = summarizeAllocations(profile, (Date.now() - allocation.startedMs) / 1000);
+        writeFileSync(join(options.out, 'alloc-profile.json'), JSON.stringify(summary, null, 2));
+        log(started, `allocation profile: ${summary.totalMB} MB in ${Math.round(summary.seconds)} s (${summary.mbPerSecond} MB/s); heaviest sites:`);
+        for (const entry of summary.top.slice(0, 25)) process.stdout.write(`    ${String(entry.mbPerSecond).padStart(7)} MB/s ${String(entry.share).padStart(5)} %  ${entry.site}\n`);
+      }
       const line = describeProgress(state);
       if (line !== lastLine) {
         log(started, line);
