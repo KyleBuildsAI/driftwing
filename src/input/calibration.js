@@ -180,7 +180,8 @@ export function createCalibrationStore({ storage }) {
  *   store: the calibration store (finish() saves into it)
  * Drive it with sample(seconds) every frame and next() / back() / skip() / cancel() / finish()
  * from the UI; getState() returns everything a wizard screen needs, onChange(listener) fires on
- * every step change.
+ * every step change. A device that connects after the Center step is left out of the run (listed
+ * in getState().lateDevices) and keeps its saved record; going back to Center includes it.
  */
 export function createCalibrationWizard({ readDevices, roleAxes, store }) {
   const steps = ['center', 'axes', 'throttle', 'pedals', 'hats', 'done'];
@@ -196,6 +197,23 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
   let hatAwaitRelease = false;
   let finished = false;
   let cancelled = false;
+  /**
+   * Device keys the Center step saw (null until it is committed). A device that appears later has
+   * no centre to measure against, so the rest of the run leaves it out and its saved record stays.
+   */
+  let centeredKeys = null;
+
+  /** The devices this run calibrates: every live device until Center is committed, then those it saw. */
+  function wizardDevices() {
+    const devices = readDevices();
+    return centeredKeys ? devices.filter((device) => centeredKeys.has(device.deviceKey)) : devices;
+  }
+
+  /** Live devices that connected after the Center step (not calibrated by this run). */
+  function lateDevices() {
+    if (!centeredKeys) return [];
+    return readDevices().filter((device) => !centeredKeys.has(device.deviceKey)).map((device) => ({ deviceKey: device.deviceKey, name: device.name }));
+  }
 
   function deviceState(device) {
     let entry = learned.get(device.deviceKey);
@@ -228,7 +246,7 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
 
   function devicesWithRole(role) {
     const result = [];
-    for (const device of readDevices()) {
+    for (const device of wizardDevices()) {
       const axes = roleAxes(device.deviceKey)[role] ?? [];
       if (axes.length > 0) result.push({ device, axes });
     }
@@ -241,7 +259,9 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
 
   /** Records the centre of every axis from the recent samples and finds axis-form hats. */
   function commitCenter() {
-    for (const device of readDevices()) {
+    const devices = readDevices();
+    centeredKeys = new Set(devices.map((device) => device.deviceKey));
+    for (const device of devices) {
       const entry = deviceState(device);
       const samples = entry.centerSamples.length > 0 ? entry.centerSamples : [device.axes];
       entry.center = device.axes.map((unused, axisIndex) => {
@@ -261,44 +281,49 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
     }
   }
 
-  function buildHatQueue() {
-    hatQueue = [];
-    for (const device of readDevices()) {
-      const entry = deviceState(device);
+  /** The hats the Hats step asks for: each device's profile hats, or its resting hat axes if more. */
+  function hatTargets() {
+    const targets = [];
+    for (const device of wizardDevices()) {
+      const hatAxes = learned.get(device.deviceKey)?.hatAxes ?? [];
       const profileHats = DEVICE_PROFILES[device.profile]?.hats ?? [];
-      const count = Math.max(profileHats.length, entry.hatAxes.length);
+      const count = Math.max(profileHats.length, hatAxes.length);
       for (let index = 0; index < count; index++) {
-        hatQueue.push({ deviceKey: device.deviceKey, index, label: profileHats[index]?.label ?? `${device.name} hat ${index + 1}` });
+        targets.push({ deviceKey: device.deviceKey, index, label: profileHats[index]?.label ?? `${device.name} hat ${index + 1}` });
       }
     }
+    return targets;
+  }
+
+  function buildHatQueue() {
+    hatQueue = hatTargets();
     hatIndex = 0;
     hatDirectionIndex = 0;
     hatCandidate = null;
     hatAwaitRelease = false;
   }
 
+  /** True when no device this run calibrates has anything for step to learn (it is passed over). */
+  function stepIsEmpty(step) {
+    if (step === 'throttle') return devicesWithRole('throttle').length === 0;
+    if (step === 'pedals') return devicesWithRole('rudder').length === 0 && devicesWithRole('brakeL').length === 0 && devicesWithRole('brakeR').length === 0;
+    if (step === 'hats') return hatTargets().length === 0;
+    return false;
+  }
+
   function enterStep(index) {
     stepIndex = Math.max(0, Math.min(index, steps.length - 1));
     const step = currentStep();
-    if (step === 'center') for (const entry of learned.values()) entry.centerSamples = [];
-    if (step === 'pedals') {
-      pedalIndex = 0;
-      if (devicesWithRole('rudder').length === 0 && devicesWithRole('brakeL').length === 0 && devicesWithRole('brakeR').length === 0) {
-        enterStep(stepIndex + 1);
-        return;
-      }
+    if (step === 'center') {
+      centeredKeys = null;
+      for (const entry of learned.values()) entry.centerSamples = [];
     }
-    if (step === 'throttle' && devicesWithRole('throttle').length === 0) {
+    if (stepIsEmpty(step)) {
       enterStep(stepIndex + 1);
       return;
     }
-    if (step === 'hats') {
-      buildHatQueue();
-      if (hatQueue.length === 0) {
-        enterStep(stepIndex + 1);
-        return;
-      }
-    }
+    if (step === 'pedals') pedalIndex = 0;
+    if (step === 'hats') buildHatQueue();
     emit();
   }
 
@@ -313,7 +338,7 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
   function sampleHat(seconds) {
     const target = hatQueue[hatIndex];
     if (!target) return;
-    const device = readDevices().find((candidate) => candidate.deviceKey === target.deviceKey);
+    const device = wizardDevices().find((candidate) => candidate.deviceKey === target.deviceKey);
     if (!device) return;
     const entry = deviceState(device);
     entry.hats[target.index] ??= null;
@@ -389,7 +414,7 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
   /** Assembles the calibration records from everything learned so far. */
   function buildResults() {
     const results = [];
-    for (const device of readDevices()) {
+    for (const device of wizardDevices()) {
       const entry = deviceState(device);
       const roles = roleAxes(device.deviceKey);
       const unipolar = new Set(roles.unipolar ?? []);
@@ -488,7 +513,7 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
     sample(seconds) {
       if (finished || cancelled) return;
       const step = currentStep();
-      for (const device of readDevices()) {
+      for (const device of wizardDevices()) {
         const entry = deviceState(device);
         if (step === 'center') {
           entry.centerSamples.push(device.axes.slice());
@@ -506,7 +531,7 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
 
     getState() {
       const step = currentStep();
-      const devices = readDevices().map((device) => {
+      const devices = wizardDevices().map((device) => {
         const entry = deviceState(device);
         return { deviceKey: device.deviceKey, name: device.name, axes: axisReadout(device, entry), roles: roleAxes(device.deviceKey) };
       });
@@ -520,6 +545,7 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
         substep: null,
         hat: null,
         devices,
+        lateDevices: lateDevices(),
         canAdvance: devices.length > 0,
         finished,
         cancelled,
@@ -609,7 +635,7 @@ export function createCalibrationWizard({ readDevices, roleAxes, store }) {
     back() {
       if (stepIndex > 0 && !finished) {
         let target = stepIndex - 1;
-        while (target > 0 && ((steps[target] === 'throttle' && devicesWithRole('throttle').length === 0) || (steps[target] === 'pedals' && devicesWithRole('rudder').length === 0 && devicesWithRole('brakeL').length === 0 && devicesWithRole('brakeR').length === 0))) target--;
+        while (target > 0 && stepIsEmpty(steps[target])) target--;
         enterStep(target);
       }
       return this.getState();
