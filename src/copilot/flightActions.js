@@ -12,9 +12,14 @@ import { craftCapabilities } from './flightState.js';
 
 /** How long to wait for an outcome that lands on a later frame (real seconds). */
 const OUTCOME_TIMEOUT_SECONDS = 1.2;
-const VIEW_ACTIONS = Object.freeze({ cockpit: 'viewForward', chase: 'viewBack' });
+/**
+ * The input action each view target presses: the first-person view, the chase view and the swap to
+ * the last third-person view. The wing and flyby views go through the per-craft view setting.
+ */
+const VIEW_ACTIONS = Object.freeze({ cockpit: 'viewForward', chase: 'viewBack', outside: 'viewToggle1P3P' });
 /** Views that count as "cockpit" for a craft: the FPV drone's first-person view is its cockpit. */
 const FIRST_PERSON_VIEWS = new Set(['cockpit', 'fpv']);
+const THIRD_PERSON_VIEWS = new Set(['chase', 'wing', 'flyby']);
 
 /**
  * Resolves conditions that become true on a later frame: wait(check, seconds) resolves true as soon
@@ -163,10 +168,24 @@ export function createFlightActionHandlers(ctx, helpers) {
     async setView(action) {
       const wanted = action.view;
       const current = getView();
-      const matches = (view) => (wanted === 'cockpit' ? FIRST_PERSON_VIEWS.has(view) : view === wanted);
-      if (current && matches(current.view)) return succeed(wanted === 'cockpit' ? "We're already in the cockpit view." : "We're already in the chase view.");
+      const matches = (view) => {
+        if (wanted === 'cockpit') return FIRST_PERSON_VIEWS.has(view);
+        if (wanted === 'outside') return THIRD_PERSON_VIEWS.has(view);
+        return view === wanted;
+      };
+      if (current && matches(current.view)) {
+        if (wanted === 'cockpit') return succeed("We're already in the cockpit view.");
+        if (wanted === 'outside') return succeed(`We're already outside, in the ${current.view} view.`);
+        return succeed(`We're already in the ${wanted} view.`);
+      }
       const serialBefore = current ? current.serial : 0;
-      emitInputAction(VIEW_ACTIONS[wanted]);
+      if (VIEW_ACTIONS[wanted]) {
+        emitInputAction(VIEW_ACTIONS[wanted]);
+      } else {
+        const system = flight();
+        const craft = typeof system?.getCraft === 'function' ? system.getCraft() : state.flight.craft;
+        if (!settings.update('views', { [craft]: wanted })) return fail("I couldn't change the view just now.");
+      }
       const switched = await waiter.wait(() => {
         const view = getView();
         return Boolean(view && view.serial !== serialBefore && matches(view.view));
@@ -174,6 +193,8 @@ export function createFlightActionHandlers(ctx, helpers) {
       if (!switched) return fail(`The camera didn't move to the ${wanted} view. That view isn't available here.`);
       const view = getView().view;
       if (wanted === 'cockpit') return succeed(view === 'fpv' ? 'FPV camera.' : pick('viewCockpit', ['Cockpit view.', 'In the cockpit. Instruments are live.']));
+      if (view === 'wing') return succeed(pick('viewWing', ['Wing view.', 'Out on the wing.']));
+      if (view === 'flyby') return succeed(pick('viewFlyby', ['Flyby camera. It sets up ahead and lets us pass.', 'Flyby view.']));
       return succeed(pick('viewChase', ['Chase view.', 'Back outside, chase view.']));
     },
 
@@ -270,7 +291,7 @@ export function keyFor(ctx, actionId, fallback) {
 /** The "what can you do" answer, with the keys and UI that do the same thing. */
 export function helpLine(ctx, pick) {
   const key = (actionId, fallback) => keyFor(ctx, actionId, fallback);
-  const flying = `Aircraft: 'switch to the bush plane' (1-6, picker), 'switch to version one' (${key('versionToggle', 'F8')}, the V1 | V2 pill), 'assists up' (settings), 'cockpit view' (${key('viewForward', 'Num 8')}), 'engine off' (${key('engineToggle', 'Z')}), 'deploy chute' (${key('chuteDeploy', 'U')}), 'relaunch' (${key('relaunch', 'Backspace')}), 'calibrate controls' (${key('controlsPanel', '.')}), 'airspeed', 'how was my landing'. Hold ${key('copilotPTT', '`')} to talk.`;
+  const flying = `Aircraft: 'switch to the bush plane' (1-6, picker), 'switch to version one' (${key('versionToggle', 'F8')}, the V1 | V2 pill), 'assists up' (settings), 'cockpit view' (${key('viewForward', 'Num 8')}), 'third person' (${key('viewToggle1P3P', 'V')}), 'engine off' (${key('engineToggle', 'Z')}), 'deploy chute' (${key('chuteDeploy', 'U')}), 'relaunch' (${key('relaunch', 'Backspace')}), 'calibrate controls' (${key('controlsPanel', '.')}), 'airspeed', 'how was my landing'. Hold ${key('copilotPTT', '`')} to talk.`;
   return pick('help', [
     `I find places, set waypoints, fly the autopilot, change the time and run ring courses. ${flying}`,
     `Try 'find mountains', 'set a waypoint' or 'make it dusk'. ${flying}`,

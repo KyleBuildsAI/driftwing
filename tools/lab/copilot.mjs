@@ -1,5 +1,5 @@
 // Copilot grammar lab: runs WREN's local brain (src/copilot/copilot.js with grammar.js) headless in
-// node against transcripts, and checks the remote action schema for the version switch.
+// node against transcripts, and checks the remote action schema for the version switch and views.
 //
 // Tests:
 //   versionOne   "switch to version one", "version one", "v1", "switch to v1", "play the original"
@@ -8,9 +8,12 @@
 //   retired      "boost", "barrel roll", "sim mode", "classic mode" and friends no longer produce the
 //                retired actions (boost, barrelRoll, setMode)
 //   neighbours   commands that share words still reach their own action (the bush plane, the
-//                cockpit view, assists)
-//   schema       the remote action switchVersion needs version 'v1' exactly (case aside); the
-//                retired types are refused
+//                cockpit view, assists, the wingsuit)
+//   views        "cockpit view" / "first person", "chase view", "wing view", "flyby camera", and
+//                "third person" / "outside view" (the last third-person view) ask for their view;
+//                "fly by the lighthouse" is not a camera request
+//   schema       the remote action switchVersion needs version 'v1' exactly (case aside); setView
+//                takes the five view targets and nothing else; the retired types are refused
 //
 // Usage: node tools/lab/copilot.mjs [--verbose]
 // Prints one line per check and exits non-zero if any check fails.
@@ -64,14 +67,34 @@ for (const phrase of ['boost', 'punch it', 'do a barrel roll', 'barrel roll left
   check('retired', `"${phrase}" -> no retired action`, !action || !['boost', 'barrelRoll', 'setMode'].includes(action.type), JSON.stringify(action));
 }
 
-for (const [phrase, type] of [['switch to the bush plane', 'setCraft'], ['cockpit view', 'setView'], ['assists up', 'setAssists'], ['relaunch', 'relaunch']]) {
+for (const [phrase, type] of [['switch to the bush plane', 'setCraft'], ['cockpit view', 'setView'], ['assists up', 'setAssists'], ['relaunch', 'relaunch'], ['switch to the wingsuit', 'setCraft']]) {
   const action = actionFor(phrase);
   check('neighbours', `"${phrase}" -> ${type}`, action && action.type === type, JSON.stringify(action));
+}
+
+for (const [phrase, view] of [
+  ['cockpit view', 'cockpit'], ['first person', 'cockpit'], ['switch to first person view', 'cockpit'], ['chase view', 'chase'], ['chase cam', 'chase'],
+  ['wing view', 'wing'], ['switch to the wingtip camera', 'wing'], ['flyby camera', 'flyby'], ['fly by view', 'flyby'],
+  ['third person', 'outside'], ['go to third person', 'outside'], ['outside view', 'outside'], ['take me outside', 'outside'],
+]) {
+  const action = actionFor(phrase);
+  check('views', `"${phrase}" -> setView ${view}`, action && action.type === 'setView' && action.view === view, JSON.stringify(action));
+}
+for (const phrase of ['fly by the lighthouse', "let's fly by the mountains"]) {
+  const action = actionFor(phrase);
+  check('views', `"${phrase}" is not a camera request`, !action || action.type !== 'setView', JSON.stringify(action));
 }
 
 const clean = Copilot.sanitizeAction({ type: 'switchVersion', version: 'V1', extra: true });
 check('schema', 'switchVersion with version "V1" is accepted as v1, extra fields dropped', clean && clean.version === 'v1' && !('extra' in clean), JSON.stringify(clean));
 for (const raw of [{ type: 'switchVersion' }, { type: 'switchVersion', version: 'v2' }, { type: 'switchVersion', version: 1 }, { type: 'switchVersion', version: 'version one' }]) {
+  check('schema', `refused: ${JSON.stringify(raw)}`, Copilot.sanitizeAction(raw) === null, JSON.stringify(Copilot.sanitizeAction(raw)));
+}
+for (const view of ['cockpit', 'chase', 'wing', 'flyby', 'outside', 'OUTSIDE']) {
+  const cleanView = Copilot.sanitizeAction({ type: 'setView', view });
+  check('schema', `setView "${view}" is accepted`, cleanView && cleanView.view === view.toLowerCase(), JSON.stringify(cleanView));
+}
+for (const raw of [{ type: 'setView', view: 'fpv' }, { type: 'setView', view: 'thirdPerson' }, { type: 'setView' }, { type: 'setView', view: 2 }]) {
   check('schema', `refused: ${JSON.stringify(raw)}`, Copilot.sanitizeAction(raw) === null, JSON.stringify(Copilot.sanitizeAction(raw)));
 }
 for (const type of ['boost', 'barrelRoll', 'setMode']) {

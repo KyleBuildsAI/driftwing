@@ -61,7 +61,7 @@ const CRAFT_IDS = ['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv'
 /** switchVersion can only ask for V1: V2 hands over to the original game, the shell switches back. */
 const SWITCH_VERSIONS = ['v1'];
 const ASSIST_CHANGES = ['up', 'down', 'full', 'off'];
-const VIEWS = ['cockpit', 'chase'];
+const VIEWS = ['cockpit', 'chase', 'wing', 'flyby', 'outside'];
 
 const ACTION_JSON_SCHEMA = {
   type: 'object',
@@ -118,7 +118,7 @@ Aircraft actions (the game reports whether each one worked, so keep speech to a 
 - {"type":"setCraft","craft":one of ${CRAFT_IDS.join('/')}} (sailplane = glider, cub or taildragger = bushplane, fighter = jet, heli or chopper = helicopter, drone or quad = fpv). flightState.availableCraft lists what is installed.
 - {"type":"setAssists","change":"up"/"down"/"full"/"off"} or {"type":"setAssists","level":0..1}: flight assists for the current craft (the only difficulty control; every craft flies the real flight model); up and down move 25 percent.
 - {"type":"switchVersion","version":"v1"}: switch to version one, the original DRIFTWING ("version one", "v1", "play the original"). This game is version two.
-- {"type":"setView","view":"cockpit" or "chase"}, {"type":"deployChute"}, {"type":"engine","enabled":bool}, {"type":"relaunch"} (aerotow for the glider), {"type":"calibrate"} (opens the controls panel's calibration wizard).
+- {"type":"setView","view":"cockpit"/"chase"/"wing"/"flyby"/"outside"} ("cockpit" is first person, the FPV camera on the drone; "outside" or "third person" returns to the last outside view), {"type":"deployChute"}, {"type":"engine","enabled":bool}, {"type":"relaunch"} (aerotow for the glider), {"type":"calibrate"} (opens the controls panel's calibration wizard).
 Use flightState to answer questions about altitude, speed, heading, time and nearby landmarks. For airspeed use flightState.airspeed (indicated, in flightState.units: knots for "aviation", km/h for "metric"); for landings use flightState.lastLanding and bestLanding (grade butter/smooth/firm/hard, sinkRate m/s); flightState.windAtCraft.fromName is where the wind blows from. There are no penalties: after a soft crash the craft is simply back in the air. When you mention where we are, use flightState.place (what the ground below actually looks like, e.g. "the foothills of the Snow Peaks"); the biome name alone can be misleading. If the request is unclear, reply kindly with a couple of example commands and action null.`;
 
 // ---- Small helpers ----------------------------------------------------------------------------------
@@ -335,6 +335,9 @@ function aircraftRule(text, flight) {
   if (/\b(engine|motor)s?\b.*\b(on|start)\b|\b(start|restart)\b.*\b(engine|motor)s?\b/.test(text)) return { speech: '', action: { type: 'engine', enabled: true } };
   if (/\b(cockpit|first person)\b/.test(text)) return { speech: '', action: { type: 'setView', view: 'cockpit' } };
   if (/\bchase (view|cam|camera)\b|^chase$/.test(text)) return { speech: '', action: { type: 'setView', view: 'chase' } };
+  if (/\bwing (view|cam|camera)\b/.test(text)) return { speech: '', action: { type: 'setView', view: 'wing' } };
+  if (/\bfly ?by (view|cam|camera)\b/.test(text)) return { speech: '', action: { type: 'setView', view: 'flyby' } };
+  if (/\b(third person|outside view)\b/.test(text)) return { speech: '', action: { type: 'setView', view: 'outside' } };
   if (/\bassists?\b/.test(text)) {
     const percent = text.match(/\b(\d{1,3})\s*(percent)?\b/);
     if (percent && Number(percent[1]) <= 100) return { speech: '', action: { type: 'setAssists', level: Number(percent[1]) / 100 } };

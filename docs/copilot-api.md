@@ -210,7 +210,7 @@ instead. Optional parameters may be omitted or `null`. Extra unknown keys are ig
 | --- | --- | --- | --- |
 | `setCraft` | `craft`: `glider` \| `bushplane` \| `jet` \| `helicopter` \| `wingsuit` \| `fpv` (case-insensitive) | any other value is invalid | writes the `craft` setting. The flight controller applies it or refuses it. A craft that is not in `availableCraft` is refused with a friendly line that names the installed craft |
 | `setAssists` | exactly one of: `level` (number 0..1, rounded to 0.01) or `change` (`up` \| `down` \| `full` \| `off`) | both or neither, a level outside 0..1, or an unknown change is invalid | sets the assists of the active craft. `up` and `down` move to the next 25 % step, `full` is 100 % and `off` is 0 %. WREN reports the new level and what is active ("auto-coordination, auto-trim and stall warning, with AoA limiter at part strength"). It counts as the pilot's own choice, so the one-time HOTAS default (50 %) leaves that craft alone |
-| `setView` | `view`: `cockpit` \| `chase` | any other value is invalid | sends the `viewForward` or `viewBack` input action (`input:action`, source `copilot`), then waits up to 1.2 s for the camera to confirm the change. On the FPV drone the first-person view is its FPV camera (`view: 'fpv'`), which counts as the cockpit. If the camera does not switch, WREN says so |
+| `setView` | `view`: `cockpit` \| `chase` \| `wing` \| `flyby` \| `outside` | any other value is invalid | `cockpit` (first person), `chase` and `outside` (the craft's last third-person view: chase, wing or flyby) send the `viewForward`, `viewBack` or `viewToggle1P3P` input action (`input:action`, source `copilot`); `wing` and `flyby` set the active craft's entry in `settings.views`. WREN then waits up to 1.2 s for the camera to confirm the change. On the FPV drone the first-person view is its FPV camera (`view: 'fpv'`), which counts as the cockpit. Asking for the view already on screen is answered without an action. If the camera does not switch, WREN says so |
 | `deployChute` | none | | refused with "No chute on the ..." when the craft has no chute. Otherwise sends `chuteDeploy` and confirms only when the canopy is open (`craftState.canopy`) |
 | `engine` | `enabled` (boolean, required) | a missing or non-boolean value is invalid | refused on craft without an engine. If the engine is already in that state, WREN says so. Otherwise sends `engineToggle` and confirms only when `engineOn` changes (up to 1.2 s) |
 | `relaunch` | none | | the craft's relaunch: aerotow to 1000 m above the ground for the glider (refused from 950 m above the ground, or while on tow), a dive from the nearest high peak for the wingsuit, or an airstart 300 m up for the others (the helicopter and the drone come back hovering). Refused during a soft-crash reset |
@@ -303,6 +303,8 @@ do". The keys shown are the defaults, and WREN reads the live bindings:
 | switch to version one ("version one", "v1", "play the original") | F8, T.16000M base button 10, the launcher's V1 \| V2 pill |
 | assists up / down / full / off | the assists slider in Settings (`,`) |
 | cockpit view / chase view | Numpad 8 / Numpad 2, the stick hat up / down |
+| third person / outside view (the last outside view), cockpit from outside | V, gamepad View, TWCS button 8 (`viewToggle1P3P`) |
+| wing view / flyby view | C cycles chase, cockpit, wing and flyby (`viewCycle`) |
 | deploy chute | U |
 | engine off / on | Z |
 | relaunch | Backspace |

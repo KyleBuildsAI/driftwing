@@ -15,7 +15,11 @@ export const FLIGHT_ACTION_TYPES = Object.freeze([
 /** The versions switchVersion can ask for: V2 can only hand over to V1 (the shell switches back). */
 export const SWITCH_VERSIONS = Object.freeze(['v1']);
 export const ASSIST_CHANGES = Object.freeze(['up', 'down', 'full', 'off']);
-export const VIEW_TARGETS = Object.freeze(['cockpit', 'chase']);
+/**
+ * setView targets: 'cockpit' (the first-person view; the drone's FPV camera), the third-person
+ * 'chase', 'wing' and 'flyby', and 'outside' (the craft's last third-person view).
+ */
+export const VIEW_TARGETS = Object.freeze(['cockpit', 'chase', 'wing', 'flyby', 'outside']);
 /** Assists up / down move along this grid (0, 25, 50, 75, 100 percent). */
 export const ASSIST_STEP = 0.25;
 
@@ -213,15 +217,25 @@ export function createFlightGrammar({ pick, helpLine }) {
     return null;
   }
 
+  /**
+   * Views: "cockpit view" / "first person" (the FPV camera on the drone), "chase view", "wing
+   * view", "flyby view", and "third person" / "outside view" (the craft's last third-person view,
+   * where the first / third person swap goes).
+   */
   function matchView(text, flight, core) {
     const viewWord = /\b(view|cam|camera|perspective|pov)\b/;
+    const bare = core.every((word) => /^(cockpit|chase|view|cam|camera|to|back|go|switch|the|inside|outside|wing|wingtip|flyby|third|first|person)$/.test(word));
     const cockpit = /\b(cockpit|first[ -]?person|inside view|pilot'?s? (view|seat|eyes?)|in the cockpit|fpv view|pov)\b/.test(text);
-    const chase = /\b(chase|third[ -]?person|outside view|external view|follow cam|behind the plane)\b/.test(text);
-    if (!cockpit && !chase) return null;
-    const bare = core.every((word) => /^(cockpit|chase|view|cam|camera|to|back|go|switch|the|inside|outside)$/.test(word));
-    if (!viewWord.test(text) && !bare && !/\b(switch|go|back|change|put)\b/.test(text)) return null;
-    if (chase && !cockpit) return { speech: '', action: { type: 'setView', view: 'chase' } };
-    return { speech: '', action: { type: 'setView', view: 'cockpit' } };
+    const outside = /\b(third[ -]?person|outside|external view|exterior view)\b/.test(text);
+    const chase = /\b(chase|follow cam|behind the plane)\b/.test(text);
+    const wing = /\b(wing ?(view|cam|camera)|wing ?tip( view| cam| camera)?)\b/.test(text);
+    // "Fly by the lighthouse" is not a camera request: the flyby needs a view word or a bare phrase.
+    const flyby = /\b(fly[ -]?by|flypast|fly past)\b/.test(text) && (viewWord.test(text) || bare);
+    if (!cockpit && !outside && !chase && !wing && !flyby) return null;
+    if (!viewWord.test(text) && !bare && !/\b(switch|go|back|change|put|swap|take)\b/.test(text)) return null;
+    let view = 'cockpit';
+    if (!cockpit) view = wing ? 'wing' : flyby ? 'flyby' : chase ? 'chase' : 'outside';
+    return { speech: '', action: { type: 'setView', view } };
   }
 
   function matchAssists(text, flight, core) {
