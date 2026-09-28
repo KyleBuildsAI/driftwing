@@ -68,7 +68,7 @@ function createRig({ assists = 0, world = createFlatWorld() } = {}) {
   bus.on('notify', (payload) => events.notify.push(payload.text));
   bus.onTyped('landed', (payload) => events.landed.push(payload));
   const craftState = craft.abilities.craftAbility.initialState();
-  const model = flightModels.create(craft.simProfile.model, { profile: craft.simProfile, craft, world, bus, state: null, input: null, craftState });
+  const model = flightModels.create(craft.simProfile.model, { profile: craft.simProfile, craft, world, bus, state: null, craftState });
   const pilot = createControlState();
   const controls = createControlState();
   const autopilot = { enabled: false, heading: 0, altitude: 0, speed: 0, followWaypoint: false };

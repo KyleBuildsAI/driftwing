@@ -6,7 +6,7 @@
   { "press": "ShiftLeft" },
   { "eval": "(() => { DRIFTWING.ctx.settings.set('craft', 'bushplane'); return 'craft bushplane'; })()" },
   { "wait": 1500 },
-  { "eval": "(() => { DRIFTWING.ctx.settings.set('mode', 'sim'); return DRIFTWING.ctx.systems.camera.getView(); })()" },
+  { "eval": "(() => { DRIFTWING.ctx.systems.camera.setView('cockpit'); return DRIFTWING.ctx.systems.camera.getView(); })()" },
   { "wait": 2000 },
   { "shot": "env-sim-cockpit" },
   { "eval": "new Promise((resolve) => { const audio = DRIFTWING.ctx.systems.audio; const camera = DRIFTWING.ctx.systems.camera; const cutsBefore = camera.getCutCount(); camera.setView('chase'); let low = Infinity; let high = -Infinity; const started = performance.now(); const timer = setInterval(() => { const spatial = audio.getStats().spatial; if (spatial) { low = Math.min(low, spatial.doppler); high = Math.max(high, spatial.doppler); } if (performance.now() - started > 900) { clearInterval(timer); const stats = audio.getStats(); resolve(JSON.stringify({ check: 'doppler-cut-to-chase', audio: stats.state, route: stats.spatial && stats.spatial.route, cuts: camera.getCutCount() - cutsBefore, low: Number(low.toFixed(3)), high: Number(high.toFixed(3)) })); } }, 16); })" },
@@ -15,7 +15,7 @@
   { "wait": 800 },
   { "press": "KeyP" },
   { "wait": 800 },
-  { "eval": "(() => { DRIFTWING.ctx.settings.set('mode', 'classic'); const camera = DRIFTWING.ctx.systems.camera; return JSON.stringify({ check: 'photo-mode-switch', photo: DRIFTWING.state.photoMode, view: camera.getView(), mode: camera.getMode() }); })()" },
+  { "eval": "(() => { const camera = DRIFTWING.ctx.systems.camera; return JSON.stringify({ check: 'photo-mode-view', photo: DRIFTWING.state.photoMode, view: camera.getView(), rigMode: camera.getMode() }); })()" },
   { "wait": 400 },
   { "press": "KeyP" },
   { "wait": 2500 },
@@ -23,6 +23,6 @@
   { "shot": "env-photo-exit-chase" },
   { "eval": "(() => { DRIFTWING.ctx.settings.set('craft', 'jet'); return 'craft jet'; })()" },
   { "wait": 4500 },
-  { "eval": "JSON.stringify({ check: 'jet-fx', craft: DRIFTWING.ctx.systems.flight.getCraft(), mode: DRIFTWING.ctx.systems.flight.getMode(), speed: Math.round(DRIFTWING.state.player.speed), roll: Math.round(DRIFTWING.state.player.roll), fx: DRIFTWING.ctx.systems.fx.getStats() })" },
-  { "shot": "env-jet-classic" }
+  { "eval": "JSON.stringify({ check: 'jet-fx', craft: DRIFTWING.ctx.systems.flight.getCraft(), speed: Math.round(DRIFTWING.state.player.speed), roll: Math.round(DRIFTWING.state.player.roll), fx: DRIFTWING.ctx.systems.fx.getStats() })" },
+  { "shot": "env-jet" }
 ]

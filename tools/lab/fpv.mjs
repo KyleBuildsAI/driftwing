@@ -74,7 +74,7 @@ function createRig({ assists = 0, world = createFlatWorld(0), settings = null } 
   bus.on('notify', (payload) => events.notify.push(payload.text));
   bus.onTyped('landed', (payload) => events.landed.push(payload));
   const craftState = craft.abilities.craftAbility.initialState();
-  const model = flightModels.create(craft.simProfile.model, { profile: craft.simProfile, craft, world, bus, state: null, input: null, craftState, settings });
+  const model = flightModels.create(craft.simProfile.model, { profile: craft.simProfile, craft, world, bus, state: null, craftState, settings });
   const pilot = createControlState();
   const controls = createControlState();
   const autopilot = { enabled: false, heading: 0, altitude: 0, speed: 0, followWaypoint: false };
@@ -147,10 +147,9 @@ function createRig({ assists = 0, world = createFlatWorld(0), settings = null } 
     pilot.pitch = 0;
     pilot.yaw = 0;
   };
-  /** Runs the craft ability the way the flight controller does in SIM. */
+  /** Runs the craft ability the way the flight controller does. */
   rig.ability = () => craft.abilities.craftAbility.run({
     craftState,
-    mode: 'sim',
     craft: craft.id,
     telemetry: { onGround: model.contact.onGround, quaternion: model.state.quaternion },
     notify: (text) => events.notify.push(text),

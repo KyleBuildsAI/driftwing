@@ -1,5 +1,5 @@
 [
-  { "eval": "(() => { const game = window.DRIFTWING; window.__dwCheck = (name, ok, detail) => { if (!ok) console.error(`[hotplug check] ${name} failed: ${detail}`); return `${ok ? 'PASS' : 'FAIL'} ${name}: ${detail}`; }; game.ctx.settings.set('craft', 'bushplane'); game.ctx.settings.set('mode', 'sim'); return `${game.ctx.systems.flight.getMode()} ${game.ctx.systems.flight.getCraft()}`; })()" },
+  { "eval": "(() => { const game = window.DRIFTWING; window.__dwCheck = (name, ok, detail) => { if (!ok) console.error(`[hotplug check] ${name} failed: ${detail}`); return `${ok ? 'PASS' : 'FAIL'} ${name}: ${detail}`; }; game.ctx.settings.set('craft', 'bushplane'); return game.ctx.systems.flight.getCraft(); })()" },
   { "wait": 1500 },
   { "eval": "(() => { const mock = window.DRIFTWING.ctx.systems.input.mock; if (!mock) { console.error('[hotplug check] the mock gamepads are missing: run with --query test=hotas'); return 'no mock'; } mock.plug('t16000m'); mock.plug('twcs'); for (const handle of ['t16000m', 'twcs']) { mock.press(handle, 5); mock.release(handle, 5); } return 'plugged the stick and the TWCS'; })()" },
   { "wait": 500 },

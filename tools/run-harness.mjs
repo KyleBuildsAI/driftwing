@@ -8,7 +8,7 @@
 //
 // Usage:
 //   node tools/run-harness.mjs --test 1|hotas [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
-//     [--crafts glider,jet] [--modes classic,sim] [--out <dir>] [--timeout-minutes N]
+//     [--crafts glider,jet] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
 //
 // --alloc-profile N (diagnostic): once the first flight-test run is flying, samples every JS
@@ -62,7 +62,6 @@ function parseArgs(argv) {
     seeds: null,
     seconds: null,
     crafts: null,
-    modes: null,
     out: null,
     timeoutMinutes: null,
     width: 1280,
@@ -84,7 +83,6 @@ function parseArgs(argv) {
       case '--seeds': options.seeds = next(); break;
       case '--seconds': options.seconds = Number(next()); break;
       case '--crafts': options.crafts = next(); break;
-      case '--modes': options.modes = next(); break;
       case '--out': options.out = next(); break;
       case '--timeout-minutes': options.timeoutMinutes = Number(next()); break;
       case '--width': options.width = Number(next()); break;
@@ -286,7 +284,6 @@ function harnessUrl(port, options) {
     if (options.seeds) url.searchParams.set('testSeeds', options.seeds);
     if (options.seconds) url.searchParams.set('testSeconds', String(options.seconds));
     if (options.crafts) url.searchParams.set('testCraft', options.crafts);
-    if (options.modes) url.searchParams.set('testModes', options.modes);
   }
   return url.href;
 }
@@ -297,9 +294,8 @@ function timeLimitMs(options) {
   if (options.test === 'hotas') return 8 * 60000;
   const seeds = options.seeds ? options.seeds.split(',').filter(Boolean).length : 3;
   const crafts = options.crafts ? options.crafts.split(',').filter(Boolean).length : 6;
-  const modes = options.modes ? options.modes.split(',').filter(Boolean).length : 2;
   const seconds = options.seconds ?? 60;
-  const plannedSeconds = seeds * crafts * modes * (seconds + 3) + (seeds + 1) * 90;
+  const plannedSeconds = seeds * crafts * (seconds + 3) + (seeds + 1) * 90;
   return Math.max(10 * 60000, plannedSeconds * 1500);
 }
 
@@ -342,7 +338,7 @@ function describeProgress(state) {
   if (!state || !state.progress) return state ? state.status : 'loading';
   const { completedRuns, totalRuns, current } = state.progress;
   if (Number.isFinite(completedRuns)) {
-    const now = current ? `, flying run ${current.index + 1}: ${current.craft} ${String(current.mode).toUpperCase()} (${current.seed}) ${Math.round(current.seconds ?? 0)} s` : '';
+    const now = current ? `, flying run ${current.index + 1}: ${current.craft} (${current.seed}) ${Math.round(current.seconds ?? 0)} s` : '';
     return `${completedRuns}/${totalRuns} runs done${now}`;
   }
   const { done, phase, step } = state.progress;
@@ -350,14 +346,13 @@ function describeProgress(state) {
 }
 
 function flightTable(report) {
-  const lines = ['  #  seed        craft       mode     fps  p99ms  maxms  >50  sys/gc/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak  GPU%avg/peak  mainThread busy%/cpuShare%'];
+  const lines = ['  #  seed        craft       fps  p99ms  maxms  >50  sys/gc/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak  GPU%avg/peak  mainThread busy%/cpuShare%'];
   for (const run of report.runs) {
     const checks = run.script.checks;
     lines.push([
       String(run.index + 1).padStart(3),
       run.seed.padEnd(11),
       run.craft.padEnd(11),
-      run.mode.toUpperCase().padEnd(7),
       String(run.avgFps).padStart(5),
       String(run.p99Ms).padStart(6),
       String(run.maxMs).padStart(6),

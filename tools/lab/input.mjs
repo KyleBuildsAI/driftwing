@@ -103,7 +103,7 @@ function createRig(devices) {
   function tick() {
     resetFrameAccumulator(frame);
     for (const device of devices) {
-      mapper.evaluate(device, { frame, craft: 'glider', mode: 'sim', seconds: 1 / 60, twistEnabled: true, connectedKinds, actionsEnabled: true, axesEnabled: true });
+      mapper.evaluate(device, { frame, craft: 'glider', seconds: 1 / 60, twistEnabled: true, connectedKinds, actionsEnabled: true, axesEnabled: true });
     }
     capture.sample(devices);
     return frame;

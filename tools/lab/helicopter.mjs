@@ -1,6 +1,6 @@
 // Helicopter flight lab: flies SimHelicopter headless (node, no renderer) through the same control
-// stages the game runs every physics tick (the helicopter autopilot and assists), plus the CLASSIC
-// hover extension of the arcade model, and prints the measured performance against the spec.
+// stages the game runs every physics tick (the helicopter autopilot and assists), and prints the
+// measured performance against the spec.
 //
 // The air is the sea-level standard atmosphere (rho 1.225 kg/m^3) over flat ground at sea level, with
 // no wind unless a test sets it. Physics runs at the game's fixed 120 Hz.
@@ -23,8 +23,6 @@
 //   strike        rotor strike on a steep bank near the ground; tail strike
 //   engine        engine off on the ground and restart; rotor spins down and back up
 //   autopilot     heading / altitude / speed hold; hands-off hold hovers
-//   classic       CLASSIC hover extension: throttle 0.5 holds height, full climbs, zero descends;
-//                 stick forward accelerates nose down; roll turns; Q/E yaw; never below the floor
 //
 // Usage: node tools/lab/helicopter.mjs [--verbose]
 // Prints a table (measured vs target) and exits non-zero if any check fails.
@@ -37,7 +35,6 @@ import { createFlightTelemetry } from '../../src/flight/telemetry.js';
 import { groundPose } from '../../src/flight/placement.js';
 import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
-import { CONFIG } from '../../src/core/config.js';
 import { DEG, clamp } from '../../src/core/util.js';
 
 const DT = 1 / 120;
@@ -74,7 +71,7 @@ function createRig({ assists = 0, ground = 0 } = {}) {
   bus.onTyped('landed', (payload) => events.landed.push(payload));
   const craftState = craft.abilities.craftAbility.initialState();
   const world = createFlatWorld(ground);
-  const model = flightModels.create(craft.simProfile.model, { profile: craft.simProfile, craft, world, bus, state: null, input: null, craftState });
+  const model = flightModels.create(craft.simProfile.model, { profile: craft.simProfile, craft, world, bus, state: null, craftState });
   const pilot = createControlState();
   pilot.throttle = 0.5;
   const controls = createControlState();
@@ -748,131 +745,6 @@ function testCatalog() {
 }
 
 // ============================================================================================
-// CLASSIC: the hover extension of the arcade model
-// ============================================================================================
-function createClassicRig() {
-  const bus = attachTypedEvents(new EventBus(), { validate: true });
-  const world = createFlatWorld(0);
-  world.groundHeight = () => 0;
-  const player = {
-    position: new THREE.Vector3(0, 300, 0),
-    velocity: new THREE.Vector3(),
-    quaternion: new THREE.Quaternion(),
-    forward: new THREE.Vector3(0, 0, -1),
-    up: new THREE.Vector3(0, 1, 0),
-    right: new THREE.Vector3(1, 0, 0),
-    speed: 0,
-    throttle: 0.5,
-    heading: 0,
-    pitch: 0,
-    roll: 0,
-    verticalSpeed: 0,
-    yawRate: 0,
-    gForce: 1,
-    stalled: false,
-    boost: { active: false, remaining: 0, cooldown: 0, cooldownTotal: 0 },
-    barrelRoll: { active: false, direction: 0, progress: 0 },
-    autopilot: { enabled: false, heading: 0, altitude: 0, followWaypoint: false },
-  };
-  const state = { player, time: { elapsed: 0 }, photoMode: false, waypoint: null, ringCourse: null };
-  const input = { pitch: 0, roll: 0, yaw: 0, throttleDelta: 0, throttleTarget: null, boost: false, fineControl: false };
-  const model = flightModels.create('arcade', { profile: helicopter.arcadeProfile, craft: helicopter, world, bus, state, input });
-  model.reset({ position: new THREE.Vector3(0, 300, 0), quaternion: new THREE.Quaternion(), velocity: new THREE.Vector3(), throttle: 0.5 });
-  const telemetry = createFlightTelemetry();
-  const rig = { model, player, input, state, telemetry, time: 0 };
-  rig.run = (seconds, script) => {
-    const frame = 1 / 60;
-    for (let tick = 0; tick < Math.round(seconds / frame); tick++) {
-      if (script) script(rig);
-      state.time.elapsed += frame;
-      model.step(frame, input);
-      // The core's safety clamp (CLASSIC): never below the ground clearance.
-      const floor = Math.max(world.groundHeight(player.position.x, player.position.z) + CONFIG.GROUND_CLEARANCE, CONFIG.WATER_LEVEL + CONFIG.WATER_CLEARANCE);
-      if (player.position.y < floor) player.position.y = floor;
-      rig.time += frame;
-    }
-  };
-  return rig;
-}
-
-function testClassic() {
-  const hover = helicopter.arcadeProfile.hover;
-  const rig = createClassicRig();
-  rig.run(5);
-  const start = rig.player.position.clone();
-  rig.run(10);
-  const heldDrift = rig.player.position.distanceTo(start);
-  record('CLASSIC throttle 0.5 holds height and position', heldDrift, 0.5, { unit: 'm', compare: 'max', note: `speed ${rig.player.speed.toFixed(2)} m/s` });
-  rig.input.throttleTarget = 1;
-  rig.run(8);
-  rig.input.throttleTarget = null;
-  record('CLASSIC full throttle climbs', rig.player.verticalSpeed, hover.CLIMB_RATE, { unit: 'm/s', tolerance: 0.1 });
-  rig.input.throttleTarget = 0;
-  rig.run(6);
-  rig.input.throttleTarget = null;
-  record('CLASSIC zero throttle descends', -rig.player.verticalSpeed, hover.DESCENT_RATE, { unit: 'm/s', tolerance: 0.1 });
-  rig.input.throttleTarget = 0.5;
-  rig.run(4);
-  rig.input.throttleTarget = null;
-  // Stick forward: accelerate, nose down.
-  let minPitch = 0;
-  rig.run(18, (lab) => {
-    lab.input.pitch = -1;
-    minPitch = Math.min(minPitch, lab.player.pitch);
-  });
-  rig.input.pitch = 0;
-  record('CLASSIC stick forward: top speed', rig.player.speed * KMH, hover.MAX_FORWARD_SPEED * KMH, { unit: 'km/h', tolerance: 0.05, decimals: 0, note: `nose down to ${minPitch.toFixed(1)} deg` });
-  record('CLASSIC stick forward pitches the nose down', -minPitch, [6, hover.MAX_PITCH / DEG + 0.5], { unit: 'deg', compare: 'range', decimals: 1 });
-  // Roll: banked turn at speed.
-  const headingBefore = rig.player.heading;
-  let maxBank = 0;
-  rig.run(5, (lab) => {
-    lab.input.roll = 1;
-    maxBank = Math.max(maxBank, Math.abs(lab.player.roll));
-  });
-  rig.input.roll = 0;
-  const turned = ((((rig.player.heading - headingBefore) % 360) + 360) % 360);
-  record('CLASSIC roll right turns right', turned, [30, 200], { unit: 'deg', compare: 'range', decimals: 0, note: `in 5 s, bank up to ${maxBank.toFixed(1)} deg (limit ${(hover.MAX_BANK / DEG).toFixed(0)})` });
-  // Stick back: stop to a hover.
-  rig.run(12, (lab) => {
-    lab.input.pitch = 1;
-  });
-  rig.input.pitch = 0;
-  rig.run(4);
-  record('CLASSIC stick back stops to a hover', rig.player.speed, 1.5, { unit: 'm/s', compare: 'max' });
-  // Q/E yaw at the hover.
-  const headingHover = rig.player.heading;
-  rig.run(2, (lab) => {
-    lab.input.yaw = 1;
-  });
-  rig.input.yaw = 0;
-  const yawed = ((((rig.player.heading - headingHover) % 360) + 360) % 360);
-  record('CLASSIC E yaws right at the hover', yawed, [60, 130], { unit: 'deg', compare: 'range', decimals: 0, note: 'in 2 s' });
-  // Descend into the ground: the cushion stops it at the floor.
-  rig.input.throttleTarget = 0;
-  let lowest = Infinity;
-  rig.run(70, (lab) => {
-    lowest = Math.min(lowest, lab.player.position.y);
-  });
-  rig.input.throttleTarget = null;
-  record('CLASSIC descent settles at the hover floor', lowest, hover.MIN_AGL - 0.3, { unit: 'm', compare: 'min', note: `floor ${hover.MIN_AGL} m, never tumbles` });
-  // The attitude never exceeds the limits whatever the stick does.
-  let worstBank = 0;
-  let worstPitch = 0;
-  rig.input.throttleTarget = 0.7;
-  rig.run(20, (lab) => {
-    lab.input.pitch = Math.sin(lab.time * 3) > 0 ? 1 : -1;
-    lab.input.roll = Math.sin(lab.time * 2.3) > 0 ? 1 : -1;
-    lab.input.yaw = Math.sin(lab.time * 1.7);
-    worstBank = Math.max(worstBank, Math.abs(lab.player.roll));
-    worstPitch = Math.max(worstPitch, Math.abs(lab.player.pitch));
-  });
-  record('CLASSIC attitude limits under stick abuse', Math.max(worstBank - hover.MAX_BANK / DEG, worstPitch - hover.MAX_PITCH / DEG), 1, { unit: 'deg', compare: 'max', decimals: 1, note: `bank ${worstBank.toFixed(1)}, pitch ${worstPitch.toFixed(1)} deg` });
-  rig.model.writeTelemetry(rig.telemetry);
-  record('CLASSIC telemetry: rotor governed, no stall', rig.telemetry.rotorRpm === 1 && rig.telemetry.stall.stalled === false ? 1 : 0, 1, { compare: rig.telemetry.rotorRpm === 1 && rig.telemetry.stall.stalled === false, note: `torque ${(rig.telemetry.torque * 100).toFixed(0)} %` });
-}
-
-// ============================================================================================
 // REPORT
 // ============================================================================================
 function printTable() {
@@ -910,7 +782,6 @@ testStrikes();
 testEngine();
 testAutopilot();
 testCatalog();
-testClassic();
 const passed = printTable();
 process.stdout.write(`(${((performance.now() - started) / 1000).toFixed(1)} s)\n`);
 process.exit(passed ? 0 : 1);
