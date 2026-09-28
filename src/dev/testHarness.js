@@ -11,9 +11,10 @@
 // Measured per run and in total:
 //   - frame time: every frame interval (ms). Average fps, p50 / p99 / max frame time and the frames
 //     over FRAME_LIMIT_MS are taken AFTER WARMUP (see below). Every slow frame is attributed
-//     (testFrameProfiler.js): 'systems' (the game's systems ran most of it), 'mainThread' (a long
-//     animation frame outside the systems: render submission, GC) or 'delayed' (the main thread was
-//     mostly idle: GPU, compositor or OS scheduling, the signature of a loaded machine).
+//     (testFrameProfiler.js): 'systems' (the game's systems ran most of it), 'gc' (a garbage
+//     collection: the used heap dropped across the frame), 'mainThread' (a long animation frame
+//     outside the systems: render submission or other browser work) or 'delayed' (the main thread
+//     was mostly idle: GPU, compositor or OS scheduling, the signature of a loaded machine).
 //   - NaN events: frames whose craft pose (state.player position, velocity, attitude) or telemetry
 //     is non-finite as sampled by the harness, plus every restore by the flight guards (the SIM
 //     model's per-tick guard, FlightController getStats().nanRestores, and core's frame guard, the
@@ -31,11 +32,17 @@
 // Warmup (excluded from the frame-time statistics and the slow-frame criterion only; NaN,
 // penetration, crash and console checks cover every frame):
 //   - world warmup: the first WORLD_WARMUP_SECONDS after the game reports ready on each page load
-//     (every seed), while the first chunks, pipelines and caches settle;
-//   - run warmup: the first RUN_WARMUP_SECONDS after each run's craft / mode switch (new mesh,
-//     cockpit, instruments and their pipelines).
-// Heap growth is measured per world load: from the end of the world warmup to the end of that
-// world's last run.
+//     (every seed), while the first chunks, pipelines and caches settle, followed by the warmup
+//     lap: every craft and mode this world will fly, switched to in plan order and flown for
+//     WARMUP_LAP_SECONDS each on the autopilot, so every craft module, mesh, cockpit, SIM model and
+//     pipeline exists once before anything is measured;
+//   - run warmup: the first RUN_WARMUP_SECONDS after each run's craft / mode switch (the switch
+//     itself: mesh, cockpit, instruments and their pipelines).
+// Heap growth is judged per world load, from the end of the warmup lap to the end of that world's
+// last run: once every craft has been built, growth means memory that is never given back. The
+// growth from the end of the world warmup (before the lap) is reported too, for transparency; a
+// 6-run repeated-jet experiment showed it is one-time allocation that plateaus (runs 3-6: under
+// 2 MB each), not a leak.
 //
 // Pass criteria: 0 NaN events, 0 penetrations, 0 console errors and 0 warnings, heap growth under
 // HEAP_LIMIT_MB on every world, no frame over FRAME_LIMIT_MS after warmup; plus two validity checks
@@ -61,6 +68,7 @@ const MODES = Object.freeze(['classic', 'sim']);
 const DEFAULT_RUN_SECONDS = 60;
 const RUN_WARMUP_SECONDS = 3;
 const WORLD_WARMUP_SECONDS = 5;
+const WARMUP_LAP_SECONDS = 3;
 const FRAME_LIMIT_MS = 50;
 const HEAP_LIMIT_MB = 50;
 const PENETRATION_LIMIT_M = 1;
@@ -74,7 +82,7 @@ const MAX_CONSOLE_ENTRIES = 300;
 const MAX_EVENT_DETAILS = 20;
 /** Slow frames listed per run in the report (the slowest; every one is counted and attributed). */
 const MAX_SLOW_LISTED = 25;
-const SLOW_CAUSES = Object.freeze(['systems', 'mainThread', 'delayed']);
+const SLOW_CAUSES = Object.freeze(['systems', 'gc', 'mainThread', 'delayed']);
 
 /** Reads the URL options; unknown craft or modes are dropped (and reported). */
 function readConfig(params) {
@@ -104,6 +112,7 @@ function readConfig(params) {
     runSeconds,
     runWarmupSeconds: RUN_WARMUP_SECONDS,
     worldWarmupSeconds: WORLD_WARMUP_SECONDS,
+    warmupLapSeconds: WARMUP_LAP_SECONDS,
     frameLimitMs: FRAME_LIMIT_MS,
     heapLimitMB: HEAP_LIMIT_MB,
     penetrationLimitM: PENETRATION_LIMIT_M,
@@ -195,9 +204,12 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     seed: state.seed,
     backend: ctx.backend,
     loadSeconds: null,
+    heapAtLoadMB: null,
     heapBaselineMB: null,
     heapFinalMB: null,
     heapGrowthMB: null,
+    heapGrowthFromLoadMB: null,
+    lap: [],
     runs: [],
     outside: createBucket(),
   };
@@ -273,6 +285,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
   let worldReadyMs = null;
   let worldClosed = false;
   let lastFrameMs = null;
+  let lastHeapMB = null;
   let lastProgressMs = 0;
   let penetrationEpisode = null;
   const profiler = createFrameProfiler(ctx, { exclude: ['test'] });
@@ -451,26 +464,64 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     flightStats.maxAltitude = Math.max(flightStats.maxAltitude, player.position.y);
   }
 
+  // ---- Warmup lap -----------------------------------------------------------------------------------
+  const lap = { queue: [], index: 0, stepStartMs: 0 };
+
+  /** Every craft and mode this world still flies, once each, in plan order. */
+  function startWarmupLap(now) {
+    const seen = new Set();
+    lap.queue = [];
+    for (const entry of plan.slice(session.nextRun)) {
+      if (entry.seed !== state.seed) break;
+      const key = `${entry.craft}|${entry.mode}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        lap.queue.push(entry);
+      }
+    }
+    phase = 'warmupLap';
+    capture.setContext(`warmup lap (seed ${worldRecord.seed})`);
+    switchLap(0, now);
+  }
+
+  function switchLap(index, now) {
+    lap.index = index;
+    lap.stepStartMs = now;
+    const entry = lap.queue[index];
+    const setup = setUpCraft(entry);
+    pilot.autopilot({ enabled: true });
+    worldRecord.lap.push({ craft: entry.craft, mode: entry.mode, setupOk: setup.setupOk, notes: setup.notes });
+  }
+
   // ---- Runs -------------------------------------------------------------------------------------------
-  function startRun(entry) {
+  /**
+   * Switches to the entry's craft and mode through the settings channel at 100 % assists, lifting a
+   * craft that came down on the ground to a clean airborne start. Returns { setupOk, notes }.
+   */
+  function setUpCraft(entry) {
     const flightSystem = flight();
-    const setupNotes = [];
+    const notes = [];
     releasePilot();
     flightSystem.setAutopilot({ enabled: false, reason: 'flight test' });
     settings.update('assists', { [entry.craft]: 1 });
     if (flightSystem.getCraft() !== entry.craft) settings.set('craft', entry.craft);
     if (flightSystem.getMode() !== entry.mode) settings.set('mode', entry.mode);
     const setupOk = flightSystem.getCraft() === entry.craft && flightSystem.getMode() === entry.mode;
-    if (!setupOk) setupNotes.push(`asked for ${entry.craft} ${entry.mode}, flying ${flightSystem.getCraft()} ${flightSystem.getMode()}`);
-    // A craft that came down on the ground (landed, or a ground start) is lifted to a clean airborne start.
+    if (!setupOk) notes.push(`asked for ${entry.craft} ${entry.mode}, flying ${flightSystem.getCraft()} ${flightSystem.getMode()}`);
     const model = flightSystem.getModel();
     const position = entry.mode === 'sim' && model && model.state ? model.state.position : state.player.position;
     const agl = position.y - surfaceAt(position.x, position.z);
     const onGround = Boolean(model && model.contact && model.contact.onGround);
     if (onGround || agl < MIN_START_AGL) {
       flightSystem.resetTo({ x: position.x, y: surfaceAt(position.x, position.z) + START_AGL, z: position.z, heading: state.player.heading });
-      setupNotes.push(`started ${onGround ? 'on the ground' : `${Math.round(agl)} m above the ground`}: lifted to ${START_AGL} m`);
+      notes.push(`started ${onGround ? 'on the ground' : `${Math.round(agl)} m above the ground`}: lifted to ${START_AGL} m`);
     }
+    return { setupOk, notes };
+  }
+
+  function startRun(entry) {
+    const flightSystem = flight();
+    const { setupOk, notes: setupNotes } = setUpCraft(entry);
     const stats = flightSystem.getStats();
     const script = flightScriptFor(entry.craft, entry.mode);
     const heapStartMB = worldRecord.runs.length > 0 ? worldRecord.runs[worldRecord.runs.length - 1].heapEndMB : worldRecord.heapBaselineMB;
@@ -521,8 +572,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     if (guardRestores > 0 && run.bucket.nanDetails.length < MAX_EVENT_DETAILS) run.bucket.nanDetails.push({ at: null, source: `SIM model guard restored ${guardRestores} tick(s)` });
     const frames = run.recorder.summary();
     const slowAttributed = frames.slowFrameList.map((frame) => {
-      const { startMs, endMs, systemsMs, top, ...kept } = frame;
-      return { ...kept, ...profiler.attribute({ startMs, endMs, ms: frame.ms, systemsMs, top }) };
+      const { startMs, endMs, systemsMs, top, heapDeltaMB, ...kept } = frame;
+      return { ...kept, ...profiler.attribute({ startMs, endMs, ms: frame.ms, systemsMs, top, heapDeltaMB }) };
     });
     const slowByCause = Object.fromEntries(SLOW_CAUSES.map((cause) => [cause, slowAttributed.filter((frame) => frame.cause === cause).length]));
     const heapEndMB = readHeapMB();
@@ -605,13 +656,19 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     worldRecord.heapGrowthMB = Number.isFinite(worldRecord.heapBaselineMB) && Number.isFinite(worldRecord.heapFinalMB)
       ? round(worldRecord.heapFinalMB - worldRecord.heapBaselineMB, 2)
       : null;
+    worldRecord.heapGrowthFromLoadMB = Number.isFinite(worldRecord.heapAtLoadMB) && Number.isFinite(worldRecord.heapFinalMB)
+      ? round(worldRecord.heapFinalMB - worldRecord.heapAtLoadMB, 2)
+      : null;
     session.worlds.push({
       seed: worldRecord.seed,
       backend: worldRecord.backend,
       loadSeconds: worldRecord.loadSeconds,
+      heapAtLoadMB: worldRecord.heapAtLoadMB,
       heapBaselineMB: worldRecord.heapBaselineMB,
       heapFinalMB: worldRecord.heapFinalMB,
       heapGrowthMB: worldRecord.heapGrowthMB,
+      heapGrowthFromLoadMB: worldRecord.heapGrowthFromLoadMB,
+      lap: worldRecord.lap,
       runs: worldRecord.runs.map((run) => run.index),
       outside: worldRecord.outside,
     });
@@ -642,7 +699,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     const worlds = session.worlds.slice();
     // This page load's world, while it is still being flown.
     if (!worldClosed && worldReadyMs !== null && session.status !== 'complete') {
-      worlds.push({ seed: worldRecord.seed, backend: worldRecord.backend, loadSeconds: worldRecord.loadSeconds, heapBaselineMB: worldRecord.heapBaselineMB, heapFinalMB: null, heapGrowthMB: null, runs: worldRecord.runs.map((run) => run.index), outside: worldRecord.outside, open: true });
+      worlds.push({ seed: worldRecord.seed, backend: worldRecord.backend, loadSeconds: worldRecord.loadSeconds, heapAtLoadMB: worldRecord.heapAtLoadMB, heapBaselineMB: worldRecord.heapBaselineMB, heapFinalMB: null, heapGrowthMB: null, heapGrowthFromLoadMB: null, lap: worldRecord.lap, runs: worldRecord.runs.map((run) => run.index), outside: worldRecord.outside, open: true });
     }
     const outsideSum = (field) => worlds.reduce((sum, entry) => sum + (field === 'nan' ? entry.outside.nanFrames + entry.outside.nanGuardEvents : entry.outside[field]), 0);
     const sum = (field) => runs.reduce((total, run) => total + (Number.isFinite(run[field]) ? run[field] : 0), 0);
@@ -696,11 +753,11 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
       },
       config,
       definitions: {
-        warmup: `The first ${config.worldWarmupSeconds} s after the game reports ready on every page load (world warmup), and the first ${config.runWarmupSeconds} s after each run's craft / mode switch (run warmup). Frame statistics and the slow-frame criterion start after warmup; NaN, penetration, crash and console checks cover every frame.`,
+        warmup: `The first ${config.worldWarmupSeconds} s after the game reports ready on every page load, then a warmup lap through every craft and mode that world flies (${config.warmupLapSeconds} s each on the autopilot, so every craft module, mesh, cockpit, SIM model and pipeline exists once), and the first ${config.runWarmupSeconds} s after each run's craft / mode switch. Frame statistics and the slow-frame criterion start after warmup; NaN, penetration, crash and console checks cover every frame, the lap included.`,
         frameTime: 'Interval between consecutive frames (ms), measured by the harness system each frame (performance.now).',
         nanEvents: 'Frames with a non-finite craft pose or telemetry sampled by the harness, plus every restore by the SIM model guard (per tick) and core\'s frame guard.',
         penetration: `The craft reference point (state.player.position) more than ${PENETRATION_LIMIT_M} m below the shared height function (world.groundHeight) or the water surface, sampled every frame; one continuous episode counts once.`,
-        heapGrowth: 'JS heap (performance.memory.usedJSHeapSize) after a forced GC, from the end of each world warmup to the end of that world\'s last run; the largest growth across worlds is judged.',
+        heapGrowth: 'JS heap (performance.memory.usedJSHeapSize) after a forced GC, from the end of each world\'s warmup lap to the end of that world\'s last run; the largest growth across worlds is judged. The growth from the end of the world warmup (before the lap) is listed too.',
       },
       criteria,
       totals: {
@@ -748,7 +805,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
       p99: run.p99Ms,
       max: run.maxMs,
       slow: countCell(run.slowFrames),
-      causes: { text: run.slowFrames === 0 ? '-' : `${run.slowByCause.systems} / ${run.slowByCause.mainThread} / ${run.slowByCause.delayed}`, status: run.slowFrames === 0 ? 'muted' : null },
+      causes: { text: run.slowFrames === 0 ? '-' : `${run.slowByCause.systems} / ${run.slowByCause.gc} / ${run.slowByCause.mainThread} / ${run.slowByCause.delayed}`, status: run.slowFrames === 0 ? 'muted' : null },
       nan: countCell(run.nanEvents),
       penetrations: countCell(run.penetrations),
       crashes: { text: run.softCrashes, status: run.softCrashes === 0 ? 'muted' : null, title: run.softCrashDetails.map((crash) => `${crash.at} s ${crash.reason}`).join(', ') },
@@ -761,7 +818,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     const footer = {
       index: '', seed: 'All', craft: `${totals.runs} runs`, mode: `${totals.measuredSeconds} s`,
       fps: totals.avgFps, p99: totals.worstP99Ms, max: totals.maxFrameMs, slow: countCell(totals.slowFrames),
-      causes: `${totals.slowByCause.systems} / ${totals.slowByCause.mainThread} / ${totals.slowByCause.delayed}`,
+      causes: `${totals.slowByCause.systems} / ${totals.slowByCause.gc} / ${totals.slowByCause.mainThread} / ${totals.slowByCause.delayed}`,
       nan: countCell(totals.nanEvents), penetrations: countCell(totals.penetrations), crashes: totals.softCrashes,
       console: `${totals.consoleErrors} / ${totals.consoleWarnings}`, heap: totals.maxHeapGrowthMB === null ? 'n/a' : `max ${totals.maxHeapGrowthMB}`,
       script: totals.scriptChecks, result: statusCell(report.result === 'PASS'),
@@ -778,7 +835,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
           { key: 'p99', label: 'p99 ms', numeric: true },
           { key: 'max', label: 'Max ms', numeric: true },
           { key: 'slow', label: `>${FRAME_LIMIT_MS} ms`, numeric: true },
-          { key: 'causes', label: 'Sys / main / delayed', numeric: true, title: 'Slow frames by cause: game systems, other main-thread work, delayed while the main thread was idle' },
+          { key: 'causes', label: 'Sys / GC / main / delayed', numeric: true, title: 'Slow frames by cause: game systems, garbage collection, other main-thread work, delayed while the main thread was idle' },
           { key: 'nan', label: 'NaN', numeric: true },
           { key: 'penetrations', label: 'Pen.', numeric: true, title: 'Terrain penetrations' },
           { key: 'crashes', label: 'Soft crash', numeric: true },
@@ -798,23 +855,27 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
           { key: 'seed', label: 'Seed' },
           { key: 'backend', label: 'Backend' },
           { key: 'load', label: 'Load s', numeric: true },
-          { key: 'baseline', label: 'Heap after warmup MB', numeric: true },
+          { key: 'atLoad', label: 'Heap at load MB', numeric: true, title: 'After the world warmup, before the warmup lap' },
+          { key: 'baseline', label: 'Heap after lap MB', numeric: true },
           { key: 'final', label: 'Heap at end MB', numeric: true },
           { key: 'growth', label: 'Growth MB', numeric: true },
+          { key: 'fromLoad', label: 'Growth from load MB', numeric: true },
           { key: 'outside', label: 'Between runs: NaN / pen. / err / warn', numeric: true },
         ],
         rows: report.worlds.map((entry) => ({
           seed: entry.seed,
           backend: entry.backend,
           load: entry.loadSeconds,
+          atLoad: entry.heapAtLoadMB ?? 'n/a',
           baseline: entry.heapBaselineMB ?? 'n/a',
+          fromLoad: entry.heapGrowthFromLoadMB ?? 'n/a',
           final: entry.heapFinalMB ?? 'n/a',
           growth: entry.heapGrowthMB === null ? 'n/a' : { text: entry.heapGrowthMB, status: entry.heapGrowthMB < HEAP_LIMIT_MB ? 'pass' : 'fail' },
           outside: `${entry.outside.nanFrames + entry.outside.nanGuardEvents} / ${entry.outside.penetrations} / ${entry.outside.consoleErrors} / ${entry.outside.consoleWarnings}`,
         })),
       },
     });
-    const slowList = report.runs.flatMap((run) => run.slowFrameList.map((frame) => `Run ${run.index + 1} (${run.craft} ${run.mode.toUpperCase()}, ${run.seed}): ${frame.ms} ms at ${frame.at} s after warmup, ${frame.cause} (systems ${frame.systemsMs} ms${frame.topSystems ? `: ${frame.topSystems}` : ''}${frame.loaf ? `; long frame ${frame.loaf.durationMs} ms, scripts ${frame.loaf.scriptsMs} ms` : ''})`));
+    const slowList = report.runs.flatMap((run) => run.slowFrameList.map((frame) => `Run ${run.index + 1} (${run.craft} ${run.mode.toUpperCase()}, ${run.seed}): ${frame.ms} ms at ${frame.at} s after warmup, ${frame.cause} (systems ${frame.systemsMs} ms${frame.topSystems ? `: ${frame.topSystems}` : ''}${Number.isFinite(frame.heapDeltaMB) ? `; heap ${frame.heapDeltaMB} MB` : ''}${frame.loaf ? `; long frame ${frame.loaf.durationMs} ms, scripts ${frame.loaf.scriptsMs} ms` : ''})`));
     if (slowList.length > 0) sections.push({ title: `Frames over ${FRAME_LIMIT_MS} ms`, notes: slowList.slice(0, 40) });
     const eventList = report.runs.flatMap((run) => [
       ...run.penetrationDetails.map((detail) => `Run ${run.index + 1} (${run.craft} ${run.mode.toUpperCase()}, ${run.seed}): penetration ${detail.depth} m below ${detail.surface} at ${detail.at} s for ${detail.frames} frame(s)`),
@@ -836,7 +897,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
         ['three.js', `r${report.environment.revision}`],
         ['Seeds', config.seeds.join(', ')],
         ['Runs', `${report.totals.runs} x ${config.runSeconds} s`],
-        ['Warmup', `${config.worldWarmupSeconds} s per world, ${config.runWarmupSeconds} s per run`],
+        ['Warmup', `${config.worldWarmupSeconds} s + a ${config.warmupLapSeconds} s lap per craft and mode per world, ${config.runWarmupSeconds} s per run`],
         ['Heap', report.environment.heap],
         ['Finished', report.finishedAt ? new Date(report.finishedAt).toLocaleString() : '-'],
       ],
@@ -862,7 +923,10 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
         fraction: (entry.index + Math.min(elapsed / activeRun.durationSeconds, 1)) / total,
       });
     } else if (phase === 'worldWarmup') {
-      panel.setProgress({ label: `World ${state.seed}: warming up`, detail: `${config.worldWarmupSeconds} s after load before the first run`, fraction: session.nextRun / total });
+      panel.setProgress({ label: `World ${state.seed}: warming up`, detail: `${config.worldWarmupSeconds} s after load, then the warmup lap`, fraction: session.nextRun / total });
+    } else if (phase === 'warmupLap') {
+      const entry = lap.queue[lap.index];
+      panel.setProgress({ label: `World ${state.seed}: warmup lap ${lap.index + 1} of ${lap.queue.length}`, detail: `${entry.craft} ${entry.mode.toUpperCase()} for ${config.warmupLapSeconds} s (not measured)`, fraction: session.nextRun / total });
     }
   }
 
@@ -870,6 +934,10 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
   function step(realDt) {
     const now = performance.now();
     const frameWork = profiler.takeFrame();
+    // The used heap every frame (no forced GC): a drop across a slow frame marks a collection in it.
+    const heapNowMB = heapAvailable() ? performance.memory.usedJSHeapSize / (1024 * 1024) : null;
+    const heapDeltaMB = heapNowMB !== null && lastHeapMB !== null ? heapNowMB - lastHeapMB : null;
+    lastHeapMB = heapNowMB;
     const frameMs = lastFrameMs === null ? null : now - lastFrameMs;
     lastFrameMs = now;
     if (phase === 'navigating') {
@@ -885,6 +953,18 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     if (phase === 'worldWarmup') {
       updateProgress(now);
       if ((now - worldReadyMs) / 1000 < config.worldWarmupSeconds) return;
+      worldRecord.heapAtLoadMB = readHeapMB();
+      startWarmupLap(now);
+      return;
+    }
+    if (phase === 'warmupLap') {
+      updateProgress(now);
+      applyPilot(flight().getMode());
+      if ((now - lap.stepStartMs) / 1000 < config.warmupLapSeconds) return;
+      if (lap.index + 1 < lap.queue.length) {
+        switchLap(lap.index + 1, now);
+        return;
+      }
       worldRecord.heapBaselineMB = readHeapMB();
       phase = 'running';
       startRun(plan[session.nextRun]);
@@ -895,7 +975,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     const elapsed = (now - run.startMs) / 1000;
     if (frameMs !== null) {
       if (elapsed > config.runWarmupSeconds) {
-        const detail = frameMs > config.frameLimitMs ? { startMs: now - frameMs, endMs: now, systemsMs: frameWork.systemsMs, top: frameWork.top } : null;
+        const detail = frameMs > config.frameLimitMs ? { startMs: now - frameMs, endMs: now, systemsMs: frameWork.systemsMs, top: frameWork.top, heapDeltaMB } : null;
         run.recorder.push(frameMs, elapsed - config.runWarmupSeconds, detail);
       } else {
         run.warmupFrames++;

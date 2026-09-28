@@ -6,16 +6,22 @@
 //     interval can say how long the game's systems ran inside it and which ones took longest;
 //   - Chrome's Long Animation Frame entries (PerformanceObserver 'long-animation-frame'): a frame
 //     whose main-thread work passed 50 ms, with its script time.
+// plus the JS heap before and after the frame (performance.memory, precise in the test runner): a
+// garbage collection shows as a drop of the used heap across the frame.
 // A slow frame is then classed as:
 //   'systems'     the game's systems ran for at least half the interval (game work; top systems listed)
-//   'mainThread'  a long animation frame covers at least half the interval but the systems did not:
-//                 render submission, garbage collection or other browser work on the main thread
+//   'gc'          main-thread time outside the systems while the used heap dropped by GC_DROP_MB or
+//                 more across the frame: a garbage collection pause
+//   'mainThread'  a long animation frame covers at least half the interval but the systems did not
+//                 and no collection shows: render submission or other browser work on the main thread
 //   'delayed'     neither: the main thread was mostly idle and the frame arrived late anyway (GPU
 //                 queue, compositor or OS scheduling; on this project's shared test machine that is
 //                 the signature of other processes loading the CPU or GPU)
 
 const MAX_LOAF_ENTRIES = 600;
 const BUSY_SHARE = 0.5;
+/** Used-heap drop across a frame (MB) that marks a garbage collection in it. */
+const GC_DROP_MB = 2;
 
 function round1(value) {
   return Math.round(value * 10) / 10;
@@ -96,8 +102,8 @@ export function createFrameProfiler(ctx, { exclude = [] } = {}) {
     },
 
     /**
-     * Classifies a slow frame { startMs, endMs, ms, systemsMs, top } (times from performance.now)
-     * and returns the report entry fields: cause, systemsMs, topSystems, loaf.
+     * Classifies a slow frame { startMs, endMs, ms, systemsMs, top, heapDeltaMB } (times from
+     * performance.now) and returns the report entry fields: cause, systemsMs, topSystems, loaf.
      */
     attribute(frame) {
       let best = null;
@@ -111,10 +117,12 @@ export function createFrameProfiler(ctx, { exclude = [] } = {}) {
       }
       let cause = 'delayed';
       if (frame.systemsMs >= frame.ms * BUSY_SHARE) cause = 'systems';
+      else if (Number.isFinite(frame.heapDeltaMB) && frame.heapDeltaMB <= -GC_DROP_MB) cause = 'gc';
       else if (best && bestOverlap >= frame.ms * BUSY_SHARE) cause = 'mainThread';
       return {
         cause,
         systemsMs: round1(frame.systemsMs),
+        heapDeltaMB: Number.isFinite(frame.heapDeltaMB) ? round1(frame.heapDeltaMB) : null,
         topSystems: frame.top,
         loaf: best ? { durationMs: round1(best.duration), overlapMs: round1(bestOverlap), scriptsMs: round1(best.scriptsMs), blockingMs: best.blockingDuration === null ? null : round1(best.blockingDuration), topScripts: best.topScripts, ...best.phases } : null,
       };
