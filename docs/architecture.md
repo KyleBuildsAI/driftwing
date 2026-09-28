@@ -308,22 +308,31 @@ telemetry (below).
 
 ### Storage (`src/core/storage.js`)
 
-The IndexedDB database is `driftwing`, with one object store, `kv`. `init()` loads everything into a
-cache, so `read(key, fallback)` is synchronous. `write(key, value)` updates the cache and persists in
-the background, returning false only when nothing can persist. The API also has `remove`,
-`keys(prefix)`, `flush()` (resolves when every write has landed), `backend` (`'indexeddb'` \|
-`'localstorage'` \| `'memory'`) and `available`. Structure migrations run in `onupgradeneeded` and
-data migrations after load; new steps are only appended. The first data migration imports v1's
-`driftwing.*` localStorage keys.
+V2 shares its origin with V1 behind the launcher shell, so all V2 storage is prefixed
+`driftwing-v2`: the IndexedDB database is `driftwing-v2`, with one object store, `kv`, and every key
+starts with `driftwing-v2.` (`read`, `write` and `remove` throw on any other key, so V2 can never
+touch V1's `driftwing.settings.v1`, `driftwing.journal.*` or `driftwing.ui.*` localStorage keys).
+`init()` loads everything into a cache, so `read(key, fallback)` is synchronous. `write(key, value)`
+updates the cache and persists in the background, returning false only when nothing can persist.
+The API also has `remove`, `keys(prefix)`, `flush()` (resolves when every write has landed),
+`backend` (`'indexeddb'` \| `'localstorage'` \| `'memory'`) and `available`. Structure migrations
+run in `onupgradeneeded` and data migrations after load; new steps are only appended. The first
+data migration imports the Phase 1 database `driftwing` once, when `driftwing-v2` is still empty:
+the settings record (without its old `mode` field), the `input.*` and `audio.*` keys and the
+journals are copied under their new names, then the old database is deleted.
 
 | key | what |
 | --- | --- |
-| `driftwing.settings` | settings (migrated from v1's `driftwing.settings.v1`) |
-| `driftwing.journal.<seed>` | the per-world journal |
-| `driftwing.ui.firstRunHintSeen`, `driftwing.ui.simHintSeen` | first-run hint flags |
-| `input.bindings` | the binding profile `{ version, devices, global: { device: { target: Ref[] } }, crafts: { craftId: {...} } }` |
-| `input.calibration.<deviceKey>` | calibration per device |
-| `audio.vario` | the variometer mode (`auto` \| `on` \| `off`) |
+| `driftwing-v2.settings` | settings |
+| `driftwing-v2.journal.<seed>` | the per-world journal |
+| `driftwing-v2.ui.firstRunHintSeen`, `driftwing-v2.ui.simHintSeen` | first-run hint flags |
+| `driftwing-v2.input.bindings` | the binding profile `{ version, devices, global: { device: { target: Ref[] } }, crafts: { craftId: {...} } }` |
+| `driftwing-v2.input.calibration.<deviceKey>` | calibration per device |
+| `driftwing-v2.audio.vario` | the variometer mode (`auto` \| `on` \| `off`) |
+
+The dev harnesses use their own databases (`driftwing-v2-test`, `driftwing-v2-test-hotas`) and
+sessionStorage keys (`driftwing-v2.test.flight`, `driftwing-v2.test.hotas`). The launcher shell
+keeps one key of its own, `driftwing.shell.lastVersion`.
 
 IndexedDB is scoped to the origin including the port. That is why the dev server is pinned to
 `127.0.0.1:5199` (`vite.config.js`: `strictPort`), and why `npm run serve:single` serves the
