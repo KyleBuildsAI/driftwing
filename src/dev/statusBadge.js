@@ -42,7 +42,8 @@ export function createStatusBadge({ ctx, root, forced = false }) {
   const element = document.createElement('div');
   element.className = 'dw-devbadge glass';
   element.id = 'dw-devbadge';
-  element.setAttribute('role', 'status');
+  // A group, not a live region: the fps and ms text changes four times a second.
+  element.setAttribute('role', 'group');
   element.setAttribute('aria-label', 'Developer status');
   element.innerHTML = [
     '<div class="dw-devbadge-head"><span class="dw-micro dw-gold">Dev</span><span class="dw-devbadge-backend" data-field="backend"></span></div>',
