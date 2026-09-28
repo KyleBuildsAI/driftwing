@@ -11,6 +11,7 @@ import { createCrashFade } from './crashFade.js';
 import { createAerotow, createRopeMaterial, createRopeStandIn, findNearestPeak, planPeakLaunch } from './relaunch.js';
 import { findFlatSpot, groundPose, vegetationClearance } from './placement.js';
 import { createTrailSystem } from './trails.js';
+import { createParkingBrake } from './parkingBrake.js';
 import { countTriangles } from '../craft/kit.js';
 
 /**
@@ -29,6 +30,9 @@ import { countTriangles } from '../craft/kit.js';
  * - Soft crash (SIM): fade, respawn 300 m above the ground at the same XZ and heading, no penalty.
  * - Relaunch: aerotow (glider), nearest peak (wingsuit) or airstart; start on ground (SIM setting);
  *   hands-off assist override while a disconnected device was flying.
+ * - Parking brake (parkingBrake.js): a powered craft placed on the ground with the throttle lever
+ *   open holds its wheels at idle until the pilot moves the lever or brakes; a throttle no physical
+ *   lever holds (keyboard, wheel, touch) goes to idle on a ground start instead.
  *
  * Mode and craft are commanded through settings ('mode', 'craft'): the controller applies a change or
  * writes the previous value back, then emits modeChanged / craftChanged.
@@ -100,6 +104,11 @@ export function createFlightController(ctx) {
   // ---- SIM fixed-step state ----------------------------------------------------------------------
   const clock = createFixedStepClock();
   const tickControls = createControlState();
+  /**
+   * Model actions whose press came only from the copilot this tick (tickControls.quietActions). The
+   * copilot speaks its own confirmation, so the model skips its toast for them.
+   */
+  tickControls.quietActions = new Set();
   const env = {
     time: 0,
     wind: { vel: new THREE.Vector3(), turbulence: 0 },
@@ -163,6 +172,10 @@ export function createFlightController(ctx) {
   // ---- Actions ------------------------------------------------------------------------------------------
   const pendingActions = new Set();
   const modelActions = new Set();
+  /** Pending flight actions pressed by the copilot alone, and the model actions they became. */
+  const copilotActions = new Set();
+  const quietModelActions = new Set();
+  const parkingBrake = createParkingBrake();
 
   const trails = createTrailSystem(ctx);
 
@@ -251,7 +264,7 @@ export function createFlightController(ctx) {
   }
 
   function createSimModel(kind) {
-    return models.create(kind, { profile: craft.simProfile, craft, world, bus, state, input, craftState });
+    return models.create(kind, { profile: craft.simProfile, craft, world, bus, state, input, craftState, settings });
   }
 
   function simKind() {
@@ -423,6 +436,8 @@ export function createFlightController(ctx) {
    * craft's SIM cruise, or the tow's velocity, with the attitude and elevator for 1 g).
    */
   function resetActiveModel(pose) {
+    // Every new pose starts without the parking brake; placeOnGround sets it again when needed.
+    parkingBrake.release();
     if (mode === 'sim' && sim) {
       speedBlend.active = false;
       sim.reset(pose);
@@ -490,7 +505,31 @@ export function createFlightController(ctx) {
       engineOn: true,
     });
     player.heading = heading;
+    setParkingBrake();
     return { spot, pose };
+  }
+
+  /**
+   * On the ground with power: a throttle no physical lever holds goes to idle (the input system knows
+   * which); a lever still above idle (a HOTAS throttle) sets the parking brake instead.
+   */
+  function setParkingBrake() {
+    if (craft.inputProfile?.throttle === 'none') return;
+    ctx.systems.input?.idleThrottle?.();
+    if (parkingBrake.engage(pilotThrottle())) notify('Parking brake set - move the throttle to taxi', 'info');
+  }
+
+  /** Each tick while set: release on the pilot's input, else hold the wheels at idle. */
+  function applyParkingBrake(controls) {
+    if (!parkingBrake.engaged) return;
+    const reason = parkingBrake.releaseReason(liveControls, player.autopilot.enabled);
+    if (reason) {
+      parkingBrake.release();
+      const messages = { throttle: 'Parking brake released.', brakes: 'Parking brake released: the brakes are yours.', airbrake: 'Parking brake released: the brakes are yours.', autopilot: 'Parking brake released for the autopilot.' };
+      notify(messages[reason], 'info');
+      return;
+    }
+    parkingBrake.hold(controls);
   }
 
   /** Heading into the wind (the direction the ambient wind blows from). */
@@ -584,6 +623,7 @@ export function createFlightController(ctx) {
     const pose = capturePose();
     const onGround = pose.onGround;
     disposeSim();
+    parkingBrake.release();
     mode = 'classic';
     resetModelTelemetry();
     refreshClassicWindTarget(pose.position);
@@ -1080,7 +1120,11 @@ export function createFlightController(ctx) {
   // ACTIONS
   // ============================================================================================
   bus.on('input:action', (action) => {
-    if (action && action.phase === 'press' && FLIGHT_ACTIONS.has(action.id)) pendingActions.add(action.id);
+    if (!action || action.phase !== 'press' || !FLIGHT_ACTIONS.has(action.id)) return;
+    // A press from a device in the same frame keeps the model's toast: the pilot did it too.
+    if (action.source === 'copilot' && !pendingActions.has(action.id)) copilotActions.add(action.id);
+    else copilotActions.delete(action.id);
+    pendingActions.add(action.id);
   });
 
   /** Flight-owned ids from ControlState.actions and input:action events (a press counts once per frame). */
@@ -1088,6 +1132,7 @@ export function createFlightController(ctx) {
     for (const id of liveControls.actions) {
       if (!FLIGHT_ACTIONS.has(id)) continue;
       pendingActions.add(id);
+      copilotActions.delete(id);
       liveControls.actions.delete(id);
     }
   }
@@ -1095,10 +1140,16 @@ export function createFlightController(ctx) {
   function performActions() {
     if (pendingActions.size === 0) return;
     const actions = [...pendingActions];
+    const fromCopilot = new Set(copilotActions);
     pendingActions.clear();
+    copilotActions.clear();
     for (const id of actions) {
       if (MODEL_ACTIONS.has(id)) {
-        if (mode === 'sim') modelActions.add(id);
+        if (mode === 'sim') {
+          modelActions.add(id);
+          if (fromCopilot.has(id)) quietModelActions.add(id);
+          else quietModelActions.delete(id);
+        }
         continue;
       }
       performAction(id);
@@ -1219,11 +1270,15 @@ export function createFlightController(ctx) {
   function prepareTickControls(firstTick) {
     copyControlState(tickControls, liveControls);
     tickControls.actions.clear();
+    tickControls.quietActions.clear();
     if (firstTick) {
       for (const id of modelActions) tickControls.actions.add(id);
+      for (const id of quietModelActions) tickControls.quietActions.add(id);
       modelActions.clear();
+      quietModelActions.clear();
     }
     applyInputProfile(tickControls);
+    applyParkingBrake(tickControls);
     env.assists = override.active ? 1 : assistLevel;
     env.handsOff = override.active;
     if (override.active) {
@@ -1535,6 +1590,7 @@ export function createFlightController(ctx) {
     telemetry.crash.active = crash.active;
     telemetry.crash.reason = crash.reason;
     telemetry.crash.progress = crashProgress();
+    telemetry.parkingBrake = mode === 'sim' && parkingBrake.engaged;
     telemetry.craftState = craftState;
   }
 

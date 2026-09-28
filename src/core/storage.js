@@ -42,6 +42,8 @@ const DATA_MIGRATIONS = [
     try {
       localKeys = Object.keys(window.localStorage).filter((key) => key.startsWith('driftwing.'));
     } catch (error) {
+      // Blocked localStorage (a privacy setting): there is nothing v1 could have left to import.
+      context.report(`localStorage is blocked, so no v1 data was imported (${error && error.message ? error.message : error})`);
       return;
     }
     for (const key of localKeys) {

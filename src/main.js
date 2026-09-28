@@ -1,4 +1,6 @@
-// DRIFTWING entry point: boots the renderer, world and every system, then runs the frame loop.
+// DRIFTWING entry point and composition root: boots storage, settings, the renderer
+// (render/renderer.js), the world and every system, then hands the frame loop (core/loop.js) to
+// renderer.setAnimationLoop.
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
@@ -12,10 +14,12 @@ import { createDebugWindSystem } from './dev/debugWind.js';
 import { createFlightController } from './flight/FlightController.js';
 import { createFxSystem } from './render/fx.js';
 import { createInputSystem } from './input/InputManager.js';
+import { createFrameLoop } from './core/loop.js';
 import { createJournal } from './gameplay/journal.js';
 import { createLandmarkSystem } from './world/landmarks.js';
 import { createPerfGovernor, measureDisplayRefresh } from './core/perf.js';
 import { createGEffectsSystem, createPostStack } from './render/post.js';
+import { createRenderer } from './render/renderer.js';
 import { createRingCourseSystem } from './gameplay/rings.js';
 import { createSettings } from './core/settings.js';
 import { createSkySystem } from './render/sky.js';
@@ -25,7 +29,7 @@ import { createWaterSystem } from './render/water.js';
 import { createWaypointSystem } from './gameplay/waypoints.js';
 import { createWindOverlaySystem } from './dev/windOverlay.js';
 import { createWorldGen } from './world/worldgen.js';
-import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName, isFiniteVector, isFiniteQuaternion } from './core/util.js';
+import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName } from './core/util.js';
 import { EventBus } from './core/eventBus.js';
 import { attachTypedEvents } from './core/events.js';
 import { createWindField } from './env/WindField.js';
@@ -72,48 +76,7 @@ async function boot() {
   }
 
   // ---- Renderer: WebGPU first, WebGL2 fallback ---------------------------------
-  // The probe creates (and releases) a real device: an adapter alone does not prove WebGPU works,
-  // since device creation can still fail (for example when the GPU is out of memory).
-  let webgpuAvailable = false;
-  if (params.get('renderer') !== 'webgl' && navigator.gpu) {
-    try {
-      const adapter = await navigator.gpu.requestAdapter({ featureLevel: 'compatibility' });
-      if (adapter) {
-        const device = await adapter.requestDevice();
-        device.destroy();
-        webgpuAvailable = true;
-      }
-    } catch (error) {
-      webgpuAvailable = false;
-    }
-  }
-  function createRenderer(useWebGPU) {
-    // Reversed depth only on WebGPU: on WebGL2 it needs EXT_clip_control (warns otherwise).
-    const created = new THREE.WebGPURenderer({ antialias: true, forceWebGL: !useWebGPU, reversedDepthBuffer: useWebGPU });
-    created.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-    created.setSize(window.innerWidth, window.innerHeight);
-    created.toneMapping = THREE.ACESFilmicToneMapping;
-    created.toneMappingExposure = 1.0;
-    created.shadowMap.enabled = true;
-    created.domElement.id = 'view';
-    created.domElement.setAttribute('tabindex', '0');
-    created.domElement.setAttribute('aria-label', 'DRIFTWING flight view');
-    created.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
-    return created;
-  }
-  let renderer = createRenderer(webgpuAvailable);
-  document.body.prepend(renderer.domElement);
-  await renderer.init();
-  if (webgpuAvailable && !renderer.backend.isWebGPUBackend) {
-    // three.js fell back to WebGL2 on its own after a late WebGPU failure; rebuild the renderer
-    // for WebGL2 so no WebGPU-only option (reversed depth) is left on.
-    renderer.domElement.remove();
-    renderer.dispose();
-    renderer = createRenderer(false);
-    document.body.prepend(renderer.domElement);
-    await renderer.init();
-  }
-  const backend = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2';
+  const { renderer, backend } = await createRenderer(params);
   if (params.get('debug') === '1') console.info(`[DRIFTWING] backend=${backend} three r${THREE.REVISION} seed=${seed}`);
 
   // ---- Scene, camera, shared uniforms ----------------------------------------------
@@ -393,8 +356,7 @@ async function boot() {
   beginPrewarm();
   const fadeStatus = document.getElementById('fade-status');
   if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
-  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind']
-    .filter((name) => ctx.systems[name]);
+  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind'];
 
   // ---- Flight-state snapshot for the copilot (local or remote brain) -----------------
   ctx.getFlightState = () => {
@@ -435,7 +397,7 @@ async function boot() {
     };
   };
 
-  // ---- Photo mode + screenshot -----------------------------------------------------------
+  // ---- Photo mode + screenshot (requested through ctx.requestScreenshot, see the frame loop) -----
   ctx.setPhotoMode = (active) => {
     const next = Boolean(active);
     if (state.photoMode === next) return;
@@ -445,10 +407,6 @@ async function boot() {
     ctx.systems.ui.setPhotoMode?.(next);
     bus.emit('photo:changed', { active: next });
   };
-  // Capture must happen in the same tick as the single render (WebGL2 has no
-  // preserveDrawingBuffer); the pixel ratio is raised BEFORE that render.
-  let screenshotRequest = null;
-  ctx.requestScreenshot = (options = {}) => { screenshotRequest = { scale: options.scale ?? 1.5 }; };
   function captureScreenshot() {
     renderer.domElement.toBlob((blob) => {
       if (!blob) {
@@ -505,149 +463,30 @@ async function boot() {
   }
   window.addEventListener('resize', onResize);
 
-  // ---- Safety net: NaN attitude, terrain clamp, altitude ceiling -------------------------
-  // CLASSIC keeps v1's clamp (terrain and water clearance, 2600 m ceiling). SIM flight has real ground
-  // contact, so here it only keeps the last-resort guard: sinking more than 1 m into the shared height
-  // function is a soft crash. The ceiling comes from the flight controller (SIM: 15000 m).
-  const SIM_PENETRATION_LIMIT = 1;
-  const lastGood = {
-    position: state.player.position.clone(),
-    quaternion: state.player.quaternion.clone(),
-    velocity: state.player.velocity.clone(),
-    heading: spawn.heading,
-  };
-  function enforceSafety() {
-    const player = state.player;
-    if (!isFiniteVector(player.position) || !isFiniteQuaternion(player.quaternion) || !isFiniteVector(player.velocity) || !Number.isFinite(player.speed)) {
-      player.position.copy(lastGood.position);
-      player.quaternion.copy(lastGood.quaternion);
-      player.velocity.copy(lastGood.velocity);
-      player.speed = Math.max(CONFIG.SPEED.STALL, lastGood.velocity.length());
-      bus.emit('safety:nonFinite', { mode: ctx.systems.flight.getMode?.() ?? null });
-      // Let the flight model rebuild its internal integrators (and snap the camera)
-      // from the restored pose, otherwise NaN rates would re-poison it next frame.
-      ctx.systems.flight.resetTo?.({ x: player.position.x, y: player.position.y, z: player.position.z, heading: lastGood.heading });
-    } else {
-      player.quaternion.normalize();
-    }
-    const flight = ctx.systems.flight;
-    const ground = world.groundHeight(player.position.x, player.position.z);
-    if (flight.getMode?.() === 'sim') {
-      if (player.position.y < ground - SIM_PENETRATION_LIMIT) flight.triggerSoftCrash?.('terrain');
-    } else {
-      const floor = Math.max(ground + CONFIG.GROUND_CLEARANCE, CONFIG.WATER_LEVEL + CONFIG.WATER_CLEARANCE);
-      if (player.position.y < floor) {
-        player.position.y = floor;
-        if (player.velocity.y < 0) player.velocity.y = 0;
-      }
-    }
-    const ceiling = flight.getCeiling?.() ?? CONFIG.MAX_ALTITUDE;
-    if (player.position.y > ceiling) {
-      player.position.y = ceiling;
-      if (player.velocity.y > 0) player.velocity.y = 0;
-    }
-    player.groundHeight = ground;
-    player.altitude = player.position.y;
-    player.agl = player.position.y - Math.max(ground, CONFIG.WATER_LEVEL);
-    lastGood.position.copy(player.position);
-    lastGood.quaternion.copy(player.quaternion);
-    lastGood.velocity.copy(player.velocity);
-    if (Number.isFinite(player.heading)) lastGood.heading = player.heading;
-  }
-
-  // ---- Biome tracking ----------------------------------------------------------------------------
-  let biomeTimer = 0;
-  function trackBiome(dt) {
-    biomeTimer -= dt;
-    if (biomeTimer > 0) return;
-    biomeTimer = 0.4;
-    const info = world.biomeAt(state.player.position.x, state.player.position.z);
-    const previous = state.player.biome;
-    state.player.biome = info;
-    if (!previous || previous.key !== info.key) bus.emit('biome:changed', { biome: info, previous });
-  }
-
-  // ---- Main loop --------------------------------------------------------------------------------------
-  const disabledSystems = new Set();
-  let lastTimeMs = null;
-  document.addEventListener('visibilitychange', () => { lastTimeMs = null; });
-  const fade = document.getElementById('fade');
-  let fadeStarted = false;
-  let warmupFrames = 0;
-  let stableFrames = 0;
-  let lastCpuMs = 0;
-  const loopStartMs = performance.now();
-
-  function frame(timeMs) {
-    const rawFrameMs = lastTimeMs === null ? 0 : timeMs - lastTimeMs;
-    let realDt = lastTimeMs === null ? 1 / 60 : (timeMs - lastTimeMs) / 1000;
-    lastTimeMs = timeMs;
-    if (!(realDt > 0) || realDt > 0.25) realDt = 1 / 60;
-    realDt = Math.min(realDt, 1 / 20);
-    const simDt = state.paused ? 0 : realDt;
-    // Unclamped frame time (capped at 0.1 s after a stall) for the fixed-step physics clock.
-    state.time.frameDt = state.paused ? 0 : Math.min(Math.max(rawFrameMs / 1000, 0), 0.1);
-    state.frame++;
-    state.time.elapsed += simDt;
-    state.time.realElapsed += realDt;
-    uniforms.time.value = state.time.elapsed;
-    uniforms.playerPosition.value.copy(state.player.position);
-
-    const cpuStart = performance.now();
-    for (const name of UPDATE_ORDER) {
-      if (disabledSystems.has(name)) continue;
-      try {
-        ctx.systems[name].update(simDt, realDt);
-      } catch (error) {
-        disabledSystems.add(name);
-        console.error(`[DRIFTWING] system "${name}" crashed and was disabled`, error);
-      }
-      if (name === 'flight') {
-        enforceSafety();
-        // state.flight is written from the final (safety-checked) pose.
-        if (!disabledSystems.has('flight')) ctx.systems.flight.publishTelemetry?.();
-      }
-    }
-    if (!state.paused) trackBiome(simDt);
-    // The governor gets the real, unclamped frame interval: it holds the frame target, so a
-    // clamped value would hide exactly the slow frames it has to react to.
-    perf.update({ frameMs: rawFrameMs, cpuMs: lastCpuMs });
-    const shot = screenshotRequest;
-    screenshotRequest = null;
-    // A capture renders at full render scale (and the raised pixel ratio) for this one frame.
-    const endCapture = shot ? perf.beginCapture(shot.scale, 4096 / Math.max(1, window.innerWidth)) : null;
-    if (!fadeStarted) forcePrewarmDrawable();
-    render();
-    lastCpuMs = performance.now() - cpuStart;
-    if (shot) captureScreenshot();
-    if (endCapture) endCapture();
-
-    // The fade lifts once the ground is built AND frames arrive steadily (pipeline
-    // compiles finished), so it never reveals a frozen canvas; 8 s safety cap.
-    if (!fadeStarted) {
-      warmupFrames++;
-      const terrainReady = ctx.systems.terrain.isReadyAround ? ctx.systems.terrain.isReadyAround(state.player.position.x, state.player.position.z) : true;
-      stableFrames = terrainReady && rawFrameMs > 0 && rawFrameMs < 45 ? stableFrames + 1 : 0;
-      if ((warmupFrames > 3 && stableFrames >= 6) || performance.now() - loopStartMs > 8000) {
-        fadeStarted = true;
-        state.ready = true;
+  // ---- Frame loop ---------------------------------------------------------------------------------
+  const loop = createFrameLoop(ctx, {
+    updateOrder: UPDATE_ORDER,
+    render,
+    spawnHeading: spawn.heading,
+    prewarm: {
+      forceDrawable: forcePrewarmDrawable,
+      finish() {
         callSystemHook('endPrewarm');
         endPrewarmProxies();
-        fade.classList.add('clear');
-        debugHandle.readyMs = Math.round(performance.now());
-        bus.emit('game:ready', {});
-      }
-    }
-    debugHandle.frame = state.frame;
-  }
+      },
+    },
+    captureScreenshot,
+  });
+  ctx.requestScreenshot = loop.requestScreenshot;
 
   const debugHandle = {
     ready: false,
     backend,
     revision: THREE.REVISION,
     seed,
-    frame: 0,
-    readyMs: null,
+    get frame() { return state.frame; },
+    /** performance.now() (ms) when the loading fade lifted. */
+    get readyMs() { return loop.readyMs; },
     ctx,
     get state() { return state; },
     getStats() {
@@ -687,14 +526,15 @@ async function boot() {
         clouds: ctx.systems.clouds.getStats ? ctx.systems.clouds.getStats() : null,
         birds: ctx.systems.birds.getStats ? ctx.systems.birds.getStats() : null,
         landmarks: ctx.systems.landmarks.getStats ? ctx.systems.landmarks.getStats() : null,
-        disabledSystems: [...disabledSystems],
+        disabledSystems: [...loop.disabledSystems],
       };
     },
   };
   window.DRIFTWING = debugHandle;
   bus.on('game:ready', () => { debugHandle.ready = true; });
 
-  renderer.setAnimationLoop(frame);
+  // ---- Start ------------------------------------------------------------------------------------------
+  renderer.setAnimationLoop(loop.frame);
 }
 
 

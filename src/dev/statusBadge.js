@@ -1,5 +1,5 @@
-// Dev status badge: backend, three.js revision, fps, a frametime graph against the frame target,
-// render scale and quality level, draw statistics and the detected input devices.
+// Dev status badge: game version, backend, three.js revision, fps, a frametime graph against the
+// frame target, render scale and quality level, draw statistics and the detected input devices.
 //
 // Shown while settings.devBadge is on, and always with ?debug=1. It replaces v1's small FPS badge
 // while it is visible (it shows everything that one did). Samples are only recorded while the
@@ -205,7 +205,7 @@ export function createStatusBadge({ ctx, root, forced = false }) {
     const targetHz = Number(perf.targetHz) || 0;
     element.classList.toggle('dw-fps-ok', targetHz > 0 && fps < targetHz * 0.92 && fps >= targetHz * 0.7);
     element.classList.toggle('dw-fps-low', targetHz > 0 ? fps < targetHz * 0.7 : fps < 30);
-    fields.backend.textContent = `${ctx.backend} · r${THREE.REVISION}`;
+    fields.backend.textContent = `v${ctx.CONFIG.VERSION} · ${ctx.backend} · r${THREE.REVISION}`;
     const refresh = perf.refreshHz ? `display ${perf.refreshHz} Hz` : 'display unmeasured';
     fields.target.textContent = targetHz ? `target ${targetHz} Hz · ${refresh}` : `uncapped · ${refresh}`;
     const quality = ctx.quality || {};

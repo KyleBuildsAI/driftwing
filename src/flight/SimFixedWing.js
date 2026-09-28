@@ -450,7 +450,8 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     if (target !== current && Math.abs(value - flapNotches[current]) > notchSpacing * (0.5 + LEVER_HYSTERESIS)) systems.flapNotch = target;
   }
 
-  function handleActions(actions) {
+  /** quiet: actions the copilot pressed (it confirms them aloud, so no toast). */
+  function handleActions(actions, quiet) {
     if (!actions || actions.size === 0) return;
     for (const action of actions) {
       switch (action) {
@@ -473,7 +474,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
         case 'engineToggle':
           if (powered) {
             systems.running = !systems.running;
-            notify(systems.running ? 'Engine running.' : 'Engine off.', systems.running ? 'success' : 'warning');
+            if (!quiet || !quiet.has(action)) notify(systems.running ? 'Engine running.' : 'Engine off.', systems.running ? 'success' : 'warning');
           } else {
             notify(`The ${craftName} has no engine.`);
           }
@@ -489,7 +490,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
 
   function updateActuators(controls, dt) {
     if (extension && extension.shapeControls) extension.shapeControls(controls, tick);
-    handleActions(controls.actions);
+    handleActions(controls.actions, controls.quietActions);
     readFlapLever(controls.flaps, 'flapLever');
     readFlapLever(controls.antenna, 'antennaLever');
     const onGround = contactReport.onGround;

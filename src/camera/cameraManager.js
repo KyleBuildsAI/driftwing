@@ -34,7 +34,7 @@ import { createCameraRig } from './chase.js';
 import { createCockpitView } from './views/cockpitView.js';
 import { createWingView } from './views/wingView.js';
 import { createFlybyView } from './views/flybyView.js';
-import { createFpvView, fpvUptilt } from './views/fpvView.js';
+import { createFpvView } from './views/fpvView.js';
 import { createInstrumentSet } from '../ui/instruments/index.js';
 import { createInstrumentHud } from '../ui/instrumentHud.js';
 import { createStickReticle } from '../ui/stickReticle.js';
@@ -64,7 +64,7 @@ export function createCameraSystem(ctx) {
     cockpit: createCockpitView(),
     wing: createWingView(),
     flyby: createFlybyView(ctx),
-    fpv: createFpvView(),
+    fpv: createFpvView({ settings, bus }),
   };
   const instruments = createInstrumentSet(ctx);
   const hud = createInstrumentHud(ctx, instruments);
@@ -613,7 +613,7 @@ export function createCameraSystem(ctx) {
         fov: Math.round(camera.fov * 100) / 100,
         near: camera.near,
         zoom: Math.round((1 / zoomTan) * 100) / 100,
-        fpvUptilt: views.fpv.isAvailable(currentRig()) ? fpvUptilt(currentRig()) : null,
+        fpvUptilt: views.fpv.isAvailable(currentRig()) ? views.fpv.uptilt(currentRig()) : null,
         hiddenParts: hiddenParts.length,
         cockpit: cockpit
           ? {

@@ -5,48 +5,318 @@
   <a href="https://kylebuildsai.github.io/driftwing/?seed=ARCH1&amp;time=0.02"><img src="docs/screenshot-night.jpg" width="49%" alt="The glider at night over snowy spires under green aurora curtains and stars"></a>
 </p>
 
-*Golden hour over seed D27TEH, and aurora at night over seed ARCH1. Click either shot to fly that world in your
-browser.*
+*v1: golden hour over seed D27TEH, and aurora at night over seed ARCH1. Click either shot to fly
+that world in your browser.*
 
 > [!NOTE]
-> This game is a single-shot prompt test of Claude Opus 5.5: it was built from one prompt, with no human code
-> edits. See [About this project](#about-this-project) for the prompt and how it was made.
+> DRIFTWING v1 is a single-shot prompt test of Claude Opus 5.5: it was built from one prompt, with
+> no human code edits. v2 is being built in four phases with the same model, one spec prompt per
+> phase. This is **v2 Phase 1** (`2.0.0-phase.1`). See [About this project](#about-this-project)
+> for how it was made.
 
-An ambient infinite-flight exploration game in a single `index.html`. You pilot a low-poly glider over an
-endless procedural world at golden hour. There is no fail state, no fuel and no enemies. An AI copilot named
-WREN rides along: talk to it or type to it, and it can set waypoints, fly the plane, change the time of day
-or lay out a ring course.
+DRIFTWING is a calm flying game. You fly over an endless world that is made up as you go:
+snowy peaks, pine valleys, deserts, island chains and flower meadows, with a sky that lingers at
+golden hour. There is no way to lose, no fuel and no enemies. An AI copilot called WREN rides
+along. Talk or type to it, and it can set waypoints, fly for you, change the time of day or set up
+a ring course.
 
-- **Engine:** three.js r184 with `WebGPURenderer` and an automatic WebGL2 fallback, loaded from a CDN import map.
-  There is no build step. (r184 is pinned on purpose; bump it deliberately after checking the three.js migration
-  notes, since the WebGPU and TSL APIs change between releases.)
-- **World:** chunked heightmap terrain generated in Web Workers from seeded simplex noise. It blends five biomes
-  (snow peaks, pine valleys, dune sea, archipelago, flower meadows) and uses ring LOD with skirts and pooled
-  meshes. Worlds are fully deterministic from the seed shown in the UI, so a seed can be shared.
-- **Atmosphere:** a day and night cycle that lingers at golden hour, a sky dome with sun, moon, stars, aurora
-  and god rays, and fog that always matches the sky. Instanced drifting clouds cast shadows. Water has
-  animated waves and sun glint, and the terrain draws foam at the shoreline. Boid bird flocks, wingtip
-  contrails and wind streaks fill in the rest.
-- **Landmarks:** stone arches, monolith circles, lighthouses on lone islands and drifting hot-air balloons, all
-  logged to a per-seed discovery journal.
+## What is new in v2 Phase 1
+
+<p align="center">
+  <img src="docs/screenshot-cockpit.jpg" width="49%" alt="Inside the bush plane's cabin at golden hour: a panel of steam gauges below the windshield, mountains ahead">
+  <img src="docs/screenshot-jet.jpg" width="49%" alt="The jet from behind, flying between snowy mountains toward a low golden sun, with speed streaks">
+  <img src="docs/screenshot-helicopter.jpg" width="49%" alt="The helicopter hovering over a small lake in a meadow valley with orchards and mountains behind it">
+  <img src="docs/screenshot-controls.jpg" width="49%" alt="The controls panel showing the T.16000M stick tab with live axis bars, button lights and the binding list">
+</p>
+
+*The bush plane's cockpit, the jet at golden hour, the helicopter in a hover, and the controls panel
+with a Thrustmaster stick connected.*
+
+- **Two ways to fly.** **CLASSIC** is the v1 game, exactly as it was: forgiving, and it never
+  stalls into a spin. **SIM** is a real flight model, with lift, drag, stalls, wind, ground contact
+  and landings. An assists slider (0-100 %) decides how much help you get. Switch at any time with
+  the pill in the top left or the **V** key, even mid-flight.
+- **Six aircraft**, keys **1-6**:
+  1. the glider (the v1 plane, a real sailplane in SIM);
+  2. a bush plane;
+  3. a supersonic jet;
+  4. a helicopter;
+  5. a wingsuit with a parachute;
+  6. an FPV racing drone.
+  Every one flies in both modes.
+- **Joysticks and HOTAS.** Xbox-style gamepads work out of the box, and so does the Thrustmaster
+  T.16000M FCS Flight Pack (stick, throttle and rudder pedals). There is a controls panel to rebind
+  anything, and a calibration wizard.
+- **Cockpits and instruments.** A cockpit view with a working instrument panel for each craft, plus
+  wing, flyby and FPV cameras.
+- **Procedural sound.** Engines, rotors, wind, a stall horn, a variometer and touchdowns, all
+  generated live, with no audio files.
+- **Wind you can use.** Thermals, ridge lift and gusts in SIM, so the glider can climb for real.
+
+## Play it
+
+### On your Windows PC (recommended)
+
+1. **Install Node.js** (the free "LTS" version) from <https://nodejs.org/en/download>. You only do
+   this once.
+2. **Double-click `start-driftwing.bat`** in this folder. The first time, it downloads what the game
+   needs, which takes a minute and needs an internet connection.
+3. The game opens in your browser at **<http://127.0.0.1:5199>**. A black window stays open while
+   you play; close it to stop the game.
+
+Always play at that exact address. Your settings, key bindings and joystick calibration are saved
+in the browser for `http://127.0.0.1:5199` only. The same game at another address (for example
+`localhost` or a different port) would start with none of them. That is why the game always uses
+port 5199 and refuses to start on another one.
+
+On macOS or Linux, run `npm install` once and then `npm run dev` in this folder, and open
+<http://127.0.0.1:5199>.
+
+### Online
+
+The version on GitHub Pages is v1, which is what CLASSIC mode plays:
+<https://kylebuildsai.github.io/driftwing/>. Share a world by copying the URL; it always carries
+the seed, for example <https://kylebuildsai.github.io/driftwing/?seed=K7Q2ZD>.
+
+## Controls at a glance
+
+The full list, including every gamepad and HOTAS button, is in [docs/controls.md](docs/controls.md).
+Everything can be rebound in the controls panel (`.`).
+
+| action | CLASSIC | SIM |
+| --- | --- | --- |
+| Pitch and bank | mouse (click the view to capture it), arrow keys, A / D | the same; the mouse is a virtual stick that stays where you leave it |
+| Rudder | Q / E | Q / E |
+| Throttle | W / S, mouse wheel | W / S move the throttle lever, mouse wheel |
+| Boost / barrel roll | Space / double-tap A or D | (off in SIM) |
+| Craft ability | | Space (water ballast, smoke, afterburner, hover hold, parachute, drone flight mode) |
+| Gear / flaps / airbrake | | G / F and Shift+F / hold B |
+| Switch CLASSIC / SIM | V | V |
+| Pick a craft | 1-6, or [ and ] | 1-6, or [ and ] |
+| Change view | Numpad 8 cockpit, Numpad 2 chase | C cycles views; Numpad 8 / 2 as well |
+| Waypoint ahead | G | N |
+| Relaunch, engine, parachute | Backspace, Z, U | Backspace, Z, U |
+| Talk to WREN | M (mic), hold ` (push to talk), Enter or / to type | the same |
+| WREN's voice on / off | Shift+V | Shift+V |
+| Photo mode, journal, help | P, J, H | P, J, H |
+| Settings, controls panel | `,` and `.` | `,` and `.` |
+
+- **Mouse:** right-drag looks around, and a middle click recenters the view.
+- **Touch:** the on-screen joystick and throttle slider work in both modes.
+- **Gamepad** (Xbox-style): left stick flies, triggers are the throttle, bumpers the rudder, A is
+  boost or the craft ability, and the right stick looks around.
+- **HOTAS** (T.16000M + TWCS + TFRP):
+  - the stick flies, and its twist is the rudder until the pedals move;
+  - the throttle lever is the throttle (the collective on the helicopter);
+  - the pedals and toe brakes steer and brake;
+  - the rocker trims, the antenna slider sets flaps or zoom, and the mini-stick looks around;
+  - the trigger is push-to-talk, and the stick hat snaps the view.
+
+## Settings
+
+Open Settings with `,` or the gear icon. There are five tabs:
+
+- **Flight**:
+  - the assists slider for the current craft;
+  - start on the ground (for take-off practice);
+  - units (km/h and metres, or knots and feet);
+  - the instrument HUD overlay and landing callouts;
+  - the FPV drone's camera tilt (0-40 degrees), stick expo and maximum rotation rate.
+- **Graphics**: quality preset, frame target (Auto uses your screen's refresh rate), dynamic
+  resolution, FPS display, and the field of view for each camera.
+- **Sound**: master volume and a mixer for engine, environment, interface, WREN and music.
+- **Controls**:
+  - mouse sensitivity and invert pitch;
+  - HOTAS options: twist yaw, the afterburner detent, and what to do when a HOTAS connects;
+  - buttons that open the controls panel and the calibration wizard.
+- **General**:
+  - day length and freezing time;
+  - WREN's voice, chatter and remote brain;
+  - the world seed;
+  - developer tools (status badge, wind arrows).
+
+Everything is saved in the browser for `http://127.0.0.1:5199` and survives restarts.
+
+## WREN, the copilot
+
+WREN's default brain is a local keyword grammar and needs no network. Speak with the mic button
+(Web Speech API; Chrome and Edge), hold the backquote key or the HOTAS trigger to talk, or type into
+the command bar. Things to try:
+
+- "Where am I?", "Find mountains", "Take us there", "Set a waypoint", "Autopilot on", "Head west"
+- "Make it night", "Golden hour", "Ring course", "Photo mode", "Journal"
+- "Switch to the helicopter", "Sim mode", "Assists down", "Cockpit view", "Deploy chute",
+  "Engine off", "Relaunch", "Calibrate controls", "Airspeed", "How was my landing?"
+
+**Remote brain.** `RemoteCopilot` can send each request to your own HTTP endpoint (for example one
+backed by a language model) and falls back to the local grammar after 800 ms. A reference server
+is included:
+
+```bash
+npm run copilot-server
+```
+
+In Settings, General, turn on **Remote brain** and keep the endpoint
+`http://localhost:3000/copilot`. If port 3000 is reserved on your machine (common on Windows with
+Hyper-V or WSL), run the server on another port, for example `PORT=3300 npm run copilot-server`, and
+change the endpoint to match.
+
+The server answers from its own rules. If `ANTHROPIC_API_KEY` is set in its environment, it asks
+Claude first (model from `COPILOT_MODEL`, default `claude-haiku-4-5`). The key never reaches the
+browser, and the server only answers the game's own origins. The full contract is in
+[docs/copilot-api.md](docs/copilot-api.md).
+
+## The single-file build
+
+```bash
+npm run build:single
+npm run serve:single
+```
+
+The first command writes one self-contained file, `dist-single/index.html`, with everything
+inlined, including the terrain worker. The second serves it at <http://127.0.0.1:5199>, the same
+address as the game, so it uses the same saved settings. Stop the dev server first, since both use
+port 5199. Serve the file from a local web server rather than opening it directly: the game is
+tested that way. It can also be copied to any static web host, but bindings saved there belong to
+that site.
+
+## URL parameters
+
+| parameter | example | effect |
+| --- | --- | --- |
+| `seed` | `?seed=K7Q2ZD` | Fly a specific world. The URL always carries the current seed, so you can share it |
+| `time` | `?time=0.02` | Start at a time of day from 0 to 1 (0 is midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset) |
+| `renderer` | `?renderer=webgl` | Force the WebGL2 fallback |
+| `debug` | `?debug=1` | Show the dev badge and log the backend and every controller's id to the console |
+| `touch` | `?touch=1` | Force the on-screen touch controls |
+
+## Troubleshooting
+
+| problem | what to do |
+| --- | --- |
+| **"Node.js is not installed"** or the window closes at once | Install the LTS version from <https://nodejs.org/en/download>, then double-click `start-driftwing.bat` again. The script opens that page for you when Node is missing or older than version 20 |
+| **Port 5199 is already in use** | DRIFTWING is probably already running: open <http://127.0.0.1:5199>, or close the other black DRIFTWING window first. If another program uses port 5199, close it. The game does not move to another port on purpose, because your saved settings belong to this one |
+| **No sound** | Browsers only allow sound after you click or press a key. If a "Sound off - click to enable" pill appears (bottom right), click it. Then check the volumes in Settings, Sound |
+| **WebGPU or WebGL2?** | The game uses WebGPU when your browser and graphics driver support it (current Chrome and Edge), and switches to WebGL2 by itself otherwise. Both look and play the same. The status badge (Settings, General, or `?debug=1`) shows which one is running. Add `?renderer=webgl` to force WebGL2 if WebGPU misbehaves on your machine. If the game shows "could not start", update the browser |
+| **The HOTAS or gamepad is not detected** | Browsers hide controllers until you **press a button** on each one while the game tab is focused. The controls panel (`.`) says "Press any button on your stick and throttle" until both appear. Use Chrome or Edge, and plug the pedals into the throttle before plugging the throttle into USB. `?debug=1` logs each controller's id in the console (F12) |
+| **The joystick drifts or feels wrong** | Run the calibration wizard (controls panel, **Calibrate**) with the stick centred and your feet off the pedals, and move every axis to its limits. The steps are in [docs/controls.md](docs/controls.md#calibration-wizard) |
+| **Settings or bindings disappeared** | Check that the address bar says exactly `http://127.0.0.1:5199`. Private windows do not keep saved data |
+| **The mic does not work** | Voice needs Chrome or Edge and microphone permission. Typing to WREN always works |
+
+## For developers
+
+### Scripts
+
+| command | what |
+| --- | --- |
+| `npm run dev` | Vite dev server at <http://127.0.0.1:5199> (strict port) |
+| `npm run build` | production build into `dist/` |
+| `npm run build:single` | one self-contained `dist-single/index.html` |
+| `npm run preview` | serves `dist/` at <http://127.0.0.1:5199> |
+| `npm run serve:single` | serves `dist-single/` at <http://127.0.0.1:5199> (`tools/serve.mjs`, no dependencies) |
+| `npm run copilot-server` | the reference remote brain for WREN |
+| `npm test` | builds the single file and runs the headless smoke test on it |
+
+three.js is pinned to exactly `0.184.0` and imported only as `three/webgpu`, `three/tsl` and
+`three/addons/...`, so there is one copy. Vite `7.3.6` and `vite-plugin-singlefile` build it.
+
+### Folder layout
+
+```
+index.html               page shell, glass UI markup
+src/main.js              composition root: boot, systems, frame loop
+src/core/                config, storage (IndexedDB), settings, events, fixed-step clock, frame loop, perf
+src/render/              renderer boot, post stack, sky, clouds, water, birds, effects
+src/world/               world generator (shared height function), terrain worker and chunks, landmarks
+src/flight/              flight controller, arcade and SIM models, assists, autopilot, trim, ground contact
+src/craft/               craft registry and the six craft modules
+src/input/               InputManager, keyboard / mouse / touch, gamepad and HOTAS, bindings, calibration
+src/camera/              camera manager, chase rig, cockpit, wing, flyby and FPV views
+src/audio/               AudioEngine, mixer, engine synths, cues, callouts
+src/env/                 WindField
+src/ui/                  glass UI, pill, picker, settings, controls panel, instruments
+src/copilot/             WREN: local grammar, remote brain, aircraft actions
+src/gameplay/            journal, ring courses, waypoints
+src/dev/                 dev badge, wind overlay, debug wind source, mock gamepads, test harnesses
+tools/                   smoke test, harness runner, parity proof, flight labs, copilot server, static server
+legacy/v1.html           the original single-file v1 game
+docs/                    architecture, controls, copilot API, screenshots
+start-driftwing.bat      one-click start for Windows
+```
+
+### Tests, labs and harnesses
+
+- **Smoke test.**
+  `node tools/smoke-test.mjs --file dist-single/index.html [--query "renderer=webgl"] [--steps-file steps.json] [--out dir]`
+  loads the game in headless Chrome or Edge (set `CHROME_PATH` if the browser is elsewhere). It
+  fails on any console error or warning, runs scripted steps (`wait`, `press`, `down`, `up`,
+  `click`, `move`, `eval`, `shot`), and saves screenshots. `window.DRIFTWING` exposes `ready`,
+  `ctx`, `state` and `getStats()` for scripted checks.
+- **CLASSIC parity.** `node tools/arcade-parity.mjs --suite all` checks that CLASSIC flies
+  bit-for-bit like v1.
+- **Flight labs.** `node tools/flight-lab.mjs` covers the glider and bush plane, and
+  `node tools/lab/jet.mjs` (also `helicopter.mjs`, `wingsuit.mjs`, `fpv.mjs`) the others. They fly
+  the SIM models headless and check them against their targets.
+- **Test harnesses** (dev server only).
+  - `?test=1` flies all six craft in both modes across three seeds and reports fps, frame times,
+    NaN events, terrain penetrations, soft crashes and heap growth.
+  - `?test=hotas` checks the HOTAS pipeline with mock devices.
+  - `node tools/run-harness.mjs --test 1|hotas` runs either one headlessly.
+
+### Documentation
+
+- [docs/architecture.md](docs/architecture.md): the module map, the frame loop, every system
+  contract, and where Phases 2-4 plug in.
+- [docs/controls.md](docs/controls.md): every default binding, calibration, and a HOTAS hardware
+  checklist.
+- [docs/copilot-api.md](docs/copilot-api.md): the remote copilot request, response and action
+  schema.
+- [CHANGELOG.md](CHANGELOG.md): what changed in each version.
+
+## Known limitations
+
+- The first click or key press unlocks audio. Creating the browser's AudioContext can take around
+  0.1 s on some machines, so a single frame may stutter at that moment.
+- The WebGL2 fallback takes a few seconds longer to start than WebGPU, because WebGL compiles its
+  shaders synchronously.
+- The Thrustmaster product ids and button numbers are the published ones and have been tested with
+  mock devices. The first session with the real hardware should follow the checklist in
+  [docs/controls.md](docs/controls.md#hotas-hardware-checklist). Every binding can be changed in
+  the controls panel if a button reports differently.
+- Voice input uses the Web Speech API, which works in Chrome and Edge and needs microphone
+  permission.
 
 ## About this project
 
-DRIFTWING is a single-shot prompt test of **Claude Opus 5.5**, run to gauge the model's quality and ability on a
-large, open-ended build. The game and its tooling came from one prompt, reproduced below. Working in
-Claude Code, Opus 5.5:
+DRIFTWING started as a single-shot prompt test of **Claude Opus 5.5**, run to gauge the model's
+quality and ability on a large, open-ended build. v1 and its tooling came from one prompt,
+reproduced below. Working in Claude Code, Opus 5.5:
 
 - planned the architecture and wrote a module contract;
 - researched the pinned three.js r184 WebGPU and TSL APIs against the library source;
 - split the work across parallel sub-agents, then reviewed, fixed and polished the result;
 - verified it in headless Chrome on both WebGPU and WebGL2.
 
-No person wrote or edited any of the game's code. The session did pause twice at usage limits and resumed with
-a plain "continue". Every later message only asked to publish the finished game: this repository, GitHub
-Pages, the release, the topics, these screenshots and this note.
+No person wrote or edited any of v1's code. The session did pause twice at usage limits and resumed
+with a plain "continue". Every later message only asked to publish the finished game: this
+repository, GitHub Pages, the release, the topics, the v1 screenshots and this note. v1 is tagged
+`v1.0.0` and kept as [legacy/v1.html](legacy/v1.html).
+
+**v2** is being built in four phases with the same model, each from one spec prompt:
+
+1. **Phase 1 (this version)**: the sim core, HOTAS, the first six craft, cockpits and procedural
+   audio.
+2. **Phase 2**: an event director with procedural environment spawns.
+3. **Phase 3**: more craft.
+4. **Phase 4**: Spotify, WebXR VR, a flight recorder with replay, and a multiplayer wingman.
+
+For Phase 1, Opus 5.5 turned the single file into a Vite project with a proof that CLASSIC still
+matches v1 bit for bit. It then built the new systems with parallel sub-agents in separate git
+worktrees, one merge per milestone, and reviewed and verified each wave. The Phase 1 screenshots
+above were captured from the single-file build with the headless smoke-test tool.
 
 <details>
-<summary>The original prompt</summary>
+<summary>The original v1 prompt</summary>
 
 ```text
 Build a complete, self-contained browser game in a SINGLE index.html file. No build step, no external assets, libraries only via CDN importmap. Use three.js (latest) with WebGPURenderer and automatic WebGL fallback.
@@ -96,163 +366,9 @@ POLISH RULES:
 
 </details>
 
-One deliberate departure from the prompt: it asks for the latest three.js, but the project pins r184. That is
-the version the author's build standards had verified, and pinning keeps the WebGPU and TSL APIs from shifting
-underneath the game.
+One deliberate departure from the v1 prompt: it asks for the latest three.js, but the project pins
+r184. That is the version the author's build standards had verified, and pinning keeps the WebGPU
+and TSL APIs from shifting underneath the game. v2 keeps the same pin, now as an npm dependency.
 
-## Running it
-
-**Play online:** <https://kylebuildsai.github.io/driftwing/> (GitHub Pages). Share a world by copying the URL; it
-always carries the seed, for example <https://kylebuildsai.github.io/driftwing/?seed=K7Q2ZD>.
-
-To run it locally instead:
-
-The game is one self-contained file: double-click `index.html` to play. It needs an internet connection the
-first time to fetch three.js from the jsDelivr CDN. Browsers with WebGPU use it; the rest fall back to WebGL2
-automatically. It was tested in Chrome on Windows on both backends and from `file://`.
-
-For microphone input the Web Speech API needs a secure origin: the online version (HTTPS) works, and locally you
-can serve it over `http://localhost`:
-
-```bash
-npm run serve
-```
-
-Then open <http://localhost:8080/>. The server has no dependencies; `node tools/serve.mjs 8080` works without
-`npm install`.
-
-### URL parameters
-
-| Parameter | Example | Effect |
-| --- | --- | --- |
-| `seed` | `?seed=K7Q2ZD` | Fly a specific world (letters, digits and dashes). The URL always carries the current seed, so you can share it. |
-| `time` | `?time=0.02` | Start at a day time from 0 to 1 (0 is midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset). |
-| `renderer` | `?renderer=webgl` | Force the WebGL2 fallback. |
-| `debug` | `?debug=1` | Show the FPS / backend / draw-call badge. |
-| `touch` | `?touch=1` | Force the on-screen touch controls. |
-
-## Controls
-
-| Action | Keyboard / mouse | Touch |
-| --- | --- | --- |
-| Pitch and bank | Mouse (click the view to capture it, `Esc` releases), or drag with the left button; arrow keys; `A` / `D` bank. Banking turns the glider; let go and the wings level. | Left joystick |
-| Throttle | `W` / `S`, mouse wheel | Right slider |
-| Boost (on cooldown) | `Space` | Boost button |
-| Barrel roll | Double-tap `A` or `D` | Roll buttons |
-| Rudder / fine control | `Q` / `E`, hold `Shift` | |
-| Ask WREN (command bar) | `C`, `Enter` or `/` | Chat button |
-| Microphone | `M` or the mic button | Mic button |
-| Photo mode | `P` (then `WASD` / `Q` `E` to move, mouse to look, wheel to zoom, `K` to capture) | |
-| Journal / Help | `J` / `H` | Menu |
-| Cycle time of day | `T` | |
-| Ring course (start / cancel) | `R` | |
-| Waypoint ahead / clear | `G` / `X` | |
-| Autopilot toggle | `O` | |
-| Copilot voice on/off | `V` | |
-| FPS badge / hide HUD | `I` / `Tab` | |
-
-The HUD fades out after three seconds without input and comes back on any input.
-
-Settings (gear icon) cover the day length (2 to 30 minutes, or frozen), quality (auto, or a fixed preset from
-minimal to ultra), mouse sensitivity, inverted pitch, WREN's voice and chatter, the remote copilot, volume, an FPS
-badge and HUD auto-hide. On auto quality the game lowers view distance and resolution before frames start to drop,
-and raises them again when there is headroom.
-
-## WREN, the copilot
-
-WREN's default brain is a local keyword grammar. It needs no network access. Speak with the mic button (Web
-Speech API; Chrome and Edge) or type into the command bar. Every command is also available from the quick
-chips, so voice is never required. Things to try:
-
-- "Where am I?", "How high are we?", "What time is it?"
-- "Find mountains", "Find the ocean", "Find the desert", "Find a landmark", "Take us there"
-- "Set a waypoint", "Clear the waypoint", "Autopilot on", "Head west", "Climb", "Descend"
-- "Make it night", "Dawn", "Golden hour"
-- "Barrel roll", "Ring course", "Cancel the course", "Photo mode", "Journal"
-
-WREN answers with speech synthesis (after your first click or key press, as browsers require) and a subtitle.
-
-### Remote copilot brain
-
-`RemoteCopilot` POSTs `{ flightState, transcript }` to a configurable endpoint and expects `{ speech, action }`
-back. If no valid reply arrives within 800 ms, it falls back to the local grammar. A reference server is
-included:
-
-```bash
-npm run copilot-server
-```
-
-Then open Settings in the game, turn on **Remote copilot** and keep the endpoint `http://localhost:3000/copilot`.
-If port 3000 is reserved on your machine (common on Windows with Hyper-V or WSL), run the server on another
-port, for example `PORT=3300 npm run copilot-server`, and set the endpoint to `http://localhost:3300/copilot`.
-The server answers from its own rules. If `ANTHROPIC_API_KEY` is set in its environment, it asks Claude first
-(model from `COPILOT_MODEL`, default `claude-haiku-4-5-20251001` for latency). The key is read only from the
-environment and never sent to the browser. The server only answers the game's own origins (`file://` pages and
-`localhost` / `127.0.0.1` on any port); add others with `ALLOWED_ORIGINS`, so an unrelated website cannot spend
-your key through it. `COPILOT_TEST_DELAY=1` enables the `?delay=ms` test aid for exercising the 800 ms fallback.
-See the header of `tools/copilot-server.mjs` for all options.
-
-## Testing
-
-```bash
-npm install
-npm test
-```
-
-`npm test` runs `tools/smoke-test.mjs`. It loads the game in your local Chrome or Edge through puppeteer-core
-(set `CHROME_PATH` if the browser is elsewhere), fails on any console error or warning, and saves two
-screenshots taken a few seconds apart to prove the render loop is live. Useful flags:
-
-```bash
-node tools/smoke-test.mjs --query "seed=K7Q2ZD&renderer=webgl" --seconds 12
-node tools/smoke-test.mjs --steps '[{"press":"KeyP"},{"wait":800},{"shot":"photo"}]'
-```
-
-`window.DRIFTWING` exposes `ready`, `backend`, `frame`, `getStats()` and the game context for scripted checks.
-
-## How it is built
-
-`index.html` holds all CSS, markup and one module script:
-
-1. **Core.** Config, the deterministic world generator (`createWorldGen`: seeded simplex noise, climate and
-   biome weights, heights, face colours, vegetation scatter, landmark sites), shared state, the event bus,
-   settings, the spawn finder, the post-processing stack, the performance governor and the main loop.
-2. **Systems.** Terrain, sky, water, clouds, birds, effects, input, flight, camera, landmarks, journal,
-   waypoints, rings, audio, copilot and UI. Each is created by a `create*System(ctx)` factory and updated
-   in a fixed order each frame.
-
-three.js is pinned to r184 and every module fetched from the CDN is checked against a SHA-384 hash in the import
-map's `integrity` block, so a tampered or changed file is refused.
-
-The terrain Web Worker is created from a Blob URL. Its source is `createWorldGen.toString()` plus the
-worker's mesh builder, so the worker and the main thread share one implementation of the world. The main
-thread uses the same generator for the exact ground height under the glider, which keeps the aircraft from
-falling through chunks that have not loaded yet.
-
-Safety guards: `dt` is clamped against tab-blur spikes, the attitude is checked for NaN, the altitude is
-clamped to terrain and water, the worker queue is bounded and stale jobs are dropped, and the performance
-governor reduces view distance and resolution before the frame rate drops.
-
-## Known limitations
-
-- The first click or key press unlocks audio. Creating the browser's AudioContext can take around 0.1 s on some
-  machines, so a single frame may stutter at that moment.
-- On some GPUs the very first ring course causes one short hitch as the driver prepares it. Every shader the game
-  uses is compiled behind the loading fade, but first-draw work inside the driver can still show once.
-- The WebGL2 fallback takes a few seconds longer to start than WebGPU, because WebGL compiles its shaders
-  synchronously.
-- Voice input uses the Web Speech API, which works in Chrome and Edge and needs microphone permission. Some browsers
-  refuse the microphone on `file://`; use `npm run serve` if the mic is blocked. Typing to WREN always works.
-- three.js loads from the jsDelivr CDN, so the first launch needs a network connection.
-
-## Project layout
-
-```
-index.html               the game
-tools/serve.mjs          zero-dependency static server (npm run serve)
-tools/smoke-test.mjs     headless console + screenshot check (npm test)
-tools/copilot-server.mjs reference remote brain for WREN (npm run copilot-server)
-package.json             scripts and the puppeteer-core dev dependency
-```
-
-No binary assets: everything, including the glider, trees, landmarks and sounds, is generated in code.
+No binary assets: everything, including the aircraft, trees, landmarks and sounds, is generated in
+code.

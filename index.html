@@ -353,6 +353,22 @@
           <div class="dw-row"><span>Landing callouts</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Landing callouts" data-setting="hud.landingCallouts"><span></span></button></div>
           <div class="dw-row"><span>Hide HUD when idle</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="Hide HUD when idle" data-setting="hudAutoHide"><span></span></button></div>
         </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">FPV drone</h3>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fpv-uptilt">Camera uptilt</label><span class="dw-row-value" data-value-for="fpv.uptilt">25°</span></div>
+            <input class="dw-range" id="dw-set-fpv-uptilt" type="range" min="0" max="40" step="1" data-setting="fpv.uptilt" data-kind="degrees">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fpv-rate">Max rate</label><span class="dw-row-value" data-value-for="fpv.rate">670°/s</span></div>
+            <input class="dw-range" id="dw-set-fpv-rate" type="range" min="200" max="1200" step="10" data-setting="fpv.rate" data-kind="rate">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fpv-expo">Expo</label><span class="dw-row-value" data-value-for="fpv.expo">0.30</span></div>
+            <input class="dw-range" id="dw-set-fpv-expo" type="range" min="0" max="1" step="0.05" data-setting="fpv.expo" data-kind="decimal">
+          </div>
+          <p class="dw-note">These apply to the FPV drone: the camera tilt in every mode, and in SIM the rate curve (the rotation rate at full stick, and how soft the stick is around centre).</p>
+        </div>
       </div>
 
       <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-graphics" aria-labelledby="dw-tab-graphics" data-tabpanel="graphics" hidden>

@@ -84,8 +84,8 @@ invalid.
 
 The game runs the action and composes the final line:
 
-- **The action failed** (for example the jet is not installed yet, or there is no chute on the
-  glider): WREN says the game's own explanation. Your speech is dropped, so the pilot never hears a
+- **The action failed** (for example there is no chute on the glider, or the engine was asked
+  to stop in CLASSIC): WREN says the game's own explanation. Your speech is dropped, so the pilot never hears a
   success you could not confirm.
 - **An informative action succeeded** (`describe`, `find`, `waypoint`, `journal`, `ringCourse`,
   `setAssists`): your speech comes first, then the game's precise facts (distances, the new assist
@@ -137,7 +137,7 @@ Numbers are rounded as shown, and a value that cannot be read is sent as `0` or 
 | `mode` | `'classic'` \| `'sim'` | flight model. CLASSIC is v1's forgiving arcade flight. SIM is the real flight model, with assists, stalls and ground contact |
 | `craft` | string | active craft id: `glider`, `bushplane`, `jet`, `helicopter`, `wingsuit` or `fpv` |
 | `craftName` | string | display name, for example `Bush plane` |
-| `availableCraft` | string[] | the craft installed in this build. `setCraft` to anything else is refused |
+| `availableCraft` | string[] | the craft installed in this build (all six in Phase 1). `setCraft` to anything else is refused |
 | `units` | `'metric'` \| `'aviation'` | the pilot's units. Metric is km/h and metres; aviation is knots and feet. Speak in them |
 | `view` | string or `null` | last camera view the game reported (`chase`, `cockpit`, `wing`, `flyby`, `fpv`). `null` until the first view change |
 | `capabilities` | `{ engine, chute, flaps, throttle }` booleans | what the craft has. In CLASSIC `throttle` is always true |
@@ -212,10 +212,10 @@ instead. Optional parameters may be omitted or `null`. Extra unknown keys are ig
 | `setCraft` | `craft`: `glider` \| `bushplane` \| `jet` \| `helicopter` \| `wingsuit` \| `fpv` (case-insensitive) | any other value is invalid | writes the `craft` setting. The flight controller applies it or refuses it. A craft that is not in `availableCraft` is refused with a friendly line that names the installed craft. If SIM is not available for the new craft, it flies in CLASSIC and WREN says so |
 | `setMode` | `mode`: `classic` \| `sim` | any other value is invalid | writes the `mode` setting. WREN reports whether the controller accepted it ("SIM mode. Real aerodynamics now...") or kept CLASSIC |
 | `setAssists` | exactly one of: `level` (number 0..1, rounded to 0.01) or `change` (`up` \| `down` \| `full` \| `off`) | both or neither, a level outside 0..1, or an unknown change is invalid | sets the assists of the active craft. `up` and `down` move to the next 25 % step, `full` is 100 % and `off` is 0 %. WREN reports the new level and what is active ("auto-coordination, auto-trim and stall warning, with AoA limiter at part strength"). In CLASSIC it adds that assists apply in SIM |
-| `setView` | `view`: `cockpit` \| `chase` | any other value is invalid | sends the `viewForward` or `viewBack` input action (`input:action`, source `copilot`), then waits up to 1.2 s for the camera to confirm the change. If the camera does not switch, WREN says so |
+| `setView` | `view`: `cockpit` \| `chase` | any other value is invalid | sends the `viewForward` or `viewBack` input action (`input:action`, source `copilot`), then waits up to 1.2 s for the camera to confirm the change. On the FPV drone the first-person view is its FPV camera (`view: 'fpv'`), which counts as the cockpit. If the camera does not switch, WREN says so |
 | `deployChute` | none | | refused with "No chute on the ..." when the craft has no chute. Otherwise sends `chuteDeploy` and confirms only when the canopy is open (`craftState.canopy`). The chute works in SIM |
 | `engine` | `enabled` (boolean, required) | a missing or non-boolean value is invalid | refused on craft without an engine, and in CLASSIC (where the engine always runs). If the engine is already in that state, WREN says so. Otherwise sends `engineToggle` and confirms only when `engineOn` changes (up to 1.2 s) |
-| `relaunch` | none | | the craft's relaunch: aerotow to 1000 m above the ground for the glider (refused above tow height, or while on tow), a peak launch for the wingsuit, or an airstart 300 m up for the others |
+| `relaunch` | none | | the craft's relaunch: aerotow to 1000 m above the ground for the glider (refused from 950 m above the ground, or while on tow), a dive from the nearest high peak for the wingsuit, or an airstart 300 m up for the others (the helicopter and the drone come back hovering). Refused during a soft-crash reset |
 | `calibrate` | `calibrate` (boolean, optional; the wizard always opens) | a non-boolean value is invalid | opens the controls panel with the calibration wizard (`ui:openControls { calibrate: true }`). It is refused honestly when this build has no controls panel |
 
 Everything the local grammar says maps onto these same actions, so a remote brain can do
@@ -239,23 +239,27 @@ unknown path, `405` for anything but POST on `/copilot`, and `413` for a body ov
 Switch craft (the game confirms or refuses):
 
 ```json
-request  { "transcript": "let's take the cub", "flightState": { "mode": "sim", "craft": "glider", "availableCraft": ["glider", "bushplane"], "...": "..." } }
+request  { "transcript": "let's take the cub", "flightState": { "mode": "sim", "craft": "glider", "availableCraft": ["glider", "bushplane", "jet", "helicopter", "wingsuit", "fpv"], "...": "..." } }
 response { "speech": "", "action": { "type": "setCraft", "craft": "bushplane" } }
 heard    "Bush plane it is."
 ```
 
-A craft that is not installed:
+An action the craft cannot do (your speech is dropped, and the game's explanation is spoken):
 
 ```json
-response { "speech": "Here comes the jet!", "action": { "type": "setCraft", "craft": "jet" } }
-heard    "The jet isn't in this hangar yet. Right now we can fly the glider and the bush plane."
+response { "speech": "Chute's out!", "action": { "type": "deployChute" } }
+heard    "No chute on the glider."
 ```
+
+A `setCraft` to a craft that is not in `availableCraft` is refused the same way ("... isn't in
+this hangar yet. Right now we can fly ..."). Every Phase 1 build installs all six craft, so this
+only happens in a build that registers fewer.
 
 Assists, with a lead-in (informative, so both parts are spoken):
 
 ```json
 response { "speech": "Easing off the training wheels.", "action": { "type": "setAssists", "change": "down" } }
-heard    "Easing off the training wheels. Assists at 75 percent for the bush plane: auto-coordination, auto-trim and stall warning, with AoA limiter, G limiter and auto-level at part strength."
+heard    "Easing off the training wheels. Assists at 75 percent for the bush plane: auto-coordination, auto-trim and stall warning, with AoA limiter, G limiter, auto-level, flight-path hold, bank protection, pitch protection and overspeed protection at part strength."
 ```
 
 A question the endpoint answers from flightState:
