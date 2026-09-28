@@ -359,16 +359,29 @@ function loadAtFrame(processLoad, machineLoad, gpuLoad, timeMs) {
   };
 }
 
+/**
+ * The machine's CPU load that is not ours (%): the whole machine minus the harness's own processes.
+ * It also covers processes whose counters cannot be read (protected processes, virtual machines),
+ * which the named other-process figure leaves out.
+ */
+function notOurs(machinePct, ownPct) {
+  if (!Number.isFinite(machinePct) || !Number.isFinite(ownPct)) return null;
+  return Math.round(Math.max(0, machinePct - ownPct) * 10) / 10;
+}
+
 /** Every slow frame with its attribution and the load evidence at that moment, then the averages. */
 function slowFrameEvidence(report) {
-  const lines = ['  frames over the limit, with the load at that moment (other = every process but the harness\'s Chrome and node):',
-    '    run  craft       view   at s     ms  cause       scripts/blocking ms  otherCPU%  ownCPU%  otherGPU%  ownGPU%  machineCPU%  GPU%  busiest other processes'];
+  const lines = ['  frames over the limit, with the load at that moment (other = the named processes other than the harness\'s Chrome and node; notOurs = the whole machine minus ours):',
+    '    run  craft       view   at s     ms  cause       scripts/blocking ms  otherCPU%  notOurs%  ownCPU%  otherGPU%  ownGPU%  machineCPU%  GPU%  busiest other processes'];
   const cell = (value, width) => String(value ?? 'n/a').padStart(width);
   const spikeOther = [];
+  const spikeNotOurs = [];
   for (const run of report.runs) {
     for (const frame of (run.slowFrameList ?? []).slice().sort((first, second) => first.at - second.at)) {
       const load = frame.load ?? {};
       if (Number.isFinite(load.otherCpuPct)) spikeOther.push(load.otherCpuPct);
+      const machineNotOurs = notOurs(load.machineCpuPct, load.ownCpuPct);
+      if (Number.isFinite(machineNotOurs)) spikeNotOurs.push(machineNotOurs);
       lines.push([
         `    ${String(run.index + 1).padStart(3)}`,
         run.craft.padEnd(11),
@@ -378,6 +391,7 @@ function slowFrameEvidence(report) {
         ` ${frame.cause.padEnd(10)}`,
         cell(frame.loaf ? `${frame.loaf.scriptsMs}/${frame.loaf.blockingMs ?? 'n/a'}` : '-', 19),
         cell(load.otherCpuPct, 10),
+        cell(machineNotOurs, 9),
         cell(load.ownCpuPct, 8),
         cell(load.otherGpuPct, 10),
         cell(load.ownGpuPct, 8),
@@ -390,7 +404,9 @@ function slowFrameEvidence(report) {
   if (lines.length === 2) return '  frames over the limit: none';
   const runOther = report.runs.map((run) => run.processLoad?.otherCpuAvgPct).filter(Number.isFinite);
   const mean = (values) => (values.length > 0 ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : 'n/a');
+  const runNotOurs = report.runs.map((run) => notOurs(run.machineLoad?.averagePct, run.processLoad?.ownCpuAvgPct)).filter(Number.isFinite);
   lines.push(`    other processes' CPU: ${mean(spikeOther)} % on average at these frames, ${mean(runOther)} % on average over the runs`);
+  lines.push(`    machine CPU not ours: ${mean(spikeNotOurs)} % on average at these frames, ${mean(runNotOurs)} % on average over the runs`);
   return lines.join('\n');
 }
 
