@@ -70,7 +70,9 @@ intent and is gone from V2.
   self-contained file each, and V1 copied byte-for-byte with its SHA-256 checked.
 - The flight-test harness flies every craft in first person and in third person on each seed
   (36 runs, where Phase 1 flew CLASSIC and SIM), checks the camera view every frame, and
-  `tools/run-harness.mjs` gains `--views` and a table per craft and view.
+  `tools/run-harness.mjs` gains `--views` and a table per craft and view. Each world now has a UI
+  warmup before the warmup lap (every time of day, a toast leaving, the HUD fading and waking), so
+  Chrome's first-use GPU program compiles for its rasterizer and compositor are not measured.
 - V2 boots straight into the real flight model. The assists slider (0-100 % per craft) is the only
   difficulty control: 100 % by default, and the first HOTAS device sets 50 % on every craft whose
   assists the player never set, once, with a toast.

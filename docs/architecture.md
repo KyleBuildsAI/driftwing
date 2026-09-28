@@ -1029,6 +1029,17 @@ utilisation (`nvidia-smi`) and the page main thread's CPU share, and every slow 
 frames coincide with another program saturating the CPU or GPU is rerun on a quiet machine; the
 50 ms limit is never loosened.
 
+Warmup, which the frame statistics skip (NaN, penetration, crash and console checks cover every
+frame), is: 5 s after each page load; a UI warmup of about 15 s; a warmup lap that flies every
+craft and view of the world for 3 s each; and the first 3 s of every run. The UI warmup steps the
+time of day through dawn, noon, golden hour, dusk and night and back, lets a toast leave and the
+HUD auto-hide, then wakes it. Chrome compiles its rasterizer's and compositor's GPU programs
+(Skia) the first time each is used, 15-50 ms apiece, on the GPU process's main thread, which also
+executes WebGPU. On the harness's fresh browser profile, a trace showed them as slow frames the
+first time a toast left or dusk fell (`shader_compile` and `cache_miss` inside
+`RasterDecoderImpl::DoEndRasterCHROMIUM`). A player's Chrome keeps these programs in its disk
+cache and compiles each only once, ever.
+
 **The shell test** (`tools/shell-test.mjs`) makes 20 round trips V2 -> V1 -> V2 (V2 -> V1 by the
 pill and by F8 in turn, V1 -> V2 by the pill). After each of the 40 switches it asserts exactly one
 iframe holding exactly one live game document (the page's frames, and Chrome's document counter
