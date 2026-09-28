@@ -63,8 +63,9 @@ const GAME_PERMISSIONS = 'gamepad; microphone; camera; fullscreen; autoplay; xr-
  * of the first reading, or an absolute allowance, whichever is larger. Measured at 1280x720 on
  * both backends (the report lists each game's footprint over a blank tab next to each allowance):
  * one running game adds 13-26 MB of JS heap, 1 document, about 1,700 (V1) or 2,200 (V2) nodes and
- * 90-160 listeners to the page, and 55-160 MB to each GPU-process figure; between two loads of the
- * same game the GPU figures move by up to about 60 MB up and 110 MB down.
+ * 90-160 listeners to the page, and to each GPU-process figure 60-580 MB on WebGPU (dedicated GPU
+ * memory about 300 MB) or 30-300 MB on WebGL2; between two loads of the same game the GPU figures
+ * move by up to about 60 MB up and 110 MB down.
  *   - JS heap: 10 % or 8 MB, below one game's heap, so one retained game fails it. The terrain
  *     streams on worker threads (their heaps are not in this reading) and the world around the
  *     craft is never exactly the same SETTLE_SECONDS after load, so a MB either way is normal.
