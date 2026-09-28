@@ -129,13 +129,19 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
       if (label.dataset.valueFor === path) label.textContent = formatSettingValue(kind, value);
     }
   }
+  function segmentedOptions(group) {
+    return Array.from(group.querySelectorAll('button[data-value]'));
+  }
+  /** Radio group: the checked option is the group's one tab stop (the first when none matches). */
   function syncSegmented(group) {
     const value = readPath(group.dataset.setting);
-    for (const button of group.querySelectorAll('button[data-value]')) {
+    const options = segmentedOptions(group);
+    const anyChecked = options.some((button) => parseChoice(button.dataset.value) === value);
+    options.forEach((button, index) => {
       const checked = parseChoice(button.dataset.value) === value;
       button.setAttribute('aria-checked', String(checked));
-      button.tabIndex = checked ? 0 : -1;
-    }
+      button.tabIndex = checked || (!anyChecked && index === 0) ? 0 : -1;
+    });
   }
   function syncAssistLabel() {
     const craftId = settings.get('craft');
@@ -291,6 +297,24 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
       if (!button || !group.contains(button)) return;
       writePath(group.dataset.setting, parseChoice(button.dataset.value));
       syncSegmented(group);
+    });
+    // Arrow keys (wrapping), Home and End choose an option, as in any radio group; the flight keys
+    // must not see them while an option has focus.
+    group.addEventListener('keydown', (event) => {
+      const options = segmentedOptions(group);
+      const index = options.indexOf(document.activeElement);
+      if (index < 0) return;
+      let next = -1;
+      if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (index + 1) % options.length;
+      else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (index - 1 + options.length) % options.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = options.length - 1;
+      if (next < 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      writePath(group.dataset.setting, parseChoice(options[next].dataset.value));
+      syncSegmented(group);
+      options[next].focus({ preventScroll: true });
     });
   }
 
