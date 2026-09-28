@@ -1024,7 +1024,9 @@ export function createFlightController(ctx) {
     override.name = device.name || 'Controller';
     override.manualSeconds = 0;
     override.savedAutopilot = { ...player.autopilot };
-    setAutopilot({ enabled: true, heading: player.heading, altitude: player.position.y, followWaypoint: false, reason: 'device disconnected' });
+    // Hold the speed flown now, not the craft's cruise: the hold promises wings level and altitude only.
+    const speed = Number.isFinite(telemetry.airspeed) && telemetry.airspeed > 0 ? telemetry.airspeed : player.speed;
+    setAutopilot({ enabled: true, heading: player.heading, altitude: player.position.y, speed, followWaypoint: false, reason: 'device disconnected' });
     notify(`${override.name} disconnected: assists are holding wings level and altitude.`, 'warning');
     bus.emit('flight:assistOverride', { active: true, reason: 'deviceDisconnected', deviceKey: override.deviceKey });
   }
@@ -1034,7 +1036,7 @@ export function createFlightController(ctx) {
     override.active = false;
     const saved = override.savedAutopilot;
     override.savedAutopilot = null;
-    if (saved) setAutopilot({ enabled: saved.enabled, heading: saved.heading, altitude: saved.altitude, followWaypoint: saved.followWaypoint, reason });
+    if (saved) setAutopilot({ enabled: saved.enabled, heading: saved.heading, altitude: saved.altitude, speed: saved.speed, followWaypoint: saved.followWaypoint, reason });
     if (!silent) notify(reason === 'device reconnected' ? `${override.name} reconnected: you have control.` : 'You have control.', 'success');
     bus.emit('flight:assistOverride', { active: false, reason });
   }

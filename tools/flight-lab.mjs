@@ -1376,26 +1376,36 @@ function flyWith(controls, device, axes) {
 }
 
 /**
- * SIM bush plane in the air flown by a HOTAS (stick on roll / pitch / yaw, TWCS on the throttle): an
- * unrelated gamepad dropping out changes nothing; the stick dropping out engages the hands-off hold,
- * and its return releases it.
+ * SIM bush plane in the air flown by a HOTAS (stick on roll / pitch / yaw, TWCS on the throttle), at
+ * full power so it flies faster than its cruise: an unrelated gamepad dropping out changes nothing;
+ * the stick dropping out engages the hands-off hold at the speed flown, and its return releases it.
+ * Then with the pilot's own autopilot on: the hold and its release keep the pilot's speed target.
  */
 function hotPlugInFlight() {
   const rig = createControllerRig({ craft: 'bushplane', mode: 'sim' });
-  rig.controls.throttle = bushplane.spawn.cruiseThrottle;
+  rig.controls.throttle = 1;
   flyWith(rig.controls, STICK, ['roll', 'pitch', 'yaw']);
   flyWith(rig.controls, THROTTLE_QUADRANT, ['throttle']);
-  rig.run(2, (lab) => lab.handsOff());
+  rig.run(20, (lab) => lab.handsOff());
   rig.bus.emitTyped('deviceDisconnected', OTHER_PAD);
   const otherPad = rig.flight.isAssistOverridden();
+  const speedBefore = rig.telemetry.airspeed;
   rig.bus.emitTyped('deviceDisconnected', STICK);
   const engaged = rig.flight.isAssistOverridden();
-  const autopilot = { ...rig.state.player.autopilot };
+  const holdSpeed = rig.state.player.autopilot.speed;
   rig.run(5, (lab) => lab.handsOff());
   const holding = rig.flight.isAssistOverridden() && rig.state.player.autopilot.enabled;
   rig.bus.emitTyped('deviceConnected', STICK);
   const released = !rig.flight.isAssistOverridden() && !rig.state.player.autopilot.enabled;
-  return { otherPad, engaged, autopilot, holding, released };
+
+  const pilotSpeed = 42;
+  rig.flight.setAutopilot({ enabled: true, speed: pilotSpeed });
+  rig.run(1, (lab) => lab.handsOff());
+  rig.bus.emitTyped('deviceDisconnected', STICK);
+  rig.run(1, (lab) => lab.handsOff());
+  rig.bus.emitTyped('deviceConnected', STICK);
+  const restored = rig.state.player.autopilot.enabled && rig.state.player.autopilot.speed === pilotSpeed;
+  return { otherPad, engaged, speedBefore, holdSpeed, cruise: bushplane.spawn.cruise, holding, released, restored };
 }
 
 /**
@@ -1546,6 +1556,7 @@ function runShared() {
     const parked = hotPlugOnGround(craftId, lever);
     record(name, `hot-plug on the ground: ${craftId}, lever ${lever}`, parked.overridden || parked.autopilot ? 'autopilot' : parked.braked ? 'parking brake' : 'no brake', 'parking brake, stays down', { compare: parked.onGroundBefore && !parked.overridden && !parked.autopilot && parked.braked && parked.onGround && parked.maxAgl < 1 && parked.groundSpeed < 1, note: `taxiing at ${parked.taxiSpeed.toFixed(1)} m/s; 15 s later: ${parked.onGround ? 'on the ground' : 'AIRBORNE'}, rose ${parked.maxAgl.toFixed(2)} m, ${parked.groundSpeed.toFixed(1)} m/s` });
   }
+  record(name, 'hot-plug hold: speed target', plug.holdSpeed * KMH, `${(plug.speedBefore * KMH).toFixed(1)} km/h +/-1%, pilot's kept`, { unit: 'km/h', note: `flying ${(plug.speedBefore * KMH).toFixed(0)} km/h (cruise ${(plug.cruise * KMH).toFixed(0)}); the pilot's own autopilot speed ${plug.restored ? 'kept' : 'LOST'} after a hold`, compare: Math.abs(plug.holdSpeed - plug.speedBefore) <= plug.speedBefore * 0.01 && plug.restored });
   record(name, 'hot-plug: HOTAS stick unplugged in flight', plug.engaged ? 'hold' : 'no hold', 'hold; other pad: no hold; release on reconnect', { compare: !plug.otherPad && plug.engaged && plug.holding && plug.released, note: `other gamepad ${plug.otherPad ? 'ENGAGED' : 'ignored'}, stick: ${plug.engaged ? 'hands-off hold' : 'NOTHING'}, ${plug.holding ? 'held 5 s' : 'NOT HELD'}, reconnect ${plug.released ? 'released' : 'NOT RELEASED'}` });
   const swap = craftSwitch();
   record(name, 'SIM craft switch glider -> bush plane', swap.toBush.speed * KMH, `${(bushplane.spawn.cruise * KMH).toFixed(0)} km/h, calm`, { unit: 'km/h', compare: calmFlight(swap.toBush.watch), note: `10 s hands off: ${describeLoads(swap.toBush.watch)}, ${swap.toBush.watch.stalled ? 'STALL' : 'no stall'}` });
