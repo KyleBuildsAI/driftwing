@@ -285,10 +285,13 @@ export function createDirector({
   let logHash = 2166136261 >>> 0;
   let logTotal = 0;
 
-  let time = 0;
-  let nextTickAt = 0;
+  // The director's clock starts at the flight time it is created at (0 at boot): pacing, the rarity
+  // schedule and the ticks all count from there, on the half second.
+  const startTime = Math.max(0, getTime());
+  let time = startTime;
+  let nextTickAt = Math.ceil(startTime / DIRECTOR_TICK_SECONDS) * DIRECTOR_TICK_SECONDS;
   let tickCount = 0;
-  let lastNotableAt = 0;
+  let lastNotableAt = startTime;
   let lastNotableKind = 'start';
   let notableCount = 0;
   let firstNotableAt = null;
@@ -317,7 +320,7 @@ export function createDirector({
   function drawDroughtThreshold() {
     return DROUGHT_MIN + DROUGHT_SPREAD * unitFromHash(rehash(baseHash, 7 + notableCount * 31337));
   }
-  for (let tier = 0; tier < RARITY_TIERS.length; tier++) tierDue[tier] = drawPeriod(tier);
+  for (let tier = 0; tier < RARITY_TIERS.length; tier++) tierDue[tier] = startTime + drawPeriod(tier);
   droughtThreshold = drawDroughtThreshold();
 
   /** Something notable happened at `now` (the tick time for the director's own activations). */
