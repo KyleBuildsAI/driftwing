@@ -78,7 +78,7 @@ async function boot() {
   }
 
   // ---- Renderer: WebGPU first, WebGL2 fallback ---------------------------------
-  const { renderer, backend } = await createRenderer(params);
+  const { renderer, backend, uniformUploads } = await createRenderer(params);
   if (params.get('debug') === '1') console.info(`[DRIFTWING] backend=${backend} three r${THREE.REVISION} seed=${seed}`);
 
   // ---- Scene, camera, shared uniforms ----------------------------------------------
@@ -486,6 +486,7 @@ async function boot() {
       return {
         backend,
         revision: THREE.REVISION,
+        uniformUploadPatch: uniformUploads.installed,
         seed,
         fps: Math.round(state.perf.fps),
         frameMs: Math.round(state.perf.frameMs * 10) / 10,

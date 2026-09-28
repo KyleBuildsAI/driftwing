@@ -1,6 +1,7 @@
 // Renderer boot: WebGPU first, WebGL2 fallback. The WebGL2 backend is never blocked (Phase 4's
 // WebXR runs on it), and ?renderer=webgl forces it.
 import * as THREE from 'three/webgpu';
+import { installUniformUploadPatch } from './uniformUploads.js';
 
 /**
  * True when a WebGPU device can actually be created. The probe creates (and releases) a real
@@ -38,7 +39,9 @@ function buildRenderer(useWebGPU) {
 
 /**
  * Creates and initialises the renderer, its canvas prepended to the page body. params: the page's
- * URLSearchParams (renderer=webgl skips WebGPU). Returns { renderer, backend: 'WebGPU' | 'WebGL2' }.
+ * URLSearchParams (renderer=webgl skips WebGPU). Returns { renderer, backend: 'WebGPU' | 'WebGL2',
+ * uniformUploads }, where uniformUploads.installed reports the garbage-free uniform upload patch
+ * (uniformUploads.js) once the first frame has rendered.
  */
 export async function createRenderer(params) {
   const webgpuAvailable = params.get('renderer') !== 'webgl' && (await probeWebGPU());
@@ -55,5 +58,6 @@ export async function createRenderer(params) {
     await renderer.init();
   }
   const backend = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL2';
-  return { renderer, backend };
+  const uniformUploads = installUniformUploadPatch(renderer);
+  return { renderer, backend, uniformUploads };
 }
