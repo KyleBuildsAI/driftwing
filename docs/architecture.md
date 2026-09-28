@@ -241,6 +241,9 @@ system, and then starts the frame loop.
 | `eventCues.js`, `voices.js` | v1's chimes, blips, flutter and shutter |
 | `spatial.js` | HRTF panner at the craft and doppler in external views |
 | `synthKit.js`, `buffers.js` | Web Audio building blocks and procedural noise / reverb buffers |
+| `spawnVoices.js` | Phase 2 spawn voices: the voice budget (virtual and realized voices), distance models, air absorption, doppler, the thunder front queue, the discovery chime |
+| `recipes/*.js` | one procedural recipe per spawn sound (`recipes/index.js` lists them; `recipeKit.js` holds the shared noise, crackle and envelope helpers) |
+| `audition.js` | the dev spawn auditions (`debug.spawn`) and offline renders with spectral analysis |
 
 ### `src/env`
 
@@ -916,7 +919,27 @@ Behaviour:
     `music`, or null before audio starts;
   - `getContext()`;
   - `setVarioMode('on' \| 'off')` and `getVarioMode()`;
-  - `debug` (dev builds, `?debug=1` or `?test` only): `setProfile`, `drive`, `cue`, `refresh`.
+  - `debug` (dev builds, `?debug=1` or `?test` only): `setProfile`, `drive`, `cue`, `refresh`, and
+    `spawn` (auditions: `play`, `place`, `intensity`, `trigger`, `stop`, `stopAll`, `voice`,
+    `voices`, `stats`, `thunder`, `thunderLog`, `chime`, `setBudget`, `render`);
+- **Phase 2 spawn sound** (`spawnVoices.js`, `recipes/`):
+  - `spawnVoice(recipe, params)` returns `{ id, recipe, setPosition(vec3, velocity?),
+    setIntensity(0..1), trigger(name, options), dispose(), realized, disposed, describe() }`. It
+    works before audio starts. Recipes: `tornado`, `thunder` (trigger `strike`), `volcano`
+    (`boom`), `geyser` (`burst`), `waterfall`, `whale` and `skyWhale` (`call`), `crystal`
+    (`chime`; the hum rises with the intensity), `turbine` (intensity = wind speed), `murmuration`
+    (`scatter`), `meteor` (`streak`, `fireball`), `lantern`, `discovery` (`chime`). A preset's
+    `audio.params` may set `intensity` and override `refDistance`, `rolloffFactor`,
+    `distanceModel`, `size` and `reverb`;
+  - `thunder({ position, intensity })` plays a crack and a rolling rumble when the sound front
+    (343 m/s) reaches the listener, who may move meanwhile;
+  - `discoveryChime({ bus?, position?, pan?, volume? })`; a typed `discovery` event with a
+    `presetId` plays it too (once, however it is asked for);
+  - `spawnRecipes`: the recipe names.
+- **Spawn voice budget.** At most 10 voices have nodes at once; the quietest (recipe level x
+  intensity x distance gain) are culled to silent virtual voices and come back when they are
+  louder than a sounding one. Voices sit on the environment bus behind a submix that takes the
+  closed-cockpit low-pass, so ducking and the mixer apply.
 - **Unlock.** The AudioContext is created only inside a real user activation (the first key,
   pointer press or touch). A gamepad press also tries. If audio stays suspended, the sound pill
   offers a click to enable it.
