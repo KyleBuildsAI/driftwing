@@ -1,11 +1,18 @@
 // The deterministic world generator. Imported by the main thread AND the terrain worker, so the
 // height function used for collision, spawning and landmarks is exactly the one that builds the mesh.
+import { PRESETS } from '../spawns/presets/index.js';
+import { SITE_CELL, createPlacement } from './placement.js';
+import { STAMP_PAINTS, accumulateStampPaint, applyStampHeight } from './stamps.js';
 
 // ============================================================================
 // WORLD GENERATION: pure and deterministic from the seed.
-// createWorldGen is serialized with Function.prototype.toString() into the
-// terrain Web Worker, so it must never reference anything outside its body.
+// The terrain Web Worker imports this module (and through it placement.js, stamps.js and the
+// pure-data preset list), so everything here stays free of DOM and three.js.
 // Units are metres. Axes: +x east, -z north, +y up.
+//
+// options: { chunkSize, lod0Resolution, waterLevel, landmarkCell, presets? }. presets overrides the
+// preset list (src/spawns/presets/index.js); only the dev test harnesses pass it (fixture presets),
+// and main.js hands the same options to the terrain worker, so both threads agree.
 // ============================================================================
 export function createWorldGen(seedString, options) {
   const CHUNK_SIZE = options.chunkSize;
@@ -29,6 +36,14 @@ export function createWorldGen(seedString, options) {
     [0xe9c98f, 0xd9a866, 0xc08850, 0xa8583a, 0x8c8a4e, 0xefe2c4], // dunes: sand light, sand warm, lee shadow, mesa red, scrub, salt flat
     [0x2e6f7a, 0x7fc6b8, 0xf0dcae, 0x3f7a45, 0x6fa04a, 0x857a6a], // archipelago: seabed, reef sand, beach, jungle, palm light, cliff
     [0x8fb45a, 0xa7b85e, 0x9a7b52, 0xe58fa6, 0xf2c94c, 0xa58fd8], // meadows: grass, warm grass, soil, pink, gold, lavender
+  ];
+  // Four shades per stamp paint (sRGB hex), in STAMP_PAINTS order; converted to linear below.
+  const PAINT_PALETTES_SRGB = [
+    [0x5d5955, 0x77716a, 0x928b82, 0x3f3b39], // ash: dark ash, ash, pale ash, cinder
+    [0x2c2a2d, 0x38353a, 0x4a3f3b, 0x242224], // basalt: basalt, grey basalt, oxidised flow, fresh flow
+    [0x28302f, 0x34403d, 0x3d4d3a, 0x1f2626], // wetRock: wet rock, slick rock, moss, soaked black rock
+    [0x47484a, 0x55565a, 0x6b6a64, 0x3a3b3d], // tarmac: tarmac, grey tarmac, worn and faded, patch repair
+    [0x55665f, 0x6f7568, 0x405a5c, 0x8a8a7a], // riverbed: wet stones, gravel, wet dark stones, dry pebbles
   ];
   const VEGETATION = { PINE: 0, BROADLEAF: 1, PALM: 2, ROCK: 3, CACTUS: 4, FLOWERS: 5 };
   const LANDMARK_TYPES = ['arch', 'monoliths', 'lighthouse', 'balloons'];
@@ -331,11 +346,92 @@ export function createWorldGen(seedString, options) {
     return height + (site.plateauHeight - height) * blend;
   }
 
-  /** Analytic terrain height at any world point (metres above sea level). */
-  function heightAt(x, z) {
+  /**
+   * The Phase 1 height (biomes plus the landmark shaping) without any site stamps. Placement filters
+   * and stamp reference heights read it, so stamps never feed back into their own placement.
+   */
+  function unstampedHeightAt(x, z) {
     const height = baseHeight(x, z, scratchClimate, scratchWeights);
     const site = landmarkSiteForCell(Math.floor(x / LANDMARK_CELL), Math.floor(z / LANDMARK_CELL));
     return shapeForSite(site, x, z, height);
+  }
+
+  // ---- Sites and terrain stamps (placement.js, stamps.js) -----------------------------------
+  const placementClimate = { temperature: 0, moisture: 0 };
+  const placementWeights = new Float64Array(5);
+  const placement = createPlacement({
+    seed: seedHash,
+    world: {
+      heightAt: unstampedHeightAt,
+      waterLevel: WATER_LEVEL,
+      landmarkSitesNear,
+      biomeIndexAt(x, z) {
+        climate(x, z, placementClimate);
+        return dominantBiome(biomeWeights(placementClimate.temperature, placementClimate.moisture, placementWeights));
+      },
+    },
+    presets: Array.isArray(options.presets) ? options.presets : PRESETS,
+  });
+  const hasStamps = placement.hasStamps;
+  let lastStampKey = NaN;
+  let lastStamps = null;
+
+  /** The spatial hash lookup: the stamps overlapping the SITE_CELL cell holding (x, z). */
+  function stampsAt(x, z) {
+    const cellX = Math.floor(x / SITE_CELL);
+    const cellZ = Math.floor(z / SITE_CELL);
+    const key = (cellX + 32768) * 65536 + (cellZ + 32768);
+    if (key !== lastStampKey) {
+      lastStamps = placement.stampsInCell(cellX, cellZ);
+      lastStampKey = key;
+    }
+    return lastStamps;
+  }
+
+  /**
+   * Analytic terrain height at any world point (metres above sea level): the Phase 1 height, then
+   * every site stamp whose bounds hold the point, in their global order. With no stamped presets
+   * this is exactly the Phase 1 function.
+   */
+  function heightAt(x, z) {
+    const height = unstampedHeightAt(x, z);
+    if (!hasStamps) return height;
+    const stamps = stampsAt(x, z);
+    let stamped = height;
+    for (let index = 0; index < stamps.length; index++) {
+      const stamp = stamps[index];
+      if (x < stamp.minX || x > stamp.maxX || z < stamp.minZ || z > stamp.maxZ) continue;
+      stamped = applyStampHeight(stamp, x, z, stamped);
+    }
+    return stamped;
+  }
+
+  const paintScratch = { paintIndex: -1, weight: 0 };
+  const influence = { paint: null, weight: 0 };
+
+  /** Fills paintScratch with the strongest stamp paint at (x, z) (weight 0 = none). */
+  function paintAt(x, z) {
+    paintScratch.paintIndex = -1;
+    paintScratch.weight = 0;
+    if (!hasStamps) return paintScratch;
+    const stamps = stampsAt(x, z);
+    for (let index = 0; index < stamps.length; index++) {
+      const stamp = stamps[index];
+      if (x < stamp.minX || x > stamp.maxX || z < stamp.minZ || z > stamp.maxZ) continue;
+      accumulateStampPaint(stamp, x, z, paintScratch);
+    }
+    return paintScratch;
+  }
+
+  /**
+   * Stamp paint at (x, z) for the colour pass: { paint: 'ash' | 'basalt' | 'wetRock' | 'tarmac' |
+   * 'riverbed' | null, weight: 0..1 }. Returns one shared object (read it before the next call).
+   */
+  function stampInfluence(x, z) {
+    paintAt(x, z);
+    influence.paint = paintScratch.paintIndex >= 0 ? STAMP_PAINTS[paintScratch.paintIndex] : null;
+    influence.weight = paintScratch.weight;
+    return influence;
   }
 
   /**
@@ -390,6 +486,12 @@ export function createWorldGen(seedString, options) {
     return linear;
   });
 
+  const PAINT_PALETTES = PAINT_PALETTES_SRGB.map((palette) => {
+    const linear = new Float32Array(12);
+    palette.forEach((hex, index) => hexToLinear(hex, linear, index * 3));
+    return linear;
+  });
+
   function forestNoise(x, z) { return fbm(x, z, 1 / 650, 3, 22); }
   function flowerFieldNoise(x, z) { return fbm(x, z, 1 / 420, 2, 23); }
 
@@ -440,6 +542,30 @@ export function createWorldGen(seedString, options) {
     }
   }
 
+  /** Shade (0-3) of a stamp paint for one face; the same patch field as the biome palettes. */
+  function paintShade(paintIndex, slope, faceHash, patch) {
+    switch (paintIndex) {
+      case 0:
+        if (slope > 0.5) return 3;
+        return patch < -0.2 ? 0 : patch > 0.35 ? 2 : 1;
+      case 1:
+        if (faceHash > 0.9) return 2;
+        if (slope > 0.55) return 3;
+        return patch < 0 ? 0 : 1;
+      case 2:
+        if (slope > 0.6) return patch < 0 ? 3 : 0;
+        return patch < 0.1 ? 2 : 1;
+      case 3:
+        if (faceHash > 0.93) return 3;
+        if (patch > 0.25) return 2;
+        return patch < -0.1 ? 0 : 1;
+      default:
+        if (patch < -0.25) return 2;
+        if (faceHash > 0.8) return 3;
+        return patch < 0.15 ? 0 : 1;
+    }
+  }
+
   const colorClimate = { temperature: 0, moisture: 0 };
   const colorWeights = new Float64Array(5);
 
@@ -472,6 +598,19 @@ export function createWorldGen(seedString, options) {
     out[offset] = palette[index] * jitter;
     out[offset + 1] = palette[index + 1] * jitter;
     out[offset + 2] = palette[index + 2] * jitter;
+    if (!hasStamps) return;
+    // Stamp paint (ash, basalt, wet rock, tarmac, riverbed) over the biome colour, with dithered edges
+    // like the biome blend zones, so a painted area reads as patches of pure paint shades.
+    paintAt(x, z);
+    if (paintScratch.weight <= 0) return;
+    const share = smoothstep(0.35, 0.65, paintScratch.weight + (faceHash - 0.5) * 0.3);
+    if (share <= 0) return;
+    const paint = PAINT_PALETTES[paintScratch.paintIndex];
+    const shade = paintShade(paintScratch.paintIndex, slope, faceHash, patch) * 3;
+    const paintJitter = 0.94 + 0.12 * faceHash;
+    out[offset] += (paint[shade] * paintJitter - out[offset]) * share;
+    out[offset + 1] += (paint[shade + 1] * paintJitter - out[offset + 1]) * share;
+    out[offset + 2] += (paint[shade + 2] * paintJitter - out[offset + 2]) * share;
   }
 
   // ---- Vegetation scatter ------------------------------------------------------
@@ -511,6 +650,8 @@ export function createWorldGen(seedString, options) {
         }
         const height = heightAt(x, z);
         if (height < WATER_LEVEL + 0.9) continue;
+        // Nothing grows on painted stamp ground: ash, lava, wet rock, the runway or a riverbed.
+        if (hasStamps && paintAt(x, z).weight > 0.35) continue;
         const slope = Math.min(1, Math.hypot(heightAt(x + 2, z) - height, heightAt(x, z + 2) - height) / 2);
         climate(x, z, localClimate);
         biomeWeights(localClimate.temperature, localClimate.moisture, localWeights);
@@ -622,15 +763,24 @@ export function createWorldGen(seedString, options) {
     WATER_LEVEL,
     CHUNK_SIZE,
     LANDMARK_CELL,
+    SITE_CELL,
     hash2,
     noise,
     fbm,
     climate,
     biomeWeights,
     heightAt,
+    unstampedHeightAt,
     groundHeight,
     biomeAt,
     faceColor,
+    placement,
+    hasStamps,
+    sitesInCell: placement.sitesInCell,
+    sitesNear: placement.sitesNear,
+    stampsInCell: placement.stampsInCell,
+    stampsOverlap: placement.stampsOverlap,
+    stampInfluence,
     forestNoise,
     scatterChunk,
     landmarkSiteForCell,
