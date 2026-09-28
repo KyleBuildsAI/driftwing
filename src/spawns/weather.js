@@ -241,11 +241,13 @@ export function createWeatherSystem(ctx) {
     const glow = golden * (1 - state.time.nightFactor);
     const stormy = storminess;
     values.weight = stormy > 0 || glow > 0 ? 1 : 0;
-    values.sunIntensity = (1 - 0.7 * stormy) * (1 + 0.3 * glow);
+    // As a storm clears the sun breaks through the thinning cloud first: the golden light lifts the
+    // sun and opens the overcast ahead of the remaining haze and gloom.
+    values.sunIntensity = (1 - 0.7 * stormy * (1 - 0.6 * glow)) * (1 + 0.25 * glow);
     values.ambient = 1 - 0.35 * stormy;
     values.fogDensity = 1 + 1.8 * stormy;
     values.darkness = 0.3 * stormy;
-    values.overcast = 0.9 * stormy;
+    values.overcast = 0.9 * stormy * (1 - 0.7 * glow);
     const stormSky = 0.8 * stormy;
     const goldenSky = 0.45 * glow;
     const mixToGolden = stormSky + goldenSky > 0 ? goldenSky / (stormSky + goldenSky) : 0;
