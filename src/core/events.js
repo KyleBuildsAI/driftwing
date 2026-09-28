@@ -12,9 +12,15 @@ const FIELD_CHECKS = Object.freeze({
   boolean: (value) => typeof value === 'boolean',
   object: (value) => value !== null && typeof value === 'object',
   vector3: (value) => value !== null && typeof value === 'object' && Number.isFinite(value.x) && Number.isFinite(value.y) && Number.isFinite(value.z),
+  /** Any value except undefined (identifiers whose form belongs to their producer). */
+  defined: (value) => value !== undefined,
 });
 
 export const LANDING_GRADES = Object.freeze(['butter', 'smooth', 'firm', 'hard']);
+/** How a spawn exists: a persistent place, or a temporary happening. */
+export const SPAWN_KINDS = Object.freeze(['site', 'event']);
+/** The regional weather states, in their cycle order. */
+export const WEATHER_STATES = Object.freeze(['clear', 'building', 'storm', 'clearing']);
 
 /**
  * Event name -> payload fields. A field is a FIELD_CHECKS type name, an array of allowed values, or
@@ -27,8 +33,11 @@ export const EVENT_TYPES = Object.freeze({
   landed: { grade: LANDING_GRADES, craft: 'string', sinkRate: 'number', groundSpeed: 'number', position: 'vector3' },
   /** Terrain or water impact handled by fade and respawn. */
   softCrash: { craft: 'string', reason: 'string', impactSpeed: 'number', position: 'vector3' },
-  /** First visit to a landmark in this world. */
-  discovery: { id: 'string', name: 'string', kind: 'string', position: 'vector3' },
+  /**
+   * First sight of a landmark or a spawn in this world. For spawns, kind is the preset category, id
+   * is the site id (sites) or the preset id (events), and presetId names the preset.
+   */
+  discovery: { id: 'string', name: 'string', kind: 'string', position: 'vector3', presetId: { type: 'string', optional: true } },
   /** A wind source joined or left the WindField (Phase 2 spawns publish these). */
   windSourceAdded: { id: 'string', kind: 'string', position: 'vector3', radius: 'number' },
   windSourceRemoved: { id: 'string', kind: 'string' },
@@ -39,6 +48,14 @@ export const EVENT_TYPES = Object.freeze({
   deviceDisconnected: { deviceKey: 'string', kind: 'string', name: 'string' },
   /** The craft was put back into the air by a relaunch (aerotow, peak launch, respawn). */
   relaunched: { craft: 'string', method: 'string', position: 'vector3' },
+  /** A spawn instance was created (a site came within range, or the director or debugger started one). */
+  spawnActivated: { id: 'string', presetId: 'string', category: 'string', kind: SPAWN_KINDS, position: 'vector3' },
+  /** A spawn instance was disposed; reason says why (ended, expired, despawn, range, debug, replaced, ...). */
+  spawnEnded: { id: 'string', presetId: 'string', reason: 'string' },
+  /** The regional weather state machine moved on (region is the director's region identifier). */
+  weatherChanged: { state: WEATHER_STATES, previous: WEATHER_STATES, region: 'defined' },
+  /** An achievement was earned (V-formation, Thread the Needle, ...). */
+  achievement: { id: 'string', title: 'string' },
 });
 
 function describeFailure(type, payload) {
