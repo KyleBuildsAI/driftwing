@@ -11,6 +11,7 @@
 //   input.bindings                   binding profile (global + per-craft overrides)
 //   input.calibration.<deviceKey>    per-device calibration (HOTAS, gamepads)
 //   input.prompts                    remembered answers to input prompts
+//   audio.vario                      variometer audio mode (AudioEngine)
 //
 // IndexedDB is scoped to the origin INCLUDING the port, which is why the dev server is pinned to
 // 127.0.0.1:5199. When IndexedDB is unavailable (some private modes), storage falls back to
@@ -19,6 +20,8 @@
 const DB_NAME = 'driftwing';
 const STORE = 'kv';
 const META_KEY = '__schema';
+/** Every game key starts with one of these; the localStorage fallback reloads only these keys. */
+const OWNED_KEY_PREFIXES = Object.freeze(['driftwing.', 'input.', 'audio.']);
 
 /**
  * Schema migrations, applied in order. Structural ones run in onupgradeneeded (the IndexedDB
@@ -151,7 +154,7 @@ function createStorage() {
   function loadFromLocalStorage() {
     try {
       for (const key of Object.keys(window.localStorage)) {
-        if (!key.startsWith('driftwing.') && !key.startsWith('input.')) continue;
+        if (!OWNED_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) continue;
         const raw = window.localStorage.getItem(key);
         if (raw !== null) cache.set(key, JSON.parse(raw));
       }
