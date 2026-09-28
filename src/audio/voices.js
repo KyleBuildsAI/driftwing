@@ -6,13 +6,13 @@ import { clamp } from '../core/util.js';
 const PENTATONIC = [0, 2, 4, 7, 9];
 const BASE_FREQUENCY = 392;
 const MAX_VOICES = 40;
-const BELL_PARTIALS = [
+export const BELL_PARTIALS = Object.freeze([
   { ratio: 1, gain: 1, decay: 1 },
   { ratio: 2.0, gain: 0.46, decay: 0.62 },
   { ratio: 3.0, gain: 0.2, decay: 0.42 },
   { ratio: 4.18, gain: 0.12, decay: 0.3 },
   { ratio: 5.43, gain: 0.065, decay: 0.2 },
-];
+]);
 
 function optionNumber(options, key, fallback, min, max) {
   const value = options && Number.isFinite(options[key]) ? options[key] : fallback;

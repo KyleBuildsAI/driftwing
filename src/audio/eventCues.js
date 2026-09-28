@@ -9,10 +9,11 @@ const EVENT_GUARD_SECONDS = 0.3;
 const MAX_PENDING = 24;
 
 /**
- * deps: { bus, state, camera, THREE, isReady(), voices() } where voices() returns the live voice
- * set (null until the context exists).
+ * deps: { bus, state, camera, THREE, isReady(), voices(), discoveryChime(options) } where voices()
+ * returns the live voice set (null until the context exists) and discoveryChime plays the Phase 2
+ * spawn discovery chime.
  */
-export function createEventCues({ bus, state, camera, THREE, isReady, voices }) {
+export function createEventCues({ bus, state, camera, THREE, isReady, voices, discoveryChime }) {
   const pendingCues = [];
   const lastDirectCue = { chime: -Infinity, flutter: -Infinity, blip: -Infinity };
   const listenerRight = new THREE.Vector3();
@@ -101,6 +102,12 @@ export function createEventCues({ bus, state, camera, THREE, isReady, voices }) 
     const site = payload && payload.site;
     const pan = panFor(site && Number.isFinite(site.x) ? { x: site.x, y: camera.position.y, z: site.z } : null);
     queueCue('chime', 'discovery', (voiceSet) => playSequence(voiceSet, [4, 6, 8, 10], 0.115, { volume: 0.46, pan, decay: 2.5 }));
+  });
+  // Phase 2 spawn discoveries (the typed event carries a presetId; v1 landmarks' does not).
+  bus.onTyped('discovery', (payload) => {
+    if (!payload || typeof payload.presetId !== 'string') return;
+    const pan = panFor(payload.position);
+    queueCue('chime', 'spawn-discovery', () => discoveryChime({ pan }));
   });
   bus.on('landmark:threaded', () => queueCue('chime', 'threaded', (voiceSet) => playSequence(voiceSet, [5, 6, 7, 8, 9, 10, 12], 0.06, { volume: 0.38, decay: 2.2 })));
   bus.on('birds:scattered', (payload) => {

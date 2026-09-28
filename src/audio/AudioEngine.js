@@ -12,9 +12,13 @@
 // - Airflow beds (airflow.js), the craft's engine family (engines/), spatialisation with doppler
 //   (spatial.js), flight cues (flightCues.js), v1 event cues and one-shot voices (eventCues.js,
 //   voices.js) and radar-altitude landing callouts (callouts.js).
+// - Phase 2 spawn sounds (spawnVoices.js, recipes/): spawnVoice(recipe, params), thunder() and
+//   discoveryChime(). Voices can be created before the AudioContext exists; they start sounding
+//   once it does.
 import { clamp } from '../core/util.js';
 import { createSoundPill } from '../ui/soundPill.js';
 import { createAirflow } from './airflow.js';
+import { createSpawnAudition } from './audition.js';
 import { createBufferFactory } from './buffers.js';
 import { createCallouts } from './callouts.js';
 import { ENGINE_FAMILIES, resolveAudioProfile } from './engines/index.js';
@@ -22,6 +26,7 @@ import { createEventCues } from './eventCues.js';
 import { createFlightCues } from './flightCues.js';
 import { BUS_NAMES, createMixer } from './mixer.js';
 import { createSpatializer } from './spatial.js';
+import { createSpawnVoices } from './spawnVoices.js';
 import { createVoices } from './voices.js';
 
 const PARAMETER_INTERVAL = 0.05;
@@ -91,13 +96,22 @@ export function createAudioSystem(ctx) {
   }
 
   const buffers = createBufferFactory(noteIssue);
+  const spawnVoices = createSpawnVoices({ THREE, onIssue: noteIssue });
   const callouts = createCallouts({
     settings,
     getUserActivated: () => ctx.userHasInteracted === true,
     getCopilotVoiceName: () => ctx.systems.copilot?.getStats?.().voice ?? null,
     onIssue: noteIssue,
   });
-  const eventCues = createEventCues({ bus, state, camera, THREE, isReady, voices: () => graph.voices });
+  const eventCues = createEventCues({
+    bus,
+    state,
+    camera,
+    THREE,
+    isReady,
+    voices: () => graph.voices,
+    discoveryChime: (options) => spawnVoices.discoveryChime(options),
+  });
   const pill = createSoundPill({ onEnable: enableFromPill });
 
   // ---- Graph -----------------------------------------------------------------------------------------
@@ -107,13 +121,15 @@ export function createAudioSystem(ctx) {
     mixer.initLevels(settings.get('mixer'));
     const kit = { context, noise, mixer };
     const voices = createVoices(kit);
+    const spatializer = createSpatializer({ context, destination: mixer.input('engine'), THREE });
+    spawnVoices.attach({ context, noise, mixer, spatializer });
     return {
       context,
       noise,
       mixer,
       voices,
       airflow: createAirflow(kit),
-      spatializer: createSpatializer({ context, destination: mixer.input('engine'), THREE }),
+      spatializer,
       flightCues: createFlightCues({ ...kit, voices }),
       engine: null,
       engineProfile: null,
@@ -342,6 +358,7 @@ export function createAudioSystem(ctx) {
     }
     const pitch = graph.spatializer.update(frame);
     graph.engine.update(frame, pitch);
+    spawnVoices.update(frame);
     graph.airflow.update(frame);
     graph.flightCues.update(frame);
     updateDuck(time);
@@ -390,6 +407,7 @@ export function createAudioSystem(ctx) {
       airflow: graph.airflow.describe(),
       cues: graph.flightCues.describe(),
       pendingEventCues: eventCues.pending,
+      spawn: spawnVoices.describe(),
     };
   }
 
@@ -404,6 +422,8 @@ export function createAudioSystem(ctx) {
       blip: (options) => graph.voices.playBlip(options),
       flutter: (options) => graph.voices.playFlutter(options?.intensity, options?.pan),
       shutter: () => graph.voices.playShutter(),
+      discovery: (options) => spawnVoices.discoveryChime(options),
+      thunder: (options) => spawnVoices.thunderFromListener(options),
     };
     return {
       families: Object.keys(ENGINE_FAMILIES),
@@ -435,6 +455,12 @@ export function createAudioSystem(ctx) {
         parameterTimer = 0;
         return true;
       },
+
+      /** Spawn-sound auditions (audition.js): play, place, trigger, render offline, budget. */
+      spawn: createSpawnAudition({
+        spawnVoices,
+        getRenderKit: () => (isReady() ? { noise: graph.noise, sampleRate: audioContext.sampleRate } : null),
+      }),
     };
   }
 
@@ -462,6 +488,29 @@ export function createAudioSystem(ctx) {
       eventCues.markDirect('flutter');
       return isReady() ? graph.voices.playFlutter(options && options.intensity, options && options.pan) : false;
     },
+
+    /**
+     * A spawn's voice on the environment bus: { id, recipe, setPosition(vec3, velocity?),
+     * setIntensity(0..1), trigger(name, options), dispose(), realized, describe() }. Works before
+     * audio starts. Throws for an unknown recipe (see spawnVoices.js and recipes/index.js).
+     */
+    spawnVoice(recipe, params) {
+      return spawnVoices.spawnVoice(recipe, params);
+    },
+
+    /** Thunder from position, heard after distance / 343 m/s. Returns whether it was queued. */
+    thunder(options) {
+      return spawnVoices.thunder(options);
+    },
+
+    /** The discovery chime: { bus: 'ui' (default) | 'environment', position?, pan?, volume? }. */
+    discoveryChime(options) {
+      eventCues.markDirect('chime');
+      return spawnVoices.discoveryChime(options);
+    },
+
+    /** The spawn recipe names. */
+    spawnRecipes: spawnVoices.recipes,
 
     /** A mixer bus input node (master, engine, environment, ui, copilot, music); null before audio starts. */
     getBus(name) {
