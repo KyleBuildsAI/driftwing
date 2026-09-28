@@ -4,11 +4,15 @@
 // Views: 'chase' (the v1 rig in chase.js, unchanged), 'cockpit' (the craft's eye point with its
 // cockpit and instrument panel), 'wing' (rigid wingtip mount), 'flyby' (fixed camera ahead on the
 // flight path) and 'fpv' (the frame-locked camera of an FPV craft, which takes the first-person slot
-// when the craft's cameraRig.fpv exists). settings.view remembers the player's view (cockpit by
-// default; the first-person slot is stored as 'cockpit'). Every change, and the start, emits the
-// typed viewChanged.
+// when the craft's cameraRig.fpv exists). The first-person slot ('cockpit') is the cockpit or the FPV
+// camera; chase, wing and flyby are third person. settings.views remembers the slot per craft (chase
+// on a first launch) and settings.thirdPersonViews the last third-person slot per craft. A craft
+// change flies the new craft from its own remembered view. Every change, and the start, emits the
+// typed viewChanged. Views are presentation only: nothing here writes ControlState or touches the
+// flight model, so changing view never changes how the craft flies.
 //
-// Input: the camera owns viewCycle, viewForward (first person), viewBack (chase), viewLeft /
+// Input: the camera owns viewCycle, viewToggle1P3P (swap at once between the first-person view and
+// the craft's last third-person view), viewForward (first person), viewBack (chase), viewLeft /
 // viewRight (look 90 degrees, press again to look ahead) and recenterView, from 'input:action'
 // presses of any source. Free look is ControlState lookX / lookY (absolute deflection: right-drag,
 // gamepad right stick, HOTAS mini-stick; releasing returns to centre) plus the 90 degree snaps:
@@ -28,7 +32,7 @@
 // cockpit is on screen) and the optional glass HUD overlay (settings.hud.overlay).
 import * as THREE from 'three/webgpu';
 import { CONFIG } from '../core/config.js';
-import { VIEW_IDS } from '../core/settings.js';
+import { VIEW_IDS, THIRD_PERSON_VIEW_IDS } from '../core/settings.js';
 import { clamp, isFiniteVector, isFiniteQuaternion } from '../core/util.js';
 import { createCameraRig } from './chase.js';
 import { createCockpitView } from './views/cockpitView.js';
@@ -279,9 +283,20 @@ export function createCameraSystem(ctx) {
     if (next === 'flyby') views.flyby.reset();
   }
 
+  /** Stores slot as the active craft's view, and as its last third-person view when it is one. */
+  function rememberSlot(slot) {
+    const craft = currentCraft();
+    const stored = settings.get('views');
+    if (stored && stored[craft] !== slot) settings.update('views', { [craft]: slot });
+    if (!THIRD_PERSON_VIEW_IDS.includes(slot)) return;
+    const thirdPerson = settings.get('thirdPersonViews');
+    if (thirdPerson && thirdPerson[craft] !== slot) settings.update('thirdPersonViews', { [craft]: slot });
+  }
+
   /**
-   * Switches to the view a slot resolves to. remember: store it as the player's view in
-   * settings.view. force: re-enter even when unchanged (craft change).
+   * Switches to the view a slot resolves to, at once (the chase rig keeps integrating while
+   * detached, so it is already in place). remember: store it as the active craft's view in
+   * settings.views. force: re-enter even when unchanged (craft change).
    */
   function setView(slot, { remember = true, force = false } = {}) {
     if (!VIEW_IDS.includes(slot)) return false;
@@ -298,7 +313,7 @@ export function createCameraSystem(ctx) {
       counters.viewChanges++;
       emitViewChanged();
     }
-    if (remember && settings.get('view') !== slotOf(next)) settings.set('view', slotOf(next));
+    if (remember) rememberSlot(slotOf(next));
     return true;
   }
 
@@ -309,10 +324,33 @@ export function createCameraSystem(ctx) {
     return setView(next);
   }
 
-  /** The player's remembered view slot (cockpit when nothing usable is stored). */
+  /** The active craft's remembered view slot (chase when nothing usable is stored). */
   function storedView() {
-    const stored = settings.get('view');
-    return VIEW_IDS.includes(stored) ? stored : 'cockpit';
+    const stored = settings.get('views');
+    const slot = stored ? stored[currentCraft()] : null;
+    return VIEW_IDS.includes(slot) ? slot : 'chase';
+  }
+
+  /** The active craft's last third-person slot (chase when nothing usable is stored). */
+  function lastThirdPersonSlot() {
+    const stored = settings.get('thirdPersonViews');
+    const slot = stored ? stored[currentCraft()] : null;
+    return THIRD_PERSON_VIEW_IDS.includes(slot) ? slot : 'chase';
+  }
+
+  /** True while the camera shows the first-person view (the cockpit, or the FPV camera). */
+  function isFirstPerson() {
+    return slotOf(view) === 'cockpit';
+  }
+
+  /**
+   * viewToggle1P3P: from the first-person view to the craft's last third-person view, and from any
+   * third-person view to the first-person one. A craft without a first-person view stays put.
+   */
+  function toggleFirstThirdPerson() {
+    if (isFirstPerson()) return setView(lastThirdPersonSlot());
+    if (!firstPersonView(currentRig())) return false;
+    return setView('cockpit');
   }
 
   // ---- Input actions --------------------------------------------------------------------------------------
@@ -324,6 +362,7 @@ export function createCameraSystem(ctx) {
   function performAction(id) {
     if (photo) return;
     if (id === 'viewCycle') cycleView(1);
+    else if (id === 'viewToggle1P3P') toggleFirstThirdPerson();
     else if (id === 'viewForward') {
       if (slotOf(view) === 'cockpit') look.snapYaw = 0;
       else setView('cockpit');
@@ -335,20 +374,25 @@ export function createCameraSystem(ctx) {
     else if (id === 'recenterView') look.snapYaw = 0;
   }
 
-  const CAMERA_ACTIONS = new Set(['viewCycle', 'viewForward', 'viewBack', 'viewLeft', 'viewRight', 'recenterView']);
+  const CAMERA_ACTIONS = new Set(['viewCycle', 'viewToggle1P3P', 'viewForward', 'viewBack', 'viewLeft', 'viewRight', 'recenterView']);
   bus.on('input:action', (action) => {
     if (!action || action.phase !== 'press' || !CAMERA_ACTIONS.has(action.id)) return;
     performAction(action.id);
   });
 
+  // A craft change flies the new craft from its own remembered view.
   bus.onTyped('craftChanged', () => {
     syncRoot();
-    setView(slotOf(view), { remember: false, force: true });
+    setView(storedView(), { remember: false, force: true });
   });
   bus.onTyped('softCrash', () => instruments.reset());
   bus.on('settings:changed', ({ key, value }) => {
     if (key === 'fov') fovSettings = readFovSettings();
-    else if (key === 'view' && VIEW_IDS.includes(value) && value !== slotOf(view)) setView(value, { remember: false });
+    else if (key === 'views') {
+      // Another channel (WREN, dev tools) chose a view for the active craft.
+      const slot = value ? value[currentCraft()] : null;
+      if (VIEW_IDS.includes(slot) && slot !== slotOf(view)) setView(slot);
+    }
   });
 
   // ---- Free look ------------------------------------------------------------------------------------------
@@ -597,6 +641,15 @@ export function createCameraSystem(ctx) {
 
     cycleView,
 
+    /** viewToggle1P3P: first person to the last third-person view and back. */
+    toggleFirstThirdPerson,
+
+    /** True while the first-person view (cockpit or FPV camera) is on screen. */
+    isFirstPerson,
+
+    /** The active craft's last third-person slot ('chase' | 'wing' | 'flyby'). */
+    getLastThirdPerson: lastThirdPersonSlot,
+
     /** The slots the active craft offers, in cycle order. */
     listViews() {
       return availableSlots();
@@ -611,6 +664,8 @@ export function createCameraSystem(ctx) {
       return {
         view,
         slot: slotOf(view),
+        firstPerson: isFirstPerson(),
+        lastThirdPerson: lastThirdPersonSlot(),
         views: availableSlots(),
         photo,
         returning: returnFlight.active || chaseRig.getMode() === 'returning',

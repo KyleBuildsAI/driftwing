@@ -1,7 +1,8 @@
 // Player settings: a versioned, validated schema persisted through core/storage (IndexedDB).
 //
-// Flat keys hold scalars; a few keys hold small objects (assists per craft and whether the player
-// set them, FOV per view, the audio mixer, HUD preferences, the FPV drone's camera and rates).
+// Flat keys hold scalars; a few keys hold small objects (assists and views per craft, whether the
+// player set the assists, FOV per view, the audio mixer, HUD preferences, the FPV drone's camera and
+// rates).
 // get/set work on whole keys; update(key, patch) merges into an object key. Every change emits
 // 'settings:changed' { key, value, settings }.
 //
@@ -11,11 +12,13 @@
 import { CONFIG } from './config.js';
 import { storage } from './storage.js';
 
-export const SETTINGS_VERSION = 4;
+export const SETTINGS_VERSION = 5;
 const STORAGE_KEY = 'driftwing-v2.settings';
 
 export const CRAFT_IDS = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv']);
 export const VIEW_IDS = Object.freeze(['chase', 'cockpit', 'wing', 'flyby']);
+/** The third-person view slots; 'cockpit' is the first-person slot (the FPV camera on the drone). */
+export const THIRD_PERSON_VIEW_IDS = Object.freeze(['chase', 'wing', 'flyby']);
 export const UNIT_SYSTEMS = Object.freeze(['metric', 'aviation']);
 export const QUALITY_PREFERENCES = Object.freeze(['auto', 'minimal', 'low', 'medium', 'high', 'ultra']);
 export const FRAME_TARGETS = Object.freeze(['auto', 60, 120, 144, 240, 'uncapped']);
@@ -67,15 +70,21 @@ const SCHEMA = Object.freeze({
   },
   units: { default: 'metric', validate: oneOf(UNIT_SYSTEMS) },
 
-  // v2: view (the camera slot the player last chose; the FPV camera is stored as 'cockpit') and HUD.
-  view: { default: 'cockpit', validate: oneOf(VIEW_IDS) },
+  // v2: views per craft. views: the slot the player last flew each craft in (the FPV camera is
+  // stored as 'cockpit', the first-person slot); a first launch starts in the chase view.
+  // thirdPersonViews: the last third-person slot per craft, where viewToggle1P3P goes back to.
+  views: { default: perCraft('chase'), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, oneOf(VIEW_IDS)])) },
+  thirdPersonViews: { default: perCraft('chase'), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, oneOf(THIRD_PERSON_VIEW_IDS)])) },
   fov: {
     default: Object.freeze({ chase: CONFIG.CAMERA.FOV_BASE, cockpit: 74, wing: 68, flyby: 50, fpv: 120 }),
     fields: { chase: unitRange(40, 100), cockpit: unitRange(50, 110), wing: unitRange(40, 110), flyby: unitRange(20, 90), fpv: unitRange(90, 150) },
   },
+  // HUD: overlay (the instrument tiles), landingCallouts, cockpitGlass (the glass HUD in a cockpit
+  // with an instrument panel; third-person views always show it) and flightPathMarker (the
+  // velocity-vector symbol, part of the glass HUD).
   hud: {
-    default: Object.freeze({ overlay: false, landingCallouts: false }),
-    fields: { overlay: isBoolean, landingCallouts: isBoolean },
+    default: Object.freeze({ overlay: false, landingCallouts: false, cockpitGlass: false, flightPathMarker: true }),
+    fields: { overlay: isBoolean, landingCallouts: isBoolean, cockpitGlass: isBoolean, flightPathMarker: isBoolean },
   },
 
   // v2: input behaviour (bindings and calibration live in input storage keys).
@@ -161,6 +170,18 @@ function migrate(stored) {
     const assists = isPlainObject(record.assists) ? record.assists : {};
     record.assistsSetByPlayer = Object.fromEntries(CRAFT_IDS.map((id) => [id, Number.isFinite(assists[id]) && assists[id] !== SCHEMA.assists.default[id]]));
     version = 4;
+  }
+  if (version < 5) {
+    // v5: the view is remembered per craft. The one remembered view seeds every craft, and a
+    // third-person one is also where the first / third person swap returns to. Records without a
+    // view (a first run) keep the defaults: the chase view everywhere.
+    const view = VIEW_IDS.includes(record.view) ? record.view : null;
+    if (view) {
+      record.views = Object.fromEntries(CRAFT_IDS.map((id) => [id, view]));
+      if (THIRD_PERSON_VIEW_IDS.includes(view)) record.thirdPersonViews = Object.fromEntries(CRAFT_IDS.map((id) => [id, view]));
+    }
+    delete record.view;
+    version = 5;
   }
   record.version = version;
   return record;

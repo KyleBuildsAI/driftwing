@@ -3,12 +3,18 @@
 // one-time HOTAS assist default.
 //
 // Tests:
-//   firstRun        no stored record: the current version, the cockpit view, assists at 100 % on
-//                   every craft, none set by the player, the HOTAS default not applied
+//   firstRun        no stored record: the current version, the chase view on every craft (the
+//                   golden-hour opening shot), the glass HUD off in the cockpit and the flight path
+//                   marker on, assists at 100 % on every craft, none set by the player, the HOTAS
+//                   default not applied
 //   migrateV3       a Phase 1 era record (version 3, with the CLASSIC | SIM mode, the per-mode views
 //                   and the HOTAS prompt answer) loses those keys, keeps everything else, takes the
-//                   SIM view as the one view, and marks craft whose assists were moved off 100 % as
-//                   set by the player
+//                   SIM view as every craft's view, and marks craft whose assists were moved off
+//                   100 % as set by the player
+//   migrateV4       a version 4 record (one remembered view) seeds every craft's view from it; a
+//                   first-person view leaves the third-person memory on chase, a third-person one
+//                   seeds it too; the old key is gone
+//   viewsPerCraft   a view chosen for one craft leaves the others alone and survives a reload
 //   playerChange    an assists change made outside assistDefaults marks that craft as set by the
 //                   player (the slider, WREN)
 //   hotasDefault    a gamepad changes nothing; the first HOTAS device sets 50 % on every craft the
@@ -61,16 +67,23 @@ function hotasToasts(notices) {
   return notices.filter((text) => text === HOTAS_ASSIST_TOAST).length;
 }
 
+/** True when every craft's value in an object setting is `expected`. */
+function everyCraft(value, expected) {
+  return Boolean(value) && CRAFT_IDS.every((id) => value[id] === expected);
+}
+
 function testFirstRun() {
   storage.remove(SETTINGS_KEY);
   const { settings } = boot();
   const stored = storage.read(SETTINGS_KEY, null);
   check('firstRun', 'the record is written in the current version', stored?.version === SETTINGS_VERSION, `version ${stored?.version}`);
-  check('firstRun', 'the view starts in the cockpit', settings.get('view') === 'cockpit', settings.get('view'));
+  check('firstRun', 'every craft starts in the chase view', everyCraft(settings.get('views'), 'chase') && everyCraft(settings.get('thirdPersonViews'), 'chase'), JSON.stringify(settings.get('views')));
+  const hud = settings.get('hud');
+  check('firstRun', 'the glass HUD is off in the cockpit, the flight path marker on', hud.cockpitGlass === false && hud.flightPathMarker === true && hud.overlay === false, JSON.stringify(hud));
   check('firstRun', 'assists 100 % on every craft', CRAFT_IDS.every((id) => settings.get('assists')[id] === 1), levels(settings));
   check('firstRun', 'no craft set by the player, the HOTAS default not applied', CRAFT_IDS.every((id) => settings.get('assistsSetByPlayer')[id] === false) && settings.get('hotasAssistsApplied') === false, JSON.stringify(settings.get('assistsSetByPlayer')));
   const all = settings.all();
-  check('firstRun', 'no mode, per-mode views or HOTAS prompt keys', !('mode' in all) && !('views' in all) && !('hotasPrompt' in all), Object.keys(all).join(', '));
+  check('firstRun', 'no mode, single view or HOTAS prompt keys', !('mode' in all) && !('view' in all) && !('hotasPrompt' in all), Object.keys(all).join(', '));
 }
 
 function testMigrateV3() {
@@ -87,12 +100,39 @@ function testMigrateV3() {
   const { settings } = boot();
   const stored = storage.read(SETTINGS_KEY, null);
   check('migrateV3', `the record is saved as version ${SETTINGS_VERSION}`, stored?.version === SETTINGS_VERSION, `version ${stored?.version}`);
-  check('migrateV3', 'mode, views and hotasPrompt are gone from the stored record', !('mode' in stored) && !('views' in stored) && !('hotasPrompt' in stored), Object.keys(stored).join(', '));
-  check('migrateV3', 'the SIM view becomes the one view', settings.get('view') === 'wing', settings.get('view'));
+  check('migrateV3', 'mode, the per-mode views, view and hotasPrompt are gone from the stored record', !('mode' in stored) && !('view' in stored) && !('hotasPrompt' in stored) && !('classic' in stored.views) && !('sim' in stored.views), Object.keys(stored).join(', '));
+  check('migrateV3', "the SIM view becomes every craft's view and third-person view", everyCraft(settings.get('views'), 'wing') && everyCraft(settings.get('thirdPersonViews'), 'wing'), JSON.stringify(settings.get('views')));
   check('migrateV3', 'everything else is kept', settings.get('craft') === 'jet' && settings.get('units') === 'aviation' && settings.get('fpv').uptilt === 30 && settings.get('assists').jet === 0.5 && settings.get('assists').helicopter === 0.75, `craft ${settings.get('craft')}, units ${settings.get('units')}, ${levels(settings)}`);
   const setByPlayer = settings.get('assistsSetByPlayer');
   check('migrateV3', 'craft with assists off 100 % count as set by the player', setByPlayer.jet === true && setByPlayer.helicopter === true && ['glider', 'bushplane', 'wingsuit', 'fpv'].every((id) => setByPlayer[id] === false), JSON.stringify(setByPlayer));
   check('migrateV3', 'the HOTAS default is still to come', settings.get('hotasAssistsApplied') === false, String(settings.get('hotasAssistsApplied')));
+}
+
+function testMigrateV4() {
+  storage.write(SETTINGS_KEY, { version: 4, craft: 'helicopter', view: 'cockpit', units: 'aviation', hud: { overlay: true, landingCallouts: true } });
+  const first = boot();
+  const stored = storage.read(SETTINGS_KEY, null);
+  check('migrateV4', `the record is saved as version ${SETTINGS_VERSION} without the old view key`, stored?.version === SETTINGS_VERSION && !('view' in stored), Object.keys(stored).join(', '));
+  check('migrateV4', 'the cockpit view seeds every craft', everyCraft(first.settings.get('views'), 'cockpit'), JSON.stringify(first.settings.get('views')));
+  check('migrateV4', 'the third-person memory stays on chase', everyCraft(first.settings.get('thirdPersonViews'), 'chase'), JSON.stringify(first.settings.get('thirdPersonViews')));
+  const hud = first.settings.get('hud');
+  check('migrateV4', 'the HUD keeps its fields and gains the new ones at their defaults', hud.overlay === true && hud.landingCallouts === true && hud.cockpitGlass === false && hud.flightPathMarker === true, JSON.stringify(hud));
+
+  storage.write(SETTINGS_KEY, { version: 4, view: 'flyby' });
+  const second = boot();
+  check('migrateV4', 'a third-person view seeds both memories', everyCraft(second.settings.get('views'), 'flyby') && everyCraft(second.settings.get('thirdPersonViews'), 'flyby'), JSON.stringify(second.settings.get('thirdPersonViews')));
+}
+
+function testViewsPerCraft() {
+  storage.remove(SETTINGS_KEY);
+  const first = boot();
+  first.settings.update('views', { jet: 'cockpit' });
+  first.settings.update('thirdPersonViews', { glider: 'wing' });
+  const reloaded = boot();
+  const views = reloaded.settings.get('views');
+  check('viewsPerCraft', 'one craft\'s view leaves the others on chase and survives a reload', views.jet === 'cockpit' && CRAFT_IDS.filter((id) => id !== 'jet').every((id) => views[id] === 'chase'), JSON.stringify(views));
+  check('viewsPerCraft', 'the third-person memory is per craft too', reloaded.settings.get('thirdPersonViews').glider === 'wing' && reloaded.settings.get('thirdPersonViews').jet === 'chase', JSON.stringify(reloaded.settings.get('thirdPersonViews')));
+  check('viewsPerCraft', 'a first-person slot is refused as a third-person view', reloaded.settings.update('thirdPersonViews', { jet: 'cockpit' }) === false && reloaded.settings.get('thirdPersonViews').jet === 'chase', JSON.stringify(reloaded.settings.get('thirdPersonViews')));
 }
 
 function testPlayerChangeAndHotasDefault() {
@@ -124,6 +164,8 @@ function testPlayerChangeAndHotasDefault() {
 
 testFirstRun();
 testMigrateV3();
+testMigrateV4();
+testViewsPerCraft();
 testPlayerChangeAndHotasDefault();
 
 let failed = 0;
