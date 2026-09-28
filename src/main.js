@@ -46,13 +46,27 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
 // ============================================================================
 // BOOT
 // ============================================================================
+/**
+ * Dev-only verification harnesses: ?test=1 (flight test) and ?test=hotas (HOTAS pipeline test).
+ * Loaded on demand from dev builds only, so neither exists in production builds. Returns
+ * { databaseName, createSystem(ctx) } or null.
+ */
+async function loadDevTest(params) {
+  const test = params.get('test');
+  if (test === '1') return (await import('./dev/testHarness.js')).prepareFlightTest({ params });
+  if (test === 'hotas') return (await import('./dev/hotasTest.js')).prepareHotasTest({ params });
+  return null;
+}
+
 async function boot() {
   const params = new URLSearchParams(window.location.search);
   const devHooks = import.meta.env.DEV || params.get('debug') === '1';
+  // First, so the harness sees every console message from boot on; it runs in its own database.
+  const devTest = import.meta.env.DEV ? await loadDevTest(params) : null;
   // The display refresh is measured while boot waits on storage and the GPU (an idle window);
   // the result becomes the default frame target.
   const refreshProbe = measureDisplayRefresh();
-  await storage.init();
+  await storage.init(devTest ? { databaseName: devTest.databaseName } : undefined);
   const bus = attachTypedEvents(new EventBus(), { validate: devHooks });
   const settings = createSettings(bus);
   const seed = resolveSeed(params);
@@ -316,6 +330,8 @@ async function boot() {
     ['windOverlay', createWindOverlaySystem],
     // Dev-only: the debug wind source that proves the Phase 2 wind writer path.
     ...(devHooks ? [['debugWind', createDebugWindSystem]] : []),
+    // Dev-only: the ?test harness (runs after input so its scripted controls reach flight).
+    ...(devTest ? [['test', devTest.createSystem]] : []),
   ];
   for (const [name, factory] of factories) {
     try {
@@ -342,7 +358,7 @@ async function boot() {
   beginPrewarm();
   const fadeStatus = document.getElementById('fade-status');
   if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
-  const UPDATE_ORDER = ['input', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind'];
+  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind'];
 
   // ---- Flight-state snapshot for the copilot (local or remote brain) -----------------
   ctx.getFlightState = () => {

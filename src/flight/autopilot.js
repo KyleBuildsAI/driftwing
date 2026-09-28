@@ -60,10 +60,15 @@ const FIXED_WING = Object.freeze({
   // Terrain look-ahead (seconds of flight ahead) and clearance above ground or water.
   LOOKAHEAD_SECONDS: Object.freeze([0, 4, 8, 14, 22, 32, 45]),
   LOOKAHEAD_MAX_DISTANCE: 2600,
+  /** Longest gap (m) between terrain samples: at jet speed the timed samples alone are 900 m apart. */
+  LOOKAHEAD_STEP: 150,
   LOOKAHEAD_REFRESH: 0.5,
   CLEARANCE: 120,
   RING_CLEARANCE: 45,
   CLIMB_GRADIENT_POWERED: 0.1,
+  /** Clearing terrain, a powered craft may climb this steeply (tan of the path); speed protection still bounds it. */
+  TERRAIN_CLIMB_GRADIENT: 0.35,
+  TERRAIN_GRADIENT_MARGIN: 1.3,
   EVADE_HEADING: 55,
   /** Ring following aims at a point on the ring axis this far ahead (longer than v1: SIM turns are wider). */
   RING_LEAD_SECONDS: 5,
@@ -166,15 +171,24 @@ function refreshTerrain(memory, env, position, headingDegrees, trackDegrees, spe
   let floor = env.waterLevel + clearance;
   let gradient = -Infinity;
   const groundSpeed = Math.max(speed, 15);
+  const horizon = Math.min(FIXED_WING.LOOKAHEAD_SECONDS[FIXED_WING.LOOKAHEAD_SECONDS.length - 1] * groundSpeed, FIXED_WING.LOOKAHEAD_MAX_DISTANCE, limit);
   for (const direction of [headingDegrees, trackDegrees]) {
     const directionX = Math.sin(direction * DEG);
     const directionZ = -Math.cos(direction * DEG);
-    for (const seconds of FIXED_WING.LOOKAHEAD_SECONDS) {
-      const distance = Math.min(seconds * groundSpeed, FIXED_WING.LOOKAHEAD_MAX_DISTANCE);
-      if (distance > limit) break;
+    const sample = (distance) => {
       const needed = surfaceAt(world, env.waterLevel, position.x + directionX * distance, position.z + directionZ * distance) + clearance;
       floor = Math.max(floor, needed);
       if (distance > 60) gradient = Math.max(gradient, (needed - position.y) / distance);
+    };
+    // The timed samples (seconds of flight ahead), with the gaps between them filled at LOOKAHEAD_STEP
+    // so a narrow ridge between two of them is never stepped over at speed.
+    let previous = -1;
+    for (const seconds of FIXED_WING.LOOKAHEAD_SECONDS) {
+      const distance = Math.min(seconds * groundSpeed, horizon);
+      if (distance <= previous) break;
+      for (let between = previous + FIXED_WING.LOOKAHEAD_STEP; between < distance; between += FIXED_WING.LOOKAHEAD_STEP) sample(between);
+      sample(distance);
+      previous = distance;
     }
   }
   memory.terrainFloor = floor;
@@ -277,7 +291,15 @@ const fixedWingAutopilot = Object.freeze({
     const cosBank = Math.max(Math.cos(clamp(data.bank, -1.3, 1.3)), 0.3);
     let flightPathRate;
     if (powered) {
-      let climb = clamp((altitudeTarget - position.y) * FIXED_WING.CLIMB_PER_METRE, -FIXED_WING.MAX_DESCENT, FIXED_WING.MAX_CLIMB);
+      // Clearing terrain, the climb is not held to MAX_CLIMB (a 1.5 deg path at jet speed, which flew the
+      // jet into ridges): it may steepen to TERRAIN_CLIMB_GRADIENT, and speed protection below still
+      // trades it away before a slow craft gets near the stall.
+      const terrainClimb = memory.terrainFloor > target.altitude && memory.terrainFloor > position.y;
+      const maxClimb = terrainClimb ? Math.max(FIXED_WING.MAX_CLIMB, speed * FIXED_WING.TERRAIN_CLIMB_GRADIENT) : FIXED_WING.MAX_CLIMB;
+      let climb = clamp((altitudeTarget - position.y) * FIXED_WING.CLIMB_PER_METRE, -FIXED_WING.MAX_DESCENT, maxClimb);
+      // The altitude loop closes slowly (a hold, not an escape): toward terrain, climb at least at the
+      // gradient the look-ahead found it needs, so the clearance is there when the ground arrives.
+      if (terrainClimb && memory.terrainGradient > 0) climb = Math.max(climb, Math.min(maxClimb, memory.terrainGradient * speed * FIXED_WING.TERRAIN_GRADIENT_MARGIN));
       if (target.ring && target.ringDistance > 0) {
         const timeToRing = Math.max(target.ringDistance / speed, FIXED_WING.RING_MIN_TIME);
         climb = clamp((altitudeTarget - position.y) / timeToRing, -FIXED_WING.MAX_DESCENT, FIXED_WING.MAX_CLIMB);

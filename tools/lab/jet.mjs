@@ -22,7 +22,9 @@
 //   AB detent      keyboard stops at the detent; the ability pushes through and pulling back cancels;
 //                  a HOTAS lever lights it past the detent; the click state and notices
 //   autopilot      heading, altitude and speed hold through the flight control system; with a HOTAS
-//                  throttle it still stops at the detent, and it engages from the pilot's lever
+//                  throttle it still stops at the detent, and it engages from the pilot's lever;
+//                  terrain: at cruise it climbs over a 7 % slope ahead and over a steep seeded ridge
+//                  (world ALLOC-1, where the flight test harness saw it strike) instead of flying into them
 //   limits         overspeed past 410 m/s equivalent or Mach 1.7
 //   protection     100 % assists: an afterburner dive stays inside the limit (speed brakes, power limit)
 //   controller     the FlightController headless: SIM boot at cruise and 60 s hands off, CLASSIC -> SIM
@@ -47,6 +49,8 @@ import { attachTypedEvents } from '../../src/core/events.js';
 import { groundPose } from '../../src/flight/placement.js';
 import { neutralLoad } from '../../src/flight/trim.js';
 import { DEG, clamp, vectorFromHeading } from '../../src/core/util.js';
+import { createWorldGen } from '../../src/world/worldgen.js';
+import { CONFIG, WORLD_OPTIONS } from '../../src/core/config.js';
 
 const DT = 1 / 120;
 const KMH = 3.6;
@@ -66,13 +70,13 @@ function log(...parts) {
  * The jet in the lab: model, the pilot's ControlState, the tick copy the control stages shape and the
  * environment. `ground` is the flat ground height (far below for air tests).
  */
-function createRig({ assists = 0, ground = -3000 } = {}) {
+function createRig({ assists = 0, ground = -3000, world: terrain = null } = {}) {
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const events = { notify: [], landed: [] };
   bus.on('notify', (payload) => events.notify.push(payload.text));
   bus.onTyped('landed', (payload) => events.landed.push(payload));
   const craftState = jet.abilities.craftAbility.initialState();
-  const world = { groundHeight: () => ground, heightAt: () => ground };
+  const world = terrain ?? { groundHeight: () => ground, heightAt: () => ground };
   const model = flightModels.create(profile.model, { profile, craft: jet, world, bus, state: null, input: null, craftState });
   const pilot = createControlState();
   pilot.throttle = 0;
@@ -82,7 +86,7 @@ function createRig({ assists = 0, ground = -3000 } = {}) {
   const telemetry = createFlightTelemetry();
   telemetry.assists = assists;
   telemetry.craftState = craftState;
-  const env = { time: 0, wind: { vel: new THREE.Vector3(), turbulence: 0 }, groundHeight: world.groundHeight, waterLevel: ground - 100, rho: 1.225, world, craftState, assists, handsOff: false, autopilot, telemetry };
+  const env = { time: 0, wind: { vel: new THREE.Vector3(), turbulence: 0 }, groundHeight: world.groundHeight, waterLevel: terrain ? CONFIG.WATER_LEVEL : ground - 100, rho: 1.225, world, craftState, assists, handsOff: false, autopilot, telemetry };
   const context = { dt: DT, model, craft: jet, craftId: jet.id, env, autopilot, assists, handsOff: false, telemetry, activeAssists: [], game: { ringCourse: { active: false }, waypoint: null } };
   const rig = { model, data: model.flightData, pilot, controls, env, context, events, telemetry, craftState, time: 0 };
 
@@ -109,10 +113,10 @@ function createRig({ assists = 0, ground = -3000 } = {}) {
     context.assists = level;
     telemetry.assists = level;
   };
-  rig.airborne = ({ speed, altitude, throttle = 0.6, heading = 0, pitch = 0, bank = 0 }) => {
+  rig.airborne = ({ speed, altitude, throttle = 0.6, heading = 0, pitch = 0, bank = 0, x = 0, z = 0 }) => {
     const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch * DEG, -heading * DEG, -bank * DEG, 'YXZ'));
     const velocity = new THREE.Vector3(0, 0, -speed).applyQuaternion(quaternion);
-    model.reset({ position: new THREE.Vector3(0, altitude, 0), quaternion, velocity, angularVelocity: new THREE.Vector3(), throttle, onGround: false, engineOn: true });
+    model.reset({ position: new THREE.Vector3(x, altitude, z), quaternion, velocity, angularVelocity: new THREE.Vector3(), throttle, onGround: false, engineOn: true });
     pilot.throttle = throttle;
   };
   rig.parked = () => {
@@ -732,6 +736,60 @@ function testDetent() {
 }
 
 /** The fixed-wing autopilot flying the jet through its flight control system (100 % assists). */
+/**
+ * The autopilot at cruise toward rising ground: flat at sea level, then a 7 % slope 3 km ahead (north)
+ * up to a 1500 m plateau. The terrain look-ahead judges 10 % climbable for a powered craft, so the
+ * autopilot must climb over it (the flight test harness saw it fly into such slopes at jet speed).
+ */
+function testAutopilotTerrain() {
+  const rig = createRig({ assists: 1 });
+  rig.setAssists(1);
+  const slope = (x, z) => clamp((-z - 3000) * 0.07, 0, 1500);
+  const world = { groundHeight: slope, heightAt: slope };
+  rig.env.world = world;
+  rig.env.groundHeight = slope;
+  rig.env.waterLevel = -100;
+  rig.airborne({ speed: 222, altitude: 400, throttle: 0.4, heading: 0 });
+  Object.assign(rig.env.autopilot, { enabled: true, heading: 0, altitude: 400, speed: 222, followWaypoint: false });
+  let minClearance = Infinity;
+  rig.run(60, (lab) => {
+    const position = lab.model.state.position;
+    minClearance = Math.min(minClearance, position.y - slope(position.x, position.z));
+  });
+  record('autopilot clears a 7 % slope at 800 km/h', minClearance, 60, { unit: 'm', compare: 'min', note: `min height above the slope; ${(-rig.model.state.position.z / 1000).toFixed(1)} km flown` });
+}
+
+/**
+ * The autopilot at cruise, 380 m above the ground, toward a narrow ridge on real seeded terrain (the
+ * world generator, seed ALLOC-1: 85 m to a 567 m crest within 800 m) from seven headings. The
+ * flight test harness saw the jet strike it: the look-ahead stepped over the ridge at speed and the
+ * climb was held to 6 m/s.
+ */
+function testAutopilotRidge() {
+  const world = createWorldGen('ALLOC-1', WORLD_OPTIONS);
+  const surface = (x, z) => Math.max(world.groundHeight(x, z), CONFIG.WATER_LEVEL);
+  let worst = Infinity;
+  let worstHeading = null;
+  for (const heading of [220, 225, 228, 231.6, 235, 240, 245]) {
+    const rig = createRig({ assists: 1, world });
+    rig.setAssists(1);
+    const start = { x: -1100, z: -1400 };
+    const altitude = surface(start.x, start.z) + 380;
+    rig.airborne({ speed: 222, altitude, throttle: 0.4, heading, x: start.x, z: start.z });
+    Object.assign(rig.env.autopilot, { enabled: true, heading, altitude, speed: 222, followWaypoint: false });
+    let minClearance = Infinity;
+    rig.run(40, (lab) => {
+      const position = lab.model.state.position;
+      minClearance = Math.min(minClearance, position.y - surface(position.x, position.z));
+    });
+    if (minClearance < worst) {
+      worst = minClearance;
+      worstHeading = heading;
+    }
+  }
+  record('autopilot clears a seeded ridge at 800 km/h', worst, 25, { unit: 'm', compare: 'min', note: `least clearance over 7 approach headings (${worstHeading} deg), world ALLOC-1` });
+}
+
 function testAutopilot() {
   const rig = createRig({ assists: 1 });
   rig.setAssists(1);
@@ -1202,7 +1260,7 @@ function printTable() {
 
 const started = Date.now();
 const only = process.argv.find((argument) => argument.startsWith('--only='));
-const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGround, testGear, testSpeedBrake, testDetent, testAutopilot, testAutopilotDetent, testLimits, testOverspeedProtection, testSimBoot, testConversions, testToClassic, testRespawn, testRelaunch, testCraftSwitch, testGroundStart };
+const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGround, testGear, testSpeedBrake, testDetent, testAutopilot, testAutopilotDetent, testAutopilotTerrain, testAutopilotRidge, testLimits, testOverspeedProtection, testSimBoot, testConversions, testToClassic, testRespawn, testRelaunch, testCraftSwitch, testGroundStart };
 for (const [name, test] of Object.entries(tests)) {
   if (only && !name.toLowerCase().includes(only.slice(7).toLowerCase())) continue;
   test();

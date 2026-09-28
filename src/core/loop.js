@@ -40,6 +40,7 @@ function createSafetyNet(ctx, spawnHeading) {
       player.quaternion.copy(lastGood.quaternion);
       player.velocity.copy(lastGood.velocity);
       player.speed = Math.max(CONFIG.SPEED.STALL, lastGood.velocity.length());
+      ctx.bus.emit('safety:nonFinite', { mode: ctx.systems.flight.getMode?.() ?? null });
       // Let the flight model rebuild its internal integrators (and snap the camera)
       // from the restored pose, otherwise NaN rates would re-poison it next frame.
       ctx.systems.flight.resetTo?.({ x: player.position.x, y: player.position.y, z: player.position.z, heading: lastGood.heading });
