@@ -8,23 +8,69 @@ and a multiplayer wingman) follow as later pre-releases of 2.0.0.
 
 ## [Unreleased]
 
-The structure correction: DRIFTWING is two separate games behind one toggle, V1 (frozen) and V2.
+## [Structure correction] - 2026-09-28
 
-### Removed
+The structure correction, tagged `v2-structure`: DRIFTWING is two separate games behind one
+toggle. V1 is the original game, frozen byte-for-byte; V2 is the new game, with real flight physics
+only and free switching between first and third person. Phase 1's CLASSIC | SIM mode misread that
+intent and is gone from V2.
 
-- CLASSIC mode from V2: the CLASSIC | SIM pill, the `modeToggle` action and its bindings on every
-  device, `src/flight/ArcadeModel.js` (and its hover extension), every craft's `arcadeProfile`,
-  the CLASSIC wind drift and mode switching in the flight controller, the `modeChanged` event, the
-  `mode` telemetry and copilot fields, and the `setMode` copilot action.
-- The CLASSIC boost (Space), the double-tap barrel roll, their touch buttons, HUD ring, sounds,
-  camera shake and particle burst, and the `boost` / `barrelRoll` copilot actions.
-- The "HOTAS detected - switch to SIM?" prompt and its `hotasPrompt` setting.
-- The legacy `ctx.input` struct; the Shift fine-control modifier (CLASSIC only).
-- `tools/arcade-parity.mjs` and `tools/parity/`, and the CLASSIC conversion checks in the labs and
-  the flight-test harness (which now flies each craft once per seed).
+### Added
+
+- **V1, frozen**: `index.html` from tag `v1-final`, byte-for-byte at `public/v1/index.html`, with
+  its own CDN import map and three.js. `tests/v1.sha256` and `npm run test:v1` fail on any change;
+  `docs/v1-known-issues.md` records what V1 prints (nothing under normal conditions).
+- **The launcher shell** at `/`: one full-window iframe and a glass **V1 | V2** pill that hides
+  after 3 s and steers clear of both games' HUDs. A switch fades out, sends the old game to
+  `about:blank` (freeing its GPU device, audio and gamepads), loads the other and focuses it.
+  `/?v=1` and `/?v=2` open a game; the last one is remembered in `driftwing.shell.lastVersion`,
+  and the first launch opens V2. Every other query parameter and the `#hash` (seed and room links)
+  are forwarded to the game. The iframe allows `gamepad`, `microphone`, `camera`, `fullscreen`,
+  `autoplay`, `xr-spatial-tracking`, `encrypted-media` and `clipboard-write`.
+- **`versionToggle`**, a bindable action (F8, T.16000M base button 10, WREN's "switch to version
+  one"): V2 asks the shell for V1 with a `postMessage` the shell accepts only from its own iframe,
+  its own origin and the exact message shape. V1 switches with the pill.
+- WREN: "switch to version one" (also "version one", "v1", "switch to v1", "play the original"),
+  the `switchVersion` remote action (`version: 'v1'`, strictly validated) and its rule in
+  `tools/copilot-server.mjs`.
+- First / third person: the bindable `viewToggle1P3P` action (V, gamepad View, TWCS button 8)
+  swaps at once between the cockpit (the drone's FPV camera) and the craft's last third-person
+  view. The stick hat keeps its snaps.
+- The glass HUD in every third-person view: the airspeed / altitude card and compass, a compact
+  attitude indicator, the throttle bar and a stall / AoA warning. It is optional in the cockpit
+  (`hud.cockpitGlass`, off by default); the FPV camera and the wingsuit keep it.
+- The flight path marker: the velocity-vector symbol where the air-relative velocity points, with a
+  nose mark, so sideslip and angle of attack read from outside (`hud.flightPathMarker`, on).
+- WREN: "wing view", "flyby view", "third person" / "outside view"; `setView` takes `wing`, `flyby`
+  and `outside`.
+- `tools/shell-test.mjs` (`npm run test:shell`): 20 round trips between the games against the dev
+  server and `dist-single/`, one live game document after every switch, memory (JS heap, DOM
+  counters, Chrome's GPU process) back to its first-load level, focus in the game, `/#seed=ABC`
+  reaching V2, and foreign-origin messages ignored; a PASS / FAIL table and a JSON report.
+  `tools/shell-check.mjs` checks the pill, persistence and forwarding.
+- `tools/steps/view-physics.json`: flies every craft through the same scripted inputs from the
+  cockpit, from chase and while switching views, and needs the same trajectory at every tick. It
+  steps frames through the dev-only `DRIFTWING.debug` hooks (`pauseLoop`, `stepFrames`,
+  `resetTiming`, `resumeLoop`).
+- `tools/lab/settings.mjs` (settings migrations, the HOTAS assist default) and
+  `tools/lab/copilot.mjs` (WREN's grammar and the `switchVersion` schema); the HOTAS harness checks
+  the assist default across a reload.
+- npm scripts `test:shell`, `test:flight`, `test:flight:webgl`, `test:hotas` and
+  `test:hotas:webgl`.
 
 ### Changed
 
+- The Vite app moved to `/v2/` (`v2/index.html`); the root page is the launcher shell.
+- All V2 storage is prefixed `driftwing-v2`: the IndexedDB database `driftwing-v2` and every key
+  in it, the localStorage fallback and the dev harnesses' databases and session keys. V2 never
+  reads or writes V1's keys. On first start V2 imports the Phase 1 database `driftwing` once (its
+  settings without `mode`, bindings, calibration, audio and journals) and deletes it.
+- The builds: `npm run build` writes `dist/` with the shell, `v1/index.html` (untouched) and
+  `v2/index.html`; `npm run build:single` writes `dist-single/` with the shell and V2 as one
+  self-contained file each, and V1 copied byte-for-byte with its SHA-256 checked.
+- The flight-test harness flies every craft in first person and in third person on each seed
+  (36 runs, where Phase 1 flew CLASSIC and SIM), checks the camera view every frame, and
+  `tools/run-harness.mjs` gains `--views` and a table per craft and view.
 - V2 boots straight into the real flight model. The assists slider (0-100 % per craft) is the only
   difficulty control: 100 % by default, and the first HOTAS device sets 50 % on every craft whose
   assists the player never set, once, with a toast.
@@ -45,28 +91,18 @@ The structure correction: DRIFTWING is two separate games behind one toggle, V1 
 - WREN's "third person" and "outside view" go back to the craft's last outside view (they meant
   the chase view before).
 
-### Added
+### Removed
 
-- WREN: "switch to version one" (also "version one", "v1", "switch to v1", "play the original"),
-  the `switchVersion` remote action (`version: 'v1'`, strictly validated) and its rule in
-  `tools/copilot-server.mjs`.
-- First / third person: the bindable `viewToggle1P3P` action (V, gamepad View, TWCS button 8)
-  swaps at once between the cockpit (the drone's FPV camera) and the craft's last third-person
-  view. The stick hat keeps its snaps.
-- The glass HUD in every third-person view: the airspeed / altitude card and compass, a compact
-  attitude indicator, the throttle bar and a stall / AoA warning. It is optional in the cockpit
-  (`hud.cockpitGlass`, off by default); the FPV camera and the wingsuit keep it.
-- The flight path marker: the velocity-vector symbol where the air-relative velocity points, with a
-  nose mark, so sideslip and angle of attack read from outside (`hud.flightPathMarker`, on).
-- WREN: "wing view", "flyby view", "third person" / "outside view"; `setView` takes `wing`, `flyby`
-  and `outside`.
-- `tools/steps/view-physics.json`: flies every craft through the same scripted inputs from the
-  cockpit, from chase and while switching views, and needs the same trajectory at every tick. It
-  steps frames through the dev-only `DRIFTWING.debug` hooks (`pauseLoop`, `stepFrames`,
-  `resetTiming`, `resumeLoop`).
-- `tools/lab/settings.mjs` (settings migrations, the HOTAS assist default) and
-  `tools/lab/copilot.mjs` (WREN's grammar and the `switchVersion` schema); the HOTAS harness checks
-  the assist default across a reload.
+- CLASSIC mode from V2: the CLASSIC | SIM pill, the `modeToggle` action and its bindings on every
+  device, `src/flight/ArcadeModel.js` (and its hover extension), every craft's `arcadeProfile`,
+  the CLASSIC wind drift and mode switching in the flight controller, the `modeChanged` event, the
+  `mode` telemetry and copilot fields, and the `setMode` copilot action.
+- The CLASSIC boost (Space), the double-tap barrel roll, their touch buttons, HUD ring, sounds,
+  camera shake and particle burst, and the `boost` / `barrelRoll` copilot actions.
+- The "HOTAS detected - switch to SIM?" prompt and its `hotasPrompt` setting.
+- The legacy `ctx.input` struct; the Shift fine-control modifier (CLASSIC only).
+- `tools/arcade-parity.mjs` and `tools/parity/`, and the CLASSIC conversion checks in the labs and
+  the flight-test harness.
 
 ## [2.0.0-phase.1] - 2026-09-27
 
@@ -338,5 +374,6 @@ The original single-file game, built from one prompt as a test of Claude Opus 5.
   quality governor.
 - A headless smoke test (`npm test`).
 
+[Structure correction]: https://github.com/KyleBuildsAI/driftwing/tree/v2-structure
 [2.0.0-phase.1]: https://github.com/KyleBuildsAI/driftwing/tree/v2-phase1
 [1.0.0]: https://github.com/KyleBuildsAI/driftwing/releases/tag/v1.0.0
