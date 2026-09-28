@@ -38,19 +38,15 @@
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { createServer as createNetServer } from 'node:net';
 import { cpus, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createServer as createViteServer } from 'vite';
 import { findBrowser } from './browser.mjs';
+import { findFreePort } from './ports.mjs';
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-/** The player's dev server port (IndexedDB is scoped to it): never used by the runner. */
-const RESERVED_PORT = 5199;
-/** Ports Chrome refuses to load (net::ERR_UNSAFE_PORT) in the range the OS may hand out. */
-const CHROME_UNSAFE_PORTS = new Set([5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080]);
 const POLL_MS = 3000;
 /** Whole-machine CPU load is sampled this often, as evidence for frame spikes caused by other processes. */
 const LOAD_SAMPLE_MS = 2000;
@@ -262,22 +258,6 @@ function startGpuSampler() {
     };
   };
   return sampler;
-}
-
-/** A free TCP port on 127.0.0.1 that Chrome will load and that is not the player's port. */
-async function findFreePort() {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const port = await new Promise((resolvePort, rejectPort) => {
-      const probe = createNetServer();
-      probe.once('error', rejectPort);
-      probe.listen(0, '127.0.0.1', () => {
-        const { port: assigned } = probe.address();
-        probe.close(() => resolvePort(assigned));
-      });
-    });
-    if (port !== RESERVED_PORT && !CHROME_UNSAFE_PORTS.has(port)) return port;
-  }
-  throw new Error('no usable free port found');
 }
 
 function harnessUrl(port, options) {
