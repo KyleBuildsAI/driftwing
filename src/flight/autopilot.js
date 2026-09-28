@@ -274,7 +274,12 @@ const fixedWingAutopilot = Object.freeze({
     const cosBank = Math.max(Math.cos(clamp(data.bank, -1.3, 1.3)), 0.3);
     let flightPathRate;
     if (powered) {
-      let climb = clamp((altitudeTarget - position.y) * FIXED_WING.CLIMB_PER_METRE, -FIXED_WING.MAX_DESCENT, FIXED_WING.MAX_CLIMB);
+      // Clearing terrain, the climb may use the gradient the look-ahead judged climbable
+      // (CLIMB_GRADIENT_POWERED): at jet speed MAX_CLIMB alone is a 1.5 deg path, and the craft flew
+      // into slopes the look-ahead had not turned away from.
+      const terrainClimb = memory.terrainFloor > target.altitude && memory.terrainFloor > position.y;
+      const maxClimb = terrainClimb ? Math.max(FIXED_WING.MAX_CLIMB, speed * FIXED_WING.CLIMB_GRADIENT_POWERED) : FIXED_WING.MAX_CLIMB;
+      let climb = clamp((altitudeTarget - position.y) * FIXED_WING.CLIMB_PER_METRE, -FIXED_WING.MAX_DESCENT, maxClimb);
       if (target.ring && target.ringDistance > 0) {
         const timeToRing = Math.max(target.ringDistance / speed, FIXED_WING.RING_MIN_TIME);
         climb = clamp((altitudeTarget - position.y) / timeToRing, -FIXED_WING.MAX_DESCENT, FIXED_WING.MAX_CLIMB);
