@@ -1456,6 +1456,28 @@ function hoverToClassic(craftId, { startOnGround = false, seconds = 5 } = {}) {
   return { simThrottle, classicThrottle: rig.state.player.throttle, heightChange: rig.state.player.position.y - start, maxSpeed, agl: rig.state.player.position.y - CONTROLLER_GROUND, minAgl: hover.MIN_AGL };
 }
 
+// ============================================================================================
+// SIM-ONLY ABILITIES ACROSS A SWITCH TO CLASSIC: smoke and ballast stop (CLASSIC is v1)
+// ============================================================================================
+/** Starts the craft's SIM ability, switches to CLASSIC, and watches the ability's flag for `seconds`. */
+function abilityToClassic(craftId, flag, seconds = 3) {
+  const rig = createControllerRig({ craft: craftId, mode: 'sim' });
+  if (craftId === 'bushplane') rig.controls.throttle = bushplane.spawn.cruiseThrottle;
+  rig.run(1, (lab) => lab.handsOff());
+  rig.flight.runAbility();
+  rig.run(1, (lab) => lab.handsOff());
+  const craftState = rig.telemetry.craftState;
+  const onInSim = craftState[flag] === true;
+  const ballastBefore = craftState.ballast;
+  rig.flight.setMode('classic');
+  rig.run(seconds, (lab) => lab.handsOff());
+  const offInClassic = craftState[flag] === false;
+  // In CLASSIC the ability button boosts; it must not turn the SIM ability back on.
+  rig.flight.runAbility();
+  rig.run(1, (lab) => lab.handsOff());
+  return { onInSim, offInClassic, staysOff: craftState[flag] === false, ballastKept: ballastBefore === undefined || craftState.ballast >= ballastBefore - 1e-9 };
+}
+
 function describeLoads(watch) {
   return `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g`;
 }
@@ -1580,6 +1602,10 @@ function runShared() {
   record(name, 'SIM -> CLASSIC: FPV hovering', Math.abs(fpvHover.heightChange), 1, { unit: 'm', compare: 'max', decimals: 2, note: `SIM motor throttle ${fpvHover.simThrottle.toFixed(2)} -> CLASSIC ${fpvHover.classicThrottle.toFixed(2)}; ${fpvHover.heightChange.toFixed(2)} m in 5 s, max ${fpvHover.maxSpeed.toFixed(1)} m/s` });
   const heliParked = hoverToClassic('helicopter', { startOnGround: true });
   record(name, 'SIM -> CLASSIC: helicopter on the ground', heliParked.maxSpeed, '<= 1 m/s, near the hover floor', { unit: 'm/s', compare: heliParked.maxSpeed <= 1 && heliParked.agl >= heliParked.minAgl && heliParked.agl <= heliParked.minAgl + 3, decimals: 2, note: `hovers ${heliParked.agl.toFixed(1)} m above the ground (floor ${heliParked.minAgl} m), max ${heliParked.maxSpeed.toFixed(2)} m/s` });
+  for (const [craftId, flag] of [['bushplane', 'smoke'], ['glider', 'dumping']]) {
+    const ability = abilityToClassic(craftId, flag);
+    record(name, `${craftId} ${flag} across SIM -> CLASSIC`, ability.offInClassic ? 'off' : 'ON', 'on in SIM, off in CLASSIC', { compare: ability.onInSim && ability.offInClassic && ability.staysOff && ability.ballastKept, note: `SIM ${ability.onInSim ? 'on' : 'NOT ON'}; CLASSIC ${ability.offInClassic ? 'off' : 'STILL ON'}, after the CLASSIC button ${ability.staysOff ? 'off' : 'ON'}; ${ability.ballastKept ? 'no drain in CLASSIC' : 'DRAINED IN CLASSIC'}` });
+  }
   record(name, 'hot-plug hold: speed target', plug.holdSpeed * KMH, `${(plug.speedBefore * KMH).toFixed(1)} km/h +/-1%, pilot's kept`, { unit: 'km/h', note: `flying ${(plug.speedBefore * KMH).toFixed(0)} km/h (cruise ${(plug.cruise * KMH).toFixed(0)}); the pilot's own autopilot speed ${plug.restored ? 'kept' : 'LOST'} after a hold`, compare: Math.abs(plug.holdSpeed - plug.speedBefore) <= plug.speedBefore * 0.01 && plug.restored });
   record(name, 'hot-plug: HOTAS stick unplugged in flight', plug.engaged ? 'hold' : 'no hold', 'hold; other pad: no hold; release on reconnect', { compare: !plug.otherPad && plug.engaged && plug.holding && plug.released, note: `other gamepad ${plug.otherPad ? 'ENGAGED' : 'ignored'}, stick: ${plug.engaged ? 'hands-off hold' : 'NOTHING'}, ${plug.holding ? 'held 5 s' : 'NOT HELD'}, reconnect ${plug.released ? 'released' : 'NOT RELEASED'}` });
   const swap = craftSwitch();

@@ -476,6 +476,12 @@ const craftAbility = Object.freeze({
   update(flight, dt) {
     const craftState = flight.craftState;
     if (!craftState.dumping) return;
+    // SIM only: a switch to CLASSIC closes the valves (the button boosts there, so it could not).
+    if (flight.mode !== 'sim') {
+      craftState.dumping = false;
+      flight.notify('Ballast valves closed.');
+      return;
+    }
     craftState.ballast = Math.max(0, craftState.ballast - dt / simProfile.ballast.dumpSeconds);
     flight.emitTrail('spray', 'ballastLeft', dt);
     flight.emitTrail('spray', 'ballastRight', dt);

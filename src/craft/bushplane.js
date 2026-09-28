@@ -561,7 +561,8 @@ function buildMesh(ctx) {
 
 // ============================================================================================
 // ABILITY: smoke trail. A smoke generator in the tail lays a soft white trail for formation-style
-// flying and for marking the wind; it toggles on and off (SIM; in CLASSIC the button boosts).
+// flying and for marking the wind; it toggles on and off (SIM; in CLASSIC the button boosts, and a
+// switch to CLASSIC shuts the smoke off, since v1 has none).
 // ============================================================================================
 const craftAbility = Object.freeze({
   label: 'Smoke trail',
@@ -574,7 +575,14 @@ const craftAbility = Object.freeze({
     return true;
   },
   update(flight, dt) {
-    if (flight.craftState.smoke) flight.emitTrail('smoke', 'smoke', dt);
+    const craftState = flight.craftState;
+    if (!craftState.smoke) return;
+    if (flight.mode !== 'sim') {
+      craftState.smoke = false;
+      flight.notify('Smoke off.');
+      return;
+    }
+    flight.emitTrail('smoke', 'smoke', dt);
   },
 });
 
