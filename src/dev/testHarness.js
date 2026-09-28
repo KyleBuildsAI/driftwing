@@ -38,8 +38,18 @@
 // Warmup (excluded from the frame-time statistics and the slow-frame criterion only; NaN,
 // penetration, crash and console checks cover every frame):
 //   - world warmup: the first WORLD_WARMUP_SECONDS after the game reports ready on each page load
-//     (every seed), while the first chunks, pipelines and caches settle, followed by the warmup
-//     lap: every craft and view this world will fly, switched to in plan order and flown for
+//     (every seed), while the first chunks, pipelines and caches settle, followed by the UI warmup
+//     and the warmup lap;
+//   - UI warmup: the time of day steps through dawn, noon, golden hour, dusk and night
+//     (UI_WARMUP_DAY_TIMES, UI_WARMUP_STEP_SECONDS each) and back to where it was, then the glass UI
+//     is left alone until its toast has left and the HUD has auto-hidden, and is woken again
+//     (UI_WARMUP_SETTLE_SECONDS). Every transient UI state (a toast arriving and leaving, the HUD
+//     fading out and in, each time-of-day chip and the night sky) is drawn once: Chrome compiles the
+//     compositor's and rasterizer's GPU programs (Skia) on their first use, 15-50 ms each on the
+//     GPU process's main thread, which also runs WebGPU, so a fresh browser profile otherwise shows
+//     them as slow frames the first time a toast leaves or dusk falls in a run. Chrome keeps these
+//     programs in its disk cache, so a player's browser compiles each once, ever;
+//   - warmup lap: every craft and view this world will fly, switched to in plan order and flown for
 //     WARMUP_LAP_SECONDS each on the autopilot, so every craft module, mesh, cockpit, flight model and
 //     pipeline exists once before anything is measured;
 //   - run warmup: the first RUN_WARMUP_SECONDS after each run's craft and view switch (the switch
@@ -79,6 +89,13 @@ const DEFAULT_RUN_SECONDS = 60;
 const RUN_WARMUP_SECONDS = 3;
 const WORLD_WARMUP_SECONDS = 5;
 const WARMUP_LAP_SECONDS = 3;
+/** Times of day the UI warmup shows: dawn, noon, golden hour, dusk and night (every chip phase and label). */
+const UI_WARMUP_DAY_TIMES = Object.freeze([0.25, 0.5, 0.72, 0.77, 0.02]);
+const UI_WARMUP_STEP_SECONDS = 1;
+/** After the time is restored: the last toast leaves (about 3.8 s) and the HUD auto-hides (3 s idle plus its fade). */
+const UI_WARMUP_SETTLE_SECONDS = 8;
+/** After the final wake: the HUD fades back in. */
+const UI_WARMUP_WAKE_SECONDS = 1.5;
 const FRAME_LIMIT_MS = 50;
 const HEAP_LIMIT_MB = 50;
 const PENETRATION_LIMIT_M = 1;
@@ -123,6 +140,7 @@ function readConfig(params) {
     runWarmupSeconds: RUN_WARMUP_SECONDS,
     worldWarmupSeconds: WORLD_WARMUP_SECONDS,
     warmupLapSeconds: WARMUP_LAP_SECONDS,
+    uiWarmupSeconds: UI_WARMUP_DAY_TIMES.length * UI_WARMUP_STEP_SECONDS + UI_WARMUP_SETTLE_SECONDS + UI_WARMUP_WAKE_SECONDS,
     frameLimitMs: FRAME_LIMIT_MS,
     heapLimitMB: HEAP_LIMIT_MB,
     penetrationLimitM: PENETRATION_LIMIT_M,
@@ -487,6 +505,42 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     flightStats.maxAltitude = Math.max(flightStats.maxAltitude, player.position.y);
   }
 
+  // ---- UI warmup ------------------------------------------------------------------------------------
+  const uiWarmup = { step: 0, stepStartMs: 0, restoreDayTime: 0, woke: false };
+
+  /** Steps the time of day through every chip phase and label, then lets the UI settle (see the header). */
+  function startUiWarmup(now) {
+    phase = 'uiWarmup';
+    capture.setContext(`UI warmup (seed ${worldRecord.seed})`);
+    pilot.autopilot({ enabled: true });
+    uiWarmup.step = 0;
+    uiWarmup.stepStartMs = now;
+    uiWarmup.woke = false;
+    uiWarmup.restoreDayTime = ctx.systems.sky.getDayTime();
+    ctx.systems.sky.setDayTime(UI_WARMUP_DAY_TIMES[0], { transition: 0 });
+  }
+
+  /** Advances the UI warmup; true once it is over. */
+  function stepUiWarmup(now) {
+    const elapsed = (now - uiWarmup.stepStartMs) / 1000;
+    if (uiWarmup.step < UI_WARMUP_DAY_TIMES.length) {
+      if (elapsed < UI_WARMUP_STEP_SECONDS) return false;
+      uiWarmup.step++;
+      uiWarmup.stepStartMs = now;
+      const dayTime = uiWarmup.step < UI_WARMUP_DAY_TIMES.length ? UI_WARMUP_DAY_TIMES[uiWarmup.step] : uiWarmup.restoreDayTime;
+      ctx.systems.sky.setDayTime(dayTime, { transition: 0 });
+      return false;
+    }
+    if (!uiWarmup.woke) {
+      if (elapsed < UI_WARMUP_SETTLE_SECONDS) return false;
+      ctx.systems.ui.wake();
+      uiWarmup.woke = true;
+      uiWarmup.stepStartMs = now;
+      return false;
+    }
+    return elapsed >= UI_WARMUP_WAKE_SECONDS;
+  }
+
   // ---- Warmup lap -----------------------------------------------------------------------------------
   const lap = { queue: [], index: 0, stepStartMs: 0 };
 
@@ -790,7 +844,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       },
       config,
       definitions: {
-        warmup: `The first ${config.worldWarmupSeconds} s after the game reports ready on every page load, then a warmup lap through every craft and view that world flies (${config.warmupLapSeconds} s each on the autopilot, so every craft module, mesh, cockpit, flight model and pipeline exists once), and the first ${config.runWarmupSeconds} s after each run's craft and view switch. Frame statistics and the slow-frame criterion start after warmup; NaN, penetration, crash and console checks cover every frame, the lap included.`,
+        warmup: `The first ${config.worldWarmupSeconds} s after the game reports ready on every page load, then a ${round(config.uiWarmupSeconds, 1)} s UI warmup (every time-of-day chip and the night sky, a toast arriving and leaving, the HUD fading out and in: Chrome compiles its compositor and rasterizer GPU programs on first use), then a warmup lap through every craft and view that world flies (${config.warmupLapSeconds} s each on the autopilot, so every craft module, mesh, cockpit, flight model and pipeline exists once), and the first ${config.runWarmupSeconds} s after each run's craft and view switch. Frame statistics and the slow-frame criterion start after warmup; NaN, penetration, crash and console checks cover every frame, the lap included.`,
         view: 'First person is the settings.views slot cockpit (the cockpit, or the FPV camera and the wingsuit helmet view); third person is chase. The camera view is checked every frame of a run: a run that leaves its planned view was not flown as planned.',
         frameTime: 'Interval between consecutive frames (ms), measured by the harness system each frame (performance.now).',
         nanEvents: 'Frames with a non-finite craft pose or telemetry sampled by the harness, plus every restore by the flight model guard (per tick) and core\'s frame guard.',
@@ -936,7 +990,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         ['Seeds', config.seeds.join(', ')],
         ['Runs', `${report.totals.runs} x ${config.runSeconds} s`],
         ['Views', config.views.map((view) => `${view} person`).join(', ')],
-        ['Warmup', `${config.worldWarmupSeconds} s + a ${config.warmupLapSeconds} s lap per craft and view per world, ${config.runWarmupSeconds} s per run`],
+        ['Warmup', `${config.worldWarmupSeconds} s + ${round(config.uiWarmupSeconds, 1)} s UI + a ${config.warmupLapSeconds} s lap per craft and view per world, ${config.runWarmupSeconds} s per run`],
         ['Heap', report.environment.heap],
         ['Input', report.environment.hiddenGamepads.length > 0 ? `scripted only (${report.environment.hiddenGamepads.length} real gamepad(s) hidden)` : 'scripted only'],
         ['Finished', report.finishedAt ? new Date(report.finishedAt).toLocaleString() : '-'],
@@ -966,6 +1020,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       });
     } else if (phase === 'worldWarmup') {
       panel.setProgress({ label: `World ${state.seed}: warming up`, detail: `${config.worldWarmupSeconds} s after load, then the warmup lap`, fraction: session.nextRun / total });
+    } else if (phase === 'uiWarmup') {
+      panel.setProgress({ label: `World ${state.seed}: UI warmup`, detail: `every time-of-day chip, a toast and the HUD fade, for ${round(config.uiWarmupSeconds, 1)} s (not measured)`, fraction: session.nextRun / total });
     } else if (phase === 'warmupLap') {
       const entry = lap.queue[lap.index];
       panel.setProgress({ label: `World ${state.seed}: warmup lap ${lap.index + 1} of ${lap.queue.length}`, detail: `${entry.craft}, ${entry.view} person, for ${config.warmupLapSeconds} s (not measured)`, fraction: session.nextRun / total });
@@ -996,7 +1052,12 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       updateProgress(now);
       if ((now - worldReadyMs) / 1000 < config.worldWarmupSeconds) return;
       worldRecord.heapAtLoadMB = readHeapMB();
-      startWarmupLap(now);
+      startUiWarmup(now);
+      return;
+    }
+    if (phase === 'uiWarmup') {
+      updateProgress(now);
+      if (stepUiWarmup(now)) startWarmupLap(now);
       return;
     }
     if (phase === 'warmupLap') {
