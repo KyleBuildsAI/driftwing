@@ -239,7 +239,7 @@ src/copilot/             WREN: local grammar, remote brain, aircraft actions
 src/gameplay/            journal, ring courses, waypoints
 src/dev/                 dev badge, wind overlay, debug wind source, mock gamepads, test harnesses
 tools/                   smoke test, harness runner, parity proof, flight labs, copilot server, static server
-legacy/v1.html           the original single-file v1 game
+public/v1/index.html     the original single-file v1 game, frozen byte-for-byte
 docs/                    architecture, controls, copilot API, screenshots
 start-driftwing.bat      one-click start for Windows
 ```
@@ -305,7 +305,7 @@ reproduced below. Working in Claude Code, Opus 5.5:
 No person wrote or edited any of v1's code. The session did pause twice at usage limits and resumed
 with a plain "continue". Every later message only asked to publish the finished game: this
 repository, GitHub Pages, the release, the topics, the v1 screenshots and this note. v1 is tagged
-`v1.0.0` and kept as [legacy/v1.html](legacy/v1.html).
+`v1.0.0` and kept, frozen byte-for-byte, as [public/v1/index.html](public/v1/index.html).
 
 **v2** is being built in four phases with the same model, each from one spec prompt:
 
