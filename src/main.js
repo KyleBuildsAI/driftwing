@@ -25,6 +25,8 @@ import { createRingCourseSystem } from './gameplay/rings.js';
 import { createSettings } from './core/settings.js';
 import { createShellBridge } from './shell/bridge.js';
 import { createSkySystem } from './render/sky.js';
+import { createSpawnDebugger } from './dev/spawnDebugger.js';
+import { createSpawnSystem } from './spawns/index.js';
 import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
 import { createWaterSystem } from './render/water.js';
@@ -49,6 +51,12 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
 // BOOT
 // ============================================================================
 /**
+ * The spawn engines (src/spawns/engines/, contract section 3): one factory per engine, registered
+ * with the spawns system before its prewarm hook initialises them.
+ */
+const SPAWN_ENGINE_FACTORIES = Object.freeze([]);
+
+/**
  * Dev-only verification harnesses: ?test=1 (flight test) and ?test=hotas (HOTAS pipeline test).
  * Loaded on demand from dev builds only, so neither exists in production builds. Returns
  * { databaseName, createSystem(ctx) } or null.
@@ -63,6 +71,8 @@ async function loadDevTest(params) {
 async function boot() {
   const params = new URLSearchParams(window.location.search);
   const devHooks = import.meta.env.DEV || params.get('debug') === '1';
+  // The spawn debugger (F9) and the spawns dev API: dev builds, or a production build with ?dev=1.
+  const spawnDevTools = import.meta.env.DEV || params.get('dev') === '1';
   // First, so the harness sees every console message from boot on; it runs in its own database.
   const devTest = import.meta.env.DEV ? await loadDevTest(params) : null;
   // The display refresh is measured while boot waits on storage and the GPU (an idle window);
@@ -308,6 +318,8 @@ async function boot() {
     ['water', createWaterSystem],
     ['clouds', createCloudSystem],
     ['birds', createBirdSystem],
+    // After wind (ctx.wind) and sky: spawn engines write wind sources and read the sky.
+    ['spawns', (context) => createSpawnSystem(context, { devHooks: devHooks || spawnDevTools })],
     ['journal', createJournal],
     ['landmarks', createLandmarkSystem],
     ['waypoints', createWaypointSystem],
@@ -318,6 +330,8 @@ async function boot() {
     ['gEffects', createGEffectsSystem],
     ['copilot', createCopilotSystem],
     ['windOverlay', createWindOverlaySystem],
+    // Dev-only: the spawn debugger (F9).
+    ...(spawnDevTools ? [['spawnDebugger', createSpawnDebugger]] : []),
     // Dev-only: the debug wind source that proves the Phase 2 wind writer path.
     ...(devHooks ? [['debugWind', createDebugWindSystem]] : []),
     // Dev-only: the ?test harness (runs after input so its scripted controls reach flight).
@@ -329,6 +343,16 @@ async function boot() {
     } catch (error) {
       console.error(`[DRIFTWING] system "${name}" failed to initialise`, error);
       ctx.systems[name] = { update() {}, failed: true };
+    }
+  }
+  // Spawn engines join before the spawns system starts in its prewarm hook.
+  if (typeof ctx.systems.spawns.register === 'function') {
+    for (const createEngine of SPAWN_ENGINE_FACTORIES) {
+      try {
+        ctx.systems.spawns.register(createEngine());
+      } catch (error) {
+        console.error('[DRIFTWING] a spawn engine failed to register', error);
+      }
     }
   }
   // Optional lifecycle hooks: prewarm() right after creation (draw lazily-shown
@@ -348,7 +372,7 @@ async function boot() {
   beginPrewarm();
   const fadeStatus = document.getElementById('fade-status');
   if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
-  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind'];
+  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'spawns', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind', 'spawnDebugger'];
 
   // ---- Flight-state snapshot for the copilot (local or remote brain) -----------------
   ctx.getFlightState = () => {
@@ -519,6 +543,7 @@ async function boot() {
         clouds: ctx.systems.clouds.getStats ? ctx.systems.clouds.getStats() : null,
         birds: ctx.systems.birds.getStats ? ctx.systems.birds.getStats() : null,
         landmarks: ctx.systems.landmarks.getStats ? ctx.systems.landmarks.getStats() : null,
+        spawns: ctx.systems.spawns.getStats ? ctx.systems.spawns.getStats() : null,
         disabledSystems: [...loop.disabledSystems],
       };
     },
