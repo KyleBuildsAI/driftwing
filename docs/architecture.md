@@ -1009,6 +1009,15 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` | the flight models, settings migrations, storage, input, WREN's grammar, the copilot server |
 | `npm test` | the V1 check, `build:single` and a smoke test of the built shell |
 
+**The flight-test harness** passes with 0 NaN events, 0 terrain penetrations, 0 console errors and
+warnings, heap growth under 50 MB per world, no frame over 50 ms after warmup, every run flown in
+its planned craft and view, and every scripted manoeuvre observed. Its frame limit measures the
+whole machine, so `tools/run-harness.mjs` records, per run, the machine's CPU load, the GPU's
+utilisation (`nvidia-smi`) and the page main thread's CPU share, and every slow frame is attributed
+(game systems, GC, other main-thread work, or a delay while the thread was idle). A run whose slow
+frames coincide with another program saturating the CPU or GPU is rerun on a quiet machine; the
+50 ms limit is never loosened.
+
 **The shell test** (`tools/shell-test.mjs`) makes 20 round trips V2 -> V1 -> V2 (V2 -> V1 by the
 pill and by F8 in turn, V1 -> V2 by the pill). After each of the 40 switches it asserts exactly one
 iframe holding exactly one live game document (the page's frames, and Chrome's document counter
