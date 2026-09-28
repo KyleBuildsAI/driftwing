@@ -534,7 +534,8 @@ async function testLifecycle(page, label) {
     await sleep(1500);
     const afterStop = tools.stats();
     let oneShotsWaited = 0;
-    while (tools.stats().oneShotNodesLive > 0 && oneShotsWaited < 40000) {
+    // The storm's strike lands anywhere inside it (up to ~3 km away): wait for it to arrive and end.
+    while ((tools.stats().oneShotNodesLive > 0 || tools.stats().thunderPending > 0) && oneShotsWaited < 40000) {
       await sleep(500);
       oneShotsWaited += 500;
     }
