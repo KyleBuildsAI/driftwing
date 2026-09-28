@@ -19,10 +19,35 @@ and changes these:
 
 - G is the landing gear (the waypoint moves to N);
 - C cycles the view (Enter and / open the command bar);
+- V swaps between first and third person; v1's V (WREN voice on / off) is **Shift+V**;
 - Space is the craft ability;
 - W / S move the throttle lever;
-- the captured mouse is a free virtual stick;
-- plain V is free; v1's V (WREN voice on / off) is **Shift+V**.
+- the captured mouse is a free virtual stick.
+
+## Views
+
+Every craft can be flown from outside or from the pilot's seat, and the view never changes how it
+flies: the same inputs give the same flight in every view.
+
+- **First person** is the cockpit, with its instrument panel. On the FPV drone it is the drone's
+  FPV camera, and on the wingsuit the view from the helmet.
+- **Third person** is the chase camera (the v1 camera: it lags a little, follows part of the bank
+  and widens with speed), the wing camera and the flyby camera.
+- **C** (`viewCycle`) steps through chase, cockpit, wing and flyby.
+- **V** (`viewToggle1P3P`) swaps at once between the cockpit and the last third-person view you
+  used on that craft.
+- Numpad 8 / Numpad 2 (the stick hat up / down) jump to the cockpit / the chase view, and
+  Numpad 4 / 6 (hat left / right) look 90 degrees to the side.
+- Each craft remembers its own view. The first launch opens in the chase view.
+
+Outside views show the glass HUD: airspeed, altitude and vertical speed, the compass heading, a
+small attitude indicator, the throttle, and a stall / AoA warning (a low-rotor-rpm warning on the
+helicopter). The flight path marker, a circle with wings, sits where the craft is really going
+through the air; the gold nose mark next to it is where the nose points. Sideslip moves the marker
+sideways from the nose mark, and angle of attack moves it down. In the cockpit the instrument panel
+does the job and the glass HUD is off unless you turn it on (Settings, Flight: "Glass HUD in the
+cockpit"); the FPV camera and the wingsuit keep the glass HUD, since they have no panel. Units
+follow the Units setting.
 
 ## Keyboard
 
@@ -40,6 +65,7 @@ and changes these:
 | Flaps down / up | F / Shift+F |
 | Airbrake / spoilers (hold; wheel brakes on the ground) | B |
 | Cycle view | C |
+| First / third person (cockpit and the last outside view) | V |
 | View forward (cockpit) / back (chase) | Numpad 8 / Numpad 2 |
 | Look left / right 90 deg | Numpad 4 / Numpad 6 |
 | Recenter view | Numpad 5 |
@@ -121,7 +147,7 @@ controls panel.
 | Y | cycle view |
 | D-pad up / down | flaps up / down |
 | D-pad left / right | previous / next craft |
-| View (back) | unbound |
+| View (back) | first / third person |
 | Menu (start) | settings |
 | L3 (left stick click) | waypoint to nearest landmark |
 
@@ -179,6 +205,7 @@ the best published layout. If your hardware reports them differently, rebind in 
 | Button 5 | engine on / off |
 | Button 6 | deploy parachute |
 | Button 7 | controls panel |
+| Button 8 | first / third person |
 | Throttle hat | unbound (reserved for music controls in a later phase) |
 
 TFRP pedals on their own USB lead (normally they come through the TWCS) default to rudder and toe
@@ -237,7 +264,9 @@ Settings (`,`) hold the input options that are not bindings:
 
 - **Flight tab**: the assists slider for the current craft (100 % by default; the first HOTAS you
   connect sets 50 % on every craft whose assists you have not set yourself, once, with a toast),
-  start on the ground, units and the HUD options. It also holds the FPV drone's camera and stick settings (`settings.fpv`):
+  start on the ground, units and the HUD options: the glass HUD in the cockpit (off by default),
+  the flight path marker (on by default), the instrument overlay, landing callouts and hiding the
+  HUD when idle. It also holds the FPV drone's camera and stick settings (`settings.fpv`):
   - camera uptilt, 0-40 deg (default 25);
   - stick expo, 0-1 (default 0.3);
   - maximum rate in deg/s (default 670).
@@ -273,7 +302,8 @@ A short checklist for the first session with the real T.16000M FCS Flight Pack:
    - FPV drone: thrust on the throttle, and head button 2 for rate / angle mode.
 5. **What to look for:**
    - **Hat snaps**: stick hat up gives the cockpit, down the chase view, left / right look 90 deg,
-     with no stuck or phantom directions at centre.
+     with no stuck or phantom directions at centre. TWCS button 8 swaps between the cockpit and
+     the last outside view.
    - **Twist hand-off to the pedals**: the twist yaws until the pedals first move, then only the
      pedals do.
    - **Afterburner detent click**: past the detent (95 %) you hear a click, the throttle gauge
@@ -286,11 +316,11 @@ A short checklist for the first session with the real T.16000M FCS Flight Pack:
 
 ## Actions
 
-`copilotPTT, craftAbility, waypointNearest, waypointAhead, photoMode, viewCycle, viewForward,
-viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, craftSelect1-6, gearToggle,
-flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack, ringCourse, journal,
-settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`. Each press and
-release is published as `input:action { id, phase, source, device }`.
+`copilotPTT, craftAbility, waypointNearest, waypointAhead, photoMode, viewCycle, viewToggle1P3P,
+viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, craftSelect1-6,
+gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack, ringCourse,
+journal, settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`. Each press
+and release is published as `input:action { id, phase, source, device }`.
 
 ## For developers: the input system API
 

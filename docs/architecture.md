@@ -150,6 +150,7 @@ system, and then starts the frame loop.
 | `controlsPanel.js`, `controlsPanel.css` | the controls panel: device tabs, live readings, bindings, tuning, export / import |
 | `calibrationWizard.js` | the calibration wizard screens |
 | `instruments/` | 17 instrument renderers (`index.js` registry, `gaugeKit.js`, `units.js`) |
+| `glassHud.js`, `glassHud.css` | the glass HUD's attitude indicator, stall / AoA warning and flight path marker, and when the glass HUD shows (the camera system drives it) |
 | `instrumentHud.js`, `instrumentHud.css` | the optional glass instrument HUD overlay |
 | `stickReticle.js`, `stickReticle.css` | the virtual-stick reticle |
 | `soundPill.js`, `soundPill.css` | the "Sound off - click to enable" pill |
@@ -186,11 +187,12 @@ system, and then starts the frame loop.
 | file | what |
 | --- | --- |
 | `smoke-test.mjs` | headless Chrome check: console errors and warnings fail it; scripted steps and screenshots |
+| `steps/*.json` | reusable smoke steps; `view-physics.json` proves every craft flies the same in every view (below) |
 | `run-harness.mjs` | runs the `?test=1` / `?test=hotas` harnesses headlessly on a spare port and saves the report |
 | `flight-lab.mjs` | headless flight lab for the glider and bush plane (handling, spawns, craft switches, hot-plug) |
 | `lab/jet.mjs`, `lab/helicopter.mjs`, `lab/wingsuit.mjs`, `lab/fpv.mjs` | headless flight labs per craft |
-| `lab/settings.mjs` | settings migrations and the one-time HOTAS assist default |
-| `lab/copilot.mjs` | WREN's local grammar (version one, retired commands) and the `switchVersion` schema |
+| `lab/settings.mjs` | settings migrations (views per craft included) and the one-time HOTAS assist default |
+| `lab/copilot.mjs` | WREN's local grammar (version one, the view commands, retired commands) and the `switchVersion` and `setView` schema |
 | `lab/input.mjs`, `lab/storage.mjs`, `lab/copilot-server.mjs` | input pipeline, storage and copilot-server origin labs |
 | `copilot-server.mjs` | the reference remote copilot brain (see `docs/copilot-api.md`) |
 | `serve.mjs` | zero-dependency static server (`npm run serve:single`) |
@@ -268,10 +270,16 @@ The rendered pose is interpolated between the last two ticks with `alpha`.
 
 ### `window.DRIFTWING`
 
-`{ ready, backend, revision, seed, frame, readyMs, ctx, state, getStats() }`. `getStats()` returns
-the backend, revision, fps, frame time, render scale, the frame target and a `perf` block, draw
-calls, quality, time of day, the copilot flight state, terrain, cloud, bird and landmark stats, and
-the disabled systems. The smoke test and the harnesses script the game through it.
+`{ ready, backend, revision, seed, frame, readyMs, ctx, state, getStats(), debug? }`.
+`getStats()` returns the backend, revision, fps, frame time, render scale, the frame target and a
+`perf` block, draw calls, quality, time of day, the copilot flight state, terrain, cloud, bird and
+landmark stats, and the disabled systems. The smoke test and the harnesses script the game through it.
+
+In dev builds, with `?debug=1` or with `?test`, `debug` steps the frame loop by hand:
+`pauseLoop()` stops the animation loop, `stepFrames(count, frameMs = 1000 / 60)` runs frames at a
+fixed frame time, `resetTiming()` makes the next frame start the timing afresh (no physics time),
+and `resumeLoop()` hands the frames back. Scripted checks use it to give two runs the same frame
+and tick timing (`tools/steps/view-physics.json`).
 
 ## Contracts
 
@@ -341,10 +349,12 @@ single-file build on the same address.
 The API is `get(key)` (object values come back as copies), `set(key, value)` (whole value; returns
 false when invalid), `update(key, patch)` (merges into an object key), `reset(key?)` and `all()`.
 Every change emits `settings:changed { key, value, settings }`. The record is versioned
-(`SETTINGS_VERSION` 4) and migrated. Unknown fields are dropped, and an invalid field falls back to
+(`SETTINGS_VERSION` 5) and migrated. Unknown fields are dropped, and an invalid field falls back to
 its default. Version 4 removed the CLASSIC | SIM `mode`, the per-mode `views` and `hotasPrompt`: the
 SIM view became `view`, and craft whose assists a record had moved off 100 % count as set by the
-player (`tools/lab/settings.mjs` checks the migration).
+player. Version 5 remembers the view per craft: `view` seeds every craft's `views` entry (and
+`thirdPersonViews` when it is a third-person view), and a first run starts every craft in chase
+(`tools/lab/settings.mjs` checks the migrations).
 
 | key | default | values |
 | --- | --- | --- |
@@ -360,10 +370,11 @@ player (`tools/lab/settings.mjs` checks the migration).
 | `hotasAssistsApplied` | false | boolean: the one-time HOTAS default has run |
 | `startOnGround` | false | boolean |
 | `units` | `metric` | `metric` (km/h, m, m/s) \| `aviation` (kt, ft, fpm) |
-| `view` | `cockpit` | `chase` \| `cockpit` \| `wing` \| `flyby` (the FPV camera is stored as `cockpit`, the first-person slot) |
+| `views` | `chase` for every craft | `{ craftId: 'chase' \| 'cockpit' \| 'wing' \| 'flyby' }`: the view each craft was last flown in (the FPV camera is stored as `cockpit`, the first-person slot) |
+| `thirdPersonViews` | `chase` for every craft | `{ craftId: 'chase' \| 'wing' \| 'flyby' }`: the last third-person view, where `viewToggle1P3P` returns |
 | `fov` | `{ chase: 60, cockpit: 74, wing: 68, flyby: 50, fpv: 120 }` | degrees; ranges 40-100, 50-110, 40-110, 20-90, 90-150 |
 | `fpv` | `{ uptilt: 25, expo: 0.3, rate: 670 }` | FPV drone: camera uptilt 0-40 deg, stick expo 0-1, maximum rate in deg/s |
-| `hud` | `{ overlay: false, landingCallouts: false }` | booleans |
+| `hud` | `{ overlay: false, landingCallouts: false, cockpitGlass: false, flightPathMarker: true }` | booleans: the instrument overlay, landing callouts, the glass HUD in a cockpit with a panel, the flight path marker |
 | `twistYaw` | `auto` | `auto` \| `on` \| `off` |
 | `afterburnerDetent` | 0.95 | 0.8-1 |
 | `frameTarget` | `auto` | `auto` \| 60 \| 120 \| 144 \| 240 \| `uncapped` |
@@ -432,12 +443,12 @@ v2 adds these untyped events:
 
 Every action is rebindable on every device:
 
-`copilotPTT, craftAbility, waypointNearest, waypointAhead, photoMode, viewCycle, viewForward,
-viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, craftSelect1` .. `craftSelect6,
-gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack, ringCourse,
-journal, settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`. Stored or
-imported bindings for the retired `modeToggle` and `boost`, and Phase 1 references limited to the
-CLASSIC key layer, are dropped quietly on load.
+`copilotPTT, craftAbility, waypointNearest, waypointAhead, photoMode, viewCycle, viewToggle1P3P,
+viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, craftSelect1` ..
+`craftSelect6, gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack,
+ringCourse, journal, settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`.
+Stored or imported bindings for the retired `modeToggle` and `boost`, and Phase 1 references
+limited to the CLASSIC key layer, are dropped quietly on load.
 
 Each press and release is published as `input:action`. Each action has exactly one owner that
 performs it:
@@ -445,7 +456,7 @@ performs it:
 | owner | actions |
 | --- | --- |
 | flight (`FlightController.js`) | craftAbility, craftNext, craftPrev, craftSelect1-6, gearToggle, flapsUp, flapsDown, airbrake (held), relaunch, engineToggle, chuteDeploy. The flight model itself handles gearToggle, flapsUp, flapsDown, airbrake, engineToggle and chuteDeploy (they reach it in `controls.actions` on the frame's first tick, and held ones in `controls.held`) |
-| camera (`cameraManager.js`) | viewCycle, viewForward, viewBack, viewLeft, viewRight, recenterView |
+| camera (`cameraManager.js`) | viewCycle, viewToggle1P3P, viewForward, viewBack, viewLeft, viewRight, recenterView |
 | ui (`ui.js`) | waypointAhead, waypointNearest, photoMode, autopilotToggle, timeForward, timeBack, ringCourse, journal, settings, controlsPanel |
 | copilot (`copilot.js`) | copilotPTT (held) |
 | shell bridge (`src/shell/bridge.js`) | versionToggle |
@@ -716,22 +727,54 @@ It keeps v1's API: `update`, `setPhotoMode`, `shake`, `snap`, `getMode()` (`chas
 
 - `getView()`: `chase` \| `cockpit` \| `wing` \| `flyby` \| `fpv`.
 - `setView(slot)`: `chase` \| `cockpit` \| `wing` \| `flyby`. `cockpit` is the first-person slot,
-  which becomes `fpv` when the craft has `cameraRig.fpv`. The choice is saved in `settings.view`.
+  which becomes `fpv` when the craft has `cameraRig.fpv`. The choice is saved per craft in
+  `settings.views`, and a third-person one also in `settings.thirdPersonViews`.
 - `cycleView(direction)` and `listViews()`.
+- `toggleFirstThirdPerson()` (the `viewToggle1P3P` action), `isFirstPerson()` and
+  `getLastThirdPerson()`.
 - `getLook()`: `{ yaw, pitch, snapYaw }` in degrees.
-- `getStats()`: view, lens, zoom, FPV uptilt, hidden parts, cockpit, HUD, reticle, flyby and
-  instrument timings.
+- `getStats()`: view, slot, first person, last third-person slot, lens, zoom, FPV uptilt, hidden
+  parts, cockpit, HUD, glass HUD, reticle, flyby and instrument timings.
 - `debug.previewCockpit(descriptor)`: dev builds, `?debug=1` or `?test` only.
 
 Behaviour:
 
-- The first view is the saved one (cockpit by default).
+- First person is the cockpit (the FPV camera on the drone, the helmet view on the wingsuit);
+  third person is chase, wing and flyby. `viewCycle` steps chase, cockpit, wing, flyby;
+  `viewToggle1P3P` cuts at once between first person and the craft's last third-person view (the
+  chase rig keeps integrating while detached, so it is already in place); the stick hat keeps its
+  snaps (`viewForward` cockpit, `viewBack` chase, `viewLeft` / `viewRight` look 90 degrees).
+- Each craft starts in its remembered view (chase on a first launch: the golden-hour opening
+  shot), and a craft change flies the new craft from its own view. A `settings.views` change for
+  the active craft from another channel (WREN) switches the view.
+- The chase view is v1's rig: critically damped lag, 60 % of the bank, a look-ahead and the FOV
+  stretch with speed.
 - Free look reads `lookX` / `lookY`: head pan in the cockpit, an orbit in chase and a small offset
   elsewhere.
 - Each view takes its FOV from `settings.fov`. The chase view keeps v1's speed stretch and is
   exactly v1 at the default 60.
 - An `inputProfile.antenna` of `'zoom'` narrows the lens by up to 3x.
-- The instruments redraw at 30 Hz, onto the cockpit panel texture and the optional glass HUD.
+- The instruments redraw at 30 Hz, onto the cockpit panel texture and the optional instrument
+  overlay (and the glass HUD's attitude indicator).
+- **Glass HUD** (`src/ui/glassHud.js`, updated after the camera pose is final). Every
+  third-person view shows it: v1's flight card (airspeed, altitude, AGL and vertical speed in
+  `settings.units`, the throttle bar) and compass, a compact attitude indicator (`state.flight`
+  pitch and roll), a stall / AoA warning (`state.flight.stall` and `aoa`; on the helicopter the
+  stall lamp is the low-rotor-rpm warning), and the flight path marker. The marker is drawn where
+  `state.flight.airVelocity` points, projected 1500 m ahead of the craft, next to a nose mark
+  projected along the craft's axis: sideslip shows as a lateral offset, angle of attack as a
+  vertical one. Off screen it pins to the edge and dims; below 5 m/s it hides. A first-person view
+  with an instrument panel shows the glass HUD only with `hud.cockpitGlass`; the panel-less first
+  person views (FPV camera, wingsuit) keep it. A warning keeps an idle HUD awake.
+- **Views never touch the physics.** The camera writes no ControlState and no model state. Free
+  look is its own ControlState axes (`lookX`, `lookY`), which no flight model, control stage or
+  assist reads; the HOTAS antenna is flaps on fixed-wing craft (read by SimFixedWing in every view)
+  and only a lens zoom on the craft whose `inputProfile.antenna` is `'zoom'`. The fixed 120 Hz
+  clock makes the flight depend on the tick count only, never on how fast a view renders.
+  `tools/steps/view-physics.json` checks it: every craft flies the same keyboard and free-look
+  script from the cockpit, from chase and while switching views with V and C, from a start the
+  craft is rebuilt at for each run, and the trajectories must agree at every tick (they are
+  bit-identical; a 0.1 % rudder leak in one view shows as 0.7 mm to 15 cm).
 - The FPV view reads its uptilt, and SimQuad its rate curve, from `settings.fpv` live, over the
   craft profile values.
 
@@ -793,7 +836,8 @@ The UI system offers `update`, `toast`, `setSubtitle`, `setMicState`, `showPanel
 `wake` and `openControls({ calibrate })`. It also exposes the v2 chrome objects `craftPicker`,
 `settingsPanel`, `controlsPanel` and `statusBadge`.
 
-- Root classes: `dw-devbadge-on`, `dw-touch` (touch controls), and `dw-no-throttle` for craft whose
+- Root classes: `dw-devbadge-on`, `dw-touch` (touch controls), `dw-glass-off` (a cockpit without
+  the glass HUD hides every `.dw-glass` element), and `dw-no-throttle` for craft whose
   `inputProfile.throttle` is `'none'` (the glider and the wingsuit).
 - The hint strip and the help panel's key lists are read from the live keyboard bindings.
 - Touch: the virtual stick and the throttle slider report to `ctx.systems.input.touch`, so they fly
@@ -807,10 +851,11 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 - `ctx.executeAction(action)` returns the reply text or a promise of it.
 - The remote brain contract (request, flight state, action schema, validation, fallbacks) is
   `docs/copilot-api.md`. The shared validator is `sanitizeFlightAction` in `grammar.js`.
-- Aircraft actions only use the public channels: settings for craft and assists; `input:action`
-  with source `copilot` for views, engine, chute and `versionToggle` ("switch to version one": the
-  shell bridge asks the launcher shell for V1); `flight.relaunch()`; and `ui:openControls` for
-  calibration.
+- Aircraft actions only use the public channels: settings for craft, assists and the wing and
+  flyby views (`settings.views`); `input:action` with source `copilot` for the cockpit, chase and
+  outside views (`viewForward`, `viewBack`, `viewToggle1P3P`), engine, chute and `versionToggle`
+  ("switch to version one": the shell bridge asks the launcher shell for V1);
+  `flight.relaunch()`; and `ui:openControls` for calibration.
 
 ### Dev tools and test entry points
 
@@ -820,6 +865,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `?renderer=webgl` | force the WebGL2 backend |
 | `?seed=...`, `?time=0..1`, `?touch=1` | world seed, start time of day, force touch controls (v1) |
 | `?test=hotas` | installs the mock gamepads (`ctx.systems.input.mock`) and, in dev builds, runs the HOTAS pipeline test (`src/dev/hotasTest.js`): bindings and hat decoding in both hat forms, calibration results, twist auto-disable, the one-time HOTAS assist default, and persistence across a reload |
+| `tools/steps/view-physics.json` | run with `tools/smoke-test.mjs --url <dev server>/v2/` (or a build with `?debug=1`): pauses the loop, steps frames by hand and proves every craft flies identically in the cockpit, in chase and while switching views |
 | `?test=1` | dev builds: the flight-test harness (`src/dev/testHarness.js`). It flies each of the six craft for 60 s across 3 seeds, and logs average fps, p99 frame time, NaN events, terrain penetrations, soft crashes, heap growth and console errors. It shows an on-screen summary and offers a JSON report (`window.DRIFTWING.testReport`) |
 | `tools/run-harness.mjs` | runs either harness headlessly on a spare port (`--test 1\|hotas`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--out`) and exits 0 on PASS |
 | `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |

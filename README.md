@@ -47,8 +47,10 @@ with a Thrustmaster stick connected.*
 - **Joysticks and HOTAS.** Xbox-style gamepads work out of the box, and so does the Thrustmaster
   T.16000M FCS Flight Pack (stick, throttle and rudder pedals). There is a controls panel to rebind
   anything, and a calibration wizard.
-- **Cockpits and instruments.** A cockpit view with a working instrument panel for each craft, plus
-  wing, flyby and FPV cameras.
+- **First or third person.** Fly from the cockpit, with a working instrument panel for each craft
+  (the FPV camera on the drone), or from outside in the chase, wing and flyby views, with a glass
+  HUD and a flight path marker. V swaps between them, each craft remembers its view, and the view
+  never changes how the craft flies.
 - **Procedural sound.** Engines, rotors, wind, a stall horn, a variometer and touchdowns, all
   generated live, with no audio files.
 - **Wind you can use.** Thermals, ridge lift and gusts, so the glider can climb for real.
@@ -91,7 +93,7 @@ Everything can be rebound in the controls panel (`.`).
 | Craft ability | Space (water ballast, smoke, afterburner, hover hold, parachute, drone flight mode) |
 | Gear / flaps / airbrake | G / F and Shift+F / hold B |
 | Pick a craft | 1-6, or [ and ] |
-| Change view | C cycles views; Numpad 8 cockpit, Numpad 2 chase |
+| Change view | C cycles chase, cockpit, wing and flyby; V swaps the cockpit and your last outside view |
 | Waypoint ahead | N |
 | Relaunch, engine, parachute | Backspace, Z, U |
 | Switch to V1, the original game | F8 |
@@ -119,7 +121,8 @@ Open Settings with `,` or the gear icon. There are five tabs:
   - the assists slider for the current craft (the only difficulty control);
   - start on the ground (for take-off practice);
   - units (km/h and metres, or knots and feet);
-  - the instrument HUD overlay and landing callouts;
+  - the HUD: the glass HUD in the cockpit, the flight path marker, the instrument overlay and
+    landing callouts;
   - the FPV drone's camera tilt (0-40 degrees), stick expo and maximum rotation rate.
 - **Graphics**: quality preset, frame target (Auto uses your screen's refresh rate), dynamic
   resolution, FPS display, and the field of view for each camera.

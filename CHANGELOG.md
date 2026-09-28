@@ -28,20 +28,42 @@ The structure correction: DRIFTWING is two separate games behind one toggle, V1 
 - V2 boots straight into the real flight model. The assists slider (0-100 % per craft) is the only
   difficulty control: 100 % by default, and the first HOTAS device sets 50 % on every craft whose
   assists the player never set, once, with a toast.
-- One keyboard layer: G gear, N waypoint ahead, C view cycle, Space craft ability; Enter and /
-  open the command bar; plain V is free.
+- One keyboard layer: G gear, N waypoint ahead, C view cycle, V first / third person, Space craft
+  ability; Enter and / open the command bar; Shift+V stays WREN's voice.
 - The touch virtual stick and throttle slider feed ControlState through `ctx.systems.input.touch`.
 - `versionToggle` moved to T.16000M base button 10 (it was TWCS button 8).
 - Settings version 4: `mode`, `views` and `hotasPrompt` are dropped (the SIM view becomes `view`),
   and `assistsSetByPlayer` / `hotasAssistsApplied` are added. Stored bindings for the retired
   actions and Phase 1's CLASSIC-only key references are dropped quietly.
 - The variometer audio is `on` or `off` (Phase 1's `auto` reads as `on`).
+- Views are remembered per craft (settings version 5: `views` and `thirdPersonViews` per craft,
+  seeded from version 4's `view`), a craft change flies the new craft from its own view, and the
+  first launch opens in the chase view, the golden-hour opening shot.
+- The v1 flight card reads "Airspeed" and follows the Units setting (km/h, m, m/s or kt, ft, fpm).
+- On landscape touch screens the compass sits between the flight card and the status chips, and
+  the launcher's V1 | V2 pill keeps clear of V2's flight card.
+- WREN's "third person" and "outside view" go back to the craft's last outside view (they meant
+  the chase view before).
 
 ### Added
 
 - WREN: "switch to version one" (also "version one", "v1", "switch to v1", "play the original"),
   the `switchVersion` remote action (`version: 'v1'`, strictly validated) and its rule in
   `tools/copilot-server.mjs`.
+- First / third person: the bindable `viewToggle1P3P` action (V, gamepad View, TWCS button 8)
+  swaps at once between the cockpit (the drone's FPV camera) and the craft's last third-person
+  view. The stick hat keeps its snaps.
+- The glass HUD in every third-person view: the airspeed / altitude card and compass, a compact
+  attitude indicator, the throttle bar and a stall / AoA warning. It is optional in the cockpit
+  (`hud.cockpitGlass`, off by default); the FPV camera and the wingsuit keep it.
+- The flight path marker: the velocity-vector symbol where the air-relative velocity points, with a
+  nose mark, so sideslip and angle of attack read from outside (`hud.flightPathMarker`, on).
+- WREN: "wing view", "flyby view", "third person" / "outside view"; `setView` takes `wing`, `flyby`
+  and `outside`.
+- `tools/steps/view-physics.json`: flies every craft through the same scripted inputs from the
+  cockpit, from chase and while switching views, and needs the same trajectory at every tick. It
+  steps frames through the dev-only `DRIFTWING.debug` hooks (`pauseLoop`, `stepFrames`,
+  `resetTiming`, `resumeLoop`).
 - `tools/lab/settings.mjs` (settings migrations, the HOTAS assist default) and
   `tools/lab/copilot.mjs` (WREN's grammar and the `switchVersion` schema); the HOTAS harness checks
   the assist default across a reload.
