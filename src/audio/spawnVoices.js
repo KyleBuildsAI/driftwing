@@ -665,6 +665,17 @@ export function createSpawnVoices({ THREE, onIssue }) {
     return true;
   }
 
+  /** Moves an audition voice: { distance, bearing, elevation } (m, degrees; bearing 0 = ahead). */
+  function setAuditionPlacement(handle, options) {
+    const voice = voices.find((candidate) => candidate.handle === handle);
+    if (!voice || !voice.follow) return false;
+    const follow = voice.follow;
+    if (options && Number.isFinite(options.distance)) follow.distance = Math.max(0, options.distance);
+    if (options && Number.isFinite(options.bearing)) follow.bearing = (options.bearing * Math.PI) / 180;
+    if (options && Number.isFinite(options.elevation)) follow.elevation = (options.elevation * Math.PI) / 180;
+    return true;
+  }
+
   // ---- Diagnostics ------------------------------------------------------------------------------------
   function describeVoice(voice) {
     const realized = voice.realized;
@@ -786,21 +797,12 @@ export function createSpawnVoices({ THREE, onIssue }) {
       const params = options && options.params && typeof options.params === 'object' ? options.params : EMPTY_OPTIONS;
       const voice = createVoice(recipe, params);
       voice.follow = { distance: 0, bearing: 0, elevation: 0 };
-      this.setAuditionPlacement(voice.handle, options);
+      setAuditionPlacement(voice.handle, options);
       if (options && Number.isFinite(options.intensity)) voice.intensity = clamp(options.intensity, 0, 1);
       return voice.handle;
     },
 
-    /** Moves an audition voice: { distance, bearing, elevation } (m, degrees; bearing 0 = ahead). */
-    setAuditionPlacement(handle, options) {
-      const voice = voices.find((candidate) => candidate.handle === handle);
-      if (!voice || !voice.follow) return false;
-      const follow = voice.follow;
-      if (options && Number.isFinite(options.distance)) follow.distance = Math.max(0, options.distance);
-      if (options && Number.isFinite(options.bearing)) follow.bearing = (options.bearing * Math.PI) / 180;
-      if (options && Number.isFinite(options.elevation)) follow.elevation = (options.elevation * Math.PI) / 180;
-      return true;
-    },
+    setAuditionPlacement,
 
     /**
      * Audition: a strike from the point distance metres from the listener at bearing and elevation
