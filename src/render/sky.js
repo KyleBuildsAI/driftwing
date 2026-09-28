@@ -597,7 +597,10 @@ export function createSkySystem(ctx) {
     if (amount <= 0) return;
     const below = combined[amountKey];
     const total = amount + below * (1 - amount);
-    combined[colorKey].multiplyScalar((below * (1 - amount)) / total).addScaledVector(color, amount / total);
+    const keep = (below * (1 - amount)) / total;
+    const add = amount / total;
+    const target = combined[colorKey];
+    target.setRGB(target.r * keep + color.r * add, target.g * keep + color.g * add, target.b * keep + color.b * add);
     combined[amountKey] = total;
   }
 
