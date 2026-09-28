@@ -43,7 +43,7 @@ const SWITCH_REQUEST_KEYS = Object.freeze(['source', 'to', 'type']);
 const frame = document.getElementById('dw-shell-frame');
 const veil = document.getElementById('dw-shell-veil');
 const pill = document.getElementById('dw-shell-pill');
-const status = document.getElementById('dw-shell-status');
+const statusRegion = document.getElementById('dw-shell-status');
 const pillButtons = [...pill.querySelectorAll('button[data-version]')];
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -144,7 +144,7 @@ function updatePill() {
 async function loadGame(version, { initial = false } = {}) {
   busy = true;
   updatePill();
-  status.textContent = `Loading ${LABELS[version]}`;
+  statusRegion.textContent = `Loading ${LABELS[version]}`;
   if (!initial) {
     await setVeil(true);
     await navigateFrame('about:blank');
@@ -159,7 +159,7 @@ async function loadGame(version, { initial = false } = {}) {
   busy = false;
   if (!initial) switches += 1;
   updatePill();
-  status.textContent = `${LABELS[version]} is running`;
+  statusRegion.textContent = `${LABELS[version]} is running`;
   focusGame();
   showPill();
   const next = queued;
@@ -168,8 +168,9 @@ async function loadGame(version, { initial = false } = {}) {
 }
 
 /**
- * Asks for a version. Switching to the running game does nothing unless reload is set (a new
- * hash). While a switch runs, the latest request waits for it. Returns true when accepted.
+ * Asks for a version. Asking for the running game only hands it the focus back, unless reload is
+ * set (a new hash). While a switch runs, the latest request waits for it. Returns true when a
+ * load was started or queued.
  */
 function requestVersion(version, { reload = false } = {}) {
   if (!VERSIONS.includes(version)) return false;
@@ -177,7 +178,10 @@ function requestVersion(version, { reload = false } = {}) {
     queued = { version, reload };
     return true;
   }
-  if (version === current && !reload) return false;
+  if (version === current && !reload) {
+    focusGame();
+    return false;
+  }
   loadGame(version).catch((error) => {
     console.error('[DRIFTWING shell] switching games failed', error);
     busy = false;
