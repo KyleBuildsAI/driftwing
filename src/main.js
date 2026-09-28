@@ -5,6 +5,7 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { CONFIG, WORLD_OPTIONS } from './core/config.js';
+import { createAssistDefaults } from './flight/assistDefaults.js';
 import { createAudioSystem } from './audio/AudioEngine.js';
 import { createBirdSystem } from './render/birds.js';
 import { createCameraSystem } from './camera/cameraManager.js';
@@ -299,6 +300,8 @@ async function boot() {
     ['shell', createShellBridge],
     ['audio', createAudioSystem],
     ['ui', createUISystem],
+    // Before input, so it hears the first deviceConnected (the one-time HOTAS assist default).
+    ['assistDefaults', createAssistDefaults],
     ['input', createInputSystem],
     ['sky', createSkySystem],
     ['terrain', createTerrainSystem],

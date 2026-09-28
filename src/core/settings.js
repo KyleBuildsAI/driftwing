@@ -1,8 +1,8 @@
 // Player settings: a versioned, validated schema persisted through core/storage (IndexedDB).
 //
-// Flat keys hold scalars; a few keys hold small objects (assists per craft, FOV per view, the audio
-// mixer, HUD preferences, the FPV drone's camera and rates). get/set work on whole keys;
-// update(key, patch) merges into an object key. Every change emits
+// Flat keys hold scalars; a few keys hold small objects (assists per craft and whether the player
+// set them, FOV per view, the audio mixer, HUD preferences, the FPV drone's camera and rates).
+// get/set work on whole keys; update(key, patch) merges into an object key. Every change emits
 // 'settings:changed' { key, value, settings }.
 //
 // Bindings and calibration are not settings: the input system keeps them in their own storage keys
@@ -53,9 +53,13 @@ const SCHEMA = Object.freeze({
   showFps: { default: false, validate: isBoolean },
   hudAutoHide: { default: true, validate: isBoolean },
 
-  // v2: flight.
+  // v2: flight. assists: 0..1 per craft (the only difficulty control); assistsSetByPlayer: which
+  // craft the player chose assists for (src/flight/assistDefaults.js leaves those alone);
+  // hotasAssistsApplied: the one-time HOTAS default (50 %) has been applied.
   craft: { default: 'glider', validate: oneOf(CRAFT_IDS) },
   assists: { default: perCraft(1), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, unitRange(0, 1)])) },
+  assistsSetByPlayer: { default: perCraft(false), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, isBoolean])) },
+  hotasAssistsApplied: { default: false, validate: isBoolean },
   startOnGround: { default: false, validate: isBoolean },
   fpv: {
     default: Object.freeze({ uptilt: 25, expo: 0.3, rate: 670 }),
@@ -147,12 +151,15 @@ function migrate(stored) {
   if (version < 4) {
     // v4: V2 has no CLASSIC | SIM mode. The mode, the per-mode views and the "HOTAS connected in
     // CLASSIC" prompt answer go (the Phase 1 import already dropped mode from imported records);
-    // the SIM view becomes the one remembered view.
+    // the SIM view becomes the one remembered view. Assists a record already moved off the default
+    // were the player's choice, so the one-time HOTAS default leaves them alone.
     const views = isPlainObject(record.views) ? record.views : null;
     if (views && VIEW_IDS.includes(views.sim)) record.view = views.sim;
     delete record.mode;
     delete record.views;
     delete record.hotasPrompt;
+    const assists = isPlainObject(record.assists) ? record.assists : {};
+    record.assistsSetByPlayer = Object.fromEntries(CRAFT_IDS.map((id) => [id, Number.isFinite(assists[id]) && assists[id] !== SCHEMA.assists.default[id]]));
     version = 4;
   }
   record.version = version;

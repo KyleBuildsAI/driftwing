@@ -18,7 +18,11 @@
 //      with the setting forced on, and re-arms when the pedals are unplugged;
 //   5. persistence: a custom binding and a per-craft tuning are added, the page reloads, and the
 //      bindings and both calibration records must come back from IndexedDB unchanged and work
-//      (devices re-plugged in other slots with another id format).
+//      (devices re-plugged in other slots with another id format);
+//   6. the one-time HOTAS assist default (src/flight/assistDefaults.js): from a first-run state
+//      with one craft's assists set by the player, the first HOTAS drops every other craft to 50 %
+//      with one toast; after the reload, a re-plugged HOTAS changes nothing and shows no toast, and
+//      the player's own choices stay.
 // Expected axis values are computed here from the documented pipeline (not by calling the game's
 // functions), so a regression in the pipeline shows up as a mismatch.
 //
@@ -27,6 +31,8 @@
 // crosses the reload in sessionStorage. Output: the on-screen summary panel and
 // window.DRIFTWING.testReport (tools/run-harness.mjs --test hotas).
 import { CHROME_HAT_CENTER, CHROME_HAT_VALUES } from './mockGamepads.js';
+import { HOTAS_ASSIST_LEVEL, HOTAS_ASSIST_TOAST } from '../flight/assistDefaults.js';
+import { CRAFT_IDS } from '../core/settings.js';
 import { installConsoleCapture } from './testConsole.js';
 import { createTestPanel } from './testPanel.js';
 import { readSession, removeSession, writeSession } from './testStats.js';
@@ -64,6 +70,11 @@ const SPEC_AXES = Object.freeze({
     lookX: { axis: 0 }, lookY: { axis: 1 }, throttle: { axis: 2 }, brakeL: { axis: 3 }, brakeR: { axis: 4 }, trim: { axis: 5 }, antenna: { axis: 6 }, yaw: { axis: 7, role: 'rudder' },
   },
 });
+/** The craft whose assists the player "set" before the HOTAS arrives, and the level chosen. */
+const PLAYER_SET_CRAFT = Object.freeze({ craft: 'jet', level: 0.8 });
+/** The craft the player sets after the reload (the re-plugged HOTAS must leave it alone too). */
+const PLAYER_SET_AFTER_RELOAD = Object.freeze({ craft: 'glider', level: 0.7 });
+
 /** Tuning of the default axis bindings (docs/controls.md), used for the expected values. */
 const TUNING = Object.freeze({
   roll: { deadzone: 0.03, saturation: 0.02, expo: 0.15 },
@@ -168,6 +179,7 @@ function createHotasTestSystem(ctx, { capture }) {
   const frameWaiters = [];
   const actions = [];
   const connections = [];
+  const notices = [];
   let currentStep = 'waiting for the game';
   const report = {};
 
@@ -176,6 +188,7 @@ function createHotasTestSystem(ctx, { capture }) {
   });
   bus.onTyped('deviceConnected', (payload) => connections.push({ type: 'connected', ...payload, frame }));
   bus.onTyped('deviceDisconnected', (payload) => connections.push({ type: 'disconnected', ...payload, frame }));
+  bus.on('notify', (payload) => notices.push({ text: payload && typeof payload.text === 'string' ? payload.text : '', frame }));
 
   // ---- Frame helpers -------------------------------------------------------------------------------
   function nextFrame() {
@@ -270,7 +283,12 @@ function createHotasTestSystem(ctx, { capture }) {
     input().calibration.reset(THROTTLE_KEY);
     settings.set('twistYaw', 'auto');
     settings.set('craft', 'glider');
+    resetAssistState();
+    settings.update('assists', { [PLAYER_SET_CRAFT.craft]: PLAYER_SET_CRAFT.level });
     await settle();
+    check('assists', 'first-run state: assists 100 %, the HOTAS default not applied yet', settings.get('hotasAssistsApplied') === false && assistsMatch(expectedAssists(1)), describeAssists(), `${describeLevels(expectedAssists(1))}, applied false`);
+    check('assists', `a player change marks that craft as set by the player (${PLAYER_SET_CRAFT.craft})`, setByPlayerList() === PLAYER_SET_CRAFT.craft, setByPlayerList() || 'none', PLAYER_SET_CRAFT.craft);
+    const noticesBeforeHotas = notices.length;
 
     // 1. Detection and identification.
     step('detection');
@@ -281,10 +299,16 @@ function createHotasTestSystem(ctx, { capture }) {
     check('detection', 'devices hidden until a button is pressed', connection.devices.length === 0 && connection.prompt === PROMPT, `${connection.devices.length} devices, prompt "${connection.prompt}"`, `0 devices, prompt "${PROMPT}"`);
     await tapButton('stick', 4);
     await settle();
+    const hotasToasts = notices.slice(noticesBeforeHotas).filter((notice) => notice.text === HOTAS_ASSIST_TOAST).length;
+    check('assists', `first HOTAS: every craft the player did not set drops to ${HOTAS_ASSIST_LEVEL * 100} %`, assistsMatch(expectedAssists(HOTAS_ASSIST_LEVEL)), describeAssists(), describeLevels(expectedAssists(HOTAS_ASSIST_LEVEL)));
+    check('assists', 'first HOTAS: one toast, and the change is remembered', hotasToasts === 1 && settings.get('hotasAssistsApplied') === true, `${hotasToasts} toast(s), applied ${settings.get('hotasAssistsApplied')}`, `1 toast "${HOTAS_ASSIST_TOAST}", applied true`);
     connection = input().getConnectionState();
     check('detection', 'stick appears after its button press, prompt stays for the throttle', connection.hotas.stick && !connection.hotas.throttle && connection.prompt === PROMPT, `stick ${connection.hotas.stick}, throttle ${connection.hotas.throttle}, prompt "${connection.prompt}"`, 'stick true, throttle false, prompt shown');
+    const noticesBeforeThrottle = notices.length;
     await tapButton('throttle', 9);
     await settle();
+    const throttleToasts = notices.slice(noticesBeforeThrottle).filter((notice) => notice.text === HOTAS_ASSIST_TOAST).length;
+    check('assists', 'the second HOTAS device changes nothing', throttleToasts === 0 && assistsMatch(expectedAssists(HOTAS_ASSIST_LEVEL)), `${throttleToasts} toast(s); ${describeAssists()}`, `0 toasts; ${describeLevels(expectedAssists(HOTAS_ASSIST_LEVEL))}`);
     connection = input().getConnectionState();
     check('detection', 'prompt clears once stick and throttle are both present', connection.hotas.complete && connection.prompt === null && connection.hotas.pedals, `complete ${connection.hotas.complete}, pedals ${connection.hotas.pedals}, prompt ${connection.prompt}`, 'complete true, pedals true, prompt null');
     const stick = deviceSummary(STICK_KEY);
@@ -671,11 +695,17 @@ function createHotasTestSystem(ctx, { capture }) {
       const record = input().calibration.get(deviceKey);
       check('persistence', `${deviceKey === STICK_KEY ? 'stick' : 'throttle'} calibration came back unchanged`, Boolean(expected) && Boolean(record) && canonical(record) === canonical(expected.calibration[deviceKey]), record ? `${Object.keys(record.axes).length} axes, ${record.hats.filter(Boolean).length} hats` : 'missing', 'identical record');
     }
+    check('assists', 'after the reload: the HOTAS default is still remembered', settings.get('hotasAssistsApplied') === true && assistsMatch(expectedAssists(HOTAS_ASSIST_LEVEL)), `${describeAssists()}, applied ${settings.get('hotasAssistsApplied')}`, `${describeLevels(expectedAssists(HOTAS_ASSIST_LEVEL))}, applied true`);
+    settings.update('assists', { [PLAYER_SET_AFTER_RELOAD.craft]: PLAYER_SET_AFTER_RELOAD.level });
     step('re-plugging in other slots');
     settings.set('craft', 'glider');
     await settle();
+    const noticesBeforeReplug = notices.length;
     await plugAndExpose('stick', 't16000m', 0, 'prefix', 4);
     await plugAndExpose('throttle', 'twcs', 3, 'chrome', 12);
+    const replugToasts = notices.slice(noticesBeforeReplug).filter((notice) => notice.text === HOTAS_ASSIST_TOAST).length;
+    const afterReload = { ...expectedAssists(HOTAS_ASSIST_LEVEL), [PLAYER_SET_AFTER_RELOAD.craft]: PLAYER_SET_AFTER_RELOAD.level };
+    check('assists', 'after the reload: a re-plugged HOTAS changes nothing and shows no toast', replugToasts === 0 && assistsMatch(afterReload), `${replugToasts} toast(s); ${describeAssists()}`, `0 toasts; ${describeLevels(afterReload)}`);
     setAxes('stick', CALIBRATION_SCRIPT.stick.rest);
     setAxes('throttle', CALIBRATION_SCRIPT.throttle.rest);
     await settle();
@@ -700,8 +730,40 @@ function createHotasTestSystem(ctx, { capture }) {
     input().bindings.resetToDefaults();
     input().calibration.reset(STICK_KEY);
     input().calibration.reset(THROTTLE_KEY);
+    resetAssistState();
     await storage.flush();
     check('cleanup', 'test database left with default bindings and no calibration', input().calibration.keys().length === 0 && canonical(input().bindings.getProfile().global) === '{}', `${input().calibration.keys().length} calibration records`, '0 calibration records, default bindings');
+  }
+
+  // ---- Assist defaults ---------------------------------------------------------------------------------
+  /** Back to a first run: assists at 100 %, none set by the player, the HOTAS default not applied. */
+  function resetAssistState() {
+    settings.reset('assists');
+    settings.reset('assistsSetByPlayer');
+    settings.reset('hotasAssistsApplied');
+  }
+
+  /** Every craft at level except the one the player set before the HOTAS arrived. */
+  function expectedAssists(level) {
+    return Object.fromEntries(CRAFT_IDS.map((id) => [id, id === PLAYER_SET_CRAFT.craft ? PLAYER_SET_CRAFT.level : level]));
+  }
+
+  function assistsMatch(expected) {
+    const assists = settings.get('assists');
+    return CRAFT_IDS.every((id) => close(assists[id], expected[id]));
+  }
+
+  function describeLevels(levels) {
+    return CRAFT_IDS.map((id) => `${id} ${Math.round(levels[id] * 100)}%`).join(', ');
+  }
+
+  function describeAssists() {
+    return describeLevels(settings.get('assists'));
+  }
+
+  function setByPlayerList() {
+    const setByPlayer = settings.get('assistsSetByPlayer');
+    return CRAFT_IDS.filter((id) => setByPlayer[id] === true).join(', ');
   }
 
   // ---- Report -------------------------------------------------------------------------------------------
