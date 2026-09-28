@@ -29,7 +29,13 @@
 //   - Chrome's own main-thread counters over CDP (Performance.getMetrics): TaskDuration (wall time
 //     the page's main thread spent in tasks) against ThreadTime (CPU time it was actually given).
 //     A CPU share well under 100 % means the thread was waiting or descheduled inside its tasks,
-//     which is what a saturated machine does to it; real game work shows up as CPU time.
+//     which is what a saturated machine does to it; real game work shows up as CPU time;
+//   - on Windows, the CPU and GPU load of OTHER processes against our own (tools/process-load.mjs:
+//     every process's processor time and Windows' per-process GPU engine counters, split into the
+//     harness's Chrome and node processes and everything else, with the busiest other programs
+//     named), per run (runs[].processLoad) and at every slow frame (slowFrameList[].load), raw
+//     samples in process-load.json. A frame spike that lands in a burst of other programs' load is
+//     evidence of the shared machine; one that lands in a quiet interval is not.
 //
 // Exit code: 0 when the harness reports PASS, the requested backend really ran and the browser
 // console stayed free of errors and warnings; 1 on FAIL; 2 when the run itself could not complete.
@@ -39,12 +45,13 @@ import puppeteer from 'puppeteer-core';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { cpus, tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createServer as createViteServer } from 'vite';
 import { findBrowser } from './browser.mjs';
 import { findFreePort } from './ports.mjs';
+import { startProcessLoadSampler } from './process-load.mjs';
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const POLL_MS = 3000;
@@ -332,8 +339,63 @@ function describeProgress(state) {
   return `${done} checks (${phase})${step ? `, ${step}` : ''}`;
 }
 
+/**
+ * The load evidence at one moment (ms since the epoch): other processes' and our own CPU and GPU
+ * (the per-process sample holding that moment), the whole machine's CPU and the whole GPU.
+ */
+function loadAtFrame(processLoad, machineLoad, gpuLoad, timeMs) {
+  const sample = processLoad.at(timeMs);
+  const nearest = (samples) => samples.reduce((best, entry) => (!best || Math.abs(entry.time - timeMs) < Math.abs(best.time - timeMs) ? entry : best), null);
+  const machine = nearest(machineLoad.samples.filter((entry) => Number.isFinite(entry.busyPct)));
+  const gpu = nearest(gpuLoad.samples);
+  return {
+    otherCpuPct: sample ? sample.otherCpuPct : null,
+    ownCpuPct: sample ? sample.ownCpuPct : null,
+    otherGpuPct: sample ? sample.otherGpuPct : null,
+    ownGpuPct: sample ? sample.ownGpuPct : null,
+    topOtherCpu: sample ? sample.topOtherCpu.map((entry) => `${entry.name} ${entry.pct}%`).join(', ') : null,
+    machineCpuPct: machine && Math.abs(machine.time - timeMs) <= LOAD_SAMPLE_MS * 2 ? machine.busyPct : null,
+    gpuPct: gpu && Math.abs(gpu.time - timeMs) <= LOAD_SAMPLE_MS * 2 ? gpu.gpuPct : null,
+  };
+}
+
+/** Every slow frame with its attribution and the load evidence at that moment, then the averages. */
+function slowFrameEvidence(report) {
+  const lines = ['  frames over the limit, with the load at that moment (other = every process but the harness\'s Chrome and node):',
+    '    run  craft       view   at s     ms  cause       scripts/blocking ms  otherCPU%  ownCPU%  otherGPU%  ownGPU%  machineCPU%  GPU%  busiest other processes'];
+  const cell = (value, width) => String(value ?? 'n/a').padStart(width);
+  const spikeOther = [];
+  for (const run of report.runs) {
+    for (const frame of (run.slowFrameList ?? []).slice().sort((first, second) => first.at - second.at)) {
+      const load = frame.load ?? {};
+      if (Number.isFinite(load.otherCpuPct)) spikeOther.push(load.otherCpuPct);
+      lines.push([
+        `    ${String(run.index + 1).padStart(3)}`,
+        run.craft.padEnd(11),
+        run.view.padEnd(6),
+        cell(frame.at, 5),
+        cell(frame.ms, 6),
+        ` ${frame.cause.padEnd(10)}`,
+        cell(frame.loaf ? `${frame.loaf.scriptsMs}/${frame.loaf.blockingMs ?? 'n/a'}` : '-', 19),
+        cell(load.otherCpuPct, 10),
+        cell(load.ownCpuPct, 8),
+        cell(load.otherGpuPct, 10),
+        cell(load.ownGpuPct, 8),
+        cell(load.machineCpuPct, 12),
+        cell(load.gpuPct, 5),
+        ` ${load.topOtherCpu ?? 'n/a'}`,
+      ].join(' '));
+    }
+  }
+  if (lines.length === 2) return '  frames over the limit: none';
+  const runOther = report.runs.map((run) => run.processLoad?.otherCpuAvgPct).filter(Number.isFinite);
+  const mean = (values) => (values.length > 0 ? Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 10) / 10 : 'n/a');
+  lines.push(`    other processes' CPU: ${mean(spikeOther)} % on average at these frames, ${mean(runOther)} % on average over the runs`);
+  return lines.join('\n');
+}
+
 function flightTable(report) {
-  const lines = ['  #  seed        craft       view   fps  p99ms  maxms  >50  sys/gc/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak  GPU%avg/peak  mainThread busy%/cpuShare%'];
+  const lines = ['  #  seed        craft       view   fps  p99ms  maxms  >50  sys/gc/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak  GPU%avg/peak  mainThread busy%/cpuShare%  otherCPU%avg/peak  otherGPU%avg/peak'];
   for (const run of report.runs) {
     const checks = run.script.checks;
     lines.push([
@@ -355,7 +417,9 @@ function flightTable(report) {
       run.passed ? '  PASS' : '  FAIL',
       run.machineLoad ? `  ${run.machineLoad.averagePct}/${run.machineLoad.peakPct}`.padEnd(21) : '  n/a'.padEnd(21),
       run.gpuLoad ? `${run.gpuLoad.averagePct}/${run.gpuLoad.peakPct}`.padEnd(13) : 'n/a'.padEnd(13),
-      run.mainThread ? `${run.mainThread.taskBusyPct}/${run.mainThread.cpuSharePct}` : 'n/a',
+      (run.mainThread ? `${run.mainThread.taskBusyPct}/${run.mainThread.cpuSharePct}` : 'n/a').padEnd(27),
+      run.processLoad ? `${run.processLoad.otherCpuAvgPct}/${run.processLoad.otherCpuPeakPct}`.padEnd(18) : 'n/a'.padEnd(18),
+      run.processLoad ? `${run.processLoad.otherGpuAvgPct}/${run.processLoad.otherGpuPeakPct}` : 'n/a',
     ].join(' '));
   }
   const totals = report.totals;
@@ -439,6 +503,8 @@ async function main() {
   const started = Date.now();
   const load = startLoadSampler();
   const gpuLoad = startGpuSampler();
+  // Every Chrome process the harness launches carries its profile directory on the command line.
+  const processLoad = startProcessLoadSampler({ markers: [basename(profileDir)], ownPids: [process.pid] });
   let report = null;
 
   try {
@@ -567,16 +633,24 @@ async function main() {
 
   load.stop();
   gpuLoad.stop();
+  processLoad.stop();
   runner.finishedAt = new Date().toISOString();
   runner.machineLoad = load.between(runner.startedAt, runner.finishedAt);
   runner.gpuLoad = gpuLoad.between(runner.startedAt, runner.finishedAt);
   if (gpuLoad.unavailable) runner.notes.push(`GPU load not recorded: ${gpuLoad.unavailable}`);
+  if (processLoad.unavailable) runner.notes.push(`per-process load not recorded: ${processLoad.unavailable}`);
+  for (const problem of processLoad.errors) runner.notes.push(`per-process load sampler: ${problem}`);
+  runner.processLoad = processLoad.between(Date.parse(runner.startedAt), Date.parse(runner.finishedAt));
   if (report && Array.isArray(report.runs)) {
     // Evidence for the frame statistics: how busy the whole machine was while each run flew.
     for (const run of report.runs) {
       run.machineLoad = run.startedAt ? load.between(run.startedAt, run.endedAt) : null;
       run.gpuLoad = run.startedAt ? gpuLoad.between(run.startedAt, run.endedAt) : null;
       run.mainThread = run.startedAt ? load.mainThreadBetween(run.startedAt, run.endedAt) : null;
+      run.processLoad = run.startedAt ? processLoad.between(Date.parse(run.startedAt), Date.parse(run.endedAt)) : null;
+      // Slow frames are timed from the end of the run's warmup.
+      const measureStart = Date.parse(run.startedAt) + (report.config?.runWarmupSeconds ?? 0) * 1000;
+      for (const frame of run.slowFrameList ?? []) frame.load = loadAtFrame(processLoad, load, gpuLoad, measureStart + frame.at * 1000);
     }
   }
   runner.durationSeconds = Math.round((Date.now() - started) / 1000);
@@ -590,8 +664,9 @@ async function main() {
   writeFileSync(join(options.out, 'console.log'), `${consoleLines.join('\n')}\n`);
   writeFileSync(join(options.out, 'machine-load.json'), JSON.stringify(load.samples, null, 2));
   writeFileSync(join(options.out, 'gpu-load.json'), JSON.stringify(gpuLoad.samples, null, 2));
+  writeFileSync(join(options.out, 'process-load.json'), JSON.stringify(processLoad.samples, null, 2));
 
-  if (report) process.stdout.write(`${options.test === '1' ? `${flightTable(report)}\n${craftViewTable(report)}` : hotasTable(report)}\n`);
+  if (report) process.stdout.write(`${options.test === '1' ? `${flightTable(report)}\n${craftViewTable(report)}\n${slowFrameEvidence(report)}` : hotasTable(report)}\n`);
   process.stdout.write(`run-harness: ${runner.passed ? 'PASS' : 'FAIL'} (harness ${report ? report.result : 'no report'}, backend ${runner.backend ? runner.backend.join(', ') : 'unknown'}, browser console ${runner.errors.length} errors / ${runner.warnings.length} warnings, ${runner.durationSeconds} s)\n`);
   for (const problem of runner.problems) process.stdout.write(`run-harness: problem: ${problem}\n`);
   for (const note of runner.notes) process.stdout.write(`run-harness: note: ${note}\n`);
