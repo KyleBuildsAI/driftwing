@@ -3,15 +3,17 @@ import { CRAFT_IDS } from '../core/settings.js';
 
 /**
  * WREN's v2 grammar: the aircraft commands (craft, assists, views, chute, engine, relaunch,
- * calibration) and the flight questions (airspeed, landing), plus the strict schema of the
+ * calibration, switching to version one) and the flight questions (airspeed, landing), plus the strict schema of the
  * matching remote actions. Everything here is pure: the matchers turn a normalized transcript and
  * the flight-state snapshot into { speech, action }, and the executor (flightActions.js) carries the
  * actions out and reports what really happened.
  */
 
 export const FLIGHT_ACTION_TYPES = Object.freeze([
-  'setCraft', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate',
+  'setCraft', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate', 'switchVersion',
 ]);
+/** The versions switchVersion can ask for: V2 can only hand over to V1 (the shell switches back). */
+export const SWITCH_VERSIONS = Object.freeze(['v1']);
 export const ASSIST_CHANGES = Object.freeze(['up', 'down', 'full', 'off']);
 export const VIEW_TARGETS = Object.freeze(['cockpit', 'chase']);
 /** Assists up / down move along this grid (0, 25, 50, 75, 100 percent). */
@@ -76,6 +78,13 @@ export function sanitizeFlightAction(raw) {
     case 'calibrate':
       if (present(raw.calibrate) && typeof raw.calibrate !== 'boolean') return null;
       return action;
+    case 'switchVersion': {
+      // version is required and must name V1 exactly (case aside).
+      const version = typeof raw.version === 'string' ? raw.version.toLowerCase() : '';
+      if (!SWITCH_VERSIONS.includes(version)) return null;
+      action.version = version;
+      return action;
+    }
     default:
       // deployChute and relaunch take no parameters.
       return action;
@@ -228,6 +237,20 @@ export function createFlightGrammar({ pick, helpLine }) {
     return { speech: describeAssistLevel(flight), action: null };
   }
 
+  /**
+   * "Switch to version one", "version one", "v1", "switch to v1", "play the original": V1, the
+   * original game, through the versionToggle action (the launcher shell does the switch). Asking
+   * for version two while flying it is answered, not acted on.
+   */
+  function matchVersion(text) {
+    if (/\b(version (two|2)|v ?2)\b/.test(text) && !/\b(version (one|1)|v ?1)\b/.test(text)) {
+      return { speech: pick('versionTwo', ["We're flying version two already.", 'This is version two.']), action: null };
+    }
+    const wanted = /\b(version (one|1)|v ?1|(play|go back to|back to|load|open|launch|start|switch to) the original( game| version| driftwing)?|original (game|version|driftwing))\b/.test(text);
+    if (!wanted) return null;
+    return { speech: '', action: { type: 'switchVersion', version: 'v1' } };
+  }
+
   function matchCraft(text, flight, core) {
     const craft = findCraft(text);
     if (!craft) return null;
@@ -239,7 +262,7 @@ export function createFlightGrammar({ pick, helpLine }) {
   return {
     matchHelp,
     /** In priority order; they run before the v1 matchers. */
-    matchers: [matchLanding, matchCalibrate, matchRelaunch, matchChute, matchEngine, matchView, matchAssists, matchCraft],
+    matchers: [matchVersion, matchLanding, matchCalibrate, matchRelaunch, matchChute, matchEngine, matchView, matchAssists, matchCraft],
   };
 }
 

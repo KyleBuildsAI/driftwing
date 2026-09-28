@@ -31,32 +31,38 @@ export function shellUrlFor(version) {
 }
 
 /**
- * Creates the bridge. ctx: the game context (bus). Returns { embedded, requestVersion(version) };
- * requestVersion returns how the request went out: 'message', 'navigate' or 'unavailable'.
+ * Creates the bridge. ctx: the game context (bus). Returns { embedded, availability(),
+ * requestVersion(version) }: availability() says how a request would go out without sending one,
+ * and requestVersion returns how it went out: 'message', 'navigate' or 'unavailable'.
  */
 export function createShellBridge(ctx) {
   const { bus } = ctx;
   const embedded = window.parent !== window;
   if (embedded) document.documentElement.classList.add('dw-embedded');
 
+  /** 'navigate' (standalone), 'message' (inside the shell) or 'unavailable' (a foreign embed). */
+  function availability() {
+    if (!embedded) return 'navigate';
+    return parentIsSameOrigin() ? 'message' : 'unavailable';
+  }
+
   function requestVersion(version) {
     if (!SHELL_VERSIONS.includes(version)) throw new Error(`unknown game version "${version}"`);
-    if (!embedded) {
+    const route = availability();
+    if (route === 'navigate') {
       // Standalone at /v2/: this window is the top window, so the whole tab moves to the shell.
       window.top.location.assign(shellUrlFor(version));
-      return 'navigate';
-    }
-    if (parentIsSameOrigin()) {
+    } else if (route === 'message') {
       window.parent.postMessage({ ...SWITCH_MESSAGE, to: version }, window.location.origin);
-      return 'message';
+    } else {
+      bus.emit('notify', { text: 'Switching to V1 works from the DRIFTWING launcher page.', kind: 'warning' });
     }
-    bus.emit('notify', { text: 'Switching to V1 works from the DRIFTWING launcher page.', kind: 'warning' });
-    return 'unavailable';
+    return route;
   }
 
   bus.on('input:action', (action) => {
     if (action && action.phase === 'press' && action.id === 'versionToggle') requestVersion('v1');
   });
 
-  return { embedded, requestVersion };
+  return { embedded, availability, requestVersion };
 }

@@ -49,8 +49,8 @@ const MAX_LABEL_LENGTH = 48;
 // ---- Shared action schema (mirrors Copilot.sanitizeAction in the game) --------------------
 const ACTION_TYPES = [
   'waypoint', 'clearWaypoint', 'autopilot', 'time', 'ringCourse', 'cancelRingCourse',
-  'barrelRoll', 'boost', 'find', 'describe', 'photoMode', 'journal', 'none',
-  'setCraft', 'setMode', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate',
+  'find', 'describe', 'photoMode', 'journal', 'none',
+  'setCraft', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate', 'switchVersion',
 ];
 const FIND_TARGETS = [
   'mountains', 'snow', 'ocean', 'archipelago', 'islands', 'desert', 'dunes', 'forest', 'pine',
@@ -58,7 +58,8 @@ const FIND_TARGETS = [
 ];
 const TIME_PRESETS = ['dawn', 'sunrise', 'morning', 'noon', 'golden', 'sunset', 'dusk', 'night', 'midnight'];
 const CRAFT_IDS = ['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv'];
-const FLIGHT_MODES = ['classic', 'sim'];
+/** switchVersion can only ask for V1: V2 hands over to the original game, the shell switches back. */
+const SWITCH_VERSIONS = ['v1'];
 const ASSIST_CHANGES = ['up', 'down', 'full', 'off'];
 const VIEWS = ['cockpit', 'chase'];
 
@@ -78,11 +79,10 @@ const ACTION_JSON_SCHEMA = {
     preset: { type: 'string', enum: TIME_PRESETS },
     dayTime: { type: 'number' },
     count: { type: 'integer' },
-    direction: { type: 'string', enum: ['left', 'right'] },
     target: { type: 'string', enum: FIND_TARGETS },
     autopilot: { type: 'boolean' },
     craft: { type: 'string', enum: CRAFT_IDS },
-    mode: { type: 'string', enum: FLIGHT_MODES },
+    version: { type: 'string', enum: SWITCH_VERSIONS },
     level: { type: 'number' },
     change: { type: 'string', enum: ASSIST_CHANGES },
     view: { type: 'string', enum: VIEWS },
@@ -113,12 +113,11 @@ action: at most one, or null for pure conversation. Types:
 - {"type":"autopilot","enabled":bool,"heading":deg,"altitude":m,"followWaypoint":bool}; "take us there" means enabled true with followWaypoint true; climb/descend means altitude = current altitude +/- 200.
 - {"type":"time","preset":one of ${TIME_PRESETS.join('/')}}
 - {"type":"ringCourse","count":3-24} starts a fly-through ring course; {"type":"cancelRingCourse"} stops it.
-- {"type":"barrelRoll","direction":"left" or "right"}, {"type":"boost"}
 - {"type":"describe"} for where-am-I questions, {"type":"photoMode","enabled":bool}, {"type":"journal"}, {"type":"none"}.
 Aircraft actions (the game reports whether each one worked, so keep speech to a short lead-in or an empty string):
 - {"type":"setCraft","craft":one of ${CRAFT_IDS.join('/')}} (sailplane = glider, cub or taildragger = bushplane, fighter = jet, heli or chopper = helicopter, drone or quad = fpv). flightState.availableCraft lists what is installed.
-- {"type":"setMode","mode":"classic" or "sim"}: CLASSIC is the forgiving arcade flight, SIM the real flight model.
-- {"type":"setAssists","change":"up"/"down"/"full"/"off"} or {"type":"setAssists","level":0..1}: SIM flight assists for the current craft; up and down move 25 percent.
+- {"type":"setAssists","change":"up"/"down"/"full"/"off"} or {"type":"setAssists","level":0..1}: flight assists for the current craft (the only difficulty control; every craft flies the real flight model); up and down move 25 percent.
+- {"type":"switchVersion","version":"v1"}: switch to version one, the original DRIFTWING ("version one", "v1", "play the original"). This game is version two.
 - {"type":"setView","view":"cockpit" or "chase"}, {"type":"deployChute"}, {"type":"engine","enabled":bool}, {"type":"relaunch"} (aerotow for the glider), {"type":"calibrate"} (opens the controls panel's calibration wizard).
 Use flightState to answer questions about altitude, speed, heading, time and nearby landmarks. For airspeed use flightState.airspeed (indicated, in flightState.units: knots for "aviation", km/h for "metric"); for landings use flightState.lastLanding and bestLanding (grade butter/smooth/firm/hard, sinkRate m/s); flightState.windAtCraft.fromName is where the wind blows from. There are no penalties: after a soft crash the craft is simply back in the air. When you mention where we are, use flightState.place (what the ground below actually looks like, e.g. "the foothills of the Snow Peaks"); the biome name alone can be misleading. If the request is unclear, reply kindly with a couple of example commands and action null.`;
 
@@ -201,12 +200,6 @@ function sanitizeAction(raw) {
       return present(raw.dayTime) && copyNumber('dayTime', (value) => ((value % 1) + 1) % 1) ? action : null;
     case 'ringCourse':
       return copyNumber('count', (value) => clamp(Math.round(value), 3, 24)) ? action : null;
-    case 'barrelRoll':
-      if (present(raw.direction)) {
-        if (raw.direction !== 'left' && raw.direction !== 'right') return null;
-        action.direction = raw.direction;
-      }
-      return action;
     case 'find':
       if (!FIND_TARGETS.includes(raw.target)) return null;
       action.target = raw.target;
@@ -217,9 +210,9 @@ function sanitizeAction(raw) {
       if (!CRAFT_IDS.includes(raw.craft)) return null;
       action.craft = raw.craft;
       return action;
-    case 'setMode':
-      if (!FLIGHT_MODES.includes(raw.mode)) return null;
-      action.mode = raw.mode;
+    case 'switchVersion':
+      if (!SWITCH_VERSIONS.includes(raw.version)) return null;
+      action.version = raw.version;
       return action;
     case 'setAssists':
       // Exactly one of level (0..1) or change.
@@ -319,8 +312,9 @@ function speedText(metresPerSecond, units) {
   return units === 'aviation' ? `${Math.round(value * 1.943844)} knots` : `${Math.round(value * 3.6)} km/h`;
 }
 
-/** The v2 aircraft rules: craft, mode, assists, views, chute, engine, relaunch, calibration, airspeed, landings. */
+/** The v2 aircraft rules: version one, craft, assists, views, chute, engine, relaunch, calibration, airspeed, landings. */
 function aircraftRule(text, flight) {
+  if (/\b(version (one|1)|v ?1|the original( game| version)?)\b/.test(text)) return { speech: '', action: { type: 'switchVersion', version: 'v1' } };
   if (/\b(how was my landing|landing (grade|report)|how did i land|best landing)\b/.test(text)) {
     const last = flight.lastLanding;
     if (!last || typeof last.grade !== 'string') return { speech: 'No landings yet. Find a flat field and ease her on.', action: null };
@@ -341,8 +335,6 @@ function aircraftRule(text, flight) {
   if (/\b(engine|motor)s?\b.*\b(on|start)\b|\b(start|restart)\b.*\b(engine|motor)s?\b/.test(text)) return { speech: '', action: { type: 'engine', enabled: true } };
   if (/\b(cockpit|first person)\b/.test(text)) return { speech: '', action: { type: 'setView', view: 'cockpit' } };
   if (/\bchase (view|cam|camera)\b|^chase$/.test(text)) return { speech: '', action: { type: 'setView', view: 'chase' } };
-  if (/\b(sim|simulation)( mode)?\b/.test(text) && !/\bclassic\b/.test(text)) return { speech: '', action: { type: 'setMode', mode: 'sim' } };
-  if (/\b(classic|arcade)( mode)?\b/.test(text)) return { speech: '', action: { type: 'setMode', mode: 'classic' } };
   if (/\bassists?\b/.test(text)) {
     const percent = text.match(/\b(\d{1,3})\s*(percent)?\b/);
     if (percent && Number(percent[1]) <= 100) return { speech: '', action: { type: 'setAssists', level: Number(percent[1]) / 100 } };
@@ -367,7 +359,7 @@ function ruleReply(flightState, transcript) {
 
   if (!text) return { speech: "I'm here whenever you need me.", action: null };
   if (/\b(help|what can you do|commands)\b/.test(text)) {
-    return { speech: "From the ground station I can find places, set waypoints, fly the autopilot, change the time and lay out ring courses, and switch craft, SIM or CLASSIC, assists, views, the engine, the chute and relaunch.", action: null };
+    return { speech: "From the ground station I can find places, set waypoints, fly the autopilot, change the time and lay out ring courses, and switch craft, assists, views, the engine, the chute, relaunch and back to version one.", action: null };
   }
   const aircraft = aircraftRule(text, flight);
   if (aircraft) return aircraft;
@@ -385,13 +377,6 @@ function ruleReply(flightState, transcript) {
     if (count) action.count = clamp(Number(count[1]), 3, 24);
     return { speech: pick(['A fresh course, just for you.', 'Rings are up.']), action };
   }
-  if (/\b(barrel ?roll|do a roll|flip|loop)\b/.test(text)) {
-    const action = { type: 'barrelRoll' };
-    if (/\bleft\b/.test(text)) action.direction = 'left';
-    if (/\bright\b/.test(text)) action.direction = 'right';
-    return { speech: pick(['Hang on.', 'Here we go.']), action };
-  }
-  if (/\b(boost|faster|speed up|punch it)\b/.test(text)) return { speech: 'Boosting.', action: { type: 'boost' } };
 
   const target = matchFirst(TARGET_RULES, text);
   if (target) {
@@ -461,13 +446,12 @@ function summarizeFlightState(flight) {
         }
       : null,
     // v2 aircraft fields (docs/copilot-api.md).
-    mode: state.mode,
     craft: state.craft,
     availableCraft: Array.isArray(state.availableCraft) ? state.availableCraft.slice(0, 12) : undefined,
     units: state.units,
     view: state.view,
     capabilities: state.capabilities,
-    assists: state.assists ? { percent: state.assists.percent, active: state.assists.active, appliesInMode: state.assists.appliesInMode } : undefined,
+    assists: state.assists ? { percent: state.assists.percent, active: state.assists.active } : undefined,
     airspeed: state.airspeed,
     aoa: state.aoa,
     gLoad: state.gLoad,
@@ -618,7 +602,7 @@ async function handleCopilot(request, response, url) {
   }
   if (!reply) reply = sanitizeReply(ruleReply(flightState, transcript)) ?? { speech: "I'm here.", action: null };
   if (!response.writableEnded && !response.destroyed) sendJson(response, 200, reply);
-  const flying = typeof flightState.mode === 'string' && typeof flightState.craft === 'string' ? ` [${flightState.craft}, ${flightState.mode}]` : '';
+  const flying = typeof flightState.craft === 'string' ? ` [${flightState.craft}]` : '';
   log(`POST /copilot${flying} -> ${brain}${reply.action ? ` ${reply.action.type}` : ''} in ${Date.now() - started} ms${delay ? ` (test delay ${delay} ms)` : ''}`);
 }
 

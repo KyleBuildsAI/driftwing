@@ -5,7 +5,7 @@ import { craftCapabilities } from './flightState.js';
 /**
  * Executor for WREN's v2 aircraft actions. Every handler changes things only through the public
  * channels (settings for craft and assists; 'input:action' events with source 'copilot' for
- * views, engine and chute; the flight controller's relaunch(); 'ui:openControls' for calibration)
+ * views, engine, chute and the switch to V1; the flight controller's relaunch(); 'ui:openControls' for calibration)
  * and then reports what actually happened: it reads the outcome back, waiting a few frames where the
  * change lands on a later physics tick or camera update, and never claims a change it cannot see.
  */
@@ -222,6 +222,19 @@ export function createFlightActionHandlers(ctx, helpers) {
       return succeed(pick('relaunchAir', ['Back in the air, 300 metres up.', 'Airstart. We are 300 metres up again.']));
     },
 
+    /**
+     * V1 through the versionToggle action, as any device would press it; the shell bridge
+     * (src/shell/bridge.js) asks the launcher shell, or opens it when V2 runs on its own. From a
+     * foreign page there is no shell to ask, so WREN says so instead of pressing it.
+     */
+    switchVersion() {
+      const shell = ctx.systems.shell;
+      if (typeof shell?.availability !== 'function' || shell.failed) return fail("I can't reach the launcher to switch versions right now.");
+      if (shell.availability() === 'unavailable') return fail('Switching to version one works from the DRIFTWING launcher page.');
+      emitInputAction('versionToggle');
+      return succeed(pick('versionOne', ['Switching to version one, the original game.', 'Back to version one. See you on the other side.']));
+    },
+
     calibrate() {
       if (!hasListeners(bus, 'ui:openControls')) {
         return fail('The controls panel is not available in this build, so I cannot open the calibration wizard.');
@@ -257,7 +270,7 @@ export function keyFor(ctx, actionId, fallback) {
 /** The "what can you do" answer, with the keys and UI that do the same thing. */
 export function helpLine(ctx, pick) {
   const key = (actionId, fallback) => keyFor(ctx, actionId, fallback);
-  const flying = `Aircraft: 'switch to the bush plane' (1-6, picker), 'assists up' (settings), 'cockpit view' (${key('viewForward', 'Num 8')}), 'engine off' (${key('engineToggle', 'Z')}), 'deploy chute' (${key('chuteDeploy', 'U')}), 'relaunch' (${key('relaunch', 'Backspace')}), 'calibrate controls' (${key('controlsPanel', '.')}), 'airspeed', 'how was my landing'. Hold ${key('copilotPTT', '`')} to talk.`;
+  const flying = `Aircraft: 'switch to the bush plane' (1-6, picker), 'switch to version one' (${key('versionToggle', 'F8')}, the V1 | V2 pill), 'assists up' (settings), 'cockpit view' (${key('viewForward', 'Num 8')}), 'engine off' (${key('engineToggle', 'Z')}), 'deploy chute' (${key('chuteDeploy', 'U')}), 'relaunch' (${key('relaunch', 'Backspace')}), 'calibrate controls' (${key('controlsPanel', '.')}), 'airspeed', 'how was my landing'. Hold ${key('copilotPTT', '`')} to talk.`;
   return pick('help', [
     `I find places, set waypoints, fly the autopilot, change the time and run ring courses. ${flying}`,
     `Try 'find mountains', 'set a waypoint' or 'make it dusk'. ${flying}`,

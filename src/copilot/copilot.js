@@ -11,7 +11,7 @@ import { createCommandChips } from './commandChips.js';
  * COPILOT "WREN".
  * - Copilot: the default local brain, a tolerant keyword grammar that turns a
  *   transcript into { speech, action } using only the flight-state snapshot. The v2
- *   aircraft grammar (craft, assists, views, chute, engine, relaunch,
+ *   aircraft grammar (craft, assists, views, chute, engine, relaunch, version one,
  *   calibration, airspeed, landings) lives in grammar.js.
  * - RemoteCopilot: POSTs { flightState, transcript } to an HTTP brain with an
  *   800 ms budget, validates the reply, and falls back to the local grammar
