@@ -57,6 +57,10 @@ intent and is gone from V2.
   the assist default across a reload.
 - npm scripts `test:shell`, `test:flight`, `test:flight:webgl`, `test:hotas` and
   `test:hotas:webgl`.
+- `tools/process-load.mjs`: the flight-test runner records other programs' CPU and GPU load
+  against its own (Windows' per-process counters, the busiest programs named) for every run and at
+  every frame over 50 ms, next to the whole machine's CPU and the GPU's utilisation, so a spike can
+  be told apart as the game's or the shared machine's.
 
 ### Changed
 
@@ -101,6 +105,34 @@ intent and is gone from V2.
   test's frames over 50 ms. `src/render/uniformUploads.js` gives each uniform group one persistent
   whole-buffer range instead (promotion 1-3 MB/s, the frame rate up by a third on WebGPU and more
   than double on WebGL2).
+
+### Verification
+
+Run on the project's shared Windows machine while other projects' builds kept it busy (the
+machine's CPU not used by the harness averaged 59-66 % over the flight tests).
+
+- `npm run test:v1`: V1 matches `tests/v1.sha256`, also as copied into `dist-single/v1/`.
+- Flight test, 36 runs of 60 s (six craft, first and third person, three seeds) per backend: 0 NaN
+  events, 0 terrain penetrations, 0 console errors and 0 warnings, heap growth at most 26.9 MB
+  (WebGPU) and 26.0 MB (WebGL2) per world, every scripted manoeuvre observed. Average 87.8 fps
+  (WebGPU) and 93.9 fps (WebGL2), worst p99 26.7 ms and 28.6 ms.
+- Frames over 50 ms after warmup: 11 of 189,683 on WebGPU (max 85.3 ms; 0 game systems, 3 GC,
+  6 main thread, 2 delayed) and 7 of 202,946 on WebGL2 (max 65.9 ms; 0 game systems, 0 GC, 6 main
+  thread, 1 delayed). None had game-system time in it. The machine's CPU not used by the harness
+  was 74 % and 77 % at those frames, against 66 % and 59 % over the runs. Runs where it averaged
+  70 % or more had 3-8 times as many of them as the others. Several of the frames follow a game
+  event that reveals the HUD (the chute opening, the autopilot switching) or a major GC. Traced
+  on the same machine in isolation, a HUD reveal's slowest frame was 18-38 ms and a major GC's
+  pause 5-20 ms, so those frames passed the limit only while the shared machine was loaded. They
+  are reported, not excluded, and the 50 ms limit is unchanged.
+- `?test=hotas`: 140 of 140 checks on each backend, including persistence across a reload in the
+  `driftwing-v2-test-hotas` database.
+- Shell test, WebGPU and WebGL2, dev server and `dist-single/`: 30 of 30 checks each. After 20
+  round trips every JS heap, document, node, listener and GPU-process reading was within its
+  allowance of the first load.
+- The verify loop: the shell at `127.0.0.1:<port>` (dev server and `dist-single/`) on both
+  backends opens V2 in the chase view at golden hour, with two screenshots 4 s apart that differ
+  and a clean console.
 
 ### Removed
 
