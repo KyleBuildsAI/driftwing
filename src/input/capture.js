@@ -9,7 +9,7 @@
 //
 // Baselines are taken from the latest readings when the session starts (and when a device first
 // appears during it), so a stick resting off-centre or a button already held does not bind
-// itself. Escape cancels.
+// itself. Escape cancels. Tab is never captured: it stays the key that moves focus through panels.
 
 import { AXIS_TARGETS } from './defaultBindings.js';
 import { isAxisTarget } from './bindings.js';
@@ -20,7 +20,8 @@ const AXIS_CAPTURE_TRAVEL = 0.5;
 const HAT_REST_THRESHOLD = 1.01;
 const KEY_RATE = 0.5;
 const BUTTON_RATE = 0.6;
-const IGNORED_KEYS = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight']);
+/** Keys a listen lets through: modifiers (combined with the next key) and Tab (moves focus on). */
+const IGNORED_KEYS = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight', 'Tab']);
 
 /**
  * registry: gamepad registry; calibration: calibration store (learned hats); mapper: device

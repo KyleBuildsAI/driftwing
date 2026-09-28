@@ -7,6 +7,8 @@
 //                with a reversed calibration; the bound action then fires when the axis is pushed
 //   import       importing a bindings file without the connected HOTAS devices keeps them registered,
 //                so their default bindings stay live
+//   tabKey       a keyboard listen lets Tab and Shift+Tab through (focus moves on) and still binds
+//                the next key
 //   wizardLate   a throttle that first appears after the Center step keeps its saved calibration
 //                (throttle idle / full, learned hat) and is listed as joined late
 //   wizardBack   Back on the results screen returns to the last step that has something to learn
@@ -192,6 +194,18 @@ function testImport() {
   check('import', 'stored profile lists the devices', Object.keys(rig.bindings.getProfile().devices).sort().join(',') === '044f-b10a,044f-b687');
 }
 
+// ---- tabKey ----------------------------------------------------------------------------------------
+async function testTabKey() {
+  const rig = createRig([]);
+  const pending = rig.capture.start({ target: 'gearToggle', device: 'keyboard' });
+  check('tabKey', 'Tab is not consumed', rig.capture.offerKey('Tab', false) === false);
+  check('tabKey', 'Shift+Tab is not consumed', rig.capture.offerKey('Tab', true) === false);
+  check('tabKey', 'still listening after Tab', rig.capture.active);
+  rig.capture.offerKey('KeyJ', false);
+  const captured = await pending;
+  check('tabKey', 'next key is bound', captured.ok && captured.ref.code === 'KeyJ', JSON.stringify(captured.ref ?? captured));
+}
+
 // ---- calibration wizard ----------------------------------------------------------------------------
 /** InputManager's roleAxesFor: which axes of a device play which role under its bindings. */
 function roleAxesFrom(bindings, devices) {
@@ -274,6 +288,7 @@ function testWizardBack() {
 
 await testAxisPress();
 testImport();
+await testTabKey();
 testWizardLate();
 testWizardBack();
 

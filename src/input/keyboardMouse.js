@@ -147,6 +147,11 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   }
 
+  /** Tab inside a panel or dialog moves focus there, even when a binding uses Tab. */
+  function isFocusNavigation(code, target) {
+    return code === 'Tab' && target instanceof Element && target.closest('[role="dialog"]') !== null;
+  }
+
   function isActivatableTarget(target) {
     if (!target || !target.tagName) return false;
     const tag = target.tagName;
@@ -210,6 +215,7 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
     if (event.isComposing || isTypingTarget(event.target)) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const code = event.code;
+    if (isFocusNavigation(code, event.target)) return;
     const shiftHeld = event.shiftKey || isShiftHeld();
     if (capture.active && !event.repeat && capture.offerKey(code, shiftHeld)) {
       event.preventDefault();
@@ -260,6 +266,7 @@ export function createKeyboardMouse(ctx, { bindings, router, canPress, capture, 
 
   /** True when a keydown would trigger an input action (the UI then leaves the key alone). */
   function consumesKey(event) {
+    if (isFocusNavigation(event.code, event.target)) return false;
     if (capture.active) return true;
     if (event.ctrlKey || event.metaKey || event.altKey) return false;
     return actionsForKey(event.code, event.shiftKey || isShiftHeld(), getMode()).length > 0;
