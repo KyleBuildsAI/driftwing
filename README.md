@@ -11,8 +11,9 @@ that world in your browser.*
 > [!NOTE]
 > DRIFTWING v1 is a single-shot prompt test of Claude Opus 5.5: it was built from one prompt, with
 > no human code edits. v2 is being built in four phases with the same model, one spec prompt per
-> phase. This is **v2 Phase 1** (`2.0.0-phase.1`). See [About this project](#about-this-project)
-> for how it was made.
+> phase. This is **v2 Phase 1** (`2.0.0-phase.1`) after the structure correction (tag
+> `v2-structure`): V1 and V2 are two separate games behind one launcher. See
+> [About this project](#about-this-project) for how it was made.
 
 DRIFTWING is a calm flying game. You fly over an endless world that is made up as you go:
 snowy peaks, pine valleys, deserts, island chains and flower meadows, with a sky that lingers at
@@ -54,6 +55,26 @@ with a Thrustmaster stick connected.*
 - **Procedural sound.** Engines, rotors, wind, a stall horn, a variometer and touchdowns, all
   generated live, with no audio files.
 - **Wind you can use.** Thermals, ridge lift and gusts, so the glider can climb for real.
+
+## Two games, one launcher
+
+DRIFTWING is two separate games behind one toggle:
+
+- **V1** is the original game, exactly as it was built from one prompt. It is frozen byte-for-byte
+  and never changed.
+- **V2** is the new game: real flight physics for every craft, first and third person views, HOTAS
+  support and everything the later phases add.
+
+The page you open is a small launcher. The game fills the window, and a small **V1 | V2** pill in
+the top-left corner switches between them; it hides after a few seconds and comes back when you
+move the pointer to that corner. Only one game runs at a time: switching fades out, closes the
+running game completely and loads the other. The launcher remembers the game you played last, and
+the very first launch opens V2. `http://127.0.0.1:5199/?v=1` and `/?v=2` open a game directly, and a
+link with a seed (`/#seed=K7Q2ZD`) is passed on to the game.
+
+The two games keep separate saved data: V2 stores everything under `driftwing-v2` names, V1 keeps
+its original ones, and neither touches the other's. The first time V2 starts, it moves the
+settings, bindings, calibration and journals saved by Phase 1 over to its own names, once.
 
 ## Play it
 
@@ -137,7 +158,8 @@ Open Settings with `,` or the gear icon. There are five tabs:
   - the world seed;
   - developer tools (status badge, wind arrows).
 
-Everything is saved in the browser for `http://127.0.0.1:5199` and survives restarts.
+Everything is saved in the browser for `http://127.0.0.1:5199` (in V2's own `driftwing-v2`
+database) and survives restarts.
 
 ## WREN, the copilot
 
@@ -186,8 +208,13 @@ to any static web host, but bindings saved there belong to that site.
 
 ## URL parameters
 
+The launcher reads `v` and passes every other parameter, and any `#hash`, on to the game, so
+`/?v=2&renderer=webgl` and `/#seed=K7Q2ZD` work from the launcher too.
+
 | parameter | example | effect |
 | --- | --- | --- |
+| `v` | `?v=1` | launcher only: open V1 (`1`) or V2 (`2`), and remember it |
+| `#seed` | `#seed=K7Q2ZD` | the seed in the hash, as the launcher forwards it and share links carry it (`?seed=` wins when both are given) |
 | `seed` | `?seed=K7Q2ZD` | Fly a specific world. The URL always carries the current seed, so you can share it |
 | `time` | `?time=0.02` | Start at a time of day from 0 to 1 (0 is midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset) |
 | `renderer` | `?renderer=webgl` | Force the WebGL2 fallback |
@@ -221,6 +248,9 @@ to any static web host, but bindings saved there belong to that site.
 | `npm run copilot-server` | the reference remote brain for WREN |
 | `npm test` | checks the V1 freeze, builds `dist-single/` and runs the headless smoke test on the shell |
 | `npm run test:v1` | fails if `public/v1/index.html` differs from `tests/v1.sha256` or from `git show v1-final:index.html` |
+| `npm run test:shell` | builds `dist-single/`, then runs the launcher shell test against the dev server and the build (`tools/shell-test.mjs`) |
+| `npm run test:flight`, `test:flight:webgl` | the flight-test harness (every craft, first and third person, 3 seeds) on WebGPU or WebGL2 |
+| `npm run test:hotas`, `test:hotas:webgl` | the HOTAS pipeline harness on WebGPU or WebGL2 |
 
 three.js is pinned to exactly `0.184.0` and imported only as `three/webgpu`, `three/tsl` and
 `three/addons/...`, so there is one copy. Vite `7.3.6` and `vite-plugin-singlefile` build it.
@@ -228,8 +258,11 @@ three.js is pinned to exactly `0.184.0` and imported only as `three/webgpu`, `th
 ### Folder layout
 
 ```
-index.html               page shell, glass UI markup
-src/main.js              composition root: boot, systems, frame loop
+index.html               the launcher shell: the game iframe and the V1 | V2 pill
+v2/index.html            V2's page: glass UI markup
+public/v1/index.html     V1, the original single-file game, frozen byte-for-byte
+src/shell/               the launcher shell's script, and V2's bridge to it (versionToggle)
+src/main.js              V2's composition root: boot, systems, frame loop
 src/core/                config, storage (IndexedDB), settings, events, fixed-step clock, frame loop, perf
 src/render/              renderer boot, post stack, sky, clouds, water, birds, effects
 src/world/               world generator (shared height function), terrain worker and chunks, landmarks
@@ -243,9 +276,9 @@ src/ui/                  glass UI, craft picker, settings, controls panel, instr
 src/copilot/             WREN: local grammar, remote brain, aircraft actions
 src/gameplay/            journal, ring courses, waypoints
 src/dev/                 dev badge, wind overlay, debug wind source, mock gamepads, test harnesses
-tools/                   smoke test, harness runner, flight and system labs, copilot server, static server
-public/v1/index.html     the original single-file v1 game, frozen byte-for-byte
-docs/                    architecture, controls, copilot API, screenshots
+tools/                   smoke test, shell test, harness runner, flight and system labs, builds, copilot server, static server
+tests/                   the V1 freeze test and its SHA-256
+docs/                    architecture, controls, copilot API, V1's known issues, screenshots
 start-driftwing.bat      one-click start for Windows
 ```
 
@@ -266,11 +299,20 @@ start-driftwing.bat      one-click start for Windows
   checks saved data against a hung or closed IndexedDB, `node tools/lab/settings.mjs` the settings
   migrations and the one-time HOTAS assist default, `node tools/lab/copilot.mjs` WREN's grammar,
   and `node tools/lab/copilot-server.mjs` which origins the copilot server accepts.
+- **Shell test.** `node tools/shell-test.mjs [--target dev,dist] [--backend webgl]` switches
+  between the games 20 times each way in headless Chrome, against the dev server and the built
+  `dist-single/`. It checks that one game document is ever live, that memory (JS heap, DOM
+  counters and Chrome's GPU process) returns to its first-load level, that the focus lands in the
+  game, that `/#seed=ABC` reaches V2, and that a page on another port cannot switch games. It
+  prints a PASS / FAIL table and writes a JSON report. `node tools/shell-check.mjs --url <shell>`
+  checks the pill and persistence.
 - **Test harnesses** (dev server only).
-  - `?test=1` flies all six craft across three seeds and reports fps, frame times,
-    NaN events, terrain penetrations, soft crashes and heap growth.
-  - `?test=hotas` checks the HOTAS pipeline and the HOTAS assist default with mock devices.
-  - `node tools/run-harness.mjs --test 1|hotas` runs either one headlessly.
+  - `?test=1` flies all six craft in first and third person across three seeds (36 runs) and
+    reports fps, frame times, NaN events, terrain penetrations, soft crashes and heap growth.
+  - `?test=hotas` checks the HOTAS pipeline, persistence across a reload and the HOTAS assist
+    default with mock devices.
+  - `node tools/run-harness.mjs --test 1|hotas [--backend webgl] [--views first,third]` runs
+    either one headlessly.
 
 ### Documentation
 
@@ -280,6 +322,8 @@ start-driftwing.bat      one-click start for Windows
   checklist.
 - [docs/copilot-api.md](docs/copilot-api.md): the remote copilot request, response and action
   schema.
+- [docs/v1-known-issues.md](docs/v1-known-issues.md): what the frozen V1 prints, recorded instead
+  of fixed.
 - [CHANGELOG.md](CHANGELOG.md): what changed in each version.
 
 ## Known limitations

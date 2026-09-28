@@ -8,6 +8,10 @@ checked, and what happens when something goes wrong.
 `tools/copilot-server.mjs` is a working reference brain. It uses rules, and Claude too when
 `ANTHROPIC_API_KEY` is set. Start it with `npm run copilot-server`.
 
+This page describes V2's WREN. V1, the frozen original game behind the same launcher, keeps its
+own WREN and its own remote-brain setting, with the contract it shipped with in v1.0.0. The "v1"
+fields and actions below are the ones V2 inherited from it.
+
 ## Turning it on
 
 1. Run your endpoint, for example `npm run copilot-server`. It listens on `http://localhost:3000/copilot`.
@@ -53,8 +57,10 @@ The game page calls your endpoint from the browser, so the endpoint must allow C
 
 - It must answer the `OPTIONS` preflight with `Access-Control-Allow-Origin: <the page origin>`,
   `Access-Control-Allow-Methods: POST, OPTIONS` and `Access-Control-Allow-Headers: Content-Type`.
-- The page origins are `http://127.0.0.1:5199` (the dev server), the origin of any local server
-  that hosts `dist-single/index.html`, and `null` when `index.html` is opened from a file.
+- The page is V2 at `/v2/`, which shares its origin with the launcher shell that runs it. The
+  origins are `http://127.0.0.1:5199` (the dev server and `npm run serve:single`), the origin of
+  any other local server that hosts `dist-single/`, and `null` when `dist-single/v2/index.html` is
+  opened directly from a file.
   Sandboxed iframes and `data:` documents on any website also send `null`, so treat it as
   untrusted.
 - If the endpoint is on the loopback address and the page is not, Chrome also sends

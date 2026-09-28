@@ -2,8 +2,9 @@
 
 Every named action can be rebound on every device, the keyboard included, in the controls panel
 (`.` or the `controlsPanel` action). Bindings are a global profile plus optional per-craft
-overrides. They, and each controller's calibration, are saved in the browser's IndexedDB for
-`http://127.0.0.1:5199` and survive restarts. **Export** / **Import** in the panel move them as
+overrides. They, and each controller's calibration, are saved in V2's own IndexedDB database
+(`driftwing-v2`) for `http://127.0.0.1:5199` and survive restarts. V1, the original game, keeps its
+own settings and never sees these. **Export** / **Import** in the panel move them as
 JSON. The defaults below come from `src/input/defaultBindings.js`; the help panel (`H`) lists the
 live keyboard bindings, so it follows any rebinds.
 
@@ -39,6 +40,8 @@ flies: the same inputs give the same flight in every view.
 - Numpad 8 / Numpad 2 (the stick hat up / down) jump to the cockpit / the chase view, and
   Numpad 4 / 6 (hat left / right) look 90 degrees to the side.
 - Each craft remembers its own view. The first launch opens in the chase view.
+- `viewToggle1P3P` is bindable like every action. Its defaults are **V**, the gamepad **View**
+  button and **TWCS button 8**.
 
 Outside views show the glass HUD: airspeed, altitude and vertical speed, the compass heading, a
 small attitude indicator, the throttle, and a stall / AoA warning (a low-rotor-rpm warning on the
@@ -48,6 +51,15 @@ sideways from the nose mark, and angle of attack moves it down. In the cockpit t
 does the job and the glass HUD is off unless you turn it on (Settings, Flight: "Glass HUD in the
 cockpit"); the FPV camera and the wingsuit keep the glass HUD, since they have no panel. Units
 follow the Units setting.
+
+## Switching to V1
+
+DRIFTWING is two games behind the launcher at `http://127.0.0.1:5199`: V1, the original, and V2,
+this game. The **V1 | V2** pill in the top-left corner switches in both directions. It hides after
+a few seconds; move the pointer to the top-left corner to bring it back. From V2 you can also press
+**F8** (the bindable `versionToggle` action), press **T.16000M base button 10**, or ask WREN to
+"switch to version one". V1 is the untouched original, so from V1 the pill is the only way back.
+`/?v=1` and `/?v=2` open a game directly.
 
 ## Keyboard
 
@@ -341,7 +353,7 @@ dev badge and touch controls build on:
 | `describeRef(ref, bindingDevice)` | short label of a binding ("Shift+F", "Trigger", "Hat 1 up") |
 | `listen({ target, device })`, `bindByListening({ target, craft, device, replace })`, `cancelListen()`, `getListenState()`, `onListenChange()` | bind by listening: the next key, mouse button, controller button, learned hat direction or axis moved past half travel; Escape cancels. `device` may be one binding device, an array of them, or null |
 | `startCalibration({ deviceKeys })`, `getCalibrationWizard()` | the wizard step machine: `getState()`, `next()`, `skip()`, `back()`, `cancel()`, `finish()`, `onChange()` |
-| `calibration` | per-device records: `get`, `save`, `reset`, `keys`, `onChange` (stored as `input.calibration.<deviceKey>`) |
+| `calibration` | per-device records: `get`, `save`, `reset`, `keys`, `onChange` (stored as `driftwing-v2.input.calibration.<deviceKey>`) |
 | `consumesKey(event)` | true when a keydown belongs to an input action (the UI leaves it alone) |
 | `isPointerLocked()`, `readPhotoControls()` | pointer-lock state; the photo-mode free-camera input |
 | `mock` | with `?test=hotas`: the scriptable mock devices from `src/dev/mockGamepads.js` (`plug`, `unplug`, `moveToSlot`, `setAxis`, `press`, `release`, `setButton`, `setHat`, `restAxes`, `get`, `list`) |

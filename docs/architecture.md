@@ -1,14 +1,121 @@
 # DRIFTWING v2 architecture
 
-This is the architecture of DRIFTWING v2 as of Phase 1 (`2.0.0-phase.1`): the module map, the
-runtime and frame loop, and the contracts between systems. The last section lists where Phases 2-4
-attach without rewrites. The code is the source of truth; every contract here names the file that
-implements it.
+This is the architecture of DRIFTWING v2 as of Phase 1 (`2.0.0-phase.1`) and the structure
+correction (tag `v2-structure`): the two games behind the launcher shell, the module map, the
+runtime and frame loop, and the contracts between systems. The last sections list how it is tested
+and where Phases 2-4 attach without rewrites. The code is the source of truth; every contract here
+names the file that implements it.
 
 Units are SI everywhere in code: m, m/s, kg, N and s, with rad and rad/s inside the physics. Degrees
 appear only where a field name or comment says so (telemetry angles, headings, FOVs). World axes are
 +x east, +y up and -z north. Craft body axes are +x right wing, +y up and +z aft (the nose is -z).
 Headings are compass degrees (0 north, 90 east).
+
+## Two games behind one toggle
+
+DRIFTWING is two separate games. The root page is a small launcher shell that runs one of them at a
+time in a full-window iframe.
+
+| page | source | what |
+| --- | --- | --- |
+| `/` | `index.html`, `src/shell/shell.js` | the launcher shell: the game iframe and the V1 \| V2 pill |
+| `/v1/` | `public/v1/index.html` | **V1**, the original single-file game, frozen |
+| `/v2/` | `v2/index.html`, `src/main.js` | **V2**, the Vite app this document describes: real flight physics only |
+
+### V1, frozen
+
+V1 is `index.html` from the git tag `v1-final`, byte-for-byte, at `public/v1/index.html`. Vite
+serves and copies `public/` without processing it, and the dev and preview servers answer `/v1/`
+with that file (`vite.config.js`, `gameDirectories`). V1 keeps its own CDN import map (jsDelivr,
+with integrity hashes) and its own copy of three.js r184, so it needs an internet connection. It is
+never ported, edited, linted or reformatted:
+
+- `tests/v1.sha256` holds its SHA-256, and `npm run test:v1` (`tests/v1-checksum.test.mjs`) fails
+  when the file's hash differs from it or its bytes differ from `git show v1-final:index.html`;
+- `npm run build:single` copies it into `dist-single/v1/` and checks the copy's hash too;
+- its console is judged only against its original behaviour, recorded in
+  [v1-known-issues.md](v1-known-issues.md) (none under normal conditions).
+
+V1 has no switch of its own: from V1 the player switches with the pill.
+
+### The launcher shell
+
+`src/shell/shell.js` picks the version, switches between the games and places the pill. Its test
+handle is `window.DRIFTWING_SHELL` (`version`, `busy`, `switches`, `pillVisible`,
+`storageAvailable`, `game` (the running game's `window.DRIFTWING`), `requestVersion(version)`).
+
+| URL | opens |
+| --- | --- |
+| `/` | the version remembered in `localStorage` `driftwing.shell.lastVersion`, else V2 |
+| `/?v=1`, `/?v=2` (also `v1`, `v2`) | that version, which is then remembered |
+| `/?v=2&renderer=webgl` | every other query parameter is forwarded to the game (`/v2/?renderer=webgl`) |
+| `/#seed=ABC` | the hash is forwarded to the game (`/v2/#seed=ABC`), so seed and room links work through the shell; a later hash change reloads the game with the new hash |
+| `/v1/`, `/v2/` | a game on its own, without the shell (`/v1` and `/v2` redirect to them) |
+
+Every load writes `?v=` back into the shell URL, so a reload opens the same game.
+
+**Switching.** Only one game ever runs. A switch fades a veil in (280 ms, none with reduced
+motion), points the iframe at `about:blank` (which ends the old game's document and frees its GPU
+device, audio context, workers and gamepads), loads the other game, fades the veil out and focuses
+the iframe (`frame.focus()` and `contentWindow.focus()`), so keyboard, mouse and gamepads go to the
+game. A request made during a switch waits, and the latest one wins. A game that never fires `load`
+is shown anyway after 30 s.
+
+**Iframe permissions.** The iframe's `allow` list is exactly `gamepad; microphone; camera;
+fullscreen; autoplay; xr-spatial-tracking; encrypted-media; clipboard-write`. There is no
+`allowfullscreen` attribute: next to an `allow` list that grants fullscreen it only makes Chrome
+warn.
+
+**The pill.** V1 \| V2, glass, top-left. It hides after 3 s without activity and reappears when the
+pointer reaches the thin hot strips along the top-left edges, when anything in the shell has focus
+or input, and after every switch. It is placed at the first spot clear of the running game's HUD
+(V1's top bar, V2's chips, compass and, on touch screens, flight card) and re-placed every 0.5 s
+while it shows. V2 inside the shell carries the root class `dw-embedded`, which keeps the corner
+free.
+
+**The postMessage protocol.** V2 asks for a switch with exactly
+
+```js
+window.parent.postMessage({ source: 'driftwing-v2', type: 'switch-version', to: 'v1' }, window.location.origin);
+```
+
+The shell honours a message only when `event.origin` is its own origin, `event.source` is its own
+iframe's window, and the data is a plain object with exactly the keys `source`, `type` and `to`
+(`to` being `v1` or `v2`). Anything else is ignored without a trace: a page on another origin
+(inside the iframe, or embedding the shell), a message of another shape, or one from the shell's
+own window. V2's side is `src/shell/bridge.js`, the owner of the bindable `versionToggle` action
+(F8, T.16000M base button 10, and WREN's "switch to version one"). Inside the shell it posts the
+message; opened on its own at `/v2/` it navigates the tab to `/?v=1`; inside any other page it
+says so in a toast and stays put.
+
+### Storage isolation
+
+V1, V2 and the shell share one origin, so they keep apart by name:
+
+- **V2** prefixes everything with `driftwing-v2`: the IndexedDB database `driftwing-v2` and every
+  key in it (`driftwing-v2.settings`, `driftwing-v2.input.*`, ...), the localStorage fallback keys
+  and the dev harnesses' databases and sessionStorage keys. `src/core/storage.js` throws on any
+  other key, so V2 can never read or write V1's.
+- **V1** keeps its original keys (`driftwing.settings.v1`, `driftwing.journal.*`, `driftwing.ui.*`
+  in localStorage).
+- **The shell** keeps one key, `driftwing.shell.lastVersion`.
+
+The one-time migration: when `driftwing-v2` is empty on first start, V2 imports the Phase 1
+database `driftwing` (its settings without the old `mode` field, the `input.*` and `audio.*` keys
+and the journals, under their new names) and then deletes it. Details are under
+[Storage](#storage-srccorestoragejs).
+
+### Builds
+
+| command | output |
+| --- | --- |
+| `npm run dev` | the Vite dev server at `http://127.0.0.1:5199` (strict port): the shell at `/`, V1 at `/v1/`, V2 at `/v2/` |
+| `npm run build` | `dist/`: the shell `index.html`, `v1/index.html` (copied untouched from `public/`), `v2/index.html` and the hashed `assets/` |
+| `npm run build:single` | `dist-single/`: the shell `index.html` and `v2/index.html`, each one self-contained file (every script, style and the terrain worker inlined), and `v1/index.html` copied byte-for-byte, its SHA-256 checked against `tests/v1.sha256` (`tools/build-single.mjs` runs one Vite build per page) |
+| `npm run serve:single` | serves `dist-single/` at `http://127.0.0.1:5199` (`tools/serve.mjs`, no dependencies) |
+
+`start-driftwing.bat` checks Node.js (20.19+, or 22.12+), installs the dependencies on the first
+run, and starts `npm run dev -- --open`, which opens the shell at `http://127.0.0.1:5199`.
 
 ## Module map
 
@@ -182,6 +289,13 @@ system, and then starts the frame loop.
 | `testHarness.js` | the flight-test harness at `?test=1` (dev builds only) |
 | `hotasTest.js` | the HOTAS pipeline test at `?test=hotas` (dev builds only) |
 
+### `src/shell`: the launcher shell and V2's side of it
+
+| file | what |
+| --- | --- |
+| `shell.js` | the launcher shell (loaded by the root `index.html`, not part of V2): version choice, switching, the pill, the message listener |
+| `bridge.js` | V2's `shell` system: the `versionToggle` owner that asks the shell for V1, and the `dw-embedded` root class |
+
 ### `tools`
 
 | file | what |
@@ -189,6 +303,11 @@ system, and then starts the frame loop.
 | `smoke-test.mjs` | headless Chrome check: console errors and warnings fail it; scripted steps and screenshots |
 | `steps/*.json` | reusable smoke steps; `view-physics.json` proves every craft flies the same in every view (below) |
 | `run-harness.mjs` | runs the `?test=1` / `?test=hotas` harnesses headlessly on a spare port and saves the report |
+| `shell-test.mjs` | the launcher shell under load: 20 round trips, one live game, memory back to baseline, focus, hash forwarding, foreign origins ([Testing](#testing)) |
+| `shell-check.mjs` | the launcher shell's behaviour: first launch, the pill (shows, hides, clear of each game's HUD), persistence, `?v=`, forwarding, messages |
+| `build-single.mjs`, `v1-checksum.mjs` | the `dist-single/` build; the V1 freeze helpers shared with `tests/v1-checksum.test.mjs` |
+| `bat-check.mjs` | runs `start-driftwing.bat`'s Node.js version check under cmd.exe against fake `node` versions |
+| `browser.mjs`, `ports.mjs` | Chrome / Edge discovery and free-port discovery (never 5199) shared by the headless tools |
 | `flight-lab.mjs` | headless flight lab for the glider and bush plane (handling, spawns, craft switches, hot-plug) |
 | `lab/jet.mjs`, `lab/helicopter.mjs`, `lab/wingsuit.mjs`, `lab/fpv.mjs` | headless flight labs per craft |
 | `lab/settings.mjs` | settings migrations (views per craft included) and the one-time HOTAS assist default |
@@ -866,10 +985,50 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `?seed=...`, `?time=0..1`, `?touch=1` | world seed, start time of day, force touch controls (v1) |
 | `?test=hotas` | installs the mock gamepads (`ctx.systems.input.mock`) and, in dev builds, runs the HOTAS pipeline test (`src/dev/hotasTest.js`): bindings and hat decoding in both hat forms, calibration results, twist auto-disable, the one-time HOTAS assist default, and persistence across a reload |
 | `tools/steps/view-physics.json` | run with `tools/smoke-test.mjs --url <dev server>/v2/` (or a build with `?debug=1`): pauses the loop, steps frames by hand and proves every craft flies identically in the cockpit, in chase and while switching views |
-| `?test=1` | dev builds: the flight-test harness (`src/dev/testHarness.js`). It flies each of the six craft for 60 s across 3 seeds, and logs average fps, p99 frame time, NaN events, terrain penetrations, soft crashes, heap growth and console errors. It shows an on-screen summary and offers a JSON report (`window.DRIFTWING.testReport`) |
-| `tools/run-harness.mjs` | runs either harness headlessly on a spare port (`--test 1\|hotas`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--out`) and exits 0 on PASS |
+| `?test=1` | dev builds: the flight-test harness (`src/dev/testHarness.js`). It flies each of the six craft for 60 s in first person and in third person across 3 seeds (36 runs), and logs average fps, p99 frame time, NaN events, terrain penetrations, soft crashes, heap growth and console errors. It shows an on-screen summary and offers a JSON report (`window.DRIFTWING.testReport`). URL options: `testSeeds`, `testSeconds`, `testCraft`, `testViews` (`first`, `third`) |
+| `tools/run-harness.mjs` | runs either harness headlessly on a spare port (`--test 1\|hotas`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--out`), prints a table per run and per craft and view, and exits 0 on PASS |
+| `tools/shell-test.mjs` | the launcher shell test (below) |
 | `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |
 | labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`) |
+
+## Testing
+
+Every headless tool runs Chrome (or Edge; `CHROME_PATH` overrides the discovery in
+`tools/browser.mjs`) with a fresh profile, starts its own servers on free ports (never the player's
+5199), and fails on any console error or warning from the shell or V2. V1's console is recorded
+separately and judged only against [v1-known-issues.md](v1-known-issues.md).
+
+| command | what it proves |
+| --- | --- |
+| `npm run test:v1` | V1 is byte-for-byte `v1-final:index.html` and matches `tests/v1.sha256` |
+| `npm run test:shell` | the launcher shell under load (below), against the dev server and the built `dist-single/` |
+| `npm run test:flight`, `test:flight:webgl` | the Phase 1 flight-test harness for every craft in first and third person, 3 seeds (36 runs of 60 s) |
+| `npm run test:hotas`, `test:hotas:webgl` | the HOTAS pipeline, including persistence across a reload in the `driftwing-v2-test-hotas` database |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/view-physics.json` | every craft flies bit-identically in every view |
+| `node tools/shell-check.mjs --url <shell>` | the pill (shows, hides, clear of both games' HUDs), persistence and forwarding |
+| `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` | the flight models, settings migrations, storage, input, WREN's grammar, the copilot server |
+| `npm test` | the V1 check, `build:single` and a smoke test of the built shell |
+
+**The shell test** (`tools/shell-test.mjs`) makes 20 round trips V2 -> V1 -> V2 (V2 -> V1 by the
+pill and by F8 in turn, V1 -> V2 by the pill). After each of the 40 switches it asserts exactly one
+iframe holding exactly one live game document (the page's frames, and Chrome's document counter
+after a forced GC), reached through `about:blank`, with `document.activeElement` on the iframe and
+the iframe's document focused. It opens the shell at `/#seed=ABC` and needs V2's seed to be `ABC`.
+A page on another port posts the exact switch request twice, from inside the shell's iframe and as
+the page embedding the shell, and nothing may switch; the same request from V2's own iframe is the
+control and must switch.
+
+Memory is read 10 s after the game reports ready, after a forced GC (`HeapProfiler.collectGarbage`):
+the JS heap (`Performance.getMetrics` `JSHeapUsedSize`), the documents, nodes and listeners
+(`Memory.getDOMCounters`), and Chrome's GPU process (the `--type=gpu-process` child of the launched
+browser: working set and private bytes, and on Windows the dedicated and shared GPU memory from
+the `GPU Process Memory` performance counters). The reading after each game's 20th load is
+compared with its first load. The tolerances, and why, are in `MEMORY_TOLERANCE` at the top of the
+tool: JS heap 15 % or 12 MB, documents none, nodes 10 % or 400, listeners 10 % or 60, and every GPU
+figure 25 % or 160 MB (Chrome's GPU process keeps shader and pipeline caches and pooled staging
+memory across loads by design, so it moves by tens of MB either way; a retained WebGPU device would
+keep its swap chain, render targets and terrain buffers, a few hundred MB). The report lists each
+game's footprint over a blank tab next to each allowance.
 
 ## Phase 2-4 plug points
 
