@@ -11,6 +11,7 @@
 //   COPILOT_CLAUDE_BUDGET_MS=700   optional: time allowed for Claude before the rules answer instead
 //   COPILOT_WARMUP=0               optional: skip the start-up request that primes the JSON-schema cache
 //   ANTHROPIC_BASE_URL=...         optional: alternative API base URL (e.g. a local proxy)
+//   ALLOW_FILE_ORIGIN=1            optional: also accept Origin "null" (index.html opened from a file)
 //
 // In the game: open Settings, turn on "Remote copilot" and keep the endpoint
 // http://localhost:3000/copilot. The game allows 800 ms per request and falls
@@ -22,10 +23,11 @@
 //   Testing aid (only with COPILOT_TEST_DELAY=1): POST /copilot?delay=1500 waits 1.5 s
 //   before answering, which exercises the game's timeout + local fallback path.
 //
-// Security: only the game's own origins may call it (file:// pages send Origin "null",
-// plus http(s)://localhost, 127.0.0.1 and [::1] on any port). Add more with
-// ALLOWED_ORIGINS=https://example.com,https://other.example. Other origins get 403, so
-// an unrelated website cannot spend your Claude key through this server.
+// Security: only the game's own origins may call it: http(s)://localhost, 127.0.0.1 and [::1]
+// on any port. Add more with ALLOWED_ORIGINS=https://example.com,https://other.example. Other
+// origins get 403, so an unrelated website cannot spend your Claude key through this server.
+// Origin "null" is refused unless ALLOW_FILE_ORIGIN=1: file:// pages send it, but so do
+// sandboxed iframes and data: documents on any website.
 import { createServer } from 'node:http';
 
 const PORT = Number.parseInt(process.env.PORT ?? '3000', 10) || 3000;
@@ -39,6 +41,7 @@ const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TEST_DELAY_MS = 5000;
 const TEST_DELAY_ENABLED = process.env.COPILOT_TEST_DELAY === '1';
 const EXTRA_ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean);
+const ALLOW_FILE_ORIGIN = process.env.ALLOW_FILE_ORIGIN === '1';
 const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 const MAX_SPEECH_LENGTH = 400;
 const MAX_LABEL_LENGTH = 48;
@@ -520,7 +523,8 @@ async function askClaude(flightState, transcript, budgetMs) {
 
 // ---- HTTP ---------------------------------------------------------------------------------------------------
 function isAllowedOrigin(origin) {
-  return origin === 'null' || LOCAL_ORIGIN_PATTERN.test(origin) || EXTRA_ALLOWED_ORIGINS.includes(origin);
+  if (origin === 'null') return ALLOW_FILE_ORIGIN;
+  return LOCAL_ORIGIN_PATTERN.test(origin) || EXTRA_ALLOWED_ORIGINS.includes(origin);
 }
 
 /** CORS for the game's own origins only. Returns false when the request must be refused. */
@@ -688,6 +692,7 @@ if (API_KEY && WARMUP) {
     .then(() => log('Claude warm-up done (response schema cached).'))
     .catch((error) => log(`Claude warm-up skipped: ${error.message}`));
 }
+if (ALLOW_FILE_ORIGIN) log('ALLOW_FILE_ORIGIN=1: accepting Origin "null" (file:// pages, but also sandboxed frames on any site).');
 
 function shutdown() {
   let open = servers.length;
