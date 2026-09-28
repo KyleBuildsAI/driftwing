@@ -5,7 +5,7 @@
 // (WindField createDebugUpdraft: a rising column with a gentle swirl) PLACE_AHEAD metres ahead of the
 // craft at its altitude through wind.addSource; the next press removes it with wind.removeSource.
 // The toasts come from the typed windSourceAdded / windSourceRemoved events, so each one confirms
-// that the event fired. The wind arrows show the column, and SIM flight through it climbs because the
+// that the event fired. The wind arrows show the column, and flight through it climbs because the
 // flight models fly through WindField.sample.
 import { createDebugUpdraft } from '../env/WindField.js';
 import { badgeWindRow, createBadgeButton } from './windOverlay.js';

@@ -5,7 +5,7 @@
 //   rush      the wind tearing past the helmet, rising with airspeed and sharply with terrain
 //             proximity (state.flight.agl inside proximityRange metres)
 //   ground    a low roar of air compressed between suit and terrain when skimming it
-//   warning   an audible-altimeter style chirp while the SIM terrain proximity warning is on
+//   warning   an audible-altimeter style chirp while the terrain proximity warning is on
 //             (state.flight.craftState.proximityWarning, an assist that is off at 0 %)
 // With a canopy open (state.flight.craftState.canopy) the flutter becomes the slow luffing of the
 // parachute and the rush falls away with the speed.

@@ -1,4 +1,4 @@
-// Trim: puts a SIM model that was just reset (mode switch, respawn, airstart, craft switch, tow
+// Trim: puts a flight model that was just reset (boot, respawn, airstart, craft switch, tow
 // release) into a consistent, trimmed state at its position and velocity, so the first hands-off
 // seconds fly straight on instead of pitching toward whatever the reset attitude implied.
 //

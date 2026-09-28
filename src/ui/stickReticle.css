@@ -1,6 +1,6 @@
-  /* SIM virtual-stick reticle: a faint ring for full deflection around the screen centre, a centre
+  /* Virtual-stick reticle: a faint ring for full deflection around the screen centre, a centre
      mark, and a small gold dot (with a hairline from the centre) at the mouse stick's deflection.
-     Shown only in SIM with the mouse captured; hidden in photo mode. */
+     Shown only with the mouse captured; hidden in photo mode. */
   #ui-root .dw-stick-reticle {
     position: absolute;
     left: 50%;

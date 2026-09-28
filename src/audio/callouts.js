@@ -1,5 +1,5 @@
 // Radar-altitude landing callouts: "one hundred, fifty, forty, thirty, twenty, ten" as the craft
-// descends toward the ground in SIM with the gear down (settings.hud.landingCallouts).
+// descends toward the ground with the gear down (settings.hud.landingCallouts).
 //
 // Thresholds are in the player's units: feet with aviation units (as real radar altimeters call
 // them), metres with metric units, so the call always matches the altitude on the HUD. A threshold

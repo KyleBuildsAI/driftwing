@@ -1944,12 +1944,12 @@ export function createUISystem(ctx) {
     if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
     return new Date(epochMs).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   }
-  /** Journal section for graded SIM landings: the best one (grade, sink rate, craft, when), count and last. */
+  /** Journal section for graded landings: the best one (grade, sink rate, craft, when), count and last. */
   function landingsHtml(landings) {
     const html = ['<div class="dw-group"><h3 class="dw-micro">Landings</h3>'];
     const best = landings && landings.best;
     if (!best || !LANDING_GRADE_LABELS[best.grade]) {
-      html.push('<p class="dw-empty">No graded landings yet. In SIM every touchdown is graded butter, smooth, firm or hard, and the best one is kept here.</p></div>');
+      html.push('<p class="dw-empty">No graded landings yet. Every touchdown is graded butter, smooth, firm or hard, and the best one is kept here.</p></div>');
       return html.join('');
     }
     const meta = [craftNameFor(best.craft), `${formatGroundSpeed(best.groundSpeed)} over the ground`, formatWhen(best.at)].filter(Boolean).join(' · ');

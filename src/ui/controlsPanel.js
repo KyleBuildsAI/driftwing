@@ -1286,7 +1286,7 @@ export function createControlsPanel({ panel, ctx }) {
     bus.onTyped('deviceDisconnected', () => scheduleRender());
     bus.onTyped('craftChanged', () => scheduleRender());
     bus.on('settings:changed', (payload) => {
-      if (payload?.key === 'craft' || payload?.key === 'mode') scheduleRender();
+      if (payload?.key === 'craft') scheduleRender();
     });
   }
 

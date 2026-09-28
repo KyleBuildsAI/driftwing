@@ -42,7 +42,7 @@ const simProfile = Object.freeze({
   // A fast jet: the speed guard sits above Mach 2 at altitude, Vne is an equivalent airspeed.
   maxSpeed: 700,
   vneBasis: 'equivalent',
-  // Gray-out, tunnel vision and red-out in the post stack (src/render/post.js, SIM).
+  // Gray-out, tunnel vision and red-out in the post stack (src/render/post.js).
   gEffects: true,
   wing: Object.freeze({
     span: 9.96,

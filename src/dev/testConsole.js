@@ -66,7 +66,7 @@ export function installConsoleCapture({ onEntry = null } = {}) {
   return {
     entries,
     counts,
-    /** Tags later entries (for example 'run 4: jet SIM'). */
+    /** Tags later entries (for example 'run 4: jet (seed HARNESS-1)'). */
     setContext(label) {
       context = String(label);
     },

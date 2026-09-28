@@ -5,7 +5,7 @@ import { LANDING_GRADES, isBetterLanding } from '../flight/landing.js';
  * JOURNAL: the per-seed discovery log. Records biomes visited, landmarks found,
  * distance flown, highest altitude, flight time, ring-course results (best
  * clean time, best streak, the best result including misses and the last run) and
- * graded SIM landings (count, last and best, from the typed 'landed' event), and
+ * graded landings (count, last and best, from the typed 'landed' event), and
  * persists them with `storage` under `driftwing-v2.journal.<seed>`.
  * Saves are throttled (every ~5 s while flying), immediate on discoveries,
  * biome firsts, finished ring courses and new best landings, and flushed when the page hides.

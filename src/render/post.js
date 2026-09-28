@@ -12,7 +12,7 @@ import * as TSL from 'three/tsl';
 // Grade and vignette run in linear HDR. The pipeline's automatic colour transform is
 // off: renderOutput() applies ACES + sRGB, then grain is added in display space
 // (grain added before the tone curve is crushed to nothing in highlights).
-// G effects (SIM, craft whose simProfile opts in with gEffects: true; driven by
+// G effects (craft whose simProfile opts in with gEffects: true; driven by
 // createGEffectsSystem below): gray-out, tunnel vision and red-out, in linear HDR after the
 // grade, inside a uniform branch so they cost nothing while inactive.
 export function createPostStack(renderer, scene, camera, uniforms) {
@@ -103,7 +103,7 @@ export function createPostStack(renderer, scene, camera, uniforms) {
 // ============================================================================
 // G EFFECTS: what the pilot's eyes do under load (the 'gEffects' system).
 // ============================================================================
-// SIM only, for craft whose simProfile opts in (gEffects: true): gray-out from 6 g, heavy at 8 g;
+// For craft whose simProfile opts in (gEffects: true): gray-out from 6 g, heavy at 8 g;
 // tunnel vision after 9 g held for 3 s; red-out below -2 g. Levels follow the load with the body's
 // lag (quicker onset than recovery) and write the post stack's uniforms; everything reads zero, so the
 // post branch is skipped, whenever the effects do not apply.

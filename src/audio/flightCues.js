@@ -1,8 +1,8 @@
 // Flight cues: the craft's instruments and mechanisms, driven by state.flight and typed events.
 //
-//   stall horn    SIM, on stall.warning: a buzzing reed horn (light aircraft) or a pulsed tone (jets)
+//   stall horn    on stall.warning: a buzzing reed horn (light aircraft) or a pulsed tone (jets)
 //   variometer    climb beeps whose pitch and rate rise with the climb, a low tone in strong sink;
-//                 for craft with a 'vario' instrument, in SIM or when the vario is switched on
+//                 for craft with a 'vario' instrument, unless the vario audio is switched off
 //   gear motor    while state.flight.gear.transit (or gear.down) changes, then a lock clunk
 //   flap motor    while state.flight.flaps moves (or briefly when flapNotch changes)
 //   touchdown     'landed' event or a new ground contact: thump plus tire chirp (wheels), scrape

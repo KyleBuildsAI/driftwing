@@ -286,7 +286,7 @@ export function createRingCourseSystem(ctx) {
   function planAltitudes(plan) {
     const startAltitude = state.player.position.y;
     const wavePhase = Math.random() * Math.PI * 2;
-    // Stay under the flight model's soft ceiling (it eases the nose down in the top 260 m).
+    // Courses stay in the low, scenic band every craft reaches comfortably (v1's ceiling, 2600 m).
     const ceiling = CONFIG.MAX_ALTITUDE - 300;
     const grade = courseGrade(plan, startAltitude);
     for (let index = 0; index < plan.length; index++) {
