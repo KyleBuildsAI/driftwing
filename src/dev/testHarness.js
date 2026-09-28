@@ -913,6 +913,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners }) {
     if (now - lastProgressMs < 1000 / PROGRESS_HZ) return;
     lastProgressMs = now;
     const total = Math.max(plan.length, 1);
+    // Automation (tools/run-harness.mjs) follows the run in flight between the full report updates.
+    report.progress = { completedRuns: session.runs.length, totalRuns: plan.length, current: activeRun ? { ...activeRun.entry, seconds: runTime() } : null, phase };
     if (activeRun) {
       const elapsed = (now - activeRun.startMs) / 1000;
       const entry = activeRun.entry;
