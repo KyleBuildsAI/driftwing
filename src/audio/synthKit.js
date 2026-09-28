@@ -131,21 +131,31 @@ export function createScaffold(context, destination) {
       return stopped;
     },
 
-    /** Fades out over fadeSeconds, then stops and disconnects everything. */
-    stop(time, fadeSeconds = 0.35) {
+    /** How many nodes the scaffold owns (every one is disconnected once stop() has finished). */
+    get nodeCount() {
+      return nodes.length;
+    },
+
+    /**
+     * Fades out over fadeSeconds, then stops and disconnects everything. onReleased (optional) is
+     * called once every node has been disconnected.
+     */
+    stop(time, fadeSeconds = 0.35, onReleased = null) {
       if (stopped) return;
       stopped = true;
       holdAt(output.gain, time);
       output.gain.setTargetAtTime(0, time, fadeSeconds / 4);
       const end = time + fadeSeconds + 0.05;
-      if (sources.length === 0) {
+      const release = () => {
         for (const node of nodes) node.disconnect();
+        if (onReleased) onReleased();
+      };
+      if (sources.length === 0) {
+        release();
         return;
       }
       for (const source of sources) source.stop(end);
-      sources[sources.length - 1].onended = () => {
-        for (const node of nodes) node.disconnect();
-      };
+      sources[sources.length - 1].onended = release;
     },
   };
 }

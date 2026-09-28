@@ -14,14 +14,34 @@
 // flyby relocation) would read as a burst of motion and swoop the pitch. cut() marks the next
 // update as a cut: the jump is skipped and the camera is taken to move with the craft (attached
 // views) or to stand still (flyby, photo mode).
+//
+// The spawn voices (spawnVoices.js) hear the world through the same listener: they read its
+// position, orientation and cut-aware velocity here and use the same dopplerFactor().
 import { clamp } from '../core/util.js';
 import { glide } from './synthKit.js';
 
-const SPEED_OF_SOUND = 343;
+export const SPEED_OF_SOUND = 343;
 const REFERENCE_DISTANCE = 18;
 const TELEPORT_SPEED = 1500;
-const DOPPLER_RANGE = [0.5, 2.2];
+export const DOPPLER_RANGE = Object.freeze([0.5, 2.2]);
 const ROUTE_TIME_CONSTANT = 0.12;
+
+/**
+ * Doppler pitch factor of a source heard by a listener (positions in m, velocities in m/s):
+ * f' = f (c + v_listener toward source) / (c - v_source toward listener), clamped to DOPPLER_RANGE.
+ * Returns 1 when the two are closer than 0.5 m. Allocates nothing.
+ */
+export function dopplerFactor(listenerPosition, listenerVelocity, sourcePosition, sourceVelocity) {
+  const dx = sourcePosition.x - listenerPosition.x;
+  const dy = sourcePosition.y - listenerPosition.y;
+  const dz = sourcePosition.z - listenerPosition.z;
+  const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (!(distance >= 0.5)) return 1;
+  const listenerTowardSource = (listenerVelocity.x * dx + listenerVelocity.y * dy + listenerVelocity.z * dz) / distance;
+  const sourceTowardListener = -(sourceVelocity.x * dx + sourceVelocity.y * dy + sourceVelocity.z * dz) / distance;
+  const denominator = Math.max(SPEED_OF_SOUND - sourceTowardListener, SPEED_OF_SOUND * 0.25);
+  return clamp((SPEED_OF_SOUND + listenerTowardSource) / denominator, DOPPLER_RANGE[0], DOPPLER_RANGE[1]);
+}
 
 /** deps: { context, destination, THREE }. */
 export function createSpatializer({ context, destination, THREE }) {
@@ -118,20 +138,21 @@ export function createSpatializer({ context, destination, THREE }) {
     else listenerVelocity.lerp(scratch, 0.5);
   }
 
-  /** f' = f (c + v_listener toward source) / (c - v_source toward listener), clamped and smoothed. */
+  /** The craft's doppler factor (dopplerFactor), smoothed by the caller. */
   function computeDoppler(sourcePosition, velocity) {
-    toSource.copy(sourcePosition).sub(listenerPosition);
-    distance = toSource.length();
-    if (distance < 0.5) return 1;
-    toSource.divideScalar(distance);
-    const listenerTowardSource = listenerVelocity.dot(toSource);
-    const sourceTowardListener = -velocity.dot(toSource);
-    const denominator = Math.max(SPEED_OF_SOUND - sourceTowardListener, SPEED_OF_SOUND * 0.25);
-    return clamp((SPEED_OF_SOUND + listenerTowardSource) / denominator, DOPPLER_RANGE[0], DOPPLER_RANGE[1]);
+    distance = toSource.copy(sourcePosition).sub(listenerPosition).length();
+    return dopplerFactor(listenerPosition, listenerVelocity, sourcePosition, velocity);
   }
 
   return {
     input,
+
+    /** The listener (camera) as of the last update: read-only, reused vectors. */
+    listenerPosition,
+    listenerForward,
+    listenerUp,
+    /** The camera's velocity (m/s) with camera cuts handled (see the header). Read-only. */
+    listenerVelocity,
 
     /** The camera cut since the last update (see the header): its jump is not motion. */
     cut() {
