@@ -17,8 +17,12 @@
 // alloc-profile.json (printed as well).
 //
 // The runner also records evidence for telling game cost from machine load, per flight-test run
-// (report.json runs[].machineLoad and runs[].mainThread, raw samples in machine-load.json):
+// (report.json runs[].machineLoad, runs[].gpuLoad and runs[].mainThread, raw samples in
+// machine-load.json and gpu-load.json):
 //   - the whole machine's CPU load (all processes, all cores), sampled every 2 s;
+//   - the GPU's utilisation and memory (all processes), sampled every 2 s through nvidia-smi when it
+//     is installed (NVIDIA GPUs; otherwise reported as unavailable). Another program saturating the
+//     GPU shows up here and not in the CPU figures;
 //   - Chrome's own main-thread counters over CDP (Performance.getMetrics): TaskDuration (wall time
 //     the page's main thread spent in tasks) against ThreadTime (CPU time it was actually given).
 //     A CPU share well under 100 % means the thread was waiting or descheduled inside its tasks,
@@ -30,6 +34,7 @@
 // exact (the flight test forces a GC before each reading).
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { createServer as createNetServer } from 'node:net';
 import { cpus, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -205,6 +210,57 @@ function startLoadSampler() {
   };
 }
 
+/**
+ * Samples the GPU's utilisation (%) and used memory (MiB) every LOAD_SAMPLE_MS through a long-running
+ * nvidia-smi. Without nvidia-smi (no NVIDIA GPU or driver tools) it stays empty and says why.
+ */
+function startGpuSampler() {
+  const samples = [];
+  const sampler = { samples, unavailable: null };
+  let pending = '';
+  let child = null;
+  try {
+    child = spawn('nvidia-smi', ['--query-gpu=utilization.gpu,memory.used', '--format=csv,noheader,nounits', `-lms=${LOAD_SAMPLE_MS}`], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+  } catch (error) {
+    sampler.unavailable = `nvidia-smi could not start: ${error.message}`;
+  }
+  if (child) {
+    child.on('error', (error) => {
+      sampler.unavailable = `nvidia-smi is not available: ${error.message}`;
+    });
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      pending += chunk;
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop();
+      for (const line of lines) {
+        // One line per GPU; the first GPU is the one Chrome renders on in a single-GPU machine.
+        const [utilization, memory] = line.split(',').map((field) => Number.parseFloat(field));
+        if (Number.isFinite(utilization)) samples.push({ time: Date.now(), gpuPct: utilization, memoryMiB: Number.isFinite(memory) ? memory : null });
+      }
+    });
+  }
+  sampler.stop = () => {
+    if (child && child.exitCode === null) child.kill();
+  };
+  /** Average and peak GPU utilisation (%) and peak memory between two ISO times, or null. */
+  sampler.between = (startIso, endIso) => {
+    const start = Date.parse(startIso);
+    const end = Date.parse(endIso);
+    const inside = samples.filter((sample) => sample.time >= start && sample.time <= end + LOAD_SAMPLE_MS);
+    if (inside.length === 0) return null;
+    const average = inside.reduce((sum, sample) => sum + sample.gpuPct, 0) / inside.length;
+    const memory = inside.map((sample) => sample.memoryMiB).filter(Number.isFinite);
+    return {
+      averagePct: Math.round(average * 10) / 10,
+      peakPct: Math.max(...inside.map((sample) => sample.gpuPct)),
+      peakMemoryMiB: memory.length > 0 ? Math.max(...memory) : null,
+      samples: inside.length,
+    };
+  };
+  return sampler;
+}
+
 /** A free TCP port on 127.0.0.1 that Chrome will load and that is not the player's port. */
 async function findFreePort() {
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -293,7 +349,7 @@ function describeProgress(state) {
 }
 
 function flightTable(report) {
-  const lines = ['  #  seed        craft       mode     fps  p99ms  maxms  >50  sys/gc/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak  mainThread busy%/cpuShare%'];
+  const lines = ['  #  seed        craft       mode     fps  p99ms  maxms  >50  sys/gc/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak  GPU%avg/peak  mainThread busy%/cpuShare%'];
   for (const run of report.runs) {
     const checks = run.script.checks;
     lines.push([
@@ -314,6 +370,7 @@ function flightTable(report) {
       `${checks.filter((check) => check.passed).length}/${checks.length}`.padStart(7),
       run.passed ? '  PASS' : '  FAIL',
       run.machineLoad ? `  ${run.machineLoad.averagePct}/${run.machineLoad.peakPct}`.padEnd(21) : '  n/a'.padEnd(21),
+      run.gpuLoad ? `${run.gpuLoad.averagePct}/${run.gpuLoad.peakPct}`.padEnd(13) : 'n/a'.padEnd(13),
       run.mainThread ? `${run.mainThread.taskBusyPct}/${run.mainThread.cpuSharePct}` : 'n/a',
     ].join(' '));
   }
@@ -368,6 +425,7 @@ async function main() {
   const consoleLines = [];
   const started = Date.now();
   const load = startLoadSampler();
+  const gpuLoad = startGpuSampler();
   let report = null;
 
   try {
@@ -495,12 +553,16 @@ async function main() {
   }
 
   load.stop();
+  gpuLoad.stop();
   runner.finishedAt = new Date().toISOString();
   runner.machineLoad = load.between(runner.startedAt, runner.finishedAt);
+  runner.gpuLoad = gpuLoad.between(runner.startedAt, runner.finishedAt);
+  if (gpuLoad.unavailable) runner.notes.push(`GPU load not recorded: ${gpuLoad.unavailable}`);
   if (report && Array.isArray(report.runs)) {
     // Evidence for the frame statistics: how busy the whole machine was while each run flew.
     for (const run of report.runs) {
       run.machineLoad = run.startedAt ? load.between(run.startedAt, run.endedAt) : null;
+      run.gpuLoad = run.startedAt ? gpuLoad.between(run.startedAt, run.endedAt) : null;
       run.mainThread = run.startedAt ? load.mainThreadBetween(run.startedAt, run.endedAt) : null;
     }
   }
@@ -514,6 +576,7 @@ async function main() {
   writeFileSync(join(options.out, 'runner.json'), JSON.stringify(runner, null, 2));
   writeFileSync(join(options.out, 'console.log'), `${consoleLines.join('\n')}\n`);
   writeFileSync(join(options.out, 'machine-load.json'), JSON.stringify(load.samples, null, 2));
+  writeFileSync(join(options.out, 'gpu-load.json'), JSON.stringify(gpuLoad.samples, null, 2));
 
   if (report) process.stdout.write(`${options.test === '1' ? flightTable(report) : hotasTable(report)}\n`);
   process.stdout.write(`run-harness: ${runner.passed ? 'PASS' : 'FAIL'} (harness ${report ? report.result : 'no report'}, backend ${runner.backend ? runner.backend.join(', ') : 'unknown'}, browser console ${runner.errors.length} errors / ${runner.warnings.length} warnings, ${runner.durationSeconds} s)\n`);
