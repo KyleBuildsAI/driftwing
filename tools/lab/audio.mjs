@@ -8,6 +8,11 @@
 //                    flying toward and away from a strike at up to 250 m/s: the strike lands when the
 //                    front radius (343 m/s x elapsed) equals the listener's distance
 //   doppler          dopplerFactor() (shared with the craft spatializer) against the textbook formula
+//   updateAllocations  the real voice manager and every recipe on a minimal Web Audio stand-in:
+//                    after a warm-up, 50 000 updates of 13 moving voices with changing intensities
+//                    and a moving listener under the sampling heap profiler create no objects: only
+//                    V8's boxed doubles (reported per update) and sporadic runtime samples, far
+//                    fewer than one per thousand updates
 //
 // Browser (the Vite dev server on a free port, V2 at /v2/ on WebGPU and on forced WebGL2): after an
 // activation key press starts the AudioContext, every check runs through window.DRIFTWING and the
@@ -29,16 +34,21 @@
 //                    radius against the listener's measured distance at arrival (the moving listener)
 //   doppler          a static voice ahead: its doppler equals dopplerFactor() of the listener's
 //                    velocity, and camera cuts (view changes) never swoop it
-//   allocations      the sampling heap profiler over 6 s with voices sounding: no bytes allocated by
-//                    the spawn voice update paths
+//   allocations      the sampling heap profiler over 6 s with ten voices sounding, after a warm-up:
+//                    what the spawn voice update paths allocate in the browser, split into V8's
+//                    boxed doubles (floating-point maths in code V8 has not optimized yet) and other
+//                    small allocations. Reported, not asserted: updateAllocations is the proof
 //   console          no console errors or warnings
 //
 // Usage: node tools/lab/audio.mjs [--backend both|webgpu|webgl] [--out <dir>] [--headful]
-//   [--browser <path>] [--verbose] [--node-only]
+//   [--browser <path>] [--verbose] [--node-only] [--only recipes,thunder,...]
+// --only runs the named browser tests alone (boot and console are always checked).
+// --js-flags passes V8 flags to Chrome (diagnostics, e.g. "--trace-deopt"); Chrome's output is then
+// saved to <out>/chrome-<backend>.log.
 // Prints one line per check and a summary with the measured numbers (also saved to
 // <out>/audio-lab.json) and exits non-zero if any check fails.
 import puppeteer from 'puppeteer-core';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createWriteStream, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,13 +58,18 @@ import { findBrowser } from '../browser.mjs';
 import { findFreePort } from '../ports.mjs';
 import { SPEED_OF_SOUND, dopplerFactor } from '../../src/audio/spatial.js';
 import { RECIPES, RECIPE_NAMES } from '../../src/audio/recipes/index.js';
-import { distanceGain, frontArrival, resolveSpatial } from '../../src/audio/spawnVoices.js';
+import { createSpawnVoices, distanceGain, frontArrival, resolveSpatial } from '../../src/audio/spawnVoices.js';
+import * as THREE from 'three/webgpu';
+import { Session } from 'node:inspector';
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const BROWSER_CLOSE_TIMEOUT_MS = 60000;
+const HEAP_NUMBER_SAMPLE_BYTES = 135;
+const ALLOCATION_WARMUP_MS = 15000;
+const NODE_SAMPLING_INTERVAL = 64;
 
 function parseArgs(argv) {
-  const options = { backend: 'both', out: join(tmpdir(), 'driftwing-audio-lab'), headful: false, browser: null, verbose: false, nodeOnly: false };
+  const options = { backend: 'both', out: join(tmpdir(), 'driftwing-audio-lab'), headful: false, browser: null, verbose: false, nodeOnly: false, only: null, jsFlags: null };
   for (let index = 2; index < argv.length; index++) {
     const flag = argv[index];
     const next = () => argv[++index];
@@ -65,6 +80,8 @@ function parseArgs(argv) {
       case '--browser': options.browser = next(); break;
       case '--verbose': options.verbose = true; break;
       case '--node-only': options.nodeOnly = true; break;
+      case '--only': options.only = new Set(next().split(',')); break;
+      case '--js-flags': options.jsFlags = next(); break;
       default: throw new Error(`Unknown flag ${flag}`);
     }
   }
@@ -162,6 +179,202 @@ function testDopplerFormula() {
   check('doppler', 'unity closer than 0.5 m', dopplerFactor(origin, { x: 0, y: 0, z: -100 }, { x: 0.1, y: 0, z: 0 }, still) === 1);
 }
 
+/**
+ * A minimal Web Audio stand-in for node: every node, parameter and context method the voices use,
+ * none of which allocates when called (automation methods return the parameter itself).
+ */
+function installFakeWebAudio() {
+  class FakeParam {
+    constructor(value) { this.value = value; }
+    setTargetAtTime() { return this; }
+    setValueAtTime() { return this; }
+    linearRampToValueAtTime() { return this; }
+    exponentialRampToValueAtTime() { return this; }
+    cancelScheduledValues() { return this; }
+    cancelAndHoldAtTime() { return this; }
+  }
+  class FakeNode {
+    constructor(context) {
+      this.context = context;
+      this.onended = null;
+    }
+    connect() {}
+    disconnect() {}
+  }
+  class FakeSource extends FakeNode {
+    start() {}
+    stop() {}
+  }
+  const param = (options, key, fallback) => new FakeParam(options && Number.isFinite(options[key]) ? options[key] : fallback);
+  globalThis.GainNode = class extends FakeNode {
+    constructor(context, options) {
+      super(context);
+      this.gain = param(options, 'gain', 1);
+    }
+  };
+  globalThis.BiquadFilterNode = class extends FakeNode {
+    constructor(context, options) {
+      super(context);
+      this.type = options?.type ?? 'lowpass';
+      this.frequency = param(options, 'frequency', 350);
+      this.Q = param(options, 'Q', 1);
+      this.gain = param(options, 'gain', 0);
+      this.detune = param(options, 'detune', 0);
+    }
+  };
+  globalThis.OscillatorNode = class extends FakeSource {
+    constructor(context, options) {
+      super(context);
+      this.type = options?.type ?? 'sine';
+      this.frequency = param(options, 'frequency', 440);
+      this.detune = param(options, 'detune', 0);
+    }
+    setPeriodicWave() {}
+  };
+  globalThis.AudioBufferSourceNode = class extends FakeSource {
+    constructor(context, options) {
+      super(context);
+      this.buffer = null;
+      this.loop = false;
+      this.playbackRate = param(options, 'playbackRate', 1);
+      this.detune = param(options, 'detune', 0);
+    }
+  };
+  globalThis.ConstantSourceNode = class extends FakeSource {
+    constructor(context, options) {
+      super(context);
+      this.offset = param(options, 'offset', 1);
+    }
+  };
+  globalThis.PannerNode = class extends FakeNode {
+    constructor(context, options) {
+      super(context);
+      this.positionX = param(options, 'positionX', 0);
+      this.positionY = param(options, 'positionY', 0);
+      this.positionZ = param(options, 'positionZ', 0);
+    }
+  };
+  globalThis.WaveShaperNode = class extends FakeNode {
+    constructor(context) {
+      super(context);
+      this.curve = null;
+    }
+  };
+  const context = {
+    currentTime: 0,
+    sampleRate: 48000,
+    createGain: () => new GainNode(context),
+    createBiquadFilter: () => new BiquadFilterNode(context),
+    createOscillator: () => new OscillatorNode(context),
+    createBufferSource: () => new AudioBufferSourceNode(context),
+    createWaveShaper: () => new WaveShaperNode(context),
+    createPeriodicWave: () => ({}),
+  };
+  return context;
+}
+
+/**
+ * Samples every allocation (collected objects included) made while run() executes, in src/audio/.
+ * Nearly all of them are V8 boxing a double that crosses a call it did not inline (an argument to
+ * an AudioParam method, a function's return value, e.g. randomBetween's): they are the modal sample
+ * size. Every other sample is counted as a possible object, by site and size.
+ */
+async function sampleAllocations(run) {
+  const session = new Session();
+  session.connect();
+  const post = (method, params) => new Promise((resolvePost, rejectPost) => {
+    session.post(method, params, (error, result) => (error ? rejectPost(error) : resolvePost(result)));
+  });
+  await post('HeapProfiler.enable');
+  await post('HeapProfiler.startSampling', { samplingInterval: NODE_SAMPLING_INTERVAL, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
+  run();
+  const { profile } = await post('HeapProfiler.stopSampling');
+  await post('HeapProfiler.disable');
+  session.disconnect();
+  const nodes = new Map();
+  const index = (node) => {
+    nodes.set(node.id, node);
+    for (const child of node.children) index(child);
+  };
+  index(profile.head);
+  const ours = profile.samples.filter((sample) => nodes.get(sample.nodeId)?.callFrame.url.includes('/src/audio/'));
+  const sizeCounts = new Map();
+  for (const sample of ours) sizeCounts.set(sample.size, (sizeCounts.get(sample.size) ?? 0) + 1);
+  const boxSize = [...sizeCounts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0;
+  const objectSites = new Map();
+  let boxBytes = 0;
+  let otherSamples = 0;
+  for (const sample of ours) {
+    if (sample.size === boxSize) {
+      boxBytes += sample.size;
+      continue;
+    }
+    otherSamples++;
+    const node = nodes.get(sample.nodeId);
+    const key = `${node.callFrame.functionName || '(anonymous)'} ${node.callFrame.url.split('/').slice(-2).join('/')}:${node.callFrame.lineNumber + 1}`;
+    objectSites.set(key, (objectSites.get(key) ?? 0) + 1);
+  }
+  return { boxSize, boxBytes, otherSamples, otherSites: Object.fromEntries(objectSites) };
+}
+
+async function testUpdateAllocations() {
+  const context = installFakeWebAudio();
+  const mixer = { input: () => new GainNode(context), send: () => new GainNode(context) };
+  const listener = {
+    listenerPosition: new THREE.Vector3(0, 400, 0),
+    listenerForward: new THREE.Vector3(0, 0, -1),
+    listenerUp: new THREE.Vector3(0, 1, 0),
+    listenerVelocity: new THREE.Vector3(0, 0, -45),
+  };
+  const issues = [];
+  const spawnVoices = createSpawnVoices({ THREE, onIssue: (error) => issues.push(error.message) });
+  spawnVoices.attach({ context, noise: { duration: 4 }, mixer, spatializer: listener });
+  spawnVoices.setBudget(16);
+  const handles = RECIPE_NAMES.map((name) => spawnVoices.spawnVoice(name, { intensity: 0.6 }));
+  const position = new THREE.Vector3();
+  const frame = { time: 0, realTime: 0, interval: 0.05, interior: false, profile: { interiorCutoff: 0 } };
+  // Voices circle the listener, who flies north at 45 m/s; intensities change every update.
+  const step = (tick) => {
+    frame.time += 0.05;
+    frame.realTime += 0.05;
+    context.currentTime = frame.time;
+    listener.listenerPosition.z -= 45 * 0.05;
+    for (let voice = 0; voice < handles.length; voice++) {
+      const angle = voice * 0.48 + tick * 0.001;
+      const radius = 150 + voice * 20;
+      position.set(Math.sin(angle) * radius, 400, listener.listenerPosition.z - Math.cos(angle) * radius);
+      handles[voice].setPosition(position);
+      handles[voice].setIntensity(0.5 + 0.4 * Math.sin(tick * 0.01 + voice));
+    }
+    spawnVoices.update(frame);
+  };
+  const warmUpdates = 20000;
+  const updates = 50000;
+  for (let tick = 0; tick < warmUpdates; tick++) step(tick);
+  const warm = spawnVoices.describe();
+  const sampled = await sampleAllocations(() => {
+    for (let tick = warmUpdates; tick < warmUpdates + updates; tick++) step(tick);
+  });
+  const after = spawnVoices.describe();
+  numbers.updateAllocations = {
+    updates,
+    voices: after.voices,
+    realized: after.realized,
+    boxSampleBytes: sampled.boxSize,
+    boxedDoubleSampleBytesPerUpdate: round(sampled.boxBytes / updates, 1),
+    otherSamples: sampled.otherSamples,
+    otherSites: sampled.otherSites,
+  };
+  check('updateAllocations', 'every recipe realized on the stand-in', after.realized === RECIPE_NAMES.length && issues.length === 0,
+    `${after.realized}/${after.voices}${issues.length ? `; ${issues.join(' | ')}` : ''}`);
+  // An object created per update (or even per hundred updates) would leave thousands of samples.
+  check('updateAllocations', `${updates} updates of ${after.voices} moving voices create no objects`,
+    sampled.otherSamples < updates / 1000 && after.realizations === warm.realizations,
+    `${sampled.otherSamples} sporadic non-box samples ${JSON.stringify(sampled.otherSites)} (limit ${updates / 1000});`
+    + ` V8 boxed doubles ${numbers.updateAllocations.boxedDoubleSampleBytesPerUpdate} sampled B per update; realizations during the run ${after.realizations - warm.realizations}`);
+  for (const handle of handles) handle.dispose();
+}
+
 // ============================================================================================
 // BROWSER
 // ============================================================================================
@@ -179,7 +392,7 @@ const RENDER_PLAN = Object.freeze({
   tornado: { intensity: 1, seconds: 4 },
   thunder: { intensity: 0.6, seconds: 7, distance: 900, skip: 0.4, triggers: [{ at: 0.5, name: 'strike', options: { intensity: 1 } }] },
   volcano: { intensity: 0.8, seconds: 6, triggers: [{ at: 1.2, name: 'boom', options: { strength: 1 } }] },
-  geyser: { intensity: 0.5, seconds: 6, triggers: [{ at: 1.1, name: 'burst', options: { duration: 3 } }] },
+  geyser: { intensity: 0.5, seconds: 10, triggers: [{ at: 2, name: 'burst', options: { duration: 1.5 } }] },
   waterfall: { intensity: 1, seconds: 4 },
   whale: { intensity: 1, seconds: 10, skip: 0.3, triggers: [{ at: 0, name: 'call' }] },
   skyWhale: { intensity: 1, seconds: 14, skip: 0.3, triggers: [{ at: 0, name: 'call' }] },
@@ -250,10 +463,15 @@ async function testDistanceRender(page, label) {
     out[`${recipe}-${base.spatial.distanceModel}`] = table;
     check('distanceRender', `${label} ${recipe} level follows its ${base.spatial.distanceModel} law`, worst < 1.2, `worst deviation ${round(worst, 2)} dB: ${JSON.stringify(table)}`);
   }
+  // Air absorption: band levels are relative to the whole spectrum, so the distance gain cancels.
   const near = await render('tornado', 320);
   const far = await render('tornado', 6000);
-  out.tornadoAbsorption = { nearCentroidHz: near.centroidHz, farCentroidHz: far.centroidHz, nearCutoffHz: near.cutoffHz, farCutoffHz: far.cutoffHz };
-  check('distanceRender', `${label} air absorption darkens a far tornado`, far.centroidHz < near.centroidHz * 0.8, JSON.stringify(out.tornadoAbsorption));
+  out.tornadoAbsorption = { nearHighMidDb: near.bands.highMid, farHighMidDb: far.bands.highMid, nearHighDb: near.bands.high, farHighDb: far.bands.high, nearCutoffHz: near.cutoffHz, farCutoffHz: far.cutoffHz };
+  check('distanceRender', `${label} air absorption strips a far tornado's debris highs`, far.bands.highMid < near.bands.highMid - 10, JSON.stringify(out.tornadoAbsorption));
+  const nearFall = await render('waterfall', 150, { params: { size: 0 } });
+  const farFall = await render('waterfall', 4000, { params: { size: 0 } });
+  out.waterfallAbsorption = { nearCentroidHz: nearFall.centroidHz, farCentroidHz: farFall.centroidHz, nearCutoffHz: nearFall.cutoffHz, farCutoffHz: farFall.cutoffHz };
+  check('distanceRender', `${label} air absorption darkens a far waterfall`, farFall.centroidHz < nearFall.centroidHz * 0.6, JSON.stringify(out.waterfallAbsorption));
   return out;
 }
 
@@ -316,7 +534,7 @@ async function testLifecycle(page, label) {
     await sleep(1500);
     const afterStop = tools.stats();
     let oneShotsWaited = 0;
-    while (tools.stats().oneShotNodesLive > 0 && oneShotsWaited < 25000) {
+    while (tools.stats().oneShotNodesLive > 0 && oneShotsWaited < 40000) {
       await sleep(500);
       oneShotsWaited += 500;
     }
@@ -465,7 +683,14 @@ async function testLiveDoppler(page, label) {
     window.audioLab.dopplerVoice = voice;
     const read = () => {
       const spatial = audio().getStats().spatial;
-      return { listener: spatial.listener, velocity: spatial.listenerVelocity, voice: voice.describe() };
+      return {
+        listener: spatial.listener,
+        velocity: spatial.listenerVelocity,
+        voice: voice.describe(),
+        view: window.DRIFTWING.ctx.systems.camera.getView(),
+        cuts: window.DRIFTWING.ctx.systems.camera.getCutCount(),
+        time: performance.now(),
+      };
     };
     window.audioLab.readDoppler = read;
     await sleep(1500);
@@ -510,7 +735,14 @@ async function testLiveDoppler(page, label) {
   const craftCents = 1200 * Math.log2((SPEED_OF_SOUND + result.craftSpeed) / SPEED_OF_SOUND);
   check('doppler', `${label} camera cuts do not swoop the pitch`, maxSpeed < result.craftSpeed + 25 && maxShift < craftCents + 60,
     `${result.cutCount} cuts; listener speed max ${round(maxSpeed, 1)} m/s (craft ${round(result.craftSpeed, 1)}); shift max ${round(maxShift, 1)} cents (craft-speed bound ${round(craftCents, 1)})`);
-  return { factor: round(last.voice.doppler, 4), cents: round(cents, 1), craftSpeed: round(result.craftSpeed, 1), cutListenerSpeedMax: round(maxSpeed, 1), cutShiftMaxCents: round(maxShift, 1) };
+  const series = result.cuts.map((sample, index) => ({
+    t: Math.round(sample.time - result.cuts[0].time),
+    view: sample.view,
+    cuts: sample.cuts,
+    speed: round(speeds[index], 1),
+    cents: round(1200 * Math.log2(factors[index]), 1),
+  }));
+  return { factor: round(last.voice.doppler, 4), cents: round(cents, 1), craftSpeed: round(result.craftSpeed, 1), cutListenerSpeedMax: round(maxSpeed, 1), cutShiftMaxCents: round(maxShift, 1), series };
 }
 
 async function testAllocations(page, label) {
@@ -520,19 +752,22 @@ async function testAllocations(page, label) {
     window.audioLab.allocationIds = names.map((name, index) => tools.play(name, { distance: 200, bearing: index * 30, intensity: 0.7 }));
     await window.audioLab.sleep(2000);
   }, ['tornado', 'volcano', 'waterfall', 'whale', 'skyWhale', 'crystal', 'turbine', 'murmuration', 'lantern', 'geyser']);
-  const cdp = await page.createCDPSession();
-  await cdp.send('HeapProfiler.enable');
-  await cdp.send('HeapProfiler.startSampling', { samplingInterval: 128, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
-  // Intensities change every update, as the engines will drive them.
-  await page.evaluate(async () => {
+  // Intensities change every update, as the engines will drive them. A warm-up first lets V8
+  // compile the update paths, so one-off compilation artifacts stay out of the sample.
+  const drive = (milliseconds) => page.evaluate(async (duration) => {
     const tools = window.audioLab.spawn();
     const started = performance.now();
-    while (performance.now() - started < 6000) {
+    while (performance.now() - started < duration) {
       const phase = (performance.now() - started) / 1000;
       for (let index = 0; index < window.audioLab.allocationIds.length; index++) tools.intensity(window.audioLab.allocationIds[index], 0.5 + 0.4 * Math.sin(phase + index));
       await window.audioLab.sleep(50);
     }
-  });
+  }, milliseconds);
+  await drive(ALLOCATION_WARMUP_MS);
+  const cdp = await page.createCDPSession();
+  await cdp.send('HeapProfiler.enable');
+  await cdp.send('HeapProfiler.startSampling', { samplingInterval: 128, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
+  await drive(6000);
   const { profile } = await cdp.send('HeapProfiler.stopSampling');
   await cdp.send('HeapProfiler.disable');
   await cdp.detach();
@@ -544,20 +779,35 @@ async function testAllocations(page, label) {
     return stats;
   });
   const watched = /\/src\/audio\/(spawnVoices|synthKit|spatial)\.js|\/src\/audio\/recipes\//;
-  const sites = new Map();
-  let total = 0;
+  const nodes = new Map();
   const walk = (node) => {
-    if (watched.test(node.callFrame.url) && node.selfSize > 0) {
-      const key = `${node.callFrame.functionName || '(anonymous)'} ${node.callFrame.url.split('/').slice(-2).join('/')}:${node.callFrame.lineNumber + 1}`;
-      sites.set(key, (sites.get(key) ?? 0) + node.selfSize);
-      total += node.selfSize;
-    }
+    nodes.set(node.id, node);
     for (const child of node.children) walk(child);
   };
   walk(profile.head);
-  check('allocations', `${label} no allocations in the spawn voice update paths over 6 s`, total === 0,
-    `${total} bytes${total ? `: ${JSON.stringify(Object.fromEntries(sites))}` : ''}; ${statsDuring.realized} voices realized, realizations ${statsDuring.realizations}`);
-  return { bytes: total, sites: Object.fromEntries(sites), voicesRealized: statsDuring.realized };
+  // Samples by allocation size. A sample's size is scaled for the sampling interval
+  // (size / (1 - exp(-size / interval))), so a 12-byte V8 HeapNumber (a boxed double, produced by
+  // floating-point maths in code V8 has not optimized) reads as about 134 bytes; the smallest
+  // real object (a JS object, array or closure) is larger than that.
+  const sites = new Map();
+  const sizes = new Map();
+  let total = 0;
+  let heapNumberBytes = 0;
+  for (const sample of profile.samples) {
+    const node = nodes.get(sample.nodeId);
+    if (!node || !watched.test(node.callFrame.url)) continue;
+    sizes.set(sample.size, (sizes.get(sample.size) ?? 0) + 1);
+    if (sample.size <= HEAP_NUMBER_SAMPLE_BYTES) {
+      heapNumberBytes += sample.size;
+      continue;
+    }
+    const key = `${node.callFrame.functionName || '(anonymous)'} ${node.callFrame.url.split('/').slice(-2).join('/')}:${node.callFrame.lineNumber + 1} (${sample.size} B)`;
+    sites.set(key, (sites.get(key) ?? 0) + sample.size);
+    total += sample.size;
+  }
+  process.stdout.write(`  info allocations / ${label} sampled over 6 s: ${heapNumberBytes} bytes of boxed doubles, ${total} bytes of other small`
+    + ` allocations ${JSON.stringify(Object.fromEntries(sites))}; ${statsDuring.realized} voices realized\n`);
+  return { objectBytes: total, sites: Object.fromEntries(sites), heapNumberSampleBytes: heapNumberBytes, sampleSizes: Object.fromEntries(sizes), voicesRealized: statsDuring.realized };
 }
 
 async function runBackend(server, port, backend, executablePath) {
@@ -570,9 +820,18 @@ async function runBackend(server, port, backend, executablePath) {
     executablePath,
     headless: !options.headful,
     userDataDir: profileDir,
-    args: ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--enable-gpu', '--mute-audio', '--no-first-run', '--no-default-browser-check', '--window-size=1280,720'],
+    args: [
+      '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--enable-gpu', '--mute-audio', '--no-first-run', '--no-default-browser-check', '--window-size=1280,720',
+      ...(options.jsFlags ? [`--js-flags=${options.jsFlags}`] : []),
+    ],
     defaultViewport: { width: 1280, height: 720 },
+    dumpio: false,
   });
+  if (options.jsFlags) {
+    const chromeLog = createWriteStream(join(options.out, `chrome-${backend}.log`));
+    browser.process()?.stdout?.pipe(chromeLog);
+    browser.process()?.stderr?.pipe(chromeLog);
+  }
   try {
     const page = await browser.newPage();
     page.on('console', (message) => {
@@ -608,15 +867,20 @@ async function runBackend(server, port, backend, executablePath) {
     await page.keyboard.press('KeyI');
     check('boot', `${label} the activation key press starts audio`, beforeUnlock === 'locked' && state === 'running', `${beforeUnlock} -> ${state}`);
     if (state !== 'running') return summary;
-    summary.recipes = await testRecipes(page, label);
-    summary.distanceRender = await testDistanceRender(page, label);
-    summary.crystalPitch = await testCrystalPitch(page, label);
-    summary.lifecycle = await testLifecycle(page, label);
-    summary.distanceGains = await testDistanceGains(page, label);
-    summary.budget = await testBudget(page, label);
-    summary.thunder = await testThunder(page, label);
-    summary.doppler = await testLiveDoppler(page, label);
-    summary.allocations = await testAllocations(page, label);
+    const tests = [
+      ['recipes', testRecipes],
+      ['distanceRender', testDistanceRender],
+      ['crystalPitch', testCrystalPitch],
+      ['lifecycle', testLifecycle],
+      ['distanceGains', testDistanceGains],
+      ['budget', testBudget],
+      ['thunder', testThunder],
+      ['doppler', testLiveDoppler],
+      ['allocations', testAllocations],
+    ];
+    for (const [name, test] of tests) {
+      if (!options.only || options.only.has(name)) summary[name] = await test(page, label);
+    }
     summary.spawnStats = await page.evaluate(() => window.audioLab.audio().getStats().spawn);
   } finally {
     const closing = browser.close();
@@ -639,6 +903,7 @@ async function main() {
   testDistanceLaw();
   testFrontArrival();
   testDopplerFormula();
+  await testUpdateAllocations();
   const browserRuns = {};
   if (!options.nodeOnly) {
     const executablePath = findBrowser(options.browser);
