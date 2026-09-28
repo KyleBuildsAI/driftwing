@@ -323,7 +323,6 @@ export function createDirector({
   for (let tier = 0; tier < RARITY_TIERS.length; tier++) tierDue[tier] = startTime + drawPeriod(tier);
   droughtThreshold = drawDroughtThreshold();
 
-  /** Something notable happened at `now` (the tick time for the director's own activations). */
   /**
    * Ends the running drought at `now`. Droughts that reached DROUGHT_MIN are the ones the fill had to
    * answer; the share of them that ended inside the pacing window is the pacing record in getState.
@@ -338,6 +337,7 @@ export function createDirector({
     lastNotableAt = now;
   }
 
+  /** Something notable happened at `now` (the tick time for the director's own activations). */
   function markNotable(kind, now = getTime()) {
     endDrought(now);
     lastNotableKind = kind;
@@ -346,15 +346,15 @@ export function createDirector({
     droughtThreshold = drawDroughtThreshold();
   }
 
-  // Discoveries (landmarks and spawns) and sites coming into view are notables. Site ids seen in a
-  // discovery mark those sites 'discovered' in getNearby (isDiscovered, when given, is asked too: the
-  // journal remembers discoveries across flights).
-  const discovered = new Set();
   /** A spawn the director started is in view at the current tick: the drought clock restarts. */
   function noteOngoing() {
     endDrought(time);
   }
 
+  // Discoveries (landmarks and spawns) and sites coming into view are notables. Site ids seen in a
+  // discovery mark those sites 'discovered' in getNearby (isDiscovered, when given, is asked too: the
+  // journal remembers discoveries across flights).
+  const discovered = new Set();
   const unsubscribers = [];
   if (bus) {
     unsubscribers.push(bus.onTyped('discovery', (payload) => {
