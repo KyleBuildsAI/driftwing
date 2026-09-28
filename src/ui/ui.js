@@ -1067,8 +1067,7 @@ export function createUISystem(ctx) {
         throttle ? hintItem(['throttle'], 'throttle lever') : '',
         hintItem(['yaw'], 'rudder', 'negative'),
         throttle ? hintItem(['gearToggle', 'flapsDown', 'airbrake'], 'gear, flaps, airbrake') : '',
-        hintItem(['viewCycle'], 'view'),
-        hintItem(['viewToggle1P3P'], 'cockpit / outside'),
+        hintItem(['viewCycle', 'viewToggle1P3P'], 'views'),
         hintItem(['craftAbility'], abilityLabel().toLowerCase()),
       ].join('');
     }
