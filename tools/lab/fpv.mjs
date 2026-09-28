@@ -18,7 +18,8 @@
 //                ignores a lever left off-centre at spawn, and lands gently on a pulled throttle
 //   hover        spawn hover at 100 %, and below the hold level (50 % angle, 0 % rate) the throttle
 //                pickup ignores a stale lever until it moves
-//   modes        the craft ability toggles rate / angle at any level; a new assist level resets it
+//   modes        the craft ability toggles rate / angle at any level; a new assist level resets it,
+//                the hands-off hold of a controller dropout does not
 //   ground       light drop on the feet bounces and settles, hard hits exceed the crash limits, a
 //                touch-and-go at speed keeps flying, parked with hold it idles and takes off on throttle
 //   terrain      idle drops at 3 m/s onto gentle real terrain (the game's world generator, three seeds):
@@ -477,6 +478,21 @@ function testModes() {
   acro.setAssists(0.2);
   acro.run(0.2);
   check('modes', 'new assist level resets the choice', acro.craftState.droneMode, 'rate', acro.craftState.droneMode === 'rate');
+  // A controller unplugged and plugged back: the hands-off hold forces 100 % for a while, then the
+  // pilot's level returns; the rate mode the pilot picked with the ability survives it.
+  const plugged = createRig({ assists: 0.9 });
+  plugged.airborne({ altitude: 300 });
+  plugged.run(0.2);
+  plugged.ability();
+  plugged.run(0.2);
+  plugged.setAssists(1);
+  plugged.setHandsOff(true);
+  plugged.run(1);
+  const held = `${plugged.craftState.droneMode}/${plugged.craftState.altitudeHold ? 'hold' : 'no hold'}`;
+  plugged.setHandsOff(false);
+  plugged.setAssists(0.9);
+  plugged.run(0.2);
+  check('modes', 'choice survives a hands-off hold', `${held} -> ${plugged.craftState.droneMode}`, 'angle/hold -> rate', held === 'angle/hold' && plugged.craftState.droneMode === 'rate' && plugged.craftState.modeOverride === 'rate');
   const tooltip = [0, 0.5, 1].map((level) => describeAssists(level, 'quad').join(' + ') || 'none').join(' | ');
   check('modes', 'assist tooltip 0 | 50 | 100 %', tooltip, 'none | angle mode | angle mode + altitude hold', tooltip === 'none | angle mode | angle mode + altitude hold');
 }

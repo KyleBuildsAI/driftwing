@@ -1168,7 +1168,9 @@ const quadAssistHandler = Object.freeze({
     const craftState = context.model && context.model.craftState;
     if (!craftState) return;
     const level = clamp(Number.isFinite(context.assists) ? context.assists : 1, 0, 1);
-    if (craftState.assistLevel !== level) {
+    // The hands-off hold forces the level to 100 % for a moment; only the pilot's own level change
+    // resets the rate / angle choice.
+    if (context.handsOff !== true && craftState.assistLevel !== level) {
       craftState.assistLevel = level;
       craftState.modeOverride = null;
     }
