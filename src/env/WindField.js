@@ -58,6 +58,11 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t);
 }
 
+/** Sources are keyed by their id as a string, so a numeric id finds the same entry on every call. */
+function sourceKey(id) {
+  return String(id ?? '');
+}
+
 function cellHashKey(cellX, cellZ) {
   return cellX * 73856093 + cellZ * 19349663;
 }
@@ -400,7 +405,7 @@ export function createWindField({ world, uniforms, state, bus }) {
      */
     addSource(source) {
       if (!source || typeof source.sample !== 'function') throw new TypeError('wind source needs sample(pos, t)');
-      const id = String(source.id ?? '');
+      const id = sourceKey(source.id);
       if (!id) throw new TypeError('wind source needs an id');
       if (sources.has(id)) throw new Error(`wind source "${id}" already exists`);
       const kind = typeof source.kind === 'string' && source.kind ? source.kind : 'source';
@@ -413,7 +418,7 @@ export function createWindField({ world, uniforms, state, bus }) {
 
     /** Moves or resizes a source (same bounds forms as addSource). */
     setSourceBounds(id, bounds) {
-      const entry = sources.get(id);
+      const entry = sources.get(sourceKey(id));
       if (!entry) return false;
       entry.box = boxFromBounds(bounds);
       indexSource(entry);
@@ -421,11 +426,11 @@ export function createWindField({ world, uniforms, state, bus }) {
     },
 
     removeSource(id) {
-      const entry = sources.get(id);
+      const entry = sources.get(sourceKey(id));
       if (!entry) return false;
       unindexSource(entry);
-      sources.delete(id);
-      bus.emitTyped('windSourceRemoved', { id, kind: entry.kind });
+      sources.delete(entry.id);
+      bus.emitTyped('windSourceRemoved', { id: entry.id, kind: entry.kind });
       return true;
     },
 
