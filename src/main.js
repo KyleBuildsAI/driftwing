@@ -22,6 +22,7 @@ import { createGEffectsSystem, createPostStack } from './render/post.js';
 import { createRenderer } from './render/renderer.js';
 import { createRingCourseSystem } from './gameplay/rings.js';
 import { createSettings } from './core/settings.js';
+import { createShellBridge } from './shell/bridge.js';
 import { createSkySystem } from './render/sky.js';
 import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
@@ -69,7 +70,7 @@ async function boot() {
   await storage.init(devTest ? { databaseName: devTest.databaseName } : undefined);
   const bus = attachTypedEvents(new EventBus(), { validate: devHooks });
   const settings = createSettings(bus);
-  const seed = resolveSeed(params);
+  const seed = resolveSeed(params, new URLSearchParams(window.location.hash.slice(1)));
   if (params.get('seed') !== seed) {
     params.set('seed', seed);
     window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}${window.location.hash}`);
@@ -310,6 +311,8 @@ async function boot() {
 
   // ---- Systems (creation order matters for cross-references at construction) --------
   const factories = [
+    // First, so the HUD lays out around the launcher shell's pill from the start.
+    ['shell', createShellBridge],
     ['audio', createAudioSystem],
     ['ui', createUISystem],
     ['input', createInputSystem],

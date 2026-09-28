@@ -53,7 +53,7 @@ const SPEC_BUTTONS = Object.freeze({
     7: ['craftPrev'], 8: ['craftNext'], 9: ['modeToggle'], 10: ['autopilotToggle'], 11: ['timeForward'], 12: ['timeBack'], 13: ['ringCourse'], 14: ['journal'], 15: ['settings'],
   },
   [THROTTLE_KEY]: {
-    0: ['recenterView'], 1: ['airbrake'], 2: ['viewCycle'], 3: ['relaunch'], 4: ['engineToggle'], 5: ['chuteDeploy'], 6: ['controlsPanel'],
+    0: ['recenterView'], 1: ['airbrake'], 2: ['viewCycle'], 3: ['relaunch'], 4: ['engineToggle'], 5: ['chuteDeploy'], 6: ['controlsPanel'], 7: ['versionToggle'],
   },
 });
 const SPEC_STICK_HAT = Object.freeze({ up: 'viewForward', down: 'viewBack', left: 'viewLeft', right: 'viewRight' });

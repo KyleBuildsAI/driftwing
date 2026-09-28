@@ -25,6 +25,8 @@
     --dw-right: calc(env(safe-area-inset-right, 0px) + 18px);
     --dw-compass-width: 440px;
     --dw-letterbox: max(46px, 9.5vh);
+    /* Room kept above the top-left stack for the launcher shell's version pill (see below). */
+    --dw-shell-inset: 0px;
     position: fixed;
     inset: 0;
     z-index: 10;
@@ -300,10 +302,15 @@
   #ui-root .dw-heading-deg { font-size: 12px; color: var(--dw-text-dim); margin-right: 6px; }
   #ui-root .dw-heading-name { font-size: 10.5px; font-weight: 600; letter-spacing: 0.16em; color: var(--dw-gold); }
 
+  /* Inside the launcher shell (src/shell/bridge.js adds html.dw-embedded) the wide layout moves the
+     top-left stack down so the shell's V1 | V2 pill fits in the corner. Narrower layouts already
+     keep that corner free, and the shell places its pill clear of the HUD in every layout. */
+  html.dw-embedded #ui-root { --dw-shell-inset: 46px; }
+
   /* CLASSIC | SIM pill and craft picker (top-left), status chips below them */
   #ui-root .dw-modebar {
     position: absolute;
-    top: var(--dw-top);
+    top: calc(var(--dw-top) + var(--dw-shell-inset));
     left: var(--dw-left);
     display: flex;
     align-items: center;
@@ -391,7 +398,7 @@
   /* Status chips (top-left, under the pill) */
   #ui-root .dw-chips {
     position: absolute;
-    top: calc(var(--dw-top) + 46px);
+    top: calc(var(--dw-top) + var(--dw-shell-inset) + 46px);
     left: var(--dw-left);
     display: flex;
     flex-direction: column;

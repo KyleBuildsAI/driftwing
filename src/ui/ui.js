@@ -1781,11 +1781,11 @@ export function createUISystem(ctx) {
   // ---------------------------------------------------------------------------
   // Seed chip: share link and new world
   // ---------------------------------------------------------------------------
+  /** Share links open V2 through the launcher shell (/?v=2), which forwards #seed= to V2. */
   function shareUrl() {
-    const url = new URL(window.location.href);
-    url.search = '';
-    url.hash = '';
-    url.searchParams.set('seed', state.seed);
+    const url = new URL('/', window.location.origin);
+    url.searchParams.set('v', '2');
+    url.hash = new URLSearchParams({ seed: state.seed }).toString();
     return url.toString();
   }
   function copyWithSelection(text) {

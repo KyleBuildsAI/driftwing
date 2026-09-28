@@ -57,6 +57,7 @@ export const ACTIONS = Object.freeze({
   relaunch: 'Relaunch',
   engineToggle: 'Engine on / off',
   chuteDeploy: 'Deploy parachute',
+  versionToggle: 'Switch to V1 (the original game)',
 });
 export const ACTION_IDS = Object.freeze(Object.keys(ACTIONS));
 

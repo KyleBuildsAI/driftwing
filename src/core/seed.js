@@ -1,7 +1,10 @@
 
-/** Seed from the URL, normalised to A-Z 0-9 and dashes (max 24), or a fresh random one. */
-export function resolveSeed(params) {
-  const requested = params.get('seed');
+/**
+ * Seed from the URL, normalised to A-Z 0-9 and dashes (max 24), or a fresh random one. The query
+ * (?seed=) wins over the hash (#seed=, the form share links and the launcher shell forward).
+ */
+export function resolveSeed(params, hashParams = null) {
+  const requested = params.get('seed') || hashParams?.get('seed');
   if (requested) {
     const normalised = requested.toUpperCase().replace(/[^A-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
     if (normalised) return normalised;

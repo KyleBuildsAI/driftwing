@@ -55,6 +55,7 @@ live keyboard bindings for the mode you are flying, so it follows any rebinds.
 | Photo mode | P | P |
 | Settings | , (comma) | , (comma) |
 | Controls panel | . (period) | . (period) |
+| Switch to V1 (versionToggle; in the launcher shell it asks the shell, at /v2/ it opens /?v=1) | F8 | F8 |
 | Relaunch | Backspace | Backspace |
 | Engine on / off | Z | Z |
 | Deploy parachute | U | U |
@@ -184,6 +185,7 @@ the best published layout. If your hardware reports them differently, rebind in 
 | Button 5 | engine on / off |
 | Button 6 | deploy parachute |
 | Button 7 | controls panel |
+| Button 8 | switch to V1 (versionToggle). Every stick base button is taken, so it lives here |
 | Throttle hat | unbound (reserved for music controls in a later phase) |
 
 TFRP pedals on their own USB lead (normally they come through the TWCS) default to rudder and toe

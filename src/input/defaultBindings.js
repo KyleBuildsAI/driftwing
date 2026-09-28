@@ -94,6 +94,8 @@ const KEYBOARD = {
     relaunch: [key('Backspace')],
     engineToggle: [key('KeyZ')],
     chuteDeploy: [key('KeyU')],
+    // F8: no browser shortcut uses it, and a bound key's default action is always prevented.
+    versionToggle: [key('F8')],
   },
   axes: {
     roll: [keys('KeyD', 'KeyA', { doubleTapRoll: true }), keys('ArrowRight', 'ArrowLeft')],
@@ -177,7 +179,8 @@ const T16000M = {
 
 /**
  * Thrustmaster TWCS throttle (with the TFRP pedals on its RJ12 port). The throttle hat is left
- * unbound on purpose: it is reserved for the Phase 4 music controls.
+ * unbound on purpose: it is reserved for the Phase 4 music controls. Button 8 (index 7) switches to
+ * V1: every T.16000M base button is taken, and button 8 is the first free TWCS button.
  */
 const TWCS = {
   actions: {
@@ -188,6 +191,7 @@ const TWCS = {
     engineToggle: [button(4)],
     chuteDeploy: [button(5)],
     controlsPanel: [button(6)],
+    versionToggle: [button(7)],
   },
   axes: {
     lookX: [axis(0, { deadzone: 0.12, smoothing: 0.15 })],
