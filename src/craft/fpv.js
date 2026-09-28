@@ -183,17 +183,24 @@ const simProfile = Object.freeze({
 // MESH (local frame: nose -z, up +y, origin at the centre of the frame's bottom plate)
 // ============================================================================================
 /**
- * FPV camera: the cage pivots on its side-plate bolt (body axes) and tilts up by UPTILT; the lens sits
- * LENS_DISTANCE ahead of the bolt along the tilted optical axis. The camera view reads cameraRig.fpv
- * (the lens position and the same uptilt), so the view and the model always agree.
+ * FPV camera: the cage pivots on its side-plate bolt (body axes) and tilts up by the uptilt (UPTILT by
+ * default, the player's settings.fpv.uptilt in flight); the lens sits LENS_DISTANCE ahead of the bolt
+ * along the tilted optical axis. The camera view reads cameraRig.fpv (pivot, lens distance and the
+ * default uptilt) and the same setting, so the view and the model always agree.
  */
 const FPV_CAMERA = (() => {
   const pivot = Object.freeze([0, 0.015, -0.047]);
   const uptilt = 25;
   const lensDistance = 0.0182;
   const lens = Object.freeze([0, pivot[1] + lensDistance * Math.sin(uptilt * DEG), pivot[2] - lensDistance * Math.cos(uptilt * DEG)]);
-  return Object.freeze({ PIVOT: pivot, UPTILT: uptilt, POSITION: lens, NEAR: 0.02 });
+  return Object.freeze({ PIVOT: pivot, UPTILT: uptilt, LENS_DISTANCE: lensDistance, POSITION: lens, NEAR: 0.02, MAX_UPTILT: 40 });
 })();
+
+/** The camera uptilt (degrees) from the player's settings.fpv, or the default when unset. */
+function settingUptilt(fpvSetting) {
+  const value = fpvSetting && Number.isFinite(fpvSetting.uptilt) ? fpvSetting.uptilt : FPV_CAMERA.UPTILT;
+  return clamp(value, 0, FPV_CAMERA.MAX_UPTILT);
+}
 const PLATE = Object.freeze({ BOTTOM: -0.004, TOP: 0, TOP_PLATE_Y: 0.028, TOP_PLATE_THICKNESS: 0.003 });
 const BATTERY = Object.freeze({ HALF_X: 0.018, BOTTOM: 0.031, TOP: 0.066, HALF_Z: 0.037 });
 const MOTOR = Object.freeze({ BASE_RADIUS: 0.0135, BELL_RADIUS: 0.0142, BASE_TOP: 0.006, BELL_TOP: 0.019 });
@@ -422,7 +429,6 @@ function buildMesh(ctx) {
   const cameraParts = buildCameraParts();
   const cameraPivot = new THREE.Group();
   cameraPivot.position.set(FPV_CAMERA.PIVOT[0], FPV_CAMERA.PIVOT[1], FPV_CAMERA.PIVOT[2]);
-  cameraPivot.rotation.x = FPV_CAMERA.UPTILT * DEG;
   addSolid(cameraPivot, cameraParts.cage, bodyMaterial);
   addSolid(cameraPivot, cameraParts.lens, materials.canopy);
   root.add(cameraPivot);
@@ -452,8 +458,21 @@ function buildMesh(ctx) {
 
   const eyeAnchor = new THREE.Object3D();
   eyeAnchor.name = 'eye';
-  eyeAnchor.position.set(FPV_CAMERA.POSITION[0], FPV_CAMERA.POSITION[1], FPV_CAMERA.POSITION[2]);
   root.add(eyeAnchor);
+
+  /** Tilts the cage and moves the eye to the lens for an uptilt (the player's settings.fpv). */
+  function applyUptilt(uptilt) {
+    const tilt = uptilt * DEG;
+    cameraPivot.rotation.x = tilt;
+    eyeAnchor.position.set(FPV_CAMERA.PIVOT[0], FPV_CAMERA.PIVOT[1] + FPV_CAMERA.LENS_DISTANCE * Math.sin(tilt), FPV_CAMERA.PIVOT[2] - FPV_CAMERA.LENS_DISTANCE * Math.cos(tilt));
+  }
+  const settings = ctx.settings && typeof ctx.settings.get === 'function' ? ctx.settings : null;
+  applyUptilt(settingUptilt(settings ? settings.get('fpv') : null));
+  const stopSettingsListener = settings && ctx.bus
+    ? ctx.bus.on('settings:changed', (change) => {
+      if (change && change.key === 'fpv') applyUptilt(settingUptilt(change.value));
+    })
+    : null;
 
   const flightState = ctx.state && ctx.state.flight ? ctx.state.flight : null;
   const motorSpeeds = MOTOR_LAYOUT.map(() => 0);
@@ -520,6 +539,7 @@ function buildMesh(ctx) {
     },
 
     dispose() {
+      if (stopSettingsListener) stopSettingsListener();
       disposeCraftMesh(root, ctx);
     },
   };
@@ -568,7 +588,8 @@ export default Object.freeze({
    * ControlState mapping: the throttle axis is thrust (in acro a centred stick is NOT a hover: it
    * climbs hard); in angle mode with altitude hold it asks for a climb rate around the centre. The
    * HOTAS antenna zooms the FPV lens. rates: Betaflight RC rate, super rate and expo per axis
-   * (defaults 670 deg/s at full stick, expo 0.3).
+   * (defaults 670 deg/s at full stick, expo 0.3); in flight the player's settings.fpv rate and expo
+   * reshape them (SimQuad ratesForFpvSetting).
    */
   inputProfile: Object.freeze({
     throttle: 'thrust',
@@ -582,8 +603,9 @@ export default Object.freeze({
     // keeps a landed quad in frame.
     chase: Object.freeze({ distance: 3, height: 0.6, lookAhead: 2 }),
     wing: Object.freeze({ position: Object.freeze([0.2, 0.09, 0.32]), target: Object.freeze([0, 0.02, -0.3]) }),
-    // The first-person slot becomes the FPV camera: locked to the frame, tilted up, settings.fov.fpv.
-    fpv: Object.freeze({ position: FPV_CAMERA.POSITION, uptilt: FPV_CAMERA.UPTILT, near: FPV_CAMERA.NEAR }),
+    // The first-person slot becomes the FPV camera: locked to the frame, tilted up (settings.fpv.uptilt,
+    // the lens swinging about the pivot), settings.fov.fpv.
+    fpv: Object.freeze({ position: FPV_CAMERA.POSITION, pivot: FPV_CAMERA.PIVOT, lensDistance: FPV_CAMERA.LENS_DISTANCE, uptilt: FPV_CAMERA.UPTILT, near: FPV_CAMERA.NEAR }),
   }),
   instruments: Object.freeze(['throttle', 'droneMode', 'airspeed', 'altitude', 'attitude', 'heading', 'vsi']),
   abilities: Object.freeze({ craftAbility }),

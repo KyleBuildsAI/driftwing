@@ -107,26 +107,3 @@ export function createAxisFilter() {
     },
   };
 }
-
-/**
- * Turns a continuous 0..1 lever (the HOTAS antenna) into detented notches with hysteresis, so
- * a lever resting on a boundary does not chatter between two settings. Returns a function
- * value -> notch position (0..1 in steps of 1 / (notches - 1)); craft input profiles use it for
- * flaps. hysteresis is in notch widths (0..0.45).
- */
-export function createNotchQuantizer({ notches, hysteresis = 0.3 }) {
-  const count = Math.max(2, Math.round(notches));
-  const band = clamp(hysteresis, 0, 0.45);
-  let index = 0;
-  let primed = false;
-  return (value) => {
-    const scaled = clamp(Number(value) || 0, 0, 1) * (count - 1);
-    if (!primed) {
-      index = Math.round(scaled);
-      primed = true;
-    } else if (Math.abs(scaled - index) > 0.5 + band / 2) {
-      index = clamp(Math.round(scaled), 0, count - 1);
-    }
-    return index / (count - 1);
-  };
-}

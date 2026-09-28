@@ -21,19 +21,8 @@ export const HAT_DIRECTION_LABELS = Object.freeze({
   upLeft: 'up-left',
 });
 
-const HAT_VECTORS = Object.freeze({
-  up: [0, 1], upRight: [1, 1], right: [1, 0], downRight: [1, -1],
-  down: [0, -1], downLeft: [-1, -1], left: [-1, 0], upLeft: [-1, 1],
-});
-
 /** Smallest allowed match window for axis-form hats (raw units). */
 const MIN_AXIS_TOLERANCE = 0.02;
-
-/** x right / y up unit steps for a direction (0, 0 when centred or unknown); for UI drawing. */
-export function hatVector(direction) {
-  const vector = HAT_VECTORS[direction];
-  return vector ? { x: vector[0], y: vector[1] } : { x: 0, y: 0 };
-}
 
 /** Values an axis-form hat has learned, centre included, as [name, value] pairs. */
 function learnedAxisValues(hat) {

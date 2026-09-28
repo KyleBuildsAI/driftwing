@@ -1,7 +1,7 @@
 // Player settings: a versioned, validated schema persisted through core/storage (IndexedDB).
 //
 // Flat keys hold scalars; a few keys hold small objects (assists per craft, FOV per view, the audio
-// mixer, HUD preferences, default view per mode). get/set work on whole keys; update(key, patch)
+// mixer, HUD preferences, default view per mode, the FPV drone's camera and rates). get/set work on whole keys; update(key, patch)
 // merges into an object key. Every change emits 'settings:changed' { key, value, settings }.
 //
 // Bindings and calibration are not settings: the input system keeps them in their own storage keys
@@ -9,7 +9,7 @@
 import { CONFIG } from './config.js';
 import { storage } from './storage.js';
 
-export const SETTINGS_VERSION = 2;
+export const SETTINGS_VERSION = 3;
 const STORAGE_KEY = 'driftwing.settings';
 const LEGACY_STORAGE_KEY = 'driftwing.settings.v1';
 
@@ -20,6 +20,12 @@ export const UNIT_SYSTEMS = Object.freeze(['metric', 'aviation']);
 export const QUALITY_PREFERENCES = Object.freeze(['auto', 'minimal', 'low', 'medium', 'high', 'ultra']);
 export const FRAME_TARGETS = Object.freeze(['auto', 60, 120, 144, 240, 'uncapped']);
 export const MIXER_BUSES = Object.freeze(['master', 'engine', 'environment', 'ui', 'copilot', 'music']);
+/** FPV drone setup: camera uptilt (deg, 0-40), rate-curve expo (0-1), rate at full stick (deg/s). */
+export const FPV_SETTING_LIMITS = Object.freeze({
+  uptilt: Object.freeze({ min: 0, max: 40 }),
+  expo: Object.freeze({ min: 0, max: 1 }),
+  rate: Object.freeze({ min: 200, max: 1200 }),
+});
 
 const unitRange = (min, max) => (value) => Number.isFinite(value) && value >= min && value <= max;
 const oneOf = (list) => (value) => list.includes(value);
@@ -52,6 +58,10 @@ const SCHEMA = Object.freeze({
   craft: { default: 'glider', validate: oneOf(CRAFT_IDS) },
   assists: { default: perCraft(1), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, unitRange(0, 1)])) },
   startOnGround: { default: false, validate: isBoolean },
+  fpv: {
+    default: Object.freeze({ uptilt: 25, expo: 0.3, rate: 670 }),
+    fields: Object.fromEntries(Object.entries(FPV_SETTING_LIMITS).map(([field, range]) => [field, unitRange(range.min, range.max)])),
+  },
   units: { default: 'metric', validate: oneOf(UNIT_SYSTEMS) },
 
   // v2: views and HUD.
@@ -132,6 +142,12 @@ function migrate(stored) {
     if (Number.isFinite(record.masterVolume)) record.mixer = { ...SCHEMA.mixer.default, master: record.masterVolume };
     delete record.masterVolume;
     version = 2;
+  }
+  if (version < 3) {
+    // v3 adds the FPV drone setup; records from before it take the defaults (sanitize keeps any
+    // valid fields a newer build may already have written).
+    if (!isPlainObject(record.fpv)) record.fpv = { ...SCHEMA.fpv.default };
+    version = 3;
   }
   record.version = version;
   return record;
