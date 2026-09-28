@@ -220,6 +220,7 @@ export function recipeByName(name) {
 export function createSpawnVoices({ THREE, onIssue }) {
   const voices = [];
   const ranked = [];
+  let rankedCount = 0;
   const counters = {
     created: 0,
     disposed: 0,
@@ -450,31 +451,36 @@ export function createSpawnVoices({ THREE, onIssue }) {
     voice.doppler += (target - voice.doppler) * DOPPLER_SMOOTHING;
   }
 
-  /** Sorts the voices by score, loudest first, into the reused ranked array (insertion sort). */
+  /**
+   * Sorts the voices by score, loudest first, into the reused ranked array (insertion sort). The
+   * array only grows (when there are more voices than ever before) and is never truncated, so its
+   * storage is reused; rankedCount says how many entries are current.
+   */
   function rank() {
-    ranked.length = 0;
-    for (let index = 0; index < voices.length; index++) {
+    while (ranked.length < voices.length) ranked.push(null);
+    rankedCount = voices.length;
+    for (let index = 0; index < rankedCount; index++) {
       const voice = voices[index];
-      let slot = ranked.length;
-      ranked.push(voice);
+      let slot = index;
       while (slot > 0 && ranked[slot - 1].score < voice.score) {
         ranked[slot] = ranked[slot - 1];
         slot--;
       }
       ranked[slot] = voice;
     }
+    for (let index = rankedCount; index < ranked.length; index++) ranked[index] = null;
   }
 
   function updateVoices(time, interval, elapsed) {
     for (let index = 0; index < voices.length; index++) measure(voices[index], elapsed);
     rank();
     // Release first, so the budget is never exceeded while voices trade places.
-    for (let index = 0; index < ranked.length; index++) {
+    for (let index = 0; index < rankedCount; index++) {
       const voice = ranked[index];
       const keep = index < budget && voice.score >= AUDIBLE_FLOOR;
       if (!keep && voice.realized) release(voice, time, index >= budget ? 'budget' : 'inaudible');
     }
-    for (let index = 0; index < ranked.length && index < budget; index++) {
+    for (let index = 0; index < rankedCount && index < budget; index++) {
       const voice = ranked[index];
       if (!voice.realized && voice.score >= AUDIBLE_FLOOR) realize(voice, time);
     }
