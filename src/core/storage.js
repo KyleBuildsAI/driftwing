@@ -79,6 +79,7 @@ export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
   let pending = Promise.resolve();
   let pendingCount = 0;
   let writeFailureReported = false;
+  const failureListeners = new Set();
 
   /**
    * Opens the database. Rejects when IndexedDB is missing, fails, is blocked, or has not opened
@@ -91,6 +92,7 @@ export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
         reject(new Error('IndexedDB is not available'));
         return;
       }
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
       let settled = false;
       const timer = setTimeout(() => {
         settled = true;
@@ -103,7 +105,6 @@ export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
         finish();
         return true;
       }
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
       request.onupgradeneeded = (event) => {
         const database = request.result;
         for (let version = event.oldVersion; version < DB_VERSION; version++) STRUCTURE_MIGRATIONS[version](database);
@@ -124,25 +125,79 @@ export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
     keys.forEach((key, index) => cache.set(key, values[index]));
   }
 
+  /**
+   * Makes database the live connection. The browser can take it away: another tab opening a newer
+   * version asks us to close (versionchange), and clearing site data, eviction or a backgrounded
+   * tab can close it outright. Either way db goes null and the next write reopens it.
+   */
+  function attachConnection(database) {
+    database.onversionchange = () => {
+      database.close();
+      if (db === database) db = null;
+    };
+    database.onclose = () => {
+      if (db === database) db = null;
+    };
+    db = database;
+  }
+
+  function writeTransaction(database, key, value, remove) {
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(STORE, 'readwrite');
+      const store = transaction.objectStore(STORE);
+      if (remove) store.delete(key);
+      else store.put(value, key);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error || new Error('transaction aborted'));
+    });
+  }
+
+  /** True when a write failed because the connection went away, not because the write was refused. */
+  function lostConnection(error, database) {
+    return database !== db || (error && (error.name === 'InvalidStateError' || error.name === 'AbortError'));
+  }
+
+  /** Writes one key, reopening the database once when the browser closed the connection. */
+  async function writeToDatabase(key, value, remove) {
+    if (!db) attachConnection(await openDatabase());
+    const database = db;
+    try {
+      await writeTransaction(database, key, value, remove);
+    } catch (error) {
+      if (!lostConnection(error, database)) throw error;
+      if (db === database) db = null;
+      database.close();
+      attachConnection(await openDatabase());
+      await writeTransaction(db, key, value, remove);
+    }
+  }
+
+  /**
+   * A write that did not land. When the database cannot be reopened (a newer version is open in
+   * another tab, or storage was disabled) the backend drops to memory, so later writes return false
+   * instead of claiming to persist. Listeners hear about the first failure once.
+   */
+  function handleWriteFailure(error) {
+    if (!db) backend = 'memory';
+    if (writeFailureReported) return;
+    writeFailureReported = true;
+    console.error('[DRIFTWING] storage write failed', error);
+    for (const listener of failureListeners) {
+      try {
+        listener(error);
+      } catch (listenerError) {
+        console.error('[DRIFTWING] storage failure listener threw', listenerError);
+      }
+    }
+  }
+
   function persist(key, value, remove = false) {
     if (backend === 'indexeddb') {
       pendingCount++;
       pending = pending
-        .then(() => new Promise((resolve, reject) => {
-          const transaction = db.transaction(STORE, 'readwrite');
-          const store = transaction.objectStore(STORE);
-          if (remove) store.delete(key);
-          else store.put(value, key);
-          transaction.oncomplete = () => resolve();
-          transaction.onerror = () => reject(transaction.error);
-          transaction.onabort = () => reject(transaction.error || new Error('transaction aborted'));
-        }))
-        .catch((error) => {
-          if (!writeFailureReported) {
-            writeFailureReported = true;
-            console.error('[DRIFTWING] storage write failed', error);
-          }
-        })
+        .then(() => writeToDatabase(key, value, remove))
+        .catch(handleWriteFailure)
         .finally(() => { pendingCount--; });
       return true;
     }
@@ -200,7 +255,7 @@ export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
       if (!initPromise) {
         initPromise = (async () => {
           try {
-            db = await openDatabase();
+            attachConnection(await openDatabase());
             backend = 'indexeddb';
             await loadAll();
             runDataMigrations();
@@ -241,6 +296,15 @@ export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
     },
 
     get pendingWrites() { return pendingCount; },
+
+    /**
+     * listener(error) runs once, on the first background write that did not land (write() had
+     * already returned true for it). Returns an unsubscribe function.
+     */
+    onWriteFailure(listener) {
+      failureListeners.add(listener);
+      return () => failureListeners.delete(listener);
+    },
   };
 }
 

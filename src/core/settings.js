@@ -177,12 +177,18 @@ export function createSettings(bus) {
   const values = loadValues();
   let saveFailureReported = false;
 
-  function save() {
-    if (!storage.write(STORAGE_KEY, { version: SETTINGS_VERSION, ...values }) && !saveFailureReported) {
-      saveFailureReported = true;
-      bus.emit('notify', { text: 'This browser is blocking storage, so settings will reset next visit.', kind: 'warning' });
-    }
+  function reportSaveFailure() {
+    if (saveFailureReported) return;
+    saveFailureReported = true;
+    bus.emit('notify', { text: 'This browser is blocking storage, so settings will reset next visit.', kind: 'warning' });
   }
+
+  function save() {
+    if (!storage.write(STORAGE_KEY, { version: SETTINGS_VERSION, ...values })) reportSaveFailure();
+  }
+  // A background write can still fail after write() returned true (the database was closed and
+  // would not reopen): the player hears about it the same way.
+  storage.onWriteFailure(reportSaveFailure);
 
   function commit(key, next) {
     if (valuesEqual(values[key], next)) return true;
