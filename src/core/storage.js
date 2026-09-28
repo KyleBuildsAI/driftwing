@@ -22,6 +22,8 @@ const STORE = 'kv';
 const META_KEY = '__schema';
 /** Every game key starts with one of these; the localStorage fallback reloads only these keys. */
 const OWNED_KEY_PREFIXES = Object.freeze(['driftwing.', 'input.', 'audio.']);
+/** Boot waits at most this long for IndexedDB to open before it takes the localStorage fallback. */
+const OPEN_TIMEOUT_MS = 4000;
 
 /**
  * Schema migrations, applied in order. Structural ones run in onupgradeneeded (the IndexedDB
@@ -65,7 +67,11 @@ function requestToPromise(request) {
   });
 }
 
-function createStorage() {
+/**
+ * Creates a storage instance (the game uses the shared `storage` below; labs make their own).
+ * openTimeoutMs: how long init() waits for IndexedDB to open before taking the fallback.
+ */
+export function createStorage({ openTimeoutMs = OPEN_TIMEOUT_MS } = {}) {
   const cache = new Map();
   let db = null;
   let backend = 'memory';
@@ -74,20 +80,40 @@ function createStorage() {
   let pendingCount = 0;
   let writeFailureReported = false;
 
+  /**
+   * Opens the database. Rejects when IndexedDB is missing, fails, is blocked, or has not opened
+   * within openTimeoutMs (some engines never answer an open): boot then takes the localStorage
+   * fallback instead of waiting forever. A connection that arrives after the timeout is closed.
+   */
   function openDatabase() {
     return new Promise((resolve, reject) => {
       if (typeof indexedDB === 'undefined') {
         reject(new Error('IndexedDB is not available'));
         return;
       }
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        reject(new Error(`IndexedDB did not open within ${openTimeoutMs} ms`));
+      }, openTimeoutMs);
+      function settle(finish) {
+        if (settled) return false;
+        settled = true;
+        clearTimeout(timer);
+        finish();
+        return true;
+      }
       const request = indexedDB.open(DB_NAME, DB_VERSION);
       request.onupgradeneeded = (event) => {
         const database = request.result;
         for (let version = event.oldVersion; version < DB_VERSION; version++) STRUCTURE_MIGRATIONS[version](database);
       };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-      request.onblocked = () => reject(new Error('IndexedDB upgrade blocked by another open tab'));
+      request.onsuccess = () => {
+        const database = request.result;
+        if (!settle(() => resolve(database))) database.close();
+      };
+      request.onerror = () => settle(() => reject(request.error));
+      request.onblocked = () => settle(() => reject(new Error('IndexedDB upgrade blocked by another open tab')));
     });
   }
 
