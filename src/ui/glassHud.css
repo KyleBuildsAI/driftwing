@@ -49,6 +49,7 @@
     box-shadow: 0 4px 14px rgba(10, 7, 14, 0.3);
   }
   #ui-root .dw-stall.dw-on { display: inline-flex; }
+  #ui-root .dw-stall-aoa:empty { display: none; }
   #ui-root .dw-stall-dot {
     width: 7px;
     height: 7px;

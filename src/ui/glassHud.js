@@ -46,6 +46,7 @@ export function createGlassHud(ctx) {
     attitude: requireElement(root, 'dw-attitude'),
     stall: requireElement(root, 'dw-stall'),
     stallText: requireElement(root, 'dw-stall-text'),
+    stallAngle: requireElement(root, 'dw-stall-aoa'),
     marker: requireElement(root, 'dw-fpm'),
     markerSymbol: requireElement(root, 'dw-fpm-marker'),
     noseSymbol: requireElement(root, 'dw-fpm-nose'),
@@ -57,7 +58,7 @@ export function createGlassHud(ctx) {
   const aimPoint = new THREE.Vector3();
   const direction = new THREE.Vector3();
   const prefs = { cockpitGlass: false, flightPathMarker: true };
-  const shown = { glass: null, marker: null, markerEdge: null, nose: null, stallKind: '', stallText: '' };
+  const shown = { glass: null, marker: null, markerEdge: null, nose: null, stallKind: '', stallText: '', stallAngle: '' };
   const placed = { markerX: NaN, markerY: NaN, noseX: NaN, noseY: NaN };
   const attitudeCanvas = { cssSize: 0, pixels: 0, measureTimer: 0, pitch: NaN, roll: NaN };
   const counters = { attitudeRedraws: 0, markerFrames: 0, stallWakes: 0 };
@@ -186,20 +187,26 @@ export function createGlassHud(ctx) {
   }
 
   // ---- Stall / AoA warning ---------------------------------------------------------------------------
-  /** The warning for this frame: { kind: '' | 'warning' | 'stalled', text }. */
+  const NO_WARNING = Object.freeze({ kind: '', text: '', angle: '' });
+
+  /**
+   * The warning for this frame: { kind: '' | 'warning' | 'stalled', text, angle }. The text is what
+   * a screen reader announces; the angle of attack beside it is visual only, so it can change every
+   * frame without repeating the announcement.
+   */
   function stallWarning() {
     const flight = state.flight;
     const stall = flight.stall;
-    if (!stall || (!stall.warning && !stall.stalled)) return { kind: '', text: '' };
+    if (!stall || (!stall.warning && !stall.stalled)) return NO_WARNING;
     const craft = ctx.systems.flight?.getCraftModule?.() ?? null;
     const kind = stall.stalled ? 'stalled' : 'warning';
-    if (craft?.simProfile?.model === 'helicopter') return { kind, text: stall.stalled ? 'Rotor stall' : 'Low rotor RPM' };
+    if (craft?.simProfile?.model === 'helicopter') return { kind, text: stall.stalled ? 'Rotor stall' : 'Low rotor RPM', angle: '' };
     const aoa = Math.round(Number.isFinite(flight.aoa) ? flight.aoa : 0);
-    return { kind, text: `${stall.stalled ? 'Stall' : 'High AoA'} ${aoa}°` };
+    return { kind, text: stall.stalled ? 'Stall' : 'High AoA', angle: `${aoa}°` };
   }
 
   function updateStall(active) {
-    const warning = active ? stallWarning() : { kind: '', text: '' };
+    const warning = active ? stallWarning() : NO_WARNING;
     if (warning.kind !== shown.stallKind) {
       shown.stallKind = warning.kind;
       dom.stall.dataset.kind = warning.kind;
@@ -208,6 +215,10 @@ export function createGlassHud(ctx) {
     if (warning.text !== shown.stallText) {
       shown.stallText = warning.text;
       dom.stallText.textContent = warning.text;
+    }
+    if (warning.angle !== shown.stallAngle) {
+      shown.stallAngle = warning.angle;
+      dom.stallAngle.textContent = warning.angle;
     }
     if (warning.kind !== '') {
       // A warning keeps an idle HUD awake so it is never hidden while it matters.
@@ -337,7 +348,7 @@ export function createGlassHud(ctx) {
         visible: shown.glass === true,
         cockpitGlass: prefs.cockpitGlass,
         flightPathMarker: prefs.flightPathMarker,
-        stall: { kind: shown.stallKind, text: shown.stallText },
+        stall: { kind: shown.stallKind, text: shown.stallText, angle: shown.stallAngle },
         marker: {
           visible: markerState.visible,
           onScreen: markerState.onScreen,
