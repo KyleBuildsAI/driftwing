@@ -5,7 +5,8 @@
 // The field is a sum of layers, each a pure function of position, time and the sun, so the same
 // query gives the same answer (replays and remote wingmen in later phases rely on that):
 //   ambient     seeded prevailing wind (the shared windDirection/windStrength uniforms the clouds
-//               drift with) that strengthens and veers slowly with height above the ground
+//               drift with; the direction comes from prevailingWindDirection(world) at boot) that
+//               strengthens and veers slowly with height above the ground
 //   ridge       the wind component blowing into a slope rises with it (lift on the windward face,
 //               sink in the lee), from the gradient of the shared height function
 //   thermals    seeded columns over sunny land: strongest at midday, off at night, each living a
@@ -50,6 +51,9 @@ const THERMAL_SHELTER_EDGE = 0.55;
 /** Chance of a thermal per cell, by biome: bright dry ground triggers the best thermals. */
 const THERMAL_BIOME_CHANCE = Object.freeze({ dunes: 0.85, meadows: 0.8, pine: 0.45, archipelago: 0.35, snow: 0.15 });
 
+/** hash2 salt of the world's prevailing wind direction. */
+const PREVAILING_WIND_SALT = 911;
+
 const SOURCE_CELL = 256;
 const SOURCE_GLOBAL_CELLS = 64;
 
@@ -79,6 +83,17 @@ function createGustNoise(seedHash) {
       + 0.05 * Math.sin(time * 7.9 - x * 0.023 + phases[base + 3])
     );
   };
+}
+
+/**
+ * The world's prevailing wind direction, seeded: a unit vector in the XZ plane written into target
+ * (a Vector2 with x = world x, y = world z). The composition root stores it in the shared
+ * windDirection uniform before any system is built, so the clouds, water, grass, balloons and this
+ * field all agree on the wind of each world.
+ */
+export function prevailingWindDirection(world, target = new THREE.Vector2()) {
+  const angle = world.hash2(0, 0, PREVAILING_WIND_SALT) * Math.PI * 2;
+  return target.set(Math.cos(angle), Math.sin(angle));
 }
 
 /** Normalizes a source's bounds to an axis-aligned box. Accepts { min, max } or { center, radius }. */
