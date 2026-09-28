@@ -91,6 +91,15 @@ intent and is gone from V2.
 - WREN's "third person" and "outside view" go back to the craft's last outside view (they meant
   the chase view before).
 
+### Fixed
+
+- Garbage-collection stalls in V2: three r184 allocated a `{ start, count }` range and a Map entry
+  for every changed uniform of every render object, every frame, and V8 promoted 12-17 MB/s of
+  them to the old generation, so a major GC ran every few seconds and its pauses were the flight
+  test's frames over 50 ms. `src/render/uniformUploads.js` gives each uniform group one persistent
+  whole-buffer range instead (promotion 1-3 MB/s, the frame rate up by a third on WebGPU and more
+  than double on WebGL2).
+
 ### Removed
 
 - CLASSIC mode from V2: the CLASSIC | SIM pill, the `modeToggle` action and its bindings on every

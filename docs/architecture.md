@@ -142,7 +142,8 @@ system, and then starts the frame loop.
 
 | file | what |
 | --- | --- |
-| `renderer.js` | renderer boot (`createRenderer(params)` returning `{ renderer, backend }`): WebGPU device probe, `WebGPURenderer` creation, WebGL2 fallback and the rebuild after a late fallback |
+| `renderer.js` | renderer boot (`createRenderer(params)` returning `{ renderer, backend, uniformUploads }`): WebGPU device probe, `WebGPURenderer` creation, WebGL2 fallback and the rebuild after a late fallback |
+| `uniformUploads.js` | garbage-free uniform uploads: replaces three r184's per-uniform update ranges (new objects every frame for every render object) with one persistent whole-buffer range per uniform group |
 | `post.js` | the post stack (bloom, warm grade, vignette, grain, render scale) and the `gEffects` system (gray-out, tunnel vision, red-out) |
 | `sky.js` | sky dome, sun, moon, stars, aurora, god rays, fog colour and the day / night cycle (v1) |
 | `clouds.js` | instanced drifting clouds, cloud shadows (v1), plus a cumulus cap over every thermal |
@@ -330,7 +331,17 @@ system, and then starts the frame loop.
    when a real device can be created, since an adapter alone does not prove it works. If three.js
    falls back to WebGL2 on its own later, the renderer is rebuilt for WebGL2 so no WebGPU-only
    option (reversed depth) stays on. `?renderer=webgl` forces WebGL2. The boot never hard-blocks
-   the WebGL2 backend, because WebXR in Phase 4 runs on it.
+   the WebGL2 backend, because WebXR in Phase 4 runs on it. The boot then installs the uniform
+   upload patch (`src/render/uniformUploads.js`). three r184 records every changed uniform as a new
+   `{ start, count }` range plus a Map entry, and every render object's matrices change every
+   frame, so V8 promoted about 17 MB/s (WebGPU; 12 MB/s on WebGL2) to the old generation and ran a
+   major GC every 3-4 s; those pauses were the flight test's frames over 50 ms. Each uniform group
+   now keeps one whole-buffer range that is never cleared (a changed group uploads whole, a few
+   hundred bytes). Measured over 40 s of flight on the loaded test machine, promotion fell to
+   1-3 MB/s and the mark-compact collections from 12 to 4-9 on WebGPU and from 21 to 6 on WebGL2,
+   while the frame rate rose by a third on WebGPU and more than doubled on WebGL2. The patch
+   takes the class from the first bound uniform group, since `three/webgpu` does not export it, and
+   throws if the renderer internals it needs are missing. `getStats().uniformUploadPatch` reports it.
 5. The scene, camera and shared TSL uniforms; the world generator and the opening spawn; the shared
    `state` and the `ctx` object.
 6. The wind field, then the perf governor (`ctx.perf`).
