@@ -9,7 +9,9 @@
 // - Mixer buses master, engine, environment, ui, copilot and music (see mixer.js), levels from
 //   settings.mixer. Everything but the copilot bus ducks while the copilot speaks; photo mode dips
 //   the master as in v1; a soft crash muffles it.
-// - Airflow beds (airflow.js), the craft's engine family (engines/), spatialisation with doppler
+// - Airflow beds (airflow.js) with the turbulence rattle under them (turbulenceRattle.js: the
+//   airframe's response to the WindField's turbulence at the craft, off in photo mode), the craft's
+//   engine family (engines/), spatialisation with doppler
 //   (spatial.js), flight cues (flightCues.js), v1 event cues and one-shot voices (eventCues.js,
 //   voices.js) and radar-altitude landing callouts (callouts.js).
 // - Phase 2 spawn sounds (spawnVoices.js, recipes/): spawnVoice(recipe, params), thunder() and
@@ -27,6 +29,7 @@ import { createFlightCues } from './flightCues.js';
 import { BUS_NAMES, createMixer } from './mixer.js';
 import { createSpatializer } from './spatial.js';
 import { createSpawnVoices } from './spawnVoices.js';
+import { createTurbulenceRattle } from './turbulenceRattle.js';
 import { createVoices } from './voices.js';
 
 const PARAMETER_INTERVAL = 0.05;
@@ -129,6 +132,7 @@ export function createAudioSystem(ctx) {
       mixer,
       voices,
       airflow: createAirflow(kit),
+      turbulenceRattle: createTurbulenceRattle(kit),
       spatializer,
       flightCues: createFlightCues({ ...kit, voices }),
       engine: null,
@@ -317,6 +321,7 @@ export function createAudioSystem(ctx) {
     realTime: 0,
     interval: PARAMETER_INTERVAL,
     paused: false,
+    photo: false,
     interior: false,
     cameraAttached: true,
     view,
@@ -335,6 +340,7 @@ export function createAudioSystem(ctx) {
     frame.realTime = state.time.realElapsed;
     frame.interval = interval;
     frame.paused = state.paused === true;
+    frame.photo = state.photoMode === true;
     frame.view = view;
     frame.interior = INTERIOR_VIEWS.has(view);
     frame.cameraAttached = !state.photoMode && view !== 'flyby';
@@ -360,6 +366,7 @@ export function createAudioSystem(ctx) {
     graph.engine.update(frame, pitch);
     spawnVoices.update(frame);
     graph.airflow.update(frame);
+    graph.turbulenceRattle.update(frame);
     graph.flightCues.update(frame);
     updateDuck(time);
     const volume = clamp(Number(settings.get('masterVolume')) || 0, 0, 1);
@@ -405,6 +412,7 @@ export function createAudioSystem(ctx) {
       engine: graph.engine ? graph.engine.describe() : null,
       spatial: graph.spatializer.describe(),
       airflow: graph.airflow.describe(),
+      turbulenceRattle: graph.turbulenceRattle.describe(),
       cues: graph.flightCues.describe(),
       pendingEventCues: eventCues.pending,
       spawn: spawnVoices.describe(),
