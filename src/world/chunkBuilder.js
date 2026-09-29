@@ -18,6 +18,22 @@ export function createChunkBuilder(worldGen, config) {
   const tint = new Float64Array(3);
   const scale = new Float64Array(4);
   const SKIRT_SHADE = 0.8;
+  // Stamp-aware skirts. A stamp's walls (a canyon, a cliff, a crater rim) can drop further between two
+  // coarse lattice points than a fixed skirt hangs, so a chunk that a stamp touches hangs each skirt
+  // segment below the lowest ground of its neighbour's edge instead: the neighbour's edge vertices are
+  // heightAt samples on the finest (LOD0) lattice inside the COARSEST LOD's segment that holds this
+  // one, so their minimum bounds the neighbour's edge at every LOD. Chunks no stamp touches keep the
+  // fixed Phase 1 skirts, bit for bit.
+  const finestResolution = resolutions[0];
+  const coarsestResolution = resolutions[resolutions.length - 1];
+  const finestStep = chunkSize / finestResolution;
+  const windowStep = chunkSize / coarsestResolution;
+  const samplesPerWindow = finestResolution / coarsestResolution;
+  const edgeMinima = new Float64Array(4 * coarsestResolution);
+  // Per build: whether a stamp touches the chunk, segments per coarsest window, the lowest skirt vertex.
+  let stampedBuild = false;
+  let segmentsPerWindow = 1;
+  let skirtFloor = Infinity;
 
   function srgbToLinear(channel) {
     return channel < 0.04045 ? channel * 0.0773993808 : Math.pow(channel * 0.9478672986 + 0.0521327014, 2.4);
@@ -97,13 +113,47 @@ export function createChunkBuilder(worldGen, config) {
     edges[slot * 3 + 2] = faceColorOut[2] * SKIRT_SHADE;
   }
 
-  /** Vertical skirt quad hanging below edge segment a-b, facing outward. */
-  function emitSkirt(output, vertex, skirtDepth, ax, ay, az, bx, by, bz, outwardX, outwardZ, edges, slot) {
+  /**
+   * Lowest heightAt sample of each coarsest-LOD window of the four chunk edges, on the finest lattice
+   * (window w of side s at edgeMinima[s * coarsestResolution + w]). Sides: 0 north (z = 0), 1 west
+   * (x = 0), 2 south (z = chunkSize), 3 east (x = chunkSize), in the order the skirts are emitted.
+   */
+  function measureEdgeMinima(originX, originZ) {
+    edgeMinima.fill(Infinity);
+    for (let side = 0; side < 4; side++) {
+      for (let sample = 0; sample <= finestResolution; sample++) {
+        const offset = sample * finestStep;
+        const x = side === 0 || side === 2 ? originX + offset : side === 1 ? originX : originX + chunkSize;
+        const z = side === 1 || side === 3 ? originZ + offset : side === 0 ? originZ : originZ + chunkSize;
+        const height = worldGen.heightAt(x, z);
+        // A sample on a window boundary belongs to both windows.
+        const window = Math.floor(sample / samplesPerWindow);
+        const before = sample % samplesPerWindow === 0 ? window - 1 : window;
+        for (let index = Math.max(0, before); index <= Math.min(window, coarsestResolution - 1); index++) {
+          const slot = side * coarsestResolution + index;
+          if (height < edgeMinima[slot]) edgeMinima[slot] = height;
+        }
+      }
+    }
+  }
+
+  /**
+   * Vertical skirt quad hanging below edge segment a-b (segment `segment` of chunk side `sideIndex`),
+   * facing outward: skirtDepth below each end, or on a stamped chunk, one level skirtDepth below the
+   * lowest ground of the segment's coarsest-LOD window.
+   */
+  function emitSkirt(output, vertex, skirtDepth, ax, ay, az, bx, by, bz, outwardX, outwardZ, edges, slot, sideIndex, segment) {
     const red = edges[slot * 3];
     const green = edges[slot * 3 + 1];
     const blue = edges[slot * 3 + 2];
-    const lowA = ay - skirtDepth;
-    const lowB = by - skirtDepth;
+    let lowA = ay - skirtDepth;
+    let lowB = by - skirtDepth;
+    if (stampedBuild) {
+      const ground = edgeMinima[sideIndex * coarsestResolution + Math.floor(segment / segmentsPerWindow)];
+      lowA = Math.min(ground, ay, by) - skirtDepth;
+      lowB = lowA;
+      if (lowA < skirtFloor) skirtFloor = lowA;
+    }
     const facesOutward = (bz - az) * outwardX - (bx - ax) * outwardZ > 0;
     const { positions, normals, colors } = output;
     if (facesOutward) {
@@ -171,15 +221,21 @@ export function createChunkBuilder(worldGen, config) {
       }
       yield;
     }
+    // Re-read after the yields above: the main-thread fallback interleaves chunk builds.
+    stampedBuild = worldGen.hasStamps === true && worldGen.stampsOverlap(originX, originZ, originX + chunkSize, originZ + chunkSize);
+    if (stampedBuild) measureEdgeMinima(originX, originZ);
+    // Every LOD step divides the coarsest step, so a segment never straddles two windows.
+    segmentsPerWindow = resolution / coarsestResolution;
+    skirtFloor = Infinity;
     for (let i = 0; i < resolution; i++) {
-      vertex = emitSkirt(output, vertex, skirtDepth, i * step, heights[i], 0, (i + 1) * step, heights[i + 1], 0, 0, -1, edges, i);
+      vertex = emitSkirt(output, vertex, skirtDepth, i * step, heights[i], 0, (i + 1) * step, heights[i + 1], 0, 0, -1, edges, i, 0, i);
     }
     for (let j = 0; j < resolution; j++) {
       vertex = emitSkirt(
         output, vertex, skirtDepth,
         0, heights[j * side], j * step,
         0, heights[(j + 1) * side], (j + 1) * step,
-        -1, 0, edges, resolution + j,
+        -1, 0, edges, resolution + j, 1, j,
       );
     }
     for (let i = 0; i < resolution; i++) {
@@ -188,7 +244,7 @@ export function createChunkBuilder(worldGen, config) {
         output, vertex, skirtDepth,
         i * step, heights[row + i], chunkSize,
         (i + 1) * step, heights[row + i + 1], chunkSize,
-        0, 1, edges, 2 * resolution + i,
+        0, 1, edges, 2 * resolution + i, 2, i,
       );
     }
     for (let j = 0; j < resolution; j++) {
@@ -196,10 +252,10 @@ export function createChunkBuilder(worldGen, config) {
         output, vertex, skirtDepth,
         chunkSize, heights[j * side + resolution], j * step,
         chunkSize, heights[(j + 1) * side + resolution], (j + 1) * step,
-        1, 0, edges, 3 * resolution + j,
+        1, 0, edges, 3 * resolution + j, 3, j,
       );
     }
-    output.minY = minY - skirtDepth;
+    output.minY = stampedBuild ? skirtFloor : minY - skirtDepth;
     output.maxY = maxY;
     output.vertexCount = vertex;
   }

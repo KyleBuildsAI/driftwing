@@ -1,15 +1,19 @@
 // Runs a dev verification harness headlessly and saves its report.
 //
 // Starts the Vite dev server (the harnesses exist only in dev builds) on a free port other than the
-// player's 5199, opens V2's page /v2/?test=1 (flight test) or /v2/?test=hotas (HOTAS pipeline
-// test) in headless Chrome with a fresh profile, follows the harness through its reloads, waits for
-// window.DRIFTWING.testReport to complete, then saves the report, the browser console and
-// screenshots of the summary panel, and stops the browser and the server.
+// player's 5199, opens V2's page /v2/?test=1 (flight test), /v2/?test=hotas (HOTAS pipeline test) or
+// /v2/?test=terrain (terrain stamps) in headless Chrome with a fresh profile, follows the harness
+// through its reloads, waits for window.DRIFTWING.testReport to complete, then saves the report, the
+// browser console and screenshots of the summary panel, and stops the browser and the server.
 //
 // Usage:
-//   node tools/run-harness.mjs --test 1|hotas [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
+//   node tools/run-harness.mjs --test 1|hotas|terrain [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
 //     [--crafts glider,jet] [--views first,third] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
+//
+// The terrain test runs on one seed (the first of --seeds, P2-TERRAIN by default) in the late
+// morning, and afterwards the runner flies its camera tour: one screenshot per stamp type from the
+// air (stamp-<type>.png), with the stamp paint in view.
 //
 // The flight test flies every craft in first person (the cockpit or FPV view) and in third person
 // (chase) by default; --views first or --views third flies one of them.
@@ -60,6 +64,9 @@ const LOAD_SAMPLE_MS = 2000;
 /** Chrome's own close can hang for minutes on a loaded machine; after this the runner kills it. */
 const CLOSE_TIMEOUT_MS = 30000;
 const EXPECTED_BACKEND = Object.freeze({ webgpu: 'WebGPU', webgl: 'WebGL2' });
+/** The terrain test's default world (every fixture stamp type lies within 13 km of its spawn) and time of day. */
+const TERRAIN_SEED = 'P2-TERRAIN';
+const TERRAIN_DAY_TIME = '0.42';
 
 function parseArgs(argv) {
   const options = {
@@ -101,7 +108,7 @@ function parseArgs(argv) {
       default: throw new Error(`Unknown flag ${flag}`);
     }
   }
-  if (options.test !== '1' && options.test !== 'hotas') throw new Error('--test must be 1 or hotas');
+  if (!['1', 'hotas', 'terrain'].includes(options.test)) throw new Error('--test must be 1, hotas or terrain');
   if (!EXPECTED_BACKEND[options.backend]) throw new Error('--backend must be webgpu or webgl');
   if (options.seconds !== null && !(options.seconds >= 5)) throw new Error('--seconds must be at least 5');
   options.out ??= join(tmpdir(), `driftwing-harness-${options.test}-${options.backend}`);
@@ -272,6 +279,10 @@ function harnessUrl(port, options) {
   const url = new URL(`http://127.0.0.1:${port}/v2/`);
   url.searchParams.set('test', options.test);
   if (options.backend === 'webgl') url.searchParams.set('renderer', 'webgl');
+  if (options.test === 'terrain') {
+    url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : TERRAIN_SEED);
+    url.searchParams.set('time', TERRAIN_DAY_TIME);
+  }
   if (options.test === '1') {
     if (options.seeds) url.searchParams.set('testSeeds', options.seeds);
     if (options.seconds) url.searchParams.set('testSeconds', String(options.seconds));
@@ -285,6 +296,7 @@ function harnessUrl(port, options) {
 function timeLimitMs(options) {
   if (Number.isFinite(options.timeoutMinutes) && options.timeoutMinutes > 0) return options.timeoutMinutes * 60000;
   if (options.test === 'hotas') return 8 * 60000;
+  if (options.test === 'terrain') return 40 * 60000;
   const seeds = options.seeds ? options.seeds.split(',').filter(Boolean).length : 3;
   const crafts = options.crafts ? options.crafts.split(',').filter(Boolean).length : 6;
   const views = options.views ? options.views.split(',').filter(Boolean).length : 2;
@@ -473,6 +485,45 @@ function craftViewTable(report) {
   return lines.join('\n');
 }
 
+function terrainTable(report) {
+  const lines = ['  stamp       site                              km  offline seams  max gap m  skirt margin m  live seams  LODs     parity                collision m  result'];
+  for (const row of report.stamps) {
+    lines.push([
+      `  ${row.type.padEnd(11)}`,
+      row.siteId.padEnd(32),
+      String(Math.round(row.distance / 100) / 10).padStart(5),
+      `${row.offline.seams - row.offline.violations}/${row.offline.seams}`.padStart(14),
+      String(row.offline.maxGap).padStart(10),
+      String(row.offline.worstCoverage).padStart(15),
+      `${row.live.seams - row.live.seamViolations}/${row.live.seams}`.padStart(11),
+      ` ${row.live.lodsSeen.join('')}`.padEnd(8),
+      ` ${row.live.parityChunks} chunks ${row.live.parityWorst === 0 ? 'identical' : `diff ${row.live.parityWorst}`}`.padEnd(22),
+      String(Math.max(row.live.collisionWorst, row.offline.collisionWorst)).padStart(12),
+      row.passed ? '  PASS' : '  FAIL',
+    ].join(' '));
+  }
+  for (const criterion of report.criteria) lines.push(`  ${criterion.status === 'pass' ? 'PASS' : 'FAIL'}  ${criterion.label}: ${criterion.value}`);
+  lines.push(`  poses: ${report.poses.map((pose) => `${pose.stamp} +${pose.offset} m ${pose.settled ? `${pose.seconds} s` : 'NOT SETTLED'}`).join('; ')}`);
+  lines.push(`  terrain: ${report.environment.terrainMode} (${report.environment.terrainWorkers} workers), ${report.environment.viewRings} view rings; seed ${report.environment.seed}; site-list hash ${report.siteListHash}`);
+  for (const problem of report.harnessErrors) lines.push(`  harness problem: ${problem}`);
+  return lines.join('\n');
+}
+
+/** Flies the terrain test's camera tour and saves one screenshot per stamp type (stamp-<type>.png). */
+async function captureStampTour(page, options, started) {
+  const count = await page.evaluate(() => window.DRIFTWING.terrainTest.views.length);
+  const shots = [];
+  for (let index = 0; index < count; index++) {
+    const view = await page.evaluate((viewIndex) => window.DRIFTWING.terrainTest.showView(viewIndex), index);
+    const file = `stamp-${view.type}.png`;
+    await page.screenshot({ path: join(options.out, file) });
+    shots.push({ ...view, file });
+    log(started, `stamp tour: ${file} (${view.siteId}, ${view.settled ? `settled in ${view.seconds} s` : 'streaming had NOT settled'})`);
+  }
+  await page.evaluate(() => window.DRIFTWING.terrainTest.showSummary());
+  return shots;
+}
+
 function hotasTable(report) {
   const lines = [];
   for (const check of report.checks) lines.push(`  ${check.passed ? 'PASS' : 'FAIL'}  [${check.group}] ${check.name}: ${check.actual}${check.passed ? '' : ` (expected ${check.expected})`}`);
@@ -632,6 +683,11 @@ async function main() {
       await sleep(300);
       await page.screenshot({ path: join(options.out, `summary-page-${pageIndex + 1}.png`) });
     }
+    if (options.test === 'terrain') {
+      await page.setViewport({ width: options.width, height: options.height });
+      runner.stampShots = await captureStampTour(page, options, started);
+      if (runner.stampShots.some((shot) => !shot.settled)) runner.notes.push('the stamp tour took some screenshots before streaming had settled');
+    }
   } catch (error) {
     runner.problems.push(error.message);
   } finally {
@@ -682,7 +738,8 @@ async function main() {
   writeFileSync(join(options.out, 'gpu-load.json'), JSON.stringify(gpuLoad.samples, null, 2));
   writeFileSync(join(options.out, 'process-load.json'), JSON.stringify(processLoad.samples, null, 2));
 
-  if (report) process.stdout.write(`${options.test === '1' ? `${flightTable(report)}\n${craftViewTable(report)}\n${slowFrameEvidence(report)}` : hotasTable(report)}\n`);
+  const tables = { 1: () => `${flightTable(report)}\n${craftViewTable(report)}\n${slowFrameEvidence(report)}`, hotas: () => hotasTable(report), terrain: () => terrainTable(report) };
+  if (report) process.stdout.write(`${tables[options.test]()}\n`);
   process.stdout.write(`run-harness: ${runner.passed ? 'PASS' : 'FAIL'} (harness ${report ? report.result : 'no report'}, backend ${runner.backend ? runner.backend.join(', ') : 'unknown'}, browser console ${runner.errors.length} errors / ${runner.warnings.length} warnings, ${runner.durationSeconds} s)\n`);
   for (const problem of runner.problems) process.stdout.write(`run-harness: problem: ${problem}\n`);
   for (const note of runner.notes) process.stdout.write(`run-harness: note: ${note}\n`);
