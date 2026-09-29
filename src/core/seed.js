@@ -55,7 +55,9 @@ export function parseDayTime(value) {
   }
   if (!/^-?\d+(\.\d+)?$/.test(text)) return null;
   const fraction = Number(text);
-  return Number.isFinite(fraction) ? ((fraction % 1) + 1) % 1 : null;
+  if (!Number.isFinite(fraction)) return null;
+  // Wrapping a value already inside the day would only add rounding error.
+  return fraction >= 0 && fraction < 1 ? fraction : ((fraction % 1) + 1) % 1;
 }
 
 /** The requested start time of day (0..1): ?time= wins over the hash's t=; null when neither is given. */
