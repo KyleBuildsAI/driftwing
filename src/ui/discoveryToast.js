@@ -4,8 +4,8 @@
 // 'journal:achievement' announcements, so it only ever shows what the journal really recorded.
 // Improved records ('journal:record') get a short toast of their own.
 //
-// Cards queue and show one at a time. In photo mode the card is hidden and its clock stops, so it comes
-// back afterwards. Clicking a card opens the journal.
+// Cards queue and show one at a time. In photo mode (and on touch screens while a panel is open) the
+// card is hidden and its clock stops, so it comes back afterwards. Clicking a card opens the journal.
 import './discoveryToast.css';
 import { JOURNAL_STATS } from '../gameplay/journal.js';
 import { discoveryIcon, discoveryIconSvg } from './categoryIcons.js';
@@ -130,9 +130,9 @@ export function createDiscoveryToast({ root, bus, toast, onActivate }) {
 
   return {
     element,
-    /** Advances the card clock (seconds of wall time); photo mode holds it. */
-    update(step, photoActive) {
-      if (photoActive) return;
+    /** Advances the card clock (seconds of wall time); held (photo mode, a touch panel) stops it. */
+    update(step, held) {
+      if (held) return;
       if (phase === 'idle') {
         if (queue.length > 0) show(queue.shift());
         return;

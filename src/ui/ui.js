@@ -2523,7 +2523,8 @@ export function createUISystem(ctx) {
     updateDebugBadge(step);
     statusBadge.update(step, photoActive);
     craftPicker.update(step);
-    discoveryToast.update(step, photoActive);
+    // On touch screens a panel covers the card's place, so the card waits for it to close.
+    discoveryToast.update(step, photoActive || (touchMode && activePanel !== null));
     worldMap.update(step);
     if (activePanel === 'journal') journalPanel.update(step);
     if (activePanel === 'settings') settingsPanel.update(step);
