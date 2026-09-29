@@ -59,6 +59,8 @@ const SNAPSHOT_EVENTS_LIMIT = 10;
 const THERMAL_MIN_STRENGTH = 0.8;
 const THERMAL_RING_RADIUS = 4500;
 const THERMAL_RING_SAMPLES = 8;
+/** Below this sun elevation (deg) thermals are too weak to work (the WindField's solar factor). */
+const LOW_SUN_ELEVATION = 15;
 /** A known (discovered) site wins over an unknown one unless the unknown one is this much closer. */
 const DISCOVERED_PREFERENCE = 2;
 /** Landmarks the next-discovery search may fall back to (m). */
@@ -655,9 +657,11 @@ export function createTourGuide(ctx, helpers) {
         }
       }
       if (!thermal) {
-        return fail(state.time.nightFactor > 0.5
-          ? 'No thermals working near us. They need sun on the ground, so try again in daylight.'
-          : "No working thermals within about 7 km. Sunny slopes and dry ground are the best bet; let's look further on.");
+        if (state.time.nightFactor > 0.5) return fail('No thermals working near us. They need sun on the ground, so try again in daylight.');
+        if (state.time.sunElevation < LOW_SUN_ELEVATION) {
+          return fail("No working thermals near us: the sun's too low to drive them. Ridge lift on a windward slope is the better bet until it climbs.");
+        }
+        return fail("No working thermals within about 7 km. Sunny slopes and dry ground are the best bet; let's look further on.");
       }
       // The column leans downwind as it rises: aim for where it is at our height.
       const rise = clamp((position.y - thermal.ground) / Math.max(1, thermal.top - thermal.ground), 0, 1);

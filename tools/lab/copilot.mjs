@@ -311,7 +311,7 @@ function createMockGame({ agl = 600 } = {}) {
   const state = {
     ready: true,
     photoMode: false,
-    time: { realElapsed: 100, elapsed: 100, nightFactor: 0 },
+    time: { realElapsed: 100, elapsed: 100, nightFactor: 0, sunElevation: 40 },
     player: { position: { x: 0, y: 700, z: 0 }, heading: 0, speed: 40 },
     flight: { agl, verticalSpeed: 0, flaps: 0, onGround: false, gear: { retractable: false, down: true }, crash: { active: false } },
   };
@@ -528,7 +528,11 @@ const NW = Math.SQRT1_2 * 9000;
   game.state.player.position.x = 0;
   game.setThermal(null);
   const noThermal = game.guide.handlers.findThermal({ type: 'findThermal' });
-  check('callouts', 'find a thermal: none -> an honest answer', !noThermal.ok && /No working thermals/.test(noThermal.text), noThermal.text);
+  check('callouts', 'find a thermal: none -> an honest answer', !noThermal.ok && /No working thermals within/.test(noThermal.text), noThermal.text);
+  game.state.time.sunElevation = 6;
+  const lowSun = game.guide.handlers.findThermal({ type: 'findThermal' });
+  check('callouts', 'find a thermal: none with a low sun -> says the sun is too low', !lowSun.ok && /sun's too low/.test(lowSun.text), lowSun.text);
+  game.state.time.sunElevation = 40;
 }
 {
   const game = createMockGame();
