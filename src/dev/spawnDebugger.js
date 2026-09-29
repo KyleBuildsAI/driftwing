@@ -6,8 +6,10 @@
 //              preset ahead of the craft (at the chosen distance, ignoring the budgets); Nearest
 //              teleports to the nearest site of that preset from the site feed
 //   Time       a time-of-day scrubber and presets
-//   Director   director.getState() when a director is attached ("Director not running" otherwise):
-//              drought timer, budgets, heavy count, candidates, weather, cooldowns, activation log
+//   Director   the spawns system's director (getState and getNearby): drought and pacing, weather,
+//              heavy count and shed level, lights and engine use, rarity tiers, cooldowns,
+//              candidates, active spawns, nearby entries and the activation log ("Director not
+//              running" when it failed to start)
 //   Spawns     the active spawns (tier, distance, source) with an End button each
 //   Engines    per-engine instances, particles, lights, buffers; heavy count, real lights, lures,
 //              memory
@@ -22,8 +24,8 @@ const TOGGLE_KEY = 'F9';
 const REFRESH_HZ = 4;
 const DISTANCES = Object.freeze([['auto', 'Auto'], ['800', '800 m'], ['3000', '3 km'], ['8000', '8 km'], ['30000', '30 km']]);
 const TIME_PRESETS = Object.freeze([['golden', 'Golden'], ['noon', 'Noon'], ['dusk', 'Dusk'], ['night', 'Night']]);
-/** Director state fields shown first, in this order; any others follow. */
-const DIRECTOR_KEYS = Object.freeze(['droughtTimer', 'drought', 'heavyCount', 'heavy', 'budgets', 'weather', 'candidates', 'cooldowns', 'log']);
+/** The director's getNearby radius shown in the Director section (km). */
+const NEARBY_RADIUS_KM = 10;
 const LIST_PREVIEW = 6;
 const TELEPORT_APPROACH = 1800;
 const TELEPORT_HEIGHT = 350;
@@ -67,31 +69,6 @@ function section(title) {
 function formatDistance(metres) {
   if (!Number.isFinite(metres)) return '-';
   return metres >= 1000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
-}
-
-/** A short one-line summary of any value from the director's state. */
-function summarize(value, depth = 0) {
-  if (value === null || value === undefined) return '-';
-  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(2);
-  if (typeof value === 'string' || typeof value === 'boolean') return String(value);
-  if (Array.isArray(value)) {
-    if (depth > 0) return `${value.length} items`;
-    if (value.length === 0) return 'none';
-    const shown = value.slice(-LIST_PREVIEW).map((item) => summarize(item, depth + 1));
-    return `${value.length}: ${shown.join(' | ')}`;
-  }
-  if (typeof value === 'object') {
-    const parts = [];
-    for (const [key, item] of Object.entries(value)) {
-      if (item !== null && typeof item === 'object') {
-        if (depth < 1) parts.push(`${key} ${summarize(item, depth + 1)}`);
-        continue;
-      }
-      parts.push(`${key} ${summarize(item, depth + 1)}`);
-    }
-    return parts.join(', ') || '-';
-  }
-  return String(value);
 }
 
 export function createSpawnDebugger(ctx) {
@@ -309,6 +286,33 @@ export function createSpawnDebugger(ctx) {
     clock.textContent = `${sky.getClockString?.() ?? ''} ${state.time.label}`;
   }
 
+  /** The rows of the director section from director.getState() (src/spawns/director.js). */
+  function directorRows(directorState, nearby) {
+    const { budgets, pacing, tiers, candidates, log } = directorState;
+    const engineCaps = Object.entries(budgets.engines)
+      .filter(([, used]) => used.instances > 0)
+      .map(([name, used]) => `${name} ${used.instances}/${used.maxInstances}`);
+    const eligible = candidates.filter((candidate) => candidate.eligible);
+    const shownCandidates = (eligible.length > 0 ? eligible : candidates).slice(0, LIST_PREVIEW)
+      .map((candidate) => `${candidate.presetId} ${formatDistance(candidate.distance)} ${candidate.offAxis} deg${candidate.eligible ? '' : ` (${candidate.rejection})`}`);
+    const cooldowns = Object.entries(directorState.cooldowns).map(([id, seconds]) => `${id} ${seconds} s`);
+    return [
+      ['Drought', `${directorState.droughtSeconds} s of ${directorState.droughtThreshold} s (longest ${directorState.longestDrought} s, ${directorState.droughtFills} fills)`],
+      ['Pacing', `${pacing.withinWindow}/${pacing.droughts} droughts ended within 90 s; ${directorState.notables} notables, last ${directorState.lastNotable.kind}`],
+      ['Weather', directorState.weather],
+      ['Heavy', `${directorState.heavyCount}/${budgets.maxHeavy}${directorState.deferHeavy ? ' - deferred' : ''} - shed level ${directorState.shedLevel}`],
+      ['Lights', `${budgets.lights}/${budgets.maxRealLights}`],
+      ['Engines', engineCaps.length > 0 ? engineCaps.join(', ') : 'none in use'],
+      ['Tiers', Object.entries(tiers).map(([name, tier]) => `${name} ${tier.dueIn} s (${tier.activations})`).join(', ')],
+      ['Cooldowns', cooldowns.length > 0 ? cooldowns.join(', ') : 'none'],
+      ['Candidates', `${candidates.length} (${eligible.length} eligible)${shownCandidates.length > 0 ? `: ${shownCandidates.join(' | ')}` : ''}`],
+      ['Active', directorState.active.length > 0 ? directorState.active.map((spawn) => `${spawn.presetId} ${spawn.source} ${spawn.age} s`).join(', ') : 'none'],
+      ['Nearby', nearby.length > 0 ? nearby.slice(0, LIST_PREVIEW).map((entry) => `${entry.name} ${formatDistance(entry.distance)} ${entry.state}`).join(' | ') : 'nothing within 10 km'],
+      ['Log', log.length > 0 ? log.slice(-LIST_PREVIEW).map((entry) => `${Math.round(entry.time)} s ${entry.presetId} (${entry.reason})`).join(' | ') : 'empty'],
+      ['Log hash', `${directorState.logHash} (${directorState.logLength} entries, ${directorState.ticks} ticks)`],
+    ];
+  }
+
   function renderDirector() {
     const director = spawns.director;
     directorList.replaceChildren();
@@ -316,20 +320,19 @@ export function createSpawnDebugger(ctx) {
       directorNote.hidden = false;
       return;
     }
-    let directorState = null;
+    let rows = null;
     try {
-      directorState = director.getState();
+      rows = directorRows(director.getState(), director.getNearby(NEARBY_RADIUS_KM));
     } catch (error) {
-      console.error('[DRIFTWING] spawn debugger: director.getState() failed', error);
+      console.error('[DRIFTWING] spawn debugger: reading the director failed', error);
     }
-    if (!directorState || typeof directorState !== 'object') {
+    if (!rows) {
       directorNote.textContent = 'Director state unavailable';
       directorNote.hidden = false;
       return;
     }
     directorNote.hidden = true;
-    const keys = [...DIRECTOR_KEYS.filter((key) => key in directorState), ...Object.keys(directorState).filter((key) => !DIRECTOR_KEYS.includes(key))];
-    for (const key of keys) directorList.append(element('dt', '', key), element('dd', '', summarize(directorState[key])));
+    for (const [label, value] of rows) directorList.append(element('dt', '', label), element('dd', '', value));
   }
 
   function renderActive(force = false) {

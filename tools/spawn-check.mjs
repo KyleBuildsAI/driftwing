@@ -392,11 +392,11 @@ async function main() {
       open: Boolean(document.querySelector('#dw-spawn-debugger.dw-open')),
       focused: document.getElementById('dw-spawn-debugger')?.contains(document.activeElement) ?? false,
       presets: document.querySelectorAll('#dw-spawn-debugger .dw-spawndbg-list')[0]?.children.length ?? 0,
-      director: document.querySelector('#dw-spawn-debugger .dw-spawndbg-section:nth-of-type(3) .dw-spawndbg-empty')?.textContent ?? '',
+      director: [...document.querySelectorAll('#dw-spawn-debugger .dw-spawndbg-section:nth-of-type(3) dt')].map((node) => node.textContent),
     }));
     await page.screenshot({ path: join(options.out, 'debugger.png') });
     check('debugger', 'F9 opens the panel with focus inside it', opened.open && opened.focused, JSON.stringify(opened));
-    check('debugger', 'it lists the presets and says the director is not running', opened.presets >= 9 && /not running/i.test(opened.director), `${opened.presets} presets, "${opened.director}"`);
+    check('debugger', 'it lists the presets and shows the running director', opened.presets >= 9 && ['Drought', 'Weather', 'Heavy', 'Candidates', 'Log'].every((label) => opened.director.includes(label)), `${opened.presets} presets, director rows ${opened.director.join(', ')}`);
     const rollOpen = await rollWhileHolding();
     check('debugger', 'open and focused: flight keys stay in the panel', Math.abs(rollOpen) < 0.05, `roll ${rollOpen.toFixed(2)}`);
     // The panel's controls, driven through the DOM like a player would.
