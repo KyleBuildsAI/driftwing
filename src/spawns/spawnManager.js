@@ -46,8 +46,8 @@ const SITE_CELLS_PER_FRAME = 48;
  * need one (not yet seen, not yet discovered, or a director event past its despawn distance).
  */
 const VISIBILITY_CHECKS_PER_FRAME = 2;
-/** Frames before a spawn found out of view is checked again. */
-const VISIBILITY_RETRY_FRAMES = 12;
+/** Frames before a spawn found out of view is checked again (about half a second). */
+const VISIBILITY_RETRY_FRAMES = 30;
 const OCCLUSION_SAMPLES = 10;
 /** A sight line is blocked when the ground rises this far (m) above it. */
 const OCCLUSION_MARGIN = 1;
@@ -286,14 +286,24 @@ export function createSpawnManager(options) {
     return Math.min(300, Math.max(5, record.radius * 0.5));
   }
 
-  /** True when terrain rises above the straight sight line from the camera to target (a Vector3). */
+  /**
+   * True when terrain rises above the straight sight line from the camera to target (a Vector3).
+   * Only terrain the player can see counts: the line is sampled out to the fog's far distance (the
+   * terrain behind it is fully fogged, and a lure is drawn over it).
+   */
   function occludedByTerrain(target) {
     const startX = cameraPosition.x;
     const startY = cameraPosition.y;
     const startZ = cameraPosition.z;
+    const offsetX = target.x - startX;
+    const offsetY = target.y - startY;
+    const offsetZ = target.z - startZ;
+    const length = Math.sqrt(offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
+    const fogFar = scene.fog ? scene.fog.far : camera.far;
+    const reach = length > fogFar ? fogFar / length : 1;
     for (let sample = 1; sample <= OCCLUSION_SAMPLES; sample++) {
       // Skip the ends: the camera's own spot and the ground right under the target.
-      const t = 0.04 + 0.92 * (sample / (OCCLUSION_SAMPLES + 1));
+      const t = (0.04 + 0.92 * (sample / (OCCLUSION_SAMPLES + 1))) * reach;
       const pointY = startY + (target.y - startY) * t;
       const ground = world.groundHeight(Math.round(startX + (target.x - startX) * t), Math.round(startZ + (target.z - startZ) * t));
       if (ground > pointY + OCCLUSION_MARGIN) return true;

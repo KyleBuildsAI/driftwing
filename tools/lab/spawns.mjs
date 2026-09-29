@@ -62,8 +62,8 @@ console.error = (...args) => {
   if (VERBOSE) originalError(...args);
 };
 
-// ---- Stub world: flat ground at 0 m with one east-west ridge 800 m high at z = -3000 --------------
-const RIDGE_Z = -3000;
+// ---- Stub world: flat ground at 0 m with one east-west ridge 800 m high at z = -1500 (inside the fog) --
+const RIDGE_Z = -1500;
 const RIDGE_HALF_WIDTH = 150;
 const RIDGE_HEIGHT = 800;
 function groundHeight(x, z) {
@@ -305,7 +305,7 @@ function testLure() {
 // ---- discovery ------------------------------------------------------------------------------------------------------
 function testDiscovery() {
   const lab = createLab();
-  // Behind the ridge (z = -3000, 800 m high): the sight line from 300 m passes through it.
+  // Behind the ridge (z = -1500, 800 m high, inside the 2400 m fog): the sight line from 300 m passes through it.
   const hidden = lab.manager.activate('testLurePlume', { position: { x: 0, y: 0, z: -3600 }, heading: 0, source: 'debug', force: true });
   const plume = createTestPresets().find((preset) => preset.id === 'testLurePlume');
   const wide = Object.freeze({ radius: 5000, requireInView: true });
@@ -318,6 +318,11 @@ function testDiscovery() {
   check('discovery', 'a plume towering over the ridge is (its middle clears it)', lab.events.discovery.some((event) => event.presetId === 'testLureTall'));
   check('discovery', 'a spawn beyond its discovery radius is not', !lab.events.discovery.some((event) => event.presetId === 'testLurePlume'));
   lab.manager.deactivate(tall);
+  // With the fog closing in at 1200 m the ridge (1500 m) is fully fogged: it no longer hides anything.
+  lab.scene.fog.far = 1200;
+  lab.step(60);
+  check('discovery', 'terrain beyond the fog does not hide a spawn', lab.events.discovery.some((event) => event.presetId === 'testLureLow'));
+  lab.scene.fog.far = 2400;
   lab.manager.deactivate(hidden);
   lab.manager.deactivate(low);
   const id = lab.spawnAhead('testMarker', 600);
