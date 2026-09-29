@@ -131,7 +131,10 @@ function copyReading(target, source) {
  *   presets                  the preset list (validated by the caller)
  *   siteFeed                 optional: { sitesInCell(cellX, cellZ) } and/or { sitesNear(x, z, radius) }
  *   seed                     the world seed (string), for event seeds
- *   registerPrewarm          optional: registers the lure mesh for the pipeline prewarm
+ *   registerPrewarm          optional: registers the lure mesh for the pipeline prewarm; engines get
+ *                            it too (engineCtx.registerPrewarm) for the meshes they build in init()
+ *   water                    optional: the water effects layer (src/render/waterEffects.js), the
+ *                            engines' water API (engineCtx.water)
  *   maxLights                the cap on real lights (default MAX_REAL_LIGHTS); the pool holds the sum
  *                            of the engines' budget.lights up to it
  *   engineBudgets            optional: default { instances, particles } caps by engine name (the
@@ -141,6 +144,7 @@ export function createSpawnManager(options) {
   const {
     THREE, TSL, scene, camera, renderer, backend, wind, audio, world, state, sky, bus, perf, settings, uniforms,
     registry, presets = [], seed = '', registerPrewarm = null, maxLights = MAX_REAL_LIGHTS, engineBudgets = null,
+    water = null,
   } = options;
   const presetById = new Map();
   for (const preset of presets) presetById.set(preset.id, preset);
@@ -394,6 +398,10 @@ export function createSpawnManager(options) {
       createMeshPool: (poolOptions) => createMeshPool(THREE, poolOptions),
     }),
     spawns: null,
+    /** Registers an object drawn once behind the loading fade (engines call it in init()), or null. */
+    registerPrewarm: typeof registerPrewarm === 'function' ? registerPrewarm : null,
+    /** The water effects layer (disturbances, trails, splashes, spray, vortices, glow, pools), or null. */
+    water,
   };
 
   function initEngine(engine) {
