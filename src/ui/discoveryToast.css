@@ -1,0 +1,113 @@
+/* Discovery toast (discoveryToast.js): a glass card under the top bar, right side, that announces a
+   discovery or an achievement. It moves beside an open panel and goes to the top centre on touch. */
+#ui-root .dw-discovery {
+  --dw-discovery-color: var(--dw-gold);
+  position: absolute;
+  z-index: 29;
+  top: calc(var(--dw-top) + 62px);
+  right: var(--dw-right);
+  width: min(340px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 12px;
+  padding: 14px 16px 14px 14px;
+  border-radius: 18px;
+  pointer-events: none;
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(18px);
+  transition: opacity 0.35s ease, transform 0.5s var(--dw-ease), visibility 0s linear 0.5s, right 0.4s var(--dw-ease);
+}
+#ui-root .dw-discovery[data-state="shown"] {
+  pointer-events: auto;
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: opacity 0.35s ease, transform 0.55s var(--dw-ease), visibility 0s, right 0.4s var(--dw-ease);
+}
+#ui-root .dw-discovery[data-state="leaving"] { opacity: 0; visibility: visible; transform: translateY(-8px); }
+#ui-root.dw-panel-open .dw-discovery { right: calc(var(--dw-right) + min(384px, calc(100vw - 32px)) + 12px); }
+#ui-root.dw-map-open .dw-discovery { right: var(--dw-right); top: calc(var(--dw-top) + 8px); }
+#ui-root.dw-photo-on .dw-discovery { opacity: 0; visibility: hidden; transition: none; }
+#ui-root .dw-discovery::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dw-discovery-color) 38%, transparent);
+}
+#ui-root .dw-discovery-badge {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  color: var(--dw-discovery-color);
+  background: color-mix(in srgb, var(--dw-discovery-color) 14%, transparent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--dw-discovery-color) 22%, transparent);
+}
+#ui-root .dw-discovery-badge .dw-icon { width: 24px; height: 24px; }
+#ui-root .dw-discovery[data-state="shown"] .dw-discovery-badge { animation: dw-discovery-glow 1.6s ease-out both; }
+#ui-root .dw-discovery-body { display: flex; flex-direction: column; min-width: 0; }
+#ui-root .dw-discovery-label {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--dw-discovery-color);
+}
+#ui-root .dw-discovery-title {
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 350;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
+  color: #fffaf1;
+  overflow-wrap: anywhere;
+}
+#ui-root .dw-discovery-text { margin-top: 5px; font-size: 12.5px; line-height: 1.5; color: var(--dw-text-dim); }
+#ui-root .dw-discovery-text[hidden],
+#ui-root .dw-discovery-count[hidden] { display: none; }
+#ui-root .dw-discovery-count {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--dw-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+#ui-root .dw-discovery-bar { flex: 1; height: 3px; border-radius: 3px; background: rgba(255, 240, 220, 0.14); overflow: hidden; }
+#ui-root .dw-discovery-bar i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--dw-discovery-color); transition: width 0.9s var(--dw-ease) 0.3s; }
+@keyframes dw-discovery-glow {
+  0% { transform: scale(0.72); box-shadow: 0 0 0 color-mix(in srgb, var(--dw-discovery-color) 0%, transparent); }
+  45% { transform: scale(1.08); box-shadow: 0 0 30px color-mix(in srgb, var(--dw-discovery-color) 55%, transparent); }
+  100% { transform: none; }
+}
+/* Beside an open panel in a narrower window the card drops below the toast lane. */
+@media (max-width: 1180px) {
+  #ui-root.dw-panel-open .dw-discovery { top: calc(var(--dw-top) + 170px); }
+}
+/* Narrow windows: the top bar moves down (ui.css), so the card follows it. */
+@media (max-width: 760px) {
+  #ui-root .dw-discovery { top: calc(var(--dw-top) + 122px); }
+}
+/* Touch screens: the top centre, under the toast lane. */
+#ui-root.dw-touch .dw-discovery,
+#ui-root.dw-touch.dw-panel-open .dw-discovery {
+  top: calc(var(--dw-top) + 118px);
+  right: auto;
+  left: 50%;
+  transform: translate(-50%, -10px);
+}
+#ui-root.dw-touch .dw-discovery[data-state="shown"] { transform: translate(-50%, 0); }
+#ui-root.dw-touch .dw-discovery[data-state="leaving"] { transform: translate(-50%, -10px); }
+@media (prefers-reduced-motion: reduce) {
+  #ui-root .dw-discovery,
+  #ui-root .dw-discovery[data-state="shown"] { transition: opacity 0.2s ease, visibility 0s; transform: none; }
+  #ui-root .dw-discovery[data-state="shown"] .dw-discovery-badge { animation: none; }
+}
