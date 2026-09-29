@@ -25,8 +25,13 @@ import { countTriangles } from '../craft/kit.js';
  *   snapshot) and renders an interpolated pose.
  * - Craft switches rebuild the mesh and the model and respawn sensibly at the same place.
  * - Soft crash: fade, respawn 300 m above the ground at the same XZ and heading, no penalty.
- * - Relaunch: aerotow (glider), nearest peak (wingsuit) or airstart; start on ground (setting);
- *   hands-off assist override while a disconnected device was flying.
+ * - Relaunch: aerotow (glider), nearest peak (wingsuit) or airstart; start on ground (setting),
+ *   which prefers the nearest discovered site offering a ground-start spot (an airfield's runway,
+ *   spawns.findGroundStart); hands-off assist override while a disconnected device was flying.
+ * - Extra ground surfaces (ctx.groundSurfaces, src/world/groundSurfaces.js): landable ground that is
+ *   not terrain (floating island tops). The contact height the models see is the higher of the
+ *   terrain and any surface at most SURFACE_REACH above the craft's own height, so a craft lands on an
+ *   island top but flies freely beneath it.
  * - Parking brake (parkingBrake.js): a powered craft placed on the ground with the throttle lever
  *   open holds its wheels at idle until the pilot moves the lever or brakes; a throttle no physical
  *   lever holds (keyboard, wheel, touch) goes to idle on a ground start instead.
@@ -47,6 +52,8 @@ const PEAK_RELAUNCH_BELOW_AGL = 300;
 const MIN_SPAWN_AGL = 60;
 const SPAWN_LIFT_AGL = 150;
 const PENETRATION_LIMIT = 1;
+/** An extra ground surface counts for a craft whose centre is at most this far (m) below it. */
+const SURFACE_REACH = 12;
 const DEFAULT_BODY_STRIKE_SPEED = 5;
 const OVERRIDE_INPUT = 0.35;
 const OVERRIDE_SECONDS = 0.25;
@@ -98,10 +105,20 @@ export function createFlightController(ctx) {
    * copilot speaks its own confirmation, so the model skips its toast for them.
    */
   tickControls.quietActions = new Set();
+  const groundSurfaces = ctx.groundSurfaces ?? null;
+  /** The height (m) extra ground surfaces are looked for below: the ticking craft's height + reach. */
+  const groundReference = new Float64Array([Infinity]);
+  /** Terrain, or an extra ground surface above it no higher than the reference height. */
+  function contactHeight(x, z) {
+    const terrain = world.groundHeight(x, z);
+    if (groundSurfaces === null || groundSurfaces.count === 0) return terrain;
+    const surface = groundSurfaces.surfaceBelow(x, z, groundReference[0]);
+    return surface > terrain ? surface : terrain;
+  }
   const env = {
     time: 0,
     wind: { vel: new THREE.Vector3(), turbulence: 0 },
-    groundHeight: (x, z) => world.groundHeight(x, z),
+    groundHeight: contactHeight,
     waterLevel: CONFIG.WATER_LEVEL,
     rho: SEA_LEVEL_DENSITY,
     world,
@@ -163,8 +180,11 @@ export function createFlightController(ctx) {
     bus.emit('notify', { text, kind });
   }
 
+  /** The highest ground at (x, z): terrain, water or any extra ground surface (island tops). */
   function surfaceHeight(x, z) {
-    return Math.max(world.groundHeight(x, z), CONFIG.WATER_LEVEL);
+    const terrain = world.groundHeight(x, z);
+    const surface = groundSurfaces !== null && groundSurfaces.count > 0 ? groundSurfaces.surfaceBelow(x, z, Infinity) : -Infinity;
+    return Math.max(terrain, surface, CONFIG.WATER_LEVEL);
   }
 
   function catalogEntry(id) {
@@ -416,16 +436,21 @@ export function createFlightController(ctx) {
     return settings.get('startOnGround') === true && craft.spawn.canStartOnGround === true;
   }
 
-  /** At rest on the gear on nearby flat, dry ground clear of trees and rocks, nose into the wind. */
-  function placeOnGround(x, z) {
-    const spot = findFlatSpot(world, x, z, {
+  /**
+   * At rest on the gear on nearby flat, dry ground clear of trees and rocks, nose into the wind.
+   * preferred ({ heading, onSurface? }) places the craft exactly at (x, z) facing heading instead: a
+   * site's ground-start spot (a runway threshold) or the extra ground surface it is parked on.
+   */
+  function placeOnGround(x, z, preferred = null) {
+    const spot = preferred ? { x, z } : findFlatSpot(world, x, z, {
       waterLevel: CONFIG.WATER_LEVEL,
       headingFor: (spotX, spotZ) => windHeadingAt(spotX, spotZ),
       clearance: vegetationClearance(craft.simProfile.contacts, undefined, craft.spawn.runwayLength),
       runwayLength: craft.spawn.runwayLength,
     });
-    const heading = windHeadingAt(spot.x, spot.z);
-    const pose = groundPose(world, craft.simProfile.contacts, spot.x, spot.z, heading, craft.simProfile.centerOfMass?.[2] ?? 0);
+    const heading = preferred && Number.isFinite(preferred.heading) ? wrapDegrees(preferred.heading) : windHeadingAt(spot.x, spot.z);
+    const poseWorld = preferred && preferred.onSurface ? { groundHeight: (px, pz) => surfaceHeight(px, pz) } : world;
+    const pose = groundPose(poseWorld, craft.simProfile.contacts, spot.x, spot.z, heading, craft.simProfile.centerOfMass?.[2] ?? 0);
     resetActiveModel({
       position: pose.position,
       quaternion: pose.quaternion,
@@ -531,7 +556,10 @@ export function createFlightController(ctx) {
       return;
     }
     if (craft.spawn.canStartOnGround && (shouldStartOnGround() || wasOnGround)) {
-      placeOnGround(position.x, position.z);
+      // Parked on an extra ground surface (an island top): the new craft stays up there.
+      const surface = groundSurfaces !== null && groundSurfaces.count > 0 ? groundSurfaces.surfaceBelow(position.x, position.z, position.y + SURFACE_REACH) : -Infinity;
+      if (wasOnGround && surface > world.groundHeight(position.x, position.z)) placeOnGround(position.x, position.z, { heading, onSurface: true });
+      else placeOnGround(position.x, position.z);
       return;
     }
     const spawnPosition = position.clone();
@@ -1064,6 +1092,7 @@ export function createFlightController(ctx) {
   function sampleEnvironment(tickTime) {
     const position = sim.state.position;
     env.time = tickTime;
+    groundReference[0] = position.y + SURFACE_REACH;
     if (ctx.wind && typeof ctx.wind.sample === 'function') ctx.wind.sample(position, tickTime, env.wind);
     else {
       env.wind.vel.set(0, 0, 0);
@@ -1249,7 +1278,8 @@ export function createFlightController(ctx) {
     telemetry.indicatedAirspeed = airspeed * Math.sqrt(airDensity(position.y) / SEA_LEVEL_DENSITY);
     telemetry.groundSpeed = Math.hypot(telemetry.velocity.x, telemetry.velocity.z);
     telemetry.mach = airspeed / speedOfSound(position.y);
-    const ground = world.groundHeight(position.x, position.z);
+    groundReference[0] = position.y + SURFACE_REACH;
+    const ground = contactHeight(position.x, position.z);
     telemetry.altitude = position.y;
     telemetry.agl = position.y - Math.max(ground, CONFIG.WATER_LEVEL);
     telemetry.radarAltitude = telemetry.agl;
@@ -1357,8 +1387,17 @@ export function createFlightController(ctx) {
    * with "Start on ground").
    */
   function startFirstFlight() {
-    if (shouldStartOnGround()) placeOnGround(player.position.x, player.position.z);
-    else resetActiveModel(airbornePose(player.position, headingOfQuaternion(player.quaternion, currentHeading())));
+    if (shouldStartOnGround()) {
+      const site = typeof ctx.systems.spawns?.findGroundStart === 'function' ? ctx.systems.spawns.findGroundStart(player.position.x, player.position.z) : null;
+      if (site) {
+        placeOnGround(site.x, site.z, { heading: site.heading });
+        notify(`Starting at the ${site.name.toLowerCase()}.`, 'info');
+      } else {
+        placeOnGround(player.position.x, player.position.z);
+      }
+    } else {
+      resetActiveModel(airbornePose(player.position, headingOfQuaternion(player.quaternion, currentHeading())));
+    }
   }
 
   const requestedCraft = settings.get('craft');

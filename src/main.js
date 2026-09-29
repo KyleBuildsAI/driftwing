@@ -27,6 +27,7 @@ import { createShellBridge } from './shell/bridge.js';
 import { createSkySystem } from './render/sky.js';
 import { createSpawnDebugger } from './dev/spawnDebugger.js';
 import { createSpawnSystem } from './spawns/index.js';
+import { createStructureEngine } from './spawns/engines/structureEngine.js';
 import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
 import { createWaterSystem } from './render/water.js';
@@ -34,6 +35,7 @@ import { createWaypointSystem } from './gameplay/waypoints.js';
 import { createWeatherSystem } from './spawns/weather.js';
 import { createWindOverlaySystem } from './dev/windOverlay.js';
 import { createWorldGen } from './world/worldgen.js';
+import { createGroundSurfaces } from './world/groundSurfaces.js';
 import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName } from './core/util.js';
 import { EventBus } from './core/eventBus.js';
 import { attachTypedEvents } from './core/events.js';
@@ -55,7 +57,9 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
  * The spawn engines (src/spawns/engines/, contract section 3): one factory per engine, registered
  * with the spawns system before its prewarm hook initialises them.
  */
-const SPAWN_ENGINE_FACTORIES = Object.freeze([]);
+const SPAWN_ENGINE_FACTORIES = Object.freeze([
+  createStructureEngine,
+]);
 
 /**
  * Dev-only verification harnesses: ?test=1 (flight test), ?test=hotas (HOTAS pipeline test) and
@@ -204,6 +208,8 @@ async function boot() {
     settings,
     storage,
     world,
+    // Landable ground that is not terrain (floating island tops): spawn engines add, flight stands on.
+    groundSurfaces: createGroundSurfaces(),
     wind: null,
     worldOptions,
     state,
