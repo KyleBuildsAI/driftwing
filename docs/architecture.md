@@ -251,7 +251,7 @@ system, and then starts the frame loop.
 
 | file | what |
 | --- | --- |
-| `index.js` | the `spawns` system: the SpawnManager, the engine registry, the pluggable site feed (`world.placement` when the world exposes it, or `setSiteFeed`), the director hook (`attachDirector`), and in dev builds the `debug` API |
+| `index.js` | the `spawns` system: the SpawnManager, the engine registry, the site feed (`world.placement`, or `setSiteFeed`), the event director it creates and updates, and in dev builds the `debug` API |
 | `spawnManager.js` | activation within the budgets, LOD tiers with hysteresis, lures, lifetimes and the despawn rule, discovery, memory accounting, leak clean-up, stats (below) |
 | `engineRegistry.js` | the engine interface check, `ENGINE_NAMES`, `LOD_TIERS` |
 | `schema.js` | the preset validator (`validatePreset`, `validatePresets`) and the preset vocabularies; pure |
@@ -1011,14 +1011,17 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
 
 - **System API.** `update`, `prewarm` (starts it), `register(engine)`, `activate(presetId, opts)`,
   `deactivate(id, reason)`, `getActive()`, `getInstance(id)`, `getStats()`, `setSiteFeed(feed)`,
-  `attachDirector(director)` / `director`, `forceSpawn(presetId, { distance, force })` (ahead of the
-  craft; through `director.forceSpawn` when a director is attached), `pointAhead(distance)` and
-  `manager` (the SpawnManager). In dev builds and with `?debug=1` or `?dev=1`, `debug`:
-  `addPreset`, `removePreset`, `registerEngine`, `unregisterEngine` and `loadTestKit()` (dev builds
-  only).
-- **Director hook.** `attachDirector({ update(dt), getState(), forceSpawn?, getNearby? })`: the
-  system calls `update(dt)` at 2 Hz with the simulated time since the previous call. A director
-  that throws is detached and logged.
+  `director`, `getNearby(radiusKm)`, `forceSpawn(presetId, { distance, force })` (ahead of the
+  craft; through `director.forceSpawn` for the director's own presets, straight through the manager
+  for presets added with `debug.addPreset`), `pointAhead(distance)` and `manager` (the
+  SpawnManager). In dev builds and with `?debug=1` or `?dev=1`, `debug`: `addPreset`,
+  `removePreset`, `registerEngine`, `unregisterEngine` and `loadTestKit()` (dev builds only).
+- **The director.** `start()` (the prewarm hook) creates the event director once the manager runs:
+  `createGameDirector(ctx, { spawnManager, presets: PRESETS, placement, isDiscovered, budgets:
+  manager.budgets, devHooks })`, where `placement` reads whichever site feed the manager holds and
+  `isDiscovered` is the manager's. The system calls `director.update()` every frame; the director
+  ticks at 2 Hz on the flight clock. A director that fails to start or throws is logged and
+  stopped; the spawns carry on without it.
 - **Site feed.** `{ sitesInCell(cellX, cellZ) }` (cached arrays, 2 km cells; read in time slices,
   48 cells a frame, over the largest site `lod.far`) or `{ sitesNear(x, z, radius) }` (read once per
   sweep). A site within its preset's `lod.far` is activated with source `site`; it is removed past
@@ -1028,14 +1031,19 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   `canActivate(presetId, source)` names the refusal: `preset`, `engine` (not registered or failed to
   initialise), `capacity` (512 spawns), `heavy` (the heavy limit, 2; sites are never refused for it
   and count toward it only while `setSiteActive(id, true)`), `instances` or `particles` (per-engine
-  caps from `engine.budget` `{ instances, particles, lights? }`, else 32 instances and 60 000 particles; `setBudget`, `setHeavyLimit`).
+  caps from `engine.budget` `{ instances, particles, lights? }`, else the engine's entry in
+  `DIRECTOR_BUDGETS.engines`, else 32 instances and 60 000 particles; `setBudget`, `setHeavyLimit`).
   A debug activation with `force: true` passes the budgets. Each preset engine entry becomes one
   engine instance (a part) created with the preset's params merged with `{ position, heading, site,
-  startTime, scale, duration, seed }` and its own seeded random generator. Events draw a duration
-  from `lifetime.duration`.
+  startTime, scale, duration, seed }` and its own seeded random generator. `opts.duration` (the
+  director draws it) is the event's duration; without it the manager draws one from
+  `lifetime.duration`.
 - **LOD.** The tier comes from the camera distance to the spawn's anchor and `preset.lod`, moving out
   past `boundary * 1.08` and back in below `boundary * 0.92` (`LOD_HYSTERESIS`). Engines hear
-  `setLOD(instance, tier)` at creation and on every change.
+  `setLOD(instance, tier)` at creation and on every change. `setLodBias(bias)` (0 < bias <= 1)
+  multiplies `lod.near` and `lod.mid` for every spawn: the director's load shedder sets 0.7 and 0.5
+  under load, so spawns step to their cheaper tiers sooner; `getLodBias()` and `getStats().lodBias`
+  read it.
 - **Lures** (`lure.js`). Heavy presets with `lure` get a FAR silhouette: plume (volcano, leaning into
   a drifting umbrella, lava glow at night), anvil (supercell: cauliflower tower, flat base, rain
   shaft, anvil and overshooting top, lightning flashes at night), funnel (tornado with wall cloud and
@@ -1067,9 +1075,10 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   priority. Lights a disposed spawn still holds are released and reported.
 - **Engine ctx.** `{ scene, camera, renderer, backend, THREE, TSL, wind, audio, terrain: { heightAt,
   groundHeight, biomeAt, waterLevel }, time, sky, bus, perf, settings, state, uniforms, budgets,
-  lights, pools, spawns }`. `budgets` is read-only (`heavyLimit`, `heavyActive`, `lightsLimit`,
-  `lightsActive`, `instanceLimit(name)`, `instances(name)`, `particleLimit(name)`,
-  `particles(name)`); `pools` has `scratch` (Vector3 / Quaternion / Matrix4 / Color rings),
+  lights, pools, spawns }`. `budgets` is read-only (`heavyLimit` / `maxHeavy`, `heavyActive`,
+  `maxRealLights`, `lightsLimit`, `lightsActive`, `engines` (every engine's live `{ instances,
+  particles }` caps), `instanceLimit(name)`, `instances(name)`, `particleLimit(name)`,
+  `particles(name)`); the director reads this same view, so the two never disagree; `pools` has `scratch` (Vector3 / Quaternion / Matrix4 / Color rings),
   `createSlotAllocator`, `createObjectPool`, `createInstancedPool` and `createMeshPool`; `spawns` is
   the SpawnManager (the setPiece engine orchestrates through it).
 - **Mesh lifetime in three r184.** A RenderObject listens for its material's `dispose` event, which
@@ -1174,13 +1183,14 @@ flight clock, `state.time.elapsed`.
 ### Event director (`src/spawns/director.js`)
 
 `createDirector(options)` takes its inputs as functions and objects so the lab can run it headless;
-`createGameDirector(ctx, { spawnManager, presets, placement?, isDiscovered? })` wires it to the game
-(the flight clock, `state.player`, `state.time`, the camera frustum, the weather model, the world's
-`heightAt` / `biomeAt`, `ctx.perf` and the bus). The spawns system creates it once its SpawnManager
-exists and calls `update()` every frame; it ticks at 2 Hz on the half second of flight time.
+`createGameDirector(ctx, { spawnManager, presets, placement?, isDiscovered?, budgets?, devHooks? })`
+wires it to the game (the flight clock, `state.player`, `state.time`, the camera frustum, the weather
+model, the world's `heightAt` / `biomeAt`, `ctx.perf` and the bus). The spawns system creates it
+once its SpawnManager runs and calls `update()` every frame; it ticks at 2 Hz on the half second of
+flight time. It is `ctx.systems.spawns.director`.
 
-- **Pacing.** The drought clock restarts on a discovery, a site coming into view
-  (`spawns:siteInView`), an activation and every tick a spawn the director started is in view. At a
+- **Pacing.** The drought clock restarts on a discovery, a spawn coming into view
+  (`spawns:inView`, or `spawns:siteInView`), an activation and every tick a spawn the director started is in view. At a
   seeded 60-70 s it activates the best eligible candidate ahead, 3-8 km out, of the common tier or a
   due tier; from 75 s uncommon too, from 80 s rare too and up to 60 degrees off the heading.
 - **Rarity.** Per-tier due times drawn from common 150-300 s, uncommon 600-900 s, rare
@@ -1189,15 +1199,18 @@ exists and calls `update()` every frame; it ticks at 2 Hz on the half second of 
   row.
 - **Ahead.** Scheduled activations within 45 degrees of the heading, inside the preset's
   `filters.minDistance` / `maxDistance` band (default 3-8 km); never behind.
-- **Budgets** (`DIRECTOR_BUDGETS`, which the SpawnManager reads as `ctx.budgets`): at most 2 heavy,
-  per-engine instance and particle caps (particles counted full at 85 % of the cap), 8 real lights
-  (a lighting preset needs 2 free). A refused activation leaves its candidate alone for the rest of
-  its bucket.
+- **Budgets.** In the game the director reads the SpawnManager's budget view (`manager.budgets`):
+  the heavy limit (2), every engine's caps (from `engine.budget`, else `DIRECTOR_BUDGETS.engines`)
+  and the real-light cap (4). The lab runs on `DIRECTOR_BUDGETS` itself (8 real lights). Particles
+  count as full at 85 % of the cap, and a lighting preset needs 2 lights free. A refused activation
+  leaves its candidate alone for the rest of its bucket.
 - **Lifetimes.** An event ends when its engine sets `ended`, or at its seeded duration plus 60 s;
   beyond `despawn.distance + hysteresis` and out of view for `outOfViewSeconds` it is despawned.
 - **Load shedding.** The director registers the shedder `director`: level 1 defers heavy
-  activations, levels 2 and 3 set `spawnManager.setLodBias(0.7)` and `(0.5)`. A headroom miss
-  defers heavy activations too.
+  activations, levels 2 and 3 set `spawnManager.setLodBias(0.7)` and `(0.5)`. A level that would take
+  nothing away is refused (no heavy candidates and no live spawns for level 1, no live spawns for
+  levels 2 and 3, from `spawnManager.spawnCount()`), so with no content the governor behaves as in
+  Phase 1. A headroom miss defers heavy activations too.
 - **Site active states.** A site preset with `activeState: { duration }` (the volcano's eruption)
   gets bucketed candidates at its sites from `placement.sitesNear`; the director activates one with
   `spawnManager.activate(presetId, { source: 'director', site, ... })`.
@@ -1205,12 +1218,15 @@ exists and calls `update()` every frame; it ticks at 2 Hz on the half second of 
   (active, dormant, site or discovered), etaSeconds }]`, nearest first; `getState()` for the
   debugger (drought, pacing record, budgets, heavy count, shed level, tier due times, cooldowns,
   candidates with their rejection reasons, active spawns, the last 50 log entries and the log hash);
-  `getLog()` (every `{ time, presetId, candidateId, reason }`); `forceSpawn(presetId, { distance,
-  bearingOffset })` in dev builds and with `?debug=1`; `shedder`; `dispose()`.
+  `getLog()` (every `{ time, presetId, candidateId, reason }`); `hasPreset(presetId)`;
+  `forceSpawn(presetId, { distance, bearingOffset, force })` in dev builds and with `?debug=1` or
+  `?dev=1`; `shedder`; `dispose()`. Sites of presets it does not know (the terrain test's fixtures)
+  are left out of `getNearby`.
 - **SpawnManager calls.** `activate(presetId, { position: { x, y, z }, heading, source, seed,
   duration, site? })`, `deactivate(id, reason)` with reasons `lifetime`, `despawn` and `dispose`,
   `getActive()`, `getInstance(id)` (`anchor`, `radius`, `heavy`, `ended`), `getStats()` as
-  `{ engines: { name: { instances, particles } }, total: { lights } }`, and `setLodBias(bias)`.
+  `{ engines: { name: { instances, particles } }, total: { lights } }`, `setLodBias(bias)`,
+  `spawnCount()`, and `canActivate`, `getSiteSpawn` / `setSiteActive` when offered.
 
 ### UI (`ctx.systems.ui`)
 
