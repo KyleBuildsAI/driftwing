@@ -1072,6 +1072,15 @@ export function createSkySystem(ctx) {
       return skyBase(directionNode);
     },
     addModifier,
+    /**
+     * The live folded modifier record, for systems that follow the sky every frame (the cloud
+     * palette): { active, sunIntensity, ambient, fogDensity, darkness, stars, overcast, fogColor,
+     * fogColorAmount, skyTint, skyTintAmount }. Read only, and never kept: it changes every frame.
+     * When active is false every value is neutral.
+     */
+    getModifierLevels() {
+      return combined;
+    },
     /** The modifiers folded together as of the last frame, for the debugger and tests (a copy). */
     getModifierState() {
       return {

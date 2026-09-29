@@ -126,6 +126,10 @@ async function boot() {
     windStrength: uniform(1),
     playerPosition: uniform(new THREE.Vector3()),
     waterLevel: uniform(CONFIG.WATER_LEVEL),
+    // Cloud optics (0..1), driven by the celestial engine: the glory and the full-circle rainbow
+    // around the antisolar point on every cloud puff (src/render/cloudShading.js).
+    cloudGlory: uniform(0),
+    cloudBow: uniform(0),
   };
 
   // ---- World + spawn ------------------------------------------------------------------
