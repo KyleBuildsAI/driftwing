@@ -456,8 +456,10 @@ function resolveGorge(stamp, spec, random, context) {
   const groundA = context.baseHeight(anchorA.x, anchorA.z);
   const groundB = context.baseHeight(anchorB.x, anchorB.z);
   const rimY = Math.max((groundA + groundB) / 2, context.waterLevel + 8);
-  // The pads level the anchors to the rim: on a slope that would raise pillars, so it does not fit.
-  stamp.fits = Math.abs(groundA - rimY) <= GORGE_ANCHOR_TOLERANCE && Math.abs(groundB - rimY) <= GORGE_ANCHOR_TOLERANCE;
+  // The pads level the anchors to the rim: on a slope that would raise pillars, so it does not fit;
+  // nor does ground too low to hold the gorge's full depth above the sea.
+  stamp.fits = Math.abs(groundA - rimY) <= GORGE_ANCHOR_TOLERANCE && Math.abs(groundB - rimY) <= GORGE_ANCHOR_TOLERANCE
+    && rimY - depth >= context.waterLevel + 2;
   const floorY = Math.max(rimY - depth, context.waterLevel + 2);
   stamp.length = length;
   stamp.halfWidth = halfWidth;

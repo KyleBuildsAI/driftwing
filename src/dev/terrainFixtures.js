@@ -109,7 +109,7 @@ export const FIXTURE_ROPE_BRIDGE = Object.freeze({
     minSpacing: 8000,
     biomes: ['meadows', 'pine', 'dunes'],
     surface: 'land',
-    terrain: { minHeight: 40, relief: 'any' },
+    terrain: { minHeight: 90, relief: 'any' },
     clearance: 300,
   },
   filters: { biomes: null, timeOfDay: null, altitude: { min: 0, max: 3000 }, weather: null, surface: 'land', minDistance: 0, maxDistance: 20000 },
