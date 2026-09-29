@@ -9,6 +9,7 @@ import { createAssistDefaults } from './flight/assistDefaults.js';
 import { createAudioSystem } from './audio/AudioEngine.js';
 import { createBirdSystem } from './render/birds.js';
 import { createCameraSystem } from './camera/cameraManager.js';
+import { createCelestialEngine } from './spawns/engines/celestialEngine.js';
 import { createCloudSystem } from './render/clouds.js';
 import { createCopilotSystem } from './copilot/copilot.js';
 import { createDebugWindSystem } from './dev/debugWind.js';
@@ -32,6 +33,7 @@ import { createUISystem } from './ui/ui.js';
 import { createWaterSystem } from './render/water.js';
 import { createWaypointSystem } from './gameplay/waypoints.js';
 import { createWeatherSystem } from './spawns/weather.js';
+import { createWeatherVolumeEngine } from './spawns/engines/weatherVolumeEngine.js';
 import { createWindOverlaySystem } from './dev/windOverlay.js';
 import { createWorldGen } from './world/worldgen.js';
 import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName } from './core/util.js';
@@ -55,7 +57,10 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
  * The spawn engines (src/spawns/engines/, contract section 3): one factory per engine, registered
  * with the spawns system before its prewarm hook initialises them.
  */
-const SPAWN_ENGINE_FACTORIES = Object.freeze([]);
+const SPAWN_ENGINE_FACTORIES = Object.freeze([
+  createWeatherVolumeEngine,
+  createCelestialEngine,
+]);
 
 /**
  * Dev-only verification harnesses: ?test=1 (flight test), ?test=hotas (HOTAS pipeline test) and
