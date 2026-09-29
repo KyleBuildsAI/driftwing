@@ -59,6 +59,12 @@ export const EVENT_TYPES = Object.freeze({
   weatherChanged: { state: WEATHER_STATES, previous: WEATHER_STATES, region: 'string' },
   /** An achievement was earned (V-formation, Thread the Needle, ...). */
   achievement: { id: 'string', title: 'string' },
+  /**
+   * Wildlife falls silent or wakes again (a total solar eclipse). source names the holder (a spawn
+   * id); quiet true starts its hold, false ends it. Birds settle and fauna stop calling while any
+   * source holds quiet; the v1 birds and the audio cues listen.
+   */
+  wildlifeQuiet: { source: 'string', quiet: 'boolean' },
 });
 
 function describeFailure(type, payload) {
