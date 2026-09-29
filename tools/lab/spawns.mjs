@@ -22,6 +22,8 @@
 //                windSourceRemoved); its real light returns to the pool
 //   leaks        an engine that forgets its wind source and light is cleaned up and reported
 //   lifetime     ended events end, expired events end, director events despawn out of range and view
+//   memory       every create and dispose is logged with its readings; a long-lived spawn whose log
+//                entry was reused by 64 newer spawns does not overwrite the newer entry
 //   allocation   after a JIT warm-up, 100 000 manager frames with 40 spawns (markers, lures, a wind
 //                column, a moving camera) allocate nothing: no garbage collection runs and the young
 //                generation grows by under 0.1 byte per frame (the camera alone measures about 0.03)
@@ -431,6 +433,29 @@ function testLifetime() {
   check('lifetime', 'a debug spawn is exempt from the despawn rule', Boolean(lab.manager.getInstance(debugId)));
 }
 
+// ---- memory ---------------------------------------------------------------------------------------------------------------------
+function testMemoryLog() {
+  const lab = createLab();
+  const longLived = lab.spawnAhead('testMarker', 500);
+  const newer = [];
+  for (let index = 0; index < 70; index++) {
+    const id = lab.spawnAhead('testMarker', 600 + index);
+    newer.push(id);
+    lab.manager.deactivate(id, 'test');
+  }
+  // The long-lived spawn's entry now belongs to a newer spawn; its dispose must leave that alone.
+  // The ring holds 64 entries: the long-lived spawn took the first, the 64th newer spawn took it over.
+  const reused = lab.manager.getStats().memory.log.find((entry) => entry.id === newer[63]);
+  lab.memory.geometries = 99;
+  lab.manager.deactivate(longLived, 'test');
+  lab.memory.geometries = 0;
+  const memory = lab.manager.getStats().memory;
+  const after = memory.log.find((entry) => entry.id === reused?.id);
+  check('memory', 'every create and dispose is counted', memory.created === 71 && memory.disposed === 71, `${memory.created} created, ${memory.disposed} disposed`);
+  check('memory', 'the log keeps the last 64 spawns, each disposed with its readings', memory.log.length === 64 && memory.log.every((entry) => entry.disposed && entry.afterDispose !== null && entry.afterCreate !== null));
+  check('memory', 'the long-lived spawn did not overwrite the newer entry it lost', Boolean(after) && !memory.log.some((entry) => entry.id === longLived) && after.afterDispose.geometries === 0, after ? `newer entry ${after.id} still reads ${after.afterDispose.geometries} geometries after dispose` : 'entry missing');
+}
+
 // ---- allocation ---------------------------------------------------------------------------------------------------------------------
 async function testAllocation() {
   const lab = createLab();
@@ -487,6 +512,7 @@ testSites();
 testWind();
 testLeaks();
 testLifetime();
+testMemoryLog();
 
 const unexpectedErrors = consoleErrors.filter((line) => !/left wind source|holding \d+ real light/.test(line));
 check('console', 'no unexpected console errors (event payloads valid)', unexpectedErrors.length === 0, unexpectedErrors.join(' | '));

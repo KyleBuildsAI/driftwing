@@ -51,7 +51,7 @@ const DEFAULT_FLASH = Object.freeze({ anvil: 1.4 });
  */
 function createLureMaterial({ THREE, TSL, uniforms, skyColorNode, shapeAttribute, tintAttribute, glowAttribute }) {
   const {
-    Fn, If, float, vec2, vec3, vec4, uv, abs, max, min, mix, pow, sqrt, exp, sin, floor, dot, normalize,
+    Fn, If, float, vec3, vec4, uv, abs, max, min, mix, pow, sqrt, exp, sin, floor, dot, normalize,
     smoothstep, saturate, clamp, hash, mx_noise_float, positionWorld, cameraPosition, instancedDynamicBufferAttribute,
   } = TSL;
   const lureShape = instancedDynamicBufferAttribute(shapeAttribute, 'vec4');

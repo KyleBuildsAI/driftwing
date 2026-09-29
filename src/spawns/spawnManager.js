@@ -26,7 +26,7 @@
 // needs a visibility answer, a few per frame and at most every VISIBILITY_RETRY_FRAMES per spawn, at
 // whole-metre coordinates (passed unboxed). The view cone is built every frame from the camera's own
 // position, quaternion and lens.
-import { validateInstance } from './engineRegistry.js';
+import { LOD_TIERS, validateInstance } from './engineRegistry.js';
 import { createLureSystem } from './lure.js';
 import { createLightPool } from './lightPool.js';
 import { createInstancedPool, createMeshPool, createObjectPool, createScratch, createSlotAllocator } from './pools.js';
@@ -56,7 +56,6 @@ const EVENT_GRACE_SECONDS = 45;
 const MEMORY_LOG_SIZE = 64;
 /** Spawns alive at once (far above the budgets; activations past it are refused as 'capacity'). */
 export const MAX_SPAWNS = 512;
-const TIER_NAMES = Object.freeze(['near', 'mid', 'far']);
 const DEG = Math.PI / 180;
 
 /** 32-bit FNV-1a hash of a string (seeds from ids). */
@@ -167,7 +166,7 @@ export function createSpawnManager(options) {
 
   // ---- Memory accounting ------------------------------------------------------------------------
   const memoryLog = Array.from({ length: MEMORY_LOG_SIZE }, () => ({
-    id: '', presetId: '', disposed: false,
+    id: '', presetId: '', serial: 0, disposed: false,
     before: createMemoryReading(), afterCreate: createMemoryReading(), afterDispose: createMemoryReading(),
   }));
   let memoryCursor = 0;
@@ -404,13 +403,25 @@ export function createSpawnManager(options) {
     return null;
   }
 
-  function nextMemoryEntry(id, presetId) {
+  function nextMemoryEntry(id, presetId, serial) {
     const entry = memoryLog[memoryCursor];
     memoryCursor = (memoryCursor + 1) % MEMORY_LOG_SIZE;
     entry.id = id;
     entry.presetId = presetId;
+    entry.serial = serial;
     entry.disposed = false;
     return entry;
+  }
+
+  /**
+   * Records a spawn's memory after its dispose. The log is a ring: a long-lived spawn's entry may
+   * have been handed to a newer spawn meanwhile (the serial tells), and then it is left alone.
+   */
+  function recordDisposed(record) {
+    const entry = record.memory;
+    if (entry.serial !== record.serial) return;
+    readMemory(entry.afterDispose);
+    entry.disposed = true;
   }
 
   function disposeParts(record) {
@@ -485,7 +496,8 @@ export function createSpawnManager(options) {
       inView: false,
       seenInView: false,
       lureSlot: -1,
-      memory: nextMemoryEntry(id, presetId),
+      serial,
+      memory: nextMemoryEntry(id, presetId, serial),
     };
     readMemory(record.memory.before);
     lightPool.currentOwner = record;
@@ -521,8 +533,7 @@ export function createSpawnManager(options) {
       console.error(`[DRIFTWING] spawn "${presetId}" failed to create`, error);
       record.parts = record.parts.filter((part) => part.instance && typeof part.instance === 'object');
       disposeParts(record);
-      readMemory(record.memory.afterDispose);
-      record.memory.disposed = true;
+      recordDisposed(record);
       return null;
     }
     lightPool.currentOwner = null;
@@ -534,8 +545,7 @@ export function createSpawnManager(options) {
         const counts = countersFor(part.engine.name);
         if (counts.particles + part.instance.particles > counts.budget.particles) {
           disposeParts(record);
-          readMemory(record.memory.afterDispose);
-          record.memory.disposed = true;
+          recordDisposed(record);
           return refuse('particles');
         }
       }
@@ -552,7 +562,7 @@ export function createSpawnManager(options) {
     outOfView[record.slot] = 0;
     nextVisibilityFrame[record.slot] = 0;
     record.tierRank = tierRankFor(distances[record.slot], preset.lod);
-    const tier = TIER_NAMES[record.tierRank];
+    const tier = LOD_TIERS[record.tierRank];
     for (let index = 0; index < record.parts.length; index++) {
       const part = record.parts[index];
       part.instance.tier = tier;
@@ -602,8 +612,7 @@ export function createSpawnManager(options) {
     record.lureSlot = -1;
     spawnSlots.free(record.slot);
     disposeParts(record);
-    readMemory(record.memory.afterDispose);
-    record.memory.disposed = true;
+    recordDisposed(record);
     memoryDisposed++;
     counters.ended++;
     bus.emitTyped('spawnEnded', { id: record.id, presetId: record.presetId, reason });
@@ -731,7 +740,7 @@ export function createSpawnManager(options) {
       record.tierRank = rank;
       counters.tierChanges++;
       if (record.lureSlot >= 0) lures.setVisible(record.lureSlot, rank === 2);
-      const tier = TIER_NAMES[rank];
+      const tier = LOD_TIERS[rank];
       for (let partIndex = 0; partIndex < record.parts.length; partIndex++) {
         const part = record.parts[partIndex];
         part.instance.tier = tier;
@@ -831,7 +840,7 @@ export function createSpawnManager(options) {
       siteId: record.siteId,
       heavy: record.preset.heavy,
       active: record.active,
-      tier: TIER_NAMES[record.tierRank],
+      tier: LOD_TIERS[record.tierRank],
       distance: Math.round(distances[record.slot]),
       inView: record.inView,
       discovered: discovered.has(record.discoveryKey),
@@ -878,7 +887,7 @@ export function createSpawnManager(options) {
       const entry = memoryLog[(memoryCursor + offset) % MEMORY_LOG_SIZE];
       if (!entry.id) continue;
       log.push({
-        id: entry.id, presetId: entry.presetId, disposed: entry.disposed,
+        id: entry.id, presetId: entry.presetId, serial: entry.serial, disposed: entry.disposed,
         before: { ...entry.before }, afterCreate: { ...entry.afterCreate }, afterDispose: entry.disposed ? { ...entry.afterDispose } : null,
       });
     }
