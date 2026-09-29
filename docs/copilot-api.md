@@ -137,7 +137,7 @@ Numbers are rounded as shown, and a value that cannot be read is sent as `0` or 
 | `waypoint` | `{ x, z, label, distance, bearing }` or `null` | active waypoint (distance in m) |
 | `ringCourse` | `{ active, total, passed, streak, bestStreak, elapsed, nextIndex, nextRingDistance?, ... }` | ring course |
 | `nearbyLandmarks` | up to 5 `{ name, type, x, z, distance, bearing, discovered }` | landmarks within 6 km |
-| `journal` | object or `null` | `{ landmarksFound: [...], biomesVisited: [...], distanceFlown, ... }` |
+| `journal` | object or `null` | `{ landmarksFound: [...], biomesVisited: [...], distanceFlown, ..., spawnsFound: [{ id, presetId, name, category, kind, x, z, dayTime, foundAt, ... }], collection: { found, total }, records: { stats, achievements, bestLanding } }` |
 
 ### v2 fields
 
