@@ -179,21 +179,28 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t);
 }
 
-/** Smooth seeded noise in about [-1, 1] for the turbulence gusts (spatial wavelengths 25-120 m). */
-function gustNoise(time, x, z, phase, channel) {
-  const offset = phase + channel * 2.39996;
-  return 0.5 * Math.sin(time * 1.9 + x * 0.061 + offset)
-    + 0.3 * Math.sin(time * 3.7 - z * 0.093 + offset * 1.7)
-    + 0.2 * Math.sin(time * 6.1 + (x + z) * 0.147 + offset * 2.3);
-}
+/**
+ * The gust inputs of the sample being computed: [time, sigma (m/s)]. Doubles cross into addGusts
+ * through this array, not as arguments (V8 boxes a double passed to a call it does not inline).
+ */
+const gustInput = new Float64Array(2);
 
-/** Adds the turbulence gusts of intensity sigma (m/s) at (x, z) to the result velocity. */
-function addGusts(result, frame, time, x, z, sigma) {
+/**
+ * Adds the turbulence gusts (smooth seeded noise in about [-1, 1] per axis, spatial wavelengths
+ * 25-120 m) of intensity gustInput[1] m/s at pos and time gustInput[0] to the result velocity.
+ */
+function addGusts(result, frame, pos) {
+  const sigma = gustInput[1];
   if (sigma <= 0) return;
+  const time = gustInput[0];
   const phase = frame[FRAME.PHASE];
-  result.vel.x += sigma * gustNoise(time, x, z, phase, 0);
-  result.vel.y += 0.6 * sigma * gustNoise(time, z, x, phase, 1);
-  result.vel.z += sigma * gustNoise(time, x + 311, z - 173, phase, 2);
+  const x = pos.x;
+  const z = pos.z;
+  const offsetY = phase + 2.39996;
+  const offsetZ = phase + 4.79992;
+  result.vel.x += sigma * (0.5 * Math.sin(time * 1.9 + x * 0.061 + phase) + 0.3 * Math.sin(time * 3.7 - z * 0.093 + phase * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z) * 0.147 + phase * 2.3));
+  result.vel.y += 0.6 * sigma * (0.5 * Math.sin(time * 1.9 + z * 0.061 + offsetY) + 0.3 * Math.sin(time * 3.7 - x * 0.093 + offsetY * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z) * 0.147 + offsetY * 2.3));
+  result.vel.z += sigma * (0.5 * Math.sin(time * 1.9 + (x + 311) * 0.061 + offsetZ) + 0.3 * Math.sin(time * 3.7 - (z - 173) * 0.093 + offsetZ * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z + 138) * 0.147 + offsetZ * 2.3));
 }
 
 // ---- Samplers (each returns result, written in place) -----------------------------------------
@@ -224,8 +231,9 @@ function createRankineSampler(p, frame, result) {
     const outer = 1 - smoothstep(0.75 * inflowRadius, inflowRadius, radius);
     // Rankine: solid body inside the core, 1/r outside.
     const tangential = p.maxTangential * (radius < core ? radius / core : core / radius) * outer;
-    const inflowShape = smoothstep(0.5 * core, 1.6 * core, radius) * (1 - smoothstep(0.4 * inflowRadius, inflowRadius, radius));
-    const inflow = p.inflowSpeed * inflowShape * (0.35 + 0.65 * Math.min(1, (2 * core) / radius)) * (1 - smoothstep(0.35, 0.85, heightShare));
+    // The pull reaches most of the inflow radius (about 40 % of inflowSpeed at 2/3 of it) and fades out at it.
+    const inflowShape = smoothstep(0.5 * core, 1.6 * core, radius) * (1 - smoothstep(0.55 * inflowRadius, inflowRadius, radius));
+    const inflow = p.inflowSpeed * inflowShape * (0.45 + 0.55 * Math.min(1, (2 * core) / radius)) * (1 - smoothstep(0.35, 0.85, heightShare));
     const coreShare = radius / (1.1 * core);
     const ringShare = (radius - 2.8 * core) / (1.2 * core);
     const liftProfile = smoothstep(-10, 0.15 * top, height) * (1 - smoothstep(0.9, 1.1, heightShare));
@@ -238,7 +246,9 @@ function createRankineSampler(p, frame, result) {
     const turbulenceShare = (radius / (2.2 * core));
     const turbulence = p.turbulence * Math.max(Math.exp(-turbulenceShare * turbulenceShare), 0.45 * (1 - smoothstep(0.3 * inflowRadius, inflowRadius, radius))) * vertical * Math.min(1, strength);
     result.turbulence = turbulence;
-    addGusts(result, frame, time, pos.x, pos.z, turbulence * p.gust * Math.min(1.5, strength));
+    gustInput[0] = time;
+    gustInput[1] = turbulence * p.gust * Math.min(1.5, strength);
+    addGusts(result, frame, pos);
     return result;
   };
 }
@@ -274,7 +284,9 @@ function createUpdraftSampler(p, frame, result) {
     const edge = smoothstep(0.6, 1, share) * (1 - smoothstep(1, ringOuter, share));
     const turbulence = p.turbulence * Math.max(0.6 * core, edge) * vertical * Math.min(1, strength);
     result.turbulence = turbulence;
-    addGusts(result, frame, time, pos.x, pos.z, turbulence * p.gust);
+    gustInput[0] = time;
+    gustInput[1] = turbulence * p.gust;
+    addGusts(result, frame, pos);
     return result;
   };
 }
@@ -313,7 +325,9 @@ function createDownburstSampler(p, frame, result) {
     const frontShare = (radius - front) / (0.35 * core);
     const turbulence = p.turbulence * Math.max(0.5 * coreShape * sinking, Math.exp(-frontShare * frontShare) * (1 - smoothstep(2 * p.depth, 4 * p.depth, height)), 0.4 * outflowShape * layer) * Math.min(1, strength);
     result.turbulence = turbulence;
-    addGusts(result, frame, time, pos.x, pos.z, turbulence * p.gust);
+    gustInput[0] = time;
+    gustInput[1] = turbulence * p.gust;
+    addGusts(result, frame, pos);
     return result;
   };
 }
@@ -348,7 +362,9 @@ function createWakeSampler(p, frame, result) {
     result.vel.z = -dirZ * deficit;
     const turbulence = p.turbulence * shape * Math.min(1, strength);
     result.turbulence = turbulence;
-    addGusts(result, frame, time, pos.x, pos.z, turbulence * p.gust);
+    gustInput[0] = time;
+    gustInput[1] = turbulence * p.gust;
+    addGusts(result, frame, pos);
     return result;
   };
 }
@@ -438,7 +454,9 @@ function createJetStreamSampler(p, frame, result, path) {
     // Shear turbulence at the tube's edge, a little in its core.
     const turbulence = p.turbulence * (0.15 * core + smoothstep(0.45, 0.9, share) * (1 - smoothstep(0.95, 1.25, share))) * endTaper * Math.min(1, strength);
     result.turbulence = turbulence;
-    addGusts(result, frame, time, pos.x, pos.z, turbulence * p.gust);
+    gustInput[0] = time;
+    gustInput[1] = turbulence * p.gust;
+    addGusts(result, frame, pos);
     return result;
   };
 }
@@ -473,7 +491,9 @@ function createSlipstreamSampler(p, frame, result) {
     // The body's tip vortices churn the lane's edges.
     const turbulence = p.turbulence * (0.3 * core + smoothstep(0.6, 1, share) * (1 - smoothstep(1, 1.4, share))) * alongShape * Math.min(1, strength);
     result.turbulence = turbulence;
-    addGusts(result, frame, time, pos.x, pos.z, turbulence * p.gust);
+    gustInput[0] = time;
+    gustInput[1] = turbulence * p.gust;
+    addGusts(result, frame, pos);
     return result;
   };
 }
@@ -515,7 +535,9 @@ function createWaveLiftSampler(p, frame, result) {
     result.vel.y = lift * strength;
     const turbulence = Math.max(p.rotorTurbulence * rotor, p.smoothTurbulence * envelope * waveVertical) * Math.min(1, strength);
     result.turbulence = turbulence;
-    addGusts(result, frame, time, pos.x, pos.z, turbulence * p.gust);
+    gustInput[0] = time;
+    gustInput[1] = turbulence * p.gust;
+    addGusts(result, frame, pos);
     return result;
   };
 }
@@ -564,7 +586,9 @@ function createGustFrontSampler(p, frame, result) {
     const edgeShare = ahead / (0.8 * width);
     const turbulence = p.turbulence * Math.max(Math.exp(-edgeShare * edgeShare) * (1 - smoothstep(0.7 * p.liftTop, p.liftTop, height)), 0.45 * behindShape * layer) * ends * Math.min(1, strength);
     result.turbulence = turbulence;
-    addGusts(result, frame, time, pos.x, pos.z, turbulence * p.gust);
+    gustInput[0] = time;
+    gustInput[1] = turbulence * p.gust;
+    addGusts(result, frame, pos);
     return result;
   };
 }
@@ -597,7 +621,9 @@ function createCurtainSampler(p, frame, result) {
     result.vel.y = -p.downdraft * sheet * vertical * strength;
     const turbulence = p.turbulence * Math.max(sheet * (1 - smoothstep(0.9 * p.top, p.top, height)), 0.6 * spill) * Math.min(1, strength);
     result.turbulence = turbulence;
-    addGusts(result, frame, time, pos.x, pos.z, turbulence * p.gust);
+    gustInput[0] = time;
+    gustInput[1] = turbulence * p.gust;
+    addGusts(result, frame, pos);
     return result;
   };
 }
@@ -615,11 +641,18 @@ const SAMPLERS = Object.freeze({
 });
 
 // ---- Bounds --------------------------------------------------------------------------------------
+/** The footprint being written (doubles cross into the helpers through it, not as arguments). */
+const extent = new Float64Array(5);
+
 /**
  * Writes the bounds of an oriented footprint into bounds.min / max: along the direction from
- * alongMin to alongMax, across it from -halfWidth to halfWidth, heights low..high above the anchor.
+ * extent[0] to extent[1], across it from -extent[2] to extent[2], heights extent[3]..extent[4]
+ * above the anchor.
  */
-function orientedBounds(bounds, frame, alongMin, alongMax, halfWidth, low, high) {
+function orientedBounds(bounds, frame) {
+  const alongMin = extent[0];
+  const alongMax = extent[1];
+  const halfWidth = extent[2];
   const x = frame[FRAME.X];
   const z = frame[FRAME.Z];
   const dirX = frame[FRAME.DIR_X];
@@ -642,104 +675,146 @@ function orientedBounds(bounds, frame, alongMin, alongMax, halfWidth, low, high)
   bounds.max.x = maxX;
   bounds.min.z = minZ;
   bounds.max.z = maxZ;
-  bounds.min.y = frame[FRAME.Y] + low;
-  bounds.max.y = frame[FRAME.Y] + high;
+  bounds.min.y = frame[FRAME.Y] + extent[3];
+  bounds.max.y = frame[FRAME.Y] + extent[4];
 }
 
-function circleBounds(bounds, frame, radius, low, high) {
+/** Writes a square footprint of radius extent[2] around the anchor, heights extent[3]..extent[4]. */
+function circleBounds(bounds, frame) {
+  const radius = extent[2];
   bounds.min.x = frame[FRAME.X] - radius;
   bounds.max.x = frame[FRAME.X] + radius;
   bounds.min.z = frame[FRAME.Z] - radius;
   bounds.max.z = frame[FRAME.Z] + radius;
-  bounds.min.y = frame[FRAME.Y] + low;
-  bounds.max.y = frame[FRAME.Y] + high;
+  bounds.min.y = frame[FRAME.Y] + extent[3];
+  bounds.max.y = frame[FRAME.Y] + extent[4];
 }
 
 /**
- * Writes the source's current bounds (from its frame) into source.bounds, and returns its
- * horizontal reach from the anchor (m).
+ * Bounds writers, one per type (a single function over every type would see nine parameter shapes
+ * and lose its optimisation): each writes the source's current bounds (from its frame) into
+ * source.bounds and its horizontal reach from the anchor (m) into source.metrics[0] (written, not
+ * returned: a returned double is boxed).
  */
-function writeBounds(source) {
-  const { type, params: p, frame, bounds } = source;
-  switch (type) {
-    case 'rankine': {
-      const lean = Math.sqrt(frame[FRAME.A] * frame[FRAME.A] + frame[FRAME.B] * frame[FRAME.B]) + Math.sqrt(frame[FRAME.C] * frame[FRAME.C] + frame[FRAME.D] * frame[FRAME.D]);
-      const reach = Math.max(p.inflowRadius, p.coreRadius * 2) + lean;
-      circleBounds(bounds, frame, reach, -60, p.top * 1.05);
-      return reach;
+const BOUNDS_WRITERS = Object.freeze({
+  rankine(source) {
+    const { params: p, frame, bounds, metrics } = source;
+    const lean = Math.sqrt(frame[FRAME.A] * frame[FRAME.A] + frame[FRAME.B] * frame[FRAME.B]) + Math.sqrt(frame[FRAME.C] * frame[FRAME.C] + frame[FRAME.D] * frame[FRAME.D]);
+    const reach = Math.max(p.inflowRadius, p.coreRadius * 2) + lean;
+    extent[2] = reach;
+    extent[3] = -60;
+    extent[4] = p.top * 1.05;
+    circleBounds(bounds, frame);
+    metrics[0] = reach;
+  },
+  updraft(source) {
+    const { params: p, frame, bounds, metrics } = source;
+    const reach = p.radius * (1 + p.ringWidth) + Math.abs(p.lean) * Math.max(0, p.top - p.base);
+    extent[2] = reach;
+    extent[3] = p.base - 20;
+    extent[4] = p.top;
+    circleBounds(bounds, frame);
+    metrics[0] = reach;
+  },
+  downburst(source) {
+    const { params: p, frame, bounds, metrics } = source;
+    const reach = Math.max(frame[FRAME.A], p.coreRadius) + p.coreRadius * 0.6;
+    extent[2] = reach;
+    extent[3] = -40;
+    extent[4] = p.top;
+    circleBounds(bounds, frame);
+    metrics[0] = reach;
+  },
+  wake(source) {
+    const { params: p, frame, bounds, metrics } = source;
+    const halfWidth = 0.5 * p.width + p.spread * p.length;
+    extent[0] = -0.5 * p.width;
+    extent[1] = p.length;
+    extent[2] = halfWidth;
+    extent[3] = p.base - 10;
+    extent[4] = p.top;
+    orientedBounds(bounds, frame);
+    metrics[0] = Math.sqrt(p.length * p.length + halfWidth * halfWidth);
+  },
+  jetStream(source) {
+    const { params: p, frame, bounds, metrics } = source;
+    const path = source.path;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    let reach = 0;
+    for (let index = 0; index <= JET_SEGMENTS; index++) {
+      const px = path[index * 3];
+      const py = path[index * 3 + 1];
+      const pz = path[index * 3 + 2];
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+      if (pz < minZ) minZ = pz;
+      if (pz > maxZ) maxZ = pz;
+      const distance = Math.sqrt(px * px + pz * pz);
+      if (distance > reach) reach = distance;
     }
-    case 'updraft': {
-      const reach = p.radius * (1 + p.ringWidth) + Math.abs(p.lean) * Math.max(0, p.top - p.base);
-      circleBounds(bounds, frame, reach, p.base - 20, p.top);
-      return reach;
-    }
-    case 'downburst': {
-      const reach = Math.max(frame[FRAME.A], p.coreRadius) + p.coreRadius * 0.6;
-      circleBounds(bounds, frame, reach, -40, p.top);
-      return reach;
-    }
-    case 'wake': {
-      const halfWidth = 0.5 * p.width + p.spread * p.length;
-      orientedBounds(bounds, frame, -0.5 * p.width, p.length, halfWidth, p.base - 10, p.top);
-      return Math.sqrt(p.length * p.length + halfWidth * halfWidth);
-    }
-    case 'jetStream': {
-      const path = source.path;
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minY = Infinity;
-      let maxY = -Infinity;
-      let minZ = Infinity;
-      let maxZ = -Infinity;
-      let reach = 0;
-      for (let index = 0; index <= JET_SEGMENTS; index++) {
-        const px = path[index * 3];
-        const py = path[index * 3 + 1];
-        const pz = path[index * 3 + 2];
-        if (px < minX) minX = px;
-        if (px > maxX) maxX = px;
-        if (py < minY) minY = py;
-        if (py > maxY) maxY = py;
-        if (pz < minZ) minZ = pz;
-        if (pz > maxZ) maxZ = pz;
-        const distance = Math.sqrt(px * px + pz * pz);
-        if (distance > reach) reach = distance;
-      }
-      const margin = p.radius * 1.25;
-      bounds.min.x = frame[FRAME.X] + minX - margin;
-      bounds.max.x = frame[FRAME.X] + maxX + margin;
-      bounds.min.y = frame[FRAME.Y] + minY - margin;
-      bounds.max.y = frame[FRAME.Y] + maxY + margin;
-      bounds.min.z = frame[FRAME.Z] + minZ - margin;
-      bounds.max.z = frame[FRAME.Z] + maxZ + margin;
-      return reach + margin;
-    }
-    case 'slipstream': {
-      const growth = p.spread * p.length;
-      const halfWidth = (0.5 * p.width + growth) * 1.4;
-      const halfHeight = (0.5 * p.height + 0.5 * growth) * 1.4;
-      orientedBounds(bounds, frame, -p.offset - p.length, -p.offset + 0.1 * p.length, halfWidth, p.centerHeight - halfHeight, p.centerHeight + halfHeight);
-      return Math.abs(p.offset) + p.length + halfWidth;
-    }
-    case 'waveLift': {
-      const alongMin = p.startOffset - 0.5 * p.wavelength;
-      const alongMax = p.startOffset + p.crests * p.wavelength;
-      orientedBounds(bounds, frame, alongMin, alongMax, 0.5 * p.width, -30, p.top);
-      return Math.max(Math.abs(alongMin), Math.abs(alongMax)) + 0.5 * p.width;
-    }
-    case 'gustFront': {
-      const bulge = p.arcRadius > 0 ? p.arcRadius - Math.sqrt(Math.max(0, p.arcRadius * p.arcRadius - 0.25 * p.length * p.length)) : 0;
-      orientedBounds(bounds, frame, -p.depth - bulge, 3 * p.frontWidth, 0.5 * p.length, -40, Math.max(p.outflowTop, p.liftTop));
-      return Math.sqrt((p.depth + bulge) * (p.depth + bulge) + 0.25 * p.length * p.length);
-    }
-    case 'curtain': {
-      orientedBounds(bounds, frame, -p.reach, p.reach, 0.5 * p.length + p.thickness, -40, p.top);
-      return Math.sqrt(p.reach * p.reach + (0.5 * p.length + p.thickness) * (0.5 * p.length + p.thickness));
-    }
-    default:
-      throw new Error(`[DRIFTWING] unknown wind source type "${type}"`);
-  }
-}
+    const margin = p.radius * 1.25;
+    bounds.min.x = frame[FRAME.X] + minX - margin;
+    bounds.max.x = frame[FRAME.X] + maxX + margin;
+    bounds.min.y = frame[FRAME.Y] + minY - margin;
+    bounds.max.y = frame[FRAME.Y] + maxY + margin;
+    bounds.min.z = frame[FRAME.Z] + minZ - margin;
+    bounds.max.z = frame[FRAME.Z] + maxZ + margin;
+    metrics[0] = reach + margin;
+  },
+  slipstream(source) {
+    const { params: p, frame, bounds, metrics } = source;
+    const growth = p.spread * p.length;
+    const halfWidth = (0.5 * p.width + growth) * 1.4;
+    const halfHeight = (0.5 * p.height + 0.5 * growth) * 1.4;
+    extent[0] = -p.offset - p.length;
+    extent[1] = -p.offset + 0.1 * p.length;
+    extent[2] = halfWidth;
+    extent[3] = p.centerHeight - halfHeight;
+    extent[4] = p.centerHeight + halfHeight;
+    orientedBounds(bounds, frame);
+    metrics[0] = Math.abs(p.offset) + p.length + halfWidth;
+  },
+  waveLift(source) {
+    const { params: p, frame, bounds, metrics } = source;
+    const alongMin = p.startOffset - 0.5 * p.wavelength;
+    const alongMax = p.startOffset + p.crests * p.wavelength;
+    extent[0] = alongMin;
+    extent[1] = alongMax;
+    extent[2] = 0.5 * p.width;
+    extent[3] = -30;
+    extent[4] = p.top;
+    orientedBounds(bounds, frame);
+    metrics[0] = Math.max(Math.abs(alongMin), Math.abs(alongMax)) + 0.5 * p.width;
+  },
+  gustFront(source) {
+    const { params: p, frame, bounds, metrics } = source;
+    const bulge = p.arcRadius > 0 ? p.arcRadius - Math.sqrt(Math.max(0, p.arcRadius * p.arcRadius - 0.25 * p.length * p.length)) : 0;
+    extent[0] = -p.depth - bulge;
+    extent[1] = 3 * p.frontWidth;
+    extent[2] = 0.5 * p.length;
+    extent[3] = -40;
+    extent[4] = Math.max(p.outflowTop, p.liftTop);
+    orientedBounds(bounds, frame);
+    metrics[0] = Math.sqrt((p.depth + bulge) * (p.depth + bulge) + 0.25 * p.length * p.length);
+  },
+  curtain(source) {
+    const { params: p, frame, bounds, metrics } = source;
+    extent[0] = -p.reach;
+    extent[1] = p.reach;
+    extent[2] = 0.5 * p.length + p.thickness;
+    extent[3] = -40;
+    extent[4] = p.top;
+    orientedBounds(bounds, frame);
+    metrics[0] = Math.sqrt(p.reach * p.reach + (0.5 * p.length + p.thickness) * (0.5 * p.length + p.thickness));
+  },
+});
 
 /**
  * A wind source of `type` for the WindField, driven by frame (FRAME_SIZE Float64Array the engine
@@ -754,6 +829,7 @@ export function createWindSource(THREE, { id, type, params, frame, kind = `spawn
   if (!(frame instanceof Float64Array) || frame.length < FRAME_SIZE) throw new TypeError('[DRIFTWING] a wind source needs a Float64Array frame of FRAME_SIZE');
   const result = { vel: new THREE.Vector3(), turbulence: 0 };
   const path = type === 'jetStream' ? buildJetPath(params, frame[FRAME.DIR_X], frame[FRAME.DIR_Z], frame[FRAME.PHASE]) : null;
+  const writeBounds = BOUNDS_WRITERS[type];
   const source = {
     id,
     type,
@@ -763,10 +839,14 @@ export function createWindSource(THREE, { id, type, params, frame, kind = `spawn
     path,
     result,
     bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
-    reach: 0,
+    metrics: new Float64Array(1),
+    /** Horizontal reach from the anchor (m), as of the last refreshBounds(). */
+    get reach() {
+      return source.metrics[0];
+    },
     sample: type === 'jetStream' ? factory(params, frame, result, path) : factory(params, frame, result),
     refreshBounds() {
-      source.reach = writeBounds(source);
+      writeBounds(source);
       return source.bounds;
     },
   };
