@@ -5,21 +5,25 @@ import { FLIGHT_ACTION_TYPES, createFlightGrammar, describeAirspeed, sanitizeFli
 import { buildFlightFields } from './flightState.js';
 import { createFlightActionHandlers, createOutcomeWaiter, helpLine, keyFor } from './flightActions.js';
 import { createFlightChatter } from './flightChatter.js';
-import { createCommandChips } from './commandChips.js';
+import { createCommandChips, createGuideChips } from './commandChips.js';
+import { TOUR_ACTION_TYPES, createTourGrammar, createTourGuide, formatDistance, sanitizeTourAction } from './tourGuide.js';
 
 /**
  * COPILOT "WREN".
  * - Copilot: the default local brain, a tolerant keyword grammar that turns a
  *   transcript into { speech, action } using only the flight-state snapshot. The v2
  *   aircraft grammar (craft, assists, views, chute, engine, relaunch, version one,
- *   calibration, airspeed, landings) lives in grammar.js.
+ *   calibration, airspeed, landings) lives in grammar.js, the tour guide ("what's
+ *   nearby", "take me to the ...", "find a thermal", "chase the storm", "next
+ *   discovery") in tourGuide.js.
  * - RemoteCopilot: POSTs { flightState, transcript } to an HTTP brain with an
  *   800 ms budget, validates the reply, and falls back to the local grammar
  *   ('local-fallback') on any timeout, network error, bad JSON or bad shape.
  * - createCopilotSystem: the action executor (ctx.executeAction), speech out
  *   (speechSynthesis after a user gesture), speech in (Web Speech API: the v1 mic
  *   toggle, and hold-to-talk on the copilotPTT action), the ui:command / ui:action /
- *   mic:toggle pipeline, and gentle chatter (flightChatter.js adds the v2 events).
+ *   mic:toggle pipeline, gentle chatter (flightChatter.js adds the v2 events), and the
+ *   tour guide's proactive callouts with their "yes" (tourGuide.js).
  * docs/copilot-api.md is the remote contract: request, flightState and every action.
  */
 export class Copilot {
@@ -27,6 +31,7 @@ export class Copilot {
     'waypoint', 'clearWaypoint', 'autopilot', 'time', 'ringCourse', 'cancelRingCourse',
     'find', 'describe', 'photoMode', 'journal', 'none',
     ...FLIGHT_ACTION_TYPES,
+    ...TOUR_ACTION_TYPES,
   ]);
 
   static FIND_TARGETS = Object.freeze([
@@ -188,6 +193,7 @@ export class Copilot {
         return action;
       }
       default:
+        if (TOUR_ACTION_TYPES.includes(type)) return sanitizeTourAction(raw);
         return FLIGHT_ACTION_TYPES.includes(type) ? sanitizeFlightAction(raw) : action;
     }
   }
@@ -264,10 +270,7 @@ export class Copilot {
   }
 
   static formatDistance(metres) {
-    if (!Number.isFinite(metres)) return 'some distance';
-    if (metres < 950) return `${Math.max(10, Math.round(metres / 10) * 10)} metres`;
-    const kilometres = metres / 1000;
-    return `${kilometres < 9.95 ? kilometres.toFixed(1) : Math.round(kilometres)} km`;
+    return formatDistance(metres);
   }
 
   /** "straight ahead" when the bearing is close to the heading, otherwise "to the north-east". */
@@ -315,6 +318,8 @@ export class Copilot {
 
   /** Settings intents that always stay on the device, whatever brain is active. */
   static localSettingIntent(text) {
+    if (/\b((tour[- ]guide )?callouts? off|no (more )?callouts|(stop|disable|mute) (the |your )?callouts|turn (the )?callouts off|turn off (the |your )?callouts)\b/.test(text)) return 'calloutsOff';
+    if (/\b((tour[- ]guide )?callouts? on|(enable|start) (the |your )?callouts|turn (the )?callouts on|turn on (the |your )?callouts)\b/.test(text)) return 'calloutsOn';
     if (/\b(voice off|mute (your )?voice|turn (your )?voice off|turn off (your )?voice|subtitles only|text only|stop speaking out loud)\b/.test(text)) return 'voiceOff';
     if (/\b(voice on|unmute|turn (your )?voice on|turn on (your )?voice|speak out loud|talk out loud)\b/.test(text)) return 'voiceOn';
     if (/\b(chatter on|talk to me more|keep me company|you can talk|more chatter|talk more)\b/.test(text)) return 'chatterOn';
@@ -518,9 +523,10 @@ export class Copilot {
     this.phraseMemory = new Map();
     const pick = (key, options) => this.pick(key, options);
     const flightGrammar = createFlightGrammar({ pick, helpLine: () => helpLine(ctx, pick) });
-    // Help first, then the v2 aircraft commands, then v1's grammar unchanged.
+    const tourGrammar = createTourGrammar({ listPresets: () => ctx.systems?.spawns?.manager?.listPresets?.() ?? [] });
+    // Help first, then the tour guide, the v2 aircraft commands, and v1's grammar unchanged.
     this.matchers = [
-      flightGrammar.matchHelp, ...flightGrammar.matchers, this.matchCancelCourse, this.matchAutopilotOff, this.matchClearWaypoint,
+      tourGrammar.matchHelp, flightGrammar.matchHelp, ...tourGrammar.matchers, ...flightGrammar.matchers, this.matchCancelCourse, this.matchAutopilotOff, this.matchClearWaypoint,
       this.matchPhotoMode, this.matchJournal, this.matchRingCourse,
       this.matchHome, this.matchFind, this.matchFlyToWaypoint, this.matchSetWaypoint, this.matchHeading,
       this.matchAltitude, this.matchAutopilotOn, this.matchStatus, this.matchGreeting, this.matchTime,
@@ -572,11 +578,21 @@ export class Copilot {
       case 'voiceOn':
         settings.set('copilotVoice', true);
         return { speech: this.pick('voiceOn', ['Voice on. Good to talk properly.', "Voice is back on. I'm here."]), action: null };
+      case 'calloutsOff':
+        settings.set('copilotCallouts', false);
+        return { speech: this.pick('calloutsOff', ["Callouts off. I won't point things out unless you ask.", "Understood. No more callouts; ask me what's nearby any time."]), action: null };
+      case 'calloutsOn':
+        settings.set('copilotCallouts', true);
+        return { speech: this.pick('calloutsOn', ["Callouts on. I'll tell you when something turns up.", "Glad to. I'll call out anything worth a detour."]), action: null };
       case 'chatterOn':
+        // "Talk to me more" brings back the chatter and the tour-guide callouts together.
         settings.set('copilotChatter', true);
+        settings.set('copilotCallouts', true);
         return { speech: this.pick('chatterOn', ["Happy to keep you company. I'll point things out now and then.", "Glad to. I'll mention anything lovely I see."]), action: null };
       default:
+        // "Be quiet" keeps its promise: no chatter and no callouts until asked.
         settings.set('copilotChatter', false);
+        settings.set('copilotCallouts', false);
         return { speech: this.pick('chatterOff', ["Understood. I'll only speak when you ask.", "Got it. I'll stay quiet unless you need me."]), action: null };
     }
   }
@@ -1006,6 +1022,7 @@ export function createCopilotSystem(ctx) {
     return {
       speak,
       cancel,
+      isSpeaking: () => Boolean(synth && (synth.speaking || synth.pending)),
       getVoiceName: () => chosenVoice?.name ?? null,
       getLastError: () => lastError,
     };
@@ -1244,6 +1261,7 @@ export function createCopilotSystem(ctx) {
   });
 
   let flightFieldsFailed = false;
+  let tourFieldsFailed = false;
   /** The core snapshot plus the visually honest place phrase and the v2 flight fields, for both brains. */
   function flightSnapshot() {
     const snapshot = ctx.getFlightState ? ctx.getFlightState() : {};
@@ -1256,6 +1274,14 @@ export function createCopilotSystem(ctx) {
       if (!flightFieldsFailed) {
         flightFieldsFailed = true;
         console.error('[DRIFTWING] WREN could not read the v2 flight state', error);
+      }
+    }
+    try {
+      Object.assign(snapshot, tourGuide.snapshotFields());
+    } catch (error) {
+      if (!tourFieldsFailed) {
+        tourFieldsFailed = true;
+        console.error('[DRIFTWING] WREN could not read the tour-guide state', error);
       }
     }
     return snapshot;
@@ -1492,6 +1518,20 @@ export function createCopilotSystem(ctx) {
     getView: () => currentView,
   }));
 
+  // The tour guide (tourGuide.js): its actions, the callouts and the "yes" that answers them.
+  const tourGuide = createTourGuide(ctx, {
+    succeed,
+    fail,
+    pick,
+    placeWaypoint,
+    engageFollow,
+    say,
+    directionPhrase: Copilot.directionPhrase,
+    /** WREN is answering, listening or speaking, or spoke within quietSeconds. */
+    isBusy: (quietSeconds) => asksQueued > 0 || voiceInput.isListening() || voiceOutput.isSpeaking() || state.time.realElapsed - lastLineAt < quietSeconds,
+  });
+  Object.assign(handlers, tourGuide.handlers);
+
   const actionFailed = (type, error) => {
     console.error(`[DRIFTWING] WREN action "${type}" failed`, error);
     return fail('Something went wrong there. Try again?');
@@ -1546,6 +1586,12 @@ export function createCopilotSystem(ctx) {
   }
 
   async function answerAsk(text, inputSource) {
+    // A "yes" or "no" to an open callout offer is answered here, whatever brain is active.
+    const offerReply = tourGuide.handleReply(Copilot.normalize(text));
+    if (offerReply) {
+      const spoken = say(offerReply.speech, 'local');
+      return { speech: spoken, action: null, source: 'local', ok: offerReply.ok, result: offerReply.speech };
+    }
     const activeBrain = brain;
     const isRemote = activeBrain instanceof RemoteCopilot;
     if (isRemote || inputSource === 'voice') bus.emit('copilot:listening', { state: 'thinking' });
@@ -1559,12 +1605,18 @@ export function createCopilotSystem(ctx) {
     return { speech, action: reply.action, source, ok: result ? result.ok : true, result: result ? result.text : '' };
   }
 
+  // The speech queue: asks are answered one at a time, in order; asksQueued counts the waiting ones
+  // so a callout never starts while an answer is on its way.
   let queue = Promise.resolve();
+  let asksQueued = 0;
   function ask(text, inputSource = 'text') {
+    asksQueued++;
     const job = queue.then(() => processAsk(text, inputSource)).catch((error) => {
       console.error('[DRIFTWING] WREN failed to answer', error);
       const speech = say('Sorry, I lost my train of thought. Could you say that again?', 'system');
       return { speech, action: null, source: 'system', ok: false, result: '' };
+    }).finally(() => {
+      asksQueued--;
     });
     queue = job;
     return job;
@@ -1621,6 +1673,7 @@ export function createCopilotSystem(ctx) {
 
   const flightChatter = createFlightChatter(ctx, { offerChatter, pick });
   const commandChips = createCommandChips(ctx);
+  const guideChips = createGuideChips(ctx, tourGuide);
 
   function flushPendingChatter() {
     const pending = chatter.pending;
@@ -1775,6 +1828,8 @@ export function createCopilotSystem(ctx) {
       if (!state.ready) return;
       watchSky();
       flightChatter.update(realDt);
+      tourGuide.update(realDt);
+      guideChips.update(realDt);
       flushPendingChatter();
     },
     ask,
@@ -1786,6 +1841,8 @@ export function createCopilotSystem(ctx) {
       return say(text, 'system');
     },
     getBrainName: () => (brain instanceof RemoteCopilot ? 'remote' : 'local'),
+    /** The tour guide: gatherEntries(radiusKm), getOffer(), snapshotFields() (the eval steps read these). */
+    tourGuide,
     getStats() {
       return {
         brain: brain instanceof RemoteCopilot ? 'remote' : 'local',
@@ -1802,6 +1859,8 @@ export function createCopilotSystem(ctx) {
         pendingOutcomes: outcomeWaiter.pending,
         flight: flightChatter.getStats(),
         quickChips: commandChips.getStats(),
+        tourGuide: tourGuide.getStats(),
+        guideChips: guideChips.getStats(),
       };
     },
   };

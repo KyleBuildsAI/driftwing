@@ -293,7 +293,7 @@ export function helpLine(ctx, pick) {
   const key = (actionId, fallback) => keyFor(ctx, actionId, fallback);
   const flying = `Aircraft: 'switch to the bush plane' (1-6, picker), 'switch to version one' (${key('versionToggle', 'F8')}, the V1 | V2 pill), 'assists up' (settings), 'cockpit view' (${key('viewForward', 'Num 8')}), 'third person' (${key('viewToggle1P3P', 'V')}), 'engine off' (${key('engineToggle', 'Z')}), 'deploy chute' (${key('chuteDeploy', 'U')}), 'relaunch' (${key('relaunch', 'Backspace')}), 'calibrate controls' (${key('controlsPanel', '.')}), 'airspeed', 'how was my landing'. Hold ${key('copilotPTT', '`')} to talk.`;
   return pick('help', [
-    `I find places, set waypoints, fly the autopilot, change the time and run ring courses. ${flying}`,
-    `Try 'find mountains', 'set a waypoint' or 'make it dusk'. ${flying}`,
+    `I guide and find places, fly the autopilot, set the time. Try 'guide help'. ${flying}`,
+    `Say 'guide help' for exploring, or 'find mountains', 'set a waypoint', 'make it dusk'. ${flying}`,
   ]);
 }
