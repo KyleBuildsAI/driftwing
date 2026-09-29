@@ -5,9 +5,9 @@
 // in node.
 //
 //   testMarker  instanced diamond markers (one shared InstancedMesh, a slot per instance) plus a
-//               per-instance halo ring with its own geometry, shown only at the near tier, so each
-//               instance really takes and returns GPU memory. Heavy presets hide the marker at the far
-//               tier, where their lure takes over.
+//               per-instance halo ring with its own geometry on a pooled mesh (pools.js explains why),
+//               shown only at the near tier, so each instance really takes and returns GPU memory.
+//               Heavy presets hide the marker at the far tier, where their lure takes over.
 //   testWind    a rising column registered in the WindField per instance (and, when asked, one real
 //               light from the pool); dispose() removes both.
 //
@@ -23,12 +23,12 @@ const HALO_SEGMENTS_SPAN = 16;
 export function createTestMarkerEngine() {
   let ctx = null;
   let pool = null;
+  let halos = null;
   let haloMaterial = null;
   let position = null;
   let rotation = null;
   let scale = null;
   let color = null;
-  let halos = 0;
   let visibleHalos = 0;
   let live = 0;
 
@@ -64,6 +64,7 @@ export function createTestMarkerEngine() {
       haloMaterial = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide });
       haloMaterial.color.set(0xfff1c8);
       haloMaterial.opacity = 0.7;
+      halos = ctx.pools.createMeshPool({ material: haloMaterial, capacity: MARKER_CAPACITY, parent: ctx.scene, name: 'test-marker-halo' });
     },
     create(preset, params, rng) {
       const { THREE } = ctx;
@@ -73,12 +74,17 @@ export function createTestMarkerEngine() {
       const segments = HALO_SEGMENTS_MIN + Math.floor(rng() * HALO_SEGMENTS_SPAN);
       const haloGeometry = new THREE.RingGeometry(size * 0.9, size * 1.25, segments, 1);
       haloGeometry.rotateX(-Math.PI / 2);
-      const halo = new THREE.Mesh(haloGeometry, haloMaterial);
-      halo.name = 'test-marker-halo';
+      const halo = halos.acquire(haloGeometry);
+      if (!halo) {
+        haloGeometry.dispose();
+        pool.free(slot);
+        throw new Error('testMarker: every halo mesh is taken');
+      }
+      // Always drawn at the near tier (never frustum-culled), so each instance's geometry reaches
+      // the GPU and the memory check sees it come and go.
+      halo.frustumCulled = false;
       halo.position.set(params.position.x, params.position.y + 1.5, params.position.z);
       halo.visible = false;
-      ctx.scene.add(halo);
-      halos++;
       live++;
       pool.setColor(slot, color.set(Number.isInteger(params.color) ? params.color : 0xffc36b));
       const instance = {
@@ -102,7 +108,8 @@ export function createTestMarkerEngine() {
     update(instance, dt, engineCtx) {
       const data = instance.data;
       const anchor = instance.anchor;
-      data.halo.position.set(anchor.x, anchor.y + 1.5, anchor.z);
+      data.halo.position.copy(anchor);
+      data.halo.position.y += 1.5;
       // Follow the anchor and bob, writing the translation in place.
       const elements = data.matrix.elements;
       elements[12] = anchor.x;
@@ -125,15 +132,16 @@ export function createTestMarkerEngine() {
     dispose(instance) {
       const data = instance.data;
       if (data.halo.visible) visibleHalos--;
-      data.halo.removeFromParent();
-      data.halo.geometry.dispose();
+      const haloGeometry = data.halo.geometry;
+      halos.release(data.halo);
+      haloGeometry.dispose();
+      data.halo = null;
       pool.free(data.slot);
       pool.flush();
-      halos--;
       live--;
     },
     stats() {
-      return { instances: live, particles: 0, lights: 0, buffers: halos + 1, drawCalls: (pool && pool.used > 0 ? 1 : 0) + visibleHalos };
+      return { instances: live, particles: 0, lights: 0, buffers: live + 1, drawCalls: (pool && pool.used > 0 ? 1 : 0) + visibleHalos };
     },
   };
 }
@@ -366,8 +374,35 @@ export function installSpawnTestKit(system) {
     return { x, y: height === null ? ground : height, z };
   }
 
+  /**
+   * A ground point minDistance..maxDistance ahead of the camera (within 16 degrees of its heading and
+   * 24 degrees below its level) whose spot lift metres above the ground the camera can see over the
+   * terrain, or null. The discovery proofs place their spawns there.
+   */
+  function visiblePointAhead({ minDistance = 350, maxDistance = 1400, lift = 15 } = {}) {
+    const origin = ctx.camera.getWorldPosition(new ctx.THREE.Vector3());
+    for (let distance = minDistance; distance <= maxDistance; distance += 50) {
+      for (const bearing of [0, -8, 8, -16, 16]) {
+        const point = pointFromCamera(distance, bearing);
+        const targetY = point.y + lift;
+        const drop = Math.atan2(origin.y - targetY, distance) * 180 / Math.PI;
+        if (drop > 24) continue;
+        let clear = true;
+        for (let sample = 1; sample < 24 && clear; sample++) {
+          const t = sample / 24;
+          const x = origin.x + (point.x - origin.x) * t;
+          const z = origin.z + (point.z - origin.z) * t;
+          if (ctx.terrain.groundHeight(x, z) > origin.y + (targetY - origin.y) * t - 2) clear = false;
+        }
+        if (clear) return { ...point, distance, bearing };
+      }
+    }
+    return null;
+  }
+
   const api = {
     presets: createTestPresets().map((preset) => preset.id),
+    visiblePointAhead,
     discoveries,
     ended,
     windEvents,
@@ -413,9 +448,15 @@ export function installSpawnTestKit(system) {
     windSourceCount() {
       return ctx.wind.sourceCount;
     },
-    /** Attaches a site feed with one testSite distance metres ahead of the camera; returns the site. */
-    placeTestSite(distance = 700) {
-      const point = pointFromCamera(distance);
+    /** Force-spawns presetId at a point ({ x, y, z }). */
+    spawnAtPoint(presetId, point) {
+      return manager.activate(presetId, { position: { x: point.x, y: point.y, z: point.z }, heading: ctx.state.player.heading, source: 'debug', force: true });
+    },
+    /**
+     * Attaches a site feed with one testSite at point (default: distance metres ahead of the camera);
+     * returns the site.
+     */
+    placeTestSite(distance = 700, point = pointFromCamera(distance)) {
       const site = Object.freeze({
         id: `testSite:${Math.floor(point.x / 2000)}:${Math.floor(point.z / 2000)}`,
         presetId: 'testSite',
