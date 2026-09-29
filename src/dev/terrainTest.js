@@ -387,11 +387,15 @@ function createTerrainTestSystem(ctx, { capture }) {
     const reach = stamp.type === 'carve' ? size * 0.55 : size * 0.95;
     const rightX = -stamp.dirZ;
     const rightZ = stamp.dirX;
-    const x = stamp.x - stamp.dirX * reach + rightX * reach * 0.45;
-    const z = stamp.z - stamp.dirZ * reach + rightZ * reach * 0.45;
+    // The waterfall is seen from downstream, facing its face; the gorge from the side, across its span;
+    // everything else from behind its start.
+    const along = stamp.type === 'cliffStep' ? 1 : stamp.type === 'gorge' ? -0.35 : -1;
+    const across = stamp.type === 'gorge' ? 1 : 0.45;
+    const x = stamp.x + along * stamp.dirX * reach + rightX * reach * across;
+    const z = stamp.z + along * stamp.dirZ * reach + rightZ * reach * across;
     const centreGround = Math.max(world.heightAt(stamp.x, stamp.z), CONFIG.WATER_LEVEL);
     const eyeGround = Math.max(world.heightAt(x, z), CONFIG.WATER_LEVEL);
-    const lift = Math.max(size * 0.45, 140);
+    const lift = Math.max(size * (stamp.type === 'gorge' ? 0.75 : 0.45), 140);
     return {
       position: { x, y: Math.max(eyeGround, centreGround) + lift, z },
       target: { x: stamp.x, y: centreGround, z: stamp.z },
