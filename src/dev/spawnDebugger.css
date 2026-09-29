@@ -7,10 +7,10 @@
   pointer-events: auto;
   position: absolute;
   z-index: 45;
-  top: calc(var(--dw-top) + 64px);
+  top: calc(var(--dw-top) + 94px);
   left: var(--dw-left);
   width: min(408px, calc(100vw - 32px));
-  max-height: calc(100vh - var(--dw-top) - 230px);
+  max-height: calc(100vh - var(--dw-top) - 260px);
   min-height: 240px;
   display: flex;
   flex-direction: column;
@@ -23,6 +23,9 @@
   transition: opacity 0.2s ease, transform 0.32s var(--dw-ease), visibility 0s linear 0.32s;
 }
 #ui-root .dw-spawndbg.dw-open { opacity: 1; visibility: visible; transform: none; transition: opacity 0.2s ease, transform 0.36s var(--dw-ease), visibility 0s; }
+/* F9 moves focus onto the panel itself: show it as a gold hairline, not the browser's outline. */
+#ui-root .dw-spawndbg:focus { outline: none; }
+#ui-root .dw-spawndbg:focus-visible { border-color: rgba(243, 199, 122, 0.5); }
 #ui-root .dw-spawndbg-head {
   display: flex;
   align-items: center;
