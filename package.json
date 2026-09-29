@@ -20,7 +20,10 @@
     "test:flight": "node tools/run-harness.mjs --test 1",
     "test:flight:webgl": "node tools/run-harness.mjs --test 1 --backend webgl",
     "test:hotas": "node tools/run-harness.mjs --test hotas",
-    "test:hotas:webgl": "node tools/run-harness.mjs --test hotas --backend webgl"
+    "test:hotas:webgl": "node tools/run-harness.mjs --test hotas --backend webgl",
+    "test:terrain": "node tools/run-harness.mjs --test terrain",
+    "test:terrain:webgl": "node tools/run-harness.mjs --test terrain --backend webgl",
+    "lab:terrain": "node tools/lab/terrain.mjs"
   },
   "dependencies": {
     "three": "0.184.0"
