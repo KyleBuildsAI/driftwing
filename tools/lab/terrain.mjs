@@ -21,12 +21,14 @@
 //                 cliff drops; the gorge floor lies below its rims and the bridge pads are level; the
 //                 airfield strip is flat (heightAt and groundHeight); the islet stands above the sea
 //   falloff       outside its bounds a stamp changes nothing (exactly the unstamped height), and lines
-//                 crossing every stamp at 0.5 m steps show no discontinuity
+//                 crossing every stamp at 0.5 m steps show no discontinuity (every steep step, refined
+//                 tenfold, must spread its change instead of keeping it in one sub-step)
 //   paint         the stamp paint at each type's characteristic place (ash, wet rock, tarmac, riverbed,
 //                 basalt) and the face colours there differ from the unstamped world's
 //   seams         near every stamp type, for every pair of LODs (0-3) of neighbouring chunks built by the
 //                 chunk builder: shared edge vertices agree, skirts hang from the surface edge and cover
-//                 every T-junction gap (no cracks)
+//                 every T-junction gap (no cracks). Every pair on edges a stamp touches; on untouched
+//                 Phase 1 edges the pairs the ring layout makes (LODs at most one apart)
 //   collision     groundHeight against the rendered LOD0 mesh (its own triangles) near every stamp
 //                 type: within 0.5 m
 //   benchmark     heightAt and groundHeight on fixed point sets with no stamps nearby and with stamps
@@ -47,7 +49,7 @@ import { STAMP_TYPES, stampReach } from '../../src/world/stamps.js';
 import { PRESETS } from '../../src/spawns/presets/index.js';
 import { FIXTURE_STAMP_TYPE, TERRAIN_FIXTURES } from '../../src/dev/terrainFixtures.js';
 import {
-  buildChunkMesh, checkSeam, checkSkirtAttachment, compareMeshBuffers, drainSteps, extractEdges, meshHeightAt, terrainBuilderConfig,
+  buildChunkMesh, checkSeam, checkSkirtAttachment, compareMeshBuffers, drainSteps, extractEdges, meshHeightAt, seamPairApplies, terrainBuilderConfig,
 } from '../../src/dev/terrainChecks.js';
 
 const VERBOSE = process.argv.includes('--verbose');
@@ -59,6 +61,8 @@ const SEEDS = ['DRIFTWING', 'HARNESS-1', 'P2-TERRAIN'];
 /** The seed the stamp checks run on (every stamp type lies within 13 km of its origin). */
 const STAMP_SEED = 'P2-TERRAIN';
 const SEARCH_RADIUS = 30000;
+/** Stamp checks run on this many sites of each fixture (nearest first). */
+const SITES_PER_TYPE = 2;
 const WATER = CONFIG.WATER_LEVEL;
 /** Digests of the Phase 1 world (tag v2-structure code), recorded with phase1Digest() below. */
 const PHASE1_DIGESTS = Object.freeze({
@@ -84,8 +88,16 @@ const BENCH_PASSES = 31;
 const BENCH_WARMUP = 4;
 /** Points per timed pass: short passes (a few ms) so some of them run undisturbed on a loaded machine. */
 const BENCH_SLICE = 800;
-/** A height change over one 0.5 m step beyond this (a slope of 24) is a discontinuity, not a wall. */
-const MAX_STEP_CHANGE_M = 12;
+/**
+ * Discontinuity test: every 0.5 m step that changes the height by more than STEEP_STEP_M is sampled
+ * again in 10 sub-steps. A continuous surface, however steep, then changes about 10 times less per
+ * sub-step; a jump does not. A sub-step keeping more than JUMP_SHARE of the step's change is a jump.
+ * The Phase 1 surface has small jumps of its own (a biome whose weight crosses the 0.003 cut-off in
+ * worldgen's baseHeight), which a stamp carries along: a step where the UNSTAMPED height jumps as well
+ * is counted as a Phase 1 jump, not a stamp one.
+ */
+const STEEP_STEP_M = 2;
+const JUMP_SHARE = 0.35;
 const BUILDER_CONFIG = terrainBuilderConfig(CONFIG);
 const CHUNK = CONFIG.CHUNK_SIZE;
 
@@ -294,11 +306,10 @@ function testDeterminism() {
 }
 
 // ---- stamp checks -----------------------------------------------------------------------------------------------
-/** One site per fixture on the stamp seed, nearest to the origin first. */
+/** The SITES_PER_TYPE sites of each fixture nearest to the stamp seed's origin. */
 function stampSites(world) {
-  const chosen = new Map();
-  for (const site of world.sitesNear(0, 0, SEARCH_RADIUS)) if (!chosen.has(site.presetId)) chosen.set(site.presetId, site);
-  return TERRAIN_FIXTURES.map((preset) => chosen.get(preset.id)).filter(Boolean);
+  const near = world.sitesNear(0, 0, SEARCH_RADIUS);
+  return TERRAIN_FIXTURES.flatMap((preset) => near.filter((site) => site.presetId === preset.id).slice(0, SITES_PER_TYPE));
 }
 
 function sampleAround(world, x, z, radius, count) {
@@ -329,7 +340,6 @@ function testShapes(world, sites) {
         let checked = 0;
         for (let index = 2; index <= path.length - 3; index++) {
           const point = path[index];
-          if (point.floorY <= WATER + 2.01) continue;
           const next = path[index + 1];
           const length = Math.hypot(next.x - point.x, next.z - point.z);
           const acrossX = -(next.z - point.z) / length;
@@ -410,25 +420,47 @@ function testFalloff(world, sites) {
       }
       check('falloff', `${stamp.type} (${site.id}): outside its bounds nothing changes`, outsideChanged === 0 && outsideChecked > 0, `${outsideChecked} points, ${outsideChanged} changed`);
       let worstStep = 0;
-      let steepest = 0;
+      let worstShare = 0;
+      let steepSteps = 0;
+      let phase1Jumps = 0;
       const centres = stamp.keyPoints;
       for (const centre of centres) {
         for (const angle of [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4]) {
           const dirX = Math.cos(angle);
           const dirZ = Math.sin(angle);
           const span = 1600;
-          let previous = world.heightAt(centre.x - dirX * span, centre.z - dirZ * span);
+          const heightAlong = (travelled) => world.heightAt(centre.x + dirX * travelled, centre.z + dirZ * travelled);
+          const unstampedAlong = (travelled) => world.unstampedHeightAt(centre.x + dirX * travelled, centre.z + dirZ * travelled);
+          /** The largest share of a 0.5 m step's change that one of its ten 5 cm sub-steps holds. */
+          const jumpShare = (sample, end) => {
+            const start = sample(end - 0.5);
+            const change = Math.abs(sample(end) - start);
+            let fine = 0;
+            let before = start;
+            for (let sub = 1; sub <= 10; sub++) {
+              const at = sample(end - 0.5 + sub * 0.05);
+              fine = Math.max(fine, Math.abs(at - before));
+              before = at;
+            }
+            return change > 0 ? fine / change : 0;
+          };
+          let previous = heightAlong(-span);
           for (let travelled = -span + 0.5; travelled <= span; travelled += 0.5) {
-            const height = world.heightAt(centre.x + dirX * travelled, centre.z + dirZ * travelled);
-            const unstampedStep = Math.abs(world.unstampedHeightAt(centre.x + dirX * travelled, centre.z + dirZ * travelled) - world.unstampedHeightAt(centre.x + dirX * (travelled - 0.5), centre.z + dirZ * (travelled - 0.5)));
+            const height = heightAlong(travelled);
             const change = Math.abs(height - previous);
             if (change > worstStep) worstStep = change;
-            if (change - unstampedStep > steepest) steepest = change - unstampedStep;
+            if (change > STEEP_STEP_M) {
+              steepSteps++;
+              const share = jumpShare(heightAlong, travelled);
+              if (share > JUMP_SHARE && jumpShare(unstampedAlong, travelled) > JUMP_SHARE) phase1Jumps++;
+              else worstShare = Math.max(worstShare, share);
+            }
             previous = height;
           }
         }
       }
-      check('falloff', `${stamp.type} (${site.id}): no discontinuity across the stamp (0.5 m steps)`, worstStep <= MAX_STEP_CHANGE_M, `largest step ${round(worstStep, 2)} m (slope ${round(worstStep / 0.5, 1)}), ${round(steepest, 2)} m of it from the stamp`);
+      check('falloff', `${stamp.type} (${site.id}): no discontinuity across the stamp`, worstShare <= JUMP_SHARE,
+        `largest 0.5 m step ${round(worstStep, 2)} m (slope ${round(worstStep / 0.5, 1)}); ${steepSteps} steps over ${STEEP_STEP_M} m refined, the worst keeping ${round(worstShare * 100, 1)} % of its change in one 5 cm sub-step (a jump keeps ~100 %); ${phase1Jumps} jumps already in the unstamped Phase 1 surface`);
     }
   }
 }
@@ -489,10 +521,15 @@ function testSeamsAndCollision(world, sites) {
       let maxShared = 0;
       let maxGap = 0;
       let worstAttachment = 0;
+      let phase1Skipped = 0;
       for (const [cx, cz] of chunks) {
         for (const [ncx, ncz, direction] of [[cx + 1, cz, 'east'], [cx, cz + 1, 'south']]) {
           for (let lod = 0; lod < 4; lod++) {
             for (let neighbourLod = 0; neighbourLod < 4; neighbourLod++) {
+              if (!seamPairApplies(world, CHUNK, cx, cz, direction, lod, neighbourLod)) {
+                phase1Skipped++;
+                continue;
+              }
               const own = edgesOf(cx, cz, lod);
               const other = edgesOf(ncx, ncz, neighbourLod);
               const seam = checkSeam(own.edges, other.edges, direction);
@@ -506,7 +543,7 @@ function testSeamsAndCollision(world, sites) {
           }
         }
       }
-      check('seams', `${stamp.type} (${site.id}): ${seams} seams over ${chunks.length} chunks, every LOD pair, no cracks`, violations === 0 && worstAttachment <= 1e-3, `shared vertices within ${round(maxShared, 5)} m, largest T-junction gap ${round(maxGap, 1)} m, skirt margin at least ${round(worstCoverage, 2)} m, skirt attachment ${round(worstAttachment, 5)} m`);
+      check('seams', `${stamp.type} (${site.id}): ${seams} seams over ${chunks.length} chunks, every LOD pair on stamped edges, no cracks`, violations === 0 && worstAttachment <= 1e-3, `shared vertices within ${round(maxShared, 5)} m, largest T-junction gap ${round(maxGap, 1)} m, skirt margin at least ${round(worstCoverage, 2)} m, skirt attachment ${round(worstAttachment, 5)} m; ${phase1Skipped} pairs two or more LODs apart on untouched Phase 1 edges left to the ring layout`);
       const random = mulberry32(7);
       let worstCollision = 0;
       let samples = 0;
@@ -625,7 +662,7 @@ testPlacement();
 testDeterminism();
 const stampWorld = fixtureWorld(STAMP_SEED);
 const sites = stampSites(stampWorld);
-check('shapes', `every stamp type has a site on ${STAMP_SEED}`, TERRAIN_FIXTURES.every((preset) => sites.some((site) => site.presetId === preset.id)),
+check('shapes', `every stamp type has ${SITES_PER_TYPE} sites on ${STAMP_SEED}`, TERRAIN_FIXTURES.every((preset) => sites.filter((site) => site.presetId === preset.id).length === SITES_PER_TYPE),
   sites.map((site) => `${FIXTURE_STAMP_TYPE[site.presetId]} ${round(Math.hypot(site.x, site.z) / 1000, 1)} km`).join(', '));
 testShapes(stampWorld, sites);
 testFalloff(stampWorld, sites);

@@ -8,7 +8,9 @@
 //   seams      between two neighbouring chunks, at any pair of LODs: the vertices both edges share
 //              must have the same height, and wherever one edge runs above the other (a T-junction
 //              across an LOD boundary) the upper chunk's skirt must hang down past the lower edge,
-//              so no gap can open. The skirts must also hang from the surface edge itself.
+//              so no gap can open. The skirts must also hang from the surface edge itself. Every LOD
+//              pair applies on an edge a stamp touches; on untouched (Phase 1) edges, the pairs the
+//              ring layout can make (seamPairApplies).
 //   collision  the collision height (worldgen.groundHeight) against the rendered LOD0 mesh, sampled
 //              through the chunk's own triangles.
 
@@ -190,6 +192,21 @@ export function meshHeightAt(mesh, chunkSize, localX, localZ) {
     }
   }
   return NaN;
+}
+
+/**
+ * Whether the seam check applies to this LOD pair. On an edge a stamp touches every pair is checked
+ * (the stamp-aware skirts must close any of them). An edge no stamp touches is Phase 1 ground with the
+ * fixed Phase 1 skirts, which are sized for the pairs the ring layout makes: neighbouring chunks' rings
+ * differ by at most one, so their LODs differ by at most one.
+ */
+export function seamPairApplies(world, chunkSize, cx, cz, direction, lod, neighbourLod) {
+  if (Math.abs(lod - neighbourLod) <= 1) return true;
+  const minX = direction === 'east' ? (cx + 1) * chunkSize : cx * chunkSize;
+  const maxX = (cx + 1) * chunkSize;
+  const minZ = direction === 'south' ? (cz + 1) * chunkSize : cz * chunkSize;
+  const maxZ = (cz + 1) * chunkSize;
+  return world.stampsOverlap(minX, minZ, maxX, maxZ);
 }
 
 /** Largest absolute difference between two meshes' position and colour buffers (Infinity if their sizes differ). */
