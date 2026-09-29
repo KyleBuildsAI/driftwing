@@ -27,6 +27,7 @@ import { createShellBridge } from './shell/bridge.js';
 import { createSkySystem } from './render/sky.js';
 import { createSpawnDebugger } from './dev/spawnDebugger.js';
 import { createSpawnSystem } from './spawns/index.js';
+import { createSetPieceEngine } from './spawns/engines/setPieceEngine.js';
 import { createStructureEngine } from './spawns/engines/structureEngine.js';
 import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
@@ -59,6 +60,7 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
  */
 const SPAWN_ENGINE_FACTORIES = Object.freeze([
   createStructureEngine,
+  createSetPieceEngine,
 ]);
 
 /**
