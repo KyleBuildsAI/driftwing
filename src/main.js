@@ -13,6 +13,7 @@ import { createCloudSystem } from './render/clouds.js';
 import { createCopilotSystem } from './copilot/copilot.js';
 import { createDebugWindSystem } from './dev/debugWind.js';
 import { createFlightController } from './flight/FlightController.js';
+import { createFaunaEngine } from './spawns/engines/faunaEngine.js';
 import { createFxSystem } from './render/fx.js';
 import { createInputSystem } from './input/InputManager.js';
 import { createFrameLoop } from './core/loop.js';
@@ -30,6 +31,7 @@ import { createSpawnSystem } from './spawns/index.js';
 import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
 import { createWaterSystem } from './render/water.js';
+import { createWaterEffectEngine } from './spawns/engines/waterEffectEngine.js';
 import { createWaypointSystem } from './gameplay/waypoints.js';
 import { createWeatherSystem } from './spawns/weather.js';
 import { createWindOverlaySystem } from './dev/windOverlay.js';
@@ -55,7 +57,10 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
  * The spawn engines (src/spawns/engines/, contract section 3): one factory per engine, registered
  * with the spawns system before its prewarm hook initialises them.
  */
-const SPAWN_ENGINE_FACTORIES = Object.freeze([]);
+const SPAWN_ENGINE_FACTORIES = Object.freeze([
+  createFaunaEngine,
+  createWaterEffectEngine,
+]);
 
 /**
  * Dev-only verification harnesses: ?test=1 (flight test), ?test=hotas (HOTAS pipeline test) and
