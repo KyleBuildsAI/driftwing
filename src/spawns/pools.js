@@ -6,7 +6,17 @@
 //   createSlotAllocator(capacity)    free-list of integer slots (instanced meshes, particle blocks)
 //   createObjectPool(factory, ...)   reusable objects with acquire() / release()
 //   createInstancedPool(THREE, ...)  an InstancedMesh with slot allocation, hidden free slots and
-//                                    dirty-range uploads; dispose() frees its GPU buffers
+//                                    whole-buffer uploads; dispose() frees its GPU buffers
+//   createMeshPool(THREE, ...)       reusable Meshes on one shared material, for per-instance geometry
+//
+// Why meshes are pooled: three.js r184 keeps the RenderObject of every mesh it has drawn with a
+// material alive until that material is disposed (each RenderObject listens for the material's
+// 'dispose' event, and that listener holds it, its mesh and its geometry). A new Mesh per spawn
+// instance on a material the engine shares would therefore leak about 8 KB of heap per instance even
+// after its geometry is disposed. A pooled mesh keeps its single RenderObject; only its geometry
+// changes (three rebinds the attributes when the geometry's id changes). The same holds for any mesh
+// or InstancedMesh on a shared material: create those once (in init) and reuse them, or give a
+// per-instance mesh its own material and dispose it with the instance.
 
 /**
  * Rings of scratch objects. vec3(), quat(), mat4() and color() hand out the next object of their
@@ -112,9 +122,10 @@ export function createObjectPool(factory, { reset = null, prefill = 0, limit = I
  * setMatrix(slot, matrix) / setColor(slot, color) write it, free(slot) hides it (zero scale). Call
  * flush() after writing (any number of times per frame): it marks the instance buffers for upload
  * when something changed and draws only up to the highest used slot. It uploads whole buffers rather
- * than update ranges, because three.js allocates an object per update range. The mesh is built on construction and added to parent (if given).
- * dispose(options) removes it and frees its instance buffers, and the geometry and material too
- * unless options.keepGeometry / options.keepMaterial (shared resources) say otherwise.
+ * than update ranges, because three.js allocates an object per update range. The mesh is built on
+ * construction and added to parent (if given). dispose(options) removes it and frees its instance
+ * buffers, and the geometry and material too unless options.keepGeometry / options.keepMaterial
+ * (shared resources) say otherwise; with a kept material, see the note on pooling at the top.
  */
 export function createInstancedPool(THREE, { geometry, material, capacity, name = 'instanced-pool', parent = null, colors = false }) {
   const mesh = new THREE.InstancedMesh(geometry, material, capacity);
@@ -178,6 +189,56 @@ export function createInstancedPool(THREE, { geometry, material, capacity, name 
       mesh.dispose();
       if (!keepGeometry) geometry.dispose();
       if (!keepMaterial) material.dispose();
+    },
+  };
+}
+
+/**
+ * Reusable Meshes on one shared material (see the note on pooling at the top). acquire(geometry)
+ * hands out a mesh showing geometry (added to parent, visible), or null when capacity meshes are in
+ * use; release(mesh) hides it and parks it on an empty geometry, so the instance's own geometry can be
+ * disposed and collected. Meshes are created on first need and reused for the session. dispose()
+ * removes every mesh (the caller disposes the material, which frees their RenderObjects).
+ */
+export function createMeshPool(THREE, { material, capacity, parent, name = 'mesh-pool' }) {
+  const parked = new THREE.BufferGeometry();
+  const free = [];
+  const all = [];
+  let inUse = 0;
+  return {
+    acquire(geometry) {
+      let mesh = free.pop();
+      if (mesh === undefined) {
+        if (all.length >= capacity) return null;
+        mesh = new THREE.Mesh(parked, material);
+        mesh.name = name;
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
+        all.push(mesh);
+        parent.add(mesh);
+      }
+      mesh.geometry = geometry;
+      mesh.visible = true;
+      inUse++;
+      return mesh;
+    },
+    release(mesh) {
+      if (!mesh || mesh.geometry === parked) return false;
+      mesh.visible = false;
+      mesh.geometry = parked;
+      free.push(mesh);
+      inUse--;
+      return true;
+    },
+    get used() { return inUse; },
+    get created() { return all.length; },
+    capacity,
+    dispose() {
+      for (const mesh of all) mesh.removeFromParent();
+      all.length = 0;
+      free.length = 0;
+      inUse = 0;
+      parked.dispose();
     },
   };
 }
