@@ -571,7 +571,7 @@ export function createSkySystem(ctx) {
     flash: [0, 1],
   });
   /** A full flash (1) adds this much of its colour to the sky palette (display-referred), per key. */
-  const FLASH_SKY_GAIN = Object.freeze({ zenith: 0.45, horizon: 0.75, anti: 0.6, ground: 0.5 });
+  const FLASH_SKY_GAIN = Object.freeze({ zenith: 0.35, horizon: 0.55, anti: 0.45, ground: 0.4 });
   /** A full flash multiplies the hemisphere light by 1 + this. */
   const FLASH_AMBIENT_GAIN = 3;
   const modifierList = [];

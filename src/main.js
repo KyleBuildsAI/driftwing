@@ -13,6 +13,7 @@ import { createCloudSystem } from './render/clouds.js';
 import { createCopilotSystem } from './copilot/copilot.js';
 import { createDebugWindSystem } from './dev/debugWind.js';
 import { createEmitterEngine } from './spawns/engines/emitterEngine.js';
+import { createLightEffectEngine } from './spawns/engines/lightEffectEngine.js';
 import { createFlightController } from './flight/FlightController.js';
 import { createFxSystem } from './render/fx.js';
 import { createInputSystem } from './input/InputManager.js';
@@ -58,6 +59,7 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
  */
 const SPAWN_ENGINE_FACTORIES = Object.freeze([
   createEmitterEngine,
+  createLightEffectEngine,
 ]);
 
 /**
