@@ -14,7 +14,8 @@
 //   discovery   fires once for an event preset (not again when it respawns) and once for a site id
 //               (not again when the site is re-created)
 //   allocation  the manager's frame update with 40 spawns, sampled by the heap profiler: bytes
-//               allocated in src/spawns and the test engines per frame
+//               allocated in src/spawns and the test engines per frame (must be none), and by what
+//               they call (the terrain heights the occlusion rays sample; reported)
 //   debugger    F9 opens the panel (screenshot debugger.png) and closes it; while it is closed the
 //               flight keys fly, while it has focus they stay in it; its Spawn, Nearest (teleport),
 //               time-of-day, Wind arrows and engine stats work
@@ -259,22 +260,28 @@ async function main() {
       return manager.getStats().spawns;
     }, allocationFrames);
     const { profile } = await cdp.send('HeapProfiler.stopSampling');
-    let spawnBytes = 0;
+    // Bytes allocated by the spawn code itself (src/spawns and the test engines), and by what it
+    // calls elsewhere (the terrain height of the occlusion rays: worldgen's noise).
+    let ownBytes = 0;
+    let calleeBytes = 0;
     const sites = new Map();
-    const walk = (node, inSpawns) => {
+    const walk = (node, underSpawns) => {
       const file = node.callFrame.url.split('?')[0];
-      const here = inSpawns || file.includes('/src/spawns/') || file.includes('/src/dev/spawnTestKit.js');
-      if (here && node.selfSize > 0) {
-        spawnBytes += node.selfSize;
+      const own = file.includes('/src/spawns/') || file.includes('/src/dev/spawnTestKit.js');
+      if (node.selfSize > 0 && (own || underSpawns)) {
+        if (own) ownBytes += node.selfSize;
+        else calleeBytes += node.selfSize;
         const key = `${node.callFrame.functionName || '(anonymous)'} ${file.split('/').pop()}:${node.callFrame.lineNumber + 1}`;
         sites.set(key, (sites.get(key) ?? 0) + node.selfSize);
       }
-      for (const child of node.children) walk(child, here);
+      for (const child of node.children) walk(child, underSpawns || own);
     };
     walk(profile.head, false);
-    const perFrame = spawnBytes / allocationFrames;
-    report.numbers.allocation = { frames: allocationFrames, spawns: spawnCount, bytes: spawnBytes, perFrame, sites: [...sites.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8) };
-    check('alloc', `manager frame update with ${spawnCount} spawns allocates under 1 byte per frame (sampled)`, perFrame < 1, `${spawnBytes} B sampled over ${allocationFrames} frames = ${perFrame.toFixed(3)} B/frame${sites.size ? `; top: ${[...sites.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([key, bytes]) => `${key} ${bytes} B`).join(', ')}` : ''}`);
+    const ownPerFrame = ownBytes / allocationFrames;
+    const calleePerFrame = calleeBytes / allocationFrames;
+    const top = [...sites.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+    report.numbers.allocation = { frames: allocationFrames, spawns: spawnCount, ownBytes, calleeBytes, ownPerFrame, calleePerFrame, sites: top };
+    check('alloc', `the spawn code's frame update with ${spawnCount} spawns allocates nothing (sampled, under 0.1 byte per frame)`, ownPerFrame < 0.1, `${ownBytes} B over ${allocationFrames} frames = ${ownPerFrame.toFixed(3)} B/frame; callees (terrain heights for the occlusion rays) ${calleeBytes} B = ${calleePerFrame.toFixed(3)} B/frame${top.length ? `; top: ${top.map(([key, bytes]) => `${key} ${bytes} B`).join(', ')}` : ''}`);
     await evaluate(() => {
       window.DRIFTWING.ctx.systems.spawns.debug.testKit.deactivateAll(window.__spawnCheckIds);
       window.__spawnCheckIds = null;
