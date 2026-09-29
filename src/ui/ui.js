@@ -42,11 +42,11 @@ export function createUISystem(ctx) {
   const TOAST_KINDS = new Set(['info', 'success', 'warning']);
   const MIC_STATES = new Set(['idle', 'listening', 'thinking', 'unsupported', 'error']);
   const MIC_TIPS = {
-    idle: 'Talk to WREN (M)',
-    listening: 'Listening. Press M to stop',
+    idle: 'Talk to WREN (Shift+M)',
+    listening: 'Listening. Press Shift+M to stop',
     thinking: 'WREN is thinking',
     unsupported: 'Voice input is not available in this browser. Press Enter to type to WREN',
-    error: 'Voice input hit a snag. Press M to try again',
+    error: 'Voice input hit a snag. Press Shift+M to try again',
   };
   const MIC_TIPS_TOUCH = {
     idle: 'Talk to WREN',
@@ -1115,10 +1115,11 @@ export function createUISystem(ctx) {
     { targets: ['craftPrev', 'craftNext'], text: 'Previous / next craft' },
     { targets: ['versionToggle'], text: 'Switch to V1, the original game' },
     { keys: [['Enter'], ['/']], text: 'Ask WREN' },
-    { keys: [['M']], text: 'Talk to WREN' },
+    { keys: [['Shift', 'M']], text: 'Talk to WREN' },
     { targets: ['copilotPTT'], text: 'Push to talk to WREN (hold)' },
     { targets: ['photoMode'], html: 'Photo mode (<kbd>K</kbd> captures)' },
     { targets: ['journal'], text: 'Journal' },
+    { targets: ['mapToggle'], text: 'World map' },
     { targets: ['settings'], text: 'Settings' },
     { targets: ['controlsPanel'], text: 'Controls: bindings and calibration' },
     { keys: [['H'], ['?']], text: 'This help' },
@@ -2084,15 +2085,15 @@ export function createUISystem(ctx) {
   // Hotkeys and input actions
   // ---------------------------------------------------------------------------
   // Named, rebindable actions (photo mode, journal, settings, time of day, ring course, waypoints,
-  // autopilot) arrive as 'input:action' presses from the input system on any device. The keys
-  // below stay UI-only: M mic, Enter and / command, H and ? help, Escape, X clear waypoint, K capture, I fps, Shift+V voice, Tab HUD. A key the
+  // autopilot, the world map) arrive as 'input:action' presses from the input system on any device. The keys
+  // below stay UI-only: Shift+M mic, Enter and / command, H and ? help, Escape, X clear waypoint, K capture, I fps, Shift+V voice, Tab HUD. A key the
   // player has bound to an action belongs to that action (input.consumesKey).
   const PHOTO_MODE_HOTKEYS = new Set(['escape', 'capture', 'fps', 'voice', 'mic']);
   const PHOTO_MODE_ACTIONS = new Set(['photoMode', 'timeForward', 'timeBack']);
   const TIME_PRESET_SUN = { dawn: [-4, false], golden: [8, true], night: [-35, true] };
   function resolveHotkey(event) {
     switch (event.code) {
-      case 'KeyM': return 'mic';
+      case 'KeyM': return event.shiftKey ? 'mic' : null;
       case 'Enter':
       case 'NumpadEnter': return 'command';
       case 'KeyH': return 'help';
@@ -2181,6 +2182,7 @@ export function createUISystem(ctx) {
     switch (actionId) {
       case 'photoMode': togglePhotoMode(!state.photoMode); break;
       case 'journal': togglePanel('journal'); break;
+      case 'mapToggle': togglePanel('map'); break;
       case 'settings': togglePanel('settings'); break;
       case 'controlsPanel': togglePanel('controls'); break;
       case 'timeForward': cycleTimePreset(); break;
@@ -2224,6 +2226,7 @@ export function createUISystem(ctx) {
     switch (name) {
       case 'open-command': openCommandBar(); break;
       case 'toggle-journal': togglePanel('journal'); break;
+      case 'toggle-map': togglePanel('map'); break;
       case 'toggle-settings': togglePanel('settings'); break;
       case 'toggle-help': togglePanel('help'); break;
       case 'open-controls': openControls(); break;

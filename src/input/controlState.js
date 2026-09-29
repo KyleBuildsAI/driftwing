@@ -51,6 +51,7 @@ export const ACTIONS = Object.freeze({
   timeBack: 'Time of day back',
   ringCourse: 'Ring course',
   journal: 'Journal',
+  mapToggle: 'World map',
   settings: 'Settings',
   controlsPanel: 'Controls panel',
   relaunch: 'Relaunch',

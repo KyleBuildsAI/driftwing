@@ -50,10 +50,10 @@ const hat = (hatIndex, direction) => ({ type: 'hat', hat: hatIndex, direction })
 const axis = (index, extra = {}) => ({ type: 'axis', axis: index, ...extra });
 
 /**
- * Keyboard: one layer. v1's keys stay where v1 had them (P, J, T, R, O; M, Enter, /, H, ?, Esc, X,
+ * Keyboard: one layer. v1's keys stay where v1 had them (P, J, T, R, O; Enter, /, H, ?, Esc, X,
  * K, I, Tab stay UI keys in ui.js), except that G is the gear (the waypoint moves to N), C cycles
  * the view and Space runs the craft ability. Plain V swaps first and third person; Shift+V stays
- * the WREN voice toggle.
+ * the WREN voice toggle. Plain M opens the world map; the mic (v1's M) is the UI key Shift+M.
  */
 const KEYBOARD = {
   actions: {
@@ -86,6 +86,7 @@ const KEYBOARD = {
     timeBack: [key('KeyT', { shift: true })],
     ringCourse: [key('KeyR')],
     journal: [key('KeyJ')],
+    mapToggle: [key('KeyM', { shift: false })],
     settings: [key('Comma')],
     controlsPanel: [key('Period')],
     relaunch: [key('Backspace')],
@@ -175,8 +176,8 @@ const T16000M = {
 
 /**
  * Thrustmaster TWCS throttle (with the TFRP pedals on its RJ12 port). Button 8 (index 7), beside
- * the view cycle on button 3, swaps first and third person. The throttle hat is left unbound on
- * purpose: it is reserved for the Phase 4 music controls.
+ * the view cycle on button 3, swaps first and third person, and button 9 (index 8) opens the world
+ * map. The throttle hat is left unbound on purpose: it is reserved for the Phase 4 music controls.
  */
 const TWCS = {
   actions: {
@@ -188,6 +189,7 @@ const TWCS = {
     chuteDeploy: [button(5)],
     controlsPanel: [button(6)],
     viewToggle1P3P: [button(7)],
+    mapToggle: [button(8)],
   },
   axes: {
     lookX: [axis(0, { deadzone: 0.12, smoothing: 0.15 })],
@@ -235,7 +237,7 @@ export const DEFAULT_BINDINGS = deepFreeze({
  * reported as a conflict, and an action binding on such a key wins over the UI key.
  */
 export const UI_RESERVED_KEYS = Object.freeze([
-  { code: 'KeyM', label: 'Talk to WREN (mic)' },
+  { code: 'KeyM', shift: true, label: 'Talk to WREN (mic)' },
   { code: 'Enter', label: 'Ask WREN' },
   { code: 'NumpadEnter', label: 'Ask WREN' },
   { code: 'Slash', label: 'Ask WREN / help' },
