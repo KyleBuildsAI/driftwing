@@ -146,7 +146,8 @@ system, and then starts the frame loop.
 | `uniformUploads.js` | garbage-free uniform uploads: replaces three r184's per-uniform update ranges (new objects every frame for every render object) with one persistent whole-buffer range per uniform group |
 | `post.js` | the post stack (bloom, warm grade, vignette, grain, render scale) and the `gEffects` system (gray-out, tunnel vision, red-out) |
 | `sky.js` | sky dome, sun, moon, stars, aurora, god rays, fog colour and the day / night cycle (v1), and the sky modifiers the weather and celestial events use (Phase 2) |
-| `clouds.js` | instanced drifting clouds, cloud shadows (v1), plus a cumulus cap over every thermal |
+| `clouds.js` | instanced drifting clouds, cloud shadows (v1), plus a cumulus cap over every thermal; the palette follows the sky modifiers (storm undersides, eclipse) |
+| `cloudShading.js` | the cloud puff geometry, palette (`createCloudLook`) and light response (`createCloudRadiance`) shared by the v1 clouds and the weather volumes, and the cloud optics (glory and rainbow bands) |
 | `water.js` | animated water, sun glint and shoreline foam (v1) |
 | `birds.js` | boid flocks that scatter (v1) |
 | `fx.js` | contrails, wind streaks, bursts (v1) |
@@ -259,6 +260,8 @@ system, and then starts the frame loop.
 | `lightPool.js` | the real-light budget pool |
 | `pools.js` | pooling helpers for engines: scratch rings, slot allocators, object pools, instanced and mesh pools |
 | `presets/index.js` | `PRESETS` (spec order) and `PRESET_BY_ID`; one pure-data file per preset |
+| `engines/weatherVolumeEngine.js`, `engines/weatherVolume/` | the weatherVolume engine: cloud masses, rain shafts, fog banks, the weather inside them ([docs/engines/weatherVolume.md](engines/weatherVolume.md)) |
+| `engines/celestialEngine.js`, `engines/celestial/` | the celestial engine: meteors, comets, the eclipse, the glory and rainbows ([docs/engines/celestial.md](engines/celestial.md)) |
 
 ### `src/env`
 
@@ -469,7 +472,7 @@ plus optional `prewarm()` / `endPrewarm()` hooks and whatever API it offers. `ct
 | `state` | shared mutable game state (`frame`, `ready`, `paused`, `photoMode`, `seed`, `spawn`, `time`, `player`, `flight`, `waypoint`, `ringCourse`, `perf`) |
 | `controls` | the v2 ControlState |
 | `systems` | every system by name |
-| `uniforms`, `textures`, `quality`, `util` | shared TSL uniforms, textures (cloud shadow), the current quality level, helpers |
+| `uniforms`, `textures`, `quality`, `util` | shared TSL uniforms (including `cloudGlory` and `cloudBow`, the cloud optics the celestial engine drives), textures (cloud shadow), the current quality level, helpers |
 | `registerPrewarm(object)` | registers a lazily shown object for the pipeline prewarm |
 | `executeAction`, `getFlightState`, `setPhotoMode`, `requestScreenshot`, `userHasInteracted` | v1 hooks shared by the UI, copilot and camera |
 
@@ -582,6 +585,7 @@ Typed events are emitted with `bus.emitTyped(name, payload)` and heard with
 | `spawnEnded` | `{ id, presetId, reason }`; reason `ended`, `expired`, `despawn`, `range`, `error`, `debug`, `removed`, `disposed` or the caller's (the director's `lifetime`, `despawn`, `dispose`) | SpawnManager |
 | `weatherChanged` | `{ state: clear\|building\|storm\|clearing, previous, region }`; fires only on a real change, so `previous` is always a state; `region` is the weather cell `"rx:rz"` | weather system |
 | `achievement` | `{ id, title }` | gameplay |
+| `wildlifeQuiet` | `{ source, quiet }`: `source` (a spawn id) starts (`true`) or ends (`false`) its hold; the wildlife is quiet while any source holds. The v1 birds settle out of the sky and the flutter cue stays silent; fauna listen too | celestial engine (eclipse) |
 
 Landing grades come from the sink rate at touchdown: butter up to 0.5 m/s, smooth up to 1.2 m/s,
 firm up to 2.2 m/s, and hard above that.
@@ -1103,6 +1107,21 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   `{ instances, particles, lights, buffers, drawCalls, active, budget, failed }` and totals, the light
   pool, the lures, discoveries, counters, refusals, leaks, memory and the site feed.
   `window.DRIFTWING.getStats().spawns` carries it.
+- **Engines (wave 2).** Each engine has a reference page for preset authors in `docs/engines/`.
+  - `weatherVolume` ([weatherVolume.md](engines/weatherVolume.md)): forms tower, cumulus, lens, bank,
+    sheet and mist from instanced puffs in the v1 look (one shared mesh), rain, snow and dust shafts,
+    distance compression of masses beyond the fog (direction and angular size kept, so an anvil reads
+    at 30+ km before its lure takes over), an inside-fog sky modifier (priority 15), a veil, local
+    streaks and canopy rain in the cockpit and FPV views, and one WindField source per volume
+    (turbulence, updraft, shaft downdrafts and outflow, lens waves), removed at FAR and on dispose.
+  - `celestial` ([celestial.md](engines/celestial.md)): meteors, comets, the eclipse (a priority-30
+    sky modifier that really darkens the sun, sky, fog and lights; `wildlifeQuiet` through totality),
+    the glory and full-circle rainbow on every cloud (`uniforms.cloudGlory` / `cloudBow`), rainbows in
+    mist and static sky values; sky objects on a shell at 96 % of the camera's far plane.
+  - Both engines build every GPU resource in `init()` and give an instance only slots, so `dispose()`
+    returns `renderer.info.memory` exactly; they write their instance buffers in place through
+    persistent update ranges (no allocation per frame). They key their once-per-frame work on
+    `state.frame`, so a second update of the same instance in one frame is skipped.
 
 ### Performance (`ctx.perf`, `src/core/perf.js`)
 
@@ -1153,7 +1172,15 @@ every colour takes exactly the Phase 1 path. `tools/steps/golden-frame.json` ren
 frame with the weather's clear-sky modifier and after removing it, and the two are pixel-identical
 on both backends. `getModifierState()` returns the folded values for the debugger and tests.
 
-Priorities in use: the weather 10. The celestial engine's eclipse should sit above it.
+Priorities in use: the weather 10, the weather volumes' inside fog (`weatherVolume`) 15, the celestial
+engine's eclipse, fireball flashes and static sky values (`<id>:celestial`) 30.
+
+`getModifierLevels()` returns the live folded record itself (no copy, read only), for systems that
+follow the sky every frame: the cloud palette (`cloudShading.js`) reads it, so the v1 clouds take a
+storm's darker blue-grey undersides and an eclipse's darkness, and with nothing weighing in keep their
+exact look (an A/B of the old and new cloud module in one page is pixel-identical at golden hour,
+noon, low sun and night, on both backends). `SUN_ANGULAR_RADIUS` and `CELESTIAL_POLE_ELEVATION_DEG`
+are exported for the celestial engine.
 
 ### Regional weather (`ctx.systems.weather`, `src/spawns/weather.js`)
 
@@ -1295,6 +1322,7 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node --expose-gc tools/lab/spawns.mjs` | the spawn framework headless: the preset validator, the engine registry, the pools, LOD hysteresis, budgets, lures, discovery (view cone, terrain occlusion, once per world), sites from a feed, wind sources and lights removed on dispose, leak clean-up, lifetimes, and a manager frame update that allocates nothing (young-generation growth over 100 000 frames with 40 spawns) |
 | `node tools/spawn-check.mjs --url <dev server>/v2/` | the spawn framework in V2 on either backend: 200 instances created and disposed three times with `renderer.info.memory` back to its baseline exactly and the heap within 1 MB, LOD transitions with hysteresis, lures at 12-30 km at golden hour, midday and night (screenshots), a wind source removed on dispose, discovery firing once, the sampled allocation of the manager's frame update, and the F9 debugger's keyboard behaviour |
 | `npm test` | the V1 check, `build:single` and a smoke test of the built shell |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-weatherVolume.json` (and `engine-celestial.json`; `--query renderer=webgl` for WebGL2) | each engine's forms and components force-spawned ahead of the craft with screenshots, their wind, inside and eclipse effects, and create/dispose with `renderer.info.memory`, wind sources and sky modifiers back to their baseline exactly |
 | `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders) |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/weather-sky.json` (or a build with `?debug=1`) | the opening is clear with the sky untouched, the sky modifier blend, the four weather states' sky (screenshots) and `weatherChanged` |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/director-game.json` | the game-wired director: its load shedder, `forceSpawn` ahead, `getNearby`, the camera frustum, the LOD bias and `dispose` |
