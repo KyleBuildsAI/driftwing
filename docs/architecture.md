@@ -88,6 +88,16 @@ own window. V2's side is `src/shell/bridge.js`, the owner of the bindable `versi
 message; opened on its own at `/v2/` it navigates the tab to `/?v=1`; inside any other page it
 says so in a toast and stays put.
 
+**Seed links.** A link to a world is the shell URL `/?v=2#seed=ABC&t=0.723` (`t`, optional, is the
+time of day as a fraction of the day, or `HH:MM`), so it opens in the launcher with V2. To reload
+into another world (the settings seed field, "New world"), V2 posts exactly
+`{ source: 'driftwing-v2', type: 'open-world', hash: '#seed=ABC&t=0.723' }` under the same origin
+and source checks; the hash must be one `worldHash()` in `src/core/seed.js` can produce
+(`isWorldHash`). The shell makes that hash its own, drops any `?seed=` and `?time=` it would
+forward (they would win over the hash), and reloads V2 with it, so the shell URL always names the
+world. V2 opened on its own reloads itself with the new `?seed=` instead
+(`bridge.openWorld(hash)`).
+
 ### Storage isolation
 
 V1, V2 and the shell share one origin, so they keep apart by name:
@@ -134,7 +144,7 @@ system, and then starts the frame loop.
 | `clock.js` | `createFixedStepClock()`: 120 Hz ticks, accumulator, interpolation `alpha`, 0.1 s frame clamp |
 | `loop.js` | the frame loop (`createFrameLoop(ctx, options)`): timing, the fade gate, the system update order, the safety net and telemetry calls, render |
 | `perf.js` | display refresh measurement, the frame target, dynamic resolution (stage one) and v1's quality governor (stage two) |
-| `seed.js` | resolves the world seed from the URL (or a new random one) |
+| `seed.js` | the world seed (query, then hash, then the saved seed, else a new random one), the start time of day (`?time=`, then the link's `#t=`), world hashes and share links |
 | `sun.js` | sun and moon directions for a time of day, and the inverse |
 | `util.js` | `clamp`, `damp`, heading helpers, `compassName`, finite checks |
 
@@ -161,6 +171,8 @@ system, and then starts the frame loop.
 | `placement.js` | deterministic site placement on the 2 km grid ([Placement and terrain stamps](#placement-and-terrain-stamps)); pure, imported by worldgen on both threads |
 | `stamps.js` | the terrain stamps (cone, carve, cliffStep, gorge, flatten, islandBase): resolution, height, paint, footprints; pure |
 | `terrain.worker.js` | the terrain Web Worker (Vite `?worker&inline`, so it also works in the single-file build) |
+| `mapTileGen.js` | map tiles from the shared height and biome functions: `generate({ x, z, size, resolution, fields })` returns `height` (Float32Array), `color` (RGBA sRGB, face colours under a shaded relief, water by depth) and `biome` (Uint8Array); seamless; pure, generic for Phase 3's far-field tiles |
+| `mapTiles.worker.js`, `mapTiles.js` | the map-tile worker (imports worldgen like the terrain worker, caches tiles in the IndexedDB database `driftwing-v2-maptiles`) and its main-thread service `createMapTileService({ seed, worldOptions })`: `request(spec, { priority })`, `reprioritize(fn)`, `stats()`, `dispose()` |
 | `chunkBuilder.js` | chunk meshes and vegetation scatter, in the worker or time-sliced on the main thread; stamp-aware skirts |
 | `terrain.js` | the chunk manager: ring LOD with skirts, pooled meshes, the worker queue (v1) |
 | `landmarks.js` | arches, monolith circles, lighthouses and balloons (v1) |
@@ -288,6 +300,11 @@ system, and then starts the frame loop.
 | `instrumentHud.js`, `instrumentHud.css` | the optional glass instrument HUD overlay |
 | `stickReticle.js`, `stickReticle.css` | the virtual-stick reticle |
 | `soundPill.js`, `soundPill.css` | the "Sound off - click to enable" pill |
+| `journalPanel.js`, `journalPanel.css` | the journal panel's body: this world's totals, discoveries (x / N), the global records and achievements, biomes, landmarks, ring courses and landings |
+| `discoveryToast.js`, `discoveryToast.css` | the glass discovery card (name, category, one-liner, count) and achievement card; toasts for improved records |
+| `worldMap.js`, `worldMap.css` | the world map panel (M): relief tiles, discovered sites, trail, craft, waypoint; click to set a waypoint |
+| `seedLinks.js` | the Copy link buttons and reloading into another world through the shell bridge |
+| `categoryIcons.js`, `journalFormat.js` | the discovery icons and colours per category and landmark type (SVG and Path2D), and the journal's number, time and coordinate formats |
 
 ### `src/copilot`: WREN
 
@@ -302,8 +319,9 @@ system, and then starts the frame loop.
 
 ### `src/gameplay`
 
-`journal.js` (discoveries, biomes, distance, best landings), `rings.js` (ring courses) and
-`waypoints.js` (waypoint beacon and arrow), all from v1.
+`journal.js` (landmarks, biomes, distance, best landings from v1; spawn discoveries, the global
+records and the achievements from Phase 2, see [UI](#ui-ctxsystemsui)), `rings.js` (ring courses)
+and `waypoints.js` (waypoint beacon and arrow), from v1.
 
 ### `src/dev`: developer tools (never player features)
 
@@ -357,7 +375,10 @@ system, and then starts the frame loop.
 1. The display refresh measurement starts (it runs while boot waits).
 2. `await storage.init()`.
 3. The typed event bus (`attachTypedEvents(new EventBus(), { validate })`), the settings and the
-   seed, which is written back into the URL.
+   seed: the query (`?seed=`), then the hash (`#seed=`, share links and the launcher shell), then
+   the saved `settings.seed` (the world flown last), else a new random one. It is written back into
+   the URL and into `settings.seed`. The start time of day is `?time=`, then the link's `#t=`,
+   else the golden-hour opening.
 4. The renderer (`src/render/renderer.js`): WebGPU first, WebGL2 fallback. WebGPU is chosen only
    when a real device can be created, since an adapter alone does not prove it works. If three.js
    falls back to WebGL2 on its own later, the renderer is rebuilt for WebGL2 so no WebGPU-only
@@ -496,13 +517,16 @@ journals are copied under their new names, then the old database is deleted.
 | key | what |
 | --- | --- |
 | `driftwing-v2.settings` | settings |
-| `driftwing-v2.journal.<seed>` | the per-world journal |
+| `driftwing-v2.journal.<seed>` | the per-world journal (landmarks, biomes, totals, ring courses, landings, spawn discoveries) |
+| `driftwing-v2.records` | the global records: journal statistics, achievements and the best landing in any world |
 | `driftwing-v2.ui.firstRunHintSeen` | first-run hint flag |
 | `driftwing-v2.input.bindings` | the binding profile `{ version, devices, global: { device: { target: Ref[] } }, crafts: { craftId: {...} } }` |
 | `driftwing-v2.input.calibration.<deviceKey>` | calibration per device |
 | `driftwing-v2.audio.vario` | the variometer audio (`on` \| `off`; Phase 1's `auto` reads as `on`) |
 
-The dev harnesses use their own databases (`driftwing-v2-test`, `driftwing-v2-test-hotas`) and
+The map-tile worker keeps finished map tiles in its own IndexedDB database, `driftwing-v2-maptiles`
+(one store, `tiles`, keyed by the seed, the tile version, a hash of the presets' placement data and
+the tile; the oldest go beyond 1200 tiles). The dev harnesses use their own databases (`driftwing-v2-test`, `driftwing-v2-test-hotas`) and
 sessionStorage keys (`driftwing-v2.test.flight`, `driftwing-v2.test.hotas`). The launcher shell
 keeps one key of its own, `driftwing.shell.lastVersion`.
 
@@ -546,6 +570,7 @@ player. Version 5 remembers the view per craft: `view` seeds every craft's `view
 | `frameTarget` | `auto` | `auto` \| 60 \| 120 \| 144 \| 240 \| `uncapped` |
 | `dynamicResolution` | true | boolean |
 | `mixer` | `{ master: 0.7, engine: 0.9, environment: 0.85, ui: 0.8, copilot: 1, music: 0.7 }` | 0..1 per bus |
+| `seed` | `''` | the world flown last (A-Z, 0-9, dashes; at most 24); a link or `?seed=` wins over it at boot |
 | `devBadge`, `windOverlay` | false, false | booleans |
 
 `masterVolume` is an alias of `mixer.master`, kept for v1-era callers. Bindings and calibration are
@@ -581,7 +606,8 @@ Typed events are emitted with `bus.emitTyped(name, payload)` and heard with
 | `spawnActivated` | `{ id, presetId, category, kind: site\|event, position }` | SpawnManager |
 | `spawnEnded` | `{ id, presetId, reason }`; reason `ended`, `expired`, `despawn`, `range`, `error`, `debug`, `removed`, `disposed` or the caller's (the director's `lifetime`, `despawn`, `dispose`) | SpawnManager |
 | `weatherChanged` | `{ state: clear\|building\|storm\|clearing, previous, region }`; fires only on a real change, so `previous` is always a state; `region` is the weather cell `"rx:rz"` | weather system |
-| `achievement` | `{ id, title }` | gameplay |
+| `achievement` | `{ id, title }`; the journal keeps each id once, in every world | presets and engines |
+| `journalStat` | `{ key, value, op: min\|max\|add, presetId? }`: `stormsChased` (add 1), `closestTornado` (min, m), `bestCanyonRun` (min, s, clean runs only) and any other key (folded with its op) | presets and engines |
 
 Landing grades come from the sink rate at touchdown: butter up to 0.5 m/s, smooth up to 1.2 m/s,
 firm up to 2.2 m/s, and hard above that.
@@ -597,7 +623,9 @@ Untyped events keep v1's `namespace:verb` names:
 - `waypoint:set`, `waypoint:reached`, `waypoint:cleared`;
 - `landmark:discovered`, `landmark:threaded`, `journal:changed`, `birds:scattered`;
 - `copilot:speech { text, source }`, `copilot:listening`, `copilot:transcript`, `mic:toggle`;
-- `ui:command`, `ui:action`.
+- `ui:command`, `ui:action`;
+- `journal:discovery { entry, found, total }`, `journal:record { key, value, previous, improved, op,
+  presetId }`, `journal:achievement { entry }` (the journal, after it recorded one).
 
 v2 adds these untyped events:
 
@@ -619,7 +647,7 @@ Every action is rebindable on every device:
 `copilotPTT, craftAbility, waypointNearest, waypointAhead, photoMode, viewCycle, viewToggle1P3P,
 viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, craftSelect1` ..
 `craftSelect6, gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack,
-ringCourse, journal, settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`.
+ringCourse, journal, mapToggle, settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`.
 Stored or imported bindings for the retired `modeToggle` and `boost`, and Phase 1 references
 limited to the CLASSIC key layer, are dropped quietly on load.
 
@@ -630,7 +658,7 @@ performs it:
 | --- | --- |
 | flight (`FlightController.js`) | craftAbility, craftNext, craftPrev, craftSelect1-6, gearToggle, flapsUp, flapsDown, airbrake (held), relaunch, engineToggle, chuteDeploy. The flight model itself handles gearToggle, flapsUp, flapsDown, airbrake, engineToggle and chuteDeploy (they reach it in `controls.actions` on the frame's first tick, and held ones in `controls.held`) |
 | camera (`cameraManager.js`) | viewCycle, viewToggle1P3P, viewForward, viewBack, viewLeft, viewRight, recenterView |
-| ui (`ui.js`) | waypointAhead, waypointNearest, photoMode, autopilotToggle, timeForward, timeBack, ringCourse, journal, settings, controlsPanel |
+| ui (`ui.js`) | waypointAhead, waypointNearest, photoMode, autopilotToggle, timeForward, timeBack, ringCourse, journal, mapToggle, settings, controlsPanel |
 | copilot (`copilot.js`) | copilotPTT (held) |
 | shell bridge (`src/shell/bridge.js`) | versionToggle |
 
@@ -1231,9 +1259,26 @@ flight time. It is `ctx.systems.spawns.director`.
 ### UI (`ctx.systems.ui`)
 
 The UI system offers `update`, `toast`, `setSubtitle`, `setMicState`, `showPanel`,
-`togglePanel(id)` (panels include `settings`, `journal`, `help` and `controls`), `setPhotoMode`,
+`togglePanel(id)` (panels include `settings`, `journal`, `map`, `help` and `controls`), `setPhotoMode`,
 `wake` and `openControls({ calibrate })`. It also exposes the v2 chrome objects `craftPicker`,
-`settingsPanel`, `controlsPanel` and `statusBadge`.
+`settingsPanel`, `controlsPanel`, `statusBadge`, `seedLinks`, `worldMap` and `discoveryToast`.
+
+- **Discovery loop (Phase 2, Milestone F).** A spawn discovery (the SpawnManager's typed
+  `discovery` with a `presetId`) is recorded by the journal (`recordSpawnDiscovery`: name, category,
+  kind, seed, coordinates, time of day, first-seen date, the preset's `journal.description`); the
+  audio system plays the chime, and the journal's `journal:discovery` raises the discovery card.
+  The journal restores its discoveries into the manager (`markDiscovered`), so they never fire
+  twice in one world. The collection count is found / total over the manager's preset registry
+  (`listPresets()`, which is `PRESETS` in a player's build). `journalStat` and `achievement`
+  events fold into the global records (`driftwing-v2.records`); achievements and bests are shared by
+  every world, discoveries belong to their seed.
+- **World map** (`worldMap.js`). A panel like the others, so the flight goes on. Tiles come from
+  `createMapTileService` at 128 samples a side, 1 km to 256 km per tile (the level whose tiles show
+  about 256 px wide), a memory LRU of 220 decoded tiles over the worker's IndexedDB cache, and a
+  coarser cached tile stands in while a tile is built. Only journal entries appear: sites among the
+  spawn discoveries and the landmarks found. The trail is recorded all flight in a fixed ring of
+  6000 points (a new line after a jump of 1.5 km or a relaunch). A click or tap sets the waypoint
+  through `ctx.systems.waypoints.set`. The root class `dw-map-open` is set while it is open.
 
 - Root classes: `dw-devbadge-on`, `dw-touch` (touch controls), `dw-glass-off` (a cockpit without
   the glass HUD hides every `.dw-glass` element), and `dw-no-throttle` for craft whose
@@ -1271,7 +1316,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `tools/run-harness.mjs` | runs either harness headlessly on a spare port (`--test 1\|hotas`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--out`), prints a table per run and per craft and view, and exits 0 on PASS |
 | `tools/shell-test.mjs` | the launcher shell test (below) |
 | `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |
-| labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`, `terrain`, `spawns`, `director`, `audio`) |
+| labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`, `terrain`, `spawns`, `director`, `audio`, `discovery`) |
 | `tools/spawn-check.mjs` | `--url <dev server>/v2/ [--backend webgpu\|webgl] [--out]`: the spawn framework proofs in the browser with the dev test kit (below) |
 
 ## Testing
@@ -1295,6 +1340,8 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node --expose-gc tools/lab/spawns.mjs` | the spawn framework headless: the preset validator, the engine registry, the pools, LOD hysteresis, budgets, lures, discovery (view cone, terrain occlusion, once per world), sites from a feed, wind sources and lights removed on dispose, leak clean-up, lifetimes, and a manager frame update that allocates nothing (young-generation growth over 100 000 frames with 40 spawns) |
 | `node tools/spawn-check.mjs --url <dev server>/v2/` | the spawn framework in V2 on either backend: 200 instances created and disposed three times with `renderer.info.memory` back to its baseline exactly and the heap within 1 MB, LOD transitions with hysteresis, lures at 12-30 km at golden hour, midday and night (screenshots), a wind source removed on dispose, discovery firing once, the sampled allocation of the manager's frame update, and the F9 debugger's keyboard behaviour |
 | `npm test` | the V1 check, `build:single` and a smoke test of the built shell |
+| `node tools/lab/discovery.mjs` | seed links (resolution order, times, world hashes, share links), the journal's spawn discoveries and collection count, the global records (add / min / max, known ops, bad payloads), achievements, and the map tiles (fields, determinism, no seams, water, cost) |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/discovery.json` | with the spawn test kit: forced discoveries give a toast, the chime and a journal entry and raise the count; journalStat and achievement events reach the records and the journal panel; M opens the map with the discovered site only, terrain tiles and the trail; a click sets the waypoint; Copy link is the shell link with the seed and time; the seed is saved |
 | `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders) |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/weather-sky.json` (or a build with `?debug=1`) | the opening is clear with the sky untouched, the sky modifier blend, the four weather states' sky (screenshots) and `weatherChanged` |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/director-game.json` | the game-wired director: its load shedder, `forceSpawn` ahead, `getNearby`, the camera frustum, the LOD bias and `dispose` |
