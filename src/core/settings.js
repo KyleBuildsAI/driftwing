@@ -51,6 +51,8 @@ const SCHEMA = Object.freeze({
   invertPitch: { default: false, validate: isBoolean },
   copilotVoice: { default: true, validate: isBoolean },
   copilotChatter: { default: true, validate: isBoolean },
+  // v2: WREN's proactive tour-guide callouts ("Supercell building 9 km north-west. Want a heading?").
+  copilotCallouts: { default: true, validate: isBoolean },
   remoteCopilot: { default: false, validate: isBoolean },
   remoteEndpoint: { default: CONFIG.REMOTE_COPILOT_DEFAULT_ENDPOINT, validate: (value) => typeof value === 'string' && /^https?:\/\/[^\s]+$/i.test(value) },
   showFps: { default: false, validate: isBoolean },
