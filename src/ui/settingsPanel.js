@@ -11,7 +11,8 @@
 import { clamp } from '../core/util.js';
 import { RemoteCopilot } from '../copilot/copilot.js';
 
-const SEED_PATTERN = /^[A-Za-z0-9-]{1,24}$/;
+/** What the seed field accepts (normalised to upper case by src/core/seed.js). */
+const SEED_INPUT_PATTERN = /^[A-Za-z0-9-]{1,24}$/;
 /** Seconds between refreshes of the live notes (running quality, frame target, active assists). */
 const LIVE_NOTE_SECONDS = 0.25;
 
@@ -39,9 +40,10 @@ function parseChoice(value) {
 /**
  * Wires the settings panel element. ctx supplies settings, bus, state (perf and flight telemetry
  * for the live notes), quality and craftRegistry; toast(text, options) is the UI's toast and
- * navigateToSeed(seed) reloads into another world.
+ * seedLinks (src/ui/seedLinks.js) reloads into another world (inside the launcher shell when
+ * embedded). The World group's Copy link button is a delegated [data-action="copy-link"].
  */
-export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
+export function createSettingsPanel({ panel, ctx, toast, seedLinks }) {
   const { settings, bus, state, craftRegistry } = ctx;
 
   function requireWithin(selector) {
@@ -63,6 +65,7 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
     endpointInput: requireWithin('#dw-set-endpoint'),
     seedForm: requireWithin('#dw-seed-form'),
     seedInput: requireWithin('#dw-seed-input'),
+    seedCurrent: requireWithin('#dw-seed-current'),
     controllersNote: requireWithin('#dw-controllers-note'),
   };
   const switches = Array.from(panel.querySelectorAll('.dw-switch[data-setting]'));
@@ -333,11 +336,11 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
   dom.seedForm.addEventListener('submit', (event) => {
     event.preventDefault();
     const seed = dom.seedInput.value.trim();
-    const valid = SEED_PATTERN.test(seed);
+    const valid = SEED_INPUT_PATTERN.test(seed);
     dom.seedInput.classList.toggle('dw-invalid', !valid);
     dom.seedForm.classList.toggle('dw-invalid', !valid);
     dom.seedInput.setAttribute('aria-invalid', String(!valid));
-    if (valid) navigateToSeed(seed);
+    if (valid) seedLinks.openWorld(seed);
   });
   dom.seedInput.addEventListener('input', () => {
     dom.seedInput.classList.remove('dw-invalid');
@@ -357,6 +360,7 @@ export function createSettingsPanel({ panel, ctx, toast, navigateToSeed }) {
   bus.on('quality:changed', syncQualityNote);
   bus.onTyped('craftChanged', () => syncKey('craft'));
 
+  dom.seedCurrent.textContent = state.seed;
   syncAll();
 
   return {

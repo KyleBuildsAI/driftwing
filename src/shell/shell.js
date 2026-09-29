@@ -12,10 +12,14 @@
 //   pointer reaches the top-left edge strips, when anything in the shell has focus or input, and
 //   after each switch. It is placed in the first spot clear of the running game's HUD.
 // - Messages: V2 asks for a switch with postMessage({ source: 'driftwing-v2',
-//   type: 'switch-version', to }). Only a message from this shell's own iframe, from this origin,
-//   with exactly that shape is honoured; anything else is ignored without a trace.
+//   type: 'switch-version', to }), and for another world (a seed link applied in its settings) with
+//   postMessage({ source: 'driftwing-v2', type: 'open-world', hash: '#seed=ABC&t=0.723' }): the shell
+//   takes that hash as its own (dropping any ?seed= and ?time= it forwards) and reloads V2 with it.
+//   Only a message from this shell's own iframe, from this origin, with exactly one of those shapes
+//   is honoured; anything else is ignored without a trace.
 //
 // window.DRIFTWING_SHELL is a small read-mostly handle for the headless tests.
+import { isWorldHash } from '../core/seed.js';
 
 const VERSIONS = Object.freeze(['v1', 'v2']);
 const DEFAULT_VERSION = 'v2';
@@ -40,6 +44,7 @@ const PILL_CLEARANCE = 8;
  */
 const HUD_SELECTOR = ['.dw-modebar', '#dw-chips > *', '#dw-compass', '#dw-flight', '.dw-topbar', '.dw-debug', '.dw-devbadge'].join(', ');
 const SWITCH_REQUEST_KEYS = Object.freeze(['source', 'to', 'type']);
+const WORLD_REQUEST_KEYS = Object.freeze(['hash', 'source', 'type']);
 
 const frame = document.getElementById('dw-shell-frame');
 const veil = document.getElementById('dw-shell-veil');
@@ -192,18 +197,41 @@ function requestVersion(version, { reload = false } = {}) {
 }
 
 // ---- Messages from V2 ---------------------------------------------------------------------------
-/** True for exactly { source: 'driftwing-v2', type: 'switch-version', to: 'v1' | 'v2' }. */
-function isSwitchRequest(data) {
+/** True when data is a plain object with exactly the (sorted) keys. */
+function hasExactKeys(data, expectedKeys) {
   if (data === null || typeof data !== 'object' || Object.getPrototypeOf(data) !== Object.prototype) return false;
   const keys = Object.keys(data).sort();
-  if (keys.length !== SWITCH_REQUEST_KEYS.length || keys.some((key, index) => key !== SWITCH_REQUEST_KEYS[index])) return false;
+  return keys.length === expectedKeys.length && keys.every((key, index) => key === expectedKeys[index]);
+}
+
+/** True for exactly { source: 'driftwing-v2', type: 'switch-version', to: 'v1' | 'v2' }. */
+function isSwitchRequest(data) {
+  if (!hasExactKeys(data, SWITCH_REQUEST_KEYS)) return false;
   return data.source === 'driftwing-v2' && data.type === 'switch-version' && VERSIONS.includes(data.to);
+}
+
+/** True for exactly { source: 'driftwing-v2', type: 'open-world', hash: '#seed=...' }. */
+function isWorldRequest(data) {
+  if (!hasExactKeys(data, WORLD_REQUEST_KEYS)) return false;
+  return data.source === 'driftwing-v2' && data.type === 'open-world' && isWorldHash(data.hash);
+}
+
+/**
+ * Makes hash the shell's own (so the shell URL names the world and a reload returns to it) and
+ * reloads V2 with it. A ?seed= or ?time= the shell forwards would win over the hash, so they go.
+ */
+function openWorld(hash) {
+  const params = new URLSearchParams(window.location.search);
+  params.delete('seed');
+  params.delete('time');
+  window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}${hash}`);
+  requestVersion('v2', { reload: true });
 }
 
 window.addEventListener('message', (event) => {
   if (event.origin !== window.location.origin || event.source !== frame.contentWindow) return;
-  if (!isSwitchRequest(event.data)) return;
-  requestVersion(event.data.to);
+  if (isSwitchRequest(event.data)) requestVersion(event.data.to);
+  else if (isWorldRequest(event.data)) openWorld(event.data.hash);
 });
 
 // ---- The pill: placement and auto-hide ----------------------------------------------------------

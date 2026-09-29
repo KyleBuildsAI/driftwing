@@ -7,11 +7,19 @@
 //   - standalone at /v2/, V2 navigates the tab to the shell with ?v=1;
 //   - inside any other page (a foreign embed), it says so in a toast and stays put.
 //
+// Seed links: openWorld(hash) reloads into another world (hash from worldHash() in src/core/seed.js).
+// Inside the shell V2 posts { source: 'driftwing-v2', type: 'open-world', hash }, and the shell takes the
+// hash as its own and reloads V2 with it, so the shell URL names the world; standalone (or inside a
+// foreign page) V2 reloads itself with the new seed.
+//
 // While embedded, <html> carries the class dw-embedded so the HUD keeps the top-left corner free
 // for the shell's version pill (src/ui/ui.css).
+import { isWorldHash } from '../core/seed.js';
 
 /** The fields every switch request carries; `to` is added per request. */
 const SWITCH_MESSAGE = Object.freeze({ source: 'driftwing-v2', type: 'switch-version' });
+/** The fields every world request carries; `hash` is added per request. */
+const WORLD_MESSAGE = Object.freeze({ source: 'driftwing-v2', type: 'open-world' });
 export const SHELL_VERSIONS = Object.freeze(['v1', 'v2']);
 
 /**
@@ -31,9 +39,22 @@ export function shellUrlFor(version) {
 }
 
 /**
+ * V2's own address for a world: the current page with ?seed= set, ?time= dropped (the hash's t= then
+ * applies) and the world hash.
+ */
+function worldPageUrl(hash) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('seed', new URLSearchParams(hash.slice(1)).get('seed'));
+  url.searchParams.delete('time');
+  url.hash = hash;
+  return url;
+}
+
+/**
  * Creates the bridge. ctx: the game context (bus). Returns { embedded, availability(),
- * requestVersion(version) }: availability() says how a request would go out without sending one,
- * and requestVersion returns how it went out: 'message', 'navigate' or 'unavailable'.
+ * requestVersion(version), openWorld(hash) }: availability() says how a request would go out without
+ * sending one, and requestVersion returns how it went out: 'message', 'navigate' or 'unavailable'.
+ * openWorld returns 'message' (the shell reloads V2) or 'navigate' (V2 reloads itself).
  */
 export function createShellBridge(ctx) {
   const { bus } = ctx;
@@ -60,9 +81,24 @@ export function createShellBridge(ctx) {
     return route;
   }
 
+  function openWorld(hash) {
+    if (!isWorldHash(hash)) throw new Error(`invalid world link "${hash}"`);
+    if (availability() === 'message') {
+      window.parent.postMessage({ ...WORLD_MESSAGE, hash }, window.location.origin);
+      return 'message';
+    }
+    // Standalone or inside a foreign page: this document reloads itself into the world. A change of
+    // the hash alone does not reload, so the same address is reloaded explicitly.
+    const target = worldPageUrl(hash);
+    const sameDocument = target.origin === window.location.origin && target.pathname === window.location.pathname && target.search === window.location.search;
+    window.location.assign(target.href);
+    if (sameDocument) window.location.reload();
+    return 'navigate';
+  }
+
   bus.on('input:action', (action) => {
     if (action && action.phase === 'press' && action.id === 'versionToggle') requestVersion('v1');
   });
 
-  return { embedded, availability, requestVersion };
+  return { embedded, availability, requestVersion, openWorld };
 }

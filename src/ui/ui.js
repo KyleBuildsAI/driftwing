@@ -5,6 +5,7 @@ import { Copilot } from '../copilot/copilot.js';
 import { storage } from '../core/storage.js';
 import { createControlsPanel } from './controlsPanel.js';
 import { createCraftPicker } from './craftPicker.js';
+import { createSeedLinks } from './seedLinks.js';
 import { createSettingsPanel } from './settingsPanel.js';
 import { createStatusBadge } from '../dev/statusBadge.js';
 import { unitsFor } from './instruments/units.js';
@@ -54,7 +55,6 @@ export function createUISystem(ctx) {
     error: 'Voice input hit a snag. Tap to try again',
   };
   const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-  const SEED_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const FIRST_RUN_KEY = 'driftwing-v2.ui.firstRunHintSeen';
   const MAX_TOASTS = 2;
   // Toasts raised in photo mode wait for the exit; older ones are no longer news.
@@ -1686,57 +1686,9 @@ export function createUISystem(ctx) {
   }
 
   // ---------------------------------------------------------------------------
-  // Seed chip: share link and new world
+  // Seed chip: share link and new world (src/ui/seedLinks.js)
   // ---------------------------------------------------------------------------
-  /** Share links open V2 through the launcher shell (/?v=2), which forwards #seed= to V2. */
-  function shareUrl() {
-    const url = new URL('/', window.location.origin);
-    url.searchParams.set('v', '2');
-    url.hash = new URLSearchParams({ seed: state.seed }).toString();
-    return url.toString();
-  }
-  function copyWithSelection(text) {
-    const area = document.createElement('textarea');
-    area.value = text;
-    area.setAttribute('readonly', '');
-    area.style.cssText = 'position:fixed;top:-200px;left:0;width:10px;height:10px;opacity:0;';
-    document.body.append(area);
-    area.select();
-    let copied = false;
-    try {
-      copied = document.execCommand('copy');
-    } catch (error) {
-      copied = false;
-    }
-    area.remove();
-    return copied;
-  }
-  function writeClipboard(text) {
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function' && window.isSecureContext) {
-      return navigator.clipboard.writeText(text).then(
-        () => true,
-        () => copyWithSelection(text),
-      );
-    }
-    return Promise.resolve(copyWithSelection(text));
-  }
-  function copyShareLink() {
-    const link = shareUrl();
-    writeClipboard(link).then((copied) => {
-      if (copied) toast('Share link copied. Anyone who opens it flies this same world.', { kind: 'success' });
-      else toast(`Share this world: ${link}`, { duration: 10, wrap: true });
-    });
-  }
-  function randomSeed() {
-    const bytes = new Uint8Array(6);
-    crypto.getRandomValues(bytes);
-    return Array.from(bytes, (byte) => SEED_ALPHABET[byte % SEED_ALPHABET.length]).join('');
-  }
-  function navigateToSeed(seed) {
-    const url = new URL(window.location.href);
-    url.searchParams.set('seed', seed.toUpperCase());
-    window.location.assign(url.toString());
-  }
+  const seedLinks = createSeedLinks({ ctx, toast });
   function setNewWorldConfirm(active) {
     dom.newWorld.classList.toggle('dw-confirm', active);
     dom.menuNewWorld.classList.toggle('dw-confirm', active);
@@ -1747,7 +1699,7 @@ export function createUISystem(ctx) {
   function requestNewWorld() {
     if (newWorldConfirmUntil && uiClock < newWorldConfirmUntil) {
       newWorldConfirmUntil = 0;
-      navigateToSeed(randomSeed());
+      seedLinks.newWorld();
       return;
     }
     newWorldConfirmUntil = uiClock + 3.2;
@@ -2009,7 +1961,7 @@ export function createUISystem(ctx) {
   }
 
   // ---- Settings and controls ------------------------------------------------------
-  const settingsPanel = createSettingsPanel({ panel: panels.settings, ctx, toast, navigateToSeed });
+  const settingsPanel = createSettingsPanel({ panel: panels.settings, ctx, toast, seedLinks });
   const controlsPanel = createControlsPanel({ panel: panels.controls, ctx });
 
   // ---------------------------------------------------------------------------
@@ -2421,7 +2373,7 @@ export function createUISystem(ctx) {
       case 'calibrate-controls': openControls({ calibrate: true }); break;
       case 'open-menu': togglePanel('menu'); break;
       case 'close-panel': showPanel(null); break;
-      case 'copy-link': copyShareLink(); break;
+      case 'copy-link': seedLinks.copyLink(); break;
       case 'new-world': requestNewWorld(); break;
       case 'mic':
         closeCommandBar();
@@ -2712,5 +2664,7 @@ export function createUISystem(ctx) {
     update, toast, setSubtitle, setMicState, showPanel, togglePanel, setPhotoMode, wake, openControls,
     /** v2 chrome for tests and other systems: the craft picker, settings tabs and controls panel. */
     craftPicker, settingsPanel, controlsPanel, statusBadge,
+    /** Seed links: shareUrl(), copyLink(), openWorld(seed, dayTime?), newWorld(). */
+    seedLinks,
   };
 }
