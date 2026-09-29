@@ -40,16 +40,25 @@ const ACTIVITY_RATE = 0.5;
 const SOURCE_FIELDS = Object.freeze(['type', 'direction', 'turn', 'offset', 'start', 'stop', 'fadeIn', 'fadeOut', 'strength', 'timeline']);
 
 // Per-instance numbers.
-const I = Object.freeze({ AGE: 0, ACTIVITY: 1, PREV_X: 2, PREV_Z: 3, TRAVEL_X: 4, TRAVEL_Z: 5, SPEED: 6 });
-const INSTANCE_SIZE = 7;
+const I = Object.freeze({ AGE: 0, ACTIVITY: 1, PREV_X: 2, PREV_Z: 3, TRAVEL_X: 4, TRAVEL_Z: 5, SPEED: 6, DT: 7, DURATION: 8 });
+const INSTANCE_SIZE = 9;
 // Per-source numbers.
-const P = Object.freeze({ START: 0, STOP: 1, FADE_IN: 2, FADE_OUT: 3, STRENGTH: 4, TURN: 5, ALONG: 6, SIDE: 7, UP: 8, MODE: 9, FIXED_X: 10, FIXED_Z: 11, WIND_ON: 12, TIMELINE_LOOP: 13, TIMELINE_OFFSET: 14 });
-const SOURCE_SIZE = 15;
+const P = Object.freeze({
+  START: 0, STOP: 1, FADE_IN: 2, FADE_OUT: 3, STRENGTH: 4, TURN: 5, ALONG: 6, SIDE: 7, UP: 8, MODE: 9, FIXED_X: 10, FIXED_Z: 11,
+  WIND_ON: 12, TIMELINE_LOOP: 13, TIMELINE_OFFSET: 14, CURRENT: 15, TIME: 16, RAMP_FROM: 17, RAMP_TO: 18, RAMP_VALUE: 19,
+});
+const SOURCE_SIZE = 20;
 const DIRECTION_MODES = Object.freeze({ heading: 0, ambient: 1, fixed: 2 });
 
-function smoothstep(edge0, edge1, value) {
-  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
+/**
+ * 1 - smoothstep(edge0, edge1, value) (fading out) or smoothstep (fading in), multiplied into
+ * numbers[P.CURRENT]: the frame update calls this instead of a function returning a double, which
+ * V8 boxes whenever it does not inline the call. The edges and value are read from numbers.
+ */
+function multiplyRamp(numbers, fadeOut) {
+  const t = Math.min(1, Math.max(0, (numbers[P.RAMP_VALUE] - numbers[P.RAMP_FROM]) / (numbers[P.RAMP_TO] - numbers[P.RAMP_FROM])));
+  const eased = t * t * (3 - 2 * t);
+  numbers[P.CURRENT] *= fadeOut ? 1 - eased : eased;
 }
 
 function finite(value, fallback, label, min = -Infinity, max = Infinity) {
@@ -91,20 +100,28 @@ function readTimeline(timeline, label) {
   return keys;
 }
 
-/** The timeline's value at time (piecewise linear, holding its end values). */
-function timelineValue(keys, time) {
+/**
+ * The timeline's value at the time numbers[P.TIME] (piecewise linear, holding its end values),
+ * written to numbers[P.CURRENT]: a returned double would be boxed.
+ */
+function writeTimelineValue(keys, numbers) {
+  const time = numbers[P.TIME];
   const count = keys.length >> 1;
-  if (time <= keys[0]) return keys[1];
+  if (time <= keys[0]) {
+    numbers[P.CURRENT] = keys[1];
+    return;
+  }
   for (let index = 1; index < count; index++) {
     const t1 = keys[index * 2];
     if (time <= t1) {
       const t0 = keys[index * 2 - 2];
       const v0 = keys[index * 2 - 1];
       const span = t1 - t0;
-      return span > 0 ? v0 + ((keys[index * 2 + 1] - v0) * (time - t0)) / span : keys[index * 2 + 1];
+      numbers[P.CURRENT] = span > 0 ? v0 + ((keys[index * 2 + 1] - v0) * (time - t0)) / span : keys[index * 2 + 1];
+      return;
     }
   }
-  return keys[count * 2 - 1];
+  numbers[P.CURRENT] = keys[count * 2 - 1];
 }
 
 export function createWindModifierEngine() {
@@ -218,9 +235,10 @@ export function createWindModifierEngine() {
     record.leader = leader.anchor;
   }
 
-  function moveAnchor(instance, dt) {
+  function moveAnchor(instance) {
     const record = instance.data;
     const numbers = record.numbers;
+    const dt = numbers[I.DT];
     const anchor = instance.anchor;
     if (record.follow) {
       if (!record.leader) resolveFollow(instance);
@@ -255,26 +273,51 @@ export function createWindModifierEngine() {
     numbers[I.PREV_Z] = anchor.z;
   }
 
-  function sourceStrength(instance, entry, index) {
+  /** The source's strength now, written to its frame's STRENGTH (worked out in numbers[P.CURRENT]). */
+  function writeSourceStrength(instance, entry, index) {
     const record = instance.data;
     const age = record.numbers[I.AGE];
     const numbers = entry.numbers;
+    const frame = entry.frame;
     const local = age - numbers[P.START];
-    if (local < 0 || age > numbers[P.STOP] + numbers[P.FADE_OUT]) return 0;
-    let strength = numbers[P.STRENGTH] * record.numbers[I.ACTIVITY];
-    strength *= numbers[P.FADE_IN] > 0 ? smoothstep(0, numbers[P.FADE_IN], local) : 1;
-    if (numbers[P.STOP] < Infinity) strength *= numbers[P.FADE_OUT] > 0 ? 1 - smoothstep(numbers[P.STOP], numbers[P.STOP] + numbers[P.FADE_OUT], age) : age > numbers[P.STOP] ? 0 : 1;
-    if (Number.isFinite(record.duration) && numbers[P.FADE_OUT] > 0) strength *= 1 - smoothstep(record.duration - numbers[P.FADE_OUT], record.duration, age);
+    if (local < 0 || age > numbers[P.STOP] + numbers[P.FADE_OUT]) {
+      frame[FRAME.STRENGTH] = 0;
+      return;
+    }
+    numbers[P.CURRENT] = numbers[P.STRENGTH] * record.numbers[I.ACTIVITY];
+    if (numbers[P.FADE_IN] > 0) {
+      numbers[P.RAMP_FROM] = 0;
+      numbers[P.RAMP_TO] = numbers[P.FADE_IN];
+      numbers[P.RAMP_VALUE] = local;
+      multiplyRamp(numbers, false);
+    }
+    if (numbers[P.STOP] < Infinity) {
+      if (numbers[P.FADE_OUT] > 0) {
+        numbers[P.RAMP_FROM] = numbers[P.STOP];
+        numbers[P.RAMP_TO] = numbers[P.STOP] + numbers[P.FADE_OUT];
+        numbers[P.RAMP_VALUE] = age;
+        multiplyRamp(numbers, true);
+      } else if (age > numbers[P.STOP]) {
+        numbers[P.CURRENT] = 0;
+      }
+    }
+    if (record.hasDuration && numbers[P.FADE_OUT] > 0) {
+      numbers[P.RAMP_FROM] = record.numbers[I.DURATION] - numbers[P.FADE_OUT];
+      numbers[P.RAMP_TO] = record.numbers[I.DURATION];
+      numbers[P.RAMP_VALUE] = age;
+      multiplyRamp(numbers, true);
+    }
     if (entry.timeline) {
-      let time = local + numbers[P.TIMELINE_OFFSET];
+      const strength = numbers[P.CURRENT];
       const loop = numbers[P.TIMELINE_LOOP];
-      if (loop > 0) time %= loop;
-      strength *= timelineValue(entry.timeline, time);
+      numbers[P.TIME] = loop > 0 ? (local + numbers[P.TIMELINE_OFFSET]) % loop : local + numbers[P.TIMELINE_OFFSET];
+      writeTimelineValue(entry.timeline, numbers);
+      numbers[P.CURRENT] *= strength;
     }
     const control = instance.control;
     const overall = Number.isFinite(control.strength) ? Math.max(0, control.strength) : 1;
     const own = control.strengths[index];
-    return strength * overall * (Number.isFinite(own) ? Math.max(0, own) : 1);
+    frame[FRAME.STRENGTH] = numbers[P.CURRENT] * overall * (Number.isFinite(own) ? Math.max(0, own) : 1);
   }
 
   function updateSource(instance, entry, index) {
@@ -301,7 +344,7 @@ export function createWindModifierEngine() {
     frame[FRAME.Z] = anchor.z + dirZ * numbers[P.ALONG] + dirX * numbers[P.SIDE];
     frame[FRAME.AGE] = age - numbers[P.START];
     frame[FRAME.SPEED] = record.numbers[I.SPEED];
-    frame[FRAME.STRENGTH] = sourceStrength(instance, entry, index);
+    writeSourceStrength(instance, entry, index);
     if (entry.type === 'downburst') {
       const params = entry.params;
       frame[FRAME.A] = Math.min(params.maxRadius, params.coreRadius + params.expand * Math.max(0, age - numbers[P.START]));
@@ -332,6 +375,7 @@ export function createWindModifierEngine() {
         numbers: new Float64Array(INSTANCE_SIZE),
         sources: entries.map((entry, index) => resolveSource(entry, index, scale, heading, rng)),
         duration,
+        hasDuration: duration !== null,
         endWithDuration: params.endWithDuration !== false,
         follow,
         leader: null,
@@ -340,6 +384,7 @@ export function createWindModifierEngine() {
         preset,
       };
       record.numbers[I.ACTIVITY] = 1;
+      record.numbers[I.DURATION] = duration ?? 0;
       record.numbers[I.PREV_X] = anchor.x;
       record.numbers[I.PREV_Z] = anchor.z;
       const instance = {
@@ -374,13 +419,14 @@ export function createWindModifierEngine() {
     update(instance, dt) {
       const record = instance.data;
       const numbers = record.numbers;
+      numbers[I.DT] = dt;
       numbers[I.AGE] += dt;
       const wantActive = instance.active === false ? 0 : 1;
       numbers[I.ACTIVITY] += (wantActive - numbers[I.ACTIVITY]) * Math.min(1, dt * ACTIVITY_RATE);
-      moveAnchor(instance, dt);
+      moveAnchor(instance);
       const sources = record.sources;
       for (let index = 0; index < sources.length; index++) updateSource(instance, sources[index], index);
-      if (record.endWithDuration && Number.isFinite(record.duration) && numbers[I.AGE] >= record.duration) instance.ended = true;
+      if (record.endWithDuration && record.hasDuration && numbers[I.AGE] >= numbers[I.DURATION]) instance.ended = true;
     },
 
     setLOD(instance, tier) {

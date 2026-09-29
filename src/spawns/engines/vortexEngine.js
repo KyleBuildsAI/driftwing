@@ -68,9 +68,11 @@ const STAGES = Object.freeze(['forming', 'mature', 'ropeOut', 'dissipated']);
 const S = Object.freeze({
   AGE: 0, STAGE: 1, STAGE_TIME: 2, FORM: 3, ROPE: 4, STRENGTH: 5, VISIBILITY: 6, ACTIVITY: 7, SPIN: 8,
   WATER: 9, VEL_X: 10, VEL_Z: 11, PREV_X: 12, PREV_Z: 13, WIND_ON: 14, GROUND_SHARE: 15, PUFF_SHARE: 16,
-  VISIBLE_TARGET: 17, MATURE_END: 18, LEAN_X: 19, LEAN_Z: 20,
+  VISIBLE_TARGET: 17, MATURE_END: 18, LEAN_X: 19, LEAN_Z: 20, DT: 21, WATER_TARGET: 22, SPIN_RATE: 23,
 });
-const STATE_SIZE = 21;
+const STATE_SIZE = 24;
+/** Ramps of the frame update (Float64Array slots, see writeSmoothstep). */
+const R = Object.freeze({ FORM: 0, CONDENSE: 1, ROPE_FADE: 2, ROPE_LIFT: 3, ROPE_LEAN: 4, CONTACT_IN: 5, CONTACT_OUT: 6 });
 
 /** Every vortex param: [name, default, min, max, isLength]. Lengths scale with the activation scale. */
 const VORTEX_PARAMETERS = Object.freeze([
@@ -98,7 +100,8 @@ const VORTEX_PARAMETERS = Object.freeze([
   ['ropeSeconds', 30, 0, 600, false],
   ['trackSpeed', 0, 0, 80, false],
   ['trackTurn', 0, -180, 180, false],
-  ['trackWander', 8, 0, 90, false],
+  ['trackWander', 20, 0, 90, false],
+  ['trackMeander', 1500, 100, 20000, true],
   ['audioIntensity', 1, 0, 1, false],
 ]);
 const COLOR_PARAMETERS = Object.freeze([
@@ -109,9 +112,14 @@ const COLOR_PARAMETERS = Object.freeze([
 ]);
 const WIND_KEYS = Object.freeze(['maxTangential', 'inflowRadius', 'inflowSpeed', 'updraft', 'sinkRing', 'turbulence', 'gust', 'rotation']);
 
-function smoothstep(edge0, edge1, value) {
-  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
+/**
+ * target[index] = smoothstep(edge0, edge1, source[sourceIndex]). The frame update calls this instead
+ * of a function taking or returning a computed double, which V8 boxes whenever it does not inline
+ * the call (the edges are literals, which V8 keeps as constants).
+ */
+function writeSmoothstep(target, index, edge0, edge1, source, sourceIndex) {
+  const t = Math.min(1, Math.max(0, (source[sourceIndex] - edge0) / (edge1 - edge0)));
+  target[index] = t * t * (3 - 2 * t);
 }
 
 function readNumber(params, name, fallback, min, max) {
@@ -170,7 +178,8 @@ export function createVortexEngine() {
   let bufferCount = 0;
   const active = [];
   let slots = null;
-  let clock = 0;
+  /** The particle clock (s): kept in a typed array, as a double closure variable would box on every write. */
+  const clock = new Float64Array(1);
   let lastFrame = -1;
   let live = 0;
   let serial = 0;
@@ -511,9 +520,11 @@ export function createVortexEngine() {
     const path = new Float64Array(points * 4);
     let x = position.x;
     let z = position.z;
-    let direction = ((heading + p.trackTurn) * Math.PI) / 180;
+    // The track meanders: its heading swings up to trackWander degrees either side of the base
+    // heading, once every trackMeander metres.
+    const baseDirection = ((heading + p.trackTurn) * Math.PI) / 180;
     const wanderPhase = rng() * Math.PI * 2;
-    const wanderRate = (p.trackWander * Math.PI) / 180;
+    const wander = (p.trackWander * Math.PI) / 180;
     for (let index = 0; index < points; index++) {
       const ground = terrain.groundHeight(x, z);
       const water = terrain.waterLevel;
@@ -522,8 +533,7 @@ export function createVortexEngine() {
       path[index * 4 + 1] = z;
       path[index * 4 + 2] = Math.max(ground, water);
       path[index * 4 + 3] = p.surface === 'water' ? 1 : p.surface === 'land' ? 0 : overWater;
-      const travelled = index * step;
-      direction += (wanderRate * step / Math.max(p.trackSpeed, 1)) * Math.sin(travelled / 700 + wanderPhase);
+      const direction = baseDirection + wander * Math.sin((2 * Math.PI * index * step) / p.trackMeander + wanderPhase);
       x += Math.sin(direction) * step;
       z -= Math.cos(direction) * step;
     }
@@ -555,11 +565,11 @@ export function createVortexEngine() {
     state[S.STAGE_TIME] = 0;
   }
 
-  function advanceStage(instance, dt) {
+  function advanceStage(instance) {
     const record = instance.data;
     const state = record.state;
     const p = record.params;
-    state[S.STAGE_TIME] += dt;
+    state[S.STAGE_TIME] += state[S.DT];
     const control = instance.control;
     const stage = state[S.STAGE];
     if (stage === 0) {
@@ -577,15 +587,16 @@ export function createVortexEngine() {
   }
 
   // ---- Frame ---------------------------------------------------------------------------------------------------
-  function advanceClock(dt) {
+  /** Advances the shared particle clock once per frame by the instance's frame time. */
+  function advanceClock(state) {
     const frame = ctx.state.frame;
     if (frame === lastFrame) return;
     lastFrame = frame;
-    clock += dt;
+    clock[0] += state[S.DT];
     // Wrapped so float32 keeps millisecond resolution in the shaders over long sessions.
-    if (clock > 3600) clock -= 3600;
+    if (clock[0] > 3600) clock[0] -= 3600;
     const globals = data.array[0];
-    globals.x = clock;
+    globals.x = clock[0];
     const fog = ctx.scene.fog;
     const fogNear = fog && Number.isFinite(fog.near) ? fog.near : 400;
     const fogFar = fog && Number.isFinite(fog.far) ? fog.far : 2400;
@@ -594,6 +605,7 @@ export function createVortexEngine() {
     globals.w = Math.max(globals.y + 100, fogFar);
   }
 
+  /** Moves the anchor along the precomputed path; the surface's water share goes to state[WATER_TARGET]. */
   function followPath(instance, record, state) {
     const path = record.path;
     const anchor = instance.anchor;
@@ -627,12 +639,14 @@ export function createVortexEngine() {
     anchor.x = pointX;
     anchor.z = pointZ;
     anchor.y = surface;
-    return water;
+    state[S.WATER_TARGET] = water;
   }
 
-  function writeFrame(instance, dt) {
+  /** Writes the stage's strength (state[STRENGTH]), the slot block and the wind frame. */
+  function writeFrame(instance) {
     const record = instance.data;
     const state = record.state;
+    const dt = state[S.DT];
     const p = record.params;
     const slot = record.slot;
     const age = state[S.AGE];
@@ -646,26 +660,33 @@ export function createVortexEngine() {
     const wantActive = instance.active === false ? 0 : Math.min(1.5, Math.max(0, Number.isFinite(control.intensity) ? control.intensity : 1));
     state[S.ACTIVITY] += (wantActive - state[S.ACTIVITY]) * Math.min(1, dt * 0.5);
     const activity = state[S.ACTIVITY];
-    const lifeStrength = stage === 3 ? 0 : smoothstep(0, 1, form) * (1 - rope) * Math.sqrt(1 - rope);
+    const ramps = record.ramps;
+    writeSmoothstep(ramps, R.FORM, 0, 1, state, S.FORM);
+    writeSmoothstep(ramps, R.CONDENSE, 0, 0.2, state, S.FORM);
+    writeSmoothstep(ramps, R.ROPE_FADE, 0.7, 1, state, S.ROPE);
+    writeSmoothstep(ramps, R.ROPE_LIFT, 0.55, 1, state, S.ROPE);
+    writeSmoothstep(ramps, R.ROPE_LEAN, 0, 0.8, state, S.ROPE);
+    writeSmoothstep(ramps, R.CONTACT_IN, 0.35, 0.8, state, S.FORM);
+    writeSmoothstep(ramps, R.CONTACT_OUT, 0.5, 0.85, state, S.ROPE);
+    const lifeStrength = stage === 3 ? 0 : ramps[R.FORM] * (1 - rope) * Math.sqrt(1 - rope);
     const strength = lifeStrength * activity;
     state[S.STRENGTH] = strength;
 
     state[S.VISIBILITY] += (state[S.VISIBLE_TARGET] - state[S.VISIBILITY]) * Math.min(1, dt * VISIBILITY_RATE * 2);
-    const condensation = (stage === 0 ? smoothstep(0, 0.2, form) : 1) * (1 - smoothstep(0.7, 1, rope)) * Math.min(1, activity);
+    const condensation = (stage === 0 ? ramps[R.CONDENSE] : 1) * (1 - ramps[R.ROPE_FADE]) * Math.min(1, activity);
     const fade = condensation * state[S.VISIBILITY];
 
-    const touchdown = smoothstep(0, 1, form);
-    const bottom = stage >= 2 ? p.cloudBase * 0.92 * smoothstep(0.55, 1, rope) : p.cloudBase * (1 - touchdown);
-    const leanScale = p.ropeLean * p.cloudBase * smoothstep(0, 0.8, rope);
+    const bottom = stage >= 2 ? p.cloudBase * 0.92 * ramps[R.ROPE_LIFT] : p.cloudBase * (1 - ramps[R.FORM]);
+    const leanScale = p.ropeLean * p.cloudBase * ramps[R.ROPE_LEAN];
     const leanX = state[S.LEAN_X] * leanScale;
     const leanZ = state[S.LEAN_Z] * leanScale;
     const wobbleAmount = p.wobble * (1 + 2 * rope);
     const wobblePhase = (age * Math.PI * 2) / p.wobblePeriod + record.phase;
     const wobbleX = wobbleAmount * Math.sin(wobblePhase);
     const wobbleZ = wobbleAmount * Math.cos(wobblePhase * 0.77 + 1.3);
-    const spinRate = (p.spin > 0 ? p.spin : Math.min(3, (0.35 * (record.wind ? record.wind.maxTangential : 40)) / Math.max(p.coreRadius, 1))) * (0.3 + 0.7 * strength);
+    const spinRate = state[S.SPIN_RATE] * (0.3 + 0.7 * strength);
     state[S.SPIN] = (state[S.SPIN] + spinRate * dt) % (Math.PI * 2000);
-    const contact = smoothstep(0.35, 0.8, form) * (1 - smoothstep(0.5, 0.85, rope)) * Math.min(1, activity);
+    const contact = ramps[R.CONTACT_IN] * (1 - ramps[R.CONTACT_OUT]) * Math.min(1, activity);
 
     const d0 = slotVector(slot, 0);
     d0.x = anchor.x;
@@ -715,7 +736,6 @@ export function createVortexEngine() {
       frame[FRAME.C] = wobbleX;
       frame[FRAME.D] = wobbleZ;
     }
-    return strength;
   }
 
   function moveWind(instance) {
@@ -725,9 +745,10 @@ export function createVortexEngine() {
     ctx.wind.setSourceBounds(source.id, source.refreshBounds());
   }
 
-  function updateVoice(instance, strength, dt) {
+  function updateVoice(instance) {
     const record = instance.data;
     const state = record.state;
+    const dt = state[S.DT];
     const anchor = instance.anchor;
     if (dt > 0) {
       state[S.VEL_X] = (anchor.x - state[S.PREV_X]) / dt;
@@ -739,7 +760,7 @@ export function createVortexEngine() {
     record.velocity.x = state[S.VEL_X];
     record.velocity.z = state[S.VEL_Z];
     record.voice.setPosition(anchor, record.velocity);
-    record.voice.setIntensity(Math.min(1, strength * record.params.audioIntensity));
+    record.voice.setIntensity(Math.min(1, state[S.STRENGTH] * record.params.audioIntensity));
   }
 
   return {
@@ -797,6 +818,8 @@ export function createVortexEngine() {
       state[S.GROUND_SHARE] = 1;
       state[S.PUFF_SHARE] = 1;
       state[S.SPIN] = rng() * Math.PI * 2;
+      // The visible spin (rad/s): the param, or a calm fraction of the wind's core rotation.
+      state[S.SPIN_RATE] = p.spin > 0 ? p.spin : Math.min(3, (0.35 * (p.wind ? p.wind.maxTangential : 40)) / Math.max(p.coreRadius, 1));
       state[S.WATER] = path.points[3];
       // Rope-out leans the rope away from its track, to a seeded side.
       const leanAngle = ((heading + p.trackTurn + (rng() < 0.5 ? 90 : -90) + (rng() - 0.5) * 60) * Math.PI) / 180;
@@ -813,6 +836,7 @@ export function createVortexEngine() {
         wind: p.wind,
         path,
         state,
+        ramps: new Float64Array(7),
         duration,
         site: params.site ?? null,
         phase: rng() * Math.PI * 2,
@@ -860,7 +884,7 @@ export function createVortexEngine() {
       }
       live++;
       active.push(instance);
-      writeFrame(instance, 0);
+      writeFrame(instance);
       refreshDrawRanges();
       return instance;
     },
@@ -868,14 +892,15 @@ export function createVortexEngine() {
     update(instance, dt) {
       const record = instance.data;
       const state = record.state;
-      advanceClock(dt);
+      state[S.DT] = dt;
+      advanceClock(state);
       state[S.AGE] += dt;
-      advanceStage(instance, dt);
-      const water = followPath(instance, record, state);
-      state[S.WATER] += (water - state[S.WATER]) * Math.min(1, dt * 0.4);
-      const strength = writeFrame(instance, dt);
+      advanceStage(instance);
+      followPath(instance, record, state);
+      state[S.WATER] += (state[S.WATER_TARGET] - state[S.WATER]) * Math.min(1, dt * 0.4);
+      writeFrame(instance);
       moveWind(instance);
-      updateVoice(instance, strength, dt);
+      updateVoice(instance);
     },
 
     setLOD(instance, tier) {
@@ -939,7 +964,7 @@ export function createVortexEngine() {
         water: state[S.WATER],
         slot: record.slot,
         windOn: state[S.WIND_ON] === 1,
-        clock,
+        clock: clock[0],
         block,
       };
     },
