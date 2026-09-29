@@ -247,6 +247,19 @@ system, and then starts the frame loop.
 | `recipes/*.js` | one procedural recipe per spawn sound (`recipes/index.js` lists them; `recipeKit.js` holds the shared noise, crackle and envelope helpers) |
 | `audition.js` | the dev spawn auditions (`debug.spawn`) and offline renders with spectral analysis |
 
+### `src/spawns`: the spawn framework (Phase 2)
+
+| file | what |
+| --- | --- |
+| `index.js` | the `spawns` system: the SpawnManager, the engine registry, the pluggable site feed (`world.placement` when the world exposes it, or `setSiteFeed`), the director hook (`attachDirector`), and in dev builds the `debug` API |
+| `spawnManager.js` | activation within the budgets, LOD tiers with hysteresis, lures, lifetimes and the despawn rule, discovery, memory accounting, leak clean-up, stats (below) |
+| `engineRegistry.js` | the engine interface check, `ENGINE_NAMES`, `LOD_TIERS` |
+| `schema.js` | the preset validator (`validatePreset`, `validatePresets`) and the preset vocabularies; pure |
+| `lure.js` | FAR lures: the horizon silhouettes of heavy spawns |
+| `lightPool.js` | the real-light budget pool |
+| `pools.js` | pooling helpers for engines: scratch rings, slot allocators, object pools, instanced and mesh pools |
+| `presets/index.js` | `PRESETS` (spec order) and `PRESET_BY_ID`; one pure-data file per preset |
+
 ### `src/env`
 
 | file | what |
@@ -290,6 +303,8 @@ system, and then starts the frame loop.
 | --- | --- |
 | `statusBadge.js` | the dev badge: version, backend, three.js revision, fps, frame-time graph, render scale, input devices |
 | `windOverlay.js` | the wind-arrow overlay (`settings.windOverlay`) and the badge's Wind row |
+| `spawnDebugger.js`, `spawnDebugger.css` | the spawn debugger (F9; dev builds, or `?dev=1` in a production build): presets with filters, force spawns ahead, teleport to the nearest site, time of day, director state, engine stats, the wind overlay toggle |
+| `spawnTestKit.js` | dev builds only (never in a production bundle): two test engines (`testMarker`, `testWind`) and their presets, loaded by `spawns.debug.loadTestKit()` to prove the framework |
 | `debugWind.js` | dev-only debug updraft wind source (key L), proving the Phase 2 wind writer path |
 | `mockGamepads.js` | scriptable mock T.16000M, TWCS and standard gamepad devices |
 | `testHarness.js` | the flight-test harness at `?test=1` (dev builds only) |
@@ -354,9 +369,12 @@ system, and then starts the frame loop.
    `state` and the `ctx` object.
 6. The wind field, then the perf governor (`ctx.perf`).
 7. Every system, created in this order: shell (the launcher bridge), audio, ui, assistDefaults, input, sky, terrain, water, clouds, birds,
-   journal, landmarks, waypoints, rings, flight, camera, fx, gEffects, copilot, windOverlay, and
-   debugWind (dev builds and `?debug=1` only). A factory that throws is logged and replaced by an
-   inert system, so one failure never stops the game.
+   spawns, journal, landmarks, waypoints, rings, flight, camera, fx, gEffects, copilot, windOverlay,
+   spawnDebugger (dev builds and `?dev=1` only) and debugWind (dev builds and `?debug=1` only). A
+   factory that throws is logged and replaced by an inert system, so one failure never stops the
+   game. The spawn engines (`SPAWN_ENGINE_FACTORIES` in `main.js`) register with the spawns system
+   right after, and its prewarm hook starts it: it validates the presets (dev builds, `?debug=1` and `?dev=1`),
+   initialises the engines and records the memory baseline, behind the loading fade.
 8. `prewarm()` hooks and the pipeline prewarm: objects that first appear later (rings, beacons,
    landmarks) are drawn once behind the loading fade so their pipelines compile before play.
 9. The post stack (in `try` / `catch`; it degrades to direct rendering), resize handling and
@@ -373,8 +391,9 @@ Every frame:
    `simDt` is `realDt`, or 0 while paused (photo mode). `state.time.frameDt` is the unclamped real
    frame time capped at 0.1 s: the fixed-step physics clock consumes it.
 2. **Systems.** Each system in `UPDATE_ORDER` runs `update(simDt, realDt)`: input, flight, camera,
-   terrain, sky, water, clouds, birds, landmarks, journal, waypoints, rings, fx, gEffects, copilot,
-   audio, ui, windOverlay, debugWind. A system that throws is disabled and logged; the rest carry on.
+   terrain, sky, water, clouds, birds, spawns, landmarks, journal, waypoints, rings, fx, gEffects,
+   copilot, audio, ui, windOverlay, debugWind, spawnDebugger. A system that throws is disabled and
+   logged; the rest carry on.
 3. **Safety net, right after flight.** A non-finite pose is restored from the last good one and the
    model is reset from it. The flight model has real ground contact, so the net only keeps the
    last-resort guard: more than 1 m below the shared height function is a soft crash. The altitude
@@ -545,11 +564,15 @@ Typed events are emitted with `bus.emitTyped(name, payload)` and heard with
 | `craftChanged` | `{ craft, previous }` | flight controller |
 | `landed` | `{ grade: butter\|smooth\|firm\|hard, craft, sinkRate, groundSpeed, position }` | landing monitor |
 | `softCrash` | `{ craft, reason, impactSpeed, position }` | flight controller |
-| `discovery` | `{ id, name, kind, position }` (bridged from `landmark:discovered`) | events.js |
+| `discovery` | `{ id, name, kind, position, presetId? }`: landmarks (bridged from `landmark:discovered`) and spawns (`kind` is the preset category, `id` the site id or the event preset id, `presetId` the preset) | events.js, SpawnManager |
 | `windSourceAdded` / `windSourceRemoved` | `{ id, kind, position, radius }` / `{ id, kind }` | WindField |
 | `viewChanged` | `{ view: chase\|cockpit\|wing\|flyby\|fpv, craft }` (also at start and on craft change) | camera |
 | `deviceConnected` / `deviceDisconnected` | `{ deviceKey, kind, name }`; kind `gamepad` \| `hotas-stick` \| `hotas-throttle` \| `hotas-pedals` | gamepad registry |
 | `relaunched` | `{ craft, method, position }` | flight controller |
+| `spawnActivated` | `{ id, presetId, category, kind: site\|event, position }` | SpawnManager |
+| `spawnEnded` | `{ id, presetId, reason }`; reason `ended`, `expired`, `despawn`, `range`, `error`, `debug`, `removed`, `disposed` or the caller's | SpawnManager |
+| `weatherChanged` | `{ state, previous, region }`; states `clear`, `building`, `storm`, `clearing` | director |
+| `achievement` | `{ id, title }` | gameplay |
 
 Landing grades come from the sink rate at touchdown: butter up to 0.5 m/s, smooth up to 1.2 m/s,
 firm up to 2.2 m/s, and hard above that.
@@ -576,6 +599,7 @@ v2 adds these untyped events:
 | `ui:openControls` | `{ calibrate?: boolean }`: opens the controls panel, and with `calibrate` starts the wizard |
 | `perf:renderScale` | the dynamic-resolution scale changed |
 | `audio:started` | `{ context }`, once, when the AudioContext is created |
+| `spawns:inView` | `{ id, presetId, siteId, kind, distance }`: a spawn was first seen (in the view cone, not hidden by terrain), once per spawn; heavy spawns count from their lure range, others from lod.mid. The director counts it toward pacing |
 
 ### Input actions and owners (`src/input/controlState.js`)
 
@@ -970,6 +994,96 @@ Behaviour:
 The flight model feels all of it every tick. `createDebugUpdraft({ id, center, radius, strength })` builds the dev source
 that `src/dev/debugWind.js` drops with the L key.
 
+### Spawns (`ctx.systems.spawns`, `src/spawns/`)
+
+The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are implemented here.
+
+- **System API.** `update`, `prewarm` (starts it), `register(engine)`, `activate(presetId, opts)`,
+  `deactivate(id, reason)`, `getActive()`, `getInstance(id)`, `getStats()`, `setSiteFeed(feed)`,
+  `attachDirector(director)` / `director`, `forceSpawn(presetId, { distance, force })` (ahead of the
+  craft; through `director.forceSpawn` when a director is attached), `pointAhead(distance)` and
+  `manager` (the SpawnManager). In dev builds and with `?debug=1` or `?dev=1`, `debug`:
+  `addPreset`, `removePreset`, `registerEngine`, `unregisterEngine` and `loadTestKit()` (dev builds
+  only).
+- **Director hook.** `attachDirector({ update(dt), getState(), forceSpawn?, getNearby? })`: the
+  system calls `update(dt)` at 2 Hz with the simulated time since the previous call. A director
+  that throws is detached and logged.
+- **Site feed.** `{ sitesInCell(cellX, cellZ) }` (cached arrays, 2 km cells; read in time slices,
+  48 cells a frame, over the largest site `lod.far`) or `{ sitesNear(x, z, radius) }` (read once per
+  sweep). A site within its preset's `lod.far` is activated with source `site`; it is removed past
+  `lod.far + lifetime.despawn.hysteresis`.
+- **Activation.** `activate(presetId, { position, heading (compass degrees), source: 'site' |
+  'director' | 'debug', site?, seed?, scale?, force? })` returns the spawn id or null.
+  `canActivate(presetId, source)` names the refusal: `preset`, `engine` (not registered or failed to
+  initialise), `capacity` (512 spawns), `heavy` (the heavy limit, 2; sites are never refused for it
+  and count toward it only while `setSiteActive(id, true)`), `instances` or `particles` (per-engine
+  caps from `engine.budget` `{ instances, particles, lights? }`, else 32 instances and 60 000 particles; `setBudget`, `setHeavyLimit`).
+  A debug activation with `force: true` passes the budgets. Each preset engine entry becomes one
+  engine instance (a part) created with the preset's params merged with `{ position, heading, site,
+  startTime, scale, duration, seed }` and its own seeded random generator. Events draw a duration
+  from `lifetime.duration`.
+- **LOD.** The tier comes from the camera distance to the spawn's anchor and `preset.lod`, moving out
+  past `boundary * 1.08` and back in below `boundary * 0.92` (`LOD_HYSTERESIS`). Engines hear
+  `setLOD(instance, tier)` at creation and on every change.
+- **Lures** (`lure.js`). Heavy presets with `lure` get a FAR silhouette: plume (volcano, leaning into
+  a drifting umbrella, lava glow at night), anvil (supercell: cauliflower tower, flat base, rain
+  shaft, anvil and overshooting top, lightning flashes at night), funnel (tornado with wall cloud and
+  debris), whale (sky whale, facing its heading, tail beat), islands (three floating islands with
+  trees and waterfalls) and comet (self-luminous head and tail pointing away from the sun). One
+  instanced mesh of camera-facing quads draws them all, fading in over 1.2 s at the FAR tier. A lure
+  beyond 92 % of the fog's far distance is drawn at that distance, scaled to keep its direction and
+  angular size, so it stays inside the camera's far plane; terrain nearer than that hides its foot
+  through the depth test, and the nearly fully fogged terrain behind it is drawn over. The material
+  ignores fog and is shaded from the sky itself (`sky.skyColorNode`): zenith ambient, the sun on its
+  sunward side, a silver lining against the sun, and aerial perspective toward the sky colour in its
+  own direction (more at its foot). Render order 1: after the water, before the near effects.
+- **Lifetimes.** An event ends when an engine sets `instance.ended` (`ended`), 45 s after its drawn
+  duration (`expired`), past `lod.far * 1.08` (`range`), or beyond `despawn.distance +
+  despawn.hysteresis` after `despawn.outOfViewSeconds` out of view (`despawn`). Debug spawns follow
+  only the first two.
+- **Discovery.** A spawn within `discovery.radius` that is in view (inside the camera's view cone,
+  the frustum's four side planes, at any distance; and not hidden by visible terrain: the sight line
+  to the middle of its lure or body is sampled 10 times out to the fog's far distance) emits the
+  typed `discovery` once per site id or event preset per world. `markDiscovered(keys)`, `isDiscovered(key)` and `getDiscovered()` let the
+  journal restore and read it. Visibility checks run round-robin, 2 a frame, only for spawns that
+  still need one, and at most every 30 frames per spawn.
+- **Real lights** (`lightPool.js`). The pool holds as many PointLights as the registered engines
+  declare in `budget.lights`, capped at 4 (`MAX_REAL_LIGHTS`), sized when the manager starts behind
+  the loading fade (an engine registered later grows it). Its lights stay in the scene for the whole
+  session, parked at intensity 0 while free, because adding or removing a light rebuilds every lit
+  material's shaders; with no engine declaring lights the scene has none. `ctx.lights.acquire(priority,
+  onRevoke?)` / `release(light)`; a holder that passed `onRevoke` can lose its light to a higher
+  priority. Lights a disposed spawn still holds are released and reported.
+- **Engine ctx.** `{ scene, camera, renderer, backend, THREE, TSL, wind, audio, terrain: { heightAt,
+  groundHeight, biomeAt, waterLevel }, time, sky, bus, perf, settings, state, uniforms, budgets,
+  lights, pools, spawns }`. `budgets` is read-only (`heavyLimit`, `heavyActive`, `lightsLimit`,
+  `lightsActive`, `instanceLimit(name)`, `instances(name)`, `particleLimit(name)`,
+  `particles(name)`); `pools` has `scratch` (Vector3 / Quaternion / Matrix4 / Color rings),
+  `createSlotAllocator`, `createObjectPool`, `createInstancedPool` and `createMeshPool`; `spawns` is
+  the SpawnManager (the setPiece engine orchestrates through it).
+- **Mesh lifetime in three r184.** A RenderObject listens for its material's `dispose` event, which
+  keeps it, its mesh and its geometry alive until that material is disposed. A new Mesh per spawn
+  instance on a shared material therefore leaks about 8 KB per instance even after its geometry is
+  disposed. Engines pool meshes on shared materials (`createMeshPool`, `createInstancedPool` built in
+  `init`) or give a per-instance mesh its own material and dispose it with the instance.
+- **Clean-up.** After `dispose(instance)` the manager removes any wind source still listed in
+  `instance.windSourceIds` and releases any real light the spawn still holds, and reports each as a
+  leak (`console.error`, `getStats().leaks`).
+- **Memory accounting.** `renderer.info.memory` (geometries, textures, attributes, programs, total
+  bytes) and the JS heap (`performance.memory`, Chrome) are read before each create, after it, and
+  after each dispose: `getStats().memory` has the baseline (after the engines initialised;
+  `resetMemoryBaseline()` moves it), the current reading, the create and dispose counts and a log of
+  the last 64 spawns.
+- **No allocations per frame.** The update keeps every per-spawn double in typed arrays, passes no
+  double across a call V8 may not inline (it would box it), avoids `Math.hypot`, builds the view cone
+  from the camera's own position, quaternion and lens, and reads the site feed's cached cells. The
+  only garbage its frames cause is the terrain height the occlusion rays sample (worldgen's noise),
+  which is why those rays are rationed.
+- **Stats.** `getStats()`: spawns, sites, events, heavy and its limit, tier counts, per-engine
+  `{ instances, particles, lights, buffers, drawCalls, active, budget, failed }` and totals, the light
+  pool, the lures, discoveries, counters, refusals, leaks, memory and the site feed.
+  `window.DRIFTWING.getStats().spawns` carries it.
+
 ### Performance (`ctx.perf`, `src/core/perf.js`)
 
 - **Frame loop.** Rendering is uncapped through `setAnimationLoop`.
@@ -1022,6 +1136,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `?debug=1` | the dev badge, typed-event validation, `console.info` of the backend and of every gamepad id, the debug updraft (L), audio and camera `debug` hooks |
 | `?renderer=webgl` | force the WebGL2 backend |
 | `?seed=...`, `?time=0..1`, `?touch=1` | world seed, start time of day, force touch controls (v1) |
+| `?dev=1` | in a production build: the spawn debugger (F9) and the spawns `debug` API (dev builds always have them) |
 | `?test=hotas` | installs the mock gamepads (`ctx.systems.input.mock`) and, in dev builds, runs the HOTAS pipeline test (`src/dev/hotasTest.js`): bindings and hat decoding in both hat forms, calibration results, twist auto-disable, the one-time HOTAS assist default, and persistence across a reload |
 | `tools/steps/view-physics.json` | run with `tools/smoke-test.mjs --url <dev server>/v2/` (or a build with `?debug=1`): pauses the loop, steps frames by hand and proves every craft flies identically in the cockpit, in chase and while switching views |
 | `?test=terrain` | dev builds: the terrain test (`src/dev/terrainTest.js`). The fixture site presets reach worldgen on both threads; near every stamp type, every LOD pair of neighbouring chunks is checked for cracks, the displayed (worker-built) meshes must equal main-thread builds bit for bit, and `groundHeight` must match the rendered LOD0 mesh within 0.5 m. On-screen summary and `window.DRIFTWING.testReport`; `window.DRIFTWING.terrainTest.showView(i)` frames stamp type i |
@@ -1029,7 +1144,8 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `tools/run-harness.mjs` | runs either harness headlessly on a spare port (`--test 1\|hotas`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--out`), prints a table per run and per craft and view, and exits 0 on PASS |
 | `tools/shell-test.mjs` | the launcher shell test (below) |
 | `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |
-| labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`) |
+| labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`, `spawns`) |
+| `tools/spawn-check.mjs` | `--url <dev server>/v2/ [--backend webgpu\|webgl] [--out]`: the spawn framework proofs in the browser with the dev test kit (below) |
 
 ## Testing
 
@@ -1049,6 +1165,8 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/view-physics.json` | every craft flies bit-identically in every view |
 | `node tools/shell-check.mjs --url <shell>` | the pill (shows, hides, clear of both games' HUDs), persistence and forwarding |
 | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` | the flight models, settings migrations, storage, input, WREN's grammar, the copilot server |
+| `node --expose-gc tools/lab/spawns.mjs` | the spawn framework headless: the preset validator, the engine registry, the pools, LOD hysteresis, budgets, lures, discovery (view cone, terrain occlusion, once per world), sites from a feed, wind sources and lights removed on dispose, leak clean-up, lifetimes, and a manager frame update that allocates nothing (young-generation growth over 100 000 frames with 40 spawns) |
+| `node tools/spawn-check.mjs --url <dev server>/v2/` | the spawn framework in V2 on either backend: 200 instances created and disposed three times with `renderer.info.memory` back to its baseline exactly and the heap within 1 MB, LOD transitions with hysteresis, lures at 12-30 km at golden hour, midday and night (screenshots), a wind source removed on dispose, discovery firing once, the sampled allocation of the manager's frame update, and the F9 debugger's keyboard behaviour |
 | `npm test` | the V1 check, `build:single` and a smoke test of the built shell |
 
 **The flight-test harness** passes with 0 NaN events, 0 terrain penetrations, 0 console errors and
