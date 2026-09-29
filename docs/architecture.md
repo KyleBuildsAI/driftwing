@@ -989,7 +989,7 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   `canActivate(presetId, source)` names the refusal: `preset`, `engine` (not registered or failed to
   initialise), `capacity` (512 spawns), `heavy` (the heavy limit, 2; sites are never refused for it
   and count toward it only while `setSiteActive(id, true)`), `instances` or `particles` (per-engine
-  caps from `engine.budget`, else 32 instances and 60 000 particles; `setBudget`, `setHeavyLimit`).
+  caps from `engine.budget` `{ instances, particles, lights? }`, else 32 instances and 60 000 particles; `setBudget`, `setHeavyLimit`).
   A debug activation with `force: true` passes the budgets. Each preset engine entry becomes one
   engine instance (a part) created with the preset's params merged with `{ position, heading, site,
   startTime, scale, duration, seed }` and its own seeded random generator. Events draw a duration
@@ -1019,10 +1019,13 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   preset per world. `markDiscovered(keys)`, `isDiscovered(key)` and `getDiscovered()` let the
   journal restore and read it. Visibility checks run round-robin, 2 a frame, only for spawns that
   still need one, and at most every 12 frames per spawn.
-- **Real lights** (`lightPool.js`). A fixed pool (2) of PointLights parked in the scene at intensity 0
-  for the whole session (adding or removing lights would rebuild every lit material's shaders).
-  `ctx.lights.acquire(priority, onRevoke?)` / `release(light)`; a holder that passed `onRevoke` can
-  lose its light to a higher priority. Lights a disposed spawn still holds are released and reported.
+- **Real lights** (`lightPool.js`). The pool holds as many PointLights as the registered engines
+  declare in `budget.lights`, capped at 4 (`MAX_REAL_LIGHTS`), sized when the manager starts behind
+  the loading fade (an engine registered later grows it). Its lights stay in the scene for the whole
+  session, parked at intensity 0 while free, because adding or removing a light rebuilds every lit
+  material's shaders; with no engine declaring lights the scene has none. `ctx.lights.acquire(priority,
+  onRevoke?)` / `release(light)`; a holder that passed `onRevoke` can lose its light to a higher
+  priority. Lights a disposed spawn still holds are released and reported.
 - **Engine ctx.** `{ scene, camera, renderer, backend, THREE, TSL, wind, audio, terrain: { heightAt,
   groundHeight, biomeAt, waterLevel }, time, sky, bus, perf, settings, state, uniforms, budgets,
   lights, pools, spawns }`. `budgets` is read-only (`heavyLimit`, `heavyActive`, `lightsLimit`,
