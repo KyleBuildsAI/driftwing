@@ -33,8 +33,8 @@ const DEFAULT_CAPACITY = 16;
 /** Lures farther than this share of the fog's far distance are drawn at it (scaled to keep their size on screen). */
 const PROJECT_SHARE = 0.92;
 /** Aerial perspective: the share of sky colour at the fog's far distance and at HAZE_FULL_DISTANCE beyond it. */
-const HAZE_NEAR = 0.28;
-const HAZE_FAR = 0.62;
+const HAZE_NEAR = 0.22;
+const HAZE_FAR = 0.55;
 const HAZE_FULL_DISTANCE = 40000;
 const RENDER_ORDER = 1;
 /** Seconds a lure takes to fade fully in or out. */
@@ -64,23 +64,33 @@ function createLureMaterial({ THREE, TSL, uniforms, skyColorNode, shapeAttribute
   const inside = (edge, value, width) => smoothstep(0, width, edge.sub(value));
 
   // Each shape returns vec3(mask 0..1, shade 0..1.2, emissive 0..).
-  const plume = Fn(([x, y, seed]) => {
-    const billow = mx_noise_float(vec3(x.mul(2.3), y.mul(5).sub(time.mul(0.05)), seed)).mul(0.13);
-    const column = mix(0.12, 0.4, pow(y, 0.9));
-    const columnMask = inside(column.add(billow), abs(x), 0.06).mul(float(1).sub(smoothstep(0.72, 0.88, y)));
-    const headDistance = x.div(0.92).mul(x.div(0.92)).add(y.sub(0.8).div(0.2).mul(y.sub(0.8).div(0.2)));
-    const headMask = smoothstep(0, 0.35, float(1).sub(headDistance).add(billow.mul(2.2)));
-    const mask = max(columnMask, headMask).mul(smoothstep(0, 0.025, y));
-    const shade = mix(0.5, 1.05, y).add(billow);
+  const plume = Fn(([x, y, seed, facing]) => {
+    const billow = mx_noise_float(vec3(x.mul(2.3), y.mul(5).sub(time.mul(0.05)), seed)).mul(0.1)
+      .add(mx_noise_float(vec3(x.mul(6.5), y.mul(11).sub(time.mul(0.08)), seed.add(3))).mul(0.045));
+    // The column leans downwind as it rises and spreads into an umbrella that drifts on.
+    const lean = facing.mul(0.24);
+    const centre = lean.mul(y).mul(y);
+    const column = mix(0.09, 0.3, pow(y, 0.8));
+    const columnMask = inside(column.add(billow), abs(x.sub(centre)), 0.05).mul(float(1).sub(smoothstep(0.7, 0.86, y)));
+    const umbrellaX = x.sub(lean.mul(1.25)).div(0.58);
+    const umbrellaY = y.sub(0.8).div(0.15);
+    const umbrella = smoothstep(0, 0.4, float(1).sub(umbrellaX.mul(umbrellaX)).sub(umbrellaY.mul(umbrellaY)).add(billow.mul(2.6)));
+    const driftX = x.sub(lean.mul(2.6)).div(0.42);
+    const driftY = y.sub(0.83).div(0.08);
+    const drift = smoothstep(0, 0.6, float(1).sub(driftX.mul(driftX)).sub(driftY.mul(driftY)).add(billow.mul(3))).mul(0.55);
+    const mask = max(max(columnMask, umbrella), drift).mul(smoothstep(0, 0.025, y));
+    const shade = mix(0.45, 1.05, y).add(billow);
     const pulse = sin(time.mul(1.7).add(seed.mul(9.1))).mul(0.25).add(0.75);
-    const emissive = exp(y.mul(-7)).mul(pulse).mul(inside(column.mul(0.8), abs(x), 0.05));
+    const emissive = exp(y.mul(-6)).mul(pulse).mul(inside(column.mul(0.85), abs(x.sub(centre)), 0.05));
     return vec3(mask, shade, emissive);
   });
 
   const anvil = Fn(([x, y, seed, flash]) => {
-    const billow = mx_noise_float(vec3(x.mul(2.6), y.mul(4).sub(time.mul(0.02)), seed)).mul(0.1);
-    const tower = mix(0.2, 0.3, y).add(billow);
-    const towerMask = inside(tower, abs(x), 0.05).mul(smoothstep(0.1, 0.14, y)).mul(float(1).sub(smoothstep(0.8, 0.86, y)));
+    // Cauliflower tower: two octaves of billows on its flanks, a flat dark base with a rain shaft.
+    const billow = mx_noise_float(vec3(x.mul(2.6), y.mul(4).sub(time.mul(0.02)), seed)).mul(0.1)
+      .add(mx_noise_float(vec3(x.mul(7), y.mul(10).sub(time.mul(0.03)), seed.add(5))).mul(0.05));
+    const tower = mix(0.3, 0.2, y).add(billow);
+    const towerMask = inside(tower, abs(x), 0.05).mul(smoothstep(0.1, 0.15, y.add(billow.mul(0.2)))).mul(float(1).sub(smoothstep(0.8, 0.86, y)));
     const underside = x.mul(x).mul(0.1).add(0.74);
     const top = float(0.95).sub(x.mul(x).mul(0.06));
     const anvilMask = inside(float(1), abs(x).sub(billow), 0.06).mul(smoothstep(0, 0.035, y.sub(underside).add(billow.mul(0.3)))).mul(smoothstep(0, 0.02, top.sub(y)));
@@ -145,7 +155,7 @@ function createLureMaterial({ THREE, TSL, uniforms, skyColorNode, shapeAttribute
         shade.assign(mix(0.55, 1.05, smoothstep(bottomY, topY, y)));
       });
       // A thin waterfall pours off the edge of each island and frays into mist.
-      const fallX = centreX + halfWidth * 0.62;
+      const fallX = centreX.add(halfWidth * 0.62);
       const fall = inside(float(0.009), abs(x.sub(fallX)), 0.006).mul(smoothstep(baseTop - 0.4, baseTop - 0.02, y)).mul(float(1).sub(smoothstep(baseTop - 0.02, baseTop, y))).mul(0.55);
       mask.assign(max(mask, fall));
     }
@@ -173,7 +183,7 @@ function createLureMaterial({ THREE, TSL, uniforms, skyColorNode, shapeAttribute
     const y = uv().y;
     const result = vec3(0).toVar();
     If(shapeIndex.lessThan(0.5), () => {
-      result.assign(plume(x, y, seed));
+      result.assign(plume(x, y, seed, facing));
     }).ElseIf(shapeIndex.lessThan(1.5), () => {
       result.assign(anvil(x, y, seed, lureGlow.w));
     }).ElseIf(shapeIndex.lessThan(2.5), () => {
@@ -185,9 +195,11 @@ function createLureMaterial({ THREE, TSL, uniforms, skyColorNode, shapeAttribute
     }).Else(() => {
       result.assign(comet(x, y));
     });
-    const mask = result.x;
+    // Every silhouette fades out before the quad's sides and top, so no shape is ever cut straight.
+    const edgeFade = float(1).sub(smoothstep(0.9, 1, abs(x))).mul(float(1).sub(smoothstep(0.96, 1, y)));
+    const mask = result.x.mul(edgeFade);
     const shade = result.y;
-    const emissive = result.z;
+    const emissive = result.z.mul(edgeFade);
 
     // Sky-lit mass: zenith ambient, the sun on the sunward side, a silver lining against the sun.
     const viewDirection = normalize(positionWorld.sub(cameraPosition));
@@ -196,12 +208,15 @@ function createLureMaterial({ THREE, TSL, uniforms, skyColorNode, shapeAttribute
     const right = normalize(vec3(viewDirection.z.negate(), 0, viewDirection.x));
     const bulge = normalize(right.mul(x.mul(0.8)).add(vec3(0, 1, 0).mul(y.sub(0.45).mul(0.9))).sub(viewDirection.mul(0.7)));
     const sunward = saturate(dot(bulge, uniforms.sunDirection).mul(0.6).add(0.4));
-    const rim = pow(saturate(dot(viewDirection, uniforms.sunDirection)), 6).mul(mask.mul(float(1).sub(mask)).mul(4));
-    const lit = lureTint.rgb.mul(ambient.mul(1.5).add(uniforms.sunColor.mul(sunward.mul(1.1).add(0.15)))).mul(shade).add(uniforms.sunColor.mul(rim.mul(0.9)));
-    const hazed = mix(lit, behind, haze);
-    // A self-luminous lure (shade 0, the comet) shows only its light over the sky behind it.
-    const body = mix(behind, hazed, min(shade.mul(4), 1));
-    const glowStrength = mix(0.35, 1.6, uniforms.nightFactor).mul(float(1).sub(haze.mul(0.5)));
+    const rim = pow(saturate(dot(viewDirection, uniforms.sunDirection)), 10).mul(mask.mul(float(1).sub(mask)).mul(4));
+    const lit = lureTint.rgb.mul(ambient.mul(1.5).add(uniforms.sunColor.mul(sunward.mul(1.35).add(0.2)))).mul(shade).add(uniforms.sunColor.mul(rim.mul(0.6)));
+    // Aerial perspective: the low, dense air hazes a silhouette's foot more than its top.
+    const hazed = mix(lit, behind, saturate(haze.mul(mix(1.2, 0.65, y))));
+    // A self-luminous lure (shade 0, the comet) shows only its light over the sky behind it, and by
+    // day that light all but drowns in the bright sky; a body's glow (lava light) still shows faintly.
+    const solid = min(shade.mul(4), 1);
+    const body = mix(behind, hazed, solid);
+    const glowStrength = mix(mix(0.04, 0.35, solid), 1.6, uniforms.nightFactor).mul(float(1).sub(haze.mul(0.5)));
     const color = body.add(lureGlow.rgb.mul(emissive).mul(glowStrength).mul(2.2));
     return vec4(color, saturate(mask.mul(weight)));
   })();
@@ -210,10 +225,11 @@ function createLureMaterial({ THREE, TSL, uniforms, skyColorNode, shapeAttribute
 
 /**
  * Creates the lure system. sky: the sky system (its skyColorNode tints the lures; without it the fog
- * colour stands in). Returns { mesh, acquire, setVisible, setHeading, weightOf, release, update,
+ * colour stands in). viewPosition (optional): a Vector3 kept at this frame's camera position by the
+ * caller; without it the camera's world matrix is read. Returns { mesh, acquire, setVisible, setHeading, weightOf, release, update,
  * getStats, dispose }.
  */
-export function createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, capacity = DEFAULT_CAPACITY }) {
+export function createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, viewPosition = null, capacity = DEFAULT_CAPACITY }) {
   const shapeData = new Float32Array(capacity * 4);
   const tintData = new Float32Array(capacity * 4);
   const glowData = new Float32Array(capacity * 4);
@@ -457,10 +473,16 @@ export function createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, cap
         }
         return;
       }
-      const cameraElements = camera.matrixWorld.elements;
-      view[0] = cameraElements[12];
-      view[1] = cameraElements[13];
-      view[2] = cameraElements[14];
+      if (viewPosition) {
+        view[0] = viewPosition.x;
+        view[1] = viewPosition.y;
+        view[2] = viewPosition.z;
+      } else {
+        const cameraElements = camera.matrixWorld.elements;
+        view[0] = cameraElements[12];
+        view[1] = cameraElements[13];
+        view[2] = cameraElements[14];
+      }
       view[4] = scene.fog ? scene.fog.far : camera.far * 0.5;
       view[3] = view[4] * PROJECT_SHARE;
       const step = realDt / FADE_SECONDS;
