@@ -36,6 +36,10 @@ const TAU = Math.PI * 2;
 /** A canyon may cut at most this many depths below the ground on its path, and lift it at most this many. */
 const MAX_CANYON_CUT = 3;
 const MAX_CANYON_LIFT = 1.2;
+/** An islet's outline swings between 1 - ISLAND_LOBE_MAX and 1 + ISLAND_LOBE_MAX of its radius (3 and 7 lobes). */
+const ISLAND_LOBE_MAX = 0.2;
+/** A gorge fits only where the ground at both bridge anchors lies within this of its rim (m). */
+const GORGE_ANCHOR_TOLERANCE = 14;
 /** The waterfall lip's largest wander (m) and the gorge wall's (m). */
 const LIP_AMPLITUDE = 7.5;
 const GORGE_WOBBLE = 6;
@@ -199,7 +203,7 @@ export function stampReach(spec) {
       extent = Math.hypot(maxOf(full.length) / 2 + maxOf(full.margin) + maxOf(full.shoulder), maxOf(full.width) / 2 + maxOf(full.margin) + maxOf(full.shoulder));
       break;
     default:
-      extent = maxOf(full.radius) + maxOf(full.falloff);
+      extent = (maxOf(full.radius) + maxOf(full.falloff)) * (1 + ISLAND_LOBE_MAX);
   }
   return offset + extent;
 }
@@ -236,7 +240,12 @@ function resolveCone(stamp, spec, random, context) {
   const gullyPhase = random() * TAU;
   stamp.gullyCos = Math.cos(gullyPhase);
   stamp.gullySin = Math.sin(gullyPhase);
-  stamp.flowPhase = random() * TAU;
+  const flowPhase = random() * TAU;
+  const flowPhaseB = random() * TAU;
+  stamp.flowCos = Math.cos(flowPhase);
+  stamp.flowSin = Math.sin(flowPhase);
+  stamp.flowCosB = Math.cos(flowPhaseB);
+  stamp.flowSinB = Math.sin(flowPhaseB);
   stamp.baseY = baseY;
   stamp.peakY = baseY + height;
   stamp.rimY = baseY + height;
@@ -444,7 +453,11 @@ function resolveGorge(stamp, spec, random, context) {
   const anchorOffset = halfWidth + pad / 2;
   const anchorA = { x: stamp.x - rightX * anchorOffset, z: stamp.z - rightZ * anchorOffset };
   const anchorB = { x: stamp.x + rightX * anchorOffset, z: stamp.z + rightZ * anchorOffset };
-  const rimY = Math.max((context.baseHeight(anchorA.x, anchorA.z) + context.baseHeight(anchorB.x, anchorB.z)) / 2, context.waterLevel + 8);
+  const groundA = context.baseHeight(anchorA.x, anchorA.z);
+  const groundB = context.baseHeight(anchorB.x, anchorB.z);
+  const rimY = Math.max((groundA + groundB) / 2, context.waterLevel + 8);
+  // The pads level the anchors to the rim: on a slope that would raise pillars, so it does not fit.
+  stamp.fits = Math.abs(groundA - rimY) <= GORGE_ANCHOR_TOLERANCE && Math.abs(groundB - rimY) <= GORGE_ANCHOR_TOLERANCE;
   const floorY = Math.max(rimY - depth, context.waterLevel + 2);
   stamp.length = length;
   stamp.halfWidth = halfWidth;
@@ -501,7 +514,14 @@ function resolveIslandBase(stamp, spec, random, context) {
   const ledgePhase = random() * TAU;
   stamp.ledgeCos = Math.cos(ledgePhase);
   stamp.ledgeSin = Math.sin(ledgePhase);
-  circleBounds(stamp, radius + falloff);
+  const lobePhaseA = random() * TAU;
+  const lobePhaseB = random() * TAU;
+  stamp.lobeCosA = Math.cos(lobePhaseA);
+  stamp.lobeSinA = Math.sin(lobePhaseA);
+  stamp.lobeCosB = Math.cos(lobePhaseB);
+  stamp.lobeSinB = Math.sin(lobePhaseB);
+  stamp.outerRadius = (radius + falloff) * (1 + ISLAND_LOBE_MAX);
+  circleBounds(stamp, stamp.outerRadius);
   stamp.keyPoints = [{ x: stamp.x, z: stamp.z }, { x: stamp.x + stamp.dirX * radius, z: stamp.z + stamp.dirZ * radius }];
 }
 
@@ -588,7 +608,7 @@ function rectangleExtents(stamp) {
  */
 export function stampFootprintDistance(stamp, x, z) {
   if (stamp.kind === 0) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.radius);
-  if (stamp.kind === 5) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.radius - stamp.falloff);
+  if (stamp.kind === 5) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.outerRadius);
   if (stamp.kind === 1) {
     const data = stamp.data;
     let nearest = Infinity;
@@ -615,7 +635,7 @@ export function stampFootprintDistance(stamp, x, z) {
  */
 export function stampFootprintDiscs(stamp) {
   if (stamp.kind === 0) return [{ x: stamp.x, z: stamp.z, radius: stamp.radius }];
-  if (stamp.kind === 5) return [{ x: stamp.x, z: stamp.z, radius: stamp.radius + stamp.falloff }];
+  if (stamp.kind === 5) return [{ x: stamp.x, z: stamp.z, radius: stamp.outerRadius }];
   if (stamp.kind === 1) {
     const data = stamp.data;
     const discs = [];
@@ -846,18 +866,33 @@ function flattenHeight(stamp, x, z, height) {
   return height + (stamp.y - height) * (1 - smoothstep(0, stamp.shoulder, distance));
 }
 
+/**
+ * The islet's distance from its centre measured against its lobed outline: the actual distance
+ * divided by the outline's scale in that direction (1 +- ISLAND_LOBE_MAX), so every radius in the
+ * height and paint functions follows the lobes.
+ */
+function islandReach(stamp, dx, dz, distance) {
+  if (distance <= 0) return 0;
+  const cosAngle = dx / distance;
+  const sinAngle = dz / distance;
+  const lobe = 1 + ISLAND_LOBE_MAX * (0.65 * angularWave(cosAngle, sinAngle, 3, stamp.lobeCosA, stamp.lobeSinA) + 0.35 * angularWave(cosAngle, sinAngle, 7, stamp.lobeCosB, stamp.lobeSinB));
+  return distance / lobe;
+}
+
 function islandBaseHeight(stamp, x, z, height) {
   const dx = x - stamp.x;
   const dz = z - stamp.z;
-  const outer = stamp.radius + stamp.falloff;
   const distanceSq = dx * dx + dz * dz;
-  if (distanceSq >= outer * outer) return height;
+  if (distanceSq >= stamp.outerRadius * stamp.outerRadius) return height;
   const distance = Math.sqrt(distanceSq);
-  const profile = 1 - smoothstep(stamp.radius * 0.5, stamp.radius, distance);
+  const reach = islandReach(stamp, dx, dz, distance);
+  const outer = stamp.radius + stamp.falloff;
+  if (reach >= outer) return height;
+  const profile = 1 - smoothstep(stamp.radius * 0.5, stamp.radius, reach);
   const ledge = distance > 0 && profile > 0 ? 1.5 * angularWave(dx / distance, dz / distance, 5, stamp.ledgeCos, stamp.ledgeSin) * profile : 0;
   const target = stamp.seabedY + (stamp.topY - stamp.seabedY) * Math.sqrt(profile) + ledge;
   if (target <= height) return height;
-  return height + (target - height) * (1 - smoothstep(stamp.radius, outer, distance));
+  return height + (target - height) * (1 - smoothstep(stamp.radius, outer, reach));
 }
 
 /**
@@ -897,10 +932,20 @@ function paintCone(stamp, x, z, out) {
   const basaltOnly = stamp.paintIndex === PAINT_INDEX.basalt;
   const ash = basaltOnly ? 0 : smoothstep(0.4, 0.62, share);
   const outward = distance / stamp.radius;
-  const streak = 0.5 + 0.5 * Math.sin(Math.atan2(dz, dx) * 5 + stamp.flowPhase + outward * 3);
-  const basalt = basaltOnly
-    ? smoothstep(0.08, 0.3, share)
-    : smoothstep(0.62, 0.82, streak) * smoothstep(0.02, 0.14, share) * (1 - ash);
+  let basalt;
+  if (basaltOnly) basalt = smoothstep(0.08, 0.3, share);
+  else if (distance <= 0) basalt = 0;
+  else {
+    // Lava flows: two angular waves (5 and 8 lobes) whose peaks run down the lower flanks, curling
+    // as they go, so the flows are irregular tongues rather than even sectors.
+    const turn = outward * 0.6;
+    const turnCos = Math.cos(turn);
+    const turnSin = Math.sin(turn);
+    const cosAngle = (dx * turnCos - dz * turnSin) / distance;
+    const sinAngle = (dz * turnCos + dx * turnSin) / distance;
+    const flow = 0.6 * angularWave(cosAngle, sinAngle, 5, stamp.flowCos, stamp.flowSin) + 0.4 * angularWave(cosAngle, sinAngle, 8, stamp.flowCosB, stamp.flowSinB);
+    basalt = smoothstep(0.55, 0.85, flow) * smoothstep(0.02, 0.1, share) * (1 - smoothstep(0.3, 0.5, share)) * (1 - ash);
+  }
   if (ash >= basalt) {
     if (ash > out.weight) { out.weight = ash; out.paintIndex = PAINT_INDEX.ash; }
   } else if (basalt > out.weight) {
@@ -983,8 +1028,10 @@ function paintFlatten(stamp, x, z, out) {
 }
 
 function paintIslandBase(stamp, x, z, out) {
-  const distance = Math.hypot(x - stamp.x, z - stamp.z);
-  const weight = smoothstep(stamp.radius * 0.55, stamp.radius * 0.75, distance) * (1 - smoothstep(stamp.radius, stamp.radius + stamp.falloff * 0.6, distance));
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const reach = islandReach(stamp, dx, dz, Math.hypot(dx, dz));
+  const weight = smoothstep(stamp.radius * 0.58, stamp.radius * 0.8, reach) * (1 - smoothstep(stamp.radius, stamp.radius + stamp.falloff * 0.6, reach));
   if (weight > out.weight) {
     out.weight = weight;
     out.paintIndex = stamp.paintIndex;
