@@ -24,6 +24,10 @@
 // ControlState.antenna narrows the lens (up to 3x). Near planes are per view (cockpit 8 cm) and the
 // v1 near plane comes back for chase and photo mode.
 //
+// Turbulence shake (turbulenceShake.js): after the view writes its pose, the WindField's turbulence at
+// the craft (state.flight.turbulence) rotates the camera a little, per view (none on the flyby
+// camera), never in photo mode or during a return flight; the next update takes it back off first.
+//
 // Photo mode (v1) runs in chase.js from any view: it starts at the current camera pose, and on exit
 // the camera returns to the view it came from (chase: v1's return flight; other views: the same
 // eased 0.9 s return, done here).
@@ -46,6 +50,7 @@ import { createInstrumentSet } from '../ui/instruments/index.js';
 import { createInstrumentHud } from '../ui/instrumentHud.js';
 import { createGlassHud } from '../ui/glassHud.js';
 import { createStickReticle } from '../ui/stickReticle.js';
+import { createTurbulenceShake } from './turbulenceShake.js';
 
 const DEG = Math.PI / 180;
 /** Cycle order of the view slots; 'cockpit' is the first-person slot (cockpit or FPV camera). */
@@ -78,6 +83,7 @@ export function createCameraSystem(ctx) {
   const hud = createInstrumentHud(ctx, instruments);
   const glassHud = createGlassHud(ctx);
   const reticle = createStickReticle(ctx);
+  const turbulenceShake = createTurbulenceShake(THREE);
 
   let view = 'chase';
   let photo = false;
@@ -574,12 +580,16 @@ export function createCameraSystem(ctx) {
 
   // ---- Frame update ---------------------------------------------------------------------------------------------
   function update(dt, realDt) {
+    turbulenceShake.restore(camera);
     chaseRig.update(dt, realDt);
     if (syncRoot()) setView(slotOf(view), { remember: false, force: true });
     updateZoom();
     const instrumentTick = updateInstruments(realDt);
     reticle.update();
     if (!photo) updatePose(realDt);
+    const flight = state.flight;
+    const steady = !photo && !returnFlight.active && (view !== 'chase' || chaseRig.getMode() === 'chase');
+    turbulenceShake.apply(camera, dt, realDt, flight ? flight.turbulence : 0, flight ? flight.airspeed : 0, view, steady);
     glassHud.update(realDt, { firstPersonPanel: panelViewActive(), photo, redraw: instrumentTick });
   }
 
@@ -716,6 +726,7 @@ export function createCameraSystem(ctx) {
         hud: hud.getStats(),
         glassHud: glassHud.getStats(),
         reticle: reticle.getStats(),
+        turbulenceShake: turbulenceShake.describe(),
         flyby: { placements: views.flyby.placements, position: { x: views.flyby.cameraPosition.x, y: views.flyby.cameraPosition.y, z: views.flyby.cameraPosition.z } },
         viewChanges: counters.viewChanges,
         returnFlights: counters.returnFlights,
