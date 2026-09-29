@@ -27,8 +27,9 @@
   transition: opacity 0.35s ease, transform 0.55s var(--dw-ease), visibility 0s, right 0.4s var(--dw-ease);
 }
 #ui-root .dw-discovery[data-state="leaving"] { opacity: 0; visibility: visible; transform: translateY(-8px); }
-#ui-root.dw-panel-open .dw-discovery { right: calc(var(--dw-right) + min(384px, calc(100vw - 32px)) + 12px); }
-#ui-root.dw-map-open .dw-discovery { right: var(--dw-right); top: calc(var(--dw-top) + 8px); }
+/* Beside an open panel, below the toast lane; over the map's lower right corner while it is open. */
+#ui-root.dw-panel-open .dw-discovery { top: calc(var(--dw-top) + 176px); right: calc(var(--dw-right) + min(384px, calc(100vw - 32px)) + 12px); }
+#ui-root.dw-panel-open.dw-map-open .dw-discovery { top: auto; bottom: calc(var(--dw-bottom) + 160px); right: calc(max(var(--dw-right), calc(50% - 600px)) + 28px); }
 #ui-root.dw-photo-on .dw-discovery { opacity: 0; visibility: hidden; transition: none; }
 #ui-root .dw-discovery::after {
   content: '';
@@ -87,10 +88,6 @@
   0% { transform: scale(0.72); box-shadow: 0 0 0 color-mix(in srgb, var(--dw-discovery-color) 0%, transparent); }
   45% { transform: scale(1.08); box-shadow: 0 0 30px color-mix(in srgb, var(--dw-discovery-color) 55%, transparent); }
   100% { transform: none; }
-}
-/* Beside an open panel in a narrower window the card drops below the toast lane. */
-@media (max-width: 1180px) {
-  #ui-root.dw-panel-open .dw-discovery { top: calc(var(--dw-top) + 170px); }
 }
 /* Narrow windows: the top bar moves down (ui.css), so the card follows it. */
 @media (max-width: 760px) {
