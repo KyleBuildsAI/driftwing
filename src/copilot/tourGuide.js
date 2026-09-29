@@ -47,6 +47,11 @@ export const CALLOUT_RULES = Object.freeze({
 /** Search radii (km): what's nearby, and the destinations of goTo / chaseStorm / nextDiscovery. */
 export const NEARBY_RADIUS_KM = 15;
 export const SEARCH_RADIUS_KM = 40;
+/**
+ * Sites and director candidates are searched within this radius (km) at most: live spawns count out
+ * to SEARCH_RADIUS_KM, but the site search reads the placement grid cell by cell.
+ */
+export const SITE_SEARCH_KM = 20;
 /** At most this many entries in the snapshot's nearby[] and activeEvents[]. */
 const SNAPSHOT_NEARBY_LIMIT = 10;
 const SNAPSHOT_EVENTS_LIMIT = 10;
@@ -502,7 +507,7 @@ export function createTourGuide(ctx, helpers) {
     let nearby = [];
     let active = [];
     try {
-      nearby = spawns.director ? spawns.director.getNearby(radiusKm) : [];
+      nearby = spawns.director ? spawns.director.getNearby(Math.min(radiusKm, SITE_SEARCH_KM)) : [];
       active = manager.getActive();
     } catch (error) {
       reportReadFailure(error);
@@ -511,7 +516,7 @@ export function createTourGuide(ctx, helpers) {
     let sites = null;
     if (nearby.some((entry) => entry.state === 'site' || entry.state === 'discovered')) {
       const feed = manager.getSiteFeed();
-      if (feed && typeof feed.sitesNear === 'function') sites = new Map(feed.sitesNear(position.x, position.z, radius).map((site) => [site.id, site]));
+      if (feed && typeof feed.sitesNear === 'function') sites = new Map(feed.sitesNear(position.x, position.z, Math.min(radius, SITE_SEARCH_KM * 1000)).map((site) => [site.id, site]));
     }
     for (const entry of nearby) {
       const presetId = presetIdFromKey(entry.id);
@@ -618,7 +623,7 @@ export function createTourGuide(ctx, helpers) {
           const tail = preset && preset.kind === 'event'
             ? " It isn't happening anywhere near us right now. I'll call it out if it starts."
             : ' Keep exploring and I will call it out when one is in range.';
-          return fail(`No ${wanted.toLowerCase()} within ${SEARCH_RADIUS_KM} km that I know of.${tail}`);
+          return fail(`No ${wanted.toLowerCase()} near us that I know of.${tail}`);
         }
       }
       const nearest = matches[0];
@@ -699,7 +704,7 @@ export function createTourGuide(ctx, helpers) {
       for (const landmark of nearestLandmark(LANDMARK_SEARCH_RADIUS)) {
         if (!landmark.discovered && landmark.distance > CALLOUT_RULES.minDistance) options.push({ x: landmark.x, z: landmark.z, distance: landmark.distance, category: 'landmark' });
       }
-      if (options.length === 0) return fail(`Everything I know of within ${SEARCH_RADIUS_KM} km is already in the journal. Pick a direction and let's find new country.`);
+      if (options.length === 0) return fail(`Everything I know of nearby is already in the journal. Pick a direction and let's find new country.`);
       options.sort((first, second) => first.distance - second.distance);
       const next = options[0];
       const hint = CATEGORY_HINTS[next.category] ?? 'something new';
