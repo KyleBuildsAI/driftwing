@@ -21,6 +21,8 @@
 //   lifetimes     every event ends (naturally, at its lifetime, or by the despawn rule), no event
 //                 outlives its duration plus the grace, and despawns only happen out of range and out
 //                 of view (a bush plane, a jet that leaves events behind, and engines that never end)
+//   framework     the same guarantees against a manager shaped like the p2/framework SpawnManager
+//                 (described records, canActivate, getSiteSpawn / setSiteActive, 'spawns:inView')
 //   deferral      while the perf headroom reports missed frames no heavy spawn starts
 //   weather       the state distribution, the cycle order, clear openings, smooth levels, and the
 //                 share of normal sessions (20 and 30 min at glider, bush plane and jet speed) that
@@ -264,7 +266,14 @@ function createView(player) {
 // ============================================================================================
 // STUB SPAWN MANAGER (contract section 4, plus the director's additions)
 // ============================================================================================
-function createStubSpawnManager({ bus, player, getTime, placement, isInView, budgets = DIRECTOR_BUDGETS, naturalEnds = true }) {
+/**
+ * shape 'contract' answers as contract section 4 reads (instances with anchor and ended, getStats
+ * { engines, total }, setLodBias, a site's active state through activate({ site })). shape 'framework'
+ * answers as the p2/framework SpawnManager does: described records with position and duration,
+ * getStats { engines, totals, heavy }, canActivate, getSiteSpawn / setSiteActive, 'spawns:inView',
+ * and no setLodBias.
+ */
+function createStubSpawnManager({ bus, player, getTime, placement, isInView, budgets = DIRECTOR_BUDGETS, naturalEnds = true, shape = 'contract' }) {
   const instances = new Map();
   const activeList = [];
   const siteInstances = new Map();
@@ -340,7 +349,35 @@ function createStubSpawnManager({ bus, player, getTime, placement, isInView, bud
     return instance;
   }
 
-  return {
+  function describe(instance) {
+    return {
+      id: instance.id, presetId: instance.presetId, heavy: instance.heavy, source: instance.data.source,
+      position: { x: instance.anchor.x, y: instance.anchor.y, z: instance.anchor.z }, radius: instance.radius,
+      duration: instance.data.duration, active: instance.data.active !== false,
+    };
+  }
+
+  /** A site's active state switched by the director (framework shape). */
+  function setSiteActive(id, active) {
+    const instance = instances.get(id);
+    if (!instance || instance.data.source !== 'site') return false;
+    const time = getTime();
+    if (active && instance.data.activeSince === undefined) {
+      const distance = Math.hypot(instance.anchor.x - player.position.x, instance.anchor.z - player.position.z);
+      const bearing = bearingDegrees(player.position.x, player.position.z, instance.anchor.x, instance.anchor.z);
+      records.push({ time, presetId: instance.presetId, source: 'director', distance, offAxis: angleBetween(bearing, player.heading), duration: null, refused: null, site: instance.data.site.id });
+      instance.data.activeSince = time;
+    } else if (!active && instance.data.activeSince !== undefined) {
+      endSiteActive(instance, 'siteInactive', time);
+    }
+    return true;
+  }
+  function endSiteActive(instance, reason, time) {
+    ends.push({ id: instance.id, presetId: instance.presetId, reason, time, age: time - instance.data.activeSince, distance: null, inView: null, duration: null, source: 'director' });
+    instance.data.activeSince = undefined;
+  }
+
+  const api = {
     records,
     ends,
     lodBiasHistory,
@@ -414,11 +451,13 @@ function createStubSpawnManager({ bus, player, getTime, placement, isInView, bud
         }
         if (!seenSites.has(site.id) && Math.hypot(site.x - player.position.x, site.z - player.position.z) < 12000 && isInView(site.x, site.groundY, site.z, 500)) {
           seenSites.add(site.id);
-          bus.emit('spawns:siteInView', { id: site.id, presetId: site.presetId });
+          if (shape === 'framework') bus.emit('spawns:inView', { id: `spawn:${site.id}`, presetId: site.presetId, siteId: site.id, kind: 'site', distance: 12000 });
+          else bus.emit('spawns:siteInView', { id: site.id, presetId: site.presetId });
         }
       }
       for (const [siteId, instance] of siteInstances) {
         if (Math.hypot(instance.anchor.x - player.position.x, instance.anchor.z - player.position.z) > SITE_INSTANCE_RANGE + 3000) {
+          if (instance.data.activeSince !== undefined) endSiteActive(instance, 'range', getTime());
           instances.delete(instance.id);
           siteInstances.delete(siteId);
           changed = true;
@@ -426,6 +465,36 @@ function createStubSpawnManager({ bus, player, getTime, placement, isInView, bud
       }
       if (changed) recount();
     },
+  };
+  if (shape === 'contract') return api;
+  const frameworkStats = { engines: {}, totals: stats.total, heavy: 0, heavyLimit: budgets.maxHeavy };
+  const REFUSAL_NAMES = Object.freeze({ heavy: 'heavy', engine: 'instances', lights: 'particles' });
+  return {
+    records, ends, lodBiasHistory, counters,
+    activate: api.activate,
+    deactivate: api.deactivate,
+    update: api.update,
+    getActive: () => activeList.filter((instance) => !instance.ended).map(describe),
+    getInstance(id) {
+      const instance = instances.get(id);
+      return instance && !instance.ended ? describe(instance) : null;
+    },
+    getStats() {
+      for (const [name, engine] of Object.entries(stats.engines)) frameworkStats.engines[name] = { ...engine, budget: { ...budgets.engines[name] } };
+      frameworkStats.heavy = stats.total.heavy;
+      return frameworkStats;
+    },
+    canActivate(presetId, source = 'director') {
+      const preset = PRESET_BY_ID.get(presetId);
+      if (!preset) return 'preset';
+      const reason = refusal(preset, preset.heavy && source !== 'site');
+      return reason ? REFUSAL_NAMES[reason] : null;
+    },
+    getSiteSpawn(siteId) {
+      const instance = siteInstances.get(siteId);
+      return instance ? instance.id : null;
+    },
+    setSiteActive,
   };
 }
 
@@ -448,7 +517,7 @@ const TYPICAL_SITE_CHANCE = 0.08;
  * Flies one scripted path. options: seed, pathSeed, hours, craft (SPEEDS key), siteChance, perf
  * (a perf governor or a stub; none by default).
  */
-function runScenario({ seed, pathSeed, hours, craft, siteChance, perf = null, naturalEnds = true }) {
+function runScenario({ seed, pathSeed, hours, craft, siteChance, perf = null, naturalEnds = true, shape = 'contract' }) {
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const world = createWorldGen(seed, WORLD_OPTIONS);
   const weather = createWeatherModel(world.seedHash >>> 0);
@@ -458,7 +527,7 @@ function runScenario({ seed, pathSeed, hours, craft, siteChance, perf = null, na
   let time = 0;
   const getTime = () => time;
   const isInView = createView(path.player);
-  const manager = createStubSpawnManager({ bus, player: path.player, getTime, placement, isInView, naturalEnds });
+  const manager = createStubSpawnManager({ bus, player: path.player, getTime, placement, isInView, naturalEnds, shape });
   const director = createDirector({
     seedHash: world.seedHash >>> 0,
     presets: PRESETS,
@@ -476,6 +545,7 @@ function runScenario({ seed, pathSeed, hours, craft, siteChance, perf = null, na
   });
   const notables = [];
   bus.on('spawns:siteInView', () => notables.push({ time, kind: 'site' }));
+  bus.on('spawns:inView', () => notables.push({ time, kind: 'site' }));
   const heavyByTick = { max: 0 };
   /** Snapshots of the director whenever a drought runs past 90 s (why nothing was eligible). */
   const longDroughts = [];
@@ -488,7 +558,7 @@ function runScenario({ seed, pathSeed, hours, craft, siteChance, perf = null, na
     if (time >= nextManagerTick) {
       nextManagerTick += 0.5;
       manager.update();
-      heavyByTick.max = Math.max(heavyByTick.max, manager.getStats().total.heavy);
+      heavyByTick.max = Math.max(heavyByTick.max, manager.counters.maxHeavy);
     }
     director.update();
     if (step % 100 === 0 && longDroughts.length < 20) {
@@ -645,6 +715,24 @@ function testLifetimes() {
   const stuck = runScenario({ seed: 'LIFETIME', pathSeed: 'lifetime-glider', hours: 3, craft: 'glider', siteChance: TYPICAL_SITE_CHANCE, naturalEnds: false });
   const stuckReasons = checkLifetimes('engines that never end', stuck, stuck.manager.records.filter((record) => record.source === 'director'));
   check('lifetimes', 'engines that never end: the lifetime rule ends them', (stuckReasons.lifetime || 0) > 0, `${stuckReasons.lifetime || 0} lifetime ends`);
+}
+
+/** The director against a manager shaped like the p2/framework SpawnManager: the same guarantees. */
+function testFrameworkShape() {
+  const hours = 8;
+  const run = runScenario({ seed: 'FRAMEWORK', pathSeed: 'framework-bushplane', hours, craft: 'bushplane', siteChance: TYPICAL_SITE_CHANCE, shape: 'framework' });
+  const director = run.manager.records.filter((record) => record.source === 'director');
+  const siteStates = director.filter((record) => record.site !== null);
+  const counters = run.manager.counters;
+  const refusals = counters.refusedHeavy + counters.refusedEngine + counters.refusedLights;
+  let repeats = 0;
+  run.log.forEach((entry, index) => { if (index > 0 && run.log[index - 1].presetId === entry.presetId) repeats++; });
+  const directorEnds = run.manager.ends.filter((end) => end.source === 'director');
+  const label = `framework-shaped manager, ${hours} h`;
+  check('framework', `${label}: nothing behind, heavy never over ${DIRECTOR_BUDGETS.maxHeavy}, no repeats`, director.every((record) => record.offAxis <= MAX_OFF_AXIS_WIDE + 1e-9) && counters.maxHeavy <= DIRECTOR_BUDGETS.maxHeavy && repeats === 0 && director.length > 0, `${director.length} activations, worst ${Math.max(...director.map((record) => record.offAxis)).toFixed(1)} deg, peak heavy ${counters.maxHeavy}, ${repeats} repeats`);
+  check('framework', `${label}: canActivate keeps refusals rare (< 2 %)`, counters.refusedHeavy === 0 && refusals < director.length * 0.02, `${refusals} refused`);
+  check('framework', `${label}: every start ends, site active states through setSiteActive`, directorEnds.length === director.filter((record) => !record.refused).length && siteStates.length > 0, `${directorEnds.length} ends of ${director.filter((record) => !record.refused).length} starts; ${siteStates.length} volcano eruptions`);
+  check('framework', `${label}: pacing with 'spawns:inView' notables`, windowShare(run.state.pacing) >= TYPICAL_WORLD_SHARE && run.notables.length > 0, describePacing({ pacing: run.state.pacing, longest: run.state.longestDrought, fills: run.state.droughtFills }));
 }
 
 function testDeferral() {
@@ -874,6 +962,7 @@ const started = Date.now();
 testPacing();
 testLongFlight();
 testLifetimes();
+testFrameworkShape();
 testDeferral();
 testDeterminism();
 testWeather();
