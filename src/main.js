@@ -12,6 +12,7 @@ import { createCameraSystem } from './camera/cameraManager.js';
 import { createCloudSystem } from './render/clouds.js';
 import { createCopilotSystem } from './copilot/copilot.js';
 import { createDebugWindSystem } from './dev/debugWind.js';
+import { createEmitterEngine } from './spawns/engines/emitterEngine.js';
 import { createFlightController } from './flight/FlightController.js';
 import { createFxSystem } from './render/fx.js';
 import { createInputSystem } from './input/InputManager.js';
@@ -55,7 +56,9 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
  * The spawn engines (src/spawns/engines/, contract section 3): one factory per engine, registered
  * with the spawns system before its prewarm hook initialises them.
  */
-const SPAWN_ENGINE_FACTORIES = Object.freeze([]);
+const SPAWN_ENGINE_FACTORIES = Object.freeze([
+  createEmitterEngine,
+]);
 
 /**
  * Dev-only verification harnesses: ?test=1 (flight test), ?test=hotas (HOTAS pipeline test) and

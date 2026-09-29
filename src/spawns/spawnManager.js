@@ -394,6 +394,8 @@ export function createSpawnManager(options) {
       createMeshPool: (poolOptions) => createMeshPool(THREE, poolOptions),
     }),
     spawns: null,
+    /** Registers an object for the pipeline prewarm behind the loading fade (null in the labs). */
+    registerPrewarm: typeof registerPrewarm === 'function' ? registerPrewarm : null,
   };
 
   function initEngine(engine) {
