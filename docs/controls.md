@@ -110,6 +110,14 @@ UI keys are not rebindable:
 
 If you bind one of these keys to an action, the action wins and the panel warns about the conflict.
 
+Developer keys (dev builds only; never player features):
+
+- **F9**: the spawn debugger (dev builds, or a production build opened with `?dev=1`). F9 opens it
+  and moves the keyboard focus into it, so keys typed there stay in the panel; F9 or **Esc** closes
+  it and hands the focus back. While it is closed it listens to F9 alone and never takes a flight
+  key.
+- **L**: drop or remove the debug updraft (dev builds and `?debug=1`).
+
 In photo mode only photo mode, time of day, push-to-talk and the UI keys above work. WASD, Q / E,
 the arrows, Shift, the mouse and the wheel drive the free camera (v1).
 
