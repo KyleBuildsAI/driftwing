@@ -394,6 +394,14 @@ export function createSpawnManager(options) {
       createMeshPool: (poolOptions) => createMeshPool(THREE, poolOptions),
     }),
     spawns: null,
+    /**
+     * Registers an object an engine builds in init() for the pipeline prewarm behind the loading fade
+     * (the game ctx's registerPrewarm), so the first spawn does not hitch on a shader compile. Objects
+     * of an engine registered after boot are simply compiled on first use.
+     */
+    registerPrewarm(object) {
+      if (typeof registerPrewarm === 'function') registerPrewarm(object);
+    },
   };
 
   function initEngine(engine) {
