@@ -1094,7 +1094,7 @@ Milestone A of Phase 2 (`src/world/placement.js`, `src/world/stamps.js`, contrac
   function; the surface (`land` | `water` | `coast` | `any`, from the unstamped height at the centre
   and on a ring the size of its stamps); the height band and relief (`peak` | `valley` | `flat` |
   `ridge` | `any`); every stamp fitting its ground (a canyon whose path would cut too deep or lift
-  too much is dropped); the preset's `clearance` between its stamp footprints and every Phase 1
+  too much, or a gorge on a slope or too low for its depth, is dropped); the preset's `clearance` between its stamp footprints and every Phase 1
   landmark; `minSpacing` from sites of the same preset; and `clearance` between its footprints and
   every other site's. The two spacing rules keep the candidate with the higher priority roll, compared
   against the neighbours' rule 1-6 results, so the answer is local and the same from any starting
