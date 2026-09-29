@@ -51,7 +51,12 @@ const ACTION_TYPES = [
   'waypoint', 'clearWaypoint', 'autopilot', 'time', 'ringCourse', 'cancelRingCourse',
   'find', 'describe', 'photoMode', 'journal', 'none',
   'setCraft', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate', 'switchVersion',
+  'nearby', 'goTo', 'findThermal', 'chaseStorm', 'nextDiscovery',
 ];
+/** Tour-guide actions that take an optional autopilot flag. */
+const GUIDE_ACTIONS = ['goTo', 'findThermal', 'chaseStorm', 'nextDiscovery'];
+const MAX_GOTO_NAME_LENGTH = 48;
+const MAX_GOTO_ID_LENGTH = 96;
 const FIND_TARGETS = [
   'mountains', 'snow', 'ocean', 'archipelago', 'islands', 'desert', 'dunes', 'forest', 'pine',
   'meadows', 'flowers', 'landmark', 'arch', 'monoliths', 'lighthouse', 'balloons',
@@ -86,6 +91,8 @@ const ACTION_JSON_SCHEMA = {
     level: { type: 'number' },
     change: { type: 'string', enum: ASSIST_CHANGES },
     view: { type: 'string', enum: VIEWS },
+    name: { type: 'string' },
+    id: { type: 'string' },
   },
   required: ['type'],
   additionalProperties: false,
@@ -119,6 +126,11 @@ Aircraft actions (the game reports whether each one worked, so keep speech to a 
 - {"type":"setAssists","change":"up"/"down"/"full"/"off"} or {"type":"setAssists","level":0..1}: flight assists for the current craft (the only difficulty control; every craft flies the real flight model); up and down move 25 percent.
 - {"type":"switchVersion","version":"v1"}: switch to version one, the original DRIFTWING ("version one", "v1", "play the original"). This game is version two.
 - {"type":"setView","view":"cockpit"/"chase"/"wing"/"flyby"/"outside"} ("cockpit" is first person, the FPV camera on the drone; "outside" or "third person" returns to the last outside view), {"type":"deployChute"}, {"type":"engine","enabled":bool}, {"type":"relaunch"} (aerotow for the glider), {"type":"calibrate"} (opens the controls panel's calibration wizard).
+Tour-guide actions (the game adds the distances, directions and headings, so keep speech to a short lead-in or an empty string):
+- {"type":"nearby"} for "what's nearby": the game lists the closest spawns (flightState.nearby) with distance, direction and state.
+- {"type":"goTo","name":"rope bridge","autopilot":bool} or {"type":"goTo","id":an id from flightState.nearby or flightState.activeEvents,"autopilot":bool} for "take me to the ...": a waypoint on the named place, event or category (weather, wildlife, structure, ...). autopilot only when the pilot asks you to fly there.
+- {"type":"findThermal","autopilot":bool} finds the nearest working thermal. {"type":"chaseStorm","autopilot":bool} guides to the nearest active storm or honestly says none is active. {"type":"nextDiscovery","autopilot":bool} guides to the nearest place not in the journal yet.
+flightState.nearby lists spawns within 15 km (state active, dormant (only a possibility), site (not discovered yet) or discovered); flightState.activeEvents the live events; flightState.weather.state the regional weather (clear, building, storm, clearing). Never claim a storm or an event that is not listed.
 Use flightState to answer questions about altitude, speed, heading, time and nearby landmarks. For airspeed use flightState.airspeed (indicated, in flightState.units: knots for "aviation", km/h for "metric"); for landings use flightState.lastLanding and bestLanding (grade butter/smooth/firm/hard, sinkRate m/s); flightState.windAtCraft.fromName is where the wind blows from. There are no penalties: after a soft crash the craft is simply back in the air. When you mention where we are, use flightState.place (what the ground below actually looks like, e.g. "the foothills of the Snow Peaks"); the biome name alone can be misleading. If the request is unclear, reply kindly with a couple of example commands and action null.`;
 
 // ---- Small helpers ----------------------------------------------------------------------------------
@@ -233,7 +245,22 @@ function sanitizeAction(raw) {
       if (typeof raw.enabled !== 'boolean') return null;
       action.enabled = raw.enabled;
       return action;
+    case 'goTo': {
+      // Exactly one of name (a preset name, synonym or category) or id (from nearby / activeEvents).
+      if (present(raw.name) === present(raw.id)) return null;
+      if (present(raw.name)) {
+        if (typeof raw.name !== 'string') return null;
+        const name = cleanText(raw.name, MAX_GOTO_NAME_LENGTH);
+        if (!name) return null;
+        action.name = name;
+      } else {
+        if (typeof raw.id !== 'string' || !raw.id.trim() || raw.id.length > MAX_GOTO_ID_LENGTH) return null;
+        action.id = raw.id.trim();
+      }
+      return copyBoolean('autopilot') ? action : null;
+    }
     default:
+      if (GUIDE_ACTIONS.includes(raw.type)) return copyBoolean('autopilot') ? action : null;
       return action;
   }
 }
@@ -353,6 +380,23 @@ function aircraftRule(text, flight) {
   return null;
 }
 
+/** The tour-guide rules: what's nearby, take me to, thermals, the storm chase and the next discovery. */
+function guideRule(text, flight) {
+  const autopilot = /\b(autopilot|fly (me|us)|you fly)\b/.test(text);
+  if (/\b(find|where'?s|any|nearest|need)\b.*\b(thermals?|updrafts?)\b|^(a )?thermals?$/.test(text)) return { speech: '', action: { type: 'findThermal', autopilot } };
+  if (/\bstorm ?chas(e|er|ing)\b|\bchase\b.*\b(storms?|tornado(es)?|supercells?)\b|\b(find|any|where'?s)\b.*\bstorms?\b/.test(text)) return { speech: '', action: { type: 'chaseStorm', autopilot } };
+  if (/\bnext (discovery|find)\b|\bsomething new\b|\bundiscovered\b/.test(text)) return { speech: '', action: { type: 'nextDiscovery', autopilot } };
+  if (/\b(what'?s|what is|anything) (nearby|around( here)?|close by|out there)\b/.test(text)) return { speech: '', action: { type: 'nearby' } };
+  const travel = text.match(/\b(take (me|us) to|fly (me |us )?to|head (to|for)|go to|guide (me|us) to)\b(.*)$/);
+  const places = Array.isArray(flight.nearby) ? flight.nearby.concat(Array.isArray(flight.activeEvents) ? flight.activeEvents : []) : [];
+  if (travel && places.length) {
+    const wanted = travel[travel.length - 1];
+    const match = places.find((place) => typeof place.name === 'string' && place.state !== 'dormant' && wanted.includes(place.name.toLowerCase()));
+    if (match && typeof match.id === 'string') return { speech: '', action: { type: 'goTo', id: match.id, autopilot } };
+  }
+  return null;
+}
+
 function ruleReply(flightState, transcript) {
   const text = String(transcript || '').toLowerCase().replace(/[^a-z0-9.\-'\s]/g, ' ').replace(/\s+/g, ' ').trim();
   const flight = flightState && typeof flightState === 'object' ? flightState : {};
@@ -362,8 +406,10 @@ function ruleReply(flightState, transcript) {
 
   if (!text) return { speech: "I'm here whenever you need me.", action: null };
   if (/\b(help|what can you do|commands)\b/.test(text)) {
-    return { speech: "From the ground station I can find places, set waypoints, fly the autopilot, change the time and lay out ring courses, and switch craft, assists, views, the engine, the chute, relaunch and back to version one.", action: null };
+    return { speech: "From the ground station I can find places, set waypoints, fly the autopilot, change the time and lay out ring courses, switch craft, assists, views, the engine, the chute, relaunch and back to version one, and guide you: what's nearby, take me to, find a thermal, chase the storm, next discovery.", action: null };
   }
+  const guide = guideRule(text, flight);
+  if (guide) return guide;
   const aircraft = aircraftRule(text, flight);
   if (aircraft) return aircraft;
   if (/\b(cancel|stop|end|quit)\b.*\b(course|rings?|race)\b/.test(text)) return { speech: 'Course called off.', action: { type: 'cancelRingCourse' } };
@@ -466,6 +512,11 @@ function summarizeFlightState(flight) {
     engineOn: state.engineOn,
     lastLanding: state.lastLanding,
     bestLanding: state.bestLanding,
+    // v2 tour-guide fields (docs/copilot-api.md).
+    nearby: Array.isArray(state.nearby) ? state.nearby.slice(0, 6) : undefined,
+    activeEvents: Array.isArray(state.activeEvents) ? state.activeEvents.slice(0, 6) : undefined,
+    weather: state.weather,
+    callouts: state.callouts,
   };
 }
 

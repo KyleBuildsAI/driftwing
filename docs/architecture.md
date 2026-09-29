@@ -315,7 +315,8 @@ system, and then starts the frame loop.
 | `flightActions.js` | the executor for aircraft actions, reporting real outcomes |
 | `flightState.js` | the v2 half of the flight-state snapshot and craft capabilities |
 | `flightChatter.js` | chatter for landings, soft crashes, craft changes, lift hints |
-| `commandChips.js` | the "Aircraft" quick-chip row |
+| `commandChips.js` | the "Aircraft" and "Guide" quick-chip rows |
+| `tourGuide.js` | the Phase 2 tour guide: "what's nearby", "take me to the ...", "find a thermal", "chase the storm", "next discovery", the proactive callouts and their "yes", and the `nearby` / `activeEvents` / `weather` / `callouts` flight-state fields |
 
 ### `src/gameplay`
 
@@ -623,6 +624,7 @@ Untyped events keep v1's `namespace:verb` names:
 - `waypoint:set`, `waypoint:reached`, `waypoint:cleared`;
 - `landmark:discovered`, `landmark:threaded`, `journal:changed`, `birds:scattered`;
 - `copilot:speech { text, source }`, `copilot:listening`, `copilot:transcript`, `mic:toggle`;
+- `copilot:callout { text, presetId, spawnId }`, `copilot:offer { active, name?, presetId?, expiresIn? }` (the tour guide);
 - `ui:command`, `ui:action`;
 - `journal:discovery { entry, found, total }`, `journal:record { key, value, previous, improved, op,
   presetId }`, `journal:achievement { entry }` (the journal, after it recorded one).
@@ -1290,7 +1292,8 @@ The UI system offers `update`, `toast`, `setSubtitle`, `setMicState`, `showPanel
 ### Copilot (`ctx.systems.copilot`)
 
 The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTalk(held)`, `speak`,
-`getBrainName` and `getStats`.
+`getBrainName`, `getStats` and `tourGuide` (`gatherEntries(radiusKm)`, `getOffer()`,
+`snapshotFields()`, `handlers`).
 
 - `ctx.executeAction(action)` returns the reply text or a promise of it.
 - The remote brain contract (request, flight state, action schema, validation, fallbacks) is
@@ -1300,6 +1303,17 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
   outside views (`viewForward`, `viewBack`, `viewToggle1P3P`), engine, chute and `versionToggle`
   ("switch to version one": the shell bridge asks the launcher shell for V1);
   `flight.relaunch()`; and `ui:openControls` for calibration.
+- The tour guide (`tourGuide.js`) reads the spawns only through their public API: the director's
+  `getNearby(radiusKm)`, the SpawnManager's `getActive`, `getInstance`, `getPreset`, `listPresets`,
+  `isDiscovered` and `getSiteFeed().sitesNear`, and the typed `spawnActivated` / `spawnEnded`
+  events. Preset names, journal titles, ids, a synonym table and the categories resolve "take me to
+  the ..."; `ctx.wind.nearestThermal` answers "find a thermal"; the weather system's `getState()`
+  keeps "chase the storm" honest. It places waypoints through `ctx.systems.waypoints.set`.
+- Callouts (setting `copilotCallouts`, default on) speak a preset's `callouts` line on
+  `spawnActivated` (events, and sites not yet discovered coming into range): at most one per 45 s,
+  never below 150 m AGL, while landing (`isLandingPhase`) or over another WREN line (the ask queue,
+  the mic, speech synthesis, 4 s after any line). A bare "yes" within 20 s places the waypoint; it is
+  answered before the brain, so it works with the remote brain too.
 
 ### Dev tools and test entry points
 

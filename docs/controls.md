@@ -110,6 +110,11 @@ UI keys are not rebindable:
 - **Shift+V**: WREN voice on / off.
 - **Tab**: hide or show the HUD.
 
+WREN's tour guide has no keys of its own: its commands are the "Guide" chips in the command bar
+(Enter or **/**): What's nearby, To [a nearby event or discovered site], Find a thermal, Chase the
+storm and Next discovery, plus **Yes, heading** / **No thanks** while a callout offer is open. Say
+or type the same phrases, or "guide help" for the list; docs/copilot-api.md has them all.
+
 If you bind one of these keys to an action, the action wins and the panel warns about the conflict.
 
 Developer keys (dev builds only; never player features):

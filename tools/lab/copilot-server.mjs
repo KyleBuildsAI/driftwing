@@ -6,6 +6,10 @@
 //   default    the game's origins (127.0.0.1:5199, localhost) are allowed and echoed back; a public
 //              site and Origin "null" (sandboxed iframes, data: documents, file:// pages) get 403
 //   fileOptIn  with ALLOW_FILE_ORIGIN=1, Origin "null" is allowed; public sites are still refused
+//   guide      the rules brain answers the tour-guide phrases with the new actions (nearby, goTo by
+//              an id from flightState.nearby, findThermal, chaseStorm, nextDiscovery), every reply
+//              passes the game's own validation (Copilot.sanitizeReply), and /health lists them.
+//              These send POST /copilot with a rules-only server (no Claude key)
 //
 // Usage: node tools/lab/copilot-server.mjs [--verbose]
 // Prints one line per check and exits non-zero if any check fails.
@@ -117,7 +121,57 @@ async function testFileOptIn() {
   }
 }
 
-for (const test of [testDefault, testFileOptIn]) {
+/** A flight state with the tour-guide fields the rules read. */
+const GUIDE_STATE = Object.freeze({
+  heading: 0,
+  altitude: 700,
+  nearby: [
+    { id: 'ropeBridge:1:0', presetId: 'ropeBridge', name: 'Rope bridge', category: 'structure', kind: 'site', distance: 3000, bearing: 90, state: 'discovered', etaSeconds: 75, discovered: true },
+    { id: 'tornado:1:2:3', presetId: 'tornado', name: 'Tornado', category: 'weather', kind: 'event', distance: 6000, bearing: 0, state: 'dormant', etaSeconds: 150, discovered: false },
+  ],
+  activeEvents: [
+    { id: 'spawn:supercell:4', presetId: 'supercell', name: 'Supercell', category: 'weather', kind: 'event', distance: 9000, bearing: 315, state: 'active', etaSeconds: 225, discovered: false },
+  ],
+  weather: { state: 'building', storminess: 0.3 },
+  callouts: { enabled: true, offer: null },
+});
+
+async function ask(base, transcript) {
+  const response = await fetch(`${base}/copilot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ flightState: GUIDE_STATE, transcript }) });
+  return { status: response.status, body: await response.json() };
+}
+
+async function testGuide() {
+  const { Copilot } = await import('../../src/copilot/copilot.js');
+  const { child, base } = await startServer({});
+  try {
+    const healthResponse = await fetch(`${base}/health`);
+    const healthBody = await healthResponse.json();
+    const listed = ['nearby', 'goTo', 'findThermal', 'chaseStorm', 'nextDiscovery'].every((type) => healthBody.actions.includes(type));
+    check('guide', '/health lists the tour-guide actions', listed, JSON.stringify(healthBody.actions));
+    for (const [transcript, expected] of [
+      ["what's nearby", { type: 'nearby' }],
+      ['take me to the rope bridge', { type: 'goTo', id: 'ropeBridge:1:0', autopilot: false }],
+      ['fly us to the supercell', { type: 'goTo', id: 'spawn:supercell:4', autopilot: true }],
+      ['find a thermal', { type: 'findThermal', autopilot: false }],
+      ['chase the storm', { type: 'chaseStorm', autopilot: false }],
+      ['next discovery', { type: 'nextDiscovery', autopilot: false }],
+      ['switch to version one', { type: 'switchVersion', version: 'v1' }],
+    ]) {
+      const { status, body } = await ask(base, transcript);
+      const valid = Copilot.sanitizeReply(body);
+      const sorted = (value) => JSON.stringify(Object.fromEntries(Object.entries(value ?? {}).sort(([first], [second]) => first.localeCompare(second))));
+      const pass = status === 200 && valid && sorted(valid.action) === sorted(expected);
+      check('guide', `"${transcript}" -> ${JSON.stringify(expected)}, valid for the game`, pass, `${status} ${JSON.stringify(body)}`);
+    }
+    const { body: tornado } = await ask(base, 'take me to the tornado');
+    check('guide', 'a dormant candidate is not a goTo target', !(tornado.action && tornado.action.type === 'goTo'), JSON.stringify(tornado));
+  } finally {
+    await stopServer(child);
+  }
+}
+
+for (const test of [testDefault, testFileOptIn, testGuide]) {
   try {
     await test();
   } catch (error) {
