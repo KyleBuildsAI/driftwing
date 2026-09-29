@@ -16,7 +16,8 @@
 //   allocation  the manager's frame update with 40 spawns, sampled by the heap profiler: bytes
 //               allocated in src/spawns and the test engines per frame
 //   debugger    F9 opens the panel (screenshot debugger.png) and closes it; while it is closed the
-//               flight keys fly, while it has focus they stay in it
+//               flight keys fly, while it has focus they stay in it; its Spawn, Nearest (teleport),
+//               time-of-day, Wind arrows and engine stats work
 //
 // The memory cycles run in photo mode (the simulation stands still, the loop keeps rendering), so
 // terrain streaming cannot move the GPU counters; the LOD, wind and allocation checks step frames by
@@ -390,6 +391,49 @@ async function main() {
     check('debugger', 'it lists the presets and says the director is not running', opened.presets >= 9 && /not running/i.test(opened.director), `${opened.presets} presets, "${opened.director}"`);
     const rollOpen = await rollWhileHolding();
     check('debugger', 'open and focused: flight keys stay in the panel', Math.abs(rollOpen) < 0.05, `roll ${rollOpen.toFixed(2)}`);
+    // The panel's controls, driven through the DOM like a player would.
+    const controls = await evaluate(async () => {
+      const ctx = window.DRIFTWING.ctx;
+      const panel = document.getElementById('dw-spawn-debugger');
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const rowFor = (name) => [...panel.querySelectorAll('.dw-spawndbg-item')].find((item) => item.querySelector('.dw-spawndbg-item-name')?.firstChild?.textContent === name);
+      const buttonIn = (row, label) => [...row.querySelectorAll('button')].find((node) => node.textContent === label);
+      const result = {};
+      // Force-spawn ahead: the Spawn button of "Test marker".
+      const before = ctx.systems.spawns.getStats().spawns;
+      buttonIn(rowFor('Test marker'), 'Spawn').click();
+      await wait(300);
+      const spawned = ctx.systems.spawns.getActive().find((spawn) => spawn.presetId === 'testMarker' && spawn.source === 'debug');
+      result.spawned = { count: ctx.systems.spawns.getStats().spawns - before, distance: spawned?.distance ?? null };
+      if (spawned) ctx.systems.spawns.deactivate(spawned.id, 'test');
+      // Teleport to the nearest site of a type: a test site 6 km ahead, then its Nearest button.
+      const site = ctx.systems.spawns.debug.testKit.placeTestSite(6000);
+      buttonIn(rowFor('Test site'), 'Nearest').click();
+      await wait(300);
+      const player = ctx.state.player.position;
+      result.teleport = { distance: Math.round(Math.hypot(player.x - site.x, player.z - site.z)), agl: Math.round(player.y - Math.max(ctx.world.groundHeight(player.x, player.z), ctx.world.WATER_LEVEL)) };
+      ctx.systems.spawns.debug.testKit.detachSiteFeed();
+      // Time of day scrubber.
+      const range = panel.querySelector('input[type="range"]');
+      range.value = '0.5';
+      range.dispatchEvent(new Event('input', { bubbles: true }));
+      await wait(100);
+      result.dayTime = Math.round(ctx.systems.sky.getDayTime() * 1000) / 1000;
+      // Wind overlay toggle.
+      const overlayBefore = Boolean(ctx.settings.get('windOverlay'));
+      [...panel.querySelectorAll('button')].find((node) => node.textContent === 'Wind arrows').click();
+      await wait(100);
+      result.overlay = { before: overlayBefore, after: Boolean(ctx.settings.get('windOverlay')) };
+      [...panel.querySelectorAll('button')].find((node) => node.textContent === 'Wind arrows').click();
+      // Engine stats rows.
+      result.engineRows = [...panel.querySelectorAll('.dw-spawndbg-table tbody tr')].map((row) => [...row.cells].map((cell) => cell.textContent).join(' | '));
+      return result;
+    });
+    check('debugger', 'Spawn force-spawns the preset ahead of the craft', controls.spawned.count === 1 && controls.spawned.distance > 300 && controls.spawned.distance < 2500, JSON.stringify(controls.spawned));
+    check('debugger', 'Nearest teleports next to the nearest site of that preset', Math.abs(controls.teleport.distance - 1800) < 60 && controls.teleport.agl > 200, JSON.stringify(controls.teleport));
+    check('debugger', 'the scrubber sets the time of day', Math.abs(controls.dayTime - 0.5) < 0.002, String(controls.dayTime));
+    check('debugger', 'the Wind arrows button toggles the WindField overlay', controls.overlay.after !== controls.overlay.before, JSON.stringify(controls.overlay));
+    check('debugger', 'engine stats list both test engines', controls.engineRows.length === 2 && controls.engineRows.every((row) => /^test(Marker|Wind) \|/.test(row)), controls.engineRows.join(' ; '));
     await page.keyboard.press('F9');
     await sleep(500);
     const closed = await evaluate(() => !document.querySelector('#dw-spawn-debugger.dw-open'));
