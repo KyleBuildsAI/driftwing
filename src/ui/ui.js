@@ -9,6 +9,7 @@ import { createDiscoveryToast } from './discoveryToast.js';
 import { createJournalPanel } from './journalPanel.js';
 import { createSeedLinks } from './seedLinks.js';
 import { createSettingsPanel } from './settingsPanel.js';
+import { createWorldMap } from './worldMap.js';
 import { createStatusBadge } from '../dev/statusBadge.js';
 import { unitsFor } from './instruments/units.js';
 
@@ -185,7 +186,10 @@ export function createUISystem(ctx) {
     photoHint: requireElement('dw-photo-hint'),
     flash: requireElement('dw-flash'),
   };
+  // The world map builds its own panel element (src/ui/worldMap.js).
+  const worldMap = createWorldMap({ root, ctx, toast });
   const panels = {
+    map: worldMap.element,
     journal: requireElement('dw-panel-journal'),
     settings: requireElement('dw-panel-settings'),
     controls: requireElement('dw-panel-controls'),
@@ -193,6 +197,7 @@ export function createUISystem(ctx) {
     menu: requireElement('dw-panel-menu'),
   };
   const panelButtons = {
+    map: requireElement('dw-map-button'),
     journal: requireElement('dw-journal-button'),
     settings: requireElement('dw-settings-button'),
     help: requireElement('dw-help-button'),
@@ -1773,6 +1778,7 @@ export function createUISystem(ctx) {
       return true;
     }
     if (activePanel === 'controls') controlsPanel.onClose();
+    if (activePanel === 'map') worldMap.onClose();
     for (const [panelName, panel] of Object.entries(panels)) {
       const open = panelName === next;
       if (!open) releaseFocusWithin(panel);
@@ -1789,6 +1795,7 @@ export function createUISystem(ctx) {
       if (next === 'journal') journalPanel.render();
       if (next === 'settings') settingsPanel.syncAll();
       if (next === 'controls') controlsPanel.onOpen();
+      if (next === 'map') worldMap.onOpen();
       if (next === 'help') {
         wireHelpBindings();
         renderHelp();
@@ -2517,6 +2524,7 @@ export function createUISystem(ctx) {
     statusBadge.update(step, photoActive);
     craftPicker.update(step);
     discoveryToast.update(step, photoActive);
+    worldMap.update(step);
     if (activePanel === 'journal') journalPanel.update(step);
     if (activePanel === 'settings') settingsPanel.update(step);
     if (activePanel === 'controls') controlsPanel.update(step);
@@ -2528,5 +2536,7 @@ export function createUISystem(ctx) {
     craftPicker, settingsPanel, controlsPanel, statusBadge,
     /** Seed links: shareUrl(), copyLink(), openWorld(seed, dayTime?), newWorld(). */
     seedLinks,
+    /** The world map (M) and the discovery toast, for tests and other systems. */
+    worldMap, discoveryToast,
   };
 }
