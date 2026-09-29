@@ -102,7 +102,9 @@ export function createStructureEngine() {
     const swayWeight = attribute('sway', 'float');
     // Per object: the sway offset (m) this frame and the glow multiplier (setParam 'glow').
     const swayOffset = uniform(new THREE.Vector3()).onObjectUpdate(({ object }) => object.userData.swayOffset);
-    const objectGlow = uniform(1).onObjectUpdate(({ object }) => object.userData.glow);
+    // x = the glow multiplier (params.glow); an object, so the per-object update boxes no number.
+    const objectLook = uniform(new THREE.Vector4(1, 0, 0, 0)).onObjectUpdate(({ object }) => object.userData.look);
+    const objectGlow = objectLook.x;
 
     const solid = new THREE.MeshStandardNodeMaterial({ flatShading: true, roughness: 0.88, metalness: 0 });
     solid.colorNode = rgba.rgb;
@@ -118,23 +120,26 @@ export function createStructureEngine() {
     const pulse = sin(time.mul(1.25).add(swayWeight.mul(TWO_PI))).mul(0.25).add(0.75);
     const facing = saturate(dot(normalView, positionViewDirection));
     const rim = pow(float(1).sub(facing), 3);
-    glow.colorNode = rgba.rgb;
-    glow.emissiveNode = rgba.rgb.mul(rgba.a.mul(pulse).mul(objectGlow).mul(mix(float(0.55), float(1.45), nightFactor)).add(rim.mul(0.5)));
+    // The glow is the crystal colour squared (deeper, more saturated than its lit body), rising with
+    // the vertex gain toward the tip, stronger at night where bloom picks it up.
+    glow.colorNode = rgba.rgb.mul(0.75);
+    glow.emissiveNode = rgba.rgb.mul(rgba.rgb).mul(rgba.a.mul(pulse).mul(objectGlow).mul(mix(float(0.9), float(2.3), nightFactor)).add(rim.mul(0.6)));
 
     // Falling water: streaks scrolling down the ribbon (uv.y in 30 m units), soft side edges, fading
     // out along its length (vertex alpha), lit by the sun's colour and dimmed at night.
     const water = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide });
     const ribbon = uv();
-    const streaks = mx_noise_float(vec3(ribbon.x.mul(7), ribbon.y.mul(2.2).sub(time.mul(1.4)), float(0.5))).mul(0.35).add(0.65);
+    const streaks = saturate(mx_noise_float(vec3(ribbon.x.mul(9), ribbon.y.mul(2.6).sub(time.mul(1.5)), float(0.5))).mul(0.55).add(0.55));
     const edges = smoothstep(float(0), float(0.18), ribbon.x).mul(smoothstep(float(1), float(0.82), ribbon.x));
     water.colorNode = rgba.rgb.mul(sunColor.mul(0.45).add(0.5)).mul(float(1).sub(nightFactor.mul(0.72)));
-    water.opacityNode = rgba.a.mul(streaks).mul(edges).mul(0.85);
+    water.opacityNode = rgba.a.mul(streaks).mul(edges).mul(0.72);
 
-    // Mist: soft blobs, opaque in the middle and fading at their silhouette, breathing slowly.
+    // Mist: soft blobs, thin in the middle and gone at their silhouette, breathing slowly, lit by
+    // the sun's colour and leaning toward the fog colour so they sit in the air.
     const mist = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
     const mistFacing = saturate(dot(normalView, positionViewDirection));
-    mist.colorNode = mix(vec3(0.86, 0.9, 0.95), sunColor, 0.25).mul(float(1).sub(nightFactor.mul(0.7)));
-    mist.opacityNode = pow(mistFacing, 1.7).mul(0.4);
+    mist.colorNode = mix(mix(vec3(0.88, 0.91, 0.95), sunColor, 0.2), ctx.uniforms.fogColor, 0.3).mul(float(1).sub(nightFactor.mul(0.72)));
+    mist.opacityNode = pow(mistFacing, 2.4).mul(0.24);
     mist.positionNode = positionLocal.mul(sin(time.mul(0.6).add(float(instanceIndex).mul(1.7))).mul(0.06).add(1));
 
     // Moving parts (nacelles, rotors, windsocks): instance colours multiply the vertex colours.
@@ -308,7 +313,7 @@ export function createStructureEngine() {
     }
     mesh.position.copy(anchor);
     mesh.userData.swayOffset = instanceData.swayOffset;
-    mesh.userData.glow = 1;
+    mesh.userData.look = instanceData.look;
     mesh.frustumCulled = true;
     mesh.castShadow = false;
     mesh.receiveShadow = kind !== 'water';
@@ -529,7 +534,7 @@ export function createStructureEngine() {
     let targetRpm = 0;
     if (speed >= settings.cutIn && speed <= settings.cutOut) {
       const share = Math.min(1, (speed - settings.cutIn) / (settings.ratedWind - settings.cutIn));
-      targetRpm = settings.maxRpm * Math.pow(share, 0.6) * data.rotorScale;
+      targetRpm = settings.maxRpm * Math.pow(share, 0.6) * data.params.rotorSpeed;
     }
     const positions = data.turbinePositions;
     const nacelleArray = nacelles.mesh.instanceMatrix.array;
@@ -697,7 +702,7 @@ export function createStructureEngine() {
     const sway = data.sway;
     const state = data.wind;
     const windStrength = Math.min(1.6, 0.25 + state[2] / 8 + state[5] * 0.8);
-    const amplitude = sway.amplitude * windStrength * data.swayScale;
+    const amplitude = sway.amplitude * windStrength * data.params.sway;
     const phase = ctx.time.elapsed * TWO_PI * sway.frequency;
     const swing = Math.sin(phase) * amplitude;
     let dirX = sway.dirX;
@@ -734,7 +739,7 @@ export function createStructureEngine() {
       const dz = player.z - point.z;
       level = 1 - (Math.sqrt(dx * dx + dy * dy + dz * dz) - 40) / data.audioReference;
     }
-    level *= data.audioScale;
+    level *= data.params.audio;
     level = level < 0 ? 0 : level > 1 ? 1 : level;
     if (Math.abs(level - audio[0]) < AUDIO_STEP) return;
     audio[0] = level;
@@ -848,7 +853,7 @@ export function createStructureEngine() {
         proxies = [solidProxy, new THREE.Mesh(proxyGeometry(false), materials.decal), new THREE.Mesh(proxyGeometry(false), materials.glow), new THREE.Mesh(proxyGeometry(true), materials.water)];
         for (const proxy of proxies) {
           proxy.userData.swayOffset = new THREE.Vector3();
-          proxy.userData.glow = 1;
+          proxy.userData.look = new THREE.Vector4(1, 0, 0, 0);
           ctx.registerPrewarm(proxy);
         }
         for (const pool of [nacelles, rotors, socks, puffs]) ctx.registerPrewarm(pool.mesh);
@@ -875,10 +880,8 @@ export function createStructureEngine() {
         meshes: { body: null, detail: null, decal: null, glow: null, water: null },
         swayOffset: new THREE.Vector3(),
         sway: out.sway ? { ...out.sway, followWind: false } : { dirX: 1, dirZ: 0, amplitude: read.number('sway', 0.35, 0, 5), frequency: 0.3, followWind: true },
-        swayScale: 1,
-        rotorScale: 1,
-        audioScale: 1,
-        glowScale: 1,
+        /** Per-object shader values: x = the glow multiplier. */
+        look: new THREE.Vector4(1, 0, 0, 0),
         wind: new Float64Array(6),
         /** The ambient wind at the probe point at create (x, z) and the windStrength then. */
         ambient: new Float64Array(3),
@@ -929,7 +932,9 @@ export function createStructureEngine() {
       data.ambient[2] = ctx.uniforms.windStrength.value || 1;
       const audioPoint = out.audioPoint ?? [0, 5, 0];
       data.audioPosition.set(anchor.x + audioPoint[0], anchor.y + audioPoint[1], anchor.z + audioPoint[2]);
-      const instance = { anchor, radius: out.radius, windSourceIds: [], lights: 0, particles: 0, data };
+      // Live params (read every frame): the set-piece engine's ramps write them directly.
+      const instance = { anchor, radius: out.radius, windSourceIds: [], lights: 0, particles: 0, data, params: { glow: 1, sway: 1, rotorSpeed: 1, audio: 1 } };
+      data.params = instance.params;
       try {
         // Geometry on pooled meshes.
         for (const kind of GEOMETRY_KINDS) data.meshes[kind] = showGeometry(kind, context[kind].toGeometry(THREE), data, anchor);
@@ -1027,6 +1032,7 @@ export function createStructureEngine() {
 
     update(instance, dt) {
       const data = instance.data;
+      data.look.x = instance.params.glow;
       updateWind(data, dt);
       if (data.turbineCount > 0 && data.animateTurbines) updateTurbines(data, dt);
       if (data.sockCount > 0 && data.animateSocks) updateSocks(data);
@@ -1098,30 +1104,15 @@ export function createStructureEngine() {
     },
 
     /**
-     * Ramps for the set-piece engine: 'glow' (crystal and emissive glow multiplier), 'sway' (sway
-     * amplitude multiplier), 'rotorSpeed' (turbine speed multiplier) and 'audio' (voice level
-     * multiplier). Returns whether the param is known.
+     * Sets a live param (the same numbers instance.params holds, which the set-piece engine's ramps
+     * write directly): 'glow' (emissive and crystal glow multiplier), 'sway' (sway amplitude
+     * multiplier), 'rotorSpeed' (turbine speed multiplier) and 'audio' (voice level multiplier).
+     * Returns whether the param is known.
      */
     setParam(instance, name, value) {
-      const data = instance.data;
-      if (!Number.isFinite(value)) return false;
-      switch (name) {
-        case 'glow':
-          data.glowScale = value;
-          for (const kind of GEOMETRY_KINDS) if (data.meshes[kind]) data.meshes[kind].userData.glow = value;
-          return true;
-        case 'sway':
-          data.swayScale = value;
-          return true;
-        case 'rotorSpeed':
-          data.rotorScale = value;
-          return true;
-        case 'audio':
-          data.audioScale = value;
-          return true;
-        default:
-          return false;
-      }
+      if (!Number.isFinite(value) || !Object.hasOwn(instance.params, name)) return false;
+      instance.params[name] = value;
+      return true;
     },
 
     /**

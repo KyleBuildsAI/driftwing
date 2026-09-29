@@ -8,8 +8,9 @@ export const PALETTE = Object.freeze({
   towerBand: paint(0xc9c4b8),
   concrete: paint(0xb3aca0),
   concreteDark: paint(0x8e887e),
-  tarmac: Object.freeze([paint(0x5e5b58), paint(0x686460), paint(0x55524f)]),
-  tarmacWeed: paint(0x5f6b45),
+  // Sun-bleached, weathered asphalt: lighter than new tarmac, so the strip reads from the air.
+  tarmac: Object.freeze([paint(0x8c8781), paint(0x807b75), paint(0x958f87)]),
+  tarmacWeed: paint(0x7d8458),
   gravel: paint(0x9a9082),
   marking: paint(0xefe9da),
   rust: Object.freeze([paint(0x9c5a3a), paint(0x86503a), paint(0xa86a44)]),
