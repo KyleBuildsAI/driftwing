@@ -68,7 +68,7 @@ const COMMON_DEFAULTS = Object.freeze({
 const FORM_DEFAULTS = Object.freeze({
   tower: Object.freeze({
     base: 900, height: 9000, radius: 2600, puffs: 150, detail: 0.35, puffSize: 0.42, storm: 0.6,
-    anvil: Object.freeze({ radius: 8500, thickness: 1500, altitude: null, lean: 2600, puffs: 80, storm: 0.3 }),
+    anvil: Object.freeze({ radius: 8500, thickness: 1500, altitude: null, lean: 2600, puffs: 110, storm: 0.3 }),
     overshoot: 0.5,
     rain: 'auto',
     haze: Object.freeze({ near: 3000, far: 45000, max: 0.9 }),
@@ -101,7 +101,7 @@ const FORM_DEFAULTS = Object.freeze({
     turbulence: 0.1,
   }),
   mist: Object.freeze({
-    base: 0, radius: 220, height: 380, puffs: 34, detail: 0.3, rise: 6, storm: 0, tint: 0xf4f7f9, brightness: 1.08,
+    base: 0, radius: 220, height: 380, puffs: 48, detail: 0.3, rise: 6, storm: 0, tint: 0xf4f7f9, brightness: 1.08,
     haze: Object.freeze({ near: 600, far: 8000, max: 0.9 }),
     insideFog: Object.freeze({ density: 3.5, color: 0xeef2f5, darkness: 0 }),
     turbulence: 0.15,
@@ -217,7 +217,7 @@ export function resolveWeatherParams(params, { event = true } = {}) {
       thickness: numberParam(anvil.thickness, 'anvil.thickness', 1500, 20, 8000),
       altitude: numberParam(anvil.altitude, 'anvil.altitude', sizes.height * 0.84, 0, 20000),
       lean: numberParam(anvil.lean, 'anvil.lean', 2600, -40000, 40000),
-      puffs: Math.round(numberParam(anvil.puffs, 'anvil.puffs', 80, 1, MAX_PUFFS_PER_VOLUME)),
+      puffs: Math.round(numberParam(anvil.puffs, 'anvil.puffs', 110, 1, MAX_PUFFS_PER_VOLUME)),
       storm: numberParam(anvil.storm, 'anvil.storm', 0.3, 0, 1),
     }) : null,
     overshoot: numberParam(value('overshoot'), 'overshoot', 0, 0, 1),
@@ -429,8 +429,8 @@ function layoutTower(layout, params, rng, withAnvil) {
 function layoutAnvil(layout, params, rng) {
   const anvil = params.anvil;
   const baseY = anvil.altitude - anvil.thickness * 0.5;
-  // The anvil streams downwind (+z, the heading) from the tower: its centre sits ahead of the tower.
-  const centreZ = anvil.lean * 0.5 + anvil.radius * 0.35;
+  // The anvil streams downwind (+z, the heading) from the tower, with a short overhang upwind.
+  const centreZ = anvil.lean * 0.3 + anvil.radius * 0.25;
   const group = addGroup(layout, baseY, anvil.altitude + anvil.thickness * 0.5, 0, anvil.altitude, centreZ, anvil.storm, true);
   const point = { x: 0, z: 0 };
   const details = detailCount(anvil.puffs, params.detail * 0.6);
@@ -439,9 +439,9 @@ function layoutAnvil(layout, params, rng) {
     discPoint(rng, point);
     const edge = point.x * point.x + point.z * point.z;
     // Semi-axes: long downwind, narrower across; the upwind rim sits over the tower.
-    const x = point.x * anvil.radius * 0.62;
-    const z = centreZ + point.z * anvil.radius * 0.72;
-    const puffRadius = anvil.radius * (detail ? 0.1 : 0.2) * (0.8 + 0.4 * rng()) * (1 - 0.35 * edge);
+    const x = point.x * anvil.radius * 0.78;
+    const z = centreZ + point.z * anvil.radius * 0.85;
+    const puffRadius = anvil.radius * (detail ? 0.11 : 0.24) * (0.8 + 0.4 * rng()) * (1 - 0.3 * edge);
     const squash = Math.min(0.5, Math.max(0.16, (anvil.thickness * (1 - 0.45 * edge)) / (2.2 * puffRadius)));
     const y = anvil.altitude + (rng() - 0.5) * anvil.thickness * 0.25 - edge * anvil.thickness * 0.15;
     const level = index < 6 ? 0 : detail ? 2 : 1;
@@ -552,7 +552,7 @@ function layoutMist(layout, params, rng) {
   for (let index = 0; index < puffs; index++) {
     const detail = index >= puffs - details;
     discPoint(rng, point);
-    const puffRadius = radius * (detail ? 0.28 : 0.45) * (0.8 + 0.4 * rng());
+    const puffRadius = radius * (detail ? 0.2 : 0.32) * (0.8 + 0.4 * rng());
     // With rise > 0 the phase (0..1 of the height) cycles the puff up the column; y is its start.
     const start = index / puffs;
     addPuff(layout, point.x * radius * 0.55, start * height, point.z * radius * 0.55, puffRadius, 0.85, rng() * Math.PI, params.brightness * (0.97 + 0.05 * rng()), 0.05 + 0.5 * rng(), group, index % 4 === 0 ? 0 : detail ? 2 : 1, start * Math.PI * 2);

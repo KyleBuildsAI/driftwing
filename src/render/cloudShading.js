@@ -186,29 +186,52 @@ export function createCloudLook(THREE, TSL) {
   return look;
 }
 
+/** Degrees (TSL float) between a unit view ray and the point opposite a light direction. */
+export function antisolarDegrees(TSL, viewRay, lightDirection) {
+  const { dot, acos, clamp } = TSL;
+  return acos(clamp(dot(viewRay, lightDirection.negate()), -1, 1)).mul(180 / Math.PI);
+}
+
+/**
+ * The glory's light at degrees from the antisolar point (TSL vec3): a bright bluish core and coloured
+ * rings (red outermost), fading out by about 7 degrees.
+ */
+export function gloryLightNode(TSL, degrees) {
+  const { vec3, exp, cos, pow, smoothstep, oneMinus } = TSL;
+  const envelope = exp(degrees.div(-2.8)).mul(oneMinus(smoothstep(GLORY_REACH_DEGREES * 0.6, GLORY_REACH_DEGREES, degrees)));
+  const ring = (period) => pow(cos(degrees.mul((2 * Math.PI) / period)).mul(0.5).add(0.5), 3);
+  const rings = vec3(ring(GLORY_PERIODS[0]), ring(GLORY_PERIODS[1]), ring(GLORY_PERIODS[2])).mul(envelope).mul(0.85);
+  const scaled = degrees.div(GLORY_CORE_DEGREES);
+  const core = exp(scaled.mul(scaled).negate());
+  return rings.add(vec3(0.85, 0.93, 1.0).mul(core.mul(1.3)));
+}
+
+/**
+ * The rainbow's light at degrees from the antisolar point (TSL vec3): the primary bow (red outside,
+ * violet inside), the brighter sky inside it and, scaled by secondary, the fainter secondary bow with
+ * its colours reversed.
+ */
+export function bowLightNode(TSL, degrees, secondary = 0.3) {
+  const { vec3, exp, smoothstep, oneMinus } = TSL;
+  const band = (centre, width) => {
+    const scaled = degrees.sub(centre).div(width);
+    return exp(scaled.mul(scaled).negate());
+  };
+  const primary = vec3(band(BOW_PRIMARY[0], BOW_WIDTH), band(BOW_PRIMARY[1], BOW_WIDTH), band(BOW_PRIMARY[2], BOW_WIDTH));
+  const outer = vec3(band(BOW_SECONDARY[0], BOW_SECONDARY_WIDTH), band(BOW_SECONDARY[1], BOW_SECONDARY_WIDTH), band(BOW_SECONDARY[2], BOW_SECONDARY_WIDTH));
+  const inside = oneMinus(smoothstep(24, 40.5, degrees)).mul(smoothstep(8, 20, degrees)).mul(0.1);
+  return primary.mul(0.9).add(outer.mul(secondary)).add(vec3(inside));
+}
+
 /**
  * The glory and the full-circle rainbow around the antisolar point (TSL), as light added to a cloud
  * surface, plus the soft shadow of the craft at the centre. Returns { light, shadow }: radiance is
  * radiance * shadow + light. With glory and bow at 0, light is 0 and shadow is 1.
  */
 function createCloudOptics(TSL, { viewRay, sunDirection, glory, bow, lit, sunKey, cameraDistance }) {
-  const { float, vec3, dot, acos, clamp, exp, cos, pow, smoothstep, saturate, max, oneMinus } = TSL;
-  const square = (node) => node.mul(node);
-  const degrees = acos(clamp(dot(viewRay, sunDirection.negate()), -1, 1)).mul(180 / Math.PI);
-  // Glory: a bright bluish core and coloured rings (red outermost), fading out by ~7 degrees.
-  const envelope = exp(degrees.div(-2.8)).mul(oneMinus(smoothstep(GLORY_REACH_DEGREES * 0.6, GLORY_REACH_DEGREES, degrees)));
-  const ring = (period) => pow(cos(degrees.mul((2 * Math.PI) / period)).mul(0.5).add(0.5), 3);
-  const rings = vec3(ring(GLORY_PERIODS[0]), ring(GLORY_PERIODS[1]), ring(GLORY_PERIODS[2])).mul(envelope).mul(0.85);
-  const core = exp(square(degrees.div(GLORY_CORE_DEGREES)).negate());
-  const gloryLight = rings.add(vec3(0.85, 0.93, 1.0).mul(core.mul(1.3)));
-  // Rainbow: the primary bow (red outside, violet inside), the brighter sky inside it and a faint
-  // secondary bow with its colours reversed.
-  const band = (centre, width) => exp(square(degrees.sub(centre).div(width)).negate());
-  const primary = vec3(band(BOW_PRIMARY[0], BOW_WIDTH), band(BOW_PRIMARY[1], BOW_WIDTH), band(BOW_PRIMARY[2], BOW_WIDTH));
-  const secondary = vec3(band(BOW_SECONDARY[0], BOW_SECONDARY_WIDTH), band(BOW_SECONDARY[1], BOW_SECONDARY_WIDTH), band(BOW_SECONDARY[2], BOW_SECONDARY_WIDTH));
-  const inside = oneMinus(smoothstep(24, 40.5, degrees)).mul(smoothstep(8, 20, degrees)).mul(0.1);
-  const bowLight = primary.mul(0.9).add(secondary.mul(0.3)).add(vec3(inside));
-  const light = gloryLight.mul(glory).add(bowLight.mul(bow)).mul(lit).mul(sunKey.mul(0.45).add(0.55));
+  const { float, smoothstep, saturate, max, oneMinus } = TSL;
+  const degrees = antisolarDegrees(TSL, viewRay, sunDirection);
+  const light = gloryLightNode(TSL, degrees).mul(glory).add(bowLightNode(TSL, degrees).mul(bow)).mul(lit).mul(sunKey.mul(0.45).add(0.55));
   // The craft's shadow: a soft dark spot whose angular size shrinks with the distance to the cloud.
   const shadowDegrees = float(CRAFT_SHADOW_RADIUS * (180 / Math.PI)).div(max(cameraDistance, 1));
   const spot = oneMinus(smoothstep(shadowDegrees.mul(0.5), shadowDegrees.mul(1.6), degrees));
