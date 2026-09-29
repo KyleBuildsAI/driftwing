@@ -145,7 +145,7 @@ system, and then starts the frame loop.
 | `renderer.js` | renderer boot (`createRenderer(params)` returning `{ renderer, backend, uniformUploads }`): WebGPU device probe, `WebGPURenderer` creation, WebGL2 fallback and the rebuild after a late fallback |
 | `uniformUploads.js` | garbage-free uniform uploads: replaces three r184's per-uniform update ranges (new objects every frame for every render object) with one persistent whole-buffer range per uniform group |
 | `post.js` | the post stack (bloom, warm grade, vignette, grain, render scale) and the `gEffects` system (gray-out, tunnel vision, red-out) |
-| `sky.js` | sky dome, sun, moon, stars, aurora, god rays, fog colour and the day / night cycle (v1) |
+| `sky.js` | sky dome, sun, moon, stars, aurora, god rays, fog colour and the day / night cycle (v1), and the sky modifiers the weather and celestial events use (Phase 2) |
 | `clouds.js` | instanced drifting clouds, cloud shadows (v1), plus a cumulus cap over every thermal |
 | `water.js` | animated water, sun glint and shoreline foam (v1) |
 | `birds.js` | boid flocks that scatter (v1) |
@@ -266,6 +266,14 @@ system, and then starts the frame loop.
 | --- | --- |
 | `WindField.js` | the wind field (ambient, ridge lift, thermals, turbulence, sources) and `createDebugUpdraft` |
 
+### `src/spawns`: the event director and the regional weather (Phase 2)
+
+| file | what |
+| --- | --- |
+| `candidates.js` | pure: deterministic event candidates from hash(seed, cellX, cellZ, timeBucket, presetId), the pooled candidate records, the ahead score and the candidates' total order |
+| `weather.js` | the pure regional weather model (clear -> building -> storm -> clearing per region cell and time bucket) and the `weather` system that drives the sky modifier and emits `weatherChanged` |
+| `director.js` | the event director (2 Hz): pacing, rarity, cooldowns, budgets, filters, lifetimes, despawn, load shedding, `getNearby`, `getState`, the activation log; `createGameDirector(ctx, ...)` wires it to the game |
+
 ### `src/ui`: glass UI
 
 | file | what |
@@ -368,13 +376,14 @@ system, and then starts the frame loop.
 5. The scene, camera and shared TSL uniforms; the world generator and the opening spawn; the shared
    `state` and the `ctx` object.
 6. The wind field, then the perf governor (`ctx.perf`).
-7. Every system, created in this order: shell (the launcher bridge), audio, ui, assistDefaults, input, sky, terrain, water, clouds, birds,
+7. Every system, created in this order: shell (the launcher bridge), audio, ui, assistDefaults, input, sky, weather, terrain, water, clouds, birds,
    spawns, journal, landmarks, waypoints, rings, flight, camera, fx, gEffects, copilot, windOverlay,
    spawnDebugger (dev builds and `?dev=1` only) and debugWind (dev builds and `?debug=1` only). A
    factory that throws is logged and replaced by an inert system, so one failure never stops the
    game. The spawn engines (`SPAWN_ENGINE_FACTORIES` in `main.js`) register with the spawns system
    right after, and its prewarm hook starts it: it validates the presets (dev builds, `?debug=1` and `?dev=1`),
-   initialises the engines and records the memory baseline, behind the loading fade.
+   initialises the engines and records the memory baseline, behind the loading fade. The spawns
+   system then creates the event director (below) on the started manager.
 8. `prewarm()` hooks and the pipeline prewarm: objects that first appear later (rings, beacons,
    landmarks) are drawn once behind the loading fade so their pipelines compile before play.
 9. The post stack (in `try` / `catch`; it degrades to direct rendering), resize handling and
@@ -391,9 +400,9 @@ Every frame:
    `simDt` is `realDt`, or 0 while paused (photo mode). `state.time.frameDt` is the unclamped real
    frame time capped at 0.1 s: the fixed-step physics clock consumes it.
 2. **Systems.** Each system in `UPDATE_ORDER` runs `update(simDt, realDt)`: input, flight, camera,
-   terrain, sky, water, clouds, birds, spawns, landmarks, journal, waypoints, rings, fx, gEffects,
-   copilot, audio, ui, windOverlay, debugWind, spawnDebugger. A system that throws is disabled and
-   logged; the rest carry on.
+   terrain, weather, sky, water, clouds, birds, spawns, landmarks, journal, waypoints, rings, fx,
+   gEffects, copilot, audio, ui, windOverlay, debugWind, spawnDebugger. A system that throws is
+   disabled and logged; the rest carry on.
 3. **Safety net, right after flight.** A non-finite pose is restored from the last good one and the
    model is reset from it. The flight model has real ground contact, so the net only keeps the
    last-resort guard: more than 1 m below the shared height function is a soft crash. The altitude
@@ -570,8 +579,8 @@ Typed events are emitted with `bus.emitTyped(name, payload)` and heard with
 | `deviceConnected` / `deviceDisconnected` | `{ deviceKey, kind, name }`; kind `gamepad` \| `hotas-stick` \| `hotas-throttle` \| `hotas-pedals` | gamepad registry |
 | `relaunched` | `{ craft, method, position }` | flight controller |
 | `spawnActivated` | `{ id, presetId, category, kind: site\|event, position }` | SpawnManager |
-| `spawnEnded` | `{ id, presetId, reason }`; reason `ended`, `expired`, `despawn`, `range`, `error`, `debug`, `removed`, `disposed` or the caller's | SpawnManager |
-| `weatherChanged` | `{ state, previous, region }`; states `clear`, `building`, `storm`, `clearing` | director |
+| `spawnEnded` | `{ id, presetId, reason }`; reason `ended`, `expired`, `despawn`, `range`, `error`, `debug`, `removed`, `disposed` or the caller's (the director's `lifetime`, `despawn`, `dispose`) | SpawnManager |
+| `weatherChanged` | `{ state: clear\|building\|storm\|clearing, previous, region }`; fires only on a real change, so `previous` is always a state; `region` is the weather cell `"rx:rz"` | weather system |
 | `achievement` | `{ id, title }` | gameplay |
 
 Landing grades come from the sink rate at touchdown: butter up to 0.5 m/s, smooth up to 1.2 m/s,
@@ -598,6 +607,8 @@ v2 adds these untyped events:
 | `flight:assistOverride` | `{ active, reason: 'deviceDisconnected' \| 'device reconnected' \| 'manual input', deviceKey? }` |
 | `ui:openControls` | `{ calibrate?: boolean }`: opens the controls panel, and with `calibrate` starts the wizard |
 | `perf:renderScale` | the dynamic-resolution scale changed |
+| `perf:loadShed` | `{ action: 'shed' | 'restore', id, depth }`: a load shedder shed or restored one level |
+| `spawns:siteInView` | `{ id, presetId }`: a site came into view for the first time; the director counts it as a notable (reserved: the SpawnManager reports sightings with `spawns:inView`, which the director also hears) |
 | `audio:started` | `{ context }`, once, when the AudioContext is created |
 | `spawns:inView` | `{ id, presetId, siteId, kind, distance }`: a spawn was first seen (in the view cone, not hidden by terrain), once per spawn; heavy spawns count from their lure range, others from lod.mid. The director counts it toward pacing |
 
@@ -1095,11 +1106,111 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   early once the load has clearly dropped. Bloom, grade and grain stay at full resolution.
 - **Stage two.** v1's quality governor (view distance, densities, pixel ratio) acts only when the
   scale is pinned.
+- **Load shedders (Phase 2), before stage one.** `addLoadShedder({ id, shed() -> boolean, restore() })`
+  returns `{ remove() }`. When frames stay over the target for the step-down dwell, the governor asks
+  the shedders in registration order to shed one level each time, and steps the render scale down
+  only when none can shed more. With headroom it climbs the scale back to 1 first and then restores
+  the shed levels, last first; a restore that has to be shed again within 4 s blocks further
+  restores for a growing time, like a failed scale up-step. They also act with dynamic resolution
+  off. With no shedder registered stage one is exactly Phase 1's (`tools/lab/director.mjs` replays
+  load traces against the `v2-structure` governor). A shedder that throws is logged and removed.
+- **Headroom.** `getHeadroom()` returns `{ missing, ratio, shedDepth }` (a reused record): `missing`
+  while the control frame time is over the step-down threshold of the target (only while the game
+  runs), `ratio` = control frame time / target.
 - **API**: `update`, `setMeasuredRefresh`, `measureDisplayRefresh`, `refreshRenderScale`,
-  `getRenderScale`, `getBasePixelRatio`, `beginCapture` and `snapRefreshRate`. The post stack adds
-  `setRenderScale` / `getRenderScale`.
-- **State.** `state.perf` holds fps, frame times, the target and refresh values, render scale and
-  quality. `perf:renderScale` fires on each scale step.
+  `getRenderScale`, `getBasePixelRatio`, `beginCapture`, `snapRefreshRate`, `addLoadShedder`,
+  `removeLoadShedder` and `getHeadroom`. The post stack adds `setRenderScale` / `getRenderScale`.
+- **State.** `state.perf` holds fps, frame times, the target and refresh values, render scale,
+  quality, `shedDepth` and `shedHistory`. `perf:renderScale` fires on each scale step and
+  `perf:loadShed` on each shed or restore.
+
+### Sky modifiers (`ctx.systems.sky`, `src/render/sky.js`)
+
+`sky.addModifier(id, { priority })` returns `{ set(values), remove() }`. `set` takes any of
+`sunIntensity`, `ambient`, `fogDensity` (multipliers, 1 = unchanged), `darkness` (dims the sky and
+every light), `overcast` (hides the sun disc, god rays, moon, stars and aurora behind cloud),
+`stars` (raises the star field, for an eclipse), `fogColor` / `fogColorAmount` and `skyTint` /
+`skyTintAmount` (a `THREE.Color` or `0xRRGGBB`, mixed in at the amount while keeping the luminance
+of what they tint), and `weight` (0..1, default 1, eases the whole modifier). Fields left out keep
+their value; a duplicate id or a non-finite value throws.
+
+Each frame the modifiers fold in priority order (lowest first): multipliers multiply, darkness and
+overcast stack like filters, stars takes the maximum and the tints composite over each other. Each
+value is eased from neutral by its modifier's weight. The result acts on the CPU side only: the
+four palette colours the dome, the fog node and the fog colour derive from, the glow, the sun disc,
+the god rays, the moon and stars, the fog distances and the sun, moon and hemisphere lights. No
+shader changes, so with no modifier weighing in (none registered, weight 0 or neutral values)
+every colour takes exactly the Phase 1 path. `tools/steps/golden-frame.json` renders the same still
+frame with the weather's clear-sky modifier and after removing it, and the two are pixel-identical
+on both backends. `getModifierState()` returns the folded values for the debugger and tests.
+
+Priorities in use: the weather 10. The celestial engine's eclipse should sit above it.
+
+### Regional weather (`ctx.systems.weather`, `src/spawns/weather.js`)
+
+`createWeatherModel(seedHash)` is pure: `sampleRegion(rx, rz, time, out)`, `sampleAt(x, z, time, out)`
+(the state of the region holding the point, with `storminess` and `golden` blended smoothly between
+the four nearest region centres), `stateAt(x, z, time)` and `regionOf(coordinate)`. `time` is the
+flight clock, `state.time.elapsed`.
+
+- **Layout.** Regions of 12 km, buckets of 150 s, cycles of 8 buckets (20 min) per region with a
+  seeded per-region offset. A cycle is stormy with chance 0.7 and then ends with one building
+  bucket, one or two storm buckets and one clearing bucket, so the order clear -> building ->
+  storm -> clearing -> clear always holds and every (region, bucket) state is a pure function of
+  the seed. The offset keeps the first bucket of every flight clear: the golden-hour opening is
+  always clear weather.
+- **Why these values.** Across 3600 regions and 24 h: clear 69 %, building 9 %, storm 13 %,
+  clearing 9 %. Of 20-minute flights, 82 % (glider), 88 % (bush plane) and 98 % (jet) meet a storm;
+  of 30-minute flights, 70 %, 76 % and 98 % meet all four states (`tools/lab/director.mjs`).
+- **Levels.** Storminess rises to 0.7 through building, to 1 early in the storm and back to 0
+  through clearing; `golden` peaks halfway through clearing.
+- **The system** (created after `sky`, updated right before it) samples the model at the player,
+  eases the sky toward it (8 s; a teleport snaps), drives the `weather` sky modifier (a storm:
+  sun x0.3, fog density x2.8, darker bluer-grey sky and fog, overcast; clearing: the sun breaks
+  through with a golden sky and fog; clear: weight 0) and emits `weatherChanged`. API: `model`,
+  `getState()`, `dispose()`, and `forceState(state | null, progress, { snap })` in dev builds and with
+  `?debug=1`.
+
+### Event director (`src/spawns/director.js`)
+
+`createDirector(options)` takes its inputs as functions and objects so the lab can run it headless;
+`createGameDirector(ctx, { spawnManager, presets, placement?, isDiscovered? })` wires it to the game
+(the flight clock, `state.player`, `state.time`, the camera frustum, the weather model, the world's
+`heightAt` / `biomeAt`, `ctx.perf` and the bus). The spawns system creates it once its SpawnManager
+exists and calls `update()` every frame; it ticks at 2 Hz on the half second of flight time.
+
+- **Pacing.** The drought clock restarts on a discovery, a site coming into view
+  (`spawns:siteInView`), an activation and every tick a spawn the director started is in view. At a
+  seeded 60-70 s it activates the best eligible candidate ahead, 3-8 km out, of the common tier or a
+  due tier; from 75 s uncommon too, from 80 s rare too and up to 60 degrees off the heading.
+- **Rarity.** Per-tier due times drawn from common 150-300 s, uncommon 600-900 s, rare
+  1800-3600 s and legendary 3600-7200 s; per-preset cooldowns (common 150 s, uncommon 1200 s,
+  rare 2700 s, legendary 5400 s, or the preset's own `cooldown`); never the same preset twice in a
+  row.
+- **Ahead.** Scheduled activations within 45 degrees of the heading, inside the preset's
+  `filters.minDistance` / `maxDistance` band (default 3-8 km); never behind.
+- **Budgets** (`DIRECTOR_BUDGETS`, which the SpawnManager reads as `ctx.budgets`): at most 2 heavy,
+  per-engine instance and particle caps (particles counted full at 85 % of the cap), 8 real lights
+  (a lighting preset needs 2 free). A refused activation leaves its candidate alone for the rest of
+  its bucket.
+- **Lifetimes.** An event ends when its engine sets `ended`, or at its seeded duration plus 60 s;
+  beyond `despawn.distance + hysteresis` and out of view for `outOfViewSeconds` it is despawned.
+- **Load shedding.** The director registers the shedder `director`: level 1 defers heavy
+  activations, levels 2 and 3 set `spawnManager.setLodBias(0.7)` and `(0.5)`. A headroom miss
+  defers heavy activations too.
+- **Site active states.** A site preset with `activeState: { duration }` (the volcano's eruption)
+  gets bucketed candidates at its sites from `placement.sitesNear`; the director activates one with
+  `spawnManager.activate(presetId, { source: 'director', site, ... })`.
+- **API.** `getNearby(radiusKm)` returns `[{ id, name, category, distance (m), bearing (deg), state
+  (active, dormant, site or discovered), etaSeconds }]`, nearest first; `getState()` for the
+  debugger (drought, pacing record, budgets, heavy count, shed level, tier due times, cooldowns,
+  candidates with their rejection reasons, active spawns, the last 50 log entries and the log hash);
+  `getLog()` (every `{ time, presetId, candidateId, reason }`); `forceSpawn(presetId, { distance,
+  bearingOffset })` in dev builds and with `?debug=1`; `shedder`; `dispose()`.
+- **SpawnManager calls.** `activate(presetId, { position: { x, y, z }, heading, source, seed,
+  duration, site? })`, `deactivate(id, reason)` with reasons `lifetime`, `despawn` and `dispose`,
+  `getActive()`, `getInstance(id)` (`anchor`, `radius`, `heavy`, `ended`), `getStats()` as
+  `{ engines: { name: { instances, particles } }, total: { lights } }`, and `setLodBias(bias)`.
 
 ### UI (`ctx.systems.ui`)
 
@@ -1144,7 +1255,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `tools/run-harness.mjs` | runs either harness headlessly on a spare port (`--test 1\|hotas`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--out`), prints a table per run and per craft and view, and exits 0 on PASS |
 | `tools/shell-test.mjs` | the launcher shell test (below) |
 | `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |
-| labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`, `spawns`) |
+| labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`, `terrain`, `spawns`, `director`, `audio`) |
 | `tools/spawn-check.mjs` | `--url <dev server>/v2/ [--backend webgpu\|webgl] [--out]`: the spawn framework proofs in the browser with the dev test kit (below) |
 
 ## Testing
@@ -1168,6 +1279,10 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node --expose-gc tools/lab/spawns.mjs` | the spawn framework headless: the preset validator, the engine registry, the pools, LOD hysteresis, budgets, lures, discovery (view cone, terrain occlusion, once per world), sites from a feed, wind sources and lights removed on dispose, leak clean-up, lifetimes, and a manager frame update that allocates nothing (young-generation growth over 100 000 frames with 40 spawns) |
 | `node tools/spawn-check.mjs --url <dev server>/v2/` | the spawn framework in V2 on either backend: 200 instances created and disposed three times with `renderer.info.memory` back to its baseline exactly and the heap within 1 MB, LOD transitions with hysteresis, lures at 12-30 km at golden hour, midday and night (screenshots), a wind source removed on dispose, discovery firing once, the sampled allocation of the manager's frame update, and the F9 debugger's keyboard behaviour |
 | `npm test` | the V1 check, `build:single` and a smoke test of the built shell |
+| `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders) |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/weather-sky.json` (or a build with `?debug=1`) | the opening is clear with the sky untouched, the sky modifier blend, the four weather states' sky (screenshots) and `weatherChanged` |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/director-game.json` | the game-wired director: its load shedder, `forceSpawn` ahead, `getNearby`, the camera frustum, the LOD bias and `dispose` |
+| `tools/steps/golden-frame.json` with `node tools/png-diff.mjs a.png b.png` | a paused still frame of the opening, rendered with the weather's clear-sky modifier and without any modifier: pixel-identical |
 
 **The flight-test harness** passes with 0 NaN events, 0 terrain penetrations, 0 console errors and
 warnings, heap growth under 50 MB per world, no frame over 50 ms after warmup, every run flown in

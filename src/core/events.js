@@ -19,7 +19,7 @@ const FIELD_CHECKS = Object.freeze({
 export const LANDING_GRADES = Object.freeze(['butter', 'smooth', 'firm', 'hard']);
 /** How a spawn exists: a persistent place, or a temporary happening. */
 export const SPAWN_KINDS = Object.freeze(['site', 'event']);
-/** The regional weather states, in their cycle order. */
+/** The regional weather cycle, in order (src/spawns/weather.js). */
 export const WEATHER_STATES = Object.freeze(['clear', 'building', 'storm', 'clearing']);
 
 /**
@@ -52,8 +52,11 @@ export const EVENT_TYPES = Object.freeze({
   spawnActivated: { id: 'string', presetId: 'string', category: 'string', kind: SPAWN_KINDS, position: 'vector3' },
   /** A spawn instance was disposed; reason says why (ended, expired, despawn, range, debug, replaced, ...). */
   spawnEnded: { id: 'string', presetId: 'string', reason: 'string' },
-  /** The regional weather state machine moved on (region is the director's region identifier). */
-  weatherChanged: { state: WEATHER_STATES, previous: WEATHER_STATES, region: 'defined' },
+  /**
+   * The regional weather where the player flies changed state (src/spawns/weather.js). It fires only on
+   * a real change, so previous is always a state; region is the weather cell id "rx:rz".
+   */
+  weatherChanged: { state: WEATHER_STATES, previous: WEATHER_STATES, region: 'string' },
   /** An achievement was earned (V-formation, Thread the Needle, ...). */
   achievement: { id: 'string', title: 'string' },
 });

@@ -31,6 +31,7 @@ import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
 import { createWaterSystem } from './render/water.js';
 import { createWaypointSystem } from './gameplay/waypoints.js';
+import { createWeatherSystem } from './spawns/weather.js';
 import { createWindOverlaySystem } from './dev/windOverlay.js';
 import { createWorldGen } from './world/worldgen.js';
 import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName } from './core/util.js';
@@ -319,6 +320,8 @@ async function boot() {
     ['assistDefaults', createAssistDefaults],
     ['input', createInputSystem],
     ['sky', createSkySystem],
+    // The regional weather drives the sky through a sky modifier, so it comes right after it.
+    ['weather', createWeatherSystem],
     ['terrain', createTerrainSystem],
     ['water', createWaterSystem],
     ['clouds', createCloudSystem],
@@ -377,7 +380,7 @@ async function boot() {
   beginPrewarm();
   const fadeStatus = document.getElementById('fade-status');
   if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
-  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'sky', 'water', 'clouds', 'birds', 'spawns', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind', 'spawnDebugger'];
+  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'weather', 'sky', 'water', 'clouds', 'birds', 'spawns', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind', 'spawnDebugger'];
 
   // ---- Flight-state snapshot for the copilot (local or remote brain) -----------------
   ctx.getFlightState = () => {

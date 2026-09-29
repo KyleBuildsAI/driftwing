@@ -13,6 +13,9 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
  *   sky function used by the dome, so fully fogged geometry dissolves exactly into the sky behind it.
  * - Lights: shadow-casting sun that follows the player with texel snapping, cool moon light, hemisphere fill.
  * - Grade (exposure, warmth, night desaturation), camera.far and all shared sky uniforms / state.time fields.
+ * - Sky modifiers (Phase 2): addModifier(id, { priority }) lets the regional weather and the celestial
+ *   events darken, tint and fog the sky. They act on the CPU-side palette and lights only (no shader
+ *   change), and with no modifier weighing in the sky runs exactly the Phase 1 path.
  */
 export function createSkySystem(ctx) {
   const { scene, camera, renderer, state, uniforms, settings, bus, CONFIG: config } = ctx;
@@ -53,6 +56,8 @@ export function createSkySystem(ctx) {
   const HIGH_ALTITUDE_FULL = 6000;
   const HIGH_FOG_VERTICAL_SCALE = 0.16;
   const FAR_STEP = 100;
+  // Sky modifiers: the share of a fog density change that also moves the fog's far edge.
+  const FOG_DENSITY_FAR_SHARE = 0.5;
   // Clock speed by sun elevation (relative; normalised so a full loop still lasts dayLength). The
   // golden band (-3..14 deg) runs slowest, so the golden-hour start keeps ~60 s of low warm sun
   // before sunset; blue hour runs a little faster and night fastest.
@@ -547,6 +552,154 @@ export function createSkySystem(ctx) {
     cameraForward: new THREE.Vector3(),
   };
 
+  // ---- Sky modifiers ----------------------------------------------------------------------------------
+  // A modifier holds target values and a weight (0..1). Each frame they are folded in priority order
+  // (lowest first, so a higher priority lands on top): the multipliers (sunIntensity, ambient,
+  // fogDensity) multiply, darkness and overcast combine like stacked filters, stars takes the
+  // maximum, and the two tint colours composite over each other by their amounts. Every value is
+  // first eased from neutral by its modifier's weight. The tints keep the luminance of the colour
+  // they tint (a storm greys a golden sky without lighting up a night one); darkness does the
+  // darkening. A modifier at weight 0 or at neutral values changes nothing, and when nothing weighs
+  // in, no modifier code touches a colour at all.
+  const MODIFIER_NEUTRAL = Object.freeze({ sunIntensity: 1, ambient: 1, fogColorAmount: 0, fogDensity: 1, skyTintAmount: 0, darkness: 0, stars: 0, overcast: 0 });
+  const MODIFIER_SCALAR_FIELDS = Object.keys(MODIFIER_NEUTRAL);
+  const MODIFIER_LIMITS = Object.freeze({
+    sunIntensity: [0, 4], ambient: [0, 4], fogColorAmount: [0, 1], fogDensity: [0.25, 8], skyTintAmount: [0, 1], darkness: [0, 1], stars: [0, 1], overcast: [0, 1],
+  });
+  const modifierList = [];
+  const modifierIds = new Set();
+  let modifierSerial = 0;
+  const combined = {
+    active: false,
+    sunIntensity: 1, ambient: 1, fogDensity: 1, darkness: 0, stars: 0, overcast: 0,
+    fogColor: new THREE.Color(), fogColorAmount: 0,
+    skyTint: new THREE.Color(), skyTintAmount: 0,
+  };
+  const tintScratch = new THREE.Color();
+
+  function luminance(color) {
+    return 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+  }
+  /** Mixes target toward tint by amount, the tint rescaled to target's luminance. */
+  function applyTint(target, tint, amount) {
+    const tintLuminance = luminance(tint);
+    if (amount <= 0 || tintLuminance <= 1e-6) return target;
+    tintScratch.copy(tint).multiplyScalar(luminance(target) / tintLuminance);
+    return target.lerp(tintScratch, amount);
+  }
+  /** Tint and darkness of the combined modifiers on a display-referred sky colour. */
+  function modifySkyColor(target) {
+    applyTint(target, combined.skyTint, combined.skyTintAmount);
+    return target.multiplyScalar(1 - combined.darkness);
+  }
+  /** Over-composites a tint colour of amount onto the running (color, amount) of the combined record. */
+  function compositeTint(colorKey, amountKey, color, amount) {
+    if (amount <= 0) return;
+    const below = combined[amountKey];
+    const total = amount + below * (1 - amount);
+    const keep = (below * (1 - amount)) / total;
+    const add = amount / total;
+    const target = combined[colorKey];
+    target.setRGB(target.r * keep + color.r * add, target.g * keep + color.g * add, target.b * keep + color.b * add);
+    combined[amountKey] = total;
+  }
+
+  function resolveModifiers() {
+    combined.sunIntensity = 1;
+    combined.ambient = 1;
+    combined.fogDensity = 1;
+    combined.darkness = 0;
+    combined.stars = 0;
+    combined.overcast = 0;
+    combined.fogColorAmount = 0;
+    combined.skyTintAmount = 0;
+    combined.fogColor.setRGB(0, 0, 0);
+    combined.skyTint.setRGB(0, 0, 0);
+    let active = false;
+    for (let index = 0; index < modifierList.length; index++) {
+      const modifier = modifierList[index];
+      const weight = modifier.weight;
+      if (!(weight > 0)) continue;
+      const values = modifier.values;
+      combined.sunIntensity *= 1 + (values.sunIntensity - 1) * weight;
+      combined.ambient *= 1 + (values.ambient - 1) * weight;
+      combined.fogDensity *= 1 + (values.fogDensity - 1) * weight;
+      combined.darkness = 1 - (1 - combined.darkness) * (1 - values.darkness * weight);
+      combined.overcast = 1 - (1 - combined.overcast) * (1 - values.overcast * weight);
+      combined.stars = Math.max(combined.stars, values.stars * weight);
+      compositeTint('fogColor', 'fogColorAmount', modifier.fogColor, values.fogColorAmount * weight);
+      compositeTint('skyTint', 'skyTintAmount', modifier.skyTint, values.skyTintAmount * weight);
+      active = true;
+    }
+    // Neutral values weigh nothing: the sky then keeps its untouched Phase 1 path.
+    combined.active = active && (
+      combined.sunIntensity !== 1 || combined.ambient !== 1 || combined.fogDensity !== 1 || combined.darkness !== 0
+      || combined.stars !== 0 || combined.overcast !== 0 || combined.fogColorAmount !== 0 || combined.skyTintAmount !== 0
+    );
+  }
+
+  function readColor(value, target, field, id) {
+    if (value && typeof value === 'object' && Number.isFinite(value.r) && Number.isFinite(value.g) && Number.isFinite(value.b)) return target.copy(value);
+    if (Number.isInteger(value) && value >= 0 && value <= 0xffffff) return target.setHex(value);
+    throw new TypeError(`sky modifier "${id}": ${field} must be a THREE.Color or a 0xRRGGBB number`);
+  }
+
+  /**
+   * Adds a sky modifier. Returns a handle: set(values) updates any of { sunIntensity, ambient,
+   * fogColor, fogColorAmount, fogDensity, skyTint, skyTintAmount, darkness, stars, overcast, weight }
+   * (fields left out keep their value; colours are a THREE.Color or 0xRRGGBB), and remove() takes it
+   * away. sunIntensity, ambient and fogDensity are multipliers (1 = unchanged); darkness dims the sky
+   * and every light; overcast hides the sun disc, god rays, moon and stars behind cloud; stars raises
+   * the star field (an eclipse); weight (default 1) eases the whole modifier in and out.
+   */
+  function addModifier(id, { priority = 0 } = {}) {
+    if (typeof id !== 'string' || !id) throw new TypeError('sky.addModifier expects a string id');
+    if (!Number.isFinite(priority)) throw new TypeError(`sky modifier "${id}": priority must be a finite number`);
+    if (modifierIds.has(id)) throw new Error(`sky modifier "${id}" already exists`);
+    const modifier = {
+      id,
+      priority,
+      order: modifierSerial++,
+      weight: 1,
+      values: { ...MODIFIER_NEUTRAL },
+      fogColor: new THREE.Color(1, 1, 1),
+      skyTint: new THREE.Color(1, 1, 1),
+    };
+    modifierIds.add(id);
+    modifierList.push(modifier);
+    modifierList.sort((first, second) => first.priority - second.priority || first.order - second.order);
+    let removed = false;
+    return {
+      id,
+      set(values) {
+        if (removed) throw new Error(`sky modifier "${id}" was removed`);
+        if (!values || typeof values !== 'object') throw new TypeError(`sky modifier "${id}": set() expects an object`);
+        for (let index = 0; index < MODIFIER_SCALAR_FIELDS.length; index++) {
+          const field = MODIFIER_SCALAR_FIELDS[index];
+          const value = values[field];
+          if (value === undefined) continue;
+          if (!Number.isFinite(value)) throw new TypeError(`sky modifier "${id}": ${field} must be a finite number`);
+          const [low, high] = MODIFIER_LIMITS[field];
+          modifier.values[field] = clamp(value, low, high);
+        }
+        if (values.weight !== undefined) {
+          if (!Number.isFinite(values.weight)) throw new TypeError(`sky modifier "${id}": weight must be a finite number`);
+          modifier.weight = clamp(values.weight, 0, 1);
+        }
+        if (values.fogColor !== undefined) readColor(values.fogColor, modifier.fogColor, 'fogColor', id);
+        if (values.skyTint !== undefined) readColor(values.skyTint, modifier.skyTint, 'skyTint', id);
+        return this;
+      },
+      remove() {
+        if (removed) return false;
+        removed = true;
+        modifierIds.delete(id);
+        modifierList.splice(modifierList.indexOf(modifier), 1);
+        return true;
+      },
+    };
+  }
+
   // ---- Per-frame pieces ----------------------------------------------------------------------------------
   function advanceTime(dt, realDt) {
     if (transition.active) {
@@ -595,20 +748,31 @@ export function createSkySystem(ctx) {
     sampleColor(KEYS.zenith, elevation, scratch.zenith).multiplyScalar(altitudeDarkening);
     sampleColor(KEYS.horizon, elevation, scratch.horizon);
     sampleColor(KEYS.antiHorizon, elevation, scratch.anti);
+    sampleColor(KEYS.groundHaze, elevation, scratch.ground);
+    if (combined.active) {
+      // The dome, the fog node and the fog colour all derive from these four, so tinting them here
+      // tints the whole sky and the haze alike.
+      modifySkyColor(scratch.zenith);
+      modifySkyColor(scratch.horizon);
+      modifySkyColor(scratch.anti);
+      modifySkyColor(scratch.ground);
+    }
     uniforms.skyZenithColor.value.copy(scratch.zenith);
     uniforms.skyHorizonColor.value.copy(scratch.horizon);
     displayToRadiance(scratch.zenith, sky.zenith.value);
     displayToRadiance(scratch.horizon, sky.horizon.value);
     displayToRadiance(scratch.anti, sky.antiHorizon.value);
-    displayToRadiance(sampleColor(KEYS.groundHaze, elevation, scratch.ground), sky.groundHaze.value);
+    displayToRadiance(scratch.ground, sky.groundHaze.value);
     sampleColor(KEYS.glow, elevation, sky.glowColor.value);
     sky.glowStrength.value = sampleScalar(KEYS.glowStrength, elevation);
+    if (combined.active) sky.glowStrength.value *= Math.min(combined.sunIntensity, 1.3) * (1 - combined.overcast) * (1 - combined.darkness);
     // The tight aureole belongs to the visible disc; after sunset only the broad afterglow remains.
     sky.aureoleStrength.value = 1.1 * smoothRange(-2.5, 0.8, elevation);
     sky.horizonFalloff.value = sampleScalar(KEYS.horizonFalloff, elevation);
 
     // Fog colour for everyone else: the azimuth-averaged horizon leaning a little toward the ground haze.
     uniforms.fogColor.value.copy(scratch.horizon).lerp(scratch.anti, 0.45).lerp(scratch.ground, 0.25);
+    if (combined.active) applyTint(uniforms.fogColor.value, combined.fogColor, combined.fogColorAmount);
     scene.fog.color.copy(uniforms.fogColor.value);
     backgroundColor.copy(uniforms.fogColor.value);
 
@@ -624,6 +788,16 @@ export function createSkySystem(ctx) {
     sky.moonStrength.value = (0.12 + 0.88 * time.nightFactor) * moonAbove;
     setBasis(time.moonDirection, sky.moonRight, sky.moonUp);
     sky.starStrength.value = 1 - smoothRange(-13, -4, elevation);
+    if (combined.active) {
+      const clouded = 1 - combined.overcast;
+      const lit = combined.sunIntensity * (1 - combined.darkness);
+      // The disc fades faster than the light: even thin cloud hides its edge.
+      sky.sunDiscColor.value.multiplyScalar(lit * clouded * clouded);
+      uniforms.sunColor.value.multiplyScalar(lit);
+      sky.rayStrength.value *= Math.min(combined.sunIntensity, 1.5) * clouded;
+      sky.moonStrength.value *= clouded;
+      sky.starStrength.value = Math.max(sky.starStrength.value * clouded, combined.stars);
+    }
 
     scratch.celestial.makeRotationAxis(CELESTIAL_POLE, -dayTime * Math.PI * 2);
     sky.starRotation.value.setFromMatrix4(scratch.celestial);
@@ -642,6 +816,7 @@ export function createSkySystem(ctx) {
     const presence = clamp(smoothRange(0.15, 0.75, smoothedSnow) + smoothedHighPine, 0, 1);
     const darkSky = 1 - smoothRange(-14, -7, state.time.sunElevation);
     sky.auroraStrength.value = darkSky * presence;
+    if (combined.active) sky.auroraStrength.value *= 1 - combined.overcast;
     sky.auroraGlow.value.setRGB(0.004, 0.02, 0.013).multiplyScalar(sky.auroraStrength.value);
   }
 
@@ -659,8 +834,13 @@ export function createSkySystem(ctx) {
     const high = smoothRange(HIGH_ALTITUDE_START, HIGH_ALTITUDE_FULL, cameraHeight);
     const verticalScale = FOG_VERTICAL_SCALE + (HIGH_FOG_VERTICAL_SCALE - FOG_VERTICAL_SCALE) * high;
     sky.fogVerticalScale.value = verticalScale;
-    const targetFar = high > 0 ? Math.hypot(viewDistance * 0.95, verticalScale * cameraHeight * high) : viewDistance * 0.95;
-    const targetNear = Math.min(Math.max(FOG_NEAR_FLOOR, viewDistance * (0.3 - 0.15 * haze + clearAir)), targetFar * 0.8);
+    let targetFar = high > 0 ? Math.hypot(viewDistance * 0.95, verticalScale * cameraHeight * high) : viewDistance * 0.95;
+    let targetNear = Math.min(Math.max(FOG_NEAR_FLOOR, viewDistance * (0.3 - 0.15 * haze + clearAir)), targetFar * 0.8);
+    if (combined.active && combined.fogDensity !== 1) {
+      // Denser air closes the haze in: the near edge moves with the density, the far edge half as much.
+      targetFar /= 1 + (combined.fogDensity - 1) * FOG_DENSITY_FAR_SHARE;
+      targetNear = Math.min(targetNear / combined.fogDensity, targetFar * 0.8);
+    }
     sky.fogLayerBase.value = sky.fogLayerBase.value === 0 ? groundBelow : damp(sky.fogLayerBase.value, groundBelow, 0.6, realDt);
     if (fogFarCurrent < 0) {
       fogFarCurrent = targetFar;
@@ -712,6 +892,12 @@ export function createSkySystem(ctx) {
     sampleColor(KEYS.hemisphereSky, elevation, hemisphereLight.color).lerp(AURORA_FILL, 0.16 * sky.auroraStrength.value);
     sampleColor(KEYS.hemisphereGround, elevation, hemisphereLight.groundColor);
     hemisphereLight.intensity = sampleScalar(KEYS.hemisphereIntensity, elevation);
+    if (combined.active) {
+      const dim = 1 - combined.darkness;
+      sunLight.intensity *= combined.sunIntensity * dim;
+      moonLight.intensity *= (1 - combined.overcast) * dim;
+      hemisphereLight.intensity *= combined.ambient * dim;
+    }
   }
 
   /** Light direction never drops below a grazing angle: the last light rakes the peaks instead of the underside. */
@@ -797,6 +983,7 @@ export function createSkySystem(ctx) {
   }
 
   function refresh(realDt) {
+    resolveModifiers();
     updateCelestialState();
     const elevation = state.time.sunElevation;
     updateSkyColors(elevation);
@@ -883,6 +1070,25 @@ export function createSkySystem(ctx) {
     /** TSL node: base sky radiance for a unit world direction node (the same colour the fog uses). */
     skyColorNode(directionNode) {
       return skyBase(directionNode);
+    },
+    addModifier,
+    /** The modifiers folded together as of the last frame, for the debugger and tests (a copy). */
+    getModifierState() {
+      return {
+        active: combined.active,
+        count: modifierList.length,
+        ids: modifierList.map((modifier) => modifier.id),
+        sunIntensity: combined.sunIntensity,
+        ambient: combined.ambient,
+        fogDensity: combined.fogDensity,
+        darkness: combined.darkness,
+        overcast: combined.overcast,
+        stars: combined.stars,
+        fogColor: `#${combined.fogColor.getHexString()}`,
+        fogColorAmount: combined.fogColorAmount,
+        skyTint: `#${combined.skyTint.getHexString()}`,
+        skyTintAmount: combined.skyTintAmount,
+      };
     },
   };
 }
