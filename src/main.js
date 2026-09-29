@@ -49,14 +49,16 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
 // BOOT
 // ============================================================================
 /**
- * Dev-only verification harnesses: ?test=1 (flight test) and ?test=hotas (HOTAS pipeline test).
- * Loaded on demand from dev builds only, so neither exists in production builds. Returns
- * { databaseName, createSystem(ctx) } or null.
+ * Dev-only verification harnesses: ?test=1 (flight test), ?test=hotas (HOTAS pipeline test) and
+ * ?test=terrain (terrain stamps: seams, worker parity, collision). Loaded on demand from dev builds
+ * only, so none exists in production builds. Returns { databaseName, createSystem(ctx), worldPresets? }
+ * or null; worldPresets (fixture presets) replace the preset list in worldgen on both threads.
  */
 async function loadDevTest(params) {
   const test = params.get('test');
   if (test === '1') return (await import('./dev/testHarness.js')).prepareFlightTest({ params });
   if (test === 'hotas') return (await import('./dev/hotasTest.js')).prepareHotasTest({ params });
+  if (test === 'terrain') return (await import('./dev/terrainTest.js')).prepareTerrainTest({ params });
   return null;
 }
 
@@ -116,7 +118,10 @@ async function boot() {
   };
 
   // ---- World + spawn ------------------------------------------------------------------
-  const world = createWorldGen(seed, WORLD_OPTIONS);
+  // The terrain worker receives the same options (ctx.worldOptions), so both threads place the same
+  // sites; only a dev test harness swaps in its own fixture presets.
+  const worldOptions = devTest && Array.isArray(devTest.worldPresets) ? Object.freeze({ ...WORLD_OPTIONS, presets: devTest.worldPresets }) : WORLD_OPTIONS;
+  const world = createWorldGen(seed, worldOptions);
   // Every world has its own prevailing wind; set before any system reads the uniform.
   prevailingWindDirection(world, uniforms.windDirection.value);
   const requestedTime = Number.parseFloat(params.get('time'));
@@ -189,7 +194,7 @@ async function boot() {
     storage,
     world,
     wind: null,
-    worldOptions: WORLD_OPTIONS,
+    worldOptions,
     state,
     controls: createControlState(),
     craftRegistry,
