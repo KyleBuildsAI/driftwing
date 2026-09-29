@@ -361,7 +361,9 @@ export function createDirector({
       if (payload && typeof payload.id === 'string') discovered.add(payload.id);
       markNotable('discovery');
     }));
+    // The SpawnManager announces the first sighting of a spawn; either name is heard.
     unsubscribers.push(bus.on('spawns:siteInView', () => markNotable('siteInView')));
+    unsubscribers.push(bus.on('spawns:inView', () => markNotable('inView')));
   }
   function isSiteDiscovered(id) {
     return discovered.has(id) || (typeof isDiscovered === 'function' && isDiscovered(id) === true);
@@ -388,6 +390,7 @@ export function createDirector({
     },
   };
   const shedderHandle = perf && typeof perf.addLoadShedder === 'function' ? perf.addLoadShedder(shedder) : null;
+  const siteSpawnApi = typeof spawnManager.getSiteSpawn === 'function' && typeof spawnManager.setSiteActive === 'function';
 
   // ---- Reading the world ----------------------------------------------------------------------------
   function readInputs() {
@@ -476,18 +479,34 @@ export function createDirector({
     if (engineAtCap(info)) return REJECT.engineBudget;
     if (info.usesLights && lightsActive + LIGHTS_PER_SPAWN > budgets.maxRealLights) return REJECT.lightBudget;
     if (record.offAxis > MAX_OFF_AXIS_WIDE || record.distance < info.band.min || record.distance > info.band.max) return REJECT.notAhead;
-    return '';
+    return info.candidateKind === 'event' ? managerRejection(info) : '';
   }
 
   function refreshBudgets() {
+    engineStats = spawnManager.getStats();
+    const totals = engineStats ? engineStats.total || engineStats.totals || null : null;
+    lightsActive = totals && Number.isFinite(totals.lights) ? totals.lights : 0;
+    // The manager's own heavy count when it keeps one (an inactive site does not count there).
+    if (engineStats && Number.isFinite(engineStats.heavy)) {
+      heavyActive = engineStats.heavy;
+      return;
+    }
     heavyActive = 0;
     const active = spawnManager.getActive();
     for (let index = 0; index < active.length; index++) {
       const instance = active[index];
-      if (instance.heavy && !instance.ended) heavyActive++;
+      if (instance.heavy && instance.ended !== true) heavyActive++;
     }
-    engineStats = spawnManager.getStats();
-    lightsActive = engineStats && engineStats.total && Number.isFinite(engineStats.total.lights) ? engineStats.total.lights : 0;
+  }
+
+  /** The manager's own verdict, when it offers one (canActivate returns a refusal reason or null). */
+  function managerRejection(info) {
+    if (typeof spawnManager.canActivate !== 'function') return '';
+    const refusal = spawnManager.canActivate(info.id, 'director');
+    if (!refusal) return '';
+    if (refusal === 'heavy') return REJECT.heavyBudget;
+    if (refusal === 'instances' || refusal === 'particles') return REJECT.engineBudget;
+    return REJECT.refused;
   }
 
   // ---- Candidates -------------------------------------------------------------------------------------
@@ -606,15 +625,19 @@ export function createDirector({
     return Math.max(terrain.heightAt(x, z), waterLevel);
   }
 
-  function track(id, info, source, { candidate, siteId, duration }) {
+  function track(id, info, source, { candidate, siteId, duration, siteActive = false }) {
     const record = {
       id,
       info,
       source,
       activatedAt: time,
-      expiresAt: duration === null ? Infinity : time + duration + LIFETIME_GRACE,
+      // A site's active state ends exactly at its duration (nothing else ends it); an event gets a
+      // grace period, since its engine normally ends it first.
+      expiresAt: duration === null ? Infinity : time + duration + (siteActive ? 0 : LIFETIME_GRACE),
+      durationChecked: siteActive,
       outOfView: 0,
       siteId,
+      siteActive,
       candidateId: candidate,
     };
     activations.push(record);
@@ -632,7 +655,8 @@ export function createDirector({
     const duration = durationFor(info, record.hash);
     const position = { x: record.x, y: site && Number.isFinite(site.groundY) ? site.groundY : groundY(record.x, record.z), z: record.z };
     const bucketEnd = (record.bucket + 1) * info.settings.bucketSeconds;
-    const id = spawnManager.activate(info.id, {
+    const siteActive = site !== null && siteSpawnApi;
+    const id = siteActive ? startSiteActiveState(site) : spawnManager.activate(info.id, {
       position,
       heading: record.heading,
       source: 'director',
@@ -641,17 +665,34 @@ export function createDirector({
       ...(site ? { site } : {}),
     });
     if (id === null || id === undefined) {
-      // Refused (a budget the director could not see): leave this candidate for the rest of its bucket.
+      // Refused (a budget the director could not see, or a site not loaded yet): leave this
+      // candidate for the rest of its bucket.
       refusedUntil.set(record.hash, bucketEnd);
       return false;
     }
     usedUntil.set(record.hash, bucketEnd);
     const label = site ? `${site.id}@${record.bucket}` : candidateId(record, info.id);
-    track(id, info, 'director', { candidate: label, siteId: site ? site.id : null, duration });
+    track(id, info, 'director', { candidate: label, siteId: site ? site.id : null, duration, siteActive });
     appendLog({ time, presetId: info.id, candidateId: label, reason });
     markNotable('event', time);
     if (reason === 'drought') droughtFills++;
     return true;
+  }
+
+  /**
+   * A manager with a site API (getSiteSpawn / setSiteActive) keeps one spawn per site and switches its
+   * active state; the director then starts and ends the state on that spawn. Returns its id or null.
+   */
+  function startSiteActiveState(site) {
+    const spawnId = spawnManager.getSiteSpawn(site.id);
+    if (!spawnId) return null;
+    return spawnManager.setSiteActive(spawnId, true) === false ? null : spawnId;
+  }
+
+  /** Ends what the director started: a site's active state, or the spawn itself. */
+  function endActivation(record, reason) {
+    if (record.siteActive) spawnManager.setSiteActive(record.id, false);
+    else spawnManager.deactivate(record.id, reason);
   }
 
   function decide() {
@@ -685,17 +726,22 @@ export function createDirector({
     for (let index = activations.length - 1; index >= 0; index--) {
       const record = activations[index];
       const instance = spawnManager.getInstance(record.id);
-      if (!instance || instance.ended) {
+      if (!instance || instance.ended === true) {
         removeActivation(index);
         continue;
+      }
+      // A manager that draws the event's duration itself reports it: the backstop follows that one.
+      if (!record.durationChecked) {
+        record.durationChecked = true;
+        if (Number.isFinite(instance.duration)) record.expiresAt = record.activatedAt + instance.duration + LIFETIME_GRACE;
       }
       if (time >= record.expiresAt) {
-        spawnManager.deactivate(record.id, 'lifetime');
+        endActivation(record, 'lifetime');
         removeActivation(index);
         continue;
       }
-      if (!instance.anchor) continue;
-      const anchor = instance.anchor;
+      const anchor = instance.anchor || instance.position;
+      if (!anchor) continue;
       const inView = isInView(anchor.x, anchor.y, anchor.z, instance.radius || 0);
       // A spawn in view is something notable going on: no drought while the player can see it.
       if (inView) noteOngoing();
@@ -706,7 +752,7 @@ export function createDirector({
         if (inView) record.outOfView = 0;
         else record.outOfView += DIRECTOR_TICK_SECONDS;
         if (record.outOfView >= rule.outOfViewSeconds) {
-          spawnManager.deactivate(record.id, 'despawn');
+          endActivation(record, 'despawn');
           removeActivation(index);
         }
       } else if (distance < rule.distance) {
@@ -774,9 +820,10 @@ export function createDirector({
       readInputs();
       for (const record of activations) {
         const instance = spawnManager.getInstance(record.id);
-        if (!instance || instance.ended || !instance.anchor) continue;
+        const anchor = instance ? instance.anchor || instance.position : null;
+        if (!instance || instance.ended === true || !anchor) continue;
         if (record.siteId) activeSites.add(record.siteId);
-        const entry = entryFor(record.siteId || record.id, record.info, instance.anchor.x, instance.anchor.z, 'active');
+        const entry = entryFor(record.siteId || record.id, record.info, anchor.x, anchor.z, 'active');
         if (entry.distance <= radius) entries.push(entry);
       }
       for (let index = 0; index < pool.count; index++) {
@@ -893,7 +940,7 @@ export function createDirector({
       disposed = true;
       for (const unsubscribe of unsubscribers) if (typeof unsubscribe === 'function') unsubscribe();
       if (shedderHandle) shedderHandle.remove();
-      for (const record of activations) spawnManager.deactivate(record.id, 'dispose');
+      for (const record of activations) endActivation(record, 'dispose');
       activations.length = 0;
     },
   };
