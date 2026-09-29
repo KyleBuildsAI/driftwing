@@ -54,6 +54,14 @@ const PATH_STEP = 60;
 const PATH_MAX_POINTS = 512;
 const SITE_PATH_SECONDS = 600;
 const VISIBILITY_RATE = 1.2;
+/**
+ * Aerial perspective (the clouds' model, not the terrain fog): a vortex hazes toward the sky colour
+ * behind it from the fog's near distance to HAZE_FAR, at most HAZE_MAX, so a tornado a few
+ * kilometres out still stands out like the clouds do. Its foot takes the terrain fog, so it sits in
+ * the same air as the ground under it.
+ */
+const HAZE_FAR = 7500;
+const HAZE_MAX = 0.9;
 const STAGES = Object.freeze(['forming', 'mature', 'ropeOut', 'dissipated']);
 
 // Per-instance numbers (Float64Array indices).
@@ -217,7 +225,7 @@ export function createVortexEngine() {
 
   /** The node expressions shared by both materials: slot data access and the funnel's axis and radius. */
   function createShaderKit(TSL) {
-    const { float, int, vec2, sin, pow, mix, clamp, PI } = TSL;
+    const { float, int, vec2, sin, pow, mix, clamp, smoothstep, saturate, normalize, length, cameraPosition, PI } = TSL;
     const element = (slotBase, offset) => data.element(slotBase.add(offset));
     const slotBaseOf = (slotNode) => int(slotNode.add(0.5)).mul(SLOT_VECTORS).add(1);
     /** The rope axis offset (x, z) at a height share of the cloud base. */
@@ -236,7 +244,21 @@ export function createVortexEngine() {
       for (let offset = 0; offset < SLOT_VECTORS; offset++) block[`d${offset}`] = element(base, offset);
       return block;
     };
-    return { readBlock, axisOffset, funnelRadius };
+    /** The haze share at a world position (heightShare: its height over the cloud base). */
+    const hazeAt = (worldPosition, heightShare) => {
+      const globals = data.element(0);
+      const distance = length(worldPosition.sub(cameraPosition));
+      const air = smoothstep(globals.y, globals.z, distance).mul(HAZE_MAX);
+      const ground = smoothstep(globals.y, globals.w, distance).mul(float(1).sub(smoothstep(0.05, 0.3, heightShare)));
+      return air.max(ground);
+    };
+    /** The sky colour behind a world position (the sky's own function, as the fog and clouds use). */
+    const skyBehind = (worldPosition) => {
+      const ray = normalize(worldPosition.sub(cameraPosition));
+      const skyColorNode = ctx.sky && typeof ctx.sky.skyColorNode === 'function' ? ctx.sky.skyColorNode : null;
+      return skyColorNode ? skyColorNode(ray) : mix(ctx.uniforms.fogColor, ctx.uniforms.skyZenithColor, smoothstep(0.03, 0.6, saturate(ray.y)));
+    };
+    return { readBlock, axisOffset, funnelRadius, hazeAt, skyBehind };
   }
 
   function buildShellMaterial(THREE, TSL, uniforms) {
@@ -245,7 +267,7 @@ export function createVortexEngine() {
       positionGeometry, positionWorld, cameraPosition, mx_noise_float, PI,
     } = TSL;
     const kit = createShaderKit(TSL);
-    const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
+    const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false });
     material.name = 'vortex-shell';
     const slot = attribute('vortexSlot', 'float');
     const clockNode = data.element(0).x;
@@ -254,8 +276,8 @@ export function createVortexEngine() {
     const cloudBase = max(block.d1.z, 1);
     const bottom = block.d1.w;
     const row = positionGeometry.y;
-    // The tube runs from its bottom to just under the cloud base; the top rows curve up into the base
-    // and flare into the lowered collar.
+    // The tube runs from its bottom to just under the cloud base; the top rows widen a little into the
+    // base and fade, hidden in the collar puffs (the lowered cloud).
     const along = clamp(row.div(COLLAR_ROW), 0, 1);
     const collar = clamp(row.sub(COLLAR_ROW).div(1 - COLLAR_ROW), 0, 1);
     const height = mix(bottom, cloudBase.mul(0.97), along).add(cloudBase.mul(0.03).mul(collar).mul(collar));
@@ -264,7 +286,7 @@ export function createVortexEngine() {
     const twist = block.d6.w.mul(PI).mul(2).mul(heightShare);
     const angle = atan(positionGeometry.z, positionGeometry.x).add(spin).add(twist);
     const bulge = mx_noise_float(vec3(cos(angle).mul(1.6), height.mul(0.006).sub(clockNode.mul(0.25)), sin(angle).mul(1.6).add(slot.mul(7.3)))).mul(0.16);
-    const flare = pow(collar, 1.5).mul(block.d10.x).mul(1.4).add(1);
+    const flare = pow(collar, 1.5).mul(block.d10.x).mul(0.25).add(1);
     // A free or hidden slot collapses to its axis.
     const radius = kit.funnelRadius(block, heightShare).mul(bulge.add(1)).mul(flare).mul(step(0.001, block.d2.z));
     const axis = kit.axisOffset(block, heightShare);
@@ -283,7 +305,12 @@ export function createVortexEngine() {
     const fragmentAxis = kit.axisOffset(fragmentBlock, fragmentShare);
     const radial = normalize(vec3(positionWorld.x.sub(fragmentBlock.d0.x.add(fragmentAxis.x)), 0.0001, positionWorld.z.sub(fragmentBlock.d0.z.add(fragmentAxis.y))));
     const viewDirection = normalize(cameraPosition.sub(positionWorld));
-    const rim = float(1).sub(abs(dot(radial, viewDirection)));
+    // The surface normal of the tapering tube: the radial direction tipped down by the radius slope.
+    const taper = fragmentBlock.d2.x;
+    const slope = fragmentBlock.d1.y.sub(fragmentBlock.d1.x).mul(taper).mul(pow(max(fragmentShare, 0.001), taper.sub(1))).div(fragmentBase)
+      .mul(mix(float(1), fragmentBlock.d9.w, fragmentBlock.d2.y));
+    const surfaceNormal = normalize(vec3(radial.x, slope.negate(), radial.z));
+    const rim = float(1).sub(abs(dot(surfaceNormal, viewDirection)));
     const streakAngle = atan(radial.z, radial.x).sub(fragmentBlock.d0.w).sub(fragmentBlock.d6.w.mul(PI).mul(2).mul(fragmentShare));
     const streaks = mx_noise_float(vec3(cos(streakAngle).mul(2.2), fragmentShare.mul(9).sub(clockNode.mul(0.9)), sin(streakAngle).mul(2.2)));
     const bands = mix(float(1), streaks.mul(0.4).add(0.8), fragmentBlock.d7.w);
@@ -302,9 +329,9 @@ export function createVortexEngine() {
     const dust = pow(float(1).sub(clamp(fragmentShare, 0, 1)), 3).mul(float(1).sub(fragmentBlock.d4.w)).mul(0.6);
     const dusty = fragmentBlock.d8.xyz.mul(uniforms.sunColor.mul(wrap.mul(sunUp).mul(0.7).add(0.3)));
     const shaded = mix(body.add(ambient), dusty.add(ambient.mul(0.5)), dust).add(silver).mul(night).mul(bands);
-    material.colorNode = vec4(shaded, 1);
+    material.colorNode = vec4(mix(shaded, kit.skyBehind(positionWorld), kit.hazeAt(positionWorld, fragmentShare)), 1);
     const footFade = smoothstep(0, 0.06, row);
-    const collarFade = float(1).sub(smoothstep(0.05, 0.85, collarShare.add(streaks.mul(0.12))));
+    const collarFade = float(1).sub(smoothstep(0, 0.8, collarShare.add(streaks.mul(0.1))));
     // Thinner near the ground (condensation thins where the air warms), opaque aloft.
     const thinning = mix(float(0.7), float(1), smoothstep(0, 0.4, fragmentShare));
     // Soft, fuzzy edges: the shell fades out toward its silhouette, the way a cloud does.
@@ -368,10 +395,10 @@ export function createVortexEngine() {
     const puffLocal = local.sub(GROUND_BLOCK);
     const puffActive = step(puffLocal, block.d5.y.sub(0.5));
     const puffLife = fract(clockNode.mul(0.35).div(seed.y.mul(4).add(3.5)).add(seed.x));
-    const inCollar = step(0.68, seed.y).mul(step(0.01, block.d10.x));
+    const inCollar = step(0.6, seed.y).mul(step(0.01, block.d10.x));
     const bottomShare = clamp(block.d1.w.div(cloudBase), 0, 1);
     const skinShare = mix(bottomShare, float(1), puffLife);
-    const collarShare = seed.z.mul(0.04).add(0.965);
+    const collarShare = seed.z.mul(0.07).add(0.93);
     const puffShare = mix(skinShare, collarShare, inCollar);
     const skinRadius = kit.funnelRadius(block, puffShare).mul(seed.z.mul(0.35).add(1));
     const collarRadius = block.d1.y.mul(block.d10.x.mul(seed.z.mul(1.2).add(0.2)).add(1));
@@ -379,7 +406,7 @@ export function createVortexEngine() {
     const puffAngle = seed.w.mul(PI).mul(2).add(spin.mul(mix(float(0.8), float(0.25), inCollar))).add(block.d6.w.mul(PI).mul(2).mul(puffShare));
     const puffAxis = kit.axisOffset(block, puffShare);
     const puffSize = block.d5.w.mul(seed.y.mul(0.8).add(0.6)).mul(mix(puffShare.mul(0.9).add(0.8), float(1.7), inCollar));
-    const puffAlpha = smoothstep(0, 0.2, puffLife).mul(float(1).sub(smoothstep(0.7, 1, puffLife))).mul(puffActive).mul(block.d2.w).mul(mix(float(0.14), float(0.5), inCollar));
+    const puffAlpha = smoothstep(0, 0.2, puffLife).mul(float(1).sub(smoothstep(0.7, 1, puffLife))).mul(puffActive).mul(block.d2.w).mul(mix(float(0.14), float(0.58), inCollar));
 
     const height = mix(groundHeight, puffShare.mul(cloudBase), isPuff);
     const radius = mix(groundRadius, puffRadius, isPuff);
@@ -390,7 +417,7 @@ export function createVortexEngine() {
     const size = mix(groundSize, puffSize, isPuff).mul(step(0.002, alpha));
     const flatten = inCollar.mul(isPuff);
 
-    const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false });
+    const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, fog: false });
     material.name = 'vortex-particles';
     material.positionNode = vec3(
       block.d0.x.add(axis.x).add(cos(angle).mul(radius)),
@@ -415,7 +442,9 @@ export function createVortexEngine() {
     const backlit = saturate(dot(normalize(worldPosition.sub(cameraPosition)), sunDirection)).mul(sunUp);
     const shade = mix(block.d7.xyz.mul(0.8), albedo.mul(uniforms.sunColor).mul(1.3), wrap.mul(sunUp).mul(0.8).add(0.2).mul(float(1).sub(backlit.mul(0.6))));
     const night = mix(float(1), float(0.3), uniforms.nightFactor);
-    const tint = varying(vec4(shade.add(ambient.mul(albedo.add(0.3))).mul(night), alpha), 'vVortexTint');
+    const lit = shade.add(ambient.mul(albedo.add(0.3))).mul(night);
+    const hazed = mix(lit, kit.skyBehind(worldPosition), kit.hazeAt(worldPosition, height.div(cloudBase)));
+    const tint = varying(vec4(hazed, alpha), 'vVortexTint');
     // Soft falloff: clouds, mist and puffs are wide and feathered, bits nearly solid.
     const softness = varying(mix(float(0.8), float(2.4), max(isPuff, cloudy)), 'vVortexSoftness');
     const radial = uv().sub(0.5).mul(2).length();
@@ -555,7 +584,14 @@ export function createVortexEngine() {
     clock += dt;
     // Wrapped so float32 keeps millisecond resolution in the shaders over long sessions.
     if (clock > 3600) clock -= 3600;
-    data.array[0].x = clock;
+    const globals = data.array[0];
+    globals.x = clock;
+    const fog = ctx.scene.fog;
+    const fogNear = fog && Number.isFinite(fog.near) ? fog.near : 400;
+    const fogFar = fog && Number.isFinite(fog.far) ? fog.far : 2400;
+    globals.y = Math.max(350, fogNear * 0.9);
+    globals.z = Math.max(globals.y + 100, HAZE_FAR);
+    globals.w = Math.max(globals.y + 100, fogFar);
   }
 
   function followPath(instance, record, state) {
@@ -714,6 +750,7 @@ export function createVortexEngine() {
       const { THREE, TSL } = ctx;
       const vectors = Array.from({ length: 1 + MAX_VORTICES * SLOT_VECTORS }, () => new THREE.Vector4());
       data = TSL.uniformArray(vectors, 'vec4');
+      vectors[0].set(0, 350, HAZE_FAR, 2400);
       slots = ctx.pools.createSlotAllocator(MAX_VORTICES);
       // A fixed seed: the particle seeds are the same every session (the look is deterministic).
       let seedState = 0x2545f491;
@@ -883,7 +920,28 @@ export function createVortexEngine() {
       };
     },
 
-    /** The stage names in order (instance.data.state[1] indexes them). */
-    stages: STAGES,
+    /**
+     * Dev inspection: an instance's stage, its lifecycle numbers and its slot's uniform block (the
+     * values the shaders read this frame).
+     */
+    describe(instance) {
+      const record = instance.data;
+      const state = record.state;
+      const block = [];
+      for (let offset = 0; offset < SLOT_VECTORS; offset++) block.push(slotVector(record.slot, offset).toArray());
+      return {
+        stage: STAGES[state[S.STAGE]],
+        age: state[S.AGE],
+        form: state[S.FORM],
+        rope: state[S.ROPE],
+        strength: state[S.STRENGTH],
+        visibility: state[S.VISIBILITY],
+        water: state[S.WATER],
+        slot: record.slot,
+        windOn: state[S.WIND_ON] === 1,
+        clock,
+        block,
+      };
+    },
   };
 }
