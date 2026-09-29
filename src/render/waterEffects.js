@@ -315,7 +315,7 @@ export function createWaterEffects(ctx) {
   const trailsActive = uniform(0);
   const trailOrigin = uniform(new T.Vector2());
   const flowTime = uniform(0);
-  const glowColor = uniform(new T.Color(0x3fd6ff));
+  const glowColor = uniform(new T.Color(0x1f9dff));
   const glowVisibility = uniform(0);
   const foamColor = uniform(new T.Color(1, 1, 1));
 
@@ -457,10 +457,12 @@ export function createWaterEffects(ctx) {
       const trail = texture(trailTexture, p.add(trailOrigin).div(TRAIL_SPAN)).rg;
       const window = max(abs(p.x), abs(p.y));
       const fade = oneMinus(smoothstep(TRAIL_SPAN * 0.38, TRAIL_SPAN * 0.48, window));
-      // Foam breaks up into lace; glow sparkles.
-      const lace = mx_noise_float(vec3(p.add(trailOrigin).mul(0.35), flowTime.mul(0.25)));
+      // Foam breaks up into lace; the glow sparkles in fine points (plankton lighting up).
+      const world = p.add(trailOrigin);
+      const lace = mx_noise_float(vec3(world.mul(0.35), flowTime.mul(0.25)));
+      const sparks = mx_noise_float(vec3(world.mul(1.1), flowTime.mul(0.9)));
       foam.addAssign(trail.y.mul(saturate(lace.mul(0.8).add(0.65))).mul(fade));
-      glow.addAssign(trail.x.mul(saturate(lace.mul(0.6).add(0.85))).mul(fade));
+      glow.addAssign(trail.x.mul(pow(saturate(sparks.mul(0.7).add(0.55)), 2).mul(1.3).add(0.15)).mul(fade));
     });
     If(regionCount.greaterThan(0.5), () => {
       const mask = float(0).toVar();
@@ -474,8 +476,8 @@ export function createWaterEffects(ctx) {
       }
       // Glowing surf: sparse flashes where the swell crests, flickering as the noise drifts.
       const sparkle = mx_noise_float(vec3(p.add(trailOrigin).mul(0.11), flowTime.mul(0.7)));
-      const crest = smoothstep(0.16, 0.42, waveHeight);
-      const surfGlow = crest.mul(pow(saturate(sparkle.mul(1.3).add(0.05)), 3)).mul(surf);
+      const crest = smoothstep(0.08, 0.36, waveHeight);
+      const surfGlow = crest.mul(pow(saturate(sparkle.mul(1.2).add(0.2)), 2)).mul(surf).mul(1.4);
       // Excitation (trails) glows only where the water is bioluminescent.
       glow.assign(glow.mul(saturate(mask)).add(surfGlow));
     }).Else(() => {
@@ -775,7 +777,7 @@ export function createWaterEffects(ctx) {
     if (height < CONTACT_HEIGHT) {
       contact.touching = true;
       contact.contacts++;
-      writeCapsule(fromX, fromZ, craft.x, craft.z, CONTACT_RADIUS, 0.85, 1);
+      writeCapsule(fromX, fromZ, craft.x, craft.z, CONTACT_RADIUS, 0.55, 1);
     } else {
       contact.stirring = true;
       const share = 1 - (height - CONTACT_HEIGHT) / (DOWNWASH_HEIGHT - CONTACT_HEIGHT);

@@ -40,7 +40,7 @@ export const WATER_EFFECT_DEFAULTS = Object.freeze({
   spray: Object.freeze({
     ringRadius: 22, rate: 260, height: 11, spread: 0.45, swirl: 9, size: 1.3, life: 2.4, foam: 0.6, glow: 0.4,
   }),
-  bioluminescence: Object.freeze({ radius: 900, strength: 1, surf: 0.6, color: 0x3fd6ff, flashRate: 5, flashRadius: 3.2 }),
+  bioluminescence: Object.freeze({ radius: 900, strength: 1, surf: 0.6, color: 0x1f9dff, flashRate: 12, flashRadius: 4.5 }),
   plungePool: Object.freeze({ radius: null, surfaceY: null, churn: 0.85, mistRate: 120, mistSize: 5.5, rippleInterval: 1.4, glow: 0 }),
 });
 

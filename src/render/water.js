@@ -359,7 +359,7 @@ export function createWaterSystem(ctx) {
     .add(moonGlint)
     .add(subsurface)
     .mul(oneMinus(foam.mul(0.85)))
-    .add(effects.nodes.glowColor.mul(effectSurface.w.mul(2.4)));
+    .add(effects.nodes.glowColor.mul(effectSurface.w.mul(1.35)));
   material.opacityNode = mix(mix(float(BASE_OPACITY), float(GRAZING_OPACITY), fresnel), float(1), foam);
 
   const mesh = new T.Mesh(buildGridGeometry(axisCoordinates), material);
