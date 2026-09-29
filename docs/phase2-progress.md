@@ -8,16 +8,16 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
 | Wave | Work | Branches | Status |
 | --- | --- | --- | --- |
 | 1 | Milestone A placement and terrain stamps, Milestone B engine framework and F9 debugger, Milestone C director and regional weather, Milestone D spawn audio | `p2/placement`, `p2/framework`, `p2/director`, `p2/audio` | done |
-| 2 | The ten engines: vortex, emitter, weatherVolume, fauna, structure, celestial, waterEffect, lightEffect, windModifier, setPiece | `p2/engines-*` | next |
+| 2 | The ten engines: vortex, emitter, weatherVolume, fauna, structure, celestial, waterEffect, lightEffect, windModifier, setPiece | `p2/engines-*` | in progress |
 | 3 | Milestone E presets 1-10, 11-20, 21-30 (verified and committed per batch) | `p2/presets-*` | planned |
-| 4 | Milestone F discovery loop: journal, copilot tour guide, world map, seed links | `p2/discovery`, `p2/copilot` | planned |
+| 4 | Milestone F discovery loop: journal, copilot tour guide, world map, seed links | `p2/discovery`, `p2/copilot-guide` | done |
 | 5 | Milestone G verification: ?test=spawns, ?test=determinism, ?test=terrain, 10-minute soak; docs/spawns.md with the preset template, architecture, controls, copilot API, CHANGELOG; review and fixes; tag `v2-phase2` | `p2/verify` | planned |
 
 ## Decisions
 
 - **No CLASSIC mode (the structure correction wins).** Spawns apply their full WindField forces in V2; the assists are the safety net. "Both modes" in the soak test means the first person and third person views.
 - **Map key.** M opens the world map (mapToggle). The mic toggle moves to Shift+M.
-- **Machine load.** Tests run immediately, whatever the machine's load. The hard criteria must pass. Frame spikes are reported with the harness's load evidence, never hidden.
+- **Machine load (owner's rule).** Ignore PC load entirely: never wait for quiet, never build load tooling, never chase spikes the busy machine causes. Run each test once and report its numbers. Correctness criteria still hold.
 - **One director name.** `createGameDirector(ctx, options)` (src/spawns/director.js) wires the director to the game; `createDirector(options)` is its headless core for the lab. The spawns system creates the game director itself when it starts and exposes it as `ctx.systems.spawns.director`; there is no `attachDirector`.
 - **The director ticks itself.** The spawns system calls `director.update()` every frame and the director ticks at 2 Hz on the flight clock (`DIRECTOR_TICK_SECONDS`), so its activation log depends only on the seed and the flown path.
 - **One budget view.** The SpawnManager's `budgets` (heavy limit 2, real-light cap 4, per-engine caps from `engine.budget`, else `DIRECTOR_BUDGETS.engines`) is both the engines' `ctx.budgets` and the director's budgets.
@@ -48,6 +48,21 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
   - Reduced flight harness (seeds INTEG-A and INTEG-B, glider and jet, both views, 45 s): hard criteria pass on both backends (0 NaN, 0 penetrations, 0/0 console, heap growth at most 21.3 MB, 24/24 scripted checks). Frames over 50 ms: 8 on WebGPU and 3 on WebGL2, every one main-thread work with 0 systems time and 0 GC, while 43-90 % of the machine's CPU was other processes'.
   - Smokes, 0 errors and 0 warnings: built V2 and the shell on both backends, built V2 with `?dev=1` (the director in the F9 panel), the dev server's weather-sky and director-game steps on both backends.
   - Live director check on the dev server, both backends: the test engines through the dev hook, the F9 Spawn button and `forceSpawn` fire `spawnActivated`, the End buttons fire `spawnEnded`, `getState()` ticks at 2 Hz on the flight clock, the shedder drives the manager's LOD bias (1, 0.7, 0.5 and back), the weather state machine follows clear -> building -> storm -> clearing at the player and forced states emit `weatherChanged` with the `"rx:rz"` region.
+
+## Done (Milestone F)
+
+- Discovery loop merged from `p2/discovery`:
+  - the journal records spawn discoveries and journalStat/achievement records;
+  - the glass discovery card;
+  - the world map on M, with worker map tiles (src/world/mapTileGen.js and mapTiles.worker.js, reusable for Phase 3's far field);
+  - seed links (`/?v=2#seed=X&t=`), the seed setting and Copy link;
+  - the mic moved to Shift+M.
+- Copilot tour guide merged from `p2/copilot-guide`:
+  - src/copilot/tourGuide.js: nearby, go-to, find a thermal, chase the storm and next discovery;
+  - proactive callouts, with the setting copilotCallouts;
+  - remote flightState nearby[] and activeEvents[];
+  - docs/copilot-api.md.
+- Verified on the merged tree: labs discovery 39/39, copilot 225/225, settings, input, storage, spawns and director all pass; build:single; built V2 smoke on WebGPU and WebGL2 with 0 errors and 0 warnings.
 
 ## Next
 
