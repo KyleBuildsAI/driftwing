@@ -249,7 +249,8 @@ async function main() {
       ];
       window.DRIFTWING.debug.stepFrames(5);
       const manager = window.DRIFTWING.ctx.systems.spawns.manager;
-      for (let frame = 0; frame < 4000; frame++) manager.update(1 / 60, 1 / 60);
+      // Warm-up: V8 tiers the code up over the first frames (its lower tiers box doubles).
+      for (let frame = 0; frame < 30000; frame++) manager.update(1 / 60, 1 / 60);
     });
     await cdp.send('HeapProfiler.enable');
     await cdp.send('HeapProfiler.startSampling', { samplingInterval: 32 });
