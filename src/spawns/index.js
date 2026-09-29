@@ -3,16 +3,20 @@
 // 'sky', registers the engines, and the prewarm hook starts it (validates the presets in dev builds,
 // initialises the engines and records the memory baseline) behind the loading fade.
 //
-// Site feed: the placement API (contract 2.1). When the world generator exposes it as
-// world.placement it is picked up here; otherwise setSiteFeed(feed) attaches one later.
-// Director: attachDirector(director) runs director.update(dt) at DIRECTOR_HZ with the simulated time
-// since its previous run, and the debugger reads director.getState().
+// Site feed: the placement API (contract 2.1). The world generator exposes it as world.placement,
+// which is the manager's feed from the start; setSiteFeed(feed) replaces it (the dev test kits).
+// Director (contract 5): created by start() once the manager runs (createGameDirector in director.js),
+// with the manager, the presets, the current site feed and the manager's discovered check. update()
+// calls it every frame and it ticks at 2 Hz on the flight clock (DIRECTOR_TICK_SECONDS), so its
+// activation log depends only on the seed and the flown path. The debugger reads director.getState()
+// and calls forceSpawn; the copilot reads getNearby(radiusKm).
 import { PRESETS } from './presets/index.js';
 import { validatePreset, validatePresets } from './schema.js';
 import { createEngineRegistry } from './engineRegistry.js';
 import { createSpawnManager } from './spawnManager.js';
+import { DIRECTOR_BUDGETS, createGameDirector } from './director.js';
 
-export const DIRECTOR_HZ = 2;
+const NO_SITES = Object.freeze([]);
 /** Distance (m) ahead of the craft a debug spawn uses when none is given. */
 const DEBUG_SPAWN_DEFAULT_DISTANCE = 1500;
 
@@ -58,19 +62,47 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
     seed: state.seed,
     siteFeed: world.placement ?? null,
     registerPrewarm: ctx.registerPrewarm,
+    engineBudgets: DIRECTOR_BUDGETS.engines,
   });
   let director = null;
-  // Doubles live in an object: a double in a closure variable is boxed anew on every write.
-  const directorClock = { timer: 0, elapsed: 0 };
   let started = false;
   const forward = { x: 0, z: -1 };
 
-  /** Validates the presets (dev builds and ?debug=1 only), initialises the engines. */
+  /** The director's view of the sites: whichever feed the manager holds now. */
+  const placementView = {
+    sitesNear(x, z, radius) {
+      const feed = manager.getSiteFeed();
+      return feed && typeof feed.sitesNear === 'function' ? feed.sitesNear(x, z, radius) : NO_SITES;
+    },
+  };
+
+  /** The event director on the running manager, or null (logged) when it cannot be created. */
+  function createDirector() {
+    try {
+      return createGameDirector(ctx, {
+        spawnManager: manager,
+        presets: PRESETS,
+        placement: placementView,
+        isDiscovered: (id) => manager.isDiscovered(id),
+        budgets: manager.budgets,
+        devHooks,
+      });
+    } catch (error) {
+      console.error('[DRIFTWING] the event director could not start; spawns run without it', error);
+      return null;
+    }
+  }
+
+  /**
+   * Validates the presets (dev builds and ?debug=1 only), initialises the engines, then creates the
+   * director.
+   */
   function start() {
     if (started) return;
     started = true;
     if (devHooks) validatePresets(PRESETS, { engineNames: registry.names() });
     manager.init();
+    director = createDirector();
   }
 
   /** The anchor distance metres ahead of the craft on its heading, on the ground (or the water). */
@@ -83,32 +115,31 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
   }
 
   /**
-   * Starts presetId ahead of the craft (dev): through the director's forceSpawn when a director is
-   * attached, else straight through the SpawnManager with source 'debug'. options: { distance (m),
-   * force (ignore budgets) }. Returns the spawn id or null.
+   * Starts presetId ahead of the craft (dev): through the director's forceSpawn for the director's own
+   * presets (it tracks the spawn's lifetime and logs it), else straight through the SpawnManager with
+   * source 'debug' (presets added through the dev API). options: { distance (m), force (ignore
+   * budgets) }. Returns the spawn id or null.
    */
   function forceSpawn(presetId, { distance = DEBUG_SPAWN_DEFAULT_DISTANCE, force = true } = {}) {
-    const position = pointAhead(distance);
-    const opts = { position, heading: state.player.heading, source: 'debug', force };
-    if (director && typeof director.forceSpawn === 'function') return director.forceSpawn(presetId, opts);
-    return manager.activate(presetId, opts);
+    if (director && director.hasPreset(presetId)) return director.forceSpawn(presetId, { distance, force });
+    return manager.activate(presetId, { position: pointAhead(distance), heading: state.player.heading, source: 'debug', force });
   }
 
   const system = {
     update(simDt, realDt) {
       manager.update(simDt, realDt);
-      if (!director || !started) return;
-      directorClock.elapsed += simDt;
-      directorClock.timer -= realDt;
-      if (directorClock.timer > 0) return;
-      directorClock.timer = 1 / DIRECTOR_HZ;
-      const elapsed = directorClock.elapsed;
-      directorClock.elapsed = 0;
+      if (!director) return;
       try {
-        director.update(elapsed);
+        director.update();
       } catch (error) {
-        console.error('[DRIFTWING] the event director failed and was detached', error);
+        console.error('[DRIFTWING] the event director failed and was stopped', error);
+        const failed = director;
         director = null;
+        try {
+          failed.dispose();
+        } catch (disposeError) {
+          console.error('[DRIFTWING] the stopped event director failed to dispose', disposeError);
+        }
       }
     },
     /** Starts the manager behind the loading fade, after main.js has registered the engines. */
@@ -124,17 +155,16 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
     getInstance: manager.getInstance,
     getStats: manager.getStats,
     setSiteFeed: manager.setSiteFeed,
-    /** Attaches the event director: { update(dt), getState(), forceSpawn?(presetId, opts), getNearby?(radiusKm) }. */
-    attachDirector(next) {
-      if (next !== null && (typeof next?.update !== 'function' || typeof next?.getState !== 'function')) {
-        throw new TypeError('[DRIFTWING] a director needs update(dt) and getState()');
-      }
-      director = next;
-      directorClock.timer = 0;
-      directorClock.elapsed = 0;
-    },
+    /** The event director (src/spawns/director.js), or null before start() or if it failed. */
     get director() {
       return director;
+    },
+    /**
+     * For the copilot: spawns, dormant candidates and sites within radiusKm, nearest first
+     * ([{ id, name, category, distance, bearing, state, etaSeconds }]); empty without a director.
+     */
+    getNearby(radiusKm) {
+      return director ? director.getNearby(radiusKm) : [];
     },
     forceSpawn,
     pointAhead,

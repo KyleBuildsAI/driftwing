@@ -216,7 +216,8 @@ function describePreset(preset, index) {
  *   seedHash        the world seed hash (worldgen's seedHash; candidates.seedHashFor(seed))
  *   presets         the preset list (src/spawns/presets/index.js PRESETS, or the lab's)
  *   spawnManager    the SpawnManager (contract section 4): activate, deactivate, getActive,
- *                   getInstance, getStats, and setLodBias for load shedding
+ *                   getInstance, getStats, and setLodBias for load shedding (spawnCount, when
+ *                   offered, lets the shedder skip levels that would take nothing away)
  *   weather         a weather model (createWeatherModel): stateAt(x, z, time), sampleAt
  *   terrain         { heightAt(x, z), biomeAt(x, z) -> { key }, waterLevel }
  *   getPlayer()     -> { position: { x, y, z }, heading (deg), speed (m/s) }
@@ -267,6 +268,7 @@ export function createDirector({
   const eventInfos = candidateInfos.filter((info) => info.candidateKind === 'event');
   const siteActiveInfos = new Map(candidateInfos.filter((info) => info.candidateKind === 'siteActive').map((info) => [info.id, info]));
   const searchRadius = Math.min(MAX_SEARCH_RADIUS, candidateInfos.reduce((largest, info) => Math.max(largest, info.band.max), DROUGHT_BAND.max));
+  const heavyCandidates = candidateInfos.some((info) => info.heavy);
 
   const pool = createCandidatePool(128);
   /** candidate hash -> { surface bits, biome key } (a candidate's ground never changes). */
@@ -373,12 +375,22 @@ export function createDirector({
   function applyLodBias() {
     if (typeof spawnManager.setLodBias === 'function') spawnManager.setLodBias(SHED_LOD_BIAS[shedLevel]);
   }
+  /**
+   * Whether the next level would take load away: deferring heavy activations needs heavy candidates
+   * (or live spawns the later levels act on), and demoting LODs needs live spawns. A level with
+   * nothing to shed is refused, so the governor goes straight to the render scale.
+   */
+  function nextLevelSheds() {
+    const liveSpawns = typeof spawnManager.spawnCount === 'function' ? spawnManager.spawnCount() > 0 : true;
+    return shedLevel === 0 ? heavyCandidates || liveSpawns : liveSpawns;
+  }
   const shedder = {
     id: 'director',
     /** Level 1 defers heavy activations; levels 2-3 demote far LODs (needs spawnManager.setLodBias). */
     shed() {
       if (shedLevel >= MAX_SHED_LEVEL) return false;
       if (shedLevel >= 1 && typeof spawnManager.setLodBias !== 'function') return false;
+      if (!nextLevelSheds()) return false;
       shedLevel++;
       applyLodBias();
       return true;
@@ -836,7 +848,8 @@ export function createDirector({
       }
       if (placement) {
         for (const site of placement.sitesNear(player.x, player.z, radius)) {
-          if (activeSites.has(site.id)) continue;
+          // Sites of presets the director does not know (the terrain test's fixtures) are skipped.
+          if (activeSites.has(site.id) || !infoById.has(site.presetId)) continue;
           const state = isSiteDiscovered(site.id) ? 'discovered' : 'site';
           entries.push(entryFor(site.id, infoById.get(site.presetId), site.x, site.z, state));
         }
@@ -911,8 +924,16 @@ export function createDirector({
       return log.map((entry) => ({ ...entry }));
     },
 
-    /** Dev only: starts a preset ahead of the player through the SpawnManager (source 'debug'). */
-    forceSpawn(presetId, { distance = 3000, bearingOffset = 0 } = {}) {
+    /** Whether presetId is one of the director's presets (forceSpawn and scheduling know it). */
+    hasPreset(presetId) {
+      return infoById.has(presetId);
+    },
+
+    /**
+     * Dev only: starts a preset ahead of the player through the SpawnManager (source 'debug').
+     * options: { distance (m), bearingOffset (deg), force (ignore the manager's budgets) }.
+     */
+    forceSpawn(presetId, { distance = 3000, bearingOffset = 0, force = false } = {}) {
       if (!devHooks) throw new Error('director.forceSpawn is only available in development builds or with ?debug=1');
       const info = infoById.get(presetId);
       if (!info) throw new RangeError(`director.forceSpawn: unknown preset "${presetId}"`);
@@ -922,7 +943,7 @@ export function createDirector({
       const z = player.z - Math.cos(radians) * distance;
       const seed = mix32((baseHash ^ Math.imul(++debugSerial, 0x9e3779b1)) >>> 0);
       const duration = durationFor(info, seed);
-      const id = spawnManager.activate(info.id, { position: { x, y: groundY(x, z), z }, heading: player.heading, source: 'debug', seed, duration });
+      const id = spawnManager.activate(info.id, { position: { x, y: groundY(x, z), z }, heading: player.heading, source: 'debug', seed, duration, force: force === true });
       if (id === null || id === undefined) return null;
       const label = `debug:${debugSerial}`;
       track(id, info, 'debug', { candidate: label, siteId: null, duration });
@@ -950,9 +971,11 @@ export function createDirector({
  * The director wired to the running game, for the spawns system to create once its SpawnManager
  * exists and to update every frame: the flight clock, the player, the sun, the camera frustum, the
  * regional weather system, the world's height and biome functions, the perf governor and the bus.
- * options: { spawnManager, presets, placement?, isDiscovered? }.
+ * options: { spawnManager, presets, placement?, isDiscovered?, budgets?, devHooks? }. budgets defaults to
+ * DIRECTOR_BUDGETS (the spawns system passes the SpawnManager's own budget view, so both agree);
+ * devHooks (forceSpawn) defaults to dev builds and ?debug=1.
  */
-export function createGameDirector(ctx, { spawnManager, presets, placement = null, isDiscovered = null }) {
+export function createGameDirector(ctx, { spawnManager, presets, placement = null, isDiscovered = null, budgets = DIRECTOR_BUDGETS, devHooks = null }) {
   const { THREE, state, camera, world, CONFIG } = ctx;
   const weather = ctx.systems.weather;
   if (!weather || !weather.model) throw new Error('createGameDirector: the weather system must be created first');
@@ -984,6 +1007,7 @@ export function createGameDirector(ctx, { spawnManager, presets, placement = nul
     perf: ctx.perf,
     bus: ctx.bus,
     isDiscovered,
-    devHooks: Boolean(import.meta.env?.DEV) || params.get('debug') === '1',
+    budgets,
+    devHooks: devHooks === null ? Boolean(import.meta.env?.DEV) || params.get('debug') === '1' : devHooks === true,
   });
 }
