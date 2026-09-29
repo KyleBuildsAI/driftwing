@@ -956,7 +956,8 @@ export function createFaunaEngine() {
     if (!following && awayX * awayX + awayZ * awayZ > params.leash * params.leash * 16) {
       g[G.HEADING] = turnToward(g[G.HEADING], Math.atan2(-awayX, awayZ), 0.2 * dt);
     }
-    g[G.SPEED] += (g[G.TARGET_SPEED] - g[G.SPEED]) * Math.min(1, dt * 0.4);
+    // Matching the player's speed is quick while following (so the slot can be held), slow otherwise.
+    g[G.SPEED] += (g[G.TARGET_SPEED] - g[G.SPEED]) * Math.min(1, dt * (following ? 1.5 : 0.4));
     g[G.VX] = headingX(g[G.HEADING]) * g[G.SPEED];
     g[G.VZ] = headingZ(g[G.HEADING]) * g[G.SPEED];
     g[G.X] += g[G.VX] * dt;
@@ -1434,7 +1435,7 @@ export function createFaunaEngine() {
         steerToward(pool, index, g[G.ANCHOR_X] + Math.cos(angle) * radius, g[G.BASE_Y], g[G.ANCHOR_Z] + Math.sin(angle) * radius, 0, 0, 0, 0.3, data.cruise, 1.4);
       } else if (mode === MODE_JOIN || mode === MODE_ESCORT) {
         // Match the craft's velocity within the speed limits, closing on the slot.
-        const gain = mode === MODE_JOIN ? 0.25 : 0.8;
+        const gain = mode === MODE_JOIN ? 0.5 : 0.8;
         steerToward(pool, index, slotX + player.right.x * side * offset, slotY, slotZ + player.right.z * side * offset, player.velocity.x, player.velocity.y, player.velocity.z, gain, speedRange[1], 2.2);
       } else {
         // Peel off: a climbing turn away from the player's side.
