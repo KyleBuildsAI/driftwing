@@ -8,7 +8,7 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
 | Wave | Work | Branches | Status |
 | --- | --- | --- | --- |
 | 1 | Milestone A placement and terrain stamps, Milestone B engine framework and F9 debugger, Milestone C director and regional weather, Milestone D spawn audio | `p2/placement`, `p2/framework`, `p2/director`, `p2/audio` | done |
-| 2 | The ten engines: vortex, emitter, weatherVolume, fauna, structure, celestial, waterEffect, lightEffect, windModifier, setPiece | `p2/engines-*` | in progress |
+| 2 | The ten engines: vortex, emitter, weatherVolume, fauna, structure, celestial, waterEffect, lightEffect, windModifier, setPiece | `p2/engines-*` | paused mid-verification (see PAUSED HERE) |
 | 3 | Milestone E presets 1-10, 11-20, 21-30 (verified and committed per batch) | `p2/presets-*` | planned |
 | 4 | Milestone F discovery loop: journal, copilot tour guide, world map, seed links | `p2/discovery`, `p2/copilot-guide` | done |
 | 5 | Milestone G verification: ?test=spawns, ?test=determinism, ?test=terrain, 10-minute soak; docs/spawns.md with the preset template, architecture, controls, copilot API, CHANGELOG; review and fixes; tag `v2-phase2` | `p2/verify` | planned |
@@ -64,9 +64,36 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
   - docs/copilot-api.md.
 - Verified on the merged tree: labs discovery 39/39, copilot 225/225, settings, input, storage, spawns and director all pass; build:single; built V2 smoke on WebGPU and WebGL2 with 0 errors and 0 warnings.
 
-## Next
+## PAUSED HERE (resume from this section)
 
-- Wave 2: the ten engines on `p2/engines-*`, registered through `SPAWN_ENGINE_FACTORIES` in src/main.js and tested with preset-like objects through `ctx.systems.spawns.debug` (see docs/architecture.md, "Spawns").
+Paused on purpose: the owner ran low on the usage budget. Everything below is committed and pushed, or saved on disk in the worktrees, so nothing is lost.
+
+**Wave 2 (the ten engines) was stopped mid-verification.** Each pair has its own branch (pushed to origin) and a worktree under `.claude/worktrees/`, with node_modules linked as a junction:
+
+| Branch | Worktree | Committed | Left uncommitted in the worktree |
+| --- | --- | --- | --- |
+| `p2/engines-vortex-wind` | `p2-e-vortex` | 12 commits: vortex and windModifier engines, turbulence camera shake and cockpit rattle, wind engines lab | untracked `tools/steps/engine-vortex.json`, `tools/steps/engine-windModifier.json` |
+| `p2/engines-emitter-light` | `p2-e-emitter` | 3 commits: emitter engine (GPU particles on both backends), lightEffect engine, sky flash modifier | nothing (docs and step files not written yet) |
+| `p2/engines-weather-celestial` | `p2-e-weather` | 8 commits: weatherVolume and celestial engines, registration, step files, docs | edits to `docs/engines/celestial.md`, `docs/engines/weatherVolume.md` and `src/render/clouds.js` (storm cloud tint) |
+| `p2/engines-fauna-water` | `p2-e-fauna` | 7 commits: fauna and waterEffect engines, whirlpool and bay glow, formation tuning, step files | edits to `src/spawns/engines/faunaEngine.js` and `tools/steps/engine-fauna.json` |
+| `p2/engines-structure-setpiece` | `p2-e-structure` | 10 commits: structure and setPiece engines, set-piece lab and timeline kit, `?test=sites`, narration via copilot chatter | nothing |
+
+**How to resume:**
+1. Read this file, docs/specs/phase2.md, docs/specs/phase2-contract.md and docs/specs/phase2-engine-api.md.
+2. Resume wave 2, one continuation engineer per pair, in its existing worktree.
+   - Each one reviews the uncommitted work above, commits what is good, then finishes its engines, docs/engines/<name>.md and tools/steps/engine-<name>.json, and verifies.
+   - The emitter-light pair has the most left: its docs, its step files, and verification.
+   - The lead's orchestration scripts are kept locally (git-ignored) in `.claude/orchestration/`: `p2-wave2.js` (wave 2 prompts), `p2-presets.js` (the 30-preset wave), `p2-common.js` (the shared engineer brief), plus the specs, the contract and the result JSONs. They were retargeted to that folder, so they still work if the session scratchpad is gone.
+3. Merge the five engine branches into `v2-phase2` and wire them with one integration engineer (the pattern is `.claude/orchestration/p2-integrate1.js`). Then verify: labs, builds, and smoke on both backends.
+4. Milestone E: launch `.claude/orchestration/p2-presets.js` (three batch engineers: presets 1-10, 11-20, 21-30) in fresh worktrees from `v2-phase2`. Merge each batch.
+5. Milestone G: ?test=spawns, ?test=determinism, ?test=terrain, the 10-minute soak (5 seeds, both views); docs/spawns.md with the preset template; architecture, controls and copilot docs; CHANGELOG; a review round; tag `v2-phase2`.
+6. Then Phase 3 (docs/specs/phase3.md, with its own docs/phase3-progress.md), then Phase 4.
+
+**Standing rules:**
+- The structure correction is the source of truth (no CLASSIC mode in V2).
+- Ignore PC load entirely: run each test once and report its numbers.
+- Before any `git worktree remove`, unlink the worktree's node_modules junction first.
+- Push with full refspecs (`refs/heads/...`), because branch and tag names repeat.
 
 ## Open issues
 
