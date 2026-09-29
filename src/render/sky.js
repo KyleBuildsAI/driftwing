@@ -556,16 +556,24 @@ export function createSkySystem(ctx) {
   // A modifier holds target values and a weight (0..1). Each frame they are folded in priority order
   // (lowest first, so a higher priority lands on top): the multipliers (sunIntensity, ambient,
   // fogDensity) multiply, darkness and overcast combine like stacked filters, stars takes the
-  // maximum, and the two tint colours composite over each other by their amounts. Every value is
-  // first eased from neutral by its modifier's weight. The tints keep the luminance of the colour
+  // maximum, flash takes the maximum (with the colour of the strongest flash), and the two tint
+  // colours composite over each other by their amounts. Every value is first eased from neutral by
+  // its modifier's weight. The tints keep the luminance of the colour
   // they tint (a storm greys a golden sky without lighting up a night one); darkness does the
-  // darkening. A modifier at weight 0 or at neutral values changes nothing, and when nothing weighs
-  // in, no modifier code touches a colour at all.
-  const MODIFIER_NEUTRAL = Object.freeze({ sunIntensity: 1, ambient: 1, fogColorAmount: 0, fogDensity: 1, skyTintAmount: 0, darkness: 0, stars: 0, overcast: 0 });
+  // darkening. flash is the one brightening: a lightning strike ADDS its colour to the sky palette
+  // (and so to the fog colour) and lifts the hemisphere light for an instant. A modifier at weight 0
+  // or at neutral values changes nothing, and when nothing weighs in, no modifier code touches a
+  // colour at all.
+  const MODIFIER_NEUTRAL = Object.freeze({ sunIntensity: 1, ambient: 1, fogColorAmount: 0, fogDensity: 1, skyTintAmount: 0, darkness: 0, stars: 0, overcast: 0, flash: 0 });
   const MODIFIER_SCALAR_FIELDS = Object.keys(MODIFIER_NEUTRAL);
   const MODIFIER_LIMITS = Object.freeze({
     sunIntensity: [0, 4], ambient: [0, 4], fogColorAmount: [0, 1], fogDensity: [0.25, 8], skyTintAmount: [0, 1], darkness: [0, 1], stars: [0, 1], overcast: [0, 1],
+    flash: [0, 1],
   });
+  /** A full flash (1) adds this much of its colour to the sky palette (display-referred), per key. */
+  const FLASH_SKY_GAIN = Object.freeze({ zenith: 0.45, horizon: 0.75, anti: 0.6, ground: 0.5 });
+  /** A full flash multiplies the hemisphere light by 1 + this. */
+  const FLASH_AMBIENT_GAIN = 3;
   const modifierList = [];
   const modifierIds = new Set();
   let modifierSerial = 0;
@@ -574,6 +582,7 @@ export function createSkySystem(ctx) {
     sunIntensity: 1, ambient: 1, fogDensity: 1, darkness: 0, stars: 0, overcast: 0,
     fogColor: new THREE.Color(), fogColorAmount: 0,
     skyTint: new THREE.Color(), skyTintAmount: 0,
+    flash: 0, flashColor: new THREE.Color(),
   };
   const tintScratch = new THREE.Color();
 
@@ -591,6 +600,12 @@ export function createSkySystem(ctx) {
   function modifySkyColor(target) {
     applyTint(target, combined.skyTint, combined.skyTintAmount);
     return target.multiplyScalar(1 - combined.darkness);
+  }
+  /** Adds the combined flash's colour to a display-referred sky colour, scaled by gain. */
+  function addFlash(target, gain) {
+    const amount = combined.flash * gain;
+    const color = combined.flashColor;
+    target.setRGB(target.r + color.r * amount, target.g + color.g * amount, target.b + color.b * amount);
   }
   /** Over-composites a tint colour of amount onto the running (color, amount) of the combined record. */
   function compositeTint(colorKey, amountKey, color, amount) {
@@ -615,6 +630,7 @@ export function createSkySystem(ctx) {
     combined.skyTintAmount = 0;
     combined.fogColor.setRGB(0, 0, 0);
     combined.skyTint.setRGB(0, 0, 0);
+    combined.flash = 0;
     let active = false;
     for (let index = 0; index < modifierList.length; index++) {
       const modifier = modifierList[index];
@@ -627,6 +643,10 @@ export function createSkySystem(ctx) {
       combined.darkness = 1 - (1 - combined.darkness) * (1 - values.darkness * weight);
       combined.overcast = 1 - (1 - combined.overcast) * (1 - values.overcast * weight);
       combined.stars = Math.max(combined.stars, values.stars * weight);
+      if (values.flash * weight > combined.flash) {
+        combined.flash = values.flash * weight;
+        combined.flashColor.copy(modifier.flashColor);
+      }
       compositeTint('fogColor', 'fogColorAmount', modifier.fogColor, values.fogColorAmount * weight);
       compositeTint('skyTint', 'skyTintAmount', modifier.skyTint, values.skyTintAmount * weight);
       active = true;
@@ -635,6 +655,7 @@ export function createSkySystem(ctx) {
     combined.active = active && (
       combined.sunIntensity !== 1 || combined.ambient !== 1 || combined.fogDensity !== 1 || combined.darkness !== 0
       || combined.stars !== 0 || combined.overcast !== 0 || combined.fogColorAmount !== 0 || combined.skyTintAmount !== 0
+      || combined.flash !== 0
     );
   }
 
@@ -646,11 +667,13 @@ export function createSkySystem(ctx) {
 
   /**
    * Adds a sky modifier. Returns a handle: set(values) updates any of { sunIntensity, ambient,
-   * fogColor, fogColorAmount, fogDensity, skyTint, skyTintAmount, darkness, stars, overcast, weight }
+   * fogColor, fogColorAmount, fogDensity, skyTint, skyTintAmount, darkness, stars, overcast, flash,
+   * flashColor, weight }
    * (fields left out keep their value; colours are a THREE.Color or 0xRRGGBB), and remove() takes it
    * away. sunIntensity, ambient and fogDensity are multipliers (1 = unchanged); darkness dims the sky
    * and every light; overcast hides the sun disc, god rays, moon and stars behind cloud; stars raises
-   * the star field (an eclipse); weight (default 1) eases the whole modifier in and out.
+   * the star field (an eclipse); flash (0..1) adds flashColor (default a cold white) to the sky and
+   * the ambient light for a lightning strike; weight (default 1) eases the whole modifier in and out.
    */
   function addModifier(id, { priority = 0 } = {}) {
     if (typeof id !== 'string' || !id) throw new TypeError('sky.addModifier expects a string id');
@@ -664,6 +687,7 @@ export function createSkySystem(ctx) {
       values: { ...MODIFIER_NEUTRAL },
       fogColor: new THREE.Color(1, 1, 1),
       skyTint: new THREE.Color(1, 1, 1),
+      flashColor: new THREE.Color(0.82, 0.88, 1),
     };
     modifierIds.add(id);
     modifierList.push(modifier);
@@ -688,6 +712,7 @@ export function createSkySystem(ctx) {
         }
         if (values.fogColor !== undefined) readColor(values.fogColor, modifier.fogColor, 'fogColor', id);
         if (values.skyTint !== undefined) readColor(values.skyTint, modifier.skyTint, 'skyTint', id);
+        if (values.flashColor !== undefined) readColor(values.flashColor, modifier.flashColor, 'flashColor', id);
         return this;
       },
       remove() {
@@ -756,6 +781,12 @@ export function createSkySystem(ctx) {
       modifySkyColor(scratch.horizon);
       modifySkyColor(scratch.anti);
       modifySkyColor(scratch.ground);
+      if (combined.flash > 0) {
+        addFlash(scratch.zenith, FLASH_SKY_GAIN.zenith);
+        addFlash(scratch.horizon, FLASH_SKY_GAIN.horizon);
+        addFlash(scratch.anti, FLASH_SKY_GAIN.anti);
+        addFlash(scratch.ground, FLASH_SKY_GAIN.ground);
+      }
     }
     uniforms.skyZenithColor.value.copy(scratch.zenith);
     uniforms.skyHorizonColor.value.copy(scratch.horizon);
@@ -896,7 +927,7 @@ export function createSkySystem(ctx) {
       const dim = 1 - combined.darkness;
       sunLight.intensity *= combined.sunIntensity * dim;
       moonLight.intensity *= (1 - combined.overcast) * dim;
-      hemisphereLight.intensity *= combined.ambient * dim;
+      hemisphereLight.intensity *= combined.ambient * dim * (1 + combined.flash * FLASH_AMBIENT_GAIN);
     }
   }
 
@@ -1088,6 +1119,8 @@ export function createSkySystem(ctx) {
         fogColorAmount: combined.fogColorAmount,
         skyTint: `#${combined.skyTint.getHexString()}`,
         skyTintAmount: combined.skyTintAmount,
+        flash: combined.flash,
+        flashColor: `#${combined.flashColor.getHexString()}`,
       };
     },
   };
