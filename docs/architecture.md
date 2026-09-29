@@ -1014,11 +1014,11 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   despawn.hysteresis` after `despawn.outOfViewSeconds` out of view (`despawn`). Debug spawns follow
   only the first two.
 - **Discovery.** A spawn within `discovery.radius` that is in view (inside the camera's view cone,
-  the frustum's four side planes, at any distance; and not hidden by terrain along the sight line to
-  the middle of its lure or body, 10 samples) emits the typed `discovery` once per site id or event
-  preset per world. `markDiscovered(keys)`, `isDiscovered(key)` and `getDiscovered()` let the
+  the frustum's four side planes, at any distance; and not hidden by visible terrain: the sight line
+  to the middle of its lure or body is sampled 10 times out to the fog's far distance) emits the
+  typed `discovery` once per site id or event preset per world. `markDiscovered(keys)`, `isDiscovered(key)` and `getDiscovered()` let the
   journal restore and read it. Visibility checks run round-robin, 2 a frame, only for spawns that
-  still need one, and at most every 12 frames per spawn.
+  still need one, and at most every 30 frames per spawn.
 - **Real lights** (`lightPool.js`). The pool holds as many PointLights as the registered engines
   declare in `budget.lights`, capped at 4 (`MAX_REAL_LIGHTS`), sized when the manager starts behind
   the loading fade (an engine registered later grows it). Its lights stay in the scene for the whole
