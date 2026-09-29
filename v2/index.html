@@ -103,6 +103,7 @@
       <symbol id="dw-i-settings" viewBox="0 0 24 24"><path d="M10.37 4.58L10.75 2.08L13.25 2.08L13.63 4.58A7.6 7.6 0 0 1 16.10 5.60L18.13 4.10L19.90 5.87L18.40 7.90A7.6 7.6 0 0 1 19.42 10.37L21.92 10.75L21.92 13.25L19.42 13.63A7.6 7.6 0 0 1 18.40 16.10L19.90 18.13L18.13 19.90L16.10 18.40A7.6 7.6 0 0 1 13.63 19.42L13.25 21.92L10.75 21.92L10.37 19.42A7.6 7.6 0 0 1 7.90 18.40L5.87 19.90L4.10 18.13L5.60 16.10A7.6 7.6 0 0 1 4.58 13.63L2.08 13.25L2.08 10.75L4.58 10.37A7.6 7.6 0 0 1 5.60 7.90L4.10 5.87L5.87 4.10L7.90 5.60A7.6 7.6 0 0 1 10.37 4.58Z"/><circle cx="12" cy="12" r="3"/></symbol>
       <symbol id="dw-i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.8"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.9.7c0 1.8-2.5 2.1-2.5 3.8"/><circle fill="currentColor" stroke="none" cx="12" cy="16.9" r="0.9"/></symbol>
       <symbol id="dw-i-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+      <symbol id="dw-i-map" viewBox="0 0 24 24"><path d="M3.5 6.2l5.4-2.1 6.2 2.1 5.4-2.1v13.7l-5.4 2.1-6.2-2.1-5.4 2.1z"/><path d="M8.9 4.1v13.7M15.1 6.2v13.7"/></symbol>
       <symbol id="dw-i-link" viewBox="0 0 24 24"><path d="M10.2 13.8a3.9 3.9 0 0 0 5.5 0l3-3a3.9 3.9 0 0 0-5.5-5.5l-1.1 1.1"/><path d="M13.8 10.2a3.9 3.9 0 0 0-5.5 0l-3 3a3.9 3.9 0 0 0 5.5 5.5l1.1-1.1"/></symbol>
       <symbol id="dw-i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M3.6 12h16.8M12 3.4c2.3 2.3 3.5 5.2 3.5 8.6s-1.2 6.3-3.5 8.6c-2.3-2.3-3.5-5.2-3.5-8.6s1.2-6.3 3.5-8.6z"/></symbol>
       <symbol id="dw-i-camera" viewBox="0 0 24 24"><path d="M4 8.4h3.1l1.6-2.5h6.6l1.6 2.5H20v10.2H4z"/><circle cx="12" cy="13.3" r="3.3"/></symbol>
@@ -186,6 +187,7 @@
 
     <div class="dw-topbar glass dw-fade" id="dw-topbar">
       <button type="button" class="dw-icon-button" data-action="open-command" id="dw-command-button" aria-label="Ask WREN" data-tip="Ask WREN (Enter)" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-ask"/></svg></button>
+      <button type="button" class="dw-icon-button" data-action="toggle-map" id="dw-map-button" aria-label="World map" data-tip="World map (M)" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-map"/></svg></button>
       <button type="button" class="dw-icon-button" data-action="toggle-journal" id="dw-journal-button" aria-label="Journal" data-tip="Journal (J)" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-journal"/></svg></button>
       <button type="button" class="dw-icon-button" data-action="toggle-settings" id="dw-settings-button" aria-label="Settings" data-tip="Settings" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-settings"/></svg></button>
       <button type="button" class="dw-icon-button" data-action="toggle-help" id="dw-help-button" aria-label="Help" data-tip="Help (H)" data-tip-pos="bottom-left"><svg class="dw-icon"><use href="#dw-i-help"/></svg></button>
@@ -224,14 +226,14 @@
     <div class="dw-corner dw-fade" id="dw-corner">
       <div class="dw-seed glass" id="dw-seed">
         <div class="dw-seed-text"><span class="dw-micro">Seed</span><span class="dw-seed-value" id="dw-seed-value">------</span></div>
-        <button type="button" class="dw-icon-button dw-small" data-action="copy-link" aria-label="Copy share link" data-tip="Copy share link" data-tip-pos="top"><svg class="dw-icon"><use href="#dw-i-link"/></svg></button>
+        <button type="button" class="dw-text-button" data-action="copy-link" aria-label="Copy a link to this world" data-tip="Opens this world at this time of day" data-tip-pos="top"><svg class="dw-icon"><use href="#dw-i-link"/></svg><span>Copy link</span></button>
         <button type="button" class="dw-text-button" id="dw-new-world" data-action="new-world" aria-label="Start a new world"><svg class="dw-icon"><use href="#dw-i-globe"/></svg><span id="dw-new-world-label">New world</span></button>
       </div>
     </div>
   </div>
 
   <!-- Mic: shared between desktop corner and touch cluster -->
-  <button type="button" class="dw-mic glass dw-fade" id="dw-mic" data-action="mic" data-state="idle" aria-label="Talk to WREN (M)" data-tip="Talk to WREN (M)" data-tip-pos="top-left">
+  <button type="button" class="dw-mic glass dw-fade" id="dw-mic" data-action="mic" data-state="idle" aria-label="Talk to WREN (Shift+M)" data-tip="Talk to WREN (Shift+M)" data-tip-pos="top-left">
     <span class="dw-mic-pulse"></span>
     <span class="dw-mic-spinner"></span>
     <svg class="dw-icon"><use href="#dw-i-mic"/></svg>
@@ -303,7 +305,7 @@
     </div>
     <form class="dw-command-form" id="dw-command-form" autocomplete="off">
       <input class="dw-command-input" id="dw-command-input" type="text" maxlength="200" placeholder="Ask WREN..." aria-label="Message to WREN" spellcheck="false" enterkeyhint="send">
-      <button type="button" class="dw-icon-button dw-command-mic" id="dw-command-mic" data-action="mic" aria-label="Speak instead (M)"><svg class="dw-icon"><use href="#dw-i-mic"/></svg></button>
+      <button type="button" class="dw-icon-button dw-command-mic" id="dw-command-mic" data-action="mic" aria-label="Speak instead (Shift+M)"><svg class="dw-icon"><use href="#dw-i-mic"/></svg></button>
       <button type="submit" class="dw-icon-button dw-send" aria-label="Send"><svg class="dw-icon"><use href="#dw-i-send"/></svg></button>
     </form>
   </div>
@@ -517,6 +519,8 @@
         </div>
         <div class="dw-group">
           <h3 class="dw-micro">World</h3>
+          <div class="dw-row"><span>This world</span><span class="dw-seed-current"><span class="dw-row-value" id="dw-seed-current">------</span><button type="button" class="dw-text-button" data-action="copy-link"><svg class="dw-icon"><use href="#dw-i-link"/></svg><span>Copy link</span></button></span></div>
+          <p class="dw-note">The link opens this world at this time of day, in the launcher with V2. The world you fly is remembered for next time.</p>
           <form class="dw-field dw-seed-form" id="dw-seed-form" autocomplete="off">
             <label class="dw-field-label" for="dw-seed-input">Fly a specific seed</label>
             <div class="dw-inline">
@@ -617,13 +621,16 @@
     <div class="dw-panel-body">
       <div class="dw-menu-grid">
         <button type="button" class="dw-menu-item" data-action="open-command"><svg class="dw-icon"><use href="#dw-i-ask"/></svg><span>Ask WREN</span></button>
+        <button type="button" class="dw-menu-item" data-action="toggle-map"><svg class="dw-icon"><use href="#dw-i-map"/></svg><span>Map</span></button>
         <button type="button" class="dw-menu-item" data-action="toggle-journal"><svg class="dw-icon"><use href="#dw-i-journal"/></svg><span>Journal</span></button>
         <button type="button" class="dw-menu-item" data-action="photo-mode"><svg class="dw-icon"><use href="#dw-i-camera"/></svg><span>Photo mode</span></button>
         <button type="button" class="dw-menu-item" data-action="toggle-settings"><svg class="dw-icon"><use href="#dw-i-settings"/></svg><span>Settings</span></button>
         <button type="button" class="dw-menu-item" data-action="toggle-help"><svg class="dw-icon"><use href="#dw-i-help"/></svg><span>Help</span></button>
-        <button type="button" class="dw-menu-item" data-action="copy-link"><svg class="dw-icon"><use href="#dw-i-link"/></svg><span>Share world</span></button>
       </div>
-      <button type="button" class="dw-text-button dw-wide" data-action="new-world" id="dw-menu-new-world"><svg class="dw-icon"><use href="#dw-i-globe"/></svg><span>New world</span></button>
+      <div class="dw-menu-row">
+        <button type="button" class="dw-text-button dw-wide" data-action="copy-link"><svg class="dw-icon"><use href="#dw-i-link"/></svg><span>Copy link</span></button>
+        <button type="button" class="dw-text-button dw-wide" data-action="new-world" id="dw-menu-new-world"><svg class="dw-icon"><use href="#dw-i-globe"/></svg><span>New world</span></button>
+      </div>
     </div>
   </section>
 

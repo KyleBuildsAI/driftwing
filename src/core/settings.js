@@ -10,6 +10,7 @@
 // (driftwing-v2.input.bindings, driftwing-v2.input.calibration.<device>) so a device profile can be
 // exported on its own.
 import { CONFIG } from './config.js';
+import { SEED_PATTERN } from './seed.js';
 import { storage } from './storage.js';
 
 export const SETTINGS_VERSION = 5;
@@ -100,6 +101,10 @@ const SCHEMA = Object.freeze({
     default: Object.freeze({ master: 0.7, engine: 0.9, environment: 0.85, ui: 0.8, copilot: 1, music: 0.7 }),
     fields: Object.fromEntries(MIXER_BUSES.map((bus) => [bus, unitRange(0, 1)])),
   },
+
+  // v2: the world. seed: the world flown last ('' before the first flight); a link or ?seed= wins over
+  // it at boot (src/core/seed.js), and every boot writes the world it opened back here.
+  seed: { default: '', validate: (value) => value === '' || (typeof value === 'string' && SEED_PATTERN.test(value)) },
 
   // v2: developer aids.
   devBadge: { default: false, validate: isBoolean },

@@ -21,6 +21,8 @@ export const LANDING_GRADES = Object.freeze(['butter', 'smooth', 'firm', 'hard']
 export const SPAWN_KINDS = Object.freeze(['site', 'event']);
 /** The regional weather cycle, in order (src/spawns/weather.js). */
 export const WEATHER_STATES = Object.freeze(['clear', 'building', 'storm', 'clearing']);
+/** How a journalStat value folds into its record. */
+export const JOURNAL_STAT_OPS = Object.freeze(['min', 'max', 'add']);
 
 /**
  * Event name -> payload fields. A field is a FIELD_CHECKS type name, an array of allowed values, or
@@ -59,6 +61,12 @@ export const EVENT_TYPES = Object.freeze({
   weatherChanged: { state: WEATHER_STATES, previous: WEATHER_STATES, region: 'string' },
   /** An achievement was earned (V-formation, Thread the Needle, ...). */
   achievement: { id: 'string', title: 'string' },
+  /**
+   * A journal statistic from a preset or an engine (src/gameplay/journal.js keeps the global records).
+   * op says how value folds into the record: 'add' sums (stormsChased, value 1), 'min' keeps the
+   * lowest (closestTornado in metres, bestCanyonRun in seconds for clean runs only), 'max' the highest.
+   */
+  journalStat: { key: 'string', value: 'number', op: JOURNAL_STAT_OPS, presetId: { type: 'string', optional: true } },
 });
 
 function describeFailure(type, payload) {

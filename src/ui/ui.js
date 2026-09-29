@@ -5,7 +5,11 @@ import { Copilot } from '../copilot/copilot.js';
 import { storage } from '../core/storage.js';
 import { createControlsPanel } from './controlsPanel.js';
 import { createCraftPicker } from './craftPicker.js';
+import { createDiscoveryToast } from './discoveryToast.js';
+import { createJournalPanel } from './journalPanel.js';
+import { createSeedLinks } from './seedLinks.js';
 import { createSettingsPanel } from './settingsPanel.js';
+import { createWorldMap } from './worldMap.js';
 import { createStatusBadge } from '../dev/statusBadge.js';
 import { unitsFor } from './instruments/units.js';
 
@@ -36,15 +40,14 @@ export function createUISystem(ctx) {
     sunset: 'sunset', dusk: 'dusk', night: 'night', midnight: 'midnight',
   };
   const TIME_CYCLE = ['dawn', 'noon', 'golden', 'night'];
-  const LANDING_GRADE_LABELS = { butter: 'Butter', smooth: 'Smooth', firm: 'Firm', hard: 'Hard' };
   const TOAST_KINDS = new Set(['info', 'success', 'warning']);
   const MIC_STATES = new Set(['idle', 'listening', 'thinking', 'unsupported', 'error']);
   const MIC_TIPS = {
-    idle: 'Talk to WREN (M)',
-    listening: 'Listening. Press M to stop',
+    idle: 'Talk to WREN (Shift+M)',
+    listening: 'Listening. Press Shift+M to stop',
     thinking: 'WREN is thinking',
     unsupported: 'Voice input is not available in this browser. Press Enter to type to WREN',
-    error: 'Voice input hit a snag. Press M to try again',
+    error: 'Voice input hit a snag. Press Shift+M to try again',
   };
   const MIC_TIPS_TOUCH = {
     idle: 'Talk to WREN',
@@ -54,7 +57,6 @@ export function createUISystem(ctx) {
     error: 'Voice input hit a snag. Tap to try again',
   };
   const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-  const SEED_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const FIRST_RUN_KEY = 'driftwing-v2.ui.firstRunHintSeen';
   const MAX_TOASTS = 2;
   // Toasts raised in photo mode wait for the exit; older ones are no longer news.
@@ -184,7 +186,10 @@ export function createUISystem(ctx) {
     photoHint: requireElement('dw-photo-hint'),
     flash: requireElement('dw-flash'),
   };
+  // The world map builds its own panel element (src/ui/worldMap.js).
+  const worldMap = createWorldMap({ root, ctx, toast });
   const panels = {
+    map: worldMap.element,
     journal: requireElement('dw-panel-journal'),
     settings: requireElement('dw-panel-settings'),
     controls: requireElement('dw-panel-controls'),
@@ -192,6 +197,7 @@ export function createUISystem(ctx) {
     menu: requireElement('dw-panel-menu'),
   };
   const panelButtons = {
+    map: requireElement('dw-map-button'),
     journal: requireElement('dw-journal-button'),
     settings: requireElement('dw-settings-button'),
     help: requireElement('dw-help-button'),
@@ -223,7 +229,6 @@ export function createUISystem(ctx) {
   let lastAutopilotEnabled = Boolean(state.player.autopilot && state.player.autopilot.enabled);
   let lastTimePreset = null;
   let lastTimePresetAt = -Infinity;
-  let journalStatsTimer = 0;
   let landmarkRefreshTimer = 0;
   let debugTimer = 0;
   let autopilotDetailTimer = 0;
@@ -258,7 +263,6 @@ export function createUISystem(ctx) {
   const photoState = { metaText: '', statusText: '', statusUntil: 0, statusShown: false, refreshTimer: 0, targetLabel: '', targetUntil: 0 };
   const commandHistory = [];
   let commandHistoryIndex = -1;
-  const journalStatElements = { distance: null, time: null, altitude: null, landmarks: null };
   const nearbyLandmarks = [];
 
   const targetWorld = new T.Vector3();
@@ -318,18 +322,6 @@ export function createUISystem(ctx) {
     if (number >= 1e6) return `${(number / 1e6).toFixed(2)}M`;
     if (number >= 1e4) return `${(number / 1e3).toFixed(1)}k`;
     return String(Math.round(number));
-  }
-  function durationParts(seconds) {
-    const safe = Math.max(0, Number(seconds) || 0);
-    if (safe < 60) return [String(Math.floor(safe)), 's'];
-    if (safe < 3600) return [String(Math.floor(safe / 60)), 'min'];
-    const hours = Math.floor(safe / 3600);
-    return [`${hours}:${padNumber(Math.floor((safe - hours * 3600) / 60), 2)}`, 'h'];
-  }
-  function distanceParts(metres) {
-    const safe = Math.max(0, Number(metres) || 0);
-    if (safe < 1000) return [String(Math.round(safe)), 'm'];
-    return [safe < 100000 ? (safe / 1000).toFixed(1) : String(Math.round(safe / 1000)), 'km'];
   }
   function biomeNameFor(value) {
     if (Number.isInteger(value) && world.BIOMES[value]) return world.BIOMES[value].name;
@@ -1128,10 +1120,11 @@ export function createUISystem(ctx) {
     { targets: ['craftPrev', 'craftNext'], text: 'Previous / next craft' },
     { targets: ['versionToggle'], text: 'Switch to V1, the original game' },
     { keys: [['Enter'], ['/']], text: 'Ask WREN' },
-    { keys: [['M']], text: 'Talk to WREN' },
+    { keys: [['Shift', 'M']], text: 'Talk to WREN' },
     { targets: ['copilotPTT'], text: 'Push to talk to WREN (hold)' },
     { targets: ['photoMode'], html: 'Photo mode (<kbd>K</kbd> captures)' },
     { targets: ['journal'], text: 'Journal' },
+    { targets: ['mapToggle'], text: 'World map' },
     { targets: ['settings'], text: 'Settings' },
     { targets: ['controlsPanel'], text: 'Controls: bindings and calibration' },
     { keys: [['H'], ['?']], text: 'This help' },
@@ -1686,57 +1679,9 @@ export function createUISystem(ctx) {
   }
 
   // ---------------------------------------------------------------------------
-  // Seed chip: share link and new world
+  // Seed chip: share link and new world (src/ui/seedLinks.js)
   // ---------------------------------------------------------------------------
-  /** Share links open V2 through the launcher shell (/?v=2), which forwards #seed= to V2. */
-  function shareUrl() {
-    const url = new URL('/', window.location.origin);
-    url.searchParams.set('v', '2');
-    url.hash = new URLSearchParams({ seed: state.seed }).toString();
-    return url.toString();
-  }
-  function copyWithSelection(text) {
-    const area = document.createElement('textarea');
-    area.value = text;
-    area.setAttribute('readonly', '');
-    area.style.cssText = 'position:fixed;top:-200px;left:0;width:10px;height:10px;opacity:0;';
-    document.body.append(area);
-    area.select();
-    let copied = false;
-    try {
-      copied = document.execCommand('copy');
-    } catch (error) {
-      copied = false;
-    }
-    area.remove();
-    return copied;
-  }
-  function writeClipboard(text) {
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function' && window.isSecureContext) {
-      return navigator.clipboard.writeText(text).then(
-        () => true,
-        () => copyWithSelection(text),
-      );
-    }
-    return Promise.resolve(copyWithSelection(text));
-  }
-  function copyShareLink() {
-    const link = shareUrl();
-    writeClipboard(link).then((copied) => {
-      if (copied) toast('Share link copied. Anyone who opens it flies this same world.', { kind: 'success' });
-      else toast(`Share this world: ${link}`, { duration: 10, wrap: true });
-    });
-  }
-  function randomSeed() {
-    const bytes = new Uint8Array(6);
-    crypto.getRandomValues(bytes);
-    return Array.from(bytes, (byte) => SEED_ALPHABET[byte % SEED_ALPHABET.length]).join('');
-  }
-  function navigateToSeed(seed) {
-    const url = new URL(window.location.href);
-    url.searchParams.set('seed', seed.toUpperCase());
-    window.location.assign(url.toString());
-  }
+  const seedLinks = createSeedLinks({ ctx, toast });
   function setNewWorldConfirm(active) {
     dom.newWorld.classList.toggle('dw-confirm', active);
     dom.menuNewWorld.classList.toggle('dw-confirm', active);
@@ -1747,7 +1692,7 @@ export function createUISystem(ctx) {
   function requestNewWorld() {
     if (newWorldConfirmUntil && uiClock < newWorldConfirmUntil) {
       newWorldConfirmUntil = 0;
-      navigateToSeed(randomSeed());
+      seedLinks.newWorld();
       return;
     }
     newWorldConfirmUntil = uiClock + 3.2;
@@ -1829,10 +1774,11 @@ export function createUISystem(ctx) {
     const next = name && panels[name] ? name : null;
     if (next && photoActive) return false;
     if (next === activePanel) {
-      if (next === 'journal') renderJournal();
+      if (next === 'journal') journalPanel.render();
       return true;
     }
     if (activePanel === 'controls') controlsPanel.onClose();
+    if (activePanel === 'map') worldMap.onClose();
     for (const [panelName, panel] of Object.entries(panels)) {
       const open = panelName === next;
       if (!open) releaseFocusWithin(panel);
@@ -1846,15 +1792,15 @@ export function createUISystem(ctx) {
     if (next) {
       if (touchMode && commandOpen) closeCommandBar();
       releasePointerLock();
-      if (next === 'journal') renderJournal();
+      if (next === 'journal') journalPanel.render();
       if (next === 'settings') settingsPanel.syncAll();
       if (next === 'controls') controlsPanel.onOpen();
+      if (next === 'map') worldMap.onOpen();
       if (next === 'help') {
         wireHelpBindings();
         renderHelp();
       }
       if (next === 'menu') dom.menuSeed.textContent = `Seed ${state.seed}`;
-      journalStatsTimer = 2;
       playBlip();
       wake();
     }
@@ -1875,141 +1821,12 @@ export function createUISystem(ctx) {
     return true;
   }
 
-  // ---- Journal ------------------------------------------------------------------
-  function statCard(label, parts, statKey) {
-    return `<div class="dw-stat"><span class="dw-micro">${escapeHtml(label)}</span><span class="dw-stat-value" data-stat="${statKey}">${escapeHtml(parts[0])}<small>${escapeHtml(parts[1])}</small></span></div>`;
-  }
-  function journalStatParts(data) {
-    const landmarks = Array.isArray(data.landmarksFound) ? data.landmarksFound.length : 0;
-    return {
-      distance: distanceParts(data.distanceFlown),
-      time: durationParts(data.flightTime),
-      altitude: [String(Math.round(Math.max(0, Number(data.maxAltitude) || 0))), 'm'],
-      landmarks: [String(landmarks), landmarks === 1 ? 'landmark' : 'landmarks'],
-    };
-  }
-  function renderJournal() {
-    dom.journalSeed.textContent = `Seed ${state.seed}`;
-    const data = ctx.systems.journal?.getData?.();
-    if (!data || typeof data !== 'object') {
-      dom.journalBody.innerHTML = '<p class="dw-empty">The journal is not available in this session.</p>';
-      journalStatElements.distance = null;
-      return;
-    }
-    const visited = new Set(Array.isArray(data.biomesVisited) ? data.biomesVisited : []);
-    const currentKey = state.player.biome ? state.player.biome.key : null;
-    const landmarks = Array.isArray(data.landmarksFound) ? data.landmarksFound : [];
-    const ringData = data.ringCourses && typeof data.ringCourses === 'object'
-      ? data.ringCourses
-      : { completed: 0, bestStreak: data.bestRingStreak, bestTime: data.bestRingTime };
-    const stats = journalStatParts(data);
-    const html = [];
-    html.push('<div class="dw-stats">');
-    html.push(statCard('Distance flown', stats.distance, 'distance'));
-    html.push(statCard('Time aloft', stats.time, 'time'));
-    html.push(statCard('Highest point', stats.altitude, 'altitude'));
-    html.push(statCard('Discovered', stats.landmarks, 'landmarks'));
-    html.push('</div>');
-
-    html.push('<div class="dw-group"><h3 class="dw-micro">Biomes</h3><div class="dw-biomes">');
-    for (const biome of world.BIOMES) {
-      const here = biome.key === currentKey;
-      const seen = here || visited.has(biome.key);
-      const swatch = (world.PALETTES_SRGB[biome.index] || []).map((hex) => `<span style="background:${hexToCss(hex)}"></span>`).join('');
-      const status = here ? 'Here now' : seen ? 'Visited' : 'Not yet';
-      html.push(`<div class="dw-biome${seen ? ' dw-visited' : ''}${here ? ' dw-current' : ''}"><div class="dw-swatch">${swatch}</div><span class="dw-biome-name">${escapeHtml(biome.name)}</span><span class="dw-biome-state">${status}</span></div>`);
-    }
-    html.push('</div></div>');
-
-    html.push('<div class="dw-group"><h3 class="dw-micro">Landmarks</h3>');
-    if (landmarks.length === 0) {
-      html.push('<p class="dw-empty">None yet. Stone arches, standing stones, lighthouses and balloon meets are scattered across this world. Ask WREN to find one.</p>');
-    } else {
-      html.push('<ul class="dw-landmarks">');
-      for (let index = landmarks.length - 1; index >= 0 && index >= landmarks.length - 60; index--) {
-        const landmark = landmarks[index] || {};
-        const type = LANDMARK_TYPE_LABELS[landmark.type] ? landmark.type : 'arch';
-        html.push(`<li class="dw-landmark"><span class="dw-landmark-icon"><svg class="dw-icon"><use href="#dw-i-${type}"/></svg></span><span><span class="dw-landmark-name">${escapeHtml(landmark.name || LANDMARK_TYPE_LABELS[type])}</span><br><span class="dw-landmark-meta">${escapeHtml(LANDMARK_TYPE_LABELS[type])} · ${escapeHtml(biomeNameFor(landmark.biome))}</span></span></li>`);
-      }
-      html.push('</ul>');
-    }
-    html.push('</div>');
-
-    const completed = Math.max(0, Math.round(Number(ringData.completed) || 0));
-    const bestStreak = Math.max(0, Math.round(Number(ringData.bestStreak) || 0));
-    const bestTime = Number(ringData.bestTime);
-    html.push('<div class="dw-group"><h3 class="dw-micro">Ring courses</h3><div class="dw-ring-bests">');
-    html.push(statCard('Flown', [String(completed), ''], 'rings-completed'));
-    html.push(statCard('Streak', [String(bestStreak), bestStreak === 1 ? 'ring' : 'rings'], 'rings-streak'));
-    html.push(statCard('Best', Number.isFinite(bestTime) && bestTime > 0 ? [formatRaceTime(bestTime), ''] : ['None', ''], 'rings-time'));
-    html.push('</div></div>');
-    html.push(landingsHtml(data.landings));
-
-    dom.journalBody.innerHTML = html.join('');
-    journalStatElements.distance = dom.journalBody.querySelector('[data-stat="distance"]');
-    journalStatElements.time = dom.journalBody.querySelector('[data-stat="time"]');
-    journalStatElements.altitude = dom.journalBody.querySelector('[data-stat="altitude"]');
-    journalStatElements.landmarks = dom.journalBody.querySelector('[data-stat="landmarks"]');
-  }
-  function craftNameFor(craftId) {
-    return ctx.craftRegistry.catalog.find((entry) => entry.id === craftId)?.name ?? capitalize(craftId || 'unknown craft');
-  }
-  /** Touchdown sink rate in the player's units, with the other unit alongside. */
-  function formatSinkRate(sinkRate) {
-    const feetPerMinute = Math.round((sinkRate * 196.85) / 10) * 10;
-    return settings.get('units') === 'aviation' ? `${feetPerMinute} fpm (${sinkRate.toFixed(1)} m/s)` : `${sinkRate.toFixed(1)} m/s (${feetPerMinute} fpm)`;
-  }
-  function formatGroundSpeed(metresPerSecond) {
-    return settings.get('units') === 'aviation' ? `${Math.round(metresPerSecond * 1.943844)} kt` : `${Math.round(metresPerSecond * 3.6)} km/h`;
-  }
-  function formatWhen(epochMs) {
-    if (!(epochMs > 0)) return '';
-    const seconds = (Date.now() - epochMs) / 1000;
-    if (seconds < 60) return 'just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
-    return new Date(epochMs).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-  }
-  /** Journal section for graded landings: the best one (grade, sink rate, craft, when), count and last. */
-  function landingsHtml(landings) {
-    const html = ['<div class="dw-group"><h3 class="dw-micro">Landings</h3>'];
-    const best = landings && landings.best;
-    if (!best || !LANDING_GRADE_LABELS[best.grade]) {
-      html.push('<p class="dw-empty">No graded landings yet. Every touchdown is graded butter, smooth, firm or hard, and the best one is kept here.</p></div>');
-      return html.join('');
-    }
-    const meta = [craftNameFor(best.craft), `${formatGroundSpeed(best.groundSpeed)} over the ground`, formatWhen(best.at)].filter(Boolean).join(' · ');
-    html.push(`<div class="dw-landing-best dw-grade-${best.grade}" data-landing-grade="${best.grade}"><span class="dw-landing-grade">${LANDING_GRADE_LABELS[best.grade]}</span><span class="dw-landing-detail"><span>Best landing: ${escapeHtml(formatSinkRate(best.sinkRate))} sink</span><span class="dw-landing-meta">${escapeHtml(meta)}</span></span></div>`);
-    const count = Math.max(0, Math.round(Number(landings.count) || 0));
-    const last = landings.last && LANDING_GRADE_LABELS[landings.last.grade] ? landings.last : null;
-    html.push('<div class="dw-landing-bests">');
-    html.push(statCard('Graded', [String(count), count === 1 ? 'landing' : 'landings'], 'landings-count'));
-    html.push(statCard('Last', last ? [LANDING_GRADE_LABELS[last.grade], formatSinkRate(last.sinkRate).split(' (')[0]] : ['None', ''], 'landings-last'));
-    html.push('</div></div>');
-    return html.join('');
-  }
-  function writeStat(element, parts) {
-    if (!element) return;
-    const valueNode = element.firstChild;
-    const unitNode = element.lastChild;
-    if (valueNode && valueNode.nodeType === 3 && valueNode.nodeValue !== parts[0]) valueNode.nodeValue = parts[0];
-    if (unitNode && unitNode.textContent !== parts[1]) unitNode.textContent = parts[1];
-  }
-  function updateJournalStats(realDt) {
-    journalStatsTimer -= realDt;
-    if (journalStatsTimer > 0 || !journalStatElements.distance) return;
-    journalStatsTimer = 2;
-    const data = ctx.systems.journal?.getData?.();
-    if (!data || typeof data !== 'object') return;
-    const stats = journalStatParts(data);
-    writeStat(journalStatElements.distance, stats.distance);
-    writeStat(journalStatElements.time, stats.time);
-    writeStat(journalStatElements.altitude, stats.altitude);
-    writeStat(journalStatElements.landmarks, stats.landmarks);
-  }
+  // ---- Journal (src/ui/journalPanel.js) and the discovery toast (src/ui/discoveryToast.js) ------
+  const journalPanel = createJournalPanel({ body: dom.journalBody, seedLabel: dom.journalSeed, ctx });
+  const discoveryToast = createDiscoveryToast({ root, bus, toast, onActivate: () => showPanel('journal') });
 
   // ---- Settings and controls ------------------------------------------------------
-  const settingsPanel = createSettingsPanel({ panel: panels.settings, ctx, toast, navigateToSeed });
+  const settingsPanel = createSettingsPanel({ panel: panels.settings, ctx, toast, seedLinks });
   const controlsPanel = createControlsPanel({ panel: panels.controls, ctx });
 
   // ---------------------------------------------------------------------------
@@ -2275,15 +2092,15 @@ export function createUISystem(ctx) {
   // Hotkeys and input actions
   // ---------------------------------------------------------------------------
   // Named, rebindable actions (photo mode, journal, settings, time of day, ring course, waypoints,
-  // autopilot) arrive as 'input:action' presses from the input system on any device. The keys
-  // below stay UI-only: M mic, Enter and / command, H and ? help, Escape, X clear waypoint, K capture, I fps, Shift+V voice, Tab HUD. A key the
+  // autopilot, the world map) arrive as 'input:action' presses from the input system on any device. The keys
+  // below stay UI-only: Shift+M mic, Enter and / command, H and ? help, Escape, X clear waypoint, K capture, I fps, Shift+V voice, Tab HUD. A key the
   // player has bound to an action belongs to that action (input.consumesKey).
   const PHOTO_MODE_HOTKEYS = new Set(['escape', 'capture', 'fps', 'voice', 'mic']);
   const PHOTO_MODE_ACTIONS = new Set(['photoMode', 'timeForward', 'timeBack']);
   const TIME_PRESET_SUN = { dawn: [-4, false], golden: [8, true], night: [-35, true] };
   function resolveHotkey(event) {
     switch (event.code) {
-      case 'KeyM': return 'mic';
+      case 'KeyM': return event.shiftKey ? 'mic' : null;
       case 'Enter':
       case 'NumpadEnter': return 'command';
       case 'KeyH': return 'help';
@@ -2372,6 +2189,7 @@ export function createUISystem(ctx) {
     switch (actionId) {
       case 'photoMode': togglePhotoMode(!state.photoMode); break;
       case 'journal': togglePanel('journal'); break;
+      case 'mapToggle': togglePanel('map'); break;
       case 'settings': togglePanel('settings'); break;
       case 'controlsPanel': togglePanel('controls'); break;
       case 'timeForward': cycleTimePreset(); break;
@@ -2415,13 +2233,14 @@ export function createUISystem(ctx) {
     switch (name) {
       case 'open-command': openCommandBar(); break;
       case 'toggle-journal': togglePanel('journal'); break;
+      case 'toggle-map': togglePanel('map'); break;
       case 'toggle-settings': togglePanel('settings'); break;
       case 'toggle-help': togglePanel('help'); break;
       case 'open-controls': openControls(); break;
       case 'calibrate-controls': openControls({ calibrate: true }); break;
       case 'open-menu': togglePanel('menu'); break;
       case 'close-panel': showPanel(null); break;
-      case 'copy-link': copyShareLink(); break;
+      case 'copy-link': seedLinks.copyLink(); break;
       case 'new-world': requestNewWorld(); break;
       case 'mic':
         closeCommandBar();
@@ -2512,7 +2331,7 @@ export function createUISystem(ctx) {
     const biomeName = biomeNameFor(Number.isInteger(site.biome) ? site.biome : site.biomeKey);
     queueBanner({ label: 'Discovered', title: payload.name || typeLabel, detail: `${typeLabel} · ${biomeName}`, paletteIndex: biomeIndexFor(Number.isInteger(site.biome) ? site.biome : site.biomeKey), duration: 4.8 });
     landmarkRefreshTimer = 0;
-    if (activePanel === 'journal') renderJournal();
+    if (activePanel === 'journal') journalPanel.render();
   });
   bus.on('landmark:threaded', (payload) => {
     toast(payload && payload.name ? `Threaded ${payload.name}` : 'Threaded the arch', { kind: 'success' });
@@ -2559,7 +2378,7 @@ export function createUISystem(ctx) {
     const total = Math.round(Number(payload.total) || 0);
     const bestStreak = Math.round(Number(payload.bestStreak) || 0);
     queueBanner({ label: 'Course complete', title: `${passed} of ${total} rings`, detail: `${formatRaceTime(payload.time)} · best streak ${bestStreak}`, duration: 5.2 });
-    if (activePanel === 'journal') renderJournal();
+    if (activePanel === 'journal') journalPanel.render();
   });
   bus.on('rings:cancelled', () => toast('Ring course cancelled', { key: 'rings' }));
   bus.on('time:changed', (payload) => {
@@ -2574,8 +2393,9 @@ export function createUISystem(ctx) {
     if (photoActive) renderPhotoMeta();
     wake();
   });
-  bus.on('journal:changed', () => {
-    if (activePanel === 'journal') renderJournal();
+  // The live totals refresh on their own (journalPanel.update); every other change re-renders.
+  bus.on('journal:changed', (payload) => {
+    if (activePanel === 'journal' && payload?.reason !== 'stats') journalPanel.render();
   });
   bus.on('screenshot:taken', () => {
     playShutterFlash();
@@ -2587,7 +2407,7 @@ export function createUISystem(ctx) {
     if (payload.key === 'hudAutoHide' && !payload.value) wake();
     if (payload.key === 'units') {
       displayUnits = unitsFor(payload.value);
-      if (activePanel === 'journal') renderJournal();
+      if (activePanel === 'journal') journalPanel.render();
     }
   });
   bus.onTyped('craftChanged', () => {
@@ -2703,7 +2523,10 @@ export function createUISystem(ctx) {
     updateDebugBadge(step);
     statusBadge.update(step, photoActive);
     craftPicker.update(step);
-    if (activePanel === 'journal') updateJournalStats(step);
+    // On touch screens a panel covers the card's place, so the card waits for it to close.
+    discoveryToast.update(step, photoActive || (touchMode && activePanel !== null));
+    worldMap.update(step);
+    if (activePanel === 'journal') journalPanel.update(step);
     if (activePanel === 'settings') settingsPanel.update(step);
     if (activePanel === 'controls') controlsPanel.update(step);
   }
@@ -2712,5 +2535,9 @@ export function createUISystem(ctx) {
     update, toast, setSubtitle, setMicState, showPanel, togglePanel, setPhotoMode, wake, openControls,
     /** v2 chrome for tests and other systems: the craft picker, settings tabs and controls panel. */
     craftPicker, settingsPanel, controlsPanel, statusBadge,
+    /** Seed links: shareUrl(), copyLink(), openWorld(seed, dayTime?), newWorld(). */
+    seedLinks,
+    /** The world map (M) and the discovery toast, for tests and other systems. */
+    worldMap, discoveryToast,
   };
 }
