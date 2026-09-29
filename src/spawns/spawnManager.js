@@ -6,7 +6,7 @@
 //     the dev debugger) within the budgets: at most heavyLimit heavy spawns, per-engine instance and
 //     particle caps, and the real-light pool;
 //   - picks each spawn's LOD tier from the camera distance and preset.lod, with hysteresis, and tells
-//     its engines (setLOD);
+//     its engines (setLOD); setLodBias scales the LOD distances down under load;
 //   - draws the FAR lure of heavy presets (src/spawns/lure.js), crossfading with the engines' own
 //     geometry at the mid boundary;
 //   - ends events that finish (instance.ended), expire, or leave range and view (the despawn rule),
@@ -95,9 +95,13 @@ export function tierRankFor(distance, lod, rank = -1) {
   return next;
 }
 
-/** tierRankFor(distance, record.preset.lod, record.tierRank), reading the distance from distances[record.slot]. */
-function nextTierRank(record, distances) {
-  const distance = distances[record.slot];
+/**
+ * tierRankFor(distance / lodScale[0], record.preset.lod, record.tierRank), reading the distance from
+ * distances[record.slot]. lodScale[0] is the LOD bias (1, or below 1 to demote spawns sooner); it
+ * lives in a typed array so the frame update never passes a double into this call.
+ */
+function nextTierRank(record, distances, lodScale) {
+  const distance = distances[record.slot] / lodScale[0];
   const lod = record.preset.lod;
   let next = record.tierRank;
   while (next < 2 && distance > (next === 0 ? lod.near : lod.mid) * (1 + LOD_HYSTERESIS)) next++;
@@ -130,11 +134,13 @@ function copyReading(target, source) {
  *   registerPrewarm          optional: registers the lure mesh for the pipeline prewarm
  *   maxLights                the cap on real lights (default MAX_REAL_LIGHTS); the pool holds the sum
  *                            of the engines' budget.lights up to it
+ *   engineBudgets            optional: default { instances, particles } caps by engine name (the
+ *                            director's DIRECTOR_BUDGETS.engines) for engines that declare no budget
  */
 export function createSpawnManager(options) {
   const {
     THREE, TSL, scene, camera, renderer, backend, wind, audio, world, state, sky, bus, perf, settings, uniforms,
-    registry, presets = [], seed = '', registerPrewarm = null, maxLights = MAX_REAL_LIGHTS,
+    registry, presets = [], seed = '', registerPrewarm = null, maxLights = MAX_REAL_LIGHTS, engineBudgets = null,
   } = options;
   const presetById = new Map();
   for (const preset of presets) presetById.set(preset.id, preset);
@@ -152,6 +158,10 @@ export function createSpawnManager(options) {
   /** Per engine: { budget: { instances, particles }, instances, particles, lights }. */
   const engineCounters = new Map();
   const tierCounts = [0, 0, 0];
+  /** Per engine name: its live { instances, particles } caps (the objects setBudget changes). */
+  const engineCaps = {};
+  /** The LOD bias (setLodBias): LOD distances are multiplied by it. */
+  const lodScale = new Float64Array([1]);
   const refusals = { preset: 0, engine: 0, heavy: 0, instances: 0, particles: 0, capacity: 0, error: 0 };
   // Per-spawn doubles written every frame live in typed arrays indexed by the spawn's slot: a double
   // field on an object can lose its unboxed representation (a map shared with records that stored
@@ -336,15 +346,22 @@ export function createSpawnManager(options) {
     let entry = engineCounters.get(name);
     if (!entry) {
       const engine = registry.get(name);
-      const budget = engine?.budget ?? DEFAULT_ENGINE_BUDGET;
+      const budget = engine?.budget ?? engineBudgets?.[name] ?? DEFAULT_ENGINE_BUDGET;
       entry = { budget: { instances: budget.instances, particles: budget.particles }, instances: 0, particles: 0, lights: 0, failed: false, initialized: false };
       engineCounters.set(name, entry);
+      engineCaps[name] = entry.budget;
     }
     return entry;
   }
 
+  // The budgets as engines (ctx.budgets) and the director read them: the director gets this same
+  // view, so both always agree on the caps.
   const budgets = Object.freeze({
     get heavyLimit() { return heavyLimit; },
+    get maxHeavy() { return heavyLimit; },
+    get maxRealLights() { return maxLights; },
+    /** { [engine]: { instances, particles } }: every known engine's caps (live; read only). */
+    engines: engineCaps,
     get heavyActive() { return heavyActive; },
     get lightsLimit() { return lightPool.size; },
     get lightsActive() { return lightPool.active; },
@@ -491,7 +508,9 @@ export function createSpawnManager(options) {
     const spawnSeed = Number.isFinite(opts.seed) ? opts.seed >>> 0 : site && Number.isFinite(site.seed) ? site.seed >>> 0 : hashString(`${worldSeedHash}:${presetId}:${serial}`);
     const random = createSeededRandom(spawnSeed);
     const heading = Number.isFinite(opts.heading) ? opts.heading : site && Number.isFinite(site.rotation) ? site.rotation / DEG : 0;
-    const duration = preset.lifetime.duration ? preset.lifetime.duration[0] + random() * (preset.lifetime.duration[1] - preset.lifetime.duration[0]) : null;
+    // The director draws an event's duration itself and passes it, so both keep the same number.
+    const duration = Number.isFinite(opts.duration) && opts.duration > 0 ? opts.duration
+      : preset.lifetime.duration ? preset.lifetime.duration[0] + random() * (preset.lifetime.duration[1] - preset.lifetime.duration[0]) : null;
     const siteId = site ? site.id : preset.kind === 'site' ? `debug:${presetId}:${serial}` : null;
     const record = {
       id,
@@ -580,7 +599,7 @@ export function createSpawnManager(options) {
     distances[record.slot] = cameraPosition.distanceTo(record.anchor);
     outOfView[record.slot] = 0;
     nextVisibilityFrame[record.slot] = 0;
-    record.tierRank = tierRankFor(distances[record.slot], preset.lod);
+    record.tierRank = tierRankFor(distances[record.slot] / lodScale[0], preset.lod);
     const tier = LOD_TIERS[record.tierRank];
     for (let index = 0; index < record.parts.length; index++) {
       const part = record.parts[index];
@@ -754,7 +773,7 @@ export function createSpawnManager(options) {
     const slot = record.slot;
     const distance = Math.sqrt(offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
     distances[slot] = distance;
-    const rank = nextTierRank(record, distances);
+    const rank = nextTierRank(record, distances, lodScale);
     if (rank !== record.tierRank) {
       record.tierRank = rank;
       counters.tierChanges++;
@@ -916,6 +935,7 @@ export function createSpawnManager(options) {
       events: records.length - sites,
       heavy: heavyActive,
       heavyLimit,
+      lodBias: lodScale[0],
       tiers: { near: tierCounts[0], mid: tierCounts[1], far: tierCounts[2] },
       engines,
       totals,
@@ -1050,6 +1070,21 @@ export function createSpawnManager(options) {
     },
     setHeavyLimit(limit) {
       if (Number.isInteger(limit) && limit >= 0) heavyLimit = limit;
+    },
+    /**
+     * Multiplies every preset's LOD distances (lod.near and lod.mid) by bias, in (0, 1]: below 1
+     * spawns step to their cheaper tiers sooner. The director's load shedder sets 0.7 and 0.5.
+     */
+    setLodBias(bias) {
+      if (!Number.isFinite(bias) || bias <= 0 || bias > 1) throw new RangeError(`[DRIFTWING] setLodBias expects a bias in (0, 1], got ${bias}`);
+      lodScale[0] = bias;
+    },
+    getLodBias() {
+      return lodScale[0];
+    },
+    /** The number of live spawns (sites and events). */
+    spawnCount() {
+      return records.length;
     },
     budgets,
     isDiscovered(key) {
