@@ -10,7 +10,8 @@
 //   setLOD(instance, tier)       'near' | 'mid' | 'far'
 //   dispose(instance)            returns every GPU resource and removes every wind source
 //   stats()                      { instances, particles, lights, buffers, drawCalls }
-// Optional: budget { instances, particles }, the engine's default caps (the director may change them).
+// Optional: budget { instances, particles, lights? }, the engine's default caps (the director may
+// change them); lights is how many real lights (the light pool) its instances may hold at once.
 // Shared resources built in init() live for the whole session; dispose(instance) frees only what
 // that instance created, so GPU memory returns to its level from before create().
 
@@ -34,8 +35,9 @@ export function validateEngine(engine) {
   }
   if (engine.budget !== undefined) {
     const budget = engine.budget;
-    const valid = budget && Number.isFinite(budget.instances) && budget.instances >= 0 && Number.isFinite(budget.particles) && budget.particles >= 0;
-    if (!valid) throw new TypeError(`[DRIFTWING] spawn engine "${label}": budget must be { instances, particles } with non-negative numbers`);
+    const valid = budget && Number.isFinite(budget.instances) && budget.instances >= 0 && Number.isFinite(budget.particles) && budget.particles >= 0
+      && (budget.lights === undefined || (Number.isInteger(budget.lights) && budget.lights >= 0));
+    if (!valid) throw new TypeError(`[DRIFTWING] spawn engine "${label}": budget must be { instances, particles, lights? } with non-negative numbers`);
   }
   return engine;
 }

@@ -155,7 +155,7 @@ export function createTestWindEngine() {
 
   return {
     name: 'testWind',
-    budget: { instances: 16, particles: 0 },
+    budget: { instances: 16, particles: 0, lights: 1 },
     init(engineCtx) {
       ctx = engineCtx;
     },

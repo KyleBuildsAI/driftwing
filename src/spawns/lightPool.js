@@ -1,10 +1,12 @@
 // The real-light budget pool (the engine ctx's `lights`). Spawns light the world mostly with
 // emissive materials and bloom; the few real PointLights they may use come from here.
 //
-// The pool's lights are created once and stay in the scene for the whole session, parked at
-// intensity 0 while free. Adding or removing a light changes every lit material's light set, which
-// in three.js rebuilds their shader programs (a visible hitch); a parked light only costs its shading,
-// and a light at intensity 0 adds exactly nothing to the image.
+// The pool's lights stay in the scene for the whole session once added, parked at intensity 0 while
+// free. Adding or removing a light changes every lit material's light set, which in three.js rebuilds
+// their shader programs (a visible hitch); a parked light only costs its shading, and a light at
+// intensity 0 adds exactly nothing to the image. So the pool holds only as many lights as the
+// registered engines declare (engine.budget.lights), decided when the SpawnManager starts behind the
+// loading fade; ensure(size) grows it later (an engine registered at runtime), never shrinks it.
 //
 //   acquire(priority = 0, onRevoke?) -> PointLight | null
 //       A free light, reset to white, intensity 0, no shadow. When the pool is full, a holder with a
@@ -17,15 +19,20 @@
 // which light: a spawn disposed without releasing its lights gets them back through releaseOwner.
 const PARK_DISTANCE = 1;
 
-export function createLightPool({ THREE, scene, size = 2 }) {
+export function createLightPool({ THREE, scene, size = 0 }) {
   const slots = [];
-  for (let index = 0; index < size; index++) {
-    const light = new THREE.PointLight(0xffffff, 0, PARK_DISTANCE, 2);
-    light.name = `spawn-light-${index}`;
-    light.castShadow = false;
-    scene.add(light);
-    slots.push({ light, held: false, priority: 0, owner: null, onRevoke: null });
+  /** Adds parked lights until the pool holds size of them. */
+  function ensure(target) {
+    while (slots.length < target) {
+      const light = new THREE.PointLight(0xffffff, 0, PARK_DISTANCE, 2);
+      light.name = `spawn-light-${slots.length}`;
+      light.castShadow = false;
+      scene.add(light);
+      slots.push({ light, held: false, priority: 0, owner: null, onRevoke: null });
+    }
+    return slots.length;
   }
+  ensure(size);
   const stats = { acquired: 0, released: 0, refused: 0, revoked: 0, leaked: 0 };
   let currentOwner = null;
 
@@ -56,6 +63,7 @@ export function createLightPool({ THREE, scene, size = 2 }) {
   }
 
   return {
+    ensure,
     acquire(priority = 0, onRevoke = null) {
       for (let index = 0; index < slots.length; index++) {
         if (!slots[index].held) return hand(slots[index], priority, onRevoke);

@@ -33,7 +33,8 @@ import { createInstancedPool, createMeshPool, createObjectPool, createScratch, c
 
 export const DEFAULT_HEAVY_LIMIT = 2;
 export const DEFAULT_ENGINE_BUDGET = Object.freeze({ instances: 32, particles: 60000 });
-export const DEFAULT_LIGHT_POOL_SIZE = 2;
+/** The most real lights spawns may use at once, whatever the engines declare (budget.lights). */
+export const MAX_REAL_LIGHTS = 4;
 /** LOD boundaries move by this share: out past boundary * (1 + H), back in below boundary * (1 - H). */
 export const LOD_HYSTERESIS = 0.08;
 /** Placement grid (contract 2.1): the site feed's cell size. */
@@ -127,12 +128,13 @@ function copyReading(target, source) {
  *   siteFeed                 optional: { sitesInCell(cellX, cellZ) } and/or { sitesNear(x, z, radius) }
  *   seed                     the world seed (string), for event seeds
  *   registerPrewarm          optional: registers the lure mesh for the pipeline prewarm
- *   lightPoolSize            real lights available to spawns (default DEFAULT_LIGHT_POOL_SIZE)
+ *   maxLights                the cap on real lights (default MAX_REAL_LIGHTS); the pool holds the sum
+ *                            of the engines' budget.lights up to it
  */
 export function createSpawnManager(options) {
   const {
     THREE, TSL, scene, camera, renderer, backend, wind, audio, world, state, sky, bus, perf, settings, uniforms,
-    registry, presets = [], seed = '', registerPrewarm = null, lightPoolSize = DEFAULT_LIGHT_POOL_SIZE,
+    registry, presets = [], seed = '', registerPrewarm = null, maxLights = MAX_REAL_LIGHTS,
   } = options;
   const presetById = new Map();
   for (const preset of presets) presetById.set(preset.id, preset);
@@ -309,7 +311,14 @@ export function createSpawnManager(options) {
   }
 
   // ---- Engine ctx -----------------------------------------------------------------------------------
-  const lightPool = createLightPool({ THREE, scene, size: lightPoolSize });
+  const lightPool = createLightPool({ THREE, scene });
+
+  /** Grows the light pool to the lights the registered engines declare, up to maxLights. */
+  function sizeLightPool() {
+    let wanted = 0;
+    for (const engine of registry.list()) wanted += engine.budget?.lights ?? 0;
+    lightPool.ensure(Math.min(maxLights, wanted));
+  }
   const lures = createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, viewPosition: cameraPosition });
   if (typeof registerPrewarm === 'function') registerPrewarm(lures.mesh);
 
@@ -924,13 +933,17 @@ export function createSpawnManager(options) {
     register(engine) {
       registry.register(engine);
       countersFor(engine.name);
-      if (initialized) initEngine(engine);
+      if (initialized) {
+        sizeLightPool();
+        initEngine(engine);
+      }
       return engine;
     },
     /** Initialises every registered engine and records the memory baseline. */
     init() {
       if (initialized) return;
       initialized = true;
+      sizeLightPool();
       for (const engine of registry.list()) initEngine(engine);
       siteScan.maxFar = maxSiteFar();
       readMemory(memoryBaseline);

@@ -19,7 +19,8 @@
 //                respawned event and a re-created site do not fire again
 //   sites        the site feed creates a site within lod.far and removes it past far + hysteresis
 //   wind         a wind engine's source is live while its spawn runs and gone after dispose (with
-//                windSourceRemoved); its real light returns to the pool
+//                windSourceRemoved); its real light returns to the pool, which holds exactly the
+//                lights the engines declare
 //   leaks        an engine that forgets its wind source and light is cleaned up and reported
 //   lifetime     ended events end, expired events end, director events despawn out of range and view
 //   memory       every create and dispose is logged with its readings; a long-lived spawn whose log
@@ -81,7 +82,7 @@ const world = {
   },
 };
 
-function createLab({ lightPoolSize = 2 } = {}) {
+function createLab() {
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0xe0b48c, 400, 2400);
@@ -109,7 +110,7 @@ function createLab({ lightPoolSize = 2 } = {}) {
   const registry = createEngineRegistry();
   const manager = createSpawnManager({
     THREE, TSL, scene, camera, renderer: { info: { memory } }, backend: 'WebGPU', wind, audio: null, world, state, sky: null,
-    bus, perf: null, settings: null, uniforms, registry, presets: [], seed: 'LAB', lightPoolSize,
+    bus, perf: null, settings: null, uniforms, registry, presets: [], seed: 'LAB',
   });
   manager.register(createTestMarkerEngine());
   manager.register(createTestWindEngine());
@@ -376,6 +377,7 @@ function testWind() {
   const during = lab.wind.probe(probe, PROBE_TIME).vel.y;
   check('wind', 'the wind engine registered its source', lab.wind.sourceCount === 1 && lab.events.windAdded.length === 1);
   check('wind', 'the column lifts the air', during - before > 3, `${before.toFixed(2)} -> ${during.toFixed(2)} m/s`);
+  check('wind', 'the light pool holds exactly the lights the engines declare (testWind: 1)', lab.manager.lights.size === 1 && lab.scene.children.filter((child) => child.isPointLight).length === 1);
   check('wind', 'the spawn holds one real light', lab.manager.lights.active === 1);
   lab.manager.deactivate(id, 'test');
   const after = lab.wind.probe(probe, PROBE_TIME).vel.y;
