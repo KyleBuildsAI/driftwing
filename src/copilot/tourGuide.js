@@ -386,9 +386,23 @@ export function createTourGrammar({ listPresets }) {
     return { speech: '', action: { type: 'goTo', name: target, autopilot: wantsAutopilot(text) } };
   }
 
+  /**
+   * Last resort, after every other matcher: "take me to the [something WREN does not know]" gets an
+   * honest answer instead of "I didn't catch that".
+   */
+  function matchUnknownPlace(text) {
+    const match = text.match(/\b(take (me|us) to|fly (me |us )?to|guide (me|us) to|head (to|for)|navigate to|where'?s|where is)\b(.*)$/);
+    if (!match) return null;
+    const target = cleanTarget(match[match.length - 1]);
+    if (!target || /\b(waypoint|marker|beacon|home|there|here|it)\b/.test(target) || /\d/.test(target)) return null;
+    return { speech: `I don't know anything called ${target} around here. Ask me what's nearby and I'll list what I can find.`, action: null };
+  }
+
   return {
     /** Runs before the general help. */
     matchHelp: matchGuideHelp,
+    /** Runs after every other matcher. */
+    matchUnknownPlace,
     /** In priority order: they run after help and before the aircraft and v1 matchers. */
     matchers: [matchThermal, matchStorm, matchNextDiscovery, matchNearby, matchGoTo],
   };

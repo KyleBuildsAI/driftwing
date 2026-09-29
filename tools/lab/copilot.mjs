@@ -200,6 +200,16 @@ for (const [phrase, value] of [['callouts off', false], ['turn on the callouts',
   check('guide', `"${phrase}" sets copilotCallouts ${value}`, !reply.action && brain.settingValues.copilotCallouts === value && reply.speech, `${brain.settingValues.copilotCallouts} "${reply.speech}"`);
 }
 
+{
+  const unknown = brain.interpret(FLIGHT, 'take me to the purple castle');
+  check('guide', 'an unknown place gets an honest answer, not "didn\'t catch that"', !unknown.action && /don't know anything called purple castle/.test(unknown.speech), unknown.speech);
+  const bare = new Copilot({ settings: { get: () => true, set: () => true }, state: { spawn: null, player: { position: { x: 0, y: 0, z: 0 } } }, systems: {} });
+  const noPresets = bare.interpret(FLIGHT, 'take me to the rope bridge');
+  check('guide', 'before any presets exist, "take me to the rope bridge" is answered honestly', !noPresets.action && /don't know anything called rope bridge/.test(noPresets.speech), noPresets.speech);
+  const stillNearby = bare.interpret(FLIGHT, "what's nearby");
+  check('guide', 'before any presets exist, "what\'s nearby" still asks the guide', stillNearby.action && stillNearby.action.type === 'nearby', JSON.stringify(stillNearby.action));
+}
+
 // ---- phase1: the Phase 1 grammar keeps its phrases -----------------------------------------------------------
 for (const [phrase, expected] of [
   ['take me to the mountains', { type: 'find', target: 'mountains', autopilot: true }],
@@ -212,9 +222,16 @@ for (const [phrase, expected] of [
   ['switch to version one', { type: 'switchVersion', version: 'v1' }],
   ['cockpit view', { type: 'setView', view: 'cockpit' }],
   ['make it dusk', { type: 'time', preset: 'dusk' }],
+  ['take us home', { type: 'waypoint', x: 0, z: 0, label: 'Home', autopilot: true }],
+  ['head to 270', { type: 'autopilot', enabled: true, heading: 270, followWaypoint: false }],
 ]) {
   const action = actionFor(phrase);
   check('phase1', `"${phrase}" -> ${JSON.stringify(expected)}`, same(action, expected), JSON.stringify(action));
+}
+{
+  const withWaypoint = { ...FLIGHT, waypoint: { x: 100, z: -2000, label: 'Waypoint', distance: 2000, bearing: 3 } };
+  const follow = brain.interpret(withWaypoint, 'take us to the waypoint');
+  check('phase1', '"take us to the waypoint" still follows the waypoint', same(follow.action, { type: 'autopilot', enabled: true, followWaypoint: true }), JSON.stringify(follow.action));
 }
 
 // ---- resolve: names, synonyms, categories --------------------------------------------------------------------

@@ -530,7 +530,7 @@ export class Copilot {
       this.matchPhotoMode, this.matchJournal, this.matchRingCourse,
       this.matchHome, this.matchFind, this.matchFlyToWaypoint, this.matchSetWaypoint, this.matchHeading,
       this.matchAltitude, this.matchAutopilotOn, this.matchStatus, this.matchGreeting, this.matchTime,
-      this.matchThanks,
+      this.matchThanks, tourGrammar.matchUnknownPlace,
     ];
   }
 
