@@ -37,7 +37,14 @@ Content-Type: application/json
 - `flightState`: a snapshot of the flight at that moment. Every field is listed below.
 
 A few settings commands never go to the endpoint: "voice off", "voice on", "be quiet" and "talk
-to me more". The game handles them locally.
+to me more" ("be quiet" also turns the tour-guide callouts off, "talk to me more" turns them back
+on), and "callouts off" / "callouts on". The game handles them locally.
+
+The answer to an open callout offer never goes to the endpoint either. While an offer is open
+(`flightState.callouts.offer` is not `null`), a bare "yes" ("yes", "yeah", "sure", "ok", "yes please,
+take us there", ...) places the waypoint and a bare "no" ("no", "no thanks", "not now", ...)
+declines, whatever brain is active. A "yes" followed by another request ("yes, switch to the jet")
+is not an answer and goes to the brain as usual. See [Proactive callouts](#proactive-callouts).
 
 ### Timeouts and failures
 
@@ -97,8 +104,11 @@ The game runs the action and composes the final line:
   was asked for from a page that is not the DRIFTWING launcher): WREN says the game's own explanation. Your speech is dropped, so the pilot never hears a
   success you could not confirm.
 - **An informative action succeeded** (`describe`, `find`, `waypoint`, `journal`, `ringCourse`,
-  `setAssists`): your speech comes first, then the game's precise facts (distances, the new assist
-  level and what it does). Keep your speech to a short lead-in, or leave it empty.
+  `setAssists`, and the tour-guide actions `nearby`, `goTo`, `findThermal`, `chaseStorm`,
+  `nextDiscovery`): your speech comes first, then the game's precise facts (distances, headings,
+  the new assist level and what it does). Keep your speech to a short lead-in, or leave it empty.
+  A tour-guide action that finds nothing ("No storms active within 40 km.") counts as failed, so
+  your speech is dropped and the pilot hears the honest answer.
 - **Any other action succeeded**: your speech is used. If it is empty, WREN says the game's own
   confirmation. For aircraft actions an empty speech is usually best, because the game reports the
   real outcome ("Engine off.", "We're already flying the bush plane.").
@@ -186,6 +196,32 @@ Landing grades come from the sink rate at touchdown: butter up to 0.5 m/s (100 f
 to 1.2 m/s, firm up to 2.2 m/s, and hard above that. Beyond the craft's limit it is a soft crash:
 a short fade and a respawn 300 m up, with no penalty.
 
+### v2 tour-guide fields
+
+The spawns (Phase 2 sites and events: storms, volcanoes, whales, bridges, ...) around the craft, from
+the event director's `getNearby(radiusKm)` merged with the spawn manager's live spawns.
+
+| field | type | meaning |
+| --- | --- | --- |
+| `nearby` | array, up to 10, nearest first | everything the director knows within 15 km: live spawns, dormant candidates and sites. `[]` before the spawns start |
+| `nearby[].id` | string | the site id (`<presetId>:<cellX>:<cellZ>`), the candidate id (`<presetId>:<cellX>:<cellZ>:<bucket>`) or the live spawn id (`spawn:<presetId>:<serial>`). Pass it to `goTo` as `id` |
+| `nearby[].presetId` | string | the preset, for example `tornado`, `ropeBridge` |
+| `nearby[].name` | string | display name, for example `Rope bridge` |
+| `nearby[].category` | string | `weather`, `geo`, `ocean`, `wildlife`, `structure`, `celestial`, `fantasy`, `flightplay` or `setpiece` |
+| `nearby[].kind` | `'site'` \| `'event'` | a persistent place or a temporary happening |
+| `nearby[].distance` | m, integer | horizontal distance from the craft |
+| `nearby[].bearing` | deg, integer | compass bearing from the craft |
+| `nearby[].state` | `'active'` \| `'dormant'` \| `'site'` \| `'discovered'` | `active`: happening now (a live event, or a site in its active state such as an erupting volcano). `dormant`: a candidate the director could start here, only a possibility; never tell the pilot it is there. `site`: a place not in the journal yet. `discovered`: a place in the journal |
+| `nearby[].etaSeconds` | s, integer, or `null` | at the current ground speed; `null` when nearly stopped |
+| `nearby[].discovered` | boolean | in the journal |
+| `activeEvents` | array, up to 10, nearest first | the live events within 40 km (and sites in their active state), same fields as `nearby[]` with `state: 'active'`; `id` is the live spawn id |
+| `weather` | `{ state, storminess }` or `null` | the regional weather where we fly: `state` is `clear`, `building`, `storm` or `clearing`; `storminess` 0..1 |
+| `callouts` | `{ enabled, offer }` | `enabled`: the pilot's tour-guide callouts setting. `offer`: the open callout offer or `null`, below |
+| `callouts.offer` | `{ name, presetId, distance, bearing, expiresIn }` or `null` | the spawn WREN just called out and offered a heading to; `expiresIn` in seconds. The game answers a "yes" or "no" to it itself |
+
+Undiscovered sites are never drawn on the world map, but WREN (and your brain) may name them and
+guide the pilot to them.
+
 New fields are only ever added. Ignore fields you do not know.
 
 ## Actions
@@ -223,8 +259,53 @@ instead. Optional parameters may be omitted or `null`. Extra unknown keys are ig
 | `calibrate` | `calibrate` (boolean, optional; the wizard always opens) | a non-boolean value is invalid | opens the controls panel with the calibration wizard (`ui:openControls { calibrate: true }`). It is refused honestly when this build has no controls panel |
 | `switchVersion` | `version`: `v1` (required, case-insensitive) | a missing version or any other value (`v2` included) is invalid | switches to version one, the original DRIFTWING, by sending the `versionToggle` input action (source `copilot`). Inside the launcher shell (`/`) the shell switches; V2 opened on its own at `/v2/` opens the shell with `?v=1`. On a page that is not the launcher it is refused ("Switching to version one works from the DRIFTWING launcher page."). The confirmation is spoken as the switch starts; this game is version two, so there is nothing to switch back to from here |
 
+### v2 tour-guide actions
+
+Each places the waypoint beacon itself and reports the distance, the direction and the heading to
+fly. `autopilot` (boolean, optional) also engages the autopilot to follow the waypoint; send it only
+when the pilot asked you to fly there. A present but non-boolean `autopilot` is invalid.
+
+| type | parameters | validation | effect and outcome |
+| --- | --- | --- | --- |
+| `nearby` | none (`autopilot` is ignored) | | "what's nearby": WREN names the closest three spawns within 15 km with distance, direction and state ("Rope bridge, 3.0 km to the east, in the journal"), leaving out dormant candidates, and how many more there are. With none, it says so and names the nearest landmark |
+| `goTo` | exactly one of: `name` (string, cleaned, at most 48 chars: a preset name, a synonym such as "twister" or "whirlpool", or a category word such as "wildlife" or "buildings") or `id` (string, at most 96 chars: an `id` from `nearby` or `activeEvents`); `autopilot` | both or neither, an empty or non-string name, or an empty or too-long id is invalid | "take me to the ...": a waypoint on the best match within 40 km, labelled with its name. A discovered site wins over an undiscovered one unless the undiscovered one is less than half as far. Dormant candidates are never targets. It fails honestly when the name is unknown ("I don't know anything called ...") or nothing matching is near ("No tornado within 40 km that I know of. It isn't happening anywhere near us right now.") |
+| `findThermal` | `autopilot` | | "find a thermal": the nearest working thermal from the WindField (at least 0.8 m/s, searched out to about 7 km), aimed at where the leaning column is at our height, with its strength and top. Inside one already, WREN says so and places nothing. None working (or night), it says so |
+| `chaseStorm` | `autopilot` | | "chase the storm": the nearest active storm (a preset that needs storm weather or is a supercell, tornado, microburst, waterspout or storm) within 40 km; else the nearest storm candidate, marked "Possible ..." and spoken as a possibility; else it fails honestly with the regional weather ("No storms active within 40 km. The weather is building here though ...") |
+| `nextDiscovery` | `autopilot` | | "next discovery": the nearest live spawn or site not in the journal (never a dormant candidate), else the nearest undiscovered landmark. The waypoint is labelled "Next discovery" and WREN gives only a hint ("Something new, a structure: ..."), so the discovery stays a surprise. With nothing left, it says everything near is already in the journal |
+
 Everything the local grammar says maps onto these same actions, so a remote brain can do
 everything the local one can.
+
+## Proactive callouts
+
+With the **Tour-guide callouts** setting on (the default; Settings, Copilot; "callouts off" and "callouts
+on" by voice), WREN calls out spawns as they appear: a live event starting (`spawnActivated`, kind
+`event`) or a site not yet in the journal coming into range (`spawnActivated`, kind `site`). It
+speaks one of the preset's callout lines with its tokens filled, `{distance}` ("9.0 km"),
+`{direction}` ("north-west"), `{name}` and `{eta}` ("about 4 minutes away"), and ends with "Want a
+heading?" when the line does not already ask:
+
+> "Supercell building 9.0 km north-west. Want a heading?"
+
+A bare "yes" (spoken, typed, or the **Yes, heading** chip) within 20 s places a waypoint on the
+spawn, where it is now, and WREN answers with the heading and the distance ("Heading 315 for the
+supercell, 9.0 km to the north-west. Waypoint set."). "Yes, take us there" also engages the
+autopilot. "No" (or the **No thanks** chip) declines. After 20 s the offer lapses.
+
+The rules:
+
+| rule | value |
+| --- | --- |
+| rate | at most one callout per 45 s |
+| height | never below 150 m above the ground or the water |
+| landing | never while landing: on the ground, retractable gear down, below 300 m and sinking faster than 1.5 m/s, or on approach (flaps out below 500 m while sinking) |
+| no overlap | never while WREN answers a question, listens, speaks, within 4 s of any other line, or while an offer is still open; the callout waits (up to 120 s, while the spawn lives) and is spoken when the rules allow |
+| once | each site and each live event is called out at most once; spawns nearer than 400 m or further than 40 km are not called out |
+| priority | when several wait, the rarest (heavy and events first) is spoken |
+
+Callouts also stay quiet in photo mode and during a soft-crash reset. Each is published on the bus
+as `copilot:callout { text, presetId, spawnId }` and the offer as `copilot:offer { active, name?,
+presetId?, expiresIn? }`.
 
 ## Errors your endpoint can return
 
@@ -288,12 +369,37 @@ response { "speech": "", "action": { "type": "engine", "enabled": false } }
 heard    "Engine off. Best glide speed now, and pick a field."
 ```
 
+What's nearby (informative, so the game's list follows your lead-in):
+
+```json
+request  { "transcript": "what's around here", "flightState": { "nearby": [{ "id": "ropeBridge:12:-4", "presetId": "ropeBridge", "name": "Rope bridge", "category": "structure", "kind": "site", "distance": 3000, "bearing": 90, "state": "discovered", "etaSeconds": 75, "discovered": true }], "...": "..." } }
+response { "speech": "Let me look.", "action": { "type": "nearby" } }
+heard    "Let me look. Nearby: Rope bridge, 3.0 km to the east, in the journal."
+```
+
+Take me to a live event by its id, and fly there:
+
+```json
+request  { "transcript": "fly us to that supercell", "flightState": { "activeEvents": [{ "id": "spawn:supercell:7", "presetId": "supercell", "name": "Supercell", "distance": 9000, "bearing": 315, "state": "active", "...": "..." }], "...": "..." } }
+response { "speech": "", "action": { "type": "goTo", "id": "spawn:supercell:7", "autopilot": true } }
+heard    "Supercell: 9.0 km to the north-west, heading 315. It's not in the journal yet. Waypoint set, autopilot engaged."
+```
+
+Chase the storm when none is active (a failed action, so your speech is dropped):
+
+```json
+response { "speech": "Storm dead ahead!", "action": { "type": "chaseStorm" } }
+heard    "No storms active within 40 km. The weather is building here though, so watch the horizon."
+```
+
 Invalid replies (each makes the game answer locally):
 
 ```json
 { "speech": "ok", "action": { "type": "setAssists", "level": 0.5, "change": "up" } }
 { "speech": "ok", "action": { "type": "setCraft", "craft": "blimp" } }
 { "speech": "ok", "action": { "type": "engine", "enabled": "off" } }
+{ "speech": "ok", "action": { "type": "goTo", "name": "volcano", "id": "eruptingVolcano:3:1" } }
+{ "speech": "ok", "action": { "type": "findThermal", "autopilot": "yes" } }
 { "speech": 42 }
 { "speech": "", "action": null }
 ```
@@ -318,3 +424,16 @@ do". The keys shown are the defaults, and WREN reads the live bindings:
 | push-to-talk | hold `` ` `` or the HOTAS trigger (the `copilotPTT` action); M or the mic button toggles the mic |
 
 The command bar also shows an "Aircraft" row of quick chips for these commands.
+
+The tour guide has a "Guide" row in the command bar (Enter or `/` opens it), and "guide help" lists
+its phrases:
+
+| command | equivalent |
+| --- | --- |
+| what's nearby ("what is nearby", "anything interesting nearby", "what's around here") | the **What's nearby** chip |
+| take me to the [name or category] ("fly us to the volcano", "head for the wind turbines", "where is the airfield"; add "on autopilot" to be flown there) | a **To [name]** chip for the two nearest live events or discovered sites (never an undiscovered one) |
+| find a thermal ("any thermals nearby", "find some lift") | the **Find a thermal** chip |
+| chase the storm ("storm chasing", "any storms around", "chase the tornado") | the **Chase the storm** chip |
+| next discovery ("find something new", "something we haven't seen") | the **Next discovery** chip |
+| yes / no to a callout | the **Yes, heading** and **No thanks** chips, shown while the offer is open |
+| callouts on / off | the **Tour-guide callouts** switch in Settings (`,`), Copilot |
