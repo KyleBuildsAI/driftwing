@@ -157,9 +157,11 @@ system, and then starts the frame loop.
 
 | file | what |
 | --- | --- |
-| `worldgen.js` | `createWorldGen(seed)`: seeded noise, biomes, the SHARED height function (`heightAt`, `groundHeight`), vegetation scatter and landmark sites. Imported by the main thread and the worker |
+| `worldgen.js` | `createWorldGen(seed, options)`: seeded noise, biomes, the SHARED height function (`heightAt`, `groundHeight`) with the site stamps applied, stamp-aware face colours, vegetation scatter and landmark sites. Imported by the main thread and the worker |
+| `placement.js` | deterministic site placement on the 2 km grid ([Placement and terrain stamps](#placement-and-terrain-stamps)); pure, imported by worldgen on both threads |
+| `stamps.js` | the terrain stamps (cone, carve, cliffStep, gorge, flatten, islandBase): resolution, height, paint, footprints; pure |
 | `terrain.worker.js` | the terrain Web Worker (Vite `?worker&inline`, so it also works in the single-file build) |
-| `chunkBuilder.js` | chunk meshes and vegetation scatter, in the worker or time-sliced on the main thread |
+| `chunkBuilder.js` | chunk meshes and vegetation scatter, in the worker or time-sliced on the main thread; stamp-aware skirts |
 | `terrain.js` | the chunk manager: ring LOD with skirts, pooled meshes, the worker queue (v1) |
 | `landmarks.js` | arches, monolith circles, lighthouses and balloons (v1) |
 | `spawn.js` | the golden-hour opening spawn (v1) |
@@ -289,6 +291,8 @@ system, and then starts the frame loop.
 | `mockGamepads.js` | scriptable mock T.16000M, TWCS and standard gamepad devices |
 | `testHarness.js` | the flight-test harness at `?test=1` (dev builds only) |
 | `hotasTest.js` | the HOTAS pipeline test at `?test=hotas` (dev builds only) |
+| `terrainTest.js` | the terrain test at `?test=terrain` (dev builds only): stamp seams at every LOD pair, worker parity, collision against the rendered mesh |
+| `terrainFixtures.js`, `terrainChecks.js` | the six fixture site presets (one per stamp type) and the seam / collision checks, shared by the terrain test and `tools/lab/terrain.mjs` |
 
 ### `src/shell`: the launcher shell and V2's side of it
 
@@ -303,7 +307,7 @@ system, and then starts the frame loop.
 | --- | --- |
 | `smoke-test.mjs` | headless Chrome check: console errors and warnings fail it; scripted steps and screenshots |
 | `steps/*.json` | reusable smoke steps; `view-physics.json` proves every craft flies the same in every view (below) |
-| `run-harness.mjs` | runs the `?test=1` / `?test=hotas` harnesses headlessly on a spare port and saves the report |
+| `run-harness.mjs` | runs the `?test=1` / `?test=hotas` / `?test=terrain` harnesses headlessly on a spare port and saves the report (and, for the terrain test, one screenshot per stamp type) |
 | `shell-test.mjs` | the launcher shell under load: 20 round trips, one live game, memory back to baseline, focus, hash forwarding, foreign origins ([Testing](#testing)) |
 | `shell-check.mjs` | the launcher shell's behaviour: first launch, the pill (shows, hides, clear of each game's HUD), persistence, `?v=`, forwarding, messages |
 | `build-single.mjs`, `v1-checksum.mjs` | the `dist-single/` build; the V1 freeze helpers shared with `tests/v1-checksum.test.mjs` |
@@ -312,6 +316,7 @@ system, and then starts the frame loop.
 | `flight-lab.mjs` | headless flight lab for the glider and bush plane (handling, spawns, craft switches, hot-plug) |
 | `lab/jet.mjs`, `lab/helicopter.mjs`, `lab/wingsuit.mjs`, `lab/fpv.mjs` | headless flight labs per craft |
 | `lab/settings.mjs` | settings migrations (views per craft included) and the one-time HOTAS assist default |
+| `lab/terrain.mjs` | site placement and terrain stamps: Phase 1 bit-identity, filters, determinism, stamp shapes, seams, collision, and the height-sampling cost against Phase 1 |
 | `lab/copilot.mjs` | WREN's local grammar (version one, the view commands, retired commands) and the `switchVersion` and `setView` schema |
 | `lab/input.mjs`, `lab/storage.mjs`, `lab/copilot-server.mjs` | input pipeline, storage and copilot-server origin labs |
 | `copilot-server.mjs` | the reference remote copilot brain (see `docs/copilot-api.md`) |
@@ -421,11 +426,11 @@ plus optional `prewarm()` / `endPrewarm()` hooks and whatever API it offers. `ct
 | field | what |
 | --- | --- |
 | `THREE`, `TSL`, `addons` | the one three.js r184 build (`three/webgpu`, `three/tsl`, `addons.BufferGeometryUtils`) |
-| `CONFIG`, `worldOptions` | tuning constants and the world generator options |
+| `CONFIG`, `worldOptions` | tuning constants and the world generator options (the terrain worker gets the same options; a dev test may add fixture `presets`) |
 | `renderer`, `backend` (`'WebGPU'` \| `'WebGL2'`), `scene`, `camera`, `post` | rendering |
 | `bus` | the EventBus with typed events (`emitTyped` / `onTyped`) |
 | `settings`, `storage` | persisted settings and the raw key-value storage |
-| `world` | the shared deterministic world generator (`heightAt`, `groundHeight`, `biomeAt`, ...) |
+| `world` | the shared deterministic world generator (`heightAt`, `groundHeight`, `biomeAt`, `sitesNear`, `sitesInCell`, `stampInfluence`, ...) |
 | `wind` | the WindField |
 | `perf` | the perf governor |
 | `craftRegistry` | craft catalog and registered craft modules |
@@ -996,6 +1001,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `?seed=...`, `?time=0..1`, `?touch=1` | world seed, start time of day, force touch controls (v1) |
 | `?test=hotas` | installs the mock gamepads (`ctx.systems.input.mock`) and, in dev builds, runs the HOTAS pipeline test (`src/dev/hotasTest.js`): bindings and hat decoding in both hat forms, calibration results, twist auto-disable, the one-time HOTAS assist default, and persistence across a reload |
 | `tools/steps/view-physics.json` | run with `tools/smoke-test.mjs --url <dev server>/v2/` (or a build with `?debug=1`): pauses the loop, steps frames by hand and proves every craft flies identically in the cockpit, in chase and while switching views |
+| `?test=terrain` | dev builds: the terrain test (`src/dev/terrainTest.js`). The fixture site presets reach worldgen on both threads; near every stamp type, every LOD pair of neighbouring chunks is checked for cracks, the displayed (worker-built) meshes must equal main-thread builds bit for bit, and `groundHeight` must match the rendered LOD0 mesh within 0.5 m. On-screen summary and `window.DRIFTWING.testReport`; `window.DRIFTWING.terrainTest.showView(i)` frames stamp type i |
 | `?test=1` | dev builds: the flight-test harness (`src/dev/testHarness.js`). It flies each of the six craft for 60 s in first person and in third person across 3 seeds (36 runs), and logs average fps, p99 frame time, NaN events, terrain penetrations, soft crashes, heap growth and console errors. It shows an on-screen summary and offers a JSON report (`window.DRIFTWING.testReport`). URL options: `testSeeds`, `testSeconds`, `testCraft`, `testViews` (`first`, `third`) |
 | `tools/run-harness.mjs` | runs either harness headlessly on a spare port (`--test 1\|hotas`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--out`), prints a table per run and per craft and view, and exits 0 on PASS |
 | `tools/shell-test.mjs` | the launcher shell test (below) |
@@ -1015,6 +1021,8 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `npm run test:shell` | the launcher shell under load (below), against the dev server and the built `dist-single/` |
 | `npm run test:flight`, `test:flight:webgl` | the Phase 1 flight-test harness for every craft in first and third person, 3 seeds (36 runs of 60 s) |
 | `npm run test:hotas`, `test:hotas:webgl` | the HOTAS pipeline, including persistence across a reload in the `driftwing-v2-test-hotas` database |
+| `npm run test:terrain`, `test:terrain:webgl` | terrain stamps in the running game: no cracks at any LOD pair, worker meshes identical to main-thread builds, collision within 0.5 m of the rendered mesh; screenshots of every stamp type |
+| `npm run lab:terrain` | placement and stamps headless: Phase 1 bit-identity with the real (empty) preset list, placement filters, determinism, stamp shapes, seams, collision, height-sampling cost within 10 % of Phase 1 |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/view-physics.json` | every craft flies bit-identically in every view |
 | `node tools/shell-check.mjs --url <shell>` | the pill (shows, hides, clear of both games' HUDs), persistence and forwarding |
 | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` | the flight models, settings migrations, storage, input, WREN's grammar, the copilot server |
@@ -1075,6 +1083,47 @@ compared with its first load, and may rise by at most (the larger of a share and
 
 The tool's `MEMORY_TOLERANCE` comment has the measurements behind these, and the JSON report lists
 each game's footprint over a blank tab next to each allowance.
+
+## Placement and terrain stamps
+
+Milestone A of Phase 2 (`src/world/placement.js`, `src/world/stamps.js`, contract section 2).
+
+- **Sites.** Every site preset (`kind: 'site'` with a `placement` block, from
+  `src/spawns/presets/index.js`) is rolled once per 2 km cell with hash(seed, cellX, cellZ, presetId).
+  A candidate must pass, in order: the chance; the dominant biome from the terrain's own biome
+  function; the surface (`land` | `water` | `coast` | `any`, from the unstamped height at the centre
+  and on a ring the size of its stamps); the height band and relief (`peak` | `valley` | `flat` |
+  `ridge` | `any`); every stamp fitting its ground (a canyon whose path would cut too deep or lift
+  too much is dropped); the preset's `clearance` between its stamp footprints and every Phase 1
+  landmark; `minSpacing` from sites of the same preset; and `clearance` between its footprints and
+  every other site's. The two spacing rules keep the candidate with the higher priority roll, compared
+  against the neighbours' rule 1-6 results, so the answer is local and the same from any starting
+  cell. `placement.align` (`random` | `downhill` | `ridge`) orients the site.
+- **Site records.** `{ id: '<presetId>:<cellX>:<cellZ>', presetId, cellX, cellZ, x, z, groundY,
+  rotation, scale, seed, biome, stamps }`, frozen. `world.sitesInCell(cellX, cellZ)` and
+  `world.sitesNear(x, z, radius)` (nearest first) query them; `hashSiteList(sites)` in placement.js is
+  the determinism key (ids and coordinates to 1 cm).
+- **Stamps.** A preset's `stamps` are specs (sizes as numbers or `[min, max]` ranges; see the table
+  at the top of stamps.js). Placement resolves each once per site into world-space geometry with
+  bounds, reference heights and the places engines need (the cone's `rimY` and `craterFloorY`, the
+  canyon's `path` with `floorY` and `rimY` per point, the waterfall's `lipX/Z`, `poolX/Z`, `topY` and
+  `bottomY`, the gorge's `anchors` and `span`, the airfield's `y` and `thresholds`, the islet's
+  `topY`). `heightAt` applies them after the Phase 1 landmark shaping, so meshes, every LOD ring,
+  skirts and `groundHeight` agree. Each has a smooth falloff and changes nothing outside its bounds.
+- **Paint.** A stamp may paint the ground `ash`, `basalt`, `wetRock`, `tarmac` or `riverbed`
+  (`world.stampInfluence(x, z)` -> `{ paint, weight }`). `faceColor` blends four shades of the paint
+  over the biome colour with dithered edges, and nothing grows on painted ground.
+- **Both threads, no messaging.** The worker imports the same worldgen, placement, stamps and preset
+  list, and gets the same options (`ctx.worldOptions`), so it places the same sites. The terrain test
+  proves it: the meshes the worker builds equal main-thread builds bit for bit.
+- **Cost.** A world without stamped presets uses the Phase 1 height function itself (bit-identical,
+  proven against digests recorded from the Phase 1 code). With stamps, a sample adds one lookup in a
+  toroidal 64 x 64 window of 2 km cells (per-cell bounds and kinds in typed arrays) and, inside a
+  stamp's bounds, its function called through a table by kind (trig in lookup tables, the canyon's
+  segments through a coarse grid): the lab measures `heightAt` and `groundHeight` within 10 % of Phase 1.
+- **Skirts.** A chunk a stamp touches hangs each skirt segment below the lowest ground of the
+  coarsest LOD segment holding it (sampled on the LOD0 lattice), so a neighbour at any LOD can never
+  open a crack at a canyon wall or a cliff; untouched chunks keep the Phase 1 skirts bit for bit.
 
 ## Phase 2-4 plug points
 
