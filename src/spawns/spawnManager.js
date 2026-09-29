@@ -21,13 +21,15 @@
 // The frame update allocates nothing: records live in an array, per-engine counters are built once,
 // the site scan reads the feed's per-cell cache in time slices, and the hot path never passes a
 // double to a call V8 may not inline (it would box it) nor uses Math.hypot (it allocates its argument
-// list). The one exception is the terrain height the occlusion ray samples: worldgen returns it as a
-// boxed double, so rays run only while a spawn still needs a visibility answer, a few per frame, and
-// at whole-metre coordinates (passed without boxing).
+// list). The exceptions are outside the manager: the terrain height the occlusion ray samples
+// (worldgen's noise allocates, and returns a boxed double). So rays run only while a spawn still
+// needs a visibility answer, a few per frame and at most every VISIBILITY_RETRY_FRAMES per spawn, at
+// whole-metre coordinates (passed unboxed). The view cone is built every frame from the camera's own
+// position, quaternion and lens.
 import { validateInstance } from './engineRegistry.js';
 import { createLureSystem } from './lure.js';
 import { createLightPool } from './lightPool.js';
-import { createInstancedPool, createObjectPool, createScratch, createSlotAllocator } from './pools.js';
+import { createInstancedPool, createMeshPool, createObjectPool, createScratch, createSlotAllocator } from './pools.js';
 
 export const DEFAULT_HEAVY_LIMIT = 2;
 export const DEFAULT_ENGINE_BUDGET = Object.freeze({ instances: 32, particles: 60000 });
@@ -43,6 +45,8 @@ const SITE_CELLS_PER_FRAME = 48;
  * need one (not yet seen, not yet discovered, or a director event past its despawn distance).
  */
 const VISIBILITY_CHECKS_PER_FRAME = 2;
+/** Frames before a spawn found out of view is checked again. */
+const VISIBILITY_RETRY_FRAMES = 12;
 const OCCLUSION_SAMPLES = 10;
 /** A sight line is blocked when the ground rises this far (m) above it. */
 const OCCLUSION_MARGIN = 1;
@@ -154,6 +158,7 @@ export function createSpawnManager(options) {
   const spawnSlots = createSlotAllocator(MAX_SPAWNS);
   const distances = new Float64Array(MAX_SPAWNS);
   const outOfView = new Float64Array(MAX_SPAWNS);
+  const nextVisibilityFrame = new Int32Array(MAX_SPAWNS);
   const leaks = { windSources: 0, lights: 0 };
   const counters = { activated: 0, ended: 0, tierChanges: 0, discoveries: 0, lureRefused: 0, visibilityChecks: 0 };
   let heavyActive = 0;
@@ -192,22 +197,59 @@ export function createSpawnManager(options) {
   const cameraPosition = new THREE.Vector3();
   const visibilitySphere = new THREE.Sphere();
 
-  /** Frame state of the view: whether the side planes match this frame's camera yet. */
-  const view = { frustumFresh: false };
-
-  function refreshCamera() {
-    camera.updateMatrixWorld();
-    cameraPosition.setFromMatrixPosition(camera.matrixWorld);
-    view.frustumFresh = false;
-  }
+  /** Frame state of the view: the frame count. */
+  const view = { frame: 0 };
 
   /**
-   * Builds this frame's side planes, once, when a visibility check first needs them: w + x, w - x,
-   * w + y and w - y of the view-projection matrix (clip space left, right, bottom, top), normalised.
+   * This frame's camera position and view cone (the frustum's four side planes), every frame the
+   * manager has spawns. The camera system has moved the camera by now, while its world matrix is only
+   * refreshed when the frame renders, so a camera hanging straight off the scene (main.js) is read from
+   * its own position, quaternion and lens: plain arithmetic in a function that runs every frame, which
+   * V8 optimises and which allocates nothing. Any other camera goes through its world matrix.
    */
-  function refreshFrustum() {
-    if (view.frustumFresh) return;
-    view.frustumFresh = true;
+  function refreshCamera() {
+    if (camera.parent !== scene && camera.parent !== null) {
+      refreshCameraFromMatrix();
+      return;
+    }
+    cameraPosition.copy(camera.position);
+    const q = camera.quaternion;
+    const qx = q.x;
+    const qy = q.y;
+    const qz = q.z;
+    const qw = q.w;
+    const rightX = 1 - 2 * (qy * qy + qz * qz);
+    const rightY = 2 * (qx * qy + qw * qz);
+    const rightZ = 2 * (qx * qz - qw * qy);
+    const upX = 2 * (qx * qy - qw * qz);
+    const upY = 1 - 2 * (qx * qx + qz * qz);
+    const upZ = 2 * (qy * qz + qw * qx);
+    const forwardX = -2 * (qx * qz + qw * qy);
+    const forwardY = -2 * (qy * qz - qw * qx);
+    const forwardZ = -(1 - 2 * (qx * qx + qy * qy));
+    const tangentV = Math.tan(camera.fov * DEG * 0.5) / camera.zoom;
+    const tangentH = tangentV * camera.aspect;
+    // Left, right, bottom, top: inward normal = (+-side + tangent * forward), through the camera.
+    for (let plane = 0; plane < 4; plane++) {
+      const horizontal = plane < 2;
+      const sign = (plane & 1) === 0 ? 1 : -1;
+      const tangent = horizontal ? tangentH : tangentV;
+      const inverseLength = 1 / Math.sqrt(1 + tangent * tangent);
+      const nx = (sign * (horizontal ? rightX : upX) + forwardX * tangent) * inverseLength;
+      const ny = (sign * (horizontal ? rightY : upY) + forwardY * tangent) * inverseLength;
+      const nz = (sign * (horizontal ? rightZ : upZ) + forwardZ * tangent) * inverseLength;
+      const offset = plane * 4;
+      sidePlanes[offset] = nx;
+      sidePlanes[offset + 1] = ny;
+      sidePlanes[offset + 2] = nz;
+      sidePlanes[offset + 3] = -(nx * cameraPosition.x + ny * cameraPosition.y + nz * cameraPosition.z);
+    }
+  }
+
+  /** The general case: w + x, w - x, w + y and w - y of the view-projection matrix, normalised. */
+  function refreshCameraFromMatrix() {
+    camera.updateMatrixWorld();
+    cameraPosition.setFromMatrixPosition(camera.matrixWorld);
     viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     const m = viewProjection.elements;
     for (let plane = 0; plane < 4; plane++) {
@@ -263,14 +305,13 @@ export function createSpawnManager(options) {
     const anchor = record.anchor;
     visibilitySphere.center.set(anchor.x, anchor.y + lift, anchor.z);
     visibilitySphere.radius = Math.max(record.radius, lift);
-    refreshFrustum();
     if (!sphereInViewCone(visibilitySphere)) return false;
     return !occludedByTerrain(visibilitySphere.center);
   }
 
   // ---- Engine ctx -----------------------------------------------------------------------------------
   const lightPool = createLightPool({ THREE, scene, size: lightPoolSize });
-  const lures = createLureSystem({ THREE, TSL, scene, camera, sky, uniforms });
+  const lures = createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, viewPosition: cameraPosition });
   if (typeof registerPrewarm === 'function') registerPrewarm(lures.mesh);
 
   function countersFor(name) {
@@ -315,6 +356,7 @@ export function createSpawnManager(options) {
       createSlotAllocator,
       createObjectPool,
       createInstancedPool: (poolOptions) => createInstancedPool(THREE, poolOptions),
+      createMeshPool: (poolOptions) => createMeshPool(THREE, poolOptions),
     }),
     spawns: null,
   };
@@ -508,6 +550,7 @@ export function createSpawnManager(options) {
     refreshCamera();
     distances[record.slot] = cameraPosition.distanceTo(record.anchor);
     outOfView[record.slot] = 0;
+    nextVisibilityFrame[record.slot] = 0;
     record.tierRank = tierRankFor(distances[record.slot], preset.lod);
     const tier = TIER_NAMES[record.tierRank];
     for (let index = 0; index < record.parts.length; index++) {
@@ -648,6 +691,7 @@ export function createSpawnManager(options) {
    * of the despawn rule.
    */
   function needsVisibility(record) {
+    if (view.frame < nextVisibilityFrame[record.slot]) return false;
     if (!record.seenInView) return true;
     const preset = record.preset;
     const distance = distances[record.slot];
@@ -662,6 +706,7 @@ export function createSpawnManager(options) {
     const range = preset.heavy ? preset.lod.far : preset.lod.mid;
     const distance = distances[record.slot];
     record.inView = distance <= range && isInView(record);
+    if (!record.inView) nextVisibilityFrame[record.slot] = view.frame + VISIBILITY_RETRY_FRAMES;
     if (record.inView && !record.seenInView) {
       record.seenInView = true;
       bus.emit('spawns:inView', { id: record.id, presetId: record.presetId, siteId: record.siteId, kind: preset.kind, distance });
@@ -751,6 +796,7 @@ export function createSpawnManager(options) {
 
   function update(simDt, realDt) {
     if (!initialized) return;
+    view.frame++;
     scanSites();
     if (records.length > 0) {
       refreshCamera();
