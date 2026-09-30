@@ -630,7 +630,7 @@ export function createEmitterEngine() {
         vy += data.velocity[1] * config.inherit;
         vz += data.velocity[2] * config.inherit;
       }
-      const slot = data.pages[(data.ring >> 10)] * PAGE_SIZE + (data.ring & (PAGE_SIZE - 1));
+      const slot = data.pages[Math.floor(data.ring / PAGE_SIZE)] * PAGE_SIZE + (data.ring % PAGE_SIZE);
       data.ring = (data.ring + 1) % data.capacity;
       const jitter = 1 + config.sizeJitter * (rng() * 2 - 1);
       const brightness = 1 + config.brightnessJitter * (rng() * 2 - 1);
@@ -911,22 +911,29 @@ export function createEmitterEngine() {
         particles: capacity,
         data,
       };
-      if (config.windSource) addWindSource(instance);
-      if (config.immersion && ctx.sky && typeof ctx.sky.addModifier === 'function') {
-        data.immersion = ctx.sky.addModifier(`${id}:immersion`, { priority: 20 });
-        const immersion = config.immersion;
-        data.immersionValues = {
-          weight: 0,
-          fogDensity: immersion.fogDensity,
-          fogColor: new THREE.Color(immersion.fogColor),
-          fogColorAmount: immersion.fogColorAmount,
-          darkness: immersion.darkness,
-        };
-        data.immersion.set(data.immersionValues);
-      }
-      if (config.sound && preset.audio && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
-        data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
-        data.voice.setPosition(anchor);
+      // The couplings can refuse (an unknown audio recipe throws): the row, the pages and whatever
+      // was already attached go back before the error reaches the SpawnManager.
+      try {
+        if (config.windSource) addWindSource(instance);
+        if (config.immersion && ctx.sky && typeof ctx.sky.addModifier === 'function') {
+          data.immersion = ctx.sky.addModifier(`${id}:immersion`, { priority: 20 });
+          const immersion = config.immersion;
+          data.immersionValues = {
+            weight: 0,
+            fogDensity: immersion.fogDensity,
+            fogColor: new THREE.Color(immersion.fogColor),
+            fogColorAmount: immersion.fogColorAmount,
+            darkness: immersion.darkness,
+          };
+          data.immersion.set(data.immersionValues);
+        }
+        if (config.sound && preset.audio && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
+          data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
+          data.voice.setPosition(anchor);
+        }
+      } catch (error) {
+        engine.dispose(instance);
+        throw error;
       }
       live.push(instance);
       return instance;
@@ -1157,6 +1164,27 @@ export function createEmitterEngine() {
       instance.particles = 0;
       const index = live.indexOf(instance);
       if (index >= 0) live.splice(index, 1);
+    },
+    /**
+     * A dev snapshot of one instance (the engine step file and the F9 checks read it): its tier and
+     * share, levels, particles emitted and held, and its couplings. Allocates; never per frame.
+     */
+    describe(instance) {
+      const data = instance.data;
+      return {
+        tier: data.tier,
+        share: data.share[0],
+        pool: data.config.pool,
+        capacity: data.capacity,
+        emitted: data.emitted,
+        level: data.levels[0],
+        schedule: data.config.schedule ? { phase: data.scheduleState[0], envelope: data.levels[1] } : null,
+        windActive: data.windActive,
+        light: data.light ? data.light.held : false,
+        voice: data.voice !== null,
+        immersion: data.immersion ? data.immersionWeight[0] : null,
+        ending: data.ending,
+      };
     },
     stats() {
       let particles = 0;

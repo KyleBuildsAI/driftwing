@@ -400,7 +400,10 @@ export function createLightEffectEngine() {
   }
 
   // ---- Points (glows and swarms) --------------------------------------------------------------------
-  /** Writes the instance's glows and swarm into its pages. Returns the points written. */
+  /**
+   * Writes the instance's glows and swarm into its pages, never more than its pages hold (config.points:
+   * a short pool leaves the last points out). Returns the points written.
+   */
   function writePoints(instance) {
     const data = instance.data;
     const config = data.config;
@@ -408,10 +411,11 @@ export function createLightEffectEngine() {
     const frame = data.heading;
     const origin = data.origin;
     const color = data.colorScratch;
+    const limit = config.points;
     let written = 0;
     const slotOf = (index) => data.pages[Math.floor(index / GLOW_PAGE_SIZE)] * GLOW_PAGE_SIZE + (index % GLOW_PAGE_SIZE);
     for (const glow of config.glows) {
-      for (let index = 0; index < glow.count; index++) {
+      for (let index = 0; index < glow.count && written < limit; index++) {
         let right = glow.offset[0];
         let forward = glow.offset[2];
         if (glow.layout === 1) {
@@ -443,7 +447,7 @@ export function createLightEffectEngine() {
     }
     const swarm = config.swarm;
     if (swarm) {
-      for (let index = 0; index < swarm.count; index++) {
+      for (let index = 0; index < swarm.count && written < limit; index++) {
         const angle = rng() * Math.PI * 2;
         const distance = Math.sqrt(rng()) * swarm.radius;
         const x = origin[0] + Math.cos(angle) * distance;
@@ -561,23 +565,30 @@ export function createLightEffectEngine() {
       points.groupVectors[group * 2 + 1].set(0, 4, 1 - (config.swarm ? config.swarm.sync : 0), config.fog);
       data.points = config.points > 0 ? writePoints(instance) : 0;
       instance.particles = data.points;
-      if (config.lightning && config.lightning.flash > 0 && ctx.sky && typeof ctx.sky.addModifier === 'function') {
-        data.flash = ctx.sky.addModifier(`${id}:flash`, { priority: 30 });
-        data.flashValues = { flash: 0, flashColor: new THREE.Color(config.lightning.color), weight: 1 };
-        data.flash.set(data.flashValues);
-      }
-      if (config.beam) {
-        const beam = beams.find((entry) => entry.owner === null) ?? null;
-        if (beam) {
-          beam.owner = instance;
-          beam.slot.color.value.setHex(config.beam.color);
-          generateBeams(beam.slot, config.beam.count, config.beam.length, config.beam.width[0], config.beam.width[1], config.beam.tilt);
-          data.beam = beam;
+      // The couplings can refuse (an unknown audio recipe throws): the group, the pages and whatever
+      // was already attached go back before the error reaches the SpawnManager.
+      try {
+        if (config.lightning && config.lightning.flash > 0 && ctx.sky && typeof ctx.sky.addModifier === 'function') {
+          data.flash = ctx.sky.addModifier(`${id}:flash`, { priority: 30 });
+          data.flashValues = { flash: 0, flashColor: new THREE.Color(config.lightning.color), weight: 1 };
+          data.flash.set(data.flashValues);
         }
-      }
-      if (config.sound && preset.audio && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
-        data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
-        data.voice.setPosition(anchor);
+        if (config.beam) {
+          const beam = beams.find((entry) => entry.owner === null) ?? null;
+          if (beam) {
+            beam.owner = instance;
+            beam.slot.color.value.setHex(config.beam.color);
+            generateBeams(beam.slot, config.beam.count, config.beam.length, config.beam.width[0], config.beam.width[1], config.beam.tilt);
+            data.beam = beam;
+          }
+        }
+        if (config.sound && preset.audio && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
+          data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
+          data.voice.setPosition(anchor);
+        }
+      } catch (error) {
+        engine.dispose(instance);
+        throw error;
       }
       live.push(instance);
       return instance;
@@ -764,6 +775,28 @@ export function createLightEffectEngine() {
       instance.particles = 0;
       const index = live.indexOf(instance);
       if (index >= 0) live.splice(index, 1);
+    },
+    /**
+     * A dev snapshot of one instance (the engine step file and the F9 checks read it): its tier, fade,
+     * points, lights and couplings, and the engine's strike counters. Allocates; never per frame.
+     */
+    describe(instance) {
+      const data = instance.data;
+      let boltsLit = 0;
+      for (let index = 0; index < bolts.length; index++) if (bolts[index].owner === instance) boltsLit++;
+      return {
+        tier: data.tier,
+        fade: data.fade[0],
+        activity: data.activity[0],
+        points: data.points,
+        light: data.light ? data.light.held : false,
+        strikeLight: data.strikeLight ? data.strikeLight.held : false,
+        bolts: boltsLit,
+        flash: data.flashValues ? data.flashValues.flash : null,
+        beam: data.beam !== null,
+        voice: data.voice !== null,
+        strikes: { ...strikeCounters },
+      };
     },
     stats() {
       let particles = 0;
