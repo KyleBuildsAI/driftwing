@@ -18,8 +18,11 @@ export const BOLT_SEGMENTS = 192;
 /** Levels of midpoint displacement of the main channel (2^levels segments). */
 const MAIN_LEVELS = 6;
 const BRANCH_LEVELS = 4;
-/** Screen-space minimum half-width of a ribbon, as a share of its view depth. */
-const MIN_ANGULAR_WIDTH = 0.0009;
+/**
+ * Screen-space minimum half-width of a ribbon, as a share of its view depth (about 2 px at 1080p): a
+ * thinner channel breaks up into dots between the pixels, a bolt 5 km away must read as one line.
+ */
+const MIN_ANGULAR_WIDTH = 0.002;
 const RENDER_ORDER = 7;
 
 /**
@@ -88,13 +91,13 @@ export function createRibbonSlot({ THREE, TSL, scene, name, segmentCapacity, kin
       const point = mix(startView, endView, ribbon.x);
       const along = endView.sub(startView);
       const side = normalize(cross(along, point.negate()));
-      const halfWidth = max(ribbon.z, point.z.negate().mul(MIN_ANGULAR_WIDTH * 3));
+      const halfWidth = max(ribbon.z, point.z.negate().mul(MIN_ANGULAR_WIDTH * 1.5));
       vAcross.assign(vec2(ribbon.y, ribbon.w));
       vAlong.assign(ribbon.x);
       return cameraProjectionMatrix.mul(vec4(point.add(side.mul(ribbon.y).mul(halfWidth)), 1));
     })();
     const across = abs(vAcross.x);
-    const body = exp(across.mul(across).mul(-3.2)).mul(pow(float(1).sub(vAlong), 1.6)).mul(smoothstep(0, 0.04, vAlong));
+    const body = exp(across.mul(across).mul(-2.4)).mul(pow(float(1).sub(vAlong), 1.1)).mul(smoothstep(0, 0.04, vAlong));
     material.colorNode = color.mul(intensity).mul(body).mul(vAcross.y);
     material.opacityNode = saturate(body.mul(intensity));
   } else {

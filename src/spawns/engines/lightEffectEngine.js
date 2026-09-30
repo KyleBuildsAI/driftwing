@@ -28,6 +28,12 @@ import { createGroundGrid, createHeadingFrame, createParamReader, createPooledLi
 
 /** Light-effect instances at once (glow groups); the director's budget is 8. */
 const MAX_INSTANCES = 8;
+/**
+ * Real lights the engine declares (budget.lights) and never exceeds, even when the shared pool has
+ * a free light another engine declared: a strike that needs one takes it from the engine's own
+ * lowest-priority steady light.
+ */
+const LIGHT_BUDGET = 2;
 /** Glow point pages (GLOW_PAGE_SIZE points each): the budget's 30 000 points and a little more. */
 const GLOW_PAGES = 120;
 export const MAX_POINTS_PER_INSTANCE = 12000;
@@ -117,7 +123,7 @@ export function resolveLightEffectConfig(preset, params) {
         color: read.color(glowParams?.color, 'lightning.cloudGlow.color', color),
       },
       light: strikeLight ? {
-        intensity: read.number(strikeLight.intensity, 'lightning.light.intensity', 5e7, 0, 1e12),
+        intensity: read.number(strikeLight.intensity, 'lightning.light.intensity', 2e7, 0, 1e12),
         range: read.number(strikeLight.range, 'lightning.light.range', 8000, 1, 100000),
         priority: read.number(strikeLight.priority, 'lightning.light.priority', 3, 0, 100),
       } : null,
@@ -163,7 +169,7 @@ export function resolveLightEffectConfig(preset, params) {
     count: Math.round(read.number(swarmParams.count, 'swarm.count', 1500, 1, MAX_POINTS_PER_INSTANCE)),
     radius: read.number(swarmParams.radius, 'swarm.radius', 150, 1, 20000) * scale,
     height: read.range(swarmParams.height, 'swarm.height', [0.5, 4], -100, 2000),
-    size: read.range(swarmParams.size, 'swarm.size', [0.12, 0.22], 0.01, 100),
+    size: read.range(swarmParams.size, 'swarm.size', [0.25, 0.45], 0.01, 100),
     colors: readColors(read, swarmParams.colors, 'swarm.colors', [0xd8ff6a, 0xfff08a, 0xb8ff8a]),
     intensity: read.number(swarmParams.intensity, 'swarm.intensity', 4, 0, 200),
     blink: readBlink(read, read.object(swarmParams.blink, 'swarm.blink'), 'swarm.blink', [2, 5], 0.25),
@@ -237,13 +243,42 @@ export function createLightEffectEngine() {
   let points = null;
   let serial = 0;
   let lastFrame = -1;
-  let lightsHeld = 0;
   let scratchColor = null;
   let boltScratch = null;
   const bolts = [];
   const beams = [];
   const live = [];
-  const strikeCounters = { strikes: 0, ground: 0, cloud: 0, thunder: 0, skipped: 0 };
+  /** thunderRequests: strikes that asked for thunder; thunder: those the audio engine queued (it
+   * needs a listener, so none before the audio has started). */
+  const strikeCounters = { strikes: 0, ground: 0, cloud: 0, thunderRequests: 0, thunder: 0, skipped: 0 };
+
+  // ---- The engine's real-light cap ------------------------------------------------------------------
+  /** Real lights the engine's instances hold right now (steady and strike). */
+  function countHeld() {
+    let held = 0;
+    for (let index = 0; index < live.length; index++) {
+      const data = live[index].data;
+      if (data.light && data.light.held) held++;
+      if (data.strikeLight && data.strikeLight.held) held++;
+    }
+    return held;
+  }
+
+  /**
+   * Makes room under LIGHT_BUDGET for a light of priority: true when one is free, or when a steady
+   * light of lower priority was given up for it (its holder asks again a second later).
+   */
+  function makeRoomForLight(priority) {
+    if (countHeld() < LIGHT_BUDGET) return true;
+    let weakest = null;
+    for (let index = 0; index < live.length; index++) {
+      const light = live[index].data.light;
+      if (light && light.held && light.priority < priority && (weakest === null || light.priority < weakest.priority)) weakest = light;
+    }
+    if (weakest === null) return false;
+    weakest.release();
+    return true;
+  }
 
   // ---- Bolt slots ---------------------------------------------------------------------------------
   /** Takes a free bolt slot, or the one that struck longest ago. */
@@ -331,13 +366,14 @@ export function createLightEffectEngine() {
     // The strike's real light, low in the channel.
     if (data.strikeLight) {
       data.strikeLight.update(false, 0);
-      data.strikeLight.update(true, 1);
+      if (makeRoomForLight(data.strikeLight.priority)) data.strikeLight.update(true, 1);
       data.strikeLight.place(x, ground + height * 0.3, z);
       data.strikeBolt = bolt;
     }
     // Thunder: the voice's recipe carries it when it is the thunder recipe, else the audio engine.
     const intensity = lightning.thunder * (toGround ? 1 : 0.6);
     if (intensity > 0 && ctx.audio) {
+      strikeCounters.thunderRequests++;
       const options = data.thunderOptions;
       options.position.x = x;
       options.position.y = ground + height * 0.5;
@@ -469,7 +505,7 @@ export function createLightEffectEngine() {
   // ---- Engine interface ----------------------------------------------------------------------------
   const engine = {
     name: 'lightEffect',
-    budget: { instances: MAX_INSTANCES, particles: 30000, lights: 2 },
+    budget: { instances: MAX_INSTANCES, particles: 30000, lights: LIGHT_BUDGET },
     init(engineCtx) {
       ctx = engineCtx;
       const { THREE, TSL } = ctx;
@@ -672,7 +708,8 @@ export function createLightEffectEngine() {
         const lightConfig = config.light;
         const visible = 1 - lightConfig.night + lightConfig.night * night;
         const level = data.fade[0] * visible;
-        const held = data.light.update(data.tier !== 'far' && level > 0.02, dt);
+        const wanted = data.tier !== 'far' && level > 0.02;
+        const held = data.light.update(wanted && (data.light.held || countHeld() < LIGHT_BUDGET), dt);
         if (held) {
           const frame = data.heading;
           const offset = lightConfig.offset;
@@ -688,7 +725,6 @@ export function createLightEffectEngine() {
         }
       }
       const lights = (data.light && data.light.held ? 1 : 0) + (data.strikeLight && data.strikeLight.held ? 1 : 0);
-      lightsHeld += lights - instance.lights;
       instance.lights = lights;
 
       // The beam sweeps.
@@ -730,7 +766,6 @@ export function createLightEffectEngine() {
         if (data.light) data.light.update(false, 0);
         if (data.strikeLight) data.strikeLight.update(false, 0);
         data.strikeBolt = null;
-        lightsHeld -= instance.lights;
         instance.lights = 0;
       }
     },
@@ -748,7 +783,6 @@ export function createLightEffectEngine() {
       }
       if (data.light) data.light.release();
       if (data.strikeLight) data.strikeLight.release();
-      lightsHeld -= instance.lights;
       instance.lights = 0;
       if (data.flash) {
         data.flash.remove();
@@ -787,6 +821,8 @@ export function createLightEffectEngine() {
       return {
         tier: data.tier,
         fade: data.fade[0],
+        /** The glows' drawn level: the fade times the day or night visibility. */
+        level: points.groupVectors[data.group * 2].w,
         activity: data.activity[0],
         points: data.points,
         light: data.light ? data.light.held : false,
@@ -808,7 +844,7 @@ export function createLightEffectEngine() {
       return {
         instances: live.length,
         particles,
-        lights: lightsHeld,
+        lights: countHeld(),
         buffers: points ? points.buffers + bolts.length * 5 + beams.length * 4 : 0,
         drawCalls: (points && points.mesh.visible ? 1 : 0) + boltsLive * 2 + beamsLive,
         bolts: boltsLive,
