@@ -136,6 +136,7 @@ system, and then starts the frame loop.
 | `perf.js` | display refresh measurement, the frame target, dynamic resolution (stage one) and v1's quality governor (stage two) |
 | `seed.js` | resolves the world seed from the URL (or a new random one) |
 | `sun.js` | sun and moon directions for a time of day, and the inverse |
+| `turbulence.js` | `turbulenceResponse(turbulence, airspeed)`: how hard the WindField's turbulence at the craft is felt (0..1), shared by the camera shake and the cockpit rattle |
 | `util.js` | `clamp`, `damp`, heading helpers, `compassName`, finite checks |
 
 ### `src/render`: renderer, post stack and the atmosphere
@@ -228,6 +229,7 @@ system, and then starts the frame loop.
 | `chase.js` | v1's chase rig and photo mode, extended with detach, zoom and a settings-driven base FOV |
 | `cockpit.js` | the cockpit interior and instrument panel generated from `cameraRig.cockpit` |
 | `views/cockpitView.js`, `views/wingView.js`, `views/flybyView.js`, `views/fpvView.js` | the four non-chase views |
+| `turbulenceShake.js` | the turbulence shake: a small rotation of the final camera pose from the turbulence at the craft |
 
 ### `src/audio`: procedural Web Audio (no audio files)
 
@@ -238,6 +240,7 @@ system, and then starts the frame loop.
 | `engines/index.js` | engine families and `resolveAudioProfile` |
 | `engines/glider.js`, `prop.js`, `jet.js`, `heli.js`, `drone.js`, `wingsuit.js` | one synth per family |
 | `airflow.js` | wind beds, buffet, ground roll, cockpit interior low-pass |
+| `turbulenceRattle.js` | the cockpit rattle and airframe thump that follow the turbulence at the craft |
 | `flightCues.js` | stall horn, variometer, gear and flap motors, touchdown, afterburner detent click, crash |
 | `callouts.js` | radar-altitude landing callouts in a voice distinct from the copilot |
 | `eventCues.js`, `voices.js` | v1's chimes, blips, flutter and shutter |
@@ -259,6 +262,9 @@ system, and then starts the frame loop.
 | `lightPool.js` | the real-light budget pool |
 | `pools.js` | pooling helpers for engines: scratch rings, slot allocators, object pools, instanced and mesh pools |
 | `presets/index.js` | `PRESETS` (spec order) and `PRESET_BY_ID`; one pure-data file per preset |
+| `engines/vortexEngine.js` | the vortex engine: tornado, waterspout and dust-devil funnels, their ground ring and their Rankine wind ([docs/engines/vortex.md](engines/vortex.md)) |
+| `engines/windModifierEngine.js` | the windModifier engine: WindField sources with no visuals ([docs/engines/windModifier.md](engines/windModifier.md)) |
+| `engines/windSources.js` | the allocation-free WindField source samplers both wind engines author (rankine, updraft, downburst, wake, jetStream, slipstream, waveLift, gustFront, curtain), their param tables and bounds; pure, so the labs use it too |
 
 ### `src/env`
 
@@ -950,6 +956,16 @@ Behaviour:
   bit-identical; a 0.1 % rudder leak in one view shows as 0.7 mm to 15 cm).
 - The FPV view reads its uptilt, and SimQuad its rate curve, from `settings.fpv` live, over the
   craft profile values.
+- **Turbulence shake** (`turbulenceShake.js`). After the view writes its pose, the WindField's
+  turbulence at the craft (`state.flight.turbulence`) rotates the camera a little: pitch, yaw and roll
+  from 2-9 Hz multi-sine noise that runs faster with airspeed. The amount is
+  `turbulenceResponse(turbulence, airspeed)` (`src/core/turbulence.js`): zero up to 0.2 (the Phase 1
+  field's ordinary chop stays under it, so quiet flight and the opening shot are untouched), then
+  rising with the square, harder at speed. Per view: cockpit 1.35, FPV 1.1, wing 0.8, chase 0.75,
+  flyby 0 (degrees at full response, times up to 0.9 pitch, 0.55 yaw, 1.2 roll). It eases in fast and
+  out slowly, stops while paused, and is off in photo mode and during a return flight. The next
+  camera update takes the rotation back off first, so it never accumulates and never touches the
+  flight. `getStats().turbulenceShake` is `{ amount, peak }`.
 
 ### Audio (`ctx.systems.audio`)
 
@@ -987,6 +1003,11 @@ Behaviour:
   v1, and the soft crash muffles it.
 - **Sources.** Engine synths follow the craft `audioProfile` and `state.flight`. External views are
   spatialised with doppler; cockpit and FPV views get the interior low-pass.
+- **Turbulence rattle** (`turbulenceRattle.js`, environment bus). The same `turbulenceResponse` as
+  the camera shake drives a bright rattle (band-passed noise chopped at 9-17 Hz) and a low airframe
+  thump. Inside a closed cockpit the rattle is close and clear; outside it is a faint buzz under the
+  thump. Silent at zero turbulence and through the calm-air floor, in photo mode and while paused.
+  `getStats().turbulenceRattle` is `{ amount, interior, rattle, thump, levels }`.
 - **Typed events consumed**: `viewChanged`, `craftChanged`, `landed` and `softCrash`.
 
 ### WindField (`ctx.wind`, `src/env/WindField.js`)
@@ -996,7 +1017,7 @@ Behaviour:
 | `sample(pos, t, out?)` | `{ vel: Vector3 (m/s), turbulence: 0..1 }`: ambient wind (seeded, veering with height), ridge lift from the shared height gradient, seeded thermals (midday-strong, off at night, leaning downwind, with a sinking ring), turbulence (wind speed and low AGL), plus registered sources. Craft compute airspeed as `velocity - vel` |
 | `probe(pos, t?, out?)` | the same query without touching `lastLayers` (overlays, many-point probes) |
 | `addSource({ id, bounds, sample(pos, t), kind? })` | Phase 2 writers. `bounds` is `{ min, max }` or `{ center, radius }`. `sample` returns `{ vel?, turbulence? }` or null. Velocities add; turbulence takes the maximum. Sources are found through a spatial hash. Emits `windSourceAdded` |
-| `setSourceBounds(id, bounds)`, `removeSource(id)` | moves a source, or removes it (emits `windSourceRemoved`) |
+| `setSourceBounds(id, bounds)`, `removeSource(id)` | moves a source, or removes it (emits `windSourceRemoved`). `setSourceBounds` rewrites the box in place and refiles the source only when it covers other hash cells, so an engine may move a source every frame without allocating |
 | `sourceCount`, `listSources()` | registered sources |
 | `thermalsNear(x, z, radius, visit, t?)`, `nearestThermal(pos, minStrength?)` | thermal queries (cloud caps, copilot lift hints) |
 | `ambientAt(pos)` | `{ speed, fromDegrees }` |
@@ -1103,6 +1124,20 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   `{ instances, particles, lights, buffers, drawCalls, active, budget, failed }` and totals, the light
   pool, the lures, discoveries, counters, refusals, leaks, memory and the site feed.
   `window.DRIFTWING.getStats().spawns` carries it.
+- **Wind engines (wave 2).** Each engine has a reference page for preset authors in `docs/engines/`.
+  - `vortex` ([vortex.md](engines/vortex.md)): up to 4 vortices share one shell mesh and one
+    instanced sprite (2 draw calls in all); their motion is computed in the vertex shaders from a
+    per-slot uniform block, the same on WebGPU and WebGL2, so a spawn uploads no buffers and adds no
+    GPU memory. Lifecycle forming, mature, ropeOut, dissipated (then `ended`); a seeded track over the
+    terrain precomputed at create. One `rankine` WindField source per vortex, removed at FAR when its
+    inflow radius cannot reach the player there.
+  - `windModifier` ([windModifier.md](engines/windModifier.md)): up to 8 WindField sources per
+    instance (updraft, downburst, wake, jetStream, slipstream, waveLift, gustFront, curtain) with
+    fades, start / stop windows, strength timelines, drift or `follow` a sibling part, and the
+    `control.strength` / `control.strengths[i]` hooks; no visuals.
+  - Both refuse a param their type does not have, naming it, so a preset typo never passes silently.
+  - Their sources (`src/spawns/engines/windSources.js`) sample into one reused result and move with
+    `setSourceBounds`: the engines' frames allocate nothing (`tools/lab/wind-engines.mjs`).
 
 ### Performance (`ctx.perf`, `src/core/perf.js`)
 
@@ -1298,6 +1333,8 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders) |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/weather-sky.json` (or a build with `?debug=1`) | the opening is clear with the sky untouched, the sky modifier blend, the four weather states' sky (screenshots) and `weatherChanged` |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/director-game.json` | the game-wired director: its load shedder, `forceSpawn` ahead, `getNearby`, the camera frustum, the LOD bias and `dispose` |
+| `node tools/lab/wind-engines.mjs [--verbose]` | the vortex and windModifier engines headless on a real WindField: every source type blows the right way, the vortex lifecycle and tracking, fades, windows, timelines and control hooks, refused params, the SIM glider and jet flown through every source (vertical speed, load factor, airspeed, drift logged), zero allocations in the engine updates and samplers, and the CPU cost |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-vortex.json` (or `engine-windModifier.json`; add `--query renderer=webgl` for WebGL2) | the wind engines in V2: force-spawned ahead, their wind probed, screenshots, dispose back to the same GPU memory with every wind source removed; the windModifier file also checks the cockpit shake and rattle in rough air and both off in photo mode |
 | `tools/steps/golden-frame.json` with `node tools/png-diff.mjs a.png b.png` | a paused still frame of the opening, rendered with the weather's clear-sky modifier and without any modifier: pixel-identical |
 
 **The flight-test harness** passes with 0 NaN events, 0 terrain penetrations, 0 console errors and
