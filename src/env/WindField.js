@@ -311,7 +311,11 @@ export function createWindField({ world, uniforms, state, bus }) {
     }
   }
 
-  let sourceTurbulence = 0;
+  /**
+   * The strongest source turbulence of the sample being taken, in a typed slot: a double closure
+   * variable (or return value) would be boxed on every write.
+   */
+  const sourceTurbulence = new Float64Array(1);
   function visitSource(entry, position, time, out) {
     const box = entry.box;
     if (position.x < box.minX || position.x > box.maxX || position.y < box.minY || position.y > box.maxY || position.z < box.minZ || position.z > box.maxZ) return;
@@ -332,15 +336,15 @@ export function createWindField({ world, uniforms, state, bus }) {
       out.vel.y += vel.y;
       out.vel.z += vel.z;
     }
-    if (Number.isFinite(result.turbulence)) sourceTurbulence = Math.max(sourceTurbulence, Math.min(1, Math.max(0, result.turbulence)));
+    if (Number.isFinite(result.turbulence)) sourceTurbulence[0] = Math.max(sourceTurbulence[0], Math.min(1, Math.max(0, result.turbulence)));
   }
 
+  /** Adds every source covering position to out.vel; their strongest turbulence goes to sourceTurbulence[0]. */
   function applySources(position, time, out) {
-    sourceTurbulence = 0;
+    sourceTurbulence[0] = 0;
     const bucket = sourceCells.get(cellHashKey(Math.floor(position.x / SOURCE_CELL), Math.floor(position.z / SOURCE_CELL)));
     if (bucket) for (const entry of bucket) visitSource(entry, position, time, out);
     for (const entry of globalSources) visitSource(entry, position, time, out);
-    return sourceTurbulence;
   }
 
   function describeSource(entry) {
@@ -388,12 +392,12 @@ export function createWindField({ world, uniforms, state, bus }) {
     layerGust.set(sigma * gust(0, t, x, z), sigma * 0.6 * gust(1, t, z, x), sigma * gust(2, t, x + 311, z - 173));
     out.vel.add(layerGust);
 
-    let fromSources = 0;
+    sourceTurbulence[0] = 0;
     if (sources.size > 0) {
       samplePosition.set(x, y, z);
-      fromSources = applySources(samplePosition, t, out);
+      applySources(samplePosition, t, out);
     }
-    out.turbulence = Math.min(1, Math.max(sigma / 3, fromSources));
+    out.turbulence = Math.min(1, Math.max(sigma / 3, sourceTurbulence[0]));
     if (record) {
       lastLayers.ambient.copy(layerAmbient);
       lastLayers.ridge = ridgeResult.lift;
