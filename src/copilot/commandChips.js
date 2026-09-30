@@ -64,3 +64,83 @@ export function createCommandChips(ctx) {
     getStats: () => ({ available: true, hidden: group.style.display === 'none', chips: [...row.children].map((button) => button.dataset.command) }),
   };
 }
+
+const GUIDE_GROUP_ID = 'dw-quick-guide';
+/** Guide chips refresh at most this often when spawns come and go (s). */
+const GUIDE_REFRESH_SECONDS = 2;
+
+/**
+ * The "Guide" row: the tour-guide commands ("what's nearby", "find a thermal", "chase the storm",
+ * "next discovery"), a "take me to" chip for the nearest live events and discovered sites (never an
+ * undiscovered one), and "Yes, heading" / "No thanks" while a callout offer is open. The chips use
+ * the same data-command hook as the Aircraft row.
+ */
+export function createGuideChips(ctx, tourGuide) {
+  const { bus } = ctx;
+  const groups = typeof document !== 'undefined' ? document.querySelector('#dw-command .dw-command-groups') : null;
+  if (!groups) {
+    return { available: false, update() {}, refresh() {}, getStats: () => ({ available: false, chips: [] }) };
+  }
+
+  const group = document.createElement('div');
+  group.className = 'dw-command-group';
+  group.id = GUIDE_GROUP_ID;
+  const label = document.createElement('span');
+  label.className = 'dw-micro';
+  label.textContent = 'Guide';
+  const row = document.createElement('div');
+  row.className = 'dw-chip-row';
+  group.append(label, row);
+  groups.append(group);
+
+  let signature = '';
+  let dirty = true;
+  let timer = 0;
+
+  function chipsFor() {
+    const chips = [];
+    if (tourGuide.getOffer()) chips.push(['Yes, heading', 'yes'], ['No thanks', 'no thanks']);
+    chips.push(["What's nearby", "what's nearby"]);
+    for (const destination of tourGuide.listDestinations(2)) chips.push([`To ${destination.name}`, `take me to the ${destination.name.toLowerCase()}`]);
+    chips.push(['Find a thermal', 'find a thermal'], ['Chase the storm', 'chase the storm'], ['Next discovery', 'next discovery']);
+    return chips;
+  }
+
+  function refresh() {
+    dirty = false;
+    const chips = chipsFor();
+    const next = chips.map(([text, command]) => `${text}>${command}`).join('|');
+    if (next === signature) return;
+    signature = next;
+    row.replaceChildren(...chips.map(([text, command]) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'dw-quick';
+      button.dataset.command = command;
+      button.textContent = text;
+      return button;
+    }));
+  }
+
+  const markDirty = () => {
+    dirty = true;
+  };
+  bus.on('copilot:offer', refresh);
+  bus.onTyped('spawnActivated', markDirty);
+  bus.onTyped('spawnEnded', markDirty);
+  bus.onTyped('discovery', markDirty);
+  refresh();
+
+  return {
+    available: true,
+    refresh,
+    /** Refreshes the destinations after spawns changed, at most every GUIDE_REFRESH_SECONDS. */
+    update(realDt) {
+      timer -= realDt;
+      if (!dirty || timer > 0) return;
+      timer = GUIDE_REFRESH_SECONDS;
+      refresh();
+    },
+    getStats: () => ({ available: true, chips: [...row.children].map((button) => button.dataset.command) }),
+  };
+}

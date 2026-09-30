@@ -47,7 +47,7 @@ import { createControlState } from './input/controlState.js';
 import { createFlightTelemetry } from './flight/telemetry.js';
 import { storage } from './core/storage.js';
 import { findSpawn } from './world/spawn.js';
-import { resolveSeed } from './core/seed.js';
+import { resolveSeed, resolveStartTime } from './core/seed.js';
 import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation } from './core/sun.js';
 
 
@@ -93,7 +93,10 @@ async function boot() {
   await storage.init(devTest ? { databaseName: devTest.databaseName } : undefined);
   const bus = attachTypedEvents(new EventBus(), { validate: devHooks });
   const settings = createSettings(bus);
-  const seed = resolveSeed(params, new URLSearchParams(window.location.hash.slice(1)));
+  // The query wins, then the hash (share links and the launcher shell), then the world flown last.
+  const hashParams = new URLSearchParams(window.location.hash.slice(1));
+  const seed = resolveSeed(params, hashParams, settings.get('seed'));
+  settings.set('seed', seed);
   if (params.get('seed') !== seed) {
     params.set('seed', seed);
     window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}${window.location.hash}`);
@@ -144,10 +147,9 @@ async function boot() {
   const world = createWorldGen(seed, worldOptions);
   // Every world has its own prevailing wind; set before any system reads the uniform.
   prevailingWindDirection(world, uniforms.windDirection.value);
-  const requestedTime = Number.parseFloat(params.get('time'));
-  const startDayTime = Number.isFinite(requestedTime)
-    ? ((requestedTime % 1) + 1) % 1
-    : dayTimeForSunElevation(CONFIG.START_SUN_ELEVATION_DEG, true);
+  // ?time= (0..1) or a link's #t= (0..1 or HH:MM); otherwise the golden-hour opening.
+  const requestedTime = resolveStartTime(params, hashParams);
+  const startDayTime = requestedTime ?? dayTimeForSunElevation(CONFIG.START_SUN_ELEVATION_DEG, true);
   const startSun = sunDirectionForDayTime(startDayTime);
   const spawn = findSpawn(world, startSun);
 

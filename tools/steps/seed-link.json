@@ -1,0 +1,11 @@
+[
+  {
+    "eval": "(() => { window.__dwCheck = (name, ok, detail) => { if (!ok) console.error('[seed link check] ' + name + ' failed: ' + detail); return (ok ? 'PASS ' : 'FAIL ') + name + ': ' + detail; }; return 'run on the launcher shell opened from a share link: /?v=2#seed=LINKTEST&t=0.300'; })()"
+  },
+  {
+    "eval": "(() => { const shell = window.DRIFTWING_SHELL; const game = shell.game; const state = game.state; const dayLength = game.ctx.settings.get('dayLength'); const advance = state.time.dayTime - 0.3; const allowed = (4 * state.time.elapsed) / dayLength + 0.005; const link = game.ctx.systems.ui.seedLinks.shareUrl(); return [ window.__dwCheck('the link opens V2 in the launcher', shell.version === 'v2' && window.location.search.includes('v=2'), window.location.href), window.__dwCheck('the link lands in its seed', game.seed === 'LINKTEST' && game.ctx.settings.get('seed') === 'LINKTEST', game.seed), window.__dwCheck('the link lands at its time of day', advance > -0.001 && advance < allowed, state.time.dayTime.toFixed(4) + ' from 0.300 after ' + state.time.elapsed.toFixed(1) + ' s of a ' + dayLength + ' s day (at most ' + allowed.toFixed(4) + ' on)'), window.__dwCheck('Copy link inside the shell gives the shell URL', link.startsWith(window.location.origin + '/?v=2#seed=LINKTEST&t='), link), ].join(' | '); })()"
+  },
+  {
+    "eval": "(async () => { const shell = window.DRIFTWING_SHELL; const before = shell.game; before.ctx.systems.ui.seedLinks.openWorld('applied-seed', 0.5); let game = null; for (let index = 0; index < 240; index++) { await new Promise((resolve) => setTimeout(resolve, 500)); const candidate = shell.game; if (candidate && candidate !== before && candidate.ready) { game = candidate; break; } } return [ window.__dwCheck('a seed applied in V2 reloads the game inside the shell', game !== null && shell.version === 'v2', game ? 'reloaded' : 'no new game within 120 s'), window.__dwCheck('into that world, at that time', game !== null && game.seed === 'APPLIED-SEED' && Math.abs(game.state.time.dayTime - 0.5) < 0.05, game ? game.seed + ' at ' + game.state.time.dayTime.toFixed(3) : 'none'), window.__dwCheck('and the shell URL names the new world', window.location.hash === '#seed=APPLIED-SEED&t=0.500' && !new URLSearchParams(window.location.search).has('seed'), window.location.href), ].join(' | '); })()"
+  }
+]

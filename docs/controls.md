@@ -21,6 +21,7 @@ and changes these:
 - G is the landing gear (the waypoint moves to N);
 - C cycles the view (Enter and / open the command bar);
 - V swaps between first and third person; v1's V (WREN voice on / off) is **Shift+V**;
+- M opens the world map; v1's M (talk to WREN) is **Shift+M**;
 - Space is the craft ability;
 - W / S move the throttle lever;
 - the captured mouse is a free virtual stick.
@@ -87,6 +88,7 @@ a few seconds; move the pointer to the top-left corner to bring it back. From V2
 | Time of day forward / back | T / Shift+T |
 | Ring course | R |
 | Journal | J |
+| World map (mapToggle) | M |
 | Photo mode | P |
 | Settings | , (comma) |
 | Controls panel | . (period) |
@@ -98,7 +100,7 @@ a few seconds; move the pointer to the top-left corner to bring it back. From V2
 
 UI keys are not rebindable:
 
-- **M**: talk to WREN (mic on / off).
+- **Shift+M**: talk to WREN (mic on / off).
 - **Enter** or **/**: type to WREN.
 - **H** or **?**: help.
 - **Esc**: close a panel or leave photo mode.
@@ -107,6 +109,11 @@ UI keys are not rebindable:
 - **I**: fps and stats.
 - **Shift+V**: WREN voice on / off.
 - **Tab**: hide or show the HUD.
+
+WREN's tour guide has no keys of its own: its commands are the "Guide" chips in the command bar
+(Enter or **/**): What's nearby, To [a nearby event or discovered site], Find a thermal, Chase the
+storm and Next discovery, plus **Yes, heading** / **No thanks** while a callout offer is open. Say
+or type the same phrases, or "guide help" for the list; docs/copilot-api.md has them all.
 
 If you bind one of these keys to an action, the action wins and the panel warns about the conflict.
 
@@ -133,6 +140,28 @@ The same ControlState drives every craft; each craft's input profile decides wha
 | Helicopter | collective | hover hold (locks position, height and heading; the stick moves the hold point) | at 100 % assists the lever is a climb / descend command around its centre; Z cuts the engine for autorotation practice |
 | Wingsuit | none | deploy the parachute (U does too) | under the canopy, stick roll, the rudder pedals and the toe brakes are the steering toggles; pull back to flare |
 | FPV drone | thrust | rate / angle mode (turtle mode when it lies upside down) | Z arms and disarms; at high assists the throttle asks for a climb rate around its centre (altitude hold) |
+
+## World map
+
+**M** (the bindable `mapToggle` action; TWCS button 9; the map button in the top bar, or Map in the
+touch menu) opens the world map over the flight, which carries on behind it. It shows the terrain in
+shaded relief, the sites and landmarks you have discovered (never the ones you have not), this
+flight's trail, your craft and its heading, and the waypoint.
+
+| input | on the map |
+| --- | --- |
+| Click or tap | set the waypoint there (on a site's icon: at the site, named after it) |
+| Drag | pan |
+| Wheel, pinch, + / − buttons | zoom |
+| Arrow keys (map focused) | pan |
+| + / − (map focused) | zoom |
+| 0 (map focused), the follow button | follow the craft again |
+| Enter (map focused) | set the waypoint at the centre |
+| M, Esc | close the map |
+
+The map keys stay in the map while it has the focus; every other key still flies the craft. The
+standard gamepad and the T.16000M have no free button, so bind `mapToggle` there in the controls
+panel if you want it.
 
 ## Mouse
 
@@ -226,6 +255,7 @@ the best published layout. If your hardware reports them differently, rebind in 
 | Button 6 | deploy parachute |
 | Button 7 | controls panel |
 | Button 8 | first / third person |
+| Button 9 | world map |
 | Throttle hat | unbound (reserved for music controls in a later phase) |
 
 TFRP pedals on their own USB lead (normally they come through the TWCS) default to rudder and toe
@@ -339,7 +369,7 @@ A short checklist for the first session with the real T.16000M FCS Flight Pack:
 `copilotPTT, craftAbility, waypointNearest, waypointAhead, photoMode, viewCycle, viewToggle1P3P,
 viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, craftSelect1-6,
 gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack, ringCourse,
-journal, settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`. Each press
+journal, mapToggle, settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`. Each press
 and release is published as `input:action { id, phase, source, device }`.
 
 ## For developers: the input system API

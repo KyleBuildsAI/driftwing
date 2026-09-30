@@ -1,0 +1,92 @@
+[
+  {
+    "eval": "(() => { window.__dwCheck = (name, ok, detail) => { if (!ok) console.error('[discovery check] ' + name + ' failed: ' + detail); return (ok ? 'PASS ' : 'FAIL ') + name + ': ' + detail; }; return 'dev server or ?dev=1 build: the discovery loop with the spawn test kit'; })()"
+  },
+  {
+    "press": "ShiftLeft"
+  },
+  {
+    "wait": 1500
+  },
+  {
+    "eval": "(async () => { const game = window.DRIFTWING; const { ctx } = game; const spawns = ctx.systems.spawns; ctx.settings.set('timeFrozen', true); await spawns.debug.loadTestKit(); const kit = spawns.debug.testKit; const before = ctx.systems.journal.getCollection(); const sitePoint = kit.visiblePointAhead({ minDistance: 450, maxDistance: 1100 }); const site = sitePoint ? kit.placeTestSite(undefined, sitePoint) : null; const eventPoint = kit.visiblePointAhead({ minDistance: 300, maxDistance: 900, lift: 30 }); const eventId = eventPoint ? kit.spawnAtPoint('testMarker', eventPoint) : null; const card = document.querySelector('.dw-discovery'); const cards = []; new MutationObserver(() => { if (card.dataset.state === 'shown') cards.push(card.innerText); }).observe(card, { attributes: true, attributeFilter: ['data-state'] }); window.__dwDiscovery = { before, site, eventId, chimeNodes: 0, cards }; return window.__dwCheck('forced spawns ahead (a test site and a test event)', site !== null && eventId !== null, JSON.stringify({ site: site && site.id, eventId, before: before.found + ' / ' + before.total })); })()"
+  },
+  {
+    "eval": "(async () => { const audio = window.DRIFTWING.ctx.systems.audio; let most = 0; for (let index = 0; index < 40; index++) { await new Promise((resolve) => setTimeout(resolve, 150)); const spawn = audio.getStats().spawn; if (spawn) most = Math.max(most, spawn.oneShotNodesLive); } window.__dwDiscovery.chimeNodes = most; return 'chime nodes seen while the discoveries fired: ' + most + ' (audio ' + audio.getStats().state + ')'; })()"
+  },
+  {
+    "eval": "(() => { const { ctx } = window.DRIFTWING; const journal = ctx.systems.journal; const record = window.__dwDiscovery; const data = journal.getData(); const ids = data.spawnsFound.map((entry) => entry.id); const siteEntry = data.spawnsFound.find((entry) => entry.id === record.site.id); const shown = record.cards.join(' || '); const results = [ window.__dwCheck('both discoveries are in the journal', ids.includes(record.site.id) && ids.includes('testMarker'), ids.join(', ')), window.__dwCheck('the entry records name, category, seed, coordinates, time of day and date', siteEntry && siteEntry.name === 'Test site' && siteEntry.category === 'structure' && siteEntry.kind === 'site' && siteEntry.seed === ctx.state.seed && Math.abs(siteEntry.x - record.site.x) < 1 && siteEntry.dayTime >= 0 && siteEntry.foundAt > 0 && siteEntry.description.length > 0, JSON.stringify(siteEntry)), window.__dwCheck('the count increments over the registry', data.collection.found === record.before.found + 2 && data.collection.total === record.before.total, record.before.found + ' -> ' + data.collection.found + ' / ' + data.collection.total), window.__dwCheck('a glass toast shows the name, the one-liner and the count', record.cards.length > 0 && /Test (site|marker)/.test(shown) && /spawn framework test fixture/.test(shown) && / \\/ /.test(shown), JSON.stringify(shown)), window.__dwCheck('the discovery chime played', record.chimeNodes > 0, record.chimeNodes + ' one-shot nodes live'), ]; return results.join(' | '); })()"
+  },
+  {
+    "shot": "discovery-toast"
+  },
+  {
+    "eval": "(() => { const { ctx } = window.DRIFTWING; const bus = ctx.bus; const journal = ctx.systems.journal; bus.emitTyped('journalStat', { key: 'stormsChased', value: 1, op: 'add', presetId: 'stormChase' }); bus.emitTyped('journalStat', { key: 'closestTornado', value: 640, op: 'min', presetId: 'tornado' }); bus.emitTyped('journalStat', { key: 'closestTornado', value: 212.4, op: 'min', presetId: 'tornado' }); bus.emitTyped('journalStat', { key: 'bestCanyonRun', value: 102.35, op: 'min', presetId: 'slotCanyon' }); bus.emitTyped('achievement', { id: 'vFormation', title: 'V-formation' }); bus.emitTyped('achievement', { id: 'threadTheNeedle', title: 'Thread the Needle' }); const records = journal.getRecords(); ctx.systems.ui.showPanel('journal'); const text = document.getElementById('dw-journal-body').innerText; return [ window.__dwCheck('journalStat events update the records', records.stats.stormsChased.value === 1 && records.stats.closestTornado.value === 212.4 && records.stats.bestCanyonRun.value === 102.35, JSON.stringify(records.stats)), window.__dwCheck('achievement events are recorded', records.achievements.map((entry) => entry.id).join() === 'vFormation,threadTheNeedle', JSON.stringify(records.achievements)), window.__dwCheck('the journal panel shows discoveries, records and achievements', /Discoveries/i.test(text) && /Test site/.test(text) && /212\\s?m/.test(text) && /1:42\\.3/.test(text) && /Thread the Needle/.test(text) && /V-formation/.test(text), text.slice(0, 400).replace(/\\n/g, ' / ')), ].join(' | '); })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "journal"
+  },
+  {
+    "eval": "(() => { const { ctx } = window.DRIFTWING; ctx.systems.ui.showPanel(null); const kit = ctx.systems.spawns.debug.testKit; const player = ctx.state.player; const behind = { x: player.position.x - player.forward.x * 5000, y: 0, z: player.position.z - player.forward.z * 5000 }; behind.y = Math.max(ctx.world.groundHeight(behind.x, behind.z), ctx.world.WATER_LEVEL); const hidden = kit.placeTestSite(undefined, behind); window.__dwDiscovery.hidden = hidden; return 'an undiscovered test site 5 km behind: ' + hidden.id + ' (discovered: ' + ctx.systems.spawns.manager.isDiscovered(hidden.id) + ')'; })()"
+  },
+  {
+    "wait": 400
+  },
+  {
+    "press": "KeyM"
+  },
+  {
+    "wait": 5000
+  },
+  {
+    "eval": "(() => { const { ctx } = window.DRIFTWING; const map = ctx.systems.ui.worldMap; const mapState = map.getState(); const record = window.__dwDiscovery; const names = mapState.sites.map((site) => site.kind + ':' + site.name + '@' + site.x + ',' + site.z); const siteShown = mapState.sites.some((site) => Math.abs(site.x - record.site.x) < 2 && Math.abs(site.z - record.site.z) < 2 && site.icon === 'structure'); const hiddenShown = mapState.sites.some((site) => Math.abs(site.x - record.hidden.x) < 2 && Math.abs(site.z - record.hidden.z) < 2); return [ window.__dwCheck('M opens the map', mapState.open && document.getElementById('dw-panel-map').classList.contains('dw-open'), JSON.stringify(mapState.size)), window.__dwCheck('the discovered site shows as its category icon, the event and the undiscovered site do not', siteShown && !hiddenShown && mapState.sites.every((site) => site.kind === 'site' || site.kind === 'landmark'), names.join(', ')), window.__dwCheck('terrain tiles came from the worker', mapState.tiles.ready > 0 && mapState.tiles.service.generated + mapState.tiles.service.fromCache > 0, JSON.stringify(mapState.tiles)), window.__dwCheck('the trail is recorded', mapState.trailPoints > 1, mapState.trailPoints + ' points'), ].join(' | '); })()"
+  },
+  {
+    "eval": "(() => { const { ctx } = window.DRIFTWING; const map = ctx.systems.ui.worldMap; const player = ctx.state.player; const target = { x: player.position.x + player.forward.x * 2400 + player.right.x * 900, z: player.position.z + player.forward.z * 2400 + player.right.z * 900 }; ctx.systems.waypoints.clear(); map.centerOn(target.x, target.z, 12); window.__dwDiscovery.target = target; const rect = document.querySelector('.dw-map-canvas').getBoundingClientRect(); return 'map centred on a point 2.6 km away; canvas centre at ' + Math.round(rect.left + rect.width / 2) + ',' + Math.round(rect.top + rect.height / 2); })()"
+  },
+  {
+    "wait": 2500
+  },
+  {
+    "eval": "(() => { const rect = document.querySelector('.dw-map-canvas').getBoundingClientRect(); window.__dwDiscovery.clickAt = { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }; return 'click target ' + JSON.stringify(window.__dwDiscovery.clickAt); })()"
+  },
+  {
+    "click": [
+      640,
+      348
+    ]
+  },
+  {
+    "wait": 1500
+  },
+  {
+    "eval": "(() => { const { ctx } = window.DRIFTWING; const record = window.__dwDiscovery; const waypoint = ctx.state.waypoint; const map = ctx.systems.ui.worldMap; const expected = { x: record.target.x + (640 - record.clickAt.x) * 12, z: record.target.z + (348 - record.clickAt.y) * 12 }; const error = waypoint ? Math.hypot(waypoint.x - expected.x, waypoint.z - expected.z) : Infinity; return window.__dwCheck('a click on the map sets the waypoint there', waypoint !== null && error < 40 && map.getState().waypoint !== null, JSON.stringify({ waypoint, expected, error: Math.round(error) })); })()"
+  },
+  {
+    "shot": "map"
+  },
+  {
+    "eval": "(() => { window.DRIFTWING.ctx.systems.ui.worldMap.follow(); return 'following the craft'; })()"
+  },
+  {
+    "wait": 1500
+  },
+  {
+    "shot": "map-follow"
+  },
+  {
+    "eval": "(async () => { const { ctx } = window.DRIFTWING; const link = await ctx.systems.ui.seedLinks.copyLink(); const expected = new URL('/', window.location.href).origin + '/?v=2#seed=' + ctx.state.seed + '&t=' + ctx.state.time.dayTime.toFixed(3); return [ window.__dwCheck('Copy link produces the shell link with the seed and the time of day', link === expected, link + ' vs ' + expected), window.__dwCheck('the current seed persists in the settings', ctx.settings.get('seed') === ctx.state.seed, ctx.settings.get('seed')), ].join(' | '); })()"
+  },
+  {
+    "press": "KeyM"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "eval": "(() => { const map = window.DRIFTWING.ctx.systems.ui.worldMap; return window.__dwCheck('M closes the map again', !map.isOpen(), JSON.stringify({ open: map.isOpen() })); })()"
+  }
+]
