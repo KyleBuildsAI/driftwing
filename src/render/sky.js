@@ -470,16 +470,24 @@ export function createSkySystem(ctx) {
   // ---- Fog: same sky function, horizontally weighted distance so the world edge always melts away ----
   const viewDirectionWorld = positionView.transformDirection(cameraViewMatrix);
   const worldOffset = viewDirectionWorld.mul(length(positionView));
-  const hazeDistance = length(vec3(worldOffset.x, worldOffset.y.mul(sky.fogVerticalScale), worldOffset.z));
-  // Low haze is densest near the ground under the glider: attenuate it by the view ray's mid height
-  // so looking down from altitude stays clear. The edge term ignores height, so the world edge always
-  // melts into the sky.
-  const fragmentHeight = cameraPosition.y.add(worldOffset.y);
-  const rayMidHeight = cameraPosition.y.add(fragmentHeight).mul(0.5).sub(sky.fogLayerBase);
-  const layerDensity = mix(float(FOG_HIGH_DENSITY), float(1), exp(max(rayMidHeight, 0.0).div(FOG_SCALE_HEIGHT).negate()));
-  const layerHaze = smoothstep(sky.fogNear, sky.fogFar, hazeDistance);
-  const edgeHaze = smoothstep(sky.fogFar.mul(FOG_EDGE_START), sky.fogFar, hazeDistance);
-  scene.fogNode = fog(skyBase(viewDirectionWorld), max(layerHaze.mul(layerHaze).mul(layerDensity), edgeHaze.mul(edgeHaze)));
+  /**
+   * The haze (0..1) of a point worldOffset metres from the camera (a world-oriented vec3 node). It
+   * builds the nodes inline, so the scene fog and the effects that draw their own fog (the spawn
+   * particles, whose vertex shaders place them) share one formula.
+   */
+  function fogAmount(offset) {
+    const hazeDistance = length(vec3(offset.x, offset.y.mul(sky.fogVerticalScale), offset.z));
+    // Low haze is densest near the ground under the glider: attenuate it by the view ray's mid height
+    // so looking down from altitude stays clear. The edge term ignores height, so the world edge always
+    // melts into the sky.
+    const fragmentHeight = cameraPosition.y.add(offset.y);
+    const rayMidHeight = cameraPosition.y.add(fragmentHeight).mul(0.5).sub(sky.fogLayerBase);
+    const layerDensity = mix(float(FOG_HIGH_DENSITY), float(1), exp(max(rayMidHeight, 0.0).div(FOG_SCALE_HEIGHT).negate()));
+    const layerHaze = smoothstep(sky.fogNear, sky.fogFar, hazeDistance);
+    const edgeHaze = smoothstep(sky.fogFar.mul(FOG_EDGE_START), sky.fogFar, hazeDistance);
+    return max(layerHaze.mul(layerHaze).mul(layerDensity), edgeHaze.mul(edgeHaze));
+  }
+  scene.fogNode = fog(skyBase(viewDirectionWorld), fogAmount(worldOffset));
   const backgroundColor = new THREE.Color();
   scene.background = backgroundColor;
 
@@ -1101,6 +1109,13 @@ export function createSkySystem(ctx) {
     /** TSL node: base sky radiance for a unit world direction node (the same colour the fog uses). */
     skyColorNode(directionNode) {
       return skyBase(directionNode);
+    },
+    /**
+     * TSL node: the scene fog's haze (0..1) for a point offsetNode metres from the camera (a world
+     * vec3), for effects that apply their own fog. Mix toward skyColorNode of its direction.
+     */
+    fogAmountNode(offsetNode) {
+      return fogAmount(offsetNode);
     },
     addModifier,
     /** The modifiers folded together as of the last frame, for the debugger and tests (a copy). */
