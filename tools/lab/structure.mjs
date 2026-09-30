@@ -7,7 +7,8 @@
 //                finite geometry, the expected parts and the same geometry for the same seed
 //   params       bad params are refused with an error naming the preset and the param
 //   stamps       the airfield strip lies on its flatten stamp, the bridge spans its gorge between the
-//                lips above the floor, the canyon course gates span the carve's ends
+//                lips above the floor, the canyon course gates span the carve's ends; structureStamps
+//                names each recipe's stamps, refuses bad options, and islands hover over their islets
 //   gates        flying under the bridge fires the gate and the achievement once; over it and a
 //                teleport do not; flying between two spires rings a chime
 //   course       start -> finish reports the time; a soft crash in between spoils a clean run
@@ -39,6 +40,7 @@ import { applyStampHeight } from '../../src/world/stamps.js';
 import { createGroundSurfaces } from '../../src/world/groundSurfaces.js';
 import { createStructureEngine } from '../../src/spawns/engines/structureEngine.js';
 import { buildTestSite, createStructureTestPresets } from '../../src/dev/structureTestKit.js';
+import { RECIPE_STAMP_TYPES, structureStamps } from '../../src/spawns/engines/structure/stamps.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -318,6 +320,28 @@ function testStamps() {
     Math.hypot(gates[0] - carve.entry.x, gates[1] - carve.entry.z) < 0.01 && Math.hypot(gates[8] - carve.exit.x, gates[9] - carve.exit.z) < 0.01,
     `entry ${carve.entry.x.toFixed(0)},${carve.entry.z.toFixed(0)}`);
   lab.manager.deactivate(canyon, 'test');
+
+  // structureStamps: the stamps a recipe needs, as preset data placement resolves on both threads.
+  const types = Object.fromEntries(Object.keys(RECIPE_STAMP_TYPES).map((recipe) => [recipe, structureStamps(recipe).map((spec) => spec.type).join('+') || 'none']));
+  check('stamps', 'structureStamps names the stamp each recipe reads (none for the wind farm and the spires)',
+    types.windFarm === 'none' && types.spires === 'none' && types.ropeBridge === 'gorge' && types.airfield === 'flatten' && types.islands === 'islandBase' && types.gates === 'carve', JSON.stringify(types));
+  const custom = structureStamps('airfield', { length: [1500, 1600], paint: null });
+  check('stamps', 'options override the preferred sizes of a recipe', custom[0].length[0] === 1500 && custom[0].paint === null && Object.isFrozen(custom), JSON.stringify(custom[0]));
+  const refusals = [
+    expectThrow(() => structureStamps('castle'), /unknown recipe "castle"/),
+    expectThrow(() => structureStamps('airfield', { width: [60, 40] }), /stamps\[0\]\.width/),
+    expectThrow(() => structureStamps('islands', { islets: 9 }), /islets/),
+  ].filter(Boolean);
+  check('stamps', 'structureStamps refuses an unknown recipe, a bad size and too many islets', refusals.length === 0, refusals.join('; '));
+  // Three islets: the first three floating islands hover over them (the islets' resolved tops).
+  const isletPreset = { ...presetById.get('devIslands'), id: 'devIslets', stamps: structureStamps('islands', { islets: 3, spread: 520 }) };
+  const isletSite = buildTestSite(isletPreset, { x: 60000, z: 9000, rotation: 1.1, seed: 4242 }, { baseHeight, waterLevel: WATER_LEVEL });
+  lab.manager.addPreset(isletPreset);
+  const islets = lab.manager.activate('devIslets', { position: { x: isletSite.x, y: isletSite.groundY, z: isletSite.z }, source: 'site', site: isletSite });
+  const centres = lab.surfaces.list().map((surface) => ({ x: (surface.minX + surface.maxX) / 2, z: (surface.minZ + surface.maxZ) / 2 }));
+  const hovering = isletSite.stamps.filter((islet) => centres.some((centre) => Math.hypot(centre.x - islet.x, centre.z - islet.z) < 0.01));
+  check('stamps', 'three islet stamps: an island hovers over each', isletSite.stamps.length === 3 && hovering.length === 3, `${hovering.length}/${isletSite.stamps.length} islets under an island`);
+  lab.manager.deactivate(islets, 'test');
 }
 
 // ---- gates ------------------------------------------------------------------------------------------------

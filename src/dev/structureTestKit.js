@@ -5,6 +5,7 @@
 // hook (spawns.debug.addPreset). Never part of a production build: only the lab and dev-server step
 // files import it. The real presets arrive with Milestone E in src/spawns/presets/.
 import { resolveStamp } from '../world/stamps.js';
+import { structureStamps } from '../spawns/engines/structure/stamps.js';
 
 const SITE_FILTERS = Object.freeze({ biomes: null, timeOfDay: null, altitude: null, weather: null });
 const SITE_LIFETIME = Object.freeze({ duration: null, despawn: Object.freeze({ distance: 12000, hysteresis: 2000, outOfViewSeconds: 20 }) });
@@ -44,12 +45,12 @@ export function createStructureTestPresets() {
       radius: 2500,
     }),
     testSite('devRopeBridge', 'Dev rope bridge', {
-      stamps: [{ type: 'gorge', length: [800, 1000], width: [90, 120], depth: [80, 110], falloff: [160, 200], pad: [60, 80], paint: 'riverbed' }],
+      stamps: structureStamps('ropeBridge'),
       engines: [{ engine: 'structure', params: Object.freeze({ recipe: 'ropeBridge', span: 150, gate: Object.freeze({ id: 'under', achievement: Object.freeze({ id: 'threadTheNeedle', title: 'Thread the Needle' }) }) }) }],
       lod: { near: 1200, mid: 4000, far: 9000 },
     }),
     testSite('devAirfield', 'Dev airfield', {
-      stamps: [{ type: 'flatten', length: [1100, 1300], width: [42, 50], margin: [36, 48], shoulder: [110, 150], paint: 'tarmac' }],
+      stamps: structureStamps('airfield'),
       engines: [{ engine: 'structure', params: Object.freeze({ recipe: 'airfield', length: 1100, width: 45, hangars: Object.freeze({ count: 3, ruin: 0.6 }) }) }],
       lod: { near: 1800, mid: 6000, far: 12000 },
       radius: 2000,
@@ -58,7 +59,7 @@ export function createStructureTestPresets() {
       category: 'fantasy',
       heavy: true,
       lure: Object.freeze({ type: 'islands', height: 600, width: 1200, altitude: 250, color: 0x7d705f }),
-      stamps: [{ type: 'islandBase', radius: [170, 230], height: [24, 40], falloff: [90, 120], paint: 'basalt' }],
+      stamps: structureStamps('islands'),
       engines: [{ engine: 'structure', params: Object.freeze({ recipe: 'islands', count: 3, altitude: [160, 260], spread: 420 }) }],
       lod: { near: 2000, mid: 8000, far: 30000 },
       audio: Object.freeze({ recipe: 'waterfall', params: Object.freeze({}) }),
@@ -72,7 +73,7 @@ export function createStructureTestPresets() {
     }),
     testSite('devCanyonGates', 'Dev canyon run', {
       category: 'geo',
-      stamps: [{ type: 'carve', length: [2200, 2600], width: [36, 50], depth: [75, 95], wallWidth: [18, 26], twist: [180, 260], plateau: [40, 60], shoulder: [110, 140], paint: 'riverbed' }],
+      stamps: structureStamps('gates'),
       engines: [{ engine: 'structure', params: Object.freeze({ recipe: 'gates', course: 'devCanyonRun' }) }],
       lod: { near: 1500, mid: 5000, far: 12000 },
     }),

@@ -15,7 +15,10 @@
 // pennants and tree tops swing with the wind in the vertex shader.
 //
 // Generic features any recipe or preset uses:
-//   gates        pass-under / pass-through gates (gateDetector.js): 'structure:gate' events, optional
+//   stamps       structure/stamps.js structureStamps(recipe, options): the terrain stamps a recipe
+//                builds on, as preset data (placement resolves them on both threads; the recipe reads
+//                the resolved stamp from params.site)
+//   gates       pass-under / pass-through gates (gateDetector.js): 'structure:gate' events, optional
 //                achievements, crystal chimes, timed courses ('structure:course')
 //   landing      runway zones grade touchdowns ('structure:landing' and a toast)
 //   surfaces     landable tops registered as extra ground surfaces (src/world/groundSurfaces.js)
