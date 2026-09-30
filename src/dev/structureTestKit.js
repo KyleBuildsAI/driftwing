@@ -6,6 +6,7 @@
 // files import it. The real presets arrive with Milestone E in src/spawns/presets/.
 import { resolveStamp } from '../world/stamps.js';
 import { structureStamps } from '../spawns/engines/structure/stamps.js';
+import { createGeometryTracker } from './geometryTracker.js';
 
 const SITE_FILTERS = Object.freeze({ biomes: null, timeOfDay: null, altitude: null, weather: null });
 const SITE_LIFETIME = Object.freeze({ duration: null, despawn: Object.freeze({ distance: 12000, hysteresis: 2000, outOfViewSeconds: 20 }) });
@@ -246,16 +247,15 @@ export function installStructureChecks(game) {
   const manager = system.manager;
   const spawned = new Map();
 
-  /**
-   * GPU memory and the terrain's chunk meshes. A flight under the bridge can make the terrain's mesh
-   * pools grow by a chunk mesh (a pooled mesh keeps its geometry by design), so the dispose check
-   * allows the geometry count to move by exactly the chunk meshes the terrain created meanwhile.
-   */
+  /** GPU memory: geometries and textures. */
   function memory() {
     const info = ctx.renderer.info.memory;
-    const terrainMeshes = ctx.systems.terrain.getStats().meshesCreated.reduce((sum, count) => sum + count, 0);
-    return { geometries: info.geometries, textures: info.textures, terrainMeshes };
+    return { geometries: info.geometries, textures: info.textures };
   }
+  // The terrain may draw a pooled chunk mesh for the first time while a structure stands (a flight
+  // under the bridge moves the craft), which adds a geometry no spawn owns: the tracker tells the
+  // terrain's new geometries from anything the structure left behind.
+  const tracker = createGeometryTracker(ctx.renderer, ctx.scene);
 
   /**
    * The gentlest open ground about `distance` m ahead of the craft (within 50 degrees of its
@@ -307,6 +307,7 @@ export function installStructureChecks(game) {
       const settled = await frameView(viewpoint(target, distance, height, heading + 180 + bearing), target);
       const idle = await terrainIdle();
       const before = memory();
+      if (tracker) tracker.start();
       const id = manager.activate(presetId, { position: anchor, heading, source: 'debug', force: true });
       await frames(12);
       const during = memory();
@@ -325,9 +326,12 @@ export function installStructureChecks(game) {
       await frames(4);
       const after = memory();
       spawned.delete(presetId);
+      const fresh = tracker ? tracker.stop() : [];
+      const terrainFresh = fresh.filter((entry) => entry.owner === 'terrain').length;
+      const leftBehind = fresh.filter((entry) => entry.owner !== 'terrain');
       return check(`${presetId}: dispose returns GPU memory and removes its wind sources`,
-        after.geometries - record.before.geometries === after.terrainMeshes - record.before.terrainMeshes && after.textures === record.before.textures && ctx.wind.sourceCount === windBefore - ownSources && record.during.geometries > record.before.geometries,
-        { terrainIdle: record.idle, before: record.before, during: record.during, after, windSources: `${windBefore} -> ${ctx.wind.sourceCount} (own ${ownSources})`, leaks: manager.getStats().leaks });
+        leftBehind.length === 0 && after.geometries - record.before.geometries === terrainFresh && after.textures === record.before.textures && ctx.wind.sourceCount === windBefore - ownSources && record.during.geometries > record.before.geometries,
+        { terrainIdle: record.idle, before: record.before, during: record.during, after, terrainFirstDrawn: terrainFresh, leftBehind, tracked: tracker !== null, windSources: `${windBefore} -> ${ctx.wind.sourceCount} (own ${ownSources})`, leaks: manager.getStats().leaks });
     },
     /** Sets the time of day (0..1) at once. */
     setTime(dayTime) {
@@ -352,7 +356,11 @@ export function installStructureChecks(game) {
     stats() {
       return manager.getStats().engines.structure;
     },
-    finish: helpers.finish,
+    /** The summary check; puts the renderer's geometry manager back. */
+    finish() {
+      if (tracker) tracker.restore();
+      return helpers.finish();
+    },
   };
   window.__dwStructure = api;
   return api;

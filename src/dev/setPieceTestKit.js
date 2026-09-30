@@ -4,6 +4,7 @@
 // ramps), through every trigger kind, a tracked child, narration and records. tools/lab/setpiece.mjs
 // runs it headless; tools/steps/engine-setPiece.json runs it in the game through the dev hook.
 // Never part of a production build.
+import { createGeometryTracker } from './geometryTracker.js';
 
 const TEST_FILTERS = Object.freeze({ biomes: null, timeOfDay: null, altitude: null, weather: null });
 
@@ -139,7 +140,7 @@ export async function installSetPieceChecks(game) {
 
   /** Where the craft is held while the timeline runs, and the GPU memory and wind sources before it. */
   const park = { x: state.spawn.x, y: state.spawn.y + 300, z: state.spawn.z, heading: state.spawn.heading };
-  const baseline = { geometries: 0, textures: 0, windSources: 0, terrainMeshes: 0, terrainIdle: false };
+  const baseline = { geometries: 0, textures: 0, windSources: 0, terrainIdle: false, warmUp: 'none' };
   let holding = false;
 
   function hold() {
@@ -160,38 +161,42 @@ export async function installSetPieceChecks(game) {
     return quiet >= 20;
   }
 
-  /**
-   * GPU memory, the wind sources and the terrain's chunk meshes. The terrain's mesh pools may grow by
-   * a chunk mesh while the craft is held (a pooled mesh keeps its geometry by design), so the check
-   * allows the geometry count to move by exactly the chunk meshes the terrain created meanwhile.
-   */
+  /** GPU memory (geometries, textures) and the WindField's source count. */
   function memory() {
     const info = ctx.renderer.info.memory;
-    const terrain = ctx.systems.terrain.getStats();
-    const terrainMeshes = terrain.meshesCreated.reduce((sum, count) => sum + count, 0);
-    return { geometries: info.geometries, textures: info.textures, windSources: ctx.wind.sourceCount, terrainMeshes };
+    return { geometries: info.geometries, textures: info.textures, windSources: ctx.wind.sourceCount };
   }
+  // The terrain may draw a pooled chunk mesh for the first time during the run, which adds a geometry
+  // no spawn owns: the tracker tells the terrain's new geometries from anything a spawn left behind.
+  const tracker = createGeometryTracker(ctx.renderer, ctx.scene);
 
   const api = {
     results,
     log,
     /**
-     * Holds the craft 300 m above the spawn, waits for the terrain to settle, records GPU memory and
-     * the wind sources, then starts the dev timeline ahead of the craft. Returns the check line.
+     * Holds the craft 300 m above the spawn and plays the dev timeline once as a warm-up, waits for
+     * the terrain to settle, records GPU memory and the wind sources, then starts the measured run of
+     * the dev timeline ahead of the craft. Returns the check line.
      */
     async start() {
       ctx.settings.set('copilotChatter', true);
+      // The tour guide's proactive callouts would offer the warm-up spawns and take the chatter slot
+      // the narration needs (one unsolicited line per 30 s).
+      ctx.settings.set('copilotCallouts', false);
       holding = true;
       hold();
       // Warm-up: an engine's session resources (a shared instanced mesh, a pooled mesh) reach the GPU
-      // the first time they draw and stay by design (tools/spawn-check.mjs does the same), so every
-      // child preset is drawn once and ended before the baseline is taken.
-      const warmUp = Object.values(DEV_TIMELINE.children).map((child) => system.forceSpawn(child.preset, { distance: 900 }));
+      // the first time they draw and stay by design (tools/spawn-check.mjs does the same), so the
+      // whole timeline plays once, drawing every child where the measured run will, before the
+      // baseline is taken.
+      const warmUp = system.forceSpawn('devTimeline', { distance: 900 });
+      const warmStarted = performance.now();
+      while (performance.now() - warmStarted < 120000 && manager.getInstance(warmUp) !== null) await frames(10);
       await frames(30);
-      for (const id of warmUp) if (id) manager.deactivate(id, 'warm-up');
-      await frames(10);
+      baseline.warmUp = manager.getInstance(warmUp) === null ? 'played' : 'timed out';
       baseline.terrainIdle = await terrainIdle();
       Object.assign(baseline, memory());
+      if (tracker) tracker.start();
       // The checks judge the timeline's own events only.
       log.length = 0;
       api.id = system.forceSpawn('devTimeline', { distance: 900 });
@@ -210,6 +215,12 @@ export async function installSetPieceChecks(game) {
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
       await new Promise((resolve) => setTimeout(resolve, 1500));
+      // A narration line waits (up to its 30 s time-to-live) while the chatter gate is closed.
+      const narrationPattern = /gathering|column of air|funnel is walking|is over/;
+      const waitStarted = performance.now();
+      while (performance.now() - waitStarted < 40000 && !spoken.some((text) => narrationPattern.test(text))) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
       const stages = log.filter((entry) => entry.type === 'stage').map((entry) => entry.stage);
       const ended = log.find((entry) => entry.type === 'ended');
       const children = log.filter((entry) => entry.type === 'activated' && entry.presetId !== 'devTimeline').map((entry) => entry.presetId);
@@ -219,8 +230,9 @@ export async function installSetPieceChecks(game) {
       check('children started through the spawn manager', ['testMarker', 'devSpires', 'testUpdraft', 'testLureFunnel'].every((id) => children.includes(id)), children);
       check('every child ended through the spawn manager', ['testMarker', 'devSpires', 'testUpdraft', 'testLureFunnel'].every((id) => childEnds.includes(id)), childEnds);
       check('the stages narrated', narrations.length >= 3, narrations);
-      // The copilot's chatter gate paces unsolicited lines (one per 30 s): at least one is spoken.
-      const fromTimeline = spoken.filter((text) => /gathering|column of air|funnel is walking|is over/.test(text));
+      // The copilot's chatter gate paces unsolicited lines (one per 30 s): at least one is spoken
+      // (over the warm-up and the measured run).
+      const fromTimeline = spoken.filter((text) => narrationPattern.test(text));
       check('the copilot spoke a narration line with its tokens filled', fromTimeline.length >= 1 && fromTimeline.every((text) => !text.includes('{')), spoken);
       check('the timeline ended complete with its records', Boolean(ended) && ended.completed === true && Number.isFinite(ended.records.closestFunnel), ended ?? 'no end');
       check('the set piece itself ended', log.some((entry) => entry.type === 'spawnEnded' && entry.presetId === 'devTimeline' && entry.reason === 'ended'), 'devTimeline spawnEnded');
@@ -229,11 +241,15 @@ export async function installSetPieceChecks(game) {
       const idle = await terrainIdle();
       const after = memory();
       holding = false;
+      const fresh = tracker ? tracker.stop() : [];
+      if (tracker) tracker.restore();
+      const terrainFresh = fresh.filter((entry) => entry.owner === 'terrain').length;
+      const leftBehind = fresh.filter((entry) => entry.owner !== 'terrain');
       const spawnIds = log.filter((entry) => entry.type === 'activated').map((entry) => entry.id);
       const alive = spawnIds.filter((id) => manager.getInstance(id) !== null);
       check('dispose returned GPU memory and removed every wind source',
-        alive.length === 0 && after.geometries - baseline.geometries === after.terrainMeshes - baseline.terrainMeshes && after.textures === baseline.textures && after.windSources === baseline.windSources,
-        { before: baseline, after, terrainIdle: idle, alive });
+        alive.length === 0 && leftBehind.length === 0 && after.geometries - baseline.geometries === terrainFresh && after.textures === baseline.textures && after.windSources === baseline.windSources,
+        { before: baseline, after, terrainFirstDrawn: terrainFresh, leftBehind, tracked: tracker !== null, terrainIdle: idle, alive });
       const failed = results.filter((line) => line.startsWith('FAIL'));
       return check('setPiece checks', failed.length === 0, `${results.length - failed.length}/${results.length} passed`);
     },
