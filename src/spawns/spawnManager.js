@@ -393,6 +393,9 @@ export function createSpawnManager(options) {
       createInstancedPool: (poolOptions) => createInstancedPool(THREE, poolOptions),
       createMeshPool: (poolOptions) => createMeshPool(THREE, poolOptions),
     }),
+    // Engines call registerPrewarm(object3D) in init() for meshes they show later, so core draws them
+    // once behind the loading fade (pipelines built, geometries counted) instead of on first use.
+    registerPrewarm: typeof registerPrewarm === 'function' ? registerPrewarm : null,
     spawns: null,
   };
 

@@ -1079,12 +1079,15 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   priority. Lights a disposed spawn still holds are released and reported.
 - **Engine ctx.** `{ scene, camera, renderer, backend, THREE, TSL, wind, audio, terrain: { heightAt,
   groundHeight, biomeAt, waterLevel }, time, sky, bus, perf, settings, state, uniforms, budgets,
-  lights, pools, spawns }`. `budgets` is read-only (`heavyLimit` / `maxHeavy`, `heavyActive`,
+  lights, pools, registerPrewarm, spawns }`. `budgets` is read-only (`heavyLimit` / `maxHeavy`, `heavyActive`,
   `maxRealLights`, `lightsLimit`, `lightsActive`, `engines` (every engine's live `{ instances,
   particles }` caps), `instanceLimit(name)`, `instances(name)`, `particleLimit(name)`,
   `particles(name)`); the director reads this same view, so the two never disagree; `pools` has `scratch` (Vector3 / Quaternion / Matrix4 / Color rings),
   `createSlotAllocator`, `createObjectPool`, `createInstancedPool` and `createMeshPool`; `spawns` is
-  the SpawnManager (the setPiece engine orchestrates through it).
+  the SpawnManager (the setPiece engine orchestrates through it). `registerPrewarm(object3D)` (null in the headless
+  lab) registers a mesh from `init()` for core's pipeline prewarm, so it is drawn once behind the
+  loading fade: the first spawn costs no pipeline build, and lazily counted geometries are in the
+  memory baseline before any dispose check.
 - **Mesh lifetime in three r184.** A RenderObject listens for its material's `dispose` event, which
   keeps it, its mesh and its geometry alive until that material is disposed. A new Mesh per spawn
   instance on a shared material therefore leaks about 8 KB per instance even after its geometry is
