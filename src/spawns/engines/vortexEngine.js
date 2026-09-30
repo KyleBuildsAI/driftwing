@@ -33,7 +33,7 @@
 //
 // No allocations in update(): per-instance numbers live in a Float64Array, the slot block is written
 // into pre-built Vector4s, the path is precomputed, and the wind source moves in place.
-import { FRAME, FRAME_SIZE, createWindSource, resolveSourceParams } from './windSources.js';
+import { FRAME, FRAME_SIZE, checkSourceParamNames, createWindSource, resolveSourceParams } from './windSources.js';
 
 export const MAX_VORTICES = 4;
 const SHELL_SEGMENTS = 28;
@@ -111,6 +111,12 @@ const COLOR_PARAMETERS = Object.freeze([
   ['sprayColor', 0xe6eff2],
 ]);
 const WIND_KEYS = Object.freeze(['maxTangential', 'inflowRadius', 'inflowSpeed', 'updraft', 'sinkRing', 'turbulence', 'gust', 'rotation']);
+/** Every param name a vortex accepts, with the ones the SpawnManager merges in. */
+const KNOWN_PARAMS = Object.freeze(new Set([
+  ...VORTEX_PARAMETERS.map((entry) => entry[0]), ...COLOR_PARAMETERS.map((entry) => entry[0]), ...WIND_KEYS,
+  'surface', 'startStage', 'voice', 'wind', 'windCoreRadius', 'windTop', 'scale',
+  'position', 'heading', 'site', 'startTime', 'duration', 'seed',
+]));
 
 /**
  * target[index] = smoothstep(edge0, edge1, source[sourceIndex]). The frame update calls this instead
@@ -142,6 +148,9 @@ function readColor(params, name, fallback) {
  * 'rankine' wind entry (preset.wind) supplies wind defaults the engine params may override.
  */
 export function resolveVortexParams(preset, params) {
+  for (const key of Object.keys(params)) {
+    if (!KNOWN_PARAMS.has(key)) throw new TypeError(`[DRIFTWING] vortex: "${key}" is not a vortex param (docs/engines/vortex.md lists them)`);
+  }
   const scale = Number.isFinite(params.scale) && params.scale > 0 ? params.scale : 1;
   const resolved = { scale };
   for (const [name, fallback, min, max, isLength] of VORTEX_PARAMETERS) {
@@ -160,6 +169,7 @@ export function resolveVortexParams(preset, params) {
   resolved.voice = params.voice !== false;
   const presetWind = Array.isArray(preset.wind) ? preset.wind.find((entry) => entry && entry.type === 'rankine') : null;
   const windInput = { ...(presetWind && presetWind.params ? presetWind.params : {}) };
+  checkSourceParamNames('rankine', windInput, `vortex: preset "${preset.id}" wind`);
   for (const key of WIND_KEYS) if (params[key] !== undefined) windInput[key] = params[key];
   // The wind's core and column follow the visible funnel unless the preset sets them apart.
   windInput.coreRadius = params.windCoreRadius ?? windInput.coreRadius ?? resolved.coreRadius / scale;

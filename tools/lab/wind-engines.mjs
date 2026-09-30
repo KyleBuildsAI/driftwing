@@ -150,6 +150,18 @@ function air(lab, x, y, z) {
   return { x: sample.vel.x, y: sample.vel.y, z: sample.vel.z, turbulence: sample.turbulence };
 }
 
+/** The mean outward (radial) wind around a ring of radius at height y (m/s): averages out the gusts. */
+function ringOutflow(lab, radius, y) {
+  let sum = 0;
+  const samples = 16;
+  for (let index = 0; index < samples; index++) {
+    const angle = (index / samples) * Math.PI * 2;
+    const sample = air(lab, Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+    sum += sample.x * Math.cos(angle) + sample.z * Math.sin(angle);
+  }
+  return sum / samples;
+}
+
 function advance(lab, engine, instance, seconds) {
   const frames = Math.round(seconds / FRAME);
   for (let index = 0; index < frames; index++) {
@@ -191,14 +203,22 @@ function testSources() {
     lab.modifier.dispose(instance);
   }
   {
+    // The type's own speed param (updraft, m/s) and the source multiplier (strength) are separate.
+    const instance = make('updraft', { updraft: 14, strength: 0.5 });
+    settle(instance);
+    const core = air(lab, 0, 400, 0);
+    check('sources', 'updraft: the updraft param sets the core speed and strength multiplies it', core.y > 5.5 && core.y < 8.5, `updraft 14 x strength 0.5: core ${round(core.y)} m/s`);
+    lab.modifier.dispose(instance);
+  }
+  {
     const instance = make('downburst');
     settle(instance, 2);
     const core = air(lab, 0, 600, 0);
-    const earlyFront = air(lab, 900, 40, 0);
+    const earlyFront = ringOutflow(lab, 900, 40);
     settle(instance, 60);
-    const lateFront = air(lab, 1400, 40, 0);
+    const lateFront = ringOutflow(lab, 1500, 40);
     check('sources', 'downburst: a sinking core that slows toward the ground', core.y < -8 && Math.abs(air(lab, 0, 5, 0).y) < Math.abs(core.y) * 0.3, `core ${round(core.y)} m/s at 600 m`);
-    check('sources', 'downburst: an outward ring gust that spreads with age', lateFront.x > 5 && lateFront.x > earlyFront.x, `outflow at 1.4 km after 62 s ${round(lateFront.x)} m/s (at 0.9 km after 2 s ${round(earlyFront.x)})`);
+    check('sources', 'downburst: an outward ring gust that spreads with age', lateFront > 5 && lateFront > earlyFront + 3, `mean outflow at 1.5 km (the front is at 1.57 km) after 62 s ${round(lateFront)} m/s (at 0.9 km after 2 s ${round(earlyFront)})`);
     lab.modifier.dispose(instance);
   }
   {
@@ -322,6 +342,16 @@ function testVortex() {
     badParam = error.message;
   }
   check('vortex', 'a non-finite param is refused, naming it', /coreRadius/.test(badParam ?? ''), badParam ?? 'accepted');
+  const unknown = [];
+  for (const [params, wind] of [[{ coreRadiu: 40 }, tornado.wind], [{}, [{ type: 'rankine', params: { speed: 60 } }]]]) {
+    try {
+      lab.spawn(lab.vortex, { ...tornado, wind }, params, { duration: 300 });
+      unknown.push('accepted');
+    } catch (error) {
+      unknown.push(error.message);
+    }
+  }
+  check('vortex', 'an unknown param (engine or preset.wind) is refused, naming it', /"coreRadiu"/.test(unknown[0]) && /"speed"/.test(unknown[1]) && lab.vortex.stats().instances === 0, unknown.join(' | '));
 }
 
 // ============================================================================================
@@ -386,6 +416,20 @@ function testModifierLifecycle() {
     refused = error.message;
   }
   check('lifecycle', "preset.wind entries become sources (only this engine's types); unknown types are refused", count === 1 && /vortexish/.test(refused ?? ''), `${count} source from 2 entries; ${refused}`);
+  const misspelt = [];
+  for (const [label, engine, entryParams, wind] of [
+    ['single source', lab.modifier, { type: 'updraft', speed: 12 }, []],
+    ['sources[]', lab.modifier, { sources: [{ type: 'slipstream', offset: 40 }] }, []],
+    ['preset.wind', lab.modifier, {}, [{ type: 'updraft', params: { radius: 400, speed: 12 } }]],
+  ]) {
+    try {
+      lab.spawn(engine, { ...preset(`misspelt-${misspelt.length}`, 'windModifier', entryParams), wind }, {}, { duration: 60 });
+      misspelt.push(`${label}: accepted`);
+    } catch (error) {
+      misspelt.push(`${label}: ${error.message}`);
+    }
+  }
+  check('lifecycle', 'a param the source type does not have is refused, naming it (no silent typos)', misspelt.every((line) => /(speed|offset)/.test(line) && !/accepted/.test(line)) && lab.wind.sourceCount === 0, misspelt.join(' | '));
   check('lifecycle', 'every source is removed after dispose', lab.wind.sourceCount === 0 && lab.modifier.stats().sources === 0, `${lab.wind.sourceCount} left`);
 }
 
@@ -539,9 +583,9 @@ function testFlight() {
   const bumped = (calm, air, factor = 2) => air.loadDeviation > calm.loadDeviation * factor;
   const airspeedSwing = (calm, air) => (air.maxAirspeed - air.minAirspeed) - (calm.maxAirspeed - calm.minAirspeed);
 
-  scenario('updraft column', modifier('updraft', { radius: 220, strength: 9 }), (entry) => ({ ...through(entry, isJet(entry) ? 4000 : 1200), altitude: 400 }),
+  scenario('updraft column', modifier('updraft', { radius: 220, updraft: 9 }), (entry) => ({ ...through(entry, isJet(entry) ? 4000 : 1200), altitude: 400 }),
     (entry, calm, air) => (isJet(entry)
-      ? { what: 'a load bump crossing the column', pass: bumped(calm, air, 4) && air.maxLoad > calm.maxLoad + 0.3 }
+      ? { what: 'a load bump crossing the column', pass: bumped(calm, air, 3) && air.maxLoad - air.minLoad > calm.maxLoad - calm.minLoad + 0.25 }
       : { what: 'climbs in the core', pass: air.maxVertical > calm.maxVertical + 3 }));
   scenario('downburst', modifier('downburst', {}), (entry) => ({ ...through(entry, isJet(entry) ? 5000 : 1600), altitude: 350 }),
     (entry, calm, air) => (isJet(entry)
@@ -681,7 +725,7 @@ async function testAllocationAndCost() {
   check('allocation', `${instances.length} instances (2 vortices, 9 wind modifier sources) and 3 wind samples per frame: the engines and their samplers allocate nothing (sampled, under 0.1 byte per frame)`, perFrame < 0.1, `${sampled.bytes} B over ${frames} frames = ${perFrame.toFixed(3)} B/frame${sampled.sites.length ? `; top: ${sampled.sites.map(([key, bytes]) => `${key} ${bytes} B`).join(', ')}` : ''}`);
   const fieldPerFrame = sampled.fieldBytes / frames;
   const calmPerFrame = calmSampled.fieldBytes / frames;
-  check('allocation', 'the sources add nothing to what the Phase 1 WindField allocates per sample (report)', fieldPerFrame <= calmPerFrame * 1.5 + 1, `WindField ${fieldPerFrame.toFixed(1)} B/frame with the sources, ${calmPerFrame.toFixed(1)} B/frame in a calm field (3 samples a frame)`);
+  check('allocation', 'the sources keep the WindField within 1.5x of its own calm-field allocation per sample (report)', fieldPerFrame <= calmPerFrame * 1.5 + 1, `WindField ${fieldPerFrame.toFixed(1)} B/frame with the sources, ${calmPerFrame.toFixed(1)} B/frame in a calm field (3 samples a frame)`);
 
   const timeIt = (count, run) => {
     const started = process.hrtime.bigint();

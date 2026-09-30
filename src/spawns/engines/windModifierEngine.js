@@ -26,7 +26,7 @@
 //
 // No allocations in update(): per-source numbers live in Float64Arrays, the sources sample into
 // reused results, and bounds move in place.
-import { FRAME, FRAME_SIZE, WIND_SOURCE_TYPES, createWindSource, resolveSourceParams } from './windSources.js';
+import { FRAME, FRAME_SIZE, WIND_SOURCE_TYPES, checkSourceParamNames, createWindSource, resolveSourceParams, sourceParameterNames } from './windSources.js';
 
 export const MAX_SOURCES = 8;
 /** The source types this engine authors ('rankine' belongs to the vortex engine). */
@@ -38,6 +38,19 @@ const PATH_MAX_POINTS = 512;
 const SITE_PATH_SECONDS = 600;
 const ACTIVITY_RATE = 0.5;
 const SOURCE_FIELDS = Object.freeze(['type', 'direction', 'turn', 'offset', 'start', 'stop', 'fadeIn', 'fadeOut', 'strength', 'timeline']);
+/**
+ * The instance's own params (and the ones the SpawnManager merges in): with a single params.type
+ * source they sit beside its type params, so they are not type params.
+ */
+const INSTANCE_FIELDS = Object.freeze([
+  'sources', 'follow', 'drift', 'driftHeading', 'driftTerrain', 'endWithDuration',
+  'position', 'heading', 'site', 'startTime', 'scale', 'duration', 'seed',
+]);
+// A type param named like a source field could never be set (the source field would take it).
+for (const type of MODIFIER_TYPES) {
+  const clash = sourceParameterNames(type).find((name) => SOURCE_FIELDS.includes(name) || INSTANCE_FIELDS.includes(name));
+  if (clash) throw new Error(`[DRIFTWING] windModifier: the ${type} param "${clash}" clashes with a source or instance field`);
+}
 
 // Per-instance numbers.
 const I = Object.freeze({ AGE: 0, ACTIVITY: 1, PREV_X: 2, PREV_Z: 3, TRAVEL_X: 4, TRAVEL_Z: 5, SPEED: 6, DT: 7, DURATION: 8 });
@@ -132,15 +145,18 @@ export function createWindModifierEngine() {
   const active = [];
 
   // ---- Create ----------------------------------------------------------------------------------------
-  function resolveSource(entry, index, scale, heading, rng) {
+  function resolveSource(entry, index, scale, heading, rng, single) {
     if (!entry || typeof entry !== 'object') throw new TypeError(`[DRIFTWING] windModifier: sources[${index}] must be an object`);
     const type = entry.type;
     if (!MODIFIER_TYPES.includes(type)) throw new TypeError(`[DRIFTWING] windModifier: sources[${index}].type must be one of ${MODIFIER_TYPES.join(', ')}, got ${String(type)}`);
+    const label = `sources[${index}]`;
     const typeParams = {};
-    for (const [key, value] of Object.entries(entry)) if (!SOURCE_FIELDS.includes(key)) typeParams[key] = value;
+    for (const [key, value] of Object.entries(entry)) {
+      if (!SOURCE_FIELDS.includes(key) && !(single && INSTANCE_FIELDS.includes(key))) typeParams[key] = value;
+    }
+    checkSourceParamNames(type, typeParams, `windModifier: ${label}`);
     const params = resolveSourceParams(type, typeParams, scale);
     const numbers = new Float64Array(SOURCE_SIZE);
-    const label = `sources[${index}]`;
     numbers[P.START] = finite(entry.start, 0, `${label}.start`, 0);
     numbers[P.STOP] = finite(entry.stop, Infinity, `${label}.stop`, 0);
     numbers[P.FADE_IN] = finite(entry.fadeIn, 4, `${label}.fadeIn`, 0, 600);
@@ -373,7 +389,7 @@ export function createWindModifierEngine() {
       const anchor = params.position;
       const record = {
         numbers: new Float64Array(INSTANCE_SIZE),
-        sources: entries.map((entry, index) => resolveSource(entry, index, scale, heading, rng)),
+        sources: entries.map((entry, index) => resolveSource(entry, index, scale, heading, rng, entry === params)),
         duration,
         hasDuration: duration !== null,
         endWithDuration: params.endWithDuration !== false,

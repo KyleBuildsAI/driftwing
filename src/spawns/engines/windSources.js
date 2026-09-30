@@ -56,7 +56,7 @@ const PARAMETERS = Object.freeze({
   ],
   updraft: [
     ['radius', 180, 5, 5000, true],
-    ['strength', 8, -40, 60, false],
+    ['updraft', 8, -40, 60, false],
     ['base', 0, -500, 10000, true],
     ['top', 900, 10, 15000, true],
     ['sinkRing', 0.2, 0, 1, false],
@@ -104,7 +104,7 @@ const PARAMETERS = Object.freeze({
     ['width', 140, 5, 5000, true],
     ['height', 70, 5, 5000, true],
     ['spread', 0.05, 0, 1, false],
-    ['offset', 0, -5000, 5000, true],
+    ['behind', 0, -5000, 5000, true],
     ['centerHeight', 0, -5000, 5000, true],
     ['boost', 8, -40, 60, false],
     ['lift', 3, -20, 30, false],
@@ -155,6 +155,19 @@ export function sourceParameterNames(type) {
   const table = PARAMETERS[type];
   if (!table) throw new Error(`[DRIFTWING] unknown wind source type "${type}" (known: ${WIND_SOURCE_TYPES.join(', ')})`);
   return table.map((entry) => entry[0]);
+}
+
+/**
+ * Throws when params (a plain object) names a parameter the type does not have, except the names in
+ * allowed (the caller's own fields): a misspelt preset param would otherwise be silently ignored.
+ */
+export function checkSourceParamNames(type, params, label, allowed = []) {
+  const names = sourceParameterNames(type);
+  for (const key of Object.keys(params)) {
+    if (!names.includes(key) && !allowed.includes(key)) {
+      throw new TypeError(`[DRIFTWING] ${label}: "${key}" is not a ${type} param (known: ${names.join(', ')})`);
+    }
+  }
 }
 
 /**
@@ -275,7 +288,7 @@ function createUpdraftSampler(p, frame, result) {
     const core = share < 1 ? (1 - share * share) * (1 - share * share) : 0;
     const ring = share >= 1 ? Math.sin(Math.PI * (share - 1) / p.ringWidth) : 0;
     const scale = strength * vertical;
-    result.vel.y = p.strength * (core - p.sinkRing * ring) * scale;
+    result.vel.y = p.updraft * (core - p.sinkRing * ring) * scale;
     if (p.swirl !== 0) {
       const swirl = p.swirl * (share < 1 ? share : Math.max(0, 1 - (share - 1) / p.ringWidth)) * scale / radius;
       result.vel.x = swirl * dz;
@@ -468,7 +481,7 @@ function createSlipstreamSampler(p, frame, result) {
     const dirZ = frame[FRAME.DIR_Z];
     const dx = pos.x - frame[FRAME.X];
     const dz = pos.z - frame[FRAME.Z];
-    const behind = -(dx * dirX + dz * dirZ) - p.offset;
+    const behind = -(dx * dirX + dz * dirZ) - p.behind;
     const lateral = -dx * dirZ + dz * dirX;
     const vertical = pos.y - frame[FRAME.Y] - p.centerHeight;
     result.vel.x = 0;
@@ -773,13 +786,13 @@ const BOUNDS_WRITERS = Object.freeze({
     const growth = p.spread * p.length;
     const halfWidth = (0.5 * p.width + growth) * 1.4;
     const halfHeight = (0.5 * p.height + 0.5 * growth) * 1.4;
-    extent[0] = -p.offset - p.length;
-    extent[1] = -p.offset + 0.1 * p.length;
+    extent[0] = -p.behind - p.length;
+    extent[1] = -p.behind + 0.1 * p.length;
     extent[2] = halfWidth;
     extent[3] = p.centerHeight - halfHeight;
     extent[4] = p.centerHeight + halfHeight;
     orientedBounds(bounds, frame);
-    metrics[0] = Math.abs(p.offset) + p.length + halfWidth;
+    metrics[0] = Math.abs(p.behind) + p.length + halfWidth;
   },
   waveLift(source) {
     const { params: p, frame, bounds, metrics } = source;
