@@ -85,10 +85,26 @@ export function createSetPieceTestPreset(params = DEV_TIMELINE, id = 'devTimelin
   });
 }
 
+/** Resolves after `count` animation frames. */
+function frames(count) {
+  return new Promise((resolve) => {
+    let left = count;
+    const tick = () => {
+      left--;
+      if (left <= 0) resolve();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
 /**
  * Installs window.__dwSetPiece on a running V2 (dev server): the framework's test kit, the structure
  * kit's presets and the dev timeline through the dev hook, and a run that records every bus event the
- * timeline causes. Failed checks call console.error, so the smoke test fails.
+ * timeline causes. While the timeline runs the craft is held at one spot (flight.resetTo every frame,
+ * the flight clock still running), so the terrain around it stays idle and the GPU memory after the
+ * run can be compared with the memory before it. Failed checks call console.error, so the smoke test
+ * fails.
  */
 export async function installSetPieceChecks(game) {
   const { ctx, state } = game;
@@ -115,14 +131,65 @@ export async function installSetPieceChecks(game) {
   const spoken = [];
   ctx.bus.on('copilot:speech', (payload) => spoken.push(payload.text));
 
+  /** Where the craft is held while the timeline runs, and the GPU memory and wind sources before it. */
+  const park = { x: state.spawn.x, y: state.spawn.y + 300, z: state.spawn.z, heading: state.spawn.heading };
+  const baseline = { geometries: 0, textures: 0, windSources: 0, terrainMeshes: 0, terrainIdle: false };
+  let holding = false;
+
+  function hold() {
+    if (!holding) return;
+    ctx.systems.flight.resetTo(park);
+    requestAnimationFrame(hold);
+  }
+
+  /** Waits (up to two minutes) for the terrain to have nothing queued, in flight or fading for 20 frames. */
+  async function terrainIdle() {
+    const started = performance.now();
+    let quiet = 0;
+    while (performance.now() - started < 120000 && quiet < 20) {
+      await frames(1);
+      const stats = ctx.systems.terrain.getStats();
+      quiet = stats.queued === 0 && stats.inFlight === 0 && stats.awaitingUpload === 0 && stats.fading === 0 ? quiet + 1 : 0;
+    }
+    return quiet >= 20;
+  }
+
+  /**
+   * GPU memory, the wind sources and the terrain's chunk meshes. The terrain's mesh pools may grow by
+   * a chunk mesh while the craft is held (a pooled mesh keeps its geometry by design), so the check
+   * allows the geometry count to move by exactly the chunk meshes the terrain created meanwhile.
+   */
+  function memory() {
+    const info = ctx.renderer.info.memory;
+    const terrain = ctx.systems.terrain.getStats();
+    const terrainMeshes = terrain.meshesCreated.reduce((sum, count) => sum + count, 0);
+    return { geometries: info.geometries, textures: info.textures, windSources: ctx.wind.sourceCount, terrainMeshes };
+  }
+
   const api = {
     results,
     log,
-    /** Starts the dev timeline ahead of the craft and returns its id. */
-    start() {
+    /**
+     * Holds the craft 300 m above the spawn, waits for the terrain to settle, records GPU memory and
+     * the wind sources, then starts the dev timeline ahead of the craft. Returns the check line.
+     */
+    async start() {
       ctx.settings.set('copilotChatter', true);
+      holding = true;
+      hold();
+      // Warm-up: an engine's session resources (a shared instanced mesh, a pooled mesh) reach the GPU
+      // the first time they draw and stay by design (tools/spawn-check.mjs does the same), so every
+      // child preset is drawn once and ended before the baseline is taken.
+      const warmUp = Object.values(DEV_TIMELINE.children).map((child) => system.forceSpawn(child.preset, { distance: 900 }));
+      await frames(30);
+      for (const id of warmUp) if (id) manager.deactivate(id, 'warm-up');
+      await frames(10);
+      baseline.terrainIdle = await terrainIdle();
+      Object.assign(baseline, memory());
+      // The checks judge the timeline's own events only.
+      log.length = 0;
       api.id = system.forceSpawn('devTimeline', { distance: 900 });
-      return check('dev timeline started ahead of the craft', Boolean(api.id), api.id);
+      return check('dev timeline started ahead of the craft', Boolean(api.id), { id: api.id, baseline });
     },
     /** The set piece's timeline state now. */
     describe() {
@@ -152,6 +219,15 @@ export async function installSetPieceChecks(game) {
       check('the timeline ended complete with its records', Boolean(ended) && ended.completed === true && Number.isFinite(ended.records.closestFunnel), ended ?? 'no end');
       check('the set piece itself ended', log.some((entry) => entry.type === 'spawnEnded' && entry.presetId === 'devTimeline' && entry.reason === 'ended'), 'devTimeline spawnEnded');
       check('no spawn or light leaked', manager.getStats().leaks.windSources === 0 && manager.getStats().leaks.lights === 0, manager.getStats().leaks);
+      // Every child disposed: GPU memory and the wind sources back to their level before the run.
+      const idle = await terrainIdle();
+      const after = memory();
+      holding = false;
+      const spawnIds = log.filter((entry) => entry.type === 'activated').map((entry) => entry.id);
+      const alive = spawnIds.filter((id) => manager.getInstance(id) !== null);
+      check('dispose returned GPU memory and removed every wind source',
+        alive.length === 0 && after.geometries - baseline.geometries === after.terrainMeshes - baseline.terrainMeshes && after.textures === baseline.textures && after.windSources === baseline.windSources,
+        { before: baseline, after, terrainIdle: idle, alive });
       const failed = results.filter((line) => line.startsWith('FAIL'));
       return check('setPiece checks', failed.length === 0, `${results.length - failed.length}/${results.length} passed`);
     },
