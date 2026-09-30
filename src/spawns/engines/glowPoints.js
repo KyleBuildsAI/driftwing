@@ -114,8 +114,9 @@ export function createGlowPoints({ THREE, TSL, scene, sky = null, maxGroups, pag
     const core = pow(saturate(float(1).sub(radius.mul(2.6))), 2);
     // flare: a thin horizontal streak through the orb (lamps, lighthouses)
     const streak = exp(abs(centred.y).mul(-60)).mul(saturate(float(1).sub(abs(centred.x).mul(2)))).mul(0.8);
-    // firefly: a tight point with a small soft halo
-    const firefly = pow(saturate(float(1).sub(radius)), 5).mul(0.7).add(pow(saturate(float(1).sub(radius.mul(3.5))), 2).mul(1.6));
+    // firefly: a tight hot point in a wide soft halo (the sprite is mostly halo, so a swarm reads as
+    // soft lights at a distance, not single pixels)
+    const firefly = pow(saturate(float(1).sub(radius)), 2.6).mul(0.45).add(pow(saturate(float(1).sub(radius.mul(5))), 2).mul(2.2));
     const orb = halo.mul(0.55).add(core.mul(1.4));
     return select(shape.lessThan(0.5), orb, select(shape.lessThan(1.5), orb.add(streak), firefly));
   })();

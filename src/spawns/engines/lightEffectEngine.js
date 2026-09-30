@@ -169,7 +169,7 @@ export function resolveLightEffectConfig(preset, params) {
     count: Math.round(read.number(swarmParams.count, 'swarm.count', 1500, 1, MAX_POINTS_PER_INSTANCE)),
     radius: read.number(swarmParams.radius, 'swarm.radius', 150, 1, 20000) * scale,
     height: read.range(swarmParams.height, 'swarm.height', [0.5, 4], -100, 2000),
-    size: read.range(swarmParams.size, 'swarm.size', [0.25, 0.45], 0.01, 100),
+    size: read.range(swarmParams.size, 'swarm.size', [0.8, 1.3], 0.01, 100),
     colors: readColors(read, swarmParams.colors, 'swarm.colors', [0xd8ff6a, 0xfff08a, 0xb8ff8a]),
     intensity: read.number(swarmParams.intensity, 'swarm.intensity', 4, 0, 200),
     blink: readBlink(read, read.object(swarmParams.blink, 'swarm.blink'), 'swarm.blink', [2, 5], 0.25),
