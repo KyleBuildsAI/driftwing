@@ -426,6 +426,12 @@ function layoutTower(layout, params, rng, withAnvil) {
   if (params.wallCloud) layoutWallCloud(layout, params, rng);
 }
 
+/**
+ * The anvil's core puffs (level 0, kept at every tier) sit on a fixed spine along its long axis plus
+ * two flanks, in unit-disc coordinates, so the coarse far mass always shows the whole anvil.
+ */
+const ANVIL_CORE_POINTS = Object.freeze([[0, -0.62], [0, -0.2], [0, 0.22], [0, 0.62], [-0.52, 0], [0.52, 0]]);
+
 function layoutAnvil(layout, params, rng) {
   const anvil = params.anvil;
   const baseY = anvil.altitude - anvil.thickness * 0.5;
@@ -436,15 +442,20 @@ function layoutAnvil(layout, params, rng) {
   const details = detailCount(anvil.puffs, params.detail * 0.6);
   for (let index = 0; index < anvil.puffs; index++) {
     const detail = index >= anvil.puffs - details;
+    const core = index < ANVIL_CORE_POINTS.length;
     discPoint(rng, point);
+    if (core) {
+      point.x = ANVIL_CORE_POINTS[index][0];
+      point.z = ANVIL_CORE_POINTS[index][1];
+    }
     const edge = point.x * point.x + point.z * point.z;
     // Semi-axes: long downwind, narrower across; the upwind rim sits over the tower.
     const x = point.x * anvil.radius * 0.78;
     const z = centreZ + point.z * anvil.radius * 0.85;
-    const puffRadius = anvil.radius * (detail ? 0.11 : 0.24) * (0.8 + 0.4 * rng()) * (1 - 0.3 * edge);
+    const puffRadius = anvil.radius * (core ? 0.34 : detail ? 0.11 : 0.24) * (0.8 + 0.4 * rng()) * (1 - 0.3 * edge);
     const squash = Math.min(0.5, Math.max(0.16, (anvil.thickness * (1 - 0.45 * edge)) / (2.2 * puffRadius)));
     const y = anvil.altitude + (rng() - 0.5) * anvil.thickness * 0.25 - edge * anvil.thickness * 0.15;
-    const level = index < 6 ? 0 : detail ? 2 : 1;
+    const level = core ? 0 : detail ? 2 : 1;
     addPuff(layout, x, y, z, puffRadius, squash, rng() * Math.PI, 0.98 + 0.05 * rng(), 0.55 + 0.3 * Math.sqrt(edge) + 0.1 * rng(), group, level, rng() * Math.PI * 2);
   }
 }
