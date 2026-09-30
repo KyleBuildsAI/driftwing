@@ -475,7 +475,7 @@ export function createLightEffectEngine() {
       const { THREE, TSL } = ctx;
       scratchColor = new THREE.Color();
       boltScratch = createBoltScratch();
-      points = createGlowPoints({ THREE, TSL, scene: ctx.scene, maxGroups: MAX_INSTANCES, pages: GLOW_PAGES });
+      points = createGlowPoints({ THREE, TSL, scene: ctx.scene, sky: ctx.sky, maxGroups: MAX_INSTANCES, pages: GLOW_PAGES });
       for (let index = 0; index < BOLT_SLOTS; index++) {
         bolts.push({
           slot: createRibbonSlot({ THREE, TSL, scene: ctx.scene, name: `lightning-bolt-${index}`, segmentCapacity: BOLT_SEGMENTS, kind: 'bolt' }),

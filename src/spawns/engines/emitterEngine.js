@@ -378,10 +378,16 @@ export function createEmitterEngine() {
     vector.z += (probeResult.vel.z - vector.z) * ease;
   }
 
-  /** Samples the ground under the emitter's field grid (16 columns) into every level's w. */
+  /**
+   * Samples the ground under the emitter's field grid (16 columns) into every level's w, and the
+   * ground under the emission point (the ceiling of the grid's ground, particleSystem.js) into its
+   * frame row.
+   */
   function sampleFieldGround(data) {
     const origin = data.frameOrigin;
     const placement = data.fieldPlacement;
+    const vent = Math.max(ctx.terrain.groundHeight(data.point[0], data.point[2]), ctx.terrain.waterLevel) - origin[1];
+    system.frameVectors[data.row * FRAME_ROWS + 1].z = vent;
     for (let column = 0; column < FIELD_X * FIELD_X; column++) {
       const x = origin[0] + placement[0] + (column % FIELD_X) * placement[3];
       const z = origin[2] + placement[2] + Math.floor(column / FIELD_X) * placement[3];
@@ -805,6 +811,7 @@ export function createEmitterEngine() {
         scene: ctx.scene,
         backend: ctx.backend,
         uniforms: ctx.uniforms,
+        sky: ctx.sky,
         maxEmitters: MAX_EMITTERS,
         pages: POOL_PAGES,
       });

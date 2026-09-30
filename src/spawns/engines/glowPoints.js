@@ -26,8 +26,11 @@ const SHAPE_STRIDE = 16;
 const MIN_ANGULAR_SIZE = 0.0022;
 const RENDER_ORDER = 6;
 
-/** Builds the pool. options: THREE, TSL, scene, uniforms, maxGroups, pages. */
-export function createGlowPoints({ THREE, TSL, scene, maxGroups, pages }) {
+/**
+ * Builds the pool. options: THREE, TSL, scene, sky (the sky system: its fogAmountNode gives the points
+ * the scene's haze; without it, as in the labs, a linear fog stands in), maxGroups, pages.
+ */
+export function createGlowPoints({ THREE, TSL, scene, sky = null, maxGroups, pages }) {
   if (maxGroups > SHAPE_STRIDE) throw new RangeError(`glow points: at most ${SHAPE_STRIDE} groups`);
   const {
     Fn, float, int, vec2, vec3, vec4, uniform, uniformArray, instancedBufferAttribute, positionGeometry,
@@ -92,7 +95,8 @@ export function createGlowPoints({ THREE, TSL, scene, maxGroups, pages }) {
     const drawnSize = max(size, distance.mul(MIN_ANGULAR_SIZE));
     const areaDim = size.div(drawnSize);
     const nearFade = smoothstep(style.y.mul(0.5), style.y, distance);
-    const fog = smoothstep(fogNear, fogFar, distance).mul(style.w);
+    const haze = sky && typeof sky.fogAmountNode === 'function' ? sky.fogAmountNode(offset) : smoothstep(fogNear, fogFar, distance);
+    const fog = haze.mul(style.w);
     const level = blink.mul(pulse).mul(flicker).mul(group.w).mul(areaDim).mul(nearFade).mul(float(1).sub(fog));
     vColor.assign(pointB.xyz.mul(level));
     vShape.assign(vec2(shape, 0));

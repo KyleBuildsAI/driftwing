@@ -6,11 +6,14 @@
 //           grid's placement. Written when an emitter is created or re-tiered.
 //   frame   FRAME_ROWS vec4 per row: the row's frame origin relative to the camera (written every
 //           frame in float64 on the CPU, so float32 never sees world coordinates), the underglow
-//           intensity and the fade.
+//           intensity, the fade, the LOD size scale and the ground under the emission point.
 //   field   FIELD_NODES vec4 per row: a coarse 4 x 3 x 4 grid of the WindField's air velocity (xyz)
 //           and the ground height under the node (w), sampled on the CPU a few nodes per frame (the
 //           engine's field budget) and eased over a few seconds. Particles read it by trilinear
-//           interpolation: wind-driven motion with no per-particle CPU work.
+//           interpolation: wind-driven motion with no per-particle CPU work. A wide grid (a volcano
+//           plume's spans 24 km) is far too coarse for the ground: a node on a ridge would lift the
+//           interpolated ground over a vent in a valley and hide the plume under it. So the ground a
+//           particle sees is the lower of the grid's and the ground under the emission point.
 // and PAGES of PAGE_SIZE particle slots in a pool. Every slot has three BIRTH records written by the
 // CPU once, when the emitter emits it:
 //   birthA  position (m, relative to its row's frame origin), birth time (engine clock, s)
@@ -32,7 +35,8 @@
 // age) and wobble, size, colour and opacity over life, velocity stretch (sparks), terrain depth fade
 // and a near-camera fade (soft particles without a depth texture, identical on both backends), sun
 // and sky lighting with an underglow (a plume lit from below by lava), HDR emission for the bloom,
-// and fog with a per-emitter strength. Five sprite styles: puff, glow, spark, lantern, droplet.
+// and the scene's own haze (the sky's fogAmountNode, toward the sky colour behind each particle) with
+// a per-emitter strength. Five sprite styles: puff, glow, spark, lantern, droplet.
 //
 // Zero allocations per frame: every table is a typed array or a pooled Vector4, update ranges are
 // pooled objects, and the frame path passes no doubles across non-inlined calls.
@@ -66,6 +70,12 @@ const SHADE_KEYS = Object.freeze([
   [35, 0.42, 0.47, 0.56],
 ]);
 const LIT_GAIN = 1.2;
+/**
+ * Smallest drawn size of an additive particle as a share of its distance (about 2 px at 1080p):
+ * farther glows, sparks and lanterns dim instead of vanishing, so a lantern festival 2 km away is a
+ * field of faint lights rather than nothing.
+ */
+const MIN_ANGULAR_SIZE = 0.0022;
 const MOONLIGHT = Object.freeze([0.05, 0.06, 0.085]);
 
 /** Smooth 0..1 of value between edge0 and edge1 (three's MathUtils.smoothstep argument order differs). */
@@ -76,15 +86,18 @@ function smoothRange(edge0, edge1, value) {
 
 /**
  * Builds the particle system. options: THREE, TSL, scene, backend ('WebGPU' uses compute),
- * uniforms (the game's shared TSL uniforms), maxEmitters, pages ({ alpha, additive }: pages per pool).
+ * uniforms (the game's shared TSL uniforms), sky (the sky system: its fogAmountNode and skyColorNode
+ * give the particles the scene's haze; without them, as in the labs, a linear fog toward the fog
+ * colour stands in), maxEmitters, pages ({ alpha, additive }: pages per pool).
  */
-export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, maxEmitters, pages }) {
+export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky = null, maxEmitters, pages }) {
   const {
     Fn, If, Return, float, int, vec2, vec3, vec4, uniform, uniformArray, instanceIndex, instancedBufferAttribute,
     storage, positionGeometry, modelViewMatrix, cameraProjectionMatrix, uv, varyingProperty,
     abs, exp, sqrt, pow, sin, cos, atan, min, max, mix, clamp, floor, smoothstep, saturate, length, hash, rotate, select,
   } = TSL;
   const useCompute = backend === 'WebGPU';
+  const sceneHaze = Boolean(sky && typeof sky.fogAmountNode === 'function' && typeof sky.skyColorNode === 'function');
 
   // ---- Shared tables --------------------------------------------------------------------------------
   const paramVectors = Array.from({ length: maxEmitters * PARAM_ROWS }, () => new THREE.Vector4());
@@ -162,8 +175,9 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, max
       mix(node(FIELD_X * FIELD_X + FIELD_X), node(FIELD_X * FIELD_X + FIELD_X + 1), fractionX),
       fractionZ,
     );
-    // The ground is the same on every level: the lower level's bilinear value.
-    return vec4(mix(lower.xyz, upper.xyz, fractionY), lower.w);
+    // The ground is the same on every level: the lower level's bilinear value, never above the
+    // ground under the emission point (see the header).
+    return vec4(mix(lower.xyz, upper.xyz, fractionY), min(lower.w, frameValue(row, 1).z));
   });
 
   /** Ground height (m, relative to the row's origin) at p from the row's field grid. */
@@ -176,7 +190,7 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, max
     const base = row.mul(FIELD_NODES).add(int(cellZ).mul(FIELD_X)).add(int(cellX));
     const node = (offset) => fieldTable.element(base.add(offset)).w;
     const fractionX = gridX.sub(cellX);
-    return mix(mix(node(0), node(1), fractionX), mix(node(FIELD_X), node(FIELD_X + 1), fractionX), gridZ.sub(cellZ));
+    return min(mix(mix(node(0), node(1), fractionX), mix(node(FIELD_X), node(FIELD_X + 1), fractionX), gridZ.sub(cellZ)), frameValue(row, 1).z);
   });
 
   // ---- Pools ----------------------------------------------------------------------------------------
@@ -417,6 +431,7 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, max
     const vLight = varyingProperty('vec4', 'vParticleLight');
     const vUp = varyingProperty('vec4', 'vParticleUp');
     const vToward = varyingProperty('float', 'vParticleTowardSun');
+    const vHaze = varyingProperty('vec3', 'vParticleHaze');
 
     material.vertexNode = Fn(() => {
       const row = int(identity.x);
@@ -464,13 +479,15 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, max
         drawn.y.assign(max(drawn.y, ground.add(groundParams.x)));
       });
 
-      // Size over life, clamped to about 60 degrees on screen right at the lens.
+      // Size over life, clamped to about 60 degrees on screen right at the lens; an additive particle
+      // keeps a minimum size on screen and dims with it.
       const sizing = param(row, 2);
       const frame = frameValue(row, 0);
       const offset = drawn.add(frame.xyz);
       const distance = length(offset);
       const size = mix(sizing.x, sizing.y, pow(lifeT, sizing.z)).mul(identity.z).mul(frameValue(row, 1).y);
-      const drawnSize = min(size, distance.mul(1.15));
+      const drawnSize = additive ? min(max(size, distance.mul(MIN_ANGULAR_SIZE)), distance.mul(1.15)) : min(size, distance.mul(1.15));
+      const smallDim = additive ? saturate(size.div(max(drawnSize, 0.0001))) : float(1);
       const viewCentre = modelViewMatrix.mul(vec4(offset, 1));
       const viewVelocity = modelViewMatrix.mul(vec4(velocity, 0)).xy;
       const viewSpeed = length(viewVelocity);
@@ -489,7 +506,7 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, max
       const fadeOut = pow(float(1).sub(lifeT), colorEnd.w);
       const depthFade = select(groundParams.y.greaterThan(0), smoothstep(0, max(groundParams.y, 0.001), drawn.y.sub(ground)), float(1));
       const nearFade = smoothstep(0.55, 1.5, distance.div(max(drawnSize, 0.01)));
-      const alpha = fades.x.mul(fadeIn).mul(fadeOut).mul(depthFade).mul(nearFade).mul(frameValue(row, 1).x).mul(alive);
+      const alpha = fades.x.mul(fadeIn).mul(fadeOut).mul(depthFade).mul(nearFade).mul(smallDim).mul(frameValue(row, 1).x).mul(alive);
 
       // Colour over life (three stops), the underglow reaching this height, and HDR emission.
       const midPoint = max(colorMid.w, 0.001);
@@ -503,7 +520,10 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, max
       vAlbedo.assign(albedo);
       vGlow.assign(glowParams.xyz.mul(frame.w).mul(glowFall));
       vEmit.assign(albedo.mul(emission));
-      vShape.assign(vec4(alpha, smoothstep(fogNear, fogFar, distance).mul(groundParams.z), groundParams.w, extras.w));
+      // The scene's haze toward the sky behind the particle (per particle, in the vertex stage).
+      const haze = sceneHaze ? sky.fogAmountNode(offset) : smoothstep(fogNear, fogFar, distance);
+      vHaze.assign(sceneHaze ? sky.skyColorNode(offset.div(max(distance, 0.001))) : uniforms.fogColor);
+      vShape.assign(vec4(alpha, haze.mul(groundParams.z), groundParams.w, extras.w));
       // The sun and the sky's up in the sprite's own frame, for the puffs' round shading.
       const sunView = modelViewMatrix.mul(vec4(uniforms.sunDirection, 0)).xyz;
       const upView = modelViewMatrix.mul(vec4(0, 1, 0, 0)).xyz;
@@ -580,7 +600,7 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, max
       material.colorNode = shaded;
       material.opacityNode = saturate(vShape.x.mul(shape.x).mul(float(1).sub(vShape.y)));
     } else {
-      material.colorNode = mix(shaded, uniforms.fogColor, vShape.y);
+      material.colorNode = mix(shaded, vHaze, vShape.y);
       material.opacityNode = saturate(vShape.x.mul(shape.x));
     }
     return material;
