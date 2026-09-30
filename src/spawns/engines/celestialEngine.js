@@ -560,6 +560,9 @@ export function createCelestialEngine() {
       eclipses = createEclipseMeshes(THREE, TSL, { skyColorNode, uniforms: ctx.uniforms, capacity: ECLIPSE_CAPACITY });
       rainbows = createRainbowMesh(THREE, TSL, { uniforms: ctx.uniforms, capacity: RAINBOW_CAPACITY });
       ctx.scene.add(meteors.mesh, comets.mesh, eclipses.disc, eclipses.corona, rainbows.mesh);
+      // Drawn once behind the loading fade, so the first meteor, comet, eclipse or rainbow costs no
+      // pipeline build and its geometry is counted in the memory baseline from the start.
+      for (const mesh of [meteors.mesh, comets.mesh, eclipses.disc, eclipses.corona, rainbows.mesh]) ctx.registerPrewarm?.(mesh);
       lists.meteors = [meteors.look, meteors.head, meteors.trail];
       lists.comets = [comets.look, comets.dust, comets.ion];
       lists.disc = [eclipses.shade];

@@ -750,6 +750,9 @@ export function createWeatherVolumeEngine() {
       ctx.scene.add(localRain.mesh);
       ctx.camera.add(canopy.mesh);
       ctx.camera.add(veil.mesh);
+      // Drawn once behind the loading fade: the first storm, shower or fog bank costs no pipeline
+      // build, and the lazily counted overlay geometries are in the memory baseline from the start.
+      for (const mesh of [puffs.mesh, shafts.mesh, localRain.mesh, canopy.mesh, veil.mesh]) ctx.registerPrewarm?.(mesh);
       // Instance buffers (5 puff, 3 shaft), the streak field's 4 and the two overlay quads' 4 each.
       buffersOwned = 5 + 3 + 4 + 8;
       met.fogColor = new THREE.Color();
