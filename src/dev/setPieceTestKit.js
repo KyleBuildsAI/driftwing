@@ -60,6 +60,11 @@ export const DEV_TIMELINE = Object.freeze({
     Object.freeze({ id: 'closestFunnel', child: 'funnel', measure: 'closestDistance' }),
     Object.freeze({ id: 'nearColumn', child: 'column', measure: 'timeWithin', radius: 800 }),
   ]),
+  journal: Object.freeze([
+    Object.freeze({ key: 'devClosestFunnel', record: 'closestFunnel', op: 'min' }),
+    Object.freeze({ key: 'devFunnelsSeen', value: 1, op: 'add', record: 'closestFunnel', max: 5000 }),
+    Object.freeze({ key: 'devTimelinesRun', value: 1, op: 'add' }),
+  ]),
 });
 
 /** The dev set-piece preset (valid against src/spawns/schema.js with the setPiece engine registered). */

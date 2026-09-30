@@ -145,9 +145,10 @@ function createLab() {
   const engine = manager.register(createStructureEngine());
   for (const preset of PRESETS) manager.addPreset(preset);
   manager.init();
-  const events = { gates: [], achievements: [], courses: [], landings: [], notify: [], windAdded: [], windRemoved: [] };
+  const events = { gates: [], achievements: [], courses: [], landings: [], notify: [], windAdded: [], windRemoved: [], journal: [] };
   bus.on('structure:gate', (payload) => events.gates.push(payload));
   bus.onTyped('achievement', (payload) => events.achievements.push(payload));
+  bus.onTyped('journalStat', (payload) => events.journal.push(payload));
   bus.on('structure:course', (payload) => events.courses.push(payload));
   bus.on('structure:landing', (payload) => events.landings.push(payload));
   bus.on('notify', (payload) => events.notify.push(payload));
@@ -272,6 +273,7 @@ function testParams() {
     ['rated wind under cut-in', variant('badRated', { recipe: 'windFarm', cutIn: 8, ratedWind: 6 }), /params\.ratedWind: must be above cutIn/],
     ['nested wake param', variant('badWake', { recipe: 'windFarm', wake: { length: 90 } }), /"badWake" params\.wake\.length: must be within \[1, 30\]/],
     ['gate list entry', variant('badGate', { recipe: 'windFarm', gates: [{ id: 'g', halfWidth: -1 }] }), /params\.gates\[0\]\.halfWidth: must be within/],
+    ['journal statistic name', variant('badJournal', { recipe: 'gates', journal: 'Best run' }), /"badJournal" params\.journal: must be a camelCase journal statistic name/],
   ];
   for (const [name, preset, pattern] of cases) {
     const detail = expectThrow(() => lab.engine.create(preset, { ...preset.engines[0].params, position: new THREE.Vector3(), heading: 0, site: null }, () => 0.5), pattern);
@@ -406,6 +408,8 @@ function testCourse() {
   lab.teleport(point(1, -60));
   lab.fly(point(1, -60), point(1, 60), 30);
   check('course', 'a soft crash between the gates spoils a clean run', lab.events.courses.length === 1, String(lab.events.courses.length));
+  const run = lab.events.journal;
+  check('course', 'the clean run alone reaches the journal (op min, seconds)', run.length === 1 && run[0].key === 'devCanyonRun' && run[0].op === 'min' && Math.abs(run[0].value - lab.events.courses[0].time) < 0.01 && run[0].presetId === 'devCanyonGates', JSON.stringify(run));
   lab.manager.deactivate(id, 'test');
 }
 

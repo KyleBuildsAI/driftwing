@@ -116,6 +116,7 @@ function createLab({ heavyLimit = 2 } = {}) {
   bus.on('setPiece:ended', record('ended'));
   bus.onTyped('spawnActivated', record('activated'));
   bus.onTyped('spawnEnded', record('spawnEnded'));
+  bus.onTyped('journalStat', record('journalStat'));
   function step(frames = 1, dt = 1 / 30) {
     for (let frame = 0; frame < frames; frame++) {
       state.time.elapsed += dt;
@@ -161,6 +162,9 @@ function testValidation() {
     ['bad weather state', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, until: { weather: ['hail'] } }] }, /"hail" is not one of clear, building, storm, clearing/],
     ['ramp on no param', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, ramps: [{ child: 'marker' }] }] }, /ramps\[0\]\.param: is required/],
     ['from an unknown child', { ...DEV_TIMELINE, children: { a: { preset: 'testMarker', from: 'b' } }, stages: [{ id: 's', duration: 1 }] }, /children\.a\.from: names no child: "b"/],
+    ['journal stat with a bad key', { ...DEV_TIMELINE, journal: [{ key: 'Closest tornado', value: 1 }] }, /params\.journal\[0\]\.key: must be a camelCase journal statistic name/],
+    ['journal stat on an unknown record', { ...DEV_TIMELINE, journal: [{ key: 'closestTornado', record: 'nothing' }] }, /params\.journal\[0\]\.record: names no record: "nothing"/],
+    ['journal stat with nothing to send', { ...DEV_TIMELINE, journal: [{ key: 'stormsChased' }] }, /params\.journal\[0\]\.value: is required without a record/],
   ];
   for (const [name, params, pattern] of cases) {
     const detail = expectThrow(() => validateTimeline(preset, params, known), pattern);
@@ -204,6 +208,9 @@ function testTimeline() {
   const ended = lab.log.find((entry) => entry.type === 'ended');
   check('timeline', 'the set piece ends complete with its records', ended && ended.completed && ended.stagesRun === 4 && Number.isFinite(ended.records.closestFunnel) && ended.records.nearColumn >= 0, JSON.stringify(ended));
   const own = lab.log.find((entry) => entry.type === 'spawnEnded' && entry.presetId === 'devTimeline');
+  const stats = lab.log.filter((entry) => entry.type === 'journalStat').map((entry) => `${entry.key}:${entry.op}:${entry.value}`);
+  check('timeline', 'the journal hears its statistics (a record, a record within its limit, a completion)',
+    stats.length === 3 && stats[0] === `devClosestFunnel:min:${ended.records.closestFunnel}` && stats[1] === 'devFunnelsSeen:add:1' && stats[2] === 'devTimelinesRun:add:1', stats.join(' '));
   check('timeline', 'and the manager removes it (reason ended)', own && own.reason === 'ended' && lab.manager.getActive().length === 0, own ? own.reason : 'still active');
   check('timeline', 'no wind source or light leaked', lab.manager.getStats().leaks.windSources === 0 && lab.manager.getStats().leaks.lights === 0 && lab.wind.sourceCount === 0);
 }

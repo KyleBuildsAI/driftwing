@@ -74,7 +74,7 @@ export function createStructureTestPresets() {
     testSite('devCanyonGates', 'Dev canyon run', {
       category: 'geo',
       stamps: structureStamps('gates'),
-      engines: [{ engine: 'structure', params: Object.freeze({ recipe: 'gates', course: 'devCanyonRun' }) }],
+      engines: [{ engine: 'structure', params: Object.freeze({ recipe: 'gates', course: 'devCanyonRun', journal: 'devCanyonRun' }) }],
       lod: { near: 1500, mid: 5000, far: 12000 },
     }),
   ]);

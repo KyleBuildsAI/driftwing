@@ -679,6 +679,7 @@ export function createStructureEngine() {
       if (course.clean && !clean) continue;
       counts.courses++;
       ctx.bus.emit('structure:course', { spawnId: instance.id, presetId: instance.presetId, siteId: data.siteId, course: course.id, time, clean });
+      if (course.journal && clean) ctx.bus.emitTyped('journalStat', { key: course.journal, value: Math.round(time * 100) / 100, op: 'min', presetId: instance.presetId });
       ctx.bus.emit('notify', { text: `${data.name}: ${time.toFixed(1)} s`, kind: 'success' });
     }
   }

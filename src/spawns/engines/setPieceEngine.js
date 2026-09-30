@@ -14,7 +14,9 @@
 //             player's altitude, the regional weather, and whether a child is active or has ended;
 //             combined with `any` / `all`
 //   records   measured while children live (the closest the player came, the seconds spent within a
-//             radius) and reported when the set piece ends ('setPiece:ended', for the journal)
+//             radius) and reported when the set piece ends ('setPiece:ended')
+//   journal   statistics sent to the journal when it ends (typed 'journalStat'): a record's value
+//             (closestTornado) or a fixed value once a record came within a limit (stormsChased)
 //
 // Children are activated through ctx.spawns (the SpawnManager) with the set piece's own source, so
 // every budget, the heavy limit, LOD, lures and dispose hold for them; a refused child is retried.
@@ -25,7 +27,7 @@
 //
 // Bus events (untyped, namespaced): 'setPiece:stage' { id, presetId, stage, index },
 // 'setPiece:narrate' { id, presetId, name, stage, text, position, priority, ttl } (the copilot speaks it),
-// 'setPiece:ended' { id, presetId, completed, stagesRun, records }.
+// 'setPiece:ended' { id, presetId, completed, stagesRun, records }; and the typed 'journalStat'.
 //
 // Deterministic: every duration, narration line and child seed is drawn from the spawn's seeded
 // random generator when the set piece is created. update() allocates nothing between stage changes.
@@ -41,6 +43,9 @@ const TRACK_GROUND_SECONDS = 0.5;
 const WEATHER_STATES = Object.freeze(['clear', 'building', 'storm', 'clearing']);
 const EASES = Object.freeze(['linear', 'smooth', 'in', 'out']);
 const MEASURES = Object.freeze(['closestDistance', 'timeWithin']);
+/** journalStat folds (src/core/events.js JOURNAL_STAT_OPS) and key form (src/gameplay/journal.js). */
+const JOURNAL_OPS = Object.freeze(['min', 'max', 'add']);
+const JOURNAL_KEY_PATTERN = /^[a-z][A-Za-z0-9]{0,39}$/;
 const CONDITION_KINDS = Object.freeze(['time', 'playerDistance', 'altitude', 'weather', 'childEnded', 'childActive']);
 const DEG = Math.PI / 180;
 
@@ -225,11 +230,29 @@ function readTimeline(preset, params, rng, manager) {
       radius: recordRead.number('radius', 1000, 0),
     };
   });
+  const recordIndex = new Map(records.map((record, index) => [record.id, index]));
+  const journal = read.array('journal', []).map((stat, index) => {
+    const statRead = createParamReader(ENGINE_NAME, preset.id, stat, `params.journal[${index}]`);
+    const key = statRead.string('key', null);
+    if (!key || !JOURNAL_KEY_PATTERN.test(key)) statRead.fail('key', `must be a camelCase journal statistic name, got ${JSON.stringify(key)}`);
+    const recordId = statRead.string('record', null);
+    if (recordId !== null && !recordIndex.has(recordId)) statRead.fail('record', `names no record: "${recordId}"`);
+    const hasValue = statRead.has('value');
+    if (!hasValue && recordId === null) statRead.fail('value', 'is required without a record (the number to send)');
+    return {
+      key,
+      op: statRead.choice('op', 'add', JOURNAL_OPS),
+      record: recordId === null ? -1 : recordIndex.get(recordId),
+      value: hasValue ? statRead.number('value', 0) : null,
+      max: statRead.number('max', Infinity),
+    };
+  });
   const narrationRead = read.nested('narration');
   return {
     children,
     stages,
     records,
+    journal,
     retrySeconds: read.number('retrySeconds', DEFAULT_RETRY_SECONDS, 0.1, 60),
     radius: read.number('radius', 4000, 10, 100000),
     priority: narrationRead.number('priority', 3, 0, 10),
@@ -394,7 +417,28 @@ export function createSetPieceEngine() {
       records[record.id] = Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
     });
     ctx.bus.emit('setPiece:ended', { id: instance.id, presetId: instance.presetId, completed, stagesRun: data.stagesRun, records });
+    sendJournalStats(instance, completed);
     instance.ended = true;
+  }
+
+  /**
+   * The timeline's journal statistics (typed 'journalStat'): a stat tied to a record sends when that
+   * record measured something within its `max` (its own value, or the record's when it has none); a
+   * stat without a record sends its value only when the timeline completed.
+   */
+  function sendJournalStats(instance, completed) {
+    const data = instance.data;
+    for (const stat of data.plan.journal) {
+      let value = stat.value;
+      if (stat.record >= 0) {
+        const measured = data.recordValues[stat.record];
+        if (!Number.isFinite(measured) || measured > stat.max) continue;
+        if (value === null) value = Math.round(measured * 10) / 10;
+      } else if (!completed) {
+        continue;
+      }
+      if (typeof ctx.bus.emitTyped === 'function') ctx.bus.emitTyped('journalStat', { key: stat.key, value, op: stat.op, presetId: instance.presetId });
+    }
   }
 
   /** True when a condition set holds now (allocation-free). */

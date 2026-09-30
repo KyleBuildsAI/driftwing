@@ -1,8 +1,9 @@
 // Recipe 'gates': a timed course through the site's canyon (the carve stamp). A start gate spans the
 // canyon mouth at its entry and a finish gate its exit, each marked by cairns with pennants on both
 // rims. Flying through start then finish (in order, without a soft crash between when `clean`)
-// completes the course: the engine emits 'structure:course' with the elapsed time, which the journal
-// keeps as the best run. Without a carve stamp (a debug spawn) the course runs `length` metres along
+// completes the course: the engine emits 'structure:course' with the elapsed time and, when the
+// preset names a `journal` statistic (bestCanyonRun), a typed 'journalStat' for clean runs (op min),
+// which the journal keeps as the best run. Without a carve stamp (a debug spawn) the course runs `length` metres along
 // the spawn heading.
 import { PALETTE } from '../palette.js';
 import { addCairn, findStamp, frameFromHeading } from '../common.js';
@@ -16,6 +17,7 @@ export const GATES_DEFAULTS = Object.freeze({
   clean: true,
   length: 600,
   markerHeight: 4.5,
+  journal: null,
 });
 
 export function buildGates(context, read) {
@@ -27,6 +29,8 @@ export function buildGates(context, read) {
   const clean = read.boolean('clean', GATES_DEFAULTS.clean);
   const markerHeight = read.number('markerHeight', GATES_DEFAULTS.markerHeight, 0.5, 30);
   const course = read.string('course', context.presetId);
+  const journal = read.string('journal', GATES_DEFAULTS.journal);
+  if (journal !== null && !/^[a-z][A-Za-z0-9]{0,39}$/.test(journal)) read.fail('journal', `must be a camelCase journal statistic name, got ${JSON.stringify(journal)}`);
 
   const ends = [];
   if (carve) {
@@ -68,6 +72,6 @@ export function buildGates(context, read) {
       addCairn(body, x, context.ground(x, z), z, markerHeight * (0.9 + rng() * 0.2), rng, index === 0 ? PALETTE.flagWhite : PALETTE.flagRed);
     }
   });
-  out.courses.push({ id: course, gates: ids, clean });
+  out.courses.push({ id: course, gates: ids, clean, journal });
   out.radius = Math.max(out.radius, Math.max(...ends.map((end) => Math.hypot(end.x, end.z) + end.halfWidth)));
 }
