@@ -35,6 +35,7 @@ export const DEV_TIMELINE = Object.freeze({
       duration: 8,
       start: ['column'],
       until: Object.freeze({ playerDistance: Object.freeze({ child: 'column', max: 120 }) }),
+      set: [Object.freeze({ child: 'spires', param: 'sway', value: 1.5 })],
       narrate: Object.freeze({ lines: ['A column of air is rising {distance} {direction}.'], target: 'column', delay: 1 }),
       marker: 'column-up',
     }),

@@ -12,6 +12,8 @@
 //   triggers     `when` waits (time, or the regional weather turning stormy), `until` ends a stage
 //                early on the player's distance, childActive / childEnded / altitude hold as stated
 //   budgets      a heavy child the heavy limit refuses is retried until the limit allows it
+//   control      a child's instance.control record (the vortex's intensity and ropeOut): ramps and
+//                a stage's `set` write it directly
 //   determinism  the same seed gives the same stage times, narration lines and child seeds
 //   dispose      ending the set piece early ends its children and still reports its records
 //   narration    the copilot's chatter handler fills {distance} {direction} {name} {eta}
@@ -162,6 +164,7 @@ function testValidation() {
     ['bad weather state', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, until: { weather: ['hail'] } }] }, /"hail" is not one of clear, building, storm, clearing/],
     ['ramp on no param', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, ramps: [{ child: 'marker' }] }] }, /ramps\[0\]\.param: is required/],
     ['from an unknown child', { ...DEV_TIMELINE, children: { a: { preset: 'testMarker', from: 'b' } }, stages: [{ id: 's', duration: 1 }] }, /children\.a\.from: names no child: "b"/],
+    ['set without a value', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, set: [{ child: 'marker', param: 'ropeOut' }] }] }, /params\.stages\[0\]\.set\[0\]\.value: must be a number or true \/ false/],
     ['journal stat with a bad key', { ...DEV_TIMELINE, journal: [{ key: 'Closest tornado', value: 1 }] }, /params\.journal\[0\]\.key: must be a camelCase journal statistic name/],
     ['journal stat on an unknown record', { ...DEV_TIMELINE, journal: [{ key: 'closestTornado', record: 'nothing' }] }, /params\.journal\[0\]\.record: names no record: "nothing"/],
     ['journal stat with nothing to send', { ...DEV_TIMELINE, journal: [{ key: 'stormsChased' }] }, /params\.journal\[0\]\.value: is required without a record/],
@@ -184,6 +187,8 @@ function testTimeline() {
   lab.step(60);
   const glowLater = spiresInstance ? spiresInstance.params.glow : NaN;
   check('timeline', 'the ramp eases the spires glow up', glowStart < 0.5 && glowLater > glowStart + 0.3, `${glowStart.toFixed(2)} -> ${glowLater.toFixed(2)}`);
+  for (let frame = 0; frame < 600 && lab.describe(id).stage !== 'rise'; frame++) lab.step(1);
+  check('timeline', 'a stage sets a child value on entry (rise: spires sway 1.5)', spiresInstance && spiresInstance.params.sway === 1.5, spiresInstance ? String(spiresInstance.params.sway) : 'none');
   check('timeline', 'the child got its per-activation params (5 spires)', spiresInstance && spiresInstance.data.meshes.glow !== null && lab.manager.getInstance(spires.id).source === 'debug', spires ? spires.id : 'none');
   let funnelStart = null;
   let funnelLater = null;
@@ -248,6 +253,45 @@ function testBudgets() {
   lab.manager.setHeavyLimit(2);
   lab.step(90);
   check('budgets', 'it starts once the limit allows it', lab.describe(id).children.find((child) => child.key === 'funnel').status === 'active');
+  lab.manager.deactivate(id, 'test');
+}
+
+// ---- control ----------------------------------------------------------------------------------------------
+// A child engine that exposes an `instance.control` record (the vortex engine: intensity, ropeOut):
+// ramps ease its numbers and a stage's `set` flips its switches, with no setParam call.
+function testControl() {
+  const lab = createLab();
+  const created = [];
+  lab.manager.register({
+    name: 'vortex',
+    init() {},
+    create(preset, params) {
+      const instance = { anchor: params.position, radius: 60, windSourceIds: [], lights: 0, particles: 0, data: {}, control: { intensity: 1, ropeOut: false } };
+      created.push(instance);
+      return instance;
+    },
+    update() {},
+    setLOD() {},
+    dispose() {},
+    stats: () => ({ instances: created.length, particles: 0, lights: 0, buffers: 0, drawCalls: 0 }),
+  });
+  const marker = lab.manager.getPreset('testMarker');
+  lab.manager.addPreset({ ...marker, id: 'labVortex', engines: [{ engine: 'vortex', params: {} }] });
+  const params = {
+    children: { tornado: { preset: 'labVortex', offset: { along: 400 } } },
+    stages: [
+      { id: 'mature', duration: 4, start: ['tornado'], ramps: [{ child: 'tornado', param: 'intensity', from: 0.2, to: 1.4, ease: 'linear' }] },
+      { id: 'ropeOut', duration: 2, set: [{ child: 'tornado', param: 'ropeOut', value: true }] },
+    ],
+  };
+  lab.manager.addPreset(createSetPieceTestPreset(params, 'devControl'));
+  const id = lab.start('devControl');
+  lab.step(61);
+  const control = created[0] ? created[0].control : null;
+  const midway = control ? control.intensity : NaN;
+  check('control', 'a ramp eases the vortex control intensity', control && midway > 0.6 && midway < 0.9 && control.ropeOut === false, `${midway.toFixed(2)} at 2 s`);
+  for (let frame = 0; frame < 120 && lab.describe(id).stage !== 'ropeOut'; frame++) lab.step(1);
+  check('control', 'a stage sets the ropeOut switch on entry', control && control.ropeOut === true && lab.describe(id).unsupportedRamps === 0 && lab.engine.stats().rampCalls === 0, JSON.stringify(control));
   lab.manager.deactivate(id, 'test');
 }
 
@@ -343,6 +387,7 @@ testValidation();
 testTimeline();
 testTriggers();
 testBudgets();
+testControl();
 testDeterminism();
 testDispose();
 testNarration();

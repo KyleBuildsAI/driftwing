@@ -8,8 +8,8 @@
 //             params, an optional track (a steady drift across the terrain)
 //   stages    run in order. Each may wait for a start condition (`when`, with a timeout that skips
 //             it), then runs for its `duration` (seconds, or a seeded [min, max]) unless `until` fires
-//             first. On entry a stage starts and ends children and narrates; while it runs, its ramps
-//             ease child params from `from` to `to`.
+//             first. On entry a stage starts and ends children, sets child values (`set`: a tornado's
+//             ropeOut) and narrates; while it runs, its ramps ease child params from `from` to `to`.
 //   triggers  conditions on the stage time, the player's distance to a child or the anchor, the
 //             player's altitude, the regional weather, and whether a child is active or has ended;
 //             combined with `any` / `all`
@@ -21,9 +21,11 @@
 // Children are activated through ctx.spawns (the SpawnManager) with the set piece's own source, so
 // every budget, the heavy limit, LOD, lures and dispose hold for them; a refused child is retried.
 // Children end by setting their instances' `ended` flag, which the manager honours on its next
-// update (never a nested deactivate from inside the manager's loop). Ramps write the child's
-// `instance.params[name]` when its engine exposes live params (no call, no allocation) and otherwise
-// call the engine's optional setParam(instance, name, value) at most RAMP_CALLS_PER_SECOND times.
+// update (never a nested deactivate from inside the manager's loop). Ramps (and a stage's `set`
+// values) write the child's live `instance.params[name]` (the structure engine) or
+// `instance.control[name]` (the vortex engine's intensity and ropeOut) when its engine exposes one
+// (no call, no allocation), and otherwise call the engine's optional setParam(instance, name, value),
+// a ramp at most RAMP_CALLS_PER_SECOND times.
 //
 // Bus events (untyped, namespaced): 'setPiece:stage' { id, presetId, stage, index },
 // 'setPiece:narrate' { id, presetId, name, stage, text, position, priority, ttl } (the copilot speaks it),
@@ -193,6 +195,14 @@ function readTimeline(preset, params, rng, manager) {
         over: rampRead.number('over', Number.isFinite(duration) ? duration : 60, 0.01, 86400),
       };
     });
+    const sets = stageRead.array('set', []).map((entry, setIndex) => {
+      const setRead = createParamReader(ENGINE_NAME, preset.id, entry, `params.${path}.set[${setIndex}]`);
+      const param = setRead.string('param', null);
+      if (!param) setRead.fail('param', 'is required (the child engine param to set)');
+      const value = entry.value;
+      if (typeof value !== 'boolean' && !(typeof value === 'number' && Number.isFinite(value))) setRead.fail('value', `must be a number or true / false, got ${JSON.stringify(value)}`);
+      return { child: childOf(entry.child, `${path}.set[${setIndex}].child`), param, value };
+    });
     const narrate = stage.narrate ?? null;
     let narration = null;
     if (narrate !== null) {
@@ -214,6 +224,7 @@ function readTimeline(preset, params, rng, manager) {
       start,
       end,
       ramps,
+      sets,
       narration,
       marker: stageRead.string('marker', null),
     };
@@ -355,6 +366,38 @@ export function createSetPieceEngine() {
     if (parts) for (const part of parts) part.ended = true;
   }
 
+  /**
+   * Writes value into every part of child `index`: its live params or control record when it has a
+   * field of that name and type, else through its engine's setParam. Returns whether any part took it.
+   */
+  function writeChildValue(data, index, param, value) {
+    const parts = data.childParts[index];
+    if (!parts) return false;
+    const engines = data.childEngines[index];
+    let taken = false;
+    for (let part = 0; part < parts.length; part++) {
+      const target = parts[part];
+      const params = target.params;
+      const control = target.control;
+      if (params !== null && typeof params === 'object' && typeof params[param] === typeof value) {
+        params[param] = value;
+        taken = true;
+      } else if (control !== null && typeof control === 'object' && typeof control[param] === typeof value) {
+        control[param] = value;
+        taken = true;
+      } else if (engines[part] && typeof engines[part].setParam === 'function') {
+        counts.rampCalls++;
+        if (engines[part].setParam(target, param, value)) taken = true;
+      }
+    }
+    return taken;
+  }
+
+  /** A stage's `set` entry: once, on entry (a child that is not running yet misses it). */
+  function setChildValue(data, index, param, value) {
+    if (!writeChildValue(data, index, param, value)) data.unsupported++;
+  }
+
   function emitNarration(instance, stage) {
     const data = instance.data;
     const narration = stage.narration;
@@ -379,6 +422,7 @@ export function createSetPieceEngine() {
     counts.stages++;
     for (const child of stage.end) endChild(data, child);
     for (const child of stage.start) startChild(instance, child);
+    for (const entry of stage.sets) setChildValue(data, entry.child, entry.param, entry.value);
     // What is left of the timeline bounds the children's own lifetimes.
     let remaining = 0;
     for (let later = index; later < data.plan.stages.length; later++) remaining += Number.isFinite(data.plan.stages[later].duration) ? data.plan.stages[later].duration : 600;
@@ -495,12 +539,16 @@ export function createSetPieceEngine() {
       const value = ramp.from + (ramp.to - ramp.from) * ease(ramp.ease, t);
       const engines = data.childEngines[ramp.child];
       for (let part = 0; part < parts.length; part++) {
-        const instanceParams = parts[part].params;
+        const target = parts[part];
+        const instanceParams = target.params;
+        const control = target.control;
         if (instanceParams !== null && typeof instanceParams === 'object' && typeof instanceParams[ramp.param] === 'number') {
           instanceParams[ramp.param] = value;
+        } else if (control !== null && typeof control === 'object' && typeof control[ramp.param] === 'number') {
+          control[ramp.param] = value;
         } else if (callsDue && engines[part] && typeof engines[part].setParam === 'function') {
           counts.rampCalls++;
-          if (!engines[part].setParam(parts[part], ramp.param, value)) data.unsupported++;
+          if (!engines[part].setParam(target, ramp.param, value)) data.unsupported++;
         } else if (callsDue) {
           data.unsupported++;
         }
