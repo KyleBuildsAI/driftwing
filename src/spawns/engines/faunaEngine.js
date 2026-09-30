@@ -31,6 +31,9 @@
 // thermalRefresh seconds), wind-source re-indexing when a slipstream leaves its bounds' margin, and
 // bus events on discrete moments (a scatter, a formation change, a call).
 //
+// Big flocks search neighbours in interleaved slices: each agent refreshes its flocking steering every
+// second frame near and every third at mid (NEIGHBOR_STRIDE), and steers on the kept value between.
+//
 // LOD: near simulates everything; mid simulates with fewer neighbours; far hides the agents and only
 // moves the group (a heavy preset's lure takes over), and they are re-seeded around it on the way
 // back in. A slipstream is removed at far (the player cannot reach it there) and re-added nearer.
@@ -100,6 +103,11 @@ const GRAVITY = 9.81;
 const GRID_BUCKETS = 4096;
 /** Groups up to this size search neighbours by brute force. */
 const BRUTE_FORCE_LIMIT = 48;
+/**
+ * Flocks larger than BRUTE_FORCE_LIMIT refresh each agent's flocking steering (the neighbour search)
+ * every NEIGHBOR_STRIDE[tier] frames, in interleaved slices, and reuse it in between.
+ */
+const NEIGHBOR_STRIDE = Object.freeze({ near: 2, mid: 3, far: 3 });
 /** Ground probes per group: a 3 x 3 grid around the group, one sample refreshed per frame. */
 const GROUND_GRID = 3;
 const SCRATCH_STEER = 0;
@@ -375,6 +383,9 @@ export function createFaunaEngine() {
       fleeX: new Float32Array(capacity),
       fleeY: new Float32Array(capacity),
       fleeZ: new Float32Array(capacity),
+      flockX: new Float32Array(capacity),
+      flockY: new Float32Array(capacity),
+      flockZ: new Float32Array(capacity),
       homeX: new Float32Array(capacity),
       homeY: new Float32Array(capacity),
       homeZ: new Float32Array(capacity),
@@ -547,6 +558,27 @@ export function createFaunaEngine() {
       pool.fleeZ[index] = pool.fleeZ[other];
     }
     return 1;
+  }
+
+  /**
+   * The flocking steering of agent index into steering[0..2]: searched afresh on its slice's frame
+   * (and kept in the flock arrays), reused from them on the others.
+   */
+  function flockSteering(pool, index, start, end, flocking, useGrid, inverseCell, maxNeighbors, spread, fresh) {
+    if (fresh) {
+      steering[0] = 0;
+      steering[1] = 0;
+      steering[2] = 0;
+      gatherNeighbors(pool, index, start, end, flocking, useGrid, inverseCell, maxNeighbors, spread);
+      steerFlocking(pool, index, flocking);
+      pool.flockX[index] = steering[0];
+      pool.flockY[index] = steering[1];
+      pool.flockZ[index] = steering[2];
+      return;
+    }
+    steering[0] = pool.flockX[index];
+    steering[1] = pool.flockY[index];
+    steering[2] = pool.flockZ[index];
   }
 
   /** Separation, alignment and cohesion from the gathered neighbourhood, loosened while excited. */
@@ -833,12 +865,10 @@ export function createFaunaEngine() {
     let sumX = 0;
     let sumY = 0;
     let sumZ = 0;
+    const stride = useGrid ? NEIGHBOR_STRIDE[tier] : 1;
+    const slice = data.neighborSlice = (data.neighborSlice + 1) % stride;
     for (let index = start; index < end; index++) {
-      steering[0] = 0;
-      steering[1] = 0;
-      steering[2] = 0;
-      gatherNeighbors(pool, index, start, end, flocking, useGrid, inverseCell, maxNeighbors, spread);
-      steerFlocking(pool, index, flocking);
+      flockSteering(pool, index, start, end, flocking, useGrid, inverseCell, maxNeighbors, spread, (index - start) % stride === slice);
       const homeX = pool.homeX[index] * axisA;
       const homeY = pool.homeY[index] * axisB;
       const homeZ = pool.homeZ[index] * axisC;
@@ -886,12 +916,10 @@ export function createFaunaEngine() {
     let sumX = 0;
     let sumY = 0;
     let sumZ = 0;
+    const stride = useGrid ? NEIGHBOR_STRIDE[tier] : 1;
+    const slice = data.neighborSlice = (data.neighborSlice + 1) % stride;
     for (let index = start; index < end; index++) {
-      steering[0] = 0;
-      steering[1] = 0;
-      steering[2] = 0;
-      gatherNeighbors(pool, index, start, end, flocking, useGrid, inverseCell, maxNeighbors, spread);
-      steerFlocking(pool, index, flocking);
+      flockSteering(pool, index, start, end, flocking, useGrid, inverseCell, maxNeighbors, spread, (index - start) % stride === slice);
       const calmShare = 1 - 0.85 * pool.excite[index];
       steerToward(pool, index, aheadX, g[G.Y], aheadZ, 0, 0, 0, 0.25, g[G.SPEED], 0.55 * calmShare);
       // A loose pull to the centre keeps stragglers in.
@@ -1738,6 +1766,9 @@ export function createFaunaEngine() {
       pool.vz[index] = forwardZ * speed;
       pool.bank[index] = 0;
       pool.excite[index] = 0;
+      pool.flockX[index] = 0;
+      pool.flockY[index] = 0;
+      pool.flockZ[index] = 0;
     }
     g[G.CX] = g[G.X];
     g[G.CY] = g[G.Y];
@@ -1936,6 +1967,7 @@ export function createFaunaEngine() {
       phaseSeed: rng(),
       ground: new Float64Array(GROUND_GRID * GROUND_GRID),
       groundCursor: 0,
+      neighborSlice: 0,
       hidden: false,
       mode: MODE_WAIT,
       duration: Number.isFinite(params.duration) ? params.duration : null,
