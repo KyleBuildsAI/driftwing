@@ -246,9 +246,15 @@ export function installStructureChecks(game) {
   const manager = system.manager;
   const spawned = new Map();
 
+  /**
+   * GPU memory and the terrain's chunk meshes. A flight under the bridge can make the terrain's mesh
+   * pools grow by a chunk mesh (a pooled mesh keeps its geometry by design), so the dispose check
+   * allows the geometry count to move by exactly the chunk meshes the terrain created meanwhile.
+   */
   function memory() {
     const info = ctx.renderer.info.memory;
-    return { geometries: info.geometries, textures: info.textures };
+    const terrainMeshes = ctx.systems.terrain.getStats().meshesCreated.reduce((sum, count) => sum + count, 0);
+    return { geometries: info.geometries, textures: info.textures, terrainMeshes };
   }
 
   /**
@@ -320,7 +326,7 @@ export function installStructureChecks(game) {
       const after = memory();
       spawned.delete(presetId);
       return check(`${presetId}: dispose returns GPU memory and removes its wind sources`,
-        after.geometries === record.before.geometries && after.textures === record.before.textures && ctx.wind.sourceCount === windBefore - ownSources && record.during.geometries > record.before.geometries,
+        after.geometries - record.before.geometries === after.terrainMeshes - record.before.terrainMeshes && after.textures === record.before.textures && ctx.wind.sourceCount === windBefore - ownSources && record.during.geometries > record.before.geometries,
         { terrainIdle: record.idle, before: record.before, during: record.during, after, windSources: `${windBefore} -> ${ctx.wind.sourceCount} (own ${ownSources})`, leaks: manager.getStats().leaks });
     },
     /** Sets the time of day (0..1) at once. */
