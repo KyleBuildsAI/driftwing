@@ -496,8 +496,7 @@ export function createSpawnManager(options) {
    * Activates presetId. opts: { position: {x, y, z} (required), heading (compass degrees),
    * source: 'site' | 'director' | 'debug', site?, seed?, scale?, force? (debug only: ignore the
    * budgets), duration?, params? ({ [engine name]: { ...overrides } } merged over that engine
-   * entry's preset params: the set-piece engine places and tunes its children this way) }. Engines
-   * see the activation's `source` among their params too.
+   * entry's preset params: the set-piece engine places and tunes its children this way) }.
    * Returns the spawn id, or null when a budget (or a missing preset or engine) refuses.
    */
   function activate(presetId, opts = {}) {
@@ -561,7 +560,6 @@ export function createSpawnManager(options) {
           heading,
           site,
           startTime: record.startTime,
-          source,
           scale: Number.isFinite(opts.scale) ? opts.scale : site && Number.isFinite(site.scale) ? site.scale : 1,
           duration,
           seed: spawnSeed,

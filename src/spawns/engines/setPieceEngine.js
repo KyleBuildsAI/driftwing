@@ -633,7 +633,8 @@ export function createSetPieceEngine() {
       const data = {
         plan,
         name: preset.name,
-        source: params.source === 'site' ? 'director' : params.source ?? 'director',
+        /** The source its children are activated with: its own (read from the manager on its first frame). */
+        source: 'director',
         heading: Number.isFinite(params.heading) ? params.heading : 0,
         stageIndex: -1,
         running: false,
@@ -664,8 +665,12 @@ export function createSetPieceEngine() {
     update(instance, dt) {
       const data = instance.data;
       if (data.finished) return;
-      // The first stage starts on the first frame, once the manager has given the set piece its id.
+      // The first stage starts on the first frame, once the manager has given the set piece its id;
+      // its children share its source ('debug' passes the budgets; a site's set piece counts as the
+      // director's).
       if (data.stageIndex < 0) {
+        const record = ctx.spawns.getInstance(instance.id);
+        data.source = record && (record.source === 'debug' || record.source === 'director') ? record.source : 'director';
         data.stageIndex = -1;
         nextStage(instance);
         if (data.finished) return;
