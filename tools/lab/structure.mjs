@@ -21,6 +21,7 @@
 //                air downwind of a rotor), gone at the far tier and after dispose
 //   lod          detail shows only near; heavy islands hide at far (the lure takes over)
 //   memory       every per-instance geometry is disposed and every pooled slot returned
+//   cost         per recipe: update() CPU time per instance, triangles, instanced parts, draw calls
 //   allocation   after a JIT warm-up, 100 000 frames of six structures (turbines turning, windsock,
 //                sway, gates, audio) allocate nothing
 //
@@ -611,7 +612,42 @@ async function testAllocation() {
   check('allocation', 'young generation grows under 0.1 byte per frame beyond the gate events', collections === 0 && perFrame < 0.1 + allowance, `${perFrame.toFixed(3)} B/frame (gate events allow ${allowance.toFixed(3)})`);
 }
 
+// ---- cost -------------------------------------------------------------------------------------------------
+// Per-instance cost of every recipe: the CPU time of its update() (after a JIT warm-up, the player
+// flying past, turbines and windsocks animating at the near tier) and what it asks of the GPU: the
+// triangles of its own geometry, its pooled instanced parts and its draw calls at the near tier.
+const COST_BUDGET_MICROSECONDS = 50;
+function testCost() {
+  const lab = createLab();
+  const lines = [];
+  let worst = 0;
+  for (const preset of PRESETS) {
+    const id = lab.spawnSite(preset.id);
+    const part = partsOf(lab, id);
+    lab.engine.setLOD(part, 'near');
+    const site = siteOf(preset.id);
+    const frame = (index) => {
+      lab.state.player.position.set(site.x + Math.sin(index * 0.001) * 400, site.groundY + 120, site.z - 600);
+      lab.state.time.elapsed += 1 / 60;
+      lab.engine.update(part, 1 / 60);
+    };
+    for (let index = 0; index < 20000; index++) frame(index);
+    const frames = 40000;
+    const started = process.hrtime.bigint();
+    for (let index = 0; index < frames; index++) frame(index);
+    const microseconds = Number(process.hrtime.bigint() - started) / 1000 / frames;
+    worst = Math.max(worst, microseconds);
+    let triangles = 0;
+    for (const mesh of Object.values(part.data.meshes)) if (mesh) triangles += mesh.geometry.attributes.position.count / 3;
+    const stats = lab.engine.stats();
+    lines.push(`${preset.id} ${microseconds.toFixed(2)} us, ${triangles} tris, ${part.data.turbineCount} turbines, ${part.data.puffSlots.length} puffs, ${stats.drawCalls} draws`);
+    lab.manager.deactivate(id, 'test');
+  }
+  check('cost', `update() under ${COST_BUDGET_MICROSECONDS} us per instance for every recipe`, worst < COST_BUDGET_MICROSECONDS, lines.join('; '));
+}
+
 await testAllocation();
+testCost();
 testRecipes();
 testParams();
 testStamps();

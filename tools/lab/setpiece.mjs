@@ -15,7 +15,7 @@
 //   determinism  the same seed gives the same stage times, narration lines and child seeds
 //   dispose      ending the set piece early ends its children and still reports its records
 //   narration    the copilot's chatter handler fills {distance} {direction} {name} {eta}
-//   allocation   frames between stage changes allocate nothing
+//   allocation   frames between stage changes allocate nothing; update() CPU time per set piece
 //
 // Usage: node --expose-gc tools/lab/setpiece.mjs [--verbose]
 // Prints one line per check and exits non-zero if any check fails.
@@ -320,6 +320,12 @@ async function testAllocation() {
   await new Promise((resolve) => setTimeout(resolve, 50));
   observer.disconnect();
   const perFrame = (after - before) / frames;
+  // CPU cost of the set piece's own update(): three live children, a ramp, a tracked child, two
+  // records and three conditions a frame (the children's own engines are measured in their labs).
+  const started = process.hrtime.bigint();
+  for (let index = 0; index < frames; index++) frame();
+  const microseconds = Number(process.hrtime.bigint() - started) / 1000 / frames;
+  check('allocation', 'update() costs under 20 us per set piece', microseconds < 20, `${microseconds.toFixed(2)} us per frame`);
   check('allocation', `no garbage collection during ${frames} set-piece frames`, collections === 0, `${collections} collections`);
   check('allocation', 'young generation grows under 0.1 byte per frame', collections === 0 && perFrame < 0.1, `${perFrame.toFixed(3)} B/frame (ramp, track, records, conditions)`);
   check('allocation', 'the stage kept running (nothing ended it)', lab.engine.describe(setPiece).stage === 'hold' && lab.engine.describe(setPiece).running);
