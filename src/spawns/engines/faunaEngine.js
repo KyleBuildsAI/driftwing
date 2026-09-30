@@ -63,7 +63,7 @@ export const FAUNA_DEFAULTS = Object.freeze({
     maxHeadingGap: 55, playerSpacing: 24, tolerance: 14, heightTolerance: 9, headingTolerance: 30, holdSeconds: 10,
     achievement: null,
   }),
-  circling: Object.freeze({ radius: Object.freeze([45, 85]), climb: 1.3, bottom: 150, top: 900, thermalSearch: 2600, thermalRefresh: 12, useThermals: true }),
+  circling: Object.freeze({ radius: Object.freeze([45, 85]), climb: 1.3, bottom: 150, top: 900, thermals: 1, thermalSearch: 1800, thermalRefresh: 12, useThermals: true }),
   pod: Object.freeze({
     spread: 45, surfaceSeconds: Object.freeze([14, 26]), diveSeconds: Object.freeze([10, 22]), breachChance: 0.3,
     spoutInterval: Object.freeze([4, 7]), spoutHeight: 8, wake: 0.55, glow: 1, depth: 16, callInterval: Object.freeze([16, 38]),
@@ -122,6 +122,8 @@ const G = Object.freeze({
   MORPH_A: 45, MORPH_B: 46, MORPH_C: 47, MORPH_YAW: 48, SIZE: 49,
 });
 const G_LENGTH = 50;
+/** The per-thermal arrays of a circling group's thermal cache. */
+const THERMAL_FIELDS = Object.freeze(['x', 'z', 'capX', 'capZ', 'ground', 'top', 'radius', 'strength']);
 
 function clamp(value, min, max) {
   return value < min ? min : value > max ? max : value;
@@ -1106,6 +1108,25 @@ export function createFaunaEngine() {
     };
   }
 
+  /** Insertion sort of the cached thermals by distance to (x, z) (at most 8; no allocation). */
+  function sortThermals(cache, x, z) {
+    for (let index = 1; index < cache.count; index++) {
+      for (let slot = index; slot > 0; slot--) {
+        const previousDx = cache.x[slot - 1] - x;
+        const previousDz = cache.z[slot - 1] - z;
+        const currentDx = cache.x[slot] - x;
+        const currentDz = cache.z[slot] - z;
+        if (previousDx * previousDx + previousDz * previousDz <= currentDx * currentDx + currentDz * currentDz) break;
+        for (let key = 0; key < THERMAL_FIELDS.length; key++) {
+          const values = cache[THERMAL_FIELDS[key]];
+          const swap = values[slot];
+          values[slot] = values[slot - 1];
+          values[slot - 1] = swap;
+        }
+      }
+    }
+  }
+
   function refreshThermals(data) {
     const cache = data.thermals;
     const g = data.g;
@@ -1113,6 +1134,9 @@ export function createFaunaEngine() {
     cache.count = 0;
     if (circling.useThermals && ctx.wind && typeof ctx.wind.thermalsNear === 'function') {
       ctx.wind.thermalsNear(g[G.ANCHOR_X], g[G.ANCHOR_Z], circling.thermalSearch, data.thermalVisitor);
+      // Keep the nearest few to the anchor: the group circles together, not across the region.
+      sortThermals(cache, g[G.ANCHOR_X], g[G.ANCHOR_Z]);
+      if (cache.count > circling.thermals) cache.count = Math.max(1, circling.thermals);
     }
     if (cache.count === 0) {
       // No working thermal: soar over the anchor.
