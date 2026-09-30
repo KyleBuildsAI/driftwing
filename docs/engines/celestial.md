@@ -149,6 +149,15 @@ folds them with an eclipse or a fireball flash into the instance's one modifier.
 - **Budget.** `budget: { instances: 3, particles: 6000 }`, where particles are the active meteors.
   The engine holds 48 meteors, 3 comets, 2 eclipses and 3 rainbows at once.
 
+## Measured cost
+
+With every component live at once (48 meteor slots, a comet, an eclipse, a glory and a rainbow),
+the engine's update takes 0.07 ms per frame on the shared test machine (0.072 on WebGPU, 0.070 on
+WebGL2). It adds at most 5 draw calls of a few quads, plus a 1280-triangle sphere per rainbow. The
+glory and the bow cost a few ALU operations in the cloud shader, and nothing when both are 0. The
+update allocates nothing once optimised (see the weatherVolume page for the heap-profiler run that
+covers both engines).
+
 ## Examples
 
 ```js

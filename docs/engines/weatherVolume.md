@@ -179,8 +179,26 @@ null.
 
 ## Measured cost
 
-These numbers come from `tools/steps/engine-weatherVolume.json` on the shared test machine. See
-[Verification](#verification).
+These numbers come from the cost section of `tools/steps/engine-weatherVolume.json` (photo mode,
+fixed view, 3 s windows) on the shared, loaded test machine, WebGPU / WebGL2:
+
+| scene | engine CPU per frame | triangles added | engine draw calls | frame interval |
+| --- | --- | --- | --- | --- |
+| no volume | 0 | 0 | 0 | 4.9 / 5.0 ms |
+| the supercell (218 puffs and 1 shaft at MID) | 0.082 / 0.076 ms | +17.5k | 2 (puffs, shafts) | 5.8 / 4.9 ms |
+| six volumes (545 puffs and shafts) | 0.14 / 0.14 ms | +43.6k | 2 | 5.7 / 5.1 ms |
+
+Each puff is one instance of an 80-triangle icosahedron, and every volume shares one draw call. The
+frame interval measures the whole machine, which other programs were loading at the time. The GPU
+cost is the triangle count above: 0.16-0.22 million triangles for the whole frame, so the volumes add
+11 to 27 %.
+
+**Allocations.** The heap profiler sampled 12 000 manager frame updates (32-byte sampling interval)
+with 8 weather volumes and 4 celestial instances live, after a 40 000-frame warm-up: 0.047 B per frame
+on WebGPU and 0.021 B per frame on WebGL2 in both engines together, which is the profiler's floor.
+While V8 still runs the engine's `update` in its mid tier (Maglev, roughly the first 6 000-18 000
+updates), it boxes a few doubles across calls, about 5 B per frame, until the optimising tier takes
+over.
 
 ## Verification
 
@@ -189,6 +207,9 @@ These numbers come from `tools/steps/engine-weatherVolume.json` on the shared te
 
 - It force-spawns every form ahead of the craft and screenshots them in photo mode (supercell at
   golden hour, midday and night, lenticular, fog bank, mist, cloud sea, snow squall, noctilucent).
+- It spawns the supercell 34 km out: as a heavy preset its anvil lure takes over at the FAR tier,
+  and with `farMode: 'coarse'` its own far mass (the core column and the anvil spine) stays; the
+  wind source is gone in both.
 - It probes the supercell's wind: a downdraft in the shaft, an updraft under the base, and the source
   removed on dispose.
 - It checks the inside fog (modifier and veil), and the local rain and canopy rain under a shower in
