@@ -780,6 +780,9 @@ export function createTourGuide(ctx, helpers) {
   bus.onTyped('spawnActivated', queueCallout);
   bus.onTyped('spawnEnded', ({ id }) => {
     dropPending(id);
+    // An event is keyed by its spawn id, which never comes back once the spawn ends. Sites are keyed
+    // by their site id (never a spawn id), so a site called out once stays called out.
+    calledOut.delete(id);
     if (offer && offer.spawnId === id) setOffer(null);
   });
 
