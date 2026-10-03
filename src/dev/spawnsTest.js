@@ -19,27 +19,30 @@
 //      worst frame, draw calls), a staging step runs where the scenario names one, the photo camera
 //      frames it and the screenshot is taken (tools/run-harness.mjs takes it, with ?testShots=1), and
 //      the spawn is disposed;
-//   4. cycle 2 (the leak check): from the same start, created again, flown 2 s and disposed.
-//   After each dispose: GPU memory back (no geometry an engine created is still alive, the geometry
-//   count moved by no more than the world's own first draws, which the geometry tracker tells apart,
-//   and the texture count exactly back), every wind source the spawn added removed, the sky modifiers
-//   and real lights back to their counts, no leak reported by the SpawnManager. After cycle 2 the JS
-//   heap must be back within HEAP_TOLERANCE_MB of its baseline (cycle 1 builds the shared pipelines and
-//   caches a first create leaves behind on purpose, so cycle 2 is the one judged).
+//   4. the leak check: from the same start, in photo mode (the simulation and the camera held, so no
+//      terrain streams and nothing else moves the heap), LEAK_CYCLES more creates and disposes, each
+//      drawn for LEAK_CYCLE_FRAMES frames.
+//   After the show and after the leak check: GPU memory back (no geometry an engine created is still
+//   alive, the geometry count moved by no more than the world's own first draws, which the geometry
+//   tracker tells apart, and the texture count exactly back), every wind source the spawn added
+//   removed, the sky modifiers and real lights back to their counts, no leak reported by the
+//   SpawnManager. Across the leak check the JS heap (read after two forced collections) must stay
+//   within HEAP_TOLERANCE_MB of its baseline: a spawn that kept even a third of a megabyte per create
+//   fails it. The show itself is not judged on the heap: a first create builds the shared pipelines and
+//   caches it leaves behind on purpose, and the craft flies through streaming terrain.
 // Criteria: 30 / 30 presets spawned, GPU memory, wind sources, lights and sky modifiers back after
-// every dispose, the heap within tolerance after every cycle 2, 0 console errors and 0 warnings, every
+// every dispose, the heap within tolerance across every leak check, 0 console errors and 0 warnings, every
 // screenshot taken (with ?testShots=1), no harness problems. Frame times are reported, not judged.
 //
 // Output: the on-screen summary panel (one row per preset, JSON download) and
 // window.DRIFTWING.testReport (tools/run-harness.mjs --test spawns). The test runs in its own
 // IndexedDB database (deleted at the start, so every discovery is a first one) and changes no
 // player setting.
-import { createGeometryTracker, splitFresh } from './geometryTracker.js';
 import { installConsoleCapture } from './testConsole.js';
 import { installMockGamepads } from './mockGamepads.js';
 import { createTestPanel } from './testPanel.js';
-import { createFrameRecorder, gcAvailable, heapAvailable, readHeapMB, round } from './testStats.js';
-import { createBrowserHelpers } from './structureTestKit.js';
+import { createFrameRecorder, gcAvailable, heapAvailable, round } from './testStats.js';
+import { createDisposeCheck, createFraming, frames, holdConditions, wait } from './spawnCheckKit.js';
 import { SPAWN_SCENARIOS } from './spawnScenarios.js';
 import { PRESETS } from '../spawns/presets/index.js';
 
@@ -51,24 +54,25 @@ const TEST_CRAFT = 'bushplane';
 const DEFAULT_ALTITUDE = 150;
 const DEFAULT_SPEED = 55;
 const DEFAULT_RUN_SECONDS = 4;
-/** Cycle 2: seconds of live flight between the create and the dispose. */
-const LEAK_CYCLE_SECONDS = 2;
-/** JS heap tolerance after cycle 2 (MB above the cycle's own baseline). */
-const HEAP_TOLERANCE_MB = 1.5;
+/** The leak check: creates and disposes in photo mode, each drawn this many frames. */
+const LEAK_CYCLES = 3;
+const LEAK_CYCLE_FRAMES = 45;
+/** JS heap tolerance across the leak check (MB above its baseline, after all LEAK_CYCLES). */
+const HEAP_TOLERANCE_MB = 1;
 /** A preset's real site is used when one lies within this distance of the start (m). */
 const SITE_SEARCH_RADIUS = 60000;
 /** Surface spots are searched for out to this distance from the start (m), in rings this far apart. */
 const SPOT_SEARCH_RADIUS = 30000;
 const SPOT_RING_STEP = 500;
+/** A land spot is lowland: at most this high (m above sea level) with this little relief within its reach. */
+const LOWLAND_MAX_HEIGHT = 350;
+const LOWLAND_REACH = 500;
+const LOWLAND_RELIEF = 90;
 const FRAME_LIMIT_MS = 50;
-/** Frames waited after a dispose before the memory is read (pending GPU frees land). */
-const SETTLE_FRAMES = 8;
 /** How long the page waits for tools/run-harness.mjs to take a screenshot (s). */
 const SHOT_TIMEOUT_S = 90;
 /** Without the runner (a person watching), each framed preset is held this long (s). */
 const SHOT_HOLD_S = 1.5;
-/** Owner-name prefixes of pooled meshes with per-instance geometry (see presetChecks.js). */
-const SPAWN_OWNERS = Object.freeze(['structure-']);
 
 /** Deletes an IndexedDB database; resolves with null or the reason it could not. */
 function deleteDatabase(name) {
@@ -100,29 +104,9 @@ export async function prepareSpawnsTest({ params }) {
   };
 }
 
-/** Resolves after `count` animation frames. */
-function frames(count) {
-  return new Promise((resolve) => {
-    let left = count;
-    const tick = () => {
-      left--;
-      if (left <= 0) resolve();
-      else requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-}
-
-/** Resolves after `ms` of wall time, while the frames keep running. */
-function wait(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
   const { bus, state, world, settings } = ctx;
-  const helpers = createBrowserHelpers({ ctx }, 'spawns');
+  const framing = createFraming(ctx);
   const panel = createTestPanel({ title: 'Spawns test' });
   const system = ctx.systems.spawns;
   const manager = system.manager;
@@ -136,7 +120,8 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
   const harnessErrors = deleteError ? [deleteError] : [];
   const startedAt = new Date().toISOString();
   const spotCache = new Map();
-  let tracker = null;
+  /** The dispose check (spawnCheckKit.js), created when the run starts. */
+  let dispose = null;
   let finishedAt = null;
   let status = 'running';
   let phase = 'waiting for the game';
@@ -173,7 +158,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     const list = [
       { id: 'spawned', label: 'Presets force-spawned ahead of the craft', value: ratio(spawned, total), status: allOf(spawned) },
       { id: 'gpu', label: 'GPU memory back after every dispose (geometries, textures)', value: ratio(gpu), status: allOf(gpu) },
-      { id: 'heap', label: `JS heap back within ${HEAP_TOLERANCE_MB} MB after the leak cycle`, value: heapAvailable() ? ratio(heap) : 'unavailable', status: heapAvailable() ? allOf(heap) : 'muted' },
+      { id: 'heap', label: `JS heap within ${HEAP_TOLERANCE_MB} MB after ${LEAK_CYCLES} more creates and disposes`, value: heapAvailable() ? ratio(heap) : 'unavailable', status: heapAvailable() ? allOf(heap) : 'muted' },
       { id: 'wind', label: 'Wind sources removed after every dispose', value: ratio(wind), status: allOf(wind) },
       { id: 'other', label: 'Real lights, sky modifiers and leak counters back', value: ratio(other), status: allOf(other) },
       { id: 'console', label: 'Console errors / warnings', value: `${counts.errors} / ${counts.warnings}`, status: counts.errors === 0 && counts.warnings === 0 ? 'pass' : 'fail' },
@@ -207,12 +192,13 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
         userAgent: navigator.userAgent,
         seed: state.seed,
         heap: heapAvailable() ? (gcAvailable() ? 'performance.memory after a forced GC' : 'performance.memory (no forced GC: start Chrome with --js-flags=--expose-gc)') : 'unavailable',
-        geometryTracker: tracker !== null,
+        geometryTracker: Boolean(dispose && dispose.tracker),
       },
       config: {
         craft: TEST_CRAFT,
         heapToleranceMB: HEAP_TOLERANCE_MB,
-        leakCycleSeconds: LEAK_CYCLE_SECONDS,
+        leakCycles: LEAK_CYCLES,
+        leakCycleFrames: LEAK_CYCLE_FRAMES,
         siteSearchRadius: SITE_SEARCH_RADIUS,
         frameLimitMs: FRAME_LIMIT_MS,
         shots: shotsWanted,
@@ -230,74 +216,6 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     step = detail;
     panel.setProgress({ label, detail, fraction: scenarios.length > 0 ? rows.length / scenarios.length : 0 });
     publish();
-  }
-
-  // ---- Readings ----------------------------------------------------------------------------------
-  function gpuMemory() {
-    const memory = ctx.renderer.info.memory;
-    return { geometries: memory.geometries, textures: memory.textures, bytes: Number.isFinite(memory.total) ? memory.total : null };
-  }
-
-  function lightsInUse() {
-    const lights = manager.getStats().lights;
-    return lights ? lights.active : 0;
-  }
-
-  /** Everything a dispose must give back, read after the terrain has gone quiet and a forced GC. */
-  async function readBaseline() {
-    await helpers.terrainIdle();
-    await frames(2);
-    return {
-      heapMB: readHeapMB(),
-      memory: gpuMemory(),
-      windIds: new Set(ctx.wind.listSources().map((source) => source.id)),
-      windCount: ctx.wind.sourceCount,
-      sky: ctx.systems.sky.getModifierState().count,
-      lights: lightsInUse(),
-      leaks: { ...manager.getStats().leaks },
-    };
-  }
-
-  /** Compares the state after a dispose with its baseline (the tracker's fresh geometries split out). */
-  async function readAfter(baseline, presetIds) {
-    await frames(SETTLE_FRAMES);
-    await helpers.terrainIdle();
-    const memory = gpuMemory();
-    const fresh = tracker ? tracker.stop() : [];
-    const split = splitFresh(fresh, SPAWN_OWNERS);
-    const ownsStructure = presetIds.some((id) => (presetById.get(id)?.engines ?? []).some((entry) => entry.engine === 'structure'));
-    const leftBehind = split.leftBehind.filter((entry) => ownsStructure || !entry.owner.startsWith('structure-'));
-    const worldFresh = split.world + (split.leftBehind.length - leftBehind.length);
-    const windLeft = ctx.wind.listSources().filter((source) => !baseline.windIds.has(source.id)).map((source) => source.id);
-    const sky = ctx.systems.sky.getModifierState().count;
-    const lights = lightsInUse();
-    const leaks = manager.getStats().leaks;
-    const heapMB = readHeapMB();
-    const geometryDelta = memory.geometries - baseline.memory.geometries;
-    const textureDelta = memory.textures - baseline.memory.textures;
-    const heapDeltaMB = Number.isFinite(heapMB) && Number.isFinite(baseline.heapMB) ? round(heapMB - baseline.heapMB, 2) : null;
-    return {
-      before: baseline.memory,
-      after: memory,
-      geometryDelta,
-      textureDelta,
-      worldFirstDrawn: worldFresh,
-      leftBehind: leftBehind.map((entry) => `${entry.owner}/${entry.object} ${entry.type}`),
-      gpuOk: tracker !== null ? leftBehind.length === 0 && geometryDelta <= worldFresh && textureDelta === 0 : geometryDelta <= 0 && textureDelta === 0,
-      windSources: `${baseline.windCount} -> ${ctx.wind.sourceCount}`,
-      windLeft,
-      windOk: windLeft.length === 0 && ctx.wind.sourceCount <= baseline.windCount,
-      skyModifiers: `${baseline.sky} -> ${sky}`,
-      skyOk: sky === baseline.sky,
-      lights: `${baseline.lights} -> ${lights}`,
-      lightsOk: lights === baseline.lights,
-      leaks,
-      leaksOk: leaks.windSources === baseline.leaks.windSources && leaks.lights === baseline.leaks.lights,
-      heapBeforeMB: baseline.heapMB,
-      heapAfterMB: heapMB,
-      heapDeltaMB,
-      heapOk: heapDeltaMB === null ? !heapAvailable() : heapDeltaMB <= HEAP_TOLERANCE_MB,
-    };
   }
 
   // ---- Where each preset stands -----------------------------------------------------------------------
@@ -326,8 +244,23 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     return false;
   }
 
+  /** Lowland: open, gently rolling country (fields and meadows), where weather and wildlife read best. */
+  function isLowland(x, z) {
+    const height = world.groundHeight(x, z);
+    if (height < world.WATER_LEVEL + 15 || height > world.WATER_LEVEL + LOWLAND_MAX_HEIGHT) return false;
+    let low = height;
+    let high = height;
+    for (let index = 0; index < 8; index++) {
+      const angle = (index * Math.PI) / 4;
+      const sample = world.groundHeight(x + Math.sin(angle) * LOWLAND_REACH, z - Math.cos(angle) * LOWLAND_REACH);
+      low = Math.min(low, sample);
+      high = Math.max(high, sample);
+    }
+    return low > world.WATER_LEVEL + 5 && high - low < LOWLAND_RELIEF;
+  }
+
   const SURFACE_TESTS = Object.freeze({
-    land: (x, z) => isLand(x, z, 25) && ringAll(x, z, 300, (px, pz) => isLand(px, pz, 10)),
+    land: isLowland,
     water: (x, z) => isWater(x, z, 6) && ringAll(x, z, 700, (px, pz) => isWater(px, pz, 2)),
     coast: (x, z) => isWater(x, z, 4) && ringAll(x, z, 250, (px, pz) => isWater(px, pz, 1)) && ringAny(x, z, 1400, (px, pz) => isLand(px, pz, 5)),
   });
@@ -541,6 +474,20 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       const described = engineOf('celestial').describe(part);
       return `uncovered ${round(described.eclipse.uncovered, 3)}`;
     },
+    /** Waits (up to 40 s of flight) for the eagle to call as it joins the wing. */
+    async wingman(spawnId) {
+      let joined = false;
+      const off = bus.on('fauna:call', (payload) => {
+        if (payload && payload.id === spawnId && payload.reason === 'join') joined = true;
+      });
+      const started = performance.now();
+      try {
+        while (!joined && manager.getInstance(spawnId) && performance.now() - started < 40000) await frames(5);
+      } finally {
+        off();
+      }
+      return joined ? `joined the wing after ${round((performance.now() - started) / 1000, 1)} s more` : 'did not join within 40 s';
+    },
     /** Moves the comet's slow fade-in on by 30 s. */
     async cometFadeIn(spawnId) {
       for (const part of partsOf(spawnId)) if (part.engine === 'celestial' && Number.isFinite(part.data.startTime)) part.data.startTime -= 30;
@@ -609,6 +556,10 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       if (view.look === 'antisolar') {
         const sun = state.time.sunDirection;
         target = new THREE.Vector3(player.x - sun.x * 1000, player.y - sun.y * 1000, player.z - sun.z * 1000);
+      } else if (view.look === 'pair') {
+        // Between the craft and the spawn (a wingman off the wing): both in the frame.
+        const live = anchorOf(spawnId, view);
+        if (live) target = new THREE.Vector3((player.x + live.x) / 2, (player.y + live.y) / 2, (player.z + live.z) / 2);
       }
       ctx.systems.camera.setFreeCameraPose({ position, target, fov });
       await frames(30);
@@ -627,10 +578,8 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
         z: live.z + Math.sin(heading) * right - Math.cos(heading) * forward,
       };
     }
-    const position = helpers.viewpoint(target, view.distance ?? 900, view.height ?? 160, state.player.heading + (view.bearing ?? 200));
-    const settled = await helpers.frameView(position, target);
-    if (fov !== undefined) ctx.systems.camera.setFreeCameraPose({ position: new THREE.Vector3(position.x, position.y, position.z), target: new THREE.Vector3(target.x, target.y, target.z), fov });
-    await frames(20);
+    const position = framing.viewpoint(target, view.distance ?? 900, view.height ?? 160, state.player.heading + (view.bearing ?? 200));
+    const settled = await framing.frameView(position, target, { fov });
     return { mode, framed: true, terrainSettled: settled, target: { x: Math.round(target.x), y: Math.round(target.y), z: Math.round(target.z) } };
   }
 
@@ -662,12 +611,6 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
   }
 
   // ---- One preset ----------------------------------------------------------------------------------------------
-  function conditions(scenario) {
-    settings.set('timeFrozen', true);
-    ctx.systems.weather.forceState(scenario.weather ?? 'clear', 0.5);
-    ctx.systems.sky.setDayTime(ctx.util.dayTimeForSunElevation(scenario.sun, !scenario.morning), { transition: 0 });
-  }
-
   async function testPreset(scenario, index) {
     const preset = presetById.get(scenario.id);
     const errorsBefore = capture.counts.errors;
@@ -704,7 +647,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       return;
     }
     const family = presetFamily(preset);
-    conditions(scenario);
+    holdConditions(ctx, { sun: scenario.sun, morning: scenario.morning === true, weather: scenario.weather ?? 'clear' });
     phase = 'placing';
     progress(label, `${row.conditions.why}: finding its spot`);
     const anchor = resolveAnchor(scenario, preset);
@@ -715,14 +658,13 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       // ---- Cycle 1: the show ----
       phase = 'show';
       progress(label, 'baseline');
-      const baseline = await readBaseline();
-      if (tracker) tracker.start();
+      const baseline = await dispose.baseline();
       const spawnId = createSpawn(scenario, anchor);
       row.spawnId = spawnId;
       row.spawned = Boolean(spawnId) && manager.getInstance(spawnId) !== null;
       if (!row.spawned) {
         row.notes.push(`refused: ${manager.getStats().lastRefusal}`);
-        if (tracker) tracker.stop();
+        dispose.cancel();
         return;
       }
       row.parts = partsOf(spawnId).map((part) => part.engine);
@@ -743,30 +685,35 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       else row.notes.push('the spawn had ended on its own before the dispose');
       ctx.setPhotoMode(false);
       row.otherSpawnsEnded += endOtherSpawns();
-      row.cycles.push(await readAfter(baseline, family.map((entry) => entry.id)));
+      row.cycles.push(await dispose.compare(baseline, { presetIds: family.map((entry) => entry.id) }));
 
-      // ---- Cycle 2: the leak check, from the same start ----
+      // ---- The leak check: more creates and disposes from the same start, everything held ----
       phase = 'leak check';
-      progress(label, 'leak cycle: create, fly, dispose');
+      progress(label, `leak check: ${LEAK_CYCLES} creates and disposes, the simulation held`);
       ctx.systems.flight.resetTo({ x: pose.x, y: pose.y, z: pose.z, heading: pose.heading });
       ctx.systems.flight.setAutopilot({ enabled: true, heading: pose.heading, altitude: pose.y, speed: scenario.speed ?? DEFAULT_SPEED, followWaypoint: false, reason: 'spawns test' });
-      const baseline2 = await readBaseline();
-      if (tracker) tracker.start();
-      const secondId = createSpawn(scenario, anchor);
-      if (!secondId) {
-        row.notes.push(`leak cycle refused: ${manager.getStats().lastRefusal}`);
-        if (tracker) tracker.stop();
-        return;
+      await frames(20);
+      ctx.setPhotoMode(true);
+      const baseline2 = await dispose.baseline({ heap: true });
+      let refused = null;
+      for (let cycle = 0; cycle < LEAK_CYCLES && !refused; cycle++) {
+        const cycleId = createSpawn(scenario, anchor);
+        if (!cycleId) {
+          refused = manager.getStats().lastRefusal;
+          break;
+        }
+        await frames(LEAK_CYCLE_FRAMES);
+        if (manager.getInstance(cycleId)) manager.deactivate(cycleId, 'spawns test');
+        await frames(2);
       }
-      await wait(LEAK_CYCLE_SECONDS * 1000);
-      if (manager.getInstance(secondId)) manager.deactivate(secondId, 'spawns test');
       row.otherSpawnsEnded += endOtherSpawns();
-      row.cycles.push(await readAfter(baseline2, family.map((entry) => entry.id)));
+      row.cycles.push(await dispose.compare(baseline2, { presetIds: family.map((entry) => entry.id), heapToleranceMB: HEAP_TOLERANCE_MB }));
+      ctx.setPhotoMode(false);
+      if (refused) row.notes.push(`leak check refused: ${refused}`);
     } finally {
       removeFamily(family);
       row.console = { errors: capture.counts.errors - errorsBefore, warnings: capture.counts.warnings - warningsBefore };
-      row.passed = row.spawned && row.cycles.length === 2 && row.cycles.every((cycle) => cycle.gpuOk && cycle.windOk && cycle.skyOk && cycle.lightsOk && cycle.leaksOk)
-        && row.cycles[1].heapOk && row.console.errors === 0 && row.console.warnings === 0 && (!shotsWanted || Boolean(row.shot && row.shot.taken));
+      row.passed = row.spawned && row.cycles.length === 2 && row.cycles.every((cycle) => cycle.ok) && row.console.errors === 0 && row.console.warnings === 0 && (!shotsWanted || Boolean(row.shot && row.shot.taken));
       publish();
     }
   }
@@ -784,14 +731,13 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     heldPresets = system.debug.holdGamePresets();
     detachedFeed = manager.getSiteFeed();
     manager.setSiteFeed(null);
-    tracker = createGeometryTracker(ctx.renderer, ctx.scene);
-    if (tracker) tracker.attribute(manager.registry.names().map((name) => manager.registry.get(name)));
-    else harnessErrors.push('the geometry tracker is unavailable (renderer internals changed): GPU memory is judged by the plain counts');
+    dispose = createDisposeCheck(ctx, framing);
+    if (!dispose.tracker) harnessErrors.push('the geometry tracker is unavailable (renderer internals changed): GPU memory is judged by the plain counts');
     await frames(10);
   }
 
   function restore() {
-    if (tracker) tracker.restore();
+    if (dispose) dispose.restore();
     if (detachedFeed) manager.setSiteFeed(detachedFeed);
     detachedFeed = null;
     if (heldPresets.length > 0) system.debug.releaseGamePresets();
@@ -811,7 +757,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
         harnessErrors.push(message);
         console.error(`[DRIFTWING test] spawns test: ${message}`, error);
         for (const spawn of manager.getActive()) manager.deactivate(spawn.id, 'spawns test');
-        if (tracker) tracker.stop();
+        if (dispose) dispose.cancel();
       }
     }
   }
@@ -870,7 +816,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     if (harnessErrors.length > 0) sections.push({ title: 'Harness problems', notes: harnessErrors.slice() });
     sections.push({ title: 'About', notes: [
       'The game\'s own presets are held out of the SpawnManager and its site feed is detached for the whole test; each preset (and a set piece\'s children) goes back in for its own show only. Site presets stand on their nearest real placed site, with its terrain stamps; events stand on a spot that suits them ahead of the craft.',
-      `Cycle 1 shows the preset (live flight toward it with the frame times recorded, staging, the photo camera, the screenshot) and disposes it; cycle 2 creates it again from the same start, flies ${LEAK_CYCLE_SECONDS} s and disposes it. After each: no geometry an engine made still alive, the geometry count up by no more than the world's own first draws (the geometry tracker), textures exactly back, every wind source it added removed, sky modifiers, real lights and leak counters back. After cycle 2 the JS heap (forced GC) must be within ${HEAP_TOLERANCE_MB} MB of the cycle's baseline.`,
+      `Cycle 1 shows the preset (live flight toward it with the frame times recorded, staging, the photo camera, the screenshot) and disposes it; the leak check then creates and disposes it ${LEAK_CYCLES} more times from the same start in photo mode (the simulation and the camera held, ${LEAK_CYCLE_FRAMES} frames each). After each: no geometry an engine made still alive, the geometry count up by no more than the world's own first draws (the geometry tracker), textures exactly back, every wind source it added removed, sky modifiers, real lights and leak counters back. Across the leak check the JS heap (two forced collections) must stay within ${HEAP_TOLERANCE_MB} MB of its baseline.`,
       'Frame times are taken over the live window with the chase camera on the craft flying toward the spawn; they are reported, not judged (the owner\'s rule on the shared machine).',
     ] });
     panel.showSummary({

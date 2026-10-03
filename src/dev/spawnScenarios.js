@@ -12,6 +12,7 @@
 //                 'site'    the preset's nearest REAL placed site (with its terrain stamps), when one
 //                           lies within reach; otherwise land (or water for a water site) ahead
 //                 'land' | 'water' | 'coast'   a spot of that surface near the start, ahead of the craft
+//                           (land is open lowland: fields and meadows, not the mountains)
 //                 'thermal' 200 m from the nearest working thermal (the hawks circle in it)
 //                 'sky'     a sky-anchored event: the spawn stands at the craft (distance 0)
 //   distance    metres from the craft to the anchor when the spawn is created
@@ -28,7 +29,8 @@
 //               piece child's anchor instead), 'sky' (from the craft toward the spawn's sky anchor,
 //               `lookUp` m higher), 'sun' (from the craft at the sun), 'player' (the free camera
 //               `distance` m from the craft at `bearing`, `height` up, looking at the craft, or with
-//               look 'antisolar' down-sun at the craft's shadow); fov in degrees
+//               look 'antisolar' down-sun at the craft's shadow, or look 'pair' between the craft and
+//               the spawn, a wingman off the wing); fov in degrees
 
 /** Activation overrides the batch 1 step file used to show a storm at its mature stage at once. */
 const MATURE_VORTEX = Object.freeze({
@@ -47,7 +49,7 @@ export const SPAWN_SCENARIOS = Object.freeze([
     id: 'supercell', why: 'a building storm in the afternoon, the anvil seen from far off', sun: 18, weather: 'building',
     anchor: 'land', distance: 9000, runSeconds: 5,
     params: { weatherVolume: { formSeconds: 0, drift: { speed: 0 } }, windModifier: { drift: 0 } },
-    view: { distance: 16000, height: 300, bearing: 200, lift: 4500, fov: 70 },
+    view: { distance: 20000, height: 1500, bearing: 200, lift: 5000, fov: 70 },
   },
   {
     id: 'waterspout', why: 'building weather over open water', sun: 22, weather: 'building',
@@ -73,14 +75,14 @@ export const SPAWN_SCENARIOS = Object.freeze([
   },
   // ---- Volcanic and geo (7-10) ----
   {
-    id: 'volcano', why: 'twilight, so the lava glow lights the ash plume', sun: -6, weather: 'clear',
+    id: 'volcano', why: 'twilight, so the lava glow lights the ash plume', sun: -3, weather: 'clear',
     anchor: 'site', distance: 5000, altitude: 500, runSeconds: 8,
-    view: { distance: 4500, height: 600, bearing: 200, lift: 800 },
+    view: { distance: 3200, height: 900, bearing: 200, lift: 350 },
   },
   {
     id: 'geyserField', why: 'a clear late morning, steam bright against the ground', sun: 35, morning: true, weather: 'clear',
     anchor: 'site', distance: 1500, runSeconds: 10,
-    view: { distance: 900, height: 160, bearing: 200, lift: 60 },
+    view: { distance: 650, height: 120, bearing: 200, lift: 50 },
   },
   {
     id: 'slotCanyon', why: 'high sun, so light reaches the canyon floor', sun: 55, weather: 'clear',
@@ -90,7 +92,7 @@ export const SPAWN_SCENARIOS = Object.freeze([
   {
     id: 'megaWaterfall', why: 'afternoon sun on the spray, the daytime rainbow in the mist', sun: 30, weather: 'clear',
     anchor: 'site', distance: 1500, altitude: 250, runSeconds: 5,
-    view: { distance: 1400, height: 200, bearing: 200, lift: 120 },
+    view: { distance: 1000, height: 180, bearing: 200, lift: 100 },
   },
   // ---- Ocean (11-13) ----
   {
@@ -117,12 +119,12 @@ export const SPAWN_SCENARIOS = Object.freeze([
   {
     id: 'geeseFormation', why: 'a clear afternoon', sun: 30, weather: 'clear',
     anchor: 'land', distance: 400, runSeconds: 5,
-    view: { distance: 120, height: 10, bearing: 200, lift: 0 },
+    view: { distance: 150, height: 15, bearing: 200, lift: 0 },
   },
   {
     id: 'thermalHawks', why: 'midday, when the thermals work', sun: 50, weather: 'clear',
     anchor: 'thermal', distance: 1500, runSeconds: 6,
-    view: { distance: 230, height: 40, bearing: 200, lift: 0, fov: 45 },
+    view: { distance: 70, height: 15, bearing: 200, lift: 0, fov: 75 },
   },
   {
     id: 'fireflies', why: 'night over a meadow', sun: -25, weather: 'clear',
@@ -131,8 +133,8 @@ export const SPAWN_SCENARIOS = Object.freeze([
   },
   {
     id: 'eagleWingman', why: 'a clear afternoon, flying slowly enough for the eagle to join', sun: 30, weather: 'clear',
-    anchor: 'land', distance: 1200, speed: 30, runSeconds: 18,
-    view: { mode: 'player', distance: 45, height: 8, bearing: 235 },
+    anchor: 'land', distance: 1200, speed: 30, runSeconds: 6, stage: 'wingman',
+    view: { mode: 'player', look: 'pair', distance: 28, height: 7, bearing: 192 },
   },
   // ---- Structures (19-21) ----
   {
