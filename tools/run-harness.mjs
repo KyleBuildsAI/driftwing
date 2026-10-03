@@ -7,7 +7,7 @@
 // browser console and screenshots of the summary panel, and stops the browser and the server.
 //
 // Usage:
-//   node tools/run-harness.mjs --test 1|hotas|terrain [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
+//   node tools/run-harness.mjs --test 1|hotas|terrain|determinism [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
 //     [--crafts glider,jet] [--views first,third] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
 //     [--presets real]
@@ -20,6 +20,10 @@
 //
 // The flight test flies every craft in first person (the cockpit or FPV view) and in third person
 // (chase) by default; --views first or --views third flies one of them.
+//
+// The determinism test (/v2/?test=determinism) flies the same scripted path on the same seed (the
+// first of --seeds, by default DETERMINISM-1) in two page loads and compares the site-list hash and the
+// director's activation log; the runner follows it through its reload.
 //
 // --alloc-profile N (diagnostic): once the first flight-test run is flying, samples every JS
 // allocation for N seconds with the sampling heap profiler (collected objects included, so it is
@@ -75,6 +79,9 @@ const TERRAIN_SEED = 'P2-TERRAIN';
  */
 const REAL_TERRAIN_SEED = 'TERRAIN-REAL-8';
 const TERRAIN_DAY_TIME = '0.42';
+/** The determinism test's default world. */
+const DETERMINISM_SEED = 'DETERMINISM-1';
+const TESTS = Object.freeze(['1', 'hotas', 'terrain', 'determinism']);
 
 function parseArgs(argv) {
   const options = {
@@ -118,7 +125,7 @@ function parseArgs(argv) {
       default: throw new Error(`Unknown flag ${flag}`);
     }
   }
-  if (!['1', 'hotas', 'terrain'].includes(options.test)) throw new Error('--test must be 1, hotas or terrain');
+  if (!TESTS.includes(options.test)) throw new Error(`--test must be one of ${TESTS.join(', ')}`);
   if (!EXPECTED_BACKEND[options.backend]) throw new Error('--backend must be webgpu or webgl');
   if (options.seconds !== null && !(options.seconds >= 5)) throw new Error('--seconds must be at least 5');
   options.out ??= join(tmpdir(), `driftwing-harness-${options.test}-${options.backend}`);
@@ -294,6 +301,7 @@ function harnessUrl(port, options) {
     url.searchParams.set('time', TERRAIN_DAY_TIME);
     if (options.presets === 'real') url.searchParams.set('presets', 'real');
   }
+  if (options.test === 'determinism') url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : DETERMINISM_SEED);
   if (options.test === '1') {
     if (options.seeds) url.searchParams.set('testSeeds', options.seeds);
     if (options.seconds) url.searchParams.set('testSeconds', String(options.seconds));
@@ -307,7 +315,7 @@ function harnessUrl(port, options) {
 function timeLimitMs(options) {
   if (Number.isFinite(options.timeoutMinutes) && options.timeoutMinutes > 0) return options.timeoutMinutes * 60000;
   if (options.test === 'hotas') return 8 * 60000;
-  if (options.test === 'terrain') return 40 * 60000;
+  if (options.test === 'terrain' || options.test === 'determinism') return 40 * 60000;
   const seeds = options.seeds ? options.seeds.split(',').filter(Boolean).length : 3;
   const crafts = options.crafts ? options.crafts.split(',').filter(Boolean).length : 6;
   const views = options.views ? options.views.split(',').filter(Boolean).length : 2;
@@ -535,6 +543,35 @@ async function captureStampTour(page, options, started) {
   return shots;
 }
 
+function determinismTable(report) {
+  const lines = ['  run  site-list hash    fresh world       path end          log hash  entries  activations  spawn events     path digest  km'];
+  for (const run of report.runs) {
+    lines.push([
+      `  ${String(run.run).padStart(3)}`,
+      run.siteListHash.padEnd(17),
+      run.freshSiteListHash.padEnd(17),
+      run.pathEndSiteListHash.padEnd(17),
+      run.logHash.padEnd(9),
+      String(run.logLength).padStart(7),
+      String(run.directorActivations).padStart(12),
+      `${run.spawnEventsHash} (${run.spawnEventCount})`.padStart(16),
+      run.pathHash.padStart(13),
+      String(run.distanceKm).padStart(5),
+    ].join(' '));
+  }
+  const longest = Math.max(0, ...report.runs.map((run) => run.log.length));
+  for (let index = 0; index < longest; index++) {
+    const cell = (entry) => (entry ? `${Math.round((entry.time - report.config.pathStartSeconds) * 10) / 10} s ${entry.presetId} ${entry.candidateId} (${entry.reason})` : '-');
+    const first = report.runs[0]?.log[index];
+    const second = report.runs[1]?.log[index];
+    const same = JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
+    lines.push(`  log ${String(index + 1).padStart(2)}: ${cell(first)} | ${cell(second)}${same ? '' : '  DIFFERENT'}`);
+  }
+  for (const criterion of report.criteria) lines.push(`  ${criterion.status === 'pass' ? 'PASS' : criterion.status === 'fail' ? 'FAIL' : '----'}  ${criterion.label}: ${criterion.value}`);
+  for (const problem of report.harnessErrors) lines.push(`  harness problem: ${problem}`);
+  return lines.join('\n');
+}
+
 function hotasTable(report) {
   const lines = [];
   for (const check of report.checks) lines.push(`  ${check.passed ? 'PASS' : 'FAIL'}  [${check.group}] ${check.name}: ${check.actual}${check.passed ? '' : ` (expected ${check.expected})`}`);
@@ -749,7 +786,7 @@ async function main() {
   writeFileSync(join(options.out, 'gpu-load.json'), JSON.stringify(gpuLoad.samples, null, 2));
   writeFileSync(join(options.out, 'process-load.json'), JSON.stringify(processLoad.samples, null, 2));
 
-  const tables = { 1: () => `${flightTable(report)}\n${craftViewTable(report)}\n${slowFrameEvidence(report)}`, hotas: () => hotasTable(report), terrain: () => terrainTable(report) };
+  const tables = { 1: () => `${flightTable(report)}\n${craftViewTable(report)}\n${slowFrameEvidence(report)}`, hotas: () => hotasTable(report), terrain: () => terrainTable(report), determinism: () => determinismTable(report) };
   if (report) process.stdout.write(`${tables[options.test]()}\n`);
   process.stdout.write(`run-harness: ${runner.passed ? 'PASS' : 'FAIL'} (harness ${report ? report.result : 'no report'}, backend ${runner.backend ? runner.backend.join(', ') : 'unknown'}, browser console ${runner.errors.length} errors / ${runner.warnings.length} warnings, ${runner.durationSeconds} s)\n`);
   for (const problem of runner.problems) process.stdout.write(`run-harness: problem: ${problem}\n`);
