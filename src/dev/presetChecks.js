@@ -120,6 +120,18 @@ export function installPresetChecks(game) {
     const info = ctx.renderer.info.memory;
     return { geometries: info.geometries, textures: info.textures };
   }
+  /**
+   * Waits (up to 30 s) for two full sweeps of the site feed, so every site within range of where the
+   * craft now is has been built before a memory baseline (a site the craft left behind earlier is
+   * rebuilt as it comes back, and that is the world's, not the spawn under test's).
+   */
+  async function siteSweeps() {
+    const feed = () => manager.getStats().siteFeed;
+    const start = feed() ? feed().sweeps : 0;
+    const started = performance.now();
+    while (feed() && feed().sweeps < start + 2 && performance.now() - started < 30000) await frames(5);
+  }
+
   /** The live anchor of a spawn: its first part's (the SpawnManager's LOD, lure and discovery read it). */
   function anchorOfSpawn(spawnId) {
     const parts = spawnId ? manager.getParts(spawnId) : [];
@@ -186,6 +198,7 @@ export function installPresetChecks(game) {
       ctx.systems.flight.resetTo({ x: state.spawn.x, y: state.spawn.y + altitude, z: state.spawn.z, heading: state.spawn.heading });
       await frames(3);
       const idle = await terrainIdle();
+      await siteSweeps();
       const record = {
         presetId,
         id: null,
@@ -410,7 +423,20 @@ export function installPresetChecks(game) {
       const after = memory();
       spawned.delete(presetId);
       const fresh = tracker ? tracker.stop() : [];
-      const { world: worldFresh, leftBehind } = splitFresh(fresh, SPAWN_OWNERS);
+      const split = splitFresh(fresh, SPAWN_OWNERS);
+      // Geometries a LIVE structure spawn still shows are not this disposed spawn's (a site the site feed
+      // built meanwhile, as the camera moved); and a structure geometry can only be this preset's when it
+      // has a structure part.
+      const held = new Set();
+      for (const spawn of manager.getActive()) {
+        for (const part of manager.getParts(spawn.id)) {
+          if (part.engine !== 'structure' || !part.data.meshes) continue;
+          for (const mesh of Object.values(part.data.meshes)) if (mesh && mesh.geometry) held.add(mesh.geometry.uuid);
+        }
+      }
+      const ownsStructure = (manager.getPreset(presetId)?.engines ?? []).some((entry) => entry.engine === 'structure');
+      const leftBehind = split.leftBehind.filter((entry) => !held.has(entry.uuid) && (ownsStructure || !entry.owner.startsWith('structure-')));
+      const worldFresh = split.world + (split.leftBehind.length - leftBehind.length);
       const leaks = manager.getStats().leaks;
       const windAfter = ctx.wind.sourceCount;
       const skyAfter = ctx.systems.sky.getModifierState().count;
