@@ -58,6 +58,7 @@ export const FAUNA_DEFAULTS = Object.freeze({
   wander: 0.06,
   leash: 600,
   fadeIn: 1.5,
+  fadeOut: 0,
   voice: null,
   voiceIntensity: 1,
   flocking: Object.freeze({ separation: 1.4, separationRadius: 3, alignment: 1.1, cohesion: 0.12, neighborRadius: 12, maxNeighbors: 7 }),
@@ -172,6 +173,7 @@ function resolveParams(params) {
   const count = Array.isArray(resolved.count) ? resolved.count : [resolved.count, resolved.count];
   if (!Number.isFinite(count[0]) || !Number.isFinite(count[1]) || count[0] < 1) throw new Error(`fauna: params.count must be a positive number or [min, max], got ${JSON.stringify(params.count)}`);
   resolved.countRange = count;
+  if (!Number.isFinite(resolved.fadeOut) || resolved.fadeOut < 0 || resolved.fadeOut > 600) throw new Error(`fauna: params.fadeOut must be within 0..600 s, got ${JSON.stringify(params.fadeOut)}`);
   if (resolved.drift.slipstream === true) resolved.drift.slipstream = { ...SLIPSTREAM_DEFAULTS };
   else if (isPlainObject(resolved.drift.slipstream)) resolved.drift.slipstream = { ...SLIPSTREAM_DEFAULTS, ...resolved.drift.slipstream };
   return resolved;
@@ -235,6 +237,18 @@ function createRangeAllocator(capacity) {
     },
     capacity,
   };
+}
+
+/**
+ * fadeOut: an event's agents shrink away over its last fadeOut seconds (the reverse of fadeIn, with
+ * the voice and a drift slipstream following G.FADE), and the group ends at its duration instead of
+ * vanishing when the SpawnManager expires it.
+ */
+function fadeOutBeforeEnd(instance, data) {
+  const g = data.g;
+  const left = data.duration - g[G.AGE];
+  if (left < data.params.fadeOut) g[G.FADE] = Math.min(g[G.FADE], Math.max(0, left / data.params.fadeOut));
+  if (left <= 0) instance.ended = true;
 }
 
 /** Creates the FaunaEngine (see the file header). */
@@ -2345,6 +2359,7 @@ export function createFaunaEngine() {
       g[G.AGE] += dt;
       g[G.TIME] += dt;
       g[G.FADE] = params.fadeIn > 0 ? Math.min(Math.max(g[G.AGE] / params.fadeIn, 0), 1) : 1;
+      if (params.fadeOut > 0 && data.duration !== null) fadeOutBeforeEnd(instance, data);
       g[G.SCATTER_COOLDOWN] -= dt;
       const mover = GOAL_MOVERS[params.behavior];
       if (dt > 0 && mover) mover(data, dt);
