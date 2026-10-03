@@ -278,6 +278,20 @@ function testSources() {
     lab.modifier.dispose(instance);
   }
   check('sources', 'every wind modifier source is gone after dispose', lab.wind.sourceCount === 0, `${lab.wind.sourceCount} left`);
+  {
+    // A source that travels 20 km east across about 80 hash cells keeps only the cells its box covers
+    // filed, and the hash is empty once it is removed.
+    const center = new THREE.Vector3(0, 600, 0);
+    lab.wind.addSource({ id: 'lab:mover', bounds: { center, radius: 100 }, sample: () => null });
+    let mostCells = 0;
+    for (let step = 0; step <= 400; step++) {
+      center.x = step * 50;
+      lab.wind.setSourceBounds('lab:mover', { center, radius: 100 });
+      mostCells = Math.max(mostCells, lab.wind.sourceCellCount);
+    }
+    lab.wind.removeSource('lab:mover');
+    check('sources', 'a moving source leaves no empty hash cells behind, and none stay after it is removed', mostCells <= 4 && lab.wind.sourceCellCount === 0, `at most ${mostCells} cells filed while it moved 20 km, ${lab.wind.sourceCellCount} after removal`);
+  }
 }
 
 // ============================================================================================
