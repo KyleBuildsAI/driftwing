@@ -268,7 +268,14 @@ export function createWindField({ world, uniforms, state, bus }) {
   // ---- Sources (Phase 2 writer API) ----------------------------------------------------------
   function unindexSource(entry) {
     globalSources.delete(entry);
-    for (const key of entry.cells) sourceCells.get(key)?.delete(entry);
+    // An emptied cell leaves the hash: moving sources would otherwise leave one dead bucket behind
+    // for every cell they ever crossed.
+    for (const key of entry.cells) {
+      const bucket = sourceCells.get(key);
+      if (!bucket) continue;
+      bucket.delete(entry);
+      if (bucket.size === 0) sourceCells.delete(key);
+    }
     entry.cells.length = 0;
     entry.footprint[4] = -1;
   }
@@ -488,6 +495,8 @@ export function createWindField({ world, uniforms, state, bus }) {
     },
 
     get sourceCount() { return sources.size; },
+    /** The spatial hash cells that hold at least one source (tests: zero once every source is gone). */
+    get sourceCellCount() { return sourceCells.size; },
     listSources() {
       return [...sources.values()].map(describeSource);
     },
