@@ -46,7 +46,7 @@ export default Object.freeze({
         size: Object.freeze([4.2, 3.4]),
         sizeJitter: 0.15,
         colors: Object.freeze([0xffb45a, 0xff9a40, 0xff7a30]),
-        emissive: 1.7,
+        emissive: 1.4,
         fadeIn: 0.02,
         fadeOut: 4,
         nightBoost: 0.6,
@@ -62,7 +62,7 @@ export default Object.freeze({
       params: Object.freeze({
         glows: Object.freeze([
           Object.freeze({ layout: 'scatter', count: 48, radius: 150, onGround: true, height: Object.freeze([1, 2]), size: Object.freeze([4, 7]), colors: Object.freeze([0xffb45a, 0xffc070]), intensity: 2, flicker: 0.2 }),
-          Object.freeze({ layout: 'scatter', count: 14, radius: 90, onGround: true, height: Object.freeze([0.5, 1.5]), size: Object.freeze([10, 16]), colors: Object.freeze([0xff9a40]), intensity: 1.4, flicker: 0.35 }),
+          Object.freeze({ layout: 'scatter', count: 14, radius: 90, onGround: true, height: Object.freeze([0.5, 1.5]), size: Object.freeze([5, 9]), colors: Object.freeze([0xff8a30]), intensity: 0.9, flicker: 0.35 }),
         ]),
         light: Object.freeze({ color: 0xffa050, intensity: 6e4, range: 500, offset: Object.freeze([0, 15, 0]), flicker: 0.15, night: 1 }),
         visibility: Object.freeze({ day: 0.2, night: 1 }),
