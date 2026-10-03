@@ -671,6 +671,7 @@ export function createStructureEngine() {
         course.startGate = member;
         course.startTime = ctx.time.elapsed;
         course.crashed = false;
+        ctx.bus.emit('notify', { text: `${data.name}: run started`, kind: 'info' });
         continue;
       }
       const time = ctx.time.elapsed - course.startTime;
@@ -700,6 +701,41 @@ export function createStructureEngine() {
     previous[1] = player.y;
     previous[2] = player.z;
     data.hasPrevious = 1;
+  }
+
+  /**
+   * A corridor course (course.corridor: x, z, top per path point, site frame) spoils its clean run
+   * once the player climbs above the top of the path point nearest it: the run left the canyon.
+   */
+  function checkCorridors(instance) {
+    const data = instance.data;
+    const courses = data.courses;
+    for (let index = 0; index < courses.length; index++) {
+      const course = courses[index];
+      const points = course.corridor;
+      if (!points || course.startGate < 0 || course.crashed) continue;
+      const player = ctx.state.player.position;
+      const x = player.x - instance.anchor.x;
+      const z = player.z - instance.anchor.z;
+      let nearest = 0;
+      let nearestSq = Infinity;
+      for (let point = 0; point < points.length; point += 3) {
+        const dx = points[point] - x;
+        const dz = points[point + 1] - z;
+        const distanceSq = dx * dx + dz * dz;
+        if (distanceSq < nearestSq) {
+          nearestSq = distanceSq;
+          nearest = point;
+        }
+      }
+      if (player.y - instance.anchor.y > points[nearest + 2]) spoilCourse(data, course);
+    }
+  }
+
+  /** Event work (once per run): the corridor run is no longer clean. */
+  function spoilCourse(data, course) {
+    course.crashed = true;
+    if (course.clean) ctx.bus.emit('notify', { text: `${data.name}: left the canyon, the run is not clean`, kind: 'info' });
   }
 
   function updateSway(data) {
@@ -1042,6 +1078,7 @@ export function createStructureEngine() {
       if (data.sockCount > 0 && data.animateSocks) updateSocks(data);
       if (data.meshes.body !== null || data.meshes.detail !== null) updateSway(data);
       checkGates(instance);
+      if (data.courses.length > 0) checkCorridors(instance);
       updateAudio(data, dt);
     },
 
