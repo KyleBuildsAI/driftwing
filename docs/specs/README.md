@@ -8,6 +8,7 @@ These are the owner's specifications for DRIFTWING v2, kept verbatim so that any
 | [structure-correction.md](structure-correction.md) | The structure correction: V1 frozen, launcher shell, no CLASSIC in V2 (tag `v2-structure`) |
 | [phase2.md](phase2.md) | Phase 2: event director, spawn engines, the first 30 spawns |
 | [phase2-contract.md](phase2-contract.md) | The lead's system contracts for Phase 2 (preset schema, placement and stamps, engines, director) |
+| [phase2-engine-api.md](phase2-engine-api.md) | The lead's engine API notes after the wave 1 integration (registration, the engine ctx, budgets), written for the engine wave |
 | [phase3.md](phase3.md) | Phase 3: 8 new craft, 70 more spawns |
 | [phase4.md](phase4.md) | Phase 4: music, flight recorder and clips, head tracking, VR, multiplayer |
 

@@ -278,8 +278,8 @@ everything the local one can.
 
 ## Proactive callouts
 
-With the **Tour-guide callouts** setting on (the default; Settings, Copilot; "callouts off" and "callouts
-on" by voice), WREN calls out spawns as they appear: a live event starting (`spawnActivated`, kind
+With the **Tour-guide callouts** setting on (the default; Settings, General, Copilot; "callouts off"
+and "callouts on" by voice), WREN calls out spawns as they appear: a live event starting (`spawnActivated`, kind
 `event`) or a site not yet in the journal coming into range (`spawnActivated`, kind `site`). It
 speaks one of the preset's callout lines with its tokens filled, `{distance}` ("9.0 km"),
 `{direction}` ("north-west"), `{name}` and `{eta}` ("about 4 minutes away"), and ends with "Want a
@@ -398,7 +398,7 @@ Invalid replies (each makes the game answer locally):
 { "speech": "ok", "action": { "type": "setAssists", "level": 0.5, "change": "up" } }
 { "speech": "ok", "action": { "type": "setCraft", "craft": "blimp" } }
 { "speech": "ok", "action": { "type": "engine", "enabled": "off" } }
-{ "speech": "ok", "action": { "type": "goTo", "name": "volcano", "id": "eruptingVolcano:3:1" } }
+{ "speech": "ok", "action": { "type": "goTo", "name": "volcano", "id": "volcano:3:1" } }
 { "speech": "ok", "action": { "type": "findThermal", "autopilot": "yes" } }
 { "speech": 42 }
 { "speech": "", "action": null }
@@ -421,7 +421,7 @@ do". The keys shown are the defaults, and WREN reads the live bindings:
 | engine off / on | Z |
 | relaunch | Backspace |
 | calibrate controls | `.` (controls panel) |
-| push-to-talk | hold `` ` `` or the HOTAS trigger (the `copilotPTT` action); M or the mic button toggles the mic |
+| push-to-talk | hold `` ` `` or the HOTAS trigger (the `copilotPTT` action); Shift+M or the mic button toggles the mic (M is the world map) |
 
 The command bar also shows an "Aircraft" row of quick chips for these commands.
 
@@ -436,4 +436,4 @@ its phrases:
 | chase the storm ("storm chasing", "any storms around", "chase the tornado") | the **Chase the storm** chip |
 | next discovery ("find something new", "something we haven't seen") | the **Next discovery** chip |
 | yes / no to a callout | the **Yes, heading** and **No thanks** chips, shown while the offer is open |
-| callouts on / off | the **Tour-guide callouts** switch in Settings (`,`), Copilot |
+| callouts on / off | the **Tour-guide callouts** switch in Settings (`,`), General, Copilot |
