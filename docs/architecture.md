@@ -261,7 +261,7 @@ system, and then starts the frame loop.
 | `presets/index.js` | `PRESETS` (spec order) and `PRESET_BY_ID`; one pure-data file per preset |
 | `engines/emitterEngine.js`, `engines/particleSystem.js` | the `emitter` engine: GPU particle pools (TSL compute on WebGPU, closed-form motion in the vertex shader on WebGL2), wind grids, couplings; params in `docs/engines/emitter.md` |
 | `engines/lightEffectEngine.js`, `engines/glowPoints.js`, `engines/ribbons.js` | the `lightEffect` engine: lightning, glows, swarms, beams, the two-light budget; params in `docs/engines/lightEffect.md` |
-| `engines/engineKit.js` | helpers the engines share: param readers with clear errors, heading frames, ground grids, pooled real lights |
+| `engines/engineKit.js` | helpers the engines share: param readers with clear errors, heading frames, ground grids, pooled real lights, fixed-capacity update range lists, batched seeded random numbers |
 
 ### `src/env`
 
