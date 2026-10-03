@@ -867,7 +867,7 @@ export function createWeatherVolumeEngine() {
         data.windSource = createWindSource(instance);
         instance.windSourceIds.push(data.windSource.id);
       }
-      if (ownsPresetAudio(preset, 'weatherVolume', params.ownsAudio)) {
+      if (ownsPresetAudio(preset, 'weatherVolume', params.ownsAudio) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
         data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: data.growth });
         data.voice.setPosition(anchor);
       }
