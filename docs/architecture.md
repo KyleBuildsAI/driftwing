@@ -1351,6 +1351,12 @@ flight time. It is `ctx.systems.spawns.director`.
   row.
 - **Ahead.** Scheduled activations within 45 degrees of the heading, inside the preset's
   `filters.minDistance` / `maxDistance` band (default 3-8 km); never behind.
+- **Near a landmark.** `filters.near: { landmarks: [types], radius }` (types from `arch`,
+  `monoliths`, `lighthouse`, `balloons`; radius up to 20 km) moves each candidate onto the nearest
+  Phase 1 landmark of those types within `radius` of its seeded point (through
+  `world.landmarkSitesNear`, cached per candidate), before the distance and heading rules see it; a
+  candidate with none in reach is rejected as `near`. The sky lantern festival uses it to rise at a
+  lighthouse or a balloon fair.
 - **Budgets.** In the game the director reads the SpawnManager's budget view (`manager.budgets`):
   the heavy limit (2), every engine's caps (from `engine.budget`, else `DIRECTOR_BUDGETS.engines`)
   and the real-light cap (4). The lab runs on `DIRECTOR_BUDGETS` itself (8 real lights). Particles
