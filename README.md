@@ -294,6 +294,10 @@ The launcher reads `v` and passes every other parameter, and any `#hash`, on to 
 | `npm run test:flight`, `test:flight:webgl` | the flight-test harness (every craft, first and third person, 3 seeds) on WebGPU or WebGL2 |
 | `npm run test:hotas`, `test:hotas:webgl` | the HOTAS pipeline harness on WebGPU or WebGL2 |
 | `npm run test:terrain`, `test:terrain:webgl` | the terrain stamps in the running game: no cracks at any LOD, worker meshes equal to main-thread builds, collision within 0.5 m |
+| `npm run test:terrain:real`, `test:terrain:real:webgl` | the same terrain test on the game's own stamped sites (seed `TERRAIN-REAL-8`, all six stamp types) |
+| `npm run test:spawns`, `test:spawns:webgl` | the spawns test: each of the 30 presets force-spawned ahead of the craft, photographed, and disposed back to its GPU memory, wind source and heap baselines |
+| `npm run test:determinism`, `test:determinism:webgl` | the determinism test: the same seed and path in two page loads, with identical site lists and director logs |
+| `npm run test:soak`, `test:soak:webgl` | the 10-minute soak: 5 seeds, first and third person, the event director live |
 | `npm run lab:terrain` | site placement and terrain stamps headless, including the height-sampling cost against Phase 1 |
 
 three.js is pinned to exactly `0.184.0` and imported only as `three/webgpu`, `three/tsl` and
@@ -358,7 +362,16 @@ start-driftwing.bat      one-click start for Windows
     default with mock devices.
   - `?test=terrain` checks the terrain stamps for cracks at every LOD and collision against the
     rendered mesh (`--presets real` runs it on the game's own stamped sites).
-  - `node tools/run-harness.mjs --test 1|hotas|terrain [--backend webgl] [--views first,third]`
+  - `?test=spawns` force-spawns each of the 30 presets ahead of the craft at a time of day and in
+    weather that suit it, records its frame times, frames a screenshot, and checks that disposing
+    it gives back its GPU memory, wind sources, lights and sky modifiers, with the JS heap within
+    1 MB over three held create and dispose cycles.
+  - `?test=determinism` flies the same seed and scripted path in two page loads and needs an
+    identical site-list hash and director activation log.
+  - `?test=1&testPlan=soak` is the 10-minute soak: 5 seeds, one craft each, first and third
+    person, the event director live; 0 NaN, 0 penetrations, heap growth under 75 MB, p99 within
+    the frame target and no frame over 50 ms after warmup.
+  - `node tools/run-harness.mjs --test 1|soak|hotas|terrain|determinism|spawns [--backend webgl] [--views first,third]`
     runs one headlessly. For every frame over 50 ms it also records what the rest of the machine
     was doing at that moment: other programs' CPU and GPU load against the harness's own (named
     per program on Windows), the whole machine's CPU and the GPU's utilisation.
