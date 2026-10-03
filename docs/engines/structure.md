@@ -340,14 +340,21 @@ instanced pool in use.
 `budget: { instances: 24, particles: 0 }` (the director's cap), no real lights. Measured by
 `tools/lab/structure.mjs` (cost test) on the test kit presets at the near tier:
 
-| preset | update() CPU | triangles | instanced parts | draw calls |
-| --- | --- | --- | --- | --- |
-| wind farm (6 turbines) | about 1.1 us | 840 | 6 nacelles, 6 rotors | 4 |
-| rope bridge | about 0.2 us | 3180 | | 2 |
-| airfield | about 0.7 us | 7040 | 5 windsock segments | 4 |
-| floating islands (3) | about 0.2 us | 10843 | 44 mist puffs | 4 |
-| crystal spires (7) | about 0.3 us | 1604 | | 2 |
-| canyon course | about 0.3 us | 992 | | 1 |
+| preset | update() CPU | triangles | instanced parts | draw calls | in game: draw calls / triangles per frame |
+| --- | --- | --- | --- | --- | --- |
+| wind farm (6 turbines) | about 0.7-1.1 us | 840 | 6 nacelles, 6 rotors | 4 | +6 / +3 048 |
+| rope bridge | about 0.2 us | 3180 | | 2 | +3 / +7 700 |
+| airfield | about 0.5-0.7 us | 7040 | 5 windsock segments | 4 | +5 / +7 760 |
+| floating islands (3) | about 0.2 us | 10843 | 44 mist puffs | 4 | +5 / +17 000 |
+| crystal spires (7) | about 0.2-0.3 us | 1604 | | 2 | +3 / +2 190 |
+| canyon course | about 0.2-0.3 us | 992 | | 1 | +2 / +1 980 |
+
+The last column is the GPU load each structure adds in the game at the near tier, every pass
+included (the shadow pass draws the bodies too): `tools/steps/engine-structure.json` samples the
+renderer's per-frame draw calls and triangles for 30 frames before and after each create, on both
+backends with the same numbers. Its frame times before and after are reported too; on the shared
+test machine they moved by about -2 to +4 ms either way with the machine's other work, so no
+structure shows a cost above that noise.
 
 `update()` allocates nothing (the lab runs 100 000 frames of six structures with no garbage
 collection); per-instance numbers live in typed arrays and the instanced matrices are written
