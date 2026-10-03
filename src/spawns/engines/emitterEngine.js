@@ -814,6 +814,204 @@ export function createEmitterEngine() {
     data.voice.trigger(config.soundTriggers.schedule, data.triggerOptions);
   }
 
+  // ---- Frame update steps ---------------------------------------------------------------------------
+  // update() runs these in order. Numbers pass between them through the instance's typed arrays
+  // (frameDt[0], data.levels[0], data.share[0]), never as call arguments, which V8 would box.
+
+  /**
+   * Moves a travelling anchor, measures the emitter's own velocity (inheritance, doppler; a jump is
+   * a relocation, not motion), follows the emission point and keeps the field and ground grids on it.
+   */
+  function followAnchor(instance, engineCtx) {
+    const dt = frameDt[0];
+    const data = instance.data;
+    const config = data.config;
+    const anchor = instance.anchor;
+    if (data.travel && dt > 0) {
+      anchor.x += data.travel.x * dt;
+      anchor.y += data.travel.y * dt;
+      anchor.z += data.travel.z * dt;
+    }
+    if (dt > 0) {
+      const moveX = anchor.x - data.previousAnchor[0];
+      const moveY = anchor.y - data.previousAnchor[1];
+      const moveZ = anchor.z - data.previousAnchor[2];
+      const moved = Math.sqrt(moveX * moveX + moveY * moveY + moveZ * moveZ);
+      const relocated = moved > TELEPORT_SPEED * dt;
+      data.velocity[0] = relocated ? 0 : moveX / dt;
+      data.velocity[1] = relocated ? 0 : moveY / dt;
+      data.velocity[2] = relocated ? 0 : moveZ / dt;
+    }
+    data.previousAnchor[0] = anchor.x;
+    data.previousAnchor[1] = anchor.y;
+    data.previousAnchor[2] = anchor.z;
+    const source = config.attachCamera ? engineCtx.camera.position : anchor;
+    data.previousPoint[0] = data.point[0];
+    data.previousPoint[1] = data.point[1];
+    data.previousPoint[2] = data.point[2];
+    data.point[0] = source.x;
+    data.point[1] = source.y;
+    data.point[2] = source.z;
+    const jumpX = data.point[0] - data.previousPoint[0];
+    const jumpZ = data.point[2] - data.previousPoint[2];
+    if (jumpX * jumpX + jumpZ * jumpZ > (TELEPORT_SPEED * Math.max(dt, 1 / 60)) ** 2) {
+      data.previousPoint[0] = data.point[0];
+      data.previousPoint[1] = data.point[1];
+      data.previousPoint[2] = data.point[2];
+    }
+    // The field grid follows a moving emission point (a camera-attached emitter, a travelling one).
+    const placement = data.fieldPlacement;
+    const middleX = data.frameOrigin[0] + placement[0] + config.field.extent / 2;
+    const middleZ = data.frameOrigin[2] + placement[2] + config.field.extent / 2;
+    if (Math.abs(data.point[0] - middleX) > config.field.extent * 0.3 || Math.abs(data.point[2] - middleZ) > config.field.extent * 0.3) {
+      placeField(data, data.point[0], data.point[1], data.point[2]);
+      sampleFieldGround(data);
+    }
+    if (data.spawnGround) {
+      if (data.spawnGround.drifted(data.point, 0.25)) data.spawnGround.recenter(data.point[0], data.point[2]);
+      data.spawnGround.step(GROUND_SAMPLES_PER_FRAME);
+    }
+  }
+
+  /**
+   * The emission level into data.levels[0] (and the light's and wind source's copies, [2] and [3]):
+   * the base (or dormant) intensity, the schedule, the pulse and the end of the event.
+   */
+  function updateLevel(instance) {
+    const dt = frameDt[0];
+    const data = instance.data;
+    const config = data.config;
+    const levels = data.levels;
+    if (dt > 0) data.age[0] += dt;
+    advanceSchedule(data);
+    const base = instance.active === false ? config.inactiveIntensity : config.intensity;
+    let level = base * levels[1];
+    if (config.pulse) {
+      const wave = 0.5 + 0.5 * Math.sin(data.age[0] * Math.PI * 2 / config.pulse.period);
+      level *= 1 - config.pulse.depth * wave;
+    }
+    if (config.duration !== null) {
+      const over = data.age[0] - config.duration;
+      if (over > 0) {
+        data.ending = true;
+        level *= config.endRamp > 0 ? Math.max(0, 1 - over / config.endRamp) : 0;
+        if (over > config.endRamp + config.lifeMax) instance.ended = true;
+      }
+    }
+    levels[0] = level;
+    levels[2] = level;
+    levels[3] = level;
+  }
+
+  /** Emission: the warm start, the continuous rate (never more than the pages hold over a life), bursts. */
+  function updateEmission(instance) {
+    const dt = frameDt[0];
+    const data = instance.data;
+    const config = data.config;
+    const level = data.levels[0];
+    const share = data.share[0];
+    if (data.warmStart && share > 0 && data.capacity > 0) {
+      // Entering an emitting tier: the emitter appears as if it had been running for a life
+      // (a plume first seen from 6 km is already a plume, not a puff growing from the ground).
+      data.warmStart = false;
+      const settled = Math.min(data.capacity * share, config.rate * level * share * config.lifeMax);
+      if (settled >= 1) {
+        refreshAxis(data);
+        emitArgs[0] = config.lifeMax;
+        emitArgs[1] = 1;
+        emit(data, Math.floor(settled), false);
+      }
+    }
+    if (dt > 0 && data.capacity > 0 && share > 0) {
+      const maxRate = data.capacity * share / config.lifeMax;
+      const rate = Math.min(config.rate * level * share, maxRate);
+      data.debt[0] += rate * dt;
+      let count = Math.floor(data.debt[0]);
+      data.debt[0] -= count;
+      if (count > MAX_EMIT_PER_FRAME) count = MAX_EMIT_PER_FRAME;
+      refreshAxis(data);
+      if (count > 0) {
+        emitArgs[0] = dt;
+        emitArgs[1] = 1;
+        emit(data, count, true);
+      }
+      if (config.bursts) {
+        data.burstTimer[0] -= dt;
+        if (data.burstTimer[0] <= 0) fireBurst(data);
+      }
+    } else if (dt > 0) {
+      data.debt[0] = 0;
+    }
+    if (data.pendingScheduleTrigger) fireScheduleTrigger(instance);
+  }
+
+  /** The emitter's frame row: its frame origin relative to the camera and the underglow intensity. */
+  function writeFrameRow(instance, engineCtx) {
+    const data = instance.data;
+    const config = data.config;
+    const camera = engineCtx.camera.position;
+    const frameTable = system.frameData;
+    const frameOffset = data.row * FRAME_ROWS * 4;
+    frameTable[frameOffset] = data.frameOrigin[0] - camera.x;
+    frameTable[frameOffset + 1] = data.frameOrigin[1] - camera.y;
+    frameTable[frameOffset + 2] = data.frameOrigin[2] - camera.z;
+    if (config.underglow) {
+      const glow = config.underglow;
+      const time = engineCtx.time.elapsed;
+      const flicker = 1 - glow.flicker * (0.5 + 0.5 * Math.sin(time * 9.7 + data.lightPhase) * Math.sin(time * 3.1 + data.lightPhase * 1.7));
+      frameTable[frameOffset + 3] = glow.intensity * (0.25 + 0.75 * data.levels[0]) * flicker * (1 - glow.night + glow.night * engineCtx.time.nightFactor);
+    } else {
+      frameTable[frameOffset + 3] = 0;
+    }
+  }
+
+  /**
+   * The couplings: the real light, the voice, the wind source and the immersion modifier. dt is
+   * update()'s own argument, handed on as it came (a number read from a typed array and passed to a
+   * call would be a new heap number).
+   */
+  function updateCouplings(instance, engineCtx, dt) {
+    const data = instance.data;
+    const config = data.config;
+    if (data.light) updateLight(instance, engineCtx, dt);
+    if (data.voice) {
+      data.voiceVelocity.x = data.velocity[0];
+      data.voiceVelocity.y = data.velocity[1];
+      data.voiceVelocity.z = data.velocity[2];
+      data.voice.setPosition(instance.anchor, data.voiceVelocity);
+      data.voiceLevel[1] = data.levels[0];
+      sendVoiceLevel(data.voice, data.voiceLevel);
+    }
+    if (data.windActive || (config.windSource && data.tier !== 'far')) followWindSource(data);
+    if (data.immersion) updateImmersion(data);
+  }
+
+  /** The real light: held while near or mid and bright enough, flickering with the emission. */
+  function updateLight(instance, engineCtx, dt) {
+    const data = instance.data;
+    const lightConfig = data.config.light;
+    const anchor = instance.anchor;
+    const visible = 1 - lightConfig.night + lightConfig.night * engineCtx.time.nightFactor;
+    const lightLevel = (1 - lightConfig.follow + lightConfig.follow * data.levels[0]) * visible;
+    const wanted = data.tier !== 'far' && lightLevel > 0.02;
+    const held = data.light.update(wanted, dt);
+    if (held) {
+      const frame = data.heading;
+      const offset = lightConfig.offset;
+      const lightState = data.light.state;
+      const time = engineCtx.time.elapsed;
+      lightState[0] = anchor.x + offset[0] * frame.rightX + offset[2] * frame.forwardX;
+      lightState[1] = anchor.y + offset[1];
+      lightState[2] = anchor.z + offset[0] * frame.rightZ + offset[2] * frame.forwardZ;
+      const flicker = 1 - lightConfig.flicker * (0.5 + 0.5 * Math.sin(time * 11.3 + data.lightPhase) * Math.sin(time * 4.3 + data.lightPhase * 0.7));
+      lightState[3] = lightConfig.intensity * lightLevel * flicker;
+      data.light.apply();
+    }
+    const lights = held ? 1 : 0;
+    lightsHeld += lights - instance.lights;
+    instance.lights = lights;
+  }
+
   // ---- Wind source ----------------------------------------------------------------------------------
   /** Registers the emitter's wind source (its sample() closes over the instance's typed arrays). */
   function addWindSource(instance) {
@@ -1089,163 +1287,12 @@ export function createEmitterEngine() {
     update(instance, dt, engineCtx) {
       frameDt[0] = dt;
       frameStep();
-      const data = instance.data;
-      const config = data.config;
-      const anchor = instance.anchor;
-      if (data.travel && dt > 0) {
-        anchor.x += data.travel.x * dt;
-        anchor.y += data.travel.y * dt;
-        anchor.z += data.travel.z * dt;
-      }
-      // The emitter's own velocity (inheritance, doppler); a jump is a relocation, not motion.
-      if (dt > 0) {
-        const moveX = anchor.x - data.previousAnchor[0];
-        const moveY = anchor.y - data.previousAnchor[1];
-        const moveZ = anchor.z - data.previousAnchor[2];
-        const moved = Math.sqrt(moveX * moveX + moveY * moveY + moveZ * moveZ);
-        const relocated = moved > TELEPORT_SPEED * dt;
-        data.velocity[0] = relocated ? 0 : moveX / dt;
-        data.velocity[1] = relocated ? 0 : moveY / dt;
-        data.velocity[2] = relocated ? 0 : moveZ / dt;
-      }
-      data.previousAnchor[0] = anchor.x;
-      data.previousAnchor[1] = anchor.y;
-      data.previousAnchor[2] = anchor.z;
-      const source = config.attachCamera ? engineCtx.camera.position : anchor;
-      data.previousPoint[0] = data.point[0];
-      data.previousPoint[1] = data.point[1];
-      data.previousPoint[2] = data.point[2];
-      data.point[0] = source.x;
-      data.point[1] = source.y;
-      data.point[2] = source.z;
-      const jumpX = data.point[0] - data.previousPoint[0];
-      const jumpZ = data.point[2] - data.previousPoint[2];
-      if (jumpX * jumpX + jumpZ * jumpZ > (TELEPORT_SPEED * Math.max(dt, 1 / 60)) ** 2) {
-        data.previousPoint[0] = data.point[0];
-        data.previousPoint[1] = data.point[1];
-        data.previousPoint[2] = data.point[2];
-      }
-      // The field grid follows a moving emission point (a camera-attached emitter, a travelling one).
-      const placement = data.fieldPlacement;
-      const middleX = data.frameOrigin[0] + placement[0] + config.field.extent / 2;
-      const middleZ = data.frameOrigin[2] + placement[2] + config.field.extent / 2;
-      if (Math.abs(data.point[0] - middleX) > config.field.extent * 0.3 || Math.abs(data.point[2] - middleZ) > config.field.extent * 0.3) {
-        placeField(data, data.point[0], data.point[1], data.point[2]);
-        sampleFieldGround(data);
-      }
-      if (data.spawnGround) {
-        if (data.spawnGround.drifted(data.point, 0.25)) data.spawnGround.recenter(data.point[0], data.point[2]);
-        data.spawnGround.step(GROUND_SAMPLES_PER_FRAME);
-      }
-
-      // Emission level: base (or dormant), schedule, pulse, the end of the event.
-      const levels = data.levels;
-      if (dt > 0) data.age[0] += dt;
-      advanceSchedule(data);
-      const base = instance.active === false ? config.inactiveIntensity : config.intensity;
-      let level = base * levels[1];
-      if (config.pulse) {
-        const wave = 0.5 + 0.5 * Math.sin(data.age[0] * Math.PI * 2 / config.pulse.period);
-        level *= 1 - config.pulse.depth * wave;
-      }
-      if (config.duration !== null) {
-        const over = data.age[0] - config.duration;
-        if (over > 0) {
-          data.ending = true;
-          level *= config.endRamp > 0 ? Math.max(0, 1 - over / config.endRamp) : 0;
-          if (over > config.endRamp + config.lifeMax) instance.ended = true;
-        }
-      }
-      levels[0] = level;
-      levels[2] = level;
-      levels[3] = level;
-
-      // Emission: the continuous rate (never more than the pages can hold over a life) and bursts.
-      const share = data.share[0];
-      if (data.warmStart && share > 0 && data.capacity > 0) {
-        // Entering an emitting tier: the emitter appears as if it had been running for a life
-        // (a plume first seen from 6 km is already a plume, not a puff growing from the ground).
-        data.warmStart = false;
-        const settled = Math.min(data.capacity * share, config.rate * level * share * config.lifeMax);
-        if (settled >= 1) {
-          refreshAxis(data);
-          emitArgs[0] = config.lifeMax;
-          emitArgs[1] = 1;
-          emit(data, Math.floor(settled), false);
-        }
-      }
-      if (dt > 0 && data.capacity > 0 && share > 0) {
-        const maxRate = data.capacity * share / config.lifeMax;
-        const rate = Math.min(config.rate * level * share, maxRate);
-        data.debt[0] += rate * dt;
-        let count = Math.floor(data.debt[0]);
-        data.debt[0] -= count;
-        if (count > MAX_EMIT_PER_FRAME) count = MAX_EMIT_PER_FRAME;
-        refreshAxis(data);
-        if (count > 0) {
-          emitArgs[0] = dt;
-          emitArgs[1] = 1;
-          emit(data, count, true);
-        }
-        if (config.bursts) {
-          data.burstTimer[0] -= dt;
-          if (data.burstTimer[0] <= 0) fireBurst(data);
-        }
-      } else if (dt > 0) {
-        data.debt[0] = 0;
-      }
-      if (data.pendingScheduleTrigger) fireScheduleTrigger(instance);
-
-      // Frame row: the frame origin relative to the camera, the underglow, the fade.
-      const camera = engineCtx.camera.position;
-      const frameTable = system.frameData;
-      const frameOffset = data.row * FRAME_ROWS * 4;
-      frameTable[frameOffset] = data.frameOrigin[0] - camera.x;
-      frameTable[frameOffset + 1] = data.frameOrigin[1] - camera.y;
-      frameTable[frameOffset + 2] = data.frameOrigin[2] - camera.z;
-      const time = engineCtx.time.elapsed;
-      const night = engineCtx.time.nightFactor;
-      if (config.underglow) {
-        const glow = config.underglow;
-        const flicker = 1 - glow.flicker * (0.5 + 0.5 * Math.sin(time * 9.7 + data.lightPhase) * Math.sin(time * 3.1 + data.lightPhase * 1.7));
-        frameTable[frameOffset + 3] = glow.intensity * (0.25 + 0.75 * level) * flicker * (1 - glow.night + glow.night * night);
-      } else {
-        frameTable[frameOffset + 3] = 0;
-      }
-
-      // Couplings: the real light, the voice, the immersion modifier.
-      if (data.light) {
-        const lightConfig = config.light;
-        const visible = 1 - lightConfig.night + lightConfig.night * night;
-        const lightLevel = (1 - lightConfig.follow + lightConfig.follow * level) * visible;
-        const wanted = data.tier !== 'far' && lightLevel > 0.02;
-        const held = data.light.update(wanted, dt);
-        if (held) {
-          const frame = data.heading;
-          const offset = lightConfig.offset;
-          const lightState = data.light.state;
-          lightState[0] = anchor.x + offset[0] * frame.rightX + offset[2] * frame.forwardX;
-          lightState[1] = anchor.y + offset[1];
-          lightState[2] = anchor.z + offset[0] * frame.rightZ + offset[2] * frame.forwardZ;
-          const flicker = 1 - lightConfig.flicker * (0.5 + 0.5 * Math.sin(time * 11.3 + data.lightPhase) * Math.sin(time * 4.3 + data.lightPhase * 0.7));
-          lightState[3] = lightConfig.intensity * lightLevel * flicker;
-          data.light.apply();
-        }
-        const lights = held ? 1 : 0;
-        lightsHeld += lights - instance.lights;
-        instance.lights = lights;
-      }
-      if (data.voice) {
-        data.voiceVelocity.x = data.velocity[0];
-        data.voiceVelocity.y = data.velocity[1];
-        data.voiceVelocity.z = data.velocity[2];
-        data.voice.setPosition(anchor, data.voiceVelocity);
-        data.voiceLevel[1] = level;
-        sendVoiceLevel(data.voice, data.voiceLevel);
-      }
-      if (data.windActive || (config.windSource && data.tier !== 'far')) followWindSource(data);
-      if (data.immersion) updateImmersion(data);
-      instance.particles = Math.round(data.capacity * share);
+      followAnchor(instance, engineCtx);
+      updateLevel(instance);
+      updateEmission(instance);
+      writeFrameRow(instance, engineCtx);
+      updateCouplings(instance, engineCtx, dt);
+      instance.particles = Math.round(instance.data.capacity * instance.data.share[0]);
     },
     setLOD(instance, tier) {
       const data = instance.data;
