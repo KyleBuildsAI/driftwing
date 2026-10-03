@@ -230,6 +230,8 @@ export function createSpawnVoices({ THREE, onIssue }) {
     buildFailures: 0,
     nodesLive: 0,
     oneShotNodesLive: 0,
+    /** Discovery chimes played (a one-shot's nodes live under a second, so checks count these). */
+    chimesPlayed: 0,
     triggers: 0,
     thunderQueued: 0,
     thunderPlayed: 0,
@@ -662,6 +664,7 @@ export function createSpawnVoices({ THREE, onIssue }) {
       destination: panner,
       trackOneShot: (nodes, endSource) => trackOneShot([...nodes, panner, send], endSource),
     }, { time, volume: options && Number.isFinite(options.volume) ? options.volume : 0.5 });
+    counters.chimesPlayed++;
     return true;
   }
 

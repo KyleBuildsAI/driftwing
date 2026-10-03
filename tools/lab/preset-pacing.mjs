@@ -5,8 +5,8 @@
 //
 // The spawn manager is a lenient stand-in: it admits every activation, ends events at their drawn
 // duration, keeps one spawn per site within the site's lod.far (so a site's active state, such as
-// the volcano's eruption, can be started) and reports a site coming into view (12 km, a 100 degree
-// view cone), as the game's manager does.
+// the volcano's eruption, can be started), reports a site coming into view (12 km, a 100 degree
+// view cone) and counts heavy spawns without the dormant sites, as the game's manager does.
 //
 // Checks:
 //   presets   every preset validates and the director takes every one of them
@@ -142,7 +142,16 @@ function createLenientManager({ bus, player, getTime, placement, isInView }) {
     deactivate(id) { return instances.delete(id); },
     getActive() { return [...instances.values()].map(describe); },
     getInstance(id) { const instance = instances.get(id); return instance && !instance.ended ? instance : null; },
-    getStats() { return stats; },
+    getStats() {
+      // The heavy count the game's manager keeps: a site counts only while its active state runs (a
+      // dormant volcano or a floating islands site holds no heavy slot), as in spawnManager.getStats.
+      let heavy = 0;
+      for (const instance of instances.values()) {
+        if (instance.heavy && !instance.ended && (instance.source !== 'site' || instance.active === true)) heavy++;
+      }
+      stats.heavy = heavy;
+      return stats;
+    },
     getSiteSpawn(siteId) { const instance = siteSpawns.get(siteId); return instance ? instance.id : null; },
     setSiteActive(id, active) {
       const instance = instances.get(id);

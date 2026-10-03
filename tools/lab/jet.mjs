@@ -30,6 +30,8 @@
 //   controller     the FlightController headless: boot at cruise and 60 s hands off, soft-crash
 //                  respawn, relaunch (airstart), craft switches with the bush plane in flight, and a
 //                  start on the ground
+//   crash hold     a 286 m/s strike into a 12:1 wall, a cliff struck again during the fade-out and
+//                  the safety net's late trigger: the rendered pose never sits below the surface
 //
 // Usage: node tools/lab/jet.mjs [--verbose]
 // Prints a table (measured vs target, tolerance about 10 %) and exits non-zero if any check fails.
@@ -912,11 +914,12 @@ function ensureDocumentStandIn() {
 /**
  * The FlightController over flat ground at CONTROLLER_GROUND m in calm air, fed like the game (the
  * ControlState, 60 Hz frames). The spawn is at `altitude`, heading 30 (the controller boots the
- * craft there at its own cruise).
+ * craft there at its own cruise). `groundHeight(x, z)` replaces the flat ground (the crash-hold
+ * checks fly into a wall).
  */
-function createControllerRig({ craft = 'jet', assists = 1, altitude = 1500, startOnGround = false } = {}) {
+function createControllerRig({ craft = 'jet', assists = 1, altitude = 1500, startOnGround = false, groundHeight = () => CONTROLLER_GROUND } = {}) {
   ensureDocumentStandIn();
-  const world = { groundHeight: () => CONTROLLER_GROUND, heightAt: () => CONTROLLER_GROUND, WATER_LEVEL: 0 };
+  const world = { groundHeight, heightAt: groundHeight, WATER_LEVEL: 0 };
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const events = { notify: [], softCrash: [], relaunched: [], landed: [] };
   bus.on('notify', (payload) => events.notify.push(payload.text));
@@ -1092,6 +1095,98 @@ function testRespawn() {
   record('respawn: hands off 10 s', `${watch.minLoad.toFixed(2)}..${watch.maxLoad.toFixed(2)} g`, '0.8..1.3 g, calm', { compare: calm(watch) && Math.abs(agl - 300) < 30, note: describeWatch(watch) });
 }
 
+/** Walls across the heading-30 track, WALL_DISTANCE m ahead of the spawn, rising 12 m per metre. */
+const WALL_DISTANCE = 450;
+const WALL_SLOPE = 12;
+const WALL_DIRECTION = vectorFromHeading(30);
+/** The ground with a wall `height` m tall (a plateau on top); the controller's flat ground before it. */
+function createWallGround(height) {
+  return (x, z) => {
+    const along = x * WALL_DIRECTION.x + z * WALL_DIRECTION.z;
+    return CONTROLLER_GROUND + clamp((along - WALL_DISTANCE) * WALL_SLOPE, 0, height);
+  };
+}
+
+/**
+ * Follows the rendered pose (state.player.position) frame by frame against the surface the flight
+ * test harness measures (the shared height function or the sea): the deepest it sat below, and how
+ * many frames it sat lower than 1 cm. It watches until the soft crash ends, or for `seconds` of
+ * frames whatever happens when `whole` is set.
+ */
+function watchCrashHold(rig, groundHeight, { seconds = 2, whole = false } = {}) {
+  const player = rig.state.player;
+  const result = { maxDepth: -Infinity, framesBelow: 0, frames: 0 };
+  const sample = () => {
+    const depth = Math.max(groundHeight(player.position.x, player.position.z), CONFIG.WATER_LEVEL) - player.position.y;
+    result.maxDepth = Math.max(result.maxDepth, depth);
+    if (depth > 0.01) result.framesBelow++;
+    result.frames++;
+  };
+  sample();
+  rig.run(seconds, (lab) => {
+    lab.handsOff();
+    if (!whole && !lab.flight.getStats().crash) return true;
+    sample();
+    return false;
+  });
+  return result;
+}
+
+/** Boots the jet 150 m above the flat ground before the wall at 286 m/s, full power, and flies hands off until it strikes. */
+function strikeWall(groundHeight) {
+  const rig = createControllerRig({ altitude: CONTROLLER_GROUND + 150, groundHeight });
+  rig.controls.throttle = 1;
+  rig.model().state.velocity.setLength(286);
+  rig.run(6, (lab) => {
+    lab.handsOff();
+    return lab.events.softCrash.length > 0;
+  });
+  return { rig, strike: rig.events.softCrash[0] ?? null };
+}
+
+/**
+ * The soft crash holds the craft at or above the surface at its contact point for the whole fade
+ * (the wave 2 harness saw a 286 m/s jet strike sink 9-14 m for 37 frames):
+ * - a strike into a 250 m wall (12:1) at 286 m/s, where a tick ends metres inside the ground; the
+ *   respawn 300 m up clears the plateau;
+ * - the same strike into a 4000 m wall: every respawn faces the cliff and strikes again during the
+ *   fade-out, which fades back to black and holds the craft again;
+ * - the safety net's path (core/loop.js), which triggers after the pose is already 6 m down.
+ */
+function testCrashHold() {
+  const plateau = createWallGround(250);
+  const { rig, strike } = strikeWall(plateau);
+  const hold = watchCrashHold(rig, plateau);
+  const respawnAgl = rig.state.player.position.y - plateau(rig.state.player.position.x, rig.state.player.position.z);
+  record('soft crash at 286 m/s: held at the surface', hold.maxDepth, 'at or above, whole fade', {
+    unit: 'm below', decimals: 2,
+    compare: strike !== null && strike.impactSpeed > 270 && hold.maxDepth <= 0.01 && hold.framesBelow === 0 && respawnAgl > 100,
+    note: strike ? `"${strike.reason}" at ${strike.impactSpeed.toFixed(0)} m/s, ${hold.frames} fade frames, ${hold.framesBelow} below, ${respawnAgl.toFixed(0)} m AGL after the fade` : 'no strike',
+  });
+
+  const cliff = createWallGround(4000);
+  const tall = strikeWall(cliff);
+  const cliffHold = watchCrashHold(tall.rig, cliff, { seconds: 4, whole: true });
+  const strikes = tall.rig.events.softCrash.length;
+  record('strikes again during the fade-out: held', cliffHold.maxDepth, 'at or above, 4 s', {
+    unit: 'm below', decimals: 2,
+    compare: tall.strike !== null && strikes >= 2 && cliffHold.maxDepth <= 0.01 && cliffHold.framesBelow === 0,
+    note: `${strikes} soft crashes, ${cliffHold.frames} frames, ${cliffHold.framesBelow} below`,
+  });
+
+  const net = createControllerRig({ altitude: CONTROLLER_GROUND + 150 });
+  net.run(0.5, (lab) => lab.handsOff());
+  net.model().state.position.y = CONTROLLER_GROUND - 6;
+  net.state.player.position.y = CONTROLLER_GROUND - 6;
+  const triggered = net.flight.triggerSoftCrash('terrain');
+  const netHold = watchCrashHold(net, () => CONTROLLER_GROUND);
+  record('safety-net soft crash 6 m down: held at the surface', netHold.maxDepth, 'at or above, whole fade', {
+    unit: 'm below', decimals: 2,
+    compare: triggered && netHold.maxDepth <= 0.01 && netHold.framesBelow === 0,
+    note: `${netHold.frames} fade frames, ${netHold.framesBelow} below`,
+  });
+}
+
 function testRelaunch() {
   const rig = createControllerRig({ altitude: CONTROLLER_GROUND + 400 });
   rig.controls.throttle = jet.spawn.cruiseThrottle;
@@ -1195,7 +1290,7 @@ function printTable() {
 
 const started = Date.now();
 const only = process.argv.find((argument) => argument.startsWith('--only='));
-const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGround, testGear, testSpeedBrake, testDetent, testAutopilot, testAutopilotDetent, testAutopilotTerrain, testAutopilotRidge, testLimits, testOverspeedProtection, testSimBoot, testRespawn, testRelaunch, testCraftSwitch, testGroundStart };
+const tests = { testTopSpeeds, testAcceleration, testSpool, testDragRise, testSustainedTurn, testInstantaneousTurn, testGLimit, testHighAoa, testTakeoff, testLanding, testGround, testGear, testSpeedBrake, testDetent, testAutopilot, testAutopilotDetent, testAutopilotTerrain, testAutopilotRidge, testLimits, testOverspeedProtection, testSimBoot, testRespawn, testCrashHold, testRelaunch, testCraftSwitch, testGroundStart };
 for (const [name, test] of Object.entries(tests)) {
   if (only && !name.toLowerCase().includes(only.slice(7).toLowerCase())) continue;
   test();

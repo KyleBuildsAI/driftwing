@@ -268,18 +268,16 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
 ## Open issues
 
 - **Wave 3 (presets) issues, for Milestone G:**
-  - **Rare-tier balance.** With all 30 presets, preset-pacing's default 3 h run starts the volcano eruption 0 times across 18 scenarios, against 16 times with batch 1 alone. A 6 h run starts it once. The tornado fell from 28 activations to 1.
-    - The sky lantern festival takes most rare slots (41). Its candidates are moved onto landmarks ahead, which gives them high ahead scores.
-    - Review the rare candidates' density and scoring, or the lantern cooldown, then re-run `node tools/lab/preset-pacing.mjs`.
-  - **The storm chase's look with the real children.** The real `tornado` preset brings its own storm tower (weatherVolume with an anvil, wall cloud and rain), placed 800 m from the supercell's centre. Inside a storm chase that may read as a second tower growing at touchdown (formSeconds 20).
-    - Child params can only override, not drop an entry. Consider a tornado child override that shrinks its tower, or a funnel-only variant.
+  - **Rare-tier balance (fixed in the lab, Milestone G).** The lab's stand-in manager reported no heavy count, so the director counted every heavy site spawn in reach, dormant or not: a dormant volcano and the floating islands filled the heavy budget and refused the eruption, the tornado, the comet and the sky whale. The game's manager counts a site only while its active state runs, and the lab now does too. The default 3 h run passes 4/4: volcano eruption 1, tornado 4, comet 20, sky whale 29, sky lantern festival 14 (was 0 / 1 / 4 / 12 / 41).
+    - The rare tier is shared by first come: the sky whale (anywhere, any time) takes most daytime rare turns, so a volcano eruption needs a volcano ahead when the tier is due. That matches the spec (the active state is rare); a per-preset fairness term is a design choice for later.
+  - **The storm chase's look with the real children (fixed, Milestone G).** The real `tornado` preset brings its own storm tower (an anvil, wall cloud and rain), 800 m from the supercell's centre. The storm chase's tornado child now overrides its weatherVolume to a dark turning lowering on the funnel (no anvil, overshoot or rain; its wall cloud ends at the funnel's cloud base), so no second tower grows at touchdown.
     - In the integration run, the touchdown screenshot on WebGPU had the funnel hidden behind a ridge (seed E29ZR4), as batch 3 also saw.
   - **One preset check kit.** presetChecks.js (21-30) and presetChecksBatch2.js (11-20) are two kits with different APIs, and batch 1's checks are inline in its step file. Fold them into one generic kit for ?test=spawns.
-  - **discovery.json on WebGL2:** "the discovery chime played" saw 0 one-shot nodes. The discoveries had already fired when the 6 s sampling window began. It passes on WebGPU (110 nodes). This step file was run on WebGPU only before.
+  - **discovery.json on WebGL2 (fixed, Milestone G):** "the discovery chime played" sampled live one-shot nodes, which live under a second, and the window opened after the chimes. The spawn voices now count `chimesPlayed` (audio `getStats().spawn`), and the check counts the chimes since the spawns were placed.
   - The jet stream tube is straight (bend 0), so its wisps line up with the air. A seeded meander cannot be matched by an emitter shape yet.
   - A 38 m/s jet stream core can stall a 30 m/s glider that enters it abruptly, as real shear would. Joining through the taper or across the edge is gentle.
   - The comet holds a heavy slot for the rest of the night. Its declared lure only draws at the FAR tier, which a sky-anchored spawn does not reach.
-  - The thermal hawks: an activation that finds no working thermal ends at once, but it still counts as a notable for pacing.
+  - The thermal hawks (fixed, Milestone G): an activation that found no working thermal ended at once but still counted as a notable. The SpawnManager now declines a director activation whose engines all end at create (refusal `declined`), so the director counts no notable, cooldown or tier turn and retries the candidate in its next bucket. The whale pod with no open water gets the same.
   - The meteor shower and the eclipse use `discovery.requireInView: false`, so they are discovered as soon as they start.
   - The waterspout is mild for the glider: peak vertical speed 3.1 m/s against 2.0 m/s in calm air. The spec asks for it to be milder than the tornado.
   - The maelstrom's pull is modest in the SIM rig: 700 m abeam, drift goes from -23 to -53 m.
@@ -310,7 +308,7 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
   - The debug airfield without a flatten stamp can extend over water. Real airfield presets use the stamp.
   - spawn-check on WebGPU needed the settle wait (`64b3207`). Its first cycle saw 6 late geometries (terrain chunks) before it.
 
-- **Storm clouds.** Since wave 2 the v1 cloud field follows the sky modifiers (`cloudShading.js`): darker blue-grey undersides in a storm and dimmed by an eclipse. Storm cloud masses come from the weatherVolume engine. A very faint sun disc (about 1 %) can still show under storm overcast.
+- **Storm clouds.** Since wave 2 the v1 cloud field follows the sky modifiers (`cloudShading.js`): darker blue-grey undersides in a storm and dimmed by an eclipse. Storm cloud masses come from the weatherVolume engine. The faint sun disc (about 1 %) under storm overcast is gone (Milestone G): the disc also fades out between overcast 0.6 and 0.85.
 - **First query of a stamped cell** resolves placement once (3-10 ms on the loaded machine), in the worker for chunks and on the main thread for the first collision query there.
 - **Real lights cost shading while they exist.** The light pool holds only the lights engines declare (`budget.lights`, capped at 4). Meshes on shared materials must be pooled (`createMeshPool` / `createInstancedPool`), or three r184 keeps each disposed mesh alive (about 8 KB each).
 - **Occlusion rays allocate a little** (worldgen noise, 0.02-0.03 B/frame after warm-up); the spawn code itself measures about 0.02 B/frame.
@@ -320,7 +318,8 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
 - **performance.memory** heap figures exist only in Chrome and are coarse.
 - **Golden-frame comparisons across runs** are not pixel-exact (vegetation sway, birds, cloud drift); the exact proof is the same-frame A/B in tools/steps/golden-frame.json.
 - **Full harness matrix.** Only reduced flight harnesses were run in waves 1 to 3. The full 36-run matrix is for Milestone G.
-- **Penetration at a high-speed terrain strike (hard criterion; for Milestone G).** In the wave 2 integration harness, the same run failed on both backends: INTEG-A, jet, first person, run 4 of 8.
+- **Penetration at a high-speed terrain strike (fixed, Milestone G).** The soft crash froze the pose of the tick that struck, which a fast strike can end metres inside a steep slope. The flight controller now holds the craft at the surface of its contact point (the shared height function, a struck ground surface or the sea) at the strike and on every fade-in frame, and a strike during the fade-out is a new soft crash that fades back to black. `node tools/lab/jet.mjs --only=crashhold` checks a 286 m/s strike into a 12:1 wall (28.2 m deep for 26 frames before the fix, 0 after), a cliff struck again during the fade-out and the safety net's late trigger. The history:
+  - In the wave 2 integration harness, the same run failed on both backends: INTEG-A, jet, first person, run 4 of 8.
   - It did not recur in the wave 3 integration harness: 0 penetrations on both backends, with the director live on the real presets. The jet had 2 soft crashes on WebGL2.
   - The scripted jet hit terrain at about 44.5 s and 286 m/s, and the soft crash fired.
   - At that strike it penetrated 8.96 m (WebGPU) and 13.56 m (WebGL2), for 37 frames each.
@@ -328,5 +327,5 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
   - The wave 2 base (478cda7, the same harness and seeds, WebGPU) had no penetration. Its jet crashed softly at 226-227 m/s in runs 3 and 7.
   - The engine branches change nothing in flight while no spawn and no extra ground surface exists. The harness flies no spawns, and a same-seed frame comparison of base and integrated builds is identical (233 against 234 draw calls, 181 fps).
   - The flown path depends on the run order and the frame timing. The p2/engines-structure-setpiece engineer reproduced the same class of penetration on the base (STRUCT-A, jet, third person, 250 m/s, 1.21 m deep).
-  - The Phase 1 contact code lets a strike above about 250 m/s sink in before the soft crash takes over. That belongs to the flight-model or harness owner, in the Milestone G matrix.
+  - The Phase 1 contact code let a strike above about 250 m/s sink in, and the soft-crash fade then held that pose.
   - Other soft crashes (not a hard criterion): 2 on WebGPU and 1 on WebGL2 in the same harness, all jet strikes.

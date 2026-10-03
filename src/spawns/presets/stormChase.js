@@ -10,6 +10,7 @@
 // build stage ramps (weatherVolume control.wallCloud), and it dissipates by itself before the
 // timeline ends, so nothing is cut off in view. The children's own approach journals are silenced
 // (journal: []): the set piece alone sends closestTornado and stormsChased, so a chase counts once.
+// The tornado's own storm tower shrinks to the lowering on its funnel (the supercell is its storm).
 export default Object.freeze({
   id: 'stormChase',
   name: 'Storm chase',
@@ -54,7 +55,23 @@ export default Object.freeze({
             from: 'supercell',
             offset: Object.freeze({ along: -800, across: 0 }),
             duration: 250,
-            params: Object.freeze({ vortex: Object.freeze({ journal: Object.freeze([]) }) }),
+            params: Object.freeze({
+              vortex: Object.freeze({ journal: Object.freeze([]) }),
+              // The supercell is the funnel's storm: the tornado's own tower (anvil, overshoot, rain)
+              // shrinks to a dark turning lowering on the funnel's top, so no second tower grows
+              // beside the supercell at touchdown. Its wall cloud ends at the funnel's cloud base.
+              weatherVolume: Object.freeze({
+                base: 1150,
+                height: 600,
+                radius: 900,
+                puffs: 36,
+                storm: 1,
+                anvil: null,
+                overshoot: 0,
+                rain: null,
+                wallCloud: Object.freeze({ radius: 520, drop: 300, offset: 0, rotation: 7, puffs: 22 }),
+              }),
+            }),
           }),
         }),
         stages: Object.freeze([

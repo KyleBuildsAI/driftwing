@@ -12,7 +12,8 @@
 //                going out and boundary * (1 - H) coming in, and holds its tier while it jitters
 //                around a boundary
 //   budgets      the heavy limit, per-engine instance caps and particle estimates refuse activations;
-//                debug force spawns pass; refusals are counted
+//                debug force spawns pass; refusals are counted; a director activation whose engines
+//                all end at create is declined (no spawn, no spawnActivated), a debug one still spawns
 //   lure         a heavy spawn 30 km out is FAR with its lure faded in, drawn at the projection limit
 //                with its angular size kept; it fades out when the spawn comes within mid range
 //   discovery    fires once when in range and in view; not while a ridge hides the sight line; a
@@ -271,6 +272,14 @@ function testBudgets() {
   check('budgets', 'a particle estimate over the cap is refused', lab.spawnAhead('testParticles', 500, { source: 'director' }) === null && lab.manager.getStats().lastRefusal === 'particles');
   const stats = lab.manager.getStats();
   check('budgets', 'refusals are counted', stats.refusals.heavy === 1 && stats.refusals.instances === 4 && stats.refusals.particles === 1, JSON.stringify(stats.refusals));
+  lab.manager.addPreset(Object.freeze({ ...createTestPresets()[0], id: 'testDeclines', engines: [{ engine: 'testMarker', params: { declines: true } }] }));
+  const activatedBefore = lab.events.activated.length;
+  const declined = lab.spawnAhead('testDeclines', 500, { source: 'director' });
+  const declinedStats = lab.manager.getStats();
+  check('budgets', 'a director activation that ends at create is declined', declined === null && declinedStats.lastRefusal === 'declined' && declinedStats.refusals.declined === 1 && lab.events.activated.length === activatedBefore, `${declined}, ${JSON.stringify(declinedStats.refusals)}`);
+  const kept = lab.spawnAhead('testDeclines', 500, { source: 'debug' });
+  lab.step(1);
+  check('budgets', 'a debug activation that ends at create still spawns, and ends on the next frame', Boolean(kept) && lab.events.ended.some((event) => event.id === kept && event.reason === 'ended'), String(kept));
 }
 
 // ---- lure --------------------------------------------------------------------------------------------------------

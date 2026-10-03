@@ -836,8 +836,10 @@ export function createSkySystem(ctx) {
     if (combined.active) {
       const clouded = 1 - combined.overcast;
       const lit = combined.sunIntensity * (1 - combined.darkness);
-      // The disc fades faster than the light: even thin cloud hides its edge.
-      sky.sunDiscColor.value.multiplyScalar(lit * clouded * clouded);
+      // The disc fades faster than the light: even thin cloud hides its edge, and a storm's overcast
+      // (0.9) hides the HDR disc entirely instead of leaving a faint 1 % of it.
+      const discShown = clouded * clouded * (1 - smoothRange(0.6, 0.85, combined.overcast));
+      sky.sunDiscColor.value.multiplyScalar(lit * discShown);
       uniforms.sunColor.value.multiplyScalar(lit);
       sky.rayStrength.value *= Math.min(combined.sunIntensity, 1.5) * clouded;
       sky.moonStrength.value *= clouded;

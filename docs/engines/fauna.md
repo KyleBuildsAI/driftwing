@@ -168,7 +168,7 @@ player leaves it, so brief wobbles do not reset the timer.
 | `thermalSearch` | m | 200..8000 | 1800 | search radius around the anchor |
 | `thermalRefresh` | s | 2..120 | 12 | how often the thermals are looked up again (they drift and expire) |
 | `useThermals` | bool | | true | `false` circles over the anchor only (Phase 3: vultures over a carcass) |
-| `requireThermal` | bool | | false | the birds mark real lift only: a group that finds no working thermal at create ends at once (a natural end, before anything is drawn), and a refresh that finds none keeps the columns the birds already ride instead of soaring over the anchor. The thermal hawks set it |
+| `requireThermal` | bool | | false | the birds mark real lift only: a group that finds no working thermal at create ends at once (a natural end, before anything is drawn; the SpawnManager declines such a director activation, so it costs no pacing slot), and a refresh that finds none keeps the columns the birds already ride instead of soaring over the anchor. The thermal hawks set it |
 
 The circle centre follows the thermal's lean with height, from the thermal's base to its cap.
 Thermals weaker than 0.3 are ignored.
@@ -187,7 +187,7 @@ Thermals weaker than 0.3 are ignored.
 | `glow` | 0..1 | | 1 | bioluminescent excitation of the wakes, splashes and spouts. It only shows inside a glow region (the waterEffect engine's `bioluminescence`) |
 | `depth` | m (x scale) | 2..80 | 16 | dive depth |
 | `callInterval` | s or `[min, max]` | | [16, 38] | time between songs (the voice's `call` trigger). A breach also calls |
-| `seekWater` | m | 0..20000 | 0 | at create, when the anchor is not on open water (the point and four points around it, 4 x `spread` and at least 250 m out, all at least 6 m deep), the pod moves to the nearest open water within this reach (rings 150 m apart). A pod that finds none ends at once (a natural end). The whale pod sets it, so a candidate on a coast puts its whales in the sea |
+| `seekWater` | m | 0..20000 | 0 | at create, when the anchor is not on open water (the point and four points around it, 4 x `spread` and at least 250 m out, all at least 6 m deep), the pod moves to the nearest open water within this reach (rings 150 m apart). A pod that finds none ends at once (a natural end; a director activation is declined). The whale pod sets it, so a candidate on a coast puts its whales in the sea |
 
 A pod looks 350 m ahead every 2 s and turns away from land.
 

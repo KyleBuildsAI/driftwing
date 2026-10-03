@@ -7,7 +7,8 @@
 //   testMarker  instanced diamond markers (one shared InstancedMesh, a slot per instance) plus a
 //               per-instance halo ring with its own geometry on a pooled mesh (pools.js explains why),
 //               shown only at the near tier, so each instance really takes and returns GPU memory.
-//               Heavy presets hide the marker at the far tier, where their lure takes over.
+//               Heavy presets hide the marker at the far tier, where their lure takes over. With
+//               `declines: true` an instance ends at create, as thermal hawks with no thermal do.
 //   testWind    a rising column registered in the WindField per instance (and, when asked, one real
 //               light from the pool); dispose() removes both.
 //
@@ -95,6 +96,7 @@ export function createTestMarkerEngine() {
         particles: 0,
         tier: 'near',
         heavy: preset.heavy,
+        ended: params.declines === true,
         data: { slot, halo, size, phase: rng() * Math.PI * 2, bob: MARKER_BOB_METRES * (size / 24), shownMatrix: new THREE.Matrix4(), hiddenMatrix: new THREE.Matrix4(), matrix: null, tierChanges: 0, lastTier: null },
       };
       position.set(params.position.x, params.position.y + size * 0.5, params.position.z);
