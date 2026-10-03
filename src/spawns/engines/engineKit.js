@@ -12,6 +12,7 @@
 //                                every frame (three's own array reallocates after each upload)
 //   fillRandoms(state, out, n)   n seeded random numbers into a typed array at once (a double
 //                                returned per call would be boxed)
+//   sendVoiceLevel(voice, levels) a spawn voice's intensity, sent only when it moved
 //
 // Nothing here allocates after construction: the frame update paths of the engines call only the
 // per-frame members (the grid's step and sample, the light's update, the range list's add).
@@ -299,6 +300,22 @@ export function fillRandoms(state, out, count) {
   state[0] = value;
 }
 
+/** A voice intensity change at or below this is not sent: the audio engine eases between levels. */
+const VOICE_LEVEL_STEP = 0.01;
+
+/**
+ * Sends voice the intensity in levels[1] when it moved more than VOICE_LEVEL_STEP from the last one
+ * sent (levels[0], -1 before the first). The voice's setter takes the number as an argument, and a
+ * fractional number passed to a call V8 does not inline is a new heap number: sending only real
+ * changes keeps that to the moments a level moves (a ramp, an approach).
+ */
+export function sendVoiceLevel(voice, levels) {
+  const level = levels[1];
+  if (Math.abs(level - levels[0]) <= VOICE_LEVEL_STEP) return;
+  levels[0] = level;
+  voice.setIntensity(level);
+}
+
 /** A seeded random value in [low, high] from rng(). */
 export function randomIn(rng, low, high) {
   return low + (high - low) * rng();
@@ -319,16 +336,17 @@ export function smoothstep(edge0, edge1, value) {
  * records and only moves its length: add(start, count) fills the next record.
  */
 export function createRangeList(capacity) {
-  let length = 0;
+  // length is a plain field rather than an accessor: three clears it from code that runs every
+  // frame, and an accessor call there costs more than a field store.
   const list = {
-    get length() { return length; },
-    set length(value) { length = value < 0 ? 0 : value > capacity ? capacity : value; },
+    length: 0,
     add(start, count) {
+      const length = list.length;
       if (length >= capacity) throw new RangeError(`createRangeList: more than ${capacity} ranges`);
       const record = list[length];
       record.start = start;
       record.count = count;
-      length++;
+      list.length = length + 1;
     },
     capacity,
   };
