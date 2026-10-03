@@ -581,6 +581,7 @@ export function createLightEffectEngine() {
         strikeBolt: null,
         flash: null,
         flashValues: null,
+        flashStrength: { flash: 0 },
         beam: null,
         voice: null,
         thunderOptions: { position: { x: 0, y: 0, z: 0 }, intensity: 1 },
@@ -687,8 +688,10 @@ export function createLightEffectEngine() {
           const reach = 1 - smoothstep(lightning.flashRange * 0.25, lightning.flashRange, flashDistance);
           const flash = Math.min(1, lightning.flash * brightest * reach * (0.35 + 0.65 * night));
           if (flash !== data.flashValues.flash) {
+            // Only the strength changes after create: the flash colour was set once.
             data.flashValues.flash = flash;
-            data.flash.set(data.flashValues);
+            data.flashStrength.flash = flash;
+            data.flash.set(data.flashStrength);
           }
         }
         if (data.strikeLight) {

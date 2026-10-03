@@ -16,6 +16,7 @@
 // point. Far points keep a minimum size on screen and dim with it, so a swarm 500 m away is a field
 // of faint sparks rather than nothing.
 import { createSlotAllocator } from '../pools.js';
+import { createRangeList } from './engineKit.js';
 
 export const GLOW_PAGE_SIZE = 256;
 export const GLOW_SHAPES = Object.freeze(['orb', 'flare', 'firefly']);
@@ -47,6 +48,7 @@ export function createGlowPoints({ THREE, TSL, scene, sky = null, maxGroups, pag
   const pageSlots = createSlotAllocator(pages);
 
   const attributes = [0, 1, 2, 3].map(() => new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4).setUsage(THREE.DynamicDrawUsage));
+  for (const attribute of attributes) attribute.updateRanges = createRangeList(1);
   const arrays = attributes.map((attribute) => attribute.array);
   const range = { start: 0, count: 0 };
 
@@ -199,7 +201,7 @@ export function createGlowPoints({ THREE, TSL, scene, sky = null, maxGroups, pag
         for (let index = 0; index < 4; index++) {
           const attribute = attributes[index];
           attribute.updateRanges.length = 0;
-          attribute.updateRanges.push(range);
+          attribute.updateRanges.add(range.start, range.count);
           attribute.needsUpdate = true;
         }
         dirtyLow = Infinity;

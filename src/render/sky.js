@@ -711,8 +711,10 @@ export function createSkySystem(ctx) {
           const value = values[field];
           if (value === undefined) continue;
           if (!Number.isFinite(value)) throw new TypeError(`sky modifier "${id}": ${field} must be a finite number`);
-          const [low, high] = MODIFIER_LIMITS[field];
-          modifier.values[field] = clamp(value, low, high);
+          // Indexed reads, not destructuring: set() runs every frame for an easing modifier, and an
+          // array pattern can allocate an iterator.
+          const limits = MODIFIER_LIMITS[field];
+          modifier.values[field] = clamp(value, limits[0], limits[1]);
         }
         if (values.weight !== undefined) {
           if (!Number.isFinite(values.weight)) throw new TypeError(`sky modifier "${id}": weight must be a finite number`);
