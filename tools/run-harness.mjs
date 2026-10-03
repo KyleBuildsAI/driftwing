@@ -7,7 +7,7 @@
 // browser console and screenshots of the summary panel, and stops the browser and the server.
 //
 // Usage:
-//   node tools/run-harness.mjs --test 1|hotas|terrain|determinism|spawns [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
+//   node tools/run-harness.mjs --test 1|soak|hotas|terrain|determinism|spawns [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
 //     [--crafts glider,jet] [--views first,third] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
 //     [--presets real | --presets tornado,comet]
@@ -24,6 +24,9 @@
 // The determinism test (/v2/?test=determinism) flies the same scripted path on the same seed (the
 // first of --seeds, by default DETERMINISM-1) in two page loads and compares the site-list hash and the
 // director's activation log; the runner follows it through its reload.
+//
+// The soak (--test soak: /v2/?test=1&testPlan=soak) is the flight test as a 10-minute run with the event
+// director live: 5 seeds (SOAK-1..5 unless --seeds), one craft per seed, both views, 60 s each.
 //
 // The spawns test (/v2/?test=spawns) force-spawns each of the 30 presets ahead of the craft on one seed
 // (the first of --seeds, by default TERRAIN-REAL-8, whose spawn has a real site of every stamped preset
@@ -90,7 +93,9 @@ const DETERMINISM_SEED = 'DETERMINISM-1';
 const SPAWNS_SEED = REAL_TERRAIN_SEED;
 /** The spawns test asks for screenshots: the runner polls this often while it runs. */
 const SHOT_POLL_MS = 400;
-const TESTS = Object.freeze(['1', 'hotas', 'terrain', 'determinism', 'spawns']);
+const TESTS = Object.freeze(['1', 'soak', 'hotas', 'terrain', 'determinism', 'spawns']);
+/** The soak's default worlds (src/dev/testHarness.js SOAK_SEEDS). */
+const SOAK_SEED_COUNT = 5;
 
 function parseArgs(argv) {
   const options = {
@@ -303,7 +308,9 @@ function startGpuSampler() {
 function harnessUrl(port, options) {
   // The harnesses are V2's: they run on V2's own page, not inside the launcher shell.
   const url = new URL(`http://127.0.0.1:${port}/v2/`);
-  url.searchParams.set('test', options.test);
+  // The soak is the flight test (?test=1) with its soak plan.
+  url.searchParams.set('test', options.test === 'soak' ? '1' : options.test);
+  if (options.test === 'soak') url.searchParams.set('testPlan', 'soak');
   if (options.backend === 'webgl') url.searchParams.set('renderer', 'webgl');
   if (options.test === 'terrain') {
     url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : options.presets === 'real' ? REAL_TERRAIN_SEED : TERRAIN_SEED);
@@ -316,7 +323,7 @@ function harnessUrl(port, options) {
     url.searchParams.set('testShots', '1');
     if (options.presets) url.searchParams.set('testPresets', options.presets);
   }
-  if (options.test === '1') {
+  if (options.test === '1' || options.test === 'soak') {
     if (options.seeds) url.searchParams.set('testSeeds', options.seeds);
     if (options.seconds) url.searchParams.set('testSeconds', String(options.seconds));
     if (options.crafts) url.searchParams.set('testCraft', options.crafts);
@@ -331,8 +338,10 @@ function timeLimitMs(options) {
   if (options.test === 'hotas') return 8 * 60000;
   if (options.test === 'terrain' || options.test === 'determinism') return 40 * 60000;
   if (options.test === 'spawns') return 90 * 60000;
-  const seeds = options.seeds ? options.seeds.split(',').filter(Boolean).length : 3;
-  const crafts = options.crafts ? options.crafts.split(',').filter(Boolean).length : 6;
+  const soak = options.test === 'soak';
+  const seeds = options.seeds ? options.seeds.split(',').filter(Boolean).length : soak ? SOAK_SEED_COUNT : 3;
+  // The soak flies one craft per seed.
+  const crafts = soak ? 1 : options.crafts ? options.crafts.split(',').filter(Boolean).length : 6;
   const views = options.views ? options.views.split(',').filter(Boolean).length : 2;
   const seconds = options.seconds ?? 60;
   const plannedSeconds = seeds * crafts * views * (seconds + 3 + 3) + (seeds + 1) * 90;
@@ -487,6 +496,17 @@ function flightTable(report) {
   const totals = report.totals;
   lines.push(`  totals: ${totals.runs} runs, ${totals.measuredSeconds} s measured, avg ${totals.avgFps} fps, worst p99 ${totals.worstP99Ms} ms, max ${totals.maxFrameMs} ms, >50 ms ${totals.slowFrames} (systems ${totals.slowByCause.systems}, gc ${totals.slowByCause.gc}, main thread ${totals.slowByCause.mainThread}, delayed ${totals.slowByCause.delayed}), NaN ${totals.nanEvents}, penetrations ${totals.penetrations}, soft crashes ${totals.softCrashes}, console ${totals.consoleErrors}/${totals.consoleWarnings}, max heap growth ${totals.maxHeapGrowthMB} MB, script ${totals.scriptChecks}`);
   for (const world of report.worlds) lines.push(`  world ${world.seed} (${world.backend}): load ${world.loadSeconds} s, heap at load ${world.heapAtLoadMB} MB, after the warmup lap ${world.heapBaselineMB} MB, at the end ${world.heapFinalMB} MB (growth ${world.heapGrowthMB} MB after the lap, ${world.heapGrowthFromLoadMB} MB from load)`);
+  return lines.join('\n');
+}
+
+/** The report's pass criteria, one line each, and (soak) each world's director and spawns. */
+function criteriaLines(report) {
+  const lines = report.criteria.map((criterion) => `  ${criterion.status === 'pass' ? 'PASS' : criterion.status === 'fail' ? 'FAIL' : '----'}  ${criterion.label}: ${criterion.value}`);
+  for (const world of report.worlds) {
+    if (!world.spawns || world.spawns.directorTicks === null) continue;
+    const log = world.spawns.directorLog.map((entry) => `${entry.presetId}@${entry.time}s(${entry.reason})`).join(', ') || 'none';
+    lines.push(`  world ${world.seed}: director ${world.spawns.directorTicks} ticks, ${world.spawns.directorActivations} activations [${log}], spawns started ${world.spawns.activated.site} sites + ${world.spawns.activated.event} events, peak ${world.spawns.peak}`);
+  }
   return lines.join('\n');
 }
 
@@ -790,7 +810,7 @@ async function main() {
     await sleep(1500);
     await page.screenshot({ path: join(options.out, 'summary.png') });
     // A tall viewport shows the whole summary table in one image.
-    await page.setViewport({ width: options.width, height: Math.max(options.height, options.test === '1' ? 1640 : 1400) });
+    await page.setViewport({ width: options.width, height: Math.max(options.height, options.test === '1' || options.test === 'soak' ? 1640 : 1400) });
     await sleep(1500);
     await page.screenshot({ path: join(options.out, 'summary-full.png') });
     // Every page of the scrolled summary body, so the whole table can be read from the images.
@@ -861,7 +881,8 @@ async function main() {
   writeFileSync(join(options.out, 'gpu-load.json'), JSON.stringify(gpuLoad.samples, null, 2));
   writeFileSync(join(options.out, 'process-load.json'), JSON.stringify(processLoad.samples, null, 2));
 
-  const tables = { 1: () => `${flightTable(report)}\n${craftViewTable(report)}\n${slowFrameEvidence(report)}`, hotas: () => hotasTable(report), terrain: () => terrainTable(report), determinism: () => determinismTable(report), spawns: () => spawnsTable(report) };
+  const flightTables = () => `${flightTable(report)}\n${craftViewTable(report)}\n${criteriaLines(report)}\n${slowFrameEvidence(report)}`;
+  const tables = { 1: flightTables, soak: flightTables, hotas: () => hotasTable(report), terrain: () => terrainTable(report), determinism: () => determinismTable(report), spawns: () => spawnsTable(report) };
   if (report) process.stdout.write(`${tables[options.test]()}\n`);
   process.stdout.write(`run-harness: ${runner.passed ? 'PASS' : 'FAIL'} (harness ${report ? report.result : 'no report'}, backend ${runner.backend ? runner.backend.join(', ') : 'unknown'}, browser console ${runner.errors.length} errors / ${runner.warnings.length} warnings, ${runner.durationSeconds} s)\n`);
   for (const problem of runner.problems) process.stdout.write(`run-harness: problem: ${problem}\n`);
