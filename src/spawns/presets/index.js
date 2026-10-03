@@ -10,6 +10,7 @@ import bioluminescentBay from './bioluminescentBay.js';
 import starlingMurmuration from './starlingMurmuration.js';
 import geeseFormation from './geeseFormation.js';
 import thermalHawks from './thermalHawks.js';
+import fireflies from './fireflies.js';
 
 export const PRESETS = Object.freeze([
   // Batch 2: presets 11-20.
@@ -19,6 +20,7 @@ export const PRESETS = Object.freeze([
   starlingMurmuration,
   geeseFormation,
   thermalHawks,
+  fireflies,
 ]);
 
 /** Presets by id. */
