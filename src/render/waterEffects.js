@@ -1,5 +1,4 @@
 import { CONFIG } from '../core/config.js';
-import { clamp } from '../core/util.js';
 import { createInstancedPool, createSlotAllocator } from '../spawns/pools.js';
 
 /**
@@ -28,7 +27,11 @@ import { createInstancedPool, createSlotAllocator } from '../spawns/pools.js';
  * With nothing registered and an empty trail buffer every added term is exactly zero, so the ocean
  * renders exactly as in Phase 1; the shader work is also skipped then (uniform branches).
  * Every spawn-facing call takes plain numbers or a descriptor object the caller built once, so the
- * callers' frame updates allocate nothing. Positions reach the GPU relative to the ocean grid's
+ * callers' frame updates allocate nothing (the numeric shorthands box their arguments when V8 does
+ * not inline the call, so frequent writers use the mark form). The layer's own frame work allocates
+ * nothing either: no
+ * double crosses a call V8 may not inline (it would be boxed), mutable doubles live in typed arrays
+ * rather than closure variables, and the float uniforms are vector components updated in place. Positions reach the GPU relative to the ocean grid's
  * camera-snapped anchor (float32-safe far from the origin).
  */
 export const WATER_EFFECT_LIMITS = Object.freeze({ vortices: 4, ripples: 8, glowRegions: 4, pools: 4, droplets: 6144 });
@@ -89,26 +92,23 @@ const VORTEX_DEFAULTS = Object.freeze({
 /** Defaults of a pool descriptor (createPool). */
 const POOL_DEFAULTS = Object.freeze({ x: 0, y: 0, z: 0, radius: 50, churn: 0.8, glow: 0 });
 
-function smoothstepNumber(edge0, edge1, value) {
-  const t = clamp((value - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
-}
+/** Defaults of a glow region descriptor (createGlowRegion). */
+const GLOW_REGION_DEFAULTS = Object.freeze({ x: 0, z: 0, radius: 900, strength: 1, surf: 0.6, color: 0x1f9dff });
+
+/**
+ * Defaults of a mark descriptor (createMark): one write into the trail buffer or the ripples. A disc
+ * uses x, z, radius, foam and glow; a trail runs from (x, z) to (x1, z1); a ring adds width; a ripple
+ * and a splash use strength (and a splash glow).
+ */
+const MARK_DEFAULTS = Object.freeze({ x: 0, z: 0, x1: 0, z1: 0, radius: 5, width: 3, foam: 0, glow: 0, strength: 0.5 });
 
 /** Positive modulo (JS % keeps the dividend's sign). */
 function positiveModulo(value, modulus) {
   return ((value % modulus) + modulus) % modulus;
 }
 
-/**
- * Normalised Rankine pressure dip of a vortex: 1 at the eye's centre, 0 at radius and beyond.
- * Shared by the CPU height query and (in TSL form) the shader.
- */
-function funnelShape(distance, radius, eyeRadius) {
-  if (distance >= radius) return 0;
-  const edge = 1 / (1 + (radius / eyeRadius) * (radius / eyeRadius));
-  const ratio = distance / eyeRadius;
-  return (1 / (1 + ratio * ratio) - edge) / (1 - edge);
-}
+/** Entries in the spray jitter table (a power of two). */
+const SPRAY_NOISE_SIZE = 4096;
 
 /**
  * Creates the water effects layer. ctx: the game ctx (THREE, TSL, scene, camera, state, uniforms,
@@ -165,10 +165,10 @@ export function createWaterEffects(ctx) {
     rowActive[row] = 0;
   }
 
-  /** Moves the window to centre on (x, z), clearing the texels that now map to newly covered ground. */
-  function scrollWindow(x, z) {
-    const nextX = Math.floor(x / TRAIL_TEXEL) - TRAIL_SIZE / 2;
-    const nextZ = Math.floor(z / TRAIL_TEXEL) - TRAIL_SIZE / 2;
+  /** Moves the window to centre on position, clearing the texels that now map to newly covered ground. */
+  function scrollWindow(position) {
+    const nextX = Math.floor(position.x / TRAIL_TEXEL) - TRAIL_SIZE / 2;
+    const nextZ = Math.floor(position.z / TRAIL_TEXEL) - TRAIL_SIZE / 2;
     if (!windowReady || Math.abs(nextX - windowX) >= TRAIL_SIZE || Math.abs(nextZ - windowZ) >= TRAIL_SIZE) {
       for (let row = 0; row < TRAIL_SIZE; row++) clearRow(row);
       windowX = nextX;
@@ -194,20 +194,32 @@ export function createWaterEffects(ctx) {
     }
   }
 
-  /** Raises one texel (world texel coordinates) to at least the given values. */
-  function raiseTexel(column, row, foam, glow) {
-    const index = positiveModulo(row, TRAIL_SIZE) * TRAIL_SIZE + positiveModulo(column, TRAIL_SIZE);
-    if (foam > trailFoam[index]) trailFoam[index] = foam;
-    if (glow > trailGlow[index]) trailGlow[index] = glow;
-    rowActive[positiveModulo(row, TRAIL_SIZE)] = 1;
+  /**
+   * Raises one texel (world texel coordinates) to at least texelValue's foam [0] and glow [1]. The
+   * values travel in a typed array, so no double is passed (and boxed) per texel.
+   */
+  const texelValue = new Float64Array(2);
+  function raiseTexel(column, row) {
+    const wrappedRow = ((row % TRAIL_SIZE) + TRAIL_SIZE) % TRAIL_SIZE;
+    const index = wrappedRow * TRAIL_SIZE + ((column % TRAIL_SIZE) + TRAIL_SIZE) % TRAIL_SIZE;
+    if (texelValue[0] > trailFoam[index]) trailFoam[index] = texelValue[0];
+    if (texelValue[1] > trailGlow[index]) trailGlow[index] = texelValue[1];
+    rowActive[wrappedRow] = 1;
   }
 
   /**
-   * Writes a capsule from (x0, z0) to (x1, z1) of radius metres into the trail buffer with a smooth
-   * edge (max blend, so repeated writes never saturate beyond their strength). Returns whether any of
-   * it lies inside the window.
+   * Writes a mark's capsule into the trail buffer: from (x, z) to (x1, z1) when segment is true, else
+   * a disc at (x, z), of mark.radius metres with a smooth edge (max blend, so repeated writes never
+   * saturate beyond their strength). Returns whether any of it lies inside the window.
    */
-  function writeCapsule(x0, z0, x1, z1, radius, foam, glow) {
+  function writeCapsule(mark, segment) {
+    const x0 = mark.x;
+    const z0 = mark.z;
+    const x1 = segment ? mark.x1 : x0;
+    const z1 = segment ? mark.z1 : z0;
+    const radius = mark.radius;
+    const foam = mark.foam;
+    const glow = mark.glow;
     if (!windowReady || !(radius > 0) || (!(foam > 0) && !(glow > 0))) return false;
     const reach = Math.min(radius, TRAIL_MAX_RADIUS);
     const minColumn = Math.max(windowX, Math.floor((Math.min(x0, x1) - reach) / TRAIL_TEXEL));
@@ -219,8 +231,8 @@ export function createWaterEffects(ctx) {
     const segmentX = x1 - x0;
     const segmentZ = z1 - z0;
     const segmentLengthSq = segmentX * segmentX + segmentZ * segmentZ;
-    const foamValue = clamp(foam, 0, 1);
-    const glowValue = clamp(glow, 0, 1);
+    const foamValue = Math.min(Math.max(foam, 0), 1);
+    const glowValue = Math.min(Math.max(glow, 0), 1);
     const reachSq = reach * reach;
     for (let row = minRow; row <= maxRow; row++) {
       const centerZ = (row + 0.5) * TRAIL_TEXEL;
@@ -234,15 +246,23 @@ export function createWaterEffects(ctx) {
         if (distanceSq >= reachSq) continue;
         const edge = 1 - distanceSq / reachSq;
         const weight = edge * edge * (3 - 2 * edge);
-        raiseTexel(column, row, foamValue * weight, glowValue * weight);
+        texelValue[0] = foamValue * weight;
+        texelValue[1] = glowValue * weight;
+        raiseTexel(column, row);
       }
     }
     trailDirty = true;
     return true;
   }
 
-  /** Writes a thin ring (a foam decal around a splash) of radius metres and width metres. */
-  function writeRing(x, z, radius, width, foam, glow) {
+  /** Writes a mark's thin ring (a foam decal around a splash): mark.radius and mark.width metres. */
+  function writeRing(mark) {
+    const x = mark.x;
+    const z = mark.z;
+    const radius = mark.radius;
+    const width = Math.max(mark.width, 0.5);
+    const foam = mark.foam;
+    const glow = mark.glow;
     if (!windowReady) return false;
     const outer = Math.min(radius + width, TRAIL_MAX_RADIUS * 2);
     const minColumn = Math.max(windowX, Math.floor((x - outer) / TRAIL_TEXEL));
@@ -258,7 +278,9 @@ export function createWaterEffects(ctx) {
         const across = Math.abs(distance - radius) / width;
         if (across >= 1) continue;
         const weight = 1 - across * across;
-        raiseTexel(column, row, foam * weight, glow * weight);
+        texelValue[0] = foam * weight;
+        texelValue[1] = glow * weight;
+        raiseTexel(column, row);
       }
     }
     trailDirty = true;
@@ -266,7 +288,8 @@ export function createWaterEffects(ctx) {
   }
 
   /** Decays both channels over the rows that hold something and refreshes their bytes. */
-  function decayTrails(dt) {
+  function decayTrails() {
+    const dt = frameState[STEP];
     const glowFactor = Math.exp(-dt / GLOW_DECAY_SECONDS);
     const foamFactor = Math.exp(-dt / FOAM_DECAY_SECONDS);
     let active = 0;
@@ -314,9 +337,12 @@ export function createWaterEffects(ctx) {
   const regionCount = uniform(0);
   const trailsActive = uniform(0);
   const trailOrigin = uniform(new T.Vector2());
-  const flowTime = uniform(0);
-  const glowColor = uniform(new T.Color(0x1f9dff));
-  const glowVisibility = uniform(0);
+  // The flow clock (s, wrapped hourly) and the glow visibility (night): one vec2 updated in place.
+  const effectClock = uniform(new T.Vector2());
+  const flowTime = effectClock.x;
+  const glowColor = uniform(new T.Color(GLOW_REGION_DEFAULTS.color));
+  let glowColorHex = GLOW_REGION_DEFAULTS.color;
+  const glowVisibility = effectClock.y;
   const foamColor = uniform(new T.Color(1, 1, 1));
 
   // CPU state behind the uniforms (world coordinates in doubles).
@@ -563,15 +589,21 @@ export function createWaterEffects(ctx) {
   let liveDroplets = 0;
   let dropletHighWater = 0;
   let droppedDroplets = 0;
-  // A tiny deterministic generator for spray jitter (no Math.random: effects stay replayable).
-  let sprayRandomState = 0x2f6b1d3;
-  function sprayRandom() {
-    sprayRandomState = (sprayRandomState + 0x6d2b79f5) >>> 0;
-    let mixed = sprayRandomState;
-    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
-    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
-    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  // Spray jitter: a table filled once by a tiny deterministic generator (no Math.random: effects stay
+  // replayable). Each droplet reads seven consecutive entries; the cursor is a small integer.
+  const sprayNoise = new Float32Array(SPRAY_NOISE_SIZE);
+  {
+    let state = 0x2f6b1d3;
+    for (let index = 0; index < SPRAY_NOISE_SIZE; index++) {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let mixed = state;
+      mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
+      mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+      sprayNoise[index] = ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+    }
   }
+  const SPRAY_NOISE_MASK = SPRAY_NOISE_SIZE - 1;
+  let sprayCursor = 0;
 
   function claimDroplet() {
     for (let attempt = 0; attempt < DROPLETS; attempt++) {
@@ -596,13 +628,15 @@ export function createWaterEffects(ctx) {
         droppedDroplets += count - index;
         break;
       }
-      const around = sprayRandom() * TWO_PI;
+      const noise = sprayCursor;
+      sprayCursor = (sprayCursor + 7) & SPRAY_NOISE_MASK;
+      const around = sprayNoise[noise] * TWO_PI;
       const cosAround = Math.cos(around);
       const sinAround = Math.sin(around);
-      const tilt = spray.spread * Math.sqrt(sprayRandom());
-      const speed = spray.speed * (0.55 + 0.45 * sprayRandom());
+      const tilt = spray.spread * Math.sqrt(sprayNoise[(noise + 1) & SPRAY_NOISE_MASK]);
+      const speed = spray.speed * (0.55 + 0.45 * sprayNoise[(noise + 2) & SPRAY_NOISE_MASK]);
       const horizontal = Math.sin(tilt) * speed;
-      const ring = spray.ringRadius * (0.85 + 0.3 * sprayRandom());
+      const ring = spray.ringRadius * (0.85 + 0.3 * sprayNoise[(noise + 3) & SPRAY_NOISE_MASK]);
       dropletX[slot] = spray.x + cosAround * ring;
       dropletY[slot] = spray.y;
       dropletZ[slot] = spray.z + sinAround * ring;
@@ -610,14 +644,14 @@ export function createWaterEffects(ctx) {
       dropletVelocityY[slot] = Math.cos(tilt) * speed * spray.up + spray.inheritY;
       dropletVelocityZ[slot] = sinAround * horizontal + cosAround * spray.swirl + spray.inheritZ;
       dropletAge[slot] = 0;
-      dropletLife[slot] = spray.life * (0.7 + 0.6 * sprayRandom());
-      dropletSize[slot] = spray.size * (0.7 + 0.6 * sprayRandom());
+      dropletLife[slot] = spray.life * (0.7 + 0.6 * sprayNoise[(noise + 4) & SPRAY_NOISE_MASK]);
+      dropletSize[slot] = spray.size * (0.7 + 0.6 * sprayNoise[(noise + 5) & SPRAY_NOISE_MASK]);
       dropletGrowth[slot] = spray.sizeGrowth;
       dropletDrag[slot] = spray.drag;
       dropletGravity[slot] = spray.gravity;
       dropletAlpha[slot] = spray.alpha;
       dropletGlow[slot] = spray.glow;
-      dropletSeed[slot] = sprayRandom();
+      dropletSeed[slot] = sprayNoise[(noise + 6) & SPRAY_NOISE_MASK];
       if (slot + 1 > dropletHighWater) dropletHighWater = slot + 1;
       emitted++;
     }
@@ -627,8 +661,13 @@ export function createWaterEffects(ctx) {
 
   const dropletOrigin = new T.Vector3();
 
-  function updateDroplets(dt, cameraPosition) {
-    dropletOrigin.set(Math.round(cameraPosition.x / 64) * 64, Math.round(cameraPosition.y / 64) * 64, Math.round(cameraPosition.z / 64) * 64);
+  const splatMark = { ...MARK_DEFAULTS, radius: 2.2 };
+
+  function updateDroplets(cameraPosition) {
+    const dt = frameState[STEP];
+    dropletOrigin.x = Math.round(cameraPosition.x / 64) * 64;
+    dropletOrigin.y = Math.round(cameraPosition.y / 64) * 64;
+    dropletOrigin.z = Math.round(cameraPosition.z / 64) * 64;
     dropletSprite.position.copy(dropletOrigin);
     const windX = uniforms.windDirection.value.x * AMBIENT_WIND_SPEED * uniforms.windStrength.value;
     const windZ = uniforms.windDirection.value.y * AMBIENT_WIND_SPEED * uniforms.windStrength.value;
@@ -656,7 +695,10 @@ export function createWaterEffects(ctx) {
       if (dropletY[index] < waterLevel && dropletVelocityY[index] < 0 && dropletGravity[index] > 0.3) {
         // Back on the water: a glowing droplet leaves a small splat.
         if (dropletGlow[index] > 0.05 && splats < DROPLET_SPLATS_PER_FRAME) {
-          writeCapsule(dropletX[index], dropletZ[index], dropletX[index], dropletZ[index], 2.2, 0, dropletGlow[index] * 0.55);
+          splatMark.x = dropletX[index];
+          splatMark.z = dropletZ[index];
+          splatMark.glow = dropletGlow[index] * 0.55;
+          writeCapsule(splatMark, false);
           splats++;
         }
         dropletLife[index] = 0;
@@ -665,7 +707,10 @@ export function createWaterEffects(ctx) {
         continue;
       }
       const lifeShare = age / life;
-      const fade = smoothstepNumber(0, 0.08, lifeShare) * (1 - smoothstepNumber(0.55, 1, lifeShare));
+      // Fade: a smoothstep in over the first 8 % of the life and out over its last 45 %.
+      const rise = Math.min(lifeShare / 0.08, 1);
+      const fall = Math.min(Math.max((lifeShare - 0.55) / 0.45, 0), 1);
+      const fade = rise * rise * (3 - 2 * rise) * (1 - fall * fall * (3 - 2 * fall));
       const offset = index * 3;
       dropletOffsets[offset] = dropletX[index] - dropletOrigin.x;
       dropletOffsets[offset + 1] = dropletY[index] - dropletOrigin.y;
@@ -731,12 +776,15 @@ export function createWaterEffects(ctx) {
 
   function writePools(cameraPosition) {
     if (pools.used === 0) return;
-    poolOrigin.set(Math.round(cameraPosition.x / 64) * 64, 0, Math.round(cameraPosition.z / 64) * 64);
+    poolOrigin.x = Math.round(cameraPosition.x / 64) * 64;
+    poolOrigin.z = Math.round(cameraPosition.z / 64) * 64;
     pools.mesh.position.copy(poolOrigin);
     for (let slot = 0; slot < MAX_POOLS; slot++) {
       const pool = poolState[slot];
       if (pool.slot < 0) continue;
-      poolMatrix.makeScale(pool.radius, 1, pool.radius);
+      // A scale and a translation, written in place (the rest stays identity).
+      poolMatrix.elements[0] = pool.radius;
+      poolMatrix.elements[10] = pool.radius;
       poolMatrix.elements[12] = pool.x - poolOrigin.x;
       poolMatrix.elements[13] = pool.y;
       poolMatrix.elements[14] = pool.z - poolOrigin.z;
@@ -753,16 +801,33 @@ export function createWaterEffects(ctx) {
   // =============================================================================================
   // CRAFT CONTACT
   // =============================================================================================
-  const contact = { touching: false, stirring: false, height: Infinity, lastX: 0, lastZ: 0, hasLast: false, contacts: 0 };
+  // The craft's height and last position live in a typed array (stored every frame without boxing);
+  // the contact object reads them through accessors.
+  const contactState = new Float64Array([Infinity, 0, 0]);
+  const CONTACT_HEIGHT_SLOT = 0;
+  const CONTACT_LAST_X = 1;
+  const CONTACT_LAST_Z = 2;
+  const contact = {
+    touching: false,
+    stirring: false,
+    hasLast: false,
+    contacts: 0,
+    get height() { return contactState[CONTACT_HEIGHT_SLOT]; },
+    get lastX() { return contactState[CONTACT_LAST_X]; },
+    get lastZ() { return contactState[CONTACT_LAST_Z]; },
+  };
+  const contactMark = { ...MARK_DEFAULTS, radius: CONTACT_RADIUS };
 
   /** Writes the craft's trail when it touches (or low-flies over) open water. */
   function updateCraftContact() {
     const craft = state.flight?.position;
     if (!craft || !Number.isFinite(craft.x) || !Number.isFinite(craft.y) || !Number.isFinite(craft.z)) return;
-    const height = craft.y - surfaceHeightAt(craft.x, craft.z);
-    contact.height = height;
     contact.touching = false;
     contact.stirring = false;
+    // Funnels only lower the surface: high above the sea the funnels need not be sampled at all.
+    const aboveSea = craft.y - waterLevel;
+    const height = aboveSea > DOWNWASH_HEIGHT ? aboveSea : craft.y - surfaceHeightAt(craft.x, craft.z);
+    contactState[CONTACT_HEIGHT_SLOT] = height;
     if (height > DOWNWASH_HEIGHT) {
       contact.hasLast = false;
       return;
@@ -772,43 +837,70 @@ export function createWaterEffects(ctx) {
       contact.hasLast = false;
       return;
     }
-    const fromX = contact.hasLast ? contact.lastX : craft.x;
-    const fromZ = contact.hasLast ? contact.lastZ : craft.z;
+    contactMark.x = contact.hasLast ? contactState[CONTACT_LAST_X] : craft.x;
+    contactMark.z = contact.hasLast ? contactState[CONTACT_LAST_Z] : craft.z;
+    contactMark.x1 = craft.x;
+    contactMark.z1 = craft.z;
     if (height < CONTACT_HEIGHT) {
       contact.touching = true;
       contact.contacts++;
-      writeCapsule(fromX, fromZ, craft.x, craft.z, CONTACT_RADIUS, 0.55, 1);
+      contactMark.radius = CONTACT_RADIUS;
+      contactMark.foam = 0.55;
+      contactMark.glow = 1;
     } else {
       contact.stirring = true;
       const share = 1 - (height - CONTACT_HEIGHT) / (DOWNWASH_HEIGHT - CONTACT_HEIGHT);
-      writeCapsule(fromX, fromZ, craft.x, craft.z, CONTACT_RADIUS * (1.4 + share), 0, 0.55 * share);
+      contactMark.radius = CONTACT_RADIUS * (1.4 + share);
+      contactMark.foam = 0;
+      contactMark.glow = 0.55 * share;
     }
-    contact.lastX = craft.x;
-    contact.lastZ = craft.z;
+    writeCapsule(contactMark, true);
+    contactState[CONTACT_LAST_X] = craft.x;
+    contactState[CONTACT_LAST_Z] = craft.z;
     contact.hasLast = true;
   }
 
   // =============================================================================================
   // CPU QUERIES AND UNIFORM UPLOAD
   // =============================================================================================
-  /** The water surface height (m) at (x, z): sea level plus every vortex funnel (swell excluded). */
+  /**
+   * The water surface height (m) at (x, z): sea level plus every vortex funnel (swell excluded). Each
+   * funnel is the normalised Rankine pressure dip, 1 at the eye's centre and 0 at its radius, as in
+   * the shader. Away from every funnel it returns sea level itself (an integer: nothing is boxed).
+   */
   function surfaceHeightAt(x, z) {
-    let height = waterLevel;
+    let dip = 0;
     for (let slot = 0; slot < MAX_VORTICES; slot++) {
       const vortex = vortexState[slot];
       if (!vortex.used || vortex.weight <= 0) continue;
       const offsetX = x - vortex.x;
       const offsetZ = z - vortex.z;
       const distance = Math.sqrt(offsetX * offsetX + offsetZ * offsetZ);
-      height -= funnelShape(distance, vortex.radius, Math.max(vortex.eyeRadius, 1)) * vortex.depth * vortex.weight;
+      if (distance >= vortex.radius) continue;
+      const eyeRadius = Math.max(vortex.eyeRadius, 1);
+      const reach = vortex.radius / eyeRadius;
+      const edge = 1 / (1 + reach * reach);
+      const ratio = distance / eyeRadius;
+      dip += ((1 / (1 + ratio * ratio) - edge) / (1 - edge)) * vortex.depth * vortex.weight;
     }
-    return height;
+    if (dip === 0) return waterLevel;
+    return waterLevel - dip;
   }
 
-  let anchorX = 0;
-  let anchorZ = 0;
+  // The grid anchor and the last flight-clock reading (doubles in a typed array: no boxing).
+  const frameState = new Float64Array(5);
+  const ANCHOR_X = 0;
+  const ANCHOR_Z = 1;
+  const LAST_ELAPSED = 2;
+  /** This frame's flight-clock step (s, at most 0.1). */
+  const STEP = 3;
+  const ELAPSED = 4;
 
-  function uploadUniforms(elapsed) {
+  /** Uploads the vortices, ripples, glow regions and clocks (vector fields written in place). */
+  function uploadUniforms() {
+    const elapsed = frameState[ELAPSED];
+    const anchorX = frameState[ANCHOR_X];
+    const anchorZ = frameState[ANCHOR_Z];
     let vortices = 0;
     for (let slot = 0; slot < MAX_VORTICES; slot++) {
       const vortex = vortexState[slot];
@@ -816,62 +908,67 @@ export function createWaterEffects(ctx) {
       const b = vortexB.array[slot];
       const c = vortexC.array[slot];
       if (!vortex.used || vortex.weight <= 0) {
-        a.set(1e6, 1e6, 1, 1);
-        b.set(0, 0, 0, 0);
-        c.set(0, 1, 0, 0);
+        a.x = 1e6; a.y = 1e6; a.z = 1; a.w = 1;
+        b.x = 0; b.y = 0; b.z = 0; b.w = 0;
+        c.x = 0; c.y = 1; c.z = 0; c.w = 0;
         continue;
       }
       vortices++;
       const weight = vortex.weight;
-      a.set(vortex.x - anchorX, vortex.z - anchorZ, vortex.radius, vortex.eyeRadius);
-      b.set(vortex.depth * weight, vortex.ridge * weight, vortex.arms, vortex.twist);
-      c.set(vortex.pattern, vortex.direction, vortex.foam * weight, vortex.spin);
+      a.x = vortex.x - anchorX; a.y = vortex.z - anchorZ; a.z = vortex.radius; a.w = vortex.eyeRadius;
+      b.x = vortex.depth * weight; b.y = vortex.ridge * weight; b.z = vortex.arms; b.w = vortex.twist;
+      c.x = vortex.pattern; c.y = vortex.direction; c.z = vortex.foam * weight; c.w = vortex.spin;
     }
     vortexCount.value = vortices;
     let ripples = 0;
     for (let index = 0; index < MAX_RIPPLES; index++) {
       const ripple = rippleData.array[index];
       if (rippleAge[index] >= RIPPLE_LIFE_SECONDS || rippleStrength[index] <= 0) {
-        ripple.set(1e6, 1e6, RIPPLE_LIFE_SECONDS, 0);
+        ripple.x = 1e6; ripple.y = 1e6; ripple.z = RIPPLE_LIFE_SECONDS; ripple.w = 0;
         continue;
       }
       ripples++;
-      ripple.set(rippleX[index] - anchorX, rippleZ[index] - anchorZ, rippleAge[index], rippleStrength[index]);
+      ripple.x = rippleX[index] - anchorX; ripple.y = rippleZ[index] - anchorZ; ripple.z = rippleAge[index]; ripple.w = rippleStrength[index];
     }
     rippleCount.value = ripples;
     let regions = 0;
     for (let slot = 0; slot < MAX_REGIONS; slot++) {
       const region = regionState[slot];
       const data = regionData.array[slot];
+      const surf = regionSurf.array[slot];
       if (!region.used || region.strength <= 0) {
-        data.set(1e6, 1e6, 1, 0);
-        regionSurf.array[slot].set(0, 0, 0, 0);
+        data.x = 1e6; data.y = 1e6; data.z = 1; data.w = 0;
+        surf.x = 0;
         continue;
       }
       regions++;
-      data.set(region.x - anchorX, region.z - anchorZ, region.radius, region.strength);
-      regionSurf.array[slot].set(region.surf, 0, 0, 0);
+      data.x = region.x - anchorX; data.y = region.z - anchorZ; data.z = region.radius; data.w = region.strength;
+      surf.x = region.surf;
     }
     regionCount.value = regions;
-    trailOrigin.value.set(positiveModulo(anchorX, TRAIL_SPAN), positiveModulo(anchorZ, TRAIL_SPAN));
-    flowTime.value = elapsed % 3600;
-    const night = state.time.nightFactor;
-    glowVisibility.value = 0.12 + 0.88 * night;
+    trailOrigin.value.x = ((anchorX % TRAIL_SPAN) + TRAIL_SPAN) % TRAIL_SPAN;
+    trailOrigin.value.y = ((anchorZ % TRAIL_SPAN) + TRAIL_SPAN) % TRAIL_SPAN;
+    effectClock.value.x = elapsed % 3600;
+    effectClock.value.y = 0.12 + 0.88 * state.time.nightFactor;
   }
 
-  let lastElapsed = state.time.elapsed;
+  frameState[LAST_ELAPSED] = state.time.elapsed;
 
   /**
-   * Every frame, after the ocean grid followed the camera: anchor = the grid's snapped centre.
-   * Advances the vortex patterns, ripples, droplets, craft contact and the trail buffer.
+   * Every frame, after the ocean grid followed the camera: gridAnchor = the grid's snapped centre (a
+   * Vector3). Advances the vortex patterns, ripples, droplets, craft contact and the trail buffer on
+   * the flight clock (a paused game freezes them).
    */
-  function update(dt, realDt, gridAnchorX, gridAnchorZ, cameraPosition) {
-    anchorX = gridAnchorX;
-    anchorZ = gridAnchorZ;
+  function update(dt, realDt, gridAnchor, cameraPosition) {
+    frameState[ANCHOR_X] = gridAnchor.x;
+    frameState[ANCHOR_Z] = gridAnchor.z;
     const elapsed = state.time.elapsed;
-    const step = Math.max(0, Math.min(0.1, elapsed - lastElapsed));
-    lastElapsed = elapsed;
-    scrollWindow(cameraPosition.x, cameraPosition.z);
+    const step = Math.max(0, Math.min(0.1, elapsed - frameState[LAST_ELAPSED]));
+    frameState[LAST_ELAPSED] = elapsed;
+    frameState[ELAPSED] = elapsed;
+    frameState[STEP] = step;
+    scrollWindow(cameraPosition);
+    drainSplashes();
     for (let slot = 0; slot < MAX_VORTICES; slot++) {
       const vortex = vortexState[slot];
       if (!vortex.used) continue;
@@ -882,10 +979,20 @@ export function createWaterEffects(ctx) {
       if (rippleAge[index] < RIPPLE_LIFE_SECONDS) rippleAge[index] += step;
     }
     if (step > 0) {
-      updateCraftContact();
-      decayTrails(step);
+      // High above the sea (funnels only lower the surface) the contact query is a single store here;
+      // only a craft within the downwash reach runs the full query.
+      const craft = state.flight?.position;
+      const aboveSea = craft ? craft.y - waterLevel : Infinity;
+      if (aboveSea <= DOWNWASH_HEIGHT) updateCraftContact();
+      else {
+        contactState[CONTACT_HEIGHT_SLOT] = aboveSea;
+        contact.touching = false;
+        contact.stirring = false;
+        contact.hasLast = false;
+      }
+      decayTrails();
     }
-    updateDroplets(step, cameraPosition);
+    updateDroplets(cameraPosition);
     writePools(cameraPosition);
     if (trailDirty) {
       trailTexture.needsUpdate = true;
@@ -893,7 +1000,7 @@ export function createWaterEffects(ctx) {
       trailDirty = false;
     }
     trailsActive.value = trailActiveRows > 0 ? 1 : 0;
-    uploadUniforms(elapsed);
+    uploadUniforms();
   }
 
   // =============================================================================================
@@ -914,68 +1021,170 @@ export function createWaterEffects(ctx) {
     return { ...POOL_DEFAULTS, ...overrides };
   }
 
-  /** Adds an expanding ring wave at (x, z); strength 0..1 (1 = 0.55 m crests). */
-  function addRipple(x, z, strength) {
+  /** Adds a mark's expanding ring wave at (x, z); strength 0..1 (1 = 0.55 m crests). */
+  function pushRipple(mark) {
     const index = rippleCursor;
     rippleCursor = (rippleCursor + 1) % MAX_RIPPLES;
-    rippleX[index] = x;
-    rippleZ[index] = z;
+    rippleX[index] = mark.x;
+    rippleZ[index] = mark.z;
     rippleAge[index] = 0;
-    rippleStrength[index] = clamp(strength, 0, 1);
+    rippleStrength[index] = Math.min(Math.max(mark.strength, 0), 1);
   }
 
   const splashSpray = createSpray();
+  const splashDisc = { ...MARK_DEFAULTS, foam: 0.95 };
+  const splashRing = { ...MARK_DEFAULTS };
+
+  // Splashes queue (four doubles each) and are drawn in the next update: a splash is a rare call that
+  // V8 runs unoptimised, where every double operation allocates, so it only copies four numbers; the
+  // per-frame update, which is optimised, does the arithmetic.
+  const SPLASH_QUEUE = 16;
+  const splashQueue = new Float64Array(SPLASH_QUEUE * 4);
+  let splashQueueCount = 0;
+  let splashesDropped = 0;
 
   /**
-   * A splash at (x, z): a spray burst, a foam disc and ring, a ripple ring and a glow splat.
-   * strength 0..1 scales all of it (1 = a whale's full breach); glow 0..1 is the excitation left in
-   * the trail buffer (it only shows inside a glow region). Returns the droplets emitted.
+   * Queues a mark's splash at (x, z): a spray burst, a foam disc and ring, a ripple ring and a glow
+   * splat. strength 0..1 scales all of it (1 = a whale's full breach); glow 0..1 is the excitation
+   * left in the trail buffer (it only shows inside a glow region). Returns whether it was queued (up
+   * to 16 per frame).
    */
-  function splash(x, z, strength, glow = 1) {
-    const power = clamp(strength, 0, 1);
-    const radius = 3 + 9 * power;
-    writeCapsule(x, z, x, z, radius, 0.95, glow);
-    writeRing(x, z, radius * 1.6, 3, 0.7 * power, glow * 0.8);
-    addRipple(x, z, 0.35 + 0.65 * power);
-    splashSpray.x = x;
-    splashSpray.y = waterLevel + 0.3;
-    splashSpray.z = z;
-    splashSpray.count = Math.round(40 + 260 * power);
-    splashSpray.speed = 6 + 14 * power;
-    splashSpray.up = 1;
-    splashSpray.spread = 0.75;
-    splashSpray.ringRadius = radius * 0.4;
-    splashSpray.swirl = 0;
-    splashSpray.size = 0.9 + 1.4 * power;
-    splashSpray.sizeGrowth = 0.9;
-    splashSpray.life = 1.6 + 1.4 * power;
-    splashSpray.drag = 0.6;
-    splashSpray.gravity = 1;
-    splashSpray.alpha = 0.75;
-    splashSpray.glow = glow * 0.8;
-    splashSpray.inheritX = 0;
-    splashSpray.inheritY = 0;
-    splashSpray.inheritZ = 0;
-    return emitSpray(splashSpray);
+  function writeSplash(mark) {
+    if (splashQueueCount >= SPLASH_QUEUE) {
+      splashesDropped++;
+      return false;
+    }
+    const base = splashQueueCount * 4;
+    splashQueue[base] = mark.x;
+    splashQueue[base + 1] = mark.z;
+    splashQueue[base + 2] = mark.strength;
+    splashQueue[base + 3] = mark.glow;
+    splashQueueCount++;
+    return true;
+  }
+
+  /**
+   * Draws the queued splashes (every frame, from update). The work sits inside this hot function's
+   * loop, so it runs optimised once a few splashes have been seen.
+   */
+  function drainSplashes() {
+    for (let queued = 0; queued < splashQueueCount; queued++) {
+      const base = queued * 4;
+      const x = splashQueue[base];
+      const z = splashQueue[base + 1];
+      const power = Math.min(Math.max(splashQueue[base + 2], 0), 1);
+      const glow = splashQueue[base + 3];
+      const radius = 3 + 9 * power;
+      splashDisc.x = x;
+      splashDisc.z = z;
+      splashDisc.radius = radius;
+      splashDisc.glow = glow;
+      writeCapsule(splashDisc, false);
+      splashRing.x = x;
+      splashRing.z = z;
+      splashRing.radius = radius * 1.6;
+      splashRing.width = 3;
+      splashRing.foam = 0.7 * power;
+      splashRing.glow = glow * 0.8;
+      writeRing(splashRing);
+      const ripple = rippleCursor;
+      rippleCursor = (rippleCursor + 1) % MAX_RIPPLES;
+      rippleX[ripple] = x;
+      rippleZ[ripple] = z;
+      rippleAge[ripple] = 0;
+      rippleStrength[ripple] = 0.35 + 0.65 * power;
+      splashSpray.x = x;
+      splashSpray.y = waterLevel + 0.3;
+      splashSpray.z = z;
+      splashSpray.count = Math.round(40 + 260 * power);
+      splashSpray.speed = 6 + 14 * power;
+      splashSpray.up = 1;
+      splashSpray.spread = 0.75;
+      splashSpray.ringRadius = radius * 0.4;
+      splashSpray.swirl = 0;
+      splashSpray.size = 0.9 + 1.4 * power;
+      splashSpray.sizeGrowth = 0.9;
+      splashSpray.life = 1.6 + 1.4 * power;
+      splashSpray.drag = 0.6;
+      splashSpray.gravity = 1;
+      splashSpray.alpha = 0.75;
+      splashSpray.glow = glow * 0.8;
+      splashSpray.inheritX = 0;
+      splashSpray.inheritY = 0;
+      splashSpray.inheritZ = 0;
+      emitSpray(splashSpray);
+    }
+    splashQueueCount = 0;
+  }
+
+  /** The numeric shorthands fill this mark (for one-off writes; frequent writers keep their own). */
+  const shorthand = { ...MARK_DEFAULTS };
+
+  function fillShorthand(x, z, radius, foam, glow) {
+    shorthand.x = x;
+    shorthand.z = z;
+    shorthand.radius = radius;
+    shorthand.foam = foam;
+    shorthand.glow = glow;
+    return shorthand;
   }
 
   const api = {
     nodes,
     update,
-    /** White foam and bioluminescent excitation (0..1 each) in a disc of radius metres at (x, z). */
+    /** A mark descriptor with defaults (build it once in create, mutate it, pass it to the mark calls). */
+    createMark(overrides = {}) {
+      return { ...MARK_DEFAULTS, ...overrides };
+    },
+    /** White foam and bioluminescent excitation (0..1 each) in a disc: mark.x, z, radius, foam, glow. */
+    disturb(mark) {
+      return writeCapsule(mark, false);
+    },
+    /** The same along a segment (a wake): from (mark.x, mark.z) to (mark.x1, mark.z1). */
+    trail(mark) {
+      return writeCapsule(mark, true);
+    },
+    /** A foam ring: mark.x, z, radius, width, foam, glow. */
+    foamRing(mark) {
+      return writeRing(mark);
+    },
+    /** An expanding ring wave: mark.x, z, strength. */
+    ripple(mark) {
+      pushRipple(mark);
+    },
+    /** A full splash: mark.x, z, strength, glow, drawn in the next update. Returns whether it was queued. */
+    splashMark(mark) {
+      return writeSplash(mark);
+    },
+    /** Shorthand of disturb: a disc of radius metres at (x, z). */
     addWaterDisturbance(x, z, radius, foam, glow) {
-      return writeCapsule(x, z, x, z, radius, foam, glow);
+      return writeCapsule(fillShorthand(x, z, radius, foam, glow), false);
     },
-    /** The same along a segment (a wake): from (x0, z0) to (x1, z1). */
+    /** Shorthand of trail: from (x0, z0) to (x1, z1). */
     addWaterTrail(x0, z0, x1, z1, radius, foam, glow) {
-      return writeCapsule(x0, z0, x1, z1, radius, foam, glow);
+      const mark = fillShorthand(x0, z0, radius, foam, glow);
+      mark.x1 = x1;
+      mark.z1 = z1;
+      return writeCapsule(mark, true);
     },
-    /** A foam ring (radius, width in metres) at (x, z). */
+    /** Shorthand of foamRing: a ring of radius and width metres at (x, z). */
     addFoamRing(x, z, radius, width, foam, glow) {
-      return writeRing(x, z, radius, width, foam, glow);
+      const mark = fillShorthand(x, z, radius, foam, glow);
+      mark.width = width;
+      return writeRing(mark);
     },
-    addRipple,
-    splash,
+    /** Shorthand of ripple. */
+    addRipple(x, z, strength) {
+      const mark = fillShorthand(x, z, 0, 0, 0);
+      mark.strength = strength;
+      pushRipple(mark);
+    },
+    /** Shorthand of splashMark: strength 0..1, glow 0..1 (default 1). */
+    splash(x, z, strength, glow = 1) {
+      const mark = fillShorthand(x, z, 0, 0, glow);
+      mark.strength = strength;
+      return writeSplash(mark);
+    },
     createSpray,
     emitSpray,
     createVortex,
@@ -1000,15 +1209,15 @@ export function createWaterEffects(ctx) {
       target.x = vortex.x;
       target.z = vortex.z;
       target.radius = Math.max(vortex.radius, 1);
-      target.eyeRadius = clamp(vortex.eyeRadius, 1, target.radius * 0.9);
+      target.eyeRadius = Math.min(Math.max(vortex.eyeRadius, 1), target.radius * 0.9);
       target.depth = Math.max(vortex.depth, 0);
       target.spin = vortex.spin;
       target.arms = Math.max(1, Math.round(vortex.arms));
       target.twist = vortex.twist;
       target.ridge = vortex.ridge;
-      target.foam = clamp(vortex.foam, 0, 1);
+      target.foam = Math.min(Math.max(vortex.foam, 0), 1);
       target.direction = vortex.direction < 0 ? -1 : 1;
-      target.weight = clamp(vortex.weight, 0, 1);
+      target.weight = Math.min(Math.max(vortex.weight, 0), 1);
       return true;
     },
     releaseVortex(slot) {
@@ -1026,20 +1235,28 @@ export function createWaterEffects(ctx) {
       }
       return slot;
     },
+    /** A glow region descriptor with defaults (see setGlowRegion). */
+    createGlowRegion(overrides = {}) {
+      return { ...GLOW_REGION_DEFAULTS, ...overrides };
+    },
     /**
-     * Bioluminescent water in a disc: radius (m), strength 0..1 (how brightly excitation glows),
-     * surf 0..1 (how brightly the swell crests glow on their own), colorHex (the layer's one glow
-     * colour: the most recently set region's).
+     * Copies a glow region descriptor (createGlowRegion) into the slot: bioluminescent water in a disc
+     * at x, z of radius (m); strength 0..1.5 (how brightly excitation glows); surf 0..1.5 (how brightly
+     * the swell crests glow on their own); color 0xRRGGBB (the layer's one glow colour: the most
+     * recently set region's).
      */
-    setGlowRegion(slot, x, z, radius, strength, surf, colorHex) {
+    setGlowRegion(slot, descriptor) {
       const region = regionState[slot];
       if (!region || !region.used) return false;
-      region.x = x;
-      region.z = z;
-      region.radius = Math.max(radius, 1);
-      region.strength = clamp(strength, 0, 1.5);
-      region.surf = clamp(surf, 0, 1.5);
-      if (Number.isInteger(colorHex)) glowColor.value.setHex(colorHex);
+      region.x = descriptor.x;
+      region.z = descriptor.z;
+      region.radius = Math.max(descriptor.radius, 1);
+      region.strength = Math.min(Math.max(descriptor.strength, 0), 1.5);
+      region.surf = Math.min(Math.max(descriptor.surf, 0), 1.5);
+      if (Number.isInteger(descriptor.color) && descriptor.color !== glowColorHex) {
+        glowColorHex = descriptor.color;
+        glowColor.value.setHex(glowColorHex);
+      }
       return true;
     },
     releaseGlowRegion(slot) {
@@ -1062,8 +1279,8 @@ export function createWaterEffects(ctx) {
       target.y = pool.y;
       target.z = pool.z;
       target.radius = Math.max(pool.radius, 1);
-      target.churn = clamp(pool.churn, 0, 1);
-      target.glow = clamp(pool.glow, 0, 1);
+      target.churn = Math.min(Math.max(pool.churn, 0), 1);
+      target.glow = Math.min(Math.max(pool.glow, 0), 1);
       return true;
     },
     releasePool(slot) {
@@ -1075,7 +1292,10 @@ export function createWaterEffects(ctx) {
       return true;
     },
     surfaceHeightAt,
-    /** The craft's height above the water surface (m) at the last frame, and whether it touched it. */
+    /**
+     * The craft's height above the water surface (m) at the last frame (above sea level while it is
+     * higher than the downwash reach), and whether it touched or stirred the water.
+     */
     get craftContact() {
       return contact;
     },
@@ -1093,6 +1313,7 @@ export function createWaterEffects(ctx) {
         pools: pools.used,
         droplets: liveDroplets,
         dropletsDropped: droppedDroplets,
+        splashesDropped,
         trailRows: trailActiveRows,
         trailUploads,
         craftContacts: contact.contacts,

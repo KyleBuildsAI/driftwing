@@ -1313,7 +1313,14 @@ export function createFaunaEngine() {
         pool.pz[index] += pool.vz[index] * dt;
         pool.bank[index] += 1.4 * dt;
         if (pool.vy[index] < 0 && pool.py[index] < surfaceY - girth * 0.4) {
-          if (water) water.splash(pool.px[index], pool.pz[index], Math.min(1, 0.55 + scale * 0.03), pod.glow);
+          if (water) {
+            const mark = data.waterMark;
+            mark.x = pool.px[index];
+            mark.z = pool.pz[index];
+            mark.strength = Math.min(1, 0.55 + scale * 0.03);
+            mark.glow = pod.glow;
+            water.splashMark(mark);
+          }
           pool.mode[index] = WHALE_DEEP;
           pool.timer[index] = 3;
           pool.vy[index] = -2;
@@ -1384,9 +1391,15 @@ export function createFaunaEngine() {
         pool.aux2[index] -= dt;
         if (pool.aux2[index] <= 0) {
           pool.aux2[index] = 0.3;
-          const backX = pool.px[index] - pool.vx[index] * 1.2;
-          const backZ = pool.pz[index] - pool.vz[index] * 1.2;
-          water.addWaterTrail(backX, backZ, pool.px[index], pool.pz[index], girth * 1.6, pod.wake * 0.7, pod.glow);
+          const mark = data.waterMark;
+          mark.x = pool.px[index] - pool.vx[index] * 1.2;
+          mark.z = pool.pz[index] - pool.vz[index] * 1.2;
+          mark.x1 = pool.px[index];
+          mark.z1 = pool.pz[index];
+          mark.radius = girth * 1.6;
+          mark.foam = pod.wake * 0.7;
+          mark.glow = pod.glow;
+          water.trail(mark);
         }
       }
       const seed = pool.seed[index];
@@ -1974,6 +1987,7 @@ export function createFaunaEngine() {
       thermals: null,
       thermalVisitor: null,
       spout: null,
+      waterMark: null,
       wind: null,
       windAttached: false,
       formationState: null,
@@ -2002,6 +2016,7 @@ export function createFaunaEngine() {
       data.formationState = { inSlot: false, holdSeconds: 0, bestHoldSeconds: 0, complete: false, distance: Infinity, slot: { x: 0, y: 0, z: 0 }, holdTarget: resolved.formation.holdSeconds };
     }
     if (resolved.behavior === 'pod' && ctx.water) {
+      data.waterMark = ctx.water.createMark();
       data.spout = ctx.water.createSpray({ speed: 12, up: 1, spread: 0.1, size: 1.4, sizeGrowth: 1.4, life: 2.6, drag: 1.1, gravity: 0.35, alpha: 0.6, glow: resolved.pod.glow * 0.8 });
     }
     initAgents(data, rng);

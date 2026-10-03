@@ -415,7 +415,7 @@ export function createWaterSystem(ctx) {
       followCamera(camera.position.x, camera.position.z);
       advanceWaves(state.time.elapsed);
       updateLighting(realDt);
-      effects.update(dt, realDt, mesh.position.x, mesh.position.z, camera.position);
+      effects.update(dt, realDt, mesh.position, camera.position);
     },
     getStats() {
       return { effects: effects.stats() };

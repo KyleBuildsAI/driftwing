@@ -17,7 +17,9 @@
 // no GPU resources per instance: it borrows slots (vortex, glow region, pool) and droplets from the
 // layer, so dispose() returns memory by construction and only has to give the slots back. It authors
 // no wind sources (the maelstrom's air column is the vortex engine's). Its frame update allocates
-// nothing: descriptors are built once in create() and mutated, and every layer call takes numbers.
+// nothing: descriptors (spray, vortex, pool, glow region, mark) are built once in create() and
+// mutated, no freshly computed double is passed to a call (V8 would box it), and the effect's random
+// numbers come from a small table drawn from the spawn's seeded generator at create.
 //
 // LOD: near runs everything; mid keeps the vortex, glow region and pool with spray at a third of its
 // rate and no plankton flashes; far releases the slots and stops the spray (the ocean grid ends 4 km
@@ -28,6 +30,9 @@ const TIER_SPRAY_SCALE = Object.freeze({ near: 1, mid: 0.35, far: 0 });
 /** Seconds between attempts to take a layer slot that was full. */
 const SLOT_RETRY_SECONDS = 1;
 const TWO_PI = Math.PI * 2;
+/** Entries in an instance's random table (a power of two), drawn from its seeded generator. */
+const NOISE_SIZE = 64;
+const NOISE_MASK = NOISE_SIZE - 1;
 
 /** Engine defaults per effect (docs/engines/waterEffect.md). A preset overrides any of them. */
 export const WATER_EFFECT_DEFAULTS = Object.freeze({
@@ -100,9 +105,9 @@ export function createWaterEffectEngine() {
       || (data.kind === 'plungePool' && data.poolOnDisc && data.poolSlot < 0);
   }
 
-  /** Emits rate * dt droplets of spray (carrying the fraction to the next frame). */
-  function emitRate(data, spray, rate, dt) {
-    data.emitCarry += rate * dt;
+  /** Emits data.rate * dt droplets of spray (carrying the fraction to the next frame). */
+  function emitRate(data, spray, dt) {
+    data.emitCarry += data.rate * dt;
     const count = Math.floor(data.emitCarry);
     if (count <= 0) return 0;
     data.emitCarry -= count;
@@ -123,12 +128,19 @@ export function createWaterEffectEngine() {
     instance.anchor.z = data.followAnchor.z;
   }
 
-  function updateWhirlpool(instance, data, dt, fade) {
+  /** The next entry of the instance's random table, written to data.noiseValue (no double returned). */
+  function drawNoise(data) {
+    data.noiseValue = data.noise[data.noiseCursor];
+    data.noiseCursor = (data.noiseCursor + 1) & NOISE_MASK;
+  }
+
+  function updateWhirlpool(instance, data, dt) {
+    const fade = data.fade;
     const vortex = data.vortex;
     vortex.x = instance.anchor.x;
     vortex.z = instance.anchor.z;
     data.spinAge += dt;
-    const spinUp = data.params.spinUp > 0 ? clamp(data.spinAge / data.params.spinUp, 0, 1) : 1;
+    const spinUp = data.params.spinUp > 0 ? Math.min(Math.max(data.spinAge / data.params.spinUp, 0), 1) : 1;
     vortex.weight = fade * (spinUp * spinUp * (3 - 2 * spinUp));
     if (data.vortexSlot >= 0) water.setVortex(data.vortexSlot, vortex);
     const mistRate = data.params.mistRate * TIER_SPRAY_SCALE[instance.tier] * vortex.weight;
@@ -136,25 +148,34 @@ export function createWaterEffectEngine() {
       const mist = data.spray;
       mist.x = vortex.x;
       mist.z = vortex.z;
-      mist.y = water.surfaceHeightAt(vortex.x, vortex.z) + 1;
+      // The eye's surface: the funnel's full depth at its centre (computed here, not queried, so no
+      // double is returned across a call).
+      mist.y = ctx.terrain.waterLevel - vortex.depth * vortex.weight + 1;
       mist.swirl = vortex.spin * vortex.eyeRadius * 0.6 * vortex.direction;
-      emitRate(data, mist, mistRate, dt);
+      data.rate = mistRate;
+      emitRate(data, mist, dt);
     }
   }
 
-  function updateSplash(instance, data, dt, fade) {
+  function updateSplash(instance, data, dt) {
     if (dt <= 0) return;
     data.timer -= dt;
     if (data.timer > 0) return;
     const params = data.params;
-    const angle = data.rng() * TWO_PI;
-    const reach = params.scatter * Math.sqrt(data.rng());
-    const x = instance.anchor.x + Math.cos(angle) * reach;
-    const z = instance.anchor.z + Math.sin(angle) * reach;
-    data.lastSplash = water.splash(x, z, params.strength * fade, params.glow);
+    const mark = data.mark;
+    drawNoise(data);
+    const angle = data.noiseValue * TWO_PI;
+    drawNoise(data);
+    const reach = params.scatter * Math.sqrt(data.noiseValue);
+    mark.x = instance.anchor.x + Math.cos(angle) * reach;
+    mark.z = instance.anchor.z + Math.sin(angle) * reach;
+    mark.strength = params.strength * data.fade;
+    mark.glow = params.glow;
+    data.lastSplash = water.splashMark(mark);
     data.splashes++;
     if (Array.isArray(params.interval)) {
-      data.timer = params.interval[0] + data.rng() * (params.interval[1] - params.interval[0]);
+      drawNoise(data);
+      data.timer = params.interval[0] + data.noiseValue * (params.interval[1] - params.interval[0]);
     } else if (Number.isFinite(params.interval) && params.interval > 0) {
       data.timer = params.interval;
     } else {
@@ -164,26 +185,46 @@ export function createWaterEffectEngine() {
     }
   }
 
-  function updateSpray(instance, data, dt, fade) {
+  function updateSpray(instance, data, dt) {
     if (dt <= 0) return;
+    const fade = data.fade;
     const params = data.params;
     const spray = data.spray;
     spray.x = instance.anchor.x;
     spray.z = instance.anchor.z;
-    spray.y = water.surfaceHeightAt(spray.x, spray.z) + 0.4;
+    // The surface under the ring (a funnel lowers it), sampled twice a second.
+    data.surfaceTimer -= dt;
+    if (data.surfaceTimer <= 0) {
+      data.surfaceTimer = 0.5;
+      spray.y = water.surfaceHeightAt(spray.x, spray.z) + 0.4;
+    }
     spray.alpha = 0.55 * fade;
-    emitRate(data, spray, params.rate * TIER_SPRAY_SCALE[instance.tier] * fade, dt);
+    data.rate = params.rate * TIER_SPRAY_SCALE[instance.tier] * fade;
+    emitRate(data, spray, dt);
     data.ringTimer -= dt;
     if (data.ringTimer <= 0) {
       data.ringTimer = 0.25;
-      water.addFoamRing(spray.x, spray.z, params.ringRadius, Math.max(3, params.ringRadius * 0.35), params.foam * fade, params.glow * fade);
+      const mark = data.mark;
+      mark.x = spray.x;
+      mark.z = spray.z;
+      mark.radius = spray.ringRadius;
+      mark.width = Math.max(3, spray.ringRadius * 0.35);
+      mark.foam = params.foam * fade;
+      mark.glow = params.glow * fade;
+      water.foamRing(mark);
     }
   }
 
-  function updateBioluminescence(instance, data, dt, fade) {
+  function updateBioluminescence(instance, data, dt) {
+    const fade = data.fade;
     const params = data.params;
     if (data.regionSlot >= 0) {
-      water.setGlowRegion(data.regionSlot, instance.anchor.x, instance.anchor.z, params.radius, params.strength * fade, params.surf * fade, params.color);
+      const region = data.region;
+      region.x = instance.anchor.x;
+      region.z = instance.anchor.z;
+      region.strength = params.strength * fade;
+      region.surf = params.surf * fade;
+      water.setGlowRegion(data.regionSlot, region);
     }
     if (dt <= 0 || instance.tier !== 'near') return;
     // Plankton flashes: little glows the swell sets off around the camera, inside the bay.
@@ -192,18 +233,27 @@ export function createWaterEffectEngine() {
     const offsetZ = camera.z - instance.anchor.z;
     if (offsetX * offsetX + offsetZ * offsetZ > params.radius * params.radius) return;
     data.emitCarry += params.flashRate * dt * fade;
+    const mark = data.mark;
     while (data.emitCarry >= 1) {
       data.emitCarry -= 1;
-      const angle = data.rng() * TWO_PI;
-      const reach = 30 + 170 * data.rng();
-      const x = camera.x + Math.cos(angle) * reach;
-      const z = camera.z + Math.sin(angle) * reach;
-      water.addWaterDisturbance(x, z, params.flashRadius * (0.6 + 0.8 * data.rng()), 0, 0.35 + 0.4 * data.rng());
+      drawNoise(data);
+      const angle = data.noiseValue * TWO_PI;
+      drawNoise(data);
+      const reach = 30 + 170 * data.noiseValue;
+      mark.x = camera.x + Math.cos(angle) * reach;
+      mark.z = camera.z + Math.sin(angle) * reach;
+      drawNoise(data);
+      mark.radius = params.flashRadius * (0.6 + 0.8 * data.noiseValue);
+      mark.foam = 0;
+      drawNoise(data);
+      mark.glow = 0.35 + 0.4 * data.noiseValue;
+      water.disturb(mark);
       data.flashes++;
     }
   }
 
-  function updatePlungePool(instance, data, dt, fade) {
+  function updatePlungePool(instance, data, dt) {
+    const fade = data.fade;
     const params = data.params;
     const pool = data.pool;
     pool.churn = params.churn * fade;
@@ -215,14 +265,22 @@ export function createWaterEffectEngine() {
     mist.y = pool.y + 1.5;
     mist.z = pool.z;
     mist.alpha = 0.35 * fade;
-    emitRate(data, mist, params.mistRate * TIER_SPRAY_SCALE[instance.tier] * fade, dt);
+    data.rate = params.mistRate * TIER_SPRAY_SCALE[instance.tier] * fade;
+    emitRate(data, mist, dt);
     if (data.poolOnDisc) return;
     // The pool lies on the open sea: churn the ocean itself.
     data.timer -= dt;
     if (data.timer <= 0) {
       data.timer = params.rippleInterval;
-      water.addRipple(pool.x, pool.z, 0.45 * fade);
-      water.addWaterDisturbance(pool.x, pool.z, pool.radius * 0.6, params.churn * fade, params.glow * fade);
+      const mark = data.mark;
+      mark.x = pool.x;
+      mark.z = pool.z;
+      mark.strength = 0.45 * fade;
+      water.ripple(mark);
+      mark.radius = pool.radius * 0.6;
+      mark.foam = params.churn * fade;
+      mark.glow = params.glow * fade;
+      water.disturb(mark);
     }
   }
 
@@ -267,6 +325,7 @@ export function createWaterEffectEngine() {
     } else if (data.kind === 'bioluminescence') {
       instance.radius = params.radius * data.scale;
       params.radius = instance.radius;
+      data.region = water.createGlowRegion({ x: anchor.x, z: anchor.z, radius: params.radius, strength: 0, surf: 0, color: params.color });
       data.particlesAtFull = 0;
     } else {
       const stamp = cliffStepOf(data.site);
@@ -341,8 +400,17 @@ export function createWaterEffectEngine() {
           followIndex: Number.isInteger(resolved.follow) ? resolved.follow : null,
           followAnchor: null,
           voice: null,
+          fade: 0,
+          rate: 0,
+          surfaceTimer: 0,
+          region: null,
+          mark: water.createMark(),
+          noise: new Float32Array(NOISE_SIZE),
+          noiseCursor: 0,
+          noiseValue: 0,
         },
       };
+      for (let index = 0; index < NOISE_SIZE; index++) instance.data.noise[index] = rng();
       prepare(instance, instance.data, rng);
       if (resolved.voice === true && preset.audio && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
         instance.data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
@@ -359,8 +427,9 @@ export function createWaterEffectEngine() {
       data.age += dt;
       followPart(instance, data);
       // Fade in from creation; events fade out over their last fadeOut seconds.
-      let fade = params.fadeIn > 0 ? clamp(data.age / params.fadeIn, 0, 1) : 1;
-      if (data.duration !== null && params.fadeOut > 0) fade = Math.min(fade, clamp((data.duration - data.age) / params.fadeOut, 0, 1));
+      let fade = params.fadeIn > 0 ? Math.min(Math.max(data.age / params.fadeIn, 0), 1) : 1;
+      if (data.duration !== null && params.fadeOut > 0) fade = Math.min(fade, Math.min(Math.max((data.duration - data.age) / params.fadeOut, 0), 1));
+      data.fade = fade;
       if (instance.tier !== 'far' && wantsSlot(data)) {
         data.retry -= dt;
         if (data.retry <= 0) {
@@ -368,7 +437,7 @@ export function createWaterEffectEngine() {
           acquireSlots(data);
         }
       }
-      if (instance.tier !== 'far') UPDATERS[data.kind](instance, data, dt, fade);
+      if (instance.tier !== 'far') UPDATERS[data.kind](instance, data, dt);
       if (data.voice) {
         data.voice.setPosition(instance.anchor);
         data.voice.setIntensity(params.voiceIntensity * fade);
