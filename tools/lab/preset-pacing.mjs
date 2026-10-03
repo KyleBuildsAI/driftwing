@@ -193,7 +193,7 @@ function runScenario({ seed, craft, hours, startDayTime }) {
     presets: PRESETS,
     spawnManager: manager,
     weather: createWeatherModel(world.seedHash >>> 0),
-    terrain: { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL },
+    terrain: { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL, landmarkSitesNear: world.landmarkSitesNear },
     getPlayer: () => path.player,
     getTime,
     getSun: () => sun.sun,
