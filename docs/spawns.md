@@ -107,6 +107,10 @@ journal's collection count is found / 30 over these presets (`PRESETS` in
   at most 4 real lights, and per-engine instance and particle caps (each engine's `budget`, else
   `DIRECTOR_BUDGETS.engines`). Under frame-time pressure the director first defers heavy activations
   and then steps far spawns to cheaper LOD tiers, before the renderer drops resolution.
+- **Declined activations.** When every engine of a director activation ends its instance at create
+  (thermal hawks with no working thermal, a whale pod with no open water in reach), the SpawnManager
+  refuses it with the reason `declined`. The director then counts no notable, cooldown or tier turn
+  and tries the candidate again in its next bucket.
 
 The full rules are in [architecture.md: Event director](architecture.md#event-director-srcspawnsdirectorjs).
 
@@ -338,8 +342,9 @@ full.
 
 - **Kind:** event, common.
 - **Engines:** `fauna` (species `whale`, behaviour `pod`: 3-6 whales, breach chance 0.35, spouts
-  every 3.5-6.5 s; a coastal candidate moves its pod to open water within 3 km; their wakes and
-  splashes glow in a bioluminescent bay).
+  every 3.5-6.5 s; a coastal candidate moves its pod to open water within 3 km, and a director activation
+  that finds none is declined and retried later; their wakes and splashes glow in a bioluminescent
+  bay).
 - **Filters:** any biome and hour and weather; on a coast; player 0-2500 m; 3-8 km ahead.
 - **Candidates:** 5 km cells, 300 s buckets, chance 0.5.
 - **Wind:** none.
@@ -432,7 +437,8 @@ Three to six hawks circle inside the Phase 1 thermals, the visual marker for lif
 - **Kind:** event, common.
 - **Engines:** `fauna` (species `hawk`, behaviour `circling` in a WindField thermal within 2.6 km,
   climbing 1.4 m/s from 120 m to 1100 m; `requireThermal`: a group that finds no working thermal
-  ends before it is drawn).
+  ends before it is drawn, and a director activation that ends this way is declined, so it counts
+  as nothing notable and the candidate is retried later).
 - **Filters:** meadows, dunes or pine; midday (the thermal hours); clear, building or clearing
   weather; over land; player 0-3000 m; 3-7.5 km ahead.
 - **Candidates:** 4.5 km cells, 300 s buckets, chance 0.5.
@@ -708,9 +714,12 @@ and the storm decays.
 - **Kind:** event, legendary. Not heavy itself: its children are the ordinary `supercell` and
   `tornado` presets, started through the SpawnManager with their own budgets, lures and wind.
 - **Engines:** `setPiece` (children `supercell`, growing over 170 s with a ramped wall cloud, and
-  `tornado`, 800 m behind the storm's centre; stages build 170-190 s, wallCloud 24-30 s, touchdown
-  235-250 s, ropeOut 20 s, clearing 60 s; narration lines at each stage through WREN). The children's
-  own approach journals are silenced, so a chase counts once.
+  `tornado`, 800 m behind the storm's centre, its own storm tower shrunk to a dark turning lowering
+  on the funnel: the child's `weatherVolume` override has base 1150 m, height 600 m, radius 900 m,
+  36 puffs, no anvil, overshoot or rain, and a 520 m wall cloud dropping 300 m; stages build
+  170-190 s, wallCloud 24-30 s, touchdown 235-250 s, ropeOut 20 s, clearing 60 s; narration lines
+  at each stage through WREN). The children's own approach journals are silenced, so a chase counts
+  once, and the supercell is the only storm tower.
 - **Filters:** any biome; day or dusk; building or storm weather; over land; any altitude;
   7-12 km ahead.
 - **Candidates:** 9 km cells, 900 s buckets, chance 0.4.
