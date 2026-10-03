@@ -593,7 +593,7 @@ export function createLightEffectEngine() {
         });
       }
       for (let index = 0; index < BEAM_SLOTS; index++) {
-        beams.push({ slot: createRibbonSlot({ THREE, TSL, scene: ctx.scene, name: `light-beam-${index}`, segmentCapacity: 8, kind: 'beam' }), owner: null });
+        beams.push({ slot: createRibbonSlot({ THREE, TSL, scene: ctx.scene, name: `light-beam-${index}`, segmentCapacity: 8, kind: 'beam', clock: ctx.uniforms.time }), owner: null });
       }
       if (typeof ctx.registerPrewarm === 'function') {
         ctx.registerPrewarm(points.mesh);
@@ -686,6 +686,9 @@ export function createLightEffectEngine() {
             beam.owner = instance;
             beam.slot.color.value.setHex(config.beam.color);
             generateBeams(beam.slot, config.beam.count, config.beam.length, config.beam.width[0], config.beam.width[1], config.beam.tilt);
+            // The sweep starts now and turns once per period on the scene clock (the shader turns it).
+            beam.slot.params.value.y = ctx.time.elapsed;
+            beam.slot.params.value.z = config.beam.period;
             data.beam = beam;
           }
         }
@@ -809,15 +812,19 @@ export function createLightEffectEngine() {
         const frame = data.heading;
         const offset = beamConfig.offset;
         const mesh = data.beam.slot.mesh;
-        mesh.position.x = anchor.x + offset[0] * frame.rightX + offset[2] * frame.forwardX;
-        mesh.position.y = anchor.y + offset[1];
-        mesh.position.z = anchor.z + offset[0] * frame.rightZ + offset[2] * frame.forwardZ;
+        // Written only when it moved (see createPooledLight's apply: a steady beam writes nothing).
+        const position = mesh.position;
+        const beamX = anchor.x + offset[0] * frame.rightX + offset[2] * frame.forwardX;
+        const beamY = anchor.y + offset[1];
+        const beamZ = anchor.z + offset[0] * frame.rightZ + offset[2] * frame.forwardZ;
+        if (position.x !== beamX) position.x = beamX;
+        if (position.y !== beamY) position.y = beamY;
+        if (position.z !== beamZ) position.z = beamZ;
         const beamVisible = 1 - beamConfig.night + beamConfig.night * night;
         const level = beamConfig.intensity * beamVisible * data.fade[0];
+        // The sweep turns in the shader on the scene clock (create set its start and period).
         const beamParams = data.beam.slot.params.value;
-        beamParams.x = level;
-        // The sweep turns in the shader (a mesh rotation would recompute its quaternion each frame).
-        beamParams.y = -((data.age[0] / beamConfig.period) % 1) * Math.PI * 2;
+        if (beamParams.x !== level) beamParams.x = level;
         mesh.visible = level > 0.001;
       }
 

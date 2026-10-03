@@ -6,9 +6,10 @@
 // segment is a quad that faces the camera around its own axis, computed in view space in the vertex
 // shader from both ends of the segment, with a minimum width on screen so a bolt 10 km away still
 // reads as a line. The fragment shader draws a hot core in a wide halo; the colour is HDR, so the
-// bloom carries it. The slot's intensity (the flash envelope) and a beam's sweep angle share one vec4
-// uniform (params.x, params.y): a strike costs no upload after its geometry is written, and a
-// Vector4 takes new numbers in place where a float uniform would box each one.
+// bloom carries it. The slot's intensity (the flash envelope) and a beam's sweep (its start time and
+// period) share one vec4 uniform (params.x, params.y, params.z): a strike costs no upload after its
+// geometry is written, a Vector4 takes new numbers in place where a float uniform would box each
+// one, and a beam turns in the shader on the scene clock, so its sweep writes nothing per frame.
 //
 // Bolt geometry comes from generateBolt(): midpoint displacement of the main channel (seeded, with a
 // little downward bias so it walks down) plus forking branches, written into the slot's attribute
@@ -35,14 +36,16 @@ const RENDER_ORDER = 7;
 
 /**
  * Builds a ribbon slot of segmentCapacity segments. options: THREE, TSL, scene, name, kind ('bolt'
- * or 'beam'). Returns the mesh, its uniforms (params: x intensity, y a beam's sweep angle in radians
- * about the vertical; color), the segment scratch and the writers.
+ * or 'beam'), clock (a beam's float node of the simulation time in seconds, ctx.uniforms.time).
+ * Returns the mesh, its uniforms (params: x intensity; for a beam, y the time its sweep started and
+ * z its period, both in seconds; color), the segment scratch and the writers.
  */
-export function createRibbonSlot({ THREE, TSL, scene, name, segmentCapacity, kind = 'bolt' }) {
+export function createRibbonSlot({ THREE, TSL, scene, name, segmentCapacity, kind = 'bolt', clock = null }) {
   const {
     Fn, float, vec2, vec4, uniform, attribute, modelViewMatrix, cameraProjectionMatrix, varyingProperty,
-    abs, exp, max, mix, cross, normalize, length, saturate, pow, smoothstep, sin, cos, vec3,
+    abs, exp, max, mix, cross, normalize, length, saturate, pow, smoothstep, sin, cos, vec3, fract,
   } = TSL;
+  if (kind === 'beam' && !clock) throw new TypeError(`ribbon slot ${name}: a beam needs the clock node`);
   const vertexCount = segmentCapacity * 4;
   const positions = new Float32Array(vertexCount * 3);
   const segmentStart = new Float32Array(vertexCount * 3);
@@ -66,7 +69,7 @@ export function createRibbonSlot({ THREE, TSL, scene, name, segmentCapacity, kin
   geometry.setDrawRange(0, 0);
   geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
 
-  const params = uniform(new THREE.Vector4(0, 0, 0, 0));
+  const params = uniform(new THREE.Vector4(0, 0, 1, 0));
   const intensity = params.x;
   const color = uniform(new THREE.Color(1, 1, 1));
   /** One segment on its way to writeSegment: ax, ay, az, bx, by, bz, half-width, end half-width, brightness. */
@@ -97,9 +100,11 @@ export function createRibbonSlot({ THREE, TSL, scene, name, segmentCapacity, kin
   if (kind === 'beam') {
     // A beam: soft across, fading along its length (the brightness carries the along position).
     const vAlong = varyingProperty('float', 'vRibbonAlong');
-    // The sweep turns the spokes about the vertical in the shader (params.y), as rotation.y would.
-    const sweepCos = cos(params.y);
-    const sweepSin = sin(params.y);
+    // The sweep turns the spokes about the vertical in the shader, as rotation.y would: one turn
+    // per period (params.z) since the sweep started (params.y), on the simulation clock.
+    const sweepAngle = fract(clock.sub(params.y).div(max(params.z, 0.001))).mul(-Math.PI * 2);
+    const sweepCos = cos(sweepAngle);
+    const sweepSin = sin(sweepAngle);
     const sweep = (point) => vec3(point.x.mul(sweepCos).add(point.z.mul(sweepSin)), point.y, point.z.mul(sweepCos).sub(point.x.mul(sweepSin)));
     material.vertexNode = Fn(() => {
       const startView = modelViewMatrix.mul(vec4(sweep(start), 1)).xyz;
@@ -320,7 +325,7 @@ export function generateBolt(slot, scratch, randoms, first, branches) {
 /**
  * Writes a beam into slot: count spokes from the origin, each length long, turned evenly around the
  * vertical axis and tilted up by tilt (radians), widening from startHalfWidth to endHalfWidth.
- * params.y sweeps them.
+ * params.y and params.z sweep them (createRibbonSlot).
  */
 export function generateBeams(slot, count, length, startHalfWidth, endHalfWidth, tilt) {
   const rise = Math.sin(tilt) * length;
