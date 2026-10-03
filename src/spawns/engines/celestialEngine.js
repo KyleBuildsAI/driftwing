@@ -679,23 +679,37 @@ export function createCelestialEngine() {
         data.eclipsePower = Math.max(1, Math.log(totalGap / CROSSING_REACH) / Math.log(totalityShare));
         data.pathAngle = eclipse.pathAngle !== null ? eclipse.pathAngle * DEG : (rng() * 2 - 1) * 0.6;
       }
-      if (resolved.eclipse || resolved.sky || resolved.meteors) {
-        data.modifier = ctx.sky && typeof ctx.sky.addModifier === 'function' ? ctx.sky.addModifier(`${id}:celestial`, { priority: MODIFIER_PRIORITY }) : null;
-        data.modifierValues = {
-          weight: 0, sunIntensity: 1, ambient: 1, fogDensity: 1, darkness: 0, stars: 0, overcast: 0,
-          skyTint: new THREE.Color(resolved.sky && resolved.sky.values.skyTint !== undefined ? resolved.sky.values.skyTint : resolved.meteors && !resolved.eclipse ? 0xcff7e2 : 0x1b2350),
-          skyTintAmount: 0,
-          fogColor: new THREE.Color(resolved.sky && resolved.sky.values.fogColor !== undefined ? resolved.sky.values.fogColor : 0x4a3a4c),
-          fogColorAmount: 0,
-        };
-        if (data.modifier) data.modifier.set(data.modifierValues);
-      }
       const anchor = params.position;
       const instance = { anchor, radius: 800, windSourceIds: [], lights: 0, particles: 0, tier: 'near', heavy: preset.heavy === true, data };
       if (resolved.rainbow) instance.radius = resolved.rainbow.radius + resolved.rainbow.height;
-      if (ownsPresetAudio(preset, 'celestial', params.ownsAudio)) {
-        data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
-        data.voice.setPosition(anchor);
+      // The couplings can refuse (an unknown audio recipe throws): the manager never receives this
+      // instance then, so whatever was registered here is removed before the error goes on.
+      try {
+        if (resolved.eclipse || resolved.sky || resolved.meteors) {
+          data.modifier = ctx.sky && typeof ctx.sky.addModifier === 'function' ? ctx.sky.addModifier(`${id}:celestial`, { priority: MODIFIER_PRIORITY }) : null;
+          data.modifierValues = {
+            weight: 0, sunIntensity: 1, ambient: 1, fogDensity: 1, darkness: 0, stars: 0, overcast: 0,
+            skyTint: new THREE.Color(resolved.sky && resolved.sky.values.skyTint !== undefined ? resolved.sky.values.skyTint : resolved.meteors && !resolved.eclipse ? 0xcff7e2 : 0x1b2350),
+            skyTintAmount: 0,
+            fogColor: new THREE.Color(resolved.sky && resolved.sky.values.fogColor !== undefined ? resolved.sky.values.fogColor : 0x4a3a4c),
+            fogColorAmount: 0,
+          };
+          if (data.modifier) data.modifier.set(data.modifierValues);
+        }
+        if (ownsPresetAudio(preset, 'celestial', params.ownsAudio) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
+          data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
+          data.voice.setPosition(anchor);
+        }
+      } catch (error) {
+        if (data.modifier) {
+          data.modifier.remove();
+          data.modifier = null;
+        }
+        if (data.voice) {
+          data.voice.dispose();
+          data.voice = null;
+        }
+        throw error;
       }
       live.push(instance);
       return instance;
