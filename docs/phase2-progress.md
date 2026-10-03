@@ -114,6 +114,34 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
     - Failed: one penetration on each backend, both in the same run (see Open issues).
   - Smokes of built V2 and of the shell on both backends: 0 errors and 0 warnings.
 
+## Done (Milestone E batch 3: presets 21-30, branch `p2/presets-21-30`)
+
+- **The ten presets**, pure data in src/spawns/presets/, registered in spec order (21-30):
+  - `abandonedAirfield` (site, structure airfield on a flatten stamp): windsock on the real wind, graded landings, ground-start spots ("Start on ground" prefers the nearest discovered airfield).
+  - `meteorShower` (common night event, celestial meteors, sky-anchored): the dense night candidate grid (3.5 km cells, chance 0.6); ends at dawn.
+  - `totalSolarEclipse` (legendary day event, celestial eclipse): about 92 s crossing, 16 s totality, the wildlife falls quiet.
+  - `comet` (rare heavy night event, celestial comet, sky-anchored): lasts the rest of the night (`untilDawn`), comet lure declared.
+  - `skyLanternFestival` (rare night event, emitter lanterns on the WindField plus lightEffect launch lights): gathered at lighthouses and balloon fairs (`filters.near`).
+  - `floatingIslands` (rare heavy site, structure islands over two islandBase stamps): waterfalls into mist, landable tops, islands lure.
+  - `skyWhale`* (rare heavy event, fauna drift plus a windModifier slipstream from the preset's `wind`): a speed and lift lane; whale lure.
+  - `crystalSpires` (site, structure spires plus lightEffect motes): approach-driven hum, chimes between spires.
+  - `jetStream`* (uncommon event, windModifier jetStream plus emitter cirrus wisps along the same axis): a 38 m/s tailwind 2200 m up.
+  - `stormChase` (legendary set piece over the batch 1 `supercell` and `tornado` presets): build with a lowering wall cloud, touchdown, rope-out; journalStat closestTornado (min) and stormsChased (add, within 5 km).
+- **Contract additions (additive, generic):**
+  - schema `filters.near: { landmarks: [arch | monoliths | lighthouse | balloons], radius (m, up to 20 km) }`, read by the director: a candidate moves onto the nearest Phase 1 landmark of those types (through `world.landmarkSitesNear`, which `createGameDirector` now passes in `terrain`), or is rejected as `near`. `LANDMARK_TYPES` exported from schema.js.
+  - celestial instance params `untilDawn` (bool) and `dawnElevation` (deg, default -6): the event ends at the first dawn after a night it has seen (docs/engines/celestial.md).
+  - weatherVolume `instance.control.wallCloud` (0..1, default 1): a set piece lowers the wall cloud (docs/engines/weatherVolume.md).
+  - fauna param `fadeOut` (s, default 0): an event's agents shrink away before its duration and the group ends itself (docs/engines/fauna.md).
+- **Tests added or retargeted:**
+  - tools/lab/terrain.mjs: the Phase 1 digests now hold for the world WITHOUT site presets; with the real (stamped) presets every sample outside every stamp's bounds must be bit-identical to it (the first stamped presets changed the digests on purpose).
+  - tools/lab/discovery.mjs: the tile cache tag check follows the real presets.
+  - tools/lab/director.mjs: `--presets real` measures pacing on the game's own presets; a new `near` check proves the landmark filter (it caught a stale distance on moved candidates, fixed in director.js).
+  - tools/lab/preset-wind.mjs (new): the SIM glider and jet flown through the real jet stream and sky whale air.
+  - src/dev/presetChecks.js and tools/steps/presets-21-30.json (new): every preset force-spawned at its time and weather, framed, discovered (event, journal entry, card), and disposed back to its memory, wind and sky baselines; the real stamped sites with the site-list hash, ground start, a graded landing, the eclipse at totality, the comet's dawn, the storm chase's stages and journal statistics. Set-piece children missing from the tree get dev stand-ins (only in that case).
+  - ?test=terrain gains `&presets=real` (`run-harness.mjs --test terrain --presets real`): seams, worker parity and collision around the real presets' stamps.
+  - tools/spawn-check.mjs: its memory accounting and lure counts allow for the game's own live site spawns.
+- **Merge notes:** stormChase names the presets `supercell` and `tornado` (batch 1). In this branch alone the director can pick stormChase only in building or storm weather and refuses it until those presets exist; the browser checks add stand-ins. The pacing check with only this batch's presets fails by design during the day (no day common event here); batch 2's geese and batch 1's commons cover it after the merge (run `node tools/lab/director.mjs --presets real` on the merged tree).
+
 ## Current state (resume from here)
 
 - `v2-phase2` holds Phase 1 and Milestones A, B (all ten engines), C, D and F. All wave 2 work is merged and committed locally. Nothing is pushed; the owner pushes.
