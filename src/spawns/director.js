@@ -159,7 +159,8 @@ const REJECT = Object.freeze({
  * Whether a time-of-day filter admits the sun at elevation (degrees) on a morning or evening.
  * day: sun up; night: sun more than 6 degrees down; dawn / dusk: the low sun of the morning / the
  * evening, from 10 degrees below the horizon to 14 above it (the golden hour counts as both day and
- * dawn or dusk).
+ * dawn or dusk); golden: the sky's golden band, 3 degrees below the horizon to 14 above, morning or
+ * evening; midday: the sun 14 degrees up or more, above the golden band (the thermal hours).
  */
 export function matchesTimeOfDay(names, sunElevation, dayTime) {
   if (!names) return true;
@@ -171,6 +172,8 @@ export function matchesTimeOfDay(names, sunElevation, dayTime) {
     if (name === 'night' && sunElevation < -6) return true;
     if (name === 'dawn' && morning && low) return true;
     if (name === 'dusk' && !morning && low) return true;
+    if (name === 'golden' && sunElevation >= -3 && sunElevation < 14) return true;
+    if (name === 'midday' && sunElevation >= 14) return true;
   }
   return false;
 }
