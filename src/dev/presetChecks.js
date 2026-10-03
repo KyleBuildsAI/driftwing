@@ -419,10 +419,22 @@ export function installPresetChecks(game) {
       const record = manager.getInstance(entry.id);
       const spot = { x: record.position.x, z: record.position.z };
       setSun(40);
-      // Look away from the bay.
-      ctx.systems.camera.setFreeCameraPose({ position: new THREE.Vector3(spot.x, 600, spot.z + 3000), target: new THREE.Vector3(spot.x, 600, spot.z + 9000) });
+      // Look away from the bay: the craft 3 km south of it facing south, the photo camera (which keeps
+      // within 900 m of the craft) just ahead of it.
+      ctx.setPhotoMode(false);
+      const away = { x: spot.x, y: Math.max(ground(spot.x, spot.z + 3000), 0) + 600, z: spot.z + 3000, heading: 180 };
+      ctx.systems.flight.resetTo(away);
+      await frames(3);
+      ctx.setPhotoMode(true);
+      await frames(2);
+      const posed = ctx.systems.camera.setFreeCameraPose({ position: new THREE.Vector3(away.x, away.y, away.z + 200), target: new THREE.Vector3(away.x, away.y, away.z + 6000) });
       const started = performance.now();
-      while (performance.now() - started < 40000 && manager.getSiteSpawn(siteId)) await frames(10);
+      let last = null;
+      while (performance.now() - started < 60000 && manager.getSiteSpawn(siteId)) {
+        const live = manager.getInstance(manager.getSiteSpawn(siteId));
+        if (live) last = { inView: live.inView, distance: live.distance, tier: live.tier };
+        await frames(10);
+      }
       const goneByDay = manager.getSiteSpawn(siteId) === null;
       const reason = events.ended.find((item) => item.id === entry.id)?.reason ?? null;
       setSun(-25);
@@ -433,7 +445,7 @@ export function installPresetChecks(game) {
         await frames(10);
       }
       if (rebuilt) entry.id = rebuilt;
-      return check('bioluminescentBay: gone by day once out of view, built again at night', goneByDay && reason === 'hours' && rebuilt !== null, { goneByDay, reason, rebuilt });
+      return check('bioluminescentBay: gone by day once out of view, built again at night', goneByDay && reason === 'hours' && rebuilt !== null, { goneByDay, reason, rebuilt, posed, last, sun: Math.round(state.time.sunElevation) });
     },
 
     /** Eagle: it joins off the wing with a call, escorts, then peels off with a call. */
