@@ -5,10 +5,12 @@
 // terrain stamps in both threads from the same data, with no messaging. To add a preset, add its
 // file here in this directory, import it below and append it to PRESETS.
 import whalePod from './whalePod.js';
+import maelstrom from './maelstrom.js';
 
 export const PRESETS = Object.freeze([
   // Batch 2: presets 11-20.
   whalePod,
+  maelstrom,
 ]);
 
 /** Presets by id. */
