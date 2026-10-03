@@ -10,10 +10,12 @@
 //   node tools/run-harness.mjs --test 1|hotas|terrain [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
 //     [--crafts glider,jet] [--views first,third] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
+//     [--presets real]
 //
 // The terrain test runs on one seed (the first of --seeds, P2-TERRAIN by default) in the late
 // morning, and afterwards the runner flies its camera tour: one screenshot per stamp type from the
-// air (stamp-<type>.png), with the stamp paint in view.
+// air (stamp-<type>.png), with the stamp paint in view. --presets real runs it on the game's own
+// stamped site presets instead of the fixtures (?presets=real).
 //
 // The flight test flies every craft in first person (the cockpit or FPV view) and in third person
 // (chase) by default; --views first or --views third flies one of them.
@@ -83,6 +85,7 @@ function parseArgs(argv) {
     headful: false,
     browser: null,
     allocProfileSeconds: null,
+    presets: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -98,6 +101,7 @@ function parseArgs(argv) {
       case '--seconds': options.seconds = Number(next()); break;
       case '--crafts': options.crafts = next(); break;
       case '--views': options.views = next(); break;
+      case '--presets': options.presets = next(); break;
       case '--out': options.out = next(); break;
       case '--timeout-minutes': options.timeoutMinutes = Number(next()); break;
       case '--width': options.width = Number(next()); break;
@@ -282,6 +286,7 @@ function harnessUrl(port, options) {
   if (options.test === 'terrain') {
     url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : TERRAIN_SEED);
     url.searchParams.set('time', TERRAIN_DAY_TIME);
+    if (options.presets === 'real') url.searchParams.set('presets', 'real');
   }
   if (options.test === '1') {
     if (options.seeds) url.searchParams.set('testSeeds', options.seeds);
