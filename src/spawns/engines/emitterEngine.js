@@ -30,7 +30,7 @@
 // create(). What the engine calls may allocate a little: the terrain height under a grid node and
 // the WindField probes (worldgen's noise), which is why they are rationed.
 import { FIELD_NODES, FIELD_X, FIELD_Y, FRAME_ROWS, GROUND_MODES, PAGE_SIZE, PARAM_ROWS, PARTICLE_STYLES, createParticleSystem } from './particleSystem.js';
-import { createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, randomIn, smoothstep } from './engineKit.js';
+import { createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, smoothstep } from './engineKit.js';
 
 /** Emitter instances at once (rows of the particle tables); the director's budget is 16. */
 const MAX_EMITTERS = 16;
@@ -55,6 +55,8 @@ const RANDOMS_PER_PARTICLE = 12;
 const RANDOM_BATCH_PARTICLES = 256;
 /** Numbers in one particle's birth record (particleSystem.js writeBirth). */
 const BIRTH_FIELDS = 12;
+/** A voice's intensity change below this is not sent (it would be inaudible). */
+const VOICE_LEVEL_STEP = 0.002;
 const GRAVITY = 9.81;
 const DEG = Math.PI / 180;
 /** Engine drag floor (1/s): the closed form divides by it. */
@@ -317,22 +319,13 @@ export function resolveEmitterConfig(preset, params) {
 }
 
 /** Creates the emitter engine (see the file header). */
-/**
- * Fills out[0..count) with numbers in [0, 1) from a mulberry32 generator whose state is state[0] (a
- * Uint32Array seeded from the spawn's rng). The numbers land in a typed array rather than coming
- * back one call at a time, because V8 boxes a double returned from a call it does not inline: that
- * would be an allocation per random number, thousands per second.
- */
-function fillRandoms(state, out, count) {
-  let value = state[0];
-  for (let index = 0; index < count; index++) {
-    value = (value + 0x6d2b79f5) >>> 0;
-    let mixed = value;
-    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
-    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
-    out[index] = ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
-  }
-  state[0] = value;
+/** Writes four numbers into element index of a vec4 table (create time and dispose: it boxes them). */
+function writeTableElement(table, index, x, y, z, w) {
+  const offset = index * 4;
+  table[offset] = x;
+  table[offset + 1] = y;
+  table[offset + 2] = z;
+  table[offset + 3] = w;
 }
 
 export function createEmitterEngine() {
@@ -402,21 +395,20 @@ export function createEmitterEngine() {
     const ix = node % FIELD_X;
     const iz = Math.floor(node / FIELD_X) % FIELD_X;
     const iy = Math.floor(node / (FIELD_X * FIELD_X));
-    probePoint.set(
-      origin[0] + placement[0] + ix * placement[3],
-      origin[1] + placement[1] + iy * placement[4],
-      origin[2] + placement[2] + iz * placement[3],
-    );
+    probePoint.x = origin[0] + placement[0] + ix * placement[3];
+    probePoint.y = origin[1] + placement[1] + iy * placement[4];
+    probePoint.z = origin[2] + placement[2] + iz * placement[3];
     const now = ctx.time.elapsed;
     // The WindField's own clock is the same elapsed time (passing it would box it).
     ctx.wind.probe(probePoint, undefined, probeResult);
     const since = now - data.fieldSampled[node];
     const ease = data.fieldSampled[node] < 0 ? 1 : 1 - Math.exp(-Math.max(0, since) / FIELD_EASE_SECONDS);
     data.fieldSampled[node] = now;
-    const vector = system.fieldVectors[data.row * FIELD_NODES + node];
-    vector.x += (probeResult.vel.x - vector.x) * ease;
-    vector.y += (probeResult.vel.y - vector.y) * ease;
-    vector.z += (probeResult.vel.z - vector.z) * ease;
+    const field = system.fieldData;
+    const offset = (data.row * FIELD_NODES + node) * 4;
+    field[offset] += (probeResult.vel.x - field[offset]) * ease;
+    field[offset + 1] += (probeResult.vel.y - field[offset + 1]) * ease;
+    field[offset + 2] += (probeResult.vel.z - field[offset + 2]) * ease;
   }
 
   /**
@@ -428,12 +420,12 @@ export function createEmitterEngine() {
     const origin = data.frameOrigin;
     const placement = data.fieldPlacement;
     const vent = Math.max(ctx.terrain.groundHeight(data.point[0], data.point[2]), ctx.terrain.waterLevel) - origin[1];
-    system.frameVectors[data.row * FRAME_ROWS + 1].z = vent;
+    system.frameData[(data.row * FRAME_ROWS + 1) * 4 + 2] = vent;
     for (let column = 0; column < FIELD_X * FIELD_X; column++) {
       const x = origin[0] + placement[0] + (column % FIELD_X) * placement[3];
       const z = origin[2] + placement[2] + Math.floor(column / FIELD_X) * placement[3];
       const ground = Math.max(ctx.terrain.groundHeight(x, z), ctx.terrain.waterLevel) - origin[1];
-      for (let level = 0; level < FIELD_Y; level++) system.fieldVectors[data.row * FIELD_NODES + level * FIELD_X * FIELD_X + column].w = ground;
+      for (let level = 0; level < FIELD_Y; level++) system.fieldData[(data.row * FIELD_NODES + level * FIELD_X * FIELD_X + column) * 4 + 3] = ground;
     }
   }
 
@@ -447,8 +439,8 @@ export function createEmitterEngine() {
     placement[3] = config.field.extent / (FIELD_X - 1);
     placement[4] = config.field.height / (FIELD_Y - 1);
     const row = data.row * PARAM_ROWS;
-    system.paramVectors[row + 10].set(placement[0], placement[1], placement[2], placement[3]);
-    system.paramVectors[row + 11].x = placement[4];
+    writeTableElement(system.paramData, row + 10, placement[0], placement[1], placement[2], placement[3]);
+    system.paramData[(row + 11) * 4] = placement[4];
     for (let node = 0; node < FIELD_NODES; node++) data.fieldSampled[node] = -1;
   }
 
@@ -456,29 +448,29 @@ export function createEmitterEngine() {
   /** Writes an emitter's static params into its row of the particle system's params table. */
   function writeParams(data) {
     const config = data.config;
-    const vectors = system.paramVectors;
+    const table = system.paramData;
     const row = data.row * PARAM_ROWS;
     const colors = data.colorScratch;
     for (let index = 0; index < 3; index++) writeColor(scratchColor, config.colors[index], colors, index * 3);
-    vectors[row].set(0, -config.gravity, 0, config.drag);
-    vectors[row + 1].set(config.buoyancy, config.buoyancyLambda, config.windFollow, config.ground);
-    vectors[row + 2].set(config.sizeStart, config.sizeEnd, config.sizeCurve, config.stretch);
-    vectors[row + 3].set(colors[0], colors[1], colors[2], config.fadeIn);
-    vectors[row + 4].set(colors[3], colors[4], colors[5], config.colorMid);
-    vectors[row + 5].set(colors[6], colors[7], colors[8], config.fadeOut);
-    vectors[row + 6].set(config.opacity, config.emissive, config.emissiveDecay, config.lit);
+    writeTableElement(table, row, 0, -config.gravity, 0, config.drag);
+    writeTableElement(table, row + 1, config.buoyancy, config.buoyancyLambda, config.windFollow, config.ground);
+    writeTableElement(table, row + 2, config.sizeStart, config.sizeEnd, config.sizeCurve, config.stretch);
+    writeTableElement(table, row + 3, colors[0], colors[1], colors[2], config.fadeIn);
+    writeTableElement(table, row + 4, colors[3], colors[4], colors[5], config.colorMid);
+    writeTableElement(table, row + 5, colors[6], colors[7], colors[8], config.fadeOut);
+    writeTableElement(table, row + 6, config.opacity, config.emissive, config.emissiveDecay, config.lit);
     if (config.underglow) {
       writeColor(scratchColor, config.underglow.color, colors, 0);
-      vectors[row + 7].set(colors[0], colors[1], colors[2], config.underglow.height);
+      writeTableElement(table, row + 7, colors[0], colors[1], colors[2], config.underglow.height);
     } else {
-      vectors[row + 7].set(0, 0, 0, 1);
+      writeTableElement(table, row + 7, 0, 0, 0, 1);
     }
-    vectors[row + 8].set(config.turbulence.spread, config.turbulence.wobble, config.turbulence.frequency, config.turbulence.vertical);
-    vectors[row + 9].set(config.groundOffset, config.depthFade, config.fog, config.style);
-    vectors[row + 11].set(vectors[row + 11].x, config.restitution, config.nightBoost, config.softness);
+    writeTableElement(table, row + 8, config.turbulence.spread, config.turbulence.wobble, config.turbulence.frequency, config.turbulence.vertical);
+    writeTableElement(table, row + 9, config.groundOffset, config.depthFade, config.fog, config.style);
+    writeTableElement(table, row + 11, table[(row + 11) * 4], config.restitution, config.nightBoost, config.softness);
     const frame = data.row * FRAME_ROWS;
-    system.frameVectors[frame].set(0, 0, 0, 0);
-    system.frameVectors[frame + 1].set(1, 1, 0, 0);
+    writeTableElement(system.frameData, frame, 0, 0, 0, 0);
+    writeTableElement(system.frameData, frame + 1, 1, 1, 0, 0);
   }
 
   // ---- Emission -----------------------------------------------------------------------------------
@@ -582,12 +574,13 @@ export function createEmitterEngine() {
       axis[1] = -sun.y;
       axis[2] = -sun.z;
     } else if (config.directionMode === 3) {
-      const vector = system.fieldVectors[data.row * FIELD_NODES + FIELD_X * FIELD_X + 5];
-      const length = Math.sqrt(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z);
+      const field = system.fieldData;
+      const offset = (data.row * FIELD_NODES + FIELD_X * FIELD_X + 5) * 4;
+      const length = Math.sqrt(field[offset] * field[offset] + field[offset + 1] * field[offset + 1] + field[offset + 2] * field[offset + 2]);
       if (length > 0.1) {
-        axis[0] = vector.x / length;
-        axis[1] = vector.y / length;
-        axis[2] = vector.z / length;
+        axis[0] = field[offset] / length;
+        axis[1] = field[offset + 1] / length;
+        axis[2] = field[offset + 2] / length;
       } else {
         axis[0] = 0;
         axis[1] = 1;
@@ -961,6 +954,8 @@ export function createEmitterEngine() {
         voice: null,
         triggerOptions: { strength: 1, duration: 1, intensity: 1 },
         voiceVelocity: new THREE.Vector3(),
+        /** The intensity last sent to the voice (-1 before the first): unchanged levels are not re-sent. */
+        voiceLevel: new Float64Array([-1]),
         windId: `${id}:wind`,
         windActive: false,
         windCentre: new Float64Array([anchor.x, anchor.y, anchor.z]),
@@ -989,7 +984,12 @@ export function createEmitterEngine() {
       // A first wind sample at the centre fills the whole grid, so the first particles already drift.
       probePoint.set(origin.x, origin.y + config.field.height * 0.3, origin.z);
       ctx.wind.probe(probePoint, ctx.time.elapsed, probeResult);
-      for (let node = 0; node < FIELD_NODES; node++) system.fieldVectors[row * FIELD_NODES + node].set(probeResult.vel.x, probeResult.vel.y, probeResult.vel.z, system.fieldVectors[row * FIELD_NODES + node].w);
+      for (let node = 0; node < FIELD_NODES; node++) {
+        const offset = (row * FIELD_NODES + node) * 4;
+        system.fieldData[offset] = probeResult.vel.x;
+        system.fieldData[offset + 1] = probeResult.vel.y;
+        system.fieldData[offset + 2] = probeResult.vel.z;
+      }
 
       const instance = {
         anchor,
@@ -1074,7 +1074,7 @@ export function createEmitterEngine() {
         sampleFieldGround(data);
       }
       if (data.spawnGround) {
-        if (data.spawnGround.drifted(data.point[0], data.point[2], 0.25)) data.spawnGround.recenter(data.point[0], data.point[2]);
+        if (data.spawnGround.drifted(data.point, 0.25)) data.spawnGround.recenter(data.point[0], data.point[2]);
         data.spawnGround.step(GROUND_SAMPLES_PER_FRAME);
       }
 
@@ -1161,18 +1161,19 @@ export function createEmitterEngine() {
 
       // Frame row: the frame origin relative to the camera, the underglow, the fade.
       const camera = engineCtx.camera.position;
-      const frameVector = system.frameVectors[data.row * FRAME_ROWS];
-      frameVector.x = data.frameOrigin[0] - camera.x;
-      frameVector.y = data.frameOrigin[1] - camera.y;
-      frameVector.z = data.frameOrigin[2] - camera.z;
+      const frameTable = system.frameData;
+      const frameOffset = data.row * FRAME_ROWS * 4;
+      frameTable[frameOffset] = data.frameOrigin[0] - camera.x;
+      frameTable[frameOffset + 1] = data.frameOrigin[1] - camera.y;
+      frameTable[frameOffset + 2] = data.frameOrigin[2] - camera.z;
       const time = engineCtx.time.elapsed;
       const night = engineCtx.time.nightFactor;
       if (config.underglow) {
         const glow = config.underglow;
         const flicker = 1 - glow.flicker * (0.5 + 0.5 * Math.sin(time * 9.7 + data.lightPhase) * Math.sin(time * 3.1 + data.lightPhase * 1.7));
-        frameVector.w = glow.intensity * (0.25 + 0.75 * level) * flicker * (1 - glow.night + glow.night * night);
+        frameTable[frameOffset + 3] = glow.intensity * (0.25 + 0.75 * level) * flicker * (1 - glow.night + glow.night * night);
       } else {
-        frameVector.w = 0;
+        frameTable[frameOffset + 3] = 0;
       }
 
       // Couplings: the real light, the voice, the immersion modifier.
@@ -1185,22 +1186,28 @@ export function createEmitterEngine() {
         if (held) {
           const frame = data.heading;
           const offset = lightConfig.offset;
-          data.light.place(
-            anchor.x + offset[0] * frame.rightX + offset[2] * frame.forwardX,
-            anchor.y + offset[1],
-            anchor.z + offset[0] * frame.rightZ + offset[2] * frame.forwardZ,
-          );
+          const lightState = data.light.state;
+          lightState[0] = anchor.x + offset[0] * frame.rightX + offset[2] * frame.forwardX;
+          lightState[1] = anchor.y + offset[1];
+          lightState[2] = anchor.z + offset[0] * frame.rightZ + offset[2] * frame.forwardZ;
           const flicker = 1 - lightConfig.flicker * (0.5 + 0.5 * Math.sin(time * 11.3 + data.lightPhase) * Math.sin(time * 4.3 + data.lightPhase * 0.7));
-          data.light.shine(lightConfig.intensity * lightLevel * flicker);
+          lightState[3] = lightConfig.intensity * lightLevel * flicker;
+          data.light.apply();
         }
         const lights = held ? 1 : 0;
         lightsHeld += lights - instance.lights;
         instance.lights = lights;
       }
       if (data.voice) {
-        data.voiceVelocity.set(data.velocity[0], data.velocity[1], data.velocity[2]);
+        data.voiceVelocity.x = data.velocity[0];
+        data.voiceVelocity.y = data.velocity[1];
+        data.voiceVelocity.z = data.velocity[2];
         data.voice.setPosition(anchor, data.voiceVelocity);
-        data.voice.setIntensity(level);
+        // Sent only when it changed (the audio engine's setter takes the number as an argument).
+        if (Math.abs(level - data.voiceLevel[0]) > VOICE_LEVEL_STEP) {
+          data.voiceLevel[0] = level;
+          data.voice.setIntensity(level);
+        }
       }
       if (data.windActive || (config.windSource && data.tier !== 'far')) followWindSource(data);
       if (data.immersion) updateImmersion(data);
@@ -1252,8 +1259,8 @@ export function createEmitterEngine() {
       pool.flush();
       pool.refreshCount();
       const frame = data.row * FRAME_ROWS;
-      system.frameVectors[frame].set(0, 0, 0, 0);
-      system.frameVectors[frame + 1].set(0, 0, 0, 0);
+      writeTableElement(system.frameData, frame, 0, 0, 0, 0);
+      writeTableElement(system.frameData, frame + 1, 0, 0, 0, 0);
       system.rows.free(data.row);
       data.row = -1;
       data.pageCount = 0;

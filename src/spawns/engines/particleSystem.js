@@ -1,7 +1,10 @@
 // The emitter engine's GPU particles: two shared pools (soft alpha-blended puffs and additive glows),
 // each one instanced quad mesh drawn in a single call, whatever the number of emitters.
 //
-// Emitters own ROWS of three shared uniform tables (up to maxEmitters rows):
+// Emitters own ROWS of three shared uniform tables (up to maxEmitters rows), each a Float32Array of
+// vec4 elements in a uniform buffer that three uploads as it is (a uniformArray of Vector4s is
+// copied element by element every frame, and that copy boxed numbers: about 28 KB of garbage a
+// frame with the compute kernels):
 //   params  PARAM_ROWS vec4 per row: motion, size and colour over life, lighting, style, the field
 //           grid's placement. Written when an emitter is created or re-tiered.
 //   frame   FRAME_ROWS vec4 per row: the row's frame origin relative to the camera (written every
@@ -38,8 +41,8 @@
 // and the scene's own haze (the sky's fogAmountNode, toward the sky colour behind each particle) with
 // a per-emitter strength. Five sprite styles: puff, glow, spark, lantern, droplet.
 //
-// Zero allocations per frame: every table is a typed array or a pooled Vector4, update ranges are
-// pooled objects, and the frame path passes no doubles across non-inlined calls.
+// Zero allocations per frame: every table is a typed array, update ranges are fixed-capacity lists,
+// and the frame path passes no doubles across non-inlined calls.
 import { createSlotAllocator } from '../pools.js';
 import { createRangeList } from './engineKit.js';
 
@@ -93,7 +96,7 @@ function smoothRange(edge0, edge1, value) {
  */
 export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky = null, maxEmitters, pages }) {
   const {
-    Fn, If, Return, float, int, vec2, vec3, vec4, uniform, uniformArray, instanceIndex, instancedBufferAttribute,
+    Fn, If, Return, float, int, vec2, vec3, vec4, uniform, buffer, instanceIndex, instancedBufferAttribute,
     storage, positionGeometry, modelViewMatrix, cameraProjectionMatrix, uv, varyingProperty,
     abs, exp, sqrt, pow, sin, cos, atan, min, max, mix, clamp, floor, smoothstep, saturate, length, hash, rotate, select,
   } = TSL;
@@ -101,12 +104,13 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
   const sceneHaze = Boolean(sky && typeof sky.fogAmountNode === 'function' && typeof sky.skyColorNode === 'function');
 
   // ---- Shared tables --------------------------------------------------------------------------------
-  const paramVectors = Array.from({ length: maxEmitters * PARAM_ROWS }, () => new THREE.Vector4());
-  const frameVectors = Array.from({ length: maxEmitters * FRAME_ROWS }, () => new THREE.Vector4());
-  const fieldVectors = Array.from({ length: maxEmitters * FIELD_NODES }, () => new THREE.Vector4());
-  const paramTable = uniformArray(paramVectors, 'vec4');
-  const frameTable = uniformArray(frameVectors, 'vec4');
-  const fieldTable = uniformArray(fieldVectors, 'vec4');
+  // Element e of a table holds [4e, 4e + 3]; a row's elements follow each other.
+  const paramData = new Float32Array(maxEmitters * PARAM_ROWS * 4);
+  const frameData = new Float32Array(maxEmitters * FRAME_ROWS * 4);
+  const fieldData = new Float32Array(maxEmitters * FIELD_NODES * 4);
+  const paramTable = buffer(paramData, 'vec4', maxEmitters * PARAM_ROWS);
+  const frameTable = buffer(frameData, 'vec4', maxEmitters * FRAME_ROWS);
+  const fieldTable = buffer(fieldData, 'vec4', maxEmitters * FIELD_NODES);
   // The per-frame scalars share one vec4 uniform: a Vector4 keeps its numbers in place, while a
   // float uniform's value field boxes every new number written to it (an allocation per frame).
   const frameValues = uniform(new THREE.Vector4(0, 0, 400, 2400));
@@ -651,9 +655,10 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
   return {
     pools,
     rows,
-    paramVectors,
-    frameVectors,
-    fieldVectors,
+    /** The tables (Float32Array, 4 numbers per element): element row * PARAM_ROWS + index and so on. */
+    paramData,
+    frameData,
+    fieldData,
     clock,
     useCompute,
     /** The meshes (for the pipeline prewarm). */
