@@ -8,6 +8,149 @@ and a multiplayer wingman) follow as later pre-releases of 2.0.0.
 
 ## [Unreleased]
 
+Phase 2 of v2, to be released as `2.0.0-phase.2` (tag `v2-phase2`): the event director, ten
+reusable spawn engines, the first 30 environment spawns and the discovery loop. Scenery becomes
+events: storms that build and drop tornadoes, a volcano that wakes, whales, geese that let you join
+their V, an eclipse that darkens the world, a sky whale whose slipstream you can ride. Every spawn
+is data on generic engines, so Phase 3 adds 70 more without engine rewrites. The milestone letters
+(A-G) follow the Phase 2 spec; the work landed on branch `v2-phase2` as one merge per milestone or
+wave. V2 has no CLASSIC mode: spawns apply their full wind forces, and the assists are the safety
+net.
+
+### Added
+
+#### Placement and terrain stamps (Milestone A)
+
+- Deterministic site placement on a 2 km grid (`src/world/placement.js`): every site preset is
+  rolled per cell with hash(seed, cellX, cellZ, presetId) and filtered by the terrain's own biome
+  function, the surface, the height and relief, the clearance from Phase 1 landmarks and other
+  sites, and a minimum spacing resolved locally. The same seed gives the same sites, in the terrain
+  worker and on the main thread, with no messaging; `hashSiteList` is the determinism key.
+- Terrain stamps inside the shared height function (`src/world/stamps.js`): a volcano cone with a
+  crater, a slot-canyon carve, a waterfall cliff step, a gorge for the rope bridge, a flattened
+  airfield strip and islet bases, each with a smooth falloff, found through a spatial hash. Meshes,
+  every LOD ring, the skirts and ground collision agree, and height sampling stays within 10 % of
+  Phase 1. Stamp-aware vertex colours paint ash, basalt, wet rock, tarmac and riverbeds.
+
+#### Spawn engines and the debugger (Milestone B)
+
+- The spawn framework (`src/spawns/`): the SpawnManager (activation within budgets, NEAR / MID /
+  FAR tiers with hysteresis, lifetimes and the despawn rule, discovery with terrain occlusion,
+  memory accounting and leak clean-up), the engine registry and interface (`init`, `create`,
+  `update`, `setLOD`, `dispose`, `stats`), the preset schema and validator, pooling helpers and a
+  real-light pool of at most 4 lights.
+- FAR lures: horizon silhouettes for heavy spawns (volcano plume, supercell anvil, tornado funnel,
+  sky whale, floating islands, comet), drawn above the fog beyond the terrain's view distance so the
+  player sees them from 30-60 km and flies toward them.
+- The ten engines, each with a reference page in `docs/engines/`: `vortex` (funnels, debris and
+  spray rings, Rankine wind), `emitter` (GPU particles: TSL compute on WebGPU, closed-form motion
+  on WebGL2), `weatherVolume` (cloud masses, rain shafts, fog banks, canopy rain), `fauna`
+  (instanced boids with vertex-shader wing flaps), `structure` (procedural builds from recipes,
+  with stamps, gates, timed courses, graded landings and landable tops), `celestial` (meteors,
+  comets, the eclipse, the glory and rainbows), `waterEffect` (whirlpools, splashes, spray,
+  bioluminescence, plunge pools on a shared water effects layer), `lightEffect` (lightning, glows,
+  swarms, beams), `windModifier` (updrafts, downbursts, wakes, jet streams, slipstreams, lee waves,
+  gust fronts, curtains) and `setPiece` (multi-stage timelines over other presets).
+- Sky modifiers (`sky.addModifier`): weather and eclipses really change the sun light, sky, fog,
+  clouds and stars; the golden-hour opening with clear weather is pixel-identical to before.
+- Perf load shedders: under frame-time pressure the director defers heavy spawns and steps far
+  spawns to cheaper LOD tiers before dynamic resolution drops.
+- The F9 spawn debugger (dev builds, or `?dev=1` in a production build): presets with filters,
+  force-spawn ahead, teleport to the nearest site, the time of day, the director's state, engine
+  stats and the WindField overlay.
+
+#### The event director and regional weather (Milestone C)
+
+- The event director (`src/spawns/director.js`, 2 Hz on the flight clock): something notable within
+  60-90 s of flight, activated ahead of the heading 3-8 km out and never behind; rarity periods
+  (common every few minutes up to legendary every 1-2 hours), per-preset cooldowns, never the same
+  preset twice in a row; at most 2 heavy spawns, per-engine caps and a real-light cap; filters for
+  biome, time of day, altitude, weather, surface, distance and nearby landmarks; an activation log
+  that is identical for the same seed and path.
+- Regional weather (`src/spawns/weather.js`): clear, building, storm and clearing per 12 km region,
+  deterministic per seed, with the sky and fog following it and the typed `weatherChanged` event.
+  The first 150 s of every flight are clear, so the golden-hour opening never changes.
+- `getNearby(radiusKm)` and the typed events `spawnActivated`, `spawnEnded`, `discovery` (for
+  spawns), `achievement`, `journalStat` and `wildlifeQuiet`.
+
+#### Spawn audio (Milestone D)
+
+- Spatialised, distance-attenuated procedural voices on the environment bus with a budget of 10
+  sounding voices: tornado roar and debris rattle, thunder delayed by distance / 343 m/s, volcano
+  rumble and booms, geyser hiss, waterfall roar, whale and sky-whale song, the crystal hum and
+  chimes, the turbine whoosh, the murmuration's wing rush, meteor sizzles, the lantern pad, hawk and
+  eagle screams, honking geese, and the discovery chime.
+
+#### The 30 presets (Milestone E)
+
+- Weather and sky: tornado, supercell, waterspout, lenticular clouds, microburst, glory and
+  full-circle rainbow.
+- Volcanic and geo: erupting volcano, geyser field, slot canyon run, mega-waterfall.
+- Ocean: whale pod, maelstrom, bioluminescent bay.
+- Wildlife: starling murmuration, geese V-formation, thermal hawks, fireflies, eagle wingman.
+- Structures: wind farm, rope bridge, abandoned airfield ("Start on ground" prefers the nearest
+  discovered one).
+- Night and celestial: meteor shower, total solar eclipse, comet, sky lantern festival.
+- Fantasy: floating islands with landable tops, sky whale, crystal spires.
+- Flight-play: jet stream ribbon.
+- The legendary storm chase: a supercell builds, a tornado touches down, tracks and ropes out while
+  WREN narrates; the journal keeps the closest pass.
+- Twelve of them change the air you fly through, the storm chase does through its children, and
+  the thermal hawks circle in real thermals; `docs/spawns.md` lists every preset with its engines,
+  filters, rarity and wind.
+
+#### The discovery loop (Milestone F)
+
+- Discoveries: a chime and a glass card with the name and one-liner when a spawn is in range and in
+  view; the journal records name, category, seed, coordinates, time of day and the first-seen date,
+  and counts found / 30.
+- Journal records and achievements, shared by every world: storms chased, closest tornado, best
+  canyon run, best landing, V-Formation and Thread the Needle.
+- WREN's tour guide: "what's nearby", "take me to the [name or category]", "find a thermal",
+  "chase the storm" and "next discovery", with Guide chips in the command bar; proactive callouts
+  ("Supercell building 9 km north-west. Want a heading?") at most once per 45 s, never below 150 m
+  or while landing, and a "yes" that places the waypoint (setting `copilotCallouts`, on by default).
+  The remote copilot's flight state gains `nearby[]`, `activeEvents[]`, `weather` and `callouts`,
+  and the actions `nearby`, `goTo`, `findThermal`, `chaseStorm` and `nextDiscovery`.
+- The world map (**M**, the bindable `mapToggle`): relief tiles generated in a worker from the
+  shared height and biome functions and cached in IndexedDB, discovered sites as category icons,
+  the craft, this flight's trail and the waypoint; click to set a waypoint. Undiscovered sites never
+  appear.
+- Seed links: `/?v=2#seed=XXXX&t=0.723` opens a world at a time of day in the launcher; Copy link
+  buttons, a seed field in Settings that reloads into that world, and the current seed remembered.
+
+#### Documentation and tools
+
+- `docs/spawns.md`: the 30 presets with their engines, filters, rarity and wind, and copy-paste
+  templates for a new event and a new site with every field documented.
+- `docs/engines/*.md`: one reference page per engine.
+- `tools/docs-check.mjs`: every relative link and anchor in the docs, the preset table against the
+  preset files, and the templates validated as presets.
+- Labs and step files for every engine, the director, the presets, audio, discovery and the tour
+  guide (listed in `docs/architecture.md`, Testing).
+
+### Changed
+
+- **M** opens the world map; the microphone toggle moves to **Shift+M**.
+- `docs/architecture.md` covers placement, stamps, the engines and the director, with one module
+  table for `src/spawns/`; `docs/controls.md` and `docs/copilot-api.md` cover F9, the map, the
+  Guide chips, callouts and seed links.
+- The v1 clouds follow the sky modifiers: darker blue-grey undersides in a storm, dimmed by an
+  eclipse, unchanged with nothing weighing in.
+
+### Known issues
+
+- Rare-tier balance: with all 30 presets the volcano's eruption and the tornado activate far less
+  often in the pacing lab than with the first 10 alone, and the sky lantern festival takes most rare
+  slots.
+- The storm chase's real tornado child brings its own storm tower, which can read as a second tower
+  at touchdown.
+- The jet stream tube is straight; a glider entering its 38 m/s core abruptly can stall.
+- The comet holds a heavy slot all night, and its declared lure does not draw (it is sky-anchored).
+- The waterfall rainbow and the glory show only with the sun behind the viewer; the supercell's
+  rain shafts are subtle at range.
+- The spawn audio recipes are verified by measurement only; a listening pass is pending.
+
 ## [Structure correction] - 2026-09-28
 
 The structure correction, tagged `v2-structure`: DRIFTWING is two separate games behind one
