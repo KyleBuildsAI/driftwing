@@ -277,3 +277,24 @@ waterEffect` samples the heap profiler over 3000 frames of the busiest scene and
 // Mega-waterfall plunge pool (site; the cliffStep stamp places it)
 { engine: 'waterEffect', params: { effect: 'plungePool', churn: 0.9, mistRate: 160 } }
 ```
+
+## Cost
+
+These numbers come from `tools/engine-cost.mjs --engine waterEffect`, headless on the busy shared
+machine (seed ENGINECOST).
+- Engine CPU is the engine's own `update()` per frame.
+- Layer CPU is the water layer's update (trail decay, droplets, splash queue, uniforms), which the
+  whole ocean shares.
+- Both are measured over a 3 s window of the live loop.
+
+| scene | engine CPU, WebGPU / WebGL2 | layer CPU, WebGPU / WebGL2 | draw calls added |
+| --- | --- | --- | --- |
+| nothing (the layer at rest) | 0 | 0.015 / 0.018 ms | 0 |
+| maelstrom whirlpool (radius 320 m) | 0.015 / 0.017 ms | 0.04 / 0.03 ms | 1 (mist droplets) |
+| bioluminescent bay at night with splashes | 0.011 / 0.012 ms | 0.20 / 0.19 ms | 1 |
+| every effect at once (5 instances) | 0.033 / 0.020 ms | 0.42 / 0.36 ms | 2 (droplets, pools) |
+
+- The whirlpool, the glow and the trails are terms in the existing ocean shader, so they add no draw
+  call. The droplets and the pool discs are one instanced draw each.
+- Allocation in the steady state is 6.5 / 5.9 B per frame (0.09 / 0.06 heap samples, under the 0.1
+  limit), all of it from splash events. No callee allocates.

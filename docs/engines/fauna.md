@@ -334,3 +334,24 @@ The engine object (`ctx.systems.spawns.manager.registry.get('fauna')`) has two r
 // Sky whale with its slipstream lane
 { engine: 'fauna', params: { species: 'skyWhale', behavior: 'drift', count: [1, 3], size: 230, altitude: { mode: 'msl', value: 1400 }, drift: { slipstream: true }, calls: { interval: [20, 45] } } }
 ```
+
+## Cost
+
+These numbers come from `tools/engine-cost.mjs --engine fauna`, headless on the busy shared machine
+(seed ENGINECOST). Engine CPU is the engine's own `update()` time per frame, summed over its
+instances, measured over a 3 s window of the live loop. The frame interval measures the whole
+machine, which other programs load, so it is only context.
+
+| scene | engine CPU per frame, WebGPU / WebGL2 | draw calls added | triangles added |
+| --- | --- | --- | --- |
+| 3000-starling murmuration | 3.9 / 3.8 ms | 1 | about 190 k |
+| 8000-starling murmuration (stress) | 12.8 / 11.1 ms | 1 | about 500 k |
+| sky whale pair with slipstream (heavy) | 0.29 / 0.26 ms | 1 | about 3 k |
+| every behaviour at once (6 groups, 3021 agents) | 4.1 / 3.7 ms | 6 | about 190 k |
+
+Allocation in the steady state is 6.4 / 2.8 B per frame in the engine's files (0.03 / 0.02 heap
+samples per frame). The terrain queries the engine makes add about 350 B per frame.
+
+The CPU cost is about 1.3 microseconds per near agent. Keep a murmuration preset at 2500-4000
+starlings. The 8000 case is the stress test, and the engine budget (12000 particles) leaves room for
+the other groups.
