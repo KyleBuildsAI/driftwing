@@ -160,13 +160,30 @@ net.
 - The v1 clouds follow the sky modifiers: darker blue-grey undersides in a storm, dimmed by an
   eclipse, unchanged with nothing weighing in.
 
+### Fixed
+
+- The soft crash holds the craft at the surface of its contact point. A fast strike (about 250 m/s
+  and up) could end its tick metres inside a steep slope, and the fade-in froze that pose under the
+  ground; the craft is now lifted to the highest of the terrain, any extra ground surface above it
+  and the sea at the strike, and held there on every fade-in frame.
+- A strike during the soft crash's fade-out (a respawn facing a cliff) was ignored, so the craft
+  flew on inside the ground for up to 0.4 s; it now starts a new soft crash that fades back to
+  black from the current opacity.
+- Director activations that spawn nothing are declined: when every engine of an activation ends
+  at create (thermal hawks with no working thermal, a whale pod with no open water in reach), the
+  SpawnManager refuses it with the reason `declined`, and the director counts no notable, cooldown
+  or tier turn and tries the candidate again later.
+- The sun disc no longer shows faintly through a storm's overcast; it fades out fully between
+  overcast 0.6 and 0.85.
+- The storm chase no longer grows a second storm tower at touchdown: its tornado child brings only
+  a small dark turning lowering on the funnel instead of the tornado preset's own anvil, overshoot
+  and rain.
+
 ### Known issues
 
-- Rare-tier balance: with all 30 presets the volcano's eruption and the tornado activate far less
-  often in the pacing lab than with the first 10 alone, and the sky lantern festival takes most rare
-  slots.
-- The storm chase's real tornado child brings its own storm tower, which can read as a second tower
-  at touchdown.
+- Rare-tier turns go to whichever eligible rare preset comes first, so the sky whale (anywhere, any
+  time) wins most daytime turns and the volcano's eruption is rare: the pacing lab starts it once in
+  54 simulated hours (18 scenarios of 3 h).
 - The jet stream tube is straight; a glider entering its 38 m/s core abruptly can stall.
 - The comet holds a heavy slot all night, and its declared lure does not draw (it is sky-anchored).
 - The waterfall rainbow and the glory show only with the sun behind the viewer; the supercell's
