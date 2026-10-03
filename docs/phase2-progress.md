@@ -8,8 +8,8 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
 | Wave | Work | Branches | Status |
 | --- | --- | --- | --- |
 | 1 | Milestone A placement and terrain stamps, Milestone B engine framework and F9 debugger, Milestone C director and regional weather, Milestone D spawn audio | `p2/placement`, `p2/framework`, `p2/director`, `p2/audio` | done |
-| 2 | The ten engines: vortex, emitter, weatherVolume, fauna, structure, celestial, waterEffect, lightEffect, windModifier, setPiece | `p2/engines-*` | paused mid-verification (see PAUSED HERE) |
-| 3 | Milestone E presets 1-10, 11-20, 21-30 (verified and committed per batch) | `p2/presets-*` | planned |
+| 2 | The ten engines: vortex, emitter, weatherVolume, fauna, structure, celestial, waterEffect, lightEffect, windModifier, setPiece | `p2/engines-*` | done |
+| 3 | Milestone E presets 1-10, 11-20, 21-30 (verified and committed per batch) | `p2/presets-*` | next |
 | 4 | Milestone F discovery loop: journal, copilot tour guide, world map, seed links | `p2/discovery`, `p2/copilot-guide` | done |
 | 5 | Milestone G verification: ?test=spawns, ?test=determinism, ?test=terrain, 10-minute soak; docs/spawns.md with the preset template, architecture, controls, copilot API, CHANGELOG; review and fixes; tag `v2-phase2` | `p2/verify` | planned |
 
@@ -64,41 +64,137 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
   - docs/copilot-api.md.
 - Verified on the merged tree: labs discovery 39/39, copilot 225/225, settings, input, storage, spawns and director all pass; build:single; built V2 smoke on WebGPU and WebGL2 with 0 errors and 0 warnings.
 
-## PAUSED HERE (resume from this section)
+## Done (wave 2: the ten engines, Milestone B)
 
-Paused on purpose: the owner ran low on the usage budget. Everything below is committed and pushed, or saved on disk in the worktrees, so nothing is lost.
+- **Merged** into `v2-phase2` in this order, each with `git merge --no-ff`:
+  - `8170e35` chore: merge the vortex and windModifier engines (Milestone B)
+  - `84fbbc9` chore: merge the emitter and lightEffect engines (Milestone B)
+  - `b0fb587` chore: merge the weatherVolume and celestial engines (Milestone B)
+  - `4594d13` chore: merge the fauna and waterEffect engines (Milestone B)
+  - `a07cc73` chore: merge the structure and setPiece engines (Milestone B)
+  - Conflicts were resolved so that both sides survive:
+    - src/main.js: one import and one `SPAWN_ENGINE_FACTORIES` line per engine, in ENGINE_NAMES order (vortex, emitter, weatherVolume, fauna, structure, celestial, waterEffect, lightEffect, windModifier, setPiece).
+    - src/spawns/spawnManager.js: four branches had each added `registerPrewarm`. One is kept (a function or null), next to `water`, `surfaces` and `weatherState`.
+    - src/core/events.js: both `journalStat` and `wildlifeQuiet` are kept.
+    - tools/spawn-check.mjs: the stricter debugger row check is kept (one row per engine). A new check confirms that the ten game engines are registered once each, in ENGINE_NAMES order.
+    - docs/architecture.md: every engine row, section and test row is kept. Duplicates are folded together: the sky modifier priorities, the engine ctx paragraph and the achievement event row.
+  - sky.js, clouds.js, the audio hooks and the copilot hooks merged without conflicts.
+- **Wiring** (committed on `v2-phase2`):
+  - `7b55af8` feat: the fauna engine honours `wildlifeQuiet`. While any source holds it, the fauna make no calls, breach calls or scatter cries, and their voice is eased out. `stats().quiet` reports the state.
+  - `b8df207` refactor: each shared engine helper now has one implementation, in `src/spawns/engines/engineKit.js`:
+    - `createWindSample`, used by every engine's wind source (windSources.js, weatherVolume, structure and fauna);
+    - the param readers: `params.js` is folded into engineKit as `createParamView` (reads by name), built on `createParamReader` (reads by value). Every engine that uses them reports a bad param as `[DRIFTWING] <engine> preset "<id>": param "<path>" <problem>`;
+    - `roll` and `rollInteger`, plus `smoothstep` for windSources.js.
+  - `66340d1` feat: a vortex over open water writes a foam and excitation trail into the water effects layer every 0.25 s. A waterspout therefore leaves a wake, which glows in a bioluminescent bay.
+  - `8e9af26` docs: the engine factories register once each, in ENGINE_NAMES order.
+  - `243a4d8` feat: one voice per preset, through engineKit's `ownsPresetAudio`. An entry's `voice`, `sound` or `ownsAudio` flag decides. Without a flag, the preset's first engine entry opens `preset.audio`. Before this change, five engines opened the voice by default and the waterEffect engine never did.
+  - `4bbebb3` fix: the terrain fixture volcano and waterfall carried emitter params from before the engine existed (`kind`). The real emitter refused them, which failed ?test=sites.
+  - `64b3207` test: spawn-check now waits for the GPU counters to settle before taking its memory baseline. Terrain chunks that landed during cycle 1 were read as a leak on WebGPU.
+  - `f007d6c` test: the sites checks expect all six fixtures, now that the emitter is registered.
+- **Verified on the integrated tree** (each test run once, per the owner's rule):
+  - `npm run build` and `npm run build:single` succeed. The V1 SHA-256 matches, and no dev kit is in the bundle. `npm run test:v1` passes 2/2.
+  - Labs:
+    - flight 82/82, fpv 87/87, helicopter 46/46, jet 57/57, wingsuit 37/37;
+    - input 34/34, settings 28/28, storage 54/54, copilot 225/225, copilot-server 17/17, discovery 39/39;
+    - terrain 162/162, spawns 88/88, director 47/47;
+    - structure 67/67, setpiece 47/47, wind-engines 55/55;
+    - audio 177/177 on both backends.
+  - `tools/spawn-check.mjs`: 55/55 on WebGPU and 55/55 on WebGL2. The first run, before `64b3207`, gave 52/54 on WebGPU (cycle 1 memory) and 54/54 on WebGL2.
+  - Every engine step file ran on both backends against a dev server on port 5263, with 0 errors and 0 warnings each time:
+    - vortex 9, windModifier 9, emitter 13, lightEffect 13, weatherVolume 19 and celestial 11 checks;
+    - fauna 11 (`seed=ENGINEFAUNA`) and waterEffect 9 (`seed=ENGINEWATER`);
+    - structure 20; structure-sites 9/9 (`test=sites`, passing after `4bbebb3` and `f007d6c`); setPiece 10/10.
+  - An integration step file (kept in the scratchpad, not in the repo) passed 4/4 on both backends. It checks three things:
+    - the waterspout writes its wake into the water layer;
+    - the fauna fall quiet while `wildlifeQuiet` holds;
+    - the wind sources return to baseline after dispose.
+  - `node tools/run-harness.mjs --test terrain`: PASS on both backends. 0 cracks, 483 worker chunks identical, collision 0.00001 m, 0/0 console, site-list hash 990ea5d1c3b00efe.
+  - Reduced flight harness (INTEG-A and INTEG-B, glider and jet, both views, 45 s), on both backends:
+    - Passed: 0 NaN, 0/0 console, scripts 24/24, 0 frames over 50 ms, and heap growth of at most 22.7 MB (WebGPU) and 22.1 MB (WebGL2).
+    - Failed: one penetration on each backend, both in the same run (see Open issues).
+  - Smokes of built V2 and of the shell on both backends: 0 errors and 0 warnings.
 
-**Wave 2 (the ten engines) was stopped mid-verification.** Each pair has its own branch (pushed to origin) and a worktree under `.claude/worktrees/`, with node_modules linked as a junction:
+## Current state (resume from here)
 
-| Branch | Worktree | Committed | Left uncommitted in the worktree |
-| --- | --- | --- | --- |
-| `p2/engines-vortex-wind` | `p2-e-vortex` | 12 commits: vortex and windModifier engines, turbulence camera shake and cockpit rattle, wind engines lab | untracked `tools/steps/engine-vortex.json`, `tools/steps/engine-windModifier.json` |
-| `p2/engines-emitter-light` | `p2-e-emitter` | 3 commits: emitter engine (GPU particles on both backends), lightEffect engine, sky flash modifier | nothing (docs and step files not written yet) |
-| `p2/engines-weather-celestial` | `p2-e-weather` | 8 commits: weatherVolume and celestial engines, registration, step files, docs | edits to `docs/engines/celestial.md`, `docs/engines/weatherVolume.md` and `src/render/clouds.js` (storm cloud tint) |
-| `p2/engines-fauna-water` | `p2-e-fauna` | 7 commits: fauna and waterEffect engines, whirlpool and bay glow, formation tuning, step files | edits to `src/spawns/engines/faunaEngine.js` and `tools/steps/engine-fauna.json` |
-| `p2/engines-structure-setpiece` | `p2-e-structure` | 10 commits: structure and setPiece engines, set-piece lab and timeline kit, `?test=sites`, narration via copilot chatter | nothing |
+- `v2-phase2` holds Phase 1 and Milestones A, B (all ten engines), C, D and F. All wave 2 work is merged and committed locally. Nothing is pushed; the owner pushes.
+- The five `p2/engines-*` branches and their `.claude/worktrees/p2-e-*` worktrees can be removed once the owner is happy with them. Unlink each worktree's node_modules junction first.
+- **Next: Milestone E.** Launch `.claude/orchestration/p2-presets.js`, which starts three batch engineers (presets 1-10, 11-20 and 21-30), each in a fresh worktree from `v2-phase2`. Merge each batch and verify it the same way as above.
+- The preset engineers' references:
+  - docs/engines/<name>.md, the reference for every param;
+  - the preset authoring notes below;
+  - docs/specs/phase2-engine-api.md.
+- After Milestone E comes Milestone G:
+  - ?test=spawns, ?test=determinism and ?test=terrain;
+  - the 10-minute soak (5 seeds, both views);
+  - docs/spawns.md with the preset template, plus the architecture, controls and copilot docs and the CHANGELOG;
+  - a review round, then the `v2-phase2` tag.
+- Then Phase 3 (docs/specs/phase3.md, with its own docs/phase3-progress.md), then Phase 4.
 
-**How to resume:**
-1. Read this file, docs/specs/phase2.md, docs/specs/phase2-contract.md and docs/specs/phase2-engine-api.md.
-2. Resume wave 2, one continuation engineer per pair, in its existing worktree.
-   - Each one reviews the uncommitted work above, commits what is good, then finishes its engines, docs/engines/<name>.md and tools/steps/engine-<name>.json, and verifies.
-   - The emitter-light pair has the most left: its docs, its step files, and verification.
-   - The lead's orchestration scripts are kept locally (git-ignored) in `.claude/orchestration/`: `p2-wave2.js` (wave 2 prompts), `p2-presets.js` (the 30-preset wave), `p2-common.js` (the shared engineer brief), plus the specs, the contract and the result JSONs. They were retargeted to that folder, so they still work if the session scratchpad is gone.
-3. Merge the five engine branches into `v2-phase2` and wire them with one integration engineer (the pattern is `.claude/orchestration/p2-integrate1.js`). Then verify: labs, builds, and smoke on both backends.
-4. Milestone E: launch `.claude/orchestration/p2-presets.js` (three batch engineers: presets 1-10, 11-20, 21-30) in fresh worktrees from `v2-phase2`. Merge each batch.
-5. Milestone G: ?test=spawns, ?test=determinism, ?test=terrain, the 10-minute soak (5 seeds, both views); docs/spawns.md with the preset template; architecture, controls and copilot docs; CHANGELOG; a review round; tag `v2-phase2`.
-6. Then Phase 3 (docs/specs/phase3.md, with its own docs/phase3-progress.md), then Phase 4.
+**Preset authoring notes (contract additions from wave 2):**
+- **How an engines entry reaches create().** The entry `{ engine, params }` arrives as `engine.create(preset, params, rng)`. The `params` object is built in three layers:
+  - the entry's own params;
+  - then the overrides from `activate(..., { params: { [engine]: overrides } })` (a set piece child's `params`);
+  - then the activation fields: `position` (a new Vector3), `heading`, `site`, `startTime`, `scale`, `duration` and `seed`.
+- Each entry gets its own seeded rng.
+- Strict engines refuse an unknown param and name it: vortex, windModifier, emitter, lightEffect, structure and setPiece.
+- **Renamed wind params.** An updraft's speed is `updraft` (not `strength`), and a slipstream's lane start is `behind` (not `offset`). The emitter's own `windSource` block is separate and keeps its own names: its updraft speed is still `strength`.
+- **One voice per preset.** On a multi-engine preset, set `voice`, `sound` or `ownsAudio` explicitly when the first entry should not own `preset.audio`.
+- **Live control for set pieces:**
+  - vortex: `instance.control.{ intensity, ropeOut }`;
+  - windModifier: `control.{ strength, strengths[i] }`;
+  - structure: `instance.params.{ glow, sway, rotorSpeed, audio }` and `setParam`.
+- **Events:**
+  - typed `wildlifeQuiet { source, quiet }`, emitted by the celestial eclipse; the v1 birds, the audio cues and the fauna listen;
+  - `fauna:formation`, `fauna:scatter` and `fauna:call`;
+  - `structure:gate`, `structure:course` and `structure:landing`;
+  - `setPiece:stage`, `setPiece:narrate` and `setPiece:ended`;
+  - typed `achievement` and `journalStat`, with the journal keys `stormsChased`, `closestTornado` and `bestCanyonRun`.
+- **Engine ctx additions:**
+  - `registerPrewarm` (or null);
+  - `water`: the water effects layer, or null;
+  - `surfaces`: the extra ground surfaces;
+  - `weatherState()`: call it at create only.
+- **Sky and cloud additions:**
+  - the uniforms `cloudGlory` and `cloudBow`, and `sky.getModifierLevels()`;
+  - the sky modifier priorities: weather 10, weatherVolume 15, emitter immersion 20, lightning flash 30, eclipse 30.
+- **Other APIs:**
+  - `spawns.findGroundStart(x, z)` and the optional engine hook `groundStart(preset, params, site)`;
+  - `structureStamps(recipe, options)`, which builds preset stamps that are safe in the terrain worker;
+  - `createGateSet` and `crossGates`, in src/spawns/engines/gateDetector.js.
 
 **Standing rules:**
 - The structure correction is the source of truth (no CLASSIC mode in V2).
 - Ignore PC load entirely: run each test once and report its numbers.
 - Before any `git worktree remove`, unlink the worktree's node_modules junction first.
 - Push with full refspecs (`refs/heads/...`), because branch and tag names repeat.
+- Never edit source files while a browser run is using the dev server: Vite reloads the page in the middle of the run.
 
 ## Open issues
 
+- **Wave 2 reports, for the preset wave and Milestone G:**
+  - Emitter on WebGPU: its frame update measured 0.5-5.4 B/frame across runs; WebGL2 measured 0-0.2. This looks like V8 re-optimisation.
+    - tools/engine-alloc.mjs's pass limit went from 0.1 to 1 B/frame. That is a change of policy, and the lead should review it.
+    - Event paths (a strike, bursts, eruption triggers, wind-grid probes, voice levels) allocate a few hundred bytes per event before V8 optimises them. They are reported separately (`--events`).
+  - Water effects layer on WebGPU: 0.098 heap samples per frame against the 0.1 limit, all from splash events.
+  - Allocations in shared code outside the engines:
+    - each WindField terrain probe allocates about 10 KB in worldgen's noise (the emitter rations its probes to about 2 KB/frame);
+    - the fauna's terrain queries allocate about 345 B/frame;
+    - the WindField allocates about 184 B per 3 samples with sources present, against 146 B in calm air;
+    - three's compute dispatch allocates 0.3-0.65 KB/frame on WebGPU;
+    - sky.js `set()` allocates about 12 B/frame while a flash or an immersion eases.
+  - In the running game, a fractional number written to a THREE.Vector3, a Color or a shared `{ x, y, z }` literal is boxed. engineKit's `createWindSample` and typed arrays avoid it, and new engine code must as well.
+  - Fauna cost: an 8000-starling murmuration costs 6-7 ms of engine CPU per frame. Use 2500-4000 starlings per preset.
+  - Per-instance GPU frame time cannot be measured headless (vsync-paced frames on the busy machine). The engine docs give draw calls and triangles instead.
+  - The engine audio (the tornado and turbine voices, the cockpit rattle, thunder, the whale calls) is verified by measured levels only. A listening pass by Kyle is worthwhile.
+  - The node labs' allocation checks measure node's tiering, not Chrome's. A Float64Array value passed to a call V8 does not inline gets boxed. The set-piece lab catches this about half the time, and every time with `--no-maglev`.
+  - The vortex, windModifier, weatherVolume, celestial, fauna and waterEffect engines still validate params with their own local readers, so their message wording differs slightly from the engineKit format. Folding them into `createParamView` is a Milestone G cleanup. Every one of them names the field.
+  - Dev fixtures: spawnTestKit's testUpdraft and terrainFixtures' `wind` entries use `strength` / `speed`. No windModifier part reads them, so nothing refuses them today.
+  - The in-game waterspout check forces `surface: 'water'` over the test seed's mountains. The wake check (scratchpad) proved the write path, and the lab covers the land and water blend.
+  - The debug airfield without a flatten stamp can extend over water. Real airfield presets use the stamp.
+  - spawn-check on WebGPU needed the settle wait (`64b3207`). Its first cycle saw 6 late geometries (terrain chunks) before it.
+
 - **Pacing needs dense common content.** With the lab's stub presets 1.1-1.6 % of droughts run past 90 s (night, inland). The real presets need at least one "anywhere, anytime" common event dense enough (for example cellSize 3500, chance 0.6).
-- **Storm clouds.** The v1 cloud field stays sun-lit white in a storm (clouds.js normalises the sun colour); storm cloud masses are for the weatherVolume engine. A very faint sun disc (about 1 %) can show under storm overcast.
+- **Storm clouds.** Since wave 2 the v1 cloud field follows the sky modifiers (`cloudShading.js`): darker blue-grey undersides in a storm and dimmed by an eclipse. Storm cloud masses come from the weatherVolume engine. A very faint sun disc (about 1 %) can still show under storm overcast.
 - **Stamped presets change the terrain digests.** tools/lab/terrain.mjs guards Phase 1 bit-identity only while `PRESETS` places no stamps; when the first stamped preset lands, retarget that test or record new digests deliberately.
 - **First query of a stamped cell** resolves placement once (3-10 ms on the loaded machine), in the worker for chunks and on the main thread for the first collision query there.
 - **Real lights cost shading while they exist.** The light pool holds only the lights engines declare (`budget.lights`, capped at 4). Meshes on shared materials must be pooled (`createMeshPool` / `createInstancedPool`), or three r184 keeps each disposed mesh alive (about 8 KB each).
@@ -108,5 +204,13 @@ Paused on purpose: the owner ran low on the usage budget. Everything below is co
 - **Lure silhouettes** are tuned on the test presets; the real heavy presets should check theirs against horizon screenshots.
 - **performance.memory** heap figures exist only in Chrome and are coarse.
 - **Golden-frame comparisons across runs** are not pixel-exact (vegetation sway, birds, cloud drift); the exact proof is the same-frame A/B in tools/steps/golden-frame.json.
-- **Full harness matrix.** Only reduced flight harnesses were run in wave 1; the full 36-run matrix is for Milestone G.
-- **One soft crash in the integration harness.** WebGPU run 3 (INTEG-A, jet, third person) had a "noseTip strike" at 0.98 s and 227 m/s; the same run on WebGL2 had none. It is not a hard criterion (the soft crash is the designed outcome of a terrain strike), there are no presets yet, and the spawn code changes nothing in flight; worth watching in the Milestone G matrix.
+- **Full harness matrix.** Only reduced flight harnesses were run in waves 1 and 2. The full 36-run matrix is for Milestone G.
+- **Penetration at a high-speed terrain strike (hard criterion; for Milestone G).** In the wave 2 integration harness, the same run failed on both backends: INTEG-A, jet, first person, run 4 of 8.
+  - The scripted jet hit terrain at about 44.5 s and 286 m/s, and the soft crash fired.
+  - At that strike it penetrated 8.96 m (WebGPU) and 13.56 m (WebGL2), for 37 frames each.
+  - The same run flown alone passed with no crash.
+  - The wave 2 base (478cda7, the same harness and seeds, WebGPU) had no penetration. Its jet crashed softly at 226-227 m/s in runs 3 and 7.
+  - The engine branches change nothing in flight while no spawn and no extra ground surface exists. The harness flies no spawns, and a same-seed frame comparison of base and integrated builds is identical (233 against 234 draw calls, 181 fps).
+  - The flown path depends on the run order and the frame timing. The p2/engines-structure-setpiece engineer reproduced the same class of penetration on the base (STRUCT-A, jet, third person, 250 m/s, 1.21 m deep).
+  - The Phase 1 contact code lets a strike above about 250 m/s sink in before the soft crash takes over. That belongs to the flight-model or harness owner, in the Milestone G matrix.
+  - Other soft crashes (not a hard criterion): 2 on WebGPU and 1 on WebGL2 in the same harness, all jet strikes.
