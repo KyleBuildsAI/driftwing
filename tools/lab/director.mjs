@@ -547,7 +547,7 @@ function runScenario({ seed, pathSeed, hours, craft, siteChance, perf = null, na
     presets: PRESETS,
     spawnManager: manager,
     weather,
-    terrain: { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL },
+    terrain: { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL, landmarkSitesNear: world.landmarkSitesNear },
     getPlayer: () => path.player,
     getTime,
     getSun: () => sun.sun,
