@@ -39,7 +39,7 @@ export default Object.freeze({
         foam: 0.95,
         direction: 1,
         spinUp: 12,
-        mistRate: 70,
+        mistRate: 50,
         mistSize: 8,
         voice: false,
       },

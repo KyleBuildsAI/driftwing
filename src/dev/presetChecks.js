@@ -68,6 +68,8 @@ export function installPresetChecks(game) {
    */
   const heldSites = new Map();
   const park = { x: 0, y: 0, z: 0, heading: 0 };
+  /** The eagle's wingman modes seen across the escort check's calls. */
+  const eagleModes = new Set();
 
   function check(name, ok, detail) {
     const line = `${ok ? 'PASS' : 'FAIL'} ${name}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`;
@@ -341,14 +343,31 @@ export function installPresetChecks(game) {
         { before: entry.before, after, worldFirstDrawn: world, leftBehind: leftBehind.map((item) => `${item.owner}/${item.object}`), ownWindSources: ownSources, left: sourcesLeft, windSources: `${entry.windBefore} -> ${ctx.wind.sourceCount}`, leaks });
     },
 
-    /** Geese: the craft holds the open slot for the hold time; the flock sends the achievement. */
-    async geeseSlot() {
+    /**
+     * Geese: the craft holds the open slot for the hold time; the flock sends the achievement. With
+     * pauseAt (s held), it stops there in photo mode with the camera behind the craft in its slot (for
+     * the screenshot) and returns; the next call carries on to the achievement.
+     */
+    async geeseSlot({ pauseAt = null } = {}) {
       const entry = open.get('geeseFormation');
       const fauna = manager.registry.get('fauna');
       ctx.setPhotoMode(false);
       const started = performance.now();
       let held = 0;
       while (performance.now() - started < 30000 && !events.achievement.includes('vFormation')) {
+        if (pauseAt !== null && held >= pauseAt) {
+          const description = fauna.describe(entry.id);
+          const forward = state.player.forward;
+          const player = state.player.position;
+          ctx.setPhotoMode(true);
+          await frames(2);
+          const posed = ctx.systems.camera.setFreeCameraPose({
+            position: new THREE.Vector3(player.x - forward.x * 45, player.y + 14, player.z - forward.z * 45),
+            target: new THREE.Vector3(description.center.x, description.center.y, description.center.z),
+          });
+          await frames(10);
+          return `geese: the craft in its slot after ${Math.round(held * 10) / 10} s, paused for the screenshot (posed ${posed})`;
+        }
         const formation = fauna.getFormation(entry.id);
         const description = fauna.describe(entry.id);
         if (!formation || !description) break;
@@ -449,19 +468,41 @@ export function installPresetChecks(game) {
     },
 
     /** Eagle: it joins off the wing with a call, escorts, then peels off with a call. */
-    async eagleEscort() {
+    /**
+     * Eagle: it joins off the wing with a call, escorts, then peels off with a call. With shot: true it
+     * stops 8 s into the escort in photo mode with the camera behind the craft and its wingman (for the
+     * screenshot) and returns; the next call carries on to the peel.
+     */
+    async eagleEscort({ shot = false } = {}) {
       const entry = open.get('eagleWingman');
       const fauna = manager.registry.get('fauna');
       const record = manager.getInstance(entry.id);
+      const modes = eagleModes;
       ctx.setPhotoMode(false);
-      await approach(record.position.x, record.position.z, 900, 0);
-      ctx.systems.flight.resetTo({ x: state.player.position.x, y: record.position.y, z: state.player.position.z, heading: state.player.heading });
-      const modes = new Set();
+      if (modes.size === 0) {
+        await approach(record.position.x, record.position.z, 900, 0);
+        ctx.systems.flight.resetTo({ x: state.player.position.x, y: record.position.y, z: state.player.position.z, heading: state.player.heading });
+      }
       const started = performance.now();
+      let escortSince = null;
       while (performance.now() - started < 110000 && !events.call.includes('peel')) {
         const description = fauna.describe(entry.id);
         if (!description) break;
         modes.add(description.mode);
+        if (description.mode === 2 && escortSince === null) escortSince = performance.now();
+        if (shot && escortSince !== null && performance.now() - escortSince > 8000) {
+          const forward = state.player.forward;
+          const right = state.player.right;
+          const player = state.player.position;
+          ctx.setPhotoMode(true);
+          await frames(2);
+          const posed = ctx.systems.camera.setFreeCameraPose({
+            position: new THREE.Vector3(player.x - forward.x * 28 - right.x * 6, player.y + 7, player.z - forward.z * 28 - right.z * 6),
+            target: new THREE.Vector3((player.x + description.center.x) / 2, (player.y + description.center.y) / 2, (player.z + description.center.z) / 2),
+          });
+          await frames(10);
+          return `eagle: on the wing ${Math.round(Math.hypot(description.center.x - player.x, description.center.z - player.z))} m from the craft, paused for the screenshot (posed ${posed})`;
+        }
         // Keep the craft high over the ground while the eagle flies with it.
         if (state.flight.agl < 250) ctx.systems.flight.resetTo({ x: state.player.position.x, y: ground(state.player.position.x, state.player.position.z) + 500, z: state.player.position.z, heading: state.player.heading });
         await frames(10);
