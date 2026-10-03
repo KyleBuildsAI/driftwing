@@ -294,7 +294,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     runs: [],
     outside: createBucket(),
     // The event director and the spawns on this world (the soak reports them; the flight test too).
-    spawns: { directorTicks: null, directorActivations: null, directorLog: [], notables: null, activated: { site: 0, event: 0 }, peak: 0 },
+    spawns: { directorTicks: null, directorActivations: null, directorLog: [], notables: null, declined: null, activated: { site: 0, event: 0 }, peak: 0 },
   };
   bus.onTyped('spawnActivated', (payload) => {
     if (payload && payload.kind === 'site') worldRecord.spawns.activated.site++;
@@ -811,7 +811,11 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     });
   }
 
-  /** The event director's record on this world so far: ticks, activations (with their log), notables. */
+  /**
+   * The event director's record on this world so far: ticks, activations (with their log), notables,
+   * and the director activations the SpawnManager declined (every engine ended at create; the director
+   * retries those candidates later, so they are not activations). The manager is new with each world.
+   */
   function readDirector() {
     const director = ctx.systems.spawns && ctx.systems.spawns.director;
     if (!director) return;
@@ -820,6 +824,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     record.directorTicks = directorState.ticks;
     record.directorActivations = directorState.logLength;
     record.notables = directorState.notables;
+    const manager = ctx.systems.spawns.manager;
+    record.declined = manager ? manager.getStats().refusals.declined ?? 0 : null;
     record.directorLog = directorState.log.map((entry) => ({ time: round(entry.time, 1), presetId: entry.presetId, reason: entry.reason }));
   }
 
@@ -934,7 +940,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         heapGrowth: 'JS heap (performance.memory.usedJSHeapSize) after a forced GC, from the end of each world\'s warmup lap to the end of that world\'s last run; the largest growth across worlds is judged. The growth from the end of the world warmup (before the lap) is listed too.',
         ...(soak ? {
           p99: 'The soak judges the worst run\'s p99 frame time (after warmup) against the frame target the perf governor holds (state.perf.targetMs: the display refresh, 60 Hz in a browser under automation).',
-          director: 'The event director runs as in the game on every world. It is live when it ticked on the world; its activations (with their reasons), the sites and events started on the world and the most spawns alive at once are listed.',
+          director: 'The event director runs as in the game on every world. It is live when it ticked on the world; its activations (with their reasons), the activations the SpawnManager declined (refusal "declined": every engine ended at create, retried later), the sites and events started on the world and the most spawns alive at once are listed.',
         } : {}),
       },
       criteria,
@@ -1065,7 +1071,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       ...run.script.checks.filter((check) => !check.passed).map((check) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): scripted manoeuvre not observed: ${check.label}`),
     ]);
     if (eventList.length > 0) sections.push({ title: 'Events', notes: eventList.slice(0, 60) });
-    const directorNotes = report.worlds.filter((entry) => entry.spawns && entry.spawns.directorTicks !== null).map((entry) => `${entry.seed}: ${entry.spawns.directorTicks} director ticks, ${entry.spawns.notables} notables, activations: ${entry.spawns.directorLog.length > 0 ? entry.spawns.directorLog.map((log) => `${log.presetId} at ${log.time} s (${log.reason})`).join(', ') : 'none'}; ${entry.spawns.activated.site} sites and ${entry.spawns.activated.event} events started, at most ${entry.spawns.peak} spawns at once`);
+    const directorNotes = report.worlds.filter((entry) => entry.spawns && entry.spawns.directorTicks !== null).map((entry) => `${entry.seed}: ${entry.spawns.directorTicks} director ticks, ${entry.spawns.notables} notables, ${entry.spawns.declined ?? 0} declined, activations: ${entry.spawns.directorLog.length > 0 ? entry.spawns.directorLog.map((log) => `${log.presetId} at ${log.time} s (${log.reason})`).join(', ') : 'none'}; ${entry.spawns.activated.site} sites and ${entry.spawns.activated.event} events started, at most ${entry.spawns.peak} spawns at once`);
     if (directorNotes.length > 0) sections.push({ title: 'Event director and spawns', notes: directorNotes });
     if (report.console.length > 0) sections.push({ title: 'Console errors and warnings', notes: report.console.slice(0, 30).map((entry) => `[${entry.level}] ${entry.context}: ${entry.text}`) });
     if (report.harnessErrors.length > 0) sections.push({ title: 'Harness problems', notes: report.harnessErrors });

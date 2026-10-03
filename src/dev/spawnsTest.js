@@ -423,6 +423,11 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     return ended;
   }
 
+  /** The director activations the SpawnManager has declined so far (getStats().refusals.declined). */
+  function declinedCount() {
+    return manager.getStats().refusals.declined ?? 0;
+  }
+
   async function recordLive(seconds) {
     const recorder = createFrameRecorder({ slowLimitMs: FRAME_LIMIT_MS });
     const render = { drawCalls: 0, triangles: 0, samples: 0 };
@@ -657,6 +662,9 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       frames: { frames: 0, avgFps: null, p99Ms: null, maxMs: null, slowFrames: 0 },
       cycles: [],
       otherSpawnsEnded: 0,
+      // Director activations of the re-added preset the manager declined meanwhile (refusal 'declined':
+      // every engine ended at create, so nothing was spawned and the director retries later).
+      directorDeclined: 0,
       console: { errors: 0, warnings: 0 },
       notes: [],
       passed: false,
@@ -667,6 +675,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       return;
     }
     const family = presetFamily(preset);
+    const declinedBefore = declinedCount();
     holdConditions(ctx, { sun: scenario.sun, morning: scenario.morning === true, weather: scenario.weather ?? 'clear' });
     phase = 'placing';
     progress(label, `${row.conditions.why}: finding its spot`);
@@ -749,6 +758,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       if (refused) row.notes.push(`leak check refused: ${refused}`);
     } finally {
       removeFamily(family);
+      row.directorDeclined = declinedCount() - declinedBefore;
       row.console = { errors: capture.counts.errors - errorsBefore, warnings: capture.counts.warnings - warningsBefore };
       row.passed = row.spawned && row.cycles.length === 2 && row.cycles.every((cycle) => cycle.ok) && row.console.errors === 0 && row.console.warnings === 0 && (!shotsWanted || Boolean(row.shot && row.shot.taken));
       publish();
@@ -846,6 +856,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     const notes = rows.flatMap((row) => [
       ...row.notes.map((note) => `${row.name}: ${note}`),
       ...(row.otherSpawnsEnded > 0 ? [`${row.name}: ${row.otherSpawnsEnded} director spawn(s) of the re-added preset ended`] : []),
+      ...(row.directorDeclined > 0 ? [`${row.name}: ${row.directorDeclined} director activation(s) of the re-added preset declined (every engine ended at create)`] : []),
       ...row.cycles.flatMap((cycle, cycleIndex) => (cycle.leftBehind.length > 0 ? [`${row.name}, cycle ${cycleIndex + 1}: left behind ${cycle.leftBehind.join(', ')}`] : [])),
       ...(row.cycles[1] && row.cycles[1].warmupRetainedMB > WARMUP_NOTE_MB ? [`${row.name}: the held warm-up create kept ${row.cycles[1].warmupRetainedMB} MB once; the heap then stayed at ${row.cycles[1].heapTraceMB.join(', ')} MB over the judged cycles`] : []),
     ]);
