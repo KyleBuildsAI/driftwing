@@ -437,6 +437,7 @@ export function installPresetChecks(game) {
       const siteId = entry.siteId;
       const record = manager.getInstance(entry.id);
       const spot = { x: record.position.x, z: record.position.z };
+      const endedBefore = events.ended.length;
       setSun(40);
       // Look away from the bay: the craft 3 km south of it facing south, the photo camera (which keeps
       // within 900 m of the craft) just ahead of it.
@@ -455,7 +456,7 @@ export function installPresetChecks(game) {
         await frames(10);
       }
       const goneByDay = manager.getSiteSpawn(siteId) === null;
-      const reason = events.ended.find((item) => item.id === entry.id)?.reason ?? null;
+      const reason = events.ended.slice(endedBefore).find((item) => item.id === entry.id)?.reason ?? null;
       setSun(-25);
       const back = performance.now();
       let rebuilt = null;
