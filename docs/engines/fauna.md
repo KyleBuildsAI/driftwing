@@ -93,6 +93,7 @@ accept a range, drawn once per group from the spawn's seeded generator.
 | `wander` | factor | 0..1 | 0.06 | how much the group's heading meanders |
 | `leash` | m | 50..20000 | 600 | how far a wandering group (murmuration, flock) may stray from its anchor before it curves back. A formation that is not following the player turns back at 4 x leash |
 | `fadeIn` | s | 0..30 | 1.5 | agents grow in from size 0. A drifting sky whale's slipstream also fades in with it |
+| `fadeOut` | s | 0..60 | 6 | an event (a spawn with a duration) fades its agents and voice out over the last `fadeOut` seconds of its duration and then ends (`instance.ended`), so it never vanishes at the manager's grace. A wingman ends this way only while it is still waiting; once it has joined it finishes its escort and peels off |
 | `voice` | bool | | unset | `true` or `false` decides whether this entry opens the preset's `audio` voice; unset, the preset's first engine entry owns it, so a preset opens one voice. Set `false` on the extra entries of a multi-group preset |
 | `voiceIntensity` | 0..1 | | 1 | the voice's intensity at full presence. Murmurations and flocks swell it from 0.15 to 1 as the player nears the flock |
 
@@ -186,7 +187,7 @@ Thermals weaker than 0.3 are ignored.
 | `glow` | 0..1 | | 1 | bioluminescent excitation of the wakes, splashes and spouts. It only shows inside a glow region (the waterEffect engine's `bioluminescence`) |
 | `depth` | m (x scale) | 2..80 | 16 | dive depth |
 | `callInterval` | s or `[min, max]` | | [16, 38] | time between songs (the voice's `call` trigger). A breach also calls |
-| `seekWater` | m | 0..20000 | 0 | at create, when the anchor is not on open water (the point and four points 1.5 x `spread` around it at least 6 m deep), the pod moves to the nearest open water within this reach (rings 150 m apart). A pod that finds none ends at once (a natural end). The whale pod sets it, so a candidate on a coast puts its whales in the sea |
+| `seekWater` | m | 0..20000 | 0 | at create, when the anchor is not on open water (the point and four points around it, 4 x `spread` and at least 250 m out, all at least 6 m deep), the pod moves to the nearest open water within this reach (rings 150 m apart). A pod that finds none ends at once (a natural end). The whale pod sets it, so a candidate on a coast puts its whales in the sea |
 
 A pod looks 350 m ahead every 2 s and turns away from land.
 

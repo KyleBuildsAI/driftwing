@@ -58,6 +58,7 @@ export const FAUNA_DEFAULTS = Object.freeze({
   wander: 0.06,
   leash: 600,
   fadeIn: 1.5,
+  fadeOut: 6,
   voice: null,
   voiceIntensity: 1,
   flocking: Object.freeze({ separation: 1.4, separationRadius: 3, alignment: 1.1, cohesion: 0.12, neighborRadius: 12, maxNeighbors: 7 }),
@@ -521,7 +522,7 @@ export function createFaunaEngine() {
     return !ctx.water || ctx.water.activeVortices === 0;
   }
 
-  /** Whether (x, z) and four points margin metres around it are all open water (the pod's land test). */
+  /** Whether (x, z) and four points margin metres around it are all open water (the pod's land test, 6 m deep). */
   function isOpenWater(x, z, margin) {
     const deep = ctx.terrain.waterLevel - 6;
     return ctx.terrain.heightAt(x, z) < deep
@@ -535,7 +536,8 @@ export function createFaunaEngine() {
    * near a coast puts its whales in the sea. Returns false when there is none.
    */
   function seekOpenWater(g, reach, spread) {
-    const margin = Math.max(60, spread * 1.5);
+    // Room to swim: the pod's own lanes and the 350 m it looks ahead for land.
+    const margin = Math.max(250, spread * 4);
     if (isOpenWater(g[G.X], g[G.Z], margin)) return true;
     for (let radius = 150; radius <= reach; radius += 150) {
       for (let step = 0; step < 16; step++) {
@@ -1501,6 +1503,19 @@ export function createFaunaEngine() {
     g[G.Y] = waterIsFlat() ? ctx.terrain.waterLevel : waterSurface(g[G.X], g[G.Z]);
   }
 
+  /**
+   * An event's natural end: the group fades out over the last fadeOut seconds of its duration and
+   * ends with it, instead of vanishing when the manager's grace runs out. A wingman only ends this way
+   * while it is still waiting (a joined eagle finishes its escort and peels off).
+   */
+  function endWithDuration(instance, data) {
+    const g = data.g;
+    const left = data.duration - g[G.AGE];
+    const fadeOut = data.params.fadeOut;
+    if (left < fadeOut) g[G.FADE] = Math.min(g[G.FADE], fadeOut > 0 ? Math.max(left / fadeOut, 0) : 0);
+    if (left <= 0) instance.ended = true;
+  }
+
   function nextWhaleTimer(data, range) {
     return range[0] + data.rng() * (range[1] - range[0]);
   }
@@ -2403,6 +2418,7 @@ export function createFaunaEngine() {
       g[G.AGE] += dt;
       g[G.TIME] += dt;
       g[G.FADE] = params.fadeIn > 0 ? Math.min(Math.max(g[G.AGE] / params.fadeIn, 0), 1) : 1;
+      if (data.duration !== null && (params.behavior !== 'wingman' || data.mode === MODE_WAIT)) endWithDuration(instance, data);
       g[G.SCATTER_COOLDOWN] -= dt;
       const mover = GOAL_MOVERS[params.behavior];
       if (dt > 0 && mover) mover(data, dt);
