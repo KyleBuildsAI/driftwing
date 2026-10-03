@@ -1,0 +1,176 @@
+[
+  {
+    "wait": 2500
+  },
+  {
+    "eval": "(async () => { try { const kit = await import('/src/dev/presetChecks.js'); const api = kit.installPresetChecks(window.DRIFTWING); return 'dev server only: imports /src/dev/presetChecks.js | backend ' + window.DRIFTWING.backend + ' | ' + api.setup(); } catch (error) { console.error('[preset check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.show('whalePod', {\"sun\": 35, \"kind\": \"coast\", \"distance\": 1200, \"view\": {\"distance\": 130, \"height\": 30, \"bearing\": 200, \"lift\": 2}}); } catch (error) { console.error('[preset check] show whalePod failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "presets-11-whale-pod"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.whalesOnWater(); } catch (error) { console.error('[preset check] whalesOnWater failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.end('whalePod'); } catch (error) { console.error('[preset check] end whalePod failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.show('maelstrom', {\"sun\": 25, \"kind\": \"site\", \"view\": {\"distance\": 750, \"height\": 480, \"bearing\": 200, \"lift\": 60}}); } catch (error) { console.error('[preset check] show maelstrom failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "presets-12-maelstrom"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.maelstromWind(); } catch (error) { console.error('[preset check] maelstromWind failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.end('maelstrom'); } catch (error) { console.error('[preset check] end maelstrom failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.show('bioluminescentBay', {\"sun\": -25, \"kind\": \"site\", \"view\": {\"distance\": 350, \"height\": 60, \"bearing\": 180, \"lift\": 0, \"water\": true}}); } catch (error) { console.error('[preset check] show bioluminescentBay failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "presets-13-bioluminescent-bay"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.bayTrails(); } catch (error) { console.error('[preset check] bayTrails failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.bayHours(); } catch (error) { console.error('[preset check] bayHours failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.end('bioluminescentBay'); } catch (error) { console.error('[preset check] end bioluminescentBay failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.show('starlingMurmuration', {\"sun\": 4, \"kind\": \"ahead\", \"distance\": 900, \"view\": {\"distance\": 650, \"height\": 60, \"bearing\": 200, \"lift\": 20}}); } catch (error) { console.error('[preset check] show starlingMurmuration failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "presets-14-starling-murmuration"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.end('starlingMurmuration'); } catch (error) { console.error('[preset check] end starlingMurmuration failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.show('geeseFormation', {\"sun\": 30, \"kind\": \"ahead\", \"distance\": 400, \"view\": {\"distance\": 120, \"height\": 10, \"bearing\": 200, \"lift\": 0}}); } catch (error) { console.error('[preset check] show geeseFormation failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "presets-15-geese-v-formation"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.geeseSlot({ pauseAt: 5 }); } catch (error) { console.error('[preset check] geeseSlot shot failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "presets-15-geese-slot"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.geeseSlot(); } catch (error) { console.error('[preset check] geeseSlot failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.end('geeseFormation'); } catch (error) { console.error('[preset check] end geeseFormation failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.show('thermalHawks', {\"sun\": 50, \"kind\": \"thermal\", \"view\": {\"distance\": 90, \"height\": 15, \"bearing\": 200, \"lift\": 0}}); } catch (error) { console.error('[preset check] show thermalHawks failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "presets-16-thermal-hawks"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.hawksInThermal(); } catch (error) { console.error('[preset check] hawksInThermal failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.end('thermalHawks'); } catch (error) { console.error('[preset check] end thermalHawks failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.show('fireflies', {\"sun\": -25, \"kind\": \"meadow\", \"distance\": 900, \"view\": {\"distance\": 60, \"height\": 5, \"bearing\": 200, \"lift\": 2}}); } catch (error) { console.error('[preset check] show fireflies failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "presets-17-fireflies"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.end('fireflies'); } catch (error) { console.error('[preset check] end fireflies failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.show('eagleWingman', {\"sun\": 30, \"kind\": \"ahead\", \"distance\": 1200, \"view\": {\"distance\": 60, \"height\": 5, \"bearing\": 200, \"lift\": 0}}); } catch (error) { console.error('[preset check] show eagleWingman failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "presets-18-eagle-wingman"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.eagleEscort({ shot: true }); } catch (error) { console.error('[preset check] eagleEscort shot failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "presets-18-eagle-on-the-wing"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.eagleEscort(); } catch (error) { console.error('[preset check] eagleEscort failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.end('eagleWingman'); } catch (error) { console.error('[preset check] end eagleWingman failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.show('windFarm', {\"sun\": 30, \"kind\": \"site\", \"view\": {\"distance\": 1300, \"height\": 160, \"bearing\": 200, \"lift\": 60}}); } catch (error) { console.error('[preset check] show windFarm failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "presets-19-wind-farm"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.windFarmTurning(); } catch (error) { console.error('[preset check] windFarmTurning failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.end('windFarm'); } catch (error) { console.error('[preset check] end windFarm failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.show('ropeBridge', {\"sun\": 30, \"kind\": \"site\", \"view\": {\"distance\": 260, \"height\": 30, \"bearing\": 90, \"lift\": -30}}); } catch (error) { console.error('[preset check] show ropeBridge failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "presets-20-rope-bridge"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.bridgeGate(); } catch (error) { console.error('[preset check] bridgeGate failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.end('ropeBridge'); } catch (error) { console.error('[preset check] end ropeBridge failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwPresets.finish(); } catch (error) { console.error('[preset check] finish failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  }
+]

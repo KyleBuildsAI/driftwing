@@ -95,6 +95,7 @@ every generic feature below then works for it with no engine change.
 | `wake.deficit` | share of the wind | 0..0.9 | 0.35 | the slower air in the wake core |
 | `wake.turbulence` | 0..1 | | 0.45 | |
 | `wake.expansion` | m per m | 0..0.3 | 0.075 | how fast the wake widens |
+| `wake.gust` | m/s | 0..30 | 3 | the wake's own gusts at full turbulence (smooth seeded noise, like the WindField sources' gusts), so a craft feels the bumps it reads; 0 leaves only the turbulence reading and the deficit |
 
 The turbines show the wind the player feels: the WindField's ambient wind at hub height (read once
 at create, then scaled by the live `windStrength`), plus the gusts and turbulence the craft meets
@@ -318,7 +319,7 @@ surface) and `surfaces.remove(id)`.
 ### Wind
 
 The wind farm's wake is a WindField source (`kind: 'structure-wake'`, id `<spawnId>:wake`): slower,
-turbulent air in a widening cone downwind of every rotor, following the eased wind the turbines
+turbulent air with its own gusts (`wake.gust`) in a widening cone downwind of every rotor, following the eased wind the turbines
 show. It is added at the near and mid tiers and removed at the far tier, where the player is
 kilometres away and cannot reach a wake a few rotor diameters long; it comes back at mid, and
 dispose removes it. No other recipe authors wind.

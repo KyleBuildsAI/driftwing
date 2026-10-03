@@ -53,11 +53,12 @@ export const FAUNA_DEFAULTS = Object.freeze({
   size: 1,
   sizeJitter: 0.15,
   speed: null,
-  altitude: Object.freeze({ mode: 'agl', value: 120, spread: 20 }),
+  altitude: Object.freeze({ mode: 'agl', value: 120, spread: 20, ceiling: 2500 }),
   floor: 15,
   wander: 0.06,
   leash: 600,
   fadeIn: 1.5,
+  fadeOut: 6,
   voice: null,
   voiceIntensity: 1,
   flocking: Object.freeze({ separation: 1.4, separationRadius: 3, alignment: 1.1, cohesion: 0.12, neighborRadius: 12, maxNeighbors: 7 }),
@@ -68,10 +69,11 @@ export const FAUNA_DEFAULTS = Object.freeze({
     maxHeadingGap: 55, playerSpacing: 24, tolerance: 14, heightTolerance: 9, headingTolerance: 30, holdSeconds: 10,
     achievement: null,
   }),
-  circling: Object.freeze({ radius: Object.freeze([45, 85]), climb: 1.3, bottom: 150, top: 900, thermals: 1, thermalSearch: 1800, thermalRefresh: 12, useThermals: true }),
+  circling: Object.freeze({ radius: Object.freeze([45, 85]), climb: 1.3, bottom: 150, top: 900, thermals: 1, thermalSearch: 1800, thermalRefresh: 12, useThermals: true, requireThermal: false }),
   pod: Object.freeze({
     spread: 45, surfaceSeconds: Object.freeze([14, 26]), diveSeconds: Object.freeze([10, 22]), breachChance: 0.3,
     spoutInterval: Object.freeze([4, 7]), spoutHeight: 8, wake: 0.55, glow: 1, depth: 16, callInterval: Object.freeze([16, 38]),
+    seekWater: 0,
   }),
   wingman: Object.freeze({
     side: 0, right: 16, up: 2, forward: 3, joinRadius: 1500, escortSeconds: 60, lostDistance: 420, lostSeconds: 6,
@@ -518,6 +520,39 @@ export function createFaunaEngine() {
   /** Whether the water is flat everywhere (no funnel): then its surface is sea level itself. */
   function waterIsFlat() {
     return !ctx.water || ctx.water.activeVortices === 0;
+  }
+
+  /** Whether (x, z) and four points margin metres around it are all open water (the pod's land test, 6 m deep). */
+  function isOpenWater(x, z, margin) {
+    const deep = ctx.terrain.waterLevel - 6;
+    return ctx.terrain.heightAt(x, z) < deep
+      && ctx.terrain.heightAt(x + margin, z) < deep && ctx.terrain.heightAt(x - margin, z) < deep
+      && ctx.terrain.heightAt(x, z + margin) < deep && ctx.terrain.heightAt(x, z - margin) < deep;
+  }
+
+  /**
+   * A pod's create-time search (pod.seekWater): when the anchor is not on open water, moves the group
+   * goal to the nearest open water within reach (rings 150 m apart, 16 bearings each), so a candidate
+   * near a coast puts its whales in the sea. Returns false when there is none.
+   */
+  function seekOpenWater(g, reach, spread) {
+    // Room to swim: the pod's own lanes and the 350 m it looks ahead for land.
+    const margin = Math.max(250, spread * 4);
+    if (isOpenWater(g[G.X], g[G.Z], margin)) return true;
+    for (let radius = 150; radius <= reach; radius += 150) {
+      for (let step = 0; step < 16; step++) {
+        const angle = (step / 16) * TWO_PI;
+        const x = Math.round(g[G.ANCHOR_X] + Math.sin(angle) * radius);
+        const z = Math.round(g[G.ANCHOR_Z] - Math.cos(angle) * radius);
+        if (!isOpenWater(x, z, margin)) continue;
+        g[G.X] = x;
+        g[G.Z] = z;
+        g[G.ANCHOR_X] = x;
+        g[G.ANCHOR_Z] = z;
+        return true;
+      }
+    }
+    return false;
   }
 
   // =============================================================================================
@@ -1313,12 +1348,23 @@ export function createFaunaEngine() {
     const cache = data.thermals;
     const g = data.g;
     const circling = data.params.circling;
+    const previousCount = cache.count;
     cache.count = 0;
     if (circling.useThermals && ctx.wind && typeof ctx.wind.thermalsNear === 'function') {
       ctx.wind.thermalsNear(g[G.ANCHOR_X], g[G.ANCHOR_Z], circling.thermalSearch, data.thermalVisitor);
       // Keep the nearest few to the anchor: the group circles together, not across the region.
       sortThermals(cache, g[G.ANCHOR_X], g[G.ANCHOR_Z]);
       if (cache.count > circling.thermals) cache.count = Math.max(1, circling.thermals);
+    }
+    if (cache.count === 0 && circling.requireThermal && circling.useThermals) {
+      // The birds mark real lift only: with no working thermal they keep the columns they had (the
+      // visitor wrote nothing over them) and ride them out. A group that never found one ends (see
+      // create); the soaring fallback below only keeps its arrays valid until then.
+      if (previousCount > 0) {
+        cache.count = previousCount;
+        return;
+      }
+      data.noThermal = true;
     }
     if (cache.count === 0) {
       // No working thermal: soar over the anchor.
@@ -1455,6 +1501,19 @@ export function createFaunaEngine() {
     g[G.X] += g[G.VX] * dt;
     g[G.Z] += g[G.VZ] * dt;
     g[G.Y] = waterIsFlat() ? ctx.terrain.waterLevel : waterSurface(g[G.X], g[G.Z]);
+  }
+
+  /**
+   * An event's natural end: the group fades out over the last fadeOut seconds of its duration and
+   * ends with it, instead of vanishing when the manager's grace runs out. A wingman only ends this way
+   * while it is still waiting (a joined eagle finishes its escort and peels off).
+   */
+  function endWithDuration(instance, data) {
+    const g = data.g;
+    const left = data.duration - g[G.AGE];
+    const fadeOut = data.params.fadeOut;
+    if (left < fadeOut) g[G.FADE] = Math.min(g[G.FADE], fadeOut > 0 ? Math.max(left / fadeOut, 0) : 0);
+    if (left <= 0) instance.ended = true;
   }
 
   function nextWhaleTimer(data, range) {
@@ -2243,12 +2302,23 @@ export function createFaunaEngine() {
       wind: null,
       windAttached: false,
       formationState: null,
+      noThermal: false,
+      noWater: false,
     };
+    if (resolved.behavior === 'pod' && resolved.pod.seekWater > 0 && !seekOpenWater(g, resolved.pod.seekWater, resolved.pod.spread)) data.noWater = true;
     fillGround(data);
     // The goal's starting height from the altitude mode.
     const altitude = resolved.altitude;
     groundUnderGoal(data);
     const ground = io[IO.GROUND];
+    if (altitude.mode === 'player') {
+      // Near the player's own height (offset by value), kept between the floor and the ceiling above
+      // the ground there; from then on the group holds that height above sea level.
+      const playerY = ctx.state && ctx.state.player ? ctx.state.player.position.y : ground + altitude.value;
+      const wanted = playerY + altitude.value + (rng() * 2 - 1) * altitude.spread;
+      altitude.value = Math.min(Math.max(wanted, ground + resolved.floor + 30), ground + Math.max(resolved.floor + 30, altitude.ceiling));
+      altitude.mode = 'msl';
+    }
     if (resolved.behavior === 'pod') g[G.Y] = waterSurface(g[G.X], g[G.Z]);
     else if (altitude.mode === 'msl') g[G.Y] = Math.max(altitude.value, ground + resolved.floor + 10);
     else if (altitude.mode === 'water') g[G.Y] = waterSurface(g[G.X], g[G.Z]);
@@ -2298,6 +2368,9 @@ export function createFaunaEngine() {
       data,
     };
     data.instance = instance;
+    // A pod with no open water in reach, or birds that must mark a thermal and found none, end at once
+    // (a natural end: the manager removes the spawn on its next frame, before anything is drawn).
+    if (data.noWater || data.noThermal) instance.ended = true;
     if (resolved.behavior === 'drift' && resolved.drift.slipstream) {
       g[G.LEAD_X] = g[G.X];
       g[G.LEAD_Y] = g[G.Y];
@@ -2345,6 +2418,7 @@ export function createFaunaEngine() {
       g[G.AGE] += dt;
       g[G.TIME] += dt;
       g[G.FADE] = params.fadeIn > 0 ? Math.min(Math.max(g[G.AGE] / params.fadeIn, 0), 1) : 1;
+      if (data.duration !== null && (params.behavior !== 'wingman' || data.mode === MODE_WAIT)) endWithDuration(instance, data);
       g[G.SCATTER_COOLDOWN] -= dt;
       const mover = GOAL_MOVERS[params.behavior];
       if (dt > 0 && mover) mover(data, dt);

@@ -237,8 +237,8 @@ function testTiles() {
   check('tiles', 'bad requests throw', badRequests === 4, `${badRequests} of 4`);
   const tag = mapTileCacheTag('lab');
   check('tiles', 'the cache tag follows the seed and the preset placement data',
-    // The default is the real preset list, whose sites stamp the terrain (preset batch 1 onward).
-    tag.startsWith('LAB|v') && tag !== mapTileCacheTag('LAB2') && tag !== mapTileCacheTag('LAB', [{ id: 'x', kind: 'site', placement: { chance: 1 }, stamps: [] }]) && tag === mapTileCacheTag('LAB', PRESETS) && tag !== mapTileCacheTag('LAB', []),
+    tag.startsWith('LAB|v') && tag !== mapTileCacheTag('LAB2') && tag !== mapTileCacheTag('LAB', [{ id: 'x', kind: 'site', placement: { chance: 1 }, stamps: [] }]) && tag === mapTileCacheTag('LAB', PRESETS)
+      && (PRESETS.some((preset) => preset.kind === 'site') ? tag !== mapTileCacheTag('LAB', []) : tag === mapTileCacheTag('LAB', [])),
     tag);
 
   const started = performance.now();

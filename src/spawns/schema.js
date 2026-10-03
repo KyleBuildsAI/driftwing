@@ -14,8 +14,8 @@ export const PRESET_SURFACES = Object.freeze(['land', 'water', 'coast', 'any']);
 export const TERRAIN_RELIEFS = Object.freeze(['peak', 'valley', 'flat', 'ridge', 'any']);
 /** placement.align: how placement.js orients a site (see ALIGNMENTS there). */
 export const PLACEMENT_ALIGNMENTS = Object.freeze(['random', 'downhill', 'ridge']);
-/** Time-of-day classes a preset may be limited to (filters.timeOfDay). */
-export const TIME_OF_DAY_CLASSES = Object.freeze(['dawn', 'day', 'golden', 'dusk', 'night']);
+/** Time-of-day classes a preset may be limited to (filters.timeOfDay; director.js matchesTimeOfDay). */
+export const TIME_OF_DAY_CLASSES = Object.freeze(['dawn', 'day', 'golden', 'dusk', 'night', 'midday']);
 export const WEATHER_STATE_NAMES = Object.freeze(['clear', 'building', 'storm', 'clearing']);
 export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase']);
 export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed']);

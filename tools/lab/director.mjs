@@ -33,7 +33,13 @@
 //                 steps exactly as the Phase 1 governor (tag v2-structure) does
 //   api           getNearby is sorted and well formed; getState carries the debugger's fields
 //
-// Usage: node tools/lab/director.mjs [--hours 24] [--verbose]
+// Usage: node tools/lab/director.mjs [--hours 24] [--verbose] [--presets stub|real|mixed]
+// --presets real runs the pacing checks against the real presets (src/spawns/presets/index.js, the
+// ones that exist in this tree) instead of the stubs: the first notable, the drought fill with no
+// sites (events only) and a typical world whose sites come from the real placement. --presets mixed
+// adds the stubs of the presets this tree does not have yet (STUB_REAL_IDS names the real preset each
+// stub stands for), a preview of the full set while the preset batches are apart. The other groups
+// test the director's rules and need the stubs, so they are skipped in both.
 // Prints a table and exits non-zero if any check fails.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -49,6 +55,7 @@ import {
   DIRECTOR_BUDGETS, DROUGHT_BAND, MAX_OFF_AXIS, MAX_OFF_AXIS_WIDE, PACING_WINDOW_MAX, RARITY_COOLDOWNS, RARITY_TIERS, createDirector,
 } from '../../src/spawns/director.js';
 import { angleBetween, bearingDegrees, hashString, mix32, rehash, unitFromHash } from '../../src/spawns/candidates.js';
+import { PRESETS as REAL_PRESETS } from '../../src/spawns/presets/index.js';
 import {
   WEATHER_BUCKET_SECONDS, WEATHER_CYCLE_BUCKETS, WEATHER_REGION_SIZE, WEATHER_STATES, createWeatherModel, createWeatherSample,
 } from '../../src/spawns/weather.js';
@@ -56,13 +63,15 @@ import {
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function parseArgs(argv) {
-  const options = { hours: 24, verbose: false };
+  const options = { hours: 24, verbose: false, presets: 'stub' };
   for (let index = 2; index < argv.length; index++) {
     const flag = argv[index];
     if (flag === '--verbose') options.verbose = true;
     else if (flag === '--hours') options.hours = Number(argv[++index]);
+    else if (flag === '--presets') options.presets = argv[++index];
     else throw new Error(`Unknown flag ${flag}`);
   }
+  if (!['stub', 'real', 'mixed'].includes(options.presets)) throw new Error('--presets must be stub, real or mixed');
   if (!(options.hours >= 4)) throw new Error('--hours must be at least 4 (the legendary tier needs hours of flight)');
   return options;
 }
@@ -116,7 +125,7 @@ function sitePreset(id, category, rarity, { heavy = false, activeState = null, e
   });
 }
 
-const PRESETS = Object.freeze([
+const STUB_PRESETS = Object.freeze([
   eventPreset('tornado', 'weather', 'rare', { heavy: true, engines: ['vortex', 'emitter', 'windModifier'], filters: { weather: ['storm'], surface: 'land' }, duration: [240, 360] }),
   eventPreset('supercell', 'weather', 'uncommon', { heavy: true, engines: ['weatherVolume', 'lightEffect', 'windModifier'], filters: { weather: ['building', 'storm'], minDistance: 6000, maxDistance: 20000 }, candidates: { cellSize: 12000, bucketSeconds: 450, chance: 0.5 }, duration: [300, 480] }),
   eventPreset('waterspout', 'ocean', 'uncommon', { engines: ['vortex', 'emitter'], filters: { surface: 'water', weather: ['building', 'storm'] } }),
@@ -144,6 +153,19 @@ const PRESETS = Object.freeze([
   sitePreset('airfield', 'structure', 'common'),
   sitePreset('crystalSpires', 'fantasy', 'uncommon', { engines: ['structure', 'lightEffect'] }),
 ]);
+/** The real preset id each stub stands for, where the two ids differ (--presets mixed). */
+const STUB_REAL_IDS = Object.freeze({
+  murmuration: 'starlingMurmuration', geese: 'geeseFormation', hawks: 'thermalHawks', eagle: 'eagleWingman',
+  lenticular: 'lenticularClouds', glory: 'gloryRainbow', meteorShower: 'meteorShower', lanterns: 'skyLanterns',
+});
+/**
+ * The presets the director runs with: the stubs; with --presets real the tree's real presets; with
+ * --presets mixed the real presets plus the stubs of those the tree does not have.
+ */
+const REAL_MODE = OPTIONS.presets !== 'stub';
+const REAL_IDS = new Set(REAL_PRESETS.map((preset) => preset.id));
+const PRESETS = !REAL_MODE ? STUB_PRESETS : OPTIONS.presets === 'real' ? REAL_PRESETS
+  : Object.freeze([...REAL_PRESETS, ...STUB_PRESETS.filter((stub) => stub.kind === 'event' && !REAL_IDS.has(stub.id) && !REAL_IDS.has(STUB_REAL_IDS[stub.id]))]);
 const PRESET_BY_ID = new Map(PRESETS.map((preset) => [preset.id, preset]));
 /** Sites within this range (m) are instances in the stub manager (beyond it, only lures). */
 const SITE_INSTANCE_RANGE = 12000;
@@ -521,7 +543,8 @@ function runScenario({ seed, pathSeed, hours, craft, siteChance, perf = null, na
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const world = createWorldGen(seed, WORLD_OPTIONS);
   const weather = createWeatherModel(world.seedHash >>> 0);
-  const placement = createStubPlacement(world.seedHash >>> 0, siteChance);
+  // Real mode: the real placement of the real site presets (none at all when siteChance is 0).
+  const placement = !REAL_MODE ? createStubPlacement(world.seedHash >>> 0, siteChance) : siteChance > 0 ? world : { sitesNear: () => [] };
   const path = createFlightPath({ pathSeed, ...SPEEDS[craft] });
   const sun = createSun();
   let time = 0;
@@ -958,15 +981,30 @@ async function testShedding() {
 // ============================================================================================
 // RUN
 // ============================================================================================
+/** Real mode: pacing in a world with the real presets' sites (their real placement), bush plane speed. */
+function testRealWorldPacing() {
+  const hours = Math.min(OPTIONS.hours, 6);
+  const run = runScenario({ seed: 'RARITY', pathSeed: 'rarity-bushplane', hours, craft: 'bushplane', siteChance: 1 });
+  for (const entry of run.longDroughts.slice(0, 6)) verbose(`long drought (real world): ${JSON.stringify(entry)}`);
+  const counts = run.log.reduce((all, entry) => ({ ...all, [entry.presetId]: (all[entry.presetId] || 0) + 1 }), {});
+  verbose(`real world: ${run.log.length} activations ${JSON.stringify(counts)}, ${run.notables.length} sites came into view`);
+  check('pacing', `real presets, real sites (${hours} h, bush plane): >= ${TYPICAL_WORLD_SHARE * 100} % of droughts end within ${PACING_WINDOW_MAX} s`, windowShare(run.state.pacing) >= TYPICAL_WORLD_SHARE,
+    `${describePacing({ pacing: run.state.pacing, longest: run.state.longestDrought, fills: run.state.droughtFills })}; ${run.notables.length} sites came into view; activations ${JSON.stringify(counts)}`);
+}
+
 const started = Date.now();
 testPacing();
-testLongFlight();
-testLifetimes();
-testFrameworkShape();
-testDeferral();
-testDeterminism();
-testWeather();
-await testShedding();
+if (REAL_MODE) {
+  testRealWorldPacing();
+} else {
+  testLongFlight();
+  testLifetimes();
+  testFrameworkShape();
+  testDeferral();
+  testDeterminism();
+  testWeather();
+  await testShedding();
+}
 const wallSeconds = (Date.now() - started) / 1000;
 
 const groupWidth = Math.max(...results.map((result) => result.group.length));

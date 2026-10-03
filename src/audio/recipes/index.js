@@ -8,6 +8,7 @@
 // triggers: the trigger names the recipe answers.
 // build(kit, params) returns { setIntensity(value, time, immediate), trigger(name, options, time),
 //   update?(time, interval), describe() }.
+import { goose, raptor } from './birdCall.js';
 import crystal from './crystal.js';
 import discovery from './discovery.js';
 import geyser from './geyser.js';
@@ -35,7 +36,12 @@ export const RECIPES = Object.freeze({
   meteor,
   lantern,
   discovery,
+  raptor,
+  goose,
 });
 
-/** Every recipe name, in the contract's order (presets' audio.recipe must be one of these). */
+/**
+ * Every recipe name, in the contract's order and then the later additions (raptor and goose, for the
+ * wildlife presets); a preset's audio.recipe must be one of these.
+ */
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

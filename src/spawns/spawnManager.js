@@ -11,6 +11,8 @@
 //     geometry at the mid boundary;
 //   - ends events that finish (instance.ended), expire, or leave range and view (the despawn rule),
 //     and removes sites beyond lod.far plus their hysteresis;
+//   - keeps a site to its hours: a site preset with filters.timeOfDay (a night-only bay) is created
+//     only inside those hours, and removed once they end and it is out of view;
 //   - detects discovery: within preset.discovery.radius and in view (in the camera frustum and not
 //     hidden by terrain along the sight line), once per site id or event preset per world;
 //   - accounts memory: renderer.info.memory and the JS heap before each create and after each
@@ -30,6 +32,7 @@ import { LOD_TIERS, validateInstance } from './engineRegistry.js';
 import { createLureSystem } from './lure.js';
 import { createLightPool } from './lightPool.js';
 import { createInstancedPool, createMeshPool, createObjectPool, createScratch, createSlotAllocator } from './pools.js';
+import { matchesTimeOfDay } from './director.js';
 
 export const DEFAULT_HEAVY_LIMIT = 2;
 export const DEFAULT_ENGINE_BUDGET = Object.freeze({ instances: 32, particles: 60000 });
@@ -794,11 +797,21 @@ export function createSpawnManager(options) {
     return far;
   }
 
+  /**
+   * Whether a site preset is open now: one with filters.timeOfDay (a night-only bay) exists only in
+   * those hours (the director's own time-of-day classes); every other site always.
+   */
+  function siteHoursOpen(preset) {
+    const hours = preset.filters ? preset.filters.timeOfDay : null;
+    return !hours || matchesTimeOfDay(hours, state.time.sunElevation, state.time.dayTime);
+  }
+
   function considerSite(site, player) {
     siteScan.sitesSeen++;
     if (recordBySite.has(site.id)) return;
     const preset = presetById.get(site.presetId);
     if (!preset) return;
+    if (!siteHoursOpen(preset)) return;
     const offsetX = site.x - player.x;
     const offsetZ = site.z - player.z;
     if (offsetX * offsetX + offsetZ * offsetZ >= preset.lod.far * preset.lod.far) return;
@@ -864,6 +877,8 @@ export function createSpawnManager(options) {
     const preset = record.preset;
     const distance = distances[record.slot];
     if (distance <= preset.discovery.radius && !discovered.has(record.discoveryKey)) return true;
+    // A site past its hours waits out of view before it goes (updateRecord), so keep its view current.
+    if (record.source === 'site' && !siteHoursOpen(preset)) return true;
     return record.source === 'director' && distance > preset.lifetime.despawn.distance;
   }
 
@@ -933,6 +948,11 @@ export function createSpawnManager(options) {
       const hysteresis = preset.lifetime.despawn.hysteresis;
       if (distance > preset.lod.far + hysteresis) {
         removeRecordAt(index, 'range');
+        return false;
+      }
+      // Out of its hours (a night-only bay at dawn): gone once the player looks away, back at nightfall.
+      if (!record.inView && outOfView[slot] >= preset.lifetime.despawn.outOfViewSeconds && !siteHoursOpen(preset)) {
+        removeRecordAt(index, 'hours');
         return false;
       }
       return true;

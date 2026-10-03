@@ -352,6 +352,7 @@ and `waypoints.js` (waypoint beacon and arrow), from v1.
 | `spawnDebugger.js`, `spawnDebugger.css` | the spawn debugger (F9; dev builds, or `?dev=1` in a production build): presets with filters, force spawns ahead, teleport to the nearest site, time of day, director state, engine stats, the wind overlay toggle |
 | `spawnTestKit.js` | dev builds only (never in a production bundle): two test engines (`testMarker`, `testWind`) and their presets, loaded by `spawns.debug.loadTestKit()` to prove the framework |
 | `structureTestKit.js` | dev builds only: preset-like objects for every structure recipe, `buildTestSite` (a site record with its stamps resolved as placement does), `?test=sites` (the terrain fixtures' stamped world with no harness) and the browser checks of `tools/steps/engine-structure*.json` |
+| `presetChecks.js` | dev builds only: the browser checks of the real presets (`tools/steps/presets-batch2.json`): each force-spawned at its time of day (events ahead, sites at their real placed site), framed, discovered with the toast and a journal entry, disposed back to the GPU memory with its wind sources gone, and its own behaviour proven |
 | `setPieceTestKit.js` | dev builds only: the dev timeline (`DEV_TIMELINE`) over the test engines and a structure child, and the browser checks of `tools/steps/engine-setPiece.json` |
 | `debugWind.js` | dev-only debug updraft wind source (key L), proving the Phase 2 wind writer path |
 | `mockGamepads.js` | scriptable mock T.16000M, TWCS and standard gamepad devices |
@@ -382,7 +383,8 @@ and `waypoints.js` (waypoint beacon and arrow), from v1.
 | `flight-lab.mjs` | headless flight lab for the glider and bush plane (handling, spawns, craft switches, hot-plug) |
 | `lab/jet.mjs`, `lab/helicopter.mjs`, `lab/wingsuit.mjs`, `lab/fpv.mjs` | headless flight labs per craft |
 | `lab/settings.mjs` | settings migrations (views per craft included) and the one-time HOTAS assist default |
-| `lab/terrain.mjs` | site placement and terrain stamps: Phase 1 bit-identity, filters, determinism, stamp shapes, seams, collision, and the height-sampling cost against Phase 1 |
+| `lab/terrain.mjs` | site placement and terrain stamps: Phase 1 bit-identity, filters, determinism, stamp shapes, seams, collision (the fixtures and the real presets' stamps), and the height-sampling cost against Phase 1 |
+| `lab/preset-flight.mjs` | the SIM glider and jet flown through the real wind-affecting presets (Milestone E) |
 | `lab/copilot.mjs` | WREN's local grammar (version one, the view commands, retired commands) and the `switchVersion` and `setView` schema |
 | `lab/input.mjs`, `lab/storage.mjs`, `lab/copilot-server.mjs` | input pipeline, storage and copilot-server origin labs |
 | `copilot-server.mjs` | the reference remote copilot brain (see `docs/copilot-api.md`) |
@@ -1035,7 +1037,9 @@ Behaviour:
     works before audio starts. Recipes: `tornado`, `thunder` (trigger `strike`), `volcano`
     (`boom`), `geyser` (`burst`), `waterfall`, `whale` and `skyWhale` (`call`), `crystal`
     (`chime`; the hum rises with the intensity), `turbine` (intensity = wind speed), `murmuration`
-    (`scatter`), `meteor` (`streak`, `fireball`), `lantern`, `discovery` (`chime`). A preset's
+    (`scatter`), `meteor` (`streak`, `fireball`), `lantern`, `discovery` (`chime`), and the bird
+    calls of the wildlife presets: `raptor` (`call`, a hawk's descending scream; `params.pitch`
+    lowers it for an eagle) and `goose` (`call`; intensity = the honking chorus). A preset's
     `audio.params` may set `intensity` and override `refDistance`, `rolloffFactor`,
     `distanceModel`, `size` and `reverb`;
   - `thunder({ position, intensity })` plays a crack and a rolling rumble when the sound front
@@ -1202,6 +1206,11 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   piece writes without a call. Engine-specific bus events are namespaced (`structure:gate`,
   `structure:course`, `structure:landing`, `setPiece:stage`, `setPiece:narrate`, `setPiece:ended`);
   the references are in `docs/engines/`.
+- **Site hours.** A site preset with `filters.timeOfDay` (the night-only bioluminescent bay) exists
+  only in those hours: the site scan creates it only while `matchesTimeOfDay` admits the sun, and
+  once the hours end it is removed (reason `hours`) as soon as it has been out of view for its
+  `despawn.outOfViewSeconds`; the scan builds it again when the hours come back. Every other site is
+  always there, as before.
 - **Clean-up.** After `dispose(instance)` the manager removes any wind source still listed in
   `instance.windSourceIds` and releases any real light the spawn still holds, and reports each as a
   leak (`console.error`, `getStats().leaks`).
@@ -1360,6 +1369,10 @@ flight time. It is `ctx.systems.spawns.director`.
   row.
 - **Ahead.** Scheduled activations within 45 degrees of the heading, inside the preset's
   `filters.minDistance` / `maxDistance` band (default 3-8 km); never behind.
+- **Time-of-day classes** (`matchesTimeOfDay`, `filters.timeOfDay`): `day` (sun up), `night` (sun
+  more than 6 degrees down), `dawn` / `dusk` (the low morning / evening sun, -10 to 14 degrees),
+  `golden` (the sky's golden band, -3 to 14 degrees, morning or evening) and `midday` (14 degrees up
+  or more: the thermal hours, which the thermal hawks use).
 - **Budgets.** In the game the director reads the SpawnManager's budget view (`manager.budgets`):
   the heavy limit (2), every engine's caps (from `engine.budget`, else `DIRECTOR_BUDGETS.engines`)
   and the real-light cap (4). The lab runs on `DIRECTOR_BUDGETS` itself (8 real lights). Particles
@@ -1480,7 +1493,7 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `npm run test:flight`, `test:flight:webgl` | the Phase 1 flight-test harness for every craft in first and third person, 3 seeds (36 runs of 60 s) |
 | `npm run test:hotas`, `test:hotas:webgl` | the HOTAS pipeline, including persistence across a reload in the `driftwing-v2-test-hotas` database |
 | `npm run test:terrain`, `test:terrain:webgl` | terrain stamps in the running game: no cracks at any LOD pair, worker meshes identical to main-thread builds, collision within 0.5 m of the rendered mesh; screenshots of every stamp type |
-| `npm run lab:terrain` | placement and stamps headless: Phase 1 bit-identity with the real (empty) preset list, placement filters, determinism, stamp shapes, seams, collision, height-sampling cost within 10 % of Phase 1 |
+| `npm run lab:terrain` | placement and stamps headless: Phase 1 bit-identity with no site presets, and with the real presets nothing changed outside their stamps; placement filters, determinism, stamp shapes, seams and collision for the fixtures and around the real presets' stamps; height-sampling cost within 10 % of Phase 1 |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/view-physics.json` | every craft flies bit-identically in every view |
 | `node tools/shell-check.mjs --url <shell>` | the pill (shows, hides, clear of both games' HUDs), persistence and forwarding |
 | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` | the flight models, settings migrations, storage, input, WREN's grammar, the copilot server |
@@ -1496,6 +1509,9 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/discovery.json` | with the spawn test kit: forced discoveries give a toast, the chime and a journal entry and raise the count; journalStat and achievement events reach the records and the journal panel; M opens the map with the discovered site only, terrain tiles and the trail; a click sets the waypoint; Copy link is the shell link with the seed and time; the seed is saved |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-weatherVolume.json` (and `engine-celestial.json`; `--query renderer=webgl` for WebGL2) | each engine's forms and components force-spawned ahead of the craft with screenshots, their wind, inside and eclipse effects, and create/dispose with `renderer.info.memory`, wind sources and sky modifiers back to their baseline exactly |
 | `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders) |
+| `node tools/lab/director.mjs --presets real` (or `mixed`) | the pacing checks against the tree's real presets (with `mixed`, plus the stubs of the presets not in the tree yet): the first notable, the drought fill with no sites and a world with the real placement's sites |
+| `node tools/lab/preset-flight.mjs [--verbose]` | the SIM glider and jet flown with scripted inputs through the real wind-affecting presets in a real world and SpawnManager (the maelstrom across its eye and abeam, the wind farm's wakes, circling with the thermal hawks), vertical speed, load factor, airspeed, drift and turbulence logged against the same path without the spawn |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --query seed=HARNESS-1 --steps-file tools/steps/presets-batch2.json` (add `renderer=webgl`) | presets 11-20 in the game: each spawned at its time of day and framed (screenshots), discovered with the toast and a journal entry, disposed back to the GPU memory with its wind sources gone, and the geese slot achievement, the bridge's Thread the Needle, the bay's glowing trails and night hours, the eagle's join and peel, the hawks in their thermal, the turning wind farm and the maelstrom's wind |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/weather-sky.json` (or a build with `?debug=1`) | the opening is clear with the sky untouched, the sky modifier blend, the four weather states' sky (screenshots) and `weatherChanged` |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-emitter.json` (or `engine-lightEffect.json`; add `--query renderer=webgl` for WebGL2) | the emitter and lightEffect engines force-spawned ahead of the craft in their representative configurations (screenshots at golden hour and night), their wind sources, lights, LOD and budgets, their per-frame cost, and dispose back to the memory, wind, modifier and light baseline (see `docs/engines/`) |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/director-game.json` | the game-wired director: its load shedder, `forceSpawn` ahead, `getNearby`, the camera frustum, the LOD bias and `dispose` |

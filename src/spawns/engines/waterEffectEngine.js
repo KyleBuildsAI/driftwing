@@ -35,6 +35,8 @@ const TWO_PI = Math.PI * 2;
 /** Entries in an instance's random table (a power of two), drawn from its seeded generator. */
 const NOISE_SIZE = 64;
 const NOISE_MASK = NOISE_SIZE - 1;
+/** A waterOnly splash that lands on land tries this many points (one a frame) before it waits again. */
+const WATER_ONLY_TRIES = 12;
 
 /** Engine defaults per effect (docs/engines/waterEffect.md). A preset overrides any of them. */
 export const WATER_EFFECT_DEFAULTS = Object.freeze({
@@ -43,7 +45,7 @@ export const WATER_EFFECT_DEFAULTS = Object.freeze({
     radius: 320, eyeShare: 0.11, depth: 18, spin: 0.8, arms: 4, twist: 8, ridge: 0.7, foam: 0.9, direction: 1,
     spinUp: 12, mistRate: 45, mistSize: 7, glow: 0,
   }),
-  splash: Object.freeze({ interval: null, strength: 0.6, scatter: 0, glow: 0.6 }),
+  splash: Object.freeze({ interval: null, strength: 0.6, scatter: 0, glow: 0.6, waterOnly: false }),
   spray: Object.freeze({
     ringRadius: 22, rate: 260, height: 11, spread: 0.45, swirl: 9, size: 1.3, life: 2.4, foam: 0.6, glow: 0.4,
   }),
@@ -174,8 +176,20 @@ export function createWaterEffectEngine() {
     mark.z = instance.anchor.z + Math.sin(angle) * reach;
     mark.strength = params.strength * data.fade;
     mark.glow = params.glow;
-    data.lastSplash = water.splashMark(mark);
-    data.splashes++;
+    // waterOnly: a splash scattered onto land (a bay's centre lies on its shore) draws another point on
+    // the next frame, up to WATER_ONLY_TRIES times, before it gives up until the next interval. Whole-metre
+    // coordinates reach the terrain unboxed; the height query runs only while a splash is due.
+    if (params.waterOnly && ctx.terrain.heightAt(Math.round(mark.x), Math.round(mark.z)) >= ctx.terrain.waterLevel - 0.5) {
+      data.landTries++;
+      if (data.landTries < WATER_ONLY_TRIES) {
+        data.timer = 0;
+        return;
+      }
+    } else {
+      data.lastSplash = water.splashMark(mark);
+      data.splashes++;
+    }
+    data.landTries = 0;
     if (Array.isArray(params.interval)) {
       drawNoise(data);
       data.timer = params.interval[0] + data.noiseValue * (params.interval[1] - params.interval[0]);
@@ -396,6 +410,7 @@ export function createWaterEffectEngine() {
           ringTimer: 0,
           spinAge: 0,
           splashes: 0,
+          landTries: 0,
           flashes: 0,
           lastSplash: 0,
           particlesAtFull: 0,

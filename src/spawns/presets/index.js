@@ -15,7 +15,20 @@ import geyserField from './geyserField.js';
 import slotCanyon from './slotCanyon.js';
 import megaWaterfall from './megaWaterfall.js';
 
+import whalePod from './whalePod.js';
+import maelstrom from './maelstrom.js';
+import bioluminescentBay from './bioluminescentBay.js';
+import starlingMurmuration from './starlingMurmuration.js';
+import geeseFormation from './geeseFormation.js';
+import thermalHawks from './thermalHawks.js';
+import fireflies from './fireflies.js';
+import eagleWingman from './eagleWingman.js';
+import windFarm from './windFarm.js';
+import ropeBridge from './ropeBridge.js';
+
+
 export const PRESETS = Object.freeze([
+  // Batch 1: presets 1-10.
   tornado,
   supercell,
   waterspout,
@@ -26,6 +39,17 @@ export const PRESETS = Object.freeze([
   geyserField,
   slotCanyon,
   megaWaterfall,
+  // Batch 2: presets 11-20.
+  whalePod,
+  maelstrom,
+  bioluminescentBay,
+  starlingMurmuration,
+  geeseFormation,
+  thermalHawks,
+  fireflies,
+  eagleWingman,
+  windFarm,
+  ropeBridge,
 ]);
 
 /** Presets by id. */

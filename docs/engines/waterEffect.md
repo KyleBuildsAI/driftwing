@@ -171,6 +171,7 @@ entry in the same preset.
 | `strength` | 0..1 | | 0.6 | see `splash()` above. It scales with the fade |
 | `scatter` | m | 0..2000 | 0 | each splash lands anywhere within this radius of the anchor |
 | `glow` | 0..1 | | 0.6 | |
+| `waterOnly` | bool | | false | keep the splashes on the water (the terrain at least 0.5 m below sea level counts as water): a point that lands on land draws another one on the next frame, up to 12 tries, before the splash waits for its next interval. For a scatter around an anchor on a shore, such as the bioluminescent bay |
 
 ### spray
 

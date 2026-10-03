@@ -61,6 +61,30 @@ const LANDING_MARGIN_ACROSS = 8;
 const LANDING_POINTS = Object.freeze({ butter: 50, smooth: 42, firm: 28, hard: 10 });
 const DEG = Math.PI / 180;
 const TWO_PI = Math.PI * 2;
+/**
+ * The wake gust inputs of the sample being computed: [time, sigma (m/s), phase]. Doubles cross into
+ * addWakeGust through this array, not as arguments (V8 boxes a double passed to a call it does not
+ * inline).
+ */
+const wakeGustInput = new Float64Array(3);
+
+/**
+ * Adds the wake's gusts to result.vel: smooth space-time noise (spatial wavelengths about 25-120 m)
+ * of intensity wakeGustInput[1] m/s at point, so a craft in the wake feels the bumps it reads. The
+ * same noise shape as the WindField sources' gusts (windSources.js).
+ */
+function addWakeGust(result, point) {
+  const time = wakeGustInput[0];
+  const sigma = wakeGustInput[1];
+  const phase = wakeGustInput[2];
+  const x = point.x;
+  const z = point.z;
+  const offsetY = phase + 2.39996;
+  const offsetZ = phase + 4.79992;
+  result.vel.x += sigma * (0.5 * Math.sin(time * 1.9 + x * 0.061 + phase) + 0.3 * Math.sin(time * 3.7 - z * 0.093 + phase * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z) * 0.147 + phase * 2.3));
+  result.vel.y += 0.6 * sigma * (0.5 * Math.sin(time * 1.9 + z * 0.061 + offsetY) + 0.3 * Math.sin(time * 3.7 - x * 0.093 + offsetY * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z) * 0.147 + offsetY * 2.3));
+  result.vel.z += sigma * (0.5 * Math.sin(time * 1.9 + (x + 311) * 0.061 + offsetZ) + 0.3 * Math.sin(time * 3.7 - (z - 173) * 0.093 + offsetZ * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z + 138) * 0.147 + offsetZ * 2.3));
+}
 const GEOMETRY_KINDS = Object.freeze(['body', 'detail', 'decal', 'glow', 'water']);
 
 /** Visibility of each geometry kind per tier: [near, mid, far] (far: non-heavy presets only). */
@@ -409,7 +433,7 @@ export function createStructureEngine() {
       id,
       kind: 'structure-wake',
       bounds: data.wakeBounds,
-      sample(point) {
+      sample(point, time) {
         const windX = state[0];
         const windZ = state[1];
         const speed = state[2];
@@ -445,6 +469,12 @@ export function createStructureEngine() {
         result.vel.y = 0;
         result.vel.z = velocityZ;
         result.turbulence = turbulence;
+        if (wake.gust > 0 && turbulence > 0) {
+          wakeGustInput[0] = time;
+          wakeGustInput[1] = turbulence * wake.gust;
+          wakeGustInput[2] = positions[0] * 0.0137;
+          addWakeGust(result, point);
+        }
         return result;
       },
     });
