@@ -123,6 +123,7 @@ distance (the clouds' aerial perspective, up to 90 % at 7.5 km), and its foot ta
 | `ropeSeconds` | s | 0..600 | 30 | rope-out time, the last part of the event's duration |
 | `audioIntensity` | 0..1 | | 1 | scales the voice's intensity (the vortex strength times this) |
 | `voice` | bool | | unset | `true` or `false` decides whether this entry opens the preset's `audio` voice; unset, the preset's first engine entry owns it, so a preset opens one voice |
+| `journal` | array | | none | approach stats in the set-piece `journal` shape: `[{ key, record: 'closestDistance', op, max? } \| { key, value, op, max? }]`. While the vortex is on the ground (mature or roping out) it keeps the player's closest horizontal distance to its foot, and when the spawn ends it sends one typed `journalStat` per entry whose `max` (m) the approach came within. The tornado preset sends `closestTornado` (op `min`) and counts `stormsChased` (op `add`, within 3 km). A set piece silences a child's stats with `params: { vortex: { journal: [] } }` |
 
 ### Wind params
 

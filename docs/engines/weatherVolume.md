@@ -111,6 +111,7 @@ null.
 | param | default | notes |
 | --- | --- | --- |
 | `ownsAudio` | the first engine entry of the preset owns `preset.audio` | the voice plays at the anchor, with the growth as its intensity |
+| `journal` | none | approach stats, as the vortex engine's `journal` param: the player's closest horizontal distance to the anchor (a storm's core) while the volume stands grown, sent as typed `journalStat` events when the spawn ends. The supercell preset counts `stormsChased` (op `add`) within 6 km |
 
 ## Behaviour
 
