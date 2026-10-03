@@ -1006,12 +1006,19 @@ export function createDirector({
     /** The director's load shedder (registered with perf when one was given). */
     shedder,
 
-    /** Stops the director: unsubscribes, unregisters the shedder and ends the spawns it started. */
+    /**
+     * Stops the director: unsubscribes, unregisters the shedder (perf drops its levels without a
+     * restore, so the manager's LOD bias is put back here) and ends the spawns it started.
+     */
     dispose() {
       if (disposed) return;
       disposed = true;
       for (const unsubscribe of unsubscribers) if (typeof unsubscribe === 'function') unsubscribe();
       if (shedderHandle) shedderHandle.remove();
+      if (shedLevel !== 0) {
+        shedLevel = 0;
+        applyLodBias();
+      }
       for (const record of activations) endActivation(record, 'dispose');
       activations.length = 0;
     },
