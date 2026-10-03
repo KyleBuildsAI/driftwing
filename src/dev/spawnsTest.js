@@ -55,11 +55,13 @@ const TEST_CRAFT = 'bushplane';
 const DEFAULT_ALTITUDE = 150;
 const DEFAULT_SPEED = 55;
 const DEFAULT_RUN_SECONDS = 4;
-/** The leak check: creates and disposes in photo mode, each drawn this many frames. */
+/** The leak check: this many held creates and disposes after its warm-up, each drawn LEAK_CYCLE_FRAMES frames. */
 const LEAK_CYCLES = 3;
+const LEAK_CYCLE_FRAMES = 45;
 /** The most leak cycles ?testLeakCycles= may ask for (a longer trend when a preset is in doubt). */
 const MAX_LEAK_CYCLES = 30;
-const LEAK_CYCLE_FRAMES = 45;
+/** A warm-up that keeps more than this (MB) is listed in the notes (it is not judged). */
+const WARMUP_NOTE_MB = 0.5;
 /** JS heap tolerance across the leak check (MB above its baseline, after all LEAK_CYCLES). */
 const HEAP_TOLERANCE_MB = 1;
 /** A preset's real site is used when one lies within this distance of the start (m). */
@@ -845,6 +847,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       ...row.notes.map((note) => `${row.name}: ${note}`),
       ...(row.otherSpawnsEnded > 0 ? [`${row.name}: ${row.otherSpawnsEnded} director spawn(s) of the re-added preset ended`] : []),
       ...row.cycles.flatMap((cycle, cycleIndex) => (cycle.leftBehind.length > 0 ? [`${row.name}, cycle ${cycleIndex + 1}: left behind ${cycle.leftBehind.join(', ')}`] : [])),
+      ...(row.cycles[1] && row.cycles[1].warmupRetainedMB > WARMUP_NOTE_MB ? [`${row.name}: the held warm-up create kept ${row.cycles[1].warmupRetainedMB} MB once; the heap then stayed at ${row.cycles[1].heapTraceMB.join(', ')} MB over the judged cycles`] : []),
     ]);
     if (notes.length > 0) sections.push({ title: 'Notes', notes });
     if (capture.entries.length > 0) sections.push({ title: 'Console errors and warnings', notes: capture.entries.slice(0, 30).map((entry) => `[${entry.level}] ${entry.context}: ${entry.text}`) });

@@ -657,6 +657,10 @@ function spawnsTable(report) {
   }
   for (const criterion of report.criteria) lines.push(`  ${criterion.status === 'pass' ? 'PASS' : criterion.status === 'fail' ? 'FAIL' : '----'}  ${criterion.label}: ${criterion.value}`);
   for (const row of report.presets) for (const note of row.notes) lines.push(`  note: ${row.presetId}: ${note}`);
+  for (const row of report.presets) {
+    const leak = row.cycles[1];
+    if (leak && leak.warmupRetainedMB > 0.5) lines.push(`  note: ${row.presetId}: the held warm-up kept ${leak.warmupRetainedMB} MB once; the judged cycles read ${leak.heapTraceMB.join(', ')} MB`);
+  }
   for (const problem of report.harnessErrors) lines.push(`  harness problem: ${problem}`);
   return lines.join('\n');
 }
