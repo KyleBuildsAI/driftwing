@@ -44,7 +44,7 @@
 import { buildCloudPuffGeometry, createCloudLook } from '../../render/cloudShading.js';
 import { GROUP_STRIDE, PUFF_STRIDE, SHAFT_STRIDE, layoutWeatherVolume, resolveWeatherParams } from './weatherVolume/forms.js';
 import { createCanopyRain, createLocalRain, createPuffMesh, createShaftMesh, createVeil } from './weatherVolume/materials.js';
-import { createWindSample, ownsPresetAudio } from './engineKit.js';
+import { createApproachJournal, createWindSample, ownsPresetAudio } from './engineKit.js';
 
 const PUFF_CAPACITY = 3072;
 const SHAFT_CAPACITY = 32;
@@ -677,6 +677,19 @@ export function createWeatherVolumeEngine() {
   }
 
   /** Records what this volume does to the camera, when it beats the strongest so far this frame. */
+  /**
+   * Approach journal (params.journal): the player's closest horizontal distance to the volume's
+   * anchor (a storm's core) while the volume stands grown.
+   */
+  function observeApproach(instance, engineCtx) {
+    const player = engineCtx.state.player.position;
+    const dx = player.x - instance.anchor.x;
+    const dz = player.z - instance.anchor.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    const closest = instance.data.journal.closest;
+    if (distance < closest[0]) closest[0] = distance;
+  }
+
   function reportCamera(instance) {
     const data = instance.data;
     const params = data.params;
@@ -828,6 +841,8 @@ export function createWeatherVolumeEngine() {
         puffsDrawn: 0,
         shaftsDrawn: 0,
         writtenFrame: -1,
+        presetId: preset.id,
+        journal: createApproachJournal(`weatherVolume preset "${preset.id}"`, params.journal),
       };
       const instance = {
         anchor,
@@ -890,6 +905,7 @@ export function createWeatherVolumeEngine() {
         data.voice.setPosition(instance.anchor);
         data.voice.setIntensity(data.growth);
       }
+      if (data.journal && data.growth > 0.5) observeApproach(instance, engineCtx);
     },
 
     setLOD(instance, tier) {
@@ -904,6 +920,7 @@ export function createWeatherVolumeEngine() {
 
     dispose(instance) {
       const data = instance.data;
+      if (data.journal) data.journal.finish(ctx.bus, data.presetId);
       removeWind(instance);
       if (data.voice) {
         data.voice.dispose();

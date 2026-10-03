@@ -19,6 +19,8 @@
 //   ownsPresetAudio(preset, name, flag)  whether an engine entry opens the preset's one audio voice
 //   createWindSample()           a wind source's sample result whose numbers stay unboxed; every
 //                                engine's WindField source returns one (windSources.js included)
+//   createApproachJournal(label, spec)  journal stats about the player's closest approach to a
+//                                spawn (closest tornado, storms chased), sent when the spawn ends
 //
 // Nothing here allocates after construction: the frame update paths of the engines call only the
 // per-frame members (the grid's step and sample, the light's update, the range list's add).
@@ -482,4 +484,56 @@ export function createRangeList(capacity) {
   };
   for (let index = 0; index < capacity; index++) list[index] = { start: 0, count: 0 };
   return list;
+}
+
+/** The journal ops a spawn's approach stats may use (the typed journalStat op). */
+const APPROACH_OPS = Object.freeze(['min', 'max', 'add']);
+/** The approach records an entry may send (record) instead of a fixed value. */
+const APPROACH_RECORDS = Object.freeze(['closestDistance']);
+const JOURNAL_KEY = /^[a-z][A-Za-z0-9]{0,39}$/;
+
+/**
+ * Journal stats an engine keeps about the player's approach to its spawn, in the set-piece engine's
+ * `journal` shape: [{ key, record: 'closestDistance', op, max? } | { key, value, op, max? }]. The
+ * engine writes the closest horizontal distance (m) into `closest[0]` while the spawn is there to be
+ * chased (a tornado on the ground), allocation-free; finish(bus, presetId) sends one typed
+ * journalStat per entry whose `max` (m, optional) the closest approach came within (event work, once
+ * when the spawn ends). A set piece silences a child's stats with `params: { [engine]: { journal: [] } }`.
+ * Returns null for an empty or absent spec; throws, naming the engine, the preset and the entry, for
+ * a bad one.
+ */
+export function createApproachJournal(label, spec) {
+  if (spec === undefined || spec === null) return null;
+  const read = createParamReader(label);
+  read.array(spec, 'journal', []);
+  if (spec.length === 0) return null;
+  const entries = spec.map((entry, index) => {
+    const path = `journal[${index}]`;
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) read.fail(path, 'must be an object');
+    read.onlyKeys(entry, path, ['key', 'record', 'value', 'op', 'max']);
+    const key = read.string(entry.key, `${path}.key`, null);
+    if (key === null || !JOURNAL_KEY.test(key)) read.fail(`${path}.key`, `must be a camelCase journal statistic name, got ${describe(entry.key)}`);
+    const record = read.oneOf(entry.record, `${path}.record`, null, APPROACH_RECORDS);
+    const hasValue = entry.value !== undefined && entry.value !== null;
+    if ((record === null) === !hasValue) read.fail(path, 'needs exactly one of record or value');
+    return {
+      key,
+      record,
+      value: hasValue ? read.number(entry.value, `${path}.value`, 0) : 0,
+      op: read.oneOf(entry.op, `${path}.op`, null, APPROACH_OPS) ?? read.fail(`${path}.op`, `must be one of ${APPROACH_OPS.join(', ')}`),
+      max: read.number(entry.max, `${path}.max`, Infinity, 0),
+    };
+  });
+  const closest = new Float64Array([Infinity]);
+  return {
+    closest,
+    finish(bus, presetId) {
+      if (!bus || typeof bus.emitTyped !== 'function' || !Number.isFinite(closest[0])) return;
+      for (const entry of entries) {
+        if (closest[0] > entry.max) continue;
+        const value = entry.record === 'closestDistance' ? Math.round(closest[0]) : entry.value;
+        bus.emitTyped('journalStat', { key: entry.key, value, op: entry.op, presetId });
+      }
+    },
+  };
 }
