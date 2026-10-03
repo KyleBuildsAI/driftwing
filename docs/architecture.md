@@ -582,6 +582,7 @@ player. Version 5 remembers the view per craft: `view` seeds every craft's `view
 | `quality` | `auto` | `auto` \| `minimal` \| `low` \| `medium` \| `high` \| `ultra` (v1) |
 | `mouseSensitivity`, `invertPitch` | 1, false | 0.2-4; boolean (v1) |
 | `copilotVoice`, `copilotChatter` | true, true | boolean (v1) |
+| `copilotCallouts` | true | boolean: WREN's proactive tour-guide callouts (Phase 2) |
 | `remoteCopilot`, `remoteEndpoint` | false, `http://localhost:3000/copilot` | boolean; http(s) URL (v1) |
 | `showFps`, `hudAutoHide` | false, true | boolean (v1) |
 | `craft` | `glider` | `glider` \| `bushplane` \| `jet` \| `helicopter` \| `wingsuit` \| `fpv` |
@@ -634,7 +635,7 @@ Typed events are emitted with `bus.emitTyped(name, payload)` and heard with
 | `deviceConnected` / `deviceDisconnected` | `{ deviceKey, kind, name }`; kind `gamepad` \| `hotas-stick` \| `hotas-throttle` \| `hotas-pedals` | gamepad registry |
 | `relaunched` | `{ craft, method, position }` | flight controller |
 | `spawnActivated` | `{ id, presetId, category, kind: site\|event, position }` | SpawnManager |
-| `spawnEnded` | `{ id, presetId, reason }`; reason `ended`, `expired`, `despawn`, `range`, `error`, `debug`, `removed`, `disposed` or the caller's (the director's `lifetime`, `despawn`, `dispose`) | SpawnManager |
+| `spawnEnded` | `{ id, presetId, reason }`; reason `ended`, `expired`, `despawn`, `range`, `hours` (a site outside its hours), `error`, `removed`, `disposed`, or the `deactivate` caller's (default `deactivated`; the director's `lifetime`, `despawn`, `dispose`; the F9 debugger's `debug`) | SpawnManager |
 | `weatherChanged` | `{ state: clear\|building\|storm\|clearing, previous, region }`; fires only on a real change, so `previous` is always a state; `region` is the weather cell `"rx:rz"` | weather system |
 | `achievement` | `{ id, title }`; the journal keeps each id once, in every world | presets and engines |
 | `journalStat` | `{ key, value, op: min\|max\|add, presetId? }`: `stormsChased` (add 1), `closestTornado` (min, m), `bestCanyonRun` (min, s, clean runs only) and any other key (folded with its op) | presets and engines |
@@ -1127,9 +1128,23 @@ Milestone A of Phase 2 (`src/world/placement.js`, `src/world/stamps.js`, contrac
   coarsest LOD segment holding it (sampled on the LOD0 lattice), so a neighbour at any LOD can never
   open a crack at a canyon wall or a cliff; untouched chunks keep the Phase 1 skirts bit for bit.
 
+The six stamp types and the presets that use them (the spec fields are listed at the top of
+`src/world/stamps.js`; the structure recipes build theirs with `structureStamps(recipe, options)`,
+which is safe in the terrain worker):
+
+| type | shape | default paint | used by |
+| --- | --- | --- | --- |
+| `cone` | a volcano cone with a crater and gullies | `ash` | volcano |
+| `carve` | a slot canyon 2-4 km long along a seeded polyline: twisting walls, a mesa band, a river floor | `riverbed` | slot canyon |
+| `cliffStep` | a waterfall cliff: a wandering lip, the drop and a plunge pool | `wetRock` | mega-waterfall |
+| `gorge` | a steep gorge with two level anchor pads at its lips | `riverbed` | rope bridge |
+| `flatten` | a flat strip with an apron and a shoulder | `tarmac` | abandoned airfield |
+| `islandBase` | a lobed islet or sea stack rising from the water | `basalt` | floating islands |
+
 ### Spawns (`ctx.systems.spawns`, `src/spawns/`)
 
-The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are implemented here.
+The Phase 2 contracts (sections 3 and 4 of [specs/phase2-contract.md](specs/phase2-contract.md))
+are implemented here. The preset schema (section 1) and the 30 presets are in [spawns.md](spawns.md).
 
 - **System API.** `update`, `prewarm` (starts it), `register(engine)`, `activate(presetId, opts)`,
   `deactivate(id, reason)`, `getActive()`, `getInstance(id)`, `getStats()`, `setSiteFeed(feed)`,
@@ -1167,7 +1182,7 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   startTime, scale, duration, seed }` and its own seeded random generator. `opts.duration` (the
   director draws it) is the event's duration; without it the manager draws one from
   `lifetime.duration`.
-- **Anchor rules and dormant sites (preset batch 1).** An event preset's optional `anchor` moves the
+- **Anchor rules and dormant sites.** An event preset's optional `anchor` moves the
   activation before the engines see it: `seek: 'peak'` takes the highest ground within `radius` (a
   25 x 25 grid over the disc, whose four highest samples then climb to their summits) and
   `align: 'downwind'` turns the heading downwind of the prevailing wind (`uniforms.windDirection`), so
@@ -1176,6 +1191,11 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   `setSiteActive(id, true)` (a dormant volcano shows no plume on the horizon). Debug activations start
   active. The per-engine particle count moves with `setLOD` (`setPartLOD`), because an engine may
   change `instance.particles` with its tier.
+- **Site hours.** A site preset with `filters.timeOfDay` (the night-only bioluminescent bay) exists
+  only in those hours: the site scan creates it only while `matchesTimeOfDay` admits the sun, and
+  once the hours end it is removed (reason `hours`) as soon as it has been out of view for its
+  `despawn.outOfViewSeconds`; the scan builds it again when the hours come back. Every other site is
+  always there.
 - **LOD.** The tier comes from the camera distance to the spawn's anchor and `preset.lod`, moving out
   past `boundary * 1.08` and back in below `boundary * 0.92` (`LOD_HYSTERESIS`). Engines hear
   `setLOD(instance, tier)` at creation and on every change. `setLodBias(bias)` (0 < bias <= 1)
@@ -1197,7 +1217,8 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
 - **Lifetimes.** An event ends when an engine sets `instance.ended` (`ended`), 45 s after its drawn
   duration (`expired`), past `lod.far * 1.08` (`range`), or beyond `despawn.distance +
   despawn.hysteresis` after `despawn.outOfViewSeconds` out of view (`despawn`). Debug spawns follow
-  only the first two.
+  only the first two. A site is removed past `lod.far + despawn.hysteresis` (`range`) or outside its
+  hours (`hours`).
 - **Discovery.** A spawn within `discovery.radius` that is in view (inside the camera's view cone,
   the frustum's four side planes, at any distance; and not hidden by visible terrain: the sight line
   to the middle of its lure or body is sampled 10 times out to the fog's far distance) emits the
@@ -1238,10 +1259,6 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   across non-inlined calls, splashes queued for the hot update). `surfaceHeightAt(x, z)` adds the funnels to sea level. With nothing registered and an
   empty trail buffer every added term is zero, so the ocean renders as in Phase 1. The full API is in
   docs/engines/waterEffect.md.
-- **Fauna and water engines (wave 2).** `fauna` (instanced boids: murmuration, flock,
-  formation with the formation-slot API, circling in thermals, whale pod, wingman, drift with a
-  slipstream; docs/engines/fauna.md) and `waterEffect` (whirlpool, splash, spray, bioluminescence,
-  plunge pool on the water effects layer; docs/engines/waterEffect.md).
 - **Mesh lifetime in three r184.** A RenderObject listens for its material's `dispose` event, which
   keeps it, its mesh and its geometry alive until that material is disposed. A new Mesh per spawn
   instance on a shared material therefore leaks about 8 KB per instance even after its geometry is
@@ -1252,14 +1269,9 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   structure engine's airfield); `setParam(instance, name, value)` sets a live param and returns
   whether it is known (a set piece's ramps). An instance may also expose live numbers directly as
   `instance.params` (the structure engine) or `instance.control` (the vortex engine), which a set
-  piece writes without a call. Engine-specific bus events are namespaced (`structure:gate`,
-  `structure:course`, `structure:landing`, `setPiece:stage`, `setPiece:narrate`, `setPiece:ended`);
-  the references are in `docs/engines/`.
-- **Site hours.** A site preset with `filters.timeOfDay` (the night-only bioluminescent bay) exists
-  only in those hours: the site scan creates it only while `matchesTimeOfDay` admits the sun, and
-  once the hours end it is removed (reason `hours`) as soon as it has been out of view for its
-  `despawn.outOfViewSeconds`; the scan builds it again when the hours come back. Every other site is
-  always there, as before.
+  piece writes without a call. Engine-specific bus events are namespaced (`fauna:formation`,
+  `fauna:scatter`, `fauna:call`, `structure:gate`, `structure:course`, `structure:landing`,
+  `setPiece:stage`, `setPiece:narrate`, `setPiece:ended`); the references are in `docs/engines/`.
 - **Clean-up.** After `dispose(instance)` the manager removes any wind source still listed in
   `instance.windSourceIds` and releases any real light the spawn still holds, and reports each as a
   leak (`console.error`, `getStats().leaks`).
@@ -1277,35 +1289,45 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   `{ instances, particles, lights, buffers, drawCalls, active, budget, failed }` and totals, the light
   pool, the lures, discoveries, counters, refusals, leaks, memory and the site feed.
   `window.DRIFTWING.getStats().spawns` carries it.
-- **Wind engines (wave 2).** Each engine has a reference page for preset authors in `docs/engines/`.
-  - `vortex` ([vortex.md](engines/vortex.md)): up to 4 vortices share one shell mesh and one
-    instanced sprite (2 draw calls in all); their motion is computed in the vertex shaders from a
-    per-slot uniform block, the same on WebGPU and WebGL2, so a spawn uploads no buffers and adds no
-    GPU memory. Lifecycle forming, mature, ropeOut, dissipated (then `ended`); a seeded track over the
-    terrain precomputed at create. One `rankine` WindField source per vortex, removed at FAR when its
-    inflow radius cannot reach the player there.
-  - `windModifier` ([windModifier.md](engines/windModifier.md)): up to 8 WindField sources per
-    instance (updraft, downburst, wake, jetStream, slipstream, waveLift, gustFront, curtain) with
-    fades, start / stop windows, strength timelines, drift or `follow` a sibling part, and the
-    `control.strength` / `control.strengths[i]` hooks; no visuals.
-  - Both refuse a param their type does not have, naming it, so a preset typo never passes silently.
-  - Their sources (`src/spawns/engines/windSources.js`) sample into one reused result and move with
-    `setSourceBounds`: the engines' frames allocate nothing (`tools/lab/wind-engines.mjs`).
-- **Weather and sky engines (wave 2).**
-  - `weatherVolume` ([weatherVolume.md](engines/weatherVolume.md)): forms tower, cumulus, lens, bank,
-    sheet and mist from instanced puffs in the v1 look (one shared mesh), rain, snow and dust shafts,
-    distance compression of masses beyond the fog (direction and angular size kept, so an anvil reads
-    at 30+ km before its lure takes over), an inside-fog sky modifier (priority 15), a veil, local
-    streaks and canopy rain in the cockpit and FPV views, and one WindField source per volume
-    (turbulence, updraft, shaft downdrafts and outflow, lens waves), removed at FAR and on dispose.
-  - `celestial` ([celestial.md](engines/celestial.md)): meteors, comets, the eclipse (a priority-30
-    sky modifier that really darkens the sun, sky, fog and lights; `wildlifeQuiet` through totality),
-    the glory and full-circle rainbow on every cloud (`uniforms.cloudGlory` / `cloudBow`), rainbows in
-    mist and static sky values; sky objects on a shell at 96 % of the camera's far plane.
-  - Both engines build every GPU resource in `init()` and give an instance only slots, so `dispose()`
-    returns `renderer.info.memory` exactly; they write their instance buffers in place through
-    persistent update ranges (no allocation per frame). They key their once-per-frame work on
-    `state.frame`, so a second update of the same instance in one frame is skipped.
+
+**The ten engines.** `SPAWN_ENGINE_FACTORIES` in `main.js` registers them once each, in
+`ENGINE_NAMES` order. Each has a reference page for preset authors in `docs/engines/`, with every
+param, its unit, range and default, its budget and its measured cost; [spawns.md](spawns.md) shows
+which presets use which.
+
+| engine | page | what it does and how |
+| --- | --- | --- |
+| `vortex` | [vortex.md](engines/vortex.md) | tornado, waterspout and dust-devil funnels with a debris or spray ring. Up to 4 vortices share one shell mesh and one instanced sprite (2 draw calls in all), moved in the vertex shaders from a per-slot uniform block, the same on both backends, so a spawn uploads no buffers and adds no GPU memory. Lifecycle forming, mature, ropeOut, dissipated (then `ended`) on a seeded track precomputed at create; one `rankine` WindField source per vortex; a wake in the water layer over the sea; live `control.{ intensity, ropeOut }` |
+| `emitter` | [emitter.md](engines/emitter.md) | GPU particles (plumes, jets, sprays, sparks, dust rings, mist, lanterns) in two shared instanced pools, `alpha` and `additive`, one draw call each. The CPU writes births only; a TSL compute kernel integrates them in storage buffers on WebGPU and the vertex shader evaluates the same motion in closed form on WebGL2. A coarse WindField grid per emitter, eruption schedules and bursts, and couplings: a real light, an underglow, a WindField source, an immersion fog (priority 20) and the voice's triggers |
+| `weatherVolume` | [weatherVolume.md](engines/weatherVolume.md) | cloud masses (tower, cumulus, lens, bank, sheet, mist) from instanced puffs in the v1 look on one shared mesh, rain, snow and dust shafts, distance compression of masses beyond the fog (an anvil reads at 30+ km before its lure takes over), an inside-fog sky modifier (priority 15), local streaks and canopy rain in the cockpit and FPV views, and one WindField source per volume (turbulence, updraft, shaft downdrafts and outflow, lens waves); live `control.wallCloud` |
+| `fauna` | [fauna.md](engines/fauna.md) | instanced boids, one `InstancedMesh` per species (one draw call however many groups): murmuration, flock, formation with the formation-slot API, circling in the WindField's thermals, whale pod, wingman and drift (a giant with a slipstream). The simulation runs on the CPU over typed arrays, the wings flap and the whales undulate in the vertex shader; flocks scatter near the player; `wildlifeQuiet` silences them |
+| `structure` | [structure.md](engines/structure.md) | procedural low-poly builds from parametric recipes (wind farm, rope bridge, airfield, floating islands, crystal spires, gate course, waterfall), built once at create on pooled meshes in the v1 palette. It registers the stamps its recipes need (`structureStamps`), pass-through and pass-under gates with achievements, timed courses, graded landings, ground-start spots, landable ground surfaces, the wind farm's wake; live `instance.params` and `setParam` |
+| `celestial` | [celestial.md](engines/celestial.md) | sky-dome additions: meteors, comets, the eclipse (a priority-30 sky modifier that really darkens the sun, sky, fog and lights, and `wildlifeQuiet` through totality), the glory and full-circle rainbow on every cloud (`uniforms.cloudGlory` / `cloudBow`), rainbows in mist and static sky values; sky objects on a shell at 96 % of the camera's far plane |
+| `waterEffect` | [waterEffect.md](engines/waterEffect.md) | whirlpools, splashes, spray, bioluminescence and plunge pools, written into the shared water effects layer (below) through its slot and mark APIs; it authors no wind |
+| `lightEffect` | [lightEffect.md](engines/lightEffect.md) | lightning (seeded branching ribbons, an in-cloud flash, a sky flash at priority 30, a real light low in the channel, thunder delayed by distance), glows and swarms in one shared additive point pool (one draw call, animated in the vertex shader), steady lights and beams. It declares and never exceeds 2 real lights; everything else is emissive plus bloom |
+| `windModifier` | [windModifier.md](engines/windModifier.md) | up to 8 WindField sources per instance (updraft, downburst, wake, jetStream, slipstream, waveLift, gustFront, curtain), from its params or the preset's `wind` entries, with fades, start / stop windows, strength timelines, drift or `follow` a sibling part, and `control.strength` / `control.strengths[i]`; no visuals |
+| `setPiece` | [setPiece.md](engines/setPiece.md) | scripted multi-stage timelines over other presets: children started through the SpawnManager with every budget, stages with conditions, ramps and `set` values, records, journal statistics and copilot narration (`setPiece:narrate`); no geometry, wind or lights of its own |
+
+Rules every engine keeps:
+
+- **Shared resources in `init()`, slots per instance.** GPU resources are built once and an
+  instance takes slots in them, so `dispose()` returns `renderer.info.memory` to its level from
+  before `create()` and removes every wind source (the SpawnManager checks and reports leaks).
+- **No allocations in `update()`.** Instance buffers are written in place through persistent update
+  ranges, per-instance numbers live in typed arrays, wind sources sample into one reused result
+  (`createWindSample`, `src/spawns/engines/windSources.js`) and move with `setSourceBounds`. Engines
+  key their once-per-frame work on `state.frame`, so a second update of one instance in a frame is
+  skipped. `tools/engine-alloc.mjs` and the engine labs measure it.
+- **Strict params.** The vortex, windModifier, emitter, lightEffect, structure and setPiece engines
+  refuse a param they do not know and name it; the others validate what they read. Every message
+  names the engine, the preset and the param (`engineKit.js`: `createParamReader`,
+  `createParamView`).
+- **Both backends.** The only WebGPU-only path, the emitter's TSL compute over storage buffers
+  (`particleSystem.js`), has a WebGL2 path that looks the same: the same motion in closed form in
+  the vertex shader. Every other engine draws the same way on both backends.
+- **One voice per preset** (`ownsPresetAudio` in `engineKit.js`): the part whose flag (`voice`,
+  `sound` or `ownsAudio`) is true opens `preset.audio`; without flags the preset's first engine
+  entry does.
 
 ### Event director (`src/spawns/director.js`)
 
@@ -1522,6 +1544,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `?renderer=webgl` | force the WebGL2 backend |
 | `?seed=...`, `?time=0..1`, `?touch=1` | world seed, start time of day, force touch controls (v1) |
 | `?dev=1` | in a production build: the spawn debugger (F9) and the spawns `debug` API (dev builds always have them) |
+| F9 | the spawn debugger (`src/dev/spawnDebugger.js`): the preset list filtered by category, kind, rarity and heavy, Spawn (force-spawn ahead at a chosen distance, past the budgets) and Nearest (teleport to the nearest site of that preset), a time-of-day scrubber, the director's state and nearby entries, the active spawns with End buttons, per-engine stats, and the WindField overlay toggle |
 | `?test=hotas` | installs the mock gamepads (`ctx.systems.input.mock`) and, in dev builds, runs the HOTAS pipeline test (`src/dev/hotasTest.js`): bindings and hat decoding in both hat forms, calibration results, twist auto-disable, the one-time HOTAS assist default, and persistence across a reload |
 | `tools/steps/view-physics.json` | run with `tools/smoke-test.mjs --url <dev server>/v2/` (or a build with `?debug=1`): pauses the loop, steps frames by hand and proves every craft flies identically in the cockpit, in chase and while switching views |
 | `?test=sites` | dev builds: the terrain test's fixture site presets (an airfield strip, a gorge with its rope bridge, islets with floating islands, a canyon course) reach worldgen on both threads with no harness, for `tools/steps/engine-structure-sites.json` |
@@ -1530,7 +1553,8 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `tools/run-harness.mjs` | runs either harness headlessly on a spare port (`--test 1\|hotas`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--out`), prints a table per run and per craft and view, and exits 0 on PASS |
 | `tools/shell-test.mjs` | the launcher shell test (below) |
 | `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |
-| labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`, `terrain`, `spawns`, `director`, `audio`, `discovery`) |
+| labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs `jet`, `helicopter`, `wingsuit`, `fpv`; `settings`, `copilot`, `input`, `storage`, `copilot-server`; `terrain`, `spawns`, `director`, `audio`, `discovery`; the engine labs `wind-engines`, `structure`, `setpiece`; the preset labs `preset-pacing`, `preset-flight`, `preset-wind`) |
+| `tools/docs-check.mjs` | the docs against the code: relative links and anchors, the preset table and sections of `docs/spawns.md`, and its two preset templates validated as presets |
 | `tools/spawn-check.mjs` | `--url <dev server>/v2/ [--backend webgpu\|webgl] [--out]`: the spawn framework proofs in the browser with the dev test kit (below) |
 | `tools/engine-alloc.mjs` | `--url <dev server>/v2/ --steps tools/steps/engine-<name>.json --presets a,b [--backend webgpu\|webgl] [--frames] [--warmup] [--events f,g]`: the sampled JS allocations of spawn engines' frame updates with the clock running and the camera swaying (under 1 byte per frame, about a twelfth of one heap number a frame; callees, lifecycle and reports, and the named event paths reported apart) |
 
@@ -1565,7 +1589,13 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-weatherVolume.json` (and `engine-celestial.json`; `--query renderer=webgl` for WebGL2) | each engine's forms and components force-spawned ahead of the craft with screenshots, their wind, inside and eclipse effects, and create/dispose with `renderer.info.memory`, wind sources and sky modifiers back to their baseline exactly |
 | `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders) |
 | `node tools/lab/director.mjs --presets real` | the pacing checks against the game's own 30 presets: the first notable, the drought fill with no sites, a world with the real placement's sites, and a per-preset activation report per speed |
-| `node tools/lab/preset-pacing.mjs` | presets 1-10 under the real director over simulated hours (3 seeds, 3 speeds, day and night): every event preset activates, the volcano's eruption starts, nothing activates behind; prints the drought shares |
+| `node tools/lab/preset-pacing.mjs [--hours N]` | the game's presets under the real director with the real placement over simulated hours (3 seeds, 3 speeds, day and night): every event preset activates, the volcano's eruption starts, nothing activates behind; prints the drought shares and the activations per preset |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/copilot-guide.json` (add `--query renderer=webgl`) | WREN's tour guide in the game: a callout on `spawnActivated` with an open offer, the Guide chips, "yes" placing the waypoint, the 45 s rate limit, "take me to", "find a thermal" against the WindField, "chase the storm", "next discovery", "guide help", and the remote flight state's `nearby[]`, `activeEvents[]`, `weather` and `callouts` |
+| `node tools/smoke-test.mjs --url <shell>/?v=2#seed=LINKTEST&t=0.300 --steps-file tools/steps/seed-link.json` | a share link opens V2 in the launcher in its seed at its time of day, Copy link inside the shell gives the shell URL, and a seed applied in V2 reloads the game inside the shell into that world |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --query seed=ENGINEFAUNA --steps-file tools/steps/engine-fauna.json` (and `engine-waterEffect.json` with `seed=ENGINEWATER`) | the fauna and waterEffect engines force-spawned ahead with screenshots, their behaviours, and dispose back to the memory baseline |
+| `node tools/engine-cost.mjs --url <dev server>/v2/ --engine fauna\|waterEffect` | the engine's per-frame CPU, triangles and draw calls in representative scenes, and its frame update's allocations from the heap profiler |
+| `node tools/lab/audio.mjs [--backend both\|webgpu\|webgl]` | the spawn voices: in node the distance laws, the thunder front against moving listeners, doppler and allocation-free updates of every recipe; in V2 (its own dev server) every recipe rendered offline and told apart, distance renders, the crystal's rising pitch, live lifecycles, the voice budget, thunder delays and doppler |
+| `node tools/docs-check.mjs` | every relative link and anchor in the docs resolves; `docs/spawns.md` matches the presets (one row and one section each, with the right id, category, kind, rarity, heavy flag and engines); its two templates are valid presets |
 | `node tools/lab/preset-flight.mjs [--verbose]` | the SIM glider and jet flown with scripted inputs through the real wind-affecting presets in a real world and SpawnManager (the maelstrom across its eye and abeam, the wind farm's wakes, circling with the thermal hawks), vertical speed, load factor, airspeed, drift and turbulence logged against the same path without the spawn |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --query seed=DRIFTWING --steps-file tools/steps/presets-batch1.json` (add `renderer=webgl`) | presets 1-10 in the game: each force-spawned ahead (sites at their real placed site), discovered with the toast and a journal entry, its wind probed; the supercell's anvil lure at 36 km, the volcano dormant, erupting and dormant again with its lure, a geyser's column over its own jet, the canyon's clean and spoiled runs and `bestCanyonRun`, the waterfall curtain's sink, the same site list twice, the tornado's approach stats, and dispose back to the memory and wind baseline |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/presets-21-30.json` (add `renderer=webgl`) | presets 21-30 in the game: each force-spawned at its time and weather, framed, discovered (event, journal entry, card) and disposed back to the memory, wind source and sky modifier baselines; the real stamped sites with the site-list hash, start on the ground at the airfield, a graded landing, the eclipse partial and at totality, the comet's dawn, and the storm chase's stages and journal stats |
@@ -1634,17 +1664,25 @@ compared with its first load, and may rise by at most (the larger of a share and
 The tool's `MEMORY_TOLERANCE` comment has the measurements behind these, and the JSON report lists
 each game's footprint over a blank tab next to each allowance.
 
-## Phase 2-4 plug points
+## Phase 3-4 plug points
 
-- **Event director and spawns (Phase 2).**
-  - Subscribe to the typed events: `discovery`, `landed`, `softCrash`, `craftChanged`,
-    `viewChanged` and `relaunched`.
-  - Register wind sources with `ctx.wind.addSource({ id, kind, bounds, sample })` and move them
-    with `setSourceBounds`. Their `windSourceAdded` / `windSourceRemoved` events come for free.
-  - Place meshes in `ctx.scene`, and register lazily shown ones with `ctx.registerPrewarm`.
-  - Nothing in the flight models changes, because every tick already flies through
-    `WindField.sample`.
-  - New typed events go into `EVENT_TYPES` in `src/core/events.js` with their payload shapes.
+Phase 2 used the Phase 1 plug points as planned: the spawns write the WindField through
+`addSource` / `setSourceBounds` (the flight models did not change, since every tick already flies
+through `WindField.sample`), react to the typed events, place their meshes in `ctx.scene` with the
+pipeline prewarm, and add their own typed events to `EVENT_TYPES` in `src/core/events.js`.
+
+- **More spawns (Phase 3).**
+  - A new preset is one pure-data file in `src/spawns/presets/` plus one line in its `index.js`;
+    [spawns.md](spawns.md#adding-a-preset) has the checklist and copy-paste templates. The journal's
+    collection count, the map, the F9 debugger, the director and WREN's tour guide read the preset
+    list, so none of them change.
+  - New species, recipes, effects or source types extend an engine's param tables (each engine page
+    in `docs/engines/` says where); a new engine implements the interface in `engineRegistry.js`,
+    joins `ENGINE_NAMES` and `SPAWN_ENGINE_FACTORIES` in `main.js`, and declares its `budget`.
+  - New lure silhouettes go into `LURE_TYPES` (`schema.js`) and `lure.js`; new stamp types into
+    `stamps.js` (both threads run it); new audio recipes into `src/audio/recipes/index.js`.
+  - Combos of existing presets are set pieces: data for the setPiece engine.
+  - The map-tile generator (`src/world/mapTileGen.js`) is generic, ready for far-field tiles.
 - **More craft (Phase 3).**
   - Append an entry to `CRAFT_CATALOG` (id, name, role, hotkey, silhouette), add
     `src/craft/<id>.js` with the module schema above, and register it in `src/craft/index.js`.
