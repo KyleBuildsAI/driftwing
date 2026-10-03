@@ -459,6 +459,10 @@ export function createWeatherVolumeEngine() {
     const age = data.age;
     const billow = params.billow;
     const growth = data.growth;
+    // The wall cloud hangs control.wallCloud of its full drop below the base (a set piece lowers it).
+    const wallGroup = layout.wallGroup;
+    const wallControl = instance.control.wallCloud;
+    const wallLower = wallControl > 0 ? (wallControl < 1 ? wallControl : 1) : 0;
     // Coarse far mass: the core puffs swell a little while the body is hidden.
     const coreSwell = 1 + 0.25 * (1 - weights[1]);
     const checkInside = data.cameraNear;
@@ -477,8 +481,9 @@ export function createWeatherVolumeEngine() {
       const follow = groups[group + 8] === 1;
       const spin = groups[group + 7];
       const rise = groups[group + 9];
+      const drop = source[offset + 8] === wallGroup ? wallLower : 1;
       let x = source[offset];
-      let y = source[offset + 1];
+      let y = source[offset + 1] * drop;
       let z = source[offset + 2];
       let radius = source[offset + 3];
       const phase = source[offset + 10];
@@ -528,11 +533,11 @@ export function createWeatherVolumeEngine() {
       const distance = Math.sqrt(toX * toX + toY * toY + toZ * toZ);
       let k = 1;
       if (distance > start) k = (start + span * (1 - Math.exp(-(distance - start) / span))) / distance;
-      const baseY = ground + groups[group];
-      const topY = ground + groups[group + 1];
+      const baseY = ground + groups[group] * drop;
+      const topY = ground + groups[group + 1] * drop;
       const centreX = anchor.x + groups[group + 2] * data.rightX + groups[group + 4] * data.forwardX;
       const centreZ = anchor.z + groups[group + 2] * data.rightZ + groups[group + 4] * data.forwardZ;
-      const centreY = ground + groups[group + 3];
+      const centreY = ground + groups[group + 3] * drop;
       const out = puffCursor * 16;
       const horizontal = scaledRadius * k;
       const cosine = data.puffCos[puff];
@@ -837,6 +842,9 @@ export function createWeatherVolumeEngine() {
         particles: 0,
         heavy: preset.heavy === true,
         tier: 'near',
+        // Live values a set piece's ramps write (docs/engines/weatherVolume.md): the wall cloud's
+        // lowering, 0 (tucked under the base) to 1 (its full drop, the default).
+        control: { wallCloud: 1 },
         data,
       };
       sampleShaftGround(instance);

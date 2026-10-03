@@ -112,6 +112,15 @@ null.
 | --- | --- | --- |
 | `ownsAudio` | the first engine entry of the preset owns `preset.audio` | the voice plays at the anchor, with the growth as its intensity |
 
+### Live control (set pieces)
+
+`instance.control` holds values a set piece's ramps and `set` entries write directly
+(docs/engines/setPiece.md, "Ramps and `set` values reach a child"):
+
+| field | range | default | notes |
+| --- | --- | --- | --- |
+| `wallCloud` | 0..1 | 1 | how far the wall cloud hangs below the base, as a share of `wallCloud.drop`: 0 tucks it up under the base, 1 is its full drop. The storm chase ramps it from 0.15 to 1 while the supercell builds, so the wall cloud lowers as the copilot narrates. No effect on a volume without a `wallCloud` |
+
 ## Behaviour
 
 - **LOD.** NEAR draws every puff. MID drops the detail puffs, and FAR keeps the core puffs as a coarse
