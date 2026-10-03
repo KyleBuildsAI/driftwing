@@ -33,8 +33,11 @@
 //                 steps exactly as the Phase 1 governor (tag v2-structure) does
 //   api           getNearby is sorted and well formed; getState carries the debugger's fields
 //
-// Usage: node tools/lab/director.mjs [--hours 24] [--verbose]
-// Prints a table and exits non-zero if any check fails.
+// Usage: node tools/lab/director.mjs [--hours 24] [--verbose] [--presets real]
+// Prints a table and exits non-zero if any check fails. --presets real runs the pacing checks (and a
+// per-preset activation count) against the game's own presets (src/spawns/presets/index.js) instead of
+// the stubs, on the same flights with no sites, so a preset batch can see whether its commons keep
+// the 60-90 s pacing; the other checks need the stubs' full Phase 2 list and are skipped.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -45,6 +48,7 @@ import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
 import { createPerfGovernor } from '../../src/core/perf.js';
 import { createWorldGen } from '../../src/world/worldgen.js';
+import { PRESETS as GAME_PRESETS } from '../../src/spawns/presets/index.js';
 import {
   DIRECTOR_BUDGETS, DROUGHT_BAND, MAX_OFF_AXIS, MAX_OFF_AXIS_WIDE, PACING_WINDOW_MAX, RARITY_COOLDOWNS, RARITY_TIERS, createDirector,
 } from '../../src/spawns/director.js';
@@ -56,13 +60,15 @@ import {
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function parseArgs(argv) {
-  const options = { hours: 24, verbose: false };
+  const options = { hours: 24, verbose: false, presets: 'stub' };
   for (let index = 2; index < argv.length; index++) {
     const flag = argv[index];
     if (flag === '--verbose') options.verbose = true;
     else if (flag === '--hours') options.hours = Number(argv[++index]);
+    else if (flag === '--presets') options.presets = argv[++index];
     else throw new Error(`Unknown flag ${flag}`);
   }
+  if (!['stub', 'real'].includes(options.presets)) throw new Error('--presets must be stub or real');
   if (!(options.hours >= 4)) throw new Error('--hours must be at least 4 (the legendary tier needs hours of flight)');
   return options;
 }
@@ -116,7 +122,7 @@ function sitePreset(id, category, rarity, { heavy = false, activeState = null, e
   });
 }
 
-const PRESETS = Object.freeze([
+const STUB_PRESETS = Object.freeze([
   eventPreset('tornado', 'weather', 'rare', { heavy: true, engines: ['vortex', 'emitter', 'windModifier'], filters: { weather: ['storm'], surface: 'land' }, duration: [240, 360] }),
   eventPreset('supercell', 'weather', 'uncommon', { heavy: true, engines: ['weatherVolume', 'lightEffect', 'windModifier'], filters: { weather: ['building', 'storm'], minDistance: 6000, maxDistance: 20000 }, candidates: { cellSize: 12000, bucketSeconds: 450, chance: 0.5 }, duration: [300, 480] }),
   eventPreset('waterspout', 'ocean', 'uncommon', { engines: ['vortex', 'emitter'], filters: { surface: 'water', weather: ['building', 'storm'] } }),
@@ -144,6 +150,8 @@ const PRESETS = Object.freeze([
   sitePreset('airfield', 'structure', 'common'),
   sitePreset('crystalSpires', 'fantasy', 'uncommon', { engines: ['structure', 'lightEffect'] }),
 ]);
+/** The presets the director runs on: the stubs, or the game's own with --presets real. */
+const PRESETS = OPTIONS.presets === 'real' ? GAME_PRESETS : STUB_PRESETS;
 const PRESET_BY_ID = new Map(PRESETS.map((preset) => [preset.id, preset]));
 /** Sites within this range (m) are instances in the stub manager (beyond it, only lures). */
 const SITE_INSTANCE_RANGE = 12000;
@@ -958,15 +966,38 @@ async function testShedding() {
 // ============================================================================================
 // RUN
 // ============================================================================================
+/**
+ * --presets real: which of the game's presets filled the drought flights, per speed (a report next to
+ * the pacing checks, which run on the same presets).
+ */
+function reportRealPresets() {
+  for (const craft of Object.keys(SPEEDS)) {
+    const run = runScenario({ seed: 'DROUGHT', pathSeed: `drought-${craft}`, hours: 3, craft, siteChance: 0 });
+    const counts = {};
+    for (const entry of run.log) counts[entry.presetId] = (counts[entry.presetId] || 0) + 1;
+    const reasons = {};
+    for (const drought of run.longDroughts) {
+      const key = `sun ${drought.sun >= 0 ? 'up' : 'down'}, ${drought.weather}`;
+      reasons[key] = (reasons[key] || 0) + 1;
+    }
+    check('real', `${craft}: activations of the game's ${PRESETS.length} presets in 3 h (report)`, true, `${describePacing({ craft: '', longest: run.state.longestDrought, fills: run.state.droughtFills, pacing: run.state.pacing })}; ${JSON.stringify(counts)}; droughts past 90 s sampled: ${JSON.stringify(reasons)}`);
+  }
+}
+
 const started = Date.now();
-testPacing();
-testLongFlight();
-testLifetimes();
-testFrameworkShape();
-testDeferral();
-testDeterminism();
-testWeather();
-await testShedding();
+if (OPTIONS.presets === 'real') {
+  testPacing();
+  reportRealPresets();
+} else {
+  testPacing();
+  testLongFlight();
+  testLifetimes();
+  testFrameworkShape();
+  testDeferral();
+  testDeterminism();
+  testWeather();
+  await testShedding();
+}
 const wallSeconds = (Date.now() - started) / 1000;
 
 const groupWidth = Math.max(...results.map((result) => result.group.length));
