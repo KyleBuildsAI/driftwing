@@ -8,6 +8,7 @@ import whalePod from './whalePod.js';
 import maelstrom from './maelstrom.js';
 import bioluminescentBay from './bioluminescentBay.js';
 import starlingMurmuration from './starlingMurmuration.js';
+import geeseFormation from './geeseFormation.js';
 
 export const PRESETS = Object.freeze([
   // Batch 2: presets 11-20.
@@ -15,6 +16,7 @@ export const PRESETS = Object.freeze([
   maelstrom,
   bioluminescentBay,
   starlingMurmuration,
+  geeseFormation,
 ]);
 
 /** Presets by id. */
