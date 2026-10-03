@@ -261,7 +261,7 @@ system, and then starts the frame loop.
 | `presets/index.js` | `PRESETS` (spec order) and `PRESET_BY_ID`; one pure-data file per preset |
 | `engines/emitterEngine.js`, `engines/particleSystem.js` | the `emitter` engine: GPU particle pools (TSL compute on WebGPU, closed-form motion in the vertex shader on WebGL2), wind grids, couplings; params in `docs/engines/emitter.md` |
 | `engines/lightEffectEngine.js`, `engines/glowPoints.js`, `engines/ribbons.js` | the `lightEffect` engine: lightning, glows, swarms, beams, the two-light budget; params in `docs/engines/lightEffect.md` |
-| `engines/engineKit.js` | helpers the engines share: param readers with clear errors, heading frames, ground grids, pooled real lights, fixed-capacity update range lists, batched seeded random numbers |
+| `engines/engineKit.js` | helpers the engines share: param readers with clear errors, heading frames, ground grids, pooled real lights, fixed-capacity update range lists, batched seeded random numbers, rationed voice levels |
 
 ### `src/env`
 
@@ -1284,7 +1284,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |
 | labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`, `terrain`, `spawns`, `director`, `audio`) |
 | `tools/spawn-check.mjs` | `--url <dev server>/v2/ [--backend webgpu\|webgl] [--out]`: the spawn framework proofs in the browser with the dev test kit (below) |
-| `tools/engine-alloc.mjs` | `--url <dev server>/v2/ --steps tools/steps/engine-<name>.json --presets a,b [--backend webgpu\|webgl] [--frames]`: the sampled JS allocations of spawn engines' frame updates (under 0.1 byte per frame, callees reported apart) |
+| `tools/engine-alloc.mjs` | `--url <dev server>/v2/ --steps tools/steps/engine-<name>.json --presets a,b [--backend webgpu\|webgl] [--frames] [--warmup] [--events f,g]`: the sampled JS allocations of spawn engines' frame updates with the clock running and the camera swaying (under 0.1 byte per frame; callees, lifecycle and reports, and the named event paths reported apart) |
 
 ## Testing
 
