@@ -34,6 +34,10 @@
 //                 Phase 1 edges the pairs the ring layout makes (LODs at most one apart)
 //   collision     groundHeight against the rendered LOD0 mesh (its own triangles) near every stamp
 //                 type: within 0.5 m
+//   real presets  the real preset list's stamped sites (src/spawns/presets/): the same seed twice, asked in
+//                 another order, gives the same site-list hash; every site passes its preset's biome,
+//                 height and minSpacing rules; and near the nearest site of every stamped preset (on
+//                 the first seed that has one) the falloff, seam and collision checks above pass too
 //   benchmark     heightAt and groundHeight on fixed point sets with no stamps nearby and with stamps
 //                 dense nearby, against the Phase 1 baseline measured from the same code with stamps
 //                 disabled (the empty preset list): within 10 %. After a JIT warmup, each slice of
@@ -593,6 +597,45 @@ function testSeamsAndCollision(world, sites) {
   }
 }
 
+// ---- real presets ---------------------------------------------------------------------------------------------
+const REAL_SEARCH_RADIUS = 60000;
+
+function testRealPresets() {
+  const stamped = PRESETS.filter((preset) => preset.kind === 'site' && (preset.stamps ?? []).length > 0);
+  const presetsById = new Map(PRESETS.map((preset) => [preset.id, preset]));
+  const nearest = new Map();
+  for (const seed of SEEDS) {
+    const first = createWorldGen(seed, WORLD_OPTIONS);
+    const second = createWorldGen(seed, WORLD_OPTIONS);
+    second.sitesNear(90000, -70000, 8000);
+    for (let ring = 3; ring >= 0; ring--) second.sitesNear(ring * 9000, -ring * 7000, 9000);
+    const sites = first.sitesNear(0, 0, REAL_SEARCH_RADIUS);
+    const again = second.sitesNear(0, 0, REAL_SEARCH_RADIUS);
+    const hash = hashSiteList(sites);
+    check('real presets', `${seed}: the same site-list hash twice (${sites.length} sites within ${REAL_SEARCH_RADIUS / 1000} km)`, sites.length > 0 && hash === hashSiteList(again), hash);
+    let failures = 0;
+    for (const site of sites) {
+      const preset = presetsById.get(site.presetId);
+      const placement = preset.placement;
+      const terrain = placement.terrain ?? {};
+      if (placement.biomes && !placement.biomes.includes(first.biomeAt(site.x, site.z).key)) failures++;
+      if ((Number.isFinite(terrain.minHeight) && site.groundY < terrain.minHeight) || (Number.isFinite(terrain.maxHeight) && site.groundY > terrain.maxHeight)) failures++;
+      for (const other of sites) {
+        if (other !== site && other.presetId === site.presetId && Math.hypot(other.x - site.x, other.z - site.z) < placement.minSpacing) failures++;
+      }
+      if (!nearest.has(site.presetId) && site.stamps.length > 0) nearest.set(site.presetId, { world: first, site });
+    }
+    check('real presets', `${seed}: every site keeps its preset's biome, height band and minSpacing`, failures === 0, `${failures} failures`);
+  }
+  for (const preset of stamped) {
+    const found = nearest.get(preset.id);
+    check('real presets', `${preset.id}: a site within ${REAL_SEARCH_RADIUS / 1000} km on some seed`, Boolean(found), found ? `${found.site.id}, ${round(Math.hypot(found.site.x, found.site.z) / 1000, 1)} km` : 'none');
+    if (!found) continue;
+    testFalloff(found.world, [found.site]);
+    testSeamsAndCollision(found.world, [found.site]);
+  }
+}
+
 // ---- benchmark --------------------------------------------------------------------------------------------------
 function timePass(fn, xs, zs) {
   const started = process.hrtime.bigint();
@@ -698,6 +741,7 @@ testShapes(stampWorld, sites);
 testFalloff(stampWorld, sites);
 testPaint(stampWorld, sites);
 testSeamsAndCollision(stampWorld, sites);
+testRealPresets();
 testBenchmark();
 
 let failed = 0;
