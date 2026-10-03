@@ -932,6 +932,10 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         nanEvents: 'Frames with a non-finite craft pose or telemetry sampled by the harness, plus every restore by the flight model guard (per tick) and core\'s frame guard.',
         penetration: `The craft reference point (state.player.position) more than ${PENETRATION_LIMIT_M} m below the shared height function (world.groundHeight) or the water surface, sampled every frame; one continuous episode counts once.`,
         heapGrowth: 'JS heap (performance.memory.usedJSHeapSize) after a forced GC, from the end of each world\'s warmup lap to the end of that world\'s last run; the largest growth across worlds is judged. The growth from the end of the world warmup (before the lap) is listed too.',
+        ...(soak ? {
+          p99: 'The soak judges the worst run\'s p99 frame time (after warmup) against the frame target the perf governor holds (state.perf.targetMs: the display refresh, 60 Hz in a browser under automation).',
+          director: 'The event director runs as in the game on every world. It is live when it ticked on the world; its activations (with their reasons), the sites and events started on the world and the most spawns alive at once are listed.',
+        } : {}),
       },
       criteria,
       totals: {
