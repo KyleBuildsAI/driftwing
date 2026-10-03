@@ -32,6 +32,9 @@
 //                 and gets them back only after the scale is back at 1; with no shedder the governor
 //                 steps exactly as the Phase 1 governor (tag v2-structure) does
 //   api           getNearby is sorted and well formed; getState carries the debugger's fields
+//   near          filters.near: every activation of a preset gathered at landmarks lies exactly on a
+//                 Phase 1 landmark of its types (the real world generator's landmarkSitesNear), still
+//                 ahead and inside its distance band; without landmarkSitesNear it never activates
 //
 // Usage: node tools/lab/director.mjs [--hours 24] [--verbose] [--presets real]
 // Prints a table and exits non-zero if any check fails. --presets real runs the pacing checks (and a
@@ -967,6 +970,70 @@ async function testShedding() {
 // RUN
 // ============================================================================================
 /**
+ * filters.near on its own: a director with one common event gathered at lighthouses and balloon fairs
+ * (the sky lantern festival's rule) flies a long path over the real world; every activation must sit
+ * on such a landmark, ahead and inside the band. A terrain without landmarkSitesNear never activates it.
+ */
+function testNearFilter() {
+  const nearPreset = Object.freeze({
+    id: 'nearTest', name: 'nearTest', category: 'celestial', kind: 'event', rarity: 'common', heavy: false,
+    candidates: { cellSize: 3500, bucketSeconds: 300, chance: 0.6 },
+    filters: { minDistance: 3000, maxDistance: 8000, near: { landmarks: ['lighthouse', 'balloons'], radius: 4000 } },
+    engines: [{ engine: 'emitter', params: {} }],
+    lifetime: { duration: [60, 90], despawn: DESPAWN },
+  });
+  // A second common event, so the no-repeat rule lets the near preset come back again and again.
+  const filler = eventPreset('nearFiller', 'wildlife', 'common', { candidates: { cellSize: 3500, bucketSeconds: 300, chance: 0.6 }, duration: [60, 90] });
+  function run(withLandmarks) {
+    const world = createWorldGen('NEAR-LAB', WORLD_OPTIONS);
+    const path = createFlightPath({ pathSeed: 'near-lab', ...SPEEDS.bushplane });
+    const sun = createSun();
+    let time = 0;
+    const activations = [];
+    const live = new Map();
+    const manager = {
+      activate(presetId, options) {
+        const id = `near:${time}`;
+        if (presetId !== nearPreset.id) {
+          live.set(id, { anchor: { ...options.position }, radius: 300, heavy: false, ended: false, startedAt: time, duration: options.duration });
+          return id;
+        }
+        const distance = Math.hypot(options.position.x - path.player.position.x, options.position.z - path.player.position.z);
+        const offAxis = angleBetween(bearingDegrees(path.player.position.x, path.player.position.z, options.position.x, options.position.z), path.player.heading);
+        activations.push({ x: options.position.x, z: options.position.z, distance, offAxis });
+        live.set(id, { anchor: { ...options.position }, radius: 300, heavy: false, ended: false, startedAt: time, duration: options.duration });
+        return id;
+      },
+      deactivate(id) { return live.delete(id); },
+      getActive: () => [...live.values()],
+      getInstance: (id) => live.get(id) ?? null,
+      getStats: () => ({ engines: {}, total: { lights: 0 } }),
+    };
+    const terrain = { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL };
+    if (withLandmarks) terrain.landmarkSitesNear = world.landmarkSitesNear;
+    const director = createDirector({
+      seedHash: world.seedHash >>> 0, presets: [nearPreset, filler], spawnManager: manager, weather: createWeatherModel(world.seedHash >>> 0), terrain,
+      getPlayer: () => path.player, getTime: () => time, getSun: () => sun.sun, isInView: createView(path.player),
+    });
+    for (let step = 0; step <= Math.round(3600 / STEP_SECONDS); step++) {
+      time = step * STEP_SECONDS;
+      path.step(STEP_SECONDS, time);
+      sun.update(time);
+      for (const [id, instance] of live) if (time - instance.startedAt > instance.duration) live.delete(id);
+      director.update();
+    }
+    director.dispose();
+    return { world, activations };
+  }
+  const { world, activations } = run(true);
+  const onLandmark = activations.filter((entry) => world.landmarkSitesNear(entry.x, entry.z, 1).some((site) => (site.type === 'lighthouse' || site.type === 'balloons') && site.x === entry.x && site.z === entry.z));
+  const ahead = activations.every((entry) => entry.offAxis <= MAX_OFF_AXIS_WIDE && entry.distance >= 3000 && entry.distance <= 8000);
+  check('near', 'every activation of a near-filtered preset sits on a lighthouse or balloon fair, ahead and in its band', activations.length > 0 && onLandmark.length === activations.length && ahead, `${onLandmark.length}/${activations.length} on a landmark in 1 h; ahead and in band: ${ahead}`);
+  const without = run(false);
+  check('near', 'without landmarkSitesNear a near-filtered preset never activates', without.activations.length === 0, `${without.activations.length} activations`);
+}
+
+/**
  * --presets real: which of the game's presets filled the drought flights, per speed (a report next to
  * the pacing checks, which run on the same presets).
  */
@@ -997,6 +1064,7 @@ if (OPTIONS.presets === 'real') {
   testDeterminism();
   testWeather();
   await testShedding();
+  testNearFilter();
 }
 const wallSeconds = (Date.now() - started) / 1000;
 
