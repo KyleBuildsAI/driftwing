@@ -12,6 +12,8 @@ export const PRESET_KINDS = Object.freeze(['site', 'event']);
 export const PRESET_RARITIES = Object.freeze(['common', 'uncommon', 'rare', 'legendary']);
 export const PRESET_SURFACES = Object.freeze(['land', 'water', 'coast', 'any']);
 export const TERRAIN_RELIEFS = Object.freeze(['peak', 'valley', 'flat', 'ridge', 'any']);
+/** placement.align: how placement.js orients a site (see ALIGNMENTS there). */
+export const PLACEMENT_ALIGNMENTS = Object.freeze(['random', 'downhill', 'ridge']);
 /** Time-of-day classes a preset may be limited to (filters.timeOfDay). */
 export const TIME_OF_DAY_CLASSES = Object.freeze(['dawn', 'day', 'golden', 'dusk', 'night']);
 export const WEATHER_STATE_NAMES = Object.freeze(['clear', 'building', 'storm', 'clearing']);
@@ -100,12 +102,20 @@ function createChecker(presetId) {
 
 function validatePlacement(check, placement) {
   check.object(placement, 'placement');
-  check.onlyKeys(placement, ['chance', 'minSpacing', 'biomes', 'surface', 'terrain', 'clearance'], 'placement');
+  check.onlyKeys(placement, ['chance', 'minSpacing', 'biomes', 'surface', 'terrain', 'clearance', 'align', 'scale'], 'placement');
   check.number(placement.chance, 'placement.chance', { above: 0, max: 1 });
   check.number(placement.minSpacing, 'placement.minSpacing', { min: 0 });
   check.listOrNull(placement.biomes, null, 'placement.biomes');
   check.oneOf(placement.surface, PRESET_SURFACES, 'placement.surface');
   check.number(placement.clearance, 'placement.clearance', { min: 0 });
+  // Optional, as src/world/placement.js reads them: how the site is oriented and its scale range.
+  if (placement.align !== undefined) check.oneOf(placement.align, PLACEMENT_ALIGNMENTS, 'placement.align');
+  if (placement.scale !== undefined) {
+    const scale = placement.scale;
+    if (!Array.isArray(scale) || scale.length !== 2 || !scale.every((value) => Number.isFinite(value) && value > 0) || scale[0] > scale[1]) {
+      check.fail('placement.scale', `must be an ascending [min, max] range of positive numbers, got ${describe(scale)}`);
+    }
+  }
   if (placement.terrain !== undefined && placement.terrain !== null) {
     const terrain = check.object(placement.terrain, 'placement.terrain');
     check.onlyKeys(terrain, ['minHeight', 'maxHeight', 'relief'], 'placement.terrain');

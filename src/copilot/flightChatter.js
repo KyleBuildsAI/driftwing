@@ -3,8 +3,9 @@ import { craftCapabilities } from './flightState.js';
 import { formatSinkRate } from './grammar.js';
 
 /**
- * WREN's v2 chatter: short, rare lines about landings, soft crashes and craft changes, and a lift
- * hint for gliders (the nearest working thermal, or ridge lift we are already in). All of
+ * WREN's v2 chatter: short, rare lines about landings, soft crashes and craft changes, a lift
+ * hint for gliders (the nearest working thermal, or ridge lift we are already in), and the lines a
+ * set piece's timeline narrates ('setPiece:narrate', src/spawns/engines/setPieceEngine.js). All of
  * it goes through the v1 chatter gate (offerChatter), so settings.copilotChatter, photo mode and the
  * v1 pacing (one unsolicited line per 30 s, quiet 10 s after any line) still hold. Lines that only
  * make sense right away carry a short time-to-live and are dropped if the gate stays closed.
@@ -31,7 +32,10 @@ const RIDGE_MAX_AGL = 450;
 /** A craft change the copilot made itself is not narrated a second time. */
 const OWN_CHANGE_WINDOW = 3;
 
-export function createFlightChatter(ctx, { offerChatter, pick }) {
+/** Narration tokens a set piece's line may use (the preset callout tokens). */
+const NARRATION_TOKENS = /\{(distance|direction|name|eta)\}/g;
+
+export function createFlightChatter(ctx, { offerChatter, pick, formatDistance, directionPhrase }) {
   const { bus, state, settings } = ctx;
   const ownChanges = { craft: -Infinity };
   const lift = { timer: 0, sinkSeconds: 0, riseSeconds: 0, lastHintAt: -Infinity };
@@ -94,6 +98,32 @@ export function createFlightChatter(ctx, { offerChatter, pick }) {
     lift.riseSeconds = 0;
     if (recentlyChangedByCopilot('craft')) return;
     offerChatter(pick('craftChatter', [`The ${craftName(craft)}. Let's see what she can do.`, `${craftName(craft).charAt(0).toUpperCase()}${craftName(craft).slice(1)} ready.`]), 2, CHANGE_TTL);
+  });
+
+  // ---- Set-piece narration ------------------------------------------------------------------------------
+  // A timeline stage narrates { text, position?, name?, priority, ttl }; the tokens are filled from
+  // where the player is when the line is offered: {distance} and {direction} to the position, {name},
+  // and {eta} at the current ground speed.
+  function formatEta(seconds) {
+    if (!Number.isFinite(seconds)) return 'a while';
+    if (seconds < 90) return `${Math.max(10, Math.round(seconds / 10) * 10)} seconds`;
+    const minutes = Math.round(seconds / 60);
+    return minutes === 1 ? 'a minute' : `${minutes} minutes`;
+  }
+
+  bus.on('setPiece:narrate', (payload) => {
+    if (!payload || typeof payload.text !== 'string' || payload.text.length === 0) return;
+    const player = state.player;
+    const target = payload.position;
+    const distance = target ? Math.hypot(target.x - player.position.x, target.z - player.position.z) : NaN;
+    const bearing = target ? bearingTo(player.position.x, player.position.z, target.x, target.z) : player.heading;
+    const text = payload.text.replace(NARRATION_TOKENS, (match, token) => {
+      if (token === 'distance') return formatDistance(distance);
+      if (token === 'direction') return directionPhrase(bearing, player.heading);
+      if (token === 'name') return typeof payload.name === 'string' ? payload.name : 'it';
+      return formatEta(distance / Math.max(player.speed, 1));
+    });
+    offerChatter(text, Number.isFinite(payload.priority) ? payload.priority : 3, Number.isFinite(payload.ttl) ? payload.ttl : 25);
   });
 
   // ---- Lift hint for gliders ----------------------------------------------------------------------------

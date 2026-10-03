@@ -1,0 +1,41 @@
+[
+  {
+    "eval": "(async () => { try { const kit = await import('/src/dev/setPieceTestKit.js'); await kit.installSetPieceChecks(window.DRIFTWING); return 'dev server only: imports /src/dev/setPieceTestKit.js | ' + (await window.__dwSetPiece.start()); } catch (error) { console.error('[setPiece check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 2500
+  },
+  {
+    "shot": "setpiece-gather"
+  },
+  {
+    "eval": "(async () => { try { return JSON.stringify(window.__dwSetPiece.describe()); } catch (error) { console.error('[setPiece check] describe gather failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 7000
+  },
+  {
+    "shot": "setpiece-rise"
+  },
+  {
+    "eval": "(async () => { try { return JSON.stringify(window.__dwSetPiece.describe()); } catch (error) { console.error('[setPiece check] describe rise failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 7000
+  },
+  {
+    "shot": "setpiece-funnel"
+  },
+  {
+    "eval": "(async () => { try { return JSON.stringify(window.__dwSetPiece.describe()); } catch (error) { console.error('[setPiece check] describe funnel failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwSetPiece.finish(120); } catch (error) { console.error('[setPiece check] finish failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return JSON.stringify(window.__dwSetPiece.log.map((entry) => [entry.type, entry.time, entry.stage ?? entry.presetId, entry.text ?? entry.reason ?? ''])); } catch (error) { console.error('[setPiece check] log failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 1500
+  }
+]

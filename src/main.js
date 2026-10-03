@@ -31,6 +31,8 @@ import { createShellBridge } from './shell/bridge.js';
 import { createSkySystem } from './render/sky.js';
 import { createSpawnDebugger } from './dev/spawnDebugger.js';
 import { createSpawnSystem } from './spawns/index.js';
+import { createSetPieceEngine } from './spawns/engines/setPieceEngine.js';
+import { createStructureEngine } from './spawns/engines/structureEngine.js';
 import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
 import { createVortexEngine } from './spawns/engines/vortexEngine.js';
@@ -42,6 +44,7 @@ import { createWeatherVolumeEngine } from './spawns/engines/weatherVolumeEngine.
 import { createWindModifierEngine } from './spawns/engines/windModifierEngine.js';
 import { createWindOverlaySystem } from './dev/windOverlay.js';
 import { createWorldGen } from './world/worldgen.js';
+import { createGroundSurfaces } from './world/groundSurfaces.js';
 import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName } from './core/util.js';
 import { EventBus } from './core/eventBus.js';
 import { attachTypedEvents } from './core/events.js';
@@ -68,23 +71,28 @@ const SPAWN_ENGINE_FACTORIES = Object.freeze([
   createEmitterEngine,
   createWeatherVolumeEngine,
   createFaunaEngine,
+  createStructureEngine,
   createCelestialEngine,
   createWaterEffectEngine,
   createLightEffectEngine,
   createWindModifierEngine,
+  createSetPieceEngine,
 ]);
 
 /**
- * Dev-only verification harnesses: ?test=1 (flight test), ?test=hotas (HOTAS pipeline test) and
- * ?test=terrain (terrain stamps: seams, worker parity, collision). Loaded on demand from dev builds
- * only, so none exists in production builds. Returns { databaseName, createSystem(ctx), worldPresets? }
- * or null; worldPresets (fixture presets) replace the preset list in worldgen on both threads.
+ * Dev-only verification harnesses: ?test=1 (flight test), ?test=hotas (HOTAS pipeline test),
+ * ?test=terrain (terrain stamps: seams, worker parity, collision) and ?test=sites (the terrain
+ * fixtures' stamped world with no harness, for engine step files that need real stamped sites).
+ * Loaded on demand from dev builds only, so none exists in production builds. Returns
+ * { databaseName, createSystem(ctx), worldPresets? } or null; worldPresets (fixture presets) replace
+ * the preset list in worldgen on both threads.
  */
 async function loadDevTest(params) {
   const test = params.get('test');
   if (test === '1') return (await import('./dev/testHarness.js')).prepareFlightTest({ params });
   if (test === 'hotas') return (await import('./dev/hotasTest.js')).prepareHotasTest({ params });
   if (test === 'terrain') return (await import('./dev/terrainTest.js')).prepareTerrainTest({ params });
+  if (test === 'sites') return (await import('./dev/structureTestKit.js')).prepareSiteWorld();
   return null;
 }
 
@@ -227,6 +235,8 @@ async function boot() {
     settings,
     storage,
     world,
+    // Landable ground that is not terrain (floating island tops): spawn engines add, flight stands on.
+    groundSurfaces: createGroundSurfaces(),
     wind: null,
     worldOptions,
     state,

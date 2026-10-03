@@ -32,6 +32,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findBrowser } from './browser.mjs';
+import { ENGINE_NAMES } from '../src/spawns/engineRegistry.js';
 
 const HEAP_TOLERANCE_BYTES = 1024 * 1024;
 const MEMORY_CYCLES = 3;
@@ -441,9 +442,12 @@ async function main() {
     check('debugger', 'Nearest teleports next to the nearest site of that preset', Math.abs(controls.teleport.distance - 1800) < 60 && controls.teleport.agl > 200, JSON.stringify(controls.teleport));
     check('debugger', 'the scrubber sets the time of day', Math.abs(controls.dayTime - 0.5) < 0.002, String(controls.dayTime));
     check('debugger', 'the Wind arrows button toggles the WindField overlay', controls.overlay.after !== controls.overlay.before, JSON.stringify(controls.overlay));
-    // The real engines registered by main.js are listed too; the test kit adds exactly these two.
-    const testEngineRows = controls.engineRows.filter((row) => /^test(Marker|Wind) \|/.test(row));
-    check('debugger', 'engine stats list both test engines', testEngineRows.length === 2, controls.engineRows.join(' ; '));
+    // The real engines registered in main.js list beside the test engines, one row per engine.
+    const testRows = controls.engineRows.filter((row) => /^test(Marker|Wind) \|/.test(row));
+    const rowNames = controls.engineRows.map((row) => row.split(' | ')[0]);
+    check('debugger', 'engine stats list both test engines, one row per engine', testRows.length === 2 && new Set(rowNames).size === rowNames.length, controls.engineRows.join(' ; '));
+    const gameRowNames = rowNames.filter((name) => !/^test(Marker|Wind)$/.test(name));
+    check('debugger', 'the ten game engines are registered once each, in ENGINE_NAMES order', gameRowNames.join(',') === ENGINE_NAMES.join(','), gameRowNames.join(','));
     await page.keyboard.press('F9');
     await sleep(500);
     const closed = await evaluate(() => !document.querySelector('#dw-spawn-debugger.dw-open'));

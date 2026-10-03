@@ -19,6 +19,10 @@ import { DIRECTOR_BUDGETS, createGameDirector } from './director.js';
 const NO_SITES = Object.freeze([]);
 /** Distance (m) ahead of the craft a debug spawn uses when none is given. */
 const DEBUG_SPAWN_DEFAULT_DISTANCE = 1500;
+/** "Start on ground" goes to a discovered site's ground-start spot within this distance (m). */
+const GROUND_START_RANGE = 80000;
+/** A site id: '<presetId>:<cellX>:<cellZ>' (src/world/placement.js). */
+const SITE_ID_PATTERN = /^([A-Za-z][A-Za-z0-9]*):(-?\d+):(-?\d+)$/;
 
 /** Horizontal unit vector of the craft's heading into target ({ x, z }). */
 function flatForward(player, target) {
@@ -64,6 +68,8 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
     registerPrewarm: ctx.registerPrewarm,
     water: ctx.systems.water?.effects ?? null,
     engineBudgets: DIRECTOR_BUDGETS.engines,
+    surfaces: ctx.groundSurfaces ?? null,
+    weatherState: () => (ctx.systems.weather ? ctx.systems.weather.getState().state : null),
   });
   let director = null;
   let started = false;
@@ -126,6 +132,53 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
     return manager.activate(presetId, { position: pointAhead(distance), heading: state.player.heading, source: 'debug', force });
   }
 
+  /** Degrees between two compass headings (0..180). */
+  function headingGap(first, second) {
+    return Math.abs((((first - second) % 360) + 540) % 360 - 180);
+  }
+
+  /**
+   * The ground-start spot of the nearest DISCOVERED site that offers one, for "Start on ground" (an
+   * airfield's runway threshold). An engine offers spots through its optional hook
+   * groundStart(preset, params, site) -> [{ x, z, y, heading, runwayLength }] | null (pure: it reads
+   * the site's resolved stamps). Of a site's spots the one facing most nearly into the ambient wind
+   * wins. Sites are found from the discovered keys (site ids name their cell), so no search runs.
+   * Returns { x, z, y, heading, siteId, presetId, name, distance } or null.
+   */
+  function findGroundStart(x, z, { maxDistance = GROUND_START_RANGE } = {}) {
+    const feed = manager.getSiteFeed();
+    if (!feed || typeof feed.sitesInCell !== 'function') return null;
+    let best = null;
+    for (const key of manager.getDiscovered()) {
+      const match = SITE_ID_PATTERN.exec(key);
+      if (!match) continue;
+      const preset = manager.getPreset(match[1]);
+      if (!preset || preset.kind !== 'site') continue;
+      const site = feed.sitesInCell(Number(match[2]), Number(match[3])).find((candidate) => candidate.id === key);
+      if (!site) continue;
+      const distance = Math.hypot(site.x - x, site.z - z);
+      if (distance > maxDistance || (best && distance >= best.distance)) continue;
+      for (const entry of preset.engines) {
+        const engine = registry.get(entry.engine);
+        if (!engine || typeof engine.groundStart !== 'function') continue;
+        let spots = null;
+        try {
+          spots = engine.groundStart(preset, entry.params ?? {}, site);
+        } catch (error) {
+          console.error(`[DRIFTWING] spawn engine "${engine.name}" groundStart failed for ${site.id}`, error);
+          continue;
+        }
+        if (!Array.isArray(spots) || spots.length === 0) continue;
+        const intoWind = ctx.wind && typeof ctx.wind.ambientAt === 'function' ? ctx.wind.ambientAt({ x: site.x, y: site.groundY + 10, z: site.z }).fromDegrees : spots[0].heading;
+        let chosen = spots[0];
+        for (const spot of spots) if (headingGap(spot.heading, intoWind) < headingGap(chosen.heading, intoWind)) chosen = spot;
+        best = { x: chosen.x, z: chosen.z, y: chosen.y, heading: chosen.heading, siteId: site.id, presetId: preset.id, name: preset.name, distance };
+        break;
+      }
+    }
+    return best;
+  }
+
   const system = {
     update(simDt, realDt) {
       manager.update(simDt, realDt);
@@ -169,6 +222,7 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
     },
     forceSpawn,
     pointAhead,
+    findGroundStart,
   };
 
   if (devHooks) {

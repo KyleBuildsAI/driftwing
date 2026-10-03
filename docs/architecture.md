@@ -173,6 +173,7 @@ system, and then starts the frame loop.
 | `worldgen.js` | `createWorldGen(seed, options)`: seeded noise, biomes, the SHARED height function (`heightAt`, `groundHeight`) with the site stamps applied, stamp-aware face colours, vegetation scatter and landmark sites. Imported by the main thread and the worker |
 | `placement.js` | deterministic site placement on the 2 km grid ([Placement and terrain stamps](#placement-and-terrain-stamps)); pure, imported by worldgen on both threads |
 | `stamps.js` | the terrain stamps (cone, carve, cliffStep, gorge, flatten, islandBase): resolution, height, paint, footprints; pure |
+| `groundSurfaces.js` | extra ground surfaces: landable ground that is not terrain (floating island tops; later decks and roofs). `add({ id, minX, maxX, minZ, maxZ, top, heightAt })`, `remove(id)`, `surfaceBelow(x, z, ceiling)`; allocation-free queries. The game's instance is `ctx.groundSurfaces` |
 | `terrain.worker.js` | the terrain Web Worker (Vite `?worker&inline`, so it also works in the single-file build) |
 | `mapTileGen.js` | map tiles from the shared height and biome functions: `generate({ x, z, size, resolution, fields })` returns `height` (Float32Array), `color` (RGBA sRGB, face colours under a shaded relief, water by depth) and `biome` (Uint8Array); seamless; pure, generic for Phase 3's far-field tiles |
 | `mapTiles.worker.js`, `mapTiles.js` | the map-tile worker (imports worldgen like the terrain worker, caches tiles in the IndexedDB database `driftwing-v2-maptiles`) and its main-thread service `createMapTileService({ seed, worldOptions })`: `request(spec, { priority })`, `reprioritize(fn)`, `stats()`, `dispose()` |
@@ -286,6 +287,10 @@ system, and then starts the frame loop.
 | `engines/celestialEngine.js`, `engines/celestial/` | the celestial engine: meteors, comets, the eclipse, the glory and rainbows ([docs/engines/celestial.md](engines/celestial.md)) |
 | `engines/faunaEngine.js`, `engines/faunaSpecies.js` | the fauna engine and its low-poly species ([docs/engines/fauna.md](engines/fauna.md)) |
 | `engines/waterEffectEngine.js` | the water effect engine (on the water effects layer) ([docs/engines/waterEffect.md](engines/waterEffect.md)) |
+| `engines/params.js` | the param readers the structure and set-piece engines share: typed, ranged, `[min, max]` rolls with the seeded generator, errors naming the engine, preset and param |
+| `engines/gateDetector.js` | generic pass-through / pass-under gates: `createGateSet(gates)` and `crossGates(set, from, to, first, result)`, allocation-free |
+| `engines/structureEngine.js`, `engines/structure/` | the structure engine and its recipes (wind farm, rope bridge, airfield, floating islands, crystal spires, gate course), the v1 palette, the mesh builder and `structureStamps` ([docs/engines/structure.md](engines/structure.md)) |
+| `engines/setPieceEngine.js` | the set-piece engine: scripted multi-stage timelines over other presets through the SpawnManager ([docs/engines/setPiece.md](engines/setPiece.md)) |
 
 ### `src/env`
 
@@ -329,7 +334,7 @@ system, and then starts the frame loop.
 | `grammar.js` | the v2 aircraft grammar and the shared action validator `sanitizeFlightAction` |
 | `flightActions.js` | the executor for aircraft actions, reporting real outcomes |
 | `flightState.js` | the v2 half of the flight-state snapshot and craft capabilities |
-| `flightChatter.js` | chatter for landings, soft crashes, craft changes, lift hints |
+| `flightChatter.js` | chatter for landings, soft crashes, craft changes, lift hints, and the lines a set piece narrates (`setPiece:narrate`, tokens {distance} {direction} {name} {eta} filled when offered), all through the chatter gate |
 | `commandChips.js` | the "Aircraft" and "Guide" quick-chip rows |
 | `tourGuide.js` | the Phase 2 tour guide: "what's nearby", "take me to the ...", "find a thermal", "chase the storm", "next discovery", the proactive callouts and their "yes", and the `nearby` / `activeEvents` / `weather` / `callouts` flight-state fields |
 
@@ -347,6 +352,8 @@ and `waypoints.js` (waypoint beacon and arrow), from v1.
 | `windOverlay.js` | the wind-arrow overlay (`settings.windOverlay`) and the badge's Wind row |
 | `spawnDebugger.js`, `spawnDebugger.css` | the spawn debugger (F9; dev builds, or `?dev=1` in a production build): presets with filters, force spawns ahead, teleport to the nearest site, time of day, director state, engine stats, the wind overlay toggle |
 | `spawnTestKit.js` | dev builds only (never in a production bundle): two test engines (`testMarker`, `testWind`) and their presets, loaded by `spawns.debug.loadTestKit()` to prove the framework |
+| `structureTestKit.js` | dev builds only: preset-like objects for every structure recipe, `buildTestSite` (a site record with its stamps resolved as placement does), `?test=sites` (the terrain fixtures' stamped world with no harness) and the browser checks of `tools/steps/engine-structure*.json` |
+| `setPieceTestKit.js` | dev builds only: the dev timeline (`DEV_TIMELINE`) over the test engines and a structure child, and the browser checks of `tools/steps/engine-setPiece.json` |
 | `debugWind.js` | dev-only debug updraft wind source (key L), proving the Phase 2 wind writer path |
 | `mockGamepads.js` | scriptable mock T.16000M, TWCS and standard gamepad devices |
 | `testHarness.js` | the flight-test harness at `?test=1` (dev builds only) |
@@ -499,6 +506,7 @@ plus optional `prewarm()` / `endPrewarm()` hooks and whatever API it offers. `ct
 | `bus` | the EventBus with typed events (`emitTyped` / `onTyped`) |
 | `settings`, `storage` | persisted settings and the raw key-value storage |
 | `world` | the shared deterministic world generator (`heightAt`, `groundHeight`, `biomeAt`, `sitesNear`, `sitesInCell`, `stampInfluence`, ...) |
+| `groundSurfaces` | extra ground surfaces (`src/world/groundSurfaces.js`): landable tops that are not terrain; spawn engines add them (engine ctx `surfaces`), the flight controller stands on them |
 | `wind` | the WindField |
 | `perf` | the perf governor |
 | `craftRegistry` | craft catalog and registered craft modules |
@@ -753,7 +761,11 @@ v1 methods keep their v1 meaning.
 | `runAbility()` | the craft ability |
 
 The controller boots straight into the craft's flight model at the spawn: level at its cruise, or
-on the ground with "Start on ground". Every airborne reset is trimmed and eases a speed outside
+on the ground with "Start on ground", which prefers the nearest discovered site offering a
+ground-start spot (an airfield's runway threshold, facing down the runway most nearly into the wind:
+`spawns.findGroundStart`). The ground contact is the higher of the terrain and any extra ground
+surface (`ctx.groundSurfaces`) at most 12 m above the craft's centre, so a craft lands and parks on
+a floating island top but flies freely beneath it. Every airborne reset is trimmed and eases a speed outside
 `[1.25 x stall, 0.9 x Vne]` into that range over 0.5 s. Craft switches rebuild the mesh and the
 model and respawn at the same place with a sensible state: the helicopter and drone hover, and a
 wingsuit below 300 m AGL relaunches from a peak. A craft whose model kind is not registered is
@@ -1074,7 +1086,9 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   `deactivate(id, reason)`, `getActive()`, `getInstance(id)`, `getStats()`, `setSiteFeed(feed)`,
   `director`, `getNearby(radiusKm)`, `forceSpawn(presetId, { distance, force })` (ahead of the
   craft; through `director.forceSpawn` for the director's own presets, straight through the manager
-  for presets added with `debug.addPreset`), `pointAhead(distance)` and `manager` (the
+  for presets added with `debug.addPreset`), `pointAhead(distance)`, `findGroundStart(x, z,
+  { maxDistance })` (the ground-start spot of the nearest discovered site within 80 km that offers
+  one, facing most nearly into the ambient wind; "Start on ground" uses it) and `manager` (the
   SpawnManager). In dev builds and with `?debug=1` or `?dev=1`, `debug`: `addPreset`,
   `removePreset`, `registerEngine`, `unregisterEngine` and `loadTestKit()` (dev builds only).
 - **The director.** `start()` (the prewarm hook) creates the event director once the manager runs:
@@ -1088,7 +1102,9 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   sweep). A site within its preset's `lod.far` is activated with source `site`; it is removed past
   `lod.far + lifetime.despawn.hysteresis`.
 - **Activation.** `activate(presetId, { position, heading (compass degrees), source: 'site' |
-  'director' | 'debug', site?, seed?, scale?, force? })` returns the spawn id or null.
+  'director' | 'debug', site?, seed?, scale?, force?, duration?, params? })` returns the spawn id or
+  null. `params` (`{ [engine name]: { ... } }`) is merged over that engine entry's preset params for
+  this activation only: the set-piece engine places and tunes its children this way.
   `canActivate(presetId, source)` names the refusal: `preset`, `engine` (not registered or failed to
   initialise), `capacity` (512 spawns), `heavy` (the heavy limit, 2; sites are never refused for it
   and count toward it only while `setSiteActive(id, true)`), `instances` or `particles` (per-engine
@@ -1136,7 +1152,11 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   priority. Lights a disposed spawn still holds are released and reported.
 - **Engine ctx.** `{ scene, camera, renderer, backend, THREE, TSL, wind, audio, terrain: { heightAt,
   groundHeight, biomeAt, waterLevel }, time, sky, bus, perf, settings, state, uniforms, budgets,
-  lights, pools, registerPrewarm, spawns }`. `budgets` is read-only (`heavyLimit` / `maxHeavy`, `heavyActive`,
+  lights, pools, spawns, surfaces, weatherState, registerPrewarm, water }`. `surfaces` is the game's extra ground
+  surfaces (landable tops; null in a lab without them), `weatherState()` returns the player's
+  regional weather state (`clear` | `building` | `storm` | `clearing`, or null without a weather
+  system; it allocates, so engines call it at create and follow the typed `weatherChanged` after,
+  which reports changes only). `budgets` is read-only (`heavyLimit` / `maxHeavy`, `heavyActive`,
   `maxRealLights`, `lightsLimit`, `lightsActive`, `engines` (every engine's live `{ instances,
   particles }` caps), `instanceLimit(name)`, `instances(name)`, `particleLimit(name)`,
   `particles(name)`); the director reads this same view, so the two never disagree; `pools` has `scratch` (Vector3 / Quaternion / Matrix4 / Color rings),
@@ -1166,6 +1186,14 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   instance on a shared material therefore leaks about 8 KB per instance even after its geometry is
   disposed. Engines pool meshes on shared materials (`createMeshPool`, `createInstancedPool` built in
   `init`) or give a per-instance mesh its own material and dispose it with the instance.
+- **Optional engine hooks.** `groundStart(preset, params, site)` returns ground-start spots
+  `[{ x, z, y, heading, runwayLength }]` or null, pure from the site's resolved stamps (the
+  structure engine's airfield); `setParam(instance, name, value)` sets a live param and returns
+  whether it is known (a set piece's ramps). An instance may also expose live numbers directly as
+  `instance.params` (the structure engine) or `instance.control` (the vortex engine), which a set
+  piece writes without a call. Engine-specific bus events are namespaced (`structure:gate`,
+  `structure:course`, `structure:landing`, `setPiece:stage`, `setPiece:narrate`, `setPiece:ended`);
+  the references are in `docs/engines/`.
 - **Clean-up.** After `dispose(instance)` the manager removes any wind source still listed in
   `instance.windSourceIds` and releases any real light the spawn still holds, and reports each as a
   leak (`console.error`, `getStats().leaks`).
@@ -1420,6 +1448,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `?dev=1` | in a production build: the spawn debugger (F9) and the spawns `debug` API (dev builds always have them) |
 | `?test=hotas` | installs the mock gamepads (`ctx.systems.input.mock`) and, in dev builds, runs the HOTAS pipeline test (`src/dev/hotasTest.js`): bindings and hat decoding in both hat forms, calibration results, twist auto-disable, the one-time HOTAS assist default, and persistence across a reload |
 | `tools/steps/view-physics.json` | run with `tools/smoke-test.mjs --url <dev server>/v2/` (or a build with `?debug=1`): pauses the loop, steps frames by hand and proves every craft flies identically in the cockpit, in chase and while switching views |
+| `?test=sites` | dev builds: the terrain test's fixture site presets (an airfield strip, a gorge with its rope bridge, islets with floating islands, a canyon course) reach worldgen on both threads with no harness, for `tools/steps/engine-structure-sites.json` |
 | `?test=terrain` | dev builds: the terrain test (`src/dev/terrainTest.js`). The fixture site presets reach worldgen on both threads; near every stamp type, every LOD pair of neighbouring chunks is checked for cracks, the displayed (worker-built) meshes must equal main-thread builds bit for bit, and `groundHeight` must match the rendered LOD0 mesh within 0.5 m. On-screen summary and `window.DRIFTWING.testReport`; `window.DRIFTWING.terrainTest.showView(i)` frames stamp type i |
 | `?test=1` | dev builds: the flight-test harness (`src/dev/testHarness.js`). It flies each of the six craft for 60 s in first person and in third person across 3 seeds (36 runs), and logs average fps, p99 frame time, NaN events, terrain penetrations, soft crashes, heap growth and console errors. It shows an on-screen summary and offers a JSON report (`window.DRIFTWING.testReport`). URL options: `testSeeds`, `testSeconds`, `testCraft`, `testViews` (`first`, `third`) |
 | `tools/run-harness.mjs` | runs either harness headlessly on a spare port (`--test 1\|hotas`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--out`), prints a table per run and per craft and view, and exits 0 on PASS |
@@ -1448,6 +1477,11 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/shell-check.mjs --url <shell>` | the pill (shows, hides, clear of both games' HUDs), persistence and forwarding |
 | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` | the flight models, settings migrations, storage, input, WREN's grammar, the copilot server |
 | `node --expose-gc tools/lab/spawns.mjs` | the spawn framework headless: the preset validator, the engine registry, the pools, LOD hysteresis, budgets, lures, discovery (view cone, terrain occlusion, once per world), sites from a feed, wind sources and lights removed on dispose, leak clean-up, lifetimes, and a manager frame update that allocates nothing (young-generation growth over 100 000 frames with 40 spawns) |
+| `node --expose-gc tools/lab/structure.mjs` | the structure engine headless: every recipe on its stamped site and free-standing, params, stamps and `structureStamps`, gates and achievements, timed courses and their journal statistic, graded landings, landable island tops, ground-start spots, the wind farm's wake by tier, LOD, memory, per-recipe cost, and 100 000 allocation-free frames |
+| `node --expose-gc tools/lab/setpiece.mjs` | the set-piece engine headless in a real SpawnManager: timeline validation, the dev timeline end to end (children through the manager, ramps, `set`, tracking, narration, records, journal statistics), every trigger kind, budget retries, control records, determinism, early dispose, the copilot's narration tokens, cost and allocation |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-structure.json` (add `--query renderer=webgl`) | every structure test preset force-spawned ahead of the craft and framed (screenshots), GPU memory and wind sources back after each dispose, the bridge's gate and achievement |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --query test=sites --steps-file tools/steps/engine-structure-sites.json` | the structure recipes on real stamped sites: the runway on its flatten strip with ground-start spots, the bridge gate across the gorge, island tops as ground surfaces, the course across the canyon |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-setPiece.json` (add `--query renderer=webgl`) | the dev timeline in the game: stages in order, children started and ended through the manager, a narration line spoken by the copilot, records, and GPU memory and wind sources back to their level after the run |
 | `node tools/spawn-check.mjs --url <dev server>/v2/` | the spawn framework in V2 on either backend: 200 instances created and disposed three times with `renderer.info.memory` back to its baseline exactly and the heap within 1 MB, LOD transitions with hysteresis, lures at 12-30 km at golden hour, midday and night (screenshots), a wind source removed on dispose, discovery firing once, the sampled allocation of the manager's frame update, and the F9 debugger's keyboard behaviour |
 | `npm test` | the V1 check, `build:single` and a smoke test of the built shell |
 | `node tools/lab/discovery.mjs` | seed links (resolution order, times, world hashes, share links), the journal's spawn discoveries and collection count, the global records (add / min / max, known ops, bad payloads), achievements, and the map tiles (fields, determinism, no seams, water, cost) |

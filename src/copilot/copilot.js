@@ -1671,7 +1671,7 @@ export function createCopilotSystem(ctx) {
     }
   }
 
-  const flightChatter = createFlightChatter(ctx, { offerChatter, pick });
+  const flightChatter = createFlightChatter(ctx, { offerChatter, pick, formatDistance: Copilot.formatDistance, directionPhrase: Copilot.directionPhrase });
   const commandChips = createCommandChips(ctx);
   const guideChips = createGuideChips(ctx, tourGuide);
 
