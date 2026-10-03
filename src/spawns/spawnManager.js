@@ -56,8 +56,8 @@ const OCCLUSION_MARGIN = 1;
 const EVENT_GRACE_SECONDS = 45;
 const MEMORY_LOG_SIZE = 64;
 /** preset.anchor seek 'peak': a coarse grid of this many samples a side over the disc, then a finer one around the best. */
-const PEAK_SEEK_GRID = 13;
-const PEAK_REFINE_GRID = 5;
+const PEAK_SEEK_GRID = 25;
+const PEAK_REFINE_GRID = 7;
 /** Spawns alive at once (far above the budgets; activations past it are refused as 'capacity'). */
 export const MAX_SPAWNS = 512;
 const DEG = Math.PI / 180;
