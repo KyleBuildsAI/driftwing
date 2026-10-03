@@ -6,7 +6,7 @@
 // files import it. The real presets arrive with Milestone E in src/spawns/presets/.
 import { resolveStamp } from '../world/stamps.js';
 import { structureStamps } from '../spawns/engines/structure/stamps.js';
-import { createGeometryTracker } from './geometryTracker.js';
+import { createGeometryTracker, splitFresh } from './geometryTracker.js';
 
 const SITE_FILTERS = Object.freeze({ biomes: null, timeOfDay: null, altitude: null, weather: null });
 const SITE_LIFETIME = Object.freeze({ duration: null, despawn: Object.freeze({ distance: 12000, hysteresis: 2000, outOfViewSeconds: 20 }) });
@@ -252,10 +252,33 @@ export function installStructureChecks(game) {
     const info = ctx.renderer.info.memory;
     return { geometries: info.geometries, textures: info.textures };
   }
-  // The terrain may draw a pooled chunk mesh for the first time while a structure stands (a flight
-  // under the bridge moves the craft), which adds a geometry no spawn owns: the tracker tells the
-  // terrain's new geometries from anything the structure left behind.
+  // The world may draw something for the first time while a structure stands (a terrain chunk mesh,
+  // a landmark the landmark system builds as the craft moves), which adds a geometry no spawn owns:
+  // the tracker tells the world's new geometries from anything the structure engine left behind.
   const tracker = createGeometryTracker(ctx.renderer, ctx.scene);
+  if (tracker) tracker.attribute([manager.registry.get('structure')]);
+
+  /**
+   * The frame's rendering cost over `count` frames: mean draw calls and triangles (every pass,
+   * shadows included) and the mean and worst frame time (ms). Before and after a create, the
+   * difference is the structure's per-instance GPU load; the frame times move with the machine's
+   * other work too, so they are reported, not judged.
+   */
+  async function renderSample(count = 30) {
+    let drawCalls = 0;
+    let triangles = 0;
+    let frameMs = 0;
+    let worstMs = 0;
+    for (let frame = 0; frame < count; frame++) {
+      await frames(1);
+      const render = ctx.renderer.info.render;
+      drawCalls += render.drawCalls ?? render.calls;
+      triangles += render.triangles;
+      frameMs += state.perf.frameMs;
+      worstMs = Math.max(worstMs, state.perf.frameMs);
+    }
+    return { drawCalls: Math.round(drawCalls / count), triangles: Math.round(triangles / count), frameMs: Math.round((frameMs / count) * 10) / 10, worstMs: Math.round(worstMs * 10) / 10 };
+  }
 
   /**
    * The gentlest open ground about `distance` m ahead of the craft (within 50 degrees of its
@@ -306,14 +329,22 @@ export function installStructureChecks(game) {
       const target = { x: anchor.x, y: anchor.y + lift, z: anchor.z };
       const settled = await frameView(viewpoint(target, distance, height, heading + 180 + bearing), target);
       const idle = await terrainIdle();
+      const renderBefore = await renderSample();
       const before = memory();
       if (tracker) tracker.start();
       const id = manager.activate(presetId, { position: anchor, heading, source: 'debug', force: true });
       await frames(12);
       const during = memory();
+      const renderDuring = await renderSample();
       spawned.set(presetId, { id, before, during, idle });
-      // The terrain settling is reported, not judged: under heavy machine load it can take minutes.
-      return check(`${presetId}: spawned`, Boolean(id) && during.geometries > before.geometries, { id, terrainSettled: settled, terrainIdle: idle, tier: id ? manager.getInstance(id).tier : null, geometriesAdded: during.geometries - before.geometries, engine: manager.getStats().engines.structure });
+      const cost = {
+        drawCalls: renderDuring.drawCalls - renderBefore.drawCalls,
+        triangles: renderDuring.triangles - renderBefore.triangles,
+        frameMs: `${renderBefore.frameMs} -> ${renderDuring.frameMs} (worst ${renderBefore.worstMs} -> ${renderDuring.worstMs})`,
+      };
+      // The terrain settling and the frame times are reported, not judged: under heavy machine load
+      // the terrain can take minutes and frame times follow the other processes.
+      return check(`${presetId}: spawned`, Boolean(id) && during.geometries > before.geometries, { id, terrainSettled: settled, terrainIdle: idle, tier: id ? manager.getInstance(id).tier : null, geometriesAdded: during.geometries - before.geometries, cost, engine: manager.getStats().engines.structure });
     },
     /** Ends presetId's spawn: GPU memory back to its level before the create, wind sources removed. */
     async end(presetId) {
@@ -327,11 +358,10 @@ export function installStructureChecks(game) {
       const after = memory();
       spawned.delete(presetId);
       const fresh = tracker ? tracker.stop() : [];
-      const terrainFresh = fresh.filter((entry) => entry.owner === 'terrain').length;
-      const leftBehind = fresh.filter((entry) => entry.owner !== 'terrain');
+      const { world: worldFresh, leftBehind } = splitFresh(fresh, ['structure-']);
       return check(`${presetId}: dispose returns GPU memory and removes its wind sources`,
-        leftBehind.length === 0 && after.geometries - record.before.geometries === terrainFresh && after.textures === record.before.textures && ctx.wind.sourceCount === windBefore - ownSources && record.during.geometries > record.before.geometries,
-        { terrainIdle: record.idle, before: record.before, during: record.during, after, terrainFirstDrawn: terrainFresh, leftBehind, tracked: tracker !== null, windSources: `${windBefore} -> ${ctx.wind.sourceCount} (own ${ownSources})`, leaks: manager.getStats().leaks });
+        leftBehind.length === 0 && after.geometries - record.before.geometries === worldFresh && after.textures === record.before.textures && ctx.wind.sourceCount === windBefore - ownSources && record.during.geometries > record.before.geometries,
+        { terrainIdle: record.idle, before: record.before, during: record.during, after, worldFirstDrawn: worldFresh, leftBehind, tracked: tracker !== null, windSources: `${windBefore} -> ${ctx.wind.sourceCount} (own ${ownSources})`, leaks: manager.getStats().leaks });
     },
     /** Sets the time of day (0..1) at once. */
     setTime(dayTime) {
