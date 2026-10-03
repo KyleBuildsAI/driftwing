@@ -55,23 +55,30 @@ vortex, emitter, setPiece and so on) call it directly. It is the generic disturb
 
 ### Layer API (for every engine)
 
-Every call takes plain numbers or a descriptor the caller built once in `create()`, so the callers'
-frame updates allocate nothing. Positions are world metres, and strengths are 0..1.
+Positions are world metres, and strengths are 0..1.
+
+- **Descriptors for per-frame and frequent writes.** Build a descriptor once in `create()` (a mark,
+  a spray, a vortex, a glow region or a pool), mutate its fields, and pass it. Nothing is allocated
+  that way.
+- **Numeric shorthands for one-off writes.** The calls that take plain numbers are fine for rare
+  writes. V8 boxes a freshly computed double passed to a call it does not inline, so anything that
+  writes several times a second uses the mark form.
 
 | call | what it does |
 | --- | --- |
-| `addWaterDisturbance(x, z, radius, foam, glow)` | foam and excitation in a disc (radius up to 40 m per write). Returns whether any of it lies inside the window |
-| `addWaterTrail(x0, z0, x1, z1, radius, foam, glow)` | the same along a segment (a wake). Writes take the maximum, so repeated writes never saturate beyond their strength |
-| `addFoamRing(x, z, radius, width, foam, glow)` | a thin foam ring (a decal around a splash) |
-| `addRipple(x, z, strength)` | an expanding ring wave |
-| `splash(x, z, strength, glow = 1)` | a full splash: a spray burst (40 + 260 x strength droplets), a foam disc and ring, a ripple and a glow splat. Strength 1 is a whale's full breach. Returns the droplets emitted |
+| `createMark(overrides)` | a mark descriptor `{ x, z, x1, z1, radius, width, foam, glow, strength }` (defaults 0, 0, 0, 0, 5, 3, 0, 0, 0.5) |
+| `disturb(mark)` / `addWaterDisturbance(x, z, radius, foam, glow)` | foam and excitation in a disc (radius up to 40 m per write). Returns whether any of it lies inside the window |
+| `trail(mark)` / `addWaterTrail(x0, z0, x1, z1, radius, foam, glow)` | the same along a segment (a wake), from (x, z) to (x1, z1). Writes take the maximum, so repeated writes never saturate beyond their strength |
+| `foamRing(mark)` / `addFoamRing(x, z, radius, width, foam, glow)` | a thin foam ring (a decal around a splash) |
+| `ripple(mark)` / `addRipple(x, z, strength)` | an expanding ring wave |
+| `splashMark(mark)` / `splash(x, z, strength, glow = 1)` | a full splash: a spray burst (40 + 260 x strength droplets), a foam disc and ring, a ripple and a glow splat. Strength 1 is a whale's full breach. It is queued and drawn in the layer's next update (up to 16 per frame; more are dropped and counted). Returns whether it was queued |
 | `createSpray(overrides)` / `emitSpray(spray)` | a spray descriptor (fields below) and a burst of `spray.count` droplets from it. Returns how many were emitted. Droplets beyond the batch's capacity are dropped and counted |
 | `createVortex(overrides)`, `acquireVortex()`, `setVortex(slot, vortex)`, `releaseVortex(slot)` | a whirlpool slot (-1 when all 4 are in use) |
-| `acquireGlowRegion()`, `setGlowRegion(slot, x, z, radius, strength, surf, colorHex)`, `releaseGlowRegion(slot)` | a glow region slot. The layer has one glow colour: the last one set |
+| `createGlowRegion(overrides)`, `acquireGlowRegion()`, `setGlowRegion(slot, region)`, `releaseGlowRegion(slot)` | a glow region slot. The descriptor is `{ x, z, radius, strength, surf, color }` (defaults 0, 0, 900, 1, 0.6, 0x1f9dff). The layer has one glow colour: the last one set |
 | `createPool(overrides)`, `acquirePool()`, `setPool(slot, pool)`, `releasePool(slot)` | a pool disc slot |
-| `surfaceHeightAt(x, z)` | sea level plus every vortex funnel (the swell is excluded). Engines use it to keep things on the water |
-| `craftContact` | `{ touching, stirring, height, contacts }`: the craft's height above the water at the last frame |
-| `stats()` | `{ vortices, ripples, glowRegions, pools, droplets, dropletsDropped, trailRows, trailUploads, craftContacts, craftHeight }` |
+| `surfaceHeightAt(x, z)` | sea level plus every vortex funnel (the swell is excluded). Engines use it to keep things on the water. Away from every funnel it returns sea level itself, so nothing is allocated |
+| `craftContact` | `{ touching, stirring, height, contacts }`: the craft's height above the water at the last frame (above sea level while the craft is higher than the 14 m downwash reach) |
+| `stats()` | `{ vortices, ripples, glowRegions, pools, droplets, dropletsDropped, splashesDropped, trailRows, trailUploads, craftContacts, craftHeight }` |
 
 | spray field | unit | default | notes |
 | --- | --- | --- | --- |
@@ -238,6 +245,23 @@ The engine creates no GPU resources per instance. It borrows slots and droplets 
 `dispose()` returns memory by construction: it gives the slots back and disposes the voice. The
 layer's own resources are the trail texture, the droplet batch (one instanced mesh) and the pool
 batch. They are built once with the water system and prewarmed behind the loading fade.
+
+## Allocation
+
+Neither the engine's update nor the layer's allocates per frame. `tools/engine-cost.mjs --engine
+waterEffect` samples the heap profiler over 3000 frames of the busiest scene and requires fewer than
+0.1 samples per frame in these files. The rules that get there:
+
+- Frame doubles live in typed arrays, not in closure variables (V8 boxes a double written to one).
+- No freshly computed double is passed to, or returned from, a call V8 may not inline. Writers take
+  descriptors, the engine keeps its fade and rate in its data, and `surfaceHeightAt` returns sea
+  level itself outside the funnels.
+- Uniform vectors are written field by field, not through `set()`.
+- Spray jitter comes from a table, and each instance's random numbers from a 64-entry table drawn
+  from its seeded generator at create.
+- Rare calls such as a splash only copy their numbers into a queue, because V8 runs them
+  unoptimised and every double operation would allocate there. The optimised per-frame update does
+  the arithmetic.
 
 ## Example params
 

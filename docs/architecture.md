@@ -1089,10 +1089,12 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
 - **Water effects layer** (`src/render/waterEffects.js`, `ctx.systems.water.effects`, the engine
   ctx's `water`). Local water deformation and shading on the v1 ocean, shared by every spawn: a
   toroidal 640 m trail buffer (bioluminescent excitation and foam) that the craft writes through a
-  contact query against its telemetry and that engines write through `addWaterDisturbance`,
-  `addWaterTrail`, `addFoamRing` and `splash`; ripple rings; up to 4 whirlpool vortices, 4 glow
-  regions and 4 pool discs (slot API); and one instanced spray-droplet batch (`createSpray` /
-  `emitSpray`). `surfaceHeightAt(x, z)` adds the funnels to sea level. With nothing registered and an
+  contact query against its telemetry and that engines write through mark descriptors (`createMark`
+  with `disturb`, `trail`, `foamRing`, `ripple` and `splashMark`; numeric shorthands such as
+  `addWaterDisturbance` and `splash` for one-off writes); ripple rings; up to 4 whirlpool vortices,
+  4 glow regions and 4 pool discs (slot API with descriptors); and one instanced spray-droplet batch
+  (`createSpray` / `emitSpray`). Its frame work allocates nothing (typed-array state, no doubles
+  across non-inlined calls, splashes queued for the hot update). `surfaceHeightAt(x, z)` adds the funnels to sea level. With nothing registered and an
   empty trail buffer every added term is zero, so the ocean renders as in Phase 1. The full API is in
   docs/engines/waterEffect.md.
 - **Engines registered** (`SPAWN_ENGINE_FACTORIES`): `fauna` (instanced boids: murmuration, flock,
