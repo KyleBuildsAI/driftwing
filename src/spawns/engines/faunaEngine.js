@@ -55,7 +55,6 @@ export const FAUNA_DEFAULTS = Object.freeze({
   wander: 0.06,
   leash: 600,
   fadeIn: 1.5,
-  tint: 1,
   voice: true,
   voiceIntensity: 1,
   flocking: Object.freeze({ separation: 1.4, separationRadius: 3, alignment: 1.1, cohesion: 0.12, neighborRadius: 12, maxNeighbors: 7 }),
