@@ -395,13 +395,10 @@ export function createSpawnManager(options) {
     }),
     spawns: null,
     /**
-     * Registers an object an engine builds in init() for the pipeline prewarm behind the loading fade
-     * (the game ctx's registerPrewarm), so the first spawn does not hitch on a shader compile. Objects
-     * of an engine registered after boot are simply compiled on first use.
+     * Registers an object an engine builds in init() for the pipeline prewarm behind the loading fade, so
+     * the first spawn does not hitch on a shader compile. Null in the labs; engines check before calling.
      */
-    registerPrewarm(object) {
-      if (typeof registerPrewarm === 'function') registerPrewarm(object);
-    },
+    registerPrewarm: typeof registerPrewarm === 'function' ? registerPrewarm : null,
   };
 
   function initEngine(engine) {

@@ -277,6 +277,9 @@ system, and then starts the frame loop.
 | `engines/vortexEngine.js` | the vortex engine: tornado, waterspout and dust-devil funnels, their ground ring and their Rankine wind ([docs/engines/vortex.md](engines/vortex.md)) |
 | `engines/windModifierEngine.js` | the windModifier engine: WindField sources with no visuals ([docs/engines/windModifier.md](engines/windModifier.md)) |
 | `engines/windSources.js` | the allocation-free WindField source samplers both wind engines author (rankine, updraft, downburst, wake, jetStream, slipstream, waveLift, gustFront, curtain), their param tables and bounds; pure, so the labs use it too |
+| `engines/emitterEngine.js`, `engines/particleSystem.js` | the `emitter` engine: GPU particle pools (TSL compute on WebGPU, closed-form motion in the vertex shader on WebGL2), wind grids, couplings; params in `docs/engines/emitter.md` |
+| `engines/lightEffectEngine.js`, `engines/glowPoints.js`, `engines/ribbons.js` | the `lightEffect` engine: lightning, glows, swarms, beams, the two-light budget; params in `docs/engines/lightEffect.md` |
+| `engines/engineKit.js` | helpers the engines share: param readers with clear errors, heading frames, ground grids, pooled real lights, fixed-capacity update range lists, batched seeded random numbers, rationed voice levels |
 
 ### `src/env`
 
@@ -1205,8 +1208,10 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
 every light), `overcast` (hides the sun disc, god rays, moon, stars and aurora behind cloud),
 `stars` (raises the star field, for an eclipse), `fogColor` / `fogColorAmount` and `skyTint` /
 `skyTintAmount` (a `THREE.Color` or `0xRRGGBB`, mixed in at the amount while keeping the luminance
-of what they tint), and `weight` (0..1, default 1, eases the whole modifier). Fields left out keep
-their value; a duplicate id or a non-finite value throws.
+of what they tint), `flash` (0..1) with `flashColor` (a lightning strike: the one brightening
+field, it adds its colour to the palette and the fog colour and lifts the hemisphere light; the
+strongest flash wins), and `weight` (0..1, default 1, eases the whole modifier). Fields left out
+keep their value; a duplicate id or a non-finite value throws.
 
 Each frame the modifiers fold in priority order (lowest first): multipliers multiply, darkness and
 overcast stack like filters, stars takes the maximum and the tints composite over each other. Each
@@ -1218,7 +1223,13 @@ every colour takes exactly the Phase 1 path. `tools/steps/golden-frame.json` ren
 frame with the weather's clear-sky modifier and after removing it, and the two are pixel-identical
 on both backends. `getModifierState()` returns the folded values for the debugger and tests.
 
-Priorities in use: the weather 10. The celestial engine's eclipse should sit above it.
+Priorities in use: the weather 10, an emitter's immersion (inside an ash plume) 20, a lightning
+flash 30. The celestial engine's eclipse should sit above the weather.
+
+Effects that place themselves in their vertex shaders (the spawn particles and glow points) draw
+their own fog with the scene's: `sky.fogAmountNode(offset)` is the scene fog's haze (0..1) for a
+world offset from the camera, built by the same function as `scene.fogNode`, and
+`sky.skyColorNode(direction)` the sky colour to haze toward.
 
 ### Regional weather (`ctx.systems.weather`, `src/spawns/weather.js`)
 
@@ -1367,6 +1378,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |
 | labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`, `terrain`, `spawns`, `director`, `audio`, `discovery`) |
 | `tools/spawn-check.mjs` | `--url <dev server>/v2/ [--backend webgpu\|webgl] [--out]`: the spawn framework proofs in the browser with the dev test kit (below) |
+| `tools/engine-alloc.mjs` | `--url <dev server>/v2/ --steps tools/steps/engine-<name>.json --presets a,b [--backend webgpu\|webgl] [--frames] [--warmup] [--events f,g]`: the sampled JS allocations of spawn engines' frame updates with the clock running and the camera swaying (under 1 byte per frame, about a twelfth of one heap number a frame; callees, lifecycle and reports, and the named event paths reported apart) |
 
 ## Testing
 
@@ -1393,6 +1405,7 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/discovery.json` | with the spawn test kit: forced discoveries give a toast, the chime and a journal entry and raise the count; journalStat and achievement events reach the records and the journal panel; M opens the map with the discovered site only, terrain tiles and the trail; a click sets the waypoint; Copy link is the shell link with the seed and time; the seed is saved |
 | `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders) |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/weather-sky.json` (or a build with `?debug=1`) | the opening is clear with the sky untouched, the sky modifier blend, the four weather states' sky (screenshots) and `weatherChanged` |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-emitter.json` (or `engine-lightEffect.json`; add `--query renderer=webgl` for WebGL2) | the emitter and lightEffect engines force-spawned ahead of the craft in their representative configurations (screenshots at golden hour and night), their wind sources, lights, LOD and budgets, their per-frame cost, and dispose back to the memory, wind, modifier and light baseline (see `docs/engines/`) |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/director-game.json` | the game-wired director: its load shedder, `forceSpawn` ahead, `getNearby`, the camera frustum, the LOD bias and `dispose` |
 | `node tools/lab/wind-engines.mjs [--verbose]` | the vortex and windModifier engines headless on a real WindField: every source type blows the right way, the vortex lifecycle and tracking, fades, windows, timelines and control hooks, refused params, the SIM glider and jet flown through every source (vertical speed, load factor, airspeed, drift logged), zero allocations in the engine updates and samplers, and the CPU cost |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-vortex.json` (or `engine-windModifier.json`; add `--query renderer=webgl` for WebGL2) | the wind engines in V2: force-spawned ahead, their wind probed, screenshots, dispose back to the same GPU memory with every wind source removed; the windModifier file also checks the cockpit shake and rattle in rough air and both off in photo mode |
