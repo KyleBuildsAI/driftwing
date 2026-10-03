@@ -10,7 +10,7 @@ import { createChunkBuilder } from './chunkBuilder.js';
  * - Square chunks (CONFIG.CHUNK_SIZE) are generated in Web Workers (terrain.worker.js,
  *   which imports the same world generator and chunk builder as the main thread) with
  *   transferable buffers that are recycled in both directions. A time-sliced main-thread builder takes over
- *   when Workers are unavailable.
+ *   when Workers are unavailable, fail, or have not started within 30 s of the first frame.
  * - Chebyshev LOD rings around the player's chunk and a velocity look-ahead
  *   chunk (union of both), each with hysteresis; replacement meshes swap in
  *   atomically, the previous mesh stays until then (never a hole).
@@ -49,7 +49,15 @@ export function createTerrainSystem(ctx) {
   const MAIN_THREAD_BUDGET_MS = 4;
   const MAIN_THREAD_STARTUP_BUDGET_MS = 12;
   const REPLAN_INTERVAL = 0.3;
-  const WORKER_READY_TIMEOUT = 6;
+  // Wall-clock wait for the workers' ready message, counted from the terrain's first frame. A slow start
+  // is not a failure: on the dev server Vite compiles the worker's whole module graph (worldgen,
+  // placement, stamps, the presets) on first use while WebGL2 compiles shaders synchronously on the
+  // main thread, and on a busy machine that takes several seconds. Past the limit the main-thread
+  // builder takes over with an info note; only a real failure (an error event) is reported as one.
+  // The wait also needs some frames: a long synchronous stall at startup (WebGL2 shader compiles) can
+  // pass the limit between two frames, and a ready message queued meanwhile arrives before the next.
+  const WORKER_READY_LIMIT_MS = 30000;
+  const WORKER_READY_MIN_FRAMES = 120;
   const BUFFER_POOL_LIMIT = 12;
   const FLOWER_RINGS = 2;
   const NEW_VEGETATION_MESHES_PER_FRAME = 6;
@@ -1252,7 +1260,15 @@ export function createTerrainSystem(ctx) {
   const workerRecords = [];
   let mode = 'workers';
   let workerFailureReported = false;
-  let workerWaitSeconds = 0;
+  /** performance.now() at the first frame that waited for the workers, or null before it. */
+  let workerWaitStartMs = null;
+  /** Frames that have waited for the workers' ready message. */
+  let workerWaitFrames = 0;
+  /** Why the main-thread builder took over: null (it did not), 'slow start' or 'failure'. */
+  let workerFallback = null;
+  /** Dev builds only: ?terrainWorkerStart=slow simulates workers that never say ready (see devSlowWorkerStart). */
+  const simulateSlowWorkerStart = devSlowWorkerStart();
+  const workerReadyLimitMs = simulateSlowWorkerStart ? 0 : WORKER_READY_LIMIT_MS;
   let workersReady = false;
   let nextJobId = 1;
   const mainThread = { builder: null, active: null };
@@ -1294,12 +1310,34 @@ export function createTerrainSystem(ctx) {
   function handleWorkerFailure(detail) {
     if (mode !== 'workers') return;
     reportWorkerFailure(detail);
+    workerFallback = 'failure';
     switchToMainThread();
+  }
+
+  /** The workers have not said ready within the limit: build on the main thread instead, quietly. */
+  function handleSlowWorkerStart(waitedMs) {
+    if (mode !== 'workers') return;
+    switchToMainThread();
+    workerFallback = 'slow start';
+    const seconds = Math.round(waitedMs / 100) / 10;
+    console.info(`[DRIFTWING] terrain workers not ready after ${seconds} s; generating terrain on the main thread`);
+  }
+
+  /**
+   * Dev builds only: ?terrainWorkerStart=slow ignores the workers' ready messages and waits 0 ms for
+   * them, so the slow-start fallback runs after WORKER_READY_MIN_FRAMES frames.
+   * tools/steps/terrain-worker-start.json proves that path: main-thread terrain and no console error
+   * or warning.
+   */
+  function devSlowWorkerStart() {
+    if (!import.meta.env.DEV || typeof location === 'undefined') return false;
+    return new URLSearchParams(location.search).get('terrainWorkerStart') === 'slow';
   }
 
   function handleWorkerMessage(record, message) {
     if (mode !== 'workers' || message === null || typeof message !== 'object') return;
     if (message.type === 'ready') {
+      if (simulateSlowWorkerStart) return;
       record.ready = true;
       if (!workersReady && workerRecords.every((candidate) => candidate.ready)) workersReady = true;
       return;
@@ -1549,8 +1587,10 @@ export function createTerrainSystem(ctx) {
       if (mode === 'workers') {
         dispatchToWorkers();
         if (!workersReady) {
-          workerWaitSeconds += realDt;
-          if (workerWaitSeconds > WORKER_READY_TIMEOUT) handleWorkerFailure(`terrain workers did not start within ${WORKER_READY_TIMEOUT} s`);
+          const now = performance.now();
+          if (workerWaitStartMs === null) workerWaitStartMs = now;
+          workerWaitFrames++;
+          if (workerWaitFrames > WORKER_READY_MIN_FRAMES && now - workerWaitStartMs > workerReadyLimitMs) handleSlowWorkerStart(now - workerWaitStartMs);
         }
       }
       if (mode === 'main-thread') runMainThreadJobs(state.ready ? MAIN_THREAD_BUDGET_MS : MAIN_THREAD_STARTUP_BUDGET_MS);
@@ -1607,6 +1647,7 @@ export function createTerrainSystem(ctx) {
         vegetationPooled,
         workers: workerRecords.length,
         mode,
+        workerFallback,
         avgBuildMs: Math.round(buildMsAverage * 100) / 100,
         viewRings: settingsView.viewRings,
         readyAtMs: firstReadyAtMs < 0 ? null : Math.round(firstReadyAtMs),

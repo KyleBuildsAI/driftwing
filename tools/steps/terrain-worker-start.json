@@ -1,0 +1,20 @@
+[
+  {
+    "eval": "(() => { window.__dwCheck = (name, ok, detail) => { if (!ok) console.error('[terrain worker start check] ' + name + ' failed: ' + detail); return (ok ? 'PASS ' : 'FAIL ') + name + ': ' + detail; }; const start = new URLSearchParams(window.location.search).get('terrainWorkerStart'); return window.__dwCheck('run on the dev server with ?terrainWorkerStart=slow', start === 'slow', 'terrainWorkerStart=' + start + ' (a slow worker start, simulated: the ready messages are ignored and the main-thread builder takes over after 120 frames)'); })()"
+  },
+  {
+    "eval": "(async () => { const { ctx, state } = window.DRIFTWING; const terrain = ctx.systems.terrain; const player = state.player; const stats = terrain.getStats(); const started = performance.now(); while (performance.now() - started < 20000 && !terrain.isReadyAround(player.position.x, player.position.z)) await new Promise((resolve) => setTimeout(resolve, 100)); const ready = terrain.isReadyAround(player.position.x, player.position.z); const after = terrain.getStats(); return [ window.__dwCheck('a slow worker start falls back to the main thread', stats.mode === 'main-thread' && stats.workerFallback === 'slow start' && stats.workers === 0, 'mode ' + stats.mode + ', fallback ' + stats.workerFallback + ', workers ' + stats.workers), window.__dwCheck('the main-thread terrain is ready around the craft', ready && after.chunks >= 9, 'ready ' + ready + ' within ' + Math.round(performance.now() - started) + ' ms, ' + after.chunks + ' chunks shown, LOD counts ' + after.lodCounts.join('/')) ].join(' | '); })()"
+  },
+  {
+    "shot": "terrain-main-thread"
+  },
+  {
+    "eval": "(async () => { const { ctx, state } = window.DRIFTWING; const terrain = ctx.systems.terrain; const player = state.player; const ahead = ctx.util.vectorFromHeading(player.heading); const x = player.position.x + ahead.x * 4000; const z = player.position.z + ahead.z * 4000; const readyBefore = terrain.isReadyAround(x, z); const y = Math.max(ctx.world.groundHeight(x, z), ctx.CONFIG.WATER_LEVEL) + 300; ctx.systems.flight.resetTo({ x, y, z, heading: player.heading }); const started = performance.now(); while (performance.now() - started < 20000 && !terrain.isReadyAround(player.position.x, player.position.z)) await new Promise((resolve) => setTimeout(resolve, 100)); const after = terrain.getStats(); const ready = terrain.isReadyAround(player.position.x, player.position.z); return window.__dwCheck('the main-thread builder streams new terrain after a 4 km move', !readyBefore && ready && after.mode === 'main-thread', 'ready there before the move ' + readyBefore + ', after it ' + ready + ' within ' + Math.round(performance.now() - started) + ' ms, ' + after.chunks + ' chunks, mode ' + after.mode); })()"
+  },
+  {
+    "wait": 1000
+  },
+  {
+    "shot": "terrain-main-thread-moved"
+  }
+]

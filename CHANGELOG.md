@@ -178,6 +178,11 @@ net.
 - The storm chase no longer grows a second storm tower at touchdown: its tornado child brings only
   a small dark turning lowering on the funnel instead of the tornado preset's own anvil, overshoot
   and rain.
+- A slow terrain worker start is no longer reported as an error. On the dev server, with WebGL2
+  compiling its shaders on the main thread, the workers could take longer than the 6 s of frame
+  time the terrain waited, and it logged "terrain worker failed". The terrain now waits 30 s of wall
+  clock (and at least 120 frames) from its first frame, then builds on the main thread with an info
+  note only; a real worker failure is still reported as an error.
 
 ### Known issues
 
