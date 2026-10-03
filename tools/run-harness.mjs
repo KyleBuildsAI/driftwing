@@ -12,7 +12,8 @@
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
 //     [--presets real]
 //
-// The terrain test runs on one seed (the first of --seeds, P2-TERRAIN by default) in the late
+// The terrain test runs on one seed (the first of --seeds; by default P2-TERRAIN, or TERRAIN-REAL-8
+// with --presets real, a world with every real stamp type near its spawn) in the late
 // morning, and afterwards the runner flies its camera tour: one screenshot per stamp type from the
 // air (stamp-<type>.png), with the stamp paint in view. --presets real runs it on the game's own
 // stamped site presets instead of the fixtures (?presets=real).
@@ -68,6 +69,11 @@ const CLOSE_TIMEOUT_MS = 30000;
 const EXPECTED_BACKEND = Object.freeze({ webgpu: 'WebGPU', webgl: 'WebGL2' });
 /** The terrain test's default world (every fixture stamp type lies within 13 km of its spawn) and time of day. */
 const TERRAIN_SEED = 'P2-TERRAIN';
+/**
+ * The default world of --presets real: every stamp type the game's own site presets use (the volcano's
+ * cone included, a rare site) lies within the terrain test's 40 km search radius of its spawn.
+ */
+const REAL_TERRAIN_SEED = 'TERRAIN-REAL-8';
 const TERRAIN_DAY_TIME = '0.42';
 
 function parseArgs(argv) {
@@ -284,7 +290,7 @@ function harnessUrl(port, options) {
   url.searchParams.set('test', options.test);
   if (options.backend === 'webgl') url.searchParams.set('renderer', 'webgl');
   if (options.test === 'terrain') {
-    url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : TERRAIN_SEED);
+    url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : options.presets === 'real' ? REAL_TERRAIN_SEED : TERRAIN_SEED);
     url.searchParams.set('time', TERRAIN_DAY_TIME);
     if (options.presets === 'real') url.searchParams.set('presets', 'real');
   }
