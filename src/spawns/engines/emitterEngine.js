@@ -30,7 +30,7 @@
 // create(). What the engine calls may allocate a little: the terrain height under a grid node and
 // the WindField probes (worldgen's noise), which is why they are rationed.
 import { FIELD_NODES, FIELD_X, FIELD_Y, FRAME_ROWS, GROUND_MODES, PAGE_SIZE, PARAM_ROWS, PARTICLE_STYLES, createParticleSystem } from './particleSystem.js';
-import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, smoothstep } from './engineKit.js';
+import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
 
 /** Emitter instances at once (rows of the particle tables); the director's budget is 16. */
 const MAX_EMITTERS = 16;
@@ -40,13 +40,17 @@ export const MAX_PARTICLES_PER_EMITTER = 32768;
 /** Particles one emitter may emit in one frame (a long stall must not flood a pool). */
 const MAX_EMIT_PER_FRAME = 4096;
 /**
- * WindField probes per frame across every emitter's wind grid. A probe costs the WindField's terrain
- * lookups (worldgen's noise allocates, about 10 KB a probe), and the nodes ease over
- * FIELD_EASE_SECONDS anyway: 8 emitters' grids refresh every 3.2 s, 16 every 6.4 s.
+ * WindField probes per frame while a wind grid fills (a new emitter, or a grid that moved): a
+ * 48-node grid fills in 24 frames. A probe costs the WindField's terrain lookups (worldgen's noise
+ * allocates, about 10 KB a probe), so once every grid is filled one node is refreshed every
+ * FIELD_REFRESH_FRAMES frames across all emitters (12 a second at 60 fps: one emitter's grid every
+ * 4 s, eight every 32 s), and the nodes ease over FIELD_EASE_SECONDS: the air a plume leans in
+ * changes slowly. Counted in frames, so the refresh pacing needs no fractional arithmetic.
  */
 const FIELD_PROBES_PER_FRAME = 2;
+const FIELD_REFRESH_FRAMES = 5;
 /** Seconds over which a grid node eases to a new wind sample. */
-const FIELD_EASE_SECONDS = 4;
+const FIELD_EASE_SECONDS = 6;
 /** Ground samples per frame for an emitter's spawn grid (hugGround) while it is stale after a move. */
 const GROUND_SAMPLES_PER_FRAME = 4;
 /** Random numbers one emitted particle draws (the slot layout is in emit()). */
@@ -55,8 +59,6 @@ const RANDOMS_PER_PARTICLE = 12;
 const RANDOM_BATCH_PARTICLES = 256;
 /** Numbers in one particle's birth record (particleSystem.js writeBirth). */
 const BIRTH_FIELDS = 12;
-/** A voice's intensity change below this is not sent (it would be inaudible). */
-const VOICE_LEVEL_STEP = 0.002;
 const GRAVITY = 9.81;
 const DEG = Math.PI / 180;
 /** Engine drag floor (1/s): the closed form divides by it. */
@@ -362,16 +364,30 @@ export function createEmitterEngine() {
     refreshFields();
   }
 
-  /** Samples FIELD_PROBES_PER_FRAME wind-grid nodes across the live emitters (round robin). */
+  /** Whether an emitter's wind grid is sampled at all (allocated, emitting, following the wind). */
+  function fieldWanted(data) {
+    return data.row >= 0 && data.share[0] > 0 && data.config.windFollow > 0;
+  }
+
+  /**
+   * Samples wind-grid nodes across the live emitters (round robin): FIELD_PROBES_PER_FRAME while a
+   * grid is filling (only the filling grids), else one every FIELD_REFRESH_FRAMES frames.
+   */
   function refreshFields() {
     const count = live.length;
     if (count === 0) return;
+    let filling = false;
+    for (let index = 0; index < count && !filling; index++) {
+      const data = live[index].data;
+      filling = data.fieldPending > 0 && fieldWanted(data);
+    }
     let probes = FIELD_PROBES_PER_FRAME;
+    if (!filling) probes = ctx.state.frame % FIELD_REFRESH_FRAMES === 0 ? 1 : 0;
     for (let visited = 0; visited < count && probes > 0; visited++) {
       if (fieldCursor >= count) fieldCursor = 0;
       const instance = live[fieldCursor];
       const data = instance.data;
-      if (data.row < 0 || data.share[0] <= 0 || data.config.windFollow <= 0) {
+      if (!fieldWanted(data) || (filling && data.fieldPending === 0)) {
         fieldCursor++;
         continue;
       }
@@ -395,14 +411,18 @@ export function createEmitterEngine() {
     const ix = node % FIELD_X;
     const iz = Math.floor(node / FIELD_X) % FIELD_X;
     const iy = Math.floor(node / (FIELD_X * FIELD_X));
-    probePoint.x = origin[0] + placement[0] + ix * placement[3];
-    probePoint.y = origin[1] + placement[1] + iy * placement[4];
-    probePoint.z = origin[2] + placement[2] + iz * placement[3];
+    // Whole metres: a small integer stored in the point's fields stays unboxed, where a fresh
+    // fractional number costs a heap number (the grid's nodes are hundreds of metres apart).
+    probePoint.x = Math.round(origin[0] + placement[0] + ix * placement[3]);
+    probePoint.y = Math.round(origin[1] + placement[1] + iy * placement[4]);
+    probePoint.z = Math.round(origin[2] + placement[2] + iz * placement[3]);
     const now = ctx.time.elapsed;
     // The WindField's own clock is the same elapsed time (passing it would box it).
     ctx.wind.probe(probePoint, undefined, probeResult);
     const since = now - data.fieldSampled[node];
-    const ease = data.fieldSampled[node] < 0 ? 1 : 1 - Math.exp(-Math.max(0, since) / FIELD_EASE_SECONDS);
+    const fresh = data.fieldSampled[node] < 0;
+    const ease = fresh ? 1 : 1 - Math.exp(-Math.max(0, since) / FIELD_EASE_SECONDS);
+    if (fresh) data.fieldPending--;
     data.fieldSampled[node] = now;
     const field = system.fieldData;
     const offset = (data.row * FIELD_NODES + node) * 4;
@@ -442,6 +462,7 @@ export function createEmitterEngine() {
     writeTableElement(system.paramData, row + 10, placement[0], placement[1], placement[2], placement[3]);
     system.paramData[(row + 11) * 4] = placement[4];
     for (let node = 0; node < FIELD_NODES; node++) data.fieldSampled[node] = -1;
+    data.fieldPending = FIELD_NODES;
   }
 
   // ---- Params table -------------------------------------------------------------------------------
@@ -758,6 +779,41 @@ export function createEmitterEngine() {
     levels[1] = schedule.idle + (1 - schedule.idle) * envelope;
   }
 
+  /**
+   * Fires one seeded burst (when the level is at least bursts.minLevel) and draws the time to the
+   * next one. The level and the share come from data's typed arrays (levels[0], share[0]).
+   */
+  function fireBurst(data) {
+    const config = data.config;
+    const bursts = config.bursts;
+    const level = data.levels[0];
+    data.burstTimer[0] += randomIn(data.rng, bursts.interval[0], bursts.interval[1]);
+    if (level < bursts.minLevel) return;
+    const burstCount = Math.min(MAX_EMIT_PER_FRAME, Math.max(1, Math.round(randomIn(data.rng, bursts.count[0], bursts.count[1]) * data.share[0])));
+    refreshAxis(data);
+    emitArgs[0] = 0;
+    emitArgs[1] = bursts.speedScale;
+    emit(data, burstCount, true);
+    if (data.voice && config.soundTriggers.burst) {
+      data.triggerOptions.strength = Math.min(1, 0.4 + 0.6 * level);
+      data.triggerOptions.intensity = data.triggerOptions.strength;
+      data.voice.trigger(config.soundTriggers.burst, data.triggerOptions);
+    }
+  }
+
+  /** Sends the voice its schedule trigger once an eruption starts (with the eruption's duration). */
+  function fireScheduleTrigger(instance) {
+    const data = instance.data;
+    const config = data.config;
+    data.pendingScheduleTrigger = false;
+    if (!data.voice || !config.soundTriggers.schedule) return;
+    const base = instance.active === false ? config.inactiveIntensity : config.intensity;
+    data.triggerOptions.strength = base;
+    data.triggerOptions.intensity = base;
+    data.triggerOptions.duration = data.triggerDuration[0];
+    data.voice.trigger(config.soundTriggers.schedule, data.triggerOptions);
+  }
+
   // ---- Wind source ----------------------------------------------------------------------------------
   /** Registers the emitter's wind source (its sample() closes over the instance's typed arrays). */
   function addWindSource(instance) {
@@ -781,7 +837,7 @@ export function createEmitterEngine() {
       id: data.windId,
       kind: 'emitter-plume',
       bounds: data.windBounds,
-      sample(position) {
+      sample: function sampleEmitterWind(position) {
         const strength = level[3];
         if (strength <= 0) return null;
         const dx = position.x - centre[0];
@@ -948,6 +1004,7 @@ export function createEmitterEngine() {
         fieldPlacement: new Float64Array(5),
         fieldSampled: new Float64Array(FIELD_NODES),
         fieldNode: 0,
+        fieldPending: FIELD_NODES,
         spawnGround: config.hugGround ? createGroundGrid(ctx.terrain, { size: 8, span: Math.max(100, config.field.extent * 0.6) }) : null,
         light: config.light ? createPooledLight(ctx.lights, { priority: config.light.priority, color: config.light.color, range: config.light.range }) : null,
         lightPhase: rng() * 100,
@@ -955,7 +1012,8 @@ export function createEmitterEngine() {
         triggerOptions: { strength: 1, duration: 1, intensity: 1 },
         voiceVelocity: new THREE.Vector3(),
         /** The intensity last sent to the voice (-1 before the first): unchanged levels are not re-sent. */
-        voiceLevel: new Float64Array([-1]),
+        /** The voice intensity: [last sent, wanted] (sendVoiceLevel). */
+        voiceLevel: new Float64Array([-1, 0]),
         windId: `${id}:wind`,
         windActive: false,
         windCentre: new Float64Array([anchor.x, anchor.y, anchor.z]),
@@ -1131,35 +1189,12 @@ export function createEmitterEngine() {
         }
         if (config.bursts) {
           data.burstTimer[0] -= dt;
-          if (data.burstTimer[0] <= 0) {
-            const bursts = config.bursts;
-            data.burstTimer[0] += randomIn(data.rng, bursts.interval[0], bursts.interval[1]);
-            if (level >= bursts.minLevel) {
-              const burstCount = Math.min(MAX_EMIT_PER_FRAME, Math.max(1, Math.round(randomIn(data.rng, bursts.count[0], bursts.count[1]) * share)));
-              refreshAxis(data);
-              emitArgs[0] = 0;
-              emitArgs[1] = bursts.speedScale;
-              emit(data, burstCount, true);
-              if (data.voice && config.soundTriggers.burst) {
-                data.triggerOptions.strength = Math.min(1, 0.4 + 0.6 * level);
-                data.triggerOptions.intensity = data.triggerOptions.strength;
-                data.voice.trigger(config.soundTriggers.burst, data.triggerOptions);
-              }
-            }
-          }
+          if (data.burstTimer[0] <= 0) fireBurst(data);
         }
       } else if (dt > 0) {
         data.debt[0] = 0;
       }
-      if (data.pendingScheduleTrigger) {
-        data.pendingScheduleTrigger = false;
-        if (data.voice && config.soundTriggers.schedule) {
-          data.triggerOptions.strength = base;
-          data.triggerOptions.intensity = base;
-          data.triggerOptions.duration = data.triggerDuration[0];
-          data.voice.trigger(config.soundTriggers.schedule, data.triggerOptions);
-        }
-      }
+      if (data.pendingScheduleTrigger) fireScheduleTrigger(instance);
 
       // Frame row: the frame origin relative to the camera, the underglow, the fade.
       const camera = engineCtx.camera.position;
@@ -1205,11 +1240,8 @@ export function createEmitterEngine() {
         data.voiceVelocity.y = data.velocity[1];
         data.voiceVelocity.z = data.velocity[2];
         data.voice.setPosition(anchor, data.voiceVelocity);
-        // Sent only when it changed (the audio engine's setter takes the number as an argument).
-        if (Math.abs(level - data.voiceLevel[0]) > VOICE_LEVEL_STEP) {
-          data.voiceLevel[0] = level;
-          data.voice.setIntensity(level);
-        }
+        data.voiceLevel[1] = level;
+        sendVoiceLevel(data.voice, data.voiceLevel);
       }
       if (data.windActive || (config.windSource && data.tier !== 'far')) followWindSource(data);
       if (data.immersion) updateImmersion(data);

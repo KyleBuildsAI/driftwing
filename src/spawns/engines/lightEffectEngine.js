@@ -26,7 +26,7 @@
 // create).
 import { GLOW_PAGE_SIZE, GLOW_SHAPES, createGlowPoints } from './glowPoints.js';
 import { BOLT_RANDOMS, BOLT_SEGMENTS, createBoltScratch, createRibbonSlot, generateBeams, generateBolt } from './ribbons.js';
-import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, smoothstep } from './engineKit.js';
+import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
 
 /** Light-effect instances at once (glow groups); the director's budget is 8. */
 const MAX_INSTANCES = 8;
@@ -53,8 +53,6 @@ const MIN_STRIKE_GAP = 0.25;
  */
 const STRIKE_RANDOMS = 21;
 const DEG = Math.PI / 180;
-/** A voice's intensity change below this is not sent (it would be inaudible). */
-const VOICE_LEVEL_STEP = 0.002;
 const LAYOUTS = Object.freeze(['point', 'ring', 'scatter', 'line']);
 const TOP_LEVEL_PARAMS = Object.freeze(['lightning', 'glows', 'swarm', 'light', 'beam', 'visibility', 'fog', 'lod', 'sound', 'soundIntensity', 'endRamp']);
 const ACTIVATION_PARAMS = Object.freeze(['position', 'heading', 'site', 'startTime', 'scale', 'duration', 'seed']);
@@ -645,7 +643,8 @@ export function createLightEffectEngine() {
         /** The strike generator's state (fillRandoms), seeded from the spawn's rng. */
         randomState: new Uint32Array([Math.floor(rng() * 4294967296)]),
         /** The intensity last sent to the voice (-1 before the first): unchanged levels are not re-sent. */
-        voiceLevel: new Float64Array([-1]),
+        /** The voice intensity: [last sent, wanted] (sendVoiceLevel). */
+        voiceLevel: new Float64Array([-1, 0]),
         light: config.light ? createPooledLight(ctx.lights, { priority: config.light.priority, color: config.light.color, range: config.light.range }) : null,
         strikeLight: config.lightning && config.lightning.light ? createPooledLight(ctx.lights, { priority: config.lightning.light.priority, color: config.lightning.color, range: config.lightning.light.range }) : null,
         strikeBolt: null,
@@ -830,21 +829,16 @@ export function createLightEffectEngine() {
 
       if (data.voice) {
         data.voice.setPosition(anchor);
-        let voiceLevel;
         if (config.soundIntensity === 'approach') {
           const dx = anchor.x - camera.x;
           const dy = anchor.y - camera.y;
           const dz = anchor.z - camera.z;
           const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-          voiceLevel = Math.max(0, 1 - distance / Math.max(1, data.lodMid)) * activity;
+          data.voiceLevel[1] = Math.max(0, 1 - distance / Math.max(1, data.lodMid)) * activity;
         } else {
-          voiceLevel = activity * (lightning ? (instance.active === false ? lightning.inactiveIntensity : lightning.intensity) : 1);
+          data.voiceLevel[1] = activity * (lightning ? (instance.active === false ? lightning.inactiveIntensity : lightning.intensity) : 1);
         }
-        // Sent only when it changed (the audio engine's setter takes the number as an argument).
-        if (Math.abs(voiceLevel - data.voiceLevel[0]) > VOICE_LEVEL_STEP) {
-          data.voiceLevel[0] = voiceLevel;
-          data.voice.setIntensity(voiceLevel);
-        }
+        sendVoiceLevel(data.voice, data.voiceLevel);
       }
     },
     setLOD(instance, tier) {
