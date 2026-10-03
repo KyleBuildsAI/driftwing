@@ -259,6 +259,9 @@ system, and then starts the frame loop.
 | `lightPool.js` | the real-light budget pool |
 | `pools.js` | pooling helpers for engines: scratch rings, slot allocators, object pools, instanced and mesh pools |
 | `presets/index.js` | `PRESETS` (spec order) and `PRESET_BY_ID`; one pure-data file per preset |
+| `engines/emitterEngine.js`, `engines/particleSystem.js` | the `emitter` engine: GPU particle pools (TSL compute on WebGPU, closed-form motion in the vertex shader on WebGL2), wind grids, couplings; params in `docs/engines/emitter.md` |
+| `engines/lightEffectEngine.js`, `engines/glowPoints.js`, `engines/ribbons.js` | the `lightEffect` engine: lightning, glows, swarms, beams, the two-light budget; params in `docs/engines/lightEffect.md` |
+| `engines/engineKit.js` | helpers the engines share: param readers with clear errors, heading frames, ground grids, pooled real lights |
 
 ### `src/env`
 
@@ -1140,8 +1143,10 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
 every light), `overcast` (hides the sun disc, god rays, moon, stars and aurora behind cloud),
 `stars` (raises the star field, for an eclipse), `fogColor` / `fogColorAmount` and `skyTint` /
 `skyTintAmount` (a `THREE.Color` or `0xRRGGBB`, mixed in at the amount while keeping the luminance
-of what they tint), and `weight` (0..1, default 1, eases the whole modifier). Fields left out keep
-their value; a duplicate id or a non-finite value throws.
+of what they tint), `flash` (0..1) with `flashColor` (a lightning strike: the one brightening
+field, it adds its colour to the palette and the fog colour and lifts the hemisphere light; the
+strongest flash wins), and `weight` (0..1, default 1, eases the whole modifier). Fields left out
+keep their value; a duplicate id or a non-finite value throws.
 
 Each frame the modifiers fold in priority order (lowest first): multipliers multiply, darkness and
 overcast stack like filters, stars takes the maximum and the tints composite over each other. Each
@@ -1153,7 +1158,13 @@ every colour takes exactly the Phase 1 path. `tools/steps/golden-frame.json` ren
 frame with the weather's clear-sky modifier and after removing it, and the two are pixel-identical
 on both backends. `getModifierState()` returns the folded values for the debugger and tests.
 
-Priorities in use: the weather 10. The celestial engine's eclipse should sit above it.
+Priorities in use: the weather 10, an emitter's immersion (inside an ash plume) 20, a lightning
+flash 30. The celestial engine's eclipse should sit above the weather.
+
+Effects that place themselves in their vertex shaders (the spawn particles and glow points) draw
+their own fog with the scene's: `sky.fogAmountNode(offset)` is the scene fog's haze (0..1) for a
+world offset from the camera, built by the same function as `scene.fogNode`, and
+`sky.skyColorNode(direction)` the sky colour to haze toward.
 
 ### Regional weather (`ctx.systems.weather`, `src/spawns/weather.js`)
 
@@ -1273,6 +1284,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |
 | labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`, `terrain`, `spawns`, `director`, `audio`) |
 | `tools/spawn-check.mjs` | `--url <dev server>/v2/ [--backend webgpu\|webgl] [--out]`: the spawn framework proofs in the browser with the dev test kit (below) |
+| `tools/engine-alloc.mjs` | `--url <dev server>/v2/ --steps tools/steps/engine-<name>.json --presets a,b [--backend webgpu\|webgl] [--frames]`: the sampled JS allocations of spawn engines' frame updates (under 0.1 byte per frame, callees reported apart) |
 
 ## Testing
 
@@ -1297,6 +1309,7 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `npm test` | the V1 check, `build:single` and a smoke test of the built shell |
 | `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders) |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/weather-sky.json` (or a build with `?debug=1`) | the opening is clear with the sky untouched, the sky modifier blend, the four weather states' sky (screenshots) and `weatherChanged` |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-emitter.json` (or `engine-lightEffect.json`; add `--query renderer=webgl` for WebGL2) | the emitter and lightEffect engines force-spawned ahead of the craft in their representative configurations (screenshots at golden hour and night), their wind sources, lights, LOD and budgets, their per-frame cost, and dispose back to the memory, wind, modifier and light baseline (see `docs/engines/`) |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/director-game.json` | the game-wired director: its load shedder, `forceSpawn` ahead, `getNearby`, the camera frustum, the LOD bias and `dispose` |
 | `tools/steps/golden-frame.json` with `node tools/png-diff.mjs a.png b.png` | a paused still frame of the opening, rendered with the weather's clear-sky modifier and without any modifier: pixel-identical |
 
