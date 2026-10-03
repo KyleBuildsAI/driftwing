@@ -404,8 +404,12 @@ export function installPresetChecks(game) {
       const stage = data.plan.stages[data.stageIndex];
       const from = stage ? stage.id : null;
       if (stage && Number.isFinite(stage.duration)) data.stageClock[0] = Math.max(data.stageClock[0], stage.duration - 0.05);
-      await frames(6);
-      return `${presetId}: ${from} -> ${manager.registry.get('setPiece').describe(part).stage}`;
+      // Wait (up to 10 s) for the timeline to leave the stage: a slow frame may not have run it yet.
+      const engine = manager.registry.get('setPiece');
+      const started = performance.now();
+      await frames(2);
+      while (performance.now() - started < 10000 && !data.finished && engine.describe(part).stage === from) await frames(2);
+      return `${presetId}: ${from} -> ${data.finished ? 'finished' : engine.describe(part).stage}`;
     },
 
     /** The set piece's timeline and its children (describe), with the journal statistics sent so far. */
