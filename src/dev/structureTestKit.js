@@ -423,7 +423,7 @@ export function installSiteChecks(game) {
 
   const api = {
     results: helpers.results,
-    /** Adds the fixtures whose engines are all registered (the structure ones). */
+    /** Adds the fixtures whose engines are all registered (all six: four structures, two emitters). */
     async setup() {
       const { TERRAIN_FIXTURES } = await import('./terrainFixtures.js');
       const registered = manager.registry.names();
@@ -434,7 +434,10 @@ export function installSiteChecks(game) {
         const site = nearestSite(preset.id);
         if (site) found.set(preset.id, site);
       }
-      return check('structure fixtures added; their stamped sites found', added.length === 4 && found.size === 4, { added, sites: [...found.values()].map((site) => site.id) });
+      // Every fixture's engines are registered now (the emitter's volcano and waterfall included), and
+      // the four structure fixtures (airfield, bridge, islands, canyon) are the ones the checks below use.
+      const structureFixtures = TERRAIN_FIXTURES.filter((preset) => preset.engines.some((entry) => entry.engine === 'structure')).length;
+      return check('structure fixtures added; their stamped sites found', added.length === TERRAIN_FIXTURES.length && found.size === added.length && structureFixtures === 4, { added, sites: [...found.values()].map((site) => site.id) });
     },
     /** Frames the site of presetId from `view` { distance, height, bearing, lift }. */
     async show(presetId, view = {}) {
