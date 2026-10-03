@@ -4,7 +4,7 @@
 // ramps), through every trigger kind, a tracked child, narration and records. tools/lab/setpiece.mjs
 // runs it headless; tools/steps/engine-setPiece.json runs it in the game through the dev hook.
 // Never part of a production build.
-import { createGeometryTracker } from './geometryTracker.js';
+import { createGeometryTracker, splitFresh } from './geometryTracker.js';
 
 const TEST_FILTERS = Object.freeze({ biomes: null, timeOfDay: null, altitude: null, weather: null });
 
@@ -166,9 +166,11 @@ export async function installSetPieceChecks(game) {
     const info = ctx.renderer.info.memory;
     return { geometries: info.geometries, textures: info.textures, windSources: ctx.wind.sourceCount };
   }
-  // The terrain may draw a pooled chunk mesh for the first time during the run, which adds a geometry
-  // no spawn owns: the tracker tells the terrain's new geometries from anything a spawn left behind.
+  // The world may draw something for the first time during the run (a terrain chunk mesh, a
+  // landmark), which adds a geometry no spawn owns: the tracker tells the world's new geometries from
+  // anything a spawn left behind.
   const tracker = createGeometryTracker(ctx.renderer, ctx.scene);
+  if (tracker) tracker.attribute(['setPiece', 'structure', 'testMarker', 'testWind'].map((name) => manager.registry.get(name)));
 
   const api = {
     results,
@@ -243,13 +245,14 @@ export async function installSetPieceChecks(game) {
       holding = false;
       const fresh = tracker ? tracker.stop() : [];
       if (tracker) tracker.restore();
-      const terrainFresh = fresh.filter((entry) => entry.owner === 'terrain').length;
-      const leftBehind = fresh.filter((entry) => entry.owner !== 'terrain');
+      // The children's engines own the structure and test-marker pools; the lure mesh is a session
+      // resource the warm-up already drew.
+      const { world: worldFresh, leftBehind } = splitFresh(fresh, ['structure-', 'test-marker']);
       const spawnIds = log.filter((entry) => entry.type === 'activated').map((entry) => entry.id);
       const alive = spawnIds.filter((id) => manager.getInstance(id) !== null);
       check('dispose returned GPU memory and removed every wind source',
-        alive.length === 0 && leftBehind.length === 0 && after.geometries - baseline.geometries === terrainFresh && after.textures === baseline.textures && after.windSources === baseline.windSources,
-        { before: baseline, after, terrainFirstDrawn: terrainFresh, leftBehind, tracked: tracker !== null, terrainIdle: idle, alive });
+        alive.length === 0 && leftBehind.length === 0 && after.geometries - baseline.geometries === worldFresh && after.textures === baseline.textures && after.windSources === baseline.windSources,
+        { before: baseline, after, worldFirstDrawn: worldFresh, leftBehind, tracked: tracker !== null, terrainIdle: idle, alive });
       const failed = results.filter((line) => line.startsWith('FAIL'));
       return check('setPiece checks', failed.length === 0, `${results.length - failed.length}/${results.length} passed`);
     },
