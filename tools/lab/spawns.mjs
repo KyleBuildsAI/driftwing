@@ -26,6 +26,9 @@
 //   lifetime     ended events end, expired events end, director events despawn out of range and view
 //   memory       every create and dispose is logged with its readings; a long-lived spawn whose log
 //                entry was reused by 64 newer spawns does not overwrite the newer entry
+//   couplings    the real celestial, weatherVolume and fauna engines with no audio service create their
+//                audio-owning presets silently; with an audio service that refuses the recipe the
+//                spawn is refused as 'error' and leaves no sky modifier and no fauna agent range behind
 //   allocation   after a JIT warm-up, 100 000 manager frames with 40 spawns (markers, lures, a wind
 //                column, a moving camera) allocate nothing: no garbage collection runs and the young
 //                generation grows by under 0.1 byte per frame (the camera alone measures about 0.03)
@@ -44,6 +47,10 @@ import { createEngineRegistry, validateEngine } from '../../src/spawns/engineReg
 import { createObjectPool, createScratch, createSlotAllocator } from '../../src/spawns/pools.js';
 import { LOD_HYSTERESIS, createSpawnManager } from '../../src/spawns/spawnManager.js';
 import { createTestMarkerEngine, createTestPresets, createTestSiteFeed, createTestWindEngine } from '../../src/dev/spawnTestKit.js';
+import { createCelestialEngine } from '../../src/spawns/engines/celestialEngine.js';
+import { createWeatherVolumeEngine } from '../../src/spawns/engines/weatherVolumeEngine.js';
+import { createFaunaEngine } from '../../src/spawns/engines/faunaEngine.js';
+import { PRESET_BY_ID } from '../../src/spawns/presets/index.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -514,6 +521,87 @@ async function testAllocation() {
   check('allocation', 'the frames saw tier changes and visibility checks, and every spawn stayed', counters.tierChanges > 0 && counters.visibilityChecks > 0 && counters.ended === 0, JSON.stringify(counters));
 }
 
+// ---- couplings ------------------------------------------------------------------------------------------------------
+/**
+ * A manager running the real celestial, weatherVolume and fauna engines, with a stub sky that tracks
+ * its modifiers and the given audio service (null: the spawn system allows a game without audio).
+ */
+function createCouplingLab(audio) {
+  const bus = attachTypedEvents(new EventBus(), { validate: true });
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0xe0b48c, 400, 9000);
+  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 1, 30000);
+  camera.position.set(0, 300, 0);
+  camera.lookAt(0, 300, -1000);
+  camera.updateMatrixWorld();
+  const { uniform } = TSL;
+  const uniforms = {
+    time: uniform(0),
+    sunDirection: uniform(new THREE.Vector3(0.3, 0.5, -0.8).normalize()),
+    sunColor: uniform(new THREE.Color(1, 0.85, 0.65)),
+    fogColor: uniform(new THREE.Color(0xe0b48c)),
+    skyZenithColor: uniform(new THREE.Color(0x4f6fa8)),
+    skyHorizonColor: uniform(new THREE.Color(0xf2c48e)),
+    nightFactor: uniform(0),
+    windDirection: uniform(new THREE.Vector2(0.8, 0.6).normalize()),
+    windStrength: uniform(1),
+    cloudGlory: uniform(0),
+    cloudBow: uniform(0),
+  };
+  const state = {
+    seed: 'LAB',
+    frame: 0,
+    time: { elapsed: 0, frameDt: 1 / 60, sunElevation: 30, dayTime: 0.4, nightFactor: 0, goldenFactor: 0, sunDirection: new THREE.Vector3(0.3, 0.5, -0.8).normalize() },
+    player: { position: new THREE.Vector3(0, 300, 0), forward: new THREE.Vector3(0, 0, -1), right: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 1, 0), velocity: new THREE.Vector3(), heading: 0, speed: 0 },
+  };
+  const modifiers = new Set();
+  const sky = {
+    addModifier(id) {
+      if (modifiers.has(id)) throw new Error(`sky modifier "${id}" already exists`);
+      modifiers.add(id);
+      return { set() {}, remove() { modifiers.delete(id); } };
+    },
+    getModifierLevels: () => ({ active: false, overcast: 0 }),
+  };
+  const wind = createWindField({ world, uniforms, state, bus });
+  const registry = createEngineRegistry();
+  const manager = createSpawnManager({
+    THREE, TSL, scene, camera, renderer: { info: { memory: { geometries: 0, textures: 0 } } }, backend: 'WebGPU', wind, audio, world, state, sky,
+    bus, perf: null, settings: null, uniforms, registry, presets: [], seed: 'LAB',
+  });
+  const fauna = createFaunaEngine();
+  for (const engine of [createCelestialEngine(), createWeatherVolumeEngine(), fauna]) manager.register(engine);
+  // Each audio-owning preset trimmed to its first engine entry, which owns the voice (the microburst's weatherVolume).
+  const trimmed = (id) => Object.freeze({ ...PRESET_BY_ID[id], engines: Object.freeze([PRESET_BY_ID[id].engines[0]]) });
+  for (const id of ['meteorShower', 'microburst', 'geeseFormation']) manager.addPreset(trimmed(id));
+  manager.init();
+  const spawn = (presetId) => manager.activate(presetId, { position: { x: 0, y: 0, z: -3000 }, heading: 0, source: 'debug', force: true });
+  return { manager, modifiers, spawn, fauna };
+}
+
+function testCouplings() {
+  const silent = createCouplingLab(null);
+  const initialized = ['celestial', 'weatherVolume', 'fauna'].every((name) => silent.manager.getStats().engines[name]?.failed === false);
+  const ids = ['meteorShower', 'microburst', 'geeseFormation'].map((presetId) => silent.spawn(presetId));
+  const silentStats = silent.manager.getStats();
+  check('couplings', 'no audio service: the meteor shower, microburst and geese create silently', initialized && ids.every(Boolean) && silentStats.refusals.error === 0, `${ids.join(', ')}; refusals ${JSON.stringify(silentStats.refusals)}`);
+  for (const id of ids) if (id) silent.manager.deactivate(id);
+  check('couplings', 'no audio service: their sky modifiers go with them', silent.modifiers.size === 0, [...silent.modifiers].join(', '));
+
+  const refusing = { spawnVoice(recipe) { throw new Error(`unknown spawn audio recipe "${recipe}"`); } };
+  const lab = createCouplingLab(refusing);
+  const errorsBefore = consoleErrors.length;
+  const meteors = lab.spawn('meteorShower');
+  check('couplings', 'a refused celestial voice refuses the spawn and removes its sky modifier', meteors === null && lab.manager.getStats().lastRefusal === 'error' && lab.modifiers.size === 0, `${meteors}; modifiers ${[...lab.modifiers].join(', ') || 'none'}`);
+  const geese = lab.spawn('geeseFormation');
+  const gooseAgents = lab.fauna.stats().species.goose ?? 0;
+  check('couplings', 'a refused fauna voice refuses the spawn and frees its agent range', geese === null && gooseAgents === 0, `${geese}; goose agents in use ${gooseAgents}`);
+  const storm = lab.spawn('microburst');
+  check('couplings', 'a refused weatherVolume voice refuses the spawn', storm === null && lab.manager.getStats().refusals.error === 3, `${storm}; refusals ${JSON.stringify(lab.manager.getStats().refusals)}`);
+  const refusals = consoleErrors.slice(errorsBefore);
+  check('couplings', 'each refusal reaches the console once as a create failure', refusals.length === 3 && refusals.every((line) => /failed to create/.test(line)), refusals.join(' | '));
+}
+
 // The allocation test runs first, on freshly compiled code: the other tests exercise error paths and
 // many preset shapes, and the deoptimisations they cause would be measured as the manager's garbage.
 await testAllocation();
@@ -529,8 +617,9 @@ testWind();
 testLeaks();
 testLifetime();
 testMemoryLog();
+testCouplings();
 
-const unexpectedErrors = consoleErrors.filter((line) => !/left wind source|holding \d+ real light/.test(line));
+const unexpectedErrors = consoleErrors.filter((line) => !/left wind source|holding \d+ real light|unknown spawn audio recipe/.test(line));
 check('console', 'no unexpected console errors (event payloads valid)', unexpectedErrors.length === 0, unexpectedErrors.join(' | '));
 console.error = originalError;
 
