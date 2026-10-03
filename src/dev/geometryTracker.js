@@ -51,6 +51,7 @@ export function createGeometryTracker(renderer, scene) {
       const geometry = renderObject.geometry;
       const owner = ownerNode(renderObject.object, scene);
       live.set(geometry.uuid, {
+        uuid: geometry.uuid,
         object: renderObject.object.name || renderObject.object.type,
         owner: owner.name || owner.type,
         spawnOwned: spawnAdded.has(owner),

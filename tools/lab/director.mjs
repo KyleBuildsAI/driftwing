@@ -32,14 +32,15 @@
 //                 and gets them back only after the scale is back at 1; with no shedder the governor
 //                 steps exactly as the Phase 1 governor (tag v2-structure) does
 //   api           getNearby is sorted and well formed; getState carries the debugger's fields
+//   near          filters.near: every activation of a preset gathered at landmarks lies exactly on a
+//                 Phase 1 landmark of its types (the real world generator's landmarkSitesNear), still
+//                 ahead and inside its distance band; without landmarkSitesNear it never activates
 //
-// Usage: node tools/lab/director.mjs [--hours 24] [--verbose] [--presets stub|real|mixed]
-// --presets real runs the pacing checks against the real presets (src/spawns/presets/index.js, the
-// ones that exist in this tree) instead of the stubs: the first notable, the drought fill with no
-// sites (events only) and a typical world whose sites come from the real placement. --presets mixed
-// adds the stubs of the presets this tree does not have yet (STUB_REAL_IDS names the real preset each
-// stub stands for), a preview of the full set while the preset batches are apart. The other groups
-// test the director's rules and need the stubs, so they are skipped in both.
+// Usage: node tools/lab/director.mjs [--hours 24] [--verbose] [--presets stub|real]
+// --presets real runs the pacing checks against the game's own presets (src/spawns/presets/index.js)
+// instead of the stubs: the first notable, the drought fill with no sites (events only), a typical
+// world whose sites come from the real placement, and a per-preset activation report per speed. The
+// other groups test the director's rules and need the stubs' full Phase 2 list, so they are skipped.
 // Prints a table and exits non-zero if any check fails.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -51,11 +52,11 @@ import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
 import { createPerfGovernor } from '../../src/core/perf.js';
 import { createWorldGen } from '../../src/world/worldgen.js';
+import { PRESETS as GAME_PRESETS } from '../../src/spawns/presets/index.js';
 import {
   DIRECTOR_BUDGETS, DROUGHT_BAND, MAX_OFF_AXIS, MAX_OFF_AXIS_WIDE, PACING_WINDOW_MAX, RARITY_COOLDOWNS, RARITY_TIERS, createDirector,
 } from '../../src/spawns/director.js';
 import { angleBetween, bearingDegrees, hashString, mix32, rehash, unitFromHash } from '../../src/spawns/candidates.js';
-import { PRESETS as REAL_PRESETS } from '../../src/spawns/presets/index.js';
 import {
   WEATHER_BUCKET_SECONDS, WEATHER_CYCLE_BUCKETS, WEATHER_REGION_SIZE, WEATHER_STATES, createWeatherModel, createWeatherSample,
 } from '../../src/spawns/weather.js';
@@ -71,7 +72,7 @@ function parseArgs(argv) {
     else if (flag === '--presets') options.presets = argv[++index];
     else throw new Error(`Unknown flag ${flag}`);
   }
-  if (!['stub', 'real', 'mixed'].includes(options.presets)) throw new Error('--presets must be stub, real or mixed');
+  if (!['stub', 'real'].includes(options.presets)) throw new Error('--presets must be stub or real');
   if (!(options.hours >= 4)) throw new Error('--hours must be at least 4 (the legendary tier needs hours of flight)');
   return options;
 }
@@ -153,19 +154,9 @@ const STUB_PRESETS = Object.freeze([
   sitePreset('airfield', 'structure', 'common'),
   sitePreset('crystalSpires', 'fantasy', 'uncommon', { engines: ['structure', 'lightEffect'] }),
 ]);
-/** The real preset id each stub stands for, where the two ids differ (--presets mixed). */
-const STUB_REAL_IDS = Object.freeze({
-  murmuration: 'starlingMurmuration', geese: 'geeseFormation', hawks: 'thermalHawks', eagle: 'eagleWingman',
-  lenticular: 'lenticularClouds', glory: 'gloryRainbow', meteorShower: 'meteorShower', lanterns: 'skyLanterns',
-});
-/**
- * The presets the director runs with: the stubs; with --presets real the tree's real presets; with
- * --presets mixed the real presets plus the stubs of those the tree does not have.
- */
-const REAL_MODE = OPTIONS.presets !== 'stub';
-const REAL_IDS = new Set(REAL_PRESETS.map((preset) => preset.id));
-const PRESETS = !REAL_MODE ? STUB_PRESETS : OPTIONS.presets === 'real' ? REAL_PRESETS
-  : Object.freeze([...REAL_PRESETS, ...STUB_PRESETS.filter((stub) => stub.kind === 'event' && !REAL_IDS.has(stub.id) && !REAL_IDS.has(STUB_REAL_IDS[stub.id]))]);
+/** The presets the director runs on: the stubs, or the game's own with --presets real. */
+const REAL_MODE = OPTIONS.presets === 'real';
+const PRESETS = REAL_MODE ? GAME_PRESETS : STUB_PRESETS;
 const PRESET_BY_ID = new Map(PRESETS.map((preset) => [preset.id, preset]));
 /** Sites within this range (m) are instances in the stub manager (beyond it, only lures). */
 const SITE_INSTANCE_RANGE = 12000;
@@ -992,10 +983,93 @@ function testRealWorldPacing() {
     `${describePacing({ pacing: run.state.pacing, longest: run.state.longestDrought, fills: run.state.droughtFills })}; ${run.notables.length} sites came into view; activations ${JSON.stringify(counts)}`);
 }
 
+/**
+ * filters.near on its own: a director with one common event gathered at lighthouses and balloon fairs
+ * (the sky lantern festival's rule) flies a long path over the real world; every activation must sit
+ * on such a landmark, ahead and inside the band. A terrain without landmarkSitesNear never activates it.
+ */
+function testNearFilter() {
+  const nearPreset = Object.freeze({
+    id: 'nearTest', name: 'nearTest', category: 'celestial', kind: 'event', rarity: 'common', heavy: false,
+    candidates: { cellSize: 3500, bucketSeconds: 300, chance: 0.6 },
+    filters: { minDistance: 3000, maxDistance: 8000, near: { landmarks: ['lighthouse', 'balloons'], radius: 4000 } },
+    engines: [{ engine: 'emitter', params: {} }],
+    lifetime: { duration: [60, 90], despawn: DESPAWN },
+  });
+  // A second common event, so the no-repeat rule lets the near preset come back again and again.
+  const filler = eventPreset('nearFiller', 'wildlife', 'common', { candidates: { cellSize: 3500, bucketSeconds: 300, chance: 0.6 }, duration: [60, 90] });
+  function run(withLandmarks) {
+    const world = createWorldGen('NEAR-LAB', WORLD_OPTIONS);
+    const path = createFlightPath({ pathSeed: 'near-lab', ...SPEEDS.bushplane });
+    const sun = createSun();
+    let time = 0;
+    const activations = [];
+    const live = new Map();
+    const manager = {
+      activate(presetId, options) {
+        const id = `near:${time}`;
+        if (presetId !== nearPreset.id) {
+          live.set(id, { anchor: { ...options.position }, radius: 300, heavy: false, ended: false, startedAt: time, duration: options.duration });
+          return id;
+        }
+        const distance = Math.hypot(options.position.x - path.player.position.x, options.position.z - path.player.position.z);
+        const offAxis = angleBetween(bearingDegrees(path.player.position.x, path.player.position.z, options.position.x, options.position.z), path.player.heading);
+        activations.push({ x: options.position.x, z: options.position.z, distance, offAxis });
+        live.set(id, { anchor: { ...options.position }, radius: 300, heavy: false, ended: false, startedAt: time, duration: options.duration });
+        return id;
+      },
+      deactivate(id) { return live.delete(id); },
+      getActive: () => [...live.values()],
+      getInstance: (id) => live.get(id) ?? null,
+      getStats: () => ({ engines: {}, total: { lights: 0 } }),
+    };
+    const terrain = { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL };
+    if (withLandmarks) terrain.landmarkSitesNear = world.landmarkSitesNear;
+    const director = createDirector({
+      seedHash: world.seedHash >>> 0, presets: [nearPreset, filler], spawnManager: manager, weather: createWeatherModel(world.seedHash >>> 0), terrain,
+      getPlayer: () => path.player, getTime: () => time, getSun: () => sun.sun, isInView: createView(path.player),
+    });
+    for (let step = 0; step <= Math.round(3600 / STEP_SECONDS); step++) {
+      time = step * STEP_SECONDS;
+      path.step(STEP_SECONDS, time);
+      sun.update(time);
+      for (const [id, instance] of live) if (time - instance.startedAt > instance.duration) live.delete(id);
+      director.update();
+    }
+    director.dispose();
+    return { world, activations };
+  }
+  const { world, activations } = run(true);
+  const onLandmark = activations.filter((entry) => world.landmarkSitesNear(entry.x, entry.z, 1).some((site) => (site.type === 'lighthouse' || site.type === 'balloons') && site.x === entry.x && site.z === entry.z));
+  const ahead = activations.every((entry) => entry.offAxis <= MAX_OFF_AXIS_WIDE && entry.distance >= 3000 && entry.distance <= 8000);
+  check('near', 'every activation of a near-filtered preset sits on a lighthouse or balloon fair, ahead and in its band', activations.length > 0 && onLandmark.length === activations.length && ahead, `${onLandmark.length}/${activations.length} on a landmark in 1 h; ahead and in band: ${ahead}`);
+  const without = run(false);
+  check('near', 'without landmarkSitesNear a near-filtered preset never activates', without.activations.length === 0, `${without.activations.length} activations`);
+}
+
+/**
+ * --presets real: which of the game's presets filled the drought flights, per speed (a report next to
+ * the pacing checks, which run on the same presets).
+ */
+function reportRealPresets() {
+  for (const craft of Object.keys(SPEEDS)) {
+    const run = runScenario({ seed: 'DROUGHT', pathSeed: `drought-${craft}`, hours: 3, craft, siteChance: 0 });
+    const counts = {};
+    for (const entry of run.log) counts[entry.presetId] = (counts[entry.presetId] || 0) + 1;
+    const reasons = {};
+    for (const drought of run.longDroughts) {
+      const key = `sun ${drought.sun >= 0 ? 'up' : 'down'}, ${drought.weather}`;
+      reasons[key] = (reasons[key] || 0) + 1;
+    }
+    check('real', `${craft}: activations of the game's ${PRESETS.length} presets in 3 h (report)`, true, `${describePacing({ craft: '', longest: run.state.longestDrought, fills: run.state.droughtFills, pacing: run.state.pacing })}; ${JSON.stringify(counts)}; droughts past 90 s sampled: ${JSON.stringify(reasons)}`);
+  }
+}
+
 const started = Date.now();
 testPacing();
 if (REAL_MODE) {
   testRealWorldPacing();
+  reportRealPresets();
 } else {
   testLongFlight();
   testLifetimes();
@@ -1004,6 +1078,7 @@ if (REAL_MODE) {
   testDeterminism();
   testWeather();
   await testShedding();
+  testNearFilter();
 }
 const wallSeconds = (Date.now() - started) / 1000;
 

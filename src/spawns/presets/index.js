@@ -14,7 +14,6 @@ import volcano from './volcano.js';
 import geyserField from './geyserField.js';
 import slotCanyon from './slotCanyon.js';
 import megaWaterfall from './megaWaterfall.js';
-
 import whalePod from './whalePod.js';
 import maelstrom from './maelstrom.js';
 import bioluminescentBay from './bioluminescentBay.js';
@@ -25,7 +24,16 @@ import fireflies from './fireflies.js';
 import eagleWingman from './eagleWingman.js';
 import windFarm from './windFarm.js';
 import ropeBridge from './ropeBridge.js';
-
+import abandonedAirfield from './abandonedAirfield.js';
+import meteorShower from './meteorShower.js';
+import totalSolarEclipse from './totalSolarEclipse.js';
+import comet from './comet.js';
+import skyLanternFestival from './skyLanternFestival.js';
+import floatingIslands from './floatingIslands.js';
+import skyWhale from './skyWhale.js';
+import crystalSpires from './crystalSpires.js';
+import jetStream from './jetStream.js';
+import stormChase from './stormChase.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -50,6 +58,17 @@ export const PRESETS = Object.freeze([
   eagleWingman,
   windFarm,
   ropeBridge,
+  // Batch 3: presets 21-30.
+  abandonedAirfield,
+  meteorShower,
+  totalSolarEclipse,
+  comet,
+  skyLanternFestival,
+  floatingIslands,
+  skyWhale,
+  crystalSpires,
+  jetStream,
+  stormChase,
 ]);
 
 /** Presets by id. */

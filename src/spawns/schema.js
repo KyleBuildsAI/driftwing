@@ -19,6 +19,8 @@ export const TIME_OF_DAY_CLASSES = Object.freeze(['dawn', 'day', 'golden', 'dusk
 export const WEATHER_STATE_NAMES = Object.freeze(['clear', 'building', 'storm', 'clearing']);
 export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase']);
 export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed']);
+/** Phase 1 landmark types (src/world/worldgen.js) a filters.near block may name. */
+export const LANDMARK_TYPES = Object.freeze(['arch', 'monoliths', 'lighthouse', 'balloons']);
 /** FAR lure silhouettes drawn by src/spawns/lure.js. */
 export const LURE_TYPES = Object.freeze(['plume', 'anvil', 'funnel', 'whale', 'islands', 'comet']);
 /** How the SpawnManager may move an activation before the engines see it (preset.anchor). */
@@ -142,7 +144,7 @@ function validateCandidates(check, candidates) {
 
 function validateFilters(check, filters) {
   check.object(filters, 'filters');
-  check.onlyKeys(filters, ['biomes', 'timeOfDay', 'altitude', 'weather', 'surface', 'minDistance', 'maxDistance'], 'filters');
+  check.onlyKeys(filters, ['biomes', 'timeOfDay', 'altitude', 'weather', 'surface', 'minDistance', 'maxDistance', 'near'], 'filters');
   check.listOrNull(filters.biomes, null, 'filters.biomes');
   check.listOrNull(filters.timeOfDay, TIME_OF_DAY_CLASSES, 'filters.timeOfDay');
   check.listOrNull(filters.weather, WEATHER_STATE_NAMES, 'filters.weather');
@@ -153,6 +155,15 @@ function validateFilters(check, filters) {
     check.number(altitude.min, 'filters.altitude.min');
     check.number(altitude.max, 'filters.altitude.max');
     if (altitude.max < altitude.min) check.fail('filters.altitude.max', `must not be below filters.altitude.min (${altitude.min}), got ${altitude.max}`);
+  }
+  if (filters.near !== undefined && filters.near !== null) {
+    // The director moves the candidate onto the nearest landmark of these types within radius (m).
+    const near = check.object(filters.near, 'filters.near');
+    check.onlyKeys(near, ['landmarks', 'radius'], 'filters.near');
+    check.array(near.landmarks, 'filters.near.landmarks');
+    if (near.landmarks.length === 0) check.fail('filters.near.landmarks', 'must name at least one landmark type');
+    near.landmarks.forEach((type, index) => check.oneOf(type, LANDMARK_TYPES, `filters.near.landmarks[${index}]`));
+    check.number(near.radius, 'filters.near.radius', { above: 0, max: 20000 });
   }
   if (filters.minDistance !== undefined) check.number(filters.minDistance, 'filters.minDistance', { min: 0 });
   if (filters.maxDistance !== undefined) check.number(filters.maxDistance, 'filters.maxDistance', { min: 0 });

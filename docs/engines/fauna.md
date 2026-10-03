@@ -93,7 +93,7 @@ accept a range, drawn once per group from the spawn's seeded generator.
 | `wander` | factor | 0..1 | 0.06 | how much the group's heading meanders |
 | `leash` | m | 50..20000 | 600 | how far a wandering group (murmuration, flock) may stray from its anchor before it curves back. A formation that is not following the player turns back at 4 x leash |
 | `fadeIn` | s | 0..30 | 1.5 | agents grow in from size 0. A drifting sky whale's slipstream also fades in with it |
-| `fadeOut` | s | 0..60 | 6 | an event (a spawn with a duration) fades its agents and voice out over the last `fadeOut` seconds of its duration and then ends (`instance.ended`), so it never vanishes at the manager's grace. A wingman ends this way only while it is still waiting; once it has joined it finishes its escort and peels off |
+| `fadeOut` | s | 0..600 | 6 | an event (a spawn with a duration) fades out over the last `fadeOut` seconds of its duration: the agents shrink away (the reverse of `fadeIn`), and the voice and a drift slipstream follow. The group then ends (`instance.ended`) at its duration, so it never vanishes at the manager's grace (a sky whale leaves its lane instead). 0 ends it at its duration with no fade. A wingman ends this way only while it is still waiting; once it has joined it finishes its escort and peels off |
 | `voice` | bool | | unset | `true` or `false` decides whether this entry opens the preset's `audio` voice; unset, the preset's first engine entry owns it, so a preset opens one voice. Set `false` on the extra entries of a multi-group preset |
 | `voiceIntensity` | 0..1 | | 1 | the voice's intensity at full presence. Murmurations and flocks swell it from 0.15 to 1 as the player nears the flock |
 

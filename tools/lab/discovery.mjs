@@ -235,10 +235,12 @@ function testTiles() {
     }
   }
   check('tiles', 'bad requests throw', badRequests === 4, `${badRequests} of 4`);
+  // The default preset list is the real one (PRESETS); its stamped sites give a different tag than no sites.
   const tag = mapTileCacheTag('lab');
+  const placesSites = PRESETS.some((preset) => preset.kind === 'site');
   check('tiles', 'the cache tag follows the seed and the preset placement data',
-    tag.startsWith('LAB|v') && tag !== mapTileCacheTag('LAB2') && tag !== mapTileCacheTag('LAB', [{ id: 'x', kind: 'site', placement: { chance: 1 }, stamps: [] }]) && tag === mapTileCacheTag('LAB', PRESETS)
-      && (PRESETS.some((preset) => preset.kind === 'site') ? tag !== mapTileCacheTag('LAB', []) : tag === mapTileCacheTag('LAB', [])),
+    tag.startsWith('LAB|v') && tag !== mapTileCacheTag('LAB2') && tag !== mapTileCacheTag('LAB', [{ id: 'x', kind: 'site', placement: { chance: 1 }, stamps: [] }])
+      && tag === mapTileCacheTag('LAB', PRESETS) && (tag !== mapTileCacheTag('LAB', [])) === placesSites,
     tag);
 
   const started = performance.now();

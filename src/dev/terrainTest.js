@@ -21,6 +21,10 @@
 //        - collision: worldgen.groundHeight against the displayed LOD0 mesh's own triangles at random
 //          points, within COLLISION_LIMIT_M;
 //        - the LODs seen: every stamp type must be seen live at every LOD.
+// With ?presets=real the same checks run on the GAME'S OWN stamped site presets
+// (src/spawns/presets/index.js) in the world as a player gets it: the nearest site of every stamped
+// preset, and every stamp type those presets use (the abandoned airfield's flatten strip, the floating
+// islands' islet bases, and whatever the other batches add).
 // Criteria: fixtures placed (every stamp type within SEARCH_RADIUS of the spawn), 0 offline and live
 // seam violations, worker parity exact, collision within 0.5 m, every LOD seen per stamp type, every
 // pose settled, 0 console errors and 0 warnings, and no harness problems.
@@ -36,6 +40,7 @@ import { STAMP_TYPES } from '../world/stamps.js';
 import { installConsoleCapture } from './testConsole.js';
 import { createTestPanel } from './testPanel.js';
 import { FIXTURE_STAMP_TYPE, TERRAIN_FIXTURES } from './terrainFixtures.js';
+import { PRESETS } from '../spawns/presets/index.js';
 import {
   buildChunkMesh, checkSeam, checkSkirtAttachment, compareMeshBuffers, extractEdges, meshHeightAt, seamPairApplies, terrainBuilderConfig,
 } from './terrainChecks.js';
@@ -60,13 +65,30 @@ const BUILD_BUDGET_MS = 12;
 const LOD_COUNT = CONFIG.LOD_RESOLUTIONS.length;
 const CHUNK = CONFIG.CHUNK_SIZE;
 
-/** Called by main.js before boot: the fixtures for worldgen and the system factory. */
+/**
+ * The presets under test: the fixtures (one per stamp type), or with ?presets=real the game's own
+ * stamped site presets. Returns { real, presets, types (the stamp types to cover), stampTypeOf(presetId) }.
+ */
+function testPresetSet() {
+  const real = new URLSearchParams(window.location.search).get('presets') === 'real';
+  if (!real) return { real, presets: TERRAIN_FIXTURES, types: STAMP_TYPES, stampTypeOf: (presetId) => FIXTURE_STAMP_TYPE[presetId] };
+  const presets = PRESETS.filter((preset) => preset.kind === 'site' && (preset.stamps ?? []).length > 0);
+  const typeById = new Map(presets.map((preset) => [preset.id, preset.stamps[0].type]));
+  const types = STAMP_TYPES.filter((type) => presets.some((preset) => preset.stamps.some((stamp) => stamp.type === type)));
+  return { real, presets, types, stampTypeOf: (presetId) => typeById.get(presetId) };
+}
+
+/**
+ * Called by main.js before boot: the fixtures for worldgen (none with ?presets=real: the world keeps
+ * the real presets) and the system factory.
+ */
 export function prepareTerrainTest() {
   const capture = installConsoleCapture();
+  const set = testPresetSet();
   return {
     databaseName: TEST_DATABASE,
-    worldPresets: TERRAIN_FIXTURES,
-    createSystem: (ctx) => createTerrainTestSystem(ctx, { capture }),
+    worldPresets: set.real ? null : TERRAIN_FIXTURES,
+    createSystem: (ctx) => createTerrainTestSystem(ctx, { capture, set }),
   };
 }
 
@@ -84,7 +106,7 @@ function mulberry32(state) {
   };
 }
 
-function createTerrainTestSystem(ctx, { capture }) {
+function createTerrainTestSystem(ctx, { capture, set }) {
   const { bus, state, world } = ctx;
   const panel = createTestPanel({ title: 'Terrain test' });
   const builderConfig = terrainBuilderConfig(CONFIG);
@@ -117,7 +139,7 @@ function createTerrainTestSystem(ctx, { capture }) {
   // ---- Report ------------------------------------------------------------------------------------
   function criteria() {
     const typesFound = new Set(rows.map((row) => row.type));
-    const everyType = STAMP_TYPES.every((type) => typesFound.has(type));
+    const everyType = set.types.length > 0 && set.types.every((type) => typesFound.has(type));
     const offlineViolations = rows.reduce((sum, row) => sum + row.offline.violations, 0);
     const liveViolations = rows.reduce((sum, row) => sum + row.live.seamViolations, 0);
     const parityChunks = rows.reduce((sum, row) => sum + row.live.parityChunks, 0);
@@ -130,16 +152,16 @@ function createTerrainTestSystem(ctx, { capture }) {
       for (const lod of row.live.lodsSeen) seen.add(lod);
       lodsByType.set(row.type, seen);
     }
-    const everyLod = STAMP_TYPES.every((type) => lodsByType.has(type) && lodsByType.get(type).size === LOD_COUNT);
+    const everyLod = set.types.every((type) => lodsByType.has(type) && lodsByType.get(type).size === LOD_COUNT);
     const unsettled = livePoses.filter((pose) => !pose.settled).length;
     const counts = capture.counts;
     return [
-      { id: 'fixtures', label: 'Fixture sites (every stamp type)', value: `${typesFound.size} / ${STAMP_TYPES.length} types`, status: world.hasStamps && everyType ? 'pass' : 'fail' },
+      { id: 'fixtures', label: set.real ? 'Real preset sites (every stamp type they use)' : 'Fixture sites (every stamp type)', value: `${typesFound.size} / ${set.types.length} types`, status: world.hasStamps && everyType ? 'pass' : 'fail' },
       { id: 'seams', label: 'Offline seams, every LOD pair', value: `${offlineViolations} cracks`, status: rows.length > 0 && offlineViolations === 0 ? 'pass' : 'fail' },
       { id: 'liveSeams', label: 'Live seams (displayed LODs)', value: `${liveViolations} cracks`, status: rows.length > 0 && liveViolations === 0 ? 'pass' : 'fail' },
       { id: 'parity', label: 'Worker meshes = main-thread builds', value: `${parityChunks} chunks, max diff ${parityWorst}`, status: parityChunks > 0 && parityWorst === 0 ? 'pass' : 'fail' },
       { id: 'collision', label: `Collision vs LOD0 mesh (<= ${COLLISION_LIMIT_M} m)`, value: `${round(collisionWorst, 5)} m worst, ${collisionSamples} live samples`, status: collisionSamples > 0 && collisionWorst <= COLLISION_LIMIT_M ? 'pass' : 'fail' },
-      { id: 'lods', label: 'Every LOD seen live per stamp type', value: STAMP_TYPES.map((type) => `${type} ${lodsByType.has(type) ? [...lodsByType.get(type)].sort().join('') : '-'}`).join(', '), status: everyLod ? 'pass' : 'fail' },
+      { id: 'lods', label: 'Every LOD seen live per stamp type', value: set.types.map((type) => `${type} ${lodsByType.has(type) ? [...lodsByType.get(type)].sort().join('') : '-'}`).join(', '), status: everyLod ? 'pass' : 'fail' },
       { id: 'settled', label: 'Streaming settled at every pose', value: `${livePoses.length - unsettled} / ${livePoses.length}`, status: livePoses.length > 0 && unsettled === 0 ? 'pass' : 'fail' },
       { id: 'console', label: 'Console errors / warnings', value: `${counts.errors} / ${counts.warnings}`, status: counts.errors === 0 && counts.warnings === 0 ? 'pass' : 'fail' },
     ];
@@ -168,9 +190,10 @@ function createTerrainTestSystem(ctx, { capture }) {
         viewRings: terrainStats ? terrainStats.viewRings : null,
       },
       config: { searchRadius: SEARCH_RADIUS, collisionLimitM: COLLISION_LIMIT_M, liveOffsets: LIVE_OFFSETS, settleTimeoutS: SETTLE_TIMEOUT_S, lodResolutions: builderConfig.lodResolutions, skirtDepths: builderConfig.skirtDepths },
-      fixtures: TERRAIN_FIXTURES.map((preset) => preset.id),
+      presetSet: set.real ? 'real' : 'fixtures',
+      fixtures: set.presets.map((preset) => preset.id),
       siteListHash,
-      sites: sites.map((site) => ({ id: site.id, presetId: site.presetId, type: FIXTURE_STAMP_TYPE[site.presetId], x: round(site.x, 1), z: round(site.z, 1), distance: Math.round(Math.hypot(site.x - state.spawn.x, site.z - state.spawn.z)) })),
+      sites: sites.map((site) => ({ id: site.id, presetId: site.presetId, type: set.stampTypeOf(site.presetId), x: round(site.x, 1), z: round(site.z, 1), distance: Math.round(Math.hypot(site.x - state.spawn.x, site.z - state.spawn.z)) })),
       criteria: list,
       stamps: rows,
       poses: livePoses,
@@ -433,10 +456,10 @@ function createTerrainTestSystem(ctx, { capture }) {
   async function run() {
     phase = 'setup';
     progress('Terrain test', 'finding the fixture sites');
-    if (!world.hasStamps) throw new Error('the fixture presets did not reach worldgen (world.hasStamps is false)');
+    if (!world.hasStamps) throw new Error(`the ${set.real ? 'real stamped' : 'fixture'} presets did not reach worldgen (world.hasStamps is false)`);
     const near = world.sitesNear(state.spawn.x, state.spawn.z, SEARCH_RADIUS);
     siteListHash = hashSiteList(near);
-    sites = TERRAIN_FIXTURES.map((preset) => near.find((site) => site.presetId === preset.id)).filter(Boolean);
+    sites = set.presets.map((preset) => near.find((site) => site.presetId === preset.id)).filter(Boolean);
     const stamps = sites.flatMap((site) => site.stamps.map((stamp) => ({ site, stamp })));
     total = stamps.length * (1 + LIVE_OFFSETS.length);
     ctx.setPhotoMode(true);
@@ -518,7 +541,9 @@ function createTerrainTestSystem(ctx, { capture }) {
         ...(capture.entries.length > 0 ? [{ title: 'Console errors and warnings', notes: capture.entries.slice(0, 30).map((entry) => `[${entry.level}] ${entry.context}: ${entry.text}`) }] : []),
         ...(harnessErrors.length > 0 ? [{ title: 'Harness problems', notes: harnessErrors.slice() }] : []),
         { title: 'About', notes: [
-          'Fixture site presets (src/dev/terrainFixtures.js) reach worldgen on both threads through the dev-only worldPresets hook; the real presets are not used.',
+          set.real
+            ? 'The stamped site presets of the game itself (src/spawns/presets/index.js), in the world as a player gets it (?presets=real).'
+            : 'Fixture site presets (src/dev/terrainFixtures.js) reach worldgen on both threads through the dev-only worldPresets hook; the real presets are not used.',
           'Offline: the chunk builder the worker runs builds every chunk around each stamp at LOD 0-3; all 16 LOD pairs of each neighbouring pair whose edge a stamp touches are checked for cracks (shared vertices, skirt attachment, T-junction coverage); on untouched Phase 1 edges, the pairs the ring layout makes (LODs at most one apart).',
           `Live: the photo camera hovers over each stamp and ${LIVE_OFFSETS.slice(1).join(' m and ')} m away; the displayed meshes must equal main-thread builds bit for bit, meet their neighbours without cracks, and match groundHeight within ${COLLISION_LIMIT_M} m at LOD0.`,
         ] },

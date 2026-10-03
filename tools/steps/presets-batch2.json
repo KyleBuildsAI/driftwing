@@ -3,7 +3,7 @@
     "wait": 2500
   },
   {
-    "eval": "(async () => { try { const kit = await import('/src/dev/presetChecks.js'); const api = kit.installPresetChecks(window.DRIFTWING); return 'dev server only: imports /src/dev/presetChecks.js | backend ' + window.DRIFTWING.backend + ' | ' + api.setup(); } catch (error) { console.error('[preset check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+    "eval": "(async () => { try { const kit = await import('/src/dev/presetChecksBatch2.js'); const api = kit.installPresetChecks(window.DRIFTWING); return 'dev server only: imports /src/dev/presetChecksBatch2.js | backend ' + window.DRIFTWING.backend + ' | ' + api.setup(); } catch (error) { console.error('[preset check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
   },
   {
     "eval": "(async () => { try { return await window.__dwPresets.show('whalePod', {\"sun\": 35, \"kind\": \"coast\", \"distance\": 1200, \"view\": {\"distance\": 130, \"height\": 30, \"bearing\": 200, \"lift\": 2}}); } catch (error) { console.error('[preset check] show whalePod failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"

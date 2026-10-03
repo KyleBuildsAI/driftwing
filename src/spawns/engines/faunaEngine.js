@@ -174,6 +174,7 @@ function resolveParams(params) {
   const count = Array.isArray(resolved.count) ? resolved.count : [resolved.count, resolved.count];
   if (!Number.isFinite(count[0]) || !Number.isFinite(count[1]) || count[0] < 1) throw new Error(`fauna: params.count must be a positive number or [min, max], got ${JSON.stringify(params.count)}`);
   resolved.countRange = count;
+  if (!Number.isFinite(resolved.fadeOut) || resolved.fadeOut < 0 || resolved.fadeOut > 600) throw new Error(`fauna: params.fadeOut must be within 0..600 s, got ${JSON.stringify(params.fadeOut)}`);
   if (resolved.drift.slipstream === true) resolved.drift.slipstream = { ...SLIPSTREAM_DEFAULTS };
   else if (isPlainObject(resolved.drift.slipstream)) resolved.drift.slipstream = { ...SLIPSTREAM_DEFAULTS, ...resolved.drift.slipstream };
   return resolved;

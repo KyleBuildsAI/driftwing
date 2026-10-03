@@ -189,12 +189,14 @@ async function main() {
       const heapDelta = cycle.after.heap - cycle.before.heap;
       check('memory', `${label}: JS heap back within ${(HEAP_TOLERANCE_BYTES / 1048576).toFixed(1)} MB`, heapDelta <= HEAP_TOLERANCE_BYTES, `${(cycle.before.heap / 1048576).toFixed(2)} -> ${(cycle.peak.heap / 1048576).toFixed(2)} -> ${(cycle.after.heap / 1048576).toFixed(2)} MB (${heapDelta >= 0 ? '+' : ''}${(heapDelta / 1024).toFixed(0)} KB)`);
     });
+    // The game's own site presets live on in the world (an airfield, crystal spires near the start), so
+    // what is created and not yet disposed must be exactly the spawns still live.
     const accounting = await evaluate(() => {
-      const memory = window.DRIFTWING.ctx.systems.spawns.getStats().memory;
-      const last = memory.log[memory.log.length - 1];
-      return { created: memory.created, disposed: memory.disposed, entries: memory.log.length, last };
+      const spawns = window.DRIFTWING.ctx.systems.spawns;
+      const memory = spawns.getStats().memory;
+      return { created: memory.created, disposed: memory.disposed, entries: memory.log.length, live: spawns.getActive().length };
     });
-    check('memory', 'getStats().memory accounts every create and dispose', accounting.created === accounting.disposed && accounting.created >= MEMORY_CYCLES * MEMORY_INSTANCES && accounting.last?.disposed === true, `${accounting.created} created, ${accounting.disposed} disposed, ${accounting.entries} log entries`);
+    check('memory', 'getStats().memory accounts every create and dispose', accounting.created - accounting.disposed === accounting.live && accounting.created >= MEMORY_CYCLES * MEMORY_INSTANCES, `${accounting.created} created, ${accounting.disposed} disposed, ${accounting.live} live, ${accounting.entries} log entries`);
 
     // ---- lod ----------------------------------------------------------------------------------------
     const lod = await evaluate(() => {
@@ -339,10 +341,13 @@ async function main() {
       await sleep(2500);
       const state = await evaluate(() => {
         const spawns = window.DRIFTWING.ctx.systems.spawns;
-        return { label: window.DRIFTWING.state.time.label, lures: spawns.manager.lures.getStats(), tiers: spawns.getStats().tiers };
+        // Heavy spawns of the game's own presets at the far tier (a floating islands site) draw their
+        // lures too.
+        const others = spawns.getActive().filter((record) => record.heavy && record.tier === 'far' && !window.__lureIds.includes(record.id)).length;
+        return { label: window.DRIFTWING.state.time.label, lures: spawns.manager.lures.getStats(), tiers: spawns.getStats().tiers, others };
       });
       await page.screenshot({ path: join(options.out, `lure-${label}.png`) });
-      check('lure', `${label}: lures drawn on the horizon (${state.label})`, state.lures.drawn === 6, `${state.lures.drawn} drawn, ${state.lures.projected} projected, tiers ${JSON.stringify(state.tiers)}`);
+      check('lure', `${label}: lures drawn on the horizon (${state.label})`, state.lures.drawn === 6 + state.others, `${state.lures.drawn} drawn (6 test lures + ${state.others} of the game's heavy sites), ${state.lures.projected} projected, tiers ${JSON.stringify(state.tiers)}`);
     }
     await evaluate(() => {
       window.DRIFTWING.ctx.systems.spawns.debug.testKit.deactivateAll(window.__lureIds);

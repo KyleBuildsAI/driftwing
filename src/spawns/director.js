@@ -25,7 +25,9 @@
 //              an activation that would still break a budget, and that candidate then waits for
 //              its next bucket)
 //   filters    per preset: biome, time of day, altitude band (player MSL), weather state at the
-//              candidate, surface (land, water, coast), distance band
+//              candidate, surface (land, water, coast), distance band, and `near`: a candidate moves
+//              onto the nearest Phase 1 landmark of the named types within the radius of its seeded
+//              point (a lantern festival at a lighthouse), or is rejected when there is none
 //   ahead      every director activation lies within 45 degrees of the heading (60 for a drought
 //              past 80 s) and inside the
 //              preset's distance band; nothing is ever started behind the player
@@ -153,6 +155,7 @@ const REJECT = Object.freeze({
   engineBudget: 'engineBudget',
   lightBudget: 'lightBudget',
   notAhead: 'notAhead',
+  near: 'near',
 });
 
 /**
@@ -191,6 +194,9 @@ function describePreset(preset, index) {
     settings.chance = SITE_ACTIVE_DEFAULTS.chance;
   }
   const engines = (preset.engines || []).map((entry) => entry.engine);
+  const near = filters.near && Array.isArray(filters.near.landmarks) && Number.isFinite(filters.near.radius)
+    ? { landmarks: filters.near.landmarks, radius: filters.near.radius }
+    : null;
   return {
     preset,
     index,
@@ -207,6 +213,7 @@ function describePreset(preset, index) {
       max: Number.isFinite(filters.maxDistance) ? filters.maxDistance : DEFAULT_BAND.max,
     },
     engines,
+    near,
     usesLights: engines.includes('lightEffect'),
     cooldown: Number.isFinite(preset.cooldown) ? preset.cooldown : RARITY_COOLDOWNS[preset.rarity],
     duration: siteActive ? preset.activeState.duration || null : lifetime.duration || null,
@@ -222,7 +229,9 @@ function describePreset(preset, index) {
  *                   getInstance, getStats, and setLodBias for load shedding (spawnCount, when
  *                   offered, lets the shedder skip levels that would take nothing away)
  *   weather         a weather model (createWeatherModel): stateAt(x, z, time), sampleAt
- *   terrain         { heightAt(x, z), biomeAt(x, z) -> { key }, waterLevel }
+ *   terrain         { heightAt(x, z), biomeAt(x, z) -> { key }, waterLevel, landmarkSitesNear?(x, z,
+ *                   radius) -> [{ type, x, z }] } (without landmarkSitesNear, presets with a `near`
+ *                   filter are never activated)
  *   getPlayer()     -> { position: { x, y, z }, heading (deg), speed (m/s) }
  *   getTime()       -> flight time (s)
  *   getSun()        -> { sunElevation (deg), dayTime (0..1) }
@@ -276,6 +285,8 @@ export function createDirector({
   const pool = createCandidatePool(128);
   /** candidate hash -> { surface bits, biome key } (a candidate's ground never changes). */
   const groundCache = new Map();
+  /** candidate hash -> the landmark { x, z } a `near` candidate moved onto, or null (none in reach). */
+  const nearCache = new Map();
   /** candidate hash -> time until which it is not considered again (activated, or refused). */
   const usedUntil = new Map();
   const refusedUntil = new Map();
@@ -454,9 +465,35 @@ export function createDirector({
     return false;
   }
 
-  /** The preset's environment filters at the candidate: time of day, altitude, weather, surface, biome. */
+  /**
+   * filters.near: the nearest Phase 1 landmark of the preset's types within its radius of the seeded
+   * point, as { x, z }, or null. Cached by the candidate's hash (landmarks never move).
+   */
+  function nearLandmark(info, record) {
+    if (nearCache.has(record.hash)) return nearCache.get(record.hash);
+    if (nearCache.size >= SURFACE_CACHE_LIMIT) nearCache.clear();
+    let best = null;
+    if (typeof terrain.landmarkSitesNear === 'function') {
+      let bestDistance = Infinity;
+      const sites = terrain.landmarkSitesNear(record.x, record.z, info.near.radius);
+      for (let index = 0; index < sites.length; index++) {
+        const site = sites[index];
+        if (!info.near.landmarks.includes(site.type)) continue;
+        const distance = Math.hypot(site.x - record.x, site.z - record.z);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = { x: site.x, z: site.z };
+        }
+      }
+    }
+    nearCache.set(record.hash, best);
+    return best;
+  }
+
+  /** The preset's environment filters at the candidate: time of day, altitude, weather, surface, biome, near. */
   function environmentRejection(info, record) {
     const filters = info.filters;
+    if (info.near && nearCache.get(record.hash) === null) return REJECT.near;
     if (!matchesTimeOfDay(filters.timeOfDay, sun.elevation, sun.dayTime)) return REJECT.timeOfDay;
     const altitude = filters.altitude;
     if (altitude && ((Number.isFinite(altitude.min) && player.y < altitude.min) || (Number.isFinite(altitude.max) && player.y > altitude.max))) return REJECT.altitude;
@@ -562,6 +599,17 @@ export function createDirector({
         record.heading = Number.isFinite(site.rotation) ? (site.rotation * 180) / Math.PI : 0;
         record.distance = distance;
         record.siteIndex = siteScratch.length - 1;
+      }
+    }
+    for (let index = 0; index < pool.count; index++) {
+      const record = pool.records[index];
+      const info = infos[record.presetIndex];
+      if (!info.near || record.siteIndex >= 0) continue;
+      const landmark = nearLandmark(info, record);
+      if (landmark) {
+        record.x = landmark.x;
+        record.z = landmark.z;
+        record.distance = Math.hypot(landmark.x - player.x, landmark.z - player.z);
       }
     }
     for (let index = 0; index < pool.count; index++) {
@@ -992,7 +1040,7 @@ export function createGameDirector(ctx, { spawnManager, presets, placement = nul
     presets,
     spawnManager,
     weather: weather.model,
-    terrain: { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL },
+    terrain: { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL, landmarkSitesNear: world.landmarkSitesNear },
     getPlayer: () => state.player,
     getTime: () => state.time.elapsed,
     getSun: () => state.time,

@@ -289,6 +289,8 @@ function createLayout() {
     groupCount: 0,
     shafts: new Float32Array(MAX_SHAFTS * SHAFT_STRIDE),
     shaftCount: 0,
+    // The wall cloud's shading group (-1: none); instance.control.wallCloud lowers it.
+    wallGroup: -1,
     // Horizontal reach (m) from the anchor and the vertical span above the base.
     reach: 0,
     bottom: 0,
@@ -464,6 +466,7 @@ function layoutWallCloud(layout, params, rng) {
   const wall = params.wallCloud;
   const spin = (wall.rotation * Math.PI) / 180;
   const group = addGroup(layout, -wall.drop, 0, 0, -wall.drop * 0.5, wall.offset, 1, true, spin);
+  layout.wallGroup = group;
   for (let index = 0; index < wall.puffs; index++) {
     const ring = index % 3;
     const angle = (index / wall.puffs) * Math.PI * 2 * 3 + rng() * 0.4;

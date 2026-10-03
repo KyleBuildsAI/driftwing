@@ -130,8 +130,8 @@ function frames(count) {
   });
 }
 
-/** The camera, terrain and check helpers both browser check sets use. */
-function createBrowserHelpers(game, label) {
+/** The camera, terrain and check helpers the browser check sets use (these two, and src/dev/presetChecks.js). */
+export function createBrowserHelpers(game, label) {
   const { ctx } = game;
   const THREE = ctx.THREE;
   const results = [];
