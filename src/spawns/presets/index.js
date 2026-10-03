@@ -7,12 +7,14 @@
 import whalePod from './whalePod.js';
 import maelstrom from './maelstrom.js';
 import bioluminescentBay from './bioluminescentBay.js';
+import starlingMurmuration from './starlingMurmuration.js';
 
 export const PRESETS = Object.freeze([
   // Batch 2: presets 11-20.
   whalePod,
   maelstrom,
   bioluminescentBay,
+  starlingMurmuration,
 ]);
 
 /** Presets by id. */
