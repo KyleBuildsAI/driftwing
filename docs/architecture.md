@@ -1284,7 +1284,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |
 | labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`, `terrain`, `spawns`, `director`, `audio`) |
 | `tools/spawn-check.mjs` | `--url <dev server>/v2/ [--backend webgpu\|webgl] [--out]`: the spawn framework proofs in the browser with the dev test kit (below) |
-| `tools/engine-alloc.mjs` | `--url <dev server>/v2/ --steps tools/steps/engine-<name>.json --presets a,b [--backend webgpu\|webgl] [--frames] [--warmup] [--events f,g]`: the sampled JS allocations of spawn engines' frame updates with the clock running and the camera swaying (under 0.1 byte per frame; callees, lifecycle and reports, and the named event paths reported apart) |
+| `tools/engine-alloc.mjs` | `--url <dev server>/v2/ --steps tools/steps/engine-<name>.json --presets a,b [--backend webgpu\|webgl] [--frames] [--warmup] [--events f,g]`: the sampled JS allocations of spawn engines' frame updates with the clock running and the camera swaying (under 1 byte per frame, about a twelfth of one heap number a frame; callees, lifecycle and reports, and the named event paths reported apart) |
 
 ## Testing
 

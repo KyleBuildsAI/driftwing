@@ -7,7 +7,7 @@
 //
 // Usage:
 //   node tools/engine-alloc.mjs --url http://127.0.0.1:<port>/v2/ --steps tools/steps/engine-emitter.json
-//     --presets emVolcano,emGeyser [--backend webgpu|webgl] [--frames 1000] [--warmup 12000] [--distance 800]
+//     --presets emVolcano,emGeyser [--backend webgpu|webgl] [--frames 3000] [--warmup 24000] [--distance 800]
 //     [--events strike,fireBurst]
 //
 // Bytes allocated in src/spawns/engines/ count as the engines' own; bytes allocated by what they call
@@ -18,7 +18,7 @@
 // the frame update. Objects the garbage collector already took are sampled as well, so short-lived
 // garbage counts. Warm-up rounds of the same loop run first, so the optimising compilers' one-time
 // work and the code that runs before it (V8's baseline tiers box numbers) stay out of the sample.
-// Exits non-zero when the engines' own frame-update allocations reach 0.1 byte per frame or the
+// Exits non-zero when the engines' own frame-update allocations reach 1 byte per frame or the
 // console has an error or a warning.
 //
 // --events names an engine's event paths: functions its update calls only when something happens
@@ -33,14 +33,21 @@ import { join } from 'node:path';
 import { findBrowser } from './browser.mjs';
 
 const SEED = 'ENGINEALLOC';
-const OWN_LIMIT_BYTES_PER_FRAME = 0.1;
-const DEFAULT_WARMUP_FRAMES = 12000;
+/**
+ * A per-frame allocation is at least one heap number (12 bytes) every frame, 36 KB over the default
+ * 3000 frames. Below 1 B/frame (a handful of samples) is V8's own tier-up and deoptimisation work:
+ * a function that is re-optimised runs its baseline code for a while, which boxes its numbers.
+ */
+const OWN_LIMIT_BYTES_PER_FRAME = 1;
+const DEFAULT_FRAMES = 3000;
+/** Long enough for the engines' event paths (a strike, a burst) to be optimised as well. */
+const DEFAULT_WARMUP_FRAMES = 24000;
 /** Warm-up rounds, each followed by a pause of WARMUP_PAUSE_MS. */
 const WARMUP_ROUNDS = 3;
 const WARMUP_PAUSE_MS = 4000;
 // Coarse on purpose: with collected objects sampled, three.js's own frame garbage makes a fine
-// interval take many minutes to stop. A real per-frame allocation of 16 bytes still lands about 30
-// samples over 1000 frames, while one sample alone already fails the 0.1 B/frame limit.
+// interval take many minutes to stop. A real per-frame allocation of 12 bytes still lands about 70
+// samples over 3000 frames, far above the 1 B/frame limit (6 samples).
 const SAMPLING_INTERVAL_BYTES = 512;
 /**
  * Engine entry points that run on a spawn's lifecycle or answer a report rather than every frame
@@ -49,7 +56,7 @@ const SAMPLING_INTERVAL_BYTES = 512;
 const LIFECYCLE_ENTRIES = new Set(['init', 'create', 'setLOD', 'dispose', 'stats', 'describe']);
 
 function parseArgs(argv) {
-  const options = { url: null, steps: null, presets: [], backend: 'webgpu', frames: 1000, warmup: DEFAULT_WARMUP_FRAMES, distance: 800, events: [] };
+  const options = { url: null, steps: null, presets: [], backend: 'webgpu', frames: DEFAULT_FRAMES, warmup: DEFAULT_WARMUP_FRAMES, distance: 800, events: [] };
   for (let index = 2; index < argv.length; index++) {
     const flag = argv[index];
     const next = () => argv[++index];
