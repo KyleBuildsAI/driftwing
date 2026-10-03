@@ -1,5 +1,8 @@
 [
   {
+    "eval": "(() => { const debug = window.DRIFTWING.ctx.systems.spawns.debug; if (!debug) throw new Error('this step file needs the spawns dev hook (a dev server, or a build with ?dev=1)'); return 'game presets held for the checks: ' + debug.holdGamePresets().length; })()"
+  },
+  {
     "eval": "(() => { window.__dwCheck = (name, ok, detail) => { if (!ok) console.error('[discovery check] ' + name + ' failed: ' + detail); return (ok ? 'PASS ' : 'FAIL ') + name + ': ' + detail; }; return 'dev server or ?dev=1 build: the discovery loop with the spawn test kit'; })()"
   },
   {
@@ -88,5 +91,8 @@
   },
   {
     "eval": "(() => { const map = window.DRIFTWING.ctx.systems.ui.worldMap; return window.__dwCheck('M closes the map again', !map.isOpen(), JSON.stringify({ open: map.isOpen() })); })()"
+  },
+  {
+    "eval": "'game presets released: ' + window.DRIFTWING.ctx.systems.spawns.debug.releaseGamePresets().length"
   }
 ]
