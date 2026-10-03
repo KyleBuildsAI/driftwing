@@ -5,7 +5,7 @@
 // downwind of every rotor (a WindField source, see the engine).
 import { PALETTE, paint } from '../palette.js';
 import { frameFromHeading } from '../common.js';
-import { roll, rollInteger } from '../../params.js';
+import { roll, rollInteger } from '../../engineKit.js';
 
 export const WIND_FARM_DEFAULTS = Object.freeze({
   count: [5, 8],

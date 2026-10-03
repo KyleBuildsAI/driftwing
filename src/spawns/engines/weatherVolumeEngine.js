@@ -44,6 +44,7 @@
 import { buildCloudPuffGeometry, createCloudLook } from '../../render/cloudShading.js';
 import { GROUP_STRIDE, PUFF_STRIDE, SHAFT_STRIDE, layoutWeatherVolume, resolveWeatherParams } from './weatherVolume/forms.js';
 import { createCanopyRain, createLocalRain, createPuffMesh, createShaftMesh, createVeil } from './weatherVolume/materials.js';
+import { createWindSample } from './engineKit.js';
 
 const PUFF_CAPACITY = 3072;
 const SHAFT_CAPACITY = 32;
@@ -280,7 +281,7 @@ export function createWeatherVolumeEngine() {
     const params = data.params;
     const layout = data.layout;
     const wind = params.wind;
-    const result = { vel: { x: 0, y: 0, z: 0 }, turbulence: 0 };
+    const result = createWindSample();
     const anchor = instance.anchor;
     const updraftRadius = params.radius * 0.6;
     return {

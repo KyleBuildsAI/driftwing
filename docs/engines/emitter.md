@@ -11,7 +11,7 @@ Preset authors use this page as the reference. A preset names the engine as
 `{ engine: 'emitter', params: { ... } }`. A preset may list several emitter entries (an ash plume and
 its lava bombs), and each entry is one emitter. Every parameter below is optional. A bad value throws
 a clear error that names the preset and the field, for example
-`[DRIFTWING] emitter params of preset "volcano": param "shape.type" must be one of point, sphere, disc, ring, box, line, got "cone"`.
+`[DRIFTWING] emitter preset "volcano": param "shape.type" must be one of point, sphere, disc, ring, box, line, got "cone"`.
 Unknown keys are refused too, so a typo never passes silently.
 
 ## How it works

@@ -156,20 +156,20 @@ function testValidation() {
   check('validation', 'the dev timeline preset validates', valid === '', valid);
   const known = ['testMarker', 'testUpdraft', 'testLureFunnel', 'devSpires'];
   const cases = [
-    ['no children', { stages: DEV_TIMELINE.stages }, /setPiece preset "devTimeline" params\.children: is required/],
-    ['child without a preset', { ...DEV_TIMELINE, children: { a: {} } }, /params\.children\.a\.preset: is required/],
-    ['unknown child preset', { ...DEV_TIMELINE, children: { ...DEV_TIMELINE.children, ghost: { preset: 'ghost' } } }, /params\.children\.ghost\.preset: names a preset the spawn manager does not know: "ghost"/],
-    ['stage starts an unknown child', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, start: ['nobody'] }] }, /params\.stages\[0\]\.start\[0\]: names no child: "nobody"/],
-    ['stage that never ends', { ...DEV_TIMELINE, stages: [{ id: 'a' }] }, /params\.stages\[0\]: needs a duration or an until condition/],
-    ['duplicate stage ids', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1 }, { id: 'a', duration: 1 }] }, /stages\[1\]\.id: "a" is used by another stage/],
-    ['bad condition', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, until: { speed: 3 } }] }, /stages\[0\]\.until: must have exactly one of time, playerDistance/],
+    ['no children', { stages: DEV_TIMELINE.stages }, /setPiece preset "devTimeline": param "params\.children" is required/],
+    ['child without a preset', { ...DEV_TIMELINE, children: { a: {} } }, /param "params\.children\.a\.preset" is required/],
+    ['unknown child preset', { ...DEV_TIMELINE, children: { ...DEV_TIMELINE.children, ghost: { preset: 'ghost' } } }, /param "params\.children\.ghost\.preset" names a preset the spawn manager does not know: "ghost"/],
+    ['stage starts an unknown child', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, start: ['nobody'] }] }, /param "params\.stages\[0\]\.start\[0\]" names no child: "nobody"/],
+    ['stage that never ends', { ...DEV_TIMELINE, stages: [{ id: 'a' }] }, /param "params\.stages\[0\]" needs a duration or an until condition/],
+    ['duplicate stage ids', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1 }, { id: 'a', duration: 1 }] }, /param "params\.stages\[1\]\.id" "a" is used by another stage/],
+    ['bad condition', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, until: { speed: 3 } }] }, /param "params\.stages\[0\]\.until" must have exactly one of time, playerDistance/],
     ['bad weather state', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, until: { weather: ['hail'] } }] }, /"hail" is not one of clear, building, storm, clearing/],
-    ['ramp on no param', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, ramps: [{ child: 'marker' }] }] }, /ramps\[0\]\.param: is required/],
-    ['from an unknown child', { ...DEV_TIMELINE, children: { a: { preset: 'testMarker', from: 'b' } }, stages: [{ id: 's', duration: 1 }] }, /children\.a\.from: names no child: "b"/],
-    ['set without a value', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, set: [{ child: 'marker', param: 'ropeOut' }] }] }, /params\.stages\[0\]\.set\[0\]\.value: must be a number or true \/ false/],
-    ['journal stat with a bad key', { ...DEV_TIMELINE, journal: [{ key: 'Closest tornado', value: 1 }] }, /params\.journal\[0\]\.key: must be a camelCase journal statistic name/],
-    ['journal stat on an unknown record', { ...DEV_TIMELINE, journal: [{ key: 'closestTornado', record: 'nothing' }] }, /params\.journal\[0\]\.record: names no record: "nothing"/],
-    ['journal stat with nothing to send', { ...DEV_TIMELINE, journal: [{ key: 'stormsChased' }] }, /params\.journal\[0\]\.value: is required without a record/],
+    ['ramp on no param', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, ramps: [{ child: 'marker' }] }] }, /param "params\.stages\[0\]\.ramps\[0\]\.param" is required/],
+    ['from an unknown child', { ...DEV_TIMELINE, children: { a: { preset: 'testMarker', from: 'b' } }, stages: [{ id: 's', duration: 1 }] }, /param "params\.children\.a\.from" names no child: "b"/],
+    ['set without a value', { ...DEV_TIMELINE, stages: [{ id: 'a', duration: 1, set: [{ child: 'marker', param: 'ropeOut' }] }] }, /param "params\.stages\[0\]\.set\[0\]\.value" must be a number or true \/ false/],
+    ['journal stat with a bad key', { ...DEV_TIMELINE, journal: [{ key: 'Closest tornado', value: 1 }] }, /param "params\.journal\[0\]\.key" must be a camelCase journal statistic name/],
+    ['journal stat on an unknown record', { ...DEV_TIMELINE, journal: [{ key: 'closestTornado', record: 'nothing' }] }, /param "params\.journal\[0\]\.record" names no record: "nothing"/],
+    ['journal stat with nothing to send', { ...DEV_TIMELINE, journal: [{ key: 'stormsChased' }] }, /param "params\.journal\[0\]\.value" is required without a record/],
   ];
   for (const [name, params, pattern] of cases) {
     const detail = expectThrow(() => validateTimeline(preset, params, known), pattern);

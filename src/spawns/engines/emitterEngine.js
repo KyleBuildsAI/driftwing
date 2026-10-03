@@ -101,7 +101,7 @@ function buoyancyRate(decaySeconds, drag) {
  * of numbers. Throws a TypeError naming the preset and the param at fault.
  */
 export function resolveEmitterConfig(preset, params) {
-  const read = createParamReader(`emitter params of preset "${preset.id}"`);
+  const read = createParamReader(`emitter preset "${preset.id}"`);
   const presetParams = {};
   for (const key of Object.keys(params)) if (!ACTIVATION_PARAMS.includes(key)) presetParams[key] = params[key];
   read.onlyKeys(presetParams, '', TOP_LEVEL_PARAMS);

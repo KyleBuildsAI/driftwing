@@ -23,6 +23,8 @@
 //
 // The strength (frame STRENGTH) scales velocities; turbulence scales with min(1, strength).
 
+import { createWindSample, smoothstep } from './engineKit.js';
+
 /** Frame slots (Float64Array indices) every source reads. */
 export const FRAME = Object.freeze({
   X: 0, Y: 1, Z: 2,               // anchor (m, world)
@@ -185,11 +187,6 @@ export function resolveSourceParams(type, params = {}, scale = 1) {
     resolved[name] = isLength ? clamped * scale : clamped;
   }
   return resolved;
-}
-
-function smoothstep(edge0, edge1, value) {
-  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
 }
 
 /**
@@ -840,7 +837,7 @@ export function createWindSource(THREE, { id, type, params, frame, kind = `spawn
   const factory = SAMPLERS[type];
   if (!factory) throw new Error(`[DRIFTWING] unknown wind source type "${type}" (known: ${WIND_SOURCE_TYPES.join(', ')})`);
   if (!(frame instanceof Float64Array) || frame.length < FRAME_SIZE) throw new TypeError('[DRIFTWING] a wind source needs a Float64Array frame of FRAME_SIZE');
-  const result = { vel: new THREE.Vector3(), turbulence: 0 };
+  const result = createWindSample();
   const path = type === 'jetStream' ? buildJetPath(params, frame[FRAME.DIR_X], frame[FRAME.DIR_Z], frame[FRAME.PHASE]) : null;
   const writeBounds = BOUNDS_WRITERS[type];
   const source = {

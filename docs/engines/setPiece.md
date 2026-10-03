@@ -10,8 +10,8 @@ Preset authors use this page as the reference. A set piece is an ordinary preset
 records?, journal?, ... } }`. The timeline is data in the preset. Every duration, narration line and
 child seed is drawn from the spawn's seeded random generator when the set piece is created, so the
 same seed plays the same timeline. A bad field throws an error that names the preset and the path,
-for example `[DRIFTWING] setPiece preset "stormChase" params.stages[2].start[0]: names no child:
-"tornadp"`, and the SpawnManager refuses that activation. `validateTimeline(preset, params,
+for example `[DRIFTWING] setPiece preset "stormChase": param "params.stages[2].start[0]"
+names no child: "tornadp"`, and the SpawnManager refuses that activation. `validateTimeline(preset, params,
 presetIds)` runs the same checks without a game (labs and preset tests).
 
 ## How it runs

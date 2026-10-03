@@ -10,7 +10,7 @@ Preset authors use this page as the reference. A preset names the engine as
 `{ engine: 'lightEffect', params: { ... } }`. One entry can combine every component (a storm's
 lightning, a vent's glows and its light, a lighthouse's beam and lamp). Every parameter below is
 optional. A bad value throws a clear error that names the preset and the field, for example
-`[DRIFTWING] lightEffect params of preset "fireflies": param "swarm.blink.duty" must be within 0..1, got 3`.
+`[DRIFTWING] lightEffect preset "fireflies": param "swarm.blink.duty" must be within 0..1, got 3`.
 Unknown keys are refused too.
 
 ## How it works

@@ -94,7 +94,7 @@ function readColors(read, value, path, fallback) {
  * config. Throws a TypeError naming the preset and the param at fault.
  */
 export function resolveLightEffectConfig(preset, params) {
-  const read = createParamReader(`lightEffect params of preset "${preset.id}"`);
+  const read = createParamReader(`lightEffect preset "${preset.id}"`);
   const presetParams = {};
   for (const key of Object.keys(params)) if (!ACTIVATION_PARAMS.includes(key)) presetParams[key] = params[key];
   read.onlyKeys(presetParams, '', TOP_LEVEL_PARAMS);

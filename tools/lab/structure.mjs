@@ -267,13 +267,13 @@ function testParams() {
   const base = presetById.get('devWindFarm');
   const variant = (id, params) => Object.freeze({ ...base, id, engines: Object.freeze([Object.freeze({ engine: 'structure', params: Object.freeze(params) })]) });
   const cases = [
-    ['missing recipe', variant('badRecipeA', {}), /structure preset "badRecipeA" params\.recipe: is required/],
-    ['unknown recipe', variant('badRecipeB', { recipe: 'castle' }), /params\.recipe: must be one of windFarm/],
-    ['count out of range', variant('badCount', { recipe: 'windFarm', count: 40 }), /"badCount" params\.count: must be within \[1, 16\], got 40/],
-    ['rated wind under cut-in', variant('badRated', { recipe: 'windFarm', cutIn: 8, ratedWind: 6 }), /params\.ratedWind: must be above cutIn/],
-    ['nested wake param', variant('badWake', { recipe: 'windFarm', wake: { length: 90 } }), /"badWake" params\.wake\.length: must be within \[1, 30\]/],
-    ['gate list entry', variant('badGate', { recipe: 'windFarm', gates: [{ id: 'g', halfWidth: -1 }] }), /params\.gates\[0\]\.halfWidth: must be within/],
-    ['journal statistic name', variant('badJournal', { recipe: 'gates', journal: 'Best run' }), /"badJournal" params\.journal: must be a camelCase journal statistic name/],
+    ['missing recipe', variant('badRecipeA', {}), /structure preset "badRecipeA": param "params\.recipe" is required/],
+    ['unknown recipe', variant('badRecipeB', { recipe: 'castle' }), /param "params\.recipe" must be one of windFarm/],
+    ['count out of range', variant('badCount', { recipe: 'windFarm', count: 40 }), /"badCount": param "params\.count" must be within 1\.\.16, got 40/],
+    ['rated wind under cut-in', variant('badRated', { recipe: 'windFarm', cutIn: 8, ratedWind: 6 }), /param "params\.ratedWind" must be above cutIn/],
+    ['nested wake param', variant('badWake', { recipe: 'windFarm', wake: { length: 90 } }), /"badWake": param "params\.wake\.length" must be within 1\.\.30/],
+    ['gate list entry', variant('badGate', { recipe: 'windFarm', gates: [{ id: 'g', halfWidth: -1 }] }), /param "params\.gates\[0\]\.halfWidth" must be within/],
+    ['journal statistic name', variant('badJournal', { recipe: 'gates', journal: 'Best run' }), /"badJournal": param "params\.journal" must be a camelCase journal statistic name/],
   ];
   for (const [name, preset, pattern] of cases) {
     const detail = expectThrow(() => lab.engine.create(preset, { ...preset.engines[0].params, position: new THREE.Vector3(), heading: 0, site: null }, () => 0.5), pattern);

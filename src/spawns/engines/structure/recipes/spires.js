@@ -8,7 +8,7 @@
 import { paint } from '../palette.js';
 import { addBoulder } from '../common.js';
 import { shade } from '../meshBuilder.js';
-import { roll, rollInteger } from '../../params.js';
+import { roll, rollInteger } from '../../engineKit.js';
 
 export const SPIRES_DEFAULTS = Object.freeze({
   count: [5, 9],

@@ -2,6 +2,9 @@
 //
 //   createParamReader(label)     readers for preset params that throw a clear TypeError naming the
 //                                engine, the preset and the param path (the preset authors' feedback)
+//   createParamView(label, params, path)  the same readers bound to one params object by name
+//                                (reader.number('count', 3, 1, 16)), for engines that read by name
+//   roll(range, rng), rollInteger(range, rng)  a value from a [low, high] pair with the seeded rng
 //   createHeadingFrame()         the local frame of a spawn: right, up and forward from its compass
 //                                heading, so params can say [right, up, forward] in metres
 //   createGroundGrid(terrain)    a coarse grid of ground heights (the water surface counts as ground)
@@ -13,7 +16,8 @@
 //   fillRandoms(state, out, n)   n seeded random numbers into a typed array at once (a double
 //                                returned per call would be boxed)
 //   sendVoiceLevel(voice, levels) a spawn voice's intensity, sent only when it moved
-//   createWindSample()           a wind source's sample result whose numbers stay unboxed
+//   createWindSample()           a wind source's sample result whose numbers stay unboxed; every
+//                                engine's WindField source returns one (windSources.js included)
 //
 // Nothing here allocates after construction: the frame update paths of the engines call only the
 // per-frame members (the grid's step and sample, the light's update, the range list's add).
@@ -28,7 +32,7 @@ function describe(value) {
 }
 
 /**
- * Param readers for one engine instance. label is for example 'emitter params of preset "volcano"'.
+ * Param readers for one engine instance. label is for example 'emitter preset "volcano"'.
  * Every reader returns the fallback for undefined or null and throws for a value of the wrong kind.
  */
 export function createParamReader(label) {
@@ -46,12 +50,33 @@ export function createParamReader(label) {
     /** A [min, max] pair; a single number n means [n, n]. */
     range(value, path, fallback, min = -Infinity, max = Infinity) {
       if (value === undefined || value === null) return fallback;
-      if (Number.isFinite(value)) value = [value, value];
+      if (Number.isFinite(value)) {
+        reader.number(value, path, 0, min, max);
+        return [value, value];
+      }
       if (!Array.isArray(value) || value.length !== 2) fail(path, `must be a number or [min, max], got ${describe(value)}`);
       const low = reader.number(value[0], `${path}[0]`, 0, min, max);
       const high = reader.number(value[1], `${path}[1]`, 0, min, max);
       if (high < low) fail(path, `must be [min, max] with max >= min, got [${low}, ${high}]`);
       return [low, high];
+    },
+    /** An integer within min..max. */
+    integer(value, path, fallback, min = -Infinity, max = Infinity) {
+      const number = reader.number(value, path, fallback, min, max);
+      if (number !== undefined && number !== null && !Number.isInteger(number)) fail(path, `must be an integer, got ${number}`);
+      return number;
+    },
+    /** A non-empty string. */
+    string(value, path, fallback) {
+      if (value === undefined || value === null) return fallback;
+      if (typeof value !== 'string' || value.length === 0) fail(path, `must be a non-empty string, got ${describe(value)}`);
+      return value;
+    },
+    /** An array (any entries; the caller reads them). */
+    array(value, path, fallback) {
+      if (value === undefined || value === null) return fallback;
+      if (!Array.isArray(value)) fail(path, `must be an array, got ${describe(value)}`);
+      return value;
     },
     /** A 0xRRGGBB integer. */
     color(value, path, fallback) {
@@ -90,6 +115,58 @@ export function createParamReader(label) {
     },
   };
   return reader;
+}
+
+/**
+ * The readers of createParamReader bound to one params object, reading each param by name: for
+ * example createParamView('structure preset "windFarm"', params).number('count', 3, 1, 16). path is
+ * the object's place in the preset (errors name `${path}.${name}`). A param that is undefined or null
+ * takes the fallback; object() keeps an explicit null, and nested(name) is the view of an object
+ * param (absent or null reads as {}).
+ */
+export function createParamView(label, params, path = 'params') {
+  const source = params ?? {};
+  const reader = createParamReader(label);
+  const at = (name) => (path ? `${path}.${name}` : name);
+  const view = {
+    fail(name, message) {
+      reader.fail(at(name), message);
+    },
+    has(name) {
+      return source[name] !== undefined && source[name] !== null;
+    },
+    number: (name, fallback, min, max) => reader.number(source[name], at(name), fallback, min, max),
+    integer: (name, fallback, min, max) => reader.integer(source[name], at(name), fallback, min, max),
+    /** A number or an ascending [min, max] pair, as [low, high]; the fallback is checked too. */
+    range: (name, fallback, min, max) => reader.range(source[name] ?? fallback, at(name), fallback, min, max),
+    boolean: (name, fallback) => reader.boolean(source[name], at(name), fallback),
+    string: (name, fallback) => reader.string(source[name], at(name), fallback),
+    choice: (name, fallback, allowed) => reader.oneOf(source[name], at(name), fallback, allowed),
+    color: (name, fallback) => reader.color(source[name], at(name), fallback),
+    vector: (name, fallback) => reader.vector(source[name], at(name), fallback),
+    array: (name, fallback) => reader.array(source[name], at(name), fallback),
+    object(name, fallback) {
+      const value = source[name];
+      if (value === undefined) return fallback;
+      return reader.object(value, at(name));
+    },
+    nested(name) {
+      return createParamView(label, view.object(name, null) ?? {}, at(name));
+    },
+  };
+  return view;
+}
+
+/** A value from a [low, high] pair with the seeded random generator. */
+export function roll([low, high], rng) {
+  return low === high ? low : randomIn(rng, low, high);
+}
+
+/** An integer from a [low, high] pair with the seeded random generator (inclusive). */
+export function rollInteger([low, high], rng) {
+  const min = Math.ceil(low);
+  const max = Math.floor(high);
+  return max <= min ? min : min + Math.min(max - min, Math.floor(rng() * (max - min + 1)));
 }
 
 /**
@@ -301,9 +378,16 @@ export function fillRandoms(state, out, count) {
   state[0] = value;
 }
 
-/** The velocity of a wind source's sample (m/s): a class of its own, holding only numbers. */
+/**
+ * The velocity of a wind source's sample (m/s): a class of its own, holding only numbers. The fields
+ * start fractional so V8 gives them a double representation from the first object on (a field that
+ * starts as a small integer changes representation on the first fractional write); then they rest at 0.
+ */
 class WindSampleVelocity {
   constructor() {
+    this.x = 0.5;
+    this.y = 0.5;
+    this.z = 0.5;
     this.x = 0;
     this.y = 0;
     this.z = 0;
@@ -314,6 +398,7 @@ class WindSampleVelocity {
 class WindSample {
   constructor() {
     this.vel = new WindSampleVelocity();
+    this.turbulence = 0.5;
     this.turbulence = 0;
   }
 }

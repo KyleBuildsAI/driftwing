@@ -34,8 +34,8 @@ import { createMeshBuilder } from './structure/meshBuilder.js';
 import { PALETTE } from './structure/palette.js';
 import { RECIPES, RECIPE_NAMES } from './structure/recipes/index.js';
 import { islandOutline, islandTopHeight } from './structure/recipes/islands.js';
-import { createParamReader } from './params.js';
 import { createGateSet, crossGates } from './gateDetector.js';
+import { createParamView, createWindSample } from './engineKit.js';
 
 const ENGINE_NAME = 'structure';
 /** Structure spawns alive at once (the director's cap is the same). */
@@ -221,7 +221,7 @@ export function createStructureEngine() {
 
   // ---- Instances --------------------------------------------------------------------------------------
   function readPreset(preset, params) {
-    const read = createParamReader(ENGINE_NAME, preset.id, params);
+    const read = createParamView(`${ENGINE_NAME} preset "${preset.id}"`, params);
     const recipeName = read.choice('recipe', null, RECIPE_NAMES);
     if (!recipeName) read.fail('recipe', `is required: one of ${RECIPE_NAMES.join(', ')}`);
     return { read, recipe: RECIPES[recipeName], recipeName };
@@ -274,7 +274,7 @@ export function createStructureEngine() {
     const forwardX = Math.sin(radians);
     const forwardZ = -Math.cos(radians);
     gates.forEach((gate, index) => {
-      const gateRead = createParamReader(ENGINE_NAME, context.presetId, gate, `params.gates[${index}]`);
+      const gateRead = createParamView(`${ENGINE_NAME} preset "${context.presetId}"`, gate, `params.gates[${index}]`);
       const along = gateRead.number('along', 0);
       const across = gateRead.number('across', 0);
       const x = forwardX * along - forwardZ * across;
@@ -915,7 +915,7 @@ export function createStructureEngine() {
         wake: out.wake,
         wakeId: null,
         wakeBounds: null,
-        wakeResult: { vel: { x: 0, y: 0, z: 0 }, turbulence: 0 },
+        wakeResult: createWindSample(),
         voice: null,
         audioMode: 'constant',
         audioLevel: 0.8,

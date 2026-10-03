@@ -41,6 +41,7 @@
 // back in. A slipstream is removed at far (the player cannot reach it there) and re-added nearer.
 // Params, units and ranges: docs/engines/fauna.md.
 import { SPECIES } from './faunaSpecies.js';
+import { createWindSample } from './engineKit.js';
 
 export const FAUNA_BEHAVIORS = Object.freeze(['murmuration', 'flock', 'formation', 'circling', 'pod', 'wingman', 'drift']);
 
@@ -141,19 +142,6 @@ const IO = Object.freeze({
 const IO_LENGTH = 41;
 /** Ground probes refresh one sample every this many frames per group (terrain heights allocate). */
 const GROUND_PROBE_FRAMES = 16;
-/**
- * A slipstream's wind reading: { vel, turbulence } for the WindField. vel is an instance of its own
- * class, so its fields keep a double representation and are updated in place (an { x, y, z } literal
- * shares hidden classes app-wide and V8 may box every double written into it).
- */
-class WindVelocity {
-  constructor() {
-    this.x = 0.5;
-    this.y = 0.5;
-    this.z = 0.5;
-  }
-}
-
 /** The per-thermal arrays of a circling group's thermal cache. */
 const THERMAL_FIELDS = Object.freeze(['x', 'z', 'capX', 'capZ', 'ground', 'top', 'radius', 'strength']);
 
@@ -1854,7 +1842,7 @@ export function createFaunaEngine() {
     const slipstream = data.params.drift.slipstream;
     const length = slipstream.length * Math.max(1, g[G.SIZE] / 200);
     const radius = slipstream.radius * Math.max(1, g[G.SIZE] / 200);
-    const result = { vel: new WindVelocity(), turbulence: 0.5 };
+    const result = createWindSample();
     const margin = length * 0.3;
     const source = {
       id,

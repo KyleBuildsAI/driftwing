@@ -12,7 +12,7 @@ Preset authors use this page as the reference. A preset names the engine as
 optional and falls back to the default below. A size given as `[min, max]` is rolled per site with
 the spawn's seeded random generator, so the same site always builds the same way. A bad value throws
 an error that names the engine, the preset and the param, for example
-`[DRIFTWING] structure preset "windFarm" params.count: must be within [1, 16], got 40`, and the
+`[DRIFTWING] structure preset "windFarm": param "params.count" must be within 1..16, got 40`, and the
 SpawnManager refuses that activation.
 
 ## What a structure is

@@ -8,7 +8,7 @@
 import { PALETTE } from '../palette.js';
 import { addBoulder, addPine, addRoundTree, pick, stampsOfType } from '../common.js';
 import { mixPaint, shade } from '../meshBuilder.js';
-import { roll, rollInteger } from '../../params.js';
+import { roll, rollInteger } from '../../engineKit.js';
 
 export const ISLANDS_DEFAULTS = Object.freeze({
   count: [3, 4],

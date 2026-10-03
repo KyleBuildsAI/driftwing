@@ -33,7 +33,7 @@
 //
 // Deterministic: every duration, narration line and child seed is drawn from the spawn's seeded
 // random generator when the set piece is created. update() allocates nothing between stage changes.
-import { createParamReader, roll } from './params.js';
+import { createParamView, roll } from './engineKit.js';
 
 const ENGINE_NAME = 'setPiece';
 /** Seconds between attempts to start a child the budgets refused. */
@@ -65,13 +65,13 @@ const EASE = Object.freeze({ linear: 0, smooth: 1, in: 2, out: 3 });
 
 /** Validates and flattens the timeline params into the plan one instance runs. Throws naming the path. */
 function readTimeline(preset, params, rng, manager) {
-  const read = createParamReader(ENGINE_NAME, preset.id, params);
+  const read = createParamView(`${ENGINE_NAME} preset "${preset.id}"`, params);
   const childrenParams = read.object('children', null);
   if (!childrenParams) read.fail('children', 'is required: { key: { preset, ... } }');
   const children = [];
   const childIndex = new Map();
   for (const [key, definition] of Object.entries(childrenParams)) {
-    const childRead = createParamReader(ENGINE_NAME, preset.id, definition, `params.children.${key}`);
+    const childRead = createParamView(`${ENGINE_NAME} preset "${preset.id}"`, definition, `params.children.${key}`);
     const presetId = childRead.string('preset', null);
     if (!presetId) childRead.fail('preset', 'is required (a preset id)');
     if (manager && !manager.getPreset(presetId)) childRead.fail('preset', `names a preset the spawn manager does not know: "${presetId}"`);
@@ -133,9 +133,9 @@ function readTimeline(preset, params, rng, manager) {
       const kind = keys[0];
       const body = condition[kind];
       const entry = { kind: KIND[kind], value: 0, min: -Infinity, max: Infinity, child: -1, agl: false, weather: null };
-      const bodyRead = createParamReader(ENGINE_NAME, preset.id, typeof body === 'object' && body !== null && !Array.isArray(body) ? body : {}, `params.${where}.${kind}`);
+      const bodyRead = createParamView(`${ENGINE_NAME} preset "${preset.id}"`, typeof body === 'object' && body !== null && !Array.isArray(body) ? body : {}, `params.${where}.${kind}`);
       if (kind === 'time') {
-        const range = createParamReader(ENGINE_NAME, preset.id, { time: body }, `params.${where}`).range('time', null, 0, 86400);
+        const range = createParamView(`${ENGINE_NAME} preset "${preset.id}"`, { time: body }, `params.${where}`).range('time', null, 0, 86400);
         entry.value = roll(range, rng);
       } else if (kind === 'playerDistance') {
         entry.min = bodyRead.number('min', -Infinity, 0);
@@ -165,7 +165,7 @@ function readTimeline(preset, params, rng, manager) {
   const stages = stagesParams.map((stage, index) => {
     const path = `stages[${index}]`;
     if (stage === null || typeof stage !== 'object' || Array.isArray(stage)) read.fail(path, 'must be an object');
-    const stageRead = createParamReader(ENGINE_NAME, preset.id, stage, `params.${path}`);
+    const stageRead = createParamView(`${ENGINE_NAME} preset "${preset.id}"`, stage, `params.${path}`);
     const id = stageRead.string('id', `stage${index}`);
     if (ids.has(id)) read.fail(`${path}.id`, `"${id}" is used by another stage`);
     ids.add(id);
@@ -177,7 +177,7 @@ function readTimeline(preset, params, rng, manager) {
     const start = stageRead.array('start', []).map((key, keyIndex) => childOf(key, `${path}.start[${keyIndex}]`));
     const end = stageRead.array('end', []).map((key, keyIndex) => childOf(key, `${path}.end[${keyIndex}]`));
     const ramps = stageRead.array('ramps', []).map((ramp, rampIndex) => {
-      const rampRead = createParamReader(ENGINE_NAME, preset.id, ramp, `params.${path}.ramps[${rampIndex}]`);
+      const rampRead = createParamView(`${ENGINE_NAME} preset "${preset.id}"`, ramp, `params.${path}.ramps[${rampIndex}]`);
       const param = rampRead.string('param', null);
       if (!param) rampRead.fail('param', 'is required (the child engine param to ramp)');
       return {
@@ -190,7 +190,7 @@ function readTimeline(preset, params, rng, manager) {
       };
     });
     const sets = stageRead.array('set', []).map((entry, setIndex) => {
-      const setRead = createParamReader(ENGINE_NAME, preset.id, entry, `params.${path}.set[${setIndex}]`);
+      const setRead = createParamView(`${ENGINE_NAME} preset "${preset.id}"`, entry, `params.${path}.set[${setIndex}]`);
       const param = setRead.string('param', null);
       if (!param) setRead.fail('param', 'is required (the child engine param to set)');
       const value = entry.value;
@@ -202,7 +202,7 @@ function readTimeline(preset, params, rng, manager) {
     if (narrate !== null) {
       const lines = Array.isArray(narrate) ? narrate : narrate.lines;
       if (!Array.isArray(lines) || lines.length === 0 || !lines.every((line) => typeof line === 'string' && line.length > 0)) read.fail(`${path}.narrate`, 'must be a non-empty array of lines, or { lines, target?, delay? }');
-      const narrateRead = createParamReader(ENGINE_NAME, preset.id, Array.isArray(narrate) ? {} : narrate, `params.${path}.narrate`);
+      const narrateRead = createParamView(`${ENGINE_NAME} preset "${preset.id}"`, Array.isArray(narrate) ? {} : narrate, `params.${path}.narrate`);
       narration = {
         text: lines[Math.min(lines.length - 1, Math.floor(rng() * lines.length))],
         target: !Array.isArray(narrate) && narrate.target !== undefined ? childOf(narrate.target, `${path}.narrate.target`) : (start.length > 0 ? start[0] : -1),
@@ -225,7 +225,7 @@ function readTimeline(preset, params, rng, manager) {
   });
 
   const records = read.array('records', []).map((record, index) => {
-    const recordRead = createParamReader(ENGINE_NAME, preset.id, record, `params.records[${index}]`);
+    const recordRead = createParamView(`${ENGINE_NAME} preset "${preset.id}"`, record, `params.records[${index}]`);
     const id = recordRead.string('id', null);
     if (!id) recordRead.fail('id', 'is required');
     return {
@@ -237,7 +237,7 @@ function readTimeline(preset, params, rng, manager) {
   });
   const recordIndex = new Map(records.map((record, index) => [record.id, index]));
   const journal = read.array('journal', []).map((stat, index) => {
-    const statRead = createParamReader(ENGINE_NAME, preset.id, stat, `params.journal[${index}]`);
+    const statRead = createParamView(`${ENGINE_NAME} preset "${preset.id}"`, stat, `params.journal[${index}]`);
     const key = statRead.string('key', null);
     if (!key || !JOURNAL_KEY_PATTERN.test(key)) statRead.fail('key', `must be a camelCase journal statistic name, got ${JSON.stringify(key)}`);
     const recordId = statRead.string('record', null);
