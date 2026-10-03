@@ -1188,8 +1188,9 @@ are implemented here. The preset schema (section 1) and the 30 presets are in [s
   null. `params` (`{ [engine name]: { ... } }`) is merged over that engine entry's preset params for
   this activation only: the set-piece engine places and tunes its children this way.
   `canActivate(presetId, source)` names the refusal: `preset`, `engine` (not registered or failed to
-  initialise), `capacity` (512 spawns), `heavy` (the heavy limit, 2; sites are never refused for it
-  and count toward it only while `setSiteActive(id, true)`), `instances` or `particles` (per-engine
+  initialise), `capacity` (512 spawns), `heavy` (the heavy limit, 2; sites are never refused for it;
+  a heavy site without an `activeState` counts toward it while it exists, and one with an
+  `activeState` only while `setSiteActive(id, true)`), `instances` or `particles` (per-engine
   caps from `engine.budget` `{ instances, particles, lights? }`, else the engine's entry in
   `DIRECTOR_BUDGETS.engines`, else 32 instances and 60 000 particles; `setBudget`, `setHeavyLimit`).
   A debug activation with `force: true` passes the budgets. A director activation whose engines all

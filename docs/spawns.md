@@ -103,7 +103,8 @@ journal's collection count is found / 30 over these presets (`PRESETS` in
 - **Sites without an active state** are always there; their `rarity` describes them (WREN's callout
   priority and the tour guide rank by it) and their `placement.chance` and `minSpacing` decide how
   often a world has one.
-- **Budgets.** At most 2 heavy spawns at once (sites count only while their active state runs),
+- **Budgets.** At most 2 heavy spawns at once (an always-on heavy site such as the floating islands
+  counts while it exists; a site with an active state, the volcano, only while that state runs),
   at most 4 real lights, and per-engine instance and particle caps (each engine's `budget`, else
   `DIRECTOR_BUDGETS.engines`). Under frame-time pressure the director first defers heavy activations
   and then steps far spawns to cheaper LOD tiers, before the renderer drops resolution.
@@ -631,8 +632,8 @@ Rock islands with trees and a meadow hang in the air over sea-stack islets; wate
 their edges into mist, and every top is landable.
 [src/spawns/presets/floatingIslands.js](../src/spawns/presets/floatingIslands.js)
 
-- **Kind:** site, rare, heavy. Islands lure, 760 m tall and 1500 m wide, 220 m up. A site counts
-  toward the heavy limit only while an active state runs, and this one has none.
+- **Kind:** site, rare, heavy. Islands lure, 760 m tall and 1500 m wide, 220 m up. It has no active
+  state, so it holds one of the 2 heavy slots for as long as it exists.
 - **Placement:** archipelago, meadows or pine; water; chance 0.3; at least 22 km apart; 600 m
   clearance.
 - **Stamps:** two `islandBase` islets 560 m apart (`structureStamps('islands', ...)`).
@@ -904,7 +905,8 @@ export default Object.freeze({
   // For a site without an active state, rarity is descriptive (callout priority, the tour guide);
   // placement.chance and minSpacing decide how common it is.
   rarity: 'uncommon',
-  // A heavy site gets a FAR lure; it counts toward the heavy limit only while an active state runs.
+  // A heavy site gets a FAR lure. It holds a heavy slot while it exists, or with an activeState
+  // only while that state runs.
   heavy: false,
   // Sites only: rolled once per 2 km cell with hash(seed, cellX, cellZ, id). chance: per cell after
   // the filters. minSpacing (m): between two sites of this preset. biomes: the dominant biome from
