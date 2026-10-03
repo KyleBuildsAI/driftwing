@@ -483,6 +483,21 @@ const NW = Math.SQRT1_2 * 9000;
   check('callouts', '"yes, take us there" also engages the autopilot', yes && yes.ok && game.follows === 1 && /autopilot engaged/.test(yes.speech), yes?.speech);
 }
 
+{
+  // calledOut forgets an event once it ends (its key, the spawn id, never returns) and keeps a site.
+  const game = createMockGame();
+  const supercell = game.spawn('supercell', -NW, -NW);
+  game.advance(1);
+  game.guide.handleReply('no');
+  const site = game.spawn('windFarm', 0, 6000, { siteId: 'windFarm:0:3', source: 'site', active: false });
+  game.advance(CALLOUT_RULES.minGapSeconds + 1);
+  const calledBefore = game.guide.getStats().calledOut;
+  game.end(supercell);
+  game.end(site);
+  const calledAfter = game.guide.getStats().calledOut;
+  check('callouts', 'an ended event leaves the called-out set; a site stays in it', game.spoken.length === 2 && calledBefore === 2 && calledAfter === 1, `${game.spoken.length} spoken; called out ${calledBefore} -> ${calledAfter}`);
+}
+
 // Actions.
 {
   const game = createMockGame();
