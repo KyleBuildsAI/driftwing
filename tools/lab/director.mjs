@@ -957,6 +957,22 @@ async function testShedding() {
   check('shedding', 'shed levels: heavy deferral, then far LOD demotion through the LOD bias', manager.lodBiasHistory.join(',') === '1,0.7,0.5,0.7,1,1' && deferSeen.some((entry) => entry.shed >= 1 && entry.defer), `LOD bias ${manager.lodBiasHistory.join(' > ')}`);
   director.dispose();
 
+  // A director disposed while shedding (the spawns system drops a director that throws) puts the
+  // manager's LOD bias back: perf removes its shedder without calling restore().
+  {
+    const sheddingManager = createStubSpawnManager({ bus, player, getTime: () => time, placement, isInView: createView(player) });
+    const shedding = createDirector({
+      seedHash: world.seedHash >>> 0, presets: PRESETS, spawnManager: sheddingManager, weather: createWeatherModel(world.seedHash >>> 0),
+      terrain: { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: 0 },
+      getPlayer: () => player, getTime: () => time, getSun: () => ({ sunElevation: 20, dayTime: 0.4 }), isInView: createView(player),
+      placement, bus,
+    });
+    for (let level = 0; level < 3; level++) shedding.shedder.shed();
+    const shedBias = sheddingManager.lodBiasHistory.at(-1);
+    shedding.dispose();
+    check('shedding', 'disposing a director at shed level 3 puts the LOD bias back to 1', shedBias === 0.5 && sheddingManager.lodBiasHistory.at(-1) === 1, `LOD bias ${sheddingManager.lodBiasHistory.join(' > ')}`);
+  }
+
   const phaseOne = await loadPhaseOneGovernor();
   for (const [name, trace] of [['step load', LOAD_TRACE], ['oscillating load', OSCILLATING_TRACE]]) {
     const current = createGovernorHarness(createPerfGovernor);
