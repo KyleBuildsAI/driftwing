@@ -122,7 +122,9 @@ Developer keys (dev builds only; never player features):
 - **F9**: the spawn debugger (dev builds, or a production build opened with `?dev=1`). F9 opens it
   and moves the keyboard focus into it, so keys typed there stay in the panel; F9 or **Esc** closes
   it and hands the focus back. While it is closed it listens to F9 alone and never takes a flight
-  key.
+  key. It lists the presets with filters, force-spawns any of them ahead of the craft, teleports to
+  the nearest site of a preset, scrubs the time of day, and shows the director's state, the active
+  spawns, the engine stats and the wind overlay switch.
 - **L**: drop or remove the debug updraft (dev builds and `?debug=1`).
 
 In photo mode only photo mode, time of day, push-to-talk and the UI keys above work. WASD, Q / E,
@@ -162,6 +164,22 @@ flight's trail, your craft and its heading, and the waypoint.
 The map keys stay in the map while it has the focus; every other key still flies the craft. The
 standard gamepad and the T.16000M have no free button, so bind `mapToggle` there in the controls
 panel if you want it.
+
+## Discoveries, the journal and seed links
+
+Spawns need no input of their own: fly toward something on the horizon and it is yours. When a
+spawn comes within its discovery range and into view, a chime plays and a glass card shows its
+name, category and one-liner. Nothing else changes; there is nothing to press.
+
+- **J** (`journal`) opens the journal: this world's discoveries (found / 30), the records (storms
+  chased, closest tornado, best canyon run, best landing) and the achievements (V-Formation,
+  Thread the Needle), shared by every world.
+- **WREN's tour guide** answers the Guide chips in the command bar (above), and when it calls a
+  spawn out, "yes" (or the **Yes, heading** chip) places a waypoint on it. **X** clears a waypoint.
+- **Copy link** copies a link to this world at this time of day (`/?v=2#seed=ABC&t=0.723`), which
+  opens in the launcher with V2. It is on the seed chip in the HUD, on the world map, in Settings
+  (General, World) and in the menu. Settings, General, World also takes a seed ("Fly a specific seed"):
+  **Fly** reloads into that world. The world you fly is remembered for next time.
 
 ## Mouse
 
@@ -327,6 +345,10 @@ Settings (`,`) hold the input options that are not bindings:
   - "Stick twist yaw" (auto / on / off);
   - the afterburner detent (80-100 %);
   - buttons that open the controls panel and the calibration wizard.
+- **General tab**: day length and freezing time; WREN's voice, chatter, tour-guide callouts (on
+  by default) and remote brain;
+  the world (Copy link, and a seed field that reloads into another world); the developer status
+  badge and wind arrows.
 
 ## HOTAS hardware checklist
 
