@@ -12,6 +12,7 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
 | 3 | Milestone E presets 1-10, 11-20, 21-30 (verified and committed per batch) | `p2/presets-*` | done |
 | 4 | Milestone F discovery loop: journal, copilot tour guide, world map, seed links | `p2/discovery`, `p2/copilot-guide` | done |
 | 5 | Milestone G verification: ?test=spawns, ?test=determinism, ?test=terrain, 10-minute soak; docs/spawns.md with the preset template, architecture, controls, copilot API, CHANGELOG; review and fixes; tag `v2-phase2` (the owner tags) | `p2/g-fixes`, `p2/g-tests`, `p2/g-docs` | done |
+| 6 | Release: the 8 review findings fixed, version 2.0.0-phase.2, CHANGELOG, manual checklist, final verification | `v2-phase2` | done: ready to tag |
 
 ## Decisions
 
@@ -215,11 +216,44 @@ Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resu
 | Built `dist-single/v2` smoke | 0/0, screenshots differ | 0/0, screenshots differ |
 | Built `dist-single/index.html` (shell) smoke | 0/0, screenshots differ | 0/0, screenshots differ |
 
+## Done (release: review fixes and release prep)
+
+- **Review findings (8), each confirmed in the code and fixed with a lab check** (the check fails on the code before its fix):
+  - `de8143f` fix: the celestial engine opens its voice only with an audio service, and a voice that throws at create removes the instance's sky modifier.
+  - `cc05361` fix: the weatherVolume engine opens its voice only with an audio service (the microburst's weatherVolume owns its voice).
+  - `eff3e61` fix: the fauna engine returns the agent range to the species pool when create throws after allocating it.
+  - `a0c8253` test: the spawns lab's `couplings` checks run the real celestial, weatherVolume and fauna engines with no audio service and with one that refuses the recipe.
+  - `97485e0` fix, `4a16acc` test: the WindField drops a hash cell once its last source leaves it (`sourceCellCount`); a source moved 20 km keeps at most 4 cells and 0 after removal (238 before the fix).
+  - `62eef0b` fix, `b3d099c` test: a director disposed while shedding puts the manager's LOD bias back to 1 (director lab 50/50; 49/50 before the fix).
+  - `2f8f25c` fix, `584108d` test: the tour guide removes an ended event's key from `calledOut`; site keys stay (copilot lab 226/226).
+  - `3614743` fix, `368ddd3` test, `8f5a6f4` docs: an always-on heavy site (the floating islands) holds a heavy slot while it exists (`holdsHeavy`); an `activeState` site still counts only while active. The preset pacing lab's stand-in counts the same way. Its default 3 h run still passes 4/4: volcano eruption 1, tornado 1 (was 4), comet 8 (was 20), sky whale 21 (was 29), lantern festival 32.
+  - The two celestial findings (null audio, modifier leak) were one fix.
+- **Release prep:**
+  - `cfaa994`: the CHANGELOG lists the review fixes.
+  - `9daf515`: the entry is `## [2.0.0-phase.2] - 2026-10-03` with the Milestone G verification numbers.
+  - `c887256`, `2bf9193`: package.json, package-lock.json and `CONFIG.VERSION` are at 2.0.0-phase.2.
+  - `9a6e4db`: [docs/phase2-manual-checklist.md](phase2-manual-checklist.md).
+- **Release verification on the final tree** (each test run once, per the owner's rule):
+
+| Check | WebGPU | WebGL2 |
+| --- | --- | --- |
+| `npm run build`, `npm run build:single` | succeed; V1 SHA-256 matches; dev kit strings 0 each in the bundle | |
+| `npm run test:v1` | 2/2 | |
+| `node tools/docs-check.mjs` | 223/223 | |
+| Labs | flight 82/82, jet 60/60, helicopter 46/46, fpv 87/87, wingsuit 37/37, input 34/34, settings 28/28, storage 54/54, copilot 226/226, copilot-server 17/17, discovery 39/39, terrain 291/291, director 50/50 (stub) and 6/6 (real), preset-flight 13/13, preset-wind 12/12, spawns 98/98, structure 68/68, setpiece 47/47, preset-pacing 4/4 | |
+| Lab that failed | wind-engines 55/56: the allocation check, 0.509 B/frame in windModifierEngine.js:435 `update` (the known V8 tiering noise; that file is untouched) | |
+| Audio lab (`--backend both`) | 190/191: "camera cuts do not swoop the pitch" failed on WebGPU (listener speed max 55.2 m/s against craft 26, shift 210.5 cents against a 126.5 bound); passed on WebGL2. No audio or camera code changed | |
+| `tools/spawn-check.mjs` | 55/55 | 55/55 |
+| Step files exercising the fixes (dev server, port 5263) | all pass, 0/0 console: celestial 11, weatherVolume 19, fauna 14 (`seed=ENGINEFAUNA`), windModifier 9, director-game 3, copilot-guide 7, presets-21-30 49 (counts are unique PASS lines) | the same |
+| `run-harness --test spawns` | PASS 30/30 on every criterion, 0/0; lowest avg 48.5 fps (starling murmuration), worst p99 49.7 ms (slot canyon) (reported) | PASS 30/30, 0/0; lowest avg 21.9 fps (eagle wingman), worst p99 1091.6 ms (microburst; max 1455.6 ms) (reported, not judged) |
+| `run-harness --test determinism` | PASS: site list d85384433861a1b0, director log 4 entries 1093b8c1, spawn events 74d3d2fa (24), path 55b1a55f, 28.66 km, 0/0 | PASS with the same hashes |
+| Built `dist-single/v2` smoke | 0/0, screenshots differ | 0/0, screenshots differ |
+| Built `dist-single/index.html` (shell) smoke | 0/0, screenshots differ | 0/0, screenshots differ |
+
 ## Current state (resume from here)
 
-- `v2-phase2` holds Phase 1 and Milestones A to G. Everything is merged and committed locally. Nothing is pushed and nothing is tagged; the owner pushes and tags `v2-phase2`.
-- Before the tag (from the docs engineer): rename the CHANGELOG's Phase 2 entry to `## [2.0.0-phase.2] - <date>`, bump package.json `version` from 2.0.0-phase.1 to 2.0.0-phase.2, and add the verification numbers above.
-- The spec's manual checklist for Kyle: fly toward the first horizon lure, chase a storm, join the geese, land at the airfield, use the map and Copy link.
+- **Phase 2 is ready to tag.** `v2-phase2` holds Phase 1, Milestones A to G, the review fixes and the release prep (version 2.0.0-phase.2, CHANGELOG entry `[2.0.0-phase.2] - 2026-10-03`). Everything is committed locally. Nothing is pushed and nothing is tagged; the owner pushes and tags `v2-phase2`.
+- The owner's manual checks before the tag are in [docs/phase2-manual-checklist.md](phase2-manual-checklist.md): the listening pass, the faint presets and lures, the storm chase touchdown, both views, the map and journal, and seed links.
 - These branches and worktrees can be removed once the owner is happy with them:
   - the three `p2/presets-*` branches and their `.claude/worktrees/p2-b*` worktrees;
   - the five `p2/engines-*` branches and their `.claude/worktrees/p2-e-*` worktrees;
