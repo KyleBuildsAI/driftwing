@@ -258,6 +258,9 @@ export function createFaunaEngine() {
   const liveInstances = new Set();
   let live = 0;
   let frameStamp = -1;
+  // Holders of the typed wildlifeQuiet event (spawn ids, a total solar eclipse): while any holds,
+  // the animals fall silent (no calls, no scatter cries, the wing rush and songs eased out).
+  const quietSources = new Set();
   const pixelWorld = { value: 0.002 };
   let pixelWorldUniform = null;
 
@@ -845,7 +848,7 @@ export function createFaunaEngine() {
     }
     if (fled > 0 && g[G.SCATTER_COOLDOWN] <= 0) {
       g[G.SCATTER_COOLDOWN] = scatter.cooldown;
-      if (data.voice && scatter.trigger) data.voice.trigger(scatter.trigger);
+      if (data.voice && scatter.trigger && quietSources.size === 0) data.voice.trigger(scatter.trigger);
       ctx.bus.emit('fauna:scatter', {
         id: data.instance.id, presetId: data.instance.presetId, species: pool.def.id, count: fled,
         position: { x: g[G.CX], y: g[G.CY], z: g[G.CZ] },
@@ -1568,7 +1571,7 @@ export function createFaunaEngine() {
               pool.vx[index] = forwardX * 2.5;
               pool.vz[index] = forwardZ * 2.5;
               pool.bank[index] = 0;
-              if (data.voice) data.voice.trigger('call');
+              if (data.voice && quietSources.size === 0) data.voice.trigger('call');
               mode = WHALE_BREACH;
             } else {
               pool.mode[index] = WHALE_SURFACE;
@@ -1762,7 +1765,7 @@ export function createFaunaEngine() {
 
   function emitCall(data, reason) {
     const calls = data.params.calls;
-    if (data.voice) data.voice.trigger(data.params.wingman.trigger || calls.trigger);
+    if (data.voice && quietSources.size === 0) data.voice.trigger(data.params.wingman.trigger || calls.trigger);
     const g = data.g;
     ctx.bus.emit('fauna:call', {
       id: data.instance.id, presetId: data.instance.presetId, species: data.pool.def.id, reason,
@@ -2101,14 +2104,15 @@ export function createFaunaEngine() {
     g[G.CALL_TIMER] -= dt;
     if (g[G.CALL_TIMER] > 0) return;
     g[G.CALL_TIMER] = rangeValue(interval, data.rng);
-    data.voice.trigger(calls.trigger);
+    if (quietSources.size === 0) data.voice.trigger(calls.trigger);
   }
 
   function updateVoice(instance, data) {
     if (!data.voice) return;
     const g = data.g;
     data.voice.setPosition(instance.anchor);
-    let intensity = data.params.voiceIntensity * g[G.FADE];
+    // While the wildlife is quiet the level drops to 0 (the audio engine eases between levels).
+    let intensity = quietSources.size > 0 ? 0 : data.params.voiceIntensity * g[G.FADE];
     if (data.params.behavior === 'murmuration' || data.params.behavior === 'flock') {
       // The wing rush swells as the player nears the flock.
       const reach = Math.max(200, g[G.RADIUS] * 3);
@@ -2337,6 +2341,12 @@ export function createFaunaEngine() {
         poolList.push(pools[id]);
       }
       gridNext = new Int32Array(maxAgents);
+      if (ctx.bus && typeof ctx.bus.onTyped === 'function') {
+        ctx.bus.onTyped('wildlifeQuiet', ({ source, quiet }) => {
+          if (quiet) quietSources.add(source);
+          else quietSources.delete(source);
+        });
+      }
     },
     create,
     update(instance, dt) {
@@ -2422,7 +2432,7 @@ export function createFaunaEngine() {
         const used = pool.ranges.used;
         if (used > 0) species[id] = used;
       }
-      return { instances: live, particles, lights: 0, buffers: Object.keys(pools).length * 3, drawCalls, species };
+      return { instances: live, particles, lights: 0, buffers: Object.keys(pools).length * 3, drawCalls, species, quiet: quietSources.size > 0 };
     },
     /**
      * The formation-slot API: the live formation state of a spawn's formation part, or null:

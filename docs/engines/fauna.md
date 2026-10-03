@@ -299,6 +299,11 @@ voice is disposed with the instance.
 | `skyWhale` | drift | `call` on `calls.interval` |
 | any | wingman | `wingman.trigger` on joining and peeling off |
 
+**Quiet wildlife.** While any source holds the typed `wildlifeQuiet` event (the celestial engine's
+eclipse through totality), every fauna group falls silent: no calls, breach calls or scatter cries,
+and the voice level drops to 0 (the audio engine eases it out). The animals keep moving, and the
+`fauna:*` bus events still fire. `stats().quiet` is true while it holds.
+
 ## Bus events and the formation-slot API
 
 | event | payload | when |
