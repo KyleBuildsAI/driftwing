@@ -13,21 +13,9 @@
 // tools/steps/presets-batch2.json drives it (a dev server: it imports this module by URL). Never part
 // of a production build: only step files import it. Every failed check calls console.error.
 // It holds the checks of presets 11-20; presetChecks.js holds those of presets 21-30, with the same
-// window.__dwPresets name (one kit is installed per run).
-import { createGeometryTracker, splitFresh } from './geometryTracker.js';
-
-/** Resolves after `count` animation frames. */
-function frames(count) {
-  return new Promise((resolve) => {
-    let left = count;
-    const tick = () => {
-      left--;
-      if (left <= 0) resolve();
-      else requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-}
+// window.__dwPresets name (one kit is installed per run). The waits, the photo-camera framing and the
+// dispose check come from spawnCheckKit.js, the one kit of the spawn checks.
+import { createDisposeCheck, createFraming, frames } from './spawnCheckKit.js';
 
 /** Resolves after `seconds` of wall time, frame by frame. */
 async function seconds(duration) {
@@ -59,9 +47,10 @@ export function installPresetChecks(game) {
   ctx.bus.on('fauna:formation', (payload) => events.formation.push(payload.state));
   ctx.bus.on('fauna:call', (payload) => events.call.push(payload.reason));
   ctx.bus.on('structure:gate', (payload) => events.gate.push(payload.kind));
-  const tracker = createGeometryTracker(ctx.renderer, ctx.scene);
-  if (tracker) tracker.attribute(manager.registry.names().map((name) => manager.registry.get(name)));
-  /** The open spawn of each preset under test: { id, before, siteId, site }. */
+  const framing = createFraming(ctx);
+  const { viewpoint, terrainIdle, frameView } = framing;
+  const dispose = createDisposeCheck(ctx, framing);
+  /** The open spawn of each preset under test: { id, baseline, siteId, site }. */
   const open = new Map();
   /**
    * The site presets, held out of the manager while another preset is under test: a site the feed
@@ -69,7 +58,8 @@ export function installPresetChecks(game) {
    * added back for its own test and all are restored by finish().
    */
   const heldSites = new Map();
-  const park = { x: 0, y: 0, z: 0, heading: 0 };
+  /** Where the craft waits while the photo camera frames a spawn (frameView moves it). */
+  const park = framing.park;
   /** The eagle's wingman modes seen across the escort check's calls. */
   const eagleModes = new Set();
 
@@ -80,71 +70,8 @@ export function installPresetChecks(game) {
     return line;
   }
 
-  function memory() {
-    const info = ctx.renderer.info.memory;
-    return { geometries: info.geometries, textures: info.textures };
-  }
-
   function setSun(elevation, morning = false) {
     ctx.systems.sky.setDayTime(ctx.util.dayTimeForSunElevation(elevation, morning), { transition: 0 });
-  }
-
-  /** True when the terrain stays below the sight line from position to target. */
-  function clearSight(position, target) {
-    for (let sample = 1; sample < 32; sample++) {
-      const share = sample / 32;
-      const y = position.y + (target.y - position.y) * share;
-      if (ground(position.x + (target.x - position.x) * share, position.z + (target.z - position.z) * share) > y - 4) return false;
-    }
-    return true;
-  }
-
-  /** A camera position `distance` m from target with a clear view of it, trying bearings around it. */
-  function viewpoint(target, distance, height, bearing) {
-    for (let lift = 0; lift < 6; lift++) {
-      for (const turn of [0, 40, -40, 80, -80, 120, -120, 160, -160]) {
-        const point = offset(target.x, target.z, bearing + turn, distance);
-        const position = { x: point.x, y: Math.max(ground(point.x, point.z) + height * (1 + lift * 0.6), target.y + height * 0.2), z: point.z };
-        if (clearSight(position, target)) return position;
-      }
-    }
-    const point = offset(target.x, target.z, bearing, distance);
-    return { x: point.x, y: target.y + distance, z: point.z };
-  }
-
-  /** Waits (up to two minutes) until the terrain has nothing queued, in flight, uploading or fading. */
-  async function terrainIdle() {
-    const started = performance.now();
-    let quiet = 0;
-    while (performance.now() - started < 120000 && quiet < 20) {
-      await frames(1);
-      const stats = ctx.systems.terrain.getStats();
-      quiet = stats.queued === 0 && stats.inFlight === 0 && stats.awaitingUpload === 0 && stats.fading === 0 ? quiet + 1 : 0;
-    }
-    return quiet >= 20;
-  }
-
-  /** Parks the craft behind the camera and frames target from position (photo mode). */
-  async function frameView(position, target) {
-    const lookX = target.x - position.x;
-    const lookZ = target.z - position.z;
-    const length = Math.hypot(lookX, lookZ) || 1;
-    park.x = position.x - (lookX / length) * 300;
-    park.z = position.z - (lookZ / length) * 300;
-    park.y = Math.max(position.y, ground(park.x, park.z) + 200);
-    park.heading = (Math.atan2(lookX, -lookZ) * 180) / Math.PI;
-    ctx.systems.flight.resetTo(park);
-    await frames(2);
-    ctx.setPhotoMode(true);
-    // The photo camera takes the pose once photo mode is live (a frame or two after the switch).
-    let posed = false;
-    for (let attempt = 0; attempt < 60 && !posed; attempt++) {
-      await frames(1);
-      posed = ctx.systems.camera.setFreeCameraPose({ position: new THREE.Vector3(position.x, position.y, position.z), target: new THREE.Vector3(target.x, target.y, target.z) });
-    }
-    const settled = await terrainIdle();
-    await frames(20);
-    return settled && posed;
   }
 
   /** Flies the craft (photo mode off) to `distance` m short of (x, z), facing it, `height` m up. */
@@ -206,14 +133,11 @@ export function installPresetChecks(game) {
     return best;
   }
 
-  /** Starts a spawn of presetId and records the memory before it (and the world's geometries since). */
+  /** Starts a spawn of presetId and records the dispose baseline before it (and the world's geometries since). */
   async function begin(presetId, start) {
-    await terrainIdle();
-    const before = memory();
-    const windBefore = ctx.wind.sourceCount;
-    if (tracker) tracker.start();
+    const baseline = await dispose.baseline();
     const id = start();
-    open.set(presetId, { id, before, windBefore });
+    open.set(presetId, { id, baseline });
     return id;
   }
 
@@ -252,7 +176,7 @@ export function installPresetChecks(game) {
         heldSites.set(preset.id, preset);
         manager.removePreset(preset.id);
       }
-      return check('setup: the real presets are registered and the geometry tracker is live', presets.length > 0 && tracker !== null, { presets, tracker: tracker !== null });
+      return check('setup: the real presets are registered and the geometry tracker is live', presets.length > 0 && dispose.tracker !== null, { presets, tracker: dispose.tracker !== null });
     },
 
     /**
@@ -318,31 +242,22 @@ export function installPresetChecks(game) {
         { id, site: siteId, category: preset.category, tier: manager.getInstance(id)?.tier, terrainSettled: settled, discovery: found, engines: preset.engines.map((entry) => entry.engine) });
     },
 
-    /** Ends presetId's spawn: GPU memory back, wind sources removed, no leak. */
+    /** Ends presetId's spawn: GPU memory back, wind sources, lights and sky modifiers back, no leak. */
     async end(presetId) {
       const entry = open.get(presetId);
       if (!entry || !entry.id) return check(`${presetId}: ended`, false, 'never spawned');
       ctx.setPhotoMode(true);
-      const record = manager.getInstance(entry.id);
-      const ownSources = record ? manager.getParts(entry.id).flatMap((instance) => instance.windSourceIds) : [];
       // A site leaves with its preset (or the feed would build it again at once); an event is ended.
       if (entry.siteId) manager.removePreset(presetId);
       else manager.deactivate(entry.id, 'preset check');
-      await frames(6);
-      await terrainIdle();
-      const after = memory();
-      const fresh = tracker ? tracker.stop() : [];
-      const { world, leftBehind } = splitFresh(fresh, []);
       open.delete(presetId);
-      const leaks = manager.getStats().leaks;
-      const live = new Set(ctx.wind.listSources().map((source) => source.id));
-      const sourcesLeft = ownSources.filter((sourceId) => live.has(sourceId));
-      // The world may also free geometries meanwhile (terrain chunks the craft left behind), so the
-      // count may fall short of the world's first draws, never exceed them.
-      const ok = leftBehind.length === 0 && after.geometries - entry.before.geometries <= world && after.textures === entry.before.textures
-        && sourcesLeft.length === 0 && manager.getInstance(entry.id) === null && (leaks.windSources ?? 0) === 0 && (leaks.lights ?? 0) === 0;
-      return check(`${presetId}: dispose returns GPU memory and removes its wind sources`, ok,
-        { before: entry.before, after, worldFirstDrawn: world, leftBehind: leftBehind.map((item) => `${item.owner}/${item.object}`), ownWindSources: ownSources, left: sourcesLeft, windSources: `${entry.windBefore} -> ${ctx.wind.sourceCount}`, leaks });
+      // Wind sources added since the baseline and still present are this spawn's leftovers.
+      const result = await dispose.compare(entry.baseline, { presetIds: [presetId] });
+      const gone = manager.getInstance(entry.id) === null;
+      return check(`${presetId}: dispose returns GPU memory and removes its wind sources`, result.ok && gone, {
+        before: result.before, after: result.after, worldFirstDrawn: result.worldFirstDrawn, leftBehind: result.leftBehind,
+        windSources: result.windSources, windLeft: result.windLeft, skyModifiers: result.skyModifiers, lights: result.lights, leaks: result.leaks, gone,
+      });
     },
 
     /**
@@ -570,7 +485,7 @@ export function installPresetChecks(game) {
 
     /** The summary line; puts the renderer's geometry manager back. */
     finish() {
-      if (tracker) tracker.restore();
+      dispose.restore();
       for (const [presetId, preset] of heldSites) if (!manager.getPreset(presetId)) manager.addPreset(preset);
       ctx.setPhotoMode(false);
       const failed = results.filter((line) => line.startsWith('FAIL'));

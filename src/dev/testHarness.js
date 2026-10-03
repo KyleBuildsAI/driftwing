@@ -65,7 +65,17 @@
 // on the harness itself: every run flew its planned craft in its planned view (checked every
 // frame of the run), and every scripted manoeuvre was observed.
 //
-// URL options: testSeeds=A,B,C  testSeconds=60  testCraft=glider,jet  testViews=first,third.
+// The soak (testPlan=soak, Phase 2 Milestone G; tools/run-harness.mjs --test soak) is the same harness
+// as a 10-minute run with the event director live: 5 world seeds (SOAK_SEEDS), one craft per seed (the
+// six craft in turn), both views, 60 s each (5 x 2 x 60 s). The director runs as in the game on every
+// world (its activations, the sites it brings into range and the spawn counts are reported per world).
+// Its criteria add to the flight test's: heap growth under SOAK_HEAP_LIMIT_MB (75 MB), the worst p99
+// frame time within the perf governor's frame target, and the director live on every world (it
+// ticked, and the spawns it and the site feed started are counted); NaN, penetrations, console and
+// frames over 50 ms after warmup are judged as in the flight test.
+//
+// URL options: testSeeds=A,B,C  testSeconds=60  testCraft=glider,jet  testViews=first,third
+// testPlan=soak.
 // Output: the on-screen summary panel (per-run table, overall PASS / FAIL, JSON download) and
 // window.DRIFTWING.testReport for automation (tools/run-harness.mjs).
 import { installConsoleCapture } from './testConsole.js';
@@ -98,6 +108,9 @@ const UI_WARMUP_SETTLE_SECONDS = 8;
 const UI_WARMUP_WAKE_SECONDS = 1.5;
 const FRAME_LIMIT_MS = 50;
 const HEAP_LIMIT_MB = 50;
+/** The soak plan (testPlan=soak): five worlds, one craft each, both views, a 75 MB heap limit. */
+const SOAK_SEEDS = Object.freeze(['SOAK-1', 'SOAK-2', 'SOAK-3', 'SOAK-4', 'SOAK-5']);
+const SOAK_HEAP_LIMIT_MB = 75;
 const PENETRATION_LIMIT_M = 1;
 /** A run that starts below this height (m) or on the ground is lifted to START_AGL first. */
 const MIN_START_AGL = 120;
@@ -114,9 +127,11 @@ const SLOW_CAUSES = Object.freeze(['systems', 'gc', 'mainThread', 'delayed']);
 /** Reads the URL options; unknown craft and views are dropped (and reported). */
 function readConfig(params) {
   const notes = [];
+  const soak = params.get('testPlan') === 'soak';
+  if (params.has('testPlan') && !soak) notes.push(`testPlan "${params.get('testPlan')}" is not a plan (soak) and was ignored`);
   const listParam = (name) => (params.get(name) ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
   let seeds = listParam('testSeeds').map((seed) => seed.toUpperCase().replace(/[^A-Z0-9-]+/g, '-').slice(0, 24)).filter(Boolean);
-  if (seeds.length === 0) seeds = DEFAULT_SEEDS.slice();
+  if (seeds.length === 0) seeds = (soak ? SOAK_SEEDS : DEFAULT_SEEDS).slice();
   let crafts = listParam('testCraft').filter((craft) => {
     const known = SCRIPTED_CRAFT.includes(craft);
     if (!known) notes.push(`testCraft "${craft}" is not a craft and was ignored`);
@@ -133,6 +148,7 @@ function readConfig(params) {
   const runSeconds = Number.isFinite(requestedSeconds) && requestedSeconds >= 5 ? Math.min(requestedSeconds, 600) : DEFAULT_RUN_SECONDS;
   if (params.has('testSeconds') && runSeconds !== requestedSeconds) notes.push(`testSeconds ${params.get('testSeconds')} is outside 5-600 s; using ${runSeconds} s`);
   return {
+    plan: soak ? 'soak' : 'matrix',
     seeds,
     crafts: SCRIPTED_CRAFT.filter((craft) => crafts.includes(craft)),
     views: VIEWS.filter((view) => views.includes(view)),
@@ -142,14 +158,25 @@ function readConfig(params) {
     warmupLapSeconds: WARMUP_LAP_SECONDS,
     uiWarmupSeconds: UI_WARMUP_DAY_TIMES.length * UI_WARMUP_STEP_SECONDS + UI_WARMUP_SETTLE_SECONDS + UI_WARMUP_WAKE_SECONDS,
     frameLimitMs: FRAME_LIMIT_MS,
-    heapLimitMB: HEAP_LIMIT_MB,
+    heapLimitMB: soak ? SOAK_HEAP_LIMIT_MB : HEAP_LIMIT_MB,
     penetrationLimitM: PENETRATION_LIMIT_M,
     notes,
   };
 }
 
+/**
+ * The runs in order: every craft and view on every seed, or for the soak one craft per seed (the
+ * crafts in turn) in every view.
+ */
 function buildPlan(config) {
   const plan = [];
+  if (config.plan === 'soak') {
+    config.seeds.forEach((seed, seedIndex) => {
+      const craft = config.crafts[seedIndex % config.crafts.length];
+      for (const view of config.views) plan.push({ index: plan.length, seed, craft, view });
+    });
+    return plan;
+  }
   for (const seed of config.seeds) {
     for (const craft of config.crafts) {
       for (const view of config.views) plan.push({ index: plan.length, seed, craft, view });
@@ -218,7 +245,7 @@ function hideRealGamepads() {
 
 function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepads }) {
   const { state, bus, settings, world, CONFIG } = ctx;
-  const panel = createTestPanel({ title: 'Flight test' });
+  const panel = createTestPanel({ title: params.get('testPlan') === 'soak' ? 'Soak test' : 'Flight test' });
   /** The run being flown (null between runs); console entries and events are booked to it. */
   let activeRun = null;
 
@@ -250,6 +277,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
   }
   const plan = session.plan;
   const config = session.config;
+  const heapLimitMB = Number.isFinite(config.heapLimitMB) ? config.heapLimitMB : HEAP_LIMIT_MB;
+  const soak = config.plan === 'soak';
 
   // The world (page load) this system belongs to. Its console entries so far happened while it loaded.
   const worldRecord = {
@@ -264,7 +293,13 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     lap: [],
     runs: [],
     outside: createBucket(),
+    // The event director and the spawns on this world (the soak reports them; the flight test too).
+    spawns: { directorTicks: null, directorActivations: null, directorLog: [], notables: null, activated: { site: 0, event: 0 }, peak: 0 },
   };
+  bus.onTyped('spawnActivated', (payload) => {
+    if (payload && payload.kind === 'site') worldRecord.spawns.activated.site++;
+    else worldRecord.spawns.activated.event++;
+  });
   const pendingConsole = [];
   for (const entry of capture.entries) pendingConsole.push(entry);
   listeners.entry = (entry) => {
@@ -479,6 +514,14 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     } else {
       penetrationEpisode = null;
     }
+  }
+
+  /** The most spawns alive at once on this world (sites and events). */
+  function sampleSpawns() {
+    const manager = ctx.systems.spawns && ctx.systems.spawns.manager;
+    if (!manager) return;
+    const count = manager.spawnCount();
+    if (count > worldRecord.spawns.peak) worldRecord.spawns.peak = count;
   }
 
   function observe(run, dt) {
@@ -706,6 +749,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       heapStartMB: run.heapStartMB,
       heapEndMB,
       heapDeltaMB: Number.isFinite(run.heapStartMB) && Number.isFinite(heapEndMB) ? round(heapEndMB - run.heapStartMB, 2) : null,
+      frameTargetMs: Number.isFinite(state.perf.targetMs) ? round(state.perf.targetMs, 2) : null,
+      spawnsAtEnd: ctx.systems.spawns && ctx.systems.spawns.manager ? ctx.systems.spawns.manager.spawnCount() : null,
       script: { checks, steps: run.stepLog, autopilotChanges: run.autopilotChanges },
       observed: {
         autopilotSeconds: round(seen.autopilotSeconds, 1),
@@ -749,6 +794,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     worldRecord.heapGrowthFromLoadMB = Number.isFinite(worldRecord.heapAtLoadMB) && Number.isFinite(worldRecord.heapFinalMB)
       ? round(worldRecord.heapFinalMB - worldRecord.heapAtLoadMB, 2)
       : null;
+    readDirector();
     session.worlds.push({
       seed: worldRecord.seed,
       backend: worldRecord.backend,
@@ -761,7 +807,20 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       lap: worldRecord.lap,
       runs: worldRecord.runs.map((run) => run.index),
       outside: worldRecord.outside,
+      spawns: worldRecord.spawns,
     });
+  }
+
+  /** The event director's record on this world so far: ticks, activations (with their log), notables. */
+  function readDirector() {
+    const director = ctx.systems.spawns && ctx.systems.spawns.director;
+    if (!director) return;
+    const directorState = director.getState();
+    const record = worldRecord.spawns;
+    record.directorTicks = directorState.ticks;
+    record.directorActivations = directorState.logLength;
+    record.notables = directorState.notables;
+    record.directorLog = directorState.log.map((entry) => ({ time: round(entry.time, 1), presetId: entry.presetId, reason: entry.reason }));
   }
 
   function complete() {
@@ -783,13 +842,35 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     return { id, label, value, status, detail };
   }
 
+  /**
+   * The soak's own criteria: the worst p99 frame time within the frame target the perf governor holds,
+   * and the event director live on every world (it ticked; its activations and the spawns started on
+   * the world are listed with it).
+   */
+  function soakCriteria(runs, worlds, complete) {
+    const p99s = runs.map((run) => run.p99Ms).filter(Number.isFinite);
+    const targets = runs.map((run) => run.frameTargetMs).filter(Number.isFinite);
+    const worstP99 = p99s.length > 0 ? Math.max(...p99s) : null;
+    const target = targets.length > 0 ? Math.min(...targets) : null;
+    const p99Status = worstP99 === null || target === null ? (complete ? 'fail' : 'muted') : worstP99 <= target ? 'pass' : 'fail';
+    const closed = worlds.filter((entry) => !entry.open && entry.spawns);
+    const live = closed.filter((entry) => entry.spawns.directorTicks > 0);
+    const activations = closed.reduce((sum, entry) => sum + (entry.spawns.directorActivations ?? 0), 0);
+    const started = closed.reduce((sum, entry) => sum + entry.spawns.activated.site + entry.spawns.activated.event, 0);
+    const directorStatus = closed.length === 0 ? (complete ? 'fail' : 'muted') : live.length === closed.length && (!complete || closed.length === config.seeds.length) ? 'pass' : 'fail';
+    return [
+      criterion('p99', 'Worst p99 frame time within the frame target', worstP99 === null ? 'pending' : `${worstP99} ms against ${target ?? 'n/a'} ms`, p99Status),
+      criterion('director', 'Event director live on every world', `${live.length} / ${closed.length} worlds, ${activations} director activations, ${started} spawns started`, directorStatus),
+    ];
+  }
+
   /** Rebuilds window.DRIFTWING.testReport (the same object, updated in place) from the session. */
   function publish() {
     const runs = session.runs;
     const worlds = session.worlds.slice();
     // This page load's world, while it is still being flown.
     if (!worldClosed && worldReadyMs !== null && session.status !== 'complete') {
-      worlds.push({ seed: worldRecord.seed, backend: worldRecord.backend, loadSeconds: worldRecord.loadSeconds, heapAtLoadMB: worldRecord.heapAtLoadMB, heapBaselineMB: worldRecord.heapBaselineMB, heapFinalMB: null, heapGrowthMB: null, heapGrowthFromLoadMB: null, lap: worldRecord.lap, runs: worldRecord.runs.map((run) => run.index), outside: worldRecord.outside, open: true });
+      worlds.push({ seed: worldRecord.seed, backend: worldRecord.backend, loadSeconds: worldRecord.loadSeconds, heapAtLoadMB: worldRecord.heapAtLoadMB, heapBaselineMB: worldRecord.heapBaselineMB, heapFinalMB: null, heapGrowthMB: null, heapGrowthFromLoadMB: null, lap: worldRecord.lap, runs: worldRecord.runs.map((run) => run.index), outside: worldRecord.outside, spawns: worldRecord.spawns, open: true });
     }
     const outsideSum = (field) => worlds.reduce((sum, entry) => sum + (field === 'nan' ? entry.outside.nanFrames + entry.outside.nanGuardEvents : entry.outside[field]), 0);
     const sum = (field) => runs.reduce((total, run) => total + (Number.isFinite(run[field]) ? run[field] : 0), 0);
@@ -814,12 +895,13 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       criterion('penetrations', `Terrain penetrations (> ${PENETRATION_LIMIT_M} m)`, String(penetrations), penetrations === 0 ? 'pass' : 'fail'),
       criterion('console', 'Console errors / warnings', `${consoleErrors} / ${consoleWarnings}`, consoleErrors === 0 && consoleWarnings === 0 ? 'pass' : 'fail'),
       heapMeasured
-        ? criterion('heap', `Heap growth after warmup (< ${HEAP_LIMIT_MB} MB)`, maxHeapGrowth === null ? 'pending' : `${maxHeapGrowth} MB max`, maxHeapGrowth === null ? (complete ? 'fail' : 'muted') : maxHeapGrowth < HEAP_LIMIT_MB ? 'pass' : 'fail')
-        : criterion('heap', `Heap growth after warmup (< ${HEAP_LIMIT_MB} MB)`, 'unavailable', 'muted', 'performance.memory is not available in this browser'),
+        ? criterion('heap', `Heap growth after warmup (< ${heapLimitMB} MB)`, maxHeapGrowth === null ? 'pending' : `${maxHeapGrowth} MB max`, maxHeapGrowth === null ? (complete ? 'fail' : 'muted') : maxHeapGrowth < heapLimitMB ? 'pass' : 'fail')
+        : criterion('heap', `Heap growth after warmup (< ${heapLimitMB} MB)`, 'unavailable', 'muted', 'performance.memory is not available in this browser'),
       criterion('frames', `Frames over ${FRAME_LIMIT_MS} ms after warmup`, String(slowFrames), slowFrames === 0 ? 'pass' : 'fail'),
       criterion('plan', 'Runs flown as planned (craft and view)', `${runs.length - setupFailures} / ${plan.length}`, setupFailures === 0 && (!complete || runs.length === plan.length) ? 'pass' : 'fail'),
       criterion('script', 'Scripted manoeuvres observed', `${scriptPassed} / ${scriptChecks.length}`, scriptPassed === scriptChecks.length ? 'pass' : 'fail'),
     ];
+    if (soak) criteria.push(...soakCriteria(runs, worlds, complete));
     const failed = criteria.some((entry) => entry.status === 'fail') || session.harnessErrors.length > 0;
     const sortedP99 = runs.map((run) => run.p99Ms).filter(Number.isFinite);
     Object.assign(report, {
@@ -850,6 +932,10 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         nanEvents: 'Frames with a non-finite craft pose or telemetry sampled by the harness, plus every restore by the flight model guard (per tick) and core\'s frame guard.',
         penetration: `The craft reference point (state.player.position) more than ${PENETRATION_LIMIT_M} m below the shared height function (world.groundHeight) or the water surface, sampled every frame; one continuous episode counts once.`,
         heapGrowth: 'JS heap (performance.memory.usedJSHeapSize) after a forced GC, from the end of each world\'s warmup lap to the end of that world\'s last run; the largest growth across worlds is judged. The growth from the end of the world warmup (before the lap) is listed too.',
+        ...(soak ? {
+          p99: 'The soak judges the worst run\'s p99 frame time (after warmup) against the frame target the perf governor holds (state.perf.targetMs: the display refresh, 60 Hz in a browser under automation).',
+          director: 'The event director runs as in the game on every world. It is live when it ticked on the world; its activations (with their reasons), the sites and events started on the world and the most spawns alive at once are listed.',
+        } : {}),
       },
       criteria,
       totals: {
@@ -953,6 +1039,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
           { key: 'growth', label: 'Growth MB', numeric: true },
           { key: 'fromLoad', label: 'Growth from load MB', numeric: true },
           { key: 'outside', label: 'Between runs: NaN / pen. / err / warn', numeric: true },
+          { key: 'spawns', label: 'Director / started / peak', numeric: true, title: 'Director activations, spawns started on the world (sites and events), most spawns alive at once' },
         ],
         rows: report.worlds.map((entry) => ({
           seed: entry.seed,
@@ -962,8 +1049,9 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
           baseline: entry.heapBaselineMB ?? 'n/a',
           fromLoad: entry.heapGrowthFromLoadMB ?? 'n/a',
           final: entry.heapFinalMB ?? 'n/a',
-          growth: entry.heapGrowthMB === null ? 'n/a' : { text: entry.heapGrowthMB, status: entry.heapGrowthMB < HEAP_LIMIT_MB ? 'pass' : 'fail' },
+          growth: entry.heapGrowthMB === null ? 'n/a' : { text: entry.heapGrowthMB, status: entry.heapGrowthMB < heapLimitMB ? 'pass' : 'fail' },
           outside: `${entry.outside.nanFrames + entry.outside.nanGuardEvents} / ${entry.outside.penetrations} / ${entry.outside.consoleErrors} / ${entry.outside.consoleWarnings}`,
+          spawns: entry.spawns ? `${entry.spawns.directorActivations ?? '-'} / ${entry.spawns.activated.site + entry.spawns.activated.event} / ${entry.spawns.peak}` : '-',
         })),
       },
     });
@@ -977,6 +1065,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       ...run.script.checks.filter((check) => !check.passed).map((check) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): scripted manoeuvre not observed: ${check.label}`),
     ]);
     if (eventList.length > 0) sections.push({ title: 'Events', notes: eventList.slice(0, 60) });
+    const directorNotes = report.worlds.filter((entry) => entry.spawns && entry.spawns.directorTicks !== null).map((entry) => `${entry.seed}: ${entry.spawns.directorTicks} director ticks, ${entry.spawns.notables} notables, activations: ${entry.spawns.directorLog.length > 0 ? entry.spawns.directorLog.map((log) => `${log.presetId} at ${log.time} s (${log.reason})`).join(', ') : 'none'}; ${entry.spawns.activated.site} sites and ${entry.spawns.activated.event} events started, at most ${entry.spawns.peak} spawns at once`);
+    if (directorNotes.length > 0) sections.push({ title: 'Event director and spawns', notes: directorNotes });
     if (report.console.length > 0) sections.push({ title: 'Console errors and warnings', notes: report.console.slice(0, 30).map((entry) => `[${entry.level}] ${entry.context}: ${entry.text}`) });
     if (report.harnessErrors.length > 0) sections.push({ title: 'Harness problems', notes: report.harnessErrors });
     sections.push({ title: 'Definitions', notes: Object.values(report.definitions).concat(config.notes) });
@@ -988,6 +1078,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         ['Backend', report.environment.backends.join(', ')],
         ['three.js', `r${report.environment.revision}`],
         ['Seeds', config.seeds.join(', ')],
+        ['Plan', soak ? 'soak: one craft per world, both views, the event director live' : 'every craft in every view on every world'],
         ['Runs', `${report.totals.runs} x ${config.runSeconds} s`],
         ['Views', config.views.map((view) => `${view} person`).join(', ')],
         ['Warmup', `${config.worldWarmupSeconds} s + ${round(config.uiWarmupSeconds, 1)} s UI + a ${config.warmupLapSeconds} s lap per craft and view per world, ${config.runWarmupSeconds} s per run`],
@@ -1048,6 +1139,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     }
     if (phase === 'complete' || phase === 'waitingForReady' || phase === 'loading') return;
     samplePose();
+    sampleSpawns();
     if (phase === 'worldWarmup') {
       updateProgress(now);
       if ((now - worldReadyMs) / 1000 < config.worldWarmupSeconds) return;

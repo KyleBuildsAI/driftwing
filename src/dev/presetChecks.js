@@ -6,10 +6,11 @@
 //   - frames it for a screenshot (photo mode, the free camera on its anchor, or on its part of the sky);
 //   - waits for its discovery: the typed discovery event, the journal entry and the journal's
 //     'journal:discovery' (the glass discovery card follows it);
-//   - after dispose, proves GPU memory back to its level (the geometry tracker tells the world's first
-//     draws, a terrain chunk or a landmark, from anything a spawn left behind), the wind sources and
-//     the sky modifiers back (no wind source added since the create left; the modifier count as
-//     before), and no leaks reported by the SpawnManager.
+//   - after dispose, proves through the shared dispose check (spawnCheckKit.js, the one kit of the
+//     spawn checks) GPU memory back to its level (the geometry tracker tells the world's first draws,
+//     a terrain chunk or a landmark, from anything a spawn left behind), the wind sources, the sky
+//     modifiers and the real lights back (no wind source added since the create left; the modifier
+//     and light counts as before), and no leaks reported by the SpawnManager.
 // Site presets are also shown on their REAL stamped sites from the site feed, and their placement is
 // checked against a freshly built world (the same site-list hash twice).
 //
@@ -19,17 +20,10 @@
 // Every failed check calls console.error, so the smoke run fails. Never part of a production build:
 // only dev-server step files import it.
 import { createBrowserHelpers } from './structureTestKit.js';
-import { createGeometryTracker, splitFresh } from './geometryTracker.js';
+import { createDisposeCheck, frames, holdConditions, wait } from './spawnCheckKit.js';
 import { createWorldGen } from '../world/worldgen.js';
 import { hashSiteList } from '../world/placement.js';
 
-/**
- * Owner-name prefixes of pooled meshes that carry per-instance geometry (the structure engine's mesh
- * pools): a geometry still alive under one after dispose is a leak. Every other engine draws its
- * spawns in fixed shared buffers, and an object an engine adds to the scene during create, update,
- * setLOD or dispose is attributed to the spawns by the tracker itself.
- */
-const SPAWN_OWNERS = Object.freeze(['structure-']);
 const STAND_IN_CALLOUTS = Object.freeze(['{name} {distance} {direction}.', '{name} ahead, {eta}.', 'Dev stand-in: {name}.']);
 
 /** Dev stand-ins for child presets a set piece names that are not in this tree yet. */
@@ -79,33 +73,13 @@ function standInPreset(id) {
   return null;
 }
 
-/** Resolves after `count` animation frames. */
-function frames(count) {
-  return new Promise((resolve) => {
-    let left = count;
-    const tick = () => {
-      left--;
-      if (left <= 0) resolve();
-      else requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-}
-
-/** Resolves after `ms` of wall time, while the frames keep running. */
-function wait(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 export function installPresetChecks(game) {
   const helpers = createBrowserHelpers(game, 'presets');
   const { ctx, THREE, check, viewpoint, frameView, terrainIdle } = helpers;
   const { state } = game;
   const system = ctx.systems.spawns;
   const manager = system.manager;
-  const tracker = createGeometryTracker(ctx.renderer, ctx.scene);
+  const dispose = createDisposeCheck(ctx, helpers);
   const spawned = new Map();
   const discoveries = [];
   const journalCards = [];
@@ -165,7 +139,6 @@ export function installPresetChecks(game) {
 
     /** Attributes the engines for the memory checks and adds dev stand-ins for missing set-piece children. */
     setup() {
-      if (tracker) tracker.attribute(manager.registry.names().map((name) => manager.registry.get(name)));
       const added = [];
       for (const preset of manager.listPresets()) {
         for (const entry of preset.engines) {
@@ -177,16 +150,14 @@ export function installPresetChecks(game) {
           }
         }
       }
-      return check('setup: engines attributed, set-piece children present', manager.listPresets().every((preset) => preset.engines.every((entry) => entry.engine !== 'setPiece' || Object.values(entry.params.children).every((child) => manager.getPreset(child.preset)))), { tracked: tracker !== null, standIns: added, presets: manager.listPresets().length });
+      return check('setup: engines attributed, set-piece children present', manager.listPresets().every((preset) => preset.engines.every((entry) => entry.engine !== 'setPiece' || Object.values(entry.params.children).every((child) => manager.getPreset(child.preset)))), { tracked: dispose.tracker !== null, standIns: added, presets: manager.listPresets().length });
     },
 
     /** The time of day (sun elevation in degrees, morning or evening, held there) and the regional weather. */
     async conditions({ sun = 20, morning = false, weather = 'clear' } = {}) {
-      ctx.settings.set('timeFrozen', true);
-      ctx.systems.weather.forceState(weather, 0.5);
-      ctx.systems.sky.setDayTime(ctx.util.dayTimeForSunElevation(sun, !morning), { transition: 0 });
+      const line = holdConditions(ctx, { sun, morning, weather });
       await frames(8);
-      return `sun ${sun} deg (${morning ? 'morning' : 'evening'}), weather ${weather}`;
+      return line;
     },
 
     /**
@@ -204,15 +175,11 @@ export function installPresetChecks(game) {
         presetId,
         id: null,
         idle,
-        before: memory(),
-        windBefore: ctx.wind.sourceCount,
-        windIdsBefore: new Set(ctx.wind.listSources().map((source) => source.id)),
-        skyBefore: ctx.systems.sky.getModifierState().count,
-        leaksBefore: { ...manager.getStats().leaks },
+        // The terrain went idle and the sites were swept just now: the baseline reads at once.
+        baseline: await dispose.baseline({ waitTerrain: false }),
         discoveriesBefore: discoveries.length,
         cardsBefore: journalCards.length,
       };
-      if (tracker) tracker.start();
       record.id = system.forceSpawn(presetId, { distance, force: true });
       spawned.set(presetId, record);
       await wait(runSeconds * 1000);
@@ -452,39 +419,14 @@ export function installPresetChecks(game) {
       const active = manager.getInstance(record.id) !== null;
       if (active) manager.deactivate(record.id, 'test');
       ctx.setPhotoMode(false);
-      await frames(8);
-      const after = memory();
       spawned.delete(presetId);
-      const fresh = tracker ? tracker.stop() : [];
-      const split = splitFresh(fresh, SPAWN_OWNERS);
-      // Geometries a LIVE structure spawn still shows are not this disposed spawn's (a site the site feed
-      // built meanwhile, as the camera moved); and a structure geometry can only be this preset's when it
-      // has a structure part.
-      const held = new Set();
-      for (const spawn of manager.getActive()) {
-        for (const part of manager.getParts(spawn.id)) {
-          if (part.engine !== 'structure' || !part.data.meshes) continue;
-          for (const mesh of Object.values(part.data.meshes)) if (mesh && mesh.geometry) held.add(mesh.geometry.uuid);
-        }
-      }
-      const ownsStructure = (manager.getPreset(presetId)?.engines ?? []).some((entry) => entry.engine === 'structure');
-      const leftBehind = split.leftBehind.filter((entry) => !held.has(entry.uuid) && (ownsStructure || !entry.owner.startsWith('structure-')));
-      const worldFresh = split.world + (split.leftBehind.length - leftBehind.length);
-      const leaks = manager.getStats().leaks;
-      const windAfter = ctx.wind.sourceCount;
-      // Wind sources added since the create and still present are this spawn's leftovers. The count
-      // alone can also drop by a live site spawn's source (a real site the craft left meanwhile).
-      const windLeft = ctx.wind.listSources().filter((source) => !record.windIdsBefore.has(source.id)).map((source) => source.id);
-      const skyAfter = ctx.systems.sky.getModifierState().count;
-      // The count may also drop by what the world freed meanwhile (a far site the craft left behind is
-      // removed with its geometry); a spawn's leftovers show as leftBehind or as a count above the
-      // world's first draws.
-      const ok = leftBehind.length === 0 && after.geometries - record.before.geometries <= worldFresh && after.textures === record.before.textures
-        && windLeft.length === 0 && skyAfter === record.skyBefore
-        && leaks.windSources === record.leaksBefore.windSources && leaks.lights === record.leaksBefore.lights;
-      return check(`${presetId}: dispose returns GPU memory, removes its wind sources and sky modifiers`, ok, {
-        endedNaturally: !active, before: record.before, during: record.during, after, worldFirstDrawn: worldFresh, leftBehind,
-        windSources: `${record.windBefore} -> ${windAfter}`, windLeft, skyModifiers: `${record.skyBefore} -> ${skyAfter}`, leaks,
+      // Wind sources added since the create and still present are this spawn's leftovers (the count
+      // alone can also drop by a live site spawn's source); geometries a LIVE structure spawn still
+      // shows are not this disposed spawn's (a site the feed built meanwhile, as the camera moved).
+      const result = await dispose.compare(record.baseline, { presetIds: [presetId] });
+      return check(`${presetId}: dispose returns GPU memory, removes its wind sources and sky modifiers`, result.ok, {
+        endedNaturally: !active, before: result.before, during: record.during, after: result.after, worldFirstDrawn: result.worldFirstDrawn, leftBehind: result.leftBehind,
+        windSources: result.windSources, windLeft: result.windLeft, skyModifiers: result.skyModifiers, lights: result.lights, leaks: result.leaks,
       });
     },
 
@@ -541,7 +483,7 @@ export function installPresetChecks(game) {
 
     /** The summary check; puts the renderer's geometry manager back. */
     finish() {
-      if (tracker) tracker.restore();
+      dispose.restore();
       ctx.systems.weather.forceState(null);
       ctx.settings.set('timeFrozen', timeFrozenBefore);
       return helpers.finish();

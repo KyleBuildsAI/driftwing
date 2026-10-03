@@ -1247,6 +1247,25 @@ export function createSpawnManager(options) {
     getDiscovered() {
       return [...discovered];
     },
+    /**
+     * Dev only (the determinism test, src/dev/determinismTest.js): ends every spawn (reason 'reset'),
+     * forgets the discoveries, restarts the site sweep and the visibility rotation from their first
+     * cell and record, and puts the LOD bias back to 1. What the manager does from here on then
+     * depends only on the seed and the flown path, not on how many frames ran before (the loading
+     * frames differ between two page loads). Returns the number of spawns ended.
+     */
+    resetForReplay() {
+      const ended = records.length;
+      for (let index = records.length - 1; index >= 0; index--) removeRecordAt(index, 'reset');
+      discovered.clear();
+      siteScan.cursor = 0;
+      siteScan.total = 0;
+      visibilityCursor = 0;
+      view.frame = 0;
+      nextVisibilityFrame.fill(0);
+      lodScale[0] = 1;
+      return ended;
+    },
     /** Reads renderer.info.memory and the heap now: { geometries, textures, attributes, programs, bytes, heap }. */
     readMemory() {
       return readMemory(createMemoryReading());

@@ -23,8 +23,9 @@
 //        - the LODs seen: every stamp type must be seen live at every LOD.
 // With ?presets=real the same checks run on the GAME'S OWN stamped site presets
 // (src/spawns/presets/index.js) in the world as a player gets it: the nearest site of every stamped
-// preset, and every stamp type those presets use (the abandoned airfield's flatten strip, the floating
-// islands' islet bases, and whatever the other batches add).
+// preset, which must cover all six stamp types (the volcano's cone, the slot canyon's carve, the
+// waterfall's cliff step, the rope bridge's gorge, the airfield's flatten strip and the floating
+// islands' islet bases); a type no real preset uses fails the coverage criterion by name.
 // Criteria: fixtures placed (every stamp type within SEARCH_RADIUS of the spawn), 0 offline and live
 // seam violations, worker parity exact, collision within 0.5 m, every LOD seen per stamp type, every
 // pose settled, 0 console errors and 0 warnings, and no harness problems.
@@ -74,8 +75,11 @@ function testPresetSet() {
   if (!real) return { real, presets: TERRAIN_FIXTURES, types: STAMP_TYPES, stampTypeOf: (presetId) => FIXTURE_STAMP_TYPE[presetId] };
   const presets = PRESETS.filter((preset) => preset.kind === 'site' && (preset.stamps ?? []).length > 0);
   const typeById = new Map(presets.map((preset) => [preset.id, preset.stamps[0].type]));
-  const types = STAMP_TYPES.filter((type) => presets.some((preset) => preset.stamps.some((stamp) => stamp.type === type)));
-  return { real, presets, types, stampTypeOf: (presetId) => typeById.get(presetId) };
+  // Every stamp type the terrain knows must be covered: a type no real preset uses fails the
+  // coverage criterion by name (unusedTypes) instead of dropping out of the test unnoticed.
+  const types = STAMP_TYPES.slice();
+  const unusedTypes = STAMP_TYPES.filter((type) => !presets.some((preset) => preset.stamps.some((stamp) => stamp.type === type)));
+  return { real, presets, types, unusedTypes, stampTypeOf: (presetId) => typeById.get(presetId) };
 }
 
 /**
@@ -156,7 +160,12 @@ function createTerrainTestSystem(ctx, { capture, set }) {
     const unsettled = livePoses.filter((pose) => !pose.settled).length;
     const counts = capture.counts;
     return [
-      { id: 'fixtures', label: set.real ? 'Real preset sites (every stamp type they use)' : 'Fixture sites (every stamp type)', value: `${typesFound.size} / ${set.types.length} types`, status: world.hasStamps && everyType ? 'pass' : 'fail' },
+      {
+        id: 'fixtures',
+        label: set.real ? 'Real preset sites (every stamp type)' : 'Fixture sites (every stamp type)',
+        value: `${typesFound.size} / ${set.types.length} types${set.unusedTypes && set.unusedTypes.length > 0 ? ` (no real preset uses ${set.unusedTypes.join(', ')})` : ''}`,
+        status: world.hasStamps && everyType ? 'pass' : 'fail',
+      },
       { id: 'seams', label: 'Offline seams, every LOD pair', value: `${offlineViolations} cracks`, status: rows.length > 0 && offlineViolations === 0 ? 'pass' : 'fail' },
       { id: 'liveSeams', label: 'Live seams (displayed LODs)', value: `${liveViolations} cracks`, status: rows.length > 0 && liveViolations === 0 ? 'pass' : 'fail' },
       { id: 'parity', label: 'Worker meshes = main-thread builds', value: `${parityChunks} chunks, max diff ${parityWorst}`, status: parityChunks > 0 && parityWorst === 0 ? 'pass' : 'fail' },

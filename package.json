@@ -23,6 +23,14 @@
     "test:hotas:webgl": "node tools/run-harness.mjs --test hotas --backend webgl",
     "test:terrain": "node tools/run-harness.mjs --test terrain",
     "test:terrain:webgl": "node tools/run-harness.mjs --test terrain --backend webgl",
+    "test:terrain:real": "node tools/run-harness.mjs --test terrain --presets real",
+    "test:terrain:real:webgl": "node tools/run-harness.mjs --test terrain --presets real --backend webgl",
+    "test:spawns": "node tools/run-harness.mjs --test spawns",
+    "test:spawns:webgl": "node tools/run-harness.mjs --test spawns --backend webgl",
+    "test:determinism": "node tools/run-harness.mjs --test determinism",
+    "test:determinism:webgl": "node tools/run-harness.mjs --test determinism --backend webgl",
+    "test:soak": "node tools/run-harness.mjs --test soak",
+    "test:soak:webgl": "node tools/run-harness.mjs --test soak --backend webgl",
     "lab:terrain": "node tools/lab/terrain.mjs"
   },
   "dependencies": {

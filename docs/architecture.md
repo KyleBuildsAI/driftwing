@@ -356,7 +356,10 @@ and `waypoints.js` (waypoint beacon and arrow), from v1.
 | `setPieceTestKit.js` | dev builds only: the dev timeline (`DEV_TIMELINE`) over the test engines and a structure child, and the browser checks of `tools/steps/engine-setPiece.json` |
 | `debugWind.js` | dev-only debug updraft wind source (key L), proving the Phase 2 wind writer path |
 | `mockGamepads.js` | scriptable mock T.16000M, TWCS and standard gamepad devices |
-| `testHarness.js` | the flight-test harness at `?test=1` (dev builds only) |
+| `testHarness.js` | the flight-test harness at `?test=1` (dev builds only), and with `&testPlan=soak` the 10-minute soak (5 seeds, one craft each, both views, the event director live) |
+| `spawnCheckKit.js` | dev builds only: the one kit of the spawn checks (`?test=spawns`, `presetChecks.js`, `presetChecksBatch2.js` and `structureTestKit.js`'s browser helpers): frame and wall-clock waits, the held time of day and weather, the photo-camera framing over the terrain, and the dispose check (GPU memory with the geometry tracker, wind sources added since the baseline, sky modifiers, real lights, leak counters and, on request, the JS heap) |
+| `spawnsTest.js`, `spawnScenarios.js` | the spawns test at `?test=spawns` (dev builds only): each of the 30 presets force-spawned ahead of the craft at the time of day and in the weather of its scenario (sites on their nearest real placed site), its frame times recorded, framed for a screenshot, and disposed back to its GPU memory, wind source, light and sky modifier baselines, with a held leak check on the JS heap |
+| `determinismTest.js` | the determinism test at `?test=determinism` (dev builds only): the same seed and scripted path in two page loads, stepped frame by frame from `spawns.debug.restartSpawns()`, with identical site-list hashes and director activation logs |
 | `hotasTest.js` | the HOTAS pipeline test at `?test=hotas` (dev builds only) |
 | `terrainTest.js` | the terrain test at `?test=terrain` (dev builds only): stamp seams at every LOD pair, worker parity, collision against the rendered mesh, on the fixtures or (`&presets=real`) the real stamped presets |
 | `presetChecks.js` | dev builds only: the browser checks of presets 21-30 (`tools/steps/presets-21-30.json` on a dev server), with dev stand-ins for a set piece's missing children: force-spawn ahead at the preset's time and weather, framing for screenshots, discovery (event, journal entry, card), memory, wind sources and sky modifiers back after dispose, real stamped sites with the site-list hash, ground start, eclipse, dawn and set-piece stages |
@@ -375,7 +378,7 @@ and `waypoints.js` (waypoint beacon and arrow), from v1.
 | --- | --- |
 | `smoke-test.mjs` | headless Chrome check: console errors and warnings fail it; scripted steps and screenshots |
 | `steps/*.json` | reusable smoke steps; `view-physics.json` proves every craft flies the same in every view (below) |
-| `run-harness.mjs` | runs the `?test=1` / `?test=hotas` / `?test=terrain` harnesses headlessly on a spare port and saves the report (and, for the terrain test, one screenshot per stamp type) |
+| `run-harness.mjs` | runs the `?test=1` (and its soak plan) / `?test=hotas` / `?test=terrain` / `?test=determinism` / `?test=spawns` harnesses headlessly on a spare port and saves the report (and one screenshot per stamp type for the terrain test, one per preset for the spawns test) |
 | `shell-test.mjs` | the launcher shell under load: 20 round trips, one live game, memory back to baseline, focus, hash forwarding, foreign origins ([Testing](#testing)) |
 | `shell-check.mjs` | the launcher shell's behaviour: first launch, the pill (shows, hides, clear of each game's HUD), persistence, `?v=`, forwarding, messages |
 | `build-single.mjs`, `v1-checksum.mjs` | the `dist-single/` build; the V1 freeze helpers shared with `tests/v1-checksum.test.mjs` |
@@ -552,8 +555,10 @@ journals are copied under their new names, then the old database is deleted.
 
 The map-tile worker keeps finished map tiles in its own IndexedDB database, `driftwing-v2-maptiles`
 (one store, `tiles`, keyed by the seed, the tile version, a hash of the presets' placement data and
-the tile; the oldest go beyond 1200 tiles). The dev harnesses use their own databases (`driftwing-v2-test`, `driftwing-v2-test-hotas`) and
-sessionStorage keys (`driftwing-v2.test.flight`, `driftwing-v2.test.hotas`). The launcher shell
+the tile; the oldest go beyond 1200 tiles). The dev harnesses use their own databases (`driftwing-v2-test`, `driftwing-v2-test-hotas`,
+`driftwing-v2-test-terrain`, `driftwing-v2-test-spawns`, `driftwing-v2-test-determinism-1` and `-2`;
+the spawns and determinism tests delete theirs before each page load) and sessionStorage keys
+(`driftwing-v2.test.flight`, `driftwing-v2.test.hotas`, `driftwing-v2.test.determinism`). The launcher shell
 keeps one key of its own, `driftwing.shell.lastVersion`.
 
 IndexedDB is scoped to the origin including the port. That is why the dev server is pinned to
@@ -1103,7 +1108,11 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   `removePreset`, `registerEngine`, `unregisterEngine`, `loadTestKit()` (dev builds only), and
   `holdGamePresets()` / `releaseGamePresets()`, which take the game's own presets out of the manager
   and put them back, so the engine step files (`tools/steps/engine-*.json`) check their test presets
-  in an otherwise empty game (the director's activations of held presets are refused quietly).
+  in an otherwise empty game (the director's activations of held presets are refused quietly),
+  and `restartSpawns()`, which disposes the director, ends every spawn through the manager's
+  `resetForReplay()` (the discoveries, the site sweep, the visibility rotation and the LOD bias start
+  afresh) and creates a new director on the current flight clock, so a scripted path from there
+  depends only on the seed and the path (the determinism test).
 - **The director.** `start()` (the prewarm hook) creates the event director once the manager runs:
   `createGameDirector(ctx, { spawnManager, presets: PRESETS, placement, isDiscovered, budgets:
   manager.budgets, devHooks })`, where `placement` reads whichever site feed the manager holds and
@@ -1493,7 +1502,10 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `?test=sites` | dev builds: the terrain test's fixture site presets (an airfield strip, a gorge with its rope bridge, islets with floating islands, a canyon course) reach worldgen on both threads with no harness, for `tools/steps/engine-structure-sites.json` |
 | `?test=terrain` | dev builds: the terrain test (`src/dev/terrainTest.js`). The fixture site presets reach worldgen on both threads; near every stamp type, every LOD pair of neighbouring chunks is checked for cracks, the displayed (worker-built) meshes must equal main-thread builds bit for bit, and `groundHeight` must match the rendered LOD0 mesh within 0.5 m. On-screen summary and `window.DRIFTWING.testReport`; `window.DRIFTWING.terrainTest.showView(i)` frames stamp type i. With `&presets=real` (`node tools/run-harness.mjs --test terrain --presets real`) the same checks run on the game's own stamped site presets, in the world as a player gets it (the runner defaults to seed `TERRAIN-REAL-8`, whose spawn has every real stamp type within the 40 km search radius, the rare volcano's cone included) |
 | `?test=1` | dev builds: the flight-test harness (`src/dev/testHarness.js`). It flies each of the six craft for 60 s in first person and in third person across 3 seeds (36 runs), and logs average fps, p99 frame time, NaN events, terrain penetrations, soft crashes, heap growth and console errors. It shows an on-screen summary and offers a JSON report (`window.DRIFTWING.testReport`). URL options: `testSeeds`, `testSeconds`, `testCraft`, `testViews` (`first`, `third`) |
-| `tools/run-harness.mjs` | runs either harness headlessly on a spare port (`--test 1\|hotas`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--out`), prints a table per run and per craft and view, and exits 0 on PASS |
+| `?test=1&testPlan=soak` | dev builds: the 10-minute soak, the flight-test harness with its soak plan: 5 seeds (`SOAK-1` to `SOAK-5`), one craft per seed (the six in turn), both views, 60 s each, the event director live as in the game. Its criteria add heap growth under 75 MB per world, the worst p99 frame time within the perf governor's frame target, and the director live on every world (its activations and the spawns started are listed per world) to the flight test's |
+| `?test=spawns` | dev builds: the spawns test (`src/dev/spawnsTest.js`, scenarios in `spawnScenarios.js`). The game's presets are held and the site feed detached; each of the 30 presets goes back in for its own show: force-spawned ahead of the craft (a site preset on its nearest real placed site, with its stamps), frame times recorded over its live window, a staging step where one is named (totality, the wall cloud, meteors in flight, the eagle on the wing), framed by the photo camera, screenshot, disposed; then, with the simulation held, one warm-up create and dispose (a one-time cache it keeps is reported, not judged) and 3 more with the heap read after each. GPU memory (with the geometry tracker), wind sources, real lights, sky modifiers and leak counters must be back after each, and the JS heap within 1 MB across the judged held cycles. URL options: `testPresets=a,b` (a subset), `testShots=1` (wait for the runner's screenshots), `testLeakCycles=N` (a longer heap trend) |
+| `?test=determinism` | dev builds: the determinism test (`src/dev/determinismTest.js`). Two page loads, each with a freshly deleted database: frames stepped by hand at 30 per second, the time of day and the perf governor's frame time held, the flight clock set to 1200 s, then `spawns.debug.restartSpawns()` and a 480 s autopilot path in the bush plane clear of the terrain. The site-list hashes (live and freshly built) and the director activation log must be identical; the spawn events and the flown path are compared as evidence |
+| `tools/run-harness.mjs` | runs a harness headlessly on a spare port (`--test 1\|soak\|hotas\|terrain\|determinism\|spawns`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--presets real` for the terrain test or `--presets a,b` and `--leak-cycles N` for the spawns test, `--out`), prints its tables, takes the spawns test's screenshots when the page asks, and exits 0 on PASS |
 | `tools/shell-test.mjs` | the launcher shell test (below) |
 | `tools/smoke-test.mjs` | `--file dist-single/index.html` or `--url`, `--query`, `--steps` / `--steps-file` (`wait`, `press`, `down`, `up`, `click`, `move`, `eval`, `shot`), `--out`; fails on any console error or warning |
 | labs | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` (the craft labs, `settings`, `copilot`, `input`, `storage`, `copilot-server`, `terrain`, `spawns`, `director`, `audio`, `discovery`) |
@@ -1514,6 +1526,10 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `npm run test:flight`, `test:flight:webgl` | the Phase 1 flight-test harness for every craft in first and third person, 3 seeds (36 runs of 60 s) |
 | `npm run test:hotas`, `test:hotas:webgl` | the HOTAS pipeline, including persistence across a reload in the `driftwing-v2-test-hotas` database |
 | `npm run test:terrain`, `test:terrain:webgl` | terrain stamps in the running game: no cracks at any LOD pair, worker meshes identical to main-thread builds, collision within 0.5 m of the rendered mesh; screenshots of every stamp type |
+| `npm run test:terrain:real`, `test:terrain:real:webgl` | the same terrain checks on the game's own stamped site presets (seed `TERRAIN-REAL-8`): all six stamp types, every LOD seen live around each |
+| `npm run test:spawns`, `test:spawns:webgl` | Milestone G item 2: each of the 30 presets force-spawned ahead of the craft (seed `TERRAIN-REAL-8`), a screenshot each (`spawn-<nn>-<preset>.png`), frame times reported, and dispose back to baseline (GPU memory, wind sources, lights, sky modifiers, the JS heap within 1 MB across 3 held cycles) |
+| `npm run test:determinism`, `test:determinism:webgl` | Milestone G item 3: the same seed and scripted path in two page loads give an identical site-list hash and an identical director activation log |
+| `npm run test:soak`, `test:soak:webgl` | Milestone G item 5: the 10-minute soak with the director live (5 seeds, both views): 0 NaN, 0 penetrations, heap growth under 75 MB, p99 within the frame target, no frame over 50 ms after warmup, 0 console errors and warnings |
 | `npm run lab:terrain` | placement and stamps headless: Phase 1 bit-identity with no site presets, and with the real presets nothing changed outside their stamps; placement filters, determinism, stamp shapes, seams and collision for the fixtures and around the real presets' stamps; height-sampling cost within 10 % of Phase 1 |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/view-physics.json` | every craft flies bit-identically in every view |
 | `node tools/shell-check.mjs --url <shell>` | the pill (shows, hides, clear of both games' HUDs), persistence and forwarding |
