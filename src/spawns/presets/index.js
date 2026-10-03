@@ -11,6 +11,7 @@ import starlingMurmuration from './starlingMurmuration.js';
 import geeseFormation from './geeseFormation.js';
 import thermalHawks from './thermalHawks.js';
 import fireflies from './fireflies.js';
+import eagleWingman from './eagleWingman.js';
 
 export const PRESETS = Object.freeze([
   // Batch 2: presets 11-20.
@@ -21,6 +22,7 @@ export const PRESETS = Object.freeze([
   geeseFormation,
   thermalHawks,
   fireflies,
+  eagleWingman,
 ]);
 
 /** Presets by id. */
