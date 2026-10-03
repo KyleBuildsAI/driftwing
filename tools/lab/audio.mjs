@@ -872,6 +872,15 @@ async function runBackend(server, port, backend, executablePath) {
     await page.keyboard.press('KeyI');
     check('boot', `${label} the activation key press starts audio`, beforeUnlock === 'locked' && state === 'running', `${beforeUnlock} -> ${state}`);
     if (state !== 'running') return summary;
+    // The game's own presets open voices of their own (live sites, director events). The checks count
+    // only the lab's voices, so they run with those presets held out of the game.
+    const held = await page.evaluate(async () => {
+      const count = window.DRIFTWING.ctx.systems.spawns.debug.holdGamePresets().length;
+      const deadline = performance.now() + 10000;
+      while ((window.audioLab.audio().getStats().spawn?.voices ?? 0) > 0 && performance.now() < deadline) await new Promise((done) => setTimeout(done, 100));
+      return { count, voices: window.audioLab.audio().getStats().spawn?.voices ?? 0 };
+    });
+    check('boot', `${label} the game's own presets held, no game voice left`, held.count > 0 && held.voices === 0, `${held.count} presets held, ${held.voices} voices`);
     const tests = [
       ['recipes', testRecipes],
       ['distanceRender', testDistanceRender],
