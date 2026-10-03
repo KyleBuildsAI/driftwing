@@ -6,9 +6,9 @@ All notable changes to DRIFTWING are documented here. The format is based on
 `2.0.0-phase.1`; Phases 2-4 (the event director and spawns, more craft, then Spotify, VR, replay
 and a multiplayer wingman) follow as later pre-releases of 2.0.0.
 
-## [Unreleased]
+## [2.0.0-phase.2] - 2026-10-03
 
-Phase 2 of v2, to be released as `2.0.0-phase.2` (tag `v2-phase2`): the event director, ten
+Phase 2 of v2, released as `2.0.0-phase.2` (tag `v2-phase2`): the event director, ten
 reusable spawn engines, the first 30 environment spawns and the discovery loop. Scenery becomes
 events: storms that build and drop tornadoes, a volcano that wakes, whales, geese that let you join
 their V, an eclipse that darkens the world, a sky whale whose slipstream you can ride. Every spawn
@@ -208,6 +208,43 @@ net.
 - The waterfall rainbow and the glory show only with the sun behind the viewer; the supercell's
   rain shafts are subtle at range.
 - The spawn audio recipes are verified by measurement only; a listening pass is pending.
+
+### Verification
+
+Milestone G, run once per test on the merged tree on the project's shared Windows machine while
+other projects' builds kept it busy (the owner's rule: frame-time numbers are reported, not chased).
+
+- `npm run build` and `npm run build:single` succeed; V1's SHA-256 matches and no dev kit is in the
+  bundle. `npm run test:v1` 2/2. `node tools/docs-check.mjs` 223/223.
+- Labs: flight 82/82, jet 60/60, helicopter 46/46, fpv 87/87, wingsuit 37/37, input 34/34, settings
+  28/28, storage 54/54, copilot 225/225, copilot-server 17/17, discovery 39/39, terrain 291/291,
+  director 49/49 (stub) and 6/6 (real presets), preset-flight 13/13, preset-wind 12/12, spawns
+  90/90, structure 68/68, setpiece 47/47, preset-pacing 4/4 (volcano eruption 1, tornado 4, comet
+  20, sky whale 29, lantern festival 14), audio 191/191 (node and both browsers). wind-engines
+  54/55: the vortex update allocated 0.556 B/frame, the known V8 tiering noise.
+- `tools/spawn-check.mjs`: 55/55 on WebGPU and on WebGL2.
+- The 24 dev-server step files (the ten engines, the three preset batches, discovery, the copilot
+  guide, the director, weather and sky, input, hotplug, view physics, the terrain worker start and
+  the golden frame) pass on both backends with 0 console errors and 0 warnings. The golden-frame
+  A/B pair is identical on WebGPU; on WebGL2 1 pixel of 921,600 differs by 1 level.
+  `seed-link.json` on the shell 7/7.
+- `run-harness --test terrain`: PASS on both backends (0 cracks, 483 worker chunks identical,
+  collision 0.00001 m, 21/21 poses, site-list hash 990ea5d1c3b00efe). With `--presets real`: PASS,
+  6/6 stamp types, 555 chunks identical, collision 0.00003 m, hash 66961973cb983903.
+- `run-harness --test determinism`: PASS on both backends with the same hashes (site list
+  d85384433861a1b0 in both runs and a fresh world, director log 4 entries 1093b8c1, spawn events
+  74d3d2fa, path 55b1a55f over 28.66 km).
+- `run-harness --test spawns` (30 presets): PASS 30/30 on every criterion on both backends, 0/0
+  console, 30 screenshots each; lowest average 71.6 fps (WebGPU) and 72.3 fps (WebGL2), worst p99
+  34.3 ms and 28.8 ms.
+- `run-harness --test soak` (10 minutes, 5 seeds, both views, the director live): every hard
+  criterion passes on both backends (0 NaN, 0 penetrations, 0/0 console, heap growth at most
+  25.68 MB on WebGPU and 22.7 MB on WebGL2, 10/10 runs, 32/32 scripts, director live 5/5, 0
+  declined). The p99 criterion fails: worst p99 21.9 ms (WebGPU, average 96.2 fps) and 24.6 ms
+  (WebGL2, average 90.1 fps) against the 16.67 ms target, and WebGL2 had 2 frames over 50 ms
+  (59.2 ms main thread and 52.3 ms delayed; 0 game systems, 0 GC). 4 soft crashes per backend.
+- Smokes of the built `dist-single/v2` and the shell on both backends: 0 errors and 0 warnings,
+  screenshots differ.
 
 ## [Structure correction] - 2026-09-28
 
