@@ -261,6 +261,21 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
         }
         return released;
       },
+      /**
+       * Starts the spawns afresh on the current flight clock (the determinism test): the director is
+       * disposed (ending what it started), the SpawnManager ends every other spawn and forgets its
+       * discoveries and frame state (resetForReplay), and a new director starts. Its activation log
+       * then depends only on the seed and the path flown from here. Returns the new director or null.
+       */
+      restartSpawns() {
+        if (director) {
+          director.dispose();
+          director = null;
+        }
+        manager.resetForReplay();
+        director = createDirector();
+        return director;
+      },
       registerEngine: (engine) => manager.register(engine),
       unregisterEngine(name) {
         for (const preset of manager.listPresets()) {
