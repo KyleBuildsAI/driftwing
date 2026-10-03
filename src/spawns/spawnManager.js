@@ -182,7 +182,7 @@ export function createSpawnManager(options) {
   const engineCaps = {};
   /** The LOD bias (setLodBias): LOD distances are multiplied by it. */
   const lodScale = new Float64Array([1]);
-  const refusals = { preset: 0, engine: 0, heavy: 0, instances: 0, particles: 0, capacity: 0, error: 0 };
+  const refusals = { preset: 0, engine: 0, heavy: 0, instances: 0, particles: 0, capacity: 0, error: 0, declined: 0 };
   // Per-spawn doubles written every frame live in typed arrays indexed by the spawn's slot: a double
   // field on an object can lose its unboxed representation (a map shared with records that stored
   // something else), after which every write allocates.
@@ -593,7 +593,8 @@ export function createSpawnManager(options) {
    * source: 'site' | 'director' | 'debug', site?, seed?, scale?, force? (debug only: ignore the
    * budgets), duration?, params? ({ [engine name]: { ...overrides } } merged over that engine
    * entry's preset params: the set-piece engine places and tunes its children this way) }.
-   * Returns the spawn id, or null when a budget (or a missing preset or engine) refuses.
+   * Returns the spawn id, or null when a budget (or a missing preset or engine) refuses, or when a
+   * director activation is declined because every engine ended its instance at create ('declined').
    */
   function activate(presetId, opts = {}) {
     const preset = presetById.get(presetId) ?? null;
@@ -687,6 +688,17 @@ export function createSpawnManager(options) {
       return null;
     }
     lightPool.currentOwner = null;
+
+    // Every engine ended its instance at create (thermal hawks that found no working thermal, a pod
+    // with no open water in reach): nothing would ever be drawn. A director activation is declined,
+    // so the director neither counts it as something notable nor spends the preset's cooldown and
+    // the tier's turn on it; it tries that candidate again in its next bucket. Other sources keep
+    // the spawn, which the manager removes as ended on its next frame.
+    if (source === 'director' && record.parts.every((part) => part.instance.ended === true)) {
+      disposeParts(record);
+      recordDisposed(record);
+      return refuse('declined');
+    }
 
     // Actual particles against the caps (an engine may create more than its params estimated).
     if (!forced) {

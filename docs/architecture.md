@@ -1123,7 +1123,11 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   and count toward it only while `setSiteActive(id, true)`), `instances` or `particles` (per-engine
   caps from `engine.budget` `{ instances, particles, lights? }`, else the engine's entry in
   `DIRECTOR_BUDGETS.engines`, else 32 instances and 60 000 particles; `setBudget`, `setHeavyLimit`).
-  A debug activation with `force: true` passes the budgets. Each preset engine entry becomes one
+  A debug activation with `force: true` passes the budgets. A director activation whose engines all
+  end their instance at create (`instance.ended` already true: thermal hawks with no working
+  thermal, a whale pod with no open water) is declined: it returns null with the refusal `declined`,
+  so the director leaves that candidate for its bucket and counts no notable, cooldown or tier turn.
+  Other sources keep such a spawn, and the manager removes it on its next frame. Each preset engine entry becomes one
   engine instance (a part) created with the preset's params merged with `{ position, heading, site,
   startTime, scale, duration, seed }` and its own seeded random generator. `opts.duration` (the
   director draws it) is the event's duration; without it the manager draws one from
