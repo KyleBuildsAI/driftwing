@@ -77,6 +77,7 @@ Positions are world metres, and strengths are 0..1.
 | `createGlowRegion(overrides)`, `acquireGlowRegion()`, `setGlowRegion(slot, region)`, `releaseGlowRegion(slot)` | a glow region slot. The descriptor is `{ x, z, radius, strength, surf, color }` (defaults 0, 0, 900, 1, 0.6, 0x1f9dff). The layer has one glow colour: the last one set |
 | `createPool(overrides)`, `acquirePool()`, `setPool(slot, pool)`, `releasePool(slot)` | a pool disc slot |
 | `surfaceHeightAt(x, z)` | sea level plus every vortex funnel (the swell is excluded). Engines use it to keep things on the water. Away from every funnel it returns sea level itself, so nothing is allocated |
+| `activeVortices` | how many whirlpool vortices are live. While it is 0 the surface is sea level everywhere, so a hot loop can skip `surfaceHeightAt` |
 | `craftContact` | `{ touching, stirring, height, contacts }`: the craft's height above the water at the last frame (above sea level while the craft is higher than the 14 m downwash reach) |
 | `stats()` | `{ vortices, ripples, glowRegions, pools, droplets, dropletsDropped, splashesDropped, trailRows, trailUploads, craftContacts, craftHeight }` |
 

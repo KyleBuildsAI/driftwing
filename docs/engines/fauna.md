@@ -38,9 +38,8 @@ A bad `species`, `behavior` or `count` throws a clear error that names the field
   WebGPU and WebGL2 behave and look the same. Big flocks find neighbours through a shared hashed
   grid. They refresh each agent's flocking steering in interleaved slices (every second frame at
   near, every third at mid) and steer on the kept value in between.
-- **Zero allocations in `update()`.** State is held in typed arrays and a Float64Array of group
-  doubles, and every helper takes integer indices. The engine cost check samples the heap profiler
-  to prove it.
+- **Zero allocations in `update()`.** The engine cost check samples the heap profiler to prove it
+  (see Allocation).
 
 ## Behaviours
 
@@ -246,6 +245,28 @@ Each behaviour applies these under the preset's own values:
 | `circling` | `scatter: { radius: 35, burst: 12, recover: 3, spread: 0 }` |
 | `pod`, `wingman`, `drift` | `scatter: null` (they never scatter) |
 
+## Allocation
+
+The frame update allocates nothing in the engine's files. `tools/engine-cost.mjs --engine fauna`
+measured 0.86 B per frame (0.02 heap samples, under the 0.1 limit) with every behaviour live and
+3021 agents, down from about 220 KB per frame before these rules were applied:
+
+- Agent state lives in typed arrays and group state in a Float64Array (`data.g`, indexed by `G`).
+- The per-agent helpers take integer indices and read their double arguments from call registers
+  (a Float64Array indexed by `IO`). V8 boxes a computed double passed to, or returned from, a call
+  it does not inline, and these helpers run thousands of times per frame.
+- The spawn's anchor (a `THREE.Vector3`) is written in whole metres. In this app V8 boxes every
+  non-integer double stored into a Vector3 or an `{ x, y, z }` literal. A metre is far below what
+  the LOD, the lure, discovery and audio resolve.
+- The formation-slot API object reads the group doubles through accessors. The slipstream's wind
+  reading uses its own class.
+- Rarely run work (a whale spout) sits inline in the hot loop, so it runs optimised.
+- No closure is created in a per-frame function.
+
+What the engine calls can still allocate, and the check reports it separately. The terrain height
+function (worldgen) allocates about 1 KB per query. The ground probe asks for one height every 16
+frames per group, at integer coordinates, which comes to about 400 B per frame with six groups.
+
 ## LOD
 
 | tier | what runs |
@@ -291,8 +312,9 @@ The engine object (`ctx.systems.spawns.manager.registry.get('fauna')`) has two r
 
 - `getFormation(spawnId)` returns the live formation state of the spawn's formation group, or null:
   `{ inSlot, holdSeconds, bestHoldSeconds, complete, distance (m from the player to the slot), slot: { x, y, z }, holdTarget (s) }`.
-  Read it, and never keep it past the spawn. A preset's achievement logic, the HUD or the copilot
-  can poll it, or listen to `fauna:formation`.
+  Read it, and never keep it past the spawn. Its numbers are accessors over the group's live state,
+  so read them when you need them. A preset's achievement logic, the HUD or the copilot can poll it,
+  or listen to `fauna:formation`.
 - `describe(spawnId)` returns `{ species, behavior, count, center, radius, excited, mode, playerDistance, hidden, wind }`
   for dev tools and tests. Wingman `mode` is 0 waiting, 1 joining, 2 escorting or 3 peeling.
 
