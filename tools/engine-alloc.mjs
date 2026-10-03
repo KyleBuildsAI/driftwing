@@ -206,7 +206,9 @@ async function main() {
     for (const [key, bytes] of ranked(calleeSites)) process.stdout.write(`  ${key} ${bytes} B\n`);
     process.stdout.write(`console: ${logs.errors.length} errors, ${logs.warnings.length} warnings\n`);
     for (const line of [...logs.errors, ...logs.warnings]) process.stdout.write(`  ${line}\n`);
-    failed = ownPerFrame >= OWN_LIMIT_BYTES_PER_FRAME || logs.errors.length > 0 || logs.warnings.length > 0;
+    // A run whose spawns all ended (an event shorter than the warm-up) measured nothing.
+    if (engines.length === 0) process.stdout.write('no engine instance was live after the sample: use presets that outlast the warm-up, or a shorter --warmup\n');
+    failed = engines.length === 0 || ownPerFrame >= OWN_LIMIT_BYTES_PER_FRAME || logs.errors.length > 0 || logs.warnings.length > 0;
     process.stdout.write(`${failed ? 'FAIL' : 'PASS'}\n`);
   } finally {
     await browser.close();
