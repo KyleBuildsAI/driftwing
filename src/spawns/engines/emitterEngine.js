@@ -70,7 +70,7 @@ const DIRECTIONS = Object.freeze(['up', 'radial', 'antiSun', 'wind']);
 const WIND_TYPES = Object.freeze(['updraft', 'downburst', 'turbulence']);
 const TOP_LEVEL_PARAMS = Object.freeze([
   'particles', 'blend', 'style', 'rate', 'intensity', 'inactiveIntensity', 'schedule', 'pulse', 'bursts', 'shape', 'offset',
-  'attach', 'hugGround', 'direction', 'speed', 'spread', 'radial', 'swirl', 'inherit', 'travel', 'gravity', 'buoyancy',
+  'attach', 'hugGround', 'snapToGround', 'direction', 'speed', 'spread', 'radial', 'swirl', 'inherit', 'travel', 'gravity', 'buoyancy',
   'buoyancyDecay', 'drag', 'windFollow', 'turbulence', 'ground', 'groundOffset', 'restitution', 'life', 'size', 'sizeCurve',
   'sizeJitter', 'stretch', 'colors', 'colorMid', 'brightnessJitter', 'opacity', 'fadeIn', 'fadeOut', 'emissive',
   'emissiveDecay', 'nightBoost', 'lit', 'softness', 'fog', 'depthFade', 'underglow', 'lod', 'lodSizeBoost', 'field',
@@ -223,6 +223,7 @@ export function resolveEmitterConfig(preset, params) {
     offset: read.vector(params.offset, 'offset', [0, 0, 0]).map((value) => value * scale),
     attachCamera: read.oneOf(params.attach, 'attach', 'anchor', ['anchor', 'camera']) === 'camera',
     hugGround: read.boolean(params.hugGround, 'hugGround', false),
+    snapToGround: read.boolean(params.snapToGround, 'snapToGround', false),
     directionMode,
     direction,
     speed,
@@ -447,6 +448,15 @@ export function createEmitterEngine() {
       const ground = Math.max(ctx.terrain.groundHeight(x, z), ctx.terrain.waterLevel) - origin[1];
       for (let level = 0; level < FIELD_Y; level++) system.fieldData[(data.row * FIELD_NODES + level * FIELD_X * FIELD_X + column) * 4 + 3] = ground;
     }
+  }
+
+  /**
+   * snapToGround: the anchor takes the (stamped) ground or water height under it, once at create. A
+   * site's activation height is its unstamped ground, so a vent on a stamped cone (a volcano's crater
+   * floor) is found this way.
+   */
+  function snapAnchorToGround(anchor) {
+    anchor.y = Math.max(ctx.terrain.groundHeight(anchor.x, anchor.z), ctx.terrain.waterLevel);
   }
 
   /** Centres an emitter's field grid on the emission point (relative to its frame origin). */
@@ -1206,6 +1216,7 @@ export function createEmitterEngine() {
       }
       const capacity = Math.min(config.particles, pageCount * PAGE_SIZE);
       const anchor = params.position;
+      if (config.snapToGround) snapAnchorToGround(anchor);
       const heading = createHeadingFrame().set(Number.isFinite(params.heading) ? params.heading : 0);
       const id = `emitter:${serial++}`;
       const origin = config.attachCamera ? ctx.camera.position : anchor;
