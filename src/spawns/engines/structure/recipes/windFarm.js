@@ -22,7 +22,7 @@ export const WIND_FARM_DEFAULTS = Object.freeze({
   ratedWind: 11,
   cutOut: 25,
   yawRate: 5,
-  wake: Object.freeze({ length: 8, deficit: 0.35, turbulence: 0.45, expansion: 0.075 }),
+  wake: Object.freeze({ length: 8, deficit: 0.35, turbulence: 0.45, expansion: 0.075, gust: 3 }),
 });
 
 export function buildWindFarm(context, read) {
@@ -52,6 +52,7 @@ export function buildWindFarm(context, read) {
       deficit: wakeRead.number('deficit', WIND_FARM_DEFAULTS.wake.deficit, 0, 0.9),
       turbulence: wakeRead.number('turbulence', WIND_FARM_DEFAULTS.wake.turbulence, 0, 1),
       expansion: wakeRead.number('expansion', WIND_FARM_DEFAULTS.wake.expansion, 0, 0.3),
+      gust: wakeRead.number('gust', WIND_FARM_DEFAULTS.wake.gust, 0, 30),
     };
   }
   out.turbineSettings = turbine;
