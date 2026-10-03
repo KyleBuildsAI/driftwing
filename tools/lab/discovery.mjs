@@ -29,6 +29,7 @@ import { storage } from '../../src/core/storage.js';
 import { isWorldHash, normalizeSeed, parseDayTime, resolveSeed, resolveStartTime, shareLink, worldHash } from '../../src/core/seed.js';
 import { createWorldGen } from '../../src/world/worldgen.js';
 import { createMapTileGenerator, mapTileCacheTag } from '../../src/world/mapTileGen.js';
+import { PRESETS } from '../../src/spawns/presets/index.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -236,7 +237,8 @@ function testTiles() {
   check('tiles', 'bad requests throw', badRequests === 4, `${badRequests} of 4`);
   const tag = mapTileCacheTag('lab');
   check('tiles', 'the cache tag follows the seed and the preset placement data',
-    tag.startsWith('LAB|v') && tag !== mapTileCacheTag('LAB2') && tag !== mapTileCacheTag('LAB', [{ id: 'x', kind: 'site', placement: { chance: 1 }, stamps: [] }]) && tag === mapTileCacheTag('LAB', []),
+    // The default is the real preset list, whose sites stamp the terrain (preset batch 1 onward).
+    tag.startsWith('LAB|v') && tag !== mapTileCacheTag('LAB2') && tag !== mapTileCacheTag('LAB', [{ id: 'x', kind: 'site', placement: { chance: 1 }, stamps: [] }]) && tag === mapTileCacheTag('LAB', PRESETS) && tag !== mapTileCacheTag('LAB', []),
     tag);
 
   const started = performance.now();
