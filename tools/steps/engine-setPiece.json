@@ -1,4 +1,5 @@
 [
+  {"eval":"(() => { const debug = window.DRIFTWING.ctx.systems.spawns.debug; if (!debug) throw new Error('this step file needs the spawns dev hook (a dev server, or a build with ?dev=1)'); return 'game presets held for the engine checks: ' + debug.holdGamePresets().length; })()"},
   {
     "eval": "(async () => { try { const kit = await import('/src/dev/setPieceTestKit.js'); await kit.installSetPieceChecks(window.DRIFTWING); return 'dev server only: imports /src/dev/setPieceTestKit.js | ' + (await window.__dwSetPiece.start()); } catch (error) { console.error('[setPiece check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
   },
@@ -37,5 +38,6 @@
   },
   {
     "wait": 1500
-  }
+  },
+  {"eval":"'game presets released: ' + window.DRIFTWING.ctx.systems.spawns.debug.releaseGamePresets().length"}
 ]

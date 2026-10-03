@@ -1094,7 +1094,10 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   { maxDistance })` (the ground-start spot of the nearest discovered site within 80 km that offers
   one, facing most nearly into the ambient wind; "Start on ground" uses it) and `manager` (the
   SpawnManager). In dev builds and with `?debug=1` or `?dev=1`, `debug`: `addPreset`,
-  `removePreset`, `registerEngine`, `unregisterEngine` and `loadTestKit()` (dev builds only).
+  `removePreset`, `registerEngine`, `unregisterEngine`, `loadTestKit()` (dev builds only), and
+  `holdGamePresets()` / `releaseGamePresets()`, which take the game's own presets out of the manager
+  and put them back, so the engine step files (`tools/steps/engine-*.json`) check their test presets
+  in an otherwise empty game (the director's activations of held presets are refused quietly).
 - **The director.** `start()` (the prewarm hook) creates the event director once the manager runs:
   `createGameDirector(ctx, { spawnManager, presets: PRESETS, placement, isDiscovered, budgets:
   manager.budgets, devHooks })`, where `placement` reads whichever site feed the manager holds and

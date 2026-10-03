@@ -1,4 +1,5 @@
 [
+  {"eval":"(() => { const debug = window.DRIFTWING.ctx.systems.spawns.debug; if (!debug) throw new Error('this step file needs the spawns dev hook (a dev server, or a build with ?dev=1)'); return 'game presets held for the engine checks: ' + debug.holdGamePresets().length; })()"},
   {
     "eval": "(async () => { try { const kit = await import('/src/dev/structureTestKit.js'); const api = kit.installStructureChecks(window.DRIFTWING); return 'dev server only: imports /src/dev/structureTestKit.js | ' + api.setup(); } catch (error) { console.error('[structure check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
   },
@@ -142,5 +143,6 @@
   },
   {
     "wait": 1500
-  }
+  },
+  {"eval":"'game presets released: ' + window.DRIFTWING.ctx.systems.spawns.debug.releaseGamePresets().length"}
 ]

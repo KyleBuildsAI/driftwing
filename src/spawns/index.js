@@ -226,6 +226,8 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
   };
 
   if (devHooks) {
+    /** The game presets holdGamePresets took out of the manager. */
+    const heldGamePresets = [];
     system.debug = {
       /** Adds a preset (validated against the registered engines). */
       addPreset(preset) {
@@ -234,6 +236,31 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
         return preset.id;
       },
       removePreset: manager.removePreset,
+      /**
+       * Takes the game's own presets (PRESETS) out of the manager, ending their live spawns, so a
+       * check runs on its test presets alone in an otherwise empty game; the director's activations
+       * of them are then refused quietly (reason 'preset'). Returns the ids held.
+       */
+      holdGamePresets() {
+        const held = [];
+        for (const preset of PRESETS) {
+          if (manager.getPreset(preset.id) !== preset) continue;
+          manager.removePreset(preset.id);
+          heldGamePresets.push(preset);
+          held.push(preset.id);
+        }
+        return held;
+      },
+      /** Puts the presets holdGamePresets took back. Returns their ids. */
+      releaseGamePresets() {
+        const released = [];
+        for (const preset of heldGamePresets.splice(0)) {
+          if (manager.getPreset(preset.id)) continue;
+          manager.addPreset(preset);
+          released.push(preset.id);
+        }
+        return released;
+      },
       registerEngine: (engine) => manager.register(engine),
       unregisterEngine(name) {
         for (const preset of manager.listPresets()) {
