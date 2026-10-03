@@ -21,12 +21,16 @@ export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge',
 export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed']);
 /** FAR lure silhouettes drawn by src/spawns/lure.js. */
 export const LURE_TYPES = Object.freeze(['plume', 'anvil', 'funnel', 'whale', 'islands', 'comet']);
+/** How the SpawnManager may move an activation before the engines see it (preset.anchor). */
+export const ANCHOR_SEEKS = Object.freeze(['peak']);
+export const ANCHOR_ALIGNS = Object.freeze(['downwind']);
 /** Tokens a callout line may use; they are filled in when the line is spoken. */
 export const CALLOUT_TOKENS = Object.freeze(['distance', 'direction', 'name', 'eta']);
 /** Every top-level preset field. Anything else is a typo and is refused. */
 export const PRESET_FIELDS = Object.freeze([
   'id', 'name', 'category', 'kind', 'rarity', 'heavy', 'placement', 'candidates', 'filters', 'stamps', 'engines',
   'lod', 'lure', 'wind', 'audio', 'journal', 'discovery', 'callouts', 'lifetime', 'achievements',
+  'activeState', 'cooldown', 'anchor',
 ]);
 
 const ID_PATTERN = /^[a-z][A-Za-z0-9]*$/;
@@ -273,6 +277,42 @@ function validateAchievements(check, achievements) {
 }
 
 /**
+ * activeState (sites only, optional): the site has a director-driven ACTIVE state, such as an
+ * erupting volcano. { duration: [minSeconds, maxSeconds] } is how long one active spell lasts; the
+ * director starts it as a candidate of the preset's rarity and the SpawnManager starts the site
+ * dormant (every part's instance.active = false) until then.
+ */
+function validateActiveState(check, activeState, kind) {
+  if (activeState === undefined || activeState === null) return;
+  if (kind !== 'site') check.fail('activeState', 'is for sites only (an event is active for its whole lifetime)');
+  check.object(activeState, 'activeState');
+  check.onlyKeys(activeState, ['duration'], 'activeState');
+  check.array(activeState.duration, 'activeState.duration');
+  if (activeState.duration.length !== 2) check.fail('activeState.duration', 'must be [minSeconds, maxSeconds]');
+  check.number(activeState.duration[0], 'activeState.duration[0]', { above: 0 });
+  check.number(activeState.duration[1], 'activeState.duration[1]', { min: activeState.duration[0] });
+}
+
+/**
+ * anchor (events only, optional): moves an activation before the engines see it. seek 'peak' takes the
+ * highest ground within radius metres of the activation point (lenticular clouds stand over peaks);
+ * align 'downwind' turns the spawn's heading downwind of the prevailing wind.
+ */
+function validateAnchor(check, anchor, kind) {
+  if (anchor === undefined || anchor === null) return;
+  if (kind !== 'event') check.fail('anchor', 'is for events only (a site is placed by its placement rules)');
+  check.object(anchor, 'anchor');
+  check.onlyKeys(anchor, ['seek', 'radius', 'align'], 'anchor');
+  if (anchor.seek !== undefined && anchor.seek !== null) {
+    check.oneOf(anchor.seek, ANCHOR_SEEKS, 'anchor.seek');
+    check.number(anchor.radius, 'anchor.radius', { above: 0, max: 20000 });
+  } else if (anchor.radius !== undefined) {
+    check.fail('anchor.radius', 'needs anchor.seek');
+  }
+  if (anchor.align !== undefined && anchor.align !== null) check.oneOf(anchor.align, ANCHOR_ALIGNS, 'anchor.align');
+}
+
+/**
  * Validates one preset against contract section 1. Returns the preset; throws an Error naming the
  * preset and the field at fault.
  */
@@ -314,6 +354,9 @@ export function validatePreset(preset, { engineNames = null } = {}) {
   validateCallouts(check, preset.callouts);
   validateLifetime(check, preset.lifetime, preset.kind);
   validateAchievements(check, preset.achievements);
+  validateActiveState(check, preset.activeState, preset.kind);
+  if (preset.cooldown !== undefined) check.number(preset.cooldown, 'cooldown', { min: 0 });
+  validateAnchor(check, preset.anchor, preset.kind);
   return preset;
 }
 
