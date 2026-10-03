@@ -21,7 +21,7 @@ export default Object.freeze({
   filters: {
     biomes: null,
     timeOfDay: null,
-    altitude: { min: 0, max: 3500 },
+    altitude: null,
     weather: null,
     surface: 'any',
     minDistance: 3000,
@@ -37,7 +37,7 @@ export default Object.freeze({
         size: 1.6,
         speed: 18,
         floor: 60,
-        altitude: { mode: 'player', value: -15, spread: 25, ceiling: 1800 },
+        altitude: { mode: 'player', value: -15, spread: 25, ceiling: 4000 },
         fadeIn: 2.5,
         fadeOut: 10,
         voiceIntensity: 0.75,
