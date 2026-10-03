@@ -8,7 +8,8 @@
 //     'journal:discovery' (the glass discovery card follows it);
 //   - after dispose, proves GPU memory back to its level (the geometry tracker tells the world's first
 //     draws, a terrain chunk or a landmark, from anything a spawn left behind), the wind sources and
-//     the sky modifiers back to their counts, and no leaks reported by the SpawnManager.
+//     the sky modifiers back (no wind source added since the create left; the modifier count as
+//     before), and no leaks reported by the SpawnManager.
 // Site presets are also shown on their REAL stamped sites from the site feed, and their placement is
 // checked against a freshly built world (the same site-list hash twice).
 //
@@ -205,6 +206,7 @@ export function installPresetChecks(game) {
         idle,
         before: memory(),
         windBefore: ctx.wind.sourceCount,
+        windIdsBefore: new Set(ctx.wind.listSources().map((source) => source.id)),
         skyBefore: ctx.systems.sky.getModifierState().count,
         leaksBefore: { ...manager.getStats().leaks },
         discoveriesBefore: discoveries.length,
@@ -470,16 +472,19 @@ export function installPresetChecks(game) {
       const worldFresh = split.world + (split.leftBehind.length - leftBehind.length);
       const leaks = manager.getStats().leaks;
       const windAfter = ctx.wind.sourceCount;
+      // Wind sources added since the create and still present are this spawn's leftovers. The count
+      // alone can also drop by a live site spawn's source (a real site the craft left meanwhile).
+      const windLeft = ctx.wind.listSources().filter((source) => !record.windIdsBefore.has(source.id)).map((source) => source.id);
       const skyAfter = ctx.systems.sky.getModifierState().count;
       // The count may also drop by what the world freed meanwhile (a far site the craft left behind is
       // removed with its geometry); a spawn's leftovers show as leftBehind or as a count above the
       // world's first draws.
       const ok = leftBehind.length === 0 && after.geometries - record.before.geometries <= worldFresh && after.textures === record.before.textures
-        && windAfter === record.windBefore && skyAfter === record.skyBefore
+        && windLeft.length === 0 && skyAfter === record.skyBefore
         && leaks.windSources === record.leaksBefore.windSources && leaks.lights === record.leaksBefore.lights;
       return check(`${presetId}: dispose returns GPU memory, removes its wind sources and sky modifiers`, ok, {
         endedNaturally: !active, before: record.before, during: record.during, after, worldFirstDrawn: worldFresh, leftBehind,
-        windSources: `${record.windBefore} -> ${windAfter}`, skyModifiers: `${record.skyBefore} -> ${skyAfter}`, leaks,
+        windSources: `${record.windBefore} -> ${windAfter}`, windLeft, skyModifiers: `${record.skyBefore} -> ${skyAfter}`, leaks,
       });
     },
 
