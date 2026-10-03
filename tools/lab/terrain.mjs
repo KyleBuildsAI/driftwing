@@ -3,11 +3,14 @@
 // src/dev/terrainFixtures.js (one per stamp type), and checks Milestone A.
 //
 // Tests:
-//   phase1        with the real preset list (src/spawns/presets/index.js, empty until the preset batches
-//                 land) the world is bit-identical to Phase 1: 20,000 heights and 20,000 collision
-//                 heights per seed, every LOD mesh of five chunks per seed (positions, normals, colours)
-//                 and their vegetation scatter hash to the digests recorded from the Phase 1 code
-//                 (tag v2-structure, before any Phase 2 change), on three seeds
+//   phase1        the unstamped world (an empty preset list: worldgen's Phase 1 code path) is bit-identical
+//                 to Phase 1: 20,000 heights and 20,000 collision heights per seed, every LOD mesh of
+//                 five chunks per seed (positions, normals, colours) and their vegetation scatter hash
+//                 to the digests recorded from the Phase 1 code (tag v2-structure, before any Phase 2
+//                 change), on three seeds. The real preset list (src/spawns/presets/index.js) places
+//                 stamped sites since preset batch 1 (volcano, geyser field, slot canyon, waterfall), so
+//                 its world differs from Phase 1 by design inside the stamps; outside every stamp's
+//                 bounds its 20,000 heights and collision heights must still equal Phase 1's exactly
 //   validation    the fixtures validate; a broken preset throws an error naming the preset and field
 //   placement     per seed, every site passes its own filters again when re-checked here (dominant biome
 //                 through worldgen.biomeAt, the terrain's own biome function; surface; relief), sites of
@@ -31,6 +34,10 @@
 //                 Phase 1 edges the pairs the ring layout makes (LODs at most one apart)
 //   collision     groundHeight against the rendered LOD0 mesh (its own triangles) near every stamp
 //                 type: within 0.5 m
+//   real presets  the real preset list's stamped sites (src/spawns/presets/): the same seed twice, asked in
+//                 another order, gives the same site-list hash; every site passes its preset's biome,
+//                 height and minSpacing rules; and near the nearest site of every stamped preset (on
+//                 the first seed that has one) the falloff, seam and collision checks above pass too
 //   benchmark     heightAt and groundHeight on fixed point sets with no stamps nearby and with stamps
 //                 dense nearby, against the Phase 1 baseline measured from the same code with stamps
 //                 disabled (the empty preset list): within 10 %. After a JIT warmup, each slice of
@@ -149,15 +156,42 @@ function phase1Digest(world) {
   return { heights: hash(heights), ground: hash(ground), meshes: meshHash.digest('hex') };
 }
 
+/** Whether (x, z) lies inside the bounds of any stamp of the world's real preset list. */
+function insideAnyStamp(world, x, z) {
+  const stamps = world.stampsInCell(Math.floor(x / 2000), Math.floor(z / 2000));
+  for (const stamp of stamps) if (x >= stamp.minX && x <= stamp.maxX && z >= stamp.minZ && z <= stamp.maxZ) return true;
+  return false;
+}
+
 function testPhase1() {
-  check('phase1', 'the real preset list places no stamps yet', PRESETS.every((preset) => preset.kind !== 'site' || !(preset.stamps ?? []).length), `${PRESETS.length} presets`);
   for (const seed of SEEDS) {
-    const world = createWorldGen(seed, WORLD_OPTIONS);
+    const world = createWorldGen(seed, { ...WORLD_OPTIONS, presets: [] });
     const digest = phase1Digest(world);
     const golden = PHASE1_DIGESTS[seed];
-    check('phase1', `${seed}: 20,000 heights bit-identical to Phase 1`, digest.heights === golden.heights, digest.heights.slice(0, 16));
-    check('phase1', `${seed}: 20,000 collision heights bit-identical to Phase 1`, digest.ground === golden.ground, digest.ground.slice(0, 16));
-    check('phase1', `${seed}: meshes of every LOD and the scatter bit-identical to Phase 1`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
+    check('phase1', `${seed}: unstamped world: 20,000 heights bit-identical to Phase 1`, digest.heights === golden.heights, digest.heights.slice(0, 16));
+    check('phase1', `${seed}: unstamped world: 20,000 collision heights bit-identical to Phase 1`, digest.ground === golden.ground, digest.ground.slice(0, 16));
+    check('phase1', `${seed}: unstamped world: meshes of every LOD and the scatter bit-identical to Phase 1`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
+  }
+  const stamped = PRESETS.filter((preset) => preset.kind === 'site' && (preset.stamps ?? []).length > 0).map((preset) => preset.id);
+  check('phase1', 'the real preset list places stamped sites', stamped.length > 0, stamped.join(', '));
+  for (const seed of SEEDS) {
+    const world = createWorldGen(seed, WORLD_OPTIONS);
+    const phase1 = createWorldGen(seed, { ...WORLD_OPTIONS, presets: [] });
+    const random = mulberry32(12345);
+    let inside = 0;
+    let failures = 0;
+    for (let index = 0; index < 20000; index++) {
+      const x = (random() - 0.5) * 120000;
+      const z = (random() - 0.5) * 120000;
+      const groundX = x + 1.37;
+      const groundZ = z - 2.11;
+      const heightInside = insideAnyStamp(world, x, z);
+      const groundInside = insideAnyStamp(world, groundX, groundZ);
+      if (heightInside) inside++;
+      if (!heightInside && world.heightAt(x, z) !== phase1.heightAt(x, z)) failures++;
+      if (!groundInside && world.groundHeight(groundX, groundZ) !== phase1.groundHeight(groundX, groundZ)) failures++;
+    }
+    check('phase1', `${seed}: real presets: outside every stamp, 20,000 heights and collision heights equal Phase 1`, failures === 0, `${failures} differ; ${inside} of the points lie inside a stamp`);
   }
 }
 
@@ -563,6 +597,45 @@ function testSeamsAndCollision(world, sites) {
   }
 }
 
+// ---- real presets ---------------------------------------------------------------------------------------------
+const REAL_SEARCH_RADIUS = 60000;
+
+function testRealPresets() {
+  const stamped = PRESETS.filter((preset) => preset.kind === 'site' && (preset.stamps ?? []).length > 0);
+  const presetsById = new Map(PRESETS.map((preset) => [preset.id, preset]));
+  const nearest = new Map();
+  for (const seed of SEEDS) {
+    const first = createWorldGen(seed, WORLD_OPTIONS);
+    const second = createWorldGen(seed, WORLD_OPTIONS);
+    second.sitesNear(90000, -70000, 8000);
+    for (let ring = 3; ring >= 0; ring--) second.sitesNear(ring * 9000, -ring * 7000, 9000);
+    const sites = first.sitesNear(0, 0, REAL_SEARCH_RADIUS);
+    const again = second.sitesNear(0, 0, REAL_SEARCH_RADIUS);
+    const hash = hashSiteList(sites);
+    check('real presets', `${seed}: the same site-list hash twice (${sites.length} sites within ${REAL_SEARCH_RADIUS / 1000} km)`, sites.length > 0 && hash === hashSiteList(again), hash);
+    let failures = 0;
+    for (const site of sites) {
+      const preset = presetsById.get(site.presetId);
+      const placement = preset.placement;
+      const terrain = placement.terrain ?? {};
+      if (placement.biomes && !placement.biomes.includes(first.biomeAt(site.x, site.z).key)) failures++;
+      if ((Number.isFinite(terrain.minHeight) && site.groundY < terrain.minHeight) || (Number.isFinite(terrain.maxHeight) && site.groundY > terrain.maxHeight)) failures++;
+      for (const other of sites) {
+        if (other !== site && other.presetId === site.presetId && Math.hypot(other.x - site.x, other.z - site.z) < placement.minSpacing) failures++;
+      }
+      if (!nearest.has(site.presetId) && site.stamps.length > 0) nearest.set(site.presetId, { world: first, site });
+    }
+    check('real presets', `${seed}: every site keeps its preset's biome, height band and minSpacing`, failures === 0, `${failures} failures`);
+  }
+  for (const preset of stamped) {
+    const found = nearest.get(preset.id);
+    check('real presets', `${preset.id}: a site within ${REAL_SEARCH_RADIUS / 1000} km on some seed`, Boolean(found), found ? `${found.site.id}, ${round(Math.hypot(found.site.x, found.site.z) / 1000, 1)} km` : 'none');
+    if (!found) continue;
+    testFalloff(found.world, [found.site]);
+    testSeamsAndCollision(found.world, [found.site]);
+  }
+}
+
 // ---- benchmark --------------------------------------------------------------------------------------------------
 function timePass(fn, xs, zs) {
   const started = process.hrtime.bigint();
@@ -668,6 +741,7 @@ testShapes(stampWorld, sites);
 testFalloff(stampWorld, sites);
 testPaint(stampWorld, sites);
 testSeamsAndCollision(stampWorld, sites);
+testRealPresets();
 testBenchmark();
 
 let failed = 0;

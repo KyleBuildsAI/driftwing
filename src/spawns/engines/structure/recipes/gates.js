@@ -5,6 +5,10 @@
 // preset names a `journal` statistic (bestCanyonRun), a typed 'journalStat' for clean runs (op min),
 // which the journal keeps as the best run. Without a carve stamp (a debug spawn) the course runs `length` metres along
 // the spawn heading.
+//
+// Two options for a canyon run: `corridor` makes the course a corridor (climbing more than `ceiling`
+// above the canyon rim nearest the craft spoils a clean run, so a run is flown inside the canyon), and
+// `river` lays a water ribbon down the canyon floor along the carve's path.
 import { PALETTE } from '../palette.js';
 import { addCairn, findStamp, frameFromHeading } from '../common.js';
 
@@ -18,7 +22,86 @@ export const GATES_DEFAULTS = Object.freeze({
   length: 600,
   markerHeight: 4.5,
   journal: null,
+  corridor: false,
+  river: false,
+  riverWidth: 0.55,
 });
+
+/** Paint of a river ribbon (linear rgb, alpha = opacity) and the ribbon's sample step along the path (m). */
+const RIVER_PAINT = Object.freeze([0.36, 0.55, 0.62, 0.82]);
+const RIVER_STEP = 18;
+/** The river sits this far over the canyon floor, and fades out over this share of the path at each end. */
+const RIVER_LIFT = 0.45;
+const RIVER_END_FADE = 0.06;
+
+/**
+ * A water ribbon down the canyon floor: the carve's polyline sampled every RIVER_STEP metres, each
+ * cross-section `widthShare` of the floor's width, laid on the stamped ground. Its v coordinate runs
+ * downstream (the carve's floor only falls from the first point to the last), so the water material's
+ * streaks flow down the canyon.
+ */
+function buildRiver(context, path, widthShare) {
+  const { water, anchor } = context;
+  const lengths = [0];
+  for (let index = 1; index < path.length; index++) lengths.push(lengths[index - 1] + Math.hypot(path[index].x - path[index - 1].x, path[index].z - path[index - 1].z));
+  const total = lengths[lengths.length - 1];
+  const samples = Math.max(2, Math.ceil(total / RIVER_STEP) + 1);
+  const section = (distance) => {
+    let segment = 0;
+    while (segment < path.length - 2 && lengths[segment + 1] < distance) segment++;
+    const span = lengths[segment + 1] - lengths[segment] || 1;
+    const share = Math.min(1, Math.max(0, (distance - lengths[segment]) / span));
+    const from = path[segment];
+    const to = path[segment + 1];
+    const dirX = (to.x - from.x) / span;
+    const dirZ = (to.z - from.z) / span;
+    const x = from.x + (to.x - from.x) * share - anchor.x;
+    const z = from.z + (to.z - from.z) * share - anchor.z;
+    const halfWidth = (from.halfWidth + (to.halfWidth - from.halfWidth) * share) * widthShare;
+    return { x, z, rightX: -dirZ * halfWidth, rightZ: dirX * halfWidth };
+  };
+  let previous = null;
+  for (let sample = 0; sample < samples; sample++) {
+    const distance = (sample / (samples - 1)) * total;
+    const point = section(distance);
+    const share = distance / total;
+    const fade = Math.min(1, share / RIVER_END_FADE, (1 - share) / RIVER_END_FADE);
+    const paint = [RIVER_PAINT[0], RIVER_PAINT[1], RIVER_PAINT[2], RIVER_PAINT[3] * fade];
+    const leftX = point.x - point.rightX;
+    const leftZ = point.z - point.rightZ;
+    const rightX = point.x + point.rightX;
+    const rightZ = point.z + point.rightZ;
+    const current = {
+      left: [leftX, context.ground(leftX, leftZ) + RIVER_LIFT, leftZ],
+      right: [rightX, context.ground(rightX, rightZ) + RIVER_LIFT, rightZ],
+      v: distance / 30,
+      paint,
+    };
+    if (previous) {
+      water.vertexQuad(
+        { p: previous.left, uv: [0, previous.v], paint: previous.paint },
+        { p: current.left, uv: [0, current.v], paint: current.paint },
+        { p: current.right, uv: [1, current.v], paint: current.paint },
+        { p: previous.right, uv: [1, previous.v], paint: previous.paint },
+      );
+    }
+    previous = current;
+  }
+}
+
+/**
+ * The corridor of a course: every path point as (x, z, top) in the site frame, where top is the rim
+ * plus the ceiling. The engine spoils a clean run that climbs above the top of the nearest point.
+ */
+function buildCorridor(context, path, ceiling) {
+  const points = new Float64Array(path.length * 3);
+  path.forEach((point, index) => {
+    points[index * 3] = point.x - context.anchor.x;
+    points[index * 3 + 1] = point.z - context.anchor.z;
+    points[index * 3 + 2] = point.rimY - context.anchor.y + ceiling;
+  });
+  return points;
+}
 
 export function buildGates(context, read) {
   const { rng, body, out } = context;
@@ -30,6 +113,9 @@ export function buildGates(context, read) {
   const markerHeight = read.number('markerHeight', GATES_DEFAULTS.markerHeight, 0.5, 30);
   const course = read.string('course', context.presetId);
   const journal = read.string('journal', GATES_DEFAULTS.journal);
+  const corridor = read.boolean('corridor', GATES_DEFAULTS.corridor);
+  const river = read.boolean('river', GATES_DEFAULTS.river);
+  const riverWidth = read.number('riverWidth', GATES_DEFAULTS.riverWidth, 0.1, 1);
   if (journal !== null && !/^[a-z][A-Za-z0-9]{0,39}$/.test(journal)) read.fail('journal', `must be a camelCase journal statistic name, got ${JSON.stringify(journal)}`);
 
   const ends = [];
@@ -72,6 +158,7 @@ export function buildGates(context, read) {
       addCairn(body, x, context.ground(x, z), z, markerHeight * (0.9 + rng() * 0.2), rng, index === 0 ? PALETTE.flagWhite : PALETTE.flagRed);
     }
   });
-  out.courses.push({ id: course, gates: ids, clean, journal });
+  if (carve && river) buildRiver(context, carve.path, riverWidth);
+  out.courses.push({ id: course, gates: ids, clean, journal, corridor: carve && corridor ? buildCorridor(context, carve.path, ceiling) : null });
   out.radius = Math.max(out.radius, Math.max(...ends.map((end) => Math.hypot(end.x, end.z) + end.halfWidth)));
 }

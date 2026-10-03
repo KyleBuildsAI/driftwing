@@ -47,7 +47,8 @@ The frame: a compass `heading` (degrees) from the activation; `along` is forward
 | `airfield` | a worn strip with faded markings, hangar ruins, a hut, edge lights, a fence and a windsock | `flatten` | graded landings, ground-start spots |
 | `islands` | floating rock islands with trees, a clear meadow, roots, waterfalls off the edges into mist | `islandBase` (optional) | landable tops (extra ground surfaces) |
 | `spires` | a cluster of glowing crystal spires with shards and boulders | none | chime gates between spires, approach-driven hum |
-| `gates` | a timed course: start and finish gates marked by cairns with pennants | `carve` | a timed course, a journal best run |
+| `gates` | a timed course: start and finish gates marked by cairns with pennants, an optional river down the canyon floor | `carve` | a timed course, a journal best run, an optional corridor |
+| `waterfall` | a river spilling over the cliff step as a wide curtain of falling strands into the plunge pool, the river on downstream, boulders and mist puffs | `cliffStep` | a voice at the pool (the `waterfall` recipe) |
 
 Without its stamp (a debug spawn, or a site whose preset lists none) every recipe still builds:
 the bridge spans `span` metres across the heading on trestles, the strip is draped along the
@@ -194,6 +195,27 @@ spread around the site, kept apart.
 | `markerHeight` | m | 0.5..30 | 4.5 | |
 | `length` | m | 50..20000 | 600 | free-standing only |
 | `journal` | journal key | camelCase | null | send each clean run's time as a `journalStat` (op `min`): `bestCanyonRun` |
+| `corridor` | bool | | false | the run is flown inside the canyon: climbing more than `ceiling` above the rim of the canyon path point nearest the craft spoils a clean run (a notice says so) |
+| `river` | bool | | false | a water ribbon down the canyon floor along the carve's path, flowing downstream, fading at both ends |
+| `riverWidth` | share of the floor | 0.1..1 | 0.55 | the river's width |
+
+## waterfall
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `spill` | share of the cliff width | 0.05..0.95 | 0.32 | the curtain's width (at least 2.2 x the stamp's channel half width) |
+| `strands` | count | 1..24 | [6, 9] | seeded strands across the curtain, with narrow gaps; each has a thinner veil behind it |
+| `launch` | m/s | 0..30 | 4.5 | how fast the water leaves the lip: the strands fall on a ballistic arc out from the face |
+| `river` | bool | | true | the river upstream (widening from the channel to the curtain at the lip) and downstream of the pool |
+| `riverWidth` | share of the channel | 0.2..1 | 0.85 | |
+| `mist` | bool | | true | mist puffs where the curtain meets the pool |
+| `boulders` | count | 0..60 | [10, 16] | about a third at the lip between strands, the rest around the pool |
+| `drop`, `width` | m | 20..400, 40..1200 | 120, 240 | free-standing only: without a `cliffStep` stamp the recipe raises its own basalt cliff across the heading |
+
+The curtain reads the stamp's lip, top and pool levels (`topY`, `bottomY`, `poolDepth`, `poolAlong`,
+`channelWidth`), so it pours from the stamped river channel into the stamped plunge pool. Pair it with
+the waterEffect `plungePool`, an emitter mist at the pool, the celestial `rainbow` and a windModifier
+`curtain` (the mega-waterfall preset).
 
 ## Generic features
 
@@ -255,7 +277,9 @@ first, result)`) is generic and allocation-free, for any engine that wants gates
 
 A course is an ordered pair of gates (start, finish). Passing the start starts the clock; passing
 the finish emits `structure:course` `{ spawnId, presetId, siteId, course, time, clean }` and a
-`notify` toast with the time. A soft crash in between spoils a `clean` course (no event). With
+`notify` toast with the time (the start raises a "run started" notice). A soft crash in between, a
+jump between frames longer than the gate detector's teleport distance (a reset or relaunch), or for a
+`corridor` course a climb out of the canyon spoils a `clean` course (no event). With
 `journal`, a clean run also sends the typed `journalStat` `{ key, value: seconds, op: 'min',
 presetId }`, which the journal keeps as the best run.
 

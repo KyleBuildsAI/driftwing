@@ -55,6 +55,13 @@ const OCCLUSION_MARGIN = 1;
 /** Seconds an event may run past its drawn duration before the manager ends it for its engine. */
 const EVENT_GRACE_SECONDS = 45;
 const MEMORY_LOG_SIZE = 64;
+/**
+ * preset.anchor seek 'peak': a coarse grid of this many samples a side over the disc, then its
+ * PEAK_CLIMBS highest samples climb to their summits in strides halving down to PEAK_MIN_STRIDE (m).
+ */
+const PEAK_SEEK_GRID = 25;
+const PEAK_CLIMBS = 4;
+const PEAK_MIN_STRIDE = 8;
 /** Spawns alive at once (far above the budgets; activations past it are refused as 'capacity'). */
 export const MAX_SPAWNS = 512;
 const DEG = Math.PI / 180;
@@ -509,6 +516,76 @@ export function createSpawnManager(options) {
   }
 
   /**
+   * preset.anchor (events): seek 'peak' moves the activation point to the highest ground within
+   * anchor.radius (a coarse grid over the disc, then a finer one around its best sample); align
+   * 'downwind' turns the heading downwind of the prevailing wind. Writes the result into out
+   * ({ x, y, z, heading }); without an anchor rule it is the activation itself. Runs once per
+   * activation, so it may allocate.
+   */
+  function applyAnchorRule(preset, position, heading, out) {
+    out.x = position.x;
+    out.y = position.y;
+    out.z = position.z;
+    out.heading = heading;
+    const rule = preset.anchor;
+    if (!rule) return out;
+    if (rule.seek === 'peak') {
+      const radiusSquared = rule.radius * rule.radius;
+      const inside = (x, z) => (x - position.x) * (x - position.x) + (z - position.z) * (z - position.z) <= radiusSquared;
+      // A coarse grid over the disc; its highest few samples then climb to their own summits (a
+      // peak narrower than the grid lies between samples), and the highest summit wins.
+      const step = (2 * rule.radius) / (PEAK_SEEK_GRID - 1);
+      const samples = [];
+      for (let row = 0; row < PEAK_SEEK_GRID; row++) {
+        for (let column = 0; column < PEAK_SEEK_GRID; column++) {
+          const x = position.x - rule.radius + column * step;
+          const z = position.z - rule.radius + row * step;
+          if (inside(x, z)) samples.push({ x, z, y: world.groundHeight(x, z) });
+        }
+      }
+      samples.sort((first, second) => second.y - first.y);
+      let best = samples.length > 0 ? samples[0] : { x: position.x, z: position.z, y: world.groundHeight(position.x, position.z) };
+      for (let index = 0; index < Math.min(PEAK_CLIMBS, samples.length); index++) {
+        const summit = { ...samples[index] };
+        for (let stride = step; stride >= PEAK_MIN_STRIDE; stride /= 2) {
+          let moved = true;
+          while (moved) {
+            moved = false;
+            for (let direction = 0; direction < 8; direction++) {
+              const angle = (direction / 8) * Math.PI * 2;
+              const x = summit.x + Math.cos(angle) * stride;
+              const z = summit.z + Math.sin(angle) * stride;
+              if (!inside(x, z)) continue;
+              const y = world.groundHeight(x, z);
+              if (y > summit.y) {
+                summit.x = x;
+                summit.z = z;
+                summit.y = y;
+                moved = true;
+              }
+            }
+          }
+        }
+        if (summit.y > best.y) best = summit;
+      }
+      out.x = best.x;
+      out.z = best.z;
+      out.y = Math.max(best.y, world.WATER_LEVEL);
+    }
+    if (rule.align === 'downwind') {
+      const direction = uniforms.windDirection.value;
+      const compass = Math.atan2(direction.x, -direction.y) / DEG;
+      out.heading = compass < 0 ? compass + 360 : compass;
+    }
+    return out;
+  }
+
+  /** Whether the spawn's FAR lure shows: at the far tier, and for a dormant site (activeState) not at all. */
+  function lureShown(record, rank) {
+    return rank === 2 && !(record.dormantStart && !record.active);
+  }
+
+  /**
    * Activates presetId. opts: { position: {x, y, z} (required), heading (compass degrees),
    * source: 'site' | 'director' | 'debug', site?, seed?, scale?, force? (debug only: ignore the
    * budgets), duration?, params? ({ [engine name]: { ...overrides } } merged over that engine
@@ -532,7 +609,9 @@ export function createSpawnManager(options) {
     const id = site ? `spawn:${site.id}` : `spawn:${presetId}:${serial}`;
     const spawnSeed = Number.isFinite(opts.seed) ? opts.seed >>> 0 : site && Number.isFinite(site.seed) ? site.seed >>> 0 : hashString(`${worldSeedHash}:${presetId}:${serial}`);
     const random = createSeededRandom(spawnSeed);
-    const heading = Number.isFinite(opts.heading) ? opts.heading : site && Number.isFinite(site.rotation) ? site.rotation / DEG : 0;
+    const requestedHeading = Number.isFinite(opts.heading) ? opts.heading : site && Number.isFinite(site.rotation) ? site.rotation / DEG : 0;
+    const placed = applyAnchorRule(preset, position, requestedHeading, { x: 0, y: 0, z: 0, heading: 0 });
+    const heading = placed.heading;
     // The director draws an event's duration itself and passes it, so both keep the same number.
     const duration = Number.isFinite(opts.duration) && opts.duration > 0 ? opts.duration
       : preset.lifetime.duration ? preset.lifetime.duration[0] + random() * (preset.lifetime.duration[1] - preset.lifetime.duration[0]) : null;
@@ -552,6 +631,8 @@ export function createSpawnManager(options) {
       radius: 0,
       tierRank: 0,
       active: source !== 'site',
+      /** A site with a director-driven active state (preset.activeState) starts dormant. */
+      dormantStart: source === 'site' && Boolean(preset.activeState),
       startTime: state.time.elapsed,
       duration,
       ended: false,
@@ -572,7 +653,7 @@ export function createSpawnManager(options) {
         const params = {
           ...(entry.params ?? {}),
           ...(overrides && typeof overrides === 'object' ? overrides : {}),
-          position: new THREE.Vector3(position.x, position.y, position.z),
+          position: new THREE.Vector3(placed.x, placed.y, placed.z),
           heading,
           site,
           startTime: record.startTime,
@@ -587,6 +668,7 @@ export function createSpawnManager(options) {
           instance.engine = engine.name;
           instance.heavy = preset.heavy;
           if (instance.ended === undefined) instance.ended = false;
+          if (record.dormantStart) instance.active = false;
         }
         record.parts.push({ engine, instance });
         validateInstance(engine.name, instance);
@@ -634,16 +716,12 @@ export function createSpawnManager(options) {
       const counts = countersFor(part.engine.name);
       counts.instances++;
       counts.particles += part.instance.particles;
-      try {
-        part.engine.setLOD(part.instance, tier);
-      } catch (error) {
-        console.error(`[DRIFTWING] spawn engine "${part.engine.name}" setLOD failed for ${id}`, error);
-      }
+      setPartLOD(part, tier, id);
     }
     if (preset.heavy && preset.lure) {
       record.lureSlot = lures.acquire(preset.lure, spawnSeed, record.anchor, heading * DEG);
       if (record.lureSlot < 0) counters.lureRefused++;
-      else lures.setVisible(record.lureSlot, record.tierRank === 2);
+      else lures.setVisible(record.lureSlot, lureShown(record, record.tierRank));
     }
     records.push(record);
     recordById.set(id, record);
@@ -656,6 +734,22 @@ export function createSpawnManager(options) {
       position: { x: record.anchor.x, y: record.anchor.y, z: record.anchor.z },
     });
     return id;
+  }
+
+  /**
+   * Tells a part its tier. An engine may change instance.particles in setLOD (an emitter's ring share
+   * follows the tier), so the engine's particle count is moved with it: otherwise every tier change
+   * would leave the difference in the count, and the drift would end up refusing spawns as 'particles'.
+   */
+  function setPartLOD(part, tier, id) {
+    const counts = countersFor(part.engine.name);
+    counts.particles -= part.instance.particles;
+    try {
+      part.engine.setLOD(part.instance, tier);
+    } catch (error) {
+      console.error(`[DRIFTWING] spawn engine "${part.engine.name}" setLOD failed for ${id}`, error);
+    }
+    counts.particles += part.instance.particles;
   }
 
   function removeRecordAt(index, reason) {
@@ -804,16 +898,12 @@ export function createSpawnManager(options) {
     if (rank !== record.tierRank) {
       record.tierRank = rank;
       counters.tierChanges++;
-      if (record.lureSlot >= 0) lures.setVisible(record.lureSlot, rank === 2);
+      if (record.lureSlot >= 0) lures.setVisible(record.lureSlot, lureShown(record, rank));
       const tier = LOD_TIERS[rank];
       for (let partIndex = 0; partIndex < record.parts.length; partIndex++) {
         const part = record.parts[partIndex];
         part.instance.tier = tier;
-        try {
-          part.engine.setLOD(part.instance, tier);
-        } catch (error) {
-          console.error(`[DRIFTWING] spawn engine "${part.engine.name}" setLOD failed for ${record.id}`, error);
-        }
+        setPartLOD(part, tier, record.id);
       }
     }
 
@@ -1087,6 +1177,7 @@ export function createSpawnManager(options) {
       if (record.preset.heavy) heavyActive += next ? 1 : -1;
       record.active = next;
       for (let index = 0; index < record.parts.length; index++) record.parts[index].instance.active = next;
+      if (record.lureSlot >= 0) lures.setVisible(record.lureSlot, lureShown(record, record.tierRank));
       return true;
     },
     /** Changes an engine's caps. */

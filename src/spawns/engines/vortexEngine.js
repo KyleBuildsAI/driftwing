@@ -36,7 +36,7 @@
 // No allocations in update(): per-instance numbers live in a Float64Array, the slot block is written
 // into pre-built Vector4s, the path is precomputed, and the wind source moves in place.
 import { FRAME, FRAME_SIZE, checkSourceParamNames, createWindSource, resolveSourceParams } from './windSources.js';
-import { ownsPresetAudio } from './engineKit.js';
+import { createApproachJournal, ownsPresetAudio } from './engineKit.js';
 
 export const MAX_VORTICES = 4;
 const SHELL_SEGMENTS = 28;
@@ -122,7 +122,7 @@ const WIND_KEYS = Object.freeze(['maxTangential', 'inflowRadius', 'inflowSpeed',
 /** Every param name a vortex accepts, with the ones the SpawnManager merges in. */
 const KNOWN_PARAMS = Object.freeze(new Set([
   ...VORTEX_PARAMETERS.map((entry) => entry[0]), ...COLOR_PARAMETERS.map((entry) => entry[0]), ...WIND_KEYS,
-  'surface', 'startStage', 'voice', 'wind', 'windCoreRadius', 'windTop', 'scale',
+  'surface', 'startStage', 'voice', 'wind', 'windCoreRadius', 'windTop', 'journal', 'scale',
   'position', 'heading', 'site', 'startTime', 'duration', 'seed',
 ]));
 
@@ -790,6 +790,21 @@ export function createVortexEngine() {
     ctx.wind.setSourceBounds(source.id, source.refreshBounds());
   }
 
+  /**
+   * Approach journal (params.journal): the player's closest horizontal distance to the funnel's foot
+   * while the vortex is on the ground (mature or roping out).
+   */
+  function observeApproach(instance, record) {
+    const stage = record.state[S.STAGE];
+    if (stage !== 1 && stage !== 2) return;
+    const player = ctx.state.player.position;
+    const dx = player.x - instance.anchor.x;
+    const dz = player.z - instance.anchor.z;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    const closest = record.journal.closest;
+    if (distance < closest[0]) closest[0] = distance;
+  }
+
   function updateVoice(instance) {
     const record = instance.data;
     const state = record.state;
@@ -892,6 +907,7 @@ export function createVortexEngine() {
         velocity: new THREE.Vector3(),
         preset,
         waterMark: water ? water.createMark({ x: anchor.x, z: anchor.z, x1: anchor.x, z1: anchor.z, radius: Math.min(WAKE_RADIUS_MAX, Math.max(8, p.coreRadius * 1.2)) }) : null,
+        journal: createApproachJournal(`vortex preset "${preset.id}"`, params.journal),
       };
       const instance = {
         anchor,
@@ -949,6 +965,7 @@ export function createVortexEngine() {
       moveWind(instance);
       updateVoice(instance);
       if (record.waterMark) writeWaterWake(instance, record, state);
+      if (record.journal && ctx.state && ctx.state.player) observeApproach(instance, record);
     },
 
     setLOD(instance, tier) {
@@ -968,6 +985,7 @@ export function createVortexEngine() {
 
     dispose(instance) {
       const record = instance.data;
+      if (record.journal) record.journal.finish(ctx.bus, record.preset.id);
       removeWind(instance);
       if (record.voice) {
         record.voice.dispose();

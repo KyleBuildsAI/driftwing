@@ -70,7 +70,7 @@ const DIRECTIONS = Object.freeze(['up', 'radial', 'antiSun', 'wind']);
 const WIND_TYPES = Object.freeze(['updraft', 'downburst', 'turbulence']);
 const TOP_LEVEL_PARAMS = Object.freeze([
   'particles', 'blend', 'style', 'rate', 'intensity', 'inactiveIntensity', 'schedule', 'pulse', 'bursts', 'shape', 'offset',
-  'attach', 'hugGround', 'direction', 'speed', 'spread', 'radial', 'swirl', 'inherit', 'travel', 'gravity', 'buoyancy',
+  'attach', 'hugGround', 'snapToGround', 'direction', 'speed', 'spread', 'radial', 'swirl', 'inherit', 'travel', 'gravity', 'buoyancy',
   'buoyancyDecay', 'drag', 'windFollow', 'turbulence', 'ground', 'groundOffset', 'restitution', 'life', 'size', 'sizeCurve',
   'sizeJitter', 'stretch', 'colors', 'colorMid', 'brightnessJitter', 'opacity', 'fadeIn', 'fadeOut', 'emissive',
   'emissiveDecay', 'nightBoost', 'lit', 'softness', 'fog', 'depthFade', 'underglow', 'lod', 'lodSizeBoost', 'field',
@@ -223,6 +223,7 @@ export function resolveEmitterConfig(preset, params) {
     offset: read.vector(params.offset, 'offset', [0, 0, 0]).map((value) => value * scale),
     attachCamera: read.oneOf(params.attach, 'attach', 'anchor', ['anchor', 'camera']) === 'camera',
     hugGround: read.boolean(params.hugGround, 'hugGround', false),
+    snapToGround: read.boolean(params.snapToGround, 'snapToGround', false),
     directionMode,
     direction,
     speed,
@@ -447,6 +448,15 @@ export function createEmitterEngine() {
       const ground = Math.max(ctx.terrain.groundHeight(x, z), ctx.terrain.waterLevel) - origin[1];
       for (let level = 0; level < FIELD_Y; level++) system.fieldData[(data.row * FIELD_NODES + level * FIELD_X * FIELD_X + column) * 4 + 3] = ground;
     }
+  }
+
+  /**
+   * snapToGround: the anchor takes the (stamped) ground or water height under it, once at create. A
+   * site's activation height is its unstamped ground, so a vent on a stamped cone (a volcano's crater
+   * floor) is found this way.
+   */
+  function snapAnchorToGround(anchor) {
+    anchor.y = Math.max(ctx.terrain.groundHeight(anchor.x, anchor.z), ctx.terrain.waterLevel);
   }
 
   /** Centres an emitter's field grid on the emission point (relative to its frame origin). */
@@ -1126,16 +1136,24 @@ export function createEmitterEngine() {
     data.windActive = false;
   }
 
-  /** Moves the wind source's bounds with its emitter when it drifted a quarter of its radius. */
+  /**
+   * Moves the wind source's bounds with its emitter when it drifted a quarter of its radius. The
+   * column stands under the emission shape's centre: the emission point plus the `offset` in the
+   * heading frame (so the geysers of one field each lift where their own jet rises).
+   */
   function followWindSource(data) {
     const source = data.config.windSource;
     const centre = data.windCentre;
-    const dx = data.point[0] - centre[0];
-    const dz = data.point[2] - centre[2];
-    centre[1] = data.point[1];
+    const offset = data.config.offset;
+    const frame = data.heading;
+    const x = data.point[0] + offset[0] * frame.rightX + offset[2] * frame.forwardX;
+    const z = data.point[2] + offset[0] * frame.rightZ + offset[2] * frame.forwardZ;
+    const dx = x - centre[0];
+    const dz = z - centre[2];
+    centre[1] = data.point[1] + offset[1];
     if (dx * dx + dz * dz < source.radius * source.radius * 0.0625) return;
-    centre[0] = data.point[0];
-    centre[2] = data.point[2];
+    centre[0] = x;
+    centre[2] = z;
     if (!data.windActive) return;
     data.windBounds.min.x = centre[0] - source.radius * 2;
     data.windBounds.min.y = centre[1] + source.base - 20;
@@ -1206,6 +1224,7 @@ export function createEmitterEngine() {
       }
       const capacity = Math.min(config.particles, pageCount * PAGE_SIZE);
       const anchor = params.position;
+      if (config.snapToGround) snapAnchorToGround(anchor);
       const heading = createHeadingFrame().set(Number.isFinite(params.heading) ? params.heading : 0);
       const id = `emitter:${serial++}`;
       const origin = config.attachCamera ? ctx.camera.position : anchor;
