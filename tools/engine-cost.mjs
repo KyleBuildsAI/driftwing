@@ -365,7 +365,7 @@ async function main() {
             ownSamples += samples.count;
           } else calleeBytes += node.selfSize;
           const key = `${node.callFrame.functionName || '(anonymous)'} ${file.split('/').pop()}:${node.callFrame.lineNumber + 1}`;
-          const site = sites.get(key) ?? { bytes: 0, samples: 0, sizes: [] };
+          const site = sites.get(key) ?? { own, bytes: 0, samples: 0, sizes: [] };
           site.bytes += node.selfSize;
           site.samples += samples.count;
           for (const size of samples.sizes) if (site.sizes.length < SIZES_KEPT) site.sizes.push(size);
@@ -377,9 +377,13 @@ async function main() {
       const ownPerFrame = ownBytes / options.frames;
       const calleePerFrame = calleeBytes / options.frames;
       const samplesPerFrame = ownSamples / options.frames;
-      const top = [...sites.entries()].sort((first, second) => second[1].bytes - first[1].bytes).slice(0, 5);
-      report.allocation.push({ frames: options.frames, ownBytes, ownSamples, calleeBytes, ownPerFrame, calleePerFrame, samplesPerFrame, sites: top });
-      const detail = `${ownBytes} B in ${ownSamples} samples over ${options.frames} frames = ${ownPerFrame.toFixed(3)} B/frame; callees ${calleeBytes} B = ${calleePerFrame.toFixed(3)} B/frame${top.length ? `; top: ${top.map(([key, site]) => `${key} ${site.bytes} B (${site.samples} samples: ${site.sizes.slice(0, 6).join(', ')} B)`).join(', ')}` : ''}`;
+      // The heaviest sites in the engine's own files (judged) and in what they call (reported).
+      const ranked = [...sites.entries()].sort((first, second) => second[1].bytes - first[1].bytes);
+      const topOwn = ranked.filter(([, site]) => site.own).slice(0, 5);
+      const topCallees = ranked.filter(([, site]) => !site.own).slice(0, 3);
+      report.allocation.push({ frames: options.frames, ownBytes, ownSamples, calleeBytes, ownPerFrame, calleePerFrame, samplesPerFrame, sites: topOwn, calleeSites: topCallees });
+      const describe = (list) => list.map(([key, site]) => `${key} ${site.bytes} B (${site.samples} samples: ${site.sizes.slice(0, 6).join(', ')} B)`).join(', ');
+      const detail = `${ownBytes} B in ${ownSamples} samples over ${options.frames} frames = ${ownPerFrame.toFixed(3)} B/frame; callees ${calleeBytes} B = ${calleePerFrame.toFixed(3)} B/frame${topOwn.length ? `; own: ${describe(topOwn)}` : ''}${topCallees.length ? `; callees: ${describe(topCallees)}` : ''}`;
       // The first window still sees the JIT settling; the second is the steady state the check judges.
       if (windowIndex === 0) process.stdout.write(`INFO  alloc      window 1 (settling): ${detail}
 `);
