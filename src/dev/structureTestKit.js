@@ -7,6 +7,7 @@
 import { resolveStamp } from '../world/stamps.js';
 import { structureStamps } from '../spawns/engines/structure/stamps.js';
 import { createGeometryTracker, splitFresh } from './geometryTracker.js';
+import { createFraming, frames } from './spawnCheckKit.js';
 
 const SITE_FILTERS = Object.freeze({ biomes: null, timeOfDay: null, altitude: null, weather: null });
 const SITE_LIFETIME = Object.freeze({ duration: null, despawn: Object.freeze({ distance: 12000, hysteresis: 2000, outOfViewSeconds: 20 }) });
@@ -117,97 +118,23 @@ export async function prepareSiteWorld() {
 }
 
 // ---- Browser checks (tools/steps/engine-structure*.json) ---------------------------------------------
-/** Resolves after `count` animation frames. */
-function frames(count) {
-  return new Promise((resolve) => {
-    let left = count;
-    const tick = () => {
-      left--;
-      if (left <= 0) resolve();
-      else requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
-}
-
-/** The camera, terrain and check helpers the browser check sets use (these two, and src/dev/presetChecks.js). */
+/**
+ * The camera, terrain and check helpers the browser check sets use (these two, and src/dev/presetChecks.js).
+ * The framing (viewpoint, frameView, terrainIdle and the parked craft) is spawnCheckKit.js's.
+ */
 export function createBrowserHelpers(game, label) {
   const { ctx } = game;
   const THREE = ctx.THREE;
   const results = [];
+  const framing = createFraming(ctx);
   /** Where the craft waits while the photo camera frames a structure. */
-  const park = { x: 0, y: 0, z: 0, heading: 0 };
-  const ground = (x, z) => Math.max(ctx.world.groundHeight(x, z), ctx.world.WATER_LEVEL);
+  const { park, ground, viewpoint, frameView, terrainIdle } = framing;
 
   function check(name, ok, detail) {
     const line = `${ok ? 'PASS' : 'FAIL'} ${name}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`;
     results.push(line);
     if (!ok) console.error(`[${label} check] ${line}`);
     return line;
-  }
-
-  /** True when the terrain stays below the sight line from position to target. */
-  function clearSight(position, target) {
-    for (let sample = 1; sample < 32; sample++) {
-      const t = sample / 32;
-      const y = position.y + (target.y - position.y) * t;
-      if (ground(position.x + (target.x - position.x) * t, position.z + (target.z - position.z) * t) > y - 4) return false;
-    }
-    return true;
-  }
-
-  /** A camera position `distance` m from target with a clear view of it, trying bearings around it. */
-  function viewpoint(target, distance, height, bearing) {
-    for (let lift = 0; lift < 6; lift++) {
-      for (const offset of [0, 40, -40, 80, -80, 120, -120, 160, -160]) {
-        const toward = (bearing + offset) * (Math.PI / 180);
-        const x = target.x + Math.sin(toward) * distance;
-        const z = target.z - Math.cos(toward) * distance;
-        const position = { x, y: Math.max(ground(x, z) + height * (1 + lift * 0.6), target.y + height * 0.2), z };
-        if (clearSight(position, target)) return position;
-      }
-    }
-    const toward = bearing * (Math.PI / 180);
-    return { x: target.x + Math.sin(toward) * distance, y: target.y + distance, z: target.z - Math.cos(toward) * distance };
-  }
-
-  /** Parks the craft behind the camera and frames target from position; waits for the terrain. */
-  async function frameView(position, target) {
-    const lookX = target.x - position.x;
-    const lookZ = target.z - position.z;
-    const length = Math.hypot(lookX, lookZ) || 1;
-    park.x = position.x - (lookX / length) * 300;
-    park.z = position.z - (lookZ / length) * 300;
-    park.y = Math.max(position.y, ctx.world.groundHeight(park.x, park.z) + 200);
-    park.heading = (Math.atan2(lookX, -lookZ) * 180) / Math.PI;
-    ctx.systems.flight.resetTo(park);
-    await frames(2);
-    ctx.setPhotoMode(true);
-    await frames(2);
-    ctx.systems.camera.setFreeCameraPose({ position: new THREE.Vector3(position.x, position.y, position.z), target: new THREE.Vector3(target.x, target.y, target.z) });
-    const started = performance.now();
-    let quiet = 0;
-    while (performance.now() - started < 120000 && quiet < 6) {
-      await frames(1);
-      quiet = ctx.systems.terrain.isReadyAround(position.x, position.z) ? quiet + 1 : 0;
-    }
-    await frames(20);
-    return quiet >= 6;
-  }
-
-  /**
-   * Waits (up to two minutes) until the terrain has nothing queued, in flight, awaiting upload or
-   * fading for 20 frames in a row, so the GPU counters move only with the structure under test.
-   */
-  async function terrainIdle() {
-    const started = performance.now();
-    let quiet = 0;
-    while (performance.now() - started < 120000 && quiet < 20) {
-      await frames(1);
-      const stats = ctx.systems.terrain.getStats();
-      quiet = stats.queued === 0 && stats.inFlight === 0 && stats.awaitingUpload === 0 && stats.fading === 0 ? quiet + 1 : 0;
-    }
-    return quiet >= 20;
   }
 
   /** Moves the craft through a gate (placed with flight.resetTo, a few metres a frame). */
