@@ -42,7 +42,7 @@ export default Object.freeze({
         ratedWind: 11,
         cutOut: 25,
         yawRate: 5,
-        wake: { length: 10, deficit: 0.35, turbulence: 0.55, expansion: 0.075 },
+        wake: { length: 10, deficit: 0.4, turbulence: 0.75, expansion: 0.075, gust: 4 },
         audioIntensity: 'wind',
       },
     },

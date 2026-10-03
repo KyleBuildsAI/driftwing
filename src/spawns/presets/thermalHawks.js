@@ -40,7 +40,7 @@ export default Object.freeze({
           climb: 1.4,
           bottom: 120,
           top: 1100,
-          thermals: 2,
+          thermals: 1,
           thermalSearch: 2600,
           thermalRefresh: 12,
           requireThermal: true,
