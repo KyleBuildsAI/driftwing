@@ -41,6 +41,8 @@ const SAMPLING_BYTES = 32;
 const MAX_SAMPLES_PER_FRAME = 0.1;
 /** The DevTools protocol timeout (ms): HeapProfiler.stopSampling of a long window needs minutes. */
 const PROTOCOL_TIMEOUT_MS = 900000;
+/** Sample sizes kept per allocation site for the report (the first few). */
+const SIZES_KEPT = 12;
 /** The warm-up flight through the first spawn: at its anchor's height (null) or this height (m MSL). */
 const THROUGH_HEIGHT = Object.freeze({ fauna: null, waterEffect: 8 });
 
@@ -346,7 +348,7 @@ async function main() {
       for (const sample of profile.samples) {
         const entry = nodeSamples.get(sample.nodeId) ?? { count: 0, sizes: [] };
         entry.count++;
-        entry.sizes.push(sample.size);
+        if (entry.sizes.length < SIZES_KEPT) entry.sizes.push(sample.size);
         nodeSamples.set(sample.nodeId, entry);
       }
       let ownBytes = 0;
@@ -366,7 +368,7 @@ async function main() {
           const site = sites.get(key) ?? { bytes: 0, samples: 0, sizes: [] };
           site.bytes += node.selfSize;
           site.samples += samples.count;
-          site.sizes.push(...samples.sizes);
+          for (const size of samples.sizes) if (site.sizes.length < SIZES_KEPT) site.sizes.push(size);
           sites.set(key, site);
         }
         for (const child of node.children) walk(child, underOwn || own);
