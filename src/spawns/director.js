@@ -606,6 +606,7 @@ export function createDirector({
       if (landmark) {
         record.x = landmark.x;
         record.z = landmark.z;
+        record.distance = Math.hypot(landmark.x - player.x, landmark.z - player.z);
       }
     }
     for (let index = 0; index < pool.count; index++) {
