@@ -3,11 +3,14 @@
 // src/dev/terrainFixtures.js (one per stamp type), and checks Milestone A.
 //
 // Tests:
-//   phase1        with the real preset list (src/spawns/presets/index.js, empty until the preset batches
-//                 land) the world is bit-identical to Phase 1: 20,000 heights and 20,000 collision
-//                 heights per seed, every LOD mesh of five chunks per seed (positions, normals, colours)
-//                 and their vegetation scatter hash to the digests recorded from the Phase 1 code
-//                 (tag v2-structure, before any Phase 2 change), on three seeds
+//   phase1        with no site presets the world is bit-identical to Phase 1: 20,000 heights and 20,000
+//                 collision heights per seed, every LOD mesh of five chunks per seed (positions, normals,
+//                 colours) and their vegetation scatter hash to the digests recorded from the Phase 1
+//                 code (tag v2-structure, before any Phase 2 change), on three seeds. With the real
+//                 preset list (src/spawns/presets/index.js), whose sites stamp the terrain since the
+//                 preset batches landed, every one of those 20,000 heights and collision heights that
+//                 lies outside every stamp's bounds is still bit-identical to the world without sites,
+//                 and samples inside a stamp's bounds show its edit
 //   validation    the fixtures validate; a broken preset throws an error naming the preset and field
 //   placement     per seed, every site passes its own filters again when re-checked here (dominant biome
 //                 through worldgen.biomeAt, the terrain's own biome function; surface; relief), sites of
@@ -44,7 +47,7 @@ import { createHash } from 'node:crypto';
 import { CONFIG, WORLD_OPTIONS } from '../../src/core/config.js';
 import { createWorldGen } from '../../src/world/worldgen.js';
 import { createChunkBuilder } from '../../src/world/chunkBuilder.js';
-import { hashSiteList, validateSitePreset } from '../../src/world/placement.js';
+import { SITE_CELL, hashSiteList, validateSitePreset } from '../../src/world/placement.js';
 import { STAMP_TYPES, stampReach } from '../../src/world/stamps.js';
 import { PRESETS } from '../../src/spawns/presets/index.js';
 import { FIXTURE_STAMP_TYPE, TERRAIN_FIXTURES } from '../../src/dev/terrainFixtures.js';
@@ -60,6 +63,8 @@ for (const flag of process.argv.slice(2)) {
 const SEEDS = ['DRIFTWING', 'HARNESS-1', 'P2-TERRAIN'];
 /** The seed the stamp checks run on (every stamp type lies within 13 km of its origin). */
 const STAMP_SEED = 'P2-TERRAIN';
+/** The world without site presets: Phase 1's terrain exactly (the phase1 digests). */
+const NO_SITES = Object.freeze([]);
 const SEARCH_RADIUS = 30000;
 /** Stamp checks run on this many sites of each fixture (nearest first). */
 const SITES_PER_TYPE = 2;
@@ -122,14 +127,28 @@ function fixtureWorld(seed) {
 }
 
 // ---- phase1 ------------------------------------------------------------------------------------------
+/**
+ * The phase1 sample points: 20,000 (x, z) pairs over a 120 km square for the heights, the collision
+ * heights at an offset from each (one shared generator, so every world is sampled at the same points).
+ */
+function phase1Samples() {
+  const random = mulberry32(12345);
+  const points = new Float64Array(40000);
+  for (let index = 0; index < 20000; index++) {
+    points[index * 2] = (random() - 0.5) * 120000;
+    points[index * 2 + 1] = (random() - 0.5) * 120000;
+  }
+  return points;
+}
+
 /** Heights, collision heights, meshes of every LOD and scatter of one world, hashed (sha256 hex). */
 function phase1Digest(world) {
-  const random = mulberry32(12345);
+  const points = phase1Samples();
   const heights = new Float64Array(20000);
   const ground = new Float64Array(20000);
   for (let index = 0; index < 20000; index++) {
-    const x = (random() - 0.5) * 120000;
-    const z = (random() - 0.5) * 120000;
+    const x = points[index * 2];
+    const z = points[index * 2 + 1];
     heights[index] = world.heightAt(x, z);
     ground[index] = world.groundHeight(x + 1.37, z - 2.11);
   }
@@ -149,10 +168,59 @@ function phase1Digest(world) {
   return { heights: hash(heights), ground: hash(ground), meshes: meshHash.digest('hex') };
 }
 
-function testPhase1() {
-  check('phase1', 'the real preset list places no stamps yet', PRESETS.every((preset) => preset.kind !== 'site' || !(preset.stamps ?? []).length), `${PRESETS.length} presets`);
+/** Whether (x, z) lies inside the bounds of any stamp of world's sites (the stamp spatial hash's own cells). */
+function insideStamp(world, x, z) {
+  const stamps = world.placement.stampsInCell(Math.floor(x / SITE_CELL), Math.floor(z / SITE_CELL));
+  for (const stamp of stamps) {
+    if (x >= stamp.minX && x <= stamp.maxX && z >= stamp.minZ && z <= stamp.maxZ) return true;
+  }
+  return false;
+}
+
+/**
+ * The real preset list stamps the terrain (the abandoned airfield's strip, the floating islands'
+ * islets, ...): away from every stamp the world must stay exactly the world without sites, so Phase 1
+ * terrain survives everywhere a site does not stand. Compares the phase1 sample points of both worlds.
+ */
+function testRealPresetsAgainstPhase1() {
+  const stampedPresets = PRESETS.filter((preset) => preset.kind === 'site' && (preset.stamps ?? []).length > 0).map((preset) => preset.id);
+  check('phase1', 'the real preset list includes stamped sites', stampedPresets.length > 0, stampedPresets.join(', ') || 'none');
+  const points = phase1Samples();
+  let insideTotal = 0;
+  let editedTotal = 0;
   for (const seed of SEEDS) {
-    const world = createWorldGen(seed, WORLD_OPTIONS);
+    const real = createWorldGen(seed, WORLD_OPTIONS);
+    const bare = createWorldGen(seed, { ...WORLD_OPTIONS, presets: NO_SITES });
+    let outside = 0;
+    let heightMismatches = 0;
+    let groundMismatches = 0;
+    let inside = 0;
+    let edited = 0;
+    for (let index = 0; index < 20000; index++) {
+      const x = points[index * 2];
+      const z = points[index * 2 + 1];
+      if (insideStamp(real, x, z)) {
+        inside++;
+        if (real.heightAt(x, z) !== bare.heightAt(x, z)) edited++;
+      } else {
+        outside++;
+        if (real.heightAt(x, z) !== bare.heightAt(x, z)) heightMismatches++;
+      }
+      const groundX = x + 1.37;
+      const groundZ = z - 2.11;
+      if (!insideStamp(real, groundX, groundZ) && real.groundHeight(groundX, groundZ) !== bare.groundHeight(groundX, groundZ)) groundMismatches++;
+    }
+    insideTotal += inside;
+    editedTotal += edited;
+    check('phase1', `${seed}: real presets, heights outside every stamp bit-identical to the world without sites`, heightMismatches === 0, `${outside} outside, ${heightMismatches} differ; ${inside} inside stamp bounds, ${edited} edited`);
+    check('phase1', `${seed}: real presets, collision heights outside every stamp bit-identical`, groundMismatches === 0, `${groundMismatches} differ`);
+  }
+  check('phase1', 'real presets: samples inside stamp bounds show the stamp edits', insideTotal === 0 || editedTotal > 0, `${editedTotal} of ${insideTotal} samples inside stamp bounds edited`);
+}
+
+function testPhase1() {
+  for (const seed of SEEDS) {
+    const world = createWorldGen(seed, { ...WORLD_OPTIONS, presets: NO_SITES });
     const digest = phase1Digest(world);
     const golden = PHASE1_DIGESTS[seed];
     check('phase1', `${seed}: 20,000 heights bit-identical to Phase 1`, digest.heights === golden.heights, digest.heights.slice(0, 16));
@@ -657,6 +725,7 @@ function testBenchmark() {
 // ---- run ---------------------------------------------------------------------------------------------------------
 const started = Date.now();
 testPhase1();
+testRealPresetsAgainstPhase1();
 testValidation();
 testPlacement();
 testDeterminism();

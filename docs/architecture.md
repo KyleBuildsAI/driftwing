@@ -382,7 +382,7 @@ and `waypoints.js` (waypoint beacon and arrow), from v1.
 | `flight-lab.mjs` | headless flight lab for the glider and bush plane (handling, spawns, craft switches, hot-plug) |
 | `lab/jet.mjs`, `lab/helicopter.mjs`, `lab/wingsuit.mjs`, `lab/fpv.mjs` | headless flight labs per craft |
 | `lab/settings.mjs` | settings migrations (views per craft included) and the one-time HOTAS assist default |
-| `lab/terrain.mjs` | site placement and terrain stamps: Phase 1 bit-identity, filters, determinism, stamp shapes, seams, collision, and the height-sampling cost against Phase 1 |
+| `lab/terrain.mjs` | site placement and terrain stamps: Phase 1 bit-identity (no sites; with the real presets, everywhere outside their stamps), filters, determinism, stamp shapes, seams, collision, and the height-sampling cost against Phase 1 |
 | `lab/copilot.mjs` | WREN's local grammar (version one, the view commands, retired commands) and the `switchVersion` and `setView` schema |
 | `lab/input.mjs`, `lab/storage.mjs`, `lab/copilot-server.mjs` | input pipeline, storage and copilot-server origin labs |
 | `copilot-server.mjs` | the reference remote copilot brain (see `docs/copilot-api.md`) |
@@ -1477,7 +1477,7 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `npm run test:flight`, `test:flight:webgl` | the Phase 1 flight-test harness for every craft in first and third person, 3 seeds (36 runs of 60 s) |
 | `npm run test:hotas`, `test:hotas:webgl` | the HOTAS pipeline, including persistence across a reload in the `driftwing-v2-test-hotas` database |
 | `npm run test:terrain`, `test:terrain:webgl` | terrain stamps in the running game: no cracks at any LOD pair, worker meshes identical to main-thread builds, collision within 0.5 m of the rendered mesh; screenshots of every stamp type |
-| `npm run lab:terrain` | placement and stamps headless: Phase 1 bit-identity with the real (empty) preset list, placement filters, determinism, stamp shapes, seams, collision, height-sampling cost within 10 % of Phase 1 |
+| `npm run lab:terrain` | placement and stamps headless: Phase 1 bit-identity with no site presets, and with the real (stamped) preset list bit-identity everywhere outside the stamps' bounds; placement filters, determinism, stamp shapes, seams, collision, height-sampling cost within 10 % of Phase 1 |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/view-physics.json` | every craft flies bit-identically in every view |
 | `node tools/shell-check.mjs --url <shell>` | the pill (shows, hides, clear of both games' HUDs), persistence and forwarding |
 | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` | the flight models, settings migrations, storage, input, WREN's grammar, the copilot server |
