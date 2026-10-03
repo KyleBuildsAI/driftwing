@@ -62,12 +62,6 @@ const CHILD_ENDED = 3;
 const KIND = Object.freeze({ time: 0, playerDistance: 1, altitude: 2, weather: 3, childEnded: 4, childActive: 5 });
 const EASE = Object.freeze({ linear: 0, smooth: 1, in: 2, out: 3 });
 
-function ease(kind, t) {
-  if (kind === 1) return t * t * (3 - 2 * t);
-  if (kind === 2) return t * t;
-  if (kind === 3) return 1 - (1 - t) * (1 - t);
-  return t;
-}
 
 /** Validates and flattens the timeline params into the plan one instance runs. Throws naming the path. */
 function readTimeline(preset, params, rng, manager) {
@@ -485,24 +479,28 @@ export function createSetPieceEngine() {
     }
   }
 
-  /** True when a condition set holds now (allocation-free). */
-  function conditionsHold(instance, set, stageTime) {
+  /**
+   * True when a condition set holds now (allocation-free). The stage time is read from the
+   * instance's clock, not passed in: a fraction passed to a call the compiler does not inline is
+   * boxed on every frame.
+   */
+  function conditionsHold(instance, set) {
     const all = set.all;
     const conditions = set.conditions;
     for (let index = 0; index < conditions.length; index++) {
-      const holds = conditionHolds(instance, conditions[index], stageTime);
+      const holds = conditionHolds(instance, conditions[index]);
       if (all && !holds) return false;
       if (!all && holds) return true;
     }
     return all;
   }
 
-  function conditionHolds(instance, condition, stageTime) {
+  function conditionHolds(instance, condition) {
     const data = instance.data;
     const player = ctx.state.player.position;
     switch (condition.kind) {
       case 0:
-        return stageTime >= condition.value;
+        return data.stageClock[0] >= condition.value;
       case 1: {
         const target = condition.child >= 0 ? childAnchor(data, condition.child) : instance.anchor;
         if (!target) return false;
@@ -536,7 +534,12 @@ export function createSetPieceEngine() {
       const parts = data.childParts[ramp.child];
       if (!parts) continue;
       const t = clock[0] >= ramp.over ? 1 : clock[0] / ramp.over;
-      const value = ramp.from + (ramp.to - ramp.from) * ease(ramp.ease, t);
+      // The ease is computed in place: a helper returning a fraction would box it on every frame.
+      let eased = t;
+      if (ramp.ease === EASE.smooth) eased = t * t * (3 - 2 * t);
+      else if (ramp.ease === EASE.in) eased = t * t;
+      else if (ramp.ease === EASE.out) eased = 1 - (1 - t) * (1 - t);
+      const value = ramp.from + (ramp.to - ramp.from) * eased;
       const engines = data.childEngines[ramp.child];
       for (let part = 0; part < parts.length; part++) {
         const target = parts[part];
@@ -683,7 +686,7 @@ export function createSetPieceEngine() {
       const clock = data.stageClock;
       clock[0] += dt;
       if (!data.running) {
-        if (conditionsHold(instance, stage.when, clock[0])) enterStage(instance, data.stageIndex);
+        if (conditionsHold(instance, stage.when)) enterStage(instance, data.stageIndex);
         else if (clock[0] >= stage.whenTimeout) nextStage(instance);
         return;
       }
@@ -695,7 +698,7 @@ export function createSetPieceEngine() {
         emitNarration(instance, stage);
         data.narrated = true;
       }
-      if (clock[0] >= stage.duration || (stage.until !== null && conditionsHold(instance, stage.until, clock[0]))) nextStage(instance);
+      if (clock[0] >= stage.duration || (stage.until !== null && conditionsHold(instance, stage.until))) nextStage(instance);
     },
 
     setLOD(instance, tier) {
