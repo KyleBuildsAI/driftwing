@@ -14,7 +14,7 @@ function geyser(offset, size, schedule, sound) {
       turbulence: { spread: 3, wobble: 2.5, frequency: 0.3 }, life: [6, 10], size: [4 * size, 42 * size],
       colors: [0xffffff, 0xf3f5f7, 0xe4e8ec], opacity: 0.72,
       schedule: { ...schedule, idle: 0.05 },
-      windSource: { type: 'updraft', strength: 13 * size, radius: 26 * size, height: 300 * size, turbulence: 0.6 },
+      windSource: { type: 'updraft', strength: 14 * size, radius: 48 * size, height: 320 * size, turbulence: 0.65 },
       soundTriggers: { schedule: 'burst' },
       sound,
     },

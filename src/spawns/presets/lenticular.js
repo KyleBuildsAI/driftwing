@@ -27,7 +27,7 @@ export default Object.freeze({
       params: {
         form: 'lens', base: 1150, radius: 2000, aspect: 0.45, layers: 4, gap: 150, thickness: 170, puffs: 18,
         brightness: 1.05, billow: 0.08,
-        wind: { turbulence: 0.04, wave: { lift: 3.2, sink: 2.6, rotor: 0.55 } },
+        wind: { turbulence: 0.04, wave: { lift: 3, sink: 2, rotor: 0.55 } },
         formSeconds: 60,
         dissipateSeconds: 60,
       },
@@ -35,7 +35,7 @@ export default Object.freeze({
     {
       engine: 'windModifier',
       params: {
-        type: 'waveLift', direction: 'heading', wavelength: 6500, amplitude: 3.4, crests: 3, startOffset: 2600, width: 9000,
+        type: 'waveLift', direction: 'heading', wavelength: 6500, amplitude: 2.8, crests: 3, startOffset: 2600, width: 9000,
         base: 250, top: 5200, rotorTop: 900, rotorTurbulence: 0.8, rotorReverse: 5, smoothTurbulence: 0.04, gust: 4, fadeIn: 30,
       },
     },
