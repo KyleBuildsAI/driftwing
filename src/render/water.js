@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { CONFIG } from '../core/config.js';
 import { MathUtils, DEG, clamp, damp } from '../core/util.js';
+import { createWaterEffects } from './waterEffects.js';
 
 /**
  * WATER: an 8 km wave grid that follows the camera.
@@ -20,6 +21,9 @@ import { MathUtils, DEG, clamp, damp } from '../core/util.js';
  *   whose lobe widens with distance as the detail waves fade (the long streak
  *   toward a low sun), a cool moon glint at night, back-lit crest glow, and
  *   cloud-shadow darkening from ctx.textures.cloudShadow.
+ * - Local effects (Phase 2, waterEffects.js): whirlpool funnels, ripple rings, foam and
+ *   bioluminescent trails, added to the displacement, the normal, the colour and the emission. With
+ *   none active every added term is exactly zero, so the ocean renders as in Phase 1.
  */
 export function createWaterSystem(ctx) {
   const { THREE: T, scene, camera, state, uniforms, textures } = ctx;
@@ -226,6 +230,9 @@ export function createWaterSystem(ctx) {
     return fract(dot(param, vec2(wave.frequencyX, wave.frequencyZ)).sub(timeCycles(waveIndex))).mul(TWO_PI);
   }
 
+  // Local effects layer: spawns write into it (ctx.systems.water.effects, the engine ctx's `water`).
+  const effects = createWaterEffects(ctx);
+
   // ---- Vertex stage: Gerstner swell in wrapped world space ------------------------------
   const material = new T.MeshStandardNodeMaterial({
     roughness: 0.12,
@@ -251,7 +258,7 @@ export function createWaterSystem(ctx) {
     // shallows never z-fight with it on 24-bit depth.
     const cameraDistance = length(local.xz.sub(cameraOffset));
     const sink = min(cameraDistance.mul(cameraDistance).mul(DEPTH_SINK_PER_SQUARE_METRE), MAX_DEPTH_SINK);
-    return local.add(offset).sub(vec3(0, sink, 0));
+    return local.add(offset).add(vec3(0, effects.nodes.displacement(local.xz), 0)).sub(vec3(0, sink, 0));
   })();
 
   // ---- Fragment stage: analytic normal at the undisplaced surface parameter -------------
@@ -288,8 +295,8 @@ export function createWaterSystem(ctx) {
       height.addAssign(sine.mul(amplitude));
       if (wave.swell) crestLift.addAssign(sine.mul(slopeAmplitude).mul(wave.waveNumber * wave.steepness));
     });
-    const normal = normalize(vec3(slopeX.negate(), oneMinus(crestLift), slopeZ.negate()));
-    return vec4(normal, height);
+    // Unnormalised: the local effects add their slopes before the normalisation below.
+    return vec4(slopeX.negate(), oneMinus(crestLift), slopeZ.negate(), height);
   })();
 
   // Slope variance of the detail that faded out: widens the glint lobe with distance.
@@ -299,8 +306,12 @@ export function createWaterSystem(ctx) {
     unresolvedVariance = unresolvedVariance.add(wave.swell ? hidden : hidden.mul(detailScale).mul(detailScale));
   });
 
-  const surfaceNormalView = cameraViewMatrix.transformDirection(surface.xyz);
   const waveHeight = surface.w;
+  // Local effects: vec4(slope x, slope z, foam, glow), all exactly zero while nothing is active.
+  const effectSurface = effects.nodes.surface(waveHeight);
+  const foam = effectSurface.z;
+  const surfaceNormal = normalize(surface.xyz.sub(vec3(effectSurface.x, 0, effectSurface.y)));
+  const surfaceNormalView = cameraViewMatrix.transformDirection(surfaceNormal);
   material.normalNode = surfaceNormalView;
 
   const viewDirection = normalize(positionView.negate());
@@ -340,12 +351,16 @@ export function createWaterSystem(ctx) {
     .mul(pow(towardSun, 5).mul(crest.mul(crest)).mul(subsurfaceStrength).mul(oneMinus(cloudShadow.mul(0.8))));
 
   const bodyColor = mix(deepColor, shallowColor, saturate(crest.mul(0.45).add(cosView.mul(0.35))));
-  material.colorNode = bodyColor.mul(oneMinus(fresnel)).mul(oneMinus(cloudShadow.mul(0.55)));
+  const waterAlbedo = bodyColor.mul(oneMinus(fresnel)).mul(oneMinus(cloudShadow.mul(0.55))).mul(oneMinus(effects.nodes.darken()));
+  // Foam is lit like the land (diffuse), and hides the mirror, the glints and the subsurface glow.
+  material.colorNode = mix(waterAlbedo, effects.nodes.foamColor.mul(0.82), foam);
   material.emissiveNode = reflectedSky.mul(fresnel).mul(oneMinus(cloudShadow.mul(0.3)))
     .add(sunGlint)
     .add(moonGlint)
-    .add(subsurface);
-  material.opacityNode = mix(float(BASE_OPACITY), float(GRAZING_OPACITY), fresnel);
+    .add(subsurface)
+    .mul(oneMinus(foam.mul(0.85)))
+    .add(effects.nodes.glowColor.mul(effectSurface.w.mul(1.35)));
+  material.opacityNode = mix(mix(float(BASE_OPACITY), float(GRAZING_OPACITY), fresnel), float(1), foam);
 
   const mesh = new T.Mesh(buildGridGeometry(axisCoordinates), material);
   mesh.name = 'water';
@@ -394,10 +409,16 @@ export function createWaterSystem(ctx) {
 
   return {
     mesh,
+    /** The local effects layer (waterEffects.js): the spawns' water API. */
+    effects,
     update(dt, realDt) {
       followCamera(camera.position.x, camera.position.z);
       advanceWaves(state.time.elapsed);
       updateLighting(realDt);
+      effects.update(dt, realDt, mesh.position, camera.position);
+    },
+    getStats() {
+      return { effects: effects.stats() };
     },
   };
 }

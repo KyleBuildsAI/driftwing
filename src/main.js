@@ -16,6 +16,7 @@ import { createDebugWindSystem } from './dev/debugWind.js';
 import { createEmitterEngine } from './spawns/engines/emitterEngine.js';
 import { createLightEffectEngine } from './spawns/engines/lightEffectEngine.js';
 import { createFlightController } from './flight/FlightController.js';
+import { createFaunaEngine } from './spawns/engines/faunaEngine.js';
 import { createFxSystem } from './render/fx.js';
 import { createInputSystem } from './input/InputManager.js';
 import { createFrameLoop } from './core/loop.js';
@@ -34,6 +35,7 @@ import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
 import { createVortexEngine } from './spawns/engines/vortexEngine.js';
 import { createWaterSystem } from './render/water.js';
+import { createWaterEffectEngine } from './spawns/engines/waterEffectEngine.js';
 import { createWaypointSystem } from './gameplay/waypoints.js';
 import { createWeatherSystem } from './spawns/weather.js';
 import { createWeatherVolumeEngine } from './spawns/engines/weatherVolumeEngine.js';
@@ -65,7 +67,9 @@ const SPAWN_ENGINE_FACTORIES = Object.freeze([
   createVortexEngine,
   createEmitterEngine,
   createWeatherVolumeEngine,
+  createFaunaEngine,
   createCelestialEngine,
+  createWaterEffectEngine,
   createLightEffectEngine,
   createWindModifierEngine,
 ]);

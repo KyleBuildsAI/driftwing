@@ -131,7 +131,10 @@ function copyReading(target, source) {
  *   presets                  the preset list (validated by the caller)
  *   siteFeed                 optional: { sitesInCell(cellX, cellZ) } and/or { sitesNear(x, z, radius) }
  *   seed                     the world seed (string), for event seeds
- *   registerPrewarm          optional: registers the lure mesh for the pipeline prewarm
+ *   registerPrewarm          optional: registers the lure mesh for the pipeline prewarm; engines get
+ *                            it too (engineCtx.registerPrewarm) for the meshes they build in init()
+ *   water                    optional: the water effects layer (src/render/waterEffects.js), the
+ *                            engines' water API (engineCtx.water)
  *   maxLights                the cap on real lights (default MAX_REAL_LIGHTS); the pool holds the sum
  *                            of the engines' budget.lights up to it
  *   engineBudgets            optional: default { instances, particles } caps by engine name (the
@@ -141,6 +144,7 @@ export function createSpawnManager(options) {
   const {
     THREE, TSL, scene, camera, renderer, backend, wind, audio, world, state, sky, bus, perf, settings, uniforms,
     registry, presets = [], seed = '', registerPrewarm = null, maxLights = MAX_REAL_LIGHTS, engineBudgets = null,
+    water = null,
   } = options;
   const presetById = new Map();
   for (const preset of presets) presetById.set(preset.id, preset);
@@ -393,15 +397,14 @@ export function createSpawnManager(options) {
       createInstancedPool: (poolOptions) => createInstancedPool(THREE, poolOptions),
       createMeshPool: (poolOptions) => createMeshPool(THREE, poolOptions),
     }),
-    // Engines call registerPrewarm(object3D) in init() for meshes they show later, so core draws them
-    // once behind the loading fade (pipelines built, geometries counted) instead of on first use.
-    registerPrewarm: typeof registerPrewarm === 'function' ? registerPrewarm : null,
     spawns: null,
     /**
      * Registers an object an engine builds in init() for the pipeline prewarm behind the loading fade, so
      * the first spawn does not hitch on a shader compile. Null in the labs; engines check before calling.
      */
     registerPrewarm: typeof registerPrewarm === 'function' ? registerPrewarm : null,
+    /** The water effects layer (disturbances, trails, splashes, spray, vortices, glow, pools), or null. */
+    water,
   };
 
   function initEngine(engine) {

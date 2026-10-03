@@ -159,7 +159,8 @@ system, and then starts the frame loop.
 | `sky.js` | sky dome, sun, moon, stars, aurora, god rays, fog colour and the day / night cycle (v1), and the sky modifiers the weather and celestial events use (Phase 2) |
 | `clouds.js` | instanced drifting clouds, cloud shadows (v1), plus a cumulus cap over every thermal; the palette follows the sky modifiers (storm undersides, eclipse) |
 | `cloudShading.js` | the cloud puff geometry, palette (`createCloudLook`) and light response (`createCloudRadiance`) shared by the v1 clouds and the weather volumes, and the cloud optics (glory and rainbow bands) |
-| `water.js` | animated water, sun glint and shoreline foam (v1) |
+| `water.js` | animated water, sun glint and shoreline foam (v1), plus the local effects layer's terms |
+| `waterEffects.js` | the water effects layer: trail buffer, vortices, ripples, glow regions, spray droplets and pool discs for spawns |
 | `birds.js` | boid flocks that scatter (v1) |
 | `fx.js` | contrails, wind streaks, bursts (v1) |
 | `jetEffects.js` | afterburner flame, vapor cones (Mach 0.9-1.05, low altitude) and wingtip vapour, attached to the jet mesh |
@@ -283,6 +284,8 @@ system, and then starts the frame loop.
 | `engines/engineKit.js` | helpers the engines share: param readers with clear errors, heading frames, ground grids, pooled real lights, fixed-capacity update range lists, batched seeded random numbers, rationed voice levels |
 | `engines/weatherVolumeEngine.js`, `engines/weatherVolume/` | the weatherVolume engine: cloud masses, rain shafts, fog banks, the weather inside them ([docs/engines/weatherVolume.md](engines/weatherVolume.md)) |
 | `engines/celestialEngine.js`, `engines/celestial/` | the celestial engine: meteors, comets, the eclipse, the glory and rainbows ([docs/engines/celestial.md](engines/celestial.md)) |
+| `engines/faunaEngine.js`, `engines/faunaSpecies.js` | the fauna engine and its low-poly species ([docs/engines/fauna.md](engines/fauna.md)) |
+| `engines/waterEffectEngine.js` | the water effect engine (on the water effects layer) ([docs/engines/waterEffect.md](engines/waterEffect.md)) |
 
 ### `src/env`
 
@@ -1141,7 +1144,23 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   the SpawnManager (the setPiece engine orchestrates through it). `registerPrewarm(object3D)` (null in the headless
   lab) registers a mesh from `init()` for core's pipeline prewarm, so it is drawn once behind the
   loading fade: the first spawn costs no pipeline build, and lazily counted geometries are in the
-  memory baseline before any dispose check.
+  memory baseline before any dispose check. `water` is the water effects layer (below; null where the water
+  system is absent).
+- **Water effects layer** (`src/render/waterEffects.js`, `ctx.systems.water.effects`, the engine
+  ctx's `water`). Local water deformation and shading on the v1 ocean, shared by every spawn: a
+  toroidal 640 m trail buffer (bioluminescent excitation and foam) that the craft writes through a
+  contact query against its telemetry and that engines write through mark descriptors (`createMark`
+  with `disturb`, `trail`, `foamRing`, `ripple` and `splashMark`; numeric shorthands such as
+  `addWaterDisturbance` and `splash` for one-off writes); ripple rings; up to 4 whirlpool vortices,
+  4 glow regions and 4 pool discs (slot API with descriptors); and one instanced spray-droplet batch
+  (`createSpray` / `emitSpray`). Its frame work allocates nothing (typed-array state, no doubles
+  across non-inlined calls, splashes queued for the hot update). `surfaceHeightAt(x, z)` adds the funnels to sea level. With nothing registered and an
+  empty trail buffer every added term is zero, so the ocean renders as in Phase 1. The full API is in
+  docs/engines/waterEffect.md.
+- **Fauna and water engines (wave 2).** `fauna` (instanced boids: murmuration, flock,
+  formation with the formation-slot API, circling in thermals, whale pod, wingman, drift with a
+  slipstream; docs/engines/fauna.md) and `waterEffect` (whirlpool, splash, spray, bioluminescence,
+  plunge pool on the water effects layer; docs/engines/waterEffect.md).
 - **Mesh lifetime in three r184.** A RenderObject listens for its material's `dispose` event, which
   keeps it, its mesh and its geometry alive until that material is disposed. A new Mesh per spawn
   instance on a shared material therefore leaks about 8 KB per instance even after its geometry is

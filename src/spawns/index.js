@@ -62,6 +62,7 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
     seed: state.seed,
     siteFeed: world.placement ?? null,
     registerPrewarm: ctx.registerPrewarm,
+    water: ctx.systems.water?.effects ?? null,
     engineBudgets: DIRECTOR_BUDGETS.engines,
   });
   let director = null;
