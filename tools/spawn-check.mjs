@@ -64,6 +64,20 @@ function check(test, name, pass, detail = '') {
   process.stdout.write(`${pass ? 'PASS' : 'FAIL'}  ${test.padEnd(10)} ${name}${detail ? `  (${detail})` : ''}\n`);
 }
 
+/** Polls the GPU counters once a second until three reads in a row agree (at most 30 s). */
+async function waitForGpuSettle(readGpu) {
+  const started = Date.now();
+  let last = await readGpu();
+  let steady = 0;
+  while (steady < 3 && Date.now() - started < 30000) {
+    await sleep(1000);
+    const now = await readGpu();
+    steady = now.geometries === last.geometries && now.attributes === last.attributes && now.textures === last.textures ? steady + 1 : 0;
+    last = now;
+  }
+  return { settled: steady >= 3, seconds: Math.round((Date.now() - started) / 100) / 10, geometries: last.geometries, attributes: last.attributes };
+}
+
 async function main() {
   const options = parseArgs(process.argv);
   mkdirSync(options.out, { recursive: true });
@@ -130,6 +144,12 @@ async function main() {
     const warmUp = await evaluate((ids) => window.DRIFTWING.ctx.systems.spawns.debug.testKit.deactivateAll(ids), warmUpIds);
     await sleep(1500);
     check('memory', `warm-up: engine session resources built (${MEMORY_INSTANCES} instances created and disposed)`, warmUp === MEMORY_INSTANCES);
+    // The baseline waits for the GPU counters to settle: terrain chunks requested during boot keep
+    // arriving from the workers for a while (longer now that ten engines build and prewarm their
+    // session meshes behind the loading fade), and a chunk landing inside cycle 1 would read as a leak.
+    const settle = await waitForGpuSettle(readGpu);
+    report.numbers.memorySettle = settle;
+    check('memory', 'GPU counters settled before the baseline', settle.settled, `${settle.seconds} s, geometries ${settle.geometries}, attributes ${settle.attributes}`);
     const cycles = [];
     for (let cycle = 0; cycle < MEMORY_CYCLES; cycle++) {
       await collectGarbage();
