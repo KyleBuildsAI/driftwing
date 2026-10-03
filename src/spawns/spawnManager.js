@@ -194,6 +194,14 @@ export function createSpawnManager(options) {
   const counters = { activated: 0, ended: 0, tierChanges: 0, discoveries: 0, lureRefused: 0, visibilityChecks: 0 };
   let heavyActive = 0;
   let visibilityCursor = 0;
+  /**
+   * Whether a record holds one of the heavy slots: a heavy event or debug spawn always, a heavy site
+   * with an active state (the volcano) only while that state runs, and a heavy site without one (the
+   * floating islands) for as long as it exists.
+   */
+  function holdsHeavy(record) {
+    return record.preset.heavy === true && (record.active || (record.source === 'site' && !record.preset.activeState));
+  }
   let lastRefusal = null;
 
   // ---- Memory accounting ------------------------------------------------------------------------
@@ -451,7 +459,8 @@ export function createSpawnManager(options) {
   /**
    * Why an activation of presetId would be refused now ('preset', 'engine', 'capacity', 'heavy',
    * 'instances', 'particles'), or null when it would be admitted. source 'site' is never refused for heavy
-   * (sites are persistent places; the director decides their active state).
+   * (sites are persistent places; the director decides their active state), though a heavy site counts
+   * toward the limit while it holds a heavy slot (holdsHeavy).
    */
   function refusalFor(preset, source) {
     if (!preset) return 'preset';
@@ -644,6 +653,8 @@ export function createSpawnManager(options) {
       inView: false,
       seenInView: false,
       lureSlot: -1,
+      /** Whether this record counts in heavyActive (holdsHeavy, kept in step by setSiteActive). */
+      heavyHeld: false,
       serial,
       memory: nextMemoryEntry(id, presetId, serial),
     };
@@ -741,7 +752,8 @@ export function createSpawnManager(options) {
     records.push(record);
     recordById.set(id, record);
     if (site) recordBySite.set(site.id, record);
-    if (preset.heavy && record.active) heavyActive++;
+    record.heavyHeld = holdsHeavy(record);
+    if (record.heavyHeld) heavyActive++;
     counters.activated++;
     lastRefusal = null;
     bus.emitTyped('spawnActivated', {
@@ -775,7 +787,8 @@ export function createSpawnManager(options) {
     if (visibilityCursor > records.length) visibilityCursor = 0;
     recordById.delete(record.id);
     if (record.site) recordBySite.delete(record.site.id);
-    if (record.preset.heavy && record.active) heavyActive--;
+    if (record.heavyHeld) heavyActive--;
+    record.heavyHeld = false;
     for (let partIndex = 0; partIndex < record.parts.length; partIndex++) {
       const part = record.parts[partIndex];
       const counts = countersFor(part.engine.name);
@@ -1206,8 +1219,10 @@ export function createSpawnManager(options) {
       if (!record || record.source !== 'site') return false;
       const next = Boolean(active);
       if (next === record.active) return true;
-      if (record.preset.heavy) heavyActive += next ? 1 : -1;
       record.active = next;
+      const held = holdsHeavy(record);
+      if (held !== record.heavyHeld) heavyActive += held ? 1 : -1;
+      record.heavyHeld = held;
       for (let index = 0; index < record.parts.length; index++) record.parts[index].instance.active = next;
       if (record.lureSlot >= 0) lures.setVisible(record.lureSlot, lureShown(record, record.tierRank));
       return true;
