@@ -439,6 +439,23 @@ export function createCelestialEngine() {
     }
   }
 
+  /**
+   * untilDawn: an event that lasts the rest of the night (a comet). Once the instance has seen the sun
+   * below dawnElevation, the sun climbing back past it ends the night: the event's duration is cut to
+   * its fadeOut from now, so it fades out and ends like any other. A spawn started in daylight waits
+   * for a night first.
+   */
+  function watchForDawn(data, params) {
+    if (frame.sunElevation < params.dawnElevation) {
+      data.sawNight = true;
+      return;
+    }
+    if (!data.sawNight) return;
+    data.dawnReached = true;
+    const remaining = data.age + params.fadeOut;
+    data.duration = data.duration === null ? remaining : Math.min(data.duration, remaining);
+  }
+
   function setQuiet(instance, quiet) {
     const data = instance.data;
     if (data.quiet === quiet) return;
@@ -595,6 +612,8 @@ export function createCelestialEngine() {
         startTime: Number.isFinite(params.startTime) ? params.startTime : ctx.time.elapsed,
         duration,
         age: 0,
+        sawNight: false,
+        dawnReached: false,
         presence: resolved.fadeIn > 0 ? 0 : 1,
         tierVisibility: 1,
         tier: 'near',
@@ -691,6 +710,7 @@ export function createCelestialEngine() {
       data.writtenFrame = stamp;
       const params = data.params;
       data.age = ctx.time.elapsed - data.startTime;
+      if (params.untilDawn && !data.dawnReached) watchForDawn(data, params);
       // Presence: fades in, and out before the end of an event (the eclipse's crossing is its own).
       let presence = params.fadeIn > 0 ? Math.min(1, data.age / params.fadeIn) : 1;
       if (data.duration !== null && params.fadeOut > 0) presence = Math.min(presence, Math.max(0, (data.duration - data.age) / params.fadeOut));
@@ -779,6 +799,8 @@ export function createCelestialEngine() {
       const data = instance.data;
       return {
         presence: data.presence,
+        duration: data.duration,
+        dawnReached: data.dawnReached,
         meteorsActive: data.meteorsActive,
         meteorsSpawned: data.meteorsSpawned,
         visibility: data.visibility,

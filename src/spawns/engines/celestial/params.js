@@ -176,6 +176,8 @@ export function resolveCelestialParams(params, duration = null) {
     anchorDistance: number(source.anchorDistance, 'anchorDistance', 1500, 50, 20000),
     fadeIn: number(source.fadeIn, 'fadeIn', 6, 0, 600),
     fadeOut: number(source.fadeOut, 'fadeOut', 10, 0, 600),
+    untilDawn: source.untilDawn === true,
+    dawnElevation: number(source.dawnElevation, 'dawnElevation', -6, -18, 20),
     meteors: meteors ? resolveMeteors(meteors) : null,
     comet: comet ? resolveComet(comet) : null,
     eclipse: eclipse ? resolveEclipse(eclipse, duration) : null,

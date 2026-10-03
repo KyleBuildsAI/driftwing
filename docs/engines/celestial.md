@@ -36,6 +36,8 @@ comet, or an eclipse that also raises the stars.
 | `anchor` | `sky` or `world` | `world` with a rainbow, else `sky` | `sky` keeps the spawn's anchor `anchorDistance` from the camera toward the component's direction (eclipse: the sun; comet: the comet; meteors: the radiant; glory: the antisolar point). The spawn is then always near, and it is discovered when the player looks at it. `world` keeps the anchor where the spawn was activated (a rainbow at a waterfall; a heavy comet preset with a lure, whose sky objects fade out at the FAR tier while the lure shows) |
 | `anchorDistance` | m (50..20000) | 1500 | with a sky anchor, keep `lod.near` above this value so the spawn stays at the NEAR tier |
 | `fadeIn`, `fadeOut` | s | 6, 10 | presence ramps; `fadeOut` runs before the event's duration ends. The eclipse's crossing is its own ramp |
+| `untilDawn` | bool | false | the event lasts the rest of the night: once the instance has seen the sun below `dawnElevation`, the sun climbing back past it cuts the duration to `fadeOut` from then, so it fades out and ends (`instance.ended`). A spawn started in daylight waits for a night first. `lifetime.duration` stays the cap (a frozen night clock never reaches dawn). Used by the comet |
+| `dawnElevation` | deg (-18..20) | -6 | the sun elevation that ends an `untilDawn` night |
 | `ownsAudio` | bool | the first engine entry of the preset owns `preset.audio` | |
 
 ### meteors
