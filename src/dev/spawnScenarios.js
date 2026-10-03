@@ -26,7 +26,8 @@
 //   view        the screenshot: mode 'world' (default: the free camera `distance` m from the anchor,
 //               `height` m up, at `bearing` degrees from the craft's heading, aimed `lift` m above the
 //               anchor, or at `offset` [right, up, forward] in the heading's frame; `child` frames a set
-//               piece child's anchor instead), 'sky' (from the craft toward the spawn's sky anchor,
+//               piece child's anchor instead; a flying flock's anchor is its live centre, so a short
+//               distance puts the camera inside a circling flock), 'sky' (from the craft toward the spawn's sky anchor,
 //               `lookUp` m higher), 'sun' (from the craft at the sun), 'player' (the free camera
 //               `distance` m from the craft at `bearing`, `height` up, looking at the craft, or with
 //               look 'antisolar' down-sun at the craft's shadow, or look 'pair' between the craft and
@@ -124,7 +125,7 @@ export const SPAWN_SCENARIOS = Object.freeze([
   {
     id: 'thermalHawks', why: 'midday, when the thermals work', sun: 50, weather: 'clear',
     anchor: 'thermal', distance: 1500, runSeconds: 6,
-    view: { distance: 70, height: 15, bearing: 200, lift: 0, fov: 75 },
+    view: { distance: 25, height: 15, bearing: 200, lift: 0, fov: 80 },
   },
   {
     id: 'fireflies', why: 'night over a meadow', sun: -25, weather: 'clear',

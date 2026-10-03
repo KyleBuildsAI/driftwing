@@ -10,7 +10,7 @@
 //   node tools/run-harness.mjs --test 1|soak|hotas|terrain|determinism|spawns [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
 //     [--crafts glider,jet] [--views first,third] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
-//     [--presets real | --presets tornado,comet]
+//     [--presets real | --presets tornado,comet] [--leak-cycles N]
 //
 // The terrain test runs on one seed (the first of --seeds; by default P2-TERRAIN, or TERRAIN-REAL-8
 // with --presets real, a world with every real stamp type near its spawn) in the late
@@ -31,7 +31,8 @@
 // The spawns test (/v2/?test=spawns) force-spawns each of the 30 presets ahead of the craft on one seed
 // (the first of --seeds, by default TERRAIN-REAL-8, whose spawn has a real site of every stamped preset
 // in reach), and the runner takes one screenshot per preset when the page asks for it
-// (spawn-<nn>-<preset>.png). --presets a,b,c shows only those presets.
+// (spawn-<nn>-<preset>.png). --presets a,b,c shows only those presets; --leak-cycles N runs N held
+// creates and disposes per preset in its leak check instead of 3 (a longer heap trend).
 //
 // --alloc-profile N (diagnostic): once the first flight-test run is flying, samples every JS
 // allocation for N seconds with the sampling heap profiler (collected objects included, so it is
@@ -113,6 +114,7 @@ function parseArgs(argv) {
     browser: null,
     allocProfileSeconds: null,
     presets: null,
+    leakCycles: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -129,6 +131,7 @@ function parseArgs(argv) {
       case '--crafts': options.crafts = next(); break;
       case '--views': options.views = next(); break;
       case '--presets': options.presets = next(); break;
+      case '--leak-cycles': options.leakCycles = Number(next()); break;
       case '--out': options.out = next(); break;
       case '--timeout-minutes': options.timeoutMinutes = Number(next()); break;
       case '--width': options.width = Number(next()); break;
@@ -322,6 +325,7 @@ function harnessUrl(port, options) {
     url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : SPAWNS_SEED);
     url.searchParams.set('testShots', '1');
     if (options.presets) url.searchParams.set('testPresets', options.presets);
+    if (Number.isInteger(options.leakCycles) && options.leakCycles > 0) url.searchParams.set('testLeakCycles', String(options.leakCycles));
   }
   if (options.test === '1' || options.test === 'soak') {
     if (options.seeds) url.searchParams.set('testSeeds', options.seeds);

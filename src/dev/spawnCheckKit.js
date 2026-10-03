@@ -50,6 +50,13 @@ export function wait(ms) {
   });
 }
 
+/** The JS heap (MB) after two forced collections a frame apart (weak references and finalizers settle). */
+export async function settledHeapMB() {
+  readHeapMB();
+  await frames(2);
+  return readHeapMB();
+}
+
 /**
  * Holds the time of day (the sun `sun` degrees up, on the morning side with morning: true) and forces
  * the regional weather. Returns a line describing it.
@@ -165,13 +172,6 @@ export function createDisposeCheck(ctx, framing) {
   function lightsInUse() {
     const lights = manager.getStats().lights;
     return lights ? lights.active : 0;
-  }
-
-  /** The JS heap (MB) after two forced collections a frame apart (weak references and finalizers settle). */
-  async function settledHeapMB() {
-    readHeapMB();
-    await frames(2);
-    return readHeapMB();
   }
 
   /** The geometries live structure spawns still show (a site built meanwhile is not the spawn under test's). */
