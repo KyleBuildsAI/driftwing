@@ -803,6 +803,12 @@ A soft crash triggers when:
 - a craft that cannot float touches water;
 - the penetration exceeds 1 m.
 
+The fade-in freezes the pose, so the controller holds the craft at its contact point, never below
+the surface there (the shared height function, an extra ground surface it struck, or the sea): a
+fast strike can end its tick metres inside a steep slope. A strike during the fade-out (a respawn
+facing a cliff) is a new soft crash that fades back to black from the current opacity.
+`node tools/lab/jet.mjs --only=crashhold` checks both.
+
 `SimFixedWing` also takes an optional `profile.extension({ profile, craft, bus, craftState, limits,
 flightData })`. Its hooks are `shapeControls`, `engine { update, forces, reset }`,
 `dragCoefficient`, `moments`, `afterStep`, `reset`, `writeTelemetry`, `snapshot` and `restore`. The

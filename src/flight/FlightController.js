@@ -584,20 +584,56 @@ export function createFlightController(ctx) {
   // ============================================================================================
   // SOFT CRASH AND RESPAWN (there is no fail state)
   // ============================================================================================
+  /**
+   * Starts the fade to black and holds the craft at its contact point. A strike during the fade-out
+   * (a respawn facing a cliff steeper than the 300 m it has to climb) is a new soft crash too: the
+   * fade turns back to black from its current opacity, so the craft never flies on inside the ground.
+   * Returns false while fading in or towing.
+   */
   function triggerSoftCrash(reason = 'impact', details = {}) {
-    if (crash.active || tow) return false;
+    if (tow || (crash.active && crash.phase !== 'fadeOut')) return false;
     const position = sim.state.position;
     const velocity = sim.state.velocity;
     const impactSpeed = Number.isFinite(details.impactSpeed) ? details.impactSpeed : velocity.length();
+    const opacity = crash.active ? 1 - clamp(crash.elapsed / CRASH_FADE_SECONDS, 0, 1) : 0;
     crash.active = true;
     crash.phase = 'fadeIn';
-    crash.elapsed = 0;
+    crash.elapsed = opacity * CRASH_FADE_SECONDS;
     crash.reason = String(reason);
     counters.softCrashes++;
     if (!crashFade) crashFade = createCrashFade();
-    crashFade.setOpacity(0);
+    crashFade.setOpacity(opacity);
+    holdAtContact();
     bus.emitTyped('softCrash', { craft: craftId, reason: crash.reason, impactSpeed: Number.isFinite(impactSpeed) ? impactSpeed : 0, position: vectorLiteral(position) });
     return true;
+  }
+
+  /**
+   * The lowest height (m) the crashed craft's reference point may sit at (x, z): the shared height
+   * function, an extra ground surface within reach above the craft (an island top it struck) and the
+   * sea, the same surface the flight test harness measures penetration against.
+   */
+  function crashFloorHeight(x, y, z) {
+    const terrain = world.groundHeight(x, z);
+    const surface = groundSurfaces !== null && groundSurfaces.count > 0 ? groundSurfaces.surfaceBelow(x, z, y + SURFACE_REACH) : -Infinity;
+    return Math.max(terrain, surface, CONFIG.WATER_LEVEL);
+  }
+
+  /**
+   * Holds the crashed craft at its contact point during the fade-in, never below the surface there.
+   * A fast strike can end its tick metres inside the ground (286 m/s is 2.4 m per tick, and far more
+   * of height along a steep slope), and the fade freezes the pose, so the model's position, the
+   * interpolated pose and state.player are lifted to the surface at the contact point. Called at the
+   * strike and on every fade-in frame (the safety net in core/loop.js triggers after the pose is out).
+   */
+  function holdAtContact() {
+    const position = sim.state.position;
+    if (!isFiniteVector(position)) return;
+    const floor = crashFloorHeight(position.x, position.y, position.z);
+    if (position.y < floor) position.y = floor;
+    interpolation.position.copy(position);
+    interpolation.previousPosition.copy(position);
+    player.position.copy(position);
   }
 
   function respawnAfterCrash() {
@@ -1138,6 +1174,7 @@ export function createFlightController(ctx) {
     updateSimAutopilotOverride(simDt);
     if (crash.active && crash.phase === 'fadeIn') {
       clock.reset();
+      holdAtContact();
       return;
     }
     const ticks = clock.advance(state.time.frameDt);
