@@ -96,19 +96,34 @@ export function prevailingWindDirection(world, target = new THREE.Vector2()) {
   return target.set(Math.cos(angle), Math.sin(angle));
 }
 
-/** Normalizes a source's bounds to an axis-aligned box. Accepts { min, max } or { center, radius }. */
-function boxFromBounds(bounds) {
+function isFinitePoint(point) {
+  return Boolean(point) && Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z);
+}
+
+/**
+ * Normalizes a source's bounds to an axis-aligned box, written into target (a new box when none is
+ * given). Accepts { min, max } or { center, radius }.
+ */
+function boxFromBounds(bounds, target = { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 }) {
   if (!bounds || typeof bounds !== 'object') throw new TypeError('wind source needs bounds');
-  const finite = (point) => point && Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z);
-  if (finite(bounds.min) && finite(bounds.max)) {
-    return {
-      minX: Math.min(bounds.min.x, bounds.max.x), minY: Math.min(bounds.min.y, bounds.max.y), minZ: Math.min(bounds.min.z, bounds.max.z),
-      maxX: Math.max(bounds.min.x, bounds.max.x), maxY: Math.max(bounds.min.y, bounds.max.y), maxZ: Math.max(bounds.min.z, bounds.max.z),
-    };
+  if (isFinitePoint(bounds.min) && isFinitePoint(bounds.max)) {
+    target.minX = Math.min(bounds.min.x, bounds.max.x);
+    target.minY = Math.min(bounds.min.y, bounds.max.y);
+    target.minZ = Math.min(bounds.min.z, bounds.max.z);
+    target.maxX = Math.max(bounds.min.x, bounds.max.x);
+    target.maxY = Math.max(bounds.min.y, bounds.max.y);
+    target.maxZ = Math.max(bounds.min.z, bounds.max.z);
+    return target;
   }
-  if (finite(bounds.center) && Number.isFinite(bounds.radius) && bounds.radius > 0) {
+  if (isFinitePoint(bounds.center) && Number.isFinite(bounds.radius) && bounds.radius > 0) {
     const { center, radius } = bounds;
-    return { minX: center.x - radius, minY: center.y - radius, minZ: center.z - radius, maxX: center.x + radius, maxY: center.y + radius, maxZ: center.z + radius };
+    target.minX = center.x - radius;
+    target.minY = center.y - radius;
+    target.minZ = center.z - radius;
+    target.maxX = center.x + radius;
+    target.maxY = center.y + radius;
+    target.maxZ = center.z + radius;
+    return target;
   }
   throw new TypeError('wind source bounds must be { min, max } or { center, radius } with finite values');
 }
@@ -255,16 +270,30 @@ export function createWindField({ world, uniforms, state, bus }) {
     globalSources.delete(entry);
     for (const key of entry.cells) sourceCells.get(key)?.delete(entry);
     entry.cells.length = 0;
+    entry.footprint[4] = -1;
   }
 
+  /**
+   * Files a source under the hash cells its box covers (or the global list when it covers more than
+   * SOURCE_GLOBAL_CELLS). A box that still covers the same cells keeps its filing untouched, so a
+   * source moved every frame within its footprint (or a global one) costs no allocation.
+   */
   function indexSource(entry) {
-    unindexSource(entry);
     const box = entry.box;
     const minX = Math.floor(box.minX / SOURCE_CELL);
     const maxX = Math.floor(box.maxX / SOURCE_CELL);
     const minZ = Math.floor(box.minZ / SOURCE_CELL);
     const maxZ = Math.floor(box.maxZ / SOURCE_CELL);
-    if ((maxX - minX + 1) * (maxZ - minZ + 1) > SOURCE_GLOBAL_CELLS) {
+    const global = (maxX - minX + 1) * (maxZ - minZ + 1) > SOURCE_GLOBAL_CELLS ? 1 : 0;
+    const footprint = entry.footprint;
+    if (footprint[4] === global && (global === 1 || (footprint[0] === minX && footprint[1] === maxX && footprint[2] === minZ && footprint[3] === maxZ))) return;
+    unindexSource(entry);
+    footprint[0] = minX;
+    footprint[1] = maxX;
+    footprint[2] = minZ;
+    footprint[3] = maxZ;
+    footprint[4] = global;
+    if (global === 1) {
       globalSources.add(entry);
       return;
     }
@@ -282,7 +311,11 @@ export function createWindField({ world, uniforms, state, bus }) {
     }
   }
 
-  let sourceTurbulence = 0;
+  /**
+   * The strongest source turbulence of the sample being taken, in a typed slot: a double closure
+   * variable (or return value) would be boxed on every write.
+   */
+  const sourceTurbulence = new Float64Array(1);
   function visitSource(entry, position, time, out) {
     const box = entry.box;
     if (position.x < box.minX || position.x > box.maxX || position.y < box.minY || position.y > box.maxY || position.z < box.minZ || position.z > box.maxZ) return;
@@ -303,15 +336,15 @@ export function createWindField({ world, uniforms, state, bus }) {
       out.vel.y += vel.y;
       out.vel.z += vel.z;
     }
-    if (Number.isFinite(result.turbulence)) sourceTurbulence = Math.max(sourceTurbulence, Math.min(1, Math.max(0, result.turbulence)));
+    if (Number.isFinite(result.turbulence)) sourceTurbulence[0] = Math.max(sourceTurbulence[0], Math.min(1, Math.max(0, result.turbulence)));
   }
 
+  /** Adds every source covering position to out.vel; their strongest turbulence goes to sourceTurbulence[0]. */
   function applySources(position, time, out) {
-    sourceTurbulence = 0;
+    sourceTurbulence[0] = 0;
     const bucket = sourceCells.get(cellHashKey(Math.floor(position.x / SOURCE_CELL), Math.floor(position.z / SOURCE_CELL)));
     if (bucket) for (const entry of bucket) visitSource(entry, position, time, out);
     for (const entry of globalSources) visitSource(entry, position, time, out);
-    return sourceTurbulence;
   }
 
   function describeSource(entry) {
@@ -359,12 +392,12 @@ export function createWindField({ world, uniforms, state, bus }) {
     layerGust.set(sigma * gust(0, t, x, z), sigma * 0.6 * gust(1, t, z, x), sigma * gust(2, t, x + 311, z - 173));
     out.vel.add(layerGust);
 
-    let fromSources = 0;
+    sourceTurbulence[0] = 0;
     if (sources.size > 0) {
       samplePosition.set(x, y, z);
-      fromSources = applySources(samplePosition, t, out);
+      applySources(samplePosition, t, out);
     }
-    out.turbulence = Math.min(1, Math.max(sigma / 3, fromSources));
+    out.turbulence = Math.min(1, Math.max(sigma / 3, sourceTurbulence[0]));
     if (record) {
       lastLayers.ambient.copy(layerAmbient);
       lastLayers.ridge = ridgeResult.lift;
@@ -424,18 +457,23 @@ export function createWindField({ world, uniforms, state, bus }) {
       if (!id) throw new TypeError('wind source needs an id');
       if (sources.has(id)) throw new Error(`wind source "${id}" already exists`);
       const kind = typeof source.kind === 'string' && source.kind ? source.kind : 'source';
-      const entry = { id, kind, box: boxFromBounds(source.bounds), sample: source.sample, cells: [], failed: false };
+      // footprint: the hash cells filed under (minX, maxX, minZ, maxZ) and 1 when global (-1: unfiled).
+      const entry = { id, kind, box: boxFromBounds(source.bounds), sample: source.sample, cells: [], footprint: new Int32Array([0, 0, 0, 0, -1]), failed: false };
       sources.set(id, entry);
       indexSource(entry);
       bus.emitTyped('windSourceAdded', describeSource(entry));
       return id;
     },
 
-    /** Moves or resizes a source (same bounds forms as addSource). */
+    /**
+     * Moves or resizes a source (same bounds forms as addSource). The box is rewritten in place and
+     * the source is refiled only when it covers other hash cells, so a source that follows a moving
+     * anchor may call this every frame without allocating (a string id allocates nothing either).
+     */
     setSourceBounds(id, bounds) {
-      const entry = sources.get(sourceKey(id));
+      const entry = sources.get(typeof id === 'string' ? id : sourceKey(id));
       if (!entry) return false;
-      entry.box = boxFromBounds(bounds);
+      boxFromBounds(bounds, entry.box);
       indexSource(entry);
       return true;
     },
