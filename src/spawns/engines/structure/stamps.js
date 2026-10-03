@@ -22,6 +22,7 @@ export const RECIPE_STAMP_TYPES = Object.freeze({
   islands: 'islandBase',
   spires: null,
   gates: 'carve',
+  waterfall: 'cliffStep',
 });
 
 /** Stamp sizes each recipe prefers over the stamp type's own defaults (m, or [min, max] ranges). */
@@ -30,6 +31,7 @@ const RECIPE_STAMP_DEFAULTS = Object.freeze({
   airfield: Object.freeze({ length: [1100, 1300], width: [42, 50], margin: [36, 48], shoulder: [110, 150], paint: 'tarmac' }),
   islands: Object.freeze({ radius: [170, 230], height: [24, 40], falloff: [90, 120], paint: 'basalt' }),
   gates: Object.freeze({ length: [2200, 2600], width: [36, 50], depth: [75, 95], wallWidth: [18, 26], twist: [180, 260], plateau: [40, 60], shoulder: [110, 140], paint: 'riverbed' }),
+  waterfall: Object.freeze({ width: [380, 520], drop: [110, 160], length: [520, 680], face: [8, 12], falloff: [140, 180], pool: [55, 75], paint: 'wetRock' }),
 });
 
 /** Islet layout for the islands recipe: how many islets, and how far out the others ring the first. */

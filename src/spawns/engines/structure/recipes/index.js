@@ -6,6 +6,7 @@ import { GATES_DEFAULTS, buildGates } from './gates.js';
 import { ISLANDS_DEFAULTS, buildIslands } from './islands.js';
 import { ROPE_BRIDGE_DEFAULTS, buildRopeBridge } from './ropeBridge.js';
 import { SPIRES_DEFAULTS, buildSpires } from './spires.js';
+import { WATERFALL_DEFAULTS, buildWaterfall } from './waterfall.js';
 import { WIND_FARM_DEFAULTS, buildWindFarm } from './windFarm.js';
 
 /**
@@ -19,6 +20,7 @@ export const RECIPES = Object.freeze({
   islands: Object.freeze({ build: buildIslands, defaults: ISLANDS_DEFAULTS, audioIntensity: 'constant' }),
   spires: Object.freeze({ build: buildSpires, defaults: SPIRES_DEFAULTS, audioIntensity: 'approach' }),
   gates: Object.freeze({ build: buildGates, defaults: GATES_DEFAULTS, audioIntensity: 'constant' }),
+  waterfall: Object.freeze({ build: buildWaterfall, defaults: WATERFALL_DEFAULTS, audioIntensity: 'constant' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));
