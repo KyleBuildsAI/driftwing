@@ -2258,6 +2258,20 @@ export function createFaunaEngine() {
     const count = Math.max(1, Math.round(rangeValue(resolved.countRange, rng)));
     const start = pool.ranges.alloc(count);
     if (start < 0) throw new Error(`fauna: no room for ${count} more ${def.id} (${pool.ranges.used} of ${pool.capacity} in use)`);
+    // The setup can refuse (an unknown audio recipe throws): the manager never receives an instance
+    // to dispose then, so the agent range goes back to the species pool before the error goes on.
+    try {
+      return createGroup(preset, params, rng, resolved, def, pool, start, count);
+    } catch (error) {
+      pool.ranges.free(start);
+      pool.mesh.count = pool.ranges.highWater;
+      if (pool.ranges.highWater === 0) pool.mesh.visible = false;
+      throw error;
+    }
+  }
+
+  /** The rest of create() once the group's agent range [start, start + count) is allocated. */
+  function createGroup(preset, params, rng, resolved, def, pool, start, count) {
     const g = new Float64Array(G_LENGTH);
     const anchor = params.position;
     const speeds = speciesDefaults(def, resolved);
