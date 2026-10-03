@@ -10,7 +10,9 @@
 //     (the mix follows the surface under a vortex that tracks across a coast);
 //   - a WindField 'rankine' source (windSources.js): solid-body core, 1/r outside, radial inflow,
 //     a violent updraft core and heavy turbulence, its axis following the visible rope;
-//   - optionally the preset's audio voice (the 'tornado' recipe), placed on the anchor.
+//   - optionally the preset's audio voice (the 'tornado' recipe), placed on the anchor;
+//   - over open water, a foam wake on the sea (the water effects layer, ctx.water): the touching
+//     foot writes a trail from its last mark every WAKE_SECONDS, glowing in a bioluminescent bay.
 // Lifecycle: forming (touchdown over formSeconds) -> mature -> ropeOut (ropeSeconds, timed to end
 // with the event's duration) -> dissipated, where instance.ended tells the manager it is over. A
 // vortex without a duration (a site) stays mature until instance.control.ropeOut is set. It can
@@ -69,8 +71,13 @@ const S = Object.freeze({
   AGE: 0, STAGE: 1, STAGE_TIME: 2, FORM: 3, ROPE: 4, STRENGTH: 5, VISIBILITY: 6, ACTIVITY: 7, SPIN: 8,
   WATER: 9, VEL_X: 10, VEL_Z: 11, PREV_X: 12, PREV_Z: 13, WIND_ON: 14, GROUND_SHARE: 15, PUFF_SHARE: 16,
   VISIBLE_TARGET: 17, MATURE_END: 18, LEAN_X: 19, LEAN_Z: 20, DT: 21, WATER_TARGET: 22, SPIN_RATE: 23,
+  CONTACT: 24, WAKE_TIMER: 25,
 });
-const STATE_SIZE = 24;
+const STATE_SIZE = 26;
+/** Seconds between two foam wake writes into the water effects layer (each a trail from the last). */
+const WAKE_SECONDS = 0.25;
+/** The water layer's widest write (m); the wake is the core's width, within it. */
+const WAKE_RADIUS_MAX = 40;
 /** Ramps of the frame update (Float64Array slots, see writeSmoothstep). */
 const R = Object.freeze({ FORM: 0, CONDENSE: 1, ROPE_FADE: 2, ROPE_LIFT: 3, ROPE_LEAN: 4, CONTACT_IN: 5, CONTACT_OUT: 6 });
 
@@ -181,6 +188,8 @@ export function resolveVortexParams(preset, params) {
 export function createVortexEngine() {
   let ctx = null;
   let data = null;
+  /** The water effects layer (ctx.water), or null where the game has none (the labs). */
+  let water = null;
   let shell = null;
   let shellGeometry = null;
   let shellMaterial = null;
@@ -195,6 +204,29 @@ export function createVortexEngine() {
   let serial = 0;
   let indicesPerShell = 0;
   const color = { r: 0, g: 0, b: 0 };
+
+  /**
+   * Over open water a touching-down vortex stirs the sea: every WAKE_SECONDS it writes a foam and
+   * excitation trail from its last mark to its foot into the water effects layer, so a waterspout
+   * leaves a wake behind it (glowing in a bioluminescent bay). Nothing is written at 'far' or over land.
+   */
+  function writeWaterWake(instance, record, state) {
+    state[S.WAKE_TIMER] -= state[S.DT];
+    if (state[S.WAKE_TIMER] > 0) return;
+    state[S.WAKE_TIMER] = WAKE_SECONDS;
+    const mark = record.waterMark;
+    const anchor = instance.anchor;
+    const stir = state[S.CONTACT] * state[S.WATER] * state[S.VISIBILITY];
+    if (instance.tier !== 'far' && stir > 0.05) {
+      mark.x1 = anchor.x;
+      mark.z1 = anchor.z;
+      mark.foam = 0.9 * stir;
+      mark.glow = 0.6 * stir;
+      water.trail(mark);
+    }
+    mark.x = anchor.x;
+    mark.z = anchor.z;
+  }
 
   // ---- Shared GPU resources ----------------------------------------------------------------------
   function buildShellGeometry(THREE) {
@@ -697,6 +729,7 @@ export function createVortexEngine() {
     const spinRate = state[S.SPIN_RATE] * (0.3 + 0.7 * strength);
     state[S.SPIN] = (state[S.SPIN] + spinRate * dt) % (Math.PI * 2000);
     const contact = ramps[R.CONTACT_IN] * (1 - ramps[R.CONTACT_OUT]) * Math.min(1, activity);
+    state[S.CONTACT] = contact;
 
     const d0 = slotVector(slot, 0);
     d0.x = anchor.x;
@@ -778,6 +811,7 @@ export function createVortexEngine() {
 
     init(engineCtx) {
       ctx = engineCtx;
+      water = ctx.water ?? null;
       const { THREE, TSL } = ctx;
       const vectors = Array.from({ length: 1 + MAX_VORTICES * SLOT_VECTORS }, () => new THREE.Vector4());
       data = TSL.uniformArray(vectors, 'vec4');
@@ -855,6 +889,7 @@ export function createVortexEngine() {
         voice: null,
         velocity: new THREE.Vector3(),
         preset,
+        waterMark: water ? water.createMark({ x: anchor.x, z: anchor.z, x1: anchor.x, z1: anchor.z, radius: Math.min(WAKE_RADIUS_MAX, Math.max(8, p.coreRadius * 1.2)) }) : null,
       };
       const instance = {
         anchor,
@@ -911,6 +946,7 @@ export function createVortexEngine() {
       writeFrame(instance);
       moveWind(instance);
       updateVoice(instance);
+      if (record.waterMark) writeWaterWake(instance, record, state);
     },
 
     setLOD(instance, tier) {

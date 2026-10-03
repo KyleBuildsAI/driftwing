@@ -30,7 +30,8 @@ vortex, emitter, setPiece and so on) call it directly. It is the generic disturb
 - **Anything touching the water writes into it:**
   - the craft, through a contact query against its telemetry every frame. Below 3 m over open
     water it leaves a 5 m foam and glow trail. Down to 14 m its downwash stirs a weaker glow;
-  - spawns, through the API below (whale wakes, breaches and spouts);
+  - spawns, through the API below (whale wakes, breaches and spouts from the fauna engine, a
+    waterspout's foam wake from the vortex engine);
   - spray droplets that fall back onto the water, which leave small splats (up to 24 per frame).
 - **Vortices (4 slots).** A whirlpool funnel displaced into the swell (a Rankine pressure dip) with
   spiral ridges. Its flow-mapped foam arms are noise advected around the eye at the Rankine angular

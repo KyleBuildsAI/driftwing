@@ -25,6 +25,7 @@ example `[DRIFTWING] vortex: coreRadius must be a finite number, got NaN`. An un
 | ground ring | at the ground contact, a churning cloud (dust or mist, two thirds of the particles) and fine bits (debris or droplets) that lift and orbit; brown debris over land, white spray over water, blended while the vortex tracks across a coast | `groundParticles`, `debrisRadius`, `debrisHeight`, `particleSize`, `sprayHeight`, `debrisColor`, `sprayColor`, `surface` |
 | wind | a WindField `rankine` source whose axis follows the visible rope | [Wind params](#wind-params) |
 | sound | the preset's `audio` voice (the `tornado` recipe), placed on the vortex, with its intensity following the vortex strength | `audioIntensity`, `voice` |
+| sea wake | over open water, the touching foot writes a foam and excitation trail into the water effects layer every 0.25 s (radius 1.2 x `coreRadius`, 8-40 m), so a waterspout leaves a wake on the sea that glows in a bioluminescent bay; nothing at the far tier, over land or before touchdown | automatic (the ground ring's water share and contact) |
 
 All vortices look deterministic: the particle seeds are fixed, and each spawn's own seed picks its
 spin phase, wobble phase, rope-out side and track meander.
