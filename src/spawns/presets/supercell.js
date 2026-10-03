@@ -34,6 +34,8 @@ export default Object.freeze({
           { offset: [-700, 2700], radius: 900, density: 0.55, downdraft: 4, outflow: 6 },
         ],
         wind: { updraft: 6, turbulence: 0.55 },
+        // A storm this size reads through tens of kilometres of air: less haze than a small cloud.
+        haze: { near: 5000, far: 70000, max: 0.55 },
         drift: { speed: 9 },
         formSeconds: 45,
         dissipateSeconds: 60,

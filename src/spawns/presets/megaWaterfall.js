@@ -2,8 +2,8 @@
 // high (the cliffStep stamp, painted wet rock) as a wide curtain of water into a churning plunge pool.
 // A mist cloud boils up from the foot with a rainbow in it by day, the roar carries for kilometres,
 // and the falling water drags a curtain of sinking air down the cliff that spills outward over the
-// pool. Docs: docs/engines/structure.md (recipe waterfall), emitter.md, weatherVolume.md,
-// celestial.md, waterEffect.md, windModifier.md.
+// pool. Docs: docs/engines/structure.md (recipe waterfall), emitter.md, celestial.md, waterEffect.md,
+// windModifier.md.
 export default Object.freeze({
   id: 'megaWaterfall',
   name: 'Mega-waterfall',
@@ -35,14 +35,10 @@ export default Object.freeze({
     {
       engine: 'emitter',
       params: {
-        particles: 4000, hugGround: true, offset: [0, 3, 80], shape: { type: 'box', size: [180, 16, 70] }, speed: [3, 9], spread: 60,
-        gravity: 0, buoyancy: 0.9, drag: 0.6, turbulence: { spread: 2, wobble: 3, frequency: 0.12 }, life: [8, 14], size: [10, 52],
-        colors: [0xf6f9fc, 0xeef3f7, 0xe8eef3], opacity: 0.32, sound: false,
+        particles: 6000, hugGround: true, offset: [0, 3, 75], shape: { type: 'box', size: [200, 16, 80] }, speed: [3, 9], spread: 60,
+        gravity: 0, buoyancy: 1.4, buoyancyDecay: 25, drag: 0.6, turbulence: { spread: 3, wobble: 4, frequency: 0.1 }, life: [10, 18],
+        size: [12, 70], sizeCurve: 0.7, colors: [0xf6f9fc, 0xeef3f7, 0xe8eef3], opacity: 0.3, fog: 0.6, sound: false,
       },
-    },
-    {
-      engine: 'weatherVolume',
-      params: { form: 'mist', baseMode: 'anchor', base: -105, radius: 190, height: 430, rise: 6, puffs: 44, ownsAudio: false },
     },
     { engine: 'celestial', params: { rainbow: { radius: 230, height: -30, offset: [0, 70], strength: 1.15, secondary: 0.4 }, ownsAudio: false } },
     { engine: 'waterEffect', params: { effect: 'plungePool', churn: 0.9, mistRate: 160, voice: false } },

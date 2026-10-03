@@ -48,6 +48,8 @@ export default Object.freeze({
         drift: { speed: 9 },
         formSeconds: 20,
         dissipateSeconds: 50,
+        // The parent storm keeps its own far mass beside the funnel lure.
+        farMode: 'coarse',
         ownsAudio: false,
       },
     },
@@ -60,7 +62,9 @@ export default Object.freeze({
       },
     },
   ],
-  lod: { near: 2500, mid: 10000, far: 45000 },
+  // The funnel lure takes over from about 5 km: the camera's far plane and the fog (a few km at golden
+  // hour) would hide the funnel's own shell beyond that.
+  lod: { near: 2000, mid: 4500, far: 45000 },
   lure: { type: 'funnel', height: 2400, width: 1300, color: 0x4f545e, flash: 0.8 },
   wind: [{ type: 'rankine', params: { maxTangential: 72, inflowRadius: 1500, inflowSpeed: 14, updraft: 45, sinkRing: 0.12, turbulence: 0.95, gust: 8 } }],
   audio: { recipe: 'tornado', params: {} },

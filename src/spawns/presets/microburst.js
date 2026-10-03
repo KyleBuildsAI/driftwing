@@ -23,7 +23,7 @@ export default Object.freeze({
     {
       engine: 'weatherVolume',
       params: {
-        form: 'cumulus', base: 1300, height: 2600, radius: 1300, storm: 0.75, puffs: 52,
+        form: 'cumulus', base: 1300, height: 2600, radius: 1300, storm: 0.85, puffs: 52, brightness: 0.72, tint: 0xc4c9d1,
         rain: [{ radius: 750, density: 0.92, fallSpeed: 14 }],
         wind: { turbulence: 0.3 },
         canopyRain: 0.4,
@@ -44,9 +44,9 @@ export default Object.freeze({
     {
       engine: 'emitter',
       params: {
-        particles: 4000, shape: { type: 'ring', radius: 110, innerRadius: 70 }, hugGround: true, radial: 22,
+        particles: 5000, shape: { type: 'ring', radius: 190, innerRadius: 120 }, hugGround: true, radial: 26,
         speed: [1, 3], spread: 20, gravity: 0.15, drag: 0.3, ground: 'settle', groundOffset: 2,
-        turbulence: { spread: 4, wobble: 3, frequency: 0.15 }, life: [6, 11], size: [8, 46],
+        turbulence: { spread: 4, wobble: 3, frequency: 0.15 }, life: [6, 11], size: [10, 62],
         colors: [0xbca47e, 0xa48c6a, 0x8f7c64], opacity: 0.55, sound: false,
       },
     },

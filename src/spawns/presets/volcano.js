@@ -39,7 +39,7 @@ export default Object.freeze({
         particles: 3500, snapToGround: true, style: 'puff', shape: { type: 'disc', radius: 110 }, speed: [24, 42], spread: 12,
         gravity: 0, buoyancy: 5, buoyancyDecay: 50, drag: 0.07, turbulence: { spread: 14, wobble: 18, frequency: 0.05 },
         life: [50, 80], size: [130, 700], sizeCurve: 0.6, sizeJitter: 0.45, brightnessJitter: 0.22,
-        colors: [0x6e6660, 0x5c5550, 0x9c968f], opacity: 0.82, softness: 1.2, fadeOut: 1.3,
+        colors: [0x6e6660, 0x5c5550, 0x9c968f], opacity: 0.82, softness: 1.2, fadeOut: 1.3, fog: 0.3,
         inactiveIntensity: 0.1, pulse: { period: 14, depth: 0.35 },
         underglow: { color: 0xff5a1e, intensity: 2.4, height: 700 },
         light: { color: 0xff7030, intensity: 3e6, range: 5000, offset: [0, 160, 0] },
@@ -53,7 +53,7 @@ export default Object.freeze({
       params: {
         particles: 1500, snapToGround: true, style: 'spark', blend: 'additive', shape: { type: 'disc', radius: 70 }, speed: [55, 110],
         spread: 30, gravity: 1, drag: 0.04, windFollow: 0.1, life: [7, 12], size: [7, 4], stretch: 0.07,
-        colors: [0xffe0a0, 0xff6a20, 0x3a0c04], emissive: 7, emissiveDecay: 1.6, ground: 'settle',
+        colors: [0xffe0a0, 0xff6a20, 0x3a0c04], emissive: 7, emissiveDecay: 1.6, ground: 'settle', fog: 0.5,
         rate: 4, bursts: { interval: [3, 7], count: [25, 60] }, inactiveIntensity: 0,
         soundTriggers: { burst: 'boom' }, sound: true,
       },
@@ -75,7 +75,9 @@ export default Object.freeze({
     },
     { engine: 'windModifier', params: { endWithDuration: false } },
   ],
-  lod: { near: 3000, mid: 10000, far: 45000 },
+  // The plume's particles sit in the scene fog and the camera's far plane (a few km at golden hour),
+  // so the plume lure takes over from about 4 km out.
+  lod: { near: 1500, mid: 4000, far: 45000 },
   lure: { type: 'plume', height: 6000, width: 3800, color: 0x5d5754, glow: 0xff5a1e },
   wind: [{ type: 'updraft', params: { radius: 300, updraft: 10, base: 0, top: 4500, sinkRing: 0.1, swirl: 2, turbulence: 0.75, gust: 6, fadeIn: 8 } }],
   audio: { recipe: 'volcano', params: {} },
