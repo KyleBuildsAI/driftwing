@@ -287,6 +287,39 @@ function testBudgets() {
   const kept = lab.spawnAhead('testDeclines', 500, { source: 'debug' });
   lab.step(1);
   check('budgets', 'a debug activation that ends at create still spawns, and ends on the next frame', Boolean(kept) && lab.events.ended.some((event) => event.id === kept && event.reason === 'ended'), String(kept));
+  testHeavySites();
+}
+
+/**
+ * Heavy sites against the heavy limit: an always-on heavy site (the floating islands) holds a slot
+ * while it exists; one with an active state (the volcano) holds one only while that state runs.
+ * Sites themselves are never refused for it.
+ */
+function testHeavySites() {
+  const lab = createLab();
+  const presets = createTestPresets();
+  const site = presets.find((preset) => preset.id === 'testSite');
+  const plume = presets.find((preset) => preset.id === 'testLurePlume');
+  lab.manager.addPreset(Object.freeze({ ...site, id: 'testHeavySite', rarity: 'rare', heavy: true, lure: plume.lure }));
+  lab.manager.addPreset(Object.freeze({ ...site, id: 'testHeavyVent', rarity: 'rare', heavy: true, lure: plume.lure, activeState: Object.freeze({ duration: Object.freeze([60, 90]) }) }));
+  const placeSite = (presetId, z) => lab.manager.activate(presetId, {
+    position: { x: 0, y: 0, z }, heading: 0, source: 'site',
+    site: Object.freeze({ id: `${presetId}:0:${z}`, presetId, x: 0, z, groundY: 0, rotation: 0, scale: 1, seed: 99, stamps: Object.freeze([]) }),
+  });
+  const islands = placeSite('testHeavySite', -3000);
+  const vent = placeSite('testHeavyVent', -3500);
+  const placed = lab.manager.getStats().heavy;
+  const event = lab.spawnAhead('testLurePlume', 20000, { source: 'director' });
+  const refused = lab.spawnAhead('testLureAnvil', 22000, { source: 'director' });
+  check('budgets', 'an always-on heavy site holds a heavy slot; a dormant one does not', Boolean(islands && vent) && placed === 1 && Boolean(event) && refused === null && lab.manager.canActivate('testLureAnvil', 'director') === 'heavy', `heavy ${placed} with both sites placed; event ${event}, second event ${refused}`);
+  lab.manager.setSiteActive(vent, true);
+  const erupting = lab.manager.getStats().heavy;
+  lab.manager.setSiteActive(vent, false);
+  const dormant = lab.manager.getStats().heavy;
+  lab.manager.deactivate(islands);
+  lab.manager.deactivate(event);
+  const after = lab.manager.getStats().heavy;
+  check('budgets', 'an active state adds a slot while it runs, and every slot is returned', erupting === 3 && dormant === 2 && after === 0, `heavy ${placed + 1} -> ${erupting} active -> ${dormant} dormant -> ${after} after the islands and event end (vent still placed)`);
 }
 
 // ---- lure --------------------------------------------------------------------------------------------------------

@@ -6,7 +6,8 @@
 // The spawn manager is a lenient stand-in: it admits every activation, ends events at their drawn
 // duration, keeps one spawn per site within the site's lod.far (so a site's active state, such as
 // the volcano's eruption, can be started), reports a site coming into view (12 km, a 100 degree
-// view cone) and counts heavy spawns without the dormant sites, as the game's manager does.
+// view cone) and counts heavy spawns as the game's manager does: a site with an active state (the
+// volcano) only while that state runs, an always-on heavy site (the floating islands) while it exists.
 //
 // Checks:
 //   presets   every preset validates and the director takes every one of them
@@ -126,7 +127,7 @@ function createLenientManager({ bus, player, getTime, placement, isInView }) {
   const describe = (instance) => instance;
   function create(preset, position, source, duration, site) {
     const id = `i${++serial}`;
-    const instance = { id, presetId: preset.id, anchor: { x: position.x, y: position.y, z: position.z }, radius: 800, heavy: preset.heavy, ended: false, source, endsAt: duration ? getTime() + duration : Infinity, site, duration };
+    const instance = { id, presetId: preset.id, anchor: { x: position.x, y: position.y, z: position.z }, radius: 800, heavy: preset.heavy, activeState: Boolean(preset.activeState), ended: false, source, endsAt: duration ? getTime() + duration : Infinity, site, duration };
     instances.set(id, instance);
     return instance;
   }
@@ -143,11 +144,11 @@ function createLenientManager({ bus, player, getTime, placement, isInView }) {
     getActive() { return [...instances.values()].map(describe); },
     getInstance(id) { const instance = instances.get(id); return instance && !instance.ended ? instance : null; },
     getStats() {
-      // The heavy count the game's manager keeps: a site counts only while its active state runs (a
-      // dormant volcano or a floating islands site holds no heavy slot), as in spawnManager.getStats.
+      // The heavy count the game's manager keeps (spawnManager's holdsHeavy): a dormant volcano holds
+      // no heavy slot, an erupting one does, and a floating islands site holds one while it exists.
       let heavy = 0;
       for (const instance of instances.values()) {
-        if (instance.heavy && !instance.ended && (instance.source !== 'site' || instance.active === true)) heavy++;
+        if (instance.heavy && !instance.ended && (instance.source !== 'site' || instance.active === true || !instance.activeState)) heavy++;
       }
       stats.heavy = heavy;
       return stats;
