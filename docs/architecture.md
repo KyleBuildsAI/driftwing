@@ -1116,10 +1116,10 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   `lifetime.duration`.
 - **Anchor rules and dormant sites (preset batch 1).** An event preset's optional `anchor` moves the
   activation before the engines see it: `seek: 'peak'` takes the highest ground within `radius` (a
-  25 x 25 grid over the disc, refined 7 x 7 around its best sample) and `align: 'downwind'` turns the
-  heading downwind of the prevailing wind (`uniforms.windDirection`), so lenticular clouds park over
-  a peak in the wind. A site preset with `activeState` starts dormant: every part's
-  `instance.active` is `false` and its FAR lure stays hidden until the director's
+  25 x 25 grid over the disc, whose four highest samples then climb to their summits) and
+  `align: 'downwind'` turns the heading downwind of the prevailing wind (`uniforms.windDirection`), so
+  lenticular clouds park over a peak in the wind. A site preset with `activeState` starts dormant:
+  every part's `instance.active` is `false` and its FAR lure stays hidden until the director's
   `setSiteActive(id, true)` (a dormant volcano shows no plume on the horizon). Debug activations start
   active. The per-engine particle count moves with `setLOD` (`setPartLOD`), because an engine may
   change `instance.particles` with its tier.

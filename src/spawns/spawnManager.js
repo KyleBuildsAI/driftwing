@@ -55,9 +55,13 @@ const OCCLUSION_MARGIN = 1;
 /** Seconds an event may run past its drawn duration before the manager ends it for its engine. */
 const EVENT_GRACE_SECONDS = 45;
 const MEMORY_LOG_SIZE = 64;
-/** preset.anchor seek 'peak': a coarse grid of this many samples a side over the disc, then a finer one around the best. */
+/**
+ * preset.anchor seek 'peak': a coarse grid of this many samples a side over the disc, then its
+ * PEAK_CLIMBS highest samples climb to their summits in strides halving down to PEAK_MIN_STRIDE (m).
+ */
 const PEAK_SEEK_GRID = 25;
-const PEAK_REFINE_GRID = 7;
+const PEAK_CLIMBS = 4;
+const PEAK_MIN_STRIDE = 8;
 /** Spawns alive at once (far above the budgets; activations past it are refused as 'capacity'). */
 export const MAX_SPAWNS = 512;
 const DEG = Math.PI / 180;
@@ -526,33 +530,47 @@ export function createSpawnManager(options) {
     const rule = preset.anchor;
     if (!rule) return out;
     if (rule.seek === 'peak') {
-      let bestX = position.x;
-      let bestZ = position.z;
-      let bestY = -Infinity;
-      const scan = (centreX, centreZ, half, samples) => {
-        const step = (2 * half) / (samples - 1);
-        for (let row = 0; row < samples; row++) {
-          for (let column = 0; column < samples; column++) {
-            const x = centreX - half + column * step;
-            const z = centreZ - half + row * step;
-            const dx = x - position.x;
-            const dz = z - position.z;
-            if (dx * dx + dz * dz > rule.radius * rule.radius) continue;
-            const y = world.groundHeight(x, z);
-            if (y > bestY) {
-              bestY = y;
-              bestX = x;
-              bestZ = z;
+      const radiusSquared = rule.radius * rule.radius;
+      const inside = (x, z) => (x - position.x) * (x - position.x) + (z - position.z) * (z - position.z) <= radiusSquared;
+      // A coarse grid over the disc; its highest few samples then climb to their own summits (a
+      // peak narrower than the grid lies between samples), and the highest summit wins.
+      const step = (2 * rule.radius) / (PEAK_SEEK_GRID - 1);
+      const samples = [];
+      for (let row = 0; row < PEAK_SEEK_GRID; row++) {
+        for (let column = 0; column < PEAK_SEEK_GRID; column++) {
+          const x = position.x - rule.radius + column * step;
+          const z = position.z - rule.radius + row * step;
+          if (inside(x, z)) samples.push({ x, z, y: world.groundHeight(x, z) });
+        }
+      }
+      samples.sort((first, second) => second.y - first.y);
+      let best = samples.length > 0 ? samples[0] : { x: position.x, z: position.z, y: world.groundHeight(position.x, position.z) };
+      for (let index = 0; index < Math.min(PEAK_CLIMBS, samples.length); index++) {
+        const summit = { ...samples[index] };
+        for (let stride = step; stride >= PEAK_MIN_STRIDE; stride /= 2) {
+          let moved = true;
+          while (moved) {
+            moved = false;
+            for (let direction = 0; direction < 8; direction++) {
+              const angle = (direction / 8) * Math.PI * 2;
+              const x = summit.x + Math.cos(angle) * stride;
+              const z = summit.z + Math.sin(angle) * stride;
+              if (!inside(x, z)) continue;
+              const y = world.groundHeight(x, z);
+              if (y > summit.y) {
+                summit.x = x;
+                summit.z = z;
+                summit.y = y;
+                moved = true;
+              }
             }
           }
         }
-      };
-      scan(position.x, position.z, rule.radius, PEAK_SEEK_GRID);
-      const coarseStep = (2 * rule.radius) / (PEAK_SEEK_GRID - 1);
-      scan(bestX, bestZ, coarseStep, PEAK_REFINE_GRID);
-      out.x = bestX;
-      out.z = bestZ;
-      out.y = Math.max(bestY, world.WATER_LEVEL);
+        if (summit.y > best.y) best = summit;
+      }
+      out.x = best.x;
+      out.z = best.z;
+      out.y = Math.max(best.y, world.WATER_LEVEL);
     }
     if (rule.align === 'downwind') {
       const direction = uniforms.windDirection.value;
