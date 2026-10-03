@@ -1136,16 +1136,24 @@ export function createEmitterEngine() {
     data.windActive = false;
   }
 
-  /** Moves the wind source's bounds with its emitter when it drifted a quarter of its radius. */
+  /**
+   * Moves the wind source's bounds with its emitter when it drifted a quarter of its radius. The
+   * column stands under the emission shape's centre: the emission point plus the `offset` in the
+   * heading frame (so the geysers of one field each lift where their own jet rises).
+   */
   function followWindSource(data) {
     const source = data.config.windSource;
     const centre = data.windCentre;
-    const dx = data.point[0] - centre[0];
-    const dz = data.point[2] - centre[2];
-    centre[1] = data.point[1];
+    const offset = data.config.offset;
+    const frame = data.heading;
+    const x = data.point[0] + offset[0] * frame.rightX + offset[2] * frame.forwardX;
+    const z = data.point[2] + offset[0] * frame.rightZ + offset[2] * frame.forwardZ;
+    const dx = x - centre[0];
+    const dz = z - centre[2];
+    centre[1] = data.point[1] + offset[1];
     if (dx * dx + dz * dz < source.radius * source.radius * 0.0625) return;
-    centre[0] = data.point[0];
-    centre[2] = data.point[2];
+    centre[0] = x;
+    centre[2] = z;
     if (!data.windActive) return;
     data.windBounds.min.x = centre[0] - source.radius * 2;
     data.windBounds.min.y = centre[1] + source.base - 20;
