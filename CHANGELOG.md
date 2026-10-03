@@ -130,6 +130,27 @@ net.
 - Labs and step files for every engine, the director, the presets, audio, discovery and the tour
   guide (listed in `docs/architecture.md`, Testing).
 
+#### Verification (Milestone G)
+
+- `?test=spawns` (`npm run test:spawns`, `test:spawns:webgl`): each of the 30 presets is
+  force-spawned ahead of the craft at a time of day and in weather that suit it (site presets on
+  their nearest real placed site), its frame times recorded and a screenshot framed; disposing it
+  must give back its GPU memory (with the geometry tracker), wind sources, real lights, sky
+  modifiers and leak counters, and the JS heap must stay within 1 MB over three held create and
+  dispose cycles after a warm-up.
+- `?test=determinism` (`npm run test:determinism`, `test:determinism:webgl`): the same seed and
+  scripted path flown in two page loads, stepped frame by frame from
+  `spawns.debug.restartSpawns()`, must give identical site-list hashes and director activation
+  logs.
+- The 10-minute soak (`?test=1&testPlan=soak`, `npm run test:soak`, `test:soak:webgl`): the
+  flight-test harness over 5 seeds, one craft each, first and third person, with the event director
+  live; 0 NaN, 0 terrain penetrations, heap growth under 75 MB, p99 within the frame target and no
+  frame over 50 ms after warmup.
+- `?test=terrain&presets=real` (`npm run test:terrain:real`) now needs all six stamp types.
+- `src/dev/spawnCheckKit.js`: one kit for the spawn checks (waits, held time of day and weather,
+  photo framing, the dispose check), shared by the spawns test, the preset checks of presets 11-30
+  and the structure step files.
+
 ### Changed
 
 - **M** opens the world map; the microphone toggle moves to **Shift+M**.
