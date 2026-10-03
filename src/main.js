@@ -64,7 +64,8 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
 // ============================================================================
 /**
  * The spawn engines (src/spawns/engines/, contract section 3): one factory per engine, registered
- * with the spawns system before its prewarm hook initialises them.
+ * with the spawns system before its prewarm hook initialises them, once each and in ENGINE_NAMES order
+ * (src/spawns/engineRegistry.js; tools/spawn-check.mjs checks it).
  */
 const SPAWN_ENGINE_FACTORIES = Object.freeze([
   createVortexEngine,
