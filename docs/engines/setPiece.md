@@ -123,7 +123,7 @@ A condition is one of the objects below, or `{ any: [conditions] }` / `{ all: [c
 | `{ time: s }` or `{ time: [min, max] }` | the stage clock has reached the seeded value: seconds since the stage started (in `until`), or since it began waiting (in `when`) |
 | `{ playerDistance: { min?, max?, child? } }` | the player's horizontal distance (m) to the child's anchor (else the set piece's anchor) lies within [min, max]; false while the child is not running |
 | `{ altitude: { min?, max?, agl? } }` | the player's altitude (m, MSL; above the ground with `agl: true`) lies within [min, max] |
-| `{ weather: state }` or `{ weather: [states] }` | the regional weather at the player (`clear`, `building`, `storm`, `clearing`, from the typed `weatherChanged`) is one of them |
+| `{ weather: state }` or `{ weather: [states] }` | the regional weather at the player (`clear`, `building`, `storm`, `clearing`: read from the weather system when the set piece is created, then followed through the typed `weatherChanged`) is one of them |
 | `{ childActive: key }` | the child is running |
 | `{ childEnded: key }` | the child has ended (by itself, by a stage or by its budget) |
 

@@ -1121,8 +1121,11 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   priority. Lights a disposed spawn still holds are released and reported.
 - **Engine ctx.** `{ scene, camera, renderer, backend, THREE, TSL, wind, audio, terrain: { heightAt,
   groundHeight, biomeAt, waterLevel }, time, sky, bus, perf, settings, state, uniforms, budgets,
-  lights, pools, spawns, surfaces, registerPrewarm }`. `surfaces` is the game's extra ground
-  surfaces (landable tops; null in a lab without them) and `registerPrewarm(object)` registers a
+  lights, pools, spawns, surfaces, weatherState, registerPrewarm }`. `surfaces` is the game's extra ground
+  surfaces (landable tops; null in a lab without them), `weatherState()` returns the player's
+  regional weather state (`clear` | `building` | `storm` | `clearing`, or null without a weather
+  system; it allocates, so engines call it at create and follow the typed `weatherChanged` after,
+  which reports changes only) and `registerPrewarm(object)` registers a
   pooled mesh for the pipeline prewarm behind the loading fade (null without it). `budgets` is read-only (`heavyLimit` / `maxHeavy`, `heavyActive`,
   `maxRealLights`, `lightsLimit`, `lightsActive`, `engines` (every engine's live `{ instances,
   particles }` caps), `instanceLimit(name)`, `instances(name)`, `particleLimit(name)`,

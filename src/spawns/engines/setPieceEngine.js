@@ -630,6 +630,10 @@ export function createSetPieceEngine() {
 
     create(preset, params, rng) {
       const plan = readTimeline(preset, params, rng, ctx.spawns);
+      // weatherChanged reports changes only: the state the player's region is in now comes from the
+      // weather system (a storm chase may start under a storm that began before it).
+      const current = typeof ctx.weatherState === 'function' ? ctx.weatherState() : null;
+      if (WEATHER_STATES.includes(current)) weather = current;
       const data = {
         plan,
         name: preset.name,

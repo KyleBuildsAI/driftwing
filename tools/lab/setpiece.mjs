@@ -9,7 +9,8 @@
 //                structure child's glow, a tracked child moves across the ground, narration fires
 //                with a target, records measure the closest pass and the time within a radius, and
 //                the set piece ends itself complete ('setPiece:ended', spawnEnded 'ended')
-//   triggers     `when` waits (time, or the regional weather turning stormy), `until` ends a stage
+//   triggers     `when` waits (time, or the regional weather turning stormy or already stormy at
+//                create), `until` ends a stage
 //                early on the player's distance, childActive / childEnded / altitude hold as stated
 //   budgets      a heavy child the heavy limit refuses is retried until the limit allows it
 //   control      a child's instance.control record (the vortex's intensity and ropeOut): ramps and
@@ -69,7 +70,7 @@ const world = {
   },
 };
 
-function createLab({ heavyLimit = 2 } = {}) {
+function createLab({ heavyLimit = 2, weatherState = null } = {}) {
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0xe0b48c, 400, 9000);
@@ -101,6 +102,7 @@ function createLab({ heavyLimit = 2 } = {}) {
     THREE, TSL, scene, camera, renderer: { info: { memory: { geometries: 0, textures: 0, attributes: 0, programs: 0, total: 0 } } }, backend: 'WebGPU',
     wind, audio: null, world, state, sky: null, bus, perf: null, settings: null, uniforms, registry, presets: [], seed: 'LAB',
     surfaces: createGroundSurfaces(),
+    weatherState,
   });
   manager.setHeavyLimit(heavyLimit);
   manager.register(createTestMarkerEngine());
@@ -239,6 +241,18 @@ function testTriggers() {
   const describe = lab.describe(id);
   check('triggers', 'childActive and altitude (all) keep "funnel" running for its duration', describe.stage === 'funnel' && describe.running, JSON.stringify(describe.children));
   lab.manager.deactivate(id, 'test');
+
+  // A storm that began before the set piece: weatherChanged never fires, the weather system's state does.
+  const stormy = createLab({ weatherState: () => 'storm' });
+  const stormyId = stormy.start();
+  for (let frame = 0; frame < 400 && stormy.describe(stormyId).stage !== 'rise'; frame++) stormy.step(1);
+  stormy.step(3);
+  const stormyColumn = stormy.manager.getActive().find((entry) => entry.presetId === 'testUpdraft');
+  stormy.state.player.position.set(stormyColumn.position.x, 300, stormyColumn.position.z + 50);
+  stormy.step(3);
+  const stormyState = stormy.describe(stormyId);
+  check('triggers', 'when: a storm already under way at create starts "funnel" without a weatherChanged', stormyState.stage === 'funnel' && stormyState.running && stormyState.weather === 'storm', JSON.stringify({ stage: stormyState.stage, running: stormyState.running, weather: stormyState.weather }));
+  stormy.manager.deactivate(stormyId, 'test');
 }
 
 // ---- budgets -------------------------------------------------------------------------------------------

@@ -68,6 +68,7 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
     registerPrewarm: ctx.registerPrewarm,
     engineBudgets: DIRECTOR_BUDGETS.engines,
     surfaces: ctx.groundSurfaces ?? null,
+    weatherState: () => (ctx.systems.weather ? ctx.systems.weather.getState().state : null),
   });
   let director = null;
   let started = false;

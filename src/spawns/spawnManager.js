@@ -138,12 +138,16 @@ function copyReading(target, source) {
  *                            director's DIRECTOR_BUDGETS.engines) for engines that declare no budget
  *   surfaces                 optional: the extra ground surfaces (src/world/groundSurfaces.js), where
  *                            engines register landable tops (engine ctx `surfaces`)
+ *   weatherState             optional: () => the player's regional weather state ('clear' |
+ *                            'building' | 'storm' | 'clearing') or null (engine ctx `weatherState`);
+ *                            the typed weatherChanged event reports changes only, so an engine reads
+ *                            the state it starts in here
  */
 export function createSpawnManager(options) {
   const {
     THREE, TSL, scene, camera, renderer, backend, wind, audio, world, state, sky, bus, perf, settings, uniforms,
     registry, presets = [], seed = '', registerPrewarm = null, maxLights = MAX_REAL_LIGHTS, engineBudgets = null,
-    surfaces = null,
+    surfaces = null, weatherState = null,
   } = options;
   const presetById = new Map();
   for (const preset of presets) presetById.set(preset.id, preset);
@@ -391,6 +395,8 @@ export function createSpawnManager(options) {
     lights: lightPool,
     /** The extra ground surfaces (landable tops that are not terrain), or null. */
     surfaces,
+    /** () => the player's regional weather state or null (allocates: call it at create, not per frame). */
+    weatherState: typeof weatherState === 'function' ? weatherState : () => null,
     /** Registers an object for the pipeline prewarm behind the loading fade (engines call it in init). */
     registerPrewarm: typeof registerPrewarm === 'function' ? registerPrewarm : null,
     pools: Object.freeze({
