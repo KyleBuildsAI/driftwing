@@ -654,7 +654,7 @@ export function createLightEffectEngine() {
         flashStrength: { flash: 0 },
         beam: null,
         voice: null,
-        thunderOptions: { position: { x: 0, y: 0, z: 0 }, intensity: 1 },
+        thunderOptions: { position: new THREE.Vector3(), intensity: 1 },
       };
       if (config.points > 0 && pageCount * GLOW_PAGE_SIZE < config.points) {
         // The pool is short: the points that fit are written, the rest are left out.

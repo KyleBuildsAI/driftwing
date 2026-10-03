@@ -41,10 +41,10 @@ export const MAX_PARTICLES_PER_EMITTER = 32768;
 const MAX_EMIT_PER_FRAME = 4096;
 /**
  * WindField probes per frame across every emitter's wind grid. A probe costs the WindField's terrain
- * lookups (worldgen's noise allocates), and the nodes ease over FIELD_EASE_SECONDS anyway: 16 full
- * grids refresh every 3.2 s.
+ * lookups (worldgen's noise allocates, about 10 KB a probe), and the nodes ease over
+ * FIELD_EASE_SECONDS anyway: 8 emitters' grids refresh every 3.2 s, 16 every 6.4 s.
  */
-const FIELD_PROBES_PER_FRAME = 4;
+const FIELD_PROBES_PER_FRAME = 2;
 /** Seconds over which a grid node eases to a new wind sample. */
 const FIELD_EASE_SECONDS = 4;
 /** Ground samples per frame for an emitter's spawn grid (hugGround) while it is stale after a move. */
@@ -959,8 +959,10 @@ export function createEmitterEngine() {
         windId: `${id}:wind`,
         windActive: false,
         windCentre: new Float64Array([anchor.x, anchor.y, anchor.z]),
-        windBounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
-        windResult: { vel: { x: 0, y: 0, z: 0 }, turbulence: 0 },
+        // Vector3s rather than {x, y, z} literals: the literal shape is shared across the whole game,
+        // and once anything stores a non-number in it, every number written to it is boxed.
+        windBounds: { min: new THREE.Vector3(), max: new THREE.Vector3() },
+        windResult: { vel: new THREE.Vector3(), turbulence: 0 },
         windReach: config.windSource ? config.windSource.radius * 2 + config.windSource.height : 0,
         lodMid: preset.lod.mid,
         warmStart: config.warmStart,
