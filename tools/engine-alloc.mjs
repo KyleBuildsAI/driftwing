@@ -25,7 +25,7 @@ import { findBrowser } from './browser.mjs';
 
 const SEED = 'ENGINEALLOC';
 const OWN_LIMIT_BYTES_PER_FRAME = 0.1;
-const WARMUP_FRAMES = 600;
+const WARMUP_FRAMES = 3000;
 // Coarse on purpose: with collected objects sampled, three.js's own frame garbage makes a fine
 // interval take many minutes to stop. A real per-frame allocation of 16 bytes still lands about 30
 // samples over 1000 frames, while one sample alone already fails the 0.1 B/frame limit.
