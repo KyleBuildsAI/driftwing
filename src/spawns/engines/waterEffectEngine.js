@@ -124,8 +124,9 @@ export function createWaterEffectEngine() {
       data.followAnchor = part && part !== instance && part.anchor ? part.anchor : undefined;
     }
     if (!data.followAnchor) return;
-    instance.anchor.x = data.followAnchor.x;
-    instance.anchor.z = data.followAnchor.z;
+    // Whole metres: V8 boxes a non-integer double written into a Vector3 field.
+    instance.anchor.x = Math.round(data.followAnchor.x);
+    instance.anchor.z = Math.round(data.followAnchor.z);
   }
 
   /** The next entry of the instance's random table, written to data.noiseValue (no double returned). */

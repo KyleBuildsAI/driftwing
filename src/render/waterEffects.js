@@ -117,7 +117,7 @@ const SPRAY_NOISE_SIZE = 4096;
 export function createWaterEffects(ctx) {
   const { THREE: T, TSL: L, scene, state, uniforms, world } = ctx;
   const {
-    Fn, If, uniform, uniformArray, float, vec2, vec3, vec4, sin, cos, atan, log, exp, length, max, min,
+    Fn, If, uniform, uniformArray, float, vec3, vec4, sin, cos, atan, log, exp, length, max, min,
     smoothstep, saturate, mix, texture, mx_noise_float, varying, positionGeometry, abs, uv, pow, oneMinus,
     instancedDynamicBufferAttribute, normalize, dot, reflect, cameraViewMatrix, positionView, color,
   } = L;
@@ -1292,6 +1292,10 @@ export function createWaterEffects(ctx) {
       return true;
     },
     surfaceHeightAt,
+    /** How many whirlpool vortices are live (while 0 the surface is sea level everywhere). */
+    get activeVortices() {
+      return vortexSlots.used;
+    },
     /**
      * The craft's height above the water surface (m) at the last frame (above sea level while it is
      * higher than the downwash reach), and whether it touched or stirred the water.

@@ -25,9 +25,11 @@
 // dark cloud from kilometres out. Positions are relative to a floating origin near the camera.
 //
 // Allocation: the frame update allocates nothing. Agent state lives in typed arrays, group doubles in
-// a Float64Array, neighbour search in a shared hashed grid, and every helper takes integer indices.
+// a Float64Array, neighbour search in a shared hashed grid, and every helper takes integer indices:
+// the per-agent helpers read their double arguments from the call registers (io, by IO index)
+// because V8 boxes a double passed to, or returned from, a call it does not inline.
 // Outside the engine, a few rationed calls may allocate: terrain heights (group ground probes, one
-// per frame per group), the thermal refresh of circling groups (WindField.thermalsNear, every
+// every sixteenth frame per group), the thermal refresh of circling groups (WindField.thermalsNear, every
 // thermalRefresh seconds), wind-source re-indexing when a slipstream leaves its bounds' margin, and
 // bus events on discrete moments (a scatter, a formation change, a call).
 //
@@ -109,7 +111,6 @@ const BRUTE_FORCE_LIMIT = 48;
 const NEIGHBOR_STRIDE = Object.freeze({ near: 2, mid: 3, far: 3 });
 /** Ground probes per group: a 3 x 3 grid around the group, one sample refreshed per frame. */
 const GROUND_GRID = 3;
-const SCRATCH_STEER = 0;
 const MODE_WAIT = 0;
 const MODE_JOIN = 1;
 const MODE_ESCORT = 2;
@@ -126,15 +127,35 @@ const G = Object.freeze({
   MODE_TIMER: 21, THERMAL_TIMER: 22, WIND_X: 23, WIND_Y: 24, WIND_Z: 25, BASE_Y: 26, PLAYER_DISTANCE: 27, SIDE: 28,
   LOST: 29, TERRAIN_TIMER: 30, ANCHOR_X: 31, ANCHOR_Y: 32, ANCHOR_Z: 33, GROUND_X: 34, GROUND_Z: 35, GROUND_SPACING: 36,
   SLOT_X: 37, SLOT_Y: 38, SLOT_Z: 39, TARGET_SPEED: 40, LEAD_X: 41, LEAD_Y: 42, LEAD_Z: 43, LEAD_HEADING: 44,
-  MORPH_A: 45, MORPH_B: 46, MORPH_C: 47, MORPH_YAW: 48, SIZE: 49,
+  MORPH_A: 45, MORPH_B: 46, MORPH_C: 47, MORPH_YAW: 48, SIZE: 49, SLOT_DISTANCE: 50,
 });
-const G_LENGTH = 50;
+const G_LENGTH = 51;
+// Call registers (io) by index. A caller writes the slots a helper reads, then calls it.
+const IO = Object.freeze({
+  TARGET_X: 0, TARGET_Y: 1, TARGET_Z: 2, FEED_X: 3, FEED_Y: 4, FEED_Z: 5, GAIN: 6, SEEK_MAX: 7, WEIGHT: 8,
+  MIN_SPEED: 9, MAX_SPEED: 10, ACCEL: 11, CLIMB: 12, BANK_BLEND: 13, FLOOR: 14, CUSHION: 15, BURST: 16,
+  TIME: 17, GLIDE: 18, DECAY: 19, GROUND: 20, SAMPLE_X: 21, SAMPLE_Z: 22, INVERSE_CELL: 23, SPREAD: 24,
+  SELF_X: 25, SELF_Y: 26, SELF_Z: 27, RADIUS_SQ: 28, SEPARATION: 29, SEPARATION_SQ: 30, SUM_X: 31, SUM_Y: 32,
+  SUM_Z: 33, TURN_TARGET: 34, TURN_STEP: 35, SIZE_SCALE: 36, FORWARD_X: 37, FORWARD_Z: 38, RIGHT_X: 39, RIGHT_Z: 40,
+});
+const IO_LENGTH = 41;
+/** Ground probes refresh one sample every this many frames per group (terrain heights allocate). */
+const GROUND_PROBE_FRAMES = 16;
+/**
+ * A slipstream's wind reading: { vel, turbulence } for the WindField. vel is an instance of its own
+ * class, so its fields keep a double representation and are updated in place (an { x, y, z } literal
+ * shares hidden classes app-wide and V8 may box every double written into it).
+ */
+class WindVelocity {
+  constructor() {
+    this.x = 0.5;
+    this.y = 0.5;
+    this.z = 0.5;
+  }
+}
+
 /** The per-thermal arrays of a circling group's thermal cache. */
 const THERMAL_FIELDS = Object.freeze(['x', 'z', 'capX', 'capZ', 'ground', 'top', 'radius', 'strength']);
-
-function clamp(value, min, max) {
-  return value < min ? min : value > max ? max : value;
-}
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -247,6 +268,7 @@ export function createFaunaEngine() {
   const neighborhood = new Float64Array(10);
   const steering = new Float64Array(3);
   const lateral = new Float64Array(1);
+  const io = new Float64Array(IO_LENGTH);
 
   // =============================================================================================
   // SPECIES POOLS (init)
@@ -254,7 +276,7 @@ export function createFaunaEngine() {
   function buildMaterial(def, attributes) {
     const { TSL } = ctx;
     const {
-      Fn, float, vec3, sin, cos, abs, sign, max, min, mix, smoothstep, saturate, normalize, length, cross,
+      Fn, float, vec3, sin, cos, abs, sign, max, min, mix, smoothstep, saturate, length, cross,
       positionGeometry, instancedDynamicBufferAttribute, vertexColor, attribute, color, uniform, modelWorldMatrix,
       cameraPosition, vec4,
     } = TSL;
@@ -403,11 +425,17 @@ export function createFaunaEngine() {
     const camera = ctx.camera;
     const height = ctx.renderer && ctx.renderer.domElement ? ctx.renderer.domElement.clientHeight : 0;
     const viewportHeight = height > 0 ? height : 720;
-    pixelWorld.value = (2 * Math.tan(camera.fov * DEG * 0.5)) / (camera.zoom * viewportHeight);
-    if (pixelWorldUniform) pixelWorldUniform.value = pixelWorld.value;
+    const nextPixelWorld = (2 * Math.tan(camera.fov * DEG * 0.5)) / (camera.zoom * viewportHeight);
+    // The uniform is written only when the lens or the viewport changed.
+    if (nextPixelWorld !== pixelWorld.value) {
+      pixelWorld.value = nextPixelWorld;
+      if (pixelWorldUniform) pixelWorldUniform.value = nextPixelWorld;
+    }
     for (let index = 0; index < poolList.length; index++) {
       const pool = poolList[index];
-      pool.origin.set(Math.round(camera.position.x / 64) * 64, Math.round(camera.position.y / 64) * 64, Math.round(camera.position.z / 64) * 64);
+      pool.origin.x = Math.round(camera.position.x / 64) * 64;
+      pool.origin.y = Math.round(camera.position.y / 64) * 64;
+      pool.origin.z = Math.round(camera.position.z / 64) * 64;
       pool.mesh.position.copy(pool.origin);
       pool.drawing = 0;
     }
@@ -422,8 +450,13 @@ export function createFaunaEngine() {
     return ground > water ? ground : water;
   }
 
-  /** Refreshes one of the group's 3 x 3 ground samples (round robin), re-centring the grid when needed. */
+  /**
+   * Every GROUND_PROBE_FRAMES frames, refreshes one of the group's 3 x 3 ground samples (round robin),
+   * re-centring the grid when needed.
+   */
   function probeGround(data) {
+    data.groundWait = (data.groundWait + 1) % GROUND_PROBE_FRAMES;
+    if (data.groundWait !== 0) return;
     const g = data.g;
     const spacing = g[G.GROUND_SPACING];
     const offsetX = g[G.CX] - g[G.GROUND_X];
@@ -439,12 +472,15 @@ export function createFaunaEngine() {
     data.ground[cell] = surfaceBelow(g[G.GROUND_X] + column * spacing, g[G.GROUND_Z] + row * spacing);
   }
 
-  /** The group's ground (or water) height at (x, z), bilinear over its sample grid. */
-  function groundAt(data, x, z) {
+  /**
+   * The group's ground (or water) height at io[SAMPLE_X], io[SAMPLE_Z], bilinear over its sample grid,
+   * into io[GROUND].
+   */
+  function sampleGround(data) {
     const g = data.g;
     const spacing = g[G.GROUND_SPACING];
-    const u = clamp((x - g[G.GROUND_X]) / spacing + 1, 0, 1.999);
-    const v = clamp((z - g[G.GROUND_Z]) / spacing + 1, 0, 1.999);
+    const u = Math.min(Math.max((io[IO.SAMPLE_X] - g[G.GROUND_X]) / spacing + 1, 0), 1.999);
+    const v = Math.min(Math.max((io[IO.SAMPLE_Z] - g[G.GROUND_Z]) / spacing + 1, 0), 1.999);
     const column = Math.floor(u);
     const row = Math.floor(v);
     const fu = u - column;
@@ -454,7 +490,21 @@ export function createFaunaEngine() {
     const h10 = ground[row * GROUND_GRID + column + 1];
     const h01 = ground[(row + 1) * GROUND_GRID + column];
     const h11 = ground[(row + 1) * GROUND_GRID + column + 1];
-    return (h00 * (1 - fu) + h10 * fu) * (1 - fv) + (h01 * (1 - fu) + h11 * fu) * fv;
+    io[IO.GROUND] = (h00 * (1 - fu) + h10 * fu) * (1 - fv) + (h01 * (1 - fu) + h11 * fu) * fv;
+  }
+
+  /** The ground under agent index, into io[GROUND]. */
+  function groundUnder(data, pool, index) {
+    io[IO.SAMPLE_X] = pool.px[index];
+    io[IO.SAMPLE_Z] = pool.pz[index];
+    sampleGround(data);
+  }
+
+  /** The ground under the group's goal, into io[GROUND]. */
+  function groundUnderGoal(data) {
+    io[IO.SAMPLE_X] = data.g[G.X];
+    io[IO.SAMPLE_Z] = data.g[G.Z];
+    sampleGround(data);
   }
 
   function fillGround(data) {
@@ -469,24 +519,32 @@ export function createFaunaEngine() {
     }
   }
 
+  /** The water surface at (x, z): sea level, unless a whirlpool funnel is active somewhere. */
   function waterSurface(x, z) {
-    return ctx.water ? ctx.water.surfaceHeightAt(x, z) : ctx.terrain.waterLevel;
+    return ctx.water && ctx.water.activeVortices > 0 ? ctx.water.surfaceHeightAt(x, z) : ctx.terrain.waterLevel;
+  }
+
+  /** Whether the water is flat everywhere (no funnel): then its surface is sea level itself. */
+  function waterIsFlat() {
+    return !ctx.water || ctx.water.activeVortices === 0;
   }
 
   // =============================================================================================
   // NEIGHBOURS
   // =============================================================================================
-  function cellKey(x, y, z, inverseCell) {
-    const cellX = Math.floor(x * inverseCell);
-    const cellY = Math.floor(y * inverseCell);
-    const cellZ = Math.floor(z * inverseCell);
+  /** The hashed grid bucket of agent index (cell size 1 / io[INVERSE_CELL]). */
+  function cellKey(pool, index) {
+    const inverseCell = io[IO.INVERSE_CELL];
+    const cellX = Math.floor(pool.px[index] * inverseCell);
+    const cellY = Math.floor(pool.py[index] * inverseCell);
+    const cellZ = Math.floor(pool.pz[index] * inverseCell);
     return ((Math.imul(cellX, 73856093) ^ Math.imul(cellY, 19349663) ^ Math.imul(cellZ, 83492791)) >>> 0) & (GRID_BUCKETS - 1);
   }
 
-  function buildGrid(pool, start, end, inverseCell) {
+  function buildGrid(pool, start, end) {
     gridHead.fill(-1);
     for (let index = start; index < end; index++) {
-      const key = cellKey(pool.px[index], pool.py[index], pool.pz[index], inverseCell);
+      const key = cellKey(pool, index);
       gridNext[index] = gridHead[key];
       gridHead[key] = index;
     }
@@ -495,16 +553,20 @@ export function createFaunaEngine() {
   /**
    * Sums separation push, neighbour velocity and offset for agent index (up to maxNeighbors within
    * radius), and adopts a neighbour's stronger excitement (the scatter wave). useGrid: the hashed grid
-   * built for this group; else brute force over [start, end).
+   * built for this group; else brute force over [start, end). Reads io[INVERSE_CELL] and io[SPREAD].
    */
-  function gatherNeighbors(pool, index, start, end, flocking, useGrid, inverseCell, maxNeighbors, spread) {
+  function gatherNeighbors(pool, index, start, end, flocking, useGrid, maxNeighbors) {
     neighborhood.fill(0);
     const x = pool.px[index];
     const y = pool.py[index];
     const z = pool.pz[index];
-    const radiusSq = flocking.neighborRadius * flocking.neighborRadius;
-    const separationRadius = flocking.separationRadius;
-    const separationSq = separationRadius * separationRadius;
+    const inverseCell = io[IO.INVERSE_CELL];
+    io[IO.SELF_X] = x;
+    io[IO.SELF_Y] = y;
+    io[IO.SELF_Z] = z;
+    io[IO.RADIUS_SQ] = flocking.neighborRadius * flocking.neighborRadius;
+    io[IO.SEPARATION] = flocking.separationRadius;
+    io[IO.SEPARATION_SQ] = flocking.separationRadius * flocking.separationRadius;
     let found = 0;
     if (useGrid) {
       const baseX = Math.floor(x * inverseCell);
@@ -517,27 +579,28 @@ export function createFaunaEngine() {
         const key = ((Math.imul(cellX, 73856093) ^ Math.imul(cellY, 19349663) ^ Math.imul(cellZ, 83492791)) >>> 0) & (GRID_BUCKETS - 1);
         for (let other = gridHead[key]; other >= 0 && found < maxNeighbors; other = gridNext[other]) {
           if (other === index) continue;
-          found += accumulateNeighbor(pool, index, other, x, y, z, radiusSq, separationRadius, separationSq, spread);
+          found += accumulateNeighbor(pool, index, other);
         }
       }
     } else {
       for (let other = start; other < end && found < maxNeighbors; other++) {
         if (other === index) continue;
-        found += accumulateNeighbor(pool, index, other, x, y, z, radiusSq, separationRadius, separationSq, spread);
+        found += accumulateNeighbor(pool, index, other);
       }
     }
     neighborhood[9] = found;
   }
 
-  function accumulateNeighbor(pool, index, other, x, y, z, radiusSq, separationRadius, separationSq, spread) {
-    const dx = pool.px[other] - x;
-    const dy = pool.py[other] - y;
-    const dz = pool.pz[other] - z;
+  /** Adds neighbour other to agent index's sums (the agent's position and radii are in io). */
+  function accumulateNeighbor(pool, index, other) {
+    const dx = pool.px[other] - io[IO.SELF_X];
+    const dy = pool.py[other] - io[IO.SELF_Y];
+    const dz = pool.pz[other] - io[IO.SELF_Z];
     const distanceSq = dx * dx + dy * dy + dz * dz;
-    if (distanceSq > radiusSq) return 0;
-    if (distanceSq < separationSq && distanceSq > 1e-6) {
+    if (distanceSq > io[IO.RADIUS_SQ]) return 0;
+    if (distanceSq < io[IO.SEPARATION_SQ] && distanceSq > 1e-6) {
       const distance = Math.sqrt(distanceSq);
-      const push = (1 - distance / separationRadius) / distance;
+      const push = (1 - distance / io[IO.SEPARATION]) / distance;
       neighborhood[0] -= dx * push;
       neighborhood[1] -= dy * push;
       neighborhood[2] -= dz * push;
@@ -549,7 +612,7 @@ export function createFaunaEngine() {
     neighborhood[7] += dy;
     neighborhood[8] += dz;
     // The scatter wave: a neighbour's panic spreads (weakened by spread per hop).
-    const panic = pool.excite[other] * spread;
+    const panic = pool.excite[other] * io[IO.SPREAD];
     if (panic > pool.excite[index] + 0.2) {
       pool.excite[index] = panic;
       pool.fleeX[index] = pool.fleeX[other];
@@ -561,14 +624,14 @@ export function createFaunaEngine() {
 
   /**
    * The flocking steering of agent index into steering[0..2]: searched afresh on its slice's frame
-   * (and kept in the flock arrays), reused from them on the others.
+   * (and kept in the flock arrays), reused from them on the others. Reads io[INVERSE_CELL] and io[SPREAD].
    */
-  function flockSteering(pool, index, start, end, flocking, useGrid, inverseCell, maxNeighbors, spread, fresh) {
+  function flockSteering(pool, index, start, end, flocking, useGrid, maxNeighbors, fresh) {
     if (fresh) {
       steering[0] = 0;
       steering[1] = 0;
       steering[2] = 0;
-      gatherNeighbors(pool, index, start, end, flocking, useGrid, inverseCell, maxNeighbors, spread);
+      gatherNeighbors(pool, index, start, end, flocking, useGrid, maxNeighbors);
       steerFlocking(pool, index, flocking);
       pool.flockX[index] = steering[0];
       pool.flockY[index] = steering[1];
@@ -598,11 +661,15 @@ export function createFaunaEngine() {
   // =============================================================================================
   // STEERING AND INTEGRATION
   // =============================================================================================
-  /** Seeks (tx, ty, tz) with a velocity feed-forward (fx, fy, fz), weight gain (1/s). */
-  function steerToward(pool, index, tx, ty, tz, fx, fy, fz, gain, maxSpeed, weight) {
-    let desiredX = (tx - pool.px[index]) * gain + fx;
-    let desiredY = (ty - pool.py[index]) * gain + fy;
-    let desiredZ = (tz - pool.pz[index]) * gain + fz;
+  /**
+   * Seeks io[TARGET_*] with a velocity feed-forward io[FEED_*] at io[GAIN] (1/s), the desired speed
+   * capped at io[SEEK_MAX], adding the difference to the agent's velocity times io[WEIGHT].
+   */
+  function steerToward(pool, index) {
+    let desiredX = (io[IO.TARGET_X] - pool.px[index]) * io[IO.GAIN] + io[IO.FEED_X];
+    let desiredY = (io[IO.TARGET_Y] - pool.py[index]) * io[IO.GAIN] + io[IO.FEED_Y];
+    let desiredZ = (io[IO.TARGET_Z] - pool.pz[index]) * io[IO.GAIN] + io[IO.FEED_Z];
+    const maxSpeed = io[IO.SEEK_MAX];
     const lengthSq = desiredX * desiredX + desiredY * desiredY + desiredZ * desiredZ;
     if (lengthSq > maxSpeed * maxSpeed) {
       const scale = maxSpeed / Math.sqrt(lengthSq);
@@ -610,32 +677,36 @@ export function createFaunaEngine() {
       desiredY *= scale;
       desiredZ *= scale;
     }
+    const weight = io[IO.WEIGHT];
     steering[0] += (desiredX - pool.vx[index]) * weight;
     steering[1] += (desiredY - pool.vy[index]) * weight;
     steering[2] += (desiredZ - pool.vz[index]) * weight;
   }
 
-  function steerFlee(pool, index, burst) {
+  /** Flees along the agent's flee direction at io[BURST] (m/s) times its excitement. */
+  function steerFlee(pool, index) {
     const excitement = pool.excite[index];
     if (excitement <= 0.01) return;
-    const strength = burst * excitement;
+    const strength = io[IO.BURST] * excitement;
     steering[0] += pool.fleeX[index] * strength;
     steering[1] += pool.fleeY[index] * strength;
     steering[2] += pool.fleeZ[index] * strength;
   }
 
-  function steerAboveFloor(pool, index, floorY) {
-    const cushion = floorY + 20 - pool.py[index];
+  /** Pushes up within 20 m of the floor height io[CUSHION]. */
+  function steerAboveFloor(pool, index) {
+    const cushion = io[IO.CUSHION] + 20 - pool.py[index];
     if (cushion > 0) steering[1] += cushion * 0.9;
   }
 
   /**
-   * Applies the steering (accel limit, climb and speed limits), banks into the turn and moves the agent.
+   * Applies the steering (accel limit io[ACCEL], climb limit io[CLIMB], speeds io[MIN_SPEED] to
+   * io[MAX_SPEED]), banks into the turn at io[BANK_BLEND] and moves the agent, never below io[FLOOR].
    * Returns nothing; writes the agent's arrays.
    */
-  function integrate(pool, index, dt, minSpeed, maxSpeed, accelLimit, climbLimit, bankBlend, floorY) {
+  function integrate(pool, index, dt) {
     const excitement = pool.excite[index];
-    const limit = accelLimit * (1 + 1.6 * excitement);
+    const limit = io[IO.ACCEL] * (1 + 1.6 * excitement);
     const lengthSq = steering[0] * steering[0] + steering[1] * steering[1] + steering[2] * steering[2];
     if (lengthSq > limit * limit) {
       const scale = limit / Math.sqrt(lengthSq);
@@ -646,11 +717,11 @@ export function createFaunaEngine() {
     let vx = pool.vx[index] + steering[0] * dt;
     let vy = pool.vy[index] + steering[1] * dt;
     let vz = pool.vz[index] + steering[2] * dt;
-    const climb = climbLimit * (1 + excitement);
-    vy = clamp(vy, -climb, climb);
+    const climb = io[IO.CLIMB] * (1 + excitement);
+    vy = Math.min(Math.max(vy, -climb), climb);
     const speed = Math.sqrt(vx * vx + vy * vy + vz * vz) || 1;
-    const top = maxSpeed * (1 + 0.5 * excitement);
-    const clamped = clamp(speed, minSpeed, top);
+    const top = io[IO.MAX_SPEED] * (1 + 0.5 * excitement);
+    const clamped = Math.min(Math.max(speed, io[IO.MIN_SPEED]), top);
     if (clamped !== speed) {
       const scale = clamped / speed;
       vx *= scale;
@@ -659,22 +730,28 @@ export function createFaunaEngine() {
     }
     const horizontal = Math.sqrt(vx * vx + vz * vz) || 1;
     lateral[0] = (steering[0] * -vz + steering[2] * vx) / horizontal;
-    const targetBank = clamp(Math.atan2(lateral[0], GRAVITY), -1.1, 1.1);
-    pool.bank[index] += (targetBank - pool.bank[index]) * bankBlend;
+    const targetBank = Math.min(Math.max(Math.atan2(lateral[0], GRAVITY), -1.1), 1.1);
+    pool.bank[index] += (targetBank - pool.bank[index]) * io[IO.BANK_BLEND];
     pool.vx[index] = vx;
     pool.vy[index] = vy;
     pool.vz[index] = vz;
     pool.px[index] += vx * dt;
     pool.py[index] += vy * dt;
     pool.pz[index] += vz * dt;
+    const floorY = io[IO.FLOOR];
     if (pool.py[index] < floorY) {
       pool.py[index] = floorY;
       if (pool.vy[index] < 1) pool.vy[index] = 1;
     }
   }
 
-  /** Flap phase and gate for a bird: flapping while excited or climbing, gliding in its glide share. */
-  function animateBird(pool, index, dt, time, glideShare, excitedGate) {
+  /**
+   * Flap phase and gate for a bird: flapping while excited or climbing, gliding in its glide share
+   * io[GLIDE] (on the group clock io[TIME]).
+   */
+  function animateBird(pool, index, dt, excitedGate) {
+    const time = io[IO.TIME];
+    const glideShare = io[IO.GLIDE];
     const def = pool.def;
     const seed = pool.seed[index];
     const rate = def.flap.rate[0] + (def.flap.rate[1] - def.flap.rate[0]) * seed;
@@ -687,9 +764,9 @@ export function createFaunaEngine() {
     pool.gate[index] += (target - pool.gate[index]) * Math.min(1, dt * 3);
   }
 
-  /** Decays excitement toward calm over the recover time. */
-  function calm(pool, index, decay) {
-    pool.excite[index] *= decay;
+  /** Decays excitement toward calm by the factor io[DECAY]. */
+  function calm(pool, index) {
+    pool.excite[index] *= io[IO.DECAY];
     if (pool.excite[index] < 0.005) pool.excite[index] = 0;
   }
 
@@ -780,19 +857,11 @@ export function createFaunaEngine() {
   // =============================================================================================
   // BEHAVIOURS: GROUP MOTION (the goal) AND AGENT RULES
   // =============================================================================================
-  function headingX(heading) {
-    return Math.sin(heading);
-  }
-
-  function headingZ(heading) {
-    return -Math.cos(heading);
-  }
-
-  /** Turns heading toward target (radians) by at most maxStep. */
-  function turnToward(heading, target, maxStep) {
-    let delta = target - heading;
+  /** Turns the group's heading toward io[TURN_TARGET] (radians) by at most io[TURN_STEP]. */
+  function turnGroup(g) {
+    let delta = io[IO.TURN_TARGET] - g[G.HEADING];
     delta -= TWO_PI * Math.floor((delta + Math.PI) / TWO_PI);
-    return heading + clamp(delta, -maxStep, maxStep);
+    g[G.HEADING] += Math.min(Math.max(delta, -io[IO.TURN_STEP]), io[IO.TURN_STEP]);
   }
 
   /** Wandering goal inside the leash around the anchor, at the altitude mode's height. */
@@ -807,11 +876,12 @@ export function createFaunaEngine() {
     const awayZ = g[G.Z] - g[G.ANCHOR_Z];
     const awaySq = awayX * awayX + awayZ * awayZ;
     if (awaySq > params.leash * params.leash) {
-      const home = Math.atan2(-awayX, awayZ);
-      g[G.HEADING] = turnToward(g[G.HEADING], home, 0.35 * dt);
+      io[IO.TURN_TARGET] = Math.atan2(-awayX, awayZ);
+      io[IO.TURN_STEP] = 0.35 * dt;
+      turnGroup(g);
     }
-    g[G.VX] = headingX(g[G.HEADING]) * g[G.SPEED];
-    g[G.VZ] = headingZ(g[G.HEADING]) * g[G.SPEED];
+    g[G.VX] = Math.sin(g[G.HEADING]) * g[G.SPEED];
+    g[G.VZ] = (-Math.cos(g[G.HEADING])) * g[G.SPEED];
     g[G.X] += g[G.VX] * dt;
     g[G.Z] += g[G.VZ] * dt;
     settleAltitude(data, dt);
@@ -821,10 +891,11 @@ export function createFaunaEngine() {
   function settleAltitude(data, dt) {
     const g = data.g;
     const altitude = data.params.altitude;
-    const ground = groundAt(data, g[G.X], g[G.Z]);
+    groundUnderGoal(data);
+    const ground = io[IO.GROUND];
     let target;
     if (altitude.mode === 'msl') target = altitude.value;
-    else if (altitude.mode === 'water') target = waterSurface(g[G.X], g[G.Z]);
+    else if (altitude.mode === 'water') target = waterIsFlat() ? ctx.terrain.waterLevel : waterSurface(g[G.X], g[G.Z]);
     else target = ground + altitude.value;
     if (altitude.mode !== 'water') target = Math.max(target, ground + data.params.floor + 10);
     const previous = g[G.Y];
@@ -854,20 +925,31 @@ export function createFaunaEngine() {
     const fold = shape.fold * radius;
     const waveAmplitude = shape.wave * radius;
     const useGrid = data.count > BRUTE_FORCE_LIMIT;
-    const inverseCell = 1 / Math.max(flocking.neighborRadius, 1);
-    if (useGrid) buildGrid(pool, start, end, inverseCell);
+    io[IO.INVERSE_CELL] = 1 / Math.max(flocking.neighborRadius, 1);
+    io[IO.SPREAD] = params.scatter ? params.scatter.spread : 0;
+    if (useGrid) buildGrid(pool, start, end);
     const maxNeighbors = tier === 'near' ? flocking.maxNeighbors : Math.min(4, flocking.maxNeighbors);
     const speedRange = data.speedRange;
-    const decay = Math.exp(-dt / Math.max(0.2, params.scatter ? params.scatter.recover : 3));
-    const bankBlend = 1 - Math.exp(-3.5 * dt);
-    const spread = params.scatter ? params.scatter.spread : 0;
+    io[IO.DECAY] = Math.exp(-dt / Math.max(0.2, params.scatter ? params.scatter.recover : 3));
+    io[IO.BANK_BLEND] = 1 - Math.exp(-3.5 * dt);
+    io[IO.MIN_SPEED] = speedRange[0];
+    io[IO.MAX_SPEED] = speedRange[1];
+    io[IO.ACCEL] = 26;
+    io[IO.CLIMB] = 8;
+    io[IO.TIME] = time;
+    io[IO.GLIDE] = pool.def.flap.glideShare;
+    io[IO.BURST] = params.scatter ? params.scatter.burst : 0;
+    io[IO.FEED_X] = g[G.VX];
+    io[IO.FEED_Y] = 0;
+    io[IO.FEED_Z] = g[G.VZ];
+    io[IO.SEEK_MAX] = speedRange[1];
     let sumX = 0;
     let sumY = 0;
     let sumZ = 0;
     const stride = useGrid ? NEIGHBOR_STRIDE[tier] : 1;
     const slice = data.neighborSlice = (data.neighborSlice + 1) % stride;
     for (let index = start; index < end; index++) {
-      flockSteering(pool, index, start, end, flocking, useGrid, inverseCell, maxNeighbors, spread, (index - start) % stride === slice);
+      flockSteering(pool, index, start, end, flocking, useGrid, maxNeighbors, (index - start) % stride === slice);
       const homeX = pool.homeX[index] * axisA;
       const homeY = pool.homeY[index] * axisB;
       const homeZ = pool.homeZ[index] * axisC;
@@ -875,22 +957,29 @@ export function createFaunaEngine() {
       const localZ = homeX * sinYaw + homeZ * cosYaw;
       const bend = Math.sin((localX / radius) * Math.PI + time * morph * 1.9) * fold;
       const pulse = Math.sin((localZ / radius) * 2.4 - time * 1.3) * waveAmplitude;
-      const targetX = g[G.X] + localX + pulse * 0.4;
-      const targetY = g[G.Y] + homeY + bend;
-      const targetZ = g[G.Z] + localZ;
+      io[IO.TARGET_X] = g[G.X] + localX + pulse * 0.4;
+      io[IO.TARGET_Y] = g[G.Y] + homeY + bend;
+      io[IO.TARGET_Z] = g[G.Z] + localZ;
       const seek = shape.seek * (1 - 0.85 * pool.excite[index]);
-      steerToward(pool, index, targetX, targetY, targetZ, g[G.VX], 0, g[G.VZ], seek, speedRange[1], 1.6 * seek);
-      steerFlee(pool, index, params.scatter ? params.scatter.burst : 0);
-      const ground = groundAt(data, pool.px[index], pool.pz[index]);
-      steerAboveFloor(pool, index, ground + params.floor);
-      integrate(pool, index, dt, speedRange[0], speedRange[1], 26, 8, bankBlend, ground + params.floor * 0.5);
-      animateBird(pool, index, dt, time, pool.def.flap.glideShare, false);
-      calm(pool, index, decay);
+      io[IO.GAIN] = seek;
+      io[IO.WEIGHT] = 1.6 * seek;
+      steerToward(pool, index);
+      steerFlee(pool, index);
+      groundUnder(data, pool, index);
+      io[IO.CUSHION] = io[IO.GROUND] + params.floor;
+      steerAboveFloor(pool, index);
+      io[IO.FLOOR] = io[IO.GROUND] + params.floor * 0.5;
+      integrate(pool, index, dt);
+      animateBird(pool, index, dt, false);
+      calm(pool, index);
       sumX += pool.px[index];
       sumY += pool.py[index];
       sumZ += pool.pz[index];
     }
-    finishCentroid(data, sumX, sumY, sumZ);
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
   }
 
   // ---- flock (v1-style) -------------------------------------------------------------------------
@@ -902,45 +991,65 @@ export function createFaunaEngine() {
     const start = data.start;
     const end = start + data.count;
     const useGrid = data.count > BRUTE_FORCE_LIMIT;
-    const inverseCell = 1 / Math.max(flocking.neighborRadius, 1);
-    if (useGrid) buildGrid(pool, start, end, inverseCell);
+    io[IO.INVERSE_CELL] = 1 / Math.max(flocking.neighborRadius, 1);
+    io[IO.SPREAD] = params.scatter ? params.scatter.spread : 0;
+    if (useGrid) buildGrid(pool, start, end);
     const maxNeighbors = tier === 'near' ? flocking.maxNeighbors : Math.min(4, flocking.maxNeighbors);
-    const decay = Math.exp(-dt / Math.max(0.2, params.scatter ? params.scatter.recover : 3));
-    const bankBlend = 1 - Math.exp(-3.5 * dt);
-    const spread = params.scatter ? params.scatter.spread : 0;
     const speedRange = data.speedRange;
+    io[IO.DECAY] = Math.exp(-dt / Math.max(0.2, params.scatter ? params.scatter.recover : 3));
+    io[IO.BANK_BLEND] = 1 - Math.exp(-3.5 * dt);
+    io[IO.MIN_SPEED] = speedRange[0];
+    io[IO.MAX_SPEED] = speedRange[1];
+    io[IO.ACCEL] = 12;
+    io[IO.CLIMB] = 4.5;
+    io[IO.TIME] = g[G.TIME];
+    io[IO.GLIDE] = pool.def.flap.glideShare;
+    io[IO.BURST] = params.scatter ? params.scatter.burst * 0.75 : 0;
     // The flock seeks a point ahead of the wandering goal.
-    const aheadX = g[G.X] + headingX(g[G.HEADING]) * 60;
-    const aheadZ = g[G.Z] + headingZ(g[G.HEADING]) * 60;
+    io[IO.TARGET_X] = g[G.X] + Math.sin(g[G.HEADING]) * 60;
+    io[IO.TARGET_Y] = g[G.Y];
+    io[IO.TARGET_Z] = g[G.Z] - Math.cos(g[G.HEADING]) * 60;
+    io[IO.FEED_X] = 0;
+    io[IO.FEED_Y] = 0;
+    io[IO.FEED_Z] = 0;
+    io[IO.GAIN] = 0.25;
+    io[IO.SEEK_MAX] = g[G.SPEED];
     let sumX = 0;
     let sumY = 0;
     let sumZ = 0;
     const stride = useGrid ? NEIGHBOR_STRIDE[tier] : 1;
     const slice = data.neighborSlice = (data.neighborSlice + 1) % stride;
     for (let index = start; index < end; index++) {
-      flockSteering(pool, index, start, end, flocking, useGrid, inverseCell, maxNeighbors, spread, (index - start) % stride === slice);
+      flockSteering(pool, index, start, end, flocking, useGrid, maxNeighbors, (index - start) % stride === slice);
       const calmShare = 1 - 0.85 * pool.excite[index];
-      steerToward(pool, index, aheadX, g[G.Y], aheadZ, 0, 0, 0, 0.25, g[G.SPEED], 0.55 * calmShare);
+      io[IO.WEIGHT] = 0.55 * calmShare;
+      steerToward(pool, index);
       // A loose pull to the centre keeps stragglers in.
       steering[0] += (g[G.CX] - pool.px[index]) * 0.012 * calmShare;
       steering[1] += (g[G.CY] - pool.py[index]) * 0.012 * calmShare;
       steering[2] += (g[G.CZ] - pool.pz[index]) * 0.012 * calmShare;
-      steerFlee(pool, index, params.scatter ? params.scatter.burst * 0.75 : 0);
-      const floorY = groundAt(data, pool.px[index], pool.pz[index]) + params.floor;
-      steerAboveFloor(pool, index, floorY);
-      integrate(pool, index, dt, speedRange[0], speedRange[1], 12, 4.5, bankBlend, floorY);
-      animateBird(pool, index, dt, g[G.TIME], pool.def.flap.glideShare, false);
-      calm(pool, index, decay);
+      steerFlee(pool, index);
+      groundUnder(data, pool, index);
+      io[IO.CUSHION] = io[IO.GROUND] + params.floor;
+      io[IO.FLOOR] = io[IO.CUSHION];
+      steerAboveFloor(pool, index);
+      integrate(pool, index, dt);
+      animateBird(pool, index, dt, false);
+      calm(pool, index);
       sumX += pool.px[index];
       sumY += pool.py[index];
       sumZ += pool.pz[index];
     }
-    finishCentroid(data, sumX, sumY, sumZ);
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
   }
 
   // ---- formation --------------------------------------------------------------------------------
-  /** Writes the local slot offset (back, right, up in metres) of slot k into steering[0..2]. */
-  function slotOffset(formation, k, sizeScale) {
+  /** Writes the local slot offset (back, right, up in metres) of slot k into steering[0..2] (io[SIZE_SCALE]). */
+  function slotOffset(formation, k) {
+    const sizeScale = io[IO.SIZE_SCALE];
     if (k === 0) {
       steering[0] = 0;
       steering[1] = 0;
@@ -972,9 +1081,11 @@ export function createFaunaEngine() {
     const following = formation.followPlayer && distance < formation.followRadius && Math.abs(gap) < formation.maxHeadingGap * DEG;
     if (following) {
       // Gentle turns only: the flock turns toward the player's heading at followTurnRate.
-      g[G.HEADING] = turnToward(g[G.HEADING], playerHeading, formation.followTurnRate * DEG * dt);
+      io[IO.TURN_TARGET] = playerHeading;
+      io[IO.TURN_STEP] = formation.followTurnRate * DEG * dt;
+      turnGroup(g);
       const groundSpeed = Math.sqrt(player.velocity.x * player.velocity.x + player.velocity.z * player.velocity.z);
-      g[G.TARGET_SPEED] = clamp(groundSpeed, data.speedRange[0], data.speedRange[1]);
+      g[G.TARGET_SPEED] = Math.min(Math.max(groundSpeed, data.speedRange[0]), data.speedRange[1]);
     } else {
       const time = g[G.TIME];
       g[G.HEADING] += (Math.sin(time * 0.05 + data.phaseSeed * 9) * 0.5) * params.wander * dt;
@@ -983,12 +1094,14 @@ export function createFaunaEngine() {
     const awayX = g[G.X] - g[G.ANCHOR_X];
     const awayZ = g[G.Z] - g[G.ANCHOR_Z];
     if (!following && awayX * awayX + awayZ * awayZ > params.leash * params.leash * 16) {
-      g[G.HEADING] = turnToward(g[G.HEADING], Math.atan2(-awayX, awayZ), 0.2 * dt);
+      io[IO.TURN_TARGET] = Math.atan2(-awayX, awayZ);
+      io[IO.TURN_STEP] = 0.2 * dt;
+      turnGroup(g);
     }
     // Matching the player's speed is quick while following (so the slot can be held), slow otherwise.
     g[G.SPEED] += (g[G.TARGET_SPEED] - g[G.SPEED]) * Math.min(1, dt * (following ? 1.5 : 0.4));
-    g[G.VX] = headingX(g[G.HEADING]) * g[G.SPEED];
-    g[G.VZ] = headingZ(g[G.HEADING]) * g[G.SPEED];
+    g[G.VX] = Math.sin(g[G.HEADING]) * g[G.SPEED];
+    g[G.VZ] = (-Math.cos(g[G.HEADING])) * g[G.SPEED];
     g[G.X] += g[G.VX] * dt;
     g[G.Z] += g[G.VZ] * dt;
     settleAltitude(data, dt);
@@ -1001,51 +1114,78 @@ export function createFaunaEngine() {
     const formation = params.formation;
     const start = data.start;
     const end = start + data.count;
-    const forwardX = headingX(g[G.HEADING]);
-    const forwardZ = headingZ(g[G.HEADING]);
+    const forwardX = Math.sin(g[G.HEADING]);
+    const forwardZ = -Math.cos(g[G.HEADING]);
     const rightX = -forwardZ;
     const rightZ = forwardX;
-    const sizeScale = g[G.SIZE];
-    const decay = Math.exp(-dt / Math.max(0.2, params.scatter ? params.scatter.recover : 3));
-    const bankBlend = 1 - Math.exp(-3 * dt);
+    io[IO.SIZE_SCALE] = g[G.SIZE];
     const speedRange = data.speedRange;
+    io[IO.DECAY] = Math.exp(-dt / Math.max(0.2, params.scatter ? params.scatter.recover : 3));
+    io[IO.BANK_BLEND] = 1 - Math.exp(-3 * dt);
+    io[IO.MIN_SPEED] = speedRange[0] * 0.8;
+    io[IO.MAX_SPEED] = speedRange[1];
+    io[IO.ACCEL] = 10;
+    io[IO.CLIMB] = 5;
+    io[IO.BURST] = params.scatter ? params.scatter.burst : 0;
+    io[IO.FEED_X] = g[G.VX];
+    io[IO.FEED_Y] = g[G.VY];
+    io[IO.FEED_Z] = g[G.VZ];
+    io[IO.GAIN] = 0.9;
+    io[IO.SEEK_MAX] = speedRange[1];
     g[G.FLAP] = (g[G.FLAP] + TWO_PI * (pool.def.flap.rate[0] + pool.def.flap.rate[1]) * 0.5 * dt) % (TWO_PI * 64);
     let sumX = 0;
     let sumY = 0;
     let sumZ = 0;
     for (let index = start; index < end; index++) {
       const k = index - start;
-      slotOffset(formation, k, sizeScale);
+      slotOffset(formation, k);
       const back = steering[0];
       const across = steering[1];
       const up = steering[2];
-      const slotX = g[G.X] - forwardX * back + rightX * across;
-      const slotY = g[G.Y] + up;
-      const slotZ = g[G.Z] - forwardZ * back + rightZ * across;
+      io[IO.TARGET_X] = g[G.X] - forwardX * back + rightX * across;
+      io[IO.TARGET_Y] = g[G.Y] + up;
+      io[IO.TARGET_Z] = g[G.Z] - forwardZ * back + rightZ * across;
       steering[0] = 0;
       steering[1] = 0;
       steering[2] = 0;
       const calmShare = 1 - pool.excite[index];
-      steerToward(pool, index, slotX, slotY, slotZ, g[G.VX], g[G.VY], g[G.VZ], 0.9, speedRange[1], 2.2 * calmShare + 0.2);
-      steerFlee(pool, index, params.scatter ? params.scatter.burst : 0);
-      const floorY = groundAt(data, pool.px[index], pool.pz[index]) + params.floor;
-      steerAboveFloor(pool, index, floorY);
-      integrate(pool, index, dt, speedRange[0] * 0.8, speedRange[1], 10, 5, bankBlend, floorY);
+      io[IO.WEIGHT] = 2.2 * calmShare + 0.2;
+      steerToward(pool, index);
+      steerFlee(pool, index);
+      groundUnder(data, pool, index);
+      io[IO.CUSHION] = io[IO.GROUND] + params.floor;
+      io[IO.FLOOR] = io[IO.CUSHION];
+      steerAboveFloor(pool, index);
+      integrate(pool, index, dt);
       // The wingbeat runs down each leg of the V as a wave.
       const rank = formation.shape === 'echelon' ? k : Math.ceil(k / 2);
       pool.phase[index] = g[G.FLAP] - rank * 0.55 + pool.excite[index] * pool.seed[index] * 3;
       pool.gate[index] = 1;
-      calm(pool, index, decay);
+      calm(pool, index);
       sumX += pool.px[index];
       sumY += pool.py[index];
       sumZ += pool.pz[index];
     }
-    finishCentroid(data, sumX, sumY, sumZ);
-    trackPlayerSlot(data, dt, forwardX, forwardZ, rightX, rightZ);
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
+    io[IO.FORWARD_X] = forwardX;
+    io[IO.FORWARD_Z] = forwardZ;
+    io[IO.RIGHT_X] = rightX;
+    io[IO.RIGHT_Z] = rightZ;
+    trackPlayerSlot(data, dt);
   }
 
-  /** The player's slot: beyond the last bird of the shorter leg, playerSpacing further out. */
-  function trackPlayerSlot(data, dt, forwardX, forwardZ, rightX, rightZ) {
+  /**
+   * The player's slot: beyond the last bird of the shorter leg, playerSpacing further out (the group's
+   * axes in io[FORWARD_*] and io[RIGHT_*]).
+   */
+  function trackPlayerSlot(data, dt) {
+    const forwardX = io[IO.FORWARD_X];
+    const forwardZ = io[IO.FORWARD_Z];
+    const rightX = io[IO.RIGHT_X];
+    const rightZ = io[IO.RIGHT_Z];
     const g = data.g;
     const formation = data.params.formation;
     const sizeScale = g[G.SIZE];
@@ -1076,10 +1216,7 @@ export function createFaunaEngine() {
     let gap = player.heading * DEG - g[G.HEADING];
     gap -= TWO_PI * Math.floor((gap + Math.PI) / TWO_PI);
     const state = data.formationState;
-    state.distance = Math.sqrt(horizontal * horizontal + dy * dy);
-    state.slot.x = g[G.SLOT_X];
-    state.slot.y = g[G.SLOT_Y];
-    state.slot.z = g[G.SLOT_Z];
+    g[G.SLOT_DISTANCE] = Math.sqrt(horizontal * horizontal + dy * dy);
     const inside = horizontal < formation.tolerance && Math.abs(dy) < formation.heightTolerance && Math.abs(gap) < formation.headingTolerance * DEG;
     if (inside) {
       g[G.GRACE] = 0.6;
@@ -1097,16 +1234,43 @@ export function createFaunaEngine() {
       }
     }
     if (g[G.HOLD] > g[G.HOLD_BEST]) g[G.HOLD_BEST] = g[G.HOLD];
-    state.holdSeconds = g[G.HOLD];
-    state.bestHoldSeconds = g[G.HOLD_BEST];
     if (!state.complete && g[G.HOLD] >= formation.holdSeconds) {
       state.complete = true;
       emitFormation(data, 'complete');
-      if (formation.achievement) {
-        const entry = Array.isArray(data.preset.achievements) ? data.preset.achievements.find((item) => item.id === formation.achievement) : null;
-        ctx.bus.emitTyped('achievement', { id: formation.achievement, title: entry ? entry.title : formation.achievement });
-      }
+      if (formation.achievement) emitAchievement(data.preset, formation.achievement);
     }
+  }
+
+  /**
+   * Emits the typed achievement event with the title from the preset's achievements list. A separate
+   * function with a plain loop: a closure inside trackPlayerSlot would make V8 allocate a context on
+   * every frame's call.
+   */
+  function emitAchievement(preset, id) {
+    let title = id;
+    const list = Array.isArray(preset.achievements) ? preset.achievements : [];
+    for (let index = 0; index < list.length; index++) if (list[index] && list[index].id === id) title = list[index].title;
+    ctx.bus.emitTyped('achievement', { id, title });
+  }
+
+  /**
+   * The formation-slot API object of a group: its numbers read the group doubles through accessors, so
+   * the frame update never writes a double into an object (V8 would box it).
+   */
+  function createFormationState(g, holdTarget) {
+    return {
+      inSlot: false,
+      complete: false,
+      holdTarget,
+      get holdSeconds() { return g[G.HOLD]; },
+      get bestHoldSeconds() { return g[G.HOLD_BEST]; },
+      get distance() { return g[G.SLOT_DISTANCE]; },
+      slot: {
+        get x() { return g[G.SLOT_X]; },
+        get y() { return g[G.SLOT_Y]; },
+        get z() { return g[G.SLOT_Z]; },
+      },
+    };
   }
 
   function emitFormation(data, change) {
@@ -1187,9 +1351,17 @@ export function createFaunaEngine() {
     const cache = data.thermals;
     const start = data.start;
     const end = start + data.count;
-    const bankBlend = 1 - Math.exp(-2.5 * dt);
     const speedRange = data.speedRange;
-    const decay = Math.exp(-dt / Math.max(0.2, params.scatter ? params.scatter.recover : 3));
+    io[IO.DECAY] = Math.exp(-dt / Math.max(0.2, params.scatter ? params.scatter.recover : 3));
+    io[IO.BANK_BLEND] = 1 - Math.exp(-2.5 * dt);
+    io[IO.MIN_SPEED] = speedRange[0];
+    io[IO.MAX_SPEED] = speedRange[1];
+    io[IO.ACCEL] = 7;
+    io[IO.CLIMB] = 3.5;
+    io[IO.TIME] = g[G.TIME];
+    io[IO.BURST] = params.scatter ? params.scatter.burst * 0.6 : 0;
+    io[IO.FEED_X] = 0;
+    io[IO.FEED_Z] = 0;
     g[G.THERMAL_TIMER] -= dt;
     if (g[G.THERMAL_TIMER] <= 0) {
       g[G.THERMAL_TIMER] = circling.thermalRefresh;
@@ -1204,7 +1376,7 @@ export function createFaunaEngine() {
       const ground = cache.ground[thermal];
       const top = Math.max(ground + circling.bottom + 60, Math.min(cache.top[thermal], ground + circling.top));
       const bottom = ground + circling.bottom;
-      const share = clamp((pool.py[index] - ground) / Math.max(1, cache.top[thermal] - ground), 0, 1);
+      const share = Math.min(Math.max((pool.py[index] - ground) / Math.max(1, cache.top[thermal] - ground), 0), 1);
       const centerX = cache.x[thermal] + (cache.capX[thermal] - cache.x[thermal]) * share;
       const centerZ = cache.z[thermal] + (cache.capZ[thermal] - cache.z[thermal]) * share;
       const radius = pool.homeX[index];
@@ -1217,16 +1389,27 @@ export function createFaunaEngine() {
       steering[2] = 0;
       if (pool.mode[index] === 1) {
         // Gliding over to the thermal: straight at it, sinking gently.
-        steerToward(pool, index, centerX, Math.max(bottom, pool.py[index] - 40), centerZ, 0, 0, 0, 0.05, data.cruise * 1.2, 1.2);
+        io[IO.TARGET_X] = centerX;
+        io[IO.TARGET_Y] = Math.max(bottom, pool.py[index] - 40);
+        io[IO.TARGET_Z] = centerZ;
+        io[IO.FEED_Y] = 0;
+        io[IO.GAIN] = 0.05;
+        io[IO.SEEK_MAX] = data.cruise * 1.2;
+        io[IO.WEIGHT] = 1.2;
+        steerToward(pool, index);
         if (distance < radius * 1.6) pool.mode[index] = 0;
       } else {
         // Circle: aim a little ahead on the circle, climbing with the thermal's strength.
         const angle = Math.atan2(toZ, toX) + direction * 0.5;
-        const targetX = centerX + Math.cos(angle) * radius;
-        const targetZ = centerZ + Math.sin(angle) * radius;
         const climb = circling.climb * (cache.strength[thermal] > 0 ? Math.min(1.6, 0.4 + cache.strength[thermal] * 0.35) : 0.35);
-        const targetY = pool.py[index] + climb * 4;
-        steerToward(pool, index, targetX, targetY, targetZ, 0, climb, 0, 0.35, data.cruise, 1.5);
+        io[IO.TARGET_X] = centerX + Math.cos(angle) * radius;
+        io[IO.TARGET_Y] = pool.py[index] + climb * 4;
+        io[IO.TARGET_Z] = centerZ + Math.sin(angle) * radius;
+        io[IO.FEED_Y] = climb;
+        io[IO.GAIN] = 0.35;
+        io[IO.SEEK_MAX] = data.cruise;
+        io[IO.WEIGHT] = 1.5;
+        steerToward(pool, index);
         if (pool.py[index] > top - 20) {
           // Top of the column: glide on to the next thermal, or spiral down and start over.
           if (cache.count > 1) {
@@ -1238,17 +1421,23 @@ export function createFaunaEngine() {
           }
         }
       }
-      steerFlee(pool, index, params.scatter ? params.scatter.burst * 0.6 : 0);
-      const floorY = Math.max(bottom * 0.5 + ground * 0.5, groundAt(data, pool.px[index], pool.pz[index]) + params.floor);
-      steerAboveFloor(pool, index, floorY);
-      integrate(pool, index, dt, speedRange[0], speedRange[1], 7, 3.5, bankBlend, floorY);
-      animateBird(pool, index, dt, g[G.TIME], pool.mode[index] === 1 ? 0.97 : pool.def.flap.glideShare, false);
-      calm(pool, index, decay);
+      steerFlee(pool, index);
+      groundUnder(data, pool, index);
+      io[IO.CUSHION] = Math.max(bottom * 0.5 + ground * 0.5, io[IO.GROUND] + params.floor);
+      io[IO.FLOOR] = io[IO.CUSHION];
+      steerAboveFloor(pool, index);
+      integrate(pool, index, dt);
+      io[IO.GLIDE] = pool.mode[index] === 1 ? 0.97 : pool.def.flap.glideShare;
+      animateBird(pool, index, dt, false);
+      calm(pool, index);
       sumX += pool.px[index];
       sumY += pool.py[index];
       sumZ += pool.pz[index];
     }
-    finishCentroid(data, sumX, sumY, sumZ);
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
     g[G.X] = g[G.CX];
     g[G.Y] = g[G.CY];
     g[G.Z] = g[G.CZ];
@@ -1264,17 +1453,17 @@ export function createFaunaEngine() {
     g[G.TERRAIN_TIMER] -= dt;
     if (g[G.TERRAIN_TIMER] <= 0) {
       g[G.TERRAIN_TIMER] = 2;
-      const aheadX = g[G.X] + headingX(g[G.HEADING]) * 350;
-      const aheadZ = g[G.Z] + headingZ(g[G.HEADING]) * 350;
+      const aheadX = g[G.X] + Math.sin(g[G.HEADING]) * 350;
+      const aheadZ = g[G.Z] - Math.cos(g[G.HEADING]) * 350;
       if (ctx.terrain.heightAt(aheadX, aheadZ) > ctx.terrain.waterLevel - 6) g[G.SIDE] = 1;
       else g[G.SIDE] = 0;
     }
     if (g[G.SIDE] > 0) g[G.HEADING] += 0.35 * dt;
-    g[G.VX] = headingX(g[G.HEADING]) * g[G.SPEED];
-    g[G.VZ] = headingZ(g[G.HEADING]) * g[G.SPEED];
+    g[G.VX] = Math.sin(g[G.HEADING]) * g[G.SPEED];
+    g[G.VZ] = (-Math.cos(g[G.HEADING])) * g[G.SPEED];
     g[G.X] += g[G.VX] * dt;
     g[G.Z] += g[G.VZ] * dt;
-    g[G.Y] = waterSurface(g[G.X], g[G.Z]);
+    g[G.Y] = waterIsFlat() ? ctx.terrain.waterLevel : waterSurface(g[G.X], g[G.Z]);
   }
 
   function nextWhaleTimer(data, range) {
@@ -1288,11 +1477,18 @@ export function createFaunaEngine() {
     const pod = params.pod;
     const start = data.start;
     const end = start + data.count;
-    const forwardX = headingX(g[G.HEADING]);
-    const forwardZ = headingZ(g[G.HEADING]);
+    const forwardX = Math.sin(g[G.HEADING]);
+    const forwardZ = -Math.cos(g[G.HEADING]);
     const water = ctx.water;
     const bankBlend = 1 - Math.exp(-1.5 * dt);
     const scaleBase = g[G.SIZE];
+    const flat = waterIsFlat();
+    const seaLevel = ctx.terrain.waterLevel;
+    io[IO.FEED_X] = g[G.VX];
+    io[IO.FEED_Y] = 0;
+    io[IO.FEED_Z] = g[G.VZ];
+    io[IO.GAIN] = 0.08;
+    io[IO.WEIGHT] = 0.6;
     let sumX = 0;
     let sumY = 0;
     let sumZ = 0;
@@ -1302,7 +1498,7 @@ export function createFaunaEngine() {
       // Horizontal: each whale keeps its lane in the pod's frame.
       const laneX = g[G.X] + forwardX * pool.homeZ[index] - forwardZ * pool.homeX[index];
       const laneZ = g[G.Z] + forwardZ * pool.homeZ[index] + forwardX * pool.homeX[index];
-      const surfaceY = waterSurface(pool.px[index], pool.pz[index]);
+      const surfaceY = flat ? seaLevel : waterSurface(pool.px[index], pool.pz[index]);
       let mode = pool.mode[index];
       pool.timer[index] -= dt;
       if (mode === WHALE_BREACH) {
@@ -1337,8 +1533,22 @@ export function createFaunaEngine() {
           // Spouts while at the surface.
           pool.aux[index] -= dt;
           if (pool.aux[index] <= 0 && pool.py[index] > surfaceY - girth * 1.2) {
-            pool.aux[index] = nextWhaleTimer(data, pod.spoutInterval);
-            if (water) spout(data, index, scale, surfaceY);
+            pool.aux[index] = pod.spoutInterval[0] + data.rng() * (pod.spoutInterval[1] - pod.spoutInterval[0]);
+            if (water) {
+              // The spout, from the blowhole a quarter of the body ahead of centre (inline: this hot
+              // loop runs optimised, a separate rarely called function would not).
+              const spray = data.spout;
+              const speed = Math.sqrt(pool.vx[index] * pool.vx[index] + pool.vz[index] * pool.vz[index]) || 1;
+              const ahead = pool.def.size * 0.28 * scale;
+              spray.x = pool.px[index] + (pool.vx[index] / speed) * ahead;
+              spray.z = pool.pz[index] + (pool.vz[index] / speed) * ahead;
+              spray.y = Math.max(surfaceY + 0.5, pool.py[index] + pool.def.size * 0.11 * scale);
+              spray.count = 70;
+              spray.speed = pod.spoutHeight * 1.5;
+              spray.inheritX = pool.vx[index];
+              spray.inheritZ = pool.vz[index];
+              water.emitSpray(spray);
+            }
           }
         } else if (mode === WHALE_DIVE) {
           targetY = surfaceY - pod.depth * scale;
@@ -1371,11 +1581,15 @@ export function createFaunaEngine() {
           steering[0] = 0;
           steering[1] = 0;
           steering[2] = 0;
-          steerToward(pool, index, laneX, pool.py[index], laneZ, g[G.VX], 0, g[G.VZ], 0.08, data.speedRange[1] * speedShare, 0.6);
+          io[IO.TARGET_X] = laneX;
+          io[IO.TARGET_Y] = pool.py[index];
+          io[IO.TARGET_Z] = laneZ;
+          io[IO.SEEK_MAX] = data.speedRange[1] * speedShare;
+          steerToward(pool, index);
           const vx = pool.vx[index] + steering[0] * dt;
           const vz = pool.vz[index] + steering[2] * dt;
           const speed = Math.sqrt(vx * vx + vz * vz) || 1;
-          const clamped = clamp(speed, data.speedRange[0], data.speedRange[1] * speedShare);
+          const clamped = Math.min(Math.max(speed, data.speedRange[0]), data.speedRange[1] * speedShare);
           pool.vx[index] = (vx / speed) * clamped;
           pool.vz[index] = (vz / speed) * clamped;
           // Vertical: eased toward the mode's depth (the pitch follows from it).
@@ -1410,23 +1624,10 @@ export function createFaunaEngine() {
       sumY += pool.py[index];
       sumZ += pool.pz[index];
     }
-    finishCentroid(data, sumX, sumY, sumZ);
-  }
-
-  function spout(data, index, scale, surfaceY) {
-    const pool = data.pool;
-    const spray = data.spout;
-    const speed = Math.sqrt(pool.vx[index] * pool.vx[index] + pool.vz[index] * pool.vz[index]) || 1;
-    // The blowhole sits over a quarter of the body ahead of centre.
-    const ahead = pool.def.size * 0.28 * scale;
-    spray.x = pool.px[index] + (pool.vx[index] / speed) * ahead;
-    spray.z = pool.pz[index] + (pool.vz[index] / speed) * ahead;
-    spray.y = Math.max(surfaceY + 0.5, pool.py[index] + pool.def.size * 0.11 * scale);
-    spray.count = 70;
-    spray.speed = data.params.pod.spoutHeight * 1.5;
-    spray.inheritX = pool.vx[index];
-    spray.inheritZ = pool.vz[index];
-    ctx.water.emitSpray(spray);
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
   }
 
   // ---- wingman ------------------------------------------------------------------------------------
@@ -1438,8 +1639,9 @@ export function createFaunaEngine() {
     const player = ctx.state.player;
     const start = data.start;
     const end = start + data.count;
-    const bankBlend = 1 - Math.exp(-2.5 * dt);
-    const decay = Math.exp(-dt / 3);
+    io[IO.BANK_BLEND] = 1 - Math.exp(-2.5 * dt);
+    io[IO.DECAY] = Math.exp(-dt / 3);
+    io[IO.TIME] = g[G.TIME];
     const lead = start;
     const dxLead = player.position.x - pool.px[lead];
     const dyLead = player.position.y - pool.py[lead];
@@ -1485,6 +1687,11 @@ export function createFaunaEngine() {
     let sumY = 0;
     let sumZ = 0;
     const speedRange = data.speedRange;
+    io[IO.MIN_SPEED] = speedRange[0];
+    io[IO.MAX_SPEED] = speedRange[1];
+    io[IO.ACCEL] = 14;
+    io[IO.CLIMB] = 12;
+    io[IO.GLIDE] = mode === MODE_ESCORT ? 0.6 : pool.def.flap.glideShare;
     for (let index = start; index < end; index++) {
       steering[0] = 0;
       steering[1] = 0;
@@ -1496,27 +1703,58 @@ export function createFaunaEngine() {
         const toZ = pool.pz[index] - g[G.ANCHOR_Z];
         const angle = Math.atan2(toZ, toX) + 0.5;
         const radius = wingman.waitRadius + offset;
-        steerToward(pool, index, g[G.ANCHOR_X] + Math.cos(angle) * radius, g[G.BASE_Y], g[G.ANCHOR_Z] + Math.sin(angle) * radius, 0, 0, 0, 0.3, data.cruise, 1.4);
+        io[IO.TARGET_X] = g[G.ANCHOR_X] + Math.cos(angle) * radius;
+        io[IO.TARGET_Y] = g[G.BASE_Y];
+        io[IO.TARGET_Z] = g[G.ANCHOR_Z] + Math.sin(angle) * radius;
+        io[IO.FEED_X] = 0;
+        io[IO.FEED_Y] = 0;
+        io[IO.FEED_Z] = 0;
+        io[IO.GAIN] = 0.3;
+        io[IO.SEEK_MAX] = data.cruise;
+        io[IO.WEIGHT] = 1.4;
+        steerToward(pool, index);
       } else if (mode === MODE_JOIN || mode === MODE_ESCORT) {
         // Match the craft's velocity within the speed limits, closing on the slot.
-        const gain = mode === MODE_JOIN ? 0.5 : 0.8;
-        steerToward(pool, index, slotX + player.right.x * side * offset, slotY, slotZ + player.right.z * side * offset, player.velocity.x, player.velocity.y, player.velocity.z, gain, speedRange[1], 2.2);
+        io[IO.TARGET_X] = slotX + player.right.x * side * offset;
+        io[IO.TARGET_Y] = slotY;
+        io[IO.TARGET_Z] = slotZ + player.right.z * side * offset;
+        io[IO.FEED_X] = player.velocity.x;
+        io[IO.FEED_Y] = player.velocity.y;
+        io[IO.FEED_Z] = player.velocity.z;
+        io[IO.GAIN] = mode === MODE_JOIN ? 0.5 : 0.8;
+        io[IO.SEEK_MAX] = speedRange[1];
+        io[IO.WEIGHT] = 2.2;
+        steerToward(pool, index);
       } else {
         // Peel off: a climbing turn away from the player's side.
         const awayX = player.right.x * side * 200 + player.forward.x * 120;
         const awayZ = player.right.z * side * 200 + player.forward.z * 120;
-        steerToward(pool, index, pool.px[index] + awayX, pool.py[index] + 60, pool.pz[index] + awayZ, 0, 0, 0, 0.1, data.cruise * 1.3, 1.1);
+        io[IO.TARGET_X] = pool.px[index] + awayX;
+        io[IO.TARGET_Y] = pool.py[index] + 60;
+        io[IO.TARGET_Z] = pool.pz[index] + awayZ;
+        io[IO.FEED_X] = 0;
+        io[IO.FEED_Y] = 0;
+        io[IO.FEED_Z] = 0;
+        io[IO.GAIN] = 0.1;
+        io[IO.SEEK_MAX] = data.cruise * 1.3;
+        io[IO.WEIGHT] = 1.1;
+        steerToward(pool, index);
       }
-      const floorY = groundAt(data, pool.px[index], pool.pz[index]) + params.floor;
-      steerAboveFloor(pool, index, floorY);
-      integrate(pool, index, dt, speedRange[0], speedRange[1], 14, 12, bankBlend, floorY);
-      animateBird(pool, index, dt, g[G.TIME], mode === MODE_ESCORT ? 0.6 : pool.def.flap.glideShare, mode === MODE_JOIN || mode === MODE_PEEL);
-      calm(pool, index, decay);
+      groundUnder(data, pool, index);
+      io[IO.CUSHION] = io[IO.GROUND] + params.floor;
+      io[IO.FLOOR] = io[IO.CUSHION];
+      steerAboveFloor(pool, index);
+      integrate(pool, index, dt);
+      animateBird(pool, index, dt, mode === MODE_JOIN || mode === MODE_PEEL);
+      calm(pool, index);
       sumX += pool.px[index];
       sumY += pool.py[index];
       sumZ += pool.pz[index];
     }
-    finishCentroid(data, sumX, sumY, sumZ);
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
     g[G.X] = g[G.CX];
     g[G.Y] = g[G.CY];
     g[G.Z] = g[G.CZ];
@@ -1538,13 +1776,14 @@ export function createFaunaEngine() {
     const params = data.params;
     const time = g[G.TIME];
     g[G.HEADING] += Math.sin(time * 0.013 + data.phaseSeed * 5) * params.wander * 0.3 * dt;
-    g[G.VX] = headingX(g[G.HEADING]) * g[G.SPEED];
-    g[G.VZ] = headingZ(g[G.HEADING]) * g[G.SPEED];
+    g[G.VX] = Math.sin(g[G.HEADING]) * g[G.SPEED];
+    g[G.VZ] = (-Math.cos(g[G.HEADING])) * g[G.SPEED];
     g[G.X] += g[G.VX] * dt;
     g[G.Z] += g[G.VZ] * dt;
     const drift = params.drift;
     const bobRate = TWO_PI / Math.max(1, drift.bobPeriod);
-    const baseY = Math.max(g[G.BASE_Y], groundAt(data, g[G.X], g[G.Z]) + params.floor + data.pool.def.size * g[G.SIZE] * 0.3);
+    groundUnderGoal(data);
+    const baseY = Math.max(g[G.BASE_Y], io[IO.GROUND] + params.floor + data.pool.def.size * g[G.SIZE] * 0.3);
     // A slow bob, and its exact derivative as the climb rate (the body pitches with it).
     const bobPhase = time * bobRate + data.phaseSeed * TWO_PI;
     g[G.Y] += (baseY + Math.sin(bobPhase) * drift.bob - g[G.Y]) * Math.min(1, dt * 0.5);
@@ -1557,8 +1796,8 @@ export function createFaunaEngine() {
     const params = data.params;
     const start = data.start;
     const end = start + data.count;
-    const forwardX = headingX(g[G.HEADING]);
-    const forwardZ = headingZ(g[G.HEADING]);
+    const forwardX = Math.sin(g[G.HEADING]);
+    const forwardZ = (-Math.cos(g[G.HEADING]));
     const lane = params.drift.lane;
     const bankBlend = 1 - Math.exp(-0.8 * dt);
     let sumX = 0;
@@ -1572,9 +1811,9 @@ export function createFaunaEngine() {
       const laneY = g[G.Y] + pool.homeY[index] * scale * lane * 0.3;
       // Each animal eases into its lane at up to a fifth of the cruise speed on top of the drift.
       const catchUp = 0.2 * data.cruise;
-      const correctionX = clamp((laneX - pool.px[index]) * 0.3, -catchUp, catchUp);
-      const correctionY = clamp((laneY - pool.py[index]) * 0.3, -catchUp, catchUp);
-      const correctionZ = clamp((laneZ - pool.pz[index]) * 0.3, -catchUp, catchUp);
+      const correctionX = Math.min(Math.max((laneX - pool.px[index]) * 0.3, -catchUp), catchUp);
+      const correctionY = Math.min(Math.max((laneY - pool.py[index]) * 0.3, -catchUp), catchUp);
+      const correctionZ = Math.min(Math.max((laneZ - pool.pz[index]) * 0.3, -catchUp), catchUp);
       pool.vx[index] = g[G.VX] + correctionX;
       pool.vy[index] = g[G.VY] + correctionY;
       pool.vz[index] = g[G.VZ] + correctionZ;
@@ -1589,7 +1828,10 @@ export function createFaunaEngine() {
       sumY += pool.py[index];
       sumZ += pool.pz[index];
     }
-    finishCentroid(data, sumX, sumY, sumZ);
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
     const leadIndex = start;
     g[G.LEAD_X] = pool.px[leadIndex];
     g[G.LEAD_Y] = pool.py[leadIndex];
@@ -1609,7 +1851,7 @@ export function createFaunaEngine() {
     const slipstream = data.params.drift.slipstream;
     const length = slipstream.length * Math.max(1, g[G.SIZE] / 200);
     const radius = slipstream.radius * Math.max(1, g[G.SIZE] / 200);
-    const result = { vel: { x: 0, y: 0, z: 0 }, turbulence: 0 };
+    const result = { vel: new WindVelocity(), turbulence: 0.5 };
     const margin = length * 0.3;
     const source = {
       id,
@@ -1686,13 +1928,14 @@ export function createFaunaEngine() {
   // =============================================================================================
   // SHARED PER-GROUP STEPS
   // =============================================================================================
-  function finishCentroid(data, sumX, sumY, sumZ) {
+  /** The group's centroid from the position sums io[SUM_*], and its sampled radius. */
+  function finishCentroid(data) {
     const g = data.g;
     const pool = data.pool;
     const count = data.count;
-    g[G.CX] = sumX / count;
-    g[G.CY] = sumY / count;
-    g[G.CZ] = sumZ / count;
+    g[G.CX] = io[IO.SUM_X] / count;
+    g[G.CY] = io[IO.SUM_Y] / count;
+    g[G.CZ] = io[IO.SUM_Z] / count;
     let radiusSq = 0;
     const end = data.start + count;
     // Sampled radius (every 8th agent): cheap enough for thousands.
@@ -1707,6 +1950,17 @@ export function createFaunaEngine() {
     g[G.RADIUS] = Math.sqrt(radiusSq) + 4;
   }
 
+  /**
+   * The spawn's anchor (a THREE.Vector3 the SpawnManager reads for the LOD, the lure, discovery and
+   * audio) at the group's centroid, in whole metres: V8 boxes every non-integer double written into a
+   * Vector3 field, and a metre is far below what those uses resolve.
+   */
+  function writeAnchor(instance, g) {
+    instance.anchor.x = Math.round(g[G.CX]);
+    instance.anchor.y = Math.round(g[G.CY]);
+    instance.anchor.z = Math.round(g[G.CZ]);
+  }
+
   /** The group's centroid and radius from its agents' positions. */
   function recomputeCentroid(data) {
     const pool = data.pool;
@@ -1718,7 +1972,10 @@ export function createFaunaEngine() {
       sumY += pool.py[index];
       sumZ += pool.pz[index];
     }
-    finishCentroid(data, sumX, sumY, sumZ);
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
   }
 
   /** Places every agent around the goal (on create and when coming back from the far tier). */
@@ -1729,8 +1986,8 @@ export function createFaunaEngine() {
     const start = data.start;
     const end = start + data.count;
     const behavior = params.behavior;
-    const forwardX = headingX(g[G.HEADING]);
-    const forwardZ = headingZ(g[G.HEADING]);
+    const forwardX = Math.sin(g[G.HEADING]);
+    const forwardZ = (-Math.cos(g[G.HEADING]));
     const sizeScale = g[G.SIZE];
     for (let index = start; index < end; index++) {
       const k = index - start;
@@ -1743,7 +2000,8 @@ export function createFaunaEngine() {
         y += pool.homeY[index] * radius * params.murmuration.flatten;
         z += pool.homeZ[index] * radius;
       } else if (behavior === 'formation') {
-        slotOffset(params.formation, k, sizeScale);
+        io[IO.SIZE_SCALE] = sizeScale;
+        slotOffset(params.formation, k);
         x += -forwardX * steering[0] - forwardZ * steering[1];
         y += steering[2];
         z += -forwardZ * steering[0] + forwardX * steering[1];
@@ -1854,7 +2112,7 @@ export function createFaunaEngine() {
     if (data.params.behavior === 'murmuration' || data.params.behavior === 'flock') {
       // The wing rush swells as the player nears the flock.
       const reach = Math.max(200, g[G.RADIUS] * 3);
-      intensity *= clamp(1 - (g[G.PLAYER_DISTANCE] - g[G.RADIUS]) / reach, 0.15, 1);
+      intensity *= Math.min(Math.max(1 - (g[G.PLAYER_DISTANCE] - g[G.RADIUS]) / reach, 0.15), 1);
     }
     data.voice.setIntensity(intensity);
   }
@@ -1961,7 +2219,8 @@ export function createFaunaEngine() {
     g[G.SPEED] = speeds.cruise;
     g[G.TARGET_SPEED] = speeds.cruise;
     g[G.SIZE] = resolved.size * (Number.isFinite(params.scale) ? params.scale : 1);
-    g[G.GROUND_SPACING] = resolved.behavior === 'murmuration' ? Math.max(120, resolved.murmuration.radius * g[G.SIZE]) : 150;
+    // Whole metres: the probe coordinates stay integers, which V8 passes to the terrain without boxing.
+    g[G.GROUND_SPACING] = resolved.behavior === 'murmuration' ? Math.max(120, Math.round(resolved.murmuration.radius * g[G.SIZE])) : 150;
     g[G.THERMAL_TIMER] = 0;
     g[G.CALL_TIMER] = 3 + rng() * 6;
     g[G.SIDE] = resolved.wingman.side === 1 || resolved.wingman.side === -1 ? resolved.wingman.side : 0;
@@ -1979,6 +2238,7 @@ export function createFaunaEngine() {
       phaseSeed: rng(),
       ground: new Float64Array(GROUND_GRID * GROUND_GRID),
       groundCursor: 0,
+      groundWait: 0,
       neighborSlice: 0,
       hidden: false,
       mode: MODE_WAIT,
@@ -1995,7 +2255,8 @@ export function createFaunaEngine() {
     fillGround(data);
     // The goal's starting height from the altitude mode.
     const altitude = resolved.altitude;
-    const ground = groundAt(data, g[G.X], g[G.Z]);
+    groundUnderGoal(data);
+    const ground = io[IO.GROUND];
     if (resolved.behavior === 'pod') g[G.Y] = waterSurface(g[G.X], g[G.Z]);
     else if (altitude.mode === 'msl') g[G.Y] = Math.max(altitude.value, ground + resolved.floor + 10);
     else if (altitude.mode === 'water') g[G.Y] = waterSurface(g[G.X], g[G.Z]);
@@ -2013,7 +2274,8 @@ export function createFaunaEngine() {
       g[G.ANCHOR_Y] = ground;
     }
     if (resolved.behavior === 'formation') {
-      data.formationState = { inSlot: false, holdSeconds: 0, bestHoldSeconds: 0, complete: false, distance: Infinity, slot: { x: 0, y: 0, z: 0 }, holdTarget: resolved.formation.holdSeconds };
+      g[G.SLOT_DISTANCE] = Infinity;
+      data.formationState = createFormationState(g, resolved.formation.holdSeconds);
     }
     if (resolved.behavior === 'pod' && ctx.water) {
       data.waterMark = ctx.water.createMark();
@@ -2084,7 +2346,7 @@ export function createFaunaEngine() {
       const params = data.params;
       g[G.AGE] += dt;
       g[G.TIME] += dt;
-      g[G.FADE] = params.fadeIn > 0 ? clamp(g[G.AGE] / params.fadeIn, 0, 1) : 1;
+      g[G.FADE] = params.fadeIn > 0 ? Math.min(Math.max(g[G.AGE] / params.fadeIn, 0), 1) : 1;
       g[G.SCATTER_COOLDOWN] -= dt;
       const mover = GOAL_MOVERS[params.behavior];
       if (dt > 0 && mover) mover(data, dt);
@@ -2098,7 +2360,7 @@ export function createFaunaEngine() {
         g[G.CY] = g[G.Y];
         g[G.CZ] = g[G.Z];
         if (data.wind && data.windAttached) detachSlipstream(instance, data);
-        instance.anchor.set(g[G.CX], g[G.CY], g[G.CZ]);
+        writeAnchor(instance, g);
         updateVoice(instance, data);
         return;
       }
@@ -2125,8 +2387,9 @@ export function createFaunaEngine() {
         }
       }
       writeAgents(data, false);
-      instance.anchor.set(g[G.CX], g[G.CY], g[G.CZ]);
-      instance.radius = Math.max(20, g[G.RADIUS]);
+      writeAnchor(instance, g);
+      // Whole metres (an integer store never boxes).
+      instance.radius = Math.max(20, Math.round(g[G.RADIUS]));
       updateVoice(instance, data);
     },
     setLOD(instance, tier) {
