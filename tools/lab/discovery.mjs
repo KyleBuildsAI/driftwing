@@ -29,6 +29,7 @@ import { storage } from '../../src/core/storage.js';
 import { isWorldHash, normalizeSeed, parseDayTime, resolveSeed, resolveStartTime, shareLink, worldHash } from '../../src/core/seed.js';
 import { createWorldGen } from '../../src/world/worldgen.js';
 import { createMapTileGenerator, mapTileCacheTag } from '../../src/world/mapTileGen.js';
+import { PRESETS } from '../../src/spawns/presets/index.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -234,9 +235,12 @@ function testTiles() {
     }
   }
   check('tiles', 'bad requests throw', badRequests === 4, `${badRequests} of 4`);
+  // The default preset list is the real one (PRESETS); its stamped sites give a different tag than no sites.
   const tag = mapTileCacheTag('lab');
+  const placesSites = PRESETS.some((preset) => preset.kind === 'site');
   check('tiles', 'the cache tag follows the seed and the preset placement data',
-    tag.startsWith('LAB|v') && tag !== mapTileCacheTag('LAB2') && tag !== mapTileCacheTag('LAB', [{ id: 'x', kind: 'site', placement: { chance: 1 }, stamps: [] }]) && tag === mapTileCacheTag('LAB', []),
+    tag.startsWith('LAB|v') && tag !== mapTileCacheTag('LAB2') && tag !== mapTileCacheTag('LAB', [{ id: 'x', kind: 'site', placement: { chance: 1 }, stamps: [] }])
+      && tag === mapTileCacheTag('LAB', PRESETS) && (tag !== mapTileCacheTag('LAB', [])) === placesSites,
     tag);
 
   const started = performance.now();
