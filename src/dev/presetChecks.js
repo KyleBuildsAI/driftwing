@@ -132,11 +132,15 @@ export function installPresetChecks(game) {
     ctx.systems.flight.resetTo(park);
     await frames(2);
     ctx.setPhotoMode(true);
-    await frames(2);
-    ctx.systems.camera.setFreeCameraPose({ position: new THREE.Vector3(position.x, position.y, position.z), target: new THREE.Vector3(target.x, target.y, target.z) });
+    // The photo camera takes the pose once photo mode is live (a frame or two after the switch).
+    let posed = false;
+    for (let attempt = 0; attempt < 60 && !posed; attempt++) {
+      await frames(1);
+      posed = ctx.systems.camera.setFreeCameraPose({ position: new THREE.Vector3(position.x, position.y, position.z), target: new THREE.Vector3(target.x, target.y, target.z) });
+    }
     const settled = await terrainIdle();
     await frames(20);
-    return settled;
+    return settled && posed;
   }
 
   /** Flies the craft (photo mode off) to `distance` m short of (x, z), facing it, `height` m up. */
@@ -198,11 +202,6 @@ export function installPresetChecks(game) {
     return id;
   }
 
-  /** The site of presetId nearest the craft (the real placement), or null. */
-  function nearestSite(presetId) {
-    return manager.findNearestSite(presetId, state.player.position.x, state.player.position.z);
-  }
-
   /** Waits (up to 60 s) for the site feed to build the spawn of site; returns its id or null. */
   async function siteSpawn(site) {
     const started = performance.now();
@@ -246,19 +245,20 @@ export function installPresetChecks(game) {
      * distance (spawn distance ahead), view: { distance, height, bearing, lift } }. Returns a line.
      */
     async show(presetId, how) {
-      const preset = manager.getPreset(presetId);
+      const preset = manager.getPreset(presetId) ?? heldSites.get(presetId);
       const { sun = 40, morning = false, kind = 'ahead', distance = 1500, view = {} } = how;
       setSun(sun, morning);
       ctx.setPhotoMode(false);
       let id = null;
       let siteId = null;
       if (kind === 'site') {
-        if (heldSites.has(presetId) && !manager.getPreset(presetId)) manager.addPreset(heldSites.get(presetId));
-        const site = nearestSite(presetId);
+        // The preset joins the manager only after the memory baseline, so the feed builds it inside it.
+        const site = ctx.world.sitesNear(state.player.position.x, state.player.position.z, 60000).find((candidate) => candidate.presetId === presetId) ?? null;
         if (!site) return check(`${presetId}: a placed site within reach`, false, 'none');
         siteId = site.id;
         await approach(site.x, site.z, 2500, 300);
         await begin(presetId, () => null);
+        if (heldSites.has(presetId) && !manager.getPreset(presetId)) manager.addPreset(heldSites.get(presetId));
         id = await siteSpawn(site);
         open.get(presetId).id = id;
         open.get(presetId).siteId = site.id;
@@ -312,7 +312,9 @@ export function installPresetChecks(game) {
       const leaks = manager.getStats().leaks;
       const live = new Set(ctx.wind.listSources().map((source) => source.id));
       const sourcesLeft = ownSources.filter((sourceId) => live.has(sourceId));
-      const ok = leftBehind.length === 0 && after.geometries - entry.before.geometries === world && after.textures === entry.before.textures
+      // The world may also free geometries meanwhile (terrain chunks the craft left behind), so the
+      // count may fall short of the world's first draws, never exceed them.
+      const ok = leftBehind.length === 0 && after.geometries - entry.before.geometries <= world && after.textures === entry.before.textures
         && sourcesLeft.length === 0 && manager.getInstance(entry.id) === null && (leaks.windSources ?? 0) === 0 && (leaks.lights ?? 0) === 0;
       return check(`${presetId}: dispose returns GPU memory and removes its wind sources`, ok,
         { before: entry.before, after, worldFirstDrawn: world, leftBehind: leftBehind.map((item) => `${item.owner}/${item.object}`), ownWindSources: ownSources, left: sourcesLeft, windSources: `${entry.windBefore} -> ${ctx.wind.sourceCount}`, leaks });
@@ -377,6 +379,9 @@ export function installPresetChecks(game) {
         ctx.systems.flight.resetTo({ x: start.x + step * 2, y: ctx.world.WATER_LEVEL + 1.5, z: start.z, heading: 90 });
         await frames(1);
       }
+      // Then a few seconds of flight time high over the bay, for the fish to jump (splashes).
+      ctx.systems.flight.resetTo({ x: record.position.x, y: ground(record.position.x, record.position.z) + 400, z: record.position.z, heading: 0 });
+      await seconds(8);
       const stats = water.stats();
       const splashes = manager.getParts(entry.id)[1].data.splashes;
       ctx.systems.flight.resetTo(park);
@@ -445,8 +450,13 @@ export function installPresetChecks(game) {
     },
 
     /** Wind farm: rotors turned into the wind and spinning, the wake source registered. */
-    windFarmTurning() {
+    async windFarmTurning() {
       const entry = open.get('windFarm');
+      // Flight time for the rotors to spin up (the photo mode stops the clock).
+      ctx.setPhotoMode(false);
+      ctx.systems.flight.resetTo(park);
+      await seconds(12);
+      ctx.setPhotoMode(true);
       const instance = manager.getParts(entry.id)[0];
       const data = instance.data;
       const windHeading = (Math.atan2(-data.wind[0], data.wind[1]) * 180) / Math.PI;
@@ -461,10 +471,14 @@ export function installPresetChecks(game) {
       const entry = open.get('maelstrom');
       const record = manager.getInstance(entry.id);
       const eye = ctx.wind.probe(new THREE.Vector3(record.position.x + 40, ctx.world.WATER_LEVEL + 300, record.position.z));
-      const side = ctx.wind.probe(new THREE.Vector3(record.position.x, ctx.world.WATER_LEVEL + 300, record.position.z + 400));
+      const south = ctx.wind.probe(new THREE.Vector3(record.position.x, ctx.world.WATER_LEVEL + 300, record.position.z + 400)).vel.x;
+      const north = ctx.wind.probe(new THREE.Vector3(record.position.x, ctx.world.WATER_LEVEL + 300, record.position.z - 400)).vel.x;
+      // Counter-clockwise from above: eastward south of the eye, westward north of it (the ambient
+      // wind cancels in the difference).
+      const swirl = (south - north) / 2;
       const vortexSources = ctx.wind.listSources().filter((source) => source.kind === 'spawn-vortex' || source.kind === 'spawn-rankine').length;
-      return check('maelstrom: lift over the eye, swirl around it, a vortex wind source', eye.vel.y > 4 && Math.abs(side.vel.x) > 2 && vortexSources >= 1 && eye.turbulence > 0.4,
-        { eyeUpdraft: Math.round(eye.vel.y * 10) / 10, swirl: Math.round(side.vel.x * 10) / 10, turbulence: Math.round(eye.turbulence * 100) / 100, vortexSources, water: ctx.systems.water.effects.stats().vortices });
+      return check('maelstrom: lift over the eye, counter-clockwise swirl around it, a vortex wind source', eye.vel.y > 4 && swirl > 2 && vortexSources >= 1 && eye.turbulence > 0.4,
+        { eyeUpdraft: Math.round(eye.vel.y * 10) / 10, swirl: Math.round(swirl * 10) / 10, turbulence: Math.round(eye.turbulence * 100) / 100, vortexSources, water: ctx.systems.water.effects.stats().vortices });
     },
 
     /** Whale pod: on open water (moved off the coast), spouting. */
