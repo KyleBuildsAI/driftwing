@@ -6,7 +6,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 // CONFIG: tuning constants shared by every system.
 // ============================================================================
 export const CONFIG = Object.freeze({
-  VERSION: '2.0.0-phase.1',
+  VERSION: '2.0.0-phase.2',
   CHUNK_SIZE: 256,
   LOD_RESOLUTIONS: Object.freeze([64, 32, 16, 8]),
   LOD_RING_LIMITS: Object.freeze([1, 3, 6]),
