@@ -1127,9 +1127,10 @@ The Phase 2 contracts (sections 3 and 4 of `docs/specs/phase2-contract.md`) are 
   end their instance at create (`instance.ended` already true: thermal hawks with no working
   thermal, a whale pod with no open water) is declined: it returns null with the refusal `declined`,
   so the director leaves that candidate for its bucket and counts no notable, cooldown or tier turn.
-  Other sources keep such a spawn, and the manager removes it on its next frame. Each preset engine entry becomes one
-  engine instance (a part) created with the preset's params merged with `{ position, heading, site,
-  startTime, scale, duration, seed }` and its own seeded random generator. `opts.duration` (the
+  Other sources keep such a spawn, and the manager removes it on its next frame. Each preset engine
+  entry becomes one engine instance (a part) created with the preset's params merged with
+  `{ position, heading, site, startTime, scale, duration, seed }` and its own seeded random
+  generator. `opts.duration` (the
   director draws it) is the event's duration; without it the manager draws one from
   `lifetime.duration`.
 - **Anchor rules and dormant sites (preset batch 1).** An event preset's optional `anchor` moves the
