@@ -183,6 +183,20 @@ net.
   time the terrain waited, and it logged "terrain worker failed". The terrain now waits 30 s of wall
   clock (and at least 120 frames) from its first frame, then builds on the main thread with an info
   note only; a real worker failure is still reported as an error.
+- At most 2 heavy spawns really run at once: an always-on heavy site (the floating islands) now
+  holds a heavy slot while it exists, so the director no longer starts two heavy events beside it.
+  A site with an active state (the volcano) still counts only while that state runs.
+- The WindField's spatial hash drops a cell once its last source leaves it; moving sources
+  (drifting weather, tornado tracks, slipstreams) left an empty bucket behind in every cell they
+  crossed for the rest of the session.
+- The celestial and weatherVolume engines run silently without an audio service instead of
+  refusing their audio-owning presets. A spawn whose voice is refused at create (an unknown recipe)
+  no longer leaves the celestial engine's sky modifier registered or the fauna engine's agent range
+  allocated.
+- A director disposed while shedding load puts the spawn LOD bias back to 1, so spawns no longer
+  stay on their cheaper LOD tiers after the spawns system drops a failed director.
+- WREN's tour guide forgets an event's callout key when the spawn ends, so the set no longer grows
+  by one entry per called-out event.
 
 ### Known issues
 
