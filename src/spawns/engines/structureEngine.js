@@ -34,7 +34,7 @@ import { createMeshBuilder } from './structure/meshBuilder.js';
 import { PALETTE } from './structure/palette.js';
 import { RECIPES, RECIPE_NAMES } from './structure/recipes/index.js';
 import { islandOutline, islandTopHeight } from './structure/recipes/islands.js';
-import { createGateSet, crossGates } from './gateDetector.js';
+import { GATE_TELEPORT_DISTANCE, createGateSet, crossGates } from './gateDetector.js';
 import { createParamView, createWindSample, ownsPresetAudio } from './engineKit.js';
 
 const ENGINE_NAME = 'structure';
@@ -697,10 +697,20 @@ export function createStructureEngine() {
         index = crossGates(set, previous, player, index + 1, crossing);
       }
     }
+    if (data.hasPrevious === 1 && data.courses.length > 0) {
+      const dx = player.x - previous[0];
+      const dz = player.z - previous[2];
+      if (dx * dx + dz * dz > GATE_TELEPORT_DISTANCE * GATE_TELEPORT_DISTANCE) interruptCourses(data);
+    }
     previous[0] = player.x;
     previous[1] = player.y;
     previous[2] = player.z;
     data.hasPrevious = 1;
+  }
+
+  /** A jump between frames (a relaunch, a reset, a craft change) leaves any running course unclean. */
+  function interruptCourses(data) {
+    for (const course of data.courses) if (course.startGate >= 0) course.crashed = true;
   }
 
   /**

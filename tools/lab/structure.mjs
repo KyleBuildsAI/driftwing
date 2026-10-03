@@ -11,7 +11,8 @@
 //                names each recipe's stamps, refuses bad options, and islands hover over their islets
 //   gates        flying under the bridge fires the gate and the achievement once; over it and a
 //                teleport do not; flying between two spires rings a chime
-//   course       start -> finish reports the time; a soft crash in between spoils a clean run
+//   course       start -> finish reports the time; a soft crash or a teleport in between spoils a clean
+//                run
 //   landing      a touchdown on the runway is graded (score, centreline, threshold distance); one
 //                beside it is not
 //   surfaces     island tops are registered, stand on exactly the rendered top mesh (within 0.3 m),
@@ -397,17 +398,23 @@ function testCourse() {
   const id = lab.spawnSite('devCanyonGates');
   const gates = partsOf(lab, id).data.gates.data;
   const point = (index, offset) => ({ x: gates[index * 8] + gates[index * 8 + 2] * offset, y: (gates[index * 8 + 5] + gates[index * 8 + 6]) * 0.5, z: gates[index * 8 + 1] + gates[index * 8 + 3] * offset });
+  // A run is flown from gate to gate: a jump between frames (a teleport) leaves it unclean.
   lab.teleport(point(0, -60));
   lab.fly(point(0, -60), point(0, 60), 30);
-  lab.teleport(point(1, -60));
+  lab.fly(point(0, 60), point(1, -60), 400);
   lab.fly(point(1, -60), point(1, 60), 30);
   check('course', 'start -> finish reports the course time', lab.events.courses.length === 1 && lab.events.courses[0].course === 'devCanyonRun' && lab.events.courses[0].time > 0 && lab.events.courses[0].clean, JSON.stringify(lab.events.courses));
   lab.teleport(point(0, -60));
   lab.fly(point(0, -60), point(0, 60), 30);
   lab.bus.emitTyped('softCrash', { craft: 'glider', reason: 'terrain', impactSpeed: 30, position: point(0, 0) });
-  lab.teleport(point(1, -60));
+  lab.fly(point(0, 60), point(1, -60), 400);
   lab.fly(point(1, -60), point(1, 60), 30);
   check('course', 'a soft crash between the gates spoils a clean run', lab.events.courses.length === 1, String(lab.events.courses.length));
+  lab.teleport(point(0, -60));
+  lab.fly(point(0, -60), point(0, 60), 30);
+  lab.teleport(point(1, -60));
+  lab.fly(point(1, -60), point(1, 60), 30);
+  check('course', 'a teleport between the gates spoils a clean run', lab.events.courses.length === 1, String(lab.events.courses.length));
   const run = lab.events.journal;
   check('course', 'the clean run alone reaches the journal (op min, seconds)', run.length === 1 && run[0].key === 'devCanyonRun' && run[0].op === 'min' && Math.abs(run[0].value - lab.events.courses[0].time) < 0.01 && run[0].presetId === 'devCanyonGates', JSON.stringify(run));
   lab.manager.deactivate(id, 'test');
