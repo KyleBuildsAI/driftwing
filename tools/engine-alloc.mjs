@@ -6,7 +6,7 @@
 //
 // Usage:
 //   node tools/engine-alloc.mjs --url http://127.0.0.1:<port>/v2/ --steps tools/steps/engine-emitter.json
-//     --presets emVolcano,emGeyser [--backend webgpu|webgl] [--frames 1000] [--distance 800]
+//     --presets emVolcano,emGeyser [--backend webgpu|webgl] [--frames 1000] [--warmup 12000] [--distance 800]
 //
 // Bytes allocated in src/spawns/engines/ count as the engines' own; bytes allocated by what they call
 // elsewhere (three.js uploads and compute dispatches, the WindField, the terrain height function, the
@@ -25,7 +25,10 @@ import { findBrowser } from './browser.mjs';
 
 const SEED = 'ENGINEALLOC';
 const OWN_LIMIT_BYTES_PER_FRAME = 0.1;
-const WARMUP_FRAMES = 3000;
+const DEFAULT_WARMUP_FRAMES = 12000;
+/** Warm-up rounds, each followed by a pause of WARMUP_PAUSE_MS. */
+const WARMUP_ROUNDS = 3;
+const WARMUP_PAUSE_MS = 4000;
 // Coarse on purpose: with collected objects sampled, three.js's own frame garbage makes a fine
 // interval take many minutes to stop. A real per-frame allocation of 16 bytes still lands about 30
 // samples over 1000 frames, while one sample alone already fails the 0.1 B/frame limit.
@@ -34,7 +37,7 @@ const SAMPLING_INTERVAL_BYTES = 512;
 const LIFECYCLE_ENTRIES = new Set(['init', 'create', 'setLOD', 'dispose']);
 
 function parseArgs(argv) {
-  const options = { url: null, steps: null, presets: [], backend: 'webgpu', frames: 1000, distance: 800 };
+  const options = { url: null, steps: null, presets: [], backend: 'webgpu', frames: 1000, warmup: DEFAULT_WARMUP_FRAMES, distance: 800 };
   for (let index = 2; index < argv.length; index++) {
     const flag = argv[index];
     const next = () => argv[++index];
@@ -44,6 +47,7 @@ function parseArgs(argv) {
       case '--presets': options.presets = next().split(',').filter(Boolean); break;
       case '--backend': options.backend = next(); break;
       case '--frames': options.frames = Number(next()); break;
+      case '--warmup': options.warmup = Number(next()); break;
       case '--distance': options.distance = Number(next()); break;
       default: throw new Error(`Unknown flag ${flag}`);
     }
@@ -51,6 +55,7 @@ function parseArgs(argv) {
   if (!options.url || !options.steps || options.presets.length === 0) throw new Error('--url, --steps and --presets are required');
   if (!['webgpu', 'webgl'].includes(options.backend)) throw new Error('--backend must be webgpu or webgl');
   if (!Number.isInteger(options.frames) || options.frames < 100) throw new Error('--frames must be an integer of at least 100');
+  if (!Number.isInteger(options.warmup) || options.warmup < WARMUP_ROUNDS) throw new Error(`--warmup must be an integer of at least ${WARMUP_ROUNDS}`);
   return options;
 }
 
@@ -95,21 +100,26 @@ async function main() {
       return presets.map((id) => ctx.systems.spawns.forceSpawn(id, { distance }));
     }, options.presets, options.distance);
     process.stdout.write(`spawned: ${spawned.join(', ')}\n`);
-    // Warm-up: the first frames build pipelines, fill wind grids and settle the lights; then a tight
-    // loop like the sampled one lets the optimising compiler settle.
+    // Warm-up: the first frames build pipelines, fill wind grids and settle the lights; then tight
+    // loops like the sampled one let the optimising compiler settle. The optimising compilers run on
+    // background threads, which a busy machine starves: each round is followed by a pause in which
+    // the finished code is installed, or the sample would catch unoptimised code boxing its numbers.
     await sleep(3000);
-    await page.evaluate((frames) => {
-      const { ctx, state } = window.DRIFTWING;
-      for (let frame = 0; frame < frames; frame++) {
-        state.frame++;
-        ctx.systems.spawns.manager.update(1 / 60, 1 / 60);
-      }
-    }, WARMUP_FRAMES);
+    for (let round = 0; round < WARMUP_ROUNDS; round++) {
+      await page.evaluate((frames) => {
+        const { ctx, state } = window.DRIFTWING;
+        for (let frame = 0; frame < frames; frame++) {
+          state.frame++;
+          ctx.systems.spawns.manager.update(1 / 60, 1 / 60);
+        }
+      }, Math.ceil(options.warmup / WARMUP_ROUNDS));
+      await sleep(WARMUP_PAUSE_MS);
+    }
 
     await cdp.send('HeapProfiler.enable');
     await cdp.send('HeapProfiler.collectGarbage');
     await cdp.send('HeapProfiler.startSampling', { samplingInterval: SAMPLING_INTERVAL_BYTES, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
-    const engines = await page.evaluate((frames) => {
+    await page.evaluate((frames) => {
       const { ctx, state } = window.DRIFTWING;
       const manager = ctx.systems.spawns.manager;
       const firstFrame = state.frame;
@@ -119,9 +129,11 @@ async function main() {
         state.frame = firstFrame + 1 + frame;
         manager.update(1 / 60, 1 / 60);
       }
-      return Object.entries(manager.getStats().engines).filter(([, entry]) => entry.instances > 0).map(([name, entry]) => `${name} ${entry.instances}`);
     }, options.frames);
     const { profile } = await cdp.send('HeapProfiler.stopSampling');
+    // Read after the sample: stats() builds its report object, which is not frame-update work.
+    const engines = await page.evaluate(() => Object.entries(window.DRIFTWING.ctx.systems.spawns.manager.getStats().engines)
+      .filter(([, entry]) => entry.instances > 0).map(([name, entry]) => `${name} ${entry.instances}`));
 
     let ownBytes = 0;
     let lifecycleBytes = 0;
