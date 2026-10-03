@@ -39,6 +39,8 @@ const WARMUP_UPDATES = 3000;
  */
 const SAMPLING_BYTES = 32;
 const MAX_SAMPLES_PER_FRAME = 0.1;
+/** The DevTools protocol timeout (ms): HeapProfiler.stopSampling of a long window needs minutes. */
+const PROTOCOL_TIMEOUT_MS = 900000;
 /** The warm-up flight through the first spawn: at its anchor's height (null) or this height (m MSL). */
 const THROUGH_HEIGHT = Object.freeze({ fauna: null, waterEffect: 8 });
 
@@ -245,6 +247,8 @@ async function main() {
   const browser = await puppeteer.launch({
     executablePath: findBrowser(null),
     headless: !options.headful,
+    // Stopping a fine-grained heap sampling over thousands of frames takes minutes on a busy machine.
+    protocolTimeout: PROTOCOL_TIMEOUT_MS,
     userDataDir: profileDir,
     args: ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--enable-gpu', '--mute-audio', '--no-first-run', '--no-default-browser-check', `--window-size=${options.width},${options.height}`],
     defaultViewport: { width: options.width, height: options.height },
