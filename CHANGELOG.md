@@ -125,7 +125,8 @@ net.
   templates for a new event and a new site with every field documented.
 - `docs/engines/*.md`: one reference page per engine.
 - `tools/docs-check.mjs`: every relative link and anchor in the docs, the preset table against the
-  preset files, and the templates validated as presets.
+  preset files, the templates validated as presets, and every WindField source param in its
+  engine page.
 - Labs and step files for every engine, the director, the presets, audio, discovery and the tour
   guide (listed in `docs/architecture.md`, Testing).
 

@@ -11,6 +11,9 @@
 //   templates  the two copy-paste templates in docs/spawns.md (an event and a site) are valid
 //              presets: each code block is evaluated as the preset file it would become and passes
 //              validatePreset with the registered engine names, and its audio recipe exists
+//   wind       every param of every WindField source type (windSources.js) is documented in its
+//              section: docs/engines/vortex.md "Wind params" for rankine, docs/engines/
+//              windModifier.md "### <type>:" for the others
 //
 // Usage: node tools/docs-check.mjs [--verbose]
 // Prints one line per failed check (every check with --verbose) and exits non-zero if any fails.
@@ -21,6 +24,7 @@ import { PRESETS } from '../src/spawns/presets/index.js';
 import { validatePreset, validatePresets } from '../src/spawns/schema.js';
 import { ENGINE_NAMES } from '../src/spawns/engineRegistry.js';
 import { RECIPES } from '../src/audio/recipes/index.js';
+import { WIND_SOURCE_TYPES, sourceParameterNames } from '../src/spawns/engines/windSources.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -226,9 +230,36 @@ function testTemplates() {
   check('templates', 'one event template and one site template', kinds.includes('event') && kinds.includes('site'), kinds.join(', '));
 }
 
+// ---- Wind source params --------------------------------------------------------------------------
+/** The text of a Markdown section: from the first heading line matching `pattern` to the next level-2 or level-3 heading. */
+function sectionText(text, pattern) {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => pattern.test(line));
+  if (start < 0) return null;
+  const end = lines.findIndex((line, index) => index > start && /^#{2,3}\s/.test(line));
+  return lines.slice(start, end < 0 ? lines.length : end).join('\n');
+}
+
+function testWindParams() {
+  const vortexDoc = readFileSync(join(ROOT, 'docs', 'engines', 'vortex.md'), 'utf8');
+  const modifierDoc = readFileSync(join(ROOT, 'docs', 'engines', 'windModifier.md'), 'utf8');
+  for (const type of WIND_SOURCE_TYPES) {
+    const section = type === 'rankine'
+      ? sectionText(vortexDoc, /^### Wind params$/)
+      : sectionText(modifierDoc, new RegExp(`^### ${type}:`));
+    if (!section) {
+      check('wind', `${type}: has a doc section`, false, 'not found');
+      continue;
+    }
+    const missing = sourceParameterNames(type).filter((name) => !section.includes(`\`${name}\``));
+    check('wind', `${type}: every source param is documented`, missing.length === 0, missing.length ? `missing ${missing.join(', ')}` : '');
+  }
+}
+
 testLinks();
 testPresets();
 testTemplates();
+testWindParams();
 
 let failed = 0;
 for (const result of results) {

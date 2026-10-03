@@ -370,7 +370,8 @@ start-driftwing.bat      one-click start for Windows
   (`engine-*.json`, `presets-*.json`, `discovery.json`, `copilot-guide.json`) check them in the
   running game on a dev server; `docs/architecture.md` lists each one.
 - **Docs check.** `node tools/docs-check.mjs` checks every relative link and anchor in the docs,
-  that `docs/spawns.md` matches the preset files, and that its preset templates are valid presets.
+  that `docs/spawns.md` matches the preset files, that its preset templates are valid presets, and
+  that every wind source param is documented.
 
 ### Documentation
 
