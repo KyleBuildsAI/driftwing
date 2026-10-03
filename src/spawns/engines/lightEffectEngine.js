@@ -809,6 +809,9 @@ export function createLightEffectEngine() {
       instance.particles = 0;
       const index = live.indexOf(instance);
       if (index >= 0) live.splice(index, 1);
+      // The frame step runs only from a live instance's update: trim the draw count (and hide the
+      // pool once the last instance is gone) and queue the cleared slots now.
+      points.update(ctx.camera, ctx.time.elapsed, ctx.scene.fog);
     },
     /**
      * A dev snapshot of one instance (the engine step file and the F9 checks read it): its tier, fade,
