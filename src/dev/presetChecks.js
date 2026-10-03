@@ -112,6 +112,9 @@ export function installPresetChecks(game) {
   ctx.bus.on('journal:discovery', (payload) => journalCards.push(payload));
   const journalStats = [];
   ctx.bus.onTyped('journalStat', (payload) => journalStats.push(payload));
+  // The day clock is held while the checks run (a night lasts seconds at the default day length), and
+  // given back by finish().
+  const timeFrozenBefore = ctx.settings.get('timeFrozen');
 
   function memory() {
     const info = ctx.renderer.info.memory;
@@ -164,10 +167,11 @@ export function installPresetChecks(game) {
       return check('setup: engines attributed, set-piece children present', manager.listPresets().every((preset) => preset.engines.every((entry) => entry.engine !== 'setPiece' || Object.values(entry.params.children).every((child) => manager.getPreset(child.preset)))), { tracked: tracker !== null, standIns: added, presets: manager.listPresets().length });
     },
 
-    /** The time of day (sun elevation in degrees; morning or evening) and the regional weather. */
+    /** The time of day (sun elevation in degrees, morning or evening, held there) and the regional weather. */
     async conditions({ sun = 20, morning = false, weather = 'clear' } = {}) {
+      ctx.settings.set('timeFrozen', true);
       ctx.systems.weather.forceState(weather, 0.5);
-      ctx.systems.sky.setDayTime(ctx.util.dayTimeForSunElevation(sun, morning), { transition: 0 });
+      ctx.systems.sky.setDayTime(ctx.util.dayTimeForSunElevation(sun, !morning), { transition: 0 });
       await frames(8);
       return `sun ${sun} deg (${morning ? 'morning' : 'evening'}), weather ${weather}`;
     },
@@ -280,7 +284,7 @@ export function installPresetChecks(game) {
       const part = record ? partsOf(record).find((candidate) => candidate.engine === 'celestial') : null;
       if (!part) return check(`${presetId}: dawn`, false, 'no celestial part');
       ctx.setPhotoMode(false);
-      ctx.systems.sky.setDayTime(ctx.util.dayTimeForSunElevation(elevation, true), { transition: 0 });
+      ctx.systems.sky.setDayTime(ctx.util.dayTimeForSunElevation(elevation, false), { transition: 0 });
       await wait(1500);
       const described = manager.registry.get('celestial').describe(part);
       return check(`${presetId}: the night ends at dawn`, described.dawnReached === true && Number.isFinite(described.duration), { dawnReached: described.dawnReached, duration: described.duration, presence: described.presence });
@@ -296,6 +300,22 @@ export function installPresetChecks(game) {
     journalStats(presetId, keys) {
       const sent = journalStats.filter((stat) => stat.presetId === presetId);
       return check(`${presetId}: journal statistics sent (${keys.join(', ')})`, keys.every((key) => sent.some((stat) => stat.key === key)), sent);
+    },
+
+    /**
+     * Grows a set piece child's weather volumes to `growth` (0..1) at once: the supercell's build takes
+     * three minutes of real time, which the still of its lowering wall cloud does not wait for.
+     */
+    growChild(presetId, childKey, growth) {
+      const child = api.setPieceState(presetId).children.find((entry) => entry.key === childKey);
+      const parts = child && child.id ? manager.getParts(child.id) : [];
+      let grown = 0;
+      for (const part of parts) {
+        if (part.engine !== 'weatherVolume') continue;
+        part.data.growth = growth;
+        grown++;
+      }
+      return check(`${presetId}: ${childKey} grown to ${growth}`, grown > 0, { grown });
     },
 
     /** Moves a celestial spawn's presence ramps on by `seconds` (a comet's slow fade-in). */
@@ -461,6 +481,7 @@ export function installPresetChecks(game) {
     finish() {
       if (tracker) tracker.restore();
       ctx.systems.weather.forceState(null);
+      ctx.settings.set('timeFrozen', timeFrozenBefore);
       return helpers.finish();
     },
   };

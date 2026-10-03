@@ -1,0 +1,293 @@
+[
+{
+"eval": "(async () => { try { const kit = await import('/src/dev/presetChecks.js'); const api = kit.installPresetChecks(window.DRIFTWING); return 'dev server only: imports /src/dev/presetChecks.js | ' + api.setup(); } catch (error) { console.error('[presets check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.conditions({\"sun\": 12, \"weather\": \"clear\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] conditions airfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.site('abandonedAirfield', {\"distance\": 650, \"height\": 110, \"bearing\": 150, \"lift\": 5}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] site abandonedAirfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 800
+},
+{
+"shot": "p21-airfield-site"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.groundStart('abandonedAirfield'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] groundStart failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.start('abandonedAirfield', {\"distance\": 1500}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] start abandonedAirfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('abandonedAirfield', {\"distance\": 900, \"height\": 200, \"bearing\": 200, \"lift\": 10}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame abandonedAirfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.end('abandonedAirfield'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] end abandonedAirfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.conditions({\"sun\": -32, \"weather\": \"clear\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] conditions meteors failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.start('meteorShower', {\"distance\": 0, \"runSeconds\": 8}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] start meteorShower failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.discovered('meteorShower'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] discovered meteorShower failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('meteorShower', {\"mode\": \"sky\", \"meteors\": 3}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame meteorShower failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 500
+},
+{
+"shot": "p22-meteor-shower"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.end('meteorShower'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] end meteorShower failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.conditions({\"sun\": 32, \"morning\": true, \"weather\": \"clear\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] conditions eclipse failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.start('totalSolarEclipse', {\"distance\": 0, \"runSeconds\": 2}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] start totalSolarEclipse failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.discovered('totalSolarEclipse'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] discovered totalSolarEclipse failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.eclipseAt('totalSolarEclipse', 1.1); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] eclipse partial failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 500
+},
+{
+"shot": "p23-eclipse-partial"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.eclipseAt('totalSolarEclipse', 0); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] eclipse totality failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 800
+},
+{
+"shot": "p23-eclipse-totality"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.end('totalSolarEclipse'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] end totalSolarEclipse failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.conditions({\"sun\": -30, \"weather\": \"clear\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] conditions comet failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.start('comet', {\"distance\": 0, \"runSeconds\": 2}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] start comet failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.fastForward('comet', 30); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] fastForward comet failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('comet', {\"mode\": \"sky\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame comet failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.discovered('comet'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] discovered comet failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 500
+},
+{
+"shot": "p24-comet"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.dawn('comet', 2); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] dawn comet failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.end('comet'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] end comet failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.conditions({\"sun\": -22, \"weather\": \"clear\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] conditions lanterns failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.start('skyLanternFestival', {\"distance\": 1200, \"runSeconds\": 6}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] start skyLanternFestival failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('skyLanternFestival', {\"distance\": 520, \"height\": 60, \"bearing\": 200, \"lift\": 140}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame skyLanternFestival failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.discovered('skyLanternFestival'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] discovered skyLanternFestival failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 600
+},
+{
+"shot": "p25-lantern-festival"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.end('skyLanternFestival'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] end skyLanternFestival failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.conditions({\"sun\": 30, \"weather\": \"clear\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] conditions islands failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.site('floatingIslands', {\"distance\": 1300, \"height\": 260, \"bearing\": 200, \"lift\": 0, \"surfaceTop\": -80}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] site floatingIslands failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 800
+},
+{
+"shot": "p26-floating-islands-site"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.start('floatingIslands', {\"distance\": 1800}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] start floatingIslands failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('floatingIslands', {\"distance\": 1400, \"height\": 260, \"bearing\": 200, \"lift\": 300}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame floatingIslands failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.end('floatingIslands'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] end floatingIslands failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.conditions({\"sun\": 35, \"weather\": \"clear\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] conditions skyWhale failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.start('skyWhale', {\"distance\": 1500, \"runSeconds\": 14, \"altitude\": 500}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] start skyWhale failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('skyWhale', {\"distance\": 750, \"height\": 120, \"bearing\": 130, \"lift\": 0}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame skyWhale failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.discovered('skyWhale'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] discovered skyWhale failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 500
+},
+{
+"shot": "p27-sky-whale"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.end('skyWhale'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] end skyWhale failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.conditions({\"sun\": -7, \"weather\": \"clear\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] conditions spires failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.site('crystalSpires', {\"distance\": 420, \"height\": 70, \"bearing\": 200, \"lift\": 45}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] site crystalSpires failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 800
+},
+{
+"shot": "p28-crystal-spires-site"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.start('crystalSpires', {\"distance\": 1200}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] start crystalSpires failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('crystalSpires', {\"distance\": 380, \"height\": 60, \"bearing\": 200, \"lift\": 45}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame crystalSpires failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.end('crystalSpires'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] end crystalSpires failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.conditions({\"sun\": 40, \"weather\": \"clear\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] conditions jetStream failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.start('jetStream', {\"distance\": 4000, \"runSeconds\": 4, \"altitude\": 1800}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] start jetStream failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('jetStream', {\"distance\": 2600, \"height\": 450, \"bearing\": 140, \"offset\": [0, 2200, 0]}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame jetStream failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.discovered('jetStream'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] discovered jetStream failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 600
+},
+{
+"shot": "p29-jet-stream"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.end('jetStream'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] end jetStream failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.conditions({\"sun\": 28, \"weather\": \"storm\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] conditions stormChase failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.start('stormChase', {\"distance\": 9000, \"runSeconds\": 8}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] start stormChase failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('stormChase', {\"distance\": 9000, \"height\": 300, \"bearing\": 180, \"lift\": 2500}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame stormChase failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.discovered('stormChase'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] discovered stormChase failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "JSON.stringify(window.__dwPresets.setPieceState('stormChase'))"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.skipStage('stormChase'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] skip build failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 4000
+},
+{
+"eval": "JSON.stringify(window.__dwPresets.setPieceState('stormChase'))"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.growChild('stormChase', 'supercell', 0.92); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] grow supercell failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('stormChase', {\"child\": \"supercell\", \"distance\": 9000, \"height\": 250, \"bearing\": 180, \"lift\": 900}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame wall cloud failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 800
+},
+{
+"shot": "p30-storm-chase-wall-cloud"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.skipStage('stormChase'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] skip wallCloud failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 10000
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.approachChild('stormChase', 'tornado', {\"distance\": 2400, \"seconds\": 4}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] approach tornado failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('stormChase', {\"child\": \"tornado\", \"distance\": 2200, \"height\": 250, \"bearing\": 180, \"lift\": 500}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame tornado failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 500
+},
+{
+"shot": "p30-storm-chase-touchdown"
+},
+{
+"eval": "JSON.stringify(window.__dwPresets.setPieceState('stormChase'))"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.skipStage('stormChase'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] skip touchdown failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 3000
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.skipStage('stormChase'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] skip ropeOut failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.skipStage('stormChase'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] skip clearing failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"wait": 1500
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.journalStats('stormChase', ['closestTornado', 'stormsChased']); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] journalStats stormChase failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.end('stormChase'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] end stormChase failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
+"eval": "(async () => { try { const result = await window.__dwPresets.finish(); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] finish failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+}
+]
