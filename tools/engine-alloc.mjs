@@ -6,12 +6,17 @@
 //
 // Usage:
 //   node tools/engine-alloc.mjs --url http://127.0.0.1:<port>/v2/ --steps tools/steps/engine-emitter.json
-//     --presets emVolcano,emGeyser [--backend webgpu|webgl] [--frames 3000] [--distance 800]
+//     --presets emVolcano,emGeyser [--backend webgpu|webgl] [--frames 1000] [--distance 800]
 //
 // Bytes allocated in src/spawns/engines/ count as the engines' own; bytes allocated by what they call
 // elsewhere (three.js uploads and compute dispatches, the WindField, the terrain height function, the
-// audio engine) are reported separately with the top sites. Exits non-zero when the engines' own
-// allocations reach 0.1 byte per frame or the console has an error or a warning.
+// audio engine) are reported separately with the top sites. Own bytes under an engine's lifecycle
+// entry points (create, setLOD, dispose: a spawn that ends or changes tier during the run) are
+// reported apart too, since the contract's zero-allocation rule is for the frame update. Objects the
+// garbage collector already took are sampled as well, so short-lived garbage counts. A tight warm-up
+// loop runs first, so the optimising compiler's one-time feedback allocations stay out of the
+// sample. Exits non-zero when the engines' own frame-update allocations reach 0.1 byte per frame or
+// the console has an error or a warning.
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,9 +25,16 @@ import { findBrowser } from './browser.mjs';
 
 const SEED = 'ENGINEALLOC';
 const OWN_LIMIT_BYTES_PER_FRAME = 0.1;
+const WARMUP_FRAMES = 600;
+// Coarse on purpose: with collected objects sampled, three.js's own frame garbage makes a fine
+// interval take many minutes to stop. A real per-frame allocation of 16 bytes still lands about 30
+// samples over 1000 frames, while one sample alone already fails the 0.1 B/frame limit.
+const SAMPLING_INTERVAL_BYTES = 512;
+/** Engine entry points that run on a spawn's lifecycle rather than every frame. */
+const LIFECYCLE_ENTRIES = new Set(['init', 'create', 'setLOD', 'dispose']);
 
 function parseArgs(argv) {
-  const options = { url: null, steps: null, presets: [], backend: 'webgpu', frames: 3000, distance: 800 };
+  const options = { url: null, steps: null, presets: [], backend: 'webgpu', frames: 1000, distance: 800 };
   for (let index = 2; index < argv.length; index++) {
     const flag = argv[index];
     const next = () => argv[++index];
@@ -57,6 +69,8 @@ async function main() {
     userDataDir: join(tmpdir(), `driftwing-engine-alloc-${process.pid}`),
     args: ['--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--enable-gpu', '--mute-audio', '--no-first-run', '--no-default-browser-check', '--window-size=1280,720'],
     defaultViewport: { width: 1280, height: 720 },
+    // Stopping a sampling profile that keeps collected objects takes minutes on a busy machine.
+    protocolTimeout: 900000,
   });
   const logs = { errors: [], warnings: [] };
   let failed = false;
@@ -81,12 +95,20 @@ async function main() {
       return presets.map((id) => ctx.systems.spawns.forceSpawn(id, { distance }));
     }, options.presets, options.distance);
     process.stdout.write(`spawned: ${spawned.join(', ')}\n`);
-    // Warm-up: the first frames build pipelines, fill wind grids and settle the lights.
+    // Warm-up: the first frames build pipelines, fill wind grids and settle the lights; then a tight
+    // loop like the sampled one lets the optimising compiler settle.
     await sleep(3000);
+    await page.evaluate((frames) => {
+      const { ctx, state } = window.DRIFTWING;
+      for (let frame = 0; frame < frames; frame++) {
+        state.frame++;
+        ctx.systems.spawns.manager.update(1 / 60, 1 / 60);
+      }
+    }, WARMUP_FRAMES);
 
     await cdp.send('HeapProfiler.enable');
     await cdp.send('HeapProfiler.collectGarbage');
-    await cdp.send('HeapProfiler.startSampling', { samplingInterval: 32 });
+    await cdp.send('HeapProfiler.startSampling', { samplingInterval: SAMPLING_INTERVAL_BYTES, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
     const engines = await page.evaluate((frames) => {
       const { ctx, state } = window.DRIFTWING;
       const manager = ctx.systems.spawns.manager;
@@ -102,17 +124,24 @@ async function main() {
     const { profile } = await cdp.send('HeapProfiler.stopSampling');
 
     let ownBytes = 0;
+    let lifecycleBytes = 0;
     let calleeBytes = 0;
     const ownSites = new Map();
+    const lifecycleSites = new Map();
     const calleeSites = new Map();
     const siteName = (node) => `${node.callFrame.functionName || '(anonymous)'} ${node.callFrame.url.split('?')[0].split('/').pop() || '(native)'}:${node.callFrame.lineNumber + 1}`;
-    // caller: the innermost engine frame above a node (the engine code that led to a callee's bytes).
-    const walk = (node, caller) => {
+    // caller: the innermost engine frame above a node (the engine code that led to a callee's bytes);
+    // entry: the outermost one (the engine API the SpawnManager called).
+    const walk = (node, caller, entry) => {
       const file = node.callFrame.url.split('?')[0];
       const own = file.includes('/src/spawns/engines/');
       const nearest = own ? siteName(node) : caller;
+      const outermost = entry ?? (own ? node.callFrame.functionName : null);
       if (node.selfSize > 0 && nearest) {
-        if (own) {
+        if (own && LIFECYCLE_ENTRIES.has(outermost)) {
+          lifecycleBytes += node.selfSize;
+          lifecycleSites.set(nearest, (lifecycleSites.get(nearest) ?? 0) + node.selfSize);
+        } else if (own) {
           ownBytes += node.selfSize;
           ownSites.set(nearest, (ownSites.get(nearest) ?? 0) + node.selfSize);
         } else {
@@ -121,16 +150,20 @@ async function main() {
           calleeSites.set(key, (calleeSites.get(key) ?? 0) + node.selfSize);
         }
       }
-      for (const child of node.children) walk(child, nearest);
+      for (const child of node.children) walk(child, nearest, outermost);
     };
-    walk(profile.head, null);
+    walk(profile.head, null, null);
     const ownPerFrame = ownBytes / options.frames;
     const ranked = (sites) => [...sites.entries()].sort((first, second) => second[1] - first[1]).slice(0, 6);
     process.stdout.write(`engines: ${engines.join(', ')}
 `);
-    process.stdout.write(`own: ${ownBytes} B over ${options.frames} frames = ${ownPerFrame.toFixed(3)} B/frame
+    process.stdout.write(`own (frame update): ${ownBytes} B over ${options.frames} frames = ${ownPerFrame.toFixed(3)} B/frame
 `);
     for (const [key, bytes] of ranked(ownSites)) process.stdout.write(`  ${key} ${bytes} B
+`);
+    process.stdout.write(`lifecycle (create, setLOD, dispose): ${lifecycleBytes} B
+`);
+    for (const [key, bytes] of ranked(lifecycleSites)) process.stdout.write(`  ${key} ${bytes} B
 `);
     process.stdout.write(`callees: ${calleeBytes} B = ${(calleeBytes / options.frames).toFixed(3)} B/frame
 `);
