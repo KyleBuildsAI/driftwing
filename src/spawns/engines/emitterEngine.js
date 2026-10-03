@@ -30,7 +30,7 @@
 // create(). What the engine calls may allocate a little: the terrain height under a grid node and
 // the WindField probes (worldgen's noise), which is why they are rationed.
 import { FIELD_NODES, FIELD_X, FIELD_Y, FRAME_ROWS, GROUND_MODES, PAGE_SIZE, PARAM_ROWS, PARTICLE_STYLES, createParticleSystem } from './particleSystem.js';
-import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
+import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, createWindSample, fillRandoms, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
 
 /** Emitter instances at once (rows of the particle tables); the director's budget is 16. */
 const MAX_EMITTERS = 16;
@@ -819,39 +819,80 @@ export function createEmitterEngine() {
   // (frameDt[0], data.levels[0], data.share[0]), never as call arguments, which V8 would box.
 
   /**
-   * Moves a travelling anchor, measures the emitter's own velocity (inheritance, doppler; a jump is
-   * a relocation, not motion), follows the emission point and keeps the field and ground grids on it.
+   * Follows the anchor (moved by travel, or by whoever relocates the spawn), measures the emitter's
+   * own velocity (inheritance, doppler; a jump is a relocation, not motion), follows the emission
+   * point and keeps the field and ground grids on it.
+   *
+   * The exact position lives in data.position. A travelling emitter writes the shared anchor (the
+   * LOD's, the lure's and discovery's, a Vector3) in whole metres and only when that changed: small
+   * integers stay unboxed in its fields, where a fresh fractional number every frame would be a new
+   * heap number each time. An anchor that differs from what the emitter last wrote was moved by
+   * someone else, and the exact position starts again from it.
    */
   function followAnchor(instance, engineCtx) {
     const dt = frameDt[0];
     const data = instance.data;
     const config = data.config;
     const anchor = instance.anchor;
+    const position = data.position;
+    const written = data.anchorWritten;
+    const relocatedByOthers = anchor.x !== written[0] || anchor.y !== written[1] || anchor.z !== written[2];
+    if (relocatedByOthers) {
+      position[0] = anchor.x;
+      position[1] = anchor.y;
+      position[2] = anchor.z;
+      written[0] = anchor.x;
+      written[1] = anchor.y;
+      written[2] = anchor.z;
+    }
     if (data.travel && dt > 0) {
-      anchor.x += data.travel.x * dt;
-      anchor.y += data.travel.y * dt;
-      anchor.z += data.travel.z * dt;
+      position[0] += data.travel.x * dt;
+      position[1] += data.travel.y * dt;
+      position[2] += data.travel.z * dt;
+      written[0] = Math.round(position[0]);
+      written[1] = Math.round(position[1]);
+      written[2] = Math.round(position[2]);
+      if (anchor.x !== written[0]) anchor.x = written[0];
+      if (anchor.y !== written[1]) anchor.y = written[1];
+      if (anchor.z !== written[2]) anchor.z = written[2];
     }
     if (dt > 0) {
-      const moveX = anchor.x - data.previousAnchor[0];
-      const moveY = anchor.y - data.previousAnchor[1];
-      const moveZ = anchor.z - data.previousAnchor[2];
+      const moveX = position[0] - data.previousAnchor[0];
+      const moveY = position[1] - data.previousAnchor[1];
+      const moveZ = position[2] - data.previousAnchor[2];
       const moved = Math.sqrt(moveX * moveX + moveY * moveY + moveZ * moveZ);
       const relocated = moved > TELEPORT_SPEED * dt;
-      data.velocity[0] = relocated ? 0 : moveX / dt;
-      data.velocity[1] = relocated ? 0 : moveY / dt;
-      data.velocity[2] = relocated ? 0 : moveZ / dt;
+      if (relocated) {
+        data.velocity[0] = 0;
+        data.velocity[1] = 0;
+        data.velocity[2] = 0;
+      } else if (data.travel && !relocatedByOthers) {
+        // Travel alone: the exact velocity (differences of positions would wobble in the last bits).
+        data.velocity[0] = data.travel.x;
+        data.velocity[1] = data.travel.y;
+        data.velocity[2] = data.travel.z;
+      } else {
+        data.velocity[0] = moveX / dt;
+        data.velocity[1] = moveY / dt;
+        data.velocity[2] = moveZ / dt;
+      }
     }
-    data.previousAnchor[0] = anchor.x;
-    data.previousAnchor[1] = anchor.y;
-    data.previousAnchor[2] = anchor.z;
-    const source = config.attachCamera ? engineCtx.camera.position : anchor;
+    data.previousAnchor[0] = position[0];
+    data.previousAnchor[1] = position[1];
+    data.previousAnchor[2] = position[2];
     data.previousPoint[0] = data.point[0];
     data.previousPoint[1] = data.point[1];
     data.previousPoint[2] = data.point[2];
-    data.point[0] = source.x;
-    data.point[1] = source.y;
-    data.point[2] = source.z;
+    if (config.attachCamera) {
+      const camera = engineCtx.camera.position;
+      data.point[0] = camera.x;
+      data.point[1] = camera.y;
+      data.point[2] = camera.z;
+    } else {
+      data.point[0] = position[0];
+      data.point[1] = position[1];
+      data.point[2] = position[2];
+    }
     const jumpX = data.point[0] - data.previousPoint[0];
     const jumpZ = data.point[2] - data.previousPoint[2];
     if (jumpX * jumpX + jumpZ * jumpZ > (TELEPORT_SPEED * Math.max(dt, 1 / 60)) ** 2) {
@@ -945,16 +986,19 @@ export function createEmitterEngine() {
     if (data.pendingScheduleTrigger) fireScheduleTrigger(instance);
   }
 
-  /** The emitter's frame row: its frame origin relative to the camera and the underglow intensity. */
+  /**
+   * The emitter's frame row: its frame origin relative to the pools' origin (the camera to the metre,
+   * particleSystem.js) and the underglow intensity.
+   */
   function writeFrameRow(instance, engineCtx) {
     const data = instance.data;
     const config = data.config;
-    const camera = engineCtx.camera.position;
+    const origin = system.origin;
     const frameTable = system.frameData;
     const frameOffset = data.row * FRAME_ROWS * 4;
-    frameTable[frameOffset] = data.frameOrigin[0] - camera.x;
-    frameTable[frameOffset + 1] = data.frameOrigin[1] - camera.y;
-    frameTable[frameOffset + 2] = data.frameOrigin[2] - camera.z;
+    frameTable[frameOffset] = data.frameOrigin[0] - origin[0];
+    frameTable[frameOffset + 1] = data.frameOrigin[1] - origin[1];
+    frameTable[frameOffset + 2] = data.frameOrigin[2] - origin[2];
     if (config.underglow) {
       const glow = config.underglow;
       const time = engineCtx.time.elapsed;
@@ -975,9 +1019,11 @@ export function createEmitterEngine() {
     const config = data.config;
     if (data.light) updateLight(instance, engineCtx, dt);
     if (data.voice) {
-      data.voiceVelocity.x = data.velocity[0];
-      data.voiceVelocity.y = data.velocity[1];
-      data.voiceVelocity.z = data.velocity[2];
+      // Written only when it changed (a Vector3: see followAnchor). A steady emitter's is constant.
+      const voiceVelocity = data.voiceVelocity;
+      if (voiceVelocity.x !== data.velocity[0]) voiceVelocity.x = data.velocity[0];
+      if (voiceVelocity.y !== data.velocity[1]) voiceVelocity.y = data.velocity[1];
+      if (voiceVelocity.z !== data.velocity[2]) voiceVelocity.z = data.velocity[2];
       data.voice.setPosition(instance.anchor, data.voiceVelocity);
       data.voiceLevel[1] = data.levels[0];
       sendVoiceLevel(data.voice, data.voiceLevel);
@@ -990,7 +1036,7 @@ export function createEmitterEngine() {
   function updateLight(instance, engineCtx, dt) {
     const data = instance.data;
     const lightConfig = data.config.light;
-    const anchor = instance.anchor;
+    const position = data.position;
     const visible = 1 - lightConfig.night + lightConfig.night * engineCtx.time.nightFactor;
     const lightLevel = (1 - lightConfig.follow + lightConfig.follow * data.levels[0]) * visible;
     const wanted = data.tier !== 'far' && lightLevel > 0.02;
@@ -1000,9 +1046,9 @@ export function createEmitterEngine() {
       const offset = lightConfig.offset;
       const lightState = data.light.state;
       const time = engineCtx.time.elapsed;
-      lightState[0] = anchor.x + offset[0] * frame.rightX + offset[2] * frame.forwardX;
-      lightState[1] = anchor.y + offset[1];
-      lightState[2] = anchor.z + offset[0] * frame.rightZ + offset[2] * frame.forwardZ;
+      lightState[0] = position[0] + offset[0] * frame.rightX + offset[2] * frame.forwardX;
+      lightState[1] = position[1] + offset[1];
+      lightState[2] = position[2] + offset[0] * frame.rightZ + offset[2] * frame.forwardZ;
       const flicker = 1 - lightConfig.flicker * (0.5 + 0.5 * Math.sin(time * 11.3 + data.lightPhase) * Math.sin(time * 4.3 + data.lightPhase * 0.7));
       lightState[3] = lightConfig.intensity * lightLevel * flicker;
       data.light.apply();
@@ -1194,6 +1240,9 @@ export function createEmitterEngine() {
         point: new Float64Array([origin.x, origin.y, origin.z]),
         previousPoint: new Float64Array([origin.x, origin.y, origin.z]),
         previousAnchor: new Float64Array([anchor.x, anchor.y, anchor.z]),
+        /** The exact anchor position (followAnchor), and the anchor as the emitter last saw or wrote it. */
+        position: new Float64Array([anchor.x, anchor.y, anchor.z]),
+        anchorWritten: new Float64Array([anchor.x, anchor.y, anchor.z]),
         velocity: new Float64Array(3),
         axis: new Float64Array([0, 1, 0]),
         emitScratch: new Float64Array(6),
@@ -1215,10 +1264,10 @@ export function createEmitterEngine() {
         windId: `${id}:wind`,
         windActive: false,
         windCentre: new Float64Array([anchor.x, anchor.y, anchor.z]),
-        // Vector3s rather than {x, y, z} literals: the literal shape is shared across the whole game,
-        // and once anything stores a non-number in it, every number written to it is boxed.
+        // The bounds change only when the source moves; the sample result changes on every query
+        // (createWindSample explains why it is not a Vector3).
         windBounds: { min: new THREE.Vector3(), max: new THREE.Vector3() },
-        windResult: { vel: new THREE.Vector3(), turbulence: 0 },
+        windResult: createWindSample(),
         windReach: config.windSource ? config.windSource.radius * 2 + config.windSource.height : 0,
         lodMid: preset.lod.mid,
         warmStart: config.warmStart,

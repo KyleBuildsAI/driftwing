@@ -13,6 +13,7 @@
 //   fillRandoms(state, out, n)   n seeded random numbers into a typed array at once (a double
 //                                returned per call would be boxed)
 //   sendVoiceLevel(voice, levels) a spawn voice's intensity, sent only when it moved
+//   createWindSample()           a wind source's sample result whose numbers stay unboxed
 //
 // Nothing here allocates after construction: the frame update paths of the engines call only the
 // per-frame members (the grid's step and sample, the light's update, the range list's add).
@@ -298,6 +299,35 @@ export function fillRandoms(state, out, count) {
     out[index] = ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
   }
   state[0] = value;
+}
+
+/** The velocity of a wind source's sample (m/s): a class of its own, holding only numbers. */
+class WindSampleVelocity {
+  constructor() {
+    this.x = 0;
+    this.y = 0;
+    this.z = 0;
+  }
+}
+
+/** A wind source's sample result: the velocity and the turbulence (0..1). */
+class WindSample {
+  constructor() {
+    this.vel = new WindSampleVelocity();
+    this.turbulence = 0;
+  }
+}
+
+/**
+ * A result for a wind source's sample(position) to fill and return ({ vel: { x, y, z }, turbulence },
+ * the WindField source API). A wind source answers every WindField query inside its bounds (the
+ * craft's, every physics step), so its numbers change all the time. These classes hold only numbers,
+ * so V8 keeps their fields as doubles written in place; a THREE.Vector3 or an { x, y, z } literal
+ * shares its field layout with the whole game, where a non-number lands in it somewhere, and from
+ * then on every fractional number written to it is a new heap number.
+ */
+export function createWindSample() {
+  return new WindSample();
 }
 
 /** A voice intensity change at or below this is not sent: the audio engine eases between levels. */

@@ -4,10 +4,10 @@
 //
 // Groups (one per light-effect instance) own a row of a small uniform table (a Float32Array of vec4
 // elements in a uniform buffer, uploaded as it is: no per-element copy every frame): the group's origin
-// relative to the camera (written each frame in float64 on the CPU) and its fade (activation, tier,
-// day and night visibility); then its near-fade distance, how far its blink phases spread (1 - sync)
-// and its fog strength. Points own slots in PAGE_SIZE pages; each has four static
-// records written once, when its instance is created:
+// relative to the mesh's origin, the camera to the metre (written each frame in float64 on the CPU)
+// and its fade (activation, tier, day and night visibility); then its near-fade distance, how far
+// its blink phases spread (1 - sync) and its fog strength. Points own slots in PAGE_SIZE pages;
+// each has four static records written once, when its instance is created:
 //   pointA  home position (m, relative to the group origin), size (m)
 //   pointB  linear colour times intensity (HDR), group row + SHAPE_STRIDE x shape
 //   pointC  wander radius (m), wander rate (rad/s), phase (rad), vertical wander (share)
@@ -43,6 +43,12 @@ export function createGlowPoints({ THREE, TSL, scene, sky = null, maxGroups, pag
   /** Element row * GROUP_ROWS + index holds [4e, 4e + 3]: see the header for the two rows. */
   const groupData = new Float32Array(maxGroups * GROUP_ROWS * 4);
   const groupTable = buffer(groupData, 'vec4', maxGroups * GROUP_ROWS);
+  /**
+   * The mesh's origin: the camera position rounded to whole metres (the group table is relative to
+   * it). Whole metres are small integers, which the mesh position (a Vector3, whose fields hold
+   * boxed numbers in the running game) takes without a new heap number each frame.
+   */
+  const origin = new Float64Array(3);
   // The frame scalars share one vec4 uniform: a Vector4 takes new numbers in place, a float uniform
   // boxes each one.
   const frameValues = uniform(new THREE.Vector4(0, 400, 2400, 0));
@@ -147,6 +153,8 @@ export function createGlowPoints({ THREE, TSL, scene, sky = null, maxGroups, pag
     groups,
     pageSlots,
     groupData,
+    /** The mesh's origin (the camera to the metre, set by update): the group table is relative to it. */
+    origin,
     capacity,
     /** Writes one point's records into slot (shape: an index of GLOW_SHAPES). */
     write(slot, x, y, z, size, red, green, blue, row, shape, wanderRadius, wanderRate, phase, vertical, blinkPeriod, blinkDuty, pulseDepth, flicker) {
@@ -185,8 +193,8 @@ export function createGlowPoints({ THREE, TSL, scene, sky = null, maxGroups, pag
       if (slot > dirtyHigh) dirtyHigh = slot;
     },
     /**
-     * Once per frame: moves the mesh to the camera, uploads the slots written since the last flush
-     * (one range), draws up to the highest page in use.
+     * Once per frame: moves the mesh to the origin (the camera to the metre), uploads the slots
+     * written since the last flush (one range), draws up to the highest page in use.
      * time is the sky's time state (its elapsed seconds drive the animation).
      */
     update(camera, time, fog) {
@@ -196,7 +204,13 @@ export function createGlowPoints({ THREE, TSL, scene, sky = null, maxGroups, pag
         values.y = fog.near;
         values.z = fog.far;
       }
-      mesh.position.copy(camera.position);
+      origin[0] = Math.round(camera.position.x);
+      origin[1] = Math.round(camera.position.y);
+      origin[2] = Math.round(camera.position.z);
+      const position = mesh.position;
+      if (position.x !== origin[0]) position.x = origin[0];
+      if (position.y !== origin[1]) position.y = origin[1];
+      if (position.z !== origin[2]) position.z = origin[2];
       if (dirtyHigh >= dirtyLow) {
         // Points are written in whole instances at create and dispose: one range covers them. A range
         // three has not uploaded yet (the mesh was hidden) is widened, never dropped.

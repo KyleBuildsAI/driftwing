@@ -7,9 +7,10 @@
 // frame with the compute kernels):
 //   params  PARAM_ROWS vec4 per row: motion, size and colour over life, lighting, style, the field
 //           grid's placement. Written when an emitter is created or re-tiered.
-//   frame   FRAME_ROWS vec4 per row: the row's frame origin relative to the camera (written every
-//           frame in float64 on the CPU, so float32 never sees world coordinates), the underglow
-//           intensity, the fade, the LOD size scale and the ground under the emission point.
+//   frame   FRAME_ROWS vec4 per row: the row's frame origin relative to the pools' origin, the
+//           camera to the metre (written every frame in float64 on the CPU, so float32 never sees
+//           world coordinates), the underglow intensity, the fade, the LOD size scale and the
+//           ground under the emission point.
 //   field   FIELD_NODES vec4 per row: a coarse 4 x 3 x 4 grid of the WindField's air velocity (xyz)
 //           and the ground height under the node (w), sampled on the CPU a few nodes per frame (the
 //           engine's field budget) and eased over a few seconds. Particles read it by trilinear
@@ -119,15 +120,24 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
   const fogNear = frameValues.z;
   const fogFar = frameValues.w;
   const rows = createSlotAllocator(maxEmitters);
-  // The cloud look, refreshed every frame from the sky (updateLook).
+  // The cloud look, refreshed every frame from the sky (updateLook). The colours are Vector4s (rgb
+  // in xyz): the sky changes a little every frame, and in the running game Color's fields hold boxed
+  // numbers (a new heap number for every channel written), while a Vector4 takes them in place.
   const look = {
-    lit: uniform(new THREE.Color(1, 1, 1)),
-    shade: uniform(new THREE.Color(0.3, 0.33, 0.4)),
-    moon: uniform(new THREE.Color(0, 0, 0)),
-    rim: uniform(new THREE.Color(0, 0, 0)),
-    /** x: the silver lining's strength (a vec4 for the same reason as frameValues). */
+    lit: uniform(new THREE.Vector4(1, 1, 1, 0)),
+    shade: uniform(new THREE.Vector4(0.3, 0.33, 0.4, 0)),
+    moon: uniform(new THREE.Vector4(0, 0, 0, 0)),
+    rim: uniform(new THREE.Vector4(0, 0, 0, 0)),
+    /** x: the silver lining's strength. */
     silver: uniform(new THREE.Vector4(1, 0, 0, 0)),
   };
+  /**
+   * The pools' origin: the camera position rounded to whole metres. The meshes sit there and the
+   * frame table holds every row's origin relative to it, so float32 never sees world coordinates;
+   * whole metres are small integers, which a mesh position (a Vector3, whose fields hold boxed
+   * numbers in the running game) takes without a new heap number each frame.
+   */
+  const origin = new Float64Array(3);
 
   /** The cloud look for the sky's current state (the formulas of clouds.js updateLook). */
   function updateLook(time) {
@@ -144,9 +154,9 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
     const litR = sunColor.r / peak;
     const litG = sunColor.g / peak;
     const litB = sunColor.b / peak;
-    lit.r = (litR + (1 - litR) * whiten) * litGain;
-    lit.g = (litG + (1 - litG) * whiten) * litGain;
-    lit.b = (litB + (1 - litB) * whiten) * litGain;
+    lit.x = (litR + (1 - litR) * whiten) * litGain;
+    lit.y = (litG + (1 - litG) * whiten) * litGain;
+    lit.z = (litB + (1 - litB) * whiten) * litGain;
     const shade = look.shade.value;
     let key = 0;
     while (key < SHADE_KEYS.length - 1 && elevation > SHADE_KEYS[key + 1][0]) key++;
@@ -154,30 +164,30 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
     const upper = SHADE_KEYS[Math.min(key + 1, SHADE_KEYS.length - 1)];
     const blend = upper === lower ? 0 : Math.min(1, Math.max(0, (elevation - lower[0]) / (upper[0] - lower[0])));
     const zenith = uniforms.skyZenithColor.value;
-    shade.r = lower[1] + (upper[1] - lower[1]) * blend;
-    shade.g = lower[2] + (upper[2] - lower[2]) * blend;
-    shade.b = lower[3] + (upper[3] - lower[3]) * blend;
-    shade.r += (zenith.r * 0.9 - shade.r) * 0.12;
-    shade.g += (zenith.g * 0.9 - shade.g) * 0.12;
-    shade.b += (zenith.b * 0.9 - shade.b) * 0.12;
+    shade.x = lower[1] + (upper[1] - lower[1]) * blend;
+    shade.y = lower[2] + (upper[2] - lower[2]) * blend;
+    shade.z = lower[3] + (upper[3] - lower[3]) * blend;
+    shade.x += (zenith.r * 0.9 - shade.x) * 0.12;
+    shade.y += (zenith.g * 0.9 - shade.y) * 0.12;
+    shade.z += (zenith.b * 0.9 - shade.z) * 0.12;
     const afterglow = smoothRange(-7, -2, elevation) * (1 - smoothRange(2, 6, elevation));
     if (afterglow > 0) {
       const horizon = uniforms.skyHorizonColor.value;
       const mixAmount = 0.5 * afterglow;
-      shade.r += (horizon.r * 0.42 - shade.r) * mixAmount;
-      shade.g += (horizon.g * 0.42 - shade.g) * mixAmount;
-      shade.b += (horizon.b * 0.42 - shade.b) * mixAmount;
+      shade.x += (horizon.r * 0.42 - shade.x) * mixAmount;
+      shade.y += (horizon.g * 0.42 - shade.y) * mixAmount;
+      shade.z += (horizon.b * 0.42 - shade.z) * mixAmount;
     }
     const moonLevel = time.nightFactor * smoothRange(0, 0.12, time.moonDirection.y);
     const moon = look.moon.value;
-    moon.r = MOONLIGHT[0] * moonLevel;
-    moon.g = MOONLIGHT[1] * moonLevel;
-    moon.b = MOONLIGHT[2] * moonLevel;
+    moon.x = MOONLIGHT[0] * moonLevel;
+    moon.y = MOONLIGHT[1] * moonLevel;
+    moon.z = MOONLIGHT[2] * moonLevel;
     const rimLevel = 0.3 + 0.85 * time.goldenFactor;
     const rim = look.rim.value;
-    rim.r = sunColor.r * rimLevel;
-    rim.g = sunColor.g * rimLevel;
-    rim.b = sunColor.b * rimLevel;
+    rim.x = sunColor.r * rimLevel;
+    rim.y = sunColor.g * rimLevel;
+    rim.z = sunColor.b * rimLevel;
     look.silver.value.x = 1.1 + 0.9 * time.goldenFactor;
   }
 
@@ -626,12 +636,12 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
       const sunKey = pow(saturate(normal.dot(vLight.xyz).mul(0.62).add(0.38)), 1.6);
       const skyTerm = saturate(normal.dot(vUp.xyz).mul(0.5).add(0.5));
       const occlusion = mix(0.72, 1, skyTerm);
-      const body = look.shade.mul(occlusion)
-        .add(look.lit.mul(sunKey).mul(mix(occlusion, 1, 0.35)))
-        .add(look.moon.mul(skyTerm.mul(0.5).add(0.5)))
+      const body = look.shade.xyz.mul(occlusion)
+        .add(look.lit.xyz.mul(sunKey).mul(mix(occlusion, 1, 0.35)))
+        .add(look.moon.xyz.mul(skyTerm.mul(0.5).add(0.5)))
         .add(vGlow.mul(float(1).sub(skyTerm).mul(0.7).add(0.3)));
       const toward = vToward;
-      const back = look.rim.mul(pow(toward, 4).mul(0.16).add(edge.mul(pow(toward, 3).mul(0.45).add(pow(toward, 16).mul(0.9))).mul(look.silver.x)));
+      const back = look.rim.xyz.mul(pow(toward, 4).mul(0.16).add(edge.mul(pow(toward, 3).mul(0.45).add(pow(toward, 16).mul(0.9))).mul(look.silver.x)));
       const unlit = vAlbedo.add(vAlbedo.mul(vGlow));
       return mix(unlit, vAlbedo.mul(body.add(back)), vLight.w).mul(shape.y).add(vEmit.mul(shape.y));
     })();
@@ -655,6 +665,8 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
   return {
     pools,
     rows,
+    /** The pools' origin (the camera to the metre, set by update): the frame table is relative to it. */
+    origin,
     /** The tables (Float32Array, 4 numbers per element): element row * PARAM_ROWS + index and so on. */
     paramData,
     frameData,
@@ -664,10 +676,11 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
     /** The meshes (for the pipeline prewarm). */
     meshes: [pools.alpha.mesh, pools.additive.mesh],
     /**
-     * Once per frame after the emitters wrote: moves the meshes to the camera, flushes the uploads,
-     * draws up to the pages in use, advances the clock and, on WebGPU, runs the integration kernels.
-     * step[0] is the frame's simulation step (s), in a typed array so the number is not boxed; time is
-     * the sky's time state (elapsed, sun, moon, night and golden factors).
+     * Once per frame after the emitters wrote: moves the origin and the meshes to the camera (to the
+     * metre), flushes the uploads, draws up to the pages in use, advances the clock and, on WebGPU,
+     * runs the integration kernels. step[0] is the frame's simulation step (s), in a typed array so
+     * the number is not boxed; time is the sky's time state (elapsed, sun, moon, night and golden
+     * factors).
      */
     update(renderer, camera, step, fog, time) {
       const dt = step[0];
@@ -679,10 +692,16 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
         values.w = fog.far;
       }
       updateLook(time);
+      origin[0] = Math.round(camera.position.x);
+      origin[1] = Math.round(camera.position.y);
+      origin[2] = Math.round(camera.position.z);
       for (let index = 0; index < poolList.length; index++) {
         const pool = poolList[index];
-        // The meshes sit at the camera: the frame table holds every row's origin relative to it.
-        pool.mesh.position.copy(camera.position);
+        // The meshes sit at the origin (the camera to the metre); the frame table is relative to it.
+        const position = pool.mesh.position;
+        if (position.x !== origin[0]) position.x = origin[0];
+        if (position.y !== origin[1]) position.y = origin[1];
+        if (position.z !== origin[2]) position.z = origin[2];
         pool.flush();
         pool.refreshCount();
         if (pool.computeNode && dt > 0 && pool.mesh.count > 0) renderer.compute(pool.computeNode);

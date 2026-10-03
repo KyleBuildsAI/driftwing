@@ -726,10 +726,12 @@ export function createLightEffectEngine() {
       const camera = engineCtx.camera.position;
       const groupTable = points.groupData;
       const groupOffset = data.group * 2 * 4;
-      // The points were written relative to the anchor at create; they follow it if it moves.
-      groupTable[groupOffset] = anchor.x - camera.x;
-      groupTable[groupOffset + 1] = anchor.y - camera.y;
-      groupTable[groupOffset + 2] = anchor.z - camera.z;
+      // The points were written relative to the anchor at create; they follow it if it moves. The
+      // group table is relative to the pool's origin (the camera to the metre, glowPoints.js).
+      const origin = points.origin;
+      groupTable[groupOffset] = anchor.x - origin[0];
+      groupTable[groupOffset + 1] = anchor.y - origin[1];
+      groupTable[groupOffset + 2] = anchor.z - origin[2];
       groupTable[groupOffset + 3] = data.fade[0] * visibility;
 
       // Lightning: strikes at the near and mid tiers, while active.
