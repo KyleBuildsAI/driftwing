@@ -208,6 +208,11 @@ export function createGroundGrid(terrain, { size = 8, span = 2000 } = {}) {
 
 /** Seconds between attempts to get a light back after the pool refused or revoked it. */
 const LIGHT_RETRY_SECONDS = 1;
+/**
+ * The brightest a pooled light may be, in candela: the largest whole number V8 stores as a small
+ * integer (2^30 - 1). Far more than any spawn needs (a lightning strike is 2e7 cd).
+ */
+export const MAX_POOLED_LIGHT_INTENSITY = 1073741823;
 
 /**
  * One real light from the pool (ctx.lights), held only while wanted. update(wanted, dt) acquires or
@@ -246,14 +251,21 @@ export function createPooledLight(lights, { priority = 1, color = 0xffffff, rang
       }
       return light !== null;
     },
-    /** Moves the held light to state[0..2] and sets its intensity to state[3] (candela, at least 0). */
+    /**
+     * Moves the held light to state[0..2] and sets its intensity to state[3] (candela, 0 to
+     * MAX_POOLED_LIGHT_INTENSITY, rounded to a whole candela).
+     */
     apply() {
       if (light === null) return;
-      light.position.x = state[0];
-      light.position.y = state[1];
-      light.position.z = state[2];
-      // Written only when it changed: a new number in the light's field is a boxed number in V8.
-      const intensity = state[3] > 0 ? state[3] : 0;
+      // Each field is written only when it changed, and the intensity as a whole number: V8 can
+      // keep a small integer in an object field unboxed, while a fresh fractional number stored
+      // from code that is not fully optimised (a light updated once a frame often is not) costs a
+      // heap number. A steady light then writes nothing, and a flickering one writes integers.
+      const position = light.position;
+      if (position.x !== state[0]) position.x = state[0];
+      if (position.y !== state[1]) position.y = state[1];
+      if (position.z !== state[2]) position.z = state[2];
+      const intensity = Math.round(Math.min(MAX_POOLED_LIGHT_INTENSITY, Math.max(0, state[3])));
       if (light.intensity !== intensity) light.intensity = intensity;
     },
     release() {

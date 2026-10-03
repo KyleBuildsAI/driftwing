@@ -26,7 +26,7 @@
 // create).
 import { GLOW_PAGE_SIZE, GLOW_SHAPES, createGlowPoints } from './glowPoints.js';
 import { BOLT_RANDOMS, BOLT_SEGMENTS, createBoltScratch, createRibbonSlot, generateBeams, generateBolt } from './ribbons.js';
-import { createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, smoothstep } from './engineKit.js';
+import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, smoothstep } from './engineKit.js';
 
 /** Light-effect instances at once (glow groups); the director's budget is 8. */
 const MAX_INSTANCES = 8;
@@ -133,7 +133,7 @@ export function resolveLightEffectConfig(preset, params) {
         color: read.color(glowParams?.color, 'lightning.cloudGlow.color', color),
       },
       light: strikeLight ? {
-        intensity: read.number(strikeLight.intensity, 'lightning.light.intensity', 2e7, 0, 1e12),
+        intensity: read.number(strikeLight.intensity, 'lightning.light.intensity', 2e7, 0, MAX_POOLED_LIGHT_INTENSITY),
         range: read.number(strikeLight.range, 'lightning.light.range', 8000, 1, 100000),
         priority: read.number(strikeLight.priority, 'lightning.light.priority', 3, 0, 100),
       } : null,
@@ -207,7 +207,7 @@ export function resolveLightEffectConfig(preset, params) {
     points: glowPoints,
     light: lightParams ? {
       color: read.color(lightParams.color, 'light.color', 0xffa050),
-      intensity: read.number(lightParams.intensity, 'light.intensity', 2e5, 0, 1e12),
+      intensity: read.number(lightParams.intensity, 'light.intensity', 2e5, 0, MAX_POOLED_LIGHT_INTENSITY),
       range: read.number(lightParams.range, 'light.range', 600, 1, 100000),
       offset: read.vector(lightParams.offset, 'light.offset', [0, 10, 0]).map((value) => value * scale),
       flicker: read.number(lightParams.flicker, 'light.flicker', 0, 0, 1),

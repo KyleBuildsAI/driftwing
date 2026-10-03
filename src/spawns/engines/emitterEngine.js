@@ -30,7 +30,7 @@
 // create(). What the engine calls may allocate a little: the terrain height under a grid node and
 // the WindField probes (worldgen's noise), which is why they are rationed.
 import { FIELD_NODES, FIELD_X, FIELD_Y, FRAME_ROWS, GROUND_MODES, PAGE_SIZE, PARAM_ROWS, PARTICLE_STYLES, createParticleSystem } from './particleSystem.js';
-import { createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, smoothstep } from './engineKit.js';
+import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, smoothstep } from './engineKit.js';
 
 /** Emitter instances at once (rows of the particle tables); the director's budget is 16. */
 const MAX_EMITTERS = 16;
@@ -279,7 +279,7 @@ export function resolveEmitterConfig(preset, params) {
     },
     light: lightParams ? {
       color: read.color(lightParams.color, 'light.color', 0xff8a3a),
-      intensity: read.number(lightParams.intensity, 'light.intensity', 2e6, 0, 1e12),
+      intensity: read.number(lightParams.intensity, 'light.intensity', 2e6, 0, MAX_POOLED_LIGHT_INTENSITY),
       range: read.number(lightParams.range, 'light.range', 3000, 1, 100000),
       offset: read.vector(lightParams.offset, 'light.offset', [0, 50, 0]).map((value) => value * scale),
       flicker: read.number(lightParams.flicker, 'light.flicker', 0.25, 0, 1),
