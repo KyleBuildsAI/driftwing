@@ -698,11 +698,7 @@ export function createSpawnManager(options) {
       const counts = countersFor(part.engine.name);
       counts.instances++;
       counts.particles += part.instance.particles;
-      try {
-        part.engine.setLOD(part.instance, tier);
-      } catch (error) {
-        console.error(`[DRIFTWING] spawn engine "${part.engine.name}" setLOD failed for ${id}`, error);
-      }
+      setPartLOD(part, tier, id);
     }
     if (preset.heavy && preset.lure) {
       record.lureSlot = lures.acquire(preset.lure, spawnSeed, record.anchor, heading * DEG);
@@ -720,6 +716,22 @@ export function createSpawnManager(options) {
       position: { x: record.anchor.x, y: record.anchor.y, z: record.anchor.z },
     });
     return id;
+  }
+
+  /**
+   * Tells a part its tier. An engine may change instance.particles in setLOD (an emitter's ring share
+   * follows the tier), so the engine's particle count is moved with it: otherwise every tier change
+   * would leave the difference in the count, and the drift would end up refusing spawns as 'particles'.
+   */
+  function setPartLOD(part, tier, id) {
+    const counts = countersFor(part.engine.name);
+    counts.particles -= part.instance.particles;
+    try {
+      part.engine.setLOD(part.instance, tier);
+    } catch (error) {
+      console.error(`[DRIFTWING] spawn engine "${part.engine.name}" setLOD failed for ${id}`, error);
+    }
+    counts.particles += part.instance.particles;
   }
 
   function removeRecordAt(index, reason) {
@@ -873,11 +885,7 @@ export function createSpawnManager(options) {
       for (let partIndex = 0; partIndex < record.parts.length; partIndex++) {
         const part = record.parts[partIndex];
         part.instance.tier = tier;
-        try {
-          part.engine.setLOD(part.instance, tier);
-        } catch (error) {
-          console.error(`[DRIFTWING] spawn engine "${part.engine.name}" setLOD failed for ${record.id}`, error);
-        }
+        setPartLOD(part, tier, record.id);
       }
     }
 
