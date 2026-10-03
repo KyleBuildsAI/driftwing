@@ -18,13 +18,15 @@
 // LOD: strikes happen only at the near and mid tiers (a heavy storm's lure flashes beyond); glows
 // fade by params.lod; the real lights are released at the far tier.
 //
-// No allocations in update(): the instance's numbers live in typed arrays; the strike records, the
-// sky modifier values and the thunder options are reused; bolt geometry is regenerated into
-// preallocated arrays. What it calls may allocate a little: none of the terrain is sampled per frame
-// (the ground under strikes and glows comes from a grid sampled at create).
+// No allocations in update(), strikes included: the instance's numbers live in typed arrays; a
+// strike's random numbers come in one typed-array batch (fillRandoms: a double returned per call
+// would be boxed); the strike records, the sky modifier values and the thunder options are reused;
+// bolt geometry is regenerated into preallocated arrays; the per-frame uniforms are Vector4s. None of
+// the terrain is sampled per frame (the ground under strikes and glows comes from a grid sampled at
+// create).
 import { GLOW_PAGE_SIZE, GLOW_SHAPES, createGlowPoints } from './glowPoints.js';
-import { BOLT_SEGMENTS, createBoltScratch, createRibbonSlot, generateBeams, generateBolt } from './ribbons.js';
-import { createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, randomIn, smoothstep } from './engineKit.js';
+import { BOLT_RANDOMS, BOLT_SEGMENTS, createBoltScratch, createRibbonSlot, generateBeams, generateBolt } from './ribbons.js';
+import { createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, smoothstep } from './engineKit.js';
 
 /** Light-effect instances at once (glow groups); the director's budget is 8. */
 const MAX_INSTANCES = 8;
@@ -44,7 +46,15 @@ const BEAM_SLOTS = 4;
 const STROKE_DECAY = 0.055;
 /** Minimum seconds between two strikes of one storm. */
 const MIN_STRIKE_GAP = 0.25;
+/**
+ * A strike's own random numbers, by slot: 0-7 the position attempts (angle, distance), 8 cloud or
+ * ground, 9 the duration, 10 the stroke count, 11-17 the stroke gaps, 18-19 the lean (or the in-cloud
+ * angle and reach), 20 the wait for the next strike. The bolt's follow from STRIKE_RANDOMS.
+ */
+const STRIKE_RANDOMS = 21;
 const DEG = Math.PI / 180;
+/** A voice's intensity change below this is not sent (it would be inaudible). */
+const VOICE_LEVEL_STEP = 0.002;
 const LAYOUTS = Object.freeze(['point', 'ring', 'scatter', 'line']);
 const TOP_LEVEL_PARAMS = Object.freeze(['lightning', 'glows', 'swarm', 'light', 'beam', 'visibility', 'fog', 'lod', 'sound', 'soundIntensity', 'endRamp']);
 const ACTIVATION_PARAMS = Object.freeze(['position', 'heading', 'site', 'startTime', 'scale', 'duration', 'seed']);
@@ -245,6 +255,10 @@ export function createLightEffectEngine() {
   let lastFrame = -1;
   let scratchColor = null;
   let boltScratch = null;
+  /** A strike's random batch: its own STRIKE_RANDOMS, then the bolt's BOLT_RANDOMS. */
+  const strikeRandoms = new Float64Array(STRIKE_RANDOMS + BOLT_RANDOMS);
+  /** A ground lookup: [x, z] in, the height out in [2]. */
+  const groundPoint = new Float64Array(3);
   const bolts = [];
   const beams = [];
   const live = [];
@@ -280,6 +294,15 @@ export function createLightEffectEngine() {
     return true;
   }
 
+  /** Writes four numbers into row (0 or 1) of a glow group (create and dispose: it boxes them). */
+  function writeGroupRow(group, row, x, y, z, w) {
+    const offset = (group * 2 + row) * 4;
+    points.groupData[offset] = x;
+    points.groupData[offset + 1] = y;
+    points.groupData[offset + 2] = z;
+    points.groupData[offset + 3] = w;
+  }
+
   // ---- Bolt slots ---------------------------------------------------------------------------------
   /** Takes a free bolt slot, or the one that struck longest ago. */
   function takeBoltSlot() {
@@ -292,9 +315,16 @@ export function createLightEffectEngine() {
     return oldest;
   }
 
-  /** The flash envelope of a bolt age seconds after its strike: decaying return strokes, then a fade. */
-  function envelope(bolt, age) {
-    if (age < 0 || age > bolt.duration[0]) return 0;
+  /**
+   * Writes the flash envelope of a bolt now into bolt.level[0] (decaying return strokes, then a
+   * fade). Returns false once the bolt has burned out (its age is past its duration).
+   */
+  function updateEnvelope(bolt) {
+    const age = ctx.time.elapsed - bolt.start[0];
+    if (age < 0 || age > bolt.duration[0]) {
+      bolt.level[0] = 0;
+      return age <= bolt.duration[0];
+    }
     let level = 0;
     for (let stroke = 0; stroke < bolt.strokeCount; stroke++) {
       const since = age - bolt.strokes[stroke];
@@ -302,22 +332,28 @@ export function createLightEffectEngine() {
     }
     // The channel glows faintly between strokes, then fades out.
     level += 0.12;
-    return Math.min(1.6, level) * (1 - smoothstep(bolt.duration[0] * 0.6, bolt.duration[0], age));
+    const fadeStart = bolt.duration[0] * 0.6;
+    const fadeShare = Math.min(1, Math.max(0, (age - fadeStart) / (bolt.duration[0] - fadeStart)));
+    bolt.level[0] = Math.min(1.6, level) * (1 - fadeShare * fadeShare * (3 - 2 * fadeShare));
+    return true;
   }
 
-  /** Lights one strike of instance's storm (seeded position within its radius, never next to the camera). */
+  /**
+   * Lights one strike of instance's storm (seeded position within its radius, never next to the
+   * camera), reading strikeRandoms (filled by the caller).
+   */
   function strike(instance) {
     const data = instance.data;
     const lightning = data.config.lightning;
-    const rng = data.rng;
+    const random = strikeRandoms;
     const anchor = instance.anchor;
     const camera = ctx.camera.position;
     let x = 0;
     let z = 0;
     let found = false;
     for (let attempt = 0; attempt < 4 && !found; attempt++) {
-      const angle = rng() * Math.PI * 2;
-      const distance = Math.sqrt(rng()) * lightning.radius;
+      const angle = random[attempt * 2] * Math.PI * 2;
+      const distance = Math.sqrt(random[attempt * 2 + 1]) * lightning.radius;
       x = anchor.x + Math.cos(angle) * distance;
       z = anchor.z + Math.sin(angle) * distance;
       const dx = x - camera.x;
@@ -328,38 +364,64 @@ export function createLightEffectEngine() {
       strikeCounters.skipped++;
       return;
     }
-    const ground = data.ground.heightAt(x, z);
+    groundPoint[0] = x;
+    groundPoint[1] = z;
+    data.ground.sample(groundPoint);
+    const ground = groundPoint[2];
     const cloudY = anchor.y + lightning.cloudBase;
-    const toGround = rng() < lightning.groundShare;
+    const toGround = random[8] < lightning.groundShare;
     const bolt = takeBoltSlot();
     bolt.owner = instance;
     bolt.start[0] = ctx.time.elapsed;
-    bolt.duration[0] = lightning.duration * (0.8 + 0.4 * rng());
-    bolt.strokeCount = Math.round(randomIn(rng, lightning.strokes[0], lightning.strokes[1]));
+    bolt.duration[0] = lightning.duration * (0.8 + 0.4 * random[9]);
+    bolt.strokeCount = Math.round(lightning.strokes[0] + (lightning.strokes[1] - lightning.strokes[0]) * random[10]);
     bolt.strokes[0] = 0;
-    for (let stroke = 1; stroke < bolt.strokeCount; stroke++) bolt.strokes[stroke] = bolt.strokes[stroke - 1] + 0.05 + rng() * 0.12;
+    for (let stroke = 1; stroke < bolt.strokeCount; stroke++) bolt.strokes[stroke] = bolt.strokes[stroke - 1] + 0.05 + random[10 + stroke] * 0.12;
     bolt.ground[0] = toGround ? 1 : 0;
     // The mesh sits at the strike point; the channel runs from the cloud base down (or across it).
-    bolt.slot.mesh.position.set(x, toGround ? ground : cloudY, z);
+    const slotPosition = bolt.slot.mesh.position;
+    slotPosition.x = x;
+    slotPosition.y = toGround ? ground : cloudY;
+    slotPosition.z = z;
+    const flashPosition = bolt.flash.mesh.position;
     const height = cloudY - ground;
+    const ends = boltScratch.ends;
     if (toGround) {
-      const leanX = (rng() * 2 - 1) * height * 0.25;
-      const leanZ = (rng() * 2 - 1) * height * 0.25;
-      generateBolt(bolt.slot, boltScratch, rng, leanX, height, leanZ, 0, 0, 0, lightning.width, lightning.branches);
-      bolt.flash.mesh.position.set(x + leanX, cloudY, z + leanZ);
+      const leanX = (random[18] * 2 - 1) * height * 0.25;
+      const leanZ = (random[19] * 2 - 1) * height * 0.25;
+      ends[0] = leanX;
+      ends[1] = height;
+      ends[2] = leanZ;
+      ends[3] = 0;
+      ends[4] = 0;
+      ends[5] = 0;
+      ends[6] = lightning.width;
+      generateBolt(bolt.slot, boltScratch, random, STRIKE_RANDOMS, lightning.branches);
+      flashPosition.x = x + leanX;
+      flashPosition.y = cloudY;
+      flashPosition.z = z + leanZ;
       strikeCounters.ground++;
     } else {
       // An in-cloud (spider) discharge: a long, dimmer channel along the cloud base.
-      const angle = rng() * Math.PI * 2;
-      const reach = lightning.radius * (0.3 + 0.4 * rng()) + 800;
-      generateBolt(bolt.slot, boltScratch, rng, -Math.cos(angle) * reach * 0.5, 0, -Math.sin(angle) * reach * 0.5, Math.cos(angle) * reach * 0.5, -60, Math.sin(angle) * reach * 0.5, lightning.width * 0.7, Math.min(lightning.branches, 4));
-      bolt.flash.mesh.position.set(x, cloudY, z);
+      const angle = random[18] * Math.PI * 2;
+      const reach = lightning.radius * (0.3 + 0.4 * random[19]) + 800;
+      ends[0] = -Math.cos(angle) * reach * 0.5;
+      ends[1] = 0;
+      ends[2] = -Math.sin(angle) * reach * 0.5;
+      ends[3] = Math.cos(angle) * reach * 0.5;
+      ends[4] = -60;
+      ends[5] = Math.sin(angle) * reach * 0.5;
+      ends[6] = lightning.width * 0.7;
+      generateBolt(bolt.slot, boltScratch, random, STRIKE_RANDOMS, Math.min(lightning.branches, 4));
+      flashPosition.x = x;
+      flashPosition.y = cloudY;
+      flashPosition.z = z;
       strikeCounters.cloud++;
     }
     bolt.brightness[0] = lightning.brightness * (toGround ? 1 : 0.45);
     bolt.slot.color.value.setHex(lightning.color);
     bolt.flash.color.value.setHex(lightning.cloudGlow.color);
-    bolt.flash.size.value = lightning.cloudGlow.radius * (toGround ? 1 : 1.4);
+    bolt.flash.params.value.y = lightning.cloudGlow.radius * (toGround ? 1 : 1.4);
     bolt.slot.mesh.visible = true;
     bolt.flash.mesh.visible = lightning.cloudGlow.intensity > 0;
     strikeCounters.strikes++;
@@ -367,7 +429,12 @@ export function createLightEffectEngine() {
     if (data.strikeLight) {
       data.strikeLight.update(false, 0);
       if (makeRoomForLight(data.strikeLight.priority)) data.strikeLight.update(true, 1);
-      data.strikeLight.place(x, ground + height * 0.3, z);
+      const strikeState = data.strikeLight.state;
+      strikeState[0] = x;
+      strikeState[1] = ground + height * 0.3;
+      strikeState[2] = z;
+      strikeState[3] = 0;
+      data.strikeLight.apply();
       data.strikeBolt = bolt;
     }
     // Thunder: the voice's recipe carries it when it is the thunder recipe, else the audio engine.
@@ -388,24 +455,21 @@ export function createLightEffectEngine() {
   function frameStep() {
     if (ctx.state.frame === lastFrame) return;
     lastFrame = ctx.state.frame;
-    points.update(ctx.camera, ctx.time.elapsed, ctx.scene.fog);
-    const now = ctx.time.elapsed;
+    points.update(ctx.camera, ctx.time, ctx.scene.fog);
     for (let index = 0; index < bolts.length; index++) {
       const bolt = bolts[index];
       if (bolt.owner === null) continue;
-      const age = now - bolt.start[0];
-      const level = envelope(bolt, age);
-      bolt.level[0] = level;
-      if (age > bolt.duration[0]) {
+      if (!updateEnvelope(bolt)) {
         bolt.owner = null;
         bolt.slot.mesh.visible = false;
         bolt.flash.mesh.visible = false;
-        bolt.slot.intensity.value = 0;
-        bolt.flash.intensity.value = 0;
+        bolt.slot.params.value.x = 0;
+        bolt.flash.params.value.x = 0;
         continue;
       }
-      bolt.slot.intensity.value = bolt.brightness[0] * level;
-      bolt.flash.intensity.value = bolt.owner.data.config.lightning.cloudGlow.intensity * (0.35 + 0.65 * Math.min(1, level));
+      const level = bolt.level[0];
+      bolt.slot.params.value.x = bolt.brightness[0] * level;
+      bolt.flash.params.value.x = bolt.owner.data.config.lightning.cloudGlow.intensity * (0.35 + 0.65 * Math.min(1, level));
     }
   }
 
@@ -413,9 +477,11 @@ export function createLightEffectEngine() {
   function createFlashBillboard(index) {
     const { THREE, TSL } = ctx;
     const { Fn, vec2, vec4, uniform, positionGeometry, modelViewMatrix, cameraProjectionMatrix, uv, length, pow, saturate, float } = TSL;
-    const intensity = uniform(0);
+    // x: intensity, y: size (m). One Vector4 takes new numbers in place; float uniforms box them.
+    const params = uniform(new THREE.Vector4(0, 1000, 0, 0));
+    const intensity = params.x;
+    const size = params.y;
     const color = uniform(new THREE.Color(1, 1, 1));
-    const size = uniform(1000);
     const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, fog: false });
     material.vertexNode = Fn(() => {
       const centre = modelViewMatrix.mul(vec4(0, 0, 0, 1));
@@ -432,7 +498,7 @@ export function createLightEffectEngine() {
     mesh.renderOrder = 5;
     mesh.visible = false;
     ctx.scene.add(mesh);
-    return { mesh, intensity, color, size, geometry, material };
+    return { mesh, params, color, geometry, material };
   }
 
   // ---- Points (glows and swarms) --------------------------------------------------------------------
@@ -576,6 +642,10 @@ export function createLightEffectEngine() {
         nextStrike: new Float64Array([config.lightning && config.lightning.rate > 0 ? randomIn(rng, 0.5, 3) : Infinity]),
         colorScratch: new Float64Array(3),
         lightPhase: rng() * 100,
+        /** The strike generator's state (fillRandoms), seeded from the spawn's rng. */
+        randomState: new Uint32Array([Math.floor(rng() * 4294967296)]),
+        /** The intensity last sent to the voice (-1 before the first): unchanged levels are not re-sent. */
+        voiceLevel: new Float64Array([-1]),
         light: config.light ? createPooledLight(ctx.lights, { priority: config.light.priority, color: config.light.color, range: config.light.range }) : null,
         strikeLight: config.lightning && config.lightning.light ? createPooledLight(ctx.lights, { priority: config.lightning.light.priority, color: config.lightning.color, range: config.lightning.light.range }) : null,
         strikeBolt: null,
@@ -598,8 +668,8 @@ export function createLightEffectEngine() {
         particles: 0,
         data,
       };
-      points.groupVectors[group * 2].set(0, 0, 0, 0);
-      points.groupVectors[group * 2 + 1].set(0, 4, 1 - (config.swarm ? config.swarm.sync : 0), config.fog);
+      writeGroupRow(group, 0, 0, 0, 0, 0);
+      writeGroupRow(group, 1, 0, 4, 1 - (config.swarm ? config.swarm.sync : 0), config.fog);
       data.points = config.points > 0 ? writePoints(instance) : 0;
       instance.particles = data.points;
       // The couplings can refuse (an unknown audio recipe throws): the group, the pages and whatever
@@ -652,12 +722,13 @@ export function createLightEffectEngine() {
       const fadeTarget = activity * data.tierShare[0];
       data.fade[0] += (fadeTarget - data.fade[0]) * (dt > 0 ? 1 - Math.exp(-dt * 1.5) : 0);
       const camera = engineCtx.camera.position;
-      const groupVector = points.groupVectors[data.group * 2];
+      const groupTable = points.groupData;
+      const groupOffset = data.group * 2 * 4;
       // The points were written relative to the anchor at create; they follow it if it moves.
-      groupVector.x = anchor.x - camera.x;
-      groupVector.y = anchor.y - camera.y;
-      groupVector.z = anchor.z - camera.z;
-      groupVector.w = data.fade[0] * visibility;
+      groupTable[groupOffset] = anchor.x - camera.x;
+      groupTable[groupOffset + 1] = anchor.y - camera.y;
+      groupTable[groupOffset + 2] = anchor.z - camera.z;
+      groupTable[groupOffset + 3] = data.fade[0] * visibility;
 
       // Lightning: strikes at the near and mid tiers, while active.
       const lightning = config.lightning;
@@ -667,8 +738,9 @@ export function createLightEffectEngine() {
         if (dt > 0 && data.tier !== 'far' && rate > 0) {
           data.nextStrike[0] -= dt;
           if (data.nextStrike[0] <= 0) {
+            fillRandoms(data.randomState, strikeRandoms, strikeRandoms.length);
             strike(instance);
-            data.nextStrike[0] = MIN_STRIKE_GAP - Math.log(1 - data.rng() * 0.999) / rate;
+            data.nextStrike[0] = MIN_STRIKE_GAP - Math.log(1 - strikeRandoms[20] * 0.999) / rate;
           }
         }
         // The flash of this storm's brightest bolt in flight, by the camera's distance to it.
@@ -701,7 +773,8 @@ export function createLightEffectEngine() {
             data.strikeLight.update(false, dt);
             data.strikeBolt = null;
           } else {
-            data.strikeLight.shine(lightning.light.intensity * Math.min(1, bolt.level[0]) * (bolt.ground[0] > 0 ? 1 : 0.4));
+            data.strikeLight.state[3] = lightning.light.intensity * Math.min(1, bolt.level[0]) * (bolt.ground[0] > 0 ? 1 : 0.4);
+            data.strikeLight.apply();
           }
         }
       }
@@ -716,15 +789,15 @@ export function createLightEffectEngine() {
         if (held) {
           const frame = data.heading;
           const offset = lightConfig.offset;
-          data.light.place(
-            anchor.x + offset[0] * frame.rightX + offset[2] * frame.forwardX,
-            anchor.y + offset[1],
-            anchor.z + offset[0] * frame.rightZ + offset[2] * frame.forwardZ,
-          );
+          const lightState = data.light.state;
+          lightState[0] = anchor.x + offset[0] * frame.rightX + offset[2] * frame.forwardX;
+          lightState[1] = anchor.y + offset[1];
+          lightState[2] = anchor.z + offset[0] * frame.rightZ + offset[2] * frame.forwardZ;
           const seconds = time.elapsed;
           const flicker = 1 - lightConfig.flicker * (0.5 + 0.5 * Math.sin(seconds * 12.7 + data.lightPhase) * Math.sin(seconds * 5.3 + data.lightPhase * 0.6));
           const pulse = lightConfig.pulse ? 1 - lightConfig.pulse.depth * (0.5 + 0.5 * Math.sin(seconds * Math.PI * 2 / lightConfig.pulse.period + data.lightPhase)) : 1;
-          data.light.shine(lightConfig.intensity * level * flicker * pulse);
+          lightState[3] = lightConfig.intensity * level * flicker * pulse;
+          data.light.apply();
         }
       }
       const lights = (data.light && data.light.held ? 1 : 0) + (data.strikeLight && data.strikeLight.held ? 1 : 0);
@@ -736,28 +809,34 @@ export function createLightEffectEngine() {
         const frame = data.heading;
         const offset = beamConfig.offset;
         const mesh = data.beam.slot.mesh;
-        mesh.position.set(
-          anchor.x + offset[0] * frame.rightX + offset[2] * frame.forwardX,
-          anchor.y + offset[1],
-          anchor.z + offset[0] * frame.rightZ + offset[2] * frame.forwardZ,
-        );
-        mesh.rotation.y = -(data.age[0] / beamConfig.period) * Math.PI * 2;
+        mesh.position.x = anchor.x + offset[0] * frame.rightX + offset[2] * frame.forwardX;
+        mesh.position.y = anchor.y + offset[1];
+        mesh.position.z = anchor.z + offset[0] * frame.rightZ + offset[2] * frame.forwardZ;
         const beamVisible = 1 - beamConfig.night + beamConfig.night * night;
         const level = beamConfig.intensity * beamVisible * data.fade[0];
-        data.beam.slot.intensity.value = level;
+        const beamParams = data.beam.slot.params.value;
+        beamParams.x = level;
+        // The sweep turns in the shader (a mesh rotation would recompute its quaternion each frame).
+        beamParams.y = -((data.age[0] / beamConfig.period) % 1) * Math.PI * 2;
         mesh.visible = level > 0.001;
       }
 
       if (data.voice) {
         data.voice.setPosition(anchor);
+        let voiceLevel;
         if (config.soundIntensity === 'approach') {
           const dx = anchor.x - camera.x;
           const dy = anchor.y - camera.y;
           const dz = anchor.z - camera.z;
           const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-          data.voice.setIntensity(Math.max(0, 1 - distance / Math.max(1, data.lodMid)) * activity);
+          voiceLevel = Math.max(0, 1 - distance / Math.max(1, data.lodMid)) * activity;
         } else {
-          data.voice.setIntensity(activity * (lightning ? (instance.active === false ? lightning.inactiveIntensity : lightning.intensity) : 1));
+          voiceLevel = activity * (lightning ? (instance.active === false ? lightning.inactiveIntensity : lightning.intensity) : 1);
+        }
+        // Sent only when it changed (the audio engine's setter takes the number as an argument).
+        if (Math.abs(voiceLevel - data.voiceLevel[0]) > VOICE_LEVEL_STEP) {
+          data.voiceLevel[0] = voiceLevel;
+          data.voice.setIntensity(voiceLevel);
         }
       }
     },
@@ -781,8 +860,8 @@ export function createLightEffectEngine() {
         bolt.level[0] = 0;
         bolt.slot.mesh.visible = false;
         bolt.flash.mesh.visible = false;
-        bolt.slot.intensity.value = 0;
-        bolt.flash.intensity.value = 0;
+        bolt.slot.params.value.x = 0;
+        bolt.flash.params.value.x = 0;
       }
       if (data.light) data.light.release();
       if (data.strikeLight) data.strikeLight.release();
@@ -794,7 +873,7 @@ export function createLightEffectEngine() {
       if (data.beam) {
         data.beam.owner = null;
         data.beam.slot.mesh.visible = false;
-        data.beam.slot.intensity.value = 0;
+        data.beam.slot.params.value.x = 0;
         data.beam = null;
       }
       if (data.voice) {
@@ -806,7 +885,7 @@ export function createLightEffectEngine() {
         for (let slot = first; slot < first + GLOW_PAGE_SIZE; slot++) points.clear(slot);
         points.pageSlots.free(data.pages[page]);
       }
-      points.groupVectors[data.group * 2].set(0, 0, 0, 0);
+      writeGroupRow(data.group, 0, 0, 0, 0, 0);
       points.groups.free(data.group);
       data.pageCount = 0;
       instance.particles = 0;
@@ -828,7 +907,7 @@ export function createLightEffectEngine() {
         tier: data.tier,
         fade: data.fade[0],
         /** The glows' drawn level: the fade times the day or night visibility. */
-        level: points.groupVectors[data.group * 2].w,
+        level: points.groupData[data.group * 2 * 4 + 3],
         activity: data.activity[0],
         points: data.points,
         light: data.light ? data.light.held : false,

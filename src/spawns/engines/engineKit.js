@@ -10,6 +10,8 @@
 //                                throttled re-acquire; everything else stays emissive plus bloom
 //   createRangeList(capacity)    a fixed-capacity updateRanges list for buffers uploaded in part
 //                                every frame (three's own array reallocates after each upload)
+//   fillRandoms(state, out, n)   n seeded random numbers into a typed array at once (a double
+//                                returned per call would be boxed)
 //
 // Nothing here allocates after construction: the frame update paths of the engines call only the
 // per-frame members (the grid's step and sample, the light's update, the range list's add).
@@ -172,12 +174,12 @@ export function createGroundGrid(terrain, { size = 8, span = 2000 } = {}) {
         stale--;
       }
     },
-    /** True when (x, z) lies more than share of the span away from the grid's middle. */
-    drifted(x, z, share) {
+    /** True when point ([x, y, z], a typed array) lies more than share of the span from the grid's middle. */
+    drifted(point, share) {
       const middleX = origin[0] + span / 2;
       const middleZ = origin[1] + span / 2;
       const limit = span * share;
-      return Math.abs(x - middleX) > limit || Math.abs(z - middleZ) > limit;
+      return Math.abs(point[0] - middleX) > limit || Math.abs(point[2] - middleZ) > limit;
     },
     heightAt(x, z) {
       lookup[0] = x;
@@ -210,29 +212,32 @@ const LIGHT_RETRY_SECONDS = 1;
 /**
  * One real light from the pool (ctx.lights), held only while wanted. update(wanted, dt) acquires or
  * releases it: a holder can lose it to a higher priority (the pool calls the revoke callback), and a
- * refused or revoked holder asks again at most once a second. While held, place() and shine() drive
- * it. release() gives it back (dispose).
+ * refused or revoked holder asks again at most once a second. While held, apply() gives it the
+ * position and intensity in state: [x, y, z, intensity (candela)], numbers in a typed array rather
+ * than call arguments, so a frame's placement boxes nothing. release() gives it back (dispose).
  */
 export function createPooledLight(lights, { priority = 1, color = 0xffffff, range = 500 } = {}) {
   let light = null;
-  let retry = 0;
+  const retry = new Float64Array(1);
+  const state = new Float64Array(4);
   const handle = {
     priority,
     color,
     range,
+    state,
     get held() { return light !== null; },
     get light() { return light; },
     /** Acquires the light when wanted and none is held (throttled), releases it when not wanted. */
     update(wanted, dt) {
       if (!wanted) {
         if (light !== null) handle.release();
-        retry = 0;
+        retry[0] = 0;
         return false;
       }
       if (light !== null) return true;
-      retry -= dt;
-      if (retry > 0) return false;
-      retry = LIGHT_RETRY_SECONDS;
+      retry[0] -= dt;
+      if (retry[0] > 0) return false;
+      retry[0] = LIGHT_RETRY_SECONDS;
       light = lights.acquire(handle.priority, onRevoke);
       if (light !== null) {
         light.color.setHex(handle.color);
@@ -241,12 +246,15 @@ export function createPooledLight(lights, { priority = 1, color = 0xffffff, rang
       }
       return light !== null;
     },
-    place(x, y, z) {
-      if (light !== null) light.position.set(x, y, z);
-    },
-    /** Sets the intensity (candela) of the held light. */
-    shine(intensity) {
-      if (light !== null) light.intensity = intensity > 0 ? intensity : 0;
+    /** Moves the held light to state[0..2] and sets its intensity to state[3] (candela, at least 0). */
+    apply() {
+      if (light === null) return;
+      light.position.x = state[0];
+      light.position.y = state[1];
+      light.position.z = state[2];
+      // Written only when it changed: a new number in the light's field is a boxed number in V8.
+      const intensity = state[3] > 0 ? state[3] : 0;
+      if (light.intensity !== intensity) light.intensity = intensity;
     },
     release() {
       if (light === null) return;
@@ -256,9 +264,27 @@ export function createPooledLight(lights, { priority = 1, color = 0xffffff, rang
   };
   function onRevoke() {
     light = null;
-    retry = LIGHT_RETRY_SECONDS;
+    retry[0] = LIGHT_RETRY_SECONDS;
   }
   return handle;
+}
+
+/**
+ * Fills out[0..count) with numbers in [0, 1) from a mulberry32 generator whose state is state[0] (a
+ * Uint32Array seeded from the spawn's rng). The numbers land in a typed array rather than coming
+ * back one call at a time, because V8 boxes a double returned from a call it does not inline: that
+ * would be an allocation per random number, thousands per second.
+ */
+export function fillRandoms(state, out, count) {
+  let value = state[0];
+  for (let index = 0; index < count; index++) {
+    value = (value + 0x6d2b79f5) >>> 0;
+    let mixed = value;
+    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    out[index] = ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  }
+  state[0] = value;
 }
 
 /** A seeded random value in [low, high] from rng(). */

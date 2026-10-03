@@ -2,7 +2,8 @@
 // single call, for glows (lava vents, crystal tips, lamps), firefly swarms and lantern halos. No
 // real light per point: emissive colour plus bloom.
 //
-// Groups (one per light-effect instance) own a row of a small uniform table: the group's origin
+// Groups (one per light-effect instance) own a row of a small uniform table (a Float32Array of vec4
+// elements in a uniform buffer, uploaded as it is: no per-element copy every frame): the group's origin
 // relative to the camera (written each frame in float64 on the CPU) and its fade (activation, tier,
 // day and night visibility); then its near-fade distance, how far its blink phases spread (1 - sync)
 // and its fog strength. Points own slots in PAGE_SIZE pages; each has four static
@@ -34,16 +35,20 @@ const RENDER_ORDER = 6;
 export function createGlowPoints({ THREE, TSL, scene, sky = null, maxGroups, pages }) {
   if (maxGroups > SHAPE_STRIDE) throw new RangeError(`glow points: at most ${SHAPE_STRIDE} groups`);
   const {
-    Fn, float, int, vec2, vec3, vec4, uniform, uniformArray, instancedBufferAttribute, positionGeometry,
+    Fn, float, int, vec2, vec3, vec4, uniform, buffer, instancedBufferAttribute, positionGeometry,
     modelViewMatrix, cameraProjectionMatrix, uv, varyingProperty, abs, exp, sin, cos, floor, fract, max, mix, pow,
     smoothstep, saturate, length, select,
   } = TSL;
   const capacity = pages * GLOW_PAGE_SIZE;
-  const groupVectors = Array.from({ length: maxGroups * GROUP_ROWS }, () => new THREE.Vector4());
-  const groupTable = uniformArray(groupVectors, 'vec4');
-  const clock = uniform(0);
-  const fogNear = uniform(400);
-  const fogFar = uniform(2400);
+  /** Element row * GROUP_ROWS + index holds [4e, 4e + 3]: see the header for the two rows. */
+  const groupData = new Float32Array(maxGroups * GROUP_ROWS * 4);
+  const groupTable = buffer(groupData, 'vec4', maxGroups * GROUP_ROWS);
+  // The frame scalars share one vec4 uniform: a Vector4 takes new numbers in place, a float uniform
+  // boxes each one.
+  const frameValues = uniform(new THREE.Vector4(0, 400, 2400, 0));
+  const clock = frameValues.x;
+  const fogNear = frameValues.y;
+  const fogFar = frameValues.z;
   const groups = createSlotAllocator(maxGroups);
   const pageSlots = createSlotAllocator(pages);
 
@@ -141,7 +146,7 @@ export function createGlowPoints({ THREE, TSL, scene, sky = null, maxGroups, pag
     mesh,
     groups,
     pageSlots,
-    groupVectors,
+    groupData,
     capacity,
     /** Writes one point's records into slot (shape: an index of GLOW_SHAPES). */
     write(slot, x, y, z, size, red, green, blue, row, shape, wanderRadius, wanderRate, phase, vertical, blinkPeriod, blinkDuty, pulseDepth, flicker) {
@@ -182,12 +187,14 @@ export function createGlowPoints({ THREE, TSL, scene, sky = null, maxGroups, pag
     /**
      * Once per frame: moves the mesh to the camera, uploads the slots written since the last flush
      * (one range), draws up to the highest page in use.
+     * time is the sky's time state (its elapsed seconds drive the animation).
      */
     update(camera, time, fog) {
-      clock.value = time;
+      const values = frameValues.value;
+      values.x = time.elapsed;
       if (fog) {
-        fogNear.value = fog.near;
-        fogFar.value = fog.far;
+        values.y = fog.near;
+        values.z = fog.far;
       }
       mesh.position.copy(camera.position);
       if (dirtyHigh >= dirtyLow) {

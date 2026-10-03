@@ -6,18 +6,26 @@
 // segment is a quad that faces the camera around its own axis, computed in view space in the vertex
 // shader from both ends of the segment, with a minimum width on screen so a bolt 10 km away still
 // reads as a line. The fragment shader draws a hot core in a wide halo; the colour is HDR, so the
-// bloom carries it. The slot's intensity is one uniform (the flash envelope), so a strike costs
-// no upload after its geometry is written.
+// bloom carries it. The slot's intensity (the flash envelope) and a beam's sweep angle share one vec4
+// uniform (params.x, params.y): a strike costs no upload after its geometry is written, and a
+// Vector4 takes new numbers in place where a float uniform would box each one.
 //
 // Bolt geometry comes from generateBolt(): midpoint displacement of the main channel (seeded, with a
 // little downward bias so it walks down) plus forking branches, written into the slot's attribute
-// arrays with no allocation.
+// arrays with no allocation: the random numbers come in a typed array (fillRandoms) and every
+// segment goes through the slot's segment scratch rather than as call arguments.
 
 /** Segments one bolt slot can hold (the main channel and its branches). */
 export const BOLT_SEGMENTS = 192;
 /** Levels of midpoint displacement of the main channel (2^levels segments). */
 const MAIN_LEVELS = 6;
 const BRANCH_LEVELS = 4;
+/** Forks one bolt may have (the lightEffect engine's lightning.branches range). */
+export const MAX_BRANCHES = 24;
+/** Random numbers a fork draws: its origin, reach, angle, droop and brightness, then its displacement. */
+const BRANCH_RANDOMS = 5 + 3 * ((1 << BRANCH_LEVELS) - 1);
+/** Random numbers generateBolt() reads at most: the main channel's displacement, then every fork. */
+export const BOLT_RANDOMS = 3 * ((1 << MAIN_LEVELS) - 1) + MAX_BRANCHES * BRANCH_RANDOMS;
 /**
  * Screen-space minimum half-width of a ribbon, as a share of its view depth (about 2 px at 1080p): a
  * thinner channel breaks up into dots between the pixels, a bolt 5 km away must read as one line.
@@ -27,12 +35,13 @@ const RENDER_ORDER = 7;
 
 /**
  * Builds a ribbon slot of segmentCapacity segments. options: THREE, TSL, scene, name, kind ('bolt'
- * or 'beam'). Returns the mesh, its uniforms (intensity, color), the attribute arrays and writers.
+ * or 'beam'). Returns the mesh, its uniforms (params: x intensity, y a beam's sweep angle in radians
+ * about the vertical; color), the segment scratch and the writers.
  */
 export function createRibbonSlot({ THREE, TSL, scene, name, segmentCapacity, kind = 'bolt' }) {
   const {
     Fn, float, vec2, vec4, uniform, attribute, modelViewMatrix, cameraProjectionMatrix, varyingProperty,
-    abs, exp, max, mix, cross, normalize, length, saturate, pow, smoothstep,
+    abs, exp, max, mix, cross, normalize, length, saturate, pow, smoothstep, sin, cos, vec3,
   } = TSL;
   const vertexCount = segmentCapacity * 4;
   const positions = new Float32Array(vertexCount * 3);
@@ -57,8 +66,11 @@ export function createRibbonSlot({ THREE, TSL, scene, name, segmentCapacity, kin
   geometry.setDrawRange(0, 0);
   geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
 
-  const intensity = uniform(0);
+  const params = uniform(new THREE.Vector4(0, 0, 0, 0));
+  const intensity = params.x;
   const color = uniform(new THREE.Color(1, 1, 1));
+  /** One segment on its way to writeSegment: ax, ay, az, bx, by, bz, half-width, end half-width, brightness. */
+  const segmentScratch = new Float64Array(9);
   const start = attribute('ribbonStart', 'vec3');
   const end = attribute('ribbonEnd', 'vec3');
   const ribbon = attribute('ribbonInfo', 'vec4');
@@ -85,9 +97,13 @@ export function createRibbonSlot({ THREE, TSL, scene, name, segmentCapacity, kin
   if (kind === 'beam') {
     // A beam: soft across, fading along its length (the brightness carries the along position).
     const vAlong = varyingProperty('float', 'vRibbonAlong');
+    // The sweep turns the spokes about the vertical in the shader (params.y), as rotation.y would.
+    const sweepCos = cos(params.y);
+    const sweepSin = sin(params.y);
+    const sweep = (point) => vec3(point.x.mul(sweepCos).add(point.z.mul(sweepSin)), point.y, point.z.mul(sweepCos).sub(point.x.mul(sweepSin)));
     material.vertexNode = Fn(() => {
-      const startView = modelViewMatrix.mul(vec4(start, 1)).xyz;
-      const endView = modelViewMatrix.mul(vec4(end, 1)).xyz;
+      const startView = modelViewMatrix.mul(vec4(sweep(start), 1)).xyz;
+      const endView = modelViewMatrix.mul(vec4(sweep(end), 1)).xyz;
       const point = mix(startView, endView, ribbon.x);
       const along = endView.sub(startView);
       const side = normalize(cross(along, point.negate()));
@@ -119,10 +135,19 @@ export function createRibbonSlot({ THREE, TSL, scene, name, segmentCapacity, kin
   let segments = 0;
 
   /**
-   * Writes segment index from (ax, ay, az) to (bx, by, bz), local to the mesh, halfWidth (m) at its
-   * start and endHalfWidth at its end.
+   * Writes segment index from segment (a Float64Array of 9: ax, ay, az, bx, by, bz local to the mesh,
+   * the half-width (m) at its start and at its end, its brightness).
    */
-  function writeSegment(index, ax, ay, az, bx, by, bz, halfWidth, endHalfWidth, brightness) {
+  function writeSegment(index, segment) {
+    const ax = segment[0];
+    const ay = segment[1];
+    const az = segment[2];
+    const bx = segment[3];
+    const by = segment[4];
+    const bz = segment[5];
+    const halfWidth = segment[6];
+    const endHalfWidth = segment[7];
+    const brightness = segment[8];
     for (let corner = 0; corner < 4; corner++) {
       const vertex = index * 4 + corner;
       const atEnd = corner >= 2 ? 1 : 0;
@@ -147,8 +172,9 @@ export function createRibbonSlot({ THREE, TSL, scene, name, segmentCapacity, kin
   return {
     mesh,
     material,
-    intensity,
+    params,
     color,
+    segment: segmentScratch,
     writeSegment,
     get segments() { return segments; },
     /** Draws count segments and uploads the written geometry. */
@@ -169,25 +195,27 @@ export function createRibbonSlot({ THREE, TSL, scene, name, segmentCapacity, kin
 }
 
 /**
- * Scratch for generateBolt: the main channel's points (x, y, z) and the working buffer of one
- * midpoint-displacement pass. Allocate once per engine.
+ * Scratch for generateBolt: the main channel's points (x, y, z), the working buffer of one
+ * midpoint-displacement pass, a fork's points, and ends (the bolt's top x, y, z, bottom x, y, z and
+ * half-width, which the caller fills). Allocate once per engine.
  */
 export function createBoltScratch() {
   const count = (1 << MAIN_LEVELS) + 1;
-  return { points: new Float64Array(count * 3), work: new Float64Array(count * 3), branch: new Float64Array(((1 << BRANCH_LEVELS) + 1) * 3) };
+  return {
+    points: new Float64Array(count * 3),
+    work: new Float64Array(count * 3),
+    branch: new Float64Array(((1 << BRANCH_LEVELS) + 1) * 3),
+    ends: new Float64Array(7),
+  };
 }
 
 /**
- * Midpoint displacement of the polyline from a to b into out (2^levels + 1 points), roughness the
- * sideways offset as a share of each segment's length. rng() is the seeded source.
+ * Midpoint displacement of the polyline from out[0..2] to out[3..5] into out (2^levels + 1 points),
+ * roughness the sideways offset as a share of each segment's length, reading 3 x (2^levels - 1)
+ * random numbers from randoms[first].
  */
-function displace(out, work, ax, ay, az, bx, by, bz, levels, roughness, rng) {
-  out[0] = ax;
-  out[1] = ay;
-  out[2] = az;
-  out[3] = bx;
-  out[4] = by;
-  out[5] = bz;
+function displace(out, work, levels, roughness, randoms, first) {
+  let next = first;
   let count = 2;
   for (let level = 0; level < levels; level++) {
     let written = 0;
@@ -207,9 +235,10 @@ function displace(out, work, ax, ay, az, bx, by, bz, levels, roughness, rng) {
       work[written * 3 + 1] = y0;
       work[written * 3 + 2] = z0;
       written++;
-      work[written * 3] = (x0 + x1) * 0.5 + (rng() * 2 - 1) * jitter;
-      work[written * 3 + 1] = (y0 + y1) * 0.5 + (rng() * 2 - 1) * jitter * 0.35;
-      work[written * 3 + 2] = (z0 + z1) * 0.5 + (rng() * 2 - 1) * jitter;
+      work[written * 3] = (x0 + x1) * 0.5 + (randoms[next] * 2 - 1) * jitter;
+      work[written * 3 + 1] = (y0 + y1) * 0.5 + (randoms[next + 1] * 2 - 1) * jitter * 0.35;
+      work[written * 3 + 2] = (z0 + z1) * 0.5 + (randoms[next + 2] * 2 - 1) * jitter;
+      next += 3;
       written++;
     }
     work[written * 3] = out[(count - 1) * 3];
@@ -222,68 +251,93 @@ function displace(out, work, ax, ay, az, bx, by, bz, levels, roughness, rng) {
   return count;
 }
 
+/** Copies the segment from points[index] to points[index + 1] into segment[0..5]. */
+function copySegmentEnds(segment, points, index) {
+  for (let axis = 0; axis < 6; axis++) segment[axis] = points[index * 3 + axis];
+}
+
 /**
- * Writes a bolt into slot: the main channel from (topX, topY, topZ) to (bottomX, bottomY, bottomZ)
- * (local to the slot's mesh) and up to branches forks. halfWidth in metres. Returns the segment count.
+ * Writes a bolt into slot: the main channel from scratch.ends[0..2] (top) to scratch.ends[3..5]
+ * (bottom), local to the slot's mesh, scratch.ends[6] its half-width in metres, and up to branches
+ * forks (at most MAX_BRANCHES). Reads BOLT_RANDOMS random numbers from randoms[first] at most.
+ * Returns the segment count.
  */
-export function generateBolt(slot, scratch, rng, topX, topY, topZ, bottomX, bottomY, bottomZ, halfWidth, branches) {
+export function generateBolt(slot, scratch, randoms, first, branches) {
+  const ends = scratch.ends;
   const points = scratch.points;
-  const count = displace(points, scratch.work, topX, topY, topZ, bottomX, bottomY, bottomZ, MAIN_LEVELS, 0.32, rng);
-  let segment = 0;
-  for (let index = 0; index < count - 1 && segment < BOLT_SEGMENTS; index++) {
+  const segment = slot.segment;
+  const halfWidth = ends[6];
+  for (let axis = 0; axis < 6; axis++) points[axis] = ends[axis];
+  const count = displace(points, scratch.work, MAIN_LEVELS, 0.32, randoms, first);
+  const branchFirst = first + 3 * ((1 << MAIN_LEVELS) - 1);
+  let written = 0;
+  for (let index = 0; index < count - 1 && written < BOLT_SEGMENTS; index++) {
     // The channel is brightest near the ground (the return stroke) and thins a little upward.
     const along = index / (count - 1);
-    slot.writeSegment(
-      segment++,
-      points[index * 3], points[index * 3 + 1], points[index * 3 + 2],
-      points[index * 3 + 3], points[index * 3 + 4], points[index * 3 + 5],
-      halfWidth * (0.7 + 0.3 * along), halfWidth * (0.7 + 0.3 * (index + 1) / (count - 1)), 0.8 + 0.2 * along,
-    );
+    copySegmentEnds(segment, points, index);
+    segment[6] = halfWidth * (0.7 + 0.3 * along);
+    segment[7] = halfWidth * (0.7 + 0.3 * (index + 1) / (count - 1));
+    segment[8] = 0.8 + 0.2 * along;
+    slot.writeSegment(written++, segment);
   }
-  const dx = bottomX - topX;
-  const dy = bottomY - topY;
-  const dz = bottomZ - topZ;
+  const dx = ends[3] - ends[0];
+  const dy = ends[4] - ends[1];
+  const dz = ends[5] - ends[2];
   const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
   const branchPoints = scratch.branch;
-  for (let branch = 0; branch < branches && segment < BOLT_SEGMENTS; branch++) {
+  const forks = branches < MAX_BRANCHES ? branches : MAX_BRANCHES;
+  for (let branch = 0; branch < forks && written < BOLT_SEGMENTS; branch++) {
+    const random = branchFirst + branch * BRANCH_RANDOMS;
     // Forks leave the upper two thirds of the channel, heading down and outward.
-    const from = 2 + Math.floor(rng() * (count * 0.65));
+    const from = 2 + Math.floor(randoms[random] * (count * 0.65));
     const originX = points[from * 3];
     const originY = points[from * 3 + 1];
     const originZ = points[from * 3 + 2];
-    const reach = length * (0.12 + rng() * 0.28);
-    const angle = rng() * Math.PI * 2;
-    const tipX = originX + Math.cos(angle) * reach * 0.8 + dx / length * reach * 0.3;
-    const tipY = originY + dy / length * reach * (0.4 + rng() * 0.5);
-    const tipZ = originZ + Math.sin(angle) * reach * 0.8 + dz / length * reach * 0.3;
-    const branchCount = displace(branchPoints, scratch.work, originX, originY, originZ, tipX, tipY, tipZ, BRANCH_LEVELS, 0.35, rng);
-    const brightness = 0.28 + rng() * 0.3;
-    for (let index = 0; index < branchCount - 1 && segment < BOLT_SEGMENTS; index++) {
+    const reach = length * (0.12 + randoms[random + 1] * 0.28);
+    const angle = randoms[random + 2] * Math.PI * 2;
+    branchPoints[0] = originX;
+    branchPoints[1] = originY;
+    branchPoints[2] = originZ;
+    branchPoints[3] = originX + Math.cos(angle) * reach * 0.8 + dx / length * reach * 0.3;
+    branchPoints[4] = originY + dy / length * reach * (0.4 + randoms[random + 3] * 0.5);
+    branchPoints[5] = originZ + Math.sin(angle) * reach * 0.8 + dz / length * reach * 0.3;
+    const brightness = 0.28 + randoms[random + 4] * 0.3;
+    const branchCount = displace(branchPoints, scratch.work, BRANCH_LEVELS, 0.35, randoms, random + 5);
+    for (let index = 0; index < branchCount - 1 && written < BOLT_SEGMENTS; index++) {
       const fade = 1 - index / (branchCount - 1);
       const nextFade = 1 - (index + 1) / (branchCount - 1);
-      slot.writeSegment(
-        segment++,
-        branchPoints[index * 3], branchPoints[index * 3 + 1], branchPoints[index * 3 + 2],
-        branchPoints[index * 3 + 3], branchPoints[index * 3 + 4], branchPoints[index * 3 + 5],
-        halfWidth * 0.55 * (0.4 + 0.6 * fade), halfWidth * 0.55 * (0.4 + 0.6 * nextFade), brightness * (0.35 + 0.65 * fade),
-      );
+      copySegmentEnds(segment, branchPoints, index);
+      segment[6] = halfWidth * 0.55 * (0.4 + 0.6 * fade);
+      segment[7] = halfWidth * 0.55 * (0.4 + 0.6 * nextFade);
+      segment[8] = brightness * (0.35 + 0.65 * fade);
+      slot.writeSegment(written++, segment);
     }
   }
-  slot.commit(segment);
-  return segment;
+  slot.commit(written);
+  return written;
 }
 
 /**
  * Writes a beam into slot: count spokes from the origin, each length long, turned evenly around the
- * vertical axis and tilted up by tilt (radians), widening from startHalfWidth to endHalfWidth. The
- * mesh rotates to sweep them.
+ * vertical axis and tilted up by tilt (radians), widening from startHalfWidth to endHalfWidth.
+ * params.y sweeps them.
  */
 export function generateBeams(slot, count, length, startHalfWidth, endHalfWidth, tilt) {
   const rise = Math.sin(tilt) * length;
   const run = Math.cos(tilt) * length;
+  const segment = slot.segment;
   for (let beam = 0; beam < count; beam++) {
     const angle = beam * Math.PI * 2 / count;
-    slot.writeSegment(beam, 0, 0, 0, Math.cos(angle) * run, rise, Math.sin(angle) * run, startHalfWidth, endHalfWidth, 1);
+    segment[0] = 0;
+    segment[1] = 0;
+    segment[2] = 0;
+    segment[3] = Math.cos(angle) * run;
+    segment[4] = rise;
+    segment[5] = Math.sin(angle) * run;
+    segment[6] = startHalfWidth;
+    segment[7] = endHalfWidth;
+    segment[8] = 1;
+    slot.writeSegment(beam, segment);
   }
   slot.commit(count);
 }
