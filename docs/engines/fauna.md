@@ -88,7 +88,7 @@ accept a range, drawn once per group from the spawn's seeded generator.
 | `size` | factor | 0.1..400 | 1 | scales the species mesh: a sky whale uses about 200-260, which makes it 200-260 m long. The activation's `scale` multiplies it |
 | `sizeJitter` | fraction | 0..0.5 | 0.15 | each agent's size varies by up to plus or minus this share |
 | `speed` | m/s | > 0 | the species' cruise | cruise speed. The species' top speed rises to 1.2 x this when it is higher |
-| `altitude` | `{ mode, value, spread }` | | `{ mode: 'agl', value: 120, spread: 20 }` | `mode`: `'agl'` (m above the ground), `'msl'` (m above sea level, kept at least `floor` + 10 m above the ground), or `'water'` (on the water surface). `spread`: the agl start height varies by plus or minus this many metres. Pods always sit on the water |
+| `altitude` | `{ mode, value, spread, ceiling }` | | `{ mode: 'agl', value: 120, spread: 20, ceiling: 2500 }` | `mode`: `'agl'` (m above the ground), `'msl'` (m above sea level, kept at least `floor` + 10 m above the ground), `'water'` (on the water surface) or `'player'` (the player's own height when the group is created, plus `value` and the `spread` jitter, kept between `floor` + 30 m and `ceiling` m above the ground there; from then on the group holds that height above sea level, so a flock you are flying toward is at your height). `spread`: the agl and player start heights vary by plus or minus this many metres. Pods always sit on the water |
 | `floor` | m AGL | 0..500 | 15 | agents steer up before going below this height over the ground |
 | `wander` | factor | 0..1 | 0.06 | how much the group's heading meanders |
 | `leash` | m | 50..20000 | 600 | how far a wandering group (murmuration, flock) may stray from its anchor before it curves back. A formation that is not following the player turns back at 4 x leash |
@@ -167,6 +167,7 @@ player leaves it, so brief wobbles do not reset the timer.
 | `thermalSearch` | m | 200..8000 | 1800 | search radius around the anchor |
 | `thermalRefresh` | s | 2..120 | 12 | how often the thermals are looked up again (they drift and expire) |
 | `useThermals` | bool | | true | `false` circles over the anchor only (Phase 3: vultures over a carcass) |
+| `requireThermal` | bool | | false | the birds mark real lift only: a group that finds no working thermal at create ends at once (a natural end, before anything is drawn), and a refresh that finds none keeps the columns the birds already ride instead of soaring over the anchor. The thermal hawks set it |
 
 The circle centre follows the thermal's lean with height, from the thermal's base to its cap.
 Thermals weaker than 0.3 are ignored.
@@ -185,6 +186,7 @@ Thermals weaker than 0.3 are ignored.
 | `glow` | 0..1 | | 1 | bioluminescent excitation of the wakes, splashes and spouts. It only shows inside a glow region (the waterEffect engine's `bioluminescence`) |
 | `depth` | m (x scale) | 2..80 | 16 | dive depth |
 | `callInterval` | s or `[min, max]` | | [16, 38] | time between songs (the voice's `call` trigger). A breach also calls |
+| `seekWater` | m | 0..20000 | 0 | at create, when the anchor is not on open water (the point and four points 1.5 x `spread` around it at least 6 m deep), the pod moves to the nearest open water within this reach (rings 150 m apart). A pod that finds none ends at once (a natural end). The whale pod sets it, so a candidate on a coast puts its whales in the sea |
 
 A pod looks 350 m ahead every 2 s and turns away from land.
 
