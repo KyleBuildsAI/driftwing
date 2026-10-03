@@ -31,8 +31,8 @@ export default Object.freeze({
       params: {
         effect: 'bioluminescence',
         radius: 1100,
-        strength: 1.25,
-        surf: 0.85,
+        strength: 1.4,
+        surf: 1.2,
         color: 0x1f9dff,
         flashRate: 18,
         flashRadius: 5,

@@ -21,7 +21,7 @@
     "eval": "(async () => { try { return await window.__dwPresets.end('whalePod'); } catch (error) { console.error('[preset check] end whalePod failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
   },
   {
-    "eval": "(async () => { try { return await window.__dwPresets.show('maelstrom', {\"sun\": 25, \"kind\": \"site\", \"view\": {\"distance\": 1500, \"height\": 420, \"bearing\": 200, \"lift\": 150}}); } catch (error) { console.error('[preset check] show maelstrom failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+    "eval": "(async () => { try { return await window.__dwPresets.show('maelstrom', {\"sun\": 25, \"kind\": \"site\", \"view\": {\"distance\": 750, \"height\": 480, \"bearing\": 200, \"lift\": 60}}); } catch (error) { console.error('[preset check] show maelstrom failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
   },
   {
     "wait": 800
@@ -36,7 +36,7 @@
     "eval": "(async () => { try { return await window.__dwPresets.end('maelstrom'); } catch (error) { console.error('[preset check] end maelstrom failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
   },
   {
-    "eval": "(async () => { try { return await window.__dwPresets.show('bioluminescentBay', {\"sun\": -25, \"kind\": \"site\", \"view\": {\"distance\": 1200, \"height\": 160, \"bearing\": 180, \"lift\": 0}}); } catch (error) { console.error('[preset check] show bioluminescentBay failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+    "eval": "(async () => { try { return await window.__dwPresets.show('bioluminescentBay', {\"sun\": -25, \"kind\": \"site\", \"view\": {\"distance\": 350, \"height\": 60, \"bearing\": 180, \"lift\": 0, \"water\": true}}); } catch (error) { console.error('[preset check] show bioluminescentBay failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
   },
   {
     "wait": 800

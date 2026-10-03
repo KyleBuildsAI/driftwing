@@ -172,6 +172,17 @@ export function installPresetChecks(game) {
     return null;
   }
 
+  /** The nearest point at least 4 m deep within reach of (x, z), searched on rings 50 m apart, or null. */
+  function nearestWater(x, z, reach) {
+    for (let radius = 0; radius <= reach; radius += 50) {
+      for (let step = 0; step < 24; step++) {
+        const point = offset(x, z, step * 15, radius);
+        if (ctx.world.heightAt(point.x, point.z) < ctx.world.WATER_LEVEL - 4) return point;
+      }
+    }
+    return null;
+  }
+
   /** The gentlest open land about `distance` m ahead of the craft (a meadow for the fireflies). */
   function openGroundAhead(distance, reach) {
     let best = null;
@@ -281,11 +292,21 @@ export function installPresetChecks(game) {
         id = await begin(presetId, () => system.forceSpawn(presetId, { distance, force: true }));
       }
       if (!id) return check(`${presetId}: spawned`, false, { refusal: manager.getStats().lastRefusal });
-      await frames(30);
+      // Flight time for the spawn to fade in and settle (the photo mode stops its clock).
+      await seconds(5);
       const record = manager.getInstance(id);
       if (!record) return check(`${presetId}: spawned`, false, { ended: events.ended.filter((entry) => entry.id === id) });
       const lift = view.lift ?? 20;
       const target = { x: record.position.x, y: record.position.y + lift, z: record.position.z };
+      if (view.water) {
+        // Frame the water nearest the anchor (a shore site's anchor may lie on the beach).
+        const water = nearestWater(record.position.x, record.position.z, 1500);
+        if (water) {
+          target.x = water.x;
+          target.y = ctx.world.WATER_LEVEL + lift;
+          target.z = water.z;
+        }
+      }
       const position = viewpoint(target, view.distance ?? 400, view.height ?? 60, view.bearing ?? 200);
       const settled = await frameView(position, target);
       const found = await discovered(presetId, siteId ?? presetId);
