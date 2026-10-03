@@ -4,7 +4,8 @@
 // plankton flash around the camera, and everything that touches the water leaves a blue trail in
 // it: the craft skimming or hovering low, the two whales that feed in the bay (their wakes, spouts
 // and breaches), and the fish jumping in the shallows (splashes kept to the water). The site is
-// placed on the shore line, so the glow lines the beach.
+// placed on a sea shore in the archipelago (an inland lake's shore would also pass the coast test),
+// so the glow lines the beach.
 //
 // Night only: filters.timeOfDay ['night'] keeps the site to its hours (the SpawnManager creates it
 // after dusk and removes it once dawn comes and it is out of view), so it is only discovered at
@@ -17,9 +18,9 @@ export default Object.freeze({
   rarity: 'uncommon',
   heavy: false,
   placement: {
-    chance: 0.06,
-    minSpacing: 14000,
-    biomes: ['archipelago', 'meadows', 'pine'],
+    chance: 0.14,
+    minSpacing: 12000,
+    biomes: ['archipelago'],
     surface: 'coast',
     clearance: 800,
   },
