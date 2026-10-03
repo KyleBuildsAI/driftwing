@@ -11,15 +11,51 @@ that world in your browser.*
 > [!NOTE]
 > DRIFTWING v1 is a single-shot prompt test of Claude Opus 5.5: it was built from one prompt, with
 > no human code edits. v2 is being built in four phases with the same model, one spec prompt per
-> phase. This is **v2 Phase 1** (`2.0.0-phase.1`) after the structure correction (tag
-> `v2-structure`): V1 and V2 are two separate games behind one launcher. See
-> [About this project](#about-this-project) for how it was made.
+> phase. This is **v2 Phase 2**: the event director and the first 30 environment spawns, on top of
+> Phase 1 (`2.0.0-phase.1`) and the structure correction (tag `v2-structure`), which made V1 and V2
+> two separate games behind one launcher. See [About this project](#about-this-project) for how it
+> was made.
 
 DRIFTWING is a calm flying game. You fly over an endless world that is made up as you go:
 snowy peaks, pine valleys, deserts, island chains and flower meadows, with a sky that lingers at
 golden hour. There is no way to lose, no fuel and no enemies. An AI copilot called WREN rides
 along. Talk or type to it, and it can set waypoints, fly for you, change the time of day or set up
 a ring course.
+
+## What is new in v2 Phase 2
+
+The world now has things happening in it. Phase 2 adds 30 places and events that appear as you
+fly, and a reason to go looking for them.
+
+- **Things to find.** Thunderstorms that build and drop tornadoes, waterspouts, lens clouds over the
+  peaks, a volcano that wakes now and then, geyser fields, a slot canyon, a huge waterfall, whales,
+  a whirlpool, a glowing night bay, starling clouds at dusk, geese, hawks, fireflies, an eagle that
+  flies on your wing, wind farms, a rope bridge, an old airfield, meteor showers, a total solar
+  eclipse, a comet, a lantern festival, floating islands, a sky whale, crystal spires and a jet
+  stream. Sites such as the volcano or the waterfall are always in the same place for the same
+  seed; events come and go, and something new turns up within a minute or so of flying.
+- **Look at the horizon.** Big things (a storm's anvil, a volcano's plume, a tornado, the sky whale,
+  the floating islands) stand on the horizon from 30-60 km away. Fly toward them.
+- **The air is part of it.** Many of them change how you fly: a tornado pulls you in, a microburst
+  slams you down, lens clouds and geysers lift you, the jet stream and the sky whale's slipstream
+  carry you. The assists are still the safety net, and hitting the ground is still only a soft
+  restart.
+- **Things to do.** Join the end of the geese's V and they follow you, fly under the rope bridge,
+  race the slot canyon for a best time, land on the old airfield (the landing is graded) or on top
+  of a floating island, and chase a legendary storm for the journal's Storm Chaser entry.
+- **Weather.** Each region of the world cycles through clear, building, storm and clearing, and
+  the sky and fog follow it. An eclipse really darkens the world, and the birds go quiet.
+- **The journal and the map.** A chime and a card greet each discovery, and the journal (J)
+  collects them (found / 30) with your records and achievements. The world map (**M**) shows the
+  terrain, the places you have found, your trail and the waypoint; click to set a waypoint.
+- **WREN as a tour guide.** Ask "what's nearby", "take me to the volcano", "find a thermal", "chase
+  the storm" or "next discovery", or use the Guide chips in the command bar. WREN also calls out
+  new things ("Supercell building 9 km north-west. Want a heading?"); say "yes" for a waypoint.
+- **Share a world.** **Copy link** gives a link that opens your world at your time of day, and a
+  seed field in Settings flies any world you type in. The talk-to-WREN key is now **Shift+M**.
+
+The full list of spawns is in [docs/spawns.md](docs/spawns.md), and the changes are in the
+[CHANGELOG](CHANGELOG.md).
 
 ## What is new in v2 Phase 1
 
@@ -118,8 +154,9 @@ Everything can be rebound in the controls panel (`.`).
 | Waypoint ahead | N |
 | Relaunch, engine, parachute | Backspace, Z, U |
 | Switch to V1, the original game | F8 |
-| Talk to WREN | M (mic), hold ` (push to talk), Enter or / to type |
+| Talk to WREN | Shift+M (mic), hold ` (push to talk), Enter or / to type |
 | WREN's voice on / off | Shift+V |
+| World map | M |
 | Photo mode, journal, help | P, J, H |
 | Settings, controls panel | `,` and `.` |
 
@@ -154,8 +191,8 @@ Open Settings with `,` or the gear icon. There are five tabs:
   - buttons that open the controls panel and the calibration wizard.
 - **General**:
   - day length and freezing time;
-  - WREN's voice, chatter and remote brain;
-  - the world seed;
+  - WREN's voice, chatter, tour-guide callouts and remote brain;
+  - the world: Copy link, and a seed field that flies another world;
   - developer tools (status badge, wind arrows).
 
 Everything is saved in the browser for `http://127.0.0.1:5199` (in V2's own `driftwing-v2`
@@ -164,13 +201,16 @@ database) and survives restarts.
 ## WREN, the copilot
 
 WREN's default brain is a local keyword grammar and needs no network. Speak with the mic button
-(Web Speech API; Chrome and Edge), hold the backquote key or the HOTAS trigger to talk, or type into
-the command bar. Things to try:
+or Shift+M (Web Speech API; Chrome and Edge), hold the backquote key or the HOTAS trigger to talk,
+or type into the command bar. Things to try:
 
 - "Where am I?", "Find mountains", "Take us there", "Set a waypoint", "Autopilot on", "Head west"
 - "Make it night", "Golden hour", "Ring course", "Photo mode", "Journal"
 - "Switch to the helicopter", "Assists down", "Cockpit view", "Deploy chute", "Engine off",
   "Relaunch", "Calibrate controls", "Airspeed", "How was my landing?", "Switch to version one"
+- "What's nearby?", "Take me to the waterfall", "Find a thermal", "Chase the storm", "Next
+  discovery", "Guide help", and "yes" when WREN offers a heading; "Callouts off" quiets the
+  callouts
 
 **Remote brain.** `RemoteCopilot` can send each request to your own HTTP endpoint (for example one
 backed by a language model) and falls back to the local grammar after 800 ms. A reference server
@@ -215,10 +255,12 @@ The launcher reads `v` and passes every other parameter, and any `#hash`, on to 
 | --- | --- | --- |
 | `v` | `?v=1` | launcher only: open V1 (`1`) or V2 (`2`), and remember it |
 | `#seed` | `#seed=K7Q2ZD` | the seed in the hash, as the launcher forwards it and share links carry it (`?seed=` wins when both are given) |
+| `#t` | `#seed=K7Q2ZD&t=0.723` | with a seed link: the time of day, as a fraction of the day or `HH:MM` (`?time=` wins when both are given) |
 | `seed` | `?seed=K7Q2ZD` | Fly a specific world. The URL always carries the current seed, so you can share it |
 | `time` | `?time=0.02` | Start at a time of day from 0 to 1 (0 is midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset) |
 | `renderer` | `?renderer=webgl` | Force the WebGL2 fallback |
 | `debug` | `?debug=1` | Show the dev badge and log the backend and every controller's id to the console |
+| `dev` | `?dev=1` | In a production build: the spawn debugger on F9 (dev builds always have it) |
 | `touch` | `?touch=1` | Force the on-screen touch controls |
 
 ## Troubleshooting
@@ -251,6 +293,8 @@ The launcher reads `v` and passes every other parameter, and any `#hash`, on to 
 | `npm run test:shell` | builds `dist-single/`, then runs the launcher shell test against the dev server and the build (`tools/shell-test.mjs`) |
 | `npm run test:flight`, `test:flight:webgl` | the flight-test harness (every craft, first and third person, 3 seeds) on WebGPU or WebGL2 |
 | `npm run test:hotas`, `test:hotas:webgl` | the HOTAS pipeline harness on WebGPU or WebGL2 |
+| `npm run test:terrain`, `test:terrain:webgl` | the terrain stamps in the running game: no cracks at any LOD, worker meshes equal to main-thread builds, collision within 0.5 m |
+| `npm run lab:terrain` | site placement and terrain stamps headless, including the height-sampling cost against Phase 1 |
 
 three.js is pinned to exactly `0.184.0` and imported only as `three/webgpu`, `three/tsl` and
 `three/addons/...`, so there is one copy. Vite `7.3.6` and `vite-plugin-singlefile` build it.
@@ -265,20 +309,21 @@ src/shell/               the launcher shell's script, and V2's bridge to it (ver
 src/main.js              V2's composition root: boot, systems, frame loop
 src/core/                config, storage (IndexedDB), settings, events, fixed-step clock, frame loop, perf
 src/render/              renderer boot, post stack, sky, clouds, water, birds, effects
-src/world/               world generator (shared height function), terrain worker and chunks, landmarks
+src/world/               world generator (shared height function), site placement and terrain stamps, terrain and map-tile workers, landmarks
 src/flight/              flight controller, flight models, assists and their defaults, autopilot, trim, ground contact
 src/craft/               craft registry and the six craft modules
 src/input/               InputManager, keyboard / mouse / touch, gamepad and HOTAS, bindings, calibration
 src/camera/              camera manager, chase rig, cockpit, wing, flyby and FPV views
-src/audio/               AudioEngine, mixer, engine synths, cues, callouts
+src/audio/               AudioEngine, mixer, engine synths, cues, callouts, spawn voices and their recipes
 src/env/                 WindField
-src/ui/                  glass UI, craft picker, settings, controls panel, instruments
-src/copilot/             WREN: local grammar, remote brain, aircraft actions
+src/spawns/              the spawn manager, event director, regional weather, the ten engines and the 30 presets
+src/ui/                  glass UI, craft picker, settings, controls panel, instruments, journal, world map, discovery card
+src/copilot/             WREN: local grammar, remote brain, aircraft actions, tour guide
 src/gameplay/            journal, ring courses, waypoints
-src/dev/                 dev badge, wind overlay, debug wind source, mock gamepads, test harnesses
-tools/                   smoke test, shell test, harness runner, flight and system labs, builds, copilot server, static server
+src/dev/                 dev badge, wind overlay, spawn debugger (F9), debug wind source, mock gamepads, test harnesses and kits
+tools/                   smoke test, shell test, harness runner, flight, engine and system labs, docs check, builds, copilot server, static server
 tests/                   the V1 freeze test and its SHA-256
-docs/                    architecture, controls, copilot API, V1's known issues, screenshots
+docs/                    architecture, spawns, the engine pages, controls, copilot API, V1's known issues, the owner specs, screenshots
 start-driftwing.bat      one-click start for Windows
 ```
 
@@ -311,15 +356,30 @@ start-driftwing.bat      one-click start for Windows
     reports fps, frame times, NaN events, terrain penetrations, soft crashes and heap growth.
   - `?test=hotas` checks the HOTAS pipeline, persistence across a reload and the HOTAS assist
     default with mock devices.
-  - `node tools/run-harness.mjs --test 1|hotas [--backend webgl] [--views first,third]` runs
-    either one headlessly. For every frame over 50 ms it also records what the rest of the
-    machine was doing at that moment: other programs' CPU and GPU load against the harness's own
-    (named per program on Windows), the whole machine's CPU and the GPU's utilisation.
+  - `?test=terrain` checks the terrain stamps for cracks at every LOD and collision against the
+    rendered mesh (`--presets real` runs it on the game's own stamped sites).
+  - `node tools/run-harness.mjs --test 1|hotas|terrain [--backend webgl] [--views first,third]`
+    runs one headlessly. For every frame over 50 ms it also records what the rest of the machine
+    was doing at that moment: other programs' CPU and GPU load against the harness's own (named
+    per program on Windows), the whole machine's CPU and the GPU's utilisation.
+- **Spawns.** `node tools/lab/spawns.mjs`, `director.mjs`, `terrain.mjs`, `audio.mjs`,
+  `discovery.mjs`, the engine labs (`wind-engines.mjs`, `structure.mjs`, `setpiece.mjs`) and the
+  preset labs (`preset-pacing.mjs`, `preset-flight.mjs`, `preset-wind.mjs`) check the spawn
+  framework, the director, placement and stamps, the spawn sound, the discovery loop, the engines
+  and the 30 presets headless. `tools/spawn-check.mjs` and the step files in `tools/steps/`
+  (`engine-*.json`, `presets-*.json`, `discovery.json`, `copilot-guide.json`) check them in the
+  running game on a dev server; `docs/architecture.md` lists each one.
+- **Docs check.** `node tools/docs-check.mjs` checks every relative link and anchor in the docs,
+  that `docs/spawns.md` matches the preset files, and that its preset templates are valid presets.
 
 ### Documentation
 
 - [docs/architecture.md](docs/architecture.md): the module map, the frame loop, every system
-  contract, and where Phases 2-4 plug in.
+  contract (placement, stamps, the spawn engines and the director included), and where Phases 3-4
+  plug in.
+- [docs/spawns.md](docs/spawns.md): the 30 spawn presets with their engines, filters, rarity and
+  wind, and templates for adding a new one.
+- [docs/engines/](docs/engines/): one reference page per spawn engine, with every param.
 - [docs/controls.md](docs/controls.md): every default binding, calibration, and a HOTAS hardware
   checklist.
 - [docs/copilot-api.md](docs/copilot-api.md): the remote copilot request, response and action
@@ -363,9 +423,9 @@ repository, GitHub Pages, the release, the topics, the v1 screenshots and this n
 
 **v2** is being built in four phases with the same model, each from one spec prompt:
 
-1. **Phase 1 (this version)**: the sim core, HOTAS, the first six craft, cockpits and procedural
-   audio.
-2. **Phase 2**: an event director with procedural environment spawns.
+1. **Phase 1**: the sim core, HOTAS, the first six craft, cockpits and procedural audio.
+2. **Phase 2 (this version)**: an event director with ten spawn engines, the first 30 environment
+   spawns, and the discovery loop (journal, tour guide, world map, seed links).
 3. **Phase 3**: more craft.
 4. **Phase 4**: Spotify, WebXR VR, a flight recorder with replay, and a multiplayer wingman.
 
@@ -374,7 +434,10 @@ parallel sub-agents in separate git worktrees, one merge per milestone, and revi
 each wave. A structure correction then made DRIFTWING two separate games behind one toggle: V1
 frozen byte-for-byte, and V2 flying only the real flight model (Phase 1's CLASSIC mode, a port of
 v1's arcade flight inside V2, was removed). The Phase 1 screenshots
-above were captured from the single-file build with the headless smoke-test tool.
+above were captured from the single-file build with the headless smoke-test tool. Phase 2 was
+built the same way: placement, the engine framework, the director and the spawn audio first, then
+the ten engines, the 30 presets in three verified batches, and the discovery loop, each wave on
+its own worktrees and merged per milestone.
 
 <details>
 <summary>The original v1 prompt</summary>
