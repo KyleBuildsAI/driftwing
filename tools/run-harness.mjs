@@ -7,10 +7,10 @@
 // browser console and screenshots of the summary panel, and stops the browser and the server.
 //
 // Usage:
-//   node tools/run-harness.mjs --test 1|hotas|terrain|determinism [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
+//   node tools/run-harness.mjs --test 1|hotas|terrain|determinism|spawns [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
 //     [--crafts glider,jet] [--views first,third] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
-//     [--presets real]
+//     [--presets real | --presets tornado,comet]
 //
 // The terrain test runs on one seed (the first of --seeds; by default P2-TERRAIN, or TERRAIN-REAL-8
 // with --presets real, a world with every real stamp type near its spawn) in the late
@@ -24,6 +24,11 @@
 // The determinism test (/v2/?test=determinism) flies the same scripted path on the same seed (the
 // first of --seeds, by default DETERMINISM-1) in two page loads and compares the site-list hash and the
 // director's activation log; the runner follows it through its reload.
+//
+// The spawns test (/v2/?test=spawns) force-spawns each of the 30 presets ahead of the craft on one seed
+// (the first of --seeds, by default TERRAIN-REAL-8, whose spawn has a real site of every stamped preset
+// in reach), and the runner takes one screenshot per preset when the page asks for it
+// (spawn-<nn>-<preset>.png). --presets a,b,c shows only those presets.
 //
 // --alloc-profile N (diagnostic): once the first flight-test run is flying, samples every JS
 // allocation for N seconds with the sampling heap profiler (collected objects included, so it is
@@ -81,7 +86,11 @@ const REAL_TERRAIN_SEED = 'TERRAIN-REAL-8';
 const TERRAIN_DAY_TIME = '0.42';
 /** The determinism test's default world. */
 const DETERMINISM_SEED = 'DETERMINISM-1';
-const TESTS = Object.freeze(['1', 'hotas', 'terrain', 'determinism']);
+/** The spawns test's default world: a real site of every stamped preset near its spawn, and open water. */
+const SPAWNS_SEED = REAL_TERRAIN_SEED;
+/** The spawns test asks for screenshots: the runner polls this often while it runs. */
+const SHOT_POLL_MS = 400;
+const TESTS = Object.freeze(['1', 'hotas', 'terrain', 'determinism', 'spawns']);
 
 function parseArgs(argv) {
   const options = {
@@ -302,6 +311,11 @@ function harnessUrl(port, options) {
     if (options.presets === 'real') url.searchParams.set('presets', 'real');
   }
   if (options.test === 'determinism') url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : DETERMINISM_SEED);
+  if (options.test === 'spawns') {
+    url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : SPAWNS_SEED);
+    url.searchParams.set('testShots', '1');
+    if (options.presets) url.searchParams.set('testPresets', options.presets);
+  }
   if (options.test === '1') {
     if (options.seeds) url.searchParams.set('testSeeds', options.seeds);
     if (options.seconds) url.searchParams.set('testSeconds', String(options.seconds));
@@ -316,6 +330,7 @@ function timeLimitMs(options) {
   if (Number.isFinite(options.timeoutMinutes) && options.timeoutMinutes > 0) return options.timeoutMinutes * 60000;
   if (options.test === 'hotas') return 8 * 60000;
   if (options.test === 'terrain' || options.test === 'determinism') return 40 * 60000;
+  if (options.test === 'spawns') return 90 * 60000;
   const seeds = options.seeds ? options.seeds.split(',').filter(Boolean).length : 3;
   const crafts = options.crafts ? options.crafts.split(',').filter(Boolean).length : 6;
   const views = options.views ? options.views.split(',').filter(Boolean).length : 2;
@@ -572,6 +587,56 @@ function determinismTable(report) {
   return lines.join('\n');
 }
 
+/**
+ * The spawns test's screenshot handshake: when the page asks for one (window.DRIFTWING.spawnsTest
+ * .pendingShot), saves <name>.png and tells the page it was taken. Returns the file name or null.
+ */
+async function takeRequestedShot(page, options, runner) {
+  let pending = null;
+  try {
+    pending = await page.evaluate(() => (window.DRIFTWING && window.DRIFTWING.spawnsTest ? window.DRIFTWING.spawnsTest.pendingShot : null));
+  } catch (error) {
+    // The page is between documents for a moment while it loads; the next poll asks again.
+    runner.notes.push(`screenshot poll skipped: ${error.message}`);
+    return null;
+  }
+  if (!pending) return null;
+  const file = `${pending.name}.png`;
+  await page.screenshot({ path: join(options.out, file) });
+  runner.shots = runner.shots ?? [];
+  runner.shots.push({ file, presetId: pending.presetId });
+  await page.evaluate((token) => window.DRIFTWING.spawnsTest.shotTaken(token), pending.token);
+  return file;
+}
+
+function spawnsTable(report) {
+  const lines = ['  #  preset               sun  weather   anchor   engines                              fps   p99ms  maxms  show: geo/world tex wind  leak: geo/world tex wind  heapMB  err/warn  shot  result'];
+  const cycleText = (cycle) => (cycle ? `${cycle.geometryDelta}/${cycle.worldFirstDrawn} ${cycle.textureDelta} ${cycle.windLeft.length}${cycle.gpuOk && cycle.windOk && cycle.skyOk && cycle.lightsOk && cycle.leaksOk ? '' : '!'}` : '-');
+  for (const row of report.presets) {
+    lines.push([
+      String(row.index).padStart(3),
+      row.presetId.padEnd(20),
+      String(row.conditions.sun).padStart(4),
+      row.conditions.weather.padEnd(9),
+      (row.anchor ? row.anchor.kind : '-').padEnd(8),
+      (row.parts.join('+') || '-').padEnd(36),
+      String(row.frames.avgFps ?? '-').padStart(5),
+      String(row.frames.p99Ms ?? '-').padStart(6),
+      String(row.frames.maxMs ?? '-').padStart(6),
+      cycleText(row.cycles[0]).padStart(22),
+      cycleText(row.cycles[1]).padStart(22),
+      String(row.cycles[1] ? row.cycles[1].heapDeltaMB : '-').padStart(7),
+      `${row.console.errors}/${row.console.warnings}`.padStart(9),
+      (row.shot && row.shot.taken ? 'yes' : 'no').padStart(5),
+      row.passed ? '  PASS' : '  FAIL',
+    ].join(' '));
+  }
+  for (const criterion of report.criteria) lines.push(`  ${criterion.status === 'pass' ? 'PASS' : criterion.status === 'fail' ? 'FAIL' : '----'}  ${criterion.label}: ${criterion.value}`);
+  for (const row of report.presets) for (const note of row.notes) lines.push(`  note: ${row.presetId}: ${note}`);
+  for (const problem of report.harnessErrors) lines.push(`  harness problem: ${problem}`);
+  return lines.join('\n');
+}
+
 function hotasTable(report) {
   const lines = [];
   for (const check of report.checks) lines.push(`  ${check.passed ? 'PASS' : 'FAIL'}  [${check.group}] ${check.name}: ${check.actual}${check.passed ? '' : ` (expected ${check.expected})`}`);
@@ -682,8 +747,18 @@ async function main() {
     let lastLine = '';
     let state = null;
     const allocation = { phase: options.allocProfileSeconds > 0 ? 'waiting' : 'off', startedMs: 0 };
+    let lastProgressRead = 0;
     while (Date.now() < deadline) {
-      await sleep(POLL_MS);
+      if (options.test === 'spawns') {
+        // The spawns test asks for a screenshot per preset and waits: answer quickly.
+        await sleep(SHOT_POLL_MS);
+        const shot = await takeRequestedShot(page, options, runner);
+        if (shot) log(started, `screenshot ${shot}`);
+        if (Date.now() - lastProgressRead < POLL_MS) continue;
+        lastProgressRead = Date.now();
+      } else {
+        await sleep(POLL_MS);
+      }
       state = await readProgress(page);
       if (allocation.phase === 'waiting' && state?.progress?.current) {
         await cdp.send('HeapProfiler.enable');
@@ -786,7 +861,7 @@ async function main() {
   writeFileSync(join(options.out, 'gpu-load.json'), JSON.stringify(gpuLoad.samples, null, 2));
   writeFileSync(join(options.out, 'process-load.json'), JSON.stringify(processLoad.samples, null, 2));
 
-  const tables = { 1: () => `${flightTable(report)}\n${craftViewTable(report)}\n${slowFrameEvidence(report)}`, hotas: () => hotasTable(report), terrain: () => terrainTable(report), determinism: () => determinismTable(report) };
+  const tables = { 1: () => `${flightTable(report)}\n${craftViewTable(report)}\n${slowFrameEvidence(report)}`, hotas: () => hotasTable(report), terrain: () => terrainTable(report), determinism: () => determinismTable(report), spawns: () => spawnsTable(report) };
   if (report) process.stdout.write(`${tables[options.test]()}\n`);
   process.stdout.write(`run-harness: ${runner.passed ? 'PASS' : 'FAIL'} (harness ${report ? report.result : 'no report'}, backend ${runner.backend ? runner.backend.join(', ') : 'unknown'}, browser console ${runner.errors.length} errors / ${runner.warnings.length} warnings, ${runner.durationSeconds} s)\n`);
   for (const problem of runner.problems) process.stdout.write(`run-harness: problem: ${problem}\n`);
