@@ -110,7 +110,14 @@ export function createEventCues({ bus, state, camera, THREE, isReady, voices, di
     queueCue('chime', 'spawn-discovery', () => discoveryChime({ pan }));
   });
   bus.on('landmark:threaded', () => queueCue('chime', 'threaded', (voiceSet) => playSequence(voiceSet, [5, 6, 7, 8, 9, 10, 12], 0.06, { volume: 0.38, decay: 2.2 })));
+  // A total solar eclipse silences the wildlife (typed wildlifeQuiet): no wing flutter while it holds.
+  const quietSources = new Set();
+  bus.onTyped('wildlifeQuiet', ({ source, quiet }) => {
+    if (quiet) quietSources.add(source);
+    else quietSources.delete(source);
+  });
   bus.on('birds:scattered', (payload) => {
+    if (quietSources.size > 0) return;
     const count = payload && Number.isFinite(payload.count) ? payload.count : 12;
     const position = payload && payload.position;
     const intensity = clamp(count / 24, 0.3, 1.3) * proximity(position, 40, 400);

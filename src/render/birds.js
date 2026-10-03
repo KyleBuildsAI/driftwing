@@ -10,6 +10,9 @@ import { CONFIG } from '../core/config.js';
  * and a CPU-driven excitement channel that makes scattered birds flap hard. Flocks spawn ahead of the
  * glider, follow a slowly wandering target, keep clear of the terrain, scatter outward/upward when the
  * glider passes through them (emitting 'birds:scattered'), regroup, and recycle once far behind.
+ * While any source holds the typed wildlifeQuiet (a total solar eclipse), the flocks settle out of the
+ * sky: none spawn, the flying ones fade away over a few seconds and stop scattering, and they return
+ * (fading in ahead of the glider) once the last hold ends.
  */
 export function createBirdSystem(ctx) {
   const { THREE: T, scene, state, world, bus, uniforms } = ctx;
@@ -40,6 +43,8 @@ export function createBirdSystem(ctx) {
   const PRECISE_FLOOR_CLEARANCE = 70;
   const MAX_GROUND_SAMPLES_PER_FRAME = 16;
   const SPAWN_FADE_SECONDS = 1.6;
+  /** Seconds the flocks take to settle out of the sky when the wildlife falls quiet. */
+  const QUIET_FADE_SECONDS = 4;
   const player = state.player;
 
   // ---- Geometry: a low-poly gull-like silhouette, nose toward -z, wings along x --------------
@@ -147,6 +152,9 @@ export function createBirdSystem(ctx) {
   let groundCursor = 0;
   let simulationTime = 0;
   let lastWrittenFrame = -1;
+  // wildlifeQuiet holders (spawn ids) and the fade the flocks share while they settle (1 = flying).
+  const quietSources = new Set();
+  let quietFade = 1;
 
   const flocks = [];
   for (let slot = 0; slot < FLOCK_SLOTS; slot++) {
@@ -191,6 +199,7 @@ export function createBirdSystem(ctx) {
   }
 
   function targetFlockCount() {
+    if (quietSources.size > 0) return 0;
     const density = Number.isFinite(ctx.quality.birdDensity) ? ctx.quality.birdDensity : 1;
     return clamp(3 + Math.floor(density * 3), 3, FLOCK_SLOTS);
   }
@@ -617,7 +626,7 @@ export function createBirdSystem(ctx) {
     const offset = index * 16;
     const axisOffset = index * 4;
     const inFlock = flock.active && index < flock.start + flock.count;
-    const scale = inFlock ? birdScale[index] * flock.fade : 0;
+    const scale = inFlock ? birdScale[index] * flock.fade * quietFade : 0;
     axisRightData[axisOffset + 3] = extraPhase[index];
     axisUpData[axisOffset + 3] = inFlock ? excitementLevel[index] : 0;
     if (scale <= 0) {
@@ -727,6 +736,20 @@ export function createBirdSystem(ctx) {
   }
 
   bus.on('quality:changed', () => rebalanceFlocks());
+  bus.onTyped('wildlifeQuiet', ({ source, quiet }) => {
+    const wasQuiet = quietSources.size > 0;
+    if (quiet) quietSources.add(source);
+    else quietSources.delete(source);
+    if (wasQuiet !== quietSources.size > 0) rebalanceFlocks();
+  });
+
+  /** Fades the flocks out while the wildlife is quiet; the settled ones leave, and none fly until it ends. */
+  function updateQuiet(dt) {
+    const quiet = quietSources.size > 0;
+    quietFade = quiet ? Math.max(0, quietFade - dt / QUIET_FADE_SECONDS) : Math.min(1, quietFade + dt / QUIET_FADE_SECONDS);
+    if (!quiet || quietFade > 0) return;
+    for (const flock of flocks) if (flock.active) deactivateFlock(flock);
+  }
 
   function recycleFlocks() {
     const px = player.position.x;
@@ -749,6 +772,7 @@ export function createBirdSystem(ctx) {
     update(dt) {
       if (dt > 0) {
         simulationTime += dt;
+        updateQuiet(dt);
         refreshGroundSamples(dt);
         for (const flock of flocks) {
           if (!flock.active) continue;
@@ -757,7 +781,7 @@ export function createBirdSystem(ctx) {
           updateFlockCenter(flock);
           updateFlockTarget(flock, dt);
           simulateFlock(flock, dt);
-          tryScatter(flock);
+          if (quietFade > 0.5) tryScatter(flock);
         }
         recycleFlocks();
         writeInstances();
@@ -792,7 +816,7 @@ export function createBirdSystem(ctx) {
           };
         }
       }
-      return { flocks: activeFlocks, birds, excited, nearest };
+      return { flocks: activeFlocks, birds, excited, nearest, quiet: quietSources.size > 0, quietFade: Math.round(quietFade * 100) / 100 };
     },
   };
 }

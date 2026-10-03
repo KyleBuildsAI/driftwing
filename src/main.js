@@ -9,6 +9,7 @@ import { createAssistDefaults } from './flight/assistDefaults.js';
 import { createAudioSystem } from './audio/AudioEngine.js';
 import { createBirdSystem } from './render/birds.js';
 import { createCameraSystem } from './camera/cameraManager.js';
+import { createCelestialEngine } from './spawns/engines/celestialEngine.js';
 import { createCloudSystem } from './render/clouds.js';
 import { createCopilotSystem } from './copilot/copilot.js';
 import { createDebugWindSystem } from './dev/debugWind.js';
@@ -35,6 +36,7 @@ import { createVortexEngine } from './spawns/engines/vortexEngine.js';
 import { createWaterSystem } from './render/water.js';
 import { createWaypointSystem } from './gameplay/waypoints.js';
 import { createWeatherSystem } from './spawns/weather.js';
+import { createWeatherVolumeEngine } from './spawns/engines/weatherVolumeEngine.js';
 import { createWindModifierEngine } from './spawns/engines/windModifierEngine.js';
 import { createWindOverlaySystem } from './dev/windOverlay.js';
 import { createWorldGen } from './world/worldgen.js';
@@ -62,6 +64,8 @@ import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation
 const SPAWN_ENGINE_FACTORIES = Object.freeze([
   createVortexEngine,
   createEmitterEngine,
+  createWeatherVolumeEngine,
+  createCelestialEngine,
   createLightEffectEngine,
   createWindModifierEngine,
 ]);
@@ -138,6 +142,10 @@ async function boot() {
     windStrength: uniform(1),
     playerPosition: uniform(new THREE.Vector3()),
     waterLevel: uniform(CONFIG.WATER_LEVEL),
+    // Cloud optics (0..1), driven by the celestial engine: the glory and the full-circle rainbow
+    // around the antisolar point on every cloud puff (src/render/cloudShading.js).
+    cloudGlory: uniform(0),
+    cloudBow: uniform(0),
   };
 
   // ---- World + spawn ------------------------------------------------------------------

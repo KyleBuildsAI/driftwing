@@ -67,6 +67,12 @@ export const EVENT_TYPES = Object.freeze({
    * lowest (closestTornado in metres, bestCanyonRun in seconds for clean runs only), 'max' the highest.
    */
   journalStat: { key: 'string', value: 'number', op: JOURNAL_STAT_OPS, presetId: { type: 'string', optional: true } },
+  /**
+   * Wildlife falls silent or wakes again (a total solar eclipse). source names the holder (a spawn
+   * id); quiet true starts its hold, false ends it. Birds settle and fauna stop calling while any
+   * source holds quiet; the v1 birds and the audio cues listen.
+   */
+  wildlifeQuiet: { source: 'string', quiet: 'boolean' },
 });
 
 function describeFailure(type, payload) {

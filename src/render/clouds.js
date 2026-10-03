@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { CONFIG } from '../core/config.js';
 import { MathUtils, DEG, clamp, damp, isFiniteVector } from '../core/util.js';
+import { NEAR_DISSOLVE_END, NEAR_DISSOLVE_START, buildCloudPuffGeometry, createCloudLook, createCloudRadiance } from './cloudShading.js';
 
 /**
  * CLOUDS: world-anchored low-poly cumulus that drift with the wind.
@@ -25,7 +26,14 @@ import { MathUtils, DEG, clamp, damp, isFiniteVector } from '../core/util.js';
  *   golden at golden hour, cool blue-grey shadow sides, a warm bounce under the
  *   base, gold rims and silver linings against the sun, dim moonlit blue-grey at
  *   night. Distance haze blends into the exact sky colour behind each cloud (the
- *   sky's own skyColorNode, the same function the fog uses).
+ *   sky's own skyColorNode, the same function the fog uses). The puff geometry, the
+ *   palette and the light response live in cloudShading.js, shared with the weather
+ *   volumes.
+ * - The regional weather reaches the field through the sky modifiers (the palette
+ *   reads sky.getModifierLevels()): a storm's overcast turns the undersides a darker
+ *   blue-grey and dims the sunlit tops, an eclipse's darkness dims them all. Clear
+ *   weather leaves the palette exactly as it was. The celestial engine's glory and
+ *   full-circle rainbow (uniforms.cloudGlory, uniforms.cloudBow) shine on the puffs.
  * - Surfaces within ~70 m of the camera dissolve with a screen-space dither so
  *   flying through a cloud never shows a hard clip; a soft veil fills the view
  *   while the camera is inside a cluster.
@@ -40,8 +48,7 @@ import { MathUtils, DEG, clamp, damp, isFiniteVector } from '../core/util.js';
 export function createCloudSystem(ctx) {
   const { THREE: T, scene, camera, state, uniforms, textures, world, bus } = ctx;
   const {
-    uniform, float, vec3, positionLocal, positionGeometry, positionView, positionWorld, normalWorld, cameraViewMatrix,
-    instancedBufferAttribute, mix, smoothstep, saturate, pow, max, dot, normalize, length, oneMinus,
+    uniform, vec3, positionLocal, instancedBufferAttribute, mix, smoothstep, saturate, max,
     screenCoordinate, interleavedGradientNoise,
   } = TSL;
 
@@ -68,8 +75,6 @@ export function createCloudSystem(ctx) {
   const MIN_VISIBLE_SCALE = 0.02;
   const MIN_PUFF_SCALE = 0.04;
   const ANCHOR_STEP = 2048;
-  const NEAR_DISSOLVE_START = 16;
-  const NEAR_DISSOLVE_END = 70;
   const SHADOW_INTERVAL_SECONDS = 0.25;
   const SHADOW_SIZE = CONFIG.CLOUD_SHADOW.SIZE;
   const SHADOW_OPACITY = 0.9;
@@ -78,16 +83,7 @@ export function createCloudSystem(ctx) {
   const VEIL_MAX_OPACITY = 0.55;
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
   const EVICT_INTERVAL_FRAMES = 30;
-  const PUFF_JITTER = 0.07;
-  // Shading shape: how much the cluster-wide ellipsoid normal softens the facets, and how strongly
-  // that ellipsoid is flattened (cumulus are wide and short, so their tops face the sky).
-  const SOFT_NORMAL_WEIGHT = 0.62;
-  const CLUSTER_NORMAL_LIFT = 2.4;
-  const BASE_OCCLUSION = 0.58;
-  // Lower half of every puff sits in the crevices between its neighbours: sunlight reaches it less.
-  const CREVICE_OCCLUSION = 0.52;
   const HAZE_MAX = 0.96;
-  const LIT_GAIN = 1.2;
 
   // ---- Cluster records (pooled) -----------------------------------------------------------
   function createClusterRecord() {
@@ -484,87 +480,34 @@ export function createCloudSystem(ctx) {
   const centreData = instancedBufferAttribute(centreAttribute);
 
   const anchorPosition = uniform(new T.Vector3());
-  const litColor = uniform(new T.Color(1, 1, 1));
-  const shadeColor = uniform(new T.Color(0.3, 0.33, 0.42));
-  const bounceColor = uniform(new T.Color(0, 0, 0));
-  const moonColor = uniform(new T.Color(0, 0, 0));
-  const rimColor = uniform(new T.Color(0, 0, 0));
-  const silverStrength = uniform(1);
+  const look = createCloudLook(T, TSL);
+  const { litColor, shadeColor, moonColor } = look;
   const hazeNear = uniform(600);
   const hazeFar = uniform(VIEW_RANGE * 1.1);
 
-  // The stylised cloud lighting below is the whole light response: the PBR light loop is skipped.
+  // The stylised cloud lighting (cloudShading.js) is the whole light response: the PBR light loop is skipped.
   const material = new T.MeshStandardNodeMaterial({ flatShading: true, roughness: 1, metalness: 0, fog: false });
   material.lights = false;
   // In r184 an InstancedMesh positionNode runs on the geometry-local puff (the instance matrix is applied
   // to its result), so the flat bottom is clamped in puff space: shape.x = (base - centreY) / halfHeight.
   // Puffs only rotate about y, so local y stays vertical and the clamp plane stays horizontal.
   material.positionNode = vec3(positionLocal.x, max(positionLocal.y, shapeData.x), positionLocal.z);
-
-  const heightFraction = saturate(positionWorld.y.sub(shapeData.y).div(max(shapeData.z.sub(shapeData.y), 1)));
-  const fromCentre = positionWorld.sub(anchorPosition).sub(centreData.xyz);
-  const clusterNormal = normalize(fromCentre.mul(vec3(1, CLUSTER_NORMAL_LIFT, 1)));
-  const shadingNormal = normalize(mix(normalWorld, clusterNormal, SOFT_NORMAL_WEIGHT));
-  const viewRay = positionView.transformDirection(cameraViewMatrix);
-  const facing = saturate(dot(shadingNormal, viewRay.negate()));
-  const rim = pow(oneMinus(facing), 3);
-  const sunDot = dot(shadingNormal, uniforms.sunDirection);
-  const sunKey = pow(saturate(sunDot.mul(0.62).add(0.38)), 1.6);
-  const moonKey = saturate(dot(shadingNormal, uniforms.moonDirection).mul(0.55).add(0.45));
-  const occlusion = mix(float(BASE_OCCLUSION), float(1), smoothstep(0, 0.65, heightFraction));
-  const underside = saturate(shadingNormal.y.negate());
-  // Brightness variation stays off the shared flat base, where overlapping puffs are coplanar.
-  const brightness = mix(float(1), shapeData.w, smoothstep(0, 0.12, heightFraction));
-  // Crevices: the puff-local height (raw geometry, before the base clamp) shades each puff's lower
-  // half, so every heap reads as its own rounded bump. Kept off the shared flat base (coplanar puffs).
-  const crevice = mix(float(1), mix(float(CREVICE_OCCLUSION), float(1), smoothstep(-0.55, 0.7, positionGeometry.y)), smoothstep(0, 0.15, heightFraction));
-  const towardSun = saturate(dot(viewRay, uniforms.sunDirection));
-  const backLight = pow(towardSun, 3).mul(0.45).add(pow(towardSun, 16).mul(0.9));
-  const towardMoon = saturate(dot(viewRay, uniforms.moonDirection));
-  const bodyLight = shadeColor.mul(occlusion).mul(mix(float(0.85), float(1), crevice))
-    .add(litColor.mul(sunKey).mul(mix(occlusion, float(1), 0.35)).mul(crevice))
-    .add(moonColor.mul(moonKey).mul(occlusion).mul(crevice))
-    .add(bounceColor.mul(underside))
-    // Light scattered forward through the cloud body when looking toward the sun.
-    .add(rimColor.mul(pow(towardSun, 4).mul(0.16)));
-  const rimLight = rimColor.mul(rim.mul(saturate(sunDot.mul(0.7).add(0.35))))
-    .add(rimColor.mul(backLight.mul(rim.mul(0.8).add(0.2)).mul(silverStrength)))
-    .add(moonColor.mul(rim.mul(moonKey.add(pow(towardMoon, 4).mul(1.6))).mul(1.4)));
-  // Limb darkening on each puff's own facets outlines the heaps even when the sun is behind the viewer.
-  const limb = mix(float(0.84), float(1), smoothstep(0, 0.45, saturate(dot(normalWorld, viewRay.negate()))));
-  const cloudRadiance = bodyLight.mul(brightness).mul(limb).add(rimLight);
+  const { radiance: cloudRadiance, viewRay, cameraDistance } = createCloudRadiance(TSL, {
+    look, uniforms, shape: shapeData, centre: centreData, anchor: anchorPosition,
+  });
 
   // Haze toward the exact sky behind the cloud (the sky's own function), plus the per-cluster fade.
   const skyColorNode = ctx.systems.sky?.skyColorNode;
   const skyBehind = typeof skyColorNode === 'function'
     ? skyColorNode(viewRay)
     : mix(uniforms.fogColor, uniforms.skyZenithColor, smoothstep(0.03, 0.6, saturate(viewRay.y)));
-  const cameraDistance = length(positionView);
   const haze = max(smoothstep(hazeNear, hazeFar, cameraDistance).mul(HAZE_MAX), centreData.w);
   material.colorNode = mix(cloudRadiance, skyBehind, haze);
 
   // Screen-door dissolve close to the camera (keeps the material opaque and sort-free).
   material.maskNode = interleavedGradientNoise(screenCoordinate.xy).lessThan(smoothstep(NEAR_DISSOLVE_START, NEAR_DISSOLVE_END, cameraDistance));
 
-  /** Icosahedron puff with a gentle deterministic radial jitter (shared positions move together). */
-  function buildPuffGeometry() {
-    const geometry = new T.IcosahedronGeometry(1, 1);
-    const positions = geometry.getAttribute('position');
-    for (let index = 0; index < positions.count; index++) {
-      const x = positions.getX(index);
-      const y = positions.getY(index);
-      const z = positions.getZ(index);
-      const hashValue = world.hash2(Math.round(x * 1000 + z * 37), Math.round(y * 1000), 470);
-      const scale = 1 + PUFF_JITTER * (hashValue * 2 - 1);
-      positions.setXYZ(index, x * scale, y * scale, z * scale);
-    }
-    positions.needsUpdate = true;
-    geometry.computeVertexNormals();
-    geometry.computeBoundingSphere();
-    return geometry;
-  }
-
-  const mesh = new T.InstancedMesh(buildPuffGeometry(), material, CAPACITY);
+  const mesh = new T.InstancedMesh(buildCloudPuffGeometry(T, world.hash2), material, CAPACITY);
   mesh.name = 'clouds';
   mesh.instanceMatrix.setUsage(T.DynamicDrawUsage);
   mesh.count = 0;
@@ -822,63 +765,13 @@ export function createCloudSystem(ctx) {
     shadowStats.strength = strength;
   }
 
-  // ---- Look: cloud palette keyed by sun elevation (linear scene radiance) ------------------------
-  function paletteKeys(entries) {
-    return entries.map(([elevation, red, green, blue]) => ({ elevation, color: new T.Color().setRGB(red, green, blue) }));
-  }
-  // Shadow sides: cool blue-grey by day, lavender-slate at twilight, dim navy under the moon.
-  const SHADE_KEYS = paletteKeys([
-    [-18, 0.02, 0.024, 0.042],
-    [-9, 0.03, 0.034, 0.058],
-    [-3, 0.075, 0.07, 0.11],
-    [2, 0.14, 0.14, 0.19],
-    [8, 0.18, 0.2, 0.27],
-    [18, 0.29, 0.33, 0.41],
-    [35, 0.42, 0.47, 0.56],
-  ]);
-  const WHITE = new T.Color(1, 1, 1);
-  const MOONLIGHT = new T.Color(0.05, 0.06, 0.085);
-  const lookScratch = { warm: new T.Color(), color: new T.Color() };
-
-  function samplePalette(keys, elevation, target) {
-    if (elevation <= keys[0].elevation) return target.copy(keys[0].color);
-    for (let index = 1; index < keys.length; index++) {
-      const upper = keys[index];
-      if (elevation <= upper.elevation) {
-        const lower = keys[index - 1];
-        const t = MathUtils.smoothstep(elevation, lower.elevation, upper.elevation);
-        return target.copy(lower.color).lerp(upper.color, t);
-      }
-    }
-    return target.copy(keys[keys.length - 1].color);
-  }
+  // ---- Look: the shared cloud palette (cloudShading.js) and the in-cloud veil --------------------
+  const veilScratch = { color: new T.Color(), moon: new T.Color() };
+  const sky = ctx.systems.sky;
+  const readModifierLevels = typeof sky?.getModifierLevels === 'function' ? () => sky.getModifierLevels() : () => null;
 
   function updateLook(realDt) {
-    const time = state.time;
-    const elevation = time.sunElevation;
-    const sunVisibility = MathUtils.smoothstep(time.sunDirection.y, -0.03, 0.05);
-    const dayness = MathUtils.smoothstep(elevation, 10, 32);
-    const sunColor = uniforms.sunColor.value;
-    const peak = Math.max(sunColor.r, sunColor.g, sunColor.b, 1e-4);
-    // Sunlit tops: golden-white at golden hour, clean white by day.
-    lookScratch.warm.setRGB(sunColor.r / peak, sunColor.g / peak, sunColor.b / peak);
-    litColor.value.copy(lookScratch.warm).lerp(WHITE, 0.4 + 0.45 * dayness).multiplyScalar((LIT_GAIN - 0.18 * dayness) * sunVisibility);
-    samplePalette(SHADE_KEYS, elevation, shadeColor.value);
-    // A little of the sky's own tint in the shadow sides keeps them coherent with the dome.
-    shadeColor.value.lerp(lookScratch.color.copy(uniforms.skyZenithColor.value).multiplyScalar(0.9), 0.12);
-    // Warm light bounced up from the lit landscape under the flat bases.
-    bounceColor.value.copy(uniforms.skyHorizonColor.value).multiplyScalar(0.07 * (1 - time.nightFactor));
-    // Afterglow: around sunset and sunrise the undersides take the pink horizon light instead of
-    // turning slate grey, so twilight clouds read as lit cumulus rather than storm blobs.
-    const afterglow = MathUtils.smoothstep(elevation, -7, -2) * (1 - MathUtils.smoothstep(elevation, 2, 6));
-    if (afterglow > 0) {
-      shadeColor.value.lerp(lookScratch.color.copy(uniforms.skyHorizonColor.value).multiplyScalar(0.42), 0.5 * afterglow);
-      bounceColor.value.add(lookScratch.color.copy(uniforms.skyHorizonColor.value).multiplyScalar(0.1 * afterglow));
-    }
-    const moonAbove = MathUtils.smoothstep(time.moonDirection.y, 0, 0.12);
-    moonColor.value.copy(MOONLIGHT).multiplyScalar(time.nightFactor * moonAbove);
-    rimColor.value.copy(sunColor).multiplyScalar(0.3 + 0.85 * time.goldenFactor);
-    silverStrength.value = 1.1 + 0.9 * time.goldenFactor;
+    look.update(state, uniforms, readModifierLevels());
     hazeNear.value = Math.max(350, scene.fog.near * 0.9);
     hazeFar.value = VIEW_RANGE * 1.1;
 
@@ -888,8 +781,8 @@ export function createCloudSystem(ctx) {
     veil.visible = opacity > 0.004;
     veilOpacity.value = opacity;
     veilColor.value.copy(shadeColor.value).multiplyScalar(1.35)
-      .add(lookScratch.color.copy(litColor.value).multiplyScalar(0.35))
-      .add(lookScratch.warm.copy(moonColor.value).multiplyScalar(0.8));
+      .add(veilScratch.color.copy(litColor.value).multiplyScalar(0.35))
+      .add(veilScratch.moon.copy(moonColor.value).multiplyScalar(0.8));
   }
 
   function updateWind(elapsed) {

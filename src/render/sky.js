@@ -4,6 +4,11 @@ import { CONFIG } from '../core/config.js';
 import { DEG, clamp, damp } from '../core/util.js';
 import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation } from '../core/sun.js';
 
+/** Angular radius (rad) of the sun disc the dome draws; the celestial engine's eclipse moon matches it. */
+export const SUN_ANGULAR_RADIUS = 0.0175;
+/** The celestial pole the star field turns about (latitude 52 degrees north). */
+export const CELESTIAL_POLE_ELEVATION_DEG = 52;
+
 /**
  * SKY / ATMOSPHERE: owns the time of day and everything the sky does with it.
  * - Day cycle with a time warp (golden hours linger, nights pass quicker), presets and smooth transitions.
@@ -26,7 +31,6 @@ export function createSkySystem(ctx) {
   } = TSL;
 
   // ---- Tunables -----------------------------------------------------------------------------------
-  const SUN_ANGULAR_RADIUS = 0.0175;
   const MOON_ANGULAR_RADIUS = 0.024;
   const STAR_CELL_SCALE = 96;
   const AURORA_LAYERS = 20;
@@ -69,7 +73,7 @@ export function createSkySystem(ctx) {
   const WARP_GOLDEN_HIGH = 14;
   const WARP_EDGE = 4;
   const DEFAULT_TRANSITION_SECONDS = 2.5;
-  const CELESTIAL_POLE = new THREE.Vector3(0, Math.sin(52 * DEG), -Math.cos(52 * DEG)).normalize();
+  const CELESTIAL_POLE = new THREE.Vector3(0, Math.sin(CELESTIAL_POLE_ELEVATION_DEG * DEG), -Math.cos(CELESTIAL_POLE_ELEVATION_DEG * DEG)).normalize();
   const GALAXY_NORMAL = new THREE.Vector3(0.62, 0.31, -0.72).normalize();
   const AURORA_FILL = new THREE.Color(0x4fd6a8);
 
@@ -1120,6 +1124,15 @@ export function createSkySystem(ctx) {
       return fogAmount(offsetNode);
     },
     addModifier,
+    /**
+     * The live folded modifier record, for systems that follow the sky every frame (the cloud
+     * palette): { active, sunIntensity, ambient, fogDensity, darkness, stars, overcast, fogColor,
+     * fogColorAmount, skyTint, skyTintAmount }. Read only, and never kept: it changes every frame.
+     * When active is false every value is neutral.
+     */
+    getModifierLevels() {
+      return combined;
+    },
     /** The modifiers folded together as of the last frame, for the debugger and tests (a copy). */
     getModifierState() {
       return {

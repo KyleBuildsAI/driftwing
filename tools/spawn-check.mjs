@@ -441,7 +441,9 @@ async function main() {
     check('debugger', 'Nearest teleports next to the nearest site of that preset', Math.abs(controls.teleport.distance - 1800) < 60 && controls.teleport.agl > 200, JSON.stringify(controls.teleport));
     check('debugger', 'the scrubber sets the time of day', Math.abs(controls.dayTime - 0.5) < 0.002, String(controls.dayTime));
     check('debugger', 'the Wind arrows button toggles the WindField overlay', controls.overlay.after !== controls.overlay.before, JSON.stringify(controls.overlay));
-    check('debugger', 'engine stats list both test engines', controls.engineRows.length === 2 && controls.engineRows.every((row) => /^test(Marker|Wind) \|/.test(row)), controls.engineRows.join(' ; '));
+    // The real engines registered by main.js are listed too; the test kit adds exactly these two.
+    const testEngineRows = controls.engineRows.filter((row) => /^test(Marker|Wind) \|/.test(row));
+    check('debugger', 'engine stats list both test engines', testEngineRows.length === 2, controls.engineRows.join(' ; '));
     await page.keyboard.press('F9');
     await sleep(500);
     const closed = await evaluate(() => !document.querySelector('#dw-spawn-debugger.dw-open'));
