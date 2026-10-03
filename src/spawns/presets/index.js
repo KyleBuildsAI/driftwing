@@ -13,6 +13,7 @@ import thermalHawks from './thermalHawks.js';
 import fireflies from './fireflies.js';
 import eagleWingman from './eagleWingman.js';
 import windFarm from './windFarm.js';
+import ropeBridge from './ropeBridge.js';
 
 export const PRESETS = Object.freeze([
   // Batch 2: presets 11-20.
@@ -25,6 +26,7 @@ export const PRESETS = Object.freeze([
   fireflies,
   eagleWingman,
   windFarm,
+  ropeBridge,
 ]);
 
 /** Presets by id. */
