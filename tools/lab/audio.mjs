@@ -402,6 +402,8 @@ const RENDER_PLAN = Object.freeze({
   meteor: { intensity: 0.6, seconds: 6, triggers: [{ at: 1.2, name: 'streak' }, { at: 3, name: 'fireball' }] },
   lantern: { intensity: 1, seconds: 5 },
   discovery: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.2, name: 'chime' }] },
+  raptor: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.3, name: 'call' }, { at: 2.6, name: 'call', options: { strength: 0.8 } }] },
+  goose: { intensity: 1, seconds: 6, skip: 0.2, triggers: [{ at: 0.2, name: 'call' }] },
 });
 
 async function testRecipes(page, label) {
@@ -525,6 +527,8 @@ async function testLifecycle(page, label) {
       skyWhale: tools.trigger(ids[names.indexOf('skyWhale')], 'call'),
       thunder: tools.trigger(ids[names.indexOf('thunder')], 'strike', { intensity: 1 }),
       discovery: tools.trigger(ids[names.indexOf('discovery')], 'chime'),
+      raptor: tools.trigger(ids[names.indexOf('raptor')], 'call'),
+      goose: tools.trigger(ids[names.indexOf('goose')], 'call'),
       discoveryChime: audio().discoveryChime(),
       unknown: tools.trigger(ids[0], 'no-such-trigger'),
     };
