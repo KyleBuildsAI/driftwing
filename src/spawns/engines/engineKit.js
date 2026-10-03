@@ -5,12 +5,14 @@
 //   createHeadingFrame()         the local frame of a spawn: right, up and forward from its compass
 //                                heading, so params can say [right, up, forward] in metres
 //   createGroundGrid(terrain)    a coarse grid of ground heights (the water surface counts as ground)
-//                                around a centre, refreshed a few samples at a time
+//                                around a centre, sampled a few nodes at a time after it moves
 //   createPooledLight(lights)    one real light from the light pool with priority, revoke and a
 //                                throttled re-acquire; everything else stays emissive plus bloom
+//   createRangeList(capacity)    a fixed-capacity updateRanges list for buffers uploaded in part
+//                                every frame (three's own array reallocates after each upload)
 //
 // Nothing here allocates after construction: the frame update paths of the engines call only the
-// per-frame members (the grid's step and heightAt, the light's update).
+// per-frame members (the grid's step and sample, the light's update, the range list's add).
 
 /** A readable description of a param value for error messages. */
 function describe(value) {
@@ -119,16 +121,20 @@ export function createHeadingFrame() {
 
 /**
  * A size x size grid of ground heights (max of the ground and the water level) spanning span metres
- * around a centre. recenter(x, z) moves it; step(samples) refreshes that many nodes (round robin);
- * heightAt(x, z) interpolates bilinearly (clamped at the edges). fill() samples every node at once
- * (create time). The samples are what rationing is for: the terrain height function allocates a
- * little (worldgen's noise), so frame updates refresh only a few nodes each.
+ * around a centre. recenter(x, z) moves it; step(samples) samples that many of the nodes still stale
+ * since the last recenter (the terrain does not change, so a grid that stays put stops sampling);
+ * sample(point) interpolates bilinearly (clamped at the edges) from point[0] = x and point[1] = z
+ * into point[2], and heightAt(x, z) returns the same (it boxes its result: create time only).
+ * fill() samples every node at once (create time). The samples are what rationing is for: the
+ * terrain height function allocates (worldgen's noise), so frame updates sample only a few nodes.
  */
 export function createGroundGrid(terrain, { size = 8, span = 2000 } = {}) {
   const heights = new Float64Array(size * size);
   const origin = new Float64Array(2);
   const spacing = new Float64Array(1);
+  const lookup = new Float64Array(3);
   let cursor = 0;
+  let stale = size * size;
   let filled = false;
 
   function sampleNode(index) {
@@ -149,17 +155,21 @@ export function createGroundGrid(terrain, { size = 8, span = 2000 } = {}) {
       origin[0] = x - span / 2;
       origin[1] = z - span / 2;
       cursor = 0;
+      stale = heights.length;
     },
     /** Samples every node now. */
     fill() {
       for (let index = 0; index < heights.length; index++) sampleNode(index);
+      cursor = 0;
+      stale = 0;
       filled = true;
     },
-    /** Samples the next count nodes (round robin). */
+    /** Samples up to count of the nodes still stale since the last recenter (in order). */
     step(count) {
-      for (let sample = 0; sample < count; sample++) {
+      for (let sample = 0; sample < count && stale > 0; sample++) {
         sampleNode(cursor);
         cursor = (cursor + 1) % heights.length;
+        stale--;
       }
     },
     /** True when (x, z) lies more than share of the span away from the grid's middle. */
@@ -170,8 +180,14 @@ export function createGroundGrid(terrain, { size = 8, span = 2000 } = {}) {
       return Math.abs(x - middleX) > limit || Math.abs(z - middleZ) > limit;
     },
     heightAt(x, z) {
-      let gridX = (x - origin[0]) / spacing[0];
-      let gridZ = (z - origin[1]) / spacing[0];
+      lookup[0] = x;
+      lookup[1] = z;
+      grid.sample(lookup);
+      return lookup[2];
+    },
+    sample(point) {
+      let gridX = (point[0] - origin[0]) / spacing[0];
+      let gridZ = (point[1] - origin[1]) / spacing[0];
       gridX = gridX < 0 ? 0 : gridX > size - 1 ? size - 1 : gridX;
       gridZ = gridZ < 0 ? 0 : gridZ > size - 1 ? size - 1 : gridZ;
       const cellX = Math.min(size - 2, Math.floor(gridX));
@@ -181,7 +197,7 @@ export function createGroundGrid(terrain, { size = 8, span = 2000 } = {}) {
       const base = cellZ * size + cellX;
       const near = heights[base] + (heights[base + 1] - heights[base]) * fractionX;
       const far = heights[base + size] + (heights[base + size + 1] - heights[base + size]) * fractionX;
-      return near + (far - near) * fractionZ;
+      point[2] = near + (far - near) * fractionZ;
     },
   };
   grid.recenter(0, 0, span);
@@ -255,4 +271,29 @@ export function smoothstep(edge0, edge1, value) {
   const t = (value - edge0) / (edge1 - edge0);
   const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
   return clamped * clamped * (3 - 2 * clamped);
+}
+
+/**
+ * A fixed-capacity stand-in for a BufferAttribute's updateRanges array, for buffers the engines
+ * upload in part every frame. three's backends only read length and [index] from it and clear it
+ * with length = 0 after the upload; a real array gives up its backing store on that clear and makes
+ * a new one on the next push, an allocation per attribute per frame. This list keeps capacity range
+ * records and only moves its length: add(start, count) fills the next record.
+ */
+export function createRangeList(capacity) {
+  let length = 0;
+  const list = {
+    get length() { return length; },
+    set length(value) { length = value < 0 ? 0 : value > capacity ? capacity : value; },
+    add(start, count) {
+      if (length >= capacity) throw new RangeError(`createRangeList: more than ${capacity} ranges`);
+      const record = list[length];
+      record.start = start;
+      record.count = count;
+      length++;
+    },
+    capacity,
+  };
+  for (let index = 0; index < capacity; index++) list[index] = { start: 0, count: 0 };
+  return list;
 }

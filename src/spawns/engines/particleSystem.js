@@ -41,6 +41,7 @@
 // Zero allocations per frame: every table is a typed array or a pooled Vector4, update ranges are
 // pooled objects, and the frame path passes no doubles across non-inlined calls.
 import { createSlotAllocator } from '../pools.js';
+import { createRangeList } from './engineKit.js';
 
 export const PAGE_SIZE = 1024;
 export const PARAM_ROWS = 12;
@@ -106,10 +107,13 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
   const paramTable = uniformArray(paramVectors, 'vec4');
   const frameTable = uniformArray(frameVectors, 'vec4');
   const fieldTable = uniformArray(fieldVectors, 'vec4');
-  const clock = uniform(0);
-  const stepSeconds = uniform(0);
-  const fogNear = uniform(400);
-  const fogFar = uniform(2400);
+  // The per-frame scalars share one vec4 uniform: a Vector4 keeps its numbers in place, while a
+  // float uniform's value field boxes every new number written to it (an allocation per frame).
+  const frameValues = uniform(new THREE.Vector4(0, 0, 400, 2400));
+  const clock = frameValues.x;
+  const stepSeconds = frameValues.y;
+  const fogNear = frameValues.z;
+  const fogFar = frameValues.w;
   const rows = createSlotAllocator(maxEmitters);
   // The cloud look, refreshed every frame from the sky (updateLook).
   const look = {
@@ -117,9 +121,9 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
     shade: uniform(new THREE.Color(0.3, 0.33, 0.4)),
     moon: uniform(new THREE.Color(0, 0, 0)),
     rim: uniform(new THREE.Color(0, 0, 0)),
-    silver: uniform(1),
+    /** x: the silver lining's strength (a vec4 for the same reason as frameValues). */
+    silver: uniform(new THREE.Vector4(1, 0, 0, 0)),
   };
-  const lookScratch = new THREE.Color();
 
   /** The cloud look for the sky's current state (the formulas of clouds.js updateLook). */
   function updateLook(time) {
@@ -128,23 +132,49 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
     const dayness = smoothRange(10, 32, elevation);
     const sunColor = uniforms.sunColor.value;
     const peak = Math.max(sunColor.r, sunColor.g, sunColor.b, 1e-4);
-    const lit = look.lit.value.setRGB(sunColor.r / peak, sunColor.g / peak, sunColor.b / peak);
+    // Components are assigned directly: Color's setters take their numbers as call arguments,
+    // which V8 boxes when it does not inline them (an allocation per channel per frame).
+    const lit = look.lit.value;
     const whiten = 0.4 + 0.45 * dayness;
-    lit.setRGB(lit.r + (1 - lit.r) * whiten, lit.g + (1 - lit.g) * whiten, lit.b + (1 - lit.b) * whiten).multiplyScalar((LIT_GAIN - 0.18 * dayness) * sunVisibility);
+    const litGain = (LIT_GAIN - 0.18 * dayness) * sunVisibility;
+    const litR = sunColor.r / peak;
+    const litG = sunColor.g / peak;
+    const litB = sunColor.b / peak;
+    lit.r = (litR + (1 - litR) * whiten) * litGain;
+    lit.g = (litG + (1 - litG) * whiten) * litGain;
+    lit.b = (litB + (1 - litB) * whiten) * litGain;
     const shade = look.shade.value;
     let key = 0;
     while (key < SHADE_KEYS.length - 1 && elevation > SHADE_KEYS[key + 1][0]) key++;
     const lower = SHADE_KEYS[key];
     const upper = SHADE_KEYS[Math.min(key + 1, SHADE_KEYS.length - 1)];
     const blend = upper === lower ? 0 : Math.min(1, Math.max(0, (elevation - lower[0]) / (upper[0] - lower[0])));
-    shade.setRGB(lower[1] + (upper[1] - lower[1]) * blend, lower[2] + (upper[2] - lower[2]) * blend, lower[3] + (upper[3] - lower[3]) * blend);
-    shade.lerp(lookScratch.copy(uniforms.skyZenithColor.value).multiplyScalar(0.9), 0.12);
+    const zenith = uniforms.skyZenithColor.value;
+    shade.r = lower[1] + (upper[1] - lower[1]) * blend;
+    shade.g = lower[2] + (upper[2] - lower[2]) * blend;
+    shade.b = lower[3] + (upper[3] - lower[3]) * blend;
+    shade.r += (zenith.r * 0.9 - shade.r) * 0.12;
+    shade.g += (zenith.g * 0.9 - shade.g) * 0.12;
+    shade.b += (zenith.b * 0.9 - shade.b) * 0.12;
     const afterglow = smoothRange(-7, -2, elevation) * (1 - smoothRange(2, 6, elevation));
-    if (afterglow > 0) shade.lerp(lookScratch.copy(uniforms.skyHorizonColor.value).multiplyScalar(0.42), 0.5 * afterglow);
-    const moonAbove = smoothRange(0, 0.12, time.moonDirection.y);
-    look.moon.value.setRGB(MOONLIGHT[0], MOONLIGHT[1], MOONLIGHT[2]).multiplyScalar(time.nightFactor * moonAbove);
-    look.rim.value.copy(sunColor).multiplyScalar(0.3 + 0.85 * time.goldenFactor);
-    look.silver.value = 1.1 + 0.9 * time.goldenFactor;
+    if (afterglow > 0) {
+      const horizon = uniforms.skyHorizonColor.value;
+      const mixAmount = 0.5 * afterglow;
+      shade.r += (horizon.r * 0.42 - shade.r) * mixAmount;
+      shade.g += (horizon.g * 0.42 - shade.g) * mixAmount;
+      shade.b += (horizon.b * 0.42 - shade.b) * mixAmount;
+    }
+    const moonLevel = time.nightFactor * smoothRange(0, 0.12, time.moonDirection.y);
+    const moon = look.moon.value;
+    moon.r = MOONLIGHT[0] * moonLevel;
+    moon.g = MOONLIGHT[1] * moonLevel;
+    moon.b = MOONLIGHT[2] * moonLevel;
+    const rimLevel = 0.3 + 0.85 * time.goldenFactor;
+    const rim = look.rim.value;
+    rim.r = sunColor.r * rimLevel;
+    rim.g = sunColor.g * rimLevel;
+    rim.b = sunColor.b * rimLevel;
+    look.silver.value.x = 1.1 + 0.9 * time.goldenFactor;
   }
 
   const param = (row, index) => paramTable.element(row.mul(PARAM_ROWS).add(index));
@@ -203,6 +233,7 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
     const capacity = pageCount * PAGE_SIZE;
     const chunkCount = capacity / CHUNK_SLOTS;
     const birthAttributes = [createBirthAttribute(capacity), createBirthAttribute(capacity), createBirthAttribute(capacity)];
+    for (const attribute of birthAttributes) attribute.updateRanges = createRangeList(MAX_RANGES);
     const birthA = birthAttributes[0].array;
     const birthB = birthAttributes[1].array;
     const birthC = birthAttributes[2].array;
@@ -265,9 +296,10 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
       }
       for (let index = 0; index < 3; index++) {
         const attribute = birthAttributes[index];
-        attribute.updateRanges.length = 0;
+        const list = attribute.updateRanges;
+        list.length = 0;
         // Too many scattered chunks: the whole buffer goes (no ranges means a whole upload).
-        if (rangeCount <= MAX_RANGES) for (let range = 0; range < rangeCount; range++) attribute.updateRanges.push(ranges[range]);
+        if (rangeCount <= MAX_RANGES) for (let range = 0; range < rangeCount; range++) list.add(ranges[range].start, ranges[range].count);
         attribute.needsUpdate = true;
       }
       flags.pending = rangeCount > 0;
@@ -285,21 +317,25 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
       birthA,
       birthB,
       birthC,
-      /** Writes one particle's birth records into slot. Positions are relative to its row's origin. */
-      write(slot, x, y, z, birthTime, vx, vy, vz, life, row, seed, sizeScale, brightness) {
+      /**
+       * Writes one particle's birth records into slot from birth, a Float64Array of 12: x, y, z
+       * (relative to its row's origin), birth time, vx, vy, vz, life, row, seed, size scale and
+       * brightness. One typed array rather than twelve arguments, so no number is boxed per particle.
+       */
+      writeBirth(slot, birth) {
         const offset = slot * 4;
-        birthA[offset] = x;
-        birthA[offset + 1] = y;
-        birthA[offset + 2] = z;
-        birthA[offset + 3] = birthTime;
-        birthB[offset] = vx;
-        birthB[offset + 1] = vy;
-        birthB[offset + 2] = vz;
-        birthB[offset + 3] = life;
-        birthC[offset] = row;
-        birthC[offset + 1] = seed;
-        birthC[offset + 2] = sizeScale;
-        birthC[offset + 3] = brightness;
+        birthA[offset] = birth[0];
+        birthA[offset + 1] = birth[1];
+        birthA[offset + 2] = birth[2];
+        birthA[offset + 3] = birth[3];
+        birthB[offset] = birth[4];
+        birthB[offset + 1] = birth[5];
+        birthB[offset + 2] = birth[6];
+        birthB[offset + 3] = birth[7];
+        birthC[offset] = birth[8];
+        birthC[offset + 1] = birth[9];
+        birthC[offset + 2] = birth[10];
+        birthC[offset + 3] = birth[11];
         markChunk(slot);
       },
       /** Ends a slot's particle at once (its life becomes 0). */
@@ -591,7 +627,7 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
         .add(look.moon.mul(skyTerm.mul(0.5).add(0.5)))
         .add(vGlow.mul(float(1).sub(skyTerm).mul(0.7).add(0.3)));
       const toward = vToward;
-      const back = look.rim.mul(pow(toward, 4).mul(0.16).add(edge.mul(pow(toward, 3).mul(0.45).add(pow(toward, 16).mul(0.9))).mul(look.silver)));
+      const back = look.rim.mul(pow(toward, 4).mul(0.16).add(edge.mul(pow(toward, 3).mul(0.45).add(pow(toward, 16).mul(0.9))).mul(look.silver.x)));
       const unlit = vAlbedo.add(vAlbedo.mul(vGlow));
       return mix(unlit, vAlbedo.mul(body.add(back)), vLight.w).mul(shape.y).add(vEmit.mul(shape.y));
     })();
@@ -625,15 +661,19 @@ export function createParticleSystem({ THREE, TSL, scene, backend, uniforms, sky
     /**
      * Once per frame after the emitters wrote: moves the meshes to the camera, flushes the uploads,
      * draws up to the pages in use, advances the clock and, on WebGPU, runs the integration kernels.
+     * step[0] is the frame's simulation step (s), in a typed array so the number is not boxed; time is
+     * the sky's time state (elapsed, sun, moon, night and golden factors).
      */
-    update(renderer, camera, dt, time, fog, skyTime) {
-      clock.value = time;
-      updateLook(skyTime);
-      stepSeconds.value = dt;
+    update(renderer, camera, step, fog, time) {
+      const dt = step[0];
+      const values = frameValues.value;
+      values.x = time.elapsed;
+      values.y = dt;
       if (fog) {
-        fogNear.value = fog.near;
-        fogFar.value = fog.far;
+        values.z = fog.near;
+        values.w = fog.far;
       }
+      updateLook(time);
       for (let index = 0; index < poolList.length; index++) {
         const pool = poolList[index];
         // The meshes sit at the camera: the frame table holds every row's origin relative to it.

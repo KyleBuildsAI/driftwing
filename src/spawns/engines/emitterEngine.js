@@ -39,12 +39,22 @@ const POOL_PAGES = Object.freeze({ alpha: 80, additive: 24 });
 export const MAX_PARTICLES_PER_EMITTER = 32768;
 /** Particles one emitter may emit in one frame (a long stall must not flood a pool). */
 const MAX_EMIT_PER_FRAME = 4096;
-/** WindField probes per frame across every emitter's wind grid. */
-const FIELD_PROBES_PER_FRAME = 12;
+/**
+ * WindField probes per frame across every emitter's wind grid. A probe costs the WindField's terrain
+ * lookups (worldgen's noise allocates), and the nodes ease over FIELD_EASE_SECONDS anyway: 16 full
+ * grids refresh every 3.2 s.
+ */
+const FIELD_PROBES_PER_FRAME = 4;
 /** Seconds over which a grid node eases to a new wind sample. */
 const FIELD_EASE_SECONDS = 4;
-/** Ground samples per frame for an emitter's spawn grid (hugGround) after it moved. */
+/** Ground samples per frame for an emitter's spawn grid (hugGround) while it is stale after a move. */
 const GROUND_SAMPLES_PER_FRAME = 4;
+/** Random numbers one emitted particle draws (the slot layout is in emit()). */
+const RANDOMS_PER_PARTICLE = 12;
+/** Particles per random batch: emit() refills its random numbers this many particles at a time. */
+const RANDOM_BATCH_PARTICLES = 256;
+/** Numbers in one particle's birth record (particleSystem.js writeBirth). */
+const BIRTH_FIELDS = 12;
 const GRAVITY = 9.81;
 const DEG = Math.PI / 180;
 /** Engine drag floor (1/s): the closed form divides by it. */
@@ -307,6 +317,24 @@ export function resolveEmitterConfig(preset, params) {
 }
 
 /** Creates the emitter engine (see the file header). */
+/**
+ * Fills out[0..count) with numbers in [0, 1) from a mulberry32 generator whose state is state[0] (a
+ * Uint32Array seeded from the spawn's rng). The numbers land in a typed array rather than coming
+ * back one call at a time, because V8 boxes a double returned from a call it does not inline: that
+ * would be an allocation per random number, thousands per second.
+ */
+function fillRandoms(state, out, count) {
+  let value = state[0];
+  for (let index = 0; index < count; index++) {
+    value = (value + 0x6d2b79f5) >>> 0;
+    let mixed = value;
+    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    out[index] = ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  }
+  state[0] = value;
+}
+
 export function createEmitterEngine() {
   let ctx = null;
   let system = null;
@@ -317,15 +345,27 @@ export function createEmitterEngine() {
   let scratchColor = null;
   let probePoint = null;
   let probeResult = null;
+  /** The current random batch of emit(): RANDOMS_PER_PARTICLE numbers per particle. */
+  const randoms = new Float64Array(RANDOMS_PER_PARTICLE * RANDOM_BATCH_PARTICLES);
+  /** One particle's birth record on its way to the pool. */
+  const birth = new Float64Array(BIRTH_FIELDS);
+  /** A ground lookup: [x, z] in, the ground height out in [2]. */
+  const groundPoint = new Float64Array(3);
+  /**
+   * The current update's step (s) and emit()'s span (s) and speed scale: numbers handed to the
+   * helpers through typed arrays, because V8 boxes a double passed to a call it does not inline.
+   */
+  const frameDt = new Float64Array(1);
+  const emitArgs = new Float64Array(2);
   /** Live instances in creation order (the field budget's round robin). */
   const live = [];
 
   // ---- Per-frame engine work ----------------------------------------------------------------------
   /** The frame's shared work, run by the first instance update of each frame. */
-  function frameStep(dt) {
+  function frameStep() {
     if (ctx.state.frame === lastFrame) return;
     lastFrame = ctx.state.frame;
-    system.update(ctx.renderer, ctx.camera, dt, ctx.time.elapsed, ctx.scene.fog, ctx.time);
+    system.update(ctx.renderer, ctx.camera, frameDt, ctx.scene.fog, ctx.time);
     refreshFields();
   }
 
@@ -368,7 +408,8 @@ export function createEmitterEngine() {
       origin[2] + placement[2] + iz * placement[3],
     );
     const now = ctx.time.elapsed;
-    ctx.wind.probe(probePoint, now, probeResult);
+    // The WindField's own clock is the same elapsed time (passing it would box it).
+    ctx.wind.probe(probePoint, undefined, probeResult);
     const since = now - data.fieldSampled[node];
     const ease = data.fieldSampled[node] < 0 ? 1 : 1 - Math.exp(-Math.max(0, since) / FIELD_EASE_SECONDS);
     data.fieldSampled[node] = now;
@@ -443,14 +484,15 @@ export function createEmitterEngine() {
   // ---- Emission -----------------------------------------------------------------------------------
   /**
    * Writes a random direction within the emitter's cone around its axis (world, unit) into
-   * data.emitScratch[3..5]. The axis is data.axis (world, unit).
+   * data.emitScratch[3..5], from the two random numbers at randoms[first]. The axis is data.axis
+   * (world, unit).
    */
-  function coneDirection(data, rng) {
+  function coneDirection(data, first) {
     const axis = data.axis;
     const spread = data.config.spread;
-    const cosine = 1 - rng() * (1 - Math.cos(spread));
+    const cosine = 1 - randoms[first] * (1 - Math.cos(spread));
     const sine = Math.sqrt(Math.max(0, 1 - cosine * cosine));
-    const angle = rng() * Math.PI * 2;
+    const angle = randoms[first + 1] * Math.PI * 2;
     // Two unit vectors perpendicular to the axis.
     let ux;
     let uy;
@@ -479,20 +521,26 @@ export function createEmitterEngine() {
     out[5] = axis[2] * cosine + uz * cosAngle + wz * sinAngle;
   }
 
-  /** A random point of the emitter's shape in its local frame (right, up, forward) into emitScratch[0..2]. */
-  function shapePoint(data, rng) {
+  /**
+   * A random point of the emitter's shape in its local frame (right, up, forward) into
+   * emitScratch[0..2], from the three random numbers at randoms[first].
+   */
+  function shapePoint(data, first) {
     const shape = data.config.shape;
     const out = data.emitScratch;
+    const randomA = randoms[first];
+    const randomB = randoms[first + 1];
+    const randomC = randoms[first + 2];
     out[0] = 0;
     out[1] = 0;
     out[2] = 0;
     switch (shape.type) {
       case 1: {
         // sphere: uniform in the volume, or on the surface
-        const cosine = rng() * 2 - 1;
+        const cosine = randomA * 2 - 1;
         const sine = Math.sqrt(1 - cosine * cosine);
-        const angle = rng() * Math.PI * 2;
-        const radius = shape.radius * (shape.surface ? 1 : Math.cbrt(rng()));
+        const angle = randomB * Math.PI * 2;
+        const radius = shape.radius * (shape.surface ? 1 : Math.cbrt(randomC));
         out[0] = Math.cos(angle) * sine * radius;
         out[1] = cosine * radius;
         out[2] = Math.sin(angle) * sine * radius;
@@ -502,22 +550,22 @@ export function createEmitterEngine() {
       case 3: {
         // disc and ring: uniform over the annulus, up to height above it
         const inner = shape.innerRadius;
-        const radius = Math.sqrt(inner * inner + rng() * (shape.radius * shape.radius - inner * inner));
-        const angle = rng() * Math.PI * 2;
+        const radius = Math.sqrt(inner * inner + randomA * (shape.radius * shape.radius - inner * inner));
+        const angle = randomB * Math.PI * 2;
         out[0] = Math.cos(angle) * radius;
-        out[1] = rng() * shape.height;
+        out[1] = randomC * shape.height;
         out[2] = Math.sin(angle) * radius;
         break;
       }
       case 4:
-        out[0] = (rng() - 0.5) * shape.size[0];
-        out[1] = (rng() - 0.5) * shape.size[1];
-        out[2] = (rng() - 0.5) * shape.size[2];
+        out[0] = (randomA - 0.5) * shape.size[0];
+        out[1] = (randomB - 0.5) * shape.size[1];
+        out[2] = (randomC - 0.5) * shape.size[2];
         break;
       case 5:
         // line: across the emitter (right), up to height above it
-        out[0] = (rng() - 0.5) * shape.length;
-        out[1] = rng() * shape.height;
+        out[0] = (randomA - 0.5) * shape.length;
+        out[1] = randomB * shape.height;
         break;
       default:
         break;
@@ -562,12 +610,18 @@ export function createEmitterEngine() {
    * Emits count particles born over the last span seconds (spread evenly, the newest now). With
    * alongPath they leave from along the emission point's path since the previous frame (a moving
    * emitter draws a continuous stream); without it from the point itself (a warm start). speedScale
-   * scales the launch speed (bursts).
+   * scales the launch speed (bursts). span and speedScale come in emitArgs[0] and emitArgs[1].
+   *
+   * Each particle reads RANDOMS_PER_PARTICLE numbers of the batch from its first slot: 0-2 the shape
+   * point, 3 the speed, 4-5 the cone direction, 6 the radial fallback angle, 7 the size jitter, 8 the
+   * brightness, 9 the life, 10 the seed. The birth record goes to the pool through one typed array,
+   * so nothing in the loop boxes a number.
    */
-  function emit(data, count, span, speedScale, alongPath) {
+  function emit(data, count, alongPath) {
+    const span = emitArgs[0];
+    const speedScale = emitArgs[1];
     const config = data.config;
     const pool = data.pool;
-    const rng = data.rng;
     const frame = data.heading;
     const out = data.emitScratch;
     const origin = data.frameOrigin;
@@ -575,13 +629,23 @@ export function createEmitterEngine() {
     const previous = data.previousPoint;
     const now = ctx.time.elapsed;
     const lifeLow = config.life[0];
-    const lifeHigh = config.life[1];
+    const lifeSpan = config.life[1] - lifeLow;
+    const speedLow = config.speed[0];
+    const speedSpan = config.speed[1] - speedLow;
     const sizeScale = data.sizeScale[0];
+    let batchLeft = 0;
+    let first = 0;
     for (let index = 0; index < count; index++) {
+      if (batchLeft === 0) {
+        batchLeft = Math.min(RANDOM_BATCH_PARTICLES, count - index);
+        fillRandoms(data.randomState, randoms, batchLeft * RANDOMS_PER_PARTICLE);
+        first = 0;
+      }
+      batchLeft--;
       const along = (index + 1) / count;
       const back = (1 - along) * span;
       const path = alongPath ? along : 1;
-      shapePoint(data, rng);
+      shapePoint(data, first);
       const localRight = out[0] + config.offset[0];
       const localUp = out[1] + config.offset[1];
       const localForward = out[2] + config.offset[2];
@@ -591,12 +655,17 @@ export function createEmitterEngine() {
       const x = baseX + localRight * frame.rightX + localForward * frame.forwardX;
       const z = baseZ + localRight * frame.rightZ + localForward * frame.forwardZ;
       let y = baseY + localUp;
-      if (config.hugGround) y = data.spawnGround.heightAt(x, z) + localUp;
+      if (config.hugGround) {
+        groundPoint[0] = x;
+        groundPoint[1] = z;
+        data.spawnGround.sample(groundPoint);
+        y = groundPoint[2] + localUp;
+      }
       // Launch velocity: the cone around the axis (or radial), plus radial and swirl, plus inheritance.
       let vx;
       let vy;
       let vz;
-      const speed = randomIn(rng, config.speed[0], config.speed[1]) * speedScale;
+      const speed = (speedLow + speedSpan * randoms[first + 3]) * speedScale;
       if (config.directionMode === 1) {
         const offsetX = x - baseX;
         const offsetY = y - baseY;
@@ -612,7 +681,7 @@ export function createEmitterEngine() {
           data.axis[2] = 0;
         }
       }
-      coneDirection(data, rng);
+      coneDirection(data, first + 4);
       vx = out[3] * speed;
       vy = out[4] * speed;
       vz = out[5] * speed;
@@ -621,7 +690,7 @@ export function createEmitterEngine() {
         let horizontalZ = z - baseZ;
         let length = Math.sqrt(horizontalX * horizontalX + horizontalZ * horizontalZ);
         if (length < 1e-3) {
-          const angle = rng() * Math.PI * 2;
+          const angle = randoms[first + 6] * Math.PI * 2;
           horizontalX = Math.cos(angle);
           horizontalZ = Math.sin(angle);
           length = 1;
@@ -638,21 +707,28 @@ export function createEmitterEngine() {
       }
       const slot = data.pages[Math.floor(data.ring / PAGE_SIZE)] * PAGE_SIZE + (data.ring % PAGE_SIZE);
       data.ring = (data.ring + 1) % data.capacity;
-      const jitter = 1 + config.sizeJitter * (rng() * 2 - 1);
-      const brightness = 1 + config.brightnessJitter * (rng() * 2 - 1);
-      pool.write(
-        slot,
-        x - origin[0], y - origin[1], z - origin[2], now - back,
-        vx, vy, vz, randomIn(rng, lifeLow, lifeHigh),
-        data.row, rng(), jitter * sizeScale, brightness,
-      );
+      birth[0] = x - origin[0];
+      birth[1] = y - origin[1];
+      birth[2] = z - origin[2];
+      birth[3] = now - back;
+      birth[4] = vx;
+      birth[5] = vy;
+      birth[6] = vz;
+      birth[7] = lifeLow + lifeSpan * randoms[first + 9];
+      birth[8] = data.row;
+      birth[9] = randoms[first + 10];
+      birth[10] = (1 + config.sizeJitter * (randoms[first + 7] * 2 - 1)) * sizeScale;
+      birth[11] = 1 + config.brightnessJitter * (randoms[first + 8] * 2 - 1);
+      pool.writeBirth(slot, birth);
+      first += RANDOMS_PER_PARTICLE;
     }
     data.emitted += count;
   }
 
   // ---- Schedule, pulse and the end of an event -----------------------------------------------------
-  /** Advances the seeded eruption schedule by dt; returns its envelope (0..1) in data.levels[1]. */
-  function advanceSchedule(data, dt) {
+  /** Advances the seeded eruption schedule by the frame's step; returns its envelope (0..1) in data.levels[1]. */
+  function advanceSchedule(data) {
+    const dt = frameDt[0];
     const schedule = data.config.schedule;
     const levels = data.levels;
     if (!schedule) {
@@ -778,7 +854,8 @@ export function createEmitterEngine() {
   }
 
   // ---- Immersion (inside the plume) -----------------------------------------------------------------
-  function updateImmersion(data, dt) {
+  function updateImmersion(data) {
+    const dt = frameDt[0];
     const immersion = data.config.immersion;
     const camera = ctx.camera.position;
     const dx = camera.x - data.point[0];
@@ -791,8 +868,9 @@ export function createEmitterEngine() {
     const eased = data.immersionWeight[0] + (target - data.immersionWeight[0]) * (1 - Math.exp(-dt * 1.5));
     if (Math.abs(eased - data.immersionWeight[0]) < 1e-4 && !(target === 0 && eased > 0 && eased < 1e-3)) return;
     data.immersionWeight[0] = eased < 1e-3 && target === 0 ? 0 : eased;
-    data.immersionValues.weight = data.immersionWeight[0];
-    data.immersion.set(data.immersionValues);
+    // Only the weight changes after create: the colour and densities were set once.
+    data.immersionWeightValues.weight = data.immersionWeight[0];
+    data.immersion.set(data.immersionWeightValues);
   }
 
   // ---- Engine interface ----------------------------------------------------------------------------
@@ -849,6 +927,8 @@ export function createEmitterEngine() {
         capacity,
         ring: 0,
         rng,
+        /** The per-particle generator's state (fillRandoms), seeded from the spawn's rng. */
+        randomState: new Uint32Array([Math.floor(rng() * 4294967296)]),
         heading,
         tier: 'near',
         share: new Float64Array([1]),
@@ -892,6 +972,7 @@ export function createEmitterEngine() {
         immersion: null,
         immersionWeight: new Float64Array(1),
         immersionValues: null,
+        immersionWeightValues: { weight: 0 },
         ending: false,
       };
       data.scheduleState[0] = config.schedule && config.schedule.startActive ? 2 : 0;
@@ -946,7 +1027,8 @@ export function createEmitterEngine() {
       return instance;
     },
     update(instance, dt, engineCtx) {
-      frameStep(dt);
+      frameDt[0] = dt;
+      frameStep();
       const data = instance.data;
       const config = data.config;
       const anchor = instance.anchor;
@@ -999,7 +1081,7 @@ export function createEmitterEngine() {
       // Emission level: base (or dormant), schedule, pulse, the end of the event.
       const levels = data.levels;
       if (dt > 0) data.age[0] += dt;
-      advanceSchedule(data, dt);
+      advanceSchedule(data);
       const base = instance.active === false ? config.inactiveIntensity : config.intensity;
       let level = base * levels[1];
       if (config.pulse) {
@@ -1027,7 +1109,9 @@ export function createEmitterEngine() {
         const settled = Math.min(data.capacity * share, config.rate * level * share * config.lifeMax);
         if (settled >= 1) {
           refreshAxis(data);
-          emit(data, Math.floor(settled), config.lifeMax, 1, false);
+          emitArgs[0] = config.lifeMax;
+          emitArgs[1] = 1;
+          emit(data, Math.floor(settled), false);
         }
       }
       if (dt > 0 && data.capacity > 0 && share > 0) {
@@ -1038,7 +1122,11 @@ export function createEmitterEngine() {
         data.debt[0] -= count;
         if (count > MAX_EMIT_PER_FRAME) count = MAX_EMIT_PER_FRAME;
         refreshAxis(data);
-        if (count > 0) emit(data, count, dt, 1, true);
+        if (count > 0) {
+          emitArgs[0] = dt;
+          emitArgs[1] = 1;
+          emit(data, count, true);
+        }
         if (config.bursts) {
           data.burstTimer[0] -= dt;
           if (data.burstTimer[0] <= 0) {
@@ -1047,7 +1135,9 @@ export function createEmitterEngine() {
             if (level >= bursts.minLevel) {
               const burstCount = Math.min(MAX_EMIT_PER_FRAME, Math.max(1, Math.round(randomIn(data.rng, bursts.count[0], bursts.count[1]) * share)));
               refreshAxis(data);
-              emit(data, burstCount, 0, bursts.speedScale, true);
+              emitArgs[0] = 0;
+              emitArgs[1] = bursts.speedScale;
+              emit(data, burstCount, true);
               if (data.voice && config.soundTriggers.burst) {
                 data.triggerOptions.strength = Math.min(1, 0.4 + 0.6 * level);
                 data.triggerOptions.intensity = data.triggerOptions.strength;
@@ -1113,7 +1203,7 @@ export function createEmitterEngine() {
         data.voice.setIntensity(level);
       }
       if (data.windActive || (config.windSource && data.tier !== 'far')) followWindSource(data);
-      if (data.immersion) updateImmersion(data, dt);
+      if (data.immersion) updateImmersion(data);
       instance.particles = Math.round(data.capacity * share);
     },
     setLOD(instance, tier) {
