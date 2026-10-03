@@ -9,13 +9,17 @@
 //      stepped by hand at FRAME_MS (window.DRIFTWING.debug), so frame times, the physics clock and
 //      every per-frame counter are the same in both runs whatever the machine is doing;
 //   2. fixes everything the director reads that would otherwise depend on the loading frames: the time
-//      of day (held at PATH_DAY_TIME), the perf governor's frame time (perf.simulateLoad, a steady
-//      8 ms, so the director's frame-miss deferral never fires), the quality level, the craft (the bush
-//      plane, at 100 % assists, in the chase view), and the flight clock, which jumps to
-//      PATH_START_SECONDS so the regional weather, the director's ticks and its log times line up;
-//   3. puts the craft at the spawn, PATH_AGL above the ground, on the autopilot, and restarts the
-//      spawns (spawns.debug.restartSpawns: every spawn ended, the SpawnManager's discoveries, site
-//      sweep and visibility rotation reset, a new director on the current clock);
+//      of day (held with the sun PATH_SUN_ELEVATION degrees up), the perf governor's frame time
+//      (perf.simulateLoad, a steady 8 ms, so the director's frame-miss deferral never fires), the
+//      quality level, the craft (the bush plane, at 100 % assists, in the chase view), and the flight
+//      clock, which jumps to PATH_START_SECONDS so the regional weather, the director's ticks and its
+//      log times line up. One frame is stepped at the new clock, so every value a system derives from
+//      the clock for the next frame (the wind strength the clouds set) is the same in both runs;
+//   3. restarts the spawns (spawns.debug.restartSpawns: every spawn ended, the SpawnManager's
+//      discoveries, site sweep and visibility rotation reset, a new director on the current clock),
+//      then puts the craft at the spawn on the autopilot, PATH_CLEARANCE above the highest ground
+//      within reach of the path (a strike would end in a soft crash and a relaunch, which is not
+//      the scripted path);
 //   4. flies PATH_SECONDS of the scripted path (autopilot heading changes at fixed path times),
 //      recording the director's activation log and its running hash, every spawnActivated, spawnEnded
 //      and discovery with its frame, and a digest of the craft's position every second;
@@ -48,11 +52,16 @@ const FRAME_MS = 1000 / 30;
 const FRAMES_PER_BATCH = 15;
 /** The flight clock (s) the scripted path starts at, in both runs. */
 const PATH_START_SECONDS = 1200;
-const PATH_SECONDS = 300;
+const PATH_SECONDS = 480;
 /** Held time of day: mid-morning, the sun 40 degrees up. */
 const PATH_SUN_ELEVATION = 40;
-/** Above the Phase 1 landmarks' discovery reach (200-260 m), so only spawns are discovered on the path. */
-const PATH_AGL = 600;
+/**
+ * The autopilot holds this much above the highest ground within PATH_REACH of the spawn, so the path
+ * never meets the terrain and stays above the Phase 1 landmarks' discovery reach (200-260 m).
+ */
+const PATH_CLEARANCE = 450;
+const PATH_REACH = 27000;
+const PATH_GROUND_STEP = 400;
 const PATH_SPEED = 55;
 const PATH_CRAFT = 'bushplane';
 /** Autopilot heading changes (degrees from the start heading) at path times (s). */
@@ -60,9 +69,11 @@ const PATH_TURNS = Object.freeze([
   Object.freeze({ at: 70, heading: 35 }),
   Object.freeze({ at: 150, heading: -40 }),
   Object.freeze({ at: 230, heading: 10 }),
+  Object.freeze({ at: 320, heading: 75 }),
+  Object.freeze({ at: 410, heading: -15 }),
 ]);
 const SITE_RADIUS = 40000;
-const MIN_ACTIVATIONS = 2;
+const MIN_ACTIVATIONS = 3;
 const MAX_LISTED_EVENTS = 400;
 const SIMULATED_FRAME_MS = 8;
 
@@ -186,6 +197,7 @@ function createDeterminismSystem(ctx, { capture, session }) {
       logDifference: logDifference === -1 ? null : { index: logDifference, first: first.log[logDifference] ?? null, second: second.log[logDifference] ?? null },
       spawnEvents: eventDifference === -1,
       spawnEventDifference: eventDifference === -1 ? null : { index: eventDifference, first: first.spawnEvents[eventDifference] ?? null, second: second.spawnEvents[eventDifference] ?? null },
+      startPose: JSON.stringify(first.startPose) === JSON.stringify(second.startPose),
       path: pathDifference === -1,
       pathDifference: pathDifference === -1 ? null : { second: pathDifference, first: first.pathSamples[pathDifference] ?? null, secondRun: second.pathSamples[pathDifference] ?? null },
     };
@@ -267,7 +279,8 @@ function createDeterminismSystem(ctx, { capture, session }) {
         pathStartSeconds: PATH_START_SECONDS,
         sunElevation: PATH_SUN_ELEVATION,
         craft: PATH_CRAFT,
-        aglM: PATH_AGL,
+        clearanceM: PATH_CLEARANCE,
+        reachM: PATH_REACH,
         speed: PATH_SPEED,
         turns: PATH_TURNS,
         siteRadius: SITE_RADIUS,
@@ -305,12 +318,30 @@ function createDeterminismSystem(ctx, { capture, session }) {
     if (ctx.systems.flight.getCraft() !== PATH_CRAFT) throw new Error(`asked for the ${PATH_CRAFT}, flying ${ctx.systems.flight.getCraft()}`);
   }
 
-  /** Puts the craft at the start of the path on the autopilot. */
-  function placeCraft() {
+  /** The path's altitude (m above sea level): PATH_CLEARANCE above the highest ground within PATH_REACH. */
+  function pathAltitude() {
     const spawn = state.spawn;
-    const ground = Math.max(world.groundHeight(spawn.x, spawn.z), world.WATER_LEVEL);
-    if (!ctx.systems.flight.resetTo({ x: spawn.x, y: ground + PATH_AGL, z: spawn.z, heading: spawn.heading })) throw new Error('the flight system refused the start pose');
-    ctx.systems.flight.setAutopilot({ enabled: true, heading: spawn.heading, altitude: ground + PATH_AGL, speed: PATH_SPEED, followWaypoint: false, reason: 'determinism test' });
+    let highest = world.WATER_LEVEL;
+    for (let offsetZ = -PATH_REACH; offsetZ <= PATH_REACH; offsetZ += PATH_GROUND_STEP) {
+      for (let offsetX = -PATH_REACH; offsetX <= PATH_REACH; offsetX += PATH_GROUND_STEP) {
+        if (offsetX * offsetX + offsetZ * offsetZ > PATH_REACH * PATH_REACH) continue;
+        highest = Math.max(highest, world.groundHeight(spawn.x + offsetX, spawn.z + offsetZ));
+      }
+    }
+    return Math.round(highest + PATH_CLEARANCE);
+  }
+
+  /** Puts the craft at the start of the path on the autopilot. */
+  function placeCraft(altitude) {
+    const spawn = state.spawn;
+    if (!ctx.systems.flight.resetTo({ x: spawn.x, y: altitude, z: spawn.z, heading: spawn.heading })) throw new Error('the flight system refused the start pose');
+    ctx.systems.flight.setAutopilot({ enabled: true, heading: spawn.heading, altitude, speed: PATH_SPEED, followWaypoint: false, reason: 'determinism test' });
+  }
+
+  /** The craft's position and velocity to 1 mm (and 1 mm/s): evidence that both runs start alike. */
+  function describePose() {
+    const { position, velocity } = state.player;
+    return { position: [round(position.x, 3), round(position.y, 3), round(position.z, 3)], velocity: [round(velocity.x, 3), round(velocity.y, 3), round(velocity.z, 3)] };
   }
 
   function siteHashes() {
@@ -329,10 +360,15 @@ function createDeterminismSystem(ctx, { capture, session }) {
     holdConditions();
     if (state.time.elapsed >= PATH_START_SECONDS) throw new Error(`the flight clock is already at ${round(state.time.elapsed, 1)} s, past the path start (${PATH_START_SECONDS} s)`);
     const sites = siteHashes();
+    const altitude = pathAltitude();
     state.time.elapsed = PATH_START_SECONDS;
-    placeCraft();
+    stepper.resetTiming();
+    stepper.stepFrames(1, FRAME_MS);
+    // Spawns first: the start pose's velocity carries the wind at the start, wind sources included.
     const director = ctx.systems.spawns.debug.restartSpawns();
     if (!director) throw new Error('the director did not restart');
+    placeCraft(altitude);
+    const startPose = describePose();
     stepper.resetTiming();
 
     const spawnEvents = [];
@@ -389,6 +425,8 @@ function createDeterminismSystem(ctx, { capture, session }) {
       backend: ctx.backend,
       finishedAt: new Date().toISOString(),
       frames: framesDone,
+      altitude,
+      startPose,
       distanceKm: round(distance / 1000, 2),
       ...sites,
       pathEndSiteListHash: hashSiteList(pathEnd),
@@ -445,6 +483,7 @@ function createDeterminismSystem(ctx, { capture, session }) {
     const notes = [];
     if (comparison && comparison.logDifference) notes.push(`First log difference at entry ${comparison.logDifference.index + 1}: ${JSON.stringify(comparison.logDifference.first)} against ${JSON.stringify(comparison.logDifference.second)}`);
     if (comparison && comparison.spawnEventDifference) notes.push(`First spawn event difference at #${comparison.spawnEventDifference.index + 1}: ${JSON.stringify(comparison.spawnEventDifference.first)} against ${JSON.stringify(comparison.spawnEventDifference.second)}`);
+    if (comparison && !comparison.startPose) notes.push(`The start poses differ: ${JSON.stringify(session.runs[0].startPose)} against ${JSON.stringify(session.runs[1].startPose)}`);
     if (comparison && comparison.pathDifference) notes.push(`The flown paths part at second ${comparison.pathDifference.second + 1}: ${comparison.pathDifference.first} against ${comparison.pathDifference.secondRun}`);
     panel.showSummary({
       result: report.result,
@@ -453,7 +492,7 @@ function createDeterminismSystem(ctx, { capture, session }) {
         ['Backend', report.environment.backends.join(', ')],
         ['three.js', `r${ctx.THREE.REVISION}`],
         ['Seed', state.seed],
-        ['Craft', `${PATH_CRAFT}, ${PATH_AGL} m AGL, ${PATH_SPEED} m/s`],
+        ['Craft', `${PATH_CRAFT}, ${session.runs.map((entry) => `${entry.altitude} m`).join(' / ')} above sea level, ${PATH_SPEED} m/s`],
         ['Sites', session.runs.map((entry) => `${entry.siteCount} within ${SITE_RADIUS / 1000} km`).join(' / ')],
         ['Console', `${capture.counts.errors} errors, ${capture.counts.warnings} warnings (this load)`],
       ],
@@ -501,8 +540,8 @@ function createDeterminismSystem(ctx, { capture, session }) {
         ...(capture.entries.length > 0 ? [{ title: 'Console errors and warnings', notes: capture.entries.slice(0, 30).map((entry) => `[${entry.level}] ${entry.context}: ${entry.text}`) }] : []),
         ...(session.harnessErrors.length > 0 ? [{ title: 'Harness problems', notes: session.harnessErrors.slice() }] : []),
         { title: 'About', notes: [
-          `Each run is its own page load with a freshly deleted database. Frames are stepped by hand at ${round(FRAME_MS, 2)} ms, the time of day is held (sun ${PATH_SUN_ELEVATION} degrees), the perf governor reads a steady ${SIMULATED_FRAME_MS} ms frame, and the flight clock jumps to ${PATH_START_SECONDS} s before spawns.debug.restartSpawns() starts a fresh director.`,
-          `The ${PATH_CRAFT} flies the autopilot from the spawn, ${PATH_AGL} m above the ground at ${PATH_SPEED} m/s, turning ${PATH_TURNS.map((turn) => `to ${turn.heading > 0 ? '+' : ''}${turn.heading} degrees at ${turn.at} s`).join(', ')}.`,
+          `Each run is its own page load with a freshly deleted database. Frames are stepped by hand at ${round(FRAME_MS, 2)} ms, the time of day is held (sun ${PATH_SUN_ELEVATION} degrees), the perf governor reads a steady ${SIMULATED_FRAME_MS} ms frame, the flight clock jumps to ${PATH_START_SECONDS} s and one frame is stepped there before spawns.debug.restartSpawns() starts a fresh director.`,
+          `The ${PATH_CRAFT} flies the autopilot from the spawn, ${PATH_CLEARANCE} m above the highest ground within ${PATH_REACH / 1000} km, at ${PATH_SPEED} m/s, turning ${PATH_TURNS.map((turn) => `to ${turn.heading > 0 ? '+' : ''}${turn.heading} degrees at ${turn.at} s`).join(', ')}.`,
           'Log times are seconds from the start of the path. The spawn events (activations, ends, discoveries with their frames) and the path digest (the craft position every second, to 1 mm) are evidence: they show where two runs part when the logs differ.',
         ] },
       ],
