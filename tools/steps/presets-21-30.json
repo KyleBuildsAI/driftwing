@@ -18,6 +18,9 @@
 "eval": "(async () => { try { const result = await window.__dwPresets.groundStart('abandonedAirfield'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] groundStart failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
 },
 {
+"eval": "(async () => { try { const result = await window.__dwPresets.landing('abandonedAirfield'); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] landing failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+},
+{
 "eval": "(async () => { try { const result = await window.__dwPresets.start('abandonedAirfield', {\"distance\": 1500}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] start abandonedAirfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
 },
 {
@@ -255,7 +258,7 @@
 "eval": "(async () => { try { const result = await window.__dwPresets.approachChild('stormChase', 'tornado', {\"distance\": 2400, \"seconds\": 4}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] approach tornado failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
 },
 {
-"eval": "(async () => { try { const result = await window.__dwPresets.frame('stormChase', {\"child\": \"tornado\", \"distance\": 2200, \"height\": 250, \"bearing\": 180, \"lift\": 500}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame tornado failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+"eval": "(async () => { try { const result = await window.__dwPresets.frame('stormChase', {\"child\": \"tornado\", \"distance\": 2600, \"height\": 600, \"bearing\": 180, \"lift\": 400}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] frame tornado failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
 },
 {
 "wait": 500

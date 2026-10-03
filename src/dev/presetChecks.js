@@ -303,6 +303,33 @@ export function installPresetChecks(game) {
       return check(`${presetId}: the night ends at dawn`, described.dawnReached === true && Number.isFinite(described.duration), { dawnReached: described.dawnReached, duration: described.duration, presence: described.presence });
     },
 
+    /**
+     * A graded landing on the nearest real site's runway: the craft is placed rolling down the runway,
+     * a smooth touchdown 300 m past the threshold on the centreline is announced (the typed 'landed'),
+     * and the structure engine must grade it (structure:landing, a good score).
+     */
+    async landing(presetId) {
+      const site = manager.findNearestSite(presetId, state.spawn.x, state.spawn.z, 90000);
+      const spawnId = site ? manager.getSiteSpawn(site.id) : null;
+      const part = spawnId ? (manager.getParts(spawnId) ?? []).find((entry) => entry.engine === 'structure') : null;
+      const zone = part && part.data.zones ? part.data.zones.find((entry) => entry.graded) : null;
+      if (!zone) return check(`${presetId}: graded landing`, false, 'no graded runway on a live site');
+      const graded = [];
+      const off = ctx.bus.on('structure:landing', (payload) => graded.push(payload));
+      ctx.setPhotoMode(false);
+      const along = 300 - zone.halfLength;
+      const x = zone.x + zone.dirX * along;
+      const z = zone.z + zone.dirZ * along;
+      const heading = (Math.atan2(zone.dirX, -zone.dirZ) * 180) / Math.PI;
+      ctx.systems.flight.resetTo({ x, y: zone.y + 2, z, heading });
+      await frames(3);
+      ctx.bus.emitTyped('landed', { grade: 'smooth', craft: 'glider', sinkRate: 1.1, groundSpeed: 26, position: { x, y: zone.y, z } });
+      await frames(3);
+      off();
+      const result = graded.find((entry) => entry.spawnId === spawnId) ?? null;
+      return check(`${presetId}: landings on its runway are graded`, Boolean(result) && result.score >= 70 && Math.abs(result.fromThreshold - 300) < 2, result);
+    },
+
     /** "Start on ground": the nearest discovered site with a ground-start spot (an airfield's threshold). */
     groundStart(presetId) {
       const spot = system.findGroundStart(state.spawn.x, state.spawn.z);
