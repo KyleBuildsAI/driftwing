@@ -8,7 +8,8 @@
 //
 // Child overrides: the supercell grows over 170 s (formSeconds) with a wall cloud whose lowering the
 // build stage ramps (weatherVolume control.wallCloud), and it dissipates by itself before the
-// timeline ends, so nothing is cut off in view.
+// timeline ends, so nothing is cut off in view. The children's own approach journals are silenced
+// (journal: []): the set piece alone sends closestTornado and stormsChased, so a chase counts once.
 export default Object.freeze({
   id: 'stormChase',
   name: 'Storm chase',
@@ -44,6 +45,7 @@ export default Object.freeze({
                 formSeconds: 170,
                 dissipateSeconds: 45,
                 wallCloud: Object.freeze({ radius: 950, drop: 420, offset: -800, rotation: 8 }),
+                journal: Object.freeze([]),
               }),
             }),
           }),
@@ -52,6 +54,7 @@ export default Object.freeze({
             from: 'supercell',
             offset: Object.freeze({ along: -800, across: 0 }),
             duration: 250,
+            params: Object.freeze({ vortex: Object.freeze({ journal: Object.freeze([]) }) }),
           }),
         }),
         stages: Object.freeze([
