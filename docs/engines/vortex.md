@@ -156,6 +156,10 @@ entry (the engine params win). `wind: false` in the engine params makes a vortex
 | `windCoreRadius` | m | 2..2000 | `coreRadius` | the wind's core, if it should differ from the visible funnel |
 | `windTop` | m | 20..15000 | `cloudBase` | the wind column's top |
 
+In the preset's `wind` entry the last two are named `coreRadius` and `top` (the names of the
+`rankine` source in `src/spawns/engines/windSources.js`); `windCoreRadius` and `windTop` in the
+engine params win over them.
+
 **Wind at the far tier.** The source is removed at FAR when its reach (the inflow radius plus the
 lean and wobble) is inside the nearest distance the FAR tier can start: `lod.mid x 0.5` (the
 director's strongest LOD bias) `x 0.92` (the LOD hysteresis). There it can never touch the player.
