@@ -138,7 +138,7 @@ Every field is optional except `effect`. A field set on the preset overrides the
 | `fadeIn` | s | 0..60 | 2 | presence ramps up from creation |
 | `fadeOut` | s | 0..60 | 3 | events fade out over their last `fadeOut` seconds before their duration ends |
 | `follow` | engine entry index or null | | null | the anchor follows another part of the same spawn each frame (x and z), for example `follow: 0` for a waterspout whose entry 0 is the vortex engine |
-| `voice` | bool | | false | when true and `preset.audio` is set, this entry spawns the preset's voice (intensity `voiceIntensity` x fade, at the anchor). Usually the vortex or fauna entry owns the voice instead |
+| `voice` | bool | | unset | `true` or `false` decides whether this entry spawns the preset's `audio` voice (intensity `voiceIntensity` x fade, at the anchor); unset, the preset's first engine entry owns it, so a preset opens one voice |
 | `voiceIntensity` | 0..1 | | 1 | |
 | `glow` | 0..1 | | per effect | excitation left in the trail buffer (it shows only inside a glow region) |
 

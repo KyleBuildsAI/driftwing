@@ -37,6 +37,7 @@
 // persistent update ranges.
 import { CELESTIAL_POLE_ELEVATION_DEG, SUN_ANGULAR_RADIUS } from '../../render/sky.js';
 import { resolveCelestialParams } from './celestial/params.js';
+import { ownsPresetAudio } from './engineKit.js';
 import { CORONA_EXTENT, createCometMesh, createEclipseMeshes, createMeteorMesh, createRainbowMesh } from './celestial/materials.js';
 
 const METEOR_CAPACITY = 48;
@@ -73,13 +74,6 @@ function uncoveredShare(distance, moonRadius) {
   const angleMoon = Math.acos(Math.min(1, Math.max(-1, (distance * distance + r2 - r1) / (2 * distance * moonRadius))));
   const overlap = r1 * angleSun + r2 * angleMoon - 0.5 * Math.sqrt(Math.max(0, (-distance + sunRadius + moonRadius) * (distance + sunRadius - moonRadius) * (distance - sunRadius + moonRadius) * (distance + sunRadius + moonRadius)));
   return 1 - overlap / Math.PI;
-}
-
-/** True when this engine entry plays the preset's audio: the first entry, or params.ownsAudio. */
-function ownsPresetAudio(preset, params) {
-  if (!preset.audio) return false;
-  if (typeof params.ownsAudio === 'boolean') return params.ownsAudio;
-  return preset.engines.length > 0 && preset.engines[0].engine === 'celestial';
 }
 
 export function createCelestialEngine() {
@@ -680,7 +674,7 @@ export function createCelestialEngine() {
       const anchor = params.position;
       const instance = { anchor, radius: 800, windSourceIds: [], lights: 0, particles: 0, tier: 'near', heavy: preset.heavy === true, data };
       if (resolved.rainbow) instance.radius = resolved.rainbow.radius + resolved.rainbow.height;
-      if (ownsPresetAudio(preset, params)) {
+      if (ownsPresetAudio(preset, 'celestial', params.ownsAudio)) {
         data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
         data.voice.setPosition(anchor);
       }

@@ -44,7 +44,7 @@
 import { buildCloudPuffGeometry, createCloudLook } from '../../render/cloudShading.js';
 import { GROUP_STRIDE, PUFF_STRIDE, SHAFT_STRIDE, layoutWeatherVolume, resolveWeatherParams } from './weatherVolume/forms.js';
 import { createCanopyRain, createLocalRain, createPuffMesh, createShaftMesh, createVeil } from './weatherVolume/materials.js';
-import { createWindSample } from './engineKit.js';
+import { createWindSample, ownsPresetAudio } from './engineKit.js';
 
 const PUFF_CAPACITY = 3072;
 const SHAFT_CAPACITY = 32;
@@ -83,13 +83,6 @@ function smooth(value, edge0, edge1) {
 /** Frame-rate independent approach of value to target at rate (1/s) over dt. */
 function approach(value, target, rate, dt) {
   return target + (value - target) * Math.exp(-rate * dt);
-}
-
-/** True when this engine entry plays the preset's audio (see the header). */
-function ownsPresetAudio(preset, params) {
-  if (!preset.audio) return false;
-  if (typeof params.ownsAudio === 'boolean') return params.ownsAudio;
-  return preset.engines.length > 0 && preset.engines[0].engine === 'weatherVolume';
 }
 
 export function createWeatherVolumeEngine() {
@@ -851,7 +844,7 @@ export function createWeatherVolumeEngine() {
         data.windSource = createWindSource(instance);
         instance.windSourceIds.push(data.windSource.id);
       }
-      if (ownsPresetAudio(preset, params)) {
+      if (ownsPresetAudio(preset, 'weatherVolume', params.ownsAudio)) {
         data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: data.growth });
         data.voice.setPosition(anchor);
       }

@@ -41,7 +41,7 @@
 // back in. A slipstream is removed at far (the player cannot reach it there) and re-added nearer.
 // Params, units and ranges: docs/engines/fauna.md.
 import { SPECIES } from './faunaSpecies.js';
-import { createWindSample } from './engineKit.js';
+import { createWindSample, ownsPresetAudio } from './engineKit.js';
 
 export const FAUNA_BEHAVIORS = Object.freeze(['murmuration', 'flock', 'formation', 'circling', 'pod', 'wingman', 'drift']);
 
@@ -58,7 +58,7 @@ export const FAUNA_DEFAULTS = Object.freeze({
   wander: 0.06,
   leash: 600,
   fadeIn: 1.5,
-  voice: true,
+  voice: null,
   voiceIntensity: 1,
   flocking: Object.freeze({ separation: 1.4, separationRadius: 3, alignment: 1.1, cohesion: 0.12, neighborRadius: 12, maxNeighbors: 7 }),
   scatter: Object.freeze({ radius: 60, burst: 24, recover: 3.5, spread: 0.9, trigger: 'scatter', cooldown: 6 }),
@@ -2305,7 +2305,7 @@ export function createFaunaEngine() {
       g[G.LEAD_HEADING] = heading;
       data.wind = createSlipstream(data, `fauna:${Math.floor(g[G.ANCHOR_X])}:${Math.floor(g[G.ANCHOR_Z])}:${start}`);
     }
-    if (resolved.voice !== false && preset.audio && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
+    if (ownsPresetAudio(preset, 'fauna', resolved.voice) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
       data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
     }
     recomputeCentroid(data);

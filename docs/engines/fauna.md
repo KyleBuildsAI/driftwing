@@ -93,7 +93,7 @@ accept a range, drawn once per group from the spawn's seeded generator.
 | `wander` | factor | 0..1 | 0.06 | how much the group's heading meanders |
 | `leash` | m | 50..20000 | 600 | how far a wandering group (murmuration, flock) may stray from its anchor before it curves back. A formation that is not following the player turns back at 4 x leash |
 | `fadeIn` | s | 0..30 | 1.5 | agents grow in from size 0. A drifting sky whale's slipstream also fades in with it |
-| `voice` | bool | | true | when `preset.audio` is set, the first fauna entry spawns its voice. Set `false` on the extra entries of a multi-group preset |
+| `voice` | bool | | unset | `true` or `false` decides whether this entry opens the preset's `audio` voice; unset, the preset's first engine entry owns it, so a preset opens one voice. Set `false` on the extra entries of a multi-group preset |
 | `voiceIntensity` | 0..1 | | 1 | the voice's intensity at full presence. Murmurations and flocks swell it from 0.15 to 1 as the player nears the flock |
 
 ### flocking (murmuration and flock)
@@ -288,7 +288,7 @@ the field itself stays exact. Circling birds read `WindField.thermalsNear` and a
 
 ## Audio
 
-When `preset.audio` is set, the group spawns `ctx.audio.spawnVoice(recipe, params)` at create, at
+When `preset.audio` is set and this entry owns it (`voice`, else the preset's first engine entry), the group spawns `ctx.audio.spawnVoice(recipe, params)` at create, at
 intensity 0. It follows the group's centre every frame with intensity `voiceIntensity` x fade. The
 voice is disposed with the instance.
 

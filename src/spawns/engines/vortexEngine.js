@@ -36,6 +36,7 @@
 // No allocations in update(): per-instance numbers live in a Float64Array, the slot block is written
 // into pre-built Vector4s, the path is precomputed, and the wind source moves in place.
 import { FRAME, FRAME_SIZE, checkSourceParamNames, createWindSource, resolveSourceParams } from './windSources.js';
+import { ownsPresetAudio } from './engineKit.js';
 
 export const MAX_VORTICES = 4;
 const SHELL_SEGMENTS = 28;
@@ -173,7 +174,8 @@ export function resolveVortexParams(preset, params) {
   const startStage = params.startStage ?? 'forming';
   if (startStage !== 'forming' && startStage !== 'mature') throw new TypeError(`[DRIFTWING] vortex: startStage must be 'forming' or 'mature', got ${String(startStage)}`);
   resolved.startStage = startStage;
-  resolved.voice = params.voice !== false;
+  if (params.voice !== undefined && params.voice !== null && typeof params.voice !== 'boolean') throw new TypeError(`[DRIFTWING] vortex: voice must be true or false, got ${String(params.voice)}`);
+  resolved.voice = typeof params.voice === 'boolean' ? params.voice : null;
   const presetWind = Array.isArray(preset.wind) ? preset.wind.find((entry) => entry && entry.type === 'rankine') : null;
   const windInput = { ...(presetWind && presetWind.params ? presetWind.params : {}) };
   checkSourceParamNames('rankine', windInput, `vortex: preset "${preset.id}" wind`);
@@ -917,7 +919,7 @@ export function createVortexEngine() {
           record.windSource = createWindSource(THREE, { id: `vortex:${params.seed ?? 0}:${serial}`, type: 'rankine', params: p.wind, frame, kind: 'spawn-vortex' });
           addWind(instance);
         }
-        if (preset.audio && p.voice && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
+        if (ownsPresetAudio(preset, 'vortex', p.voice) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
           record.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
         }
       } catch (error) {

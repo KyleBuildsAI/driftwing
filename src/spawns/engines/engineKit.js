@@ -16,6 +16,7 @@
 //   fillRandoms(state, out, n)   n seeded random numbers into a typed array at once (a double
 //                                returned per call would be boxed)
 //   sendVoiceLevel(voice, levels) a spawn voice's intensity, sent only when it moved
+//   ownsPresetAudio(preset, name, flag)  whether an engine entry opens the preset's one audio voice
 //   createWindSample()           a wind source's sample result whose numbers stay unboxed; every
 //                                engine's WindField source returns one (windSources.js included)
 //
@@ -413,6 +414,20 @@ class WindSample {
  */
 export function createWindSample() {
   return new WindSample();
+}
+
+/**
+ * Whether an engine entry opens the preset's audio voice. A preset has one voice (preset.audio), and
+ * one entry plays it: an entry's explicit flag (true or false; the engine's `voice`, `sound` or
+ * `ownsAudio` param) decides, and without one the voice belongs to the preset's first engine entry,
+ * so a multi-engine preset (a plume with a lava glow, a whirlpool with its air column) never opens
+ * two voices of one recipe.
+ */
+export function ownsPresetAudio(preset, engineName, flag) {
+  if (!preset || !preset.audio) return false;
+  if (typeof flag === 'boolean') return flag;
+  const engines = preset.engines;
+  return Array.isArray(engines) && engines.length > 0 && engines[0].engine === engineName;
 }
 
 /** A voice intensity change at or below this is not sent: the audio engine eases between levels. */

@@ -67,7 +67,7 @@ every generic feature below then works for it with no engine change.
 | `stamp` | index | 0..16 | 0 | which stamp of the recipe's type on the site to build on (a site with two gorges) |
 | `sway` | m | 0..5 | 0.35 | sway amplitude for recipes without their own sway (tree tops and pennants swing with the wind in the vertex shader); the rope bridge uses `swayAmplitude` |
 | `gates` | array | | `[]` | extra gates in the site frame, see [Gates](#gates) |
-| `voice` | bool | | true | play `preset.audio` as this engine's spawn voice; false leaves the voice to another engine of the preset |
+| `voice` | bool | | unset | `true` or `false` decides whether this entry plays `preset.audio` as its spawn voice; unset, the preset's first engine entry owns it, so a preset opens one voice |
 | `audioIntensity` | | `approach`, `wind`, `constant` | per recipe | how the voice's intensity is driven: the player's approach (spires), the wind speed over the rated wind (wind farm), or `audioLevel` (the others) |
 | `audioLevel` | 0..1 | | 0.8 | the level for `constant` |
 

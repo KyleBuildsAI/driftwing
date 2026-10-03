@@ -26,7 +26,7 @@
 // create).
 import { GLOW_PAGE_SIZE, GLOW_SHAPES, createGlowPoints } from './glowPoints.js';
 import { BOLT_RANDOMS, BOLT_SEGMENTS, createBoltScratch, createRibbonSlot, generateBeams, generateBolt } from './ribbons.js';
-import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
+import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, ownsPresetAudio, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
 
 /** Light-effect instances at once (glow groups); the director's budget is 8. */
 const MAX_INSTANCES = 8;
@@ -237,7 +237,7 @@ export function resolveLightEffectConfig(preset, params) {
       mid: read.number(lodParams?.mid, 'lod.mid', 1, 0, 1),
       far: read.number(lodParams?.far, 'lod.far', 0.8, 0, 1),
     },
-    sound: read.boolean(params.sound, 'sound', true),
+    sound: read.boolean(params.sound, 'sound', null),
     soundIntensity: read.oneOf(params.soundIntensity, 'soundIntensity', 'activity', ['activity', 'approach']),
     endRamp: read.number(params.endRamp, 'endRamp', 4, 0, 600),
     duration: Number.isFinite(params.duration) && params.duration > 0 ? params.duration : null,
@@ -691,7 +691,7 @@ export function createLightEffectEngine() {
             data.beam = beam;
           }
         }
-        if (config.sound && preset.audio && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
+        if (ownsPresetAudio(preset, 'lightEffect', config.sound) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
           data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
           data.voice.setPosition(anchor);
         }

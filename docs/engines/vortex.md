@@ -122,7 +122,7 @@ distance (the clouds' aerial perspective, up to 90 % at 7.5 km), and its foot ta
 | `formSeconds` | s | 0..600 | 20 | touchdown time |
 | `ropeSeconds` | s | 0..600 | 30 | rope-out time, the last part of the event's duration |
 | `audioIntensity` | 0..1 | | 1 | scales the voice's intensity (the vortex strength times this) |
-| `voice` | bool | | true | `false` keeps the vortex silent even when the preset has `audio` |
+| `voice` | bool | | unset | `true` or `false` decides whether this entry opens the preset's `audio` voice; unset, the preset's first engine entry owns it, so a preset opens one voice |
 
 ### Wind params
 

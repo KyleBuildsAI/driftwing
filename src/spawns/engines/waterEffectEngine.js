@@ -25,6 +25,8 @@
 // rate and no plankton flashes; far releases the slots and stops the spray (the ocean grid ends 4 km
 // from the camera, the pool and the glow are invisible there), and they are taken again on the way in.
 
+import { ownsPresetAudio } from './engineKit.js';
+
 const EFFECTS = Object.freeze(['whirlpool', 'splash', 'spray', 'bioluminescence', 'plungePool']);
 const TIER_SPRAY_SCALE = Object.freeze({ near: 1, mid: 0.35, far: 0 });
 /** Seconds between attempts to take a layer slot that was full. */
@@ -36,7 +38,7 @@ const NOISE_MASK = NOISE_SIZE - 1;
 
 /** Engine defaults per effect (docs/engines/waterEffect.md). A preset overrides any of them. */
 export const WATER_EFFECT_DEFAULTS = Object.freeze({
-  common: Object.freeze({ effect: 'splash', fadeIn: 2, fadeOut: 3, follow: null, voice: false, voiceIntensity: 1, glow: 0 }),
+  common: Object.freeze({ effect: 'splash', fadeIn: 2, fadeOut: 3, follow: null, voice: null, voiceIntensity: 1, glow: 0 }),
   whirlpool: Object.freeze({
     radius: 320, eyeShare: 0.11, depth: 18, spin: 0.8, arms: 4, twist: 8, ridge: 0.7, foam: 0.9, direction: 1,
     spinUp: 12, mistRate: 45, mistSize: 7, glow: 0,
@@ -413,7 +415,7 @@ export function createWaterEffectEngine() {
       };
       for (let index = 0; index < NOISE_SIZE; index++) instance.data.noise[index] = rng();
       prepare(instance, instance.data, rng);
-      if (resolved.voice === true && preset.audio && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
+      if (ownsPresetAudio(preset, 'waterEffect', resolved.voice) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
         instance.data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
       }
       acquireSlots(instance.data);

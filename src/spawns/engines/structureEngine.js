@@ -35,7 +35,7 @@ import { PALETTE } from './structure/palette.js';
 import { RECIPES, RECIPE_NAMES } from './structure/recipes/index.js';
 import { islandOutline, islandTopHeight } from './structure/recipes/islands.js';
 import { createGateSet, crossGates } from './gateDetector.js';
-import { createParamView, createWindSample } from './engineKit.js';
+import { createParamView, createWindSample, ownsPresetAudio } from './engineKit.js';
 
 const ENGINE_NAME = 'structure';
 /** Structure spawns alive at once (the director's cap is the same). */
@@ -1017,8 +1017,8 @@ export function createStructureEngine() {
         updateWind(data, 0);
         if (data.turbineCount > 0) updateTurbines(data, 0);
         if (data.sockCount > 0) updateSocks(data);
-        // The preset's voice (params.voice false leaves it to another engine of the preset).
-        if (preset.audio && read.boolean('voice', true) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
+        // The preset's voice (engineKit's ownsPresetAudio: params.voice, else the first engine entry).
+        if (ownsPresetAudio(preset, ENGINE_NAME, read.boolean('voice', null)) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
           data.audioMode = read.choice('audioIntensity', recipe.audioIntensity, ['approach', 'wind', 'constant']);
           data.audioLevel = read.number('audioLevel', 0.8, 0, 1);
           data.audioReference = data.audioMode === 'wind' ? (out.turbineSettings ? out.turbineSettings.ratedWind : 10) : data.audioMode === 'approach' ? (out.approach || 1500) : 1;

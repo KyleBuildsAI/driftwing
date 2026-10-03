@@ -30,7 +30,7 @@
 // create(). What the engine calls may allocate a little: the terrain height under a grid node and
 // the WindField probes (worldgen's noise), which is why they are rationed.
 import { FIELD_NODES, FIELD_X, FIELD_Y, FRAME_ROWS, GROUND_MODES, PAGE_SIZE, PARAM_ROWS, PARTICLE_STYLES, createParticleSystem } from './particleSystem.js';
-import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, createWindSample, fillRandoms, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
+import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, createWindSample, fillRandoms, ownsPresetAudio, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
 
 /** Emitter instances at once (rows of the particle tables); the director's budget is 16. */
 const MAX_EMITTERS = 16;
@@ -308,7 +308,7 @@ export function resolveEmitterConfig(preset, params) {
       fogColorAmount: read.number(immersionParams.fogColorAmount, 'immersion.fogColorAmount', 0.7, 0, 1),
       darkness: read.number(immersionParams.darkness, 'immersion.darkness', 0.3, 0, 1),
     } : null,
-    sound: read.boolean(params.sound, 'sound', true),
+    sound: read.boolean(params.sound, 'sound', null),
     soundTriggers: {
       schedule: triggerParams ? read.oneOf(triggerParams.schedule, 'soundTriggers.schedule', null, ['burst', 'boom', 'streak', 'fireball', 'call', 'chime', 'scatter']) : null,
       burst: triggerParams ? read.oneOf(triggerParams.burst, 'soundTriggers.burst', null, ['burst', 'boom', 'streak', 'fireball', 'call', 'chime', 'scatter']) : null,
@@ -1322,7 +1322,7 @@ export function createEmitterEngine() {
           };
           data.immersion.set(data.immersionValues);
         }
-        if (config.sound && preset.audio && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
+        if (ownsPresetAudio(preset, 'emitter', config.sound) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
           data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: 0 });
           data.voice.setPosition(anchor);
         }

@@ -150,7 +150,7 @@ One instance holds at most 12 000 points (glows and swarm together).
 | `visibility` | object | | `{ day 0.15, night 1 }` | the glows' and swarm's level by day and by night (blended by the night factor) |
 | `fog` | 0..1 | | 0.7 | how much the scene haze takes the glows |
 | `lod` | object | | `{ near 1, mid 1, far 0.8 }` | the glows' level at each tier |
-| `sound` | bool | | true | opens the preset's `audio` voice |
+| `sound` | bool | | unset | `true` or `false` decides whether this entry opens the preset's `audio` voice; unset, the preset's first engine entry owns it, so a preset opens one voice |
 | `soundIntensity` | | `activity`, `approach` | `activity` | the voice follows the storm's activity, or the camera's approach within `lod.mid` (crystal spires hum louder as you close in) |
 | `endRamp` | s | 0..600 | 4 | an event fades its lightning and glows over this after its duration, then ends |
 
