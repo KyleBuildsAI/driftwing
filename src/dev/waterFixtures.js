@@ -64,7 +64,7 @@ export const FIXTURE_TERRACES = fixture('fixtureTerraces', 'Fixture hot spring t
 });
 
 export const FIXTURE_FROZEN_LAKE = fixture('fixtureFrozenLake', 'Fixture frozen lake', 'geo', {
-  placement: Object.freeze({ chance: 0.6, minSpacing: 8000, biomes: Object.freeze(['snow', 'pine']), surface: 'land', terrain: Object.freeze({ minHeight: 10, relief: 'any' }), clearance: 300 }),
+  placement: Object.freeze({ chance: 0.6, minSpacing: 8000, biomes: Object.freeze(['snow', 'pine', 'meadows']), surface: 'land', terrain: Object.freeze({ minHeight: 10, relief: 'any' }), clearance: 300 }),
   stamps: Object.freeze([Object.freeze({ type: 'basin', radius: [180, 250], depth: [10, 16], rim: [30, 40], falloff: [70, 100], paint: 'ice' })]),
   waters: Object.freeze([Object.freeze({ kind: 'lake', stamp: 0, level: Object.freeze({ mode: 'basin', fill: 0.8 }), material: 'ice' })]),
   overlays: Object.freeze([Object.freeze({ shape: Object.freeze({ kind: 'stamp', stamp: 0, grow: 160, falloff: 120 }), palette: 'frozen', material: 'ice' })]),
