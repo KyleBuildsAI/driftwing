@@ -16,6 +16,17 @@
 //                limits for escortSeconds, then peels off with a call (bus 'fauna:call')
 //   drift        colossal animals drifting along their heading at a cruise altitude with slow
 //                undulation; an optional slipstream wind source trails the leader (a lift lane)
+//   herd         a terrain-following herd (altitude mode 'ground'): grazing and walking on the ground,
+//                never onto slopes steeper than slopeLimit (rise over 6 m) or into water within
+//                waterMargin; a stampede (the player buzzing it, a timer, or setParam 'stampede')
+//                runs it away from the trigger, downhill-biased, raising the engine's own pooled dust
+//   column       a long line of walkers along a PathFollower path (src/world/pathFollower.js): a
+//                given path in the spawn frame, or 'auto' (buildGroundPath around slopes and water);
+//                lanes, spacing and jitter (a caribou migration, a camel caravan)
+//   surface      animals on the water surface of ctx.game.waterQuery (ocean and lakes, following the
+//                swell): dolphins porpoise and race the craft's shadow when it flies low over the
+//                water; flamingos stand in shallow water and take off in a wave when buzzed, fly as
+//                a flock over the water, and settle back
 //
 // Rendering: one InstancedMesh per species, built in init() and shared by every group of that
 // species (a contiguous block of agents each). The per-agent state reaches the GPU as three vec4
@@ -24,12 +35,17 @@
 // the body there. Far away a small agent is drawn at least minPixels tall, so a murmuration reads as a
 // dark cloud from kilometres out. Positions are relative to a floating origin near the camera.
 //
+// Ground and surface animals pool like the others; their dust (one shared sprite of soft billboards,
+// each group owning a block of slots) counts against the fauna particle budget. Predators: the
+// scatter radius and burst scale with the active craft module's faunaThreat (default 1; the eagle 2.5).
+//
 // Allocation: the frame update allocates nothing. Agent state lives in typed arrays, group doubles in
 // a Float64Array, neighbour search in a shared hashed grid, and every helper takes integer indices:
 // the per-agent helpers read their double arguments from the call registers (io, by IO index)
 // because V8 boxes a double passed to, or returned from, a call it does not inline.
 // Outside the engine, a few rationed calls may allocate: terrain heights (group ground probes, one
-// every sixteenth frame per group), the thermal refresh of circling groups (WindField.thermalsNear, every
+// every sixteenth frame per group; a herd's fine ground grid, one cell every fourth frame, every
+// second while it stampedes; a surface group's water heights, one agent a frame), the thermal refresh of circling groups (WindField.thermalsNear, every
 // thermalRefresh seconds), wind-source re-indexing when a slipstream leaves its bounds' margin, and
 // bus events on discrete moments (a scatter, a formation change, a call).
 //
@@ -42,8 +58,15 @@
 // Params, units and ranges: docs/engines/fauna.md.
 import { SPECIES } from './faunaSpecies.js';
 import { createWindSample, ownsPresetAudio } from './engineKit.js';
+import { SLOPE_RUN, buildGroundPath, createPath, createPathFollower } from '../../world/pathFollower.js';
 
-export const FAUNA_BEHAVIORS = Object.freeze(['murmuration', 'flock', 'formation', 'circling', 'pod', 'wingman', 'drift']);
+export const FAUNA_BEHAVIORS = Object.freeze(['murmuration', 'flock', 'formation', 'circling', 'pod', 'wingman', 'drift', 'herd', 'column', 'surface']);
+/** Altitude modes: above the ground, above sea level, on the water, near the player, on the ground. */
+export const ALTITUDE_MODES = Object.freeze(['agl', 'msl', 'water', 'player', 'ground']);
+/** Stampede triggers of a herd. */
+export const STAMPEDE_TRIGGERS = Object.freeze(['player', 'timer', 'event']);
+/** Dust sprites shared by every ground group (each group owns a block of slots). */
+export const DUST_CAPACITY = 2048;
 
 /** Engine defaults (docs/engines/fauna.md). A preset overrides any field; nested blocks merge. */
 export const FAUNA_DEFAULTS = Object.freeze({
@@ -80,6 +103,24 @@ export const FAUNA_DEFAULTS = Object.freeze({
     peelSeconds: 16, trigger: 'call', waitAltitude: 140, waitRadius: 70,
   }),
   drift: Object.freeze({ bob: 22, bobPeriod: 46, lane: 0.6, slipstream: null }),
+  herd: Object.freeze({
+    slopeLimit: 0.45, waterMargin: 8, gaits: Object.freeze({ walk: 1.3, trot: 4, run: 11 }), cohesion: 0.5, spacing: 6,
+    graze: 0.55, stampede: Object.freeze({ trigger: 'player', radius: 260, speed: null, duration: 22, interval: 120, cooldown: 45, downhill: 0.6, maxAltitude: 350 }),
+    dust: Object.freeze({ rate: 5, size: 5, color: 0xb39876 }),
+  }),
+  column: Object.freeze({
+    path: 'auto', length: 2600, spacing: 5, lanes: 2, laneWidth: 3.2, speed: null, jitter: 0.6, mode: 'pingpong',
+    maxSlope: null, resample: 8, dust: Object.freeze({ rate: 0, size: 4, color: 0xc4ab84 }),
+  }),
+  surface: Object.freeze({
+    spread: 10,
+    porpoise: Object.freeze({ height: 2, interval: Object.freeze([3, 7]) }),
+    raceShadow: Object.freeze({ radius: 700, boost: 1.8, maxAltitude: 260 }),
+    wade: Object.freeze({
+      depthMax: 0.6, flushRadius: 150, takeoffWave: Object.freeze({ delay: 0.35, spread: 0.6 }), flySeconds: Object.freeze([25, 45]),
+      flyAltitude: 45, flyRadius: 260, spacing: 2.2, searchRadius: 1600,
+    }),
+  }),
   calls: Object.freeze({ trigger: 'call', interval: null }),
 });
 
@@ -95,6 +136,9 @@ const BEHAVIOR_DEFAULTS = Object.freeze({
   pod: Object.freeze({ scatter: null }),
   wingman: Object.freeze({ scatter: null }),
   drift: Object.freeze({ scatter: null }),
+  herd: Object.freeze({ scatter: null, altitude: Object.freeze({ mode: 'ground', value: 0, spread: 0 }), fadeIn: 0.8, sizeJitter: 0.08 }),
+  column: Object.freeze({ scatter: null, altitude: Object.freeze({ mode: 'ground', value: 0, spread: 0 }), fadeIn: 0.8, sizeJitter: 0.08 }),
+  surface: Object.freeze({ scatter: null, altitude: Object.freeze({ mode: 'water', value: 0, spread: 0 }) }),
 });
 
 /** Slipstream defaults (drift.slipstream: true or an object). */
@@ -131,8 +175,11 @@ const G = Object.freeze({
   LOST: 29, TERRAIN_TIMER: 30, ANCHOR_X: 31, ANCHOR_Y: 32, ANCHOR_Z: 33, GROUND_X: 34, GROUND_Z: 35, GROUND_SPACING: 36,
   SLOT_X: 37, SLOT_Y: 38, SLOT_Z: 39, TARGET_SPEED: 40, LEAD_X: 41, LEAD_Y: 42, LEAD_Z: 43, LEAD_HEADING: 44,
   MORPH_A: 45, MORPH_B: 46, MORPH_C: 47, MORPH_YAW: 48, SIZE: 49, SLOT_DISTANCE: 50,
+  STAMPEDE: 51, STAMPEDE_X: 52, STAMPEDE_Z: 53, STAMPEDE_COOLDOWN: 54, GAIT: 55, AVOID_TIMER: 56, STAMPEDE_TIMER: 57,
+  FLUSH: 58, FLUSH_X: 59, FLUSH_Z: 60, FLUSH_Y: 61, RACE: 62, SHADOW_X: 63, SHADOW_Z: 64, PATH_TIME: 65, HOME_X: 66,
+  HOME_Y: 67, HOME_Z: 68, DUST_LIVE: 69, FLUSH_COUNT: 70, WATER_CURSOR: 71, SHADOW_WET: 72,
 });
-const G_LENGTH = 51;
+const G_LENGTH = 73;
 // Call registers (io) by index. A caller writes the slots a helper reads, then calls it.
 const IO = Object.freeze({
   TARGET_X: 0, TARGET_Y: 1, TARGET_Z: 2, FEED_X: 3, FEED_Y: 4, FEED_Z: 5, GAIN: 6, SEEK_MAX: 7, WEIGHT: 8,
@@ -140,8 +187,20 @@ const IO = Object.freeze({
   TIME: 17, GLIDE: 18, DECAY: 19, GROUND: 20, SAMPLE_X: 21, SAMPLE_Z: 22, INVERSE_CELL: 23, SPREAD: 24,
   SELF_X: 25, SELF_Y: 26, SELF_Z: 27, RADIUS_SQ: 28, SEPARATION: 29, SEPARATION_SQ: 30, SUM_X: 31, SUM_Y: 32,
   SUM_Z: 33, TURN_TARGET: 34, TURN_STEP: 35, SIZE_SCALE: 36, FORWARD_X: 37, FORWARD_Z: 38, RIGHT_X: 39, RIGHT_Z: 40,
+  SLOPE: 41, GRAD_X: 42, GRAD_Z: 43, WET: 44, SLOPE_LIMIT: 45, MARGIN: 46, SPEED_NOW: 47, DUST_MIN: 48, STEP_DT: 49,
 });
-const IO_LENGTH = 41;
+const IO_LENGTH = 50;
+/** Agent modes of the new behaviours (pool.mode). */
+const HERD_GRAZE = 0;
+const HERD_WALK = 1;
+const WADE_STAND = 0;
+const WADE_TAKEOFF = 1;
+const WADE_FLY = 2;
+const WADE_LAND = 3;
+const SWIM = 0;
+const SWIM_LEAP = 1;
+/** A herd's fine ground grid: FINE_GRID x FINE_GRID cells around the herd. */
+const FINE_GRID = 9;
 /** Ground probes refresh one sample every this many frames per group (terrain heights allocate). */
 const GROUND_PROBE_FRAMES = 16;
 /** The per-thermal arrays of a circling group's thermal cache. */
@@ -177,7 +236,101 @@ function resolveParams(params) {
   if (!Number.isFinite(resolved.fadeOut) || resolved.fadeOut < 0 || resolved.fadeOut > 600) throw new Error(`fauna: params.fadeOut must be within 0..600 s, got ${JSON.stringify(params.fadeOut)}`);
   if (resolved.drift.slipstream === true) resolved.drift.slipstream = { ...SLIPSTREAM_DEFAULTS };
   else if (isPlainObject(resolved.drift.slipstream)) resolved.drift.slipstream = { ...SLIPSTREAM_DEFAULTS, ...resolved.drift.slipstream };
+  validateGroundAndSurface(resolved, params);
   return resolved;
+}
+
+function positive(value) {
+  return Number.isFinite(value) && value > 0;
+}
+
+function isRange(value, min = 0) {
+  return Array.isArray(value) && value.length === 2 && Number.isFinite(value[0]) && Number.isFinite(value[1]) && value[0] >= min && value[1] >= value[0];
+}
+
+/**
+ * The Phase 3 params (altitude mode, herd, column, surface): validated like the Phase 2 ones, each
+ * error naming the field. The species' kind must suit the behaviour (quadrupeds herd or walk in a
+ * column; the surface takes whales and wading birds).
+ */
+function validateGroundAndSurface(resolved, params) {
+  const fail = (field, message) => {
+    throw new Error(`fauna: params.${field} ${message}`);
+  };
+  const def = SPECIES[resolved.species];
+  const behavior = resolved.behavior;
+  if (!ALTITUDE_MODES.includes(resolved.altitude.mode)) fail('altitude.mode', `must be one of ${ALTITUDE_MODES.join(', ')}, got ${JSON.stringify(resolved.altitude.mode)}`);
+  const walks = behavior === 'herd' || behavior === 'column';
+  if (walks && def.kind !== 'quadruped') fail('species', `must be a quadruped for behavior ${behavior}, got ${def.id}`);
+  if (def.kind === 'quadruped' && !walks) fail('behavior', `must be herd or column for the quadruped ${def.id}, got ${behavior}`);
+  if (walks && resolved.altitude.mode !== 'ground') fail('altitude.mode', `must be ground for behavior ${behavior}`);
+  if (resolved.altitude.mode === 'ground' && !walks) fail('altitude.mode', 'ground is for herd and column behaviours');
+  if (behavior === 'surface' && def.kind !== 'whale' && !def.wade) fail('species', `must swim (a whale kind) or wade for behavior surface, got ${def.id}`);
+  if (behavior === 'herd') {
+    const herd = resolved.herd;
+    if (!positive(herd.slopeLimit) || herd.slopeLimit > 5) fail('herd.slopeLimit', `must be within 0..5 (rise over ${SLOPE_RUN} m), got ${JSON.stringify(herd.slopeLimit)}`);
+    if (!(Number.isFinite(herd.waterMargin) && herd.waterMargin >= 0)) fail('herd.waterMargin', 'must be a number >= 0 (m)');
+    const gaits = { ...FAUNA_DEFAULTS.herd.gaits, ...(isPlainObject(params.herd?.gaits) ? params.herd.gaits : {}) };
+    if (!(positive(gaits.walk) && gaits.trot > gaits.walk && gaits.run > gaits.trot)) fail('herd.gaits', 'must be { walk, trot, run } in rising m/s');
+    herd.gaits = gaits;
+    if (!positive(herd.spacing)) fail('herd.spacing', 'must be a positive number (m)');
+    if (!(Number.isFinite(herd.cohesion) && herd.cohesion >= 0)) fail('herd.cohesion', 'must be a number >= 0');
+    if (!(Number.isFinite(herd.graze) && herd.graze >= 0 && herd.graze <= 1)) fail('herd.graze', 'must be within 0..1');
+    const stampede = { ...FAUNA_DEFAULTS.herd.stampede, ...(isPlainObject(params.herd?.stampede) ? params.herd.stampede : {}) };
+    if (!STAMPEDE_TRIGGERS.includes(stampede.trigger)) fail('herd.stampede.trigger', `must be one of ${STAMPEDE_TRIGGERS.join(', ')}`);
+    for (const field of ['radius', 'duration', 'interval']) if (!positive(stampede[field])) fail(`herd.stampede.${field}`, 'must be a positive number');
+    if (stampede.speed !== null && !positive(stampede.speed)) fail('herd.stampede.speed', 'must be null or a positive number (m/s)');
+    if (!(Number.isFinite(stampede.cooldown) && stampede.cooldown >= 0)) fail('herd.stampede.cooldown', 'must be a number >= 0 (s)');
+    if (!(Number.isFinite(stampede.downhill) && stampede.downhill >= 0 && stampede.downhill <= 1)) fail('herd.stampede.downhill', 'must be within 0..1');
+    herd.stampede = stampede;
+    herd.dust = validateDust({ ...FAUNA_DEFAULTS.herd.dust, ...(isPlainObject(params.herd?.dust) ? params.herd.dust : {}) }, 'herd.dust', fail);
+  }
+  if (behavior === 'column') {
+    const column = resolved.column;
+    const path = column.path;
+    if (path !== 'auto') {
+      if (!isPlainObject(path) || !Array.isArray(path.points) || path.points.length < 2) fail('column.path', "must be 'auto' or { points: [[along, across], ...] (at least two), closed?, smoothing? }");
+      path.points.forEach((point, index) => {
+        if (!Array.isArray(point) || point.length !== 2 || !Number.isFinite(point[0]) || !Number.isFinite(point[1])) fail(`column.path.points[${index}]`, 'must be [along, across] in metres');
+      });
+    }
+    if (!positive(column.length)) fail('column.length', 'must be a positive number (m)');
+    if (!positive(column.spacing)) fail('column.spacing', 'must be a positive number (m)');
+    if (!Number.isInteger(column.lanes) || column.lanes < 1 || column.lanes > 8) fail('column.lanes', 'must be an integer 1..8');
+    if (!(Number.isFinite(column.laneWidth) && column.laneWidth >= 0)) fail('column.laneWidth', 'must be a number >= 0 (m)');
+    if (column.speed !== null && !positive(column.speed)) fail('column.speed', 'must be null or a positive number (m/s)');
+    if (!(Number.isFinite(column.jitter) && column.jitter >= 0)) fail('column.jitter', 'must be a number >= 0 (m)');
+    if (!['loop', 'pingpong', 'once'].includes(column.mode)) fail('column.mode', 'must be loop, pingpong or once');
+    if (column.maxSlope !== null && !positive(column.maxSlope)) fail('column.maxSlope', 'must be null or a positive number');
+    if (!(Number.isFinite(column.resample) && column.resample >= 2)) fail('column.resample', 'must be a number >= 2 (m)');
+    column.dust = validateDust({ ...FAUNA_DEFAULTS.column.dust, ...(isPlainObject(params.column?.dust) ? params.column.dust : {}) }, 'column.dust', fail);
+  }
+  if (behavior === 'surface') {
+    const surface = resolved.surface;
+    const merge = (key) => ({ ...FAUNA_DEFAULTS.surface[key], ...(isPlainObject(params.surface?.[key]) ? params.surface[key] : {}) });
+    surface.porpoise = merge('porpoise');
+    surface.raceShadow = merge('raceShadow');
+    surface.wade = merge('wade');
+    surface.wade.takeoffWave = { ...FAUNA_DEFAULTS.surface.wade.takeoffWave, ...(isPlainObject(params.surface?.wade?.takeoffWave) ? params.surface.wade.takeoffWave : {}) };
+    if (!positive(surface.spread)) fail('surface.spread', 'must be a positive number (m)');
+    if (!(Number.isFinite(surface.porpoise.height) && surface.porpoise.height >= 0)) fail('surface.porpoise.height', 'must be a number >= 0 (m)');
+    if (!isRange(surface.porpoise.interval, 0.5)) fail('surface.porpoise.interval', 'must be [min, max] seconds (min >= 0.5)');
+    if (!(Number.isFinite(surface.raceShadow.radius) && surface.raceShadow.radius >= 0)) fail('surface.raceShadow.radius', 'must be a number >= 0 (m)');
+    if (!(Number.isFinite(surface.raceShadow.boost) && surface.raceShadow.boost >= 1)) fail('surface.raceShadow.boost', 'must be a number >= 1');
+    if (!positive(surface.raceShadow.maxAltitude)) fail('surface.raceShadow.maxAltitude', 'must be a positive number (m above the water)');
+    const wade = surface.wade;
+    for (const field of ['depthMax', 'flushRadius', 'flyAltitude', 'flyRadius', 'spacing', 'searchRadius']) if (!positive(wade[field])) fail(`surface.wade.${field}`, 'must be a positive number');
+    if (!isRange(wade.flySeconds, 1)) fail('surface.wade.flySeconds', 'must be [min, max] seconds (min >= 1)');
+    if (!(Number.isFinite(wade.takeoffWave.delay) && wade.takeoffWave.delay >= 0)) fail('surface.wade.takeoffWave.delay', 'must be a number >= 0 (s per 10 m)');
+    if (!(Number.isFinite(wade.takeoffWave.spread) && wade.takeoffWave.spread >= 0)) fail('surface.wade.takeoffWave.spread', 'must be a number >= 0 (s)');
+  }
+}
+
+function validateDust(dust, field, fail) {
+  if (!(Number.isFinite(dust.rate) && dust.rate >= 0 && dust.rate <= 60)) fail(`${field}.rate`, 'must be within 0..60 puffs a second per running animal');
+  if (!positive(dust.size)) fail(`${field}.size`, 'must be a positive number (m)');
+  if (!Number.isInteger(dust.color) || dust.color < 0 || dust.color > 0xffffff) fail(`${field}.color`, 'must be an sRGB hex number');
+  return dust;
 }
 
 function fallbackValue(behaviorValue, base) {
@@ -263,6 +416,13 @@ export function createFaunaEngine() {
   const steering = new Float64Array(3);
   const lateral = new Float64Array(1);
   const io = new Float64Array(IO_LENGTH);
+  // The active craft's faunaThreat (default 1; the eagle 2.5): scatter radius and burst scale with it.
+  const threat = new Float64Array(1);
+  threat[0] = 1;
+  // The frame's time step, for the helpers below update(): a double handed to a call V8 does not
+  // inline (the engine's update inlines a great deal and runs out of budget) is boxed every call.
+  const frameStep = new Float64Array(1);
+  let threatCraft = null;
 
   // =============================================================================================
   // SPECIES POOLS (init)
@@ -275,7 +435,7 @@ export function createFaunaEngine() {
       cameraPosition, vec4,
     } = TSL;
     const material = new THREE.MeshStandardNodeMaterial({
-      roughness: def.kind === 'whale' ? 0.55 : 0.86,
+      roughness: def.kind === 'whale' ? 0.55 : def.kind === 'quadruped' ? 0.92 : 0.86,
       metalness: 0,
       flatShading: true,
       side: THREE.DoubleSide,
@@ -291,7 +451,41 @@ export function createFaunaEngine() {
       const phase = agentAnim.x;
       const radial = abs(local.x);
       let animated;
-      if (def.kind === 'bird') {
+      if (def.kind === 'bird' && def.wade) {
+        // A wading bird: gate below 0 folds it (standing: wings tucked, legs down, neck up); above 0
+        // it flaps as any bird, the legs trailing straight back and the neck reaching forward.
+        const flap = def.flap;
+        const hinge = def.hinge;
+        const reach = Math.max(def.halfSpan - hinge, 1e-3);
+        const fold = saturate(agentAnim.y.negate());
+        const flapGate = saturate(agentAnim.y);
+        const span = max(radial.sub(hinge), 0).mul(float(1).sub(fold.mul(0.82)));
+        const stroke = sin(phase).add(sin(phase.mul(2)).mul(0.2));
+        const flapAngle = stroke.mul(agentAnim.z.mul(0.35).add(0.8).mul(flap.amplitude)).add(flap.dihedral);
+        const glideAngle = sin(time.mul(1.2).add(agentAnim.w.mul(40))).mul(0.03).add(flap.glideDihedral);
+        const wingAngle = mix(mix(glideAngle, flapAngle, flapGate), float(0.25), fold);
+        const bend = wingAngle.mul(smoothstep(0.3, 0.9, span.div(reach)).mul(0.55).add(1));
+        const bentX = sign(local.x).mul(min(radial, hinge).add(span.mul(cos(bend))));
+        const limb = attribute('leg', 'vec2');
+        const legMask = limb.y.mul(float(1).sub(limb.x));
+        const neckMask = limb.y.mul(limb.x);
+        // Legs swing back about the hip (legTop) as the fold opens; the neck tips forward about its base.
+        const legAngle = float(1).sub(fold).mul(1.35);
+        const legY = local.y.sub(def.wade.legTop[1]);
+        const legZ = local.z.sub(def.wade.legTop[2]);
+        const legRotY = legY.mul(cos(legAngle)).add(legZ.mul(sin(legAngle))).add(def.wade.legTop[1]);
+        const legRotZ = legZ.mul(cos(legAngle)).sub(legY.mul(sin(legAngle))).add(def.wade.legTop[2]);
+        const neckAngle = float(1).sub(fold).mul(-1.15);
+        const neckY = local.y.sub(def.wade.neckBase[1]);
+        const neckZ = local.z.sub(def.wade.neckBase[2]);
+        const neckRotY = neckY.mul(cos(neckAngle)).add(neckZ.mul(sin(neckAngle))).add(def.wade.neckBase[1]);
+        const neckRotZ = neckZ.mul(cos(neckAngle)).sub(neckY.mul(sin(neckAngle))).add(def.wade.neckBase[2]);
+        const bodyBob = sin(phase).mul(-0.018 * def.size).mul(flapGate);
+        const wingY = local.y.add(span.mul(sin(bend))).add(bodyBob);
+        const limbY = mix(mix(wingY, legRotY, legMask), neckRotY, neckMask);
+        const limbZ = mix(mix(local.z, legRotZ, legMask), neckRotZ, neckMask);
+        animated = vec3(mix(bentX, local.x, limb.y), limbY, limbZ);
+      } else if (def.kind === 'bird') {
         const flap = def.flap;
         const hinge = def.hinge;
         const reach = Math.max(def.halfSpan - hinge, 1e-3);
@@ -304,6 +498,19 @@ export function createFaunaEngine() {
         const bentX = sign(local.x).mul(min(radial, hinge).add(span.mul(cos(bend))));
         const bodyBob = sin(phase).mul(-0.018 * def.size).mul(agentAnim.y);
         animated = vec3(bentX, local.y.add(span.mul(sin(bend))).add(bodyBob), local.z);
+      } else if (def.kind === 'quadruped') {
+        // Legs swing about the hip in diagonal pairs (the leg attribute's phase offset), the stride
+        // widening from walk to run (anim.z); standing (gate 0) freezes them. The body bobs twice a
+        // stride. Leg vertices move as a lever about the hip: a thin leg rotates as it translates.
+        const gait = def.gait;
+        const limb = attribute('leg', 'vec2');
+        const amplitude = mix(float(gait.amplitude[0]), float(gait.amplitude[1]), agentAnim.z).mul(agentAnim.y);
+        const swing = sin(phase.add(limb.x)).mul(amplitude);
+        const lever = max(float(gait.hip).sub(local.y), 0).mul(limb.y);
+        const legZ = local.z.sub(sin(swing).mul(lever));
+        const legY = local.y.add(float(1).sub(cos(swing)).mul(lever));
+        const bob = abs(sin(phase)).mul(gait.bob).mul(agentAnim.y).mul(agentAnim.z.mul(1.5).add(0.5)).mul(float(1).sub(limb.y));
+        animated = vec3(local.x, legY.add(bob), legZ);
       } else {
         const body = def.body;
         const hinge = def.hinge;
@@ -408,6 +615,8 @@ export function createFaunaEngine() {
       timer: new Float32Array(capacity),
       aux: new Float32Array(capacity),
       aux2: new Float32Array(capacity),
+      /** Quadrupeds: the gait blend (0 walk .. 1 run) the shader widens the stride with. */
+      gait: new Float32Array(capacity),
     };
   }
 
@@ -432,6 +641,20 @@ export function createFaunaEngine() {
       pool.origin.z = Math.round(camera.position.z / 64) * 64;
       pool.mesh.position.copy(pool.origin);
       pool.drawing = 0;
+    }
+    if (dust) {
+      dust.origin.x = Math.round(camera.position.x / 64) * 64;
+      dust.origin.y = Math.round(camera.position.y / 64) * 64;
+      dust.origin.z = Math.round(camera.position.z / 64) * 64;
+      dust.sprite.position.copy(dust.origin);
+    }
+    // The threat follows a craft change only (a string compare a frame).
+    const craft = ctx.state.flight ? ctx.state.flight.craft : null;
+    if (craft !== threatCraft) {
+      threatCraft = craft;
+      const registry = ctx.game && ctx.game.craftRegistry;
+      const module = craft && registry && typeof registry.get === 'function' ? registry.get(craft) : null;
+      threat[0] = module && Number.isFinite(module.faunaThreat) && module.faunaThreat > 0 ? module.faunaThreat : 1;
     }
   }
 
@@ -728,10 +951,11 @@ export function createFaunaEngine() {
 
   /**
    * Applies the steering (accel limit io[ACCEL], climb limit io[CLIMB], speeds io[MIN_SPEED] to
-   * io[MAX_SPEED]), banks into the turn at io[BANK_BLEND] and moves the agent, never below io[FLOOR].
-   * Returns nothing; writes the agent's arrays.
+   * io[MAX_SPEED]), banks into the turn at io[BANK_BLEND] and moves the agent over the frame's step,
+   * never below io[FLOOR]. Returns nothing; writes the agent's arrays.
    */
-  function integrate(pool, index, dt) {
+  function integrate(pool, index) {
+    const dt = frameStep[0];
     const excitement = pool.excite[index];
     const limit = io[IO.ACCEL] * (1 + 1.6 * excitement);
     const lengthSq = steering[0] * steering[0] + steering[1] * steering[1] + steering[2] * steering[2];
@@ -776,7 +1000,8 @@ export function createFaunaEngine() {
    * Flap phase and gate for a bird: flapping while excited or climbing, gliding in its glide share
    * io[GLIDE] (on the group clock io[TIME]).
    */
-  function animateBird(pool, index, dt, excitedGate) {
+  function animateBird(pool, index, excitedGate) {
+    const dt = frameStep[0];
     const time = io[IO.TIME];
     const glideShare = io[IO.GLIDE];
     const def = pool.def;
@@ -814,7 +1039,8 @@ export function createFaunaEngine() {
     const px = player.position.x;
     const py = player.position.y;
     const pz = player.position.z;
-    const reach = g[G.RADIUS] + scatter.radius;
+    const scatterRadius = scatter.radius * threat[0];
+    const reach = g[G.RADIUS] + scatterRadius;
     const toCenterX = g[G.CX] - px;
     const toCenterY = g[G.CY] - py;
     const toCenterZ = g[G.CZ] - pz;
@@ -832,7 +1058,8 @@ export function createFaunaEngine() {
     pathDirection[0] = directionX / directionLength;
     pathDirection[1] = directionY / directionLength;
     pathDirection[2] = directionZ / directionLength;
-    const radiusSq = scatter.radius * scatter.radius;
+    const radiusSq = scatterRadius * scatterRadius;
+    const burstScale = Math.min(threat[0], 2);
     let fled = 0;
     for (let index = start; index < end; index++) {
       const dx = pool.px[index] - px;
@@ -863,7 +1090,7 @@ export function createFaunaEngine() {
       pool.fleeX[index] = fleeX;
       pool.fleeY[index] = fleeY;
       pool.fleeZ[index] = fleeZ;
-      const burst = scatter.burst * (0.85 + 0.3 * pool.seed[index]);
+      const burst = scatter.burst * burstScale * (0.85 + 0.3 * pool.seed[index]);
       pool.vx[index] = pool.vx[index] * 0.3 + fleeX * burst;
       pool.vy[index] = pool.vy[index] * 0.3 + fleeY * burst * 0.6;
       pool.vz[index] = pool.vz[index] * 0.3 + fleeZ * burst;
@@ -996,8 +1223,8 @@ export function createFaunaEngine() {
       io[IO.CUSHION] = io[IO.GROUND] + params.floor;
       steerAboveFloor(pool, index);
       io[IO.FLOOR] = io[IO.GROUND] + params.floor * 0.5;
-      integrate(pool, index, dt);
-      animateBird(pool, index, dt, false);
+      integrate(pool, index);
+      animateBird(pool, index, false);
       calm(pool, index);
       sumX += pool.px[index];
       sumY += pool.py[index];
@@ -1060,8 +1287,8 @@ export function createFaunaEngine() {
       io[IO.CUSHION] = io[IO.GROUND] + params.floor;
       io[IO.FLOOR] = io[IO.CUSHION];
       steerAboveFloor(pool, index);
-      integrate(pool, index, dt);
-      animateBird(pool, index, dt, false);
+      integrate(pool, index);
+      animateBird(pool, index, false);
       calm(pool, index);
       sumX += pool.px[index];
       sumY += pool.py[index];
@@ -1183,7 +1410,7 @@ export function createFaunaEngine() {
       io[IO.CUSHION] = io[IO.GROUND] + params.floor;
       io[IO.FLOOR] = io[IO.CUSHION];
       steerAboveFloor(pool, index);
-      integrate(pool, index, dt);
+      integrate(pool, index);
       // The wingbeat runs down each leg of the V as a wave.
       const rank = formation.shape === 'echelon' ? k : Math.ceil(k / 2);
       pool.phase[index] = g[G.FLAP] - rank * 0.55 + pool.excite[index] * pool.seed[index] * 3;
@@ -1464,9 +1691,9 @@ export function createFaunaEngine() {
       io[IO.CUSHION] = Math.max(bottom * 0.5 + ground * 0.5, io[IO.GROUND] + params.floor);
       io[IO.FLOOR] = io[IO.CUSHION];
       steerAboveFloor(pool, index);
-      integrate(pool, index, dt);
+      integrate(pool, index);
       io[IO.GLIDE] = pool.mode[index] === 1 ? 0.97 : pool.def.flap.glideShare;
-      animateBird(pool, index, dt, false);
+      animateBird(pool, index, false);
       calm(pool, index);
       sumX += pool.px[index];
       sumY += pool.py[index];
@@ -1482,7 +1709,8 @@ export function createFaunaEngine() {
   }
 
   // ---- pod (whales) --------------------------------------------------------------------------------
-  function movePodGoal(data, dt) {
+  function movePodGoal(data) {
+    const dt = frameStep[0];
     const g = data.g;
     const params = data.params;
     const time = g[G.TIME];
@@ -1795,8 +2023,8 @@ export function createFaunaEngine() {
       io[IO.CUSHION] = io[IO.GROUND] + params.floor;
       io[IO.FLOOR] = io[IO.CUSHION];
       steerAboveFloor(pool, index);
-      integrate(pool, index, dt);
-      animateBird(pool, index, dt, mode === MODE_JOIN || mode === MODE_PEEL);
+      integrate(pool, index);
+      animateBird(pool, index, mode === MODE_JOIN || mode === MODE_PEEL);
       calm(pool, index);
       sumX += pool.px[index];
       sumY += pool.py[index];
@@ -1977,6 +2205,1254 @@ export function createFaunaEngine() {
   }
 
   // =============================================================================================
+  // DUST: one shared sprite of soft billboards (herds and columns); each group owns a block of slots
+  // =============================================================================================
+  let dust = null;
+
+  function createDustPool() {
+    const { TSL } = ctx;
+    const { instancedDynamicBufferAttribute, uv, saturate, float, vec2, vec4, mix, pow, min } = TSL;
+    const dustA = new Float32Array(DUST_CAPACITY * 4);
+    const dustB = new Float32Array(DUST_CAPACITY * 4);
+    const attributeA = new THREE.InstancedBufferAttribute(dustA, 4).setUsage(THREE.DynamicDrawUsage);
+    const attributeB = new THREE.InstancedBufferAttribute(dustB, 4).setUsage(THREE.DynamicDrawUsage);
+    const nodeA = instancedDynamicBufferAttribute(attributeA, 'vec4');
+    const nodeB = instancedDynamicBufferAttribute(attributeB, 'vec4');
+    const material = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false });
+    material.name = 'fauna-dust';
+    // nodeA: position relative to the pool origin (m) and size (m); nodeB: linear colour and opacity.
+    material.positionNode = nodeA.xyz;
+    material.scaleNode = vec2(nodeA.w, nodeA.w);
+    const light = mix(float(1), float(0.3), ctx.uniforms.nightFactor);
+    material.colorNode = vec4(nodeB.rgb.mul(ctx.uniforms.sunColor.mul(0.45).add(0.6)).mul(light), 1);
+    const radial = uv().sub(0.5).mul(2).length();
+    material.opacityNode = saturate(nodeB.a.mul(pow(saturate(float(1).sub(min(radial, float(1)).mul(radial))), 1.6)));
+    const sprite = new THREE.Sprite(material);
+    sprite.name = 'fauna-dust';
+    sprite.count = 0;
+    sprite.frustumCulled = false;
+    sprite.renderOrder = 2;
+    sprite.visible = false;
+    ctx.scene.add(sprite);
+    if (ctx.registerPrewarm) ctx.registerPrewarm(sprite);
+    return {
+      sprite,
+      material,
+      attributeA,
+      attributeB,
+      dustA,
+      dustB,
+      ranges: createRangeAllocator(DUST_CAPACITY),
+      origin: new THREE.Vector3(),
+      px: new Float64Array(DUST_CAPACITY),
+      py: new Float64Array(DUST_CAPACITY),
+      pz: new Float64Array(DUST_CAPACITY),
+      vx: new Float32Array(DUST_CAPACITY),
+      vy: new Float32Array(DUST_CAPACITY),
+      vz: new Float32Array(DUST_CAPACITY),
+      age: new Float32Array(DUST_CAPACITY),
+      life: new Float32Array(DUST_CAPACITY),
+      size: new Float32Array(DUST_CAPACITY),
+      // Linear rgb of each group's dust (written per slot at emission).
+      color: new Float32Array(DUST_CAPACITY * 3),
+    };
+  }
+
+  /** sRGB hex to linear rgb into out (Float32Array of 3). */
+  function linearColor(hex, out) {
+    for (let channel = 0; channel < 3; channel++) {
+      const value = ((hex >> (16 - channel * 8)) & 255) / 255;
+      out[channel] = value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+    }
+  }
+
+  /** A group's dust block (slots), or none when the dust is off or the pool is full (a budget, not an error). */
+  function allocDust(data, dustParams) {
+    data.dustStart = -1;
+    data.dustCount = 0;
+    if (!dust || !dustParams || dustParams.rate <= 0) return 0;
+    const slots = Math.min(256, Math.max(48, data.count * 3));
+    const start = dust.ranges.alloc(slots);
+    if (start < 0) return 0;
+    data.dustStart = start;
+    data.dustCount = slots;
+    data.dustCursor = 0;
+    data.dustParams = dustParams;
+    data.dustColor = new Float32Array(3);
+    linearColor(dustParams.color, data.dustColor);
+    for (let slot = start; slot < start + slots; slot++) {
+      dust.life[slot] = 0;
+      dust.age[slot] = 0;
+      dust.dustA[slot * 4 + 3] = 0;
+      dust.dustB[slot * 4 + 3] = 0;
+    }
+    return slots;
+  }
+
+  function freeDust(data) {
+    if (!dust || data.dustStart < 0) return;
+    for (let slot = data.dustStart; slot < data.dustStart + data.dustCount; slot++) {
+      dust.life[slot] = 0;
+      dust.dustA[slot * 4 + 3] = 0;
+      dust.dustB[slot * 4 + 3] = 0;
+    }
+    dust.ranges.free(data.dustStart);
+    data.dustStart = -1;
+    data.dustCount = 0;
+    refreshDustDraw();
+  }
+
+  /** Hides the group's puffs (the far tier): they would not follow the moving origin there. */
+  function clearDust(data) {
+    for (let slot = data.dustStart; slot < data.dustStart + data.dustCount; slot++) {
+      dust.life[slot] = 0;
+      dust.dustA[slot * 4 + 3] = 0;
+      dust.dustB[slot * 4 + 3] = 0;
+    }
+    data.g[G.DUST_LIVE] = 0;
+    refreshDustDraw();
+  }
+
+  function refreshDustDraw() {
+    dust.sprite.count = dust.ranges.highWater;
+    dust.sprite.visible = dust.ranges.highWater > 0;
+    dust.attributeA.needsUpdate = true;
+    dust.attributeB.needsUpdate = true;
+  }
+
+  /** One puff at agent index's feet, kicked back from its motion (the oldest slot of the block is reused). */
+  function emitDust(data, pool, index) {
+    const slot = data.dustStart + data.dustCursor;
+    data.dustCursor = (data.dustCursor + 1) % data.dustCount;
+    // A cheap deterministic jitter from the slot and the agent's phase (no random stream per puff).
+    const jitter = Math.sin(slot * 12.9898 + pool.phase[index] * 78.233) * 43758.5453;
+    const share = jitter - Math.floor(jitter);
+    const params = data.dustParams;
+    dust.px[slot] = pool.px[index] + (share - 0.5) * 1.6;
+    dust.py[slot] = pool.py[index] + 0.25;
+    dust.pz[slot] = pool.pz[index] + (0.5 - share) * 1.6;
+    dust.vx[slot] = -pool.vx[index] * 0.18 + (share - 0.5) * 1.2;
+    dust.vy[slot] = 0.7 + share * 0.9;
+    dust.vz[slot] = -pool.vz[index] * 0.18 + (0.5 - share) * 1.2;
+    dust.age[slot] = 0;
+    dust.life[slot] = 2.6 + share * 2;
+    dust.size[slot] = params.size * (0.6 + share * 0.5);
+    dust.color[slot * 3] = data.dustColor[0];
+    dust.color[slot * 3 + 1] = data.dustColor[1];
+    dust.color[slot * 3 + 2] = data.dustColor[2];
+  }
+
+  /** Advances and writes the group's dust block; the group's live puffs into g[DUST_LIVE]. */
+  function updateDust(data) {
+    const dt = frameStep[0];
+    if (data.dustStart < 0) return;
+    const origin = dust.origin;
+    const drag = Math.exp(-0.9 * dt);
+    const windX = data.g[G.WIND_X];
+    const windZ = data.g[G.WIND_Z];
+    let alive = 0;
+    for (let slot = data.dustStart; slot < data.dustStart + data.dustCount; slot++) {
+      const offset = slot * 4;
+      if (dust.life[slot] <= 0) continue;
+      dust.age[slot] += dt;
+      const share = dust.age[slot] / dust.life[slot];
+      if (share >= 1) {
+        dust.life[slot] = 0;
+        dust.dustA[offset + 3] = 0;
+        dust.dustB[offset + 3] = 0;
+        continue;
+      }
+      alive++;
+      dust.vx[slot] = dust.vx[slot] * drag + windX * (1 - drag);
+      dust.vy[slot] = dust.vy[slot] * drag + 0.12 * dt;
+      dust.vz[slot] = dust.vz[slot] * drag + windZ * (1 - drag);
+      dust.px[slot] += dust.vx[slot] * dt;
+      dust.py[slot] += dust.vy[slot] * dt;
+      dust.pz[slot] += dust.vz[slot] * dt;
+      dust.dustA[offset] = dust.px[slot] - origin.x;
+      dust.dustA[offset + 1] = dust.py[slot] - origin.y;
+      dust.dustA[offset + 2] = dust.pz[slot] - origin.z;
+      dust.dustA[offset + 3] = dust.size[slot] * (1 + share * 1.8);
+      dust.dustB[offset] = dust.color[slot * 3];
+      dust.dustB[offset + 1] = dust.color[slot * 3 + 1];
+      dust.dustB[offset + 2] = dust.color[slot * 3 + 2];
+      // Fades in fast, thins out slowly; the group's own fade applies.
+      dust.dustB[offset + 3] = 0.42 * Math.min(1, share * 8) * (1 - share) * (1 - share) * data.g[G.FADE];
+    }
+    data.g[G.DUST_LIVE] = alive;
+    refreshDustDraw();
+  }
+
+  /**
+   * Emits the group's dust from agent index running at io[SPEED_NOW]: `rate` puffs a second above
+   * io[DUST_MIN] m/s, over io[STEP_DT] seconds.
+   */
+  function kickDust(data, pool, index) {
+    const speed = io[IO.SPEED_NOW];
+    const threshold = io[IO.DUST_MIN];
+    if (data.dustStart < 0 || speed < threshold) return;
+    pool.aux2[index] += data.dustParams.rate * Math.min(1, speed / (threshold * 2)) * io[IO.STEP_DT];
+    while (pool.aux2[index] >= 1) {
+      pool.aux2[index] -= 1;
+      emitDust(data, pool, index);
+    }
+  }
+
+  // =============================================================================================
+  // GROUND AND WATER QUERIES OF THE NEW MODES
+  // =============================================================================================
+  /** Integer probe coordinates reach the terrain unboxed; the extra ground surfaces (island tops) count. */
+  function groundAt(data, x, z) {
+    let height = ctx.terrain.groundHeight(x, z);
+    const surfaces = ctx.surfaces;
+    if (surfaces && surfaces.count > 0) {
+      const top = surfaces.surfaceBelow(x, z, data.g[G.BASE_Y] + 40);
+      if (top > height) height = top;
+    }
+    return height;
+  }
+
+  /** Water at (x, z): the shared water query (ocean and lakes) when the game has one, else the sea. */
+  function isWaterAt(x, z, ground) {
+    const query = ctx.game && ctx.game.waterQuery;
+    if (query && typeof query.isWater === 'function') return query.isWater(x, z);
+    return ground < ctx.terrain.waterLevel;
+  }
+
+  /**
+   * The water surface height at (x, z): the shared water query (swell and local lakes) when the game
+   * has one, else sea level with the whirlpool dips.
+   */
+  function waterHeightAt(x, z) {
+    const query = ctx.game && ctx.game.waterQuery;
+    if (query && typeof query.heightAt === 'function') {
+      const height = query.heightAt(x, z);
+      if (height > -Infinity) return height;
+    }
+    return waterSurface(x, z);
+  }
+
+  // ---- A herd's fine ground grid ----------------------------------------------------------------
+  function createFineGround(spacing) {
+    const cells = FINE_GRID * FINE_GRID;
+    return {
+      spacing,
+      cx: 0,
+      cz: 0,
+      heights: new Float64Array(cells),
+      water: new Uint8Array(cells),
+      dirty: new Uint8Array(cells),
+      scratchHeights: new Float64Array(cells),
+      scratchWater: new Uint8Array(cells),
+      cursor: 0,
+      wait: 0,
+    };
+  }
+
+  function probeFineCell(data, fine, cell) {
+    const half = (FINE_GRID - 1) / 2;
+    const x = fine.cx + ((cell % FINE_GRID) - half) * fine.spacing;
+    const z = fine.cz + (Math.floor(cell / FINE_GRID) - half) * fine.spacing;
+    const height = groundAt(data, x, z);
+    fine.heights[cell] = height;
+    fine.water[cell] = isWaterAt(x, z, height) ? 1 : 0;
+    fine.dirty[cell] = 0;
+  }
+
+  /** Centres the grid on (x, z) (whole cells) and probes every cell (create, and back from far). */
+  function fillFine(data, x, z) {
+    const fine = data.fine;
+    fine.cx = Math.round(x / fine.spacing) * fine.spacing;
+    fine.cz = Math.round(z / fine.spacing) * fine.spacing;
+    for (let cell = 0; cell < FINE_GRID * FINE_GRID; cell++) probeFineCell(data, fine, cell);
+  }
+
+  /**
+   * Follows the herd's centroid: shifts the grid by whole cells (kept cells move, new ones wait for a
+   * probe).
+   */
+  function recentreFine(data) {
+    const fine = data.fine;
+    const shiftX = Math.round((data.g[G.CX] - fine.cx) / fine.spacing);
+    const shiftZ = Math.round((data.g[G.CZ] - fine.cz) / fine.spacing);
+    if (shiftX === 0 && shiftZ === 0) return;
+    fine.scratchHeights.set(fine.heights);
+    fine.scratchWater.set(fine.water);
+    for (let row = 0; row < FINE_GRID; row++) {
+      for (let column = 0; column < FINE_GRID; column++) {
+        const cell = row * FINE_GRID + column;
+        const sourceColumn = column + shiftX;
+        const sourceRow = row + shiftZ;
+        if (sourceColumn >= 0 && sourceColumn < FINE_GRID && sourceRow >= 0 && sourceRow < FINE_GRID) {
+          const source = sourceRow * FINE_GRID + sourceColumn;
+          fine.heights[cell] = fine.scratchHeights[source];
+          fine.water[cell] = fine.scratchWater[source];
+        } else {
+          // Until probed, a new cell takes its nearest kept neighbour's height and counts as water,
+          // so nothing walks onto ground the herd has not seen yet.
+          const nearColumn = Math.min(Math.max(sourceColumn, 0), FINE_GRID - 1);
+          const nearRow = Math.min(Math.max(sourceRow, 0), FINE_GRID - 1);
+          fine.heights[cell] = fine.scratchHeights[nearRow * FINE_GRID + nearColumn];
+          fine.water[cell] = 1;
+          fine.dirty[cell] = 1;
+        }
+      }
+    }
+    fine.cx += shiftX * fine.spacing;
+    fine.cz += shiftZ * fine.spacing;
+  }
+
+  /** One probe every `every` frames: a cell waiting since a shift first, else the next in turn. */
+  function probeFine(data, every) {
+    const fine = data.fine;
+    fine.wait = (fine.wait + 1) % every;
+    if (fine.wait !== 0) return;
+    recentreFine(data);
+    const cells = FINE_GRID * FINE_GRID;
+    let cell = -1;
+    for (let step = 0; step < cells; step++) {
+      const candidate = (fine.cursor + step) % cells;
+      if (fine.dirty[candidate]) {
+        cell = candidate;
+        break;
+      }
+    }
+    if (cell < 0) cell = fine.cursor;
+    fine.cursor = (cell + 1) % cells;
+    probeFineCell(data, fine, cell);
+  }
+
+  /**
+   * Bilinear ground at io[SAMPLE_X], io[SAMPLE_Z] on the fine grid into io[GROUND], its gradient into
+   * io[GRAD_X], io[GRAD_Z] and the slope (the gradient's length, rise over run) into io[SLOPE]; io[WET]
+   * is 1 when the nearest cell is water.
+   */
+  function sampleFine(fine) {
+    const half = (FINE_GRID - 1) / 2;
+    const spacing = fine.spacing;
+    const u = Math.min(Math.max((io[IO.SAMPLE_X] - fine.cx) / spacing + half, 0), FINE_GRID - 1.001);
+    const v = Math.min(Math.max((io[IO.SAMPLE_Z] - fine.cz) / spacing + half, 0), FINE_GRID - 1.001);
+    const column = Math.floor(u);
+    const row = Math.floor(v);
+    const fu = u - column;
+    const fv = v - row;
+    const heights = fine.heights;
+    const h00 = heights[row * FINE_GRID + column];
+    const h10 = heights[row * FINE_GRID + column + 1];
+    const h01 = heights[(row + 1) * FINE_GRID + column];
+    const h11 = heights[(row + 1) * FINE_GRID + column + 1];
+    io[IO.GROUND] = (h00 * (1 - fu) + h10 * fu) * (1 - fv) + (h01 * (1 - fu) + h11 * fu) * fv;
+    io[IO.GRAD_X] = ((h10 - h00) * (1 - fv) + (h11 - h01) * fv) / spacing;
+    io[IO.GRAD_Z] = ((h01 - h00) * (1 - fu) + (h11 - h10) * fu) / spacing;
+    io[IO.SLOPE] = Math.sqrt(io[IO.GRAD_X] * io[IO.GRAD_X] + io[IO.GRAD_Z] * io[IO.GRAD_Z]);
+    io[IO.WET] = fine.water[((v + 0.5) | 0) * FINE_GRID + ((u + 0.5) | 0)];
+  }
+
+  /**
+   * True when (io[SAMPLE_X], io[SAMPLE_Z]) is steeper than io[SLOPE_LIMIT], or water lies within
+   * io[MARGIN] metres of it.
+   */
+  function blockedAt(fine) {
+    const slopeLimit = io[IO.SLOPE_LIMIT];
+    const margin = io[IO.MARGIN];
+    const x = io[IO.SAMPLE_X];
+    const z = io[IO.SAMPLE_Z];
+    sampleFine(fine);
+    if (io[IO.SLOPE] > slopeLimit || io[IO.WET] > 0) return true;
+    if (margin <= 0) return false;
+    const ground = io[IO.GROUND];
+    const slope = io[IO.SLOPE];
+    let wet = false;
+    for (let side = 0; side < 4 && !wet; side++) {
+      io[IO.SAMPLE_X] = x + (side === 0 ? margin : side === 1 ? -margin : 0);
+      io[IO.SAMPLE_Z] = z + (side === 2 ? margin : side === 3 ? -margin : 0);
+      sampleFine(fine);
+      if (io[IO.WET] > 0) wet = true;
+    }
+    io[IO.SAMPLE_X] = x;
+    io[IO.SAMPLE_Z] = z;
+    io[IO.GROUND] = ground;
+    io[IO.SLOPE] = slope;
+    return wet;
+  }
+
+  // =============================================================================================
+  // HERD
+  // =============================================================================================
+  const STAMPEDE_REASONS = Object.freeze({ player: 'player', timer: 'timer', event: 'event' });
+
+  function startStampede(data, x, z, trigger) {
+    const g = data.g;
+    const stampede = data.params.herd.stampede;
+    g[G.STAMPEDE] = stampede.duration;
+    g[G.STAMPEDE_X] = x;
+    g[G.STAMPEDE_Z] = z;
+    g[G.STAMPEDE_COOLDOWN] = stampede.duration + stampede.cooldown;
+    // Away from the trigger at once; the agents follow at their own pace.
+    g[G.HEADING] = Math.atan2(g[G.CX] - x, -(g[G.CZ] - z));
+    const pool = data.pool;
+    for (let index = data.start; index < data.start + data.count; index++) pool.mode[index] = HERD_WALK;
+    ctx.bus.emit('fauna:stampede', {
+      id: data.instance.id, presetId: data.instance.presetId, species: pool.def.id, trigger: STAMPEDE_REASONS[trigger],
+      position: { x: g[G.CX], y: g[G.CY], z: g[G.CZ] },
+    });
+  }
+
+  function checkStampede(data) {
+    const dt = frameStep[0];
+    const g = data.g;
+    const stampede = data.params.herd.stampede;
+    if (g[G.STAMPEDE] > 0) {
+      g[G.STAMPEDE] -= dt;
+      return;
+    }
+    g[G.STAMPEDE_COOLDOWN] -= dt;
+    if (stampede.trigger === 'timer') {
+      g[G.STAMPEDE_TIMER] -= dt;
+      if (g[G.STAMPEDE_TIMER] <= 0) {
+        g[G.STAMPEDE_TIMER] = stampede.interval;
+        // From a side that turns with the group clock (deterministic).
+        const angle = data.phaseSeed * TWO_PI + g[G.TIME] * 0.37;
+        startStampede(data, g[G.CX] + Math.sin(angle) * 200, g[G.CZ] - Math.cos(angle) * 200, 'timer');
+      }
+      return;
+    }
+    if (stampede.trigger !== 'player' || g[G.STAMPEDE_COOLDOWN] > 0) return;
+    const player = ctx.state.player.position;
+    const dx = player.x - g[G.CX];
+    const dz = player.z - g[G.CZ];
+    const reach = stampede.radius * Math.sqrt(threat[0]);
+    if (dx * dx + dz * dz > reach * reach || player.y - g[G.CY] > stampede.maxAltitude) return;
+    startStampede(data, player.x, player.z, 'player');
+  }
+
+  /** The herd's goal: grazing drift or a stampede, steering clear of steep ground and water. */
+  function moveHerdGoal(data) {
+    const dt = frameStep[0];
+    const g = data.g;
+    const herd = data.params.herd;
+    if (data.instance.tier === 'far') return;
+    checkStampede(data);
+    const stampeding = g[G.STAMPEDE] > 0;
+    const runSpeed = data.runSpeed;
+    const target = stampeding ? runSpeed : herd.gaits.walk * (1 - herd.graze * 0.6);
+    g[G.SPEED] += (target - g[G.SPEED]) * Math.min(1, dt * (stampeding ? 1.4 : 0.4));
+    if (stampeding) {
+      // Away from the trigger, bent downhill.
+      const awayX = g[G.CX] - g[G.STAMPEDE_X];
+      const awayZ = g[G.CZ] - g[G.STAMPEDE_Z];
+      const awayLength = Math.sqrt(awayX * awayX + awayZ * awayZ) || 1;
+      io[IO.SAMPLE_X] = g[G.X];
+      io[IO.SAMPLE_Z] = g[G.Z];
+      sampleFine(data.fine);
+      const downhill = herd.stampede.downhill;
+      const fleeX = awayX / awayLength - io[IO.GRAD_X] * downhill * 4;
+      const fleeZ = awayZ / awayLength - io[IO.GRAD_Z] * downhill * 4;
+      io[IO.TURN_TARGET] = Math.atan2(fleeX, -fleeZ);
+      io[IO.TURN_STEP] = 0.6 * dt;
+      turnGroup(g);
+    } else {
+      const time = g[G.TIME];
+      g[G.HEADING] += (Math.sin(time * 0.05 + data.phaseSeed * 13.7) * 0.11 + Math.sin(time * 0.017 + data.phaseSeed * 41.3) * 0.07) * dt;
+      const awayX = g[G.X] - g[G.ANCHOR_X];
+      const awayZ = g[G.Z] - g[G.ANCHOR_Z];
+      if (awayX * awayX + awayZ * awayZ > data.params.leash * data.params.leash) {
+        io[IO.TURN_TARGET] = Math.atan2(-awayX, awayZ);
+        io[IO.TURN_STEP] = 0.25 * dt;
+        turnGroup(g);
+      }
+    }
+    // Look ahead now and then: a blocked line turns the goal to the nearest clear heading.
+    g[G.AVOID_TIMER] -= dt;
+    if (g[G.AVOID_TIMER] <= 0) {
+      g[G.AVOID_TIMER] = 0.4;
+      steerGoalClear(data);
+    }
+    const nextX = g[G.X] + Math.sin(g[G.HEADING]) * g[G.SPEED] * dt;
+    const nextZ = g[G.Z] - Math.cos(g[G.HEADING]) * g[G.SPEED] * dt;
+    io[IO.SAMPLE_X] = nextX;
+    io[IO.SAMPLE_Z] = nextZ;
+    io[IO.SLOPE_LIMIT] = herd.slopeLimit;
+    io[IO.MARGIN] = herd.waterMargin;
+    if (!blockedAt(data.fine)) {
+      g[G.VX] = (nextX - g[G.X]) / dt;
+      g[G.VZ] = (nextZ - g[G.Z]) / dt;
+      g[G.X] = nextX;
+      g[G.Z] = nextZ;
+    } else {
+      g[G.VX] = 0;
+      g[G.VZ] = 0;
+      g[G.AVOID_TIMER] = 0;
+    }
+    io[IO.SAMPLE_X] = g[G.X];
+    io[IO.SAMPLE_Z] = g[G.Z];
+    sampleFine(data.fine);
+    g[G.Y] = io[IO.GROUND];
+    g[G.GAIT] = Math.min(Math.max((g[G.SPEED] - herd.gaits.walk) / (herd.gaits.run - herd.gaits.walk), 0), 1);
+  }
+
+  /** Candidate turns (radians) tried in order when the line ahead is blocked. */
+  const CLEAR_TURNS = Object.freeze([0, 0.6, -0.6, 1.2, -1.2, 1.9, -1.9, Math.PI]);
+
+  function steerGoalClear(data) {
+    const g = data.g;
+    const herd = data.params.herd;
+    const fine = data.fine;
+    const reach = Math.min(fine.spacing * (FINE_GRID - 1) * 0.42, 18 + g[G.SPEED] * 3);
+    io[IO.SLOPE_LIMIT] = herd.slopeLimit;
+    io[IO.MARGIN] = herd.waterMargin;
+    for (let attempt = 0; attempt < CLEAR_TURNS.length; attempt++) {
+      const heading = g[G.HEADING] + CLEAR_TURNS[attempt];
+      let clear = true;
+      for (let step = 1; step <= 3 && clear; step++) {
+        io[IO.SAMPLE_X] = g[G.X] + Math.sin(heading) * reach * (step / 3);
+        io[IO.SAMPLE_Z] = g[G.Z] - Math.cos(heading) * reach * (step / 3);
+        if (blockedAt(fine)) clear = false;
+      }
+      if (clear) {
+        g[G.HEADING] = heading;
+        return;
+      }
+    }
+    // Hemmed in: stand still this time and look again soon.
+    g[G.SPEED] = 0;
+  }
+
+  function simulateHerd(data) {
+    const dt = frameStep[0];
+    const pool = data.pool;
+    const g = data.g;
+    const herd = data.params.herd;
+    const fine = data.fine;
+    const start = data.start;
+    const end = start + data.count;
+    const stampeding = g[G.STAMPEDE] > 0;
+    probeFine(data, stampeding ? 2 : 4);
+    const forwardX = Math.sin(g[G.HEADING]);
+    const forwardZ = -Math.cos(g[G.HEADING]);
+    const spacing = herd.spacing * g[G.SIZE] * (stampeding ? 0.8 : 1);
+    const runSpeed = data.runSpeed;
+    const topSpeed = Math.max(herd.gaits.walk * 1.4, g[G.SPEED] * 1.25);
+    const accel = stampeding ? 7 : 2.5;
+    const separation = spacing * 0.55;
+    const separationSq = separation * separation;
+    const stride = pool.def.gait.stride;
+    let sumX = 0;
+    let sumY = 0;
+    let sumZ = 0;
+    for (let index = start; index < end; index++) {
+      // The animal's place in the herd (a loose sunflower around the goal, turned to the heading).
+      const slotX = g[G.X] + (-forwardZ * pool.homeX[index] + forwardX * pool.homeZ[index]) * spacing;
+      const slotZ = g[G.Z] + (forwardX * pool.homeX[index] + forwardZ * pool.homeZ[index]) * spacing;
+      pool.timer[index] -= dt;
+      if (!stampeding && pool.timer[index] <= 0) {
+        // Grazing: stand a while, then walk a little; the herd's graze share sets the balance.
+        const grazing = pool.mode[index] === HERD_GRAZE;
+        pool.mode[index] = grazing ? HERD_WALK : HERD_GRAZE;
+        pool.timer[index] = grazing ? 4 + pool.seed[index] * 8 : (6 + pool.seed[index] * 14) * herd.graze * 2;
+      }
+      const toSlotX = slotX - pool.px[index];
+      const toSlotZ = slotZ - pool.pz[index];
+      const toSlotSq = toSlotX * toSlotX + toSlotZ * toSlotZ;
+      const standing = !stampeding && pool.mode[index] === HERD_GRAZE && toSlotSq < spacing * spacing * 4;
+      let steerX = 0;
+      let steerZ = 0;
+      if (standing) {
+        steerX = -pool.vx[index] * 2;
+        steerZ = -pool.vz[index] * 2;
+      } else {
+        const gain = stampeding ? 0.9 : 0.35;
+        let desiredX = toSlotX * gain + g[G.VX];
+        let desiredZ = toSlotZ * gain + g[G.VZ];
+        const desiredLength = Math.sqrt(desiredX * desiredX + desiredZ * desiredZ);
+        if (desiredLength > topSpeed) {
+          desiredX *= topSpeed / desiredLength;
+          desiredZ *= topSpeed / desiredLength;
+        }
+        steerX = (desiredX - pool.vx[index]) * 1.5;
+        steerZ = (desiredZ - pool.vz[index]) * 1.5;
+      }
+      // Separation (each animal keeps its spacing; a big herd checks a rotating share of the others).
+      const x = pool.px[index];
+      const z = pool.pz[index];
+      const stride2 = data.count > 64 ? 3 : 1;
+      for (let other = start + ((index + data.neighborSlice) % stride2); other < end; other += stride2) {
+        if (other === index) continue;
+        const dx = x - pool.px[other];
+        const dz = z - pool.pz[other];
+        const distanceSq = dx * dx + dz * dz;
+        if (distanceSq >= separationSq || distanceSq < 1e-6) continue;
+        const push = (separation - Math.sqrt(distanceSq)) / separation;
+        steerX += dx * push * 3 * stride2;
+        steerZ += dz * push * 3 * stride2;
+      }
+      const steerLength = Math.sqrt(steerX * steerX + steerZ * steerZ);
+      if (steerLength > accel) {
+        steerX *= accel / steerLength;
+        steerZ *= accel / steerLength;
+      }
+      let vx = pool.vx[index] + steerX * dt;
+      let vz = pool.vz[index] + steerZ * dt;
+      const speed = Math.sqrt(vx * vx + vz * vz);
+      const limit = stampeding ? runSpeed * 1.1 : topSpeed;
+      if (speed > limit) {
+        vx *= limit / speed;
+        vz *= limit / speed;
+      }
+      // Never onto steep ground or into water: try the move, then each axis alone, else stop.
+      let nextX = x + vx * dt;
+      let nextZ = z + vz * dt;
+      io[IO.SAMPLE_X] = nextX;
+      io[IO.SAMPLE_Z] = nextZ;
+      io[IO.SLOPE_LIMIT] = herd.slopeLimit;
+      io[IO.MARGIN] = herd.waterMargin * 0.5;
+      if (blockedAt(fine)) {
+        io[IO.SAMPLE_X] = nextX;
+        io[IO.SAMPLE_Z] = z;
+        if (!blockedAt(fine)) {
+          nextZ = z;
+          vz = 0;
+        } else {
+          io[IO.SAMPLE_X] = x;
+          io[IO.SAMPLE_Z] = nextZ;
+          if (!blockedAt(fine)) {
+            nextX = x;
+            vx = 0;
+          } else {
+            nextX = x;
+            nextZ = z;
+            vx = 0;
+            vz = 0;
+          }
+        }
+      }
+      io[IO.SAMPLE_X] = nextX;
+      io[IO.SAMPLE_Z] = nextZ;
+      sampleFine(fine);
+      const y = io[IO.GROUND];
+      pool.vy[index] = dt > 0 ? (y - pool.py[index]) / dt : 0;
+      pool.vx[index] = vx;
+      pool.vz[index] = vz;
+      pool.px[index] = nextX;
+      pool.py[index] = y;
+      pool.pz[index] = nextZ;
+      const moving = Math.sqrt(vx * vx + vz * vz);
+      pool.gait[index] = Math.min(Math.max((moving - herd.gaits.walk) / (herd.gaits.run - herd.gaits.walk), 0), 1);
+      pool.gate[index] += ((moving > 0.25 ? 1 : 0) - pool.gate[index]) * Math.min(1, dt * 4);
+      pool.phase[index] = (pool.phase[index] + TWO_PI * (moving / (stride * pool.scale[index] * g[G.SIZE])) * dt) % (TWO_PI * 64);
+      pool.bank[index] = 0;
+      io[IO.SPEED_NOW] = moving;
+      io[IO.DUST_MIN] = herd.gaits.trot * 0.8;
+      io[IO.STEP_DT] = dt;
+      kickDust(data, pool, index);
+      sumX += nextX;
+      sumY += y;
+      sumZ += nextZ;
+    }
+    data.neighborSlice = (data.neighborSlice + 1) % 3;
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
+    updateDust(data);
+  }
+
+  /**
+   * Finds where a herd can stand: the anchor when its ground is clear, else the nearest clear point
+   * within reach (rings 120 m apart, 16 bearings), re-filling the fine grid there. False when none.
+   */
+  function seekClearGround(data, reach) {
+    const g = data.g;
+    const herd = data.params.herd;
+    const clearHere = () => {
+      fillFine(data, g[G.X], g[G.Z]);
+      io[IO.SAMPLE_X] = g[G.X];
+      io[IO.SAMPLE_Z] = g[G.Z];
+      io[IO.SLOPE_LIMIT] = herd.slopeLimit;
+      io[IO.MARGIN] = herd.waterMargin;
+      return !blockedAt(data.fine);
+    };
+    if (clearHere()) return true;
+    for (let radius = 120; radius <= reach; radius += 120) {
+      for (let step = 0; step < 16; step++) {
+        const angle = (step / 16) * TWO_PI;
+        g[G.X] = Math.round(g[G.ANCHOR_X] + Math.sin(angle) * radius);
+        g[G.Z] = Math.round(g[G.ANCHOR_Z] - Math.cos(angle) * radius);
+        if (clearHere()) {
+          g[G.ANCHOR_X] = g[G.X];
+          g[G.ANCHOR_Z] = g[G.Z];
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // =============================================================================================
+  // COLUMN
+  // =============================================================================================
+  const columnOut = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 1, heading: 0, distance: 0, speed: 0, done: false };
+  /** [flight time, car offset] handed to the follower without boxing. */
+  const columnQuery = new Float64Array(2);
+
+  /**
+   * The column's path in the world: column.path points ([along, across] in the spawn frame) or 'auto'
+   * (buildGroundPath from the anchor along the heading, around slopes and water), resampled every
+   * `resample` metres with the ground height, as a PathFollower. Returns false when no route exists.
+   */
+  function buildColumnPath(data, heading) {
+    const g = data.g;
+    const column = data.params.column;
+    const forwardX = Math.sin(heading);
+    const forwardZ = -Math.cos(heading);
+    let planar;
+    if (column.path === 'auto') {
+      const route = buildGroundPath(ctx.terrain, ctx.game ? ctx.game.waterQuery ?? null : null, {
+        from: { x: g[G.ANCHOR_X], z: g[G.ANCHOR_Z] },
+        to: { x: g[G.ANCHOR_X] + forwardX * column.length, z: g[G.ANCHOR_Z] + forwardZ * column.length },
+        maxSlope: column.maxSlope ?? data.params.herd.slopeLimit,
+        seed: Math.floor(data.phaseSeed * 2147483647),
+        spacing: 50,
+        waterLevel: ctx.terrain.waterLevel,
+      });
+      if (route.points.length < 6) return false;
+      planar = route.points;
+    } else {
+      planar = new Float64Array(column.path.points.length * 3);
+      column.path.points.forEach(([along, across], index) => {
+        planar[index * 3] = g[G.ANCHOR_X] + forwardX * along - forwardZ * across;
+        planar[index * 3 + 2] = g[G.ANCHOR_Z] + forwardZ * along + forwardX * across;
+      });
+    }
+    // Resample with the ground under every point, so the walkers stand on the terrain.
+    const smooth = createPath({ points: planar, closed: column.path !== 'auto' && column.path.closed === true, smoothing: column.path === 'auto' ? 'catmullRom' : column.path.smoothing ?? 'catmullRom', samplesPerSegment: 8 });
+    const samples = Math.max(2, Math.ceil(smooth.length / column.resample) + 1);
+    const points = new Float64Array(samples * 3);
+    const point = { x: 0, y: 0, z: 0 };
+    for (let index = 0; index < samples; index++) {
+      smooth.sampleAt((index / (samples - 1)) * smooth.length, point);
+      points[index * 3] = point.x;
+      points[index * 3 + 1] = groundAt(data, point.x, point.z);
+      points[index * 3 + 2] = point.z;
+    }
+    data.path = createPath({ points, closed: smooth.closed, smoothing: 'linear' });
+    const length = Math.ceil(data.count / column.lanes) * column.spacing;
+    data.follower = createPathFollower({
+      path: data.path,
+      speed: column.speed ?? data.cruise,
+      mode: smooth.closed ? 'loop' : column.mode,
+      startTime: ctx.state.time.elapsed,
+      startDistance: Math.min(length, data.path.length * 0.5),
+    });
+    return true;
+  }
+
+  function simulateColumn(data) {
+    const dt = frameStep[0];
+    const pool = data.pool;
+    const g = data.g;
+    const column = data.params.column;
+    const lanes = column.lanes;
+    const start = data.start;
+    const end = start + data.count;
+    const stride = pool.def.gait.stride;
+    const time = g[G.TIME];
+    columnQuery[0] = ctx.state.time.elapsed;
+    let sumX = 0;
+    let sumY = 0;
+    let sumZ = 0;
+    for (let index = start; index < end; index++) {
+      const k = index - start;
+      columnQuery[1] = Math.floor(k / lanes) * column.spacing + pool.homeZ[index];
+      data.follower.carAtFrom(columnQuery, 0, columnOut);
+      const horizontal = Math.sqrt(columnOut.tx * columnOut.tx + columnOut.tz * columnOut.tz) || 1;
+      const rightX = -columnOut.tz / horizontal;
+      const rightZ = columnOut.tx / horizontal;
+      const lateral = ((k % lanes) - (lanes - 1) * 0.5) * column.laneWidth + pool.homeX[index] + Math.sin(time * 0.3 + pool.seed[index] * TWO_PI) * column.jitter * 0.5;
+      const x = columnOut.x + rightX * lateral;
+      const y = columnOut.y;
+      const z = columnOut.z + rightZ * lateral;
+      if (dt > 0) {
+        pool.vx[index] = (x - pool.px[index]) / dt;
+        pool.vy[index] = (y - pool.py[index]) / dt;
+        pool.vz[index] = (z - pool.pz[index]) / dt;
+      }
+      pool.px[index] = x;
+      pool.py[index] = y;
+      pool.pz[index] = z;
+      const moving = columnOut.speed;
+      pool.gait[index] = Math.min(Math.max((moving - data.cruise) / (data.speedRange[1] - data.cruise), 0), 1);
+      pool.gate[index] += ((moving > 0.2 ? 1 : 0) - pool.gate[index]) * Math.min(1, dt * 3);
+      pool.phase[index] = (pool.phase[index] + TWO_PI * (moving / (stride * pool.scale[index] * g[G.SIZE])) * dt) % (TWO_PI * 64);
+      pool.bank[index] = 0;
+      io[IO.SPEED_NOW] = moving;
+      io[IO.DUST_MIN] = 0.5;
+      io[IO.STEP_DT] = dt;
+      kickDust(data, pool, index);
+      sumX += x;
+      sumY += y;
+      sumZ += z;
+    }
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
+    g[G.X] = g[G.CX];
+    g[G.Y] = g[G.CY];
+    g[G.Z] = g[G.CZ];
+    updateDust(data);
+  }
+
+  // =============================================================================================
+  // SURFACE: dolphins and wading birds
+  // =============================================================================================
+  /** Refreshes one agent's cached water height a frame (pool.homeY), round robin. */
+  function refreshWaterCache(data) {
+    const pool = data.pool;
+    const g = data.g;
+    const cursor = g[G.WATER_CURSOR];
+    const index = data.start + cursor;
+    pool.homeY[index] = waterHeightAt(Math.round(pool.px[index]), Math.round(pool.pz[index]));
+    g[G.WATER_CURSOR] = (cursor + 1) % data.count;
+  }
+
+  /** The point under the craft's shadow on the water (the sun's direction), into SHADOW_X / SHADOW_Z. */
+  function shadowPoint(g, waterY) {
+    const player = ctx.state.player.position;
+    const sun = ctx.state.time.sunDirection;
+    const height = player.y - waterY;
+    if (sun && sun.y > 0.12 && height > 0) {
+      g[G.SHADOW_X] = player.x - (sun.x / sun.y) * height;
+      g[G.SHADOW_Z] = player.z - (sun.z / sun.y) * height;
+    } else {
+      g[G.SHADOW_X] = player.x;
+      g[G.SHADOW_Z] = player.z;
+    }
+  }
+
+  function moveSurfaceGoal(data) {
+    const dt = frameStep[0];
+    if (data.pool.def.wade) moveWaderGoal(data);
+    else moveDolphinGoal(data);
+  }
+
+  /** Dolphins: wander on open water like a pod, or race toward the craft's shadow when it flies low. */
+  function moveDolphinGoal(data) {
+    const dt = frameStep[0];
+    const g = data.g;
+    const race = data.params.surface.raceShadow;
+    const waterY = g[G.BASE_Y];
+    shadowPoint(g, waterY);
+    const player = ctx.state.player.position;
+    const dx = g[G.SHADOW_X] - g[G.CX];
+    const dz = g[G.SHADOW_Z] - g[G.CZ];
+    const near = dx * dx + dz * dz < race.radius * race.radius && player.y - waterY < race.maxAltitude;
+    // Whether the shadow is over open water: a terrain probe twice a second (terrain heights allocate).
+    g[G.AVOID_TIMER] -= dt;
+    if (g[G.AVOID_TIMER] <= 0) {
+      g[G.AVOID_TIMER] = 0.5;
+      g[G.SHADOW_WET] = ctx.terrain.heightAt(Math.round(g[G.SHADOW_X]), Math.round(g[G.SHADOW_Z])) < ctx.terrain.waterLevel - 3 ? 1 : 0;
+    }
+    const racing = near && g[G.SHADOW_WET] > 0;
+    const previous = g[G.RACE] > 0.5;
+    g[G.RACE] += ((racing ? 1 : 0) - g[G.RACE]) * Math.min(1, dt * 1.5);
+    if ((g[G.RACE] > 0.5) !== previous) {
+      ctx.bus.emit('fauna:race', { id: data.instance.id, presetId: data.instance.presetId, species: data.pool.def.id, racing: g[G.RACE] > 0.5 });
+    }
+    if (g[G.RACE] > 0.5) {
+      // Chase the shadow: the goal heads for it at the boosted speed (dolphins cannot keep up with a
+      // fast craft, they race it while it is slow or circling).
+      const toX = g[G.SHADOW_X] - g[G.X];
+      const toZ = g[G.SHADOW_Z] - g[G.Z];
+      io[IO.TURN_TARGET] = Math.atan2(toX, -toZ);
+      io[IO.TURN_STEP] = 1.4 * dt;
+      turnGroup(g);
+      const top = data.cruise * race.boost;
+      const distance = Math.sqrt(toX * toX + toZ * toZ);
+      g[G.SPEED] += (Math.min(top, Math.max(data.cruise, distance * 0.4)) - g[G.SPEED]) * Math.min(1, dt * 1.2);
+      g[G.VX] = Math.sin(g[G.HEADING]) * g[G.SPEED];
+      g[G.VZ] = -Math.cos(g[G.HEADING]) * g[G.SPEED];
+      g[G.X] += g[G.VX] * dt;
+      g[G.Z] += g[G.VZ] * dt;
+      g[G.Y] = waterY;
+      return;
+    }
+    g[G.SPEED] += (data.cruise - g[G.SPEED]) * Math.min(1, dt * 0.5);
+    movePodGoal(data);
+    g[G.Y] = waterY;
+  }
+
+  function simulateDolphins(data) {
+    const dt = frameStep[0];
+    const pool = data.pool;
+    const g = data.g;
+    const surface = data.params.surface;
+    const start = data.start;
+    const end = start + data.count;
+    data.waterWait = (data.waterWait + 1) % 2;
+    if (data.waterWait === 0) refreshWaterCache(data);
+    g[G.BASE_Y] = pool.homeY[start];
+    const forwardX = Math.sin(g[G.HEADING]);
+    const forwardZ = -Math.cos(g[G.HEADING]);
+    const water = ctx.water;
+    const boost = 1 + (surface.raceShadow.boost - 1) * g[G.RACE];
+    const top = data.speedRange[1] * boost;
+    const leap = Math.sqrt(2 * GRAVITY * Math.max(0.1, surface.porpoise.height));
+    let sumX = 0;
+    let sumY = 0;
+    let sumZ = 0;
+    for (let index = start; index < end; index++) {
+      const scale = pool.scale[index] * g[G.SIZE];
+      const surfaceY = pool.homeY[index];
+      const laneX = g[G.X] + (forwardX * pool.homeZ[index] - forwardZ * pool.homeX[index]) * surface.spread;
+      const laneZ = g[G.Z] + (forwardZ * pool.homeZ[index] + forwardX * pool.homeX[index]) * surface.spread;
+      pool.timer[index] -= dt * (1 + g[G.RACE]);
+      if (pool.mode[index] === SWIM_LEAP) {
+        pool.vy[index] -= GRAVITY * dt;
+        pool.px[index] += pool.vx[index] * dt;
+        pool.py[index] += pool.vy[index] * dt;
+        pool.pz[index] += pool.vz[index] * dt;
+        if (pool.vy[index] < 0 && pool.py[index] < surfaceY - 0.2 * scale) {
+          pool.mode[index] = SWIM;
+          pool.aux2[index] = 0;
+          pool.timer[index] = rangeValue(surface.porpoise.interval, data.rng);
+          if (water) {
+            const mark = data.waterMark;
+            mark.x = pool.px[index];
+            mark.z = pool.pz[index];
+            mark.strength = 0.28;
+            mark.glow = 1;
+            water.splashMark(mark);
+          }
+        }
+      } else {
+        steering[0] = 0;
+        steering[1] = 0;
+        steering[2] = 0;
+        io[IO.TARGET_X] = laneX;
+        io[IO.TARGET_Y] = pool.py[index];
+        io[IO.TARGET_Z] = laneZ;
+        io[IO.FEED_X] = g[G.VX];
+        io[IO.FEED_Y] = 0;
+        io[IO.FEED_Z] = g[G.VZ];
+        io[IO.GAIN] = 0.5;
+        io[IO.WEIGHT] = 1.2;
+        io[IO.SEEK_MAX] = top;
+        steerToward(pool, index);
+        const vx = pool.vx[index] + steering[0] * dt;
+        const vz = pool.vz[index] + steering[2] * dt;
+        const speed = Math.sqrt(vx * vx + vz * vz) || 1;
+        const clamped = Math.min(Math.max(speed, data.speedRange[0]), top);
+        pool.vx[index] = (vx / speed) * clamped;
+        pool.vz[index] = (vz / speed) * clamped;
+        // Just under the surface, riding the swell (the cached water height); aux2 counts the
+        // seconds since the last splash-down.
+        pool.aux2[index] += dt;
+        const targetY = surfaceY - 0.25 * scale;
+        pool.vy[index] += ((targetY - pool.py[index]) * 3 - pool.vy[index]) * Math.min(1, dt * 4);
+        pool.px[index] += pool.vx[index] * dt;
+        pool.py[index] += pool.vy[index] * dt;
+        pool.pz[index] += pool.vz[index] * dt;
+        if (pool.timer[index] <= 0 && surface.porpoise.height > 0) {
+          pool.mode[index] = SWIM_LEAP;
+          pool.py[index] = surfaceY - 0.15 * scale;
+          pool.vy[index] = leap * (0.8 + 0.4 * pool.seed[index]) * Math.sqrt(scale);
+          if (water) {
+            const mark = data.waterMark;
+            mark.x = pool.px[index];
+            mark.z = pool.pz[index];
+            mark.strength = 0.2;
+            mark.glow = 1;
+            water.splashMark(mark);
+          }
+        }
+      }
+      const seed = pool.seed[index];
+      const rate = pool.def.body.rate[0] + (pool.def.body.rate[1] - pool.def.body.rate[0]) * seed;
+      pool.phase[index] = (pool.phase[index] + TWO_PI * rate * boost * dt) % (TWO_PI * 64);
+      pool.gate[index] = 1;
+      pool.bank[index] *= 0.95;
+      sumX += pool.px[index];
+      sumY += pool.py[index];
+      sumZ += pool.pz[index];
+    }
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
+  }
+
+  // ---- wading birds ------------------------------------------------------------------------------
+  /**
+   * Finds shallow water to stand in: depth (water height minus ground) within (0.06, depthMax), at
+   * the anchor or the nearest point within searchRadius (rings 60 m apart, 24 bearings). Writes the
+   * wading centre into HOME_X / HOME_Z and the agents' home offsets; false when there is none.
+   */
+  function seekShallows(data) {
+    const g = data.g;
+    const wade = data.params.surface.wade;
+    const shallowAt = (x, z) => {
+      const ground = groundAt(data, x, z);
+      if (!isWaterAt(x, z, ground)) return false;
+      const depth = waterHeightAt(x, z) - ground;
+      return depth > 0.06 && depth < wade.depthMax;
+    };
+    let found = shallowAt(Math.round(g[G.ANCHOR_X]), Math.round(g[G.ANCHOR_Z]));
+    if (found) {
+      g[G.HOME_X] = Math.round(g[G.ANCHOR_X]);
+      g[G.HOME_Z] = Math.round(g[G.ANCHOR_Z]);
+    }
+    for (let radius = 60; radius <= wade.searchRadius && !found; radius += 60) {
+      for (let step = 0; step < 24 && !found; step++) {
+        const angle = (step / 24) * TWO_PI;
+        const x = Math.round(g[G.ANCHOR_X] + Math.sin(angle) * radius);
+        const z = Math.round(g[G.ANCHOR_Z] - Math.cos(angle) * radius);
+        if (shallowAt(x, z)) {
+          found = true;
+          g[G.HOME_X] = x;
+          g[G.HOME_Z] = z;
+        }
+      }
+    }
+    if (!found) return false;
+    // Homes: a golden-angle spiral around the centre, kept only in the shallows (else on the centre).
+    const pool = data.pool;
+    const legHeight = pool.def.wade.legHeight;
+    for (let index = data.start; index < data.start + data.count; index++) {
+      const k = index - data.start;
+      let homeX = 0;
+      let homeZ = 0;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const ring = Math.sqrt(k + 1 + attempt * data.count) * wade.spacing;
+        const angle = (k + attempt * 7) * 2.399963;
+        const x = Math.round(g[G.HOME_X] + Math.cos(angle) * ring);
+        const z = Math.round(g[G.HOME_Z] + Math.sin(angle) * ring);
+        if (shallowAt(x, z)) {
+          homeX = x - g[G.HOME_X];
+          homeZ = z - g[G.HOME_Z];
+          break;
+        }
+      }
+      pool.homeX[index] = homeX;
+      pool.homeZ[index] = homeZ;
+      // The body stands legHeight above the bottom.
+      pool.homeY[index] = groundAt(data, g[G.HOME_X] + homeX, g[G.HOME_Z] + homeZ) + legHeight * pool.scale[index] * g[G.SIZE];
+    }
+    g[G.HOME_Y] = waterHeightAt(g[G.HOME_X], g[G.HOME_Z]);
+    g[G.X] = g[G.HOME_X];
+    g[G.Y] = g[G.HOME_Y];
+    g[G.Z] = g[G.HOME_Z];
+    return true;
+  }
+
+  /** The waders' goal: their shallows while standing; a wide circle over the water while they fly. */
+  function moveWaderGoal(data) {
+    const dt = frameStep[0];
+    const g = data.g;
+    const wade = data.params.surface.wade;
+    g[G.STAMPEDE_COOLDOWN] -= dt;
+    if (g[G.FLUSH] > 0) {
+      g[G.FLUSH] += dt;
+      const angle = data.phaseSeed * TWO_PI + g[G.FLUSH] * (data.cruise / wade.flyRadius);
+      g[G.X] = g[G.HOME_X] + Math.sin(angle) * wade.flyRadius;
+      g[G.Z] = g[G.HOME_Z] - Math.cos(angle) * wade.flyRadius;
+      g[G.Y] = g[G.HOME_Y] + wade.flyAltitude;
+      g[G.VX] = Math.cos(angle) * data.cruise;
+      g[G.VZ] = Math.sin(angle) * data.cruise;
+      return;
+    }
+    g[G.X] = g[G.HOME_X];
+    g[G.Y] = g[G.HOME_Y];
+    g[G.Z] = g[G.HOME_Z];
+    g[G.VX] = 0;
+    g[G.VZ] = 0;
+    if (g[G.STAMPEDE_COOLDOWN] > 0) return;
+    // Buzzed: the craft within flushRadius of the flock takes it off, in a wave from the craft.
+    const player = ctx.state.player.position;
+    const dx = player.x - g[G.CX];
+    const dy = player.y - g[G.CY];
+    const dz = player.z - g[G.CZ];
+    const reach = wade.flushRadius * threat[0];
+    if (dx * dx + dy * dy + dz * dz > reach * reach) return;
+    flushWaders(data, player.x, player.y, player.z);
+  }
+
+  /** Every bird gets its take-off delay: farther from the trigger, later (the wave), plus a seeded spread. */
+  function flushWaders(data, x, y, z) {
+    const g = data.g;
+    const pool = data.pool;
+    const wave = data.params.surface.wade.takeoffWave;
+    g[G.FLUSH] = 1e-3;
+    g[G.FLUSH_X] = x;
+    g[G.FLUSH_Y] = y;
+    g[G.FLUSH_Z] = z;
+    g[G.FLUSH_COUNT] = 0;
+    for (let index = data.start; index < data.start + data.count; index++) {
+      const dx = pool.px[index] - x;
+      const dz = pool.pz[index] - z;
+      pool.timer[index] = (Math.sqrt(dx * dx + dz * dz) / 10) * wave.delay + pool.seed[index] * wave.spread;
+      pool.gait[index] = 0;
+      pool.aux[index] = rangeValue(data.params.surface.wade.flySeconds, data.rng);
+    }
+    ctx.bus.emit('fauna:flush', {
+      id: data.instance.id, presetId: data.instance.presetId, species: pool.def.id, count: data.count,
+      position: { x: g[G.CX], y: g[G.CY], z: g[G.CZ] },
+    });
+  }
+
+  function simulateWaders(data) {
+    const dt = frameStep[0];
+    const pool = data.pool;
+    const g = data.g;
+    const wade = data.params.surface.wade;
+    const start = data.start;
+    const end = start + data.count;
+    const water = ctx.water;
+    const time = g[G.TIME];
+    const flying = g[G.FLUSH] > 0;
+    let standing = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let sumZ = 0;
+    io[IO.TIME] = time;
+    io[IO.GLIDE] = pool.def.flap.glideShare;
+    for (let index = start; index < end; index++) {
+      const scale = pool.scale[index] * g[G.SIZE];
+      const homeX = g[G.HOME_X] + pool.homeX[index];
+      const homeZ = g[G.HOME_Z] + pool.homeZ[index];
+      const standY = pool.homeY[index];
+      let mode = pool.mode[index];
+      if (mode === WADE_STAND) {
+        // pool.gait (a quadruped's gait) marks a wading bird that has flown in this flush.
+        if (flying && pool.gait[index] === 0) {
+          pool.timer[index] -= dt;
+          if (pool.timer[index] <= 0) {
+            pool.gait[index] = 1;
+            mode = WADE_TAKEOFF;
+            pool.mode[index] = mode;
+            pool.aux2[index] = 0;
+            g[G.FLUSH_COUNT] += 1;
+            // Away from the trigger along the water.
+            const awayX = pool.px[index] - g[G.FLUSH_X];
+            const awayZ = pool.pz[index] - g[G.FLUSH_Z];
+            const awayLength = Math.sqrt(awayX * awayX + awayZ * awayZ) || 1;
+            pool.vx[index] = (awayX / awayLength) * 3;
+            pool.vz[index] = (awayZ / awayLength) * 3;
+            pool.vy[index] = 0;
+          }
+        }
+        if (mode === WADE_STAND) {
+          // Standing in the shallows: a slow shuffle about the home spot, wings folded.
+          const shuffle = time * 0.07 + pool.seed[index] * TWO_PI;
+          const targetX = homeX + Math.sin(shuffle) * 1.2;
+          const targetZ = homeZ + Math.cos(shuffle * 0.8) * 1.2;
+          pool.vx[index] = (targetX - pool.px[index]) * 0.4;
+          pool.vy[index] = 0;
+          pool.vz[index] = (targetZ - pool.pz[index]) * 0.4;
+          pool.px[index] += pool.vx[index] * dt;
+          pool.py[index] += (standY - pool.py[index]) * Math.min(1, dt * 3);
+          pool.pz[index] += pool.vz[index] * dt;
+          pool.gate[index] += (-1 - pool.gate[index]) * Math.min(1, dt * 2.5);
+          pool.phase[index] = (pool.phase[index] + dt * 2) % (TWO_PI * 64);
+          standing++;
+        }
+      }
+      if (mode === WADE_TAKEOFF || mode === WADE_FLY || mode === WADE_LAND) {
+        steering[0] = 0;
+        steering[1] = 0;
+        steering[2] = 0;
+        pool.aux2[index] += dt;
+        if (mode === WADE_TAKEOFF) {
+          // A running take-off: flapping hard, speed building along the water, then the climb.
+          const run = pool.aux2[index];
+          const awayLength = Math.sqrt(pool.vx[index] * pool.vx[index] + pool.vz[index] * pool.vz[index]) || 1;
+          steering[0] = (pool.vx[index] / awayLength) * 6;
+          steering[2] = (pool.vz[index] / awayLength) * 6;
+          steering[1] = run > 0.8 ? 3 : 0;
+          if (water && run < 1.4 && pool.timer[index] <= 0) {
+            pool.timer[index] = 0.22;
+            const mark = data.waterMark;
+            mark.x = pool.px[index] - pool.vx[index] * 0.3;
+            mark.z = pool.pz[index] - pool.vz[index] * 0.3;
+            mark.x1 = pool.px[index];
+            mark.z1 = pool.pz[index];
+            mark.radius = 0.6 * scale;
+            mark.foam = 0.6;
+            mark.glow = 1;
+            water.trail(mark);
+          }
+          pool.timer[index] -= dt;
+          if (pool.py[index] > standY + 6) pool.mode[index] = WADE_FLY;
+        } else if (mode === WADE_FLY) {
+          // A loose flock on the group's circle, each bird on its own offset.
+          io[IO.TARGET_X] = g[G.X] + pool.homeX[index] * 2.2;
+          io[IO.TARGET_Y] = g[G.Y] + (pool.seed[index] - 0.5) * 10;
+          io[IO.TARGET_Z] = g[G.Z] + pool.homeZ[index] * 2.2;
+          io[IO.FEED_X] = g[G.VX];
+          io[IO.FEED_Y] = 0;
+          io[IO.FEED_Z] = g[G.VZ];
+          io[IO.GAIN] = 0.4;
+          io[IO.WEIGHT] = 1;
+          io[IO.SEEK_MAX] = data.speedRange[1];
+          steerToward(pool, index);
+          if (g[G.FLUSH] > pool.aux[index]) pool.mode[index] = WADE_LAND;
+        } else {
+          // Settling back: glide to the home spot, slowing with the distance, and stand.
+          const toX = homeX - pool.px[index];
+          const toZ = homeZ - pool.pz[index];
+          const distance = Math.sqrt(toX * toX + toZ * toZ);
+          const approach = Math.min(data.cruise, Math.max(1.5, distance * 0.25));
+          io[IO.TARGET_X] = homeX;
+          io[IO.TARGET_Y] = standY + Math.min(distance * 0.12, 30);
+          io[IO.TARGET_Z] = homeZ;
+          io[IO.FEED_X] = 0;
+          io[IO.FEED_Y] = 0;
+          io[IO.FEED_Z] = 0;
+          io[IO.GAIN] = 0.6;
+          io[IO.WEIGHT] = 1.2;
+          io[IO.SEEK_MAX] = approach;
+          steerToward(pool, index);
+          if (distance < 7 && pool.py[index] < standY + 3) {
+            pool.mode[index] = WADE_STAND;
+            pool.vx[index] = 0;
+            pool.vy[index] = 0;
+            pool.vz[index] = 0;
+          }
+        }
+        if (pool.mode[index] !== WADE_STAND) {
+          io[IO.ACCEL] = 9;
+          io[IO.CLIMB] = 4;
+          io[IO.MIN_SPEED] = pool.mode[index] === WADE_LAND ? 0.5 : 2;
+          io[IO.MAX_SPEED] = data.speedRange[1];
+          io[IO.BANK_BLEND] = Math.min(1, dt * 2.5);
+          io[IO.FLOOR] = standY - 0.5;
+          integrate(pool, index);
+          animateBird(pool, index, pool.mode[index] === WADE_TAKEOFF);
+          if (pool.mode[index] === WADE_LAND && pool.py[index] < standY + 3) pool.gate[index] += (-0.2 - pool.gate[index]) * Math.min(1, dt * 2);
+        }
+      }
+      sumX += pool.px[index];
+      sumY += pool.py[index];
+      sumZ += pool.pz[index];
+    }
+    if (flying && standing === data.count && g[G.FLUSH_COUNT] > 0) {
+      // Everyone is back: re-armed after a short rest.
+      g[G.FLUSH] = 0;
+      g[G.STAMPEDE_COOLDOWN] = 20;
+    }
+    io[IO.SUM_X] = sumX;
+    io[IO.SUM_Y] = sumY;
+    io[IO.SUM_Z] = sumZ;
+    finishCentroid(data);
+  }
+
+  function simulateSurface(data) {
+    const dt = frameStep[0];
+    if (data.pool.def.wade) simulateWaders(data);
+    else simulateDolphins(data);
+  }
+
+  // =============================================================================================
   // SHARED PER-GROUP STEPS
   // =============================================================================================
   /** The group's centroid from the position sums io[SUM_*], and its sampled radius. */
@@ -2071,6 +3547,29 @@ export function createFaunaEngine() {
         const angle = pool.seed[index] * TWO_PI;
         x += Math.cos(angle) * params.wingman.waitRadius;
         z += Math.sin(angle) * params.wingman.waitRadius;
+      } else if (behavior === 'herd') {
+        const spacing = params.herd.spacing * sizeScale;
+        x += (-forwardZ * pool.homeX[index] + forwardX * pool.homeZ[index]) * spacing;
+        z += (forwardX * pool.homeX[index] + forwardZ * pool.homeZ[index]) * spacing;
+        io[IO.SAMPLE_X] = x;
+        io[IO.SAMPLE_Z] = z;
+        sampleFine(data.fine);
+        y = io[IO.GROUND];
+      } else if (behavior === 'surface' && pool.def.wade) {
+        // On their home spots in the shallows, standing.
+        x = g[G.HOME_X] + pool.homeX[index];
+        z = g[G.HOME_Z] + pool.homeZ[index];
+        y = pool.homeY[index];
+        pool.mode[index] = WADE_STAND;
+        pool.gate[index] = -1;
+      } else if (behavior === 'surface') {
+        x += (forwardX * pool.homeZ[index] - forwardZ * pool.homeX[index]) * params.surface.spread;
+        z += (forwardZ * pool.homeZ[index] + forwardX * pool.homeX[index]) * params.surface.spread;
+        pool.homeY[index] = waterHeightAt(Math.round(x), Math.round(z));
+        y = pool.homeY[index] - 0.25 * pool.scale[index] * sizeScale;
+        pool.mode[index] = SWIM;
+      } else if (behavior === 'column') {
+        // Placed on the path below (simulateColumn with no time step).
       } else {
         const angle = pool.seed[index] * TWO_PI;
         const radius = Math.sqrt(pool.homeX[index] * 0.5 + 0.5) * 14 * sizeScale;
@@ -2081,7 +3580,8 @@ export function createFaunaEngine() {
       pool.px[index] = x;
       pool.py[index] = y;
       pool.pz[index] = z;
-      const speed = behavior === 'pod' ? data.cruise * 0.8 : data.cruise;
+      const still = behavior === 'herd' || (behavior === 'surface' && pool.def.wade);
+      const speed = still ? 0 : behavior === 'pod' ? data.cruise * 0.8 : data.cruise;
       pool.vx[index] = forwardX * speed;
       pool.vy[index] = 0;
       pool.vz[index] = forwardZ * speed;
@@ -2094,6 +3594,17 @@ export function createFaunaEngine() {
     g[G.CX] = g[G.X];
     g[G.CY] = g[G.Y];
     g[G.CZ] = g[G.Z];
+    if (behavior === 'column') {
+      // Placed on the path with no time step (the frame's step is restored after).
+      const step = frameStep[0];
+      frameStep[0] = 0;
+      simulateColumn(data);
+      frameStep[0] = step;
+    }
+    if (behavior === 'surface' && pool.def.wade && g[G.FLUSH] > 0) {
+      g[G.FLUSH] = 0;
+      g[G.STAMPEDE_COOLDOWN] = 10;
+    }
   }
 
   /** Writes the group's agents into the species buffers (hidden: scale 0). */
@@ -2130,7 +3641,8 @@ export function createFaunaEngine() {
       directionData[offset + 3] = pool.bank[index];
       animData[offset] = pool.phase[index];
       animData[offset + 1] = pool.gate[index];
-      animData[offset + 2] = pool.def.kind === 'whale' ? (pool.mode[index] === WHALE_BREACH ? 0.35 : 1) : pool.excite[index];
+      const kind = pool.def.kind;
+      animData[offset + 2] = kind === 'whale' ? (pool.mode[index] === WHALE_BREACH ? 0.35 : 1) : kind === 'quadruped' ? pool.gait[index] : pool.excite[index];
       animData[offset + 3] = pool.seed[index];
     }
     pool.attributes.position.needsUpdate = true;
@@ -2166,6 +3678,8 @@ export function createFaunaEngine() {
       const reach = Math.max(200, g[G.RADIUS] * 3);
       intensity *= Math.min(Math.max(1 - (g[G.PLAYER_DISTANCE] - g[G.RADIUS]) / reach, 0.15), 1);
     }
+    // A herd's rumble swells with its gait (a stampede is loud).
+    if (data.params.behavior === 'herd') intensity *= 0.3 + 0.7 * g[G.GAIT];
     data.voice.setIntensity(intensity);
   }
 
@@ -2177,6 +3691,9 @@ export function createFaunaEngine() {
     pod: movePodGoal,
     wingman: null,
     drift: moveDriftGoal,
+    herd: moveHerdGoal,
+    column: null,
+    surface: moveSurfaceGoal,
   });
 
   function playerDistance(data) {
@@ -2238,6 +3755,26 @@ export function createFaunaEngine() {
         pool.mode[index] = rng() < 0.6 ? WHALE_SURFACE : WHALE_DEEP;
         pool.timer[index] = pool.mode[index] === WHALE_SURFACE ? rangeValue(params.pod.surfaceSeconds, rng) : rangeValue(params.pod.diveSeconds, rng) * rng();
         pool.aux[index] = rng() * 3;
+      } else if (params.behavior === 'herd') {
+        // A loose sunflower (golden angle), in units of the herd spacing: x across, z along.
+        const ring = Math.sqrt(k + 0.5) * 0.62;
+        const angle = k * 2.399963 + rng() * 0.4;
+        pool.homeX[index] = Math.cos(angle) * ring;
+        pool.homeZ[index] = Math.sin(angle) * ring * 1.3;
+        pool.mode[index] = rng() < params.herd.graze ? HERD_GRAZE : HERD_WALK;
+        pool.timer[index] = rng() * 10;
+        pool.aux2[index] = 0;
+      } else if (params.behavior === 'column') {
+        // Jitter across (x) and along (z) the line.
+        pool.homeX[index] = (rng() * 2 - 1) * params.column.jitter;
+        pool.homeZ[index] = (rng() * 2 - 1) * params.column.jitter * 2;
+        pool.aux2[index] = 0;
+      } else if (params.behavior === 'surface') {
+        pool.homeX[index] = rng() * 2 - 1;
+        pool.homeZ[index] = (rng() * 2 - 1) * 0.7;
+        pool.mode[index] = 0;
+        pool.timer[index] = rangeValue(params.surface.porpoise.interval, rng) * rng();
+        pool.gate[index] = SPECIES[params.species].wade ? -1 : 1;
       } else if (params.behavior === 'drift') {
         pool.homeX[index] = k === 0 ? 0 : (k % 2 === 1 ? -1 : 1) * Math.ceil(k / 2);
         pool.homeY[index] = k === 0 ? 0 : -0.5 * Math.ceil(k / 2);
@@ -2319,6 +3856,17 @@ export function createFaunaEngine() {
       formationState: null,
       noThermal: false,
       noWater: false,
+      noGround: false,
+      runSpeed: 0,
+      waterWait: 0,
+      fine: null,
+      path: null,
+      follower: null,
+      dustStart: -1,
+      dustCount: 0,
+      dustCursor: 0,
+      dustParams: null,
+      dustColor: null,
     };
     if (resolved.behavior === 'pod' && resolved.pod.seekWater > 0 && !seekOpenWater(g, resolved.pod.seekWater, resolved.pod.spread)) data.noWater = true;
     fillGround(data);
@@ -2354,12 +3902,40 @@ export function createFaunaEngine() {
       g[G.SLOT_DISTANCE] = Infinity;
       data.formationState = createFormationState(g, resolved.formation.holdSeconds);
     }
-    if (resolved.behavior === 'pod' && ctx.water) {
+    if (resolved.behavior === 'herd') {
+      const span = Math.max(96, resolved.herd.spacing * g[G.SIZE] * Math.sqrt(count) * 2.4);
+      data.fine = createFineGround(Math.max(8, Math.ceil(span / (FINE_GRID - 1))));
+      if (!seekClearGround(data, 1500)) data.noGround = true;
+      io[IO.SAMPLE_X] = g[G.X];
+      io[IO.SAMPLE_Z] = g[G.Z];
+      sampleFine(data.fine);
+      g[G.Y] = io[IO.GROUND];
+      g[G.BASE_Y] = g[G.Y];
+      g[G.SPEED] = resolved.herd.gaits.walk * (1 - resolved.herd.graze * 0.6);
+      // A plain number (a null-or-number read in the frame would box the other branch's double).
+      data.runSpeed = resolved.herd.stampede.speed ?? resolved.herd.gaits.run;
+      g[G.STAMPEDE_TIMER] = resolved.herd.stampede.interval * (0.5 + data.phaseSeed * 0.5);
+      g[G.STAMPEDE_COOLDOWN] = 4;
+    }
+    if (resolved.behavior === 'column' && !buildColumnPath(data, heading)) data.noGround = true;
+    if (resolved.behavior === 'surface') {
+      g[G.SPEED] = speeds.cruise;
+      if (def.wade) {
+        if (!seekShallows(data)) data.noWater = true;
+        g[G.STAMPEDE_COOLDOWN] = 2;
+      } else {
+        if (!seekOpenWater(g, 3000, resolved.surface.spread * 3)) data.noWater = true;
+        g[G.Y] = waterHeightAt(Math.round(g[G.X]), Math.round(g[G.Z]));
+        g[G.BASE_Y] = g[G.Y];
+      }
+    }
+    if ((resolved.behavior === 'pod' || resolved.behavior === 'surface') && ctx.water) {
       data.waterMark = ctx.water.createMark();
       data.spout = ctx.water.createSpray({ speed: 12, up: 1, spread: 0.1, size: 1.4, sizeGrowth: 1.4, life: 2.6, drag: 1.1, gravity: 0.35, alpha: 0.6, glow: resolved.pod.glow * 0.8 });
     }
     initAgents(data, rng);
-    seedAgents(data);
+    if (resolved.behavior === 'surface' && def.wade && !data.noWater) seekShallows(data);
+    if (!data.noGround) seedAgents(data);
     if (resolved.behavior === 'circling') {
       // Spread the birds over the first thermals they find.
       refreshThermals(data);
@@ -2385,7 +3961,9 @@ export function createFaunaEngine() {
     data.instance = instance;
     // A pod with no open water in reach, or birds that must mark a thermal and found none, end at once
     // (a natural end: the manager removes the spawn on its next frame, before anything is drawn).
-    if (data.noWater || data.noThermal) instance.ended = true;
+    if (data.noWater || data.noThermal || data.noGround) instance.ended = true;
+    if (resolved.behavior === 'herd') instance.particles += allocDust(data, resolved.herd.dust);
+    if (resolved.behavior === 'column') instance.particles += allocDust(data, resolved.column.dust);
     if (resolved.behavior === 'drift' && resolved.drift.slipstream) {
       g[G.LEAD_X] = g[G.X];
       g[G.LEAD_Y] = g[G.Y];
@@ -2417,6 +3995,7 @@ export function createFaunaEngine() {
         poolList.push(pools[id]);
       }
       gridNext = new Int32Array(maxAgents);
+      dust = createDustPool();
       if (ctx.bus && typeof ctx.bus.onTyped === 'function') {
         ctx.bus.onTyped('wildlifeQuiet', ({ source, quiet }) => {
           if (quiet) quietSources.add(source);
@@ -2426,6 +4005,7 @@ export function createFaunaEngine() {
     },
     create,
     update(instance, dt) {
+      frameStep[0] = dt;
       beginFrame();
       const data = instance.data;
       const g = data.g;
@@ -2447,12 +4027,14 @@ export function createFaunaEngine() {
         g[G.CY] = g[G.Y];
         g[G.CZ] = g[G.Z];
         if (data.wind && data.windAttached) detachSlipstream(instance, data);
+        if (data.dustStart >= 0) clearDust(data);
         writeAnchor(instance, g);
         updateVoice(instance, data);
         return;
       }
       if (data.hidden) {
         data.hidden = false;
+        if (data.fine) fillFine(data, g[G.X], g[G.Z]);
         seedAgents(data);
       }
       if (dt > 0) {
@@ -2465,8 +4047,11 @@ export function createFaunaEngine() {
         else if (behavior === 'circling') simulateCircling(data, dt);
         else if (behavior === 'pod') simulatePod(data, dt);
         else if (behavior === 'wingman') simulateWingman(instance, data, dt);
+        else if (behavior === 'herd') simulateHerd(data);
+        else if (behavior === 'column') simulateColumn(data);
+        else if (behavior === 'surface') simulateSurface(data);
         else simulateDrift(data, dt);
-        if (behavior !== 'pod' && behavior !== 'drift') scatterFromPlayer(data.pool, data, data.start, data.start + data.count);
+        if (behavior !== 'pod' && behavior !== 'drift' && behavior !== 'herd' && behavior !== 'column' && behavior !== 'surface') scatterFromPlayer(data.pool, data, data.start, data.start + data.count);
         updateCalls(data, dt);
         if (data.wind) {
           if (!data.windAttached) attachSlipstream(instance, data);
@@ -2487,6 +4072,7 @@ export function createFaunaEngine() {
       const data = instance.data;
       detachSlipstream(instance, data);
       writeAgents(data, true);
+      freeDust(data);
       data.pool.ranges.free(data.start);
       data.pool.mesh.count = data.pool.ranges.highWater;
       if (data.pool.ranges.highWater === 0) data.pool.mesh.visible = false;
@@ -2509,7 +4095,11 @@ export function createFaunaEngine() {
         const used = pool.ranges.used;
         if (used > 0) species[id] = used;
       }
-      return { instances: live, particles, lights: 0, buffers: Object.keys(pools).length * 3, drawCalls, species, quiet: quietSources.size > 0 };
+      if (dust && dust.sprite.visible) drawCalls++;
+      return {
+        instances: live, particles, lights: 0, buffers: Object.keys(pools).length * 3 + 2, drawCalls, species, quiet: quietSources.size > 0,
+        dustSlots: dust ? dust.ranges.used : 0, threat: threat[0],
+      };
     },
     /**
      * The formation-slot API: the live formation state of a spawn's formation part, or null:
@@ -2524,6 +4114,25 @@ export function createFaunaEngine() {
       }
       return null;
     },
+    /**
+     * Live params (the set-piece engine's hook): 'stampede' (a value >= 0.5 starts a herd's stampede
+     * from the player's side, the event trigger) and 'flush' (>= 0.5 takes wading birds off). Returns
+     * whether the param is known for this group.
+     */
+    setParam(instance, name, value) {
+      const data = instance.data;
+      if (!data || !Number.isFinite(value)) return false;
+      const player = ctx.state.player.position;
+      if (name === 'stampede' && data.params.behavior === 'herd') {
+        if (value >= 0.5 && data.g[G.STAMPEDE] <= 0) startStampede(data, player.x, player.z, 'event');
+        return true;
+      }
+      if (name === 'flush' && data.params.behavior === 'surface' && data.pool.def.wade) {
+        if (value >= 0.5 && data.g[G.FLUSH] <= 0) flushWaders(data, player.x, player.y, player.z);
+        return true;
+      }
+      return false;
+    },
     /** Live group summary for dev tools and tests: { species, behavior, count, center, radius, mode }. */
     describe(spawnId) {
       if (!ctx || !ctx.spawns) return null;
@@ -2533,6 +4142,12 @@ export function createFaunaEngine() {
         const g = data.g;
         let excited = 0;
         for (let index = data.start; index < data.start + data.count; index++) if (data.pool.excite[index] > 0.5) excited++;
+        let airborne = 0;
+        let leaping = 0;
+        for (let index = data.start; index < data.start + data.count; index++) {
+          if (data.params.behavior === 'surface' && data.pool.def.wade && data.pool.mode[index] !== WADE_STAND) airborne++;
+          if (data.params.behavior === 'surface' && !data.pool.def.wade && data.pool.mode[index] === SWIM_LEAP) leaping++;
+        }
         return {
           species: data.pool.def.id,
           behavior: data.params.behavior,
@@ -2544,6 +4159,15 @@ export function createFaunaEngine() {
           playerDistance: g[G.PLAYER_DISTANCE],
           hidden: data.hidden,
           wind: data.windAttached,
+          // Phase 3 modes: a herd's stampede and gait, a column's path, waders aloft, dolphins racing.
+          stampede: g[G.STAMPEDE] > 0,
+          gait: g[G.GAIT],
+          dust: g[G.DUST_LIVE],
+          pathLength: data.path ? data.path.length : 0,
+          airborne,
+          leaping,
+          flushed: g[G.FLUSH] > 0,
+          racing: g[G.RACE] > 0.5,
         };
       }
       return null;

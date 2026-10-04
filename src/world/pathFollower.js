@@ -33,6 +33,100 @@ function catmullRom(p0, p1, p2, p3, t) {
   return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
 }
 
+/** The tabulated state of every path from createPath (followers read it directly). */
+const pathStates = new WeakMap();
+
+/** Normalises state.query[0]: wrapped on a closed path, clamped to [0, length] on an open one. */
+function normalizeQuery(state) {
+  const query = state.query;
+  const distance = query[0];
+  const length = state.length;
+  if (!Number.isFinite(distance)) query[0] = 0;
+  else if (state.closed) query[0] = distance - Math.floor(distance / length) * length;
+  else query[0] = distance < 0 ? 0 : distance > length ? length : distance;
+}
+
+/** The table segment holding state.query[0] (normalised): binary search; the share goes to query[1]. */
+function locateQuery(state) {
+  normalizeQuery(state);
+  const query = state.query;
+  const cumulative = state.cumulative;
+  const distance = query[0];
+  let low = 0;
+  let high = state.vertexCount - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >> 1;
+    if (cumulative[middle] <= distance) low = middle;
+    else high = middle;
+  }
+  const span = cumulative[low + 1] - cumulative[low];
+  query[1] = span > 0 ? (distance - cumulative[low]) / span : 0;
+  return low;
+}
+
+/** out = the path point at state.query[0]. */
+function sampleState(state, out) {
+  const segment = locateQuery(state);
+  const share = state.query[1];
+  const table = state.table;
+  const base = segment * 3;
+  out.x = table[base] + (table[base + 3] - table[base]) * share;
+  out.y = table[base + 1] + (table[base + 4] - table[base + 1]) * share;
+  out.z = table[base + 2] + (table[base + 5] - table[base + 2]) * share;
+  return out;
+}
+
+/** Unit direction of table segment `segment` into out (x, y, z). */
+function segmentDirection(state, segment, out) {
+  const table = state.table;
+  const base = segment * 3;
+  const dx = table[base + 3] - table[base];
+  const dy = table[base + 4] - table[base + 1];
+  const dz = table[base + 5] - table[base + 2];
+  const span = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+  out.x = dx / span;
+  out.y = dy / span;
+  out.z = dz / span;
+}
+
+/**
+ * out = the unit tangent at state.query[0], blended across each table vertex so headings turn
+ * smoothly: within TANGENT_BLEND metres (at most half the segment) of a vertex the direction blends
+ * toward the neighbouring segment's, reaching their average at the vertex.
+ */
+function tangentState(state, out) {
+  const segment = locateQuery(state);
+  const share = state.query[1];
+  const cumulative = state.cumulative;
+  const vertexCount = state.vertexCount;
+  segmentDirection(state, segment, out);
+  const span = cumulative[segment + 1] - cumulative[segment];
+  const blend = Math.min(span * 0.5, TANGENT_BLEND);
+  const fromStart = share * span;
+  const toEnd = span - fromStart;
+  let neighbour = -1;
+  let weight = 0;
+  if (blend > 0 && fromStart < blend) {
+    neighbour = segment > 0 ? segment - 1 : state.closed ? vertexCount - 2 : -1;
+    weight = 0.5 * (1 - fromStart / blend);
+  } else if (blend > 0 && toEnd < blend) {
+    neighbour = segment < vertexCount - 2 ? segment + 1 : state.closed ? 0 : -1;
+    weight = 0.5 * (1 - toEnd / blend);
+  }
+  if (neighbour >= 0 && weight > 0) {
+    const scratch = state.scratch;
+    segmentDirection(state, neighbour, scratch);
+    out.x += (scratch.x - out.x) * weight;
+    out.y += (scratch.y - out.y) * weight;
+    out.z += (scratch.z - out.z) * weight;
+    const size = Math.sqrt(out.x * out.x + out.y * out.y + out.z * out.z) || 1;
+    out.x /= size;
+    out.y /= size;
+    out.z /= size;
+  }
+  return out;
+}
+
 /**
  * A path through `points` (a Float64Array or array of xyz triples, at least two points).
  * `closed` joins the last point back to the first; `smoothing` 'catmullRom' passes a smooth curve
@@ -93,116 +187,33 @@ export function createPath({ points, closed = false, smoothing = 'catmullRom', s
   const length = cumulative[vertexCount - 1];
   if (!(length > 0)) fail('a path needs a positive length');
 
-  // Doubles never cross a call inside a query (V8 boxes a double passed to a call it does not
-  // inline): the distance being looked up lives in query[0], the share along its segment in query[1].
-  const query = new Float64Array(2);
-
-  /** Normalises query[0]: wrapped on a closed path, clamped to [0, length] on an open one. */
-  function normalizeQuery() {
-    const distance = query[0];
-    if (!Number.isFinite(distance)) query[0] = 0;
-    else if (isClosed) {
-      const wrapped = distance % length;
-      query[0] = wrapped < 0 ? wrapped + length : wrapped;
-    } else {
-      query[0] = distance < 0 ? 0 : distance > length ? length : distance;
-    }
-  }
-
-  /** The table segment holding query[0] (normalised): binary search; writes the share to query[1]. */
-  function locateQuery() {
-    normalizeQuery();
-    const distance = query[0];
-    let low = 0;
-    let high = vertexCount - 1;
-    while (high - low > 1) {
-      const middle = (low + high) >> 1;
-      if (cumulative[middle] <= distance) low = middle;
-      else high = middle;
-    }
-    const span = cumulative[low + 1] - cumulative[low];
-    query[1] = span > 0 ? (distance - cumulative[low]) / span : 0;
-    return low;
-  }
-
-  function sampleQuery(out) {
-    const segment = locateQuery();
-    const share = query[1];
-    const base = segment * 3;
-    out.x = table[base] + (table[base + 3] - table[base]) * share;
-    out.y = table[base + 1] + (table[base + 4] - table[base + 1]) * share;
-    out.z = table[base + 2] + (table[base + 5] - table[base + 2]) * share;
-    return out;
-  }
-
-  /** Unit direction of table segment `segment` into out (x, y, z). */
-  function segmentDirection(segment, out) {
-    const base = segment * 3;
-    const dx = table[base + 3] - table[base];
-    const dy = table[base + 4] - table[base + 1];
-    const dz = table[base + 5] - table[base + 2];
-    const span = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-    out.x = dx / span;
-    out.y = dy / span;
-    out.z = dz / span;
-  }
-
-  const tangentScratch = { x: 0, y: 0, z: 0 };
-  /** The unit tangent at query[0], blended across each table vertex so headings turn smoothly. */
-  function tangentQuery(out) {
-    const segment = locateQuery();
-    const share = query[1];
-    segmentDirection(segment, out);
-    // Within TANGENT_BLEND metres (at most half the segment) of a table vertex the direction blends
-    // toward the neighbouring segment's, reaching their average at the vertex.
-    const span = cumulative[segment + 1] - cumulative[segment];
-    const blend = Math.min(span * 0.5, TANGENT_BLEND);
-    const fromStart = share * span;
-    const toEnd = span - fromStart;
-    let neighbour = -1;
-    let weight = 0;
-    if (blend > 0 && fromStart < blend) {
-      neighbour = segment > 0 ? segment - 1 : isClosed ? vertexCount - 2 : -1;
-      weight = 0.5 * (1 - fromStart / blend);
-    } else if (blend > 0 && toEnd < blend) {
-      neighbour = segment < vertexCount - 2 ? segment + 1 : isClosed ? 0 : -1;
-      weight = 0.5 * (1 - toEnd / blend);
-    }
-    if (neighbour >= 0 && weight > 0) {
-      segmentDirection(neighbour, tangentScratch);
-      out.x += (tangentScratch.x - out.x) * weight;
-      out.y += (tangentScratch.y - out.y) * weight;
-      out.z += (tangentScratch.z - out.z) * weight;
-      const size = Math.sqrt(out.x * out.x + out.y * out.y + out.z * out.z) || 1;
-      out.x /= size;
-      out.y /= size;
-      out.z /= size;
-    }
-    return out;
-  }
+  // The queries are module functions over this state (one closure each, whatever the number of
+  // paths, so V8 inlines them); doubles never cross a call: the distance being looked up lives in
+  // query[0], the share along its segment in query[1].
+  const state = { table, cumulative, vertexCount, length, closed: isClosed, query: new Float64Array(2), scratch: { x: 0, y: 0, z: 0 } };
 
   /** out = the point `distance` metres along the path. */
   function sampleAt(distance, out) {
-    query[0] = distance;
-    return sampleQuery(out);
+    state.query[0] = distance;
+    return sampleState(state, out);
   }
 
   /** out = the unit tangent `distance` metres along the path. */
   function tangentAt(distance, out) {
-    query[0] = distance;
-    return tangentQuery(out);
+    state.query[0] = distance;
+    return tangentState(state, out);
   }
 
   /** sampleAt with the distance read from buffer[index] (callers that keep doubles in typed arrays). */
   function sampleFrom(buffer, index, out) {
-    query[0] = buffer[index];
-    return sampleQuery(out);
+    state.query[0] = buffer[index];
+    return sampleState(state, out);
   }
 
   /** tangentAt with the distance read from buffer[index]. */
   function tangentFrom(buffer, index, out) {
-    query[0] = buffer[index];
-    return tangentQuery(out);
+    state.query[0] = buffer[index];
+    return tangentState(state, out);
   }
 
   /** The distance along the path of the path point nearest (x, y, z) (linear scan of the table). */
@@ -232,7 +243,10 @@ export function createPath({ points, closed = false, smoothing = 'catmullRom', s
     return bestDistance;
   }
 
-  return Object.freeze({ length, closed: isClosed, pointCount: count, sampleAt, tangentAt, sampleFrom, tangentFrom, nearestDistance });
+  const path = Object.freeze({ length, closed: isClosed, pointCount: count, sampleAt, tangentAt, sampleFrom, tangentFrom, nearestDistance });
+  pathStates.set(path, state);
+  return path;
+
 }
 
 /**
@@ -242,7 +256,8 @@ export function createPath({ points, closed = false, smoothing = 'catmullRom', s
  * [{ distance, seconds }] (stations, a caravan's rest), honoured on every pass (both directions on a
  * ping-pong). `ground(x, z)` (optional) puts the follower on the terrain plus `groundOffset`.
  *
- * Returns { at(time, out), atFrom(buffer, index, out), carAt(time, offset, out), length, duration, period }: out receives
+ * Returns { at(time, out), atFrom(buffer, index, out), carAt(time, offset, out), carAtFrom(buffer, index, out),
+ * length, duration, period }: out receives
  * { x, y, z, tx, ty, tz, heading (deg), distance, speed (m/s now: 0 while waiting), done }.
  * carAt is a trailing car `offset` metres behind the head along the track it travelled (train cars,
  * camels); duration is Infinity for loop and ping-pong; period is one cycle in seconds.
@@ -259,6 +274,8 @@ export function createPathFollower({
   if (!Number.isFinite(groundOffset)) fail('groundOffset must be finite (m)');
   if (!Array.isArray(waits)) fail('waits must be an array of { distance, seconds }');
   const length = path.length;
+  // A path from createPath is queried through its state directly (module functions V8 inlines).
+  const pathState = pathStates.get(path) ?? null;
   // The unfolded track: a loop runs [0, length), a ping-pong [0, 2 length) (out and back).
   const trackLength = mode === 'pingpong' ? length * 2 : length;
   const startAlong = Math.min(length, Math.max(0, path.closed ? ((startDistance % length) + length) % length : startDistance));
@@ -361,8 +378,8 @@ export function createPathFollower({
   function fold() {
     const track = located[0];
     if (mode === 'pingpong') {
-      let wrapped = track % trackLength;
-      if (wrapped < 0) wrapped += trackLength;
+      // A floor-based wrap: V8's % on a negative double (a car behind the start) allocates.
+      const wrapped = track - Math.floor(track / trackLength) * trackLength;
       if (wrapped <= length) {
         located[4] = wrapped;
         return 1;
@@ -371,7 +388,7 @@ export function createPathFollower({
       return -1;
     }
     if (path.closed) {
-      located[4] = ((track % length) + length) % length;
+      located[4] = track - Math.floor(track / length) * length;
       return 1;
     }
     const distance = track < 0 ? (mode === 'loop' ? track + length : 0) : track > length ? length : track;
@@ -383,8 +400,15 @@ export function createPathFollower({
   function write(out) {
     const direction = fold();
     out.distance = located[4];
-    path.sampleFrom(located, 4, sample);
-    path.tangentFrom(located, 4, tangent);
+    if (pathState) {
+      pathState.query[0] = located[4];
+      sampleState(pathState, sample);
+      pathState.query[0] = located[4];
+      tangentState(pathState, tangent);
+    } else {
+      path.sampleFrom(located, 4, sample);
+      path.tangentFrom(located, 4, tangent);
+    }
     let tx = tangent.x * direction;
     let ty = tangent.y * direction;
     let tz = tangent.z * direction;
@@ -439,6 +463,16 @@ export function createPathFollower({
       locate();
       out.speed = located[1];
       out.done = located[2] === 1;
+      if (Number.isFinite(offset)) located[0] -= offset;
+      return write(out);
+    },
+    /** carAt() with the time read from buffer[index] and the offset from buffer[index + 1]. */
+    carAtFrom(buffer, index, out) {
+      located[3] = buffer[index];
+      locate();
+      out.speed = located[1];
+      out.done = located[2] === 1;
+      const offset = buffer[index + 1];
       if (Number.isFinite(offset)) located[0] -= offset;
       return write(out);
     },

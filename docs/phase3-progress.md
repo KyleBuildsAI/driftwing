@@ -42,7 +42,18 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   migrated onto the core through a legacy adapter (identical to the six Phase 2 goldens), the
   challenge HUD (`src/ui/challengeHud.js`: prompt, edge chevron and 3D gate frame, timer with splits,
   miss flash, medal toast), the journal's Challenges section, and `tools/lab/challenges.mjs` (68/68).
-- **Next:** the structure recipe `challengeGates`, the fauna ground and surface modes, the step files.
+- **Done:** the structure recipe `challengeGates` (gate frames from a preset's `challenge` block, the
+  course registered with the challenge system for the instance's life; structure lab 75/75), and the
+  engine ctx `game` handle (contract 0.4, verbatim lines).
+- **Done:** FaunaEngine ground and water-surface modes: `herd` (altitude mode `ground`, a fine ground
+  grid, slope and water avoidance, grazing, player / timer / event stampedes, pooled dust sprites),
+  `column` (PathFollower walkers, 'auto' paths from buildGroundPath), `surface` (dolphins porpoising
+  on the water query's swell and racing the craft's shadow; flamingos wading, flushed in a wave,
+  flying as a flock and settling back); species bison, caribou, dolphin, flamingo; `faunaThreat`;
+  `tools/lab/fauna-modes.mjs` (40/40).
+- **Next:** docs/engines/fauna.md, the step files (`engine-fauna-modes.json`, `challenge.json`) on
+  both backends, the builds, test:v1, the fauna / discovery / preset step files and the reduced
+  `?test=1` harness.
 - **Open issues:** none yet.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
