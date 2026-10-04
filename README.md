@@ -133,9 +133,10 @@ On macOS or Linux, run `npm install` once and then `npm run dev` in this folder,
 
 ### Online
 
-The version on GitHub Pages is v1, the original game (the launcher opens the same game at `/?v=1`):
-<https://kylebuildsai.github.io/driftwing/>. Share a world by copying the URL; it always carries
-the seed, for example <https://kylebuildsai.github.io/driftwing/?seed=K7Q2ZD>.
+GitHub Pages serves the launcher at <https://kylebuildsai.github.io/driftwing/>, with v1 and v2
+behind it. Every push to `main` runs `.github/workflows/pages.yml`, which checks the frozen v1,
+runs `npm run build:single` and deploys `dist-single/`. Share a world by copying the URL; it
+always carries the seed.
 
 ## Controls at a glance
 
