@@ -23,13 +23,28 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 ### Wave 1 - p3/high-altitude
 
-- **Done:** `src/env/atmosphere.js` (the one density model re-exported from telemetry; `skyState()`
-  writes every render input from the camera altitude, exactly neutral below 3 km),
-  `src/render/curvature.js` (CPU drop, rigid drop, the TSL curvature nodes, the planet radius
-  setting's clamp), `tools/lab/atmosphere.mjs` 28/28.
-- **Next:** the sky (state.atmosphere, darkening, daylight stars, limb, sun, column haze, far plane),
-  the per-craft ceiling, terrain curvature and the handoff API, the far field, clouds / lures /
-  rigid drops, the near plane, the planet radius setting, `tools/steps/high-altitude.json`.
+- **Done:**
+  - `src/env/atmosphere.js`: the one density model (re-exported from telemetry) and `skyState()`,
+    every render input from the camera altitude, exactly neutral below 3 km; `state.atmosphere`.
+  - `src/render/curvature.js`: `curvatureDrop`, `rigidCurvatureDrop`, `applyRigidDrop`, the TSL
+    `curvatureDropNode` / `curvedPositionNode`, the `planetRadiusKm` clamp (setting + Graphics slider).
+  - Sky (`sky.js`): darkening to black above the limb band, sharper whiter sun, daylight stars, the
+    blue limb on the curved horizon, the column haze taking over from the Phase 1 fog (6-9 km),
+    `camera.far` to the horizon (600 km at most), overcast fading above the cloud decks; all in a
+    shader branch that is off below 3 km.
+  - The per-craft ceiling (`limits.ceiling`, `flight.getCeiling()`), FLIGHT_CEILING the default.
+  - Terrain: curved material variants from 5 km (the originals below), the handoff API
+    (`getCoverageRadius`, `setFarFieldHandoff`, `handoffUniforms`), hidden above 13 km, streaming
+    paused 20 km above the ground.
+  - `src/world/farField.js` (system `farField` after `terrain`): quadtree tiles from the map-tile
+    worker (new fields `surface` / `albedo`, a bare-world option for coarse tiles), skirts, curvature,
+    water glint, the dithered handoff, the cloud-layer shell (cumulus coverage + regional weather).
+  - Clouds (rigid drop, haze lift, edge shrink, `getCoverageProbability`), lures (CPU drop before the
+    projection), spawnManager g.5 (heavy spawns by horizontal distance at the far tier above 12 km),
+    landmark and structure rigid drops, the third-person near plane above 12 km.
+  - `tools/lab/atmosphere.mjs` 28/28; `tools/steps/high-altitude.json`; docs/architecture.md.
+- **Next:** run the step files on both backends, the golden frame against the base build, the
+  verification list, then finish.
 - **Open issues:** none yet.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
