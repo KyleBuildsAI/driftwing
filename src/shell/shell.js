@@ -100,12 +100,16 @@ function reflectVersionInUrl(version) {
   window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}${window.location.hash}`);
 }
 
-/** The game URL: its directory plus every shell query parameter except v, and the shell's hash. */
+/**
+ * The game URL: its directory beside the shell plus every shell query parameter except v, and the
+ * shell's hash. Relative, so the site works at a subpath (GitHub Pages serves /driftwing/).
+ */
 function gameUrl(version) {
   const params = new URLSearchParams(window.location.search);
   params.delete('v');
   const query = params.toString();
-  return `/${version}/${query ? `?${query}` : ''}${window.location.hash}`;
+  const page = window.location.protocol === 'file:' ? `${version}/index.html` : `${version}/`;
+  return `${page}${query ? `?${query}` : ''}${window.location.hash}`;
 }
 
 // ---- Loading and switching ----------------------------------------------------------------------
