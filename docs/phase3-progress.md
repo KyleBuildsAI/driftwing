@@ -43,7 +43,13 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 - Audio in the render frame: the spatializer and the spawn voices keep world positions (doppler,
   distances, camera velocity) and feed the Web Audio graph `world - offset`; after a rebase the
   listener and every panner are snapped (`snapParameter`), never glided.
-- Next: the rebase step file with the dev hook, and the verification runs.
+- Found by the step file's image check: three's HemisphereLight takes its up direction from its own
+  render-frame position, so after a rebase the sky fill lit everything sideways (a 44 % pixel pop
+  near the ground). The sky now keeps it 1 m above the render origin (`sky.js`, `updateDome`).
+- Dev hook `DRIFTWING.debug.rebaseOrigin(point?)`; `src/dev/originRebaseCheck.js` and
+  `tools/steps/origin-rebase.json` (image checks at fixed poses, two flight legs of 900 rendered
+  frames with forced rebases, terrain and site identity).
+- Next: the verification runs on both backends.
 - Open issues: `src/render/water.js` (`surfaceNoise`, `shadowUV`) is the water engineer's (contract
   0.1); they apply `worldPositionNode` there in the integration pass.
 

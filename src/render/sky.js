@@ -524,6 +524,8 @@ export function createSkySystem(ctx) {
 
   const hemisphereLight = new THREE.HemisphereLight(0xc4d8f0, 0x6f6450, 1);
   hemisphereLight.name = 'sky-fill';
+  // The render origin's offset (world m; a live reference), or the world origin without one.
+  const renderOffset = ctx.origin ? ctx.origin.offset : new THREE.Vector3();
   scene.add(hemisphereLight);
 
   function applyShadowQuality() {
@@ -1020,6 +1022,9 @@ export function createSkySystem(ctx) {
   function updateDome() {
     dome.position.copy(camera.position);
     dome.scale.setScalar(camera.far * DOME_RADIUS_FRACTION);
+    // The hemisphere fill takes its up direction from its own position, which three reads in the
+    // render frame (src/core/origin.js): it stays 1 m above the render origin.
+    hemisphereLight.position.set(renderOffset.x, renderOffset.y + 1, renderOffset.z);
   }
 
   function emitLabelChange() {
