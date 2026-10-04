@@ -57,7 +57,7 @@ heading, the islands float over the ground, and the course runs `length` metres 
 Phase 3 adds hangars, a monastery, a castle, an observatory, a viaduct, a dam, a labyrinth and more
 as new recipes: a recipe is `build(context, read)` in `structure/recipes/`, registered by name in
 `recipes/index.js`. It fills the context's builders and its `out` record (turbines, socks, puffs,
-zones, surfaces, courses, wake, sway, audio point, radius) and adds gates with `context.addGate`;
+zones, surfaces, colliders, courses, wake, sway, audio point, radius) and adds gates with `context.addGate`;
 every generic feature below then works for it with no engine change.
 
 ## Common params (every recipe)
@@ -315,6 +315,27 @@ parks on an island top but flies freely beneath it. A craft change on a top keep
 there. Any recipe (or engine) that builds landable ground uses the same registry:
 `surfaces.add({ id, minX, maxX, minZ, maxZ, top, heightAt(x, z) })` (`heightAt` returns NaN off the
 surface) and `surfaces.remove(id)`.
+
+With the game's collider service (Phase 3, `ctx.game.colliders`) each island top is instead a
+landable heightfield collider sampled from the same exact function, which publishes that function
+to the ground surfaces under the collider's id (still listed in `data.surfaceIds`): landings stand on
+exactly the rendered top, and a fast strike on it is a structure strike.
+
+### Colliders (Phase 3)
+
+A recipe lists its solid parts in `out.colliders`, in the instance's local frame, with the helpers of
+`structure/colliders.js` (`localBox`, `localBoxAxes`, `localCylinder`, `localCapsule`,
+`localSphere`, `localHull`, plus `builderFrame` and `ringPoints` to follow the mesh builder's frames
+and lathes). The engine registers them with `ctx.game.colliders` at create (ids
+`${preset.id}:${params.seed}:${serial}:<part><n>`, all in `instance.colliderIds`) and removes them
+on dispose. Turbine nacelles and rotor discs are added by the engine from `out.turbines` and turned
+with each turbine's yaw every frame (`setPose`, allocation-free). The Phase 2 recipes: wind farm masts
+(cylinders as wide as the foot), the rope bridge's deck boxes (covering the sway), rope, post, guy
+and lintel capsules and its landings, the airfield's hangar hulls (landable roof crests), hut,
+control tower and windsock pole, the crystal and shard hulls (perches on the spire tips) and boulder
+spheres, the islands' rock body (four wedge hulls of the actual ring vertices), trees, boulders and
+roots. Props under 2 m tall carry none. The node labs run the engine without a collider service and
+skip all of it.
 
 ### Wind
 
