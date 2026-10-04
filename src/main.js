@@ -37,6 +37,8 @@ import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
 import { createVortexEngine } from './spawns/engines/vortexEngine.js';
 import { createWaterSystem } from './render/water.js';
+import { createWaterBodySystem } from './render/waterBodies.js';
+import { createWaterQuery } from './world/waterQuery.js';
 import { createWaterEffectEngine } from './spawns/engines/waterEffectEngine.js';
 import { createWaypointSystem } from './gameplay/waypoints.js';
 import { createWeatherSystem } from './spawns/weather.js';
@@ -281,6 +283,7 @@ async function boot() {
 
   const perf = createPerfGovernor(ctx, { devHooks });
   ctx.perf = perf;
+  ctx.waterQuery = createWaterQuery({ world, windDirection: uniforms.windDirection.value, clock: state.time });
   refreshProbe.then(
     (result) => perf.setMeasuredRefresh(result),
     (error) => {
@@ -362,6 +365,7 @@ async function boot() {
     ['weather', createWeatherSystem],
     ['terrain', createTerrainSystem],
     ['water', createWaterSystem],
+    ['waterBodies', createWaterBodySystem],
     ['clouds', createCloudSystem],
     ['birds', createBirdSystem],
     // After wind (ctx.wind) and sky: spawn engines write wind sources and read the sky.
@@ -418,7 +422,7 @@ async function boot() {
   beginPrewarm();
   const fadeStatus = document.getElementById('fade-status');
   if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
-  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'weather', 'sky', 'water', 'clouds', 'birds', 'spawns', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind', 'spawnDebugger'];
+  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'farField', 'weather', 'sky', 'water', 'waterBodies', 'clouds', 'birds', 'spawns', 'landmarks', 'journal', 'waypoints', 'rings', 'challenges', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'challengeHud', 'windOverlay', 'debugWind', 'spawnDebugger'];
 
   // ---- Flight-state snapshot for the copilot (local or remote brain) -----------------
   ctx.getFlightState = () => {

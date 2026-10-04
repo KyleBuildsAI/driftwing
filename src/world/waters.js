@@ -185,6 +185,43 @@ export function waterOutlineContains(record, x, z) {
   }
 }
 
+/**
+ * The frame a water body's mesh is laid out in: its centre (x, z), its along axis (alongX, alongZ;
+ * across is (-alongZ, alongX)) and the half extents covering its outline. Basins and craters use the
+ * world axes; terrace shelves and strips follow their stamp.
+ */
+export function waterOutlineFrame(record) {
+  const stamp = record.basin;
+  if (stamp.kind === 6) return { x: stamp.x, z: stamp.z, alongX: 0, alongZ: -1, halfAlong: stamp.radius * 1.15, halfAcross: stamp.radius * 1.15 };
+  if (stamp.kind === 7) return { x: stamp.x, z: stamp.z, alongX: 0, alongZ: -1, halfAlong: stamp.radius, halfAcross: stamp.radius };
+  if (stamp.kind === 8) {
+    const along = -stamp.length / 2 + stamp.stepLength * (record.shelf + 0.4);
+    return {
+      x: stamp.x + stamp.dirX * along, z: stamp.z + stamp.dirZ * along, alongX: stamp.dirX, alongZ: stamp.dirZ,
+      halfAlong: stamp.stepLength * 0.4, halfAcross: stamp.width / 2,
+    };
+  }
+  return { x: stamp.x, z: stamp.z, alongX: stamp.dirX, alongZ: stamp.dirZ, halfAlong: stamp.length / 2 + stamp.margin, halfAcross: stamp.width / 2 + stamp.margin };
+}
+
+/**
+ * The signed distance (m, positive inside) from (x, z) to a water body's outline edge: the basin's
+ * shoreline (measured along its lobed radius), the crater's rim, the shelf's or the strip's sides.
+ * The renderer bakes it per vertex to discard what lies outside.
+ */
+export function waterOutlineDistance(record, x, z) {
+  const stamp = record.basin;
+  if (stamp.kind === 6) return stamp.radius - basinReach(stamp, x, z);
+  if (stamp.kind === 7) return stamp.radius - Math.hypot(x - stamp.x, z - stamp.z);
+  const frame = waterOutlineFrame(record);
+  const dx = x - frame.x;
+  const dz = z - frame.z;
+  const along = Math.abs(dx * frame.alongX + dz * frame.alongZ);
+  const across = Math.abs(dx * -frame.alongZ + dz * frame.alongX);
+  const sideMargin = stamp.kind === 8 ? 2.4 : 0;
+  return Math.min(frame.halfAlong - along, frame.halfAcross - sideMargin - across);
+}
+
 /** One line of the site-list hash per water body: id, level and bounds to 1 cm. */
 export function waterHashLine(record) {
   const b = record.bounds;

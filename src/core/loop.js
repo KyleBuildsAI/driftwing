@@ -56,7 +56,9 @@ function createSafetyNet(ctx, spawnHeading) {
     }
     player.groundHeight = ground;
     player.altitude = player.position.y;
-    player.agl = player.position.y - Math.max(ground, CONFIG.WATER_LEVEL);
+    // Above the ground or the water below (the shared water query: ocean swell and local bodies).
+    const water = ctx.waterQuery ? ctx.waterQuery.heightAt(player.position.x, player.position.z) : CONFIG.WATER_LEVEL;
+    player.agl = player.position.y - Math.max(ground, water);
     lastGood.position.copy(player.position);
     lastGood.quaternion.copy(player.quaternion);
     lastGood.velocity.copy(player.velocity);

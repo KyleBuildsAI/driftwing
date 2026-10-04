@@ -434,15 +434,29 @@ export class Copilot {
    * (PLACE_LEAD metres), where the pilot is actually looking, unless that point is water. Returns
    * { phrase, key, snowy, foothills, overWater, peaksNearby }.
    */
+  /** The local water body (lake, pool, film, frozen lake) at (x, z), or null (worldgen.waterBodyAt). */
+  static lakeAt(world, x, z) {
+    return typeof world.waterBodyAt === 'function' ? world.waterBodyAt(x, z) : null;
+  }
+
+  /** A noun phrase for a local water body in a region named `name`. */
+  static lakePhrase(body, name) {
+    if (body.material === 'ice') return `a frozen lake in the ${name}`;
+    if (body.kind === 'thin') return body.mirror > 0.5 ? 'a mirror-flat salt pan' : `a sheet of shallow water in the ${name}`;
+    if (body.kind === 'pool') return body.shelf >= 0 ? 'a staircase of terraced pools' : `a pool in the ${name}`;
+    return `a lake in the ${name}`;
+  }
+
   static describePlace(world, x, z, groundHeight, heading) {
     const PLACE_LEAD = 300;
     const groundBelow = Number.isFinite(groundHeight) ? groundHeight : world.groundHeight(x, z);
-    if (Number.isFinite(heading) && groundBelow >= CONFIG.WATER_LEVEL - 0.5) {
+    const lake = Copilot.lakeAt(world, x, z);
+    if (Number.isFinite(heading) && groundBelow >= CONFIG.WATER_LEVEL - 0.5 && lake === null) {
       const radians = heading * DEG;
       const leadX = x + Math.sin(radians) * PLACE_LEAD;
       const leadZ = z - Math.cos(radians) * PLACE_LEAD;
       const leadGround = world.groundHeight(leadX, leadZ);
-      if (leadGround >= CONFIG.WATER_LEVEL - 0.5) return Copilot.describePlace(world, leadX, leadZ, leadGround);
+      if (leadGround >= CONFIG.WATER_LEVEL - 0.5 && Copilot.lakeAt(world, leadX, leadZ) === null) return Copilot.describePlace(world, leadX, leadZ, leadGround);
     }
     const info = world.biomeAt(x, z);
     const ground = groundBelow;
@@ -456,6 +470,11 @@ export class Copilot {
       overWater: false,
       peaksNearby: false,
     };
+    if (lake !== null) {
+      place.overWater = true;
+      place.phrase = Copilot.lakePhrase(lake, name);
+      return place;
+    }
     if (ground < CONFIG.WATER_LEVEL - 0.5) {
       place.overWater = true;
       const deep = ground < CONFIG.WATER_LEVEL - 18;
@@ -790,7 +809,9 @@ export class Copilot {
   }
 
   matchStatus(text, flight) {
-    const overWater = typeof flight.overWater === 'boolean' ? flight.overWater : (this.ctx.state?.player?.groundHeight ?? 1) < CONFIG.WATER_LEVEL;
+    const position = this.ctx.state?.player?.position;
+    const overWater = typeof flight.overWater === 'boolean' ? flight.overWater
+      : this.ctx.waterQuery && position ? this.ctx.waterQuery.isWater(position.x, position.z) : (this.ctx.state?.player?.groundHeight ?? 1) < CONFIG.WATER_LEVEL;
     if (/\b(where am i|where are we|status|report|position|location|describe|look around|what do you see|surroundings|sitrep|where is this|what biome|what (place|region|area) is this|what's (around|below|down there|nearby)|what is (around|below|down there|nearby)|anything (nearby|around|interesting))\b/.test(text)) {
       return { speech: '', action: { type: 'describe' } };
     }

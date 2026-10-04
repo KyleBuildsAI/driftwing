@@ -107,7 +107,7 @@ function createFixedWingTrim() {
   const BODY_Z = new THREE.Vector3(0, 0, 1);
   const WORLD_UP = new THREE.Vector3(0, 1, 0);
   const controls = createControlState();
-  const probeEnv = { time: 0, wind: { vel: new THREE.Vector3(), turbulence: 0 }, groundHeight: () => -Infinity, waterLevel: -Infinity, rho: 1.225 };
+  const probeEnv = { time: 0, wind: { vel: new THREE.Vector3(), turbulence: 0 }, groundHeight: () => -Infinity, waterLevel: -Infinity, waterHeight: null, waterSample: null, rho: 1.225 };
 
   /** Attitude for an angle of attack: the air path, rolled to the bank, pitched up by aoa about the wing. */
   function attitudeFor(aoa, bank, target) {
@@ -155,6 +155,8 @@ function createFixedWingTrim() {
       probeEnv.rho = Number.isFinite(env.rho) ? env.rho : 1.225;
       probeEnv.groundHeight = typeof env.groundHeight === 'function' ? env.groundHeight : () => -Infinity;
       probeEnv.waterLevel = Number.isFinite(env.waterLevel) ? env.waterLevel : -Infinity;
+      probeEnv.waterHeight = typeof env.waterHeight === 'function' ? env.waterHeight : null;
+      probeEnv.waterSample = typeof env.waterSample === 'function' ? env.waterSample : null;
       controls.throttle = clamp(Number.isFinite(request.throttle) ? request.throttle : 0, 0, 1);
       controls.trim = pilotTrim;
       controls.roll = 0;

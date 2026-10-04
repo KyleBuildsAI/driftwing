@@ -67,6 +67,7 @@ export function createLandingMonitor({ bus, craftId, limits = {} }) {
       craft: craftId,
       sinkRate: record.sinkRate,
       groundSpeed: record.groundSpeed,
+      surface: record.surface,
       position: { x: record.position.x, y: record.position.y, z: record.position.z },
     });
     const feetPerMinute = Math.round((record.sinkRate * 196.85) / 10) * 10;
@@ -94,13 +95,15 @@ export function createLandingMonitor({ bus, craftId, limits = {} }) {
       if (report.gearContacts > 0 || report.contacts > 0) airborne = false;
       if (!qualifies) return null;
       // A crash is the controller's business (fade and respawn), not a graded landing.
-      if (touchdown.sinkRate > crashSinkRate || report.water) return null;
+      // A floating craft's touchdown on the water is graded like one on the ground.
+      if (touchdown.sinkRate > crashSinkRate || (report.water && !report.floating)) return null;
       if (report.bodyStrike && report.bodyStrike.speed > strikeLimit) return null;
       const record = {
         grade: gradeLanding(touchdown.sinkRate),
         sinkRate: Math.round(touchdown.sinkRate * 100) / 100,
         groundSpeed: Math.round(touchdown.groundSpeed * 10) / 10,
         part: touchdown.part,
+        surface: report.surface === 'water' ? 'water' : 'ground',
         position,
       };
       announce(record);

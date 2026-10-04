@@ -179,7 +179,7 @@ export function createWaterEffectEngine() {
     // waterOnly: a splash scattered onto land (a bay's centre lies on its shore) draws another point on
     // the next frame, up to WATER_ONLY_TRIES times, before it gives up until the next interval. Whole-metre
     // coordinates reach the terrain unboxed; the height query runs only while a splash is due.
-    if (params.waterOnly && ctx.terrain.heightAt(Math.round(mark.x), Math.round(mark.z)) >= ctx.terrain.waterLevel - 0.5) {
+    if (params.waterOnly && !water.isWaterAt(Math.round(mark.x), Math.round(mark.z))) {
       data.landTries++;
       if (data.landTries < WATER_ONLY_TRIES) {
         data.timer = 0;
@@ -264,6 +264,8 @@ export function createWaterEffectEngine() {
       mark.foam = 0;
       drawNoise(data);
       mark.glow = 0.35 + 0.4 * data.noiseValue;
+      // Plankton glow only in the open ocean (never in a lake the bay's radius reaches).
+      if (!water.isOceanAt(Math.round(mark.x), Math.round(mark.z))) continue;
       water.disturb(mark);
       data.flashes++;
     }

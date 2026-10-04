@@ -12,6 +12,7 @@
 //   penetration  the deepest point below the surface (m)
 import * as THREE from 'three/webgpu';
 import { DEG, clamp } from '../core/util.js';
+import { createWaterSampleScratch, surfaceHeightAt, waterSampleAt } from './waterSurface.js';
 
 const DEFAULTS = Object.freeze({
   WHEEL: Object.freeze({ spring: 40000, damping: 3000, rollingFriction: 0.04, sideFriction: 0.8, brakeFriction: 0.55, steerAngle: 28 }),
@@ -32,6 +33,8 @@ const NORMAL_PROBE = 0.6;
 const MAX_NORMAL_FORCE_G = 40;
 /** Water acts as a surface for floating craft, with this much drag. */
 const WATER_FRICTION = 0.35;
+/** Ice is ground with this little grip (wheels, skids and the airframe alike). */
+const ICE_FRICTION = 0.05;
 /** Tail-wheel steering fades out between these ground speeds (m/s); above it the wheel only castors. */
 const STEERING_FADE = Object.freeze({ START: 6, END: 22, MIN_SHARE: 0.2 });
 
@@ -79,6 +82,10 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
     touchdown: null,
     bodyStrike: null,
     water: false,
+    /** A floating craft is resting on the water (some contact is held by the water surface). */
+    floating: false,
+    /** What the touching contacts stand on: 'ground', 'water' (floating) or 'ice'. */
+    surface: 'ground',
     penetration: 0,
     contacts: 0,
     gearContacts: 0,
@@ -103,6 +110,7 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
   const inverseQuaternion = new THREE.Quaternion();
   const steerQuaternion = new THREE.Quaternion();
   const BODY_UP = new THREE.Vector3(0, 1, 0);
+  const waterAtPoint = createWaterSampleScratch();
 
   /** Ground normal from the shared height function's gradient around (x, z). */
   function groundNormal(env, x, z, target) {
@@ -118,6 +126,8 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
     report.touchdown = null;
     report.bodyStrike = null;
     report.water = false;
+    report.floating = false;
+    report.surface = 'ground';
     report.penetration = 0;
     report.contacts = 0;
     report.gearContacts = 0;
@@ -132,13 +142,20 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
    * Adds the contact forces for one tick. body: { position (centre of mass, world), velocity (world),
    * quaternion (body to world), angularVelocity (body) }. inputs: { brakeLeft, brakeRight (0..1),
    * steering (-1..1, tail-wheel / nose-wheel), gearDown (retractable gear extended) }. env: the tick
-   * environment ({ groundHeight(x, z), waterLevel }). Adds the world force to forceWorld and the
-   * body-axes moment about the centre of mass to momentBody. Returns the report.
+   * environment ({ groundHeight(x, z), and the water: waterHeight / waterSample, or a flat sea at
+   * waterLevel; see waterSurface.js }). Adds the world force to forceWorld and the body-axes moment
+   * about the centre of mass to momentBody. Returns the report.
+   *
+   * Water is the shared water query's surface at each contact point (the ocean's swell and every
+   * local body). A contact in water sets report.water (the water soft crash, unless the craft
+   * floats); a floating craft rests on the water (report.floating). Ice is ground at its level
+   * (friction ICE_FRICTION, report.surface 'ice'), and a thin film over a flat is wet ground (the
+   * contact goes through it to the ground below).
    */
   function evaluate(body, inputs, env, dt, forceWorld, momentBody) {
     clearReport();
     const position = body.position;
-    const surfaceBelow = Math.max(env.groundHeight(position.x, position.z), env.waterLevel);
+    const surfaceBelow = surfaceHeightAt(env, position.x, position.z);
     // Broad phase: nothing can touch while the centre of mass is well clear of the ground below it
     // (twice the craft's reach covers slopes up to 45 degrees under a wingtip).
     if (position.y - surfaceBelow > boundingRadius * 2 + 3) {
@@ -153,17 +170,25 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
       offsetWorld.copy(contact.relative).applyQuaternion(body.quaternion);
       worldPoint.copy(position).add(offsetWorld);
       const ground = env.groundHeight(worldPoint.x, worldPoint.z);
-      const overWater = ground < env.waterLevel;
-      if (overWater && worldPoint.y < env.waterLevel) report.water = true;
+      waterSampleAt(env, worldPoint.x, worldPoint.z, waterAtPoint);
+      const waterSurface = waterAtPoint.height;
+      const ice = waterAtPoint.material === 'ice' && waterSurface > ground;
+      const overWater = waterSurface > ground && !ice && !waterAtPoint.film;
+      if (overWater && worldPoint.y < waterSurface) report.water = true;
       if (overWater && !floats) {
         if (worldPoint.y >= ground) continue;
       }
-      const surface = overWater && floats ? env.waterLevel : ground;
+      const onWater = overWater && floats;
+      const surface = onWater || ice ? waterSurface : ground;
       const depth = surface - worldPoint.y;
       if (depth <= 0) continue;
 
-      if (overWater && floats) normal.set(0, 1, 0);
+      if (onWater) normal.set(waterAtPoint.normalX, waterAtPoint.normalY, waterAtPoint.normalZ);
+      else if (ice) normal.set(0, 1, 0);
       else groundNormal(env, worldPoint.x, worldPoint.z, normal);
+      if (onWater) report.floating = true;
+      if (onWater) report.surface = 'water';
+      else if (ice && report.surface === 'ground') report.surface = 'ice';
       const penetration = depth * normal.y;
       spinVelocity.crossVectors(body.angularVelocity, contact.relative).applyQuaternion(body.quaternion);
       pointVelocity.copy(body.velocity).add(spinVelocity);
@@ -173,7 +198,7 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
       force.copy(normal).multiplyScalar(normalForce);
 
       tangential.copy(pointVelocity).addScaledVector(normal, -normalSpeed);
-      if (contact.kind === 'wheel' && !(overWater && floats)) {
+      if (contact.kind === 'wheel' && !onWater) {
         // Wheel frame: the body's nose direction (steered for a steerable wheel) laid onto the ground.
         forward.set(0, 0, -1);
         if (contact.steerable && inputs.steering !== 0) {
@@ -191,11 +216,13 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
         const rolling = tangential.dot(forward);
         const sliding = tangential.dot(lateral);
         const brake = contact.brakes ? (contact.side < 0 ? inputs.brakeLeft : contact.side > 0 ? inputs.brakeRight : Math.max(inputs.brakeLeft, inputs.brakeRight)) : 0;
-        const longitudinalGrip = contact.rollingFriction + contact.brakeFriction * clamp(brake, 0, 1);
+        // On ice the tyre's grip (rolling, braking and cornering) is at most ICE_FRICTION.
+        const longitudinalGrip = ice ? Math.min(contact.rollingFriction + contact.brakeFriction * clamp(brake, 0, 1), ICE_FRICTION) : contact.rollingFriction + contact.brakeFriction * clamp(brake, 0, 1);
+        const sideGrip = ice ? Math.min(contact.sideFriction, ICE_FRICTION) : contact.sideFriction;
         let longitudinal = -longitudinalGrip * normalForce * clamp(rolling / ROLLING_SLIP, -1, 1);
-        let side = -contact.sideFriction * normalForce * clamp(sliding / SIDE_SLIP, -1, 1);
+        let side = -sideGrip * normalForce * clamp(sliding / SIDE_SLIP, -1, 1);
         // Friction circle: braking and cornering share the tyre's grip.
-        const limit = Math.max(contact.sideFriction, longitudinalGrip) * normalForce;
+        const limit = Math.max(sideGrip, longitudinalGrip) * normalForce;
         const total = Math.hypot(longitudinal, side);
         if (total > limit && total > 0) {
           longitudinal *= limit / total;
@@ -204,7 +231,7 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
         force.addScaledVector(forward, longitudinal).addScaledVector(lateral, side);
         report.wheelSpeed = Math.max(report.wheelSpeed, Math.abs(rolling));
       } else {
-        const friction = overWater && floats ? WATER_FRICTION : contact.friction;
+        const friction = onWater ? WATER_FRICTION : ice ? Math.min(contact.friction, ICE_FRICTION) : contact.friction;
         const slideSpeed = tangential.length();
         if (slideSpeed > 1e-6) force.addScaledVector(tangential, (-friction * normalForce * Math.min(1, slideSpeed / SLIDE_SLIP)) / slideSpeed);
       }

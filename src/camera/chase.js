@@ -140,8 +140,10 @@ export function createCameraRig(ctx) {
     if (length > 1e-6) vector.divideScalar(length);
     else vector.copy(target);
   }
+  /** The ground or the water surface below (the shared water query: ocean swell and local bodies). */
   function groundFloor(x, z) {
-    return Math.max(world.groundHeight(x, z), CONFIG.WATER_LEVEL);
+    const water = ctx.waterQuery ? ctx.waterQuery.heightAt(x, z) : CONFIG.WATER_LEVEL;
+    return Math.max(world.groundHeight(x, z), water);
   }
   function vectorSum(vector) {
     return vector.x + vector.y + vector.z;

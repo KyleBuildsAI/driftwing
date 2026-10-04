@@ -63,9 +63,12 @@ function climbToSummit(world, x, z) {
  * The nearest high peak to (x, z): searches outward in rings on the shared height function, climbs
  * each promising sample to its summit and returns the closest summit that is high enough
  * ({ x, z, height, distance }). Falls back to the highest summit found, or null on flat worlds.
+ * options.waterHeight(x, z): the water surface (the shared water query; a flat sea at
+ * world.WATER_LEVEL without it).
  */
 export function findNearestPeak(world, x, z, options = {}) {
-  const startGround = Math.max(world.heightAt(x, z), world.WATER_LEVEL ?? 0);
+  const water = typeof options.waterHeight === 'function' ? options.waterHeight(x, z) : world.WATER_LEVEL ?? 0;
+  const startGround = Math.max(world.heightAt(x, z), water);
   const threshold = Math.max(options.minHeight ?? PEAK.MIN_HEIGHT, startGround + (options.minRise ?? PEAK.MIN_RISE));
   const maxRadius = options.maxRadius ?? PEAK.MAX_RADIUS;
   let highest = null;
@@ -108,11 +111,12 @@ export function planPeakLaunch(world, peak, options = {}) {
   }
   const ground = Math.max(world.groundHeight(peak.x, peak.z), peak.height);
   if (!Number.isFinite(options.diveAngle)) return { position: new THREE.Vector3(peak.x, ground + PEAK.LAUNCH_HEIGHT, peak.z), heading };
-  return planDive(world, peak, heading, ground, options.diveAngle);
+  const waterHeight = typeof options.waterHeight === 'function' ? options.waterHeight : () => world.WATER_LEVEL ?? -Infinity;
+  return planDive(world, peak, heading, ground, options.diveAngle, waterHeight);
 }
 
 /** The edge of the summit along `heading` and the steepest dive (up to diveAngle) that clears the slope. */
-function planDive(world, peak, heading, summitGround, diveAngle) {
+function planDive(world, peak, heading, summitGround, diveAngle, waterHeight) {
   const forward = vectorFromHeading(heading);
   let edge = 0;
   for (let distance = PEAK.EDGE_STEP; distance <= PEAK.EDGE_MAX; distance += PEAK.EDGE_STEP) {
@@ -121,11 +125,13 @@ function planDive(world, peak, heading, summitGround, diveAngle) {
   }
   const x = peak.x + forward.x * edge;
   const z = peak.z + forward.z * edge;
-  const startY = Math.max(world.groundHeight(x, z), world.WATER_LEVEL ?? -Infinity) + PEAK.LAUNCH_HEIGHT;
+  const startY = Math.max(world.groundHeight(x, z), waterHeight(x, z)) + PEAK.LAUNCH_HEIGHT;
   // Steepest straight path that stays DIVE_CLEARANCE above the ground ahead.
   let slope = Math.tan(diveAngle * DEG);
   for (let distance = PEAK.DIVE_PROBE_STEP; distance <= PEAK.DIVE_PROBE_DISTANCE; distance += PEAK.DIVE_PROBE_STEP) {
-    const ground = Math.max(world.groundHeight(x + forward.x * distance, z + forward.z * distance), world.WATER_LEVEL ?? -Infinity);
+    const probeX = x + forward.x * distance;
+    const probeZ = z + forward.z * distance;
+    const ground = Math.max(world.groundHeight(probeX, probeZ), waterHeight(probeX, probeZ));
     slope = Math.min(slope, (startY - ground - PEAK.DIVE_CLEARANCE) / distance);
   }
   const pitch = -Math.atan(Math.max(0, slope)) / DEG;
@@ -205,9 +211,9 @@ function plateau(u, rampIn, rampOut) {
  * it early enough to clear it by TOW.CLEARANCE, rising no steeper than TOW.OBSTACLE_SLOPE.
  * Returns sampled arrays plus how much the terrain forced it up (lower is a clearer heading).
  */
-function planTowPath(world, waterLevel, start, heading, startSpeed, releaseSpeed, releaseAgl) {
+function planTowPath(world, waterHeight, start, heading, startSpeed, releaseSpeed, releaseAgl) {
   const direction = vectorFromHeading(heading);
-  const surface = (x, z) => Math.max(world.groundHeight(x, z), waterLevel);
+  const surface = (x, z) => Math.max(world.groundHeight(x, z), waterHeight(x, z));
   const startAgl = Math.max(0, start.y - surface(start.x, start.z));
   const takeoff = startAgl < TOW.GROUND_START_AGL ? TOW.TAKEOFF_SECONDS : 0;
   const climbShare = 1 - 0.5 * TOW.RAMP_IN - 0.5 * TOW.RAMP_OUT;
@@ -291,8 +297,8 @@ function planTowPath(world, waterLevel, start, heading, startSpeed, releaseSpeed
 }
 
 /** A tow path along a heading and how hard the terrain pushed it up: the tow picks the clearest. */
-function pathObstruction(world, waterLevel, start, heading, startSpeed, releaseSpeed, releaseAgl) {
-  const path = planTowPath(world, waterLevel, start, heading, startSpeed, releaseSpeed, releaseAgl);
+function pathObstruction(world, waterHeight, start, heading, startSpeed, releaseSpeed, releaseAgl) {
+  const path = planTowPath(world, waterHeight, start, heading, startSpeed, releaseSpeed, releaseAgl);
   return { path, obstruction: path.forcedUp };
 }
 
@@ -300,16 +306,17 @@ function pathObstruction(world, waterLevel, start, heading, startSpeed, releaseS
  * Starts an aerotow. Returns { update(dt), release(reason), finished, dispose() }. update(dt) moves
  * the tug and rope and returns the towed craft's pose { position, quaternion, velocity, released };
  * released is true exactly once, on the frame the rope lets go (then the craft flies on its own and
- * the tug keeps animating until finished).
+ * the tug keeps animating until finished). waterHeight(x, z) is the water surface the path clears
+ * (the shared water query); without it, a flat sea at waterLevel.
  */
-export function createAerotow({ scene, world, waterLevel = 0, start, startQuaternion, heading, startSpeed, releaseSpeed, releaseAgl, tug, gliderHook, ropeMaterial, time }) {
+export function createAerotow({ scene, world, waterLevel = 0, waterHeight = () => waterLevel, start, startQuaternion, heading, startSpeed, releaseSpeed, releaseAgl, tug, gliderHook, ropeMaterial, time }) {
   const origin = start.clone();
   const initialAttitude = startQuaternion ? startQuaternion.clone() : null;
   const pathAttitude = new THREE.Quaternion();
   const initialSpeed = clamp(Number.isFinite(startSpeed) ? startSpeed : 0, 0, TOW.MAX_SPEED);
   let chosen = null;
   for (const offset of TOW.HEADING_CANDIDATES) {
-    const candidate = pathObstruction(world, waterLevel, origin, wrapDegrees(heading + offset), initialSpeed, releaseSpeed, releaseAgl);
+    const candidate = pathObstruction(world, waterHeight, origin, wrapDegrees(heading + offset), initialSpeed, releaseSpeed, releaseAgl);
     if (!chosen || candidate.obstruction < chosen.obstruction - 1e-6) chosen = candidate;
     if (offset === 0 && candidate.obstruction === 0) break;
   }

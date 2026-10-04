@@ -52,8 +52,10 @@ export function createFlybyView(ctx) {
     placements: 0,
   };
 
+  /** The camera's floor: clear of the ground and of the water (the ocean or a local body). */
   function floorAt(x, z) {
-    return Math.max(world.groundHeight(x, z) + FLYBY.CLEARANCE, CONFIG.WATER_LEVEL + FLYBY.WATER_CLEARANCE);
+    const water = ctx.waterQuery ? ctx.waterQuery.heightAt(x, z) : CONFIG.WATER_LEVEL;
+    return Math.max(world.groundHeight(x, z) + FLYBY.CLEARANCE, water + FLYBY.WATER_CLEARANCE);
   }
 
   /** True when the straight line from `from` to `to` stays above the terrain (with a small margin). */

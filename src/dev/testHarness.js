@@ -425,8 +425,13 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     return camera().isFirstPerson() === (entry.view === 'first');
   }
 
+  /** The water surface at (x, z): the shared water query (ocean swell, local bodies), else the flat sea. */
+  function waterAt(x, z) {
+    return ctx.waterQuery ? ctx.waterQuery.heightAt(x, z) : CONFIG.WATER_LEVEL;
+  }
+
   function surfaceAt(x, z) {
-    return Math.max(world.groundHeight(x, z), CONFIG.WATER_LEVEL);
+    return Math.max(world.groundHeight(x, z), waterAt(x, z));
   }
 
   const pilot = {
@@ -497,7 +502,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     }
     const position = player.position;
     const ground = world.groundHeight(position.x, position.z);
-    const surface = Math.max(ground, CONFIG.WATER_LEVEL);
+    const water = waterAt(position.x, position.z);
+    const surface = Math.max(ground, water);
     const depth = surface - position.y;
     if (depth > PENETRATION_LIMIT_M) {
       bucket.penetrationFrames++;
@@ -505,7 +511,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         bucket.penetrations++;
         penetrationEpisode = {
           bucket,
-          detail: { at: runTime(), depth: round(depth, 2), frames: 0, surface: ground >= CONFIG.WATER_LEVEL ? 'terrain' : 'water', position: { x: round(position.x, 1), y: round(position.y, 1), z: round(position.z, 1) }, craft: flight().getCraft() },
+          detail: { at: runTime(), depth: round(depth, 2), frames: 0, surface: ground >= water ? 'terrain' : 'water', position: { x: round(position.x, 1), y: round(position.y, 1), z: round(position.z, 1) }, craft: flight().getCraft() },
         };
         if (bucket.penetrationDetails.length < MAX_EVENT_DETAILS) bucket.penetrationDetails.push(penetrationEpisode.detail);
       }

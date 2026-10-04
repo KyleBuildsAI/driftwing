@@ -39,6 +39,7 @@ import { GRAVITY, SEA_LEVEL_DENSITY, createLiftCurve, createSurface, createSurfa
 import { createGroundContact } from './groundContact.js';
 import { createLandingMonitor } from './landing.js';
 import './helicopterAssists.js';
+import { surfaceHeightAt } from './waterSurface.js';
 
 const MAX_ANGULAR_SPEED = 8;
 const MAX_SPEED = 160;
@@ -721,7 +722,7 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
     const share = rotor.speed / heli.governedSpeed;
     if (share < 0.12) return;
     const hubWorld = worldPoint.copy(heli.hub).applyQuaternion(state.quaternion).add(centerPosition);
-    const surfaceBelow = Math.max(env.groundHeight(hubWorld.x, hubWorld.z), env.waterLevel);
+    const surfaceBelow = surfaceHeightAt(env, hubWorld.x, hubWorld.z);
     if (hubWorld.y - surfaceBelow > heli.radius * 1.2 + 2) return;
     computeDiscNormal(discNormal);
     discU.set(1, 0, 0).addScaledVector(discNormal, -discNormal.x).normalize();
@@ -736,7 +737,7 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
       tipOffset.applyQuaternion(state.quaternion);
       const x = hubX + tipOffset.x;
       const z = hubZ + tipOffset.z;
-      if (hubY + tipOffset.y < Math.max(env.groundHeight(x, z), env.waterLevel)) {
+      if (hubY + tipOffset.y < surfaceHeightAt(env, x, z)) {
         reportStrike('main rotor', rotor.speed * heli.radius);
         return;
       }
@@ -745,7 +746,7 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
     for (let index = 0; index < 8; index++) {
       const angle = (index / 8) * Math.PI * 2;
       tipOffset.set(0, Math.cos(angle) * tail.radius, Math.sin(angle) * tail.radius).add(tail.position).applyQuaternion(state.quaternion).add(centerPosition);
-      if (tipOffset.y < Math.max(env.groundHeight(tipOffset.x, tipOffset.z), env.waterLevel)) {
+      if (tipOffset.y < surfaceHeightAt(env, tipOffset.x, tipOffset.z)) {
         reportStrike('tail rotor', rotor.speed * tail.ratio * tail.radius);
         return;
       }
@@ -769,9 +770,9 @@ export function createSimHelicopterModel({ profile, craft, bus, craftState = {} 
     if (env.wind && env.wind.vel) airVelocityWorld.sub(env.wind.vel);
     bodyAir.copy(airVelocityWorld).applyQuaternion(inverseQuaternion);
 
-    const surfaceHeight = Math.max(env.groundHeight(centerPosition.x, centerPosition.z), env.waterLevel);
+    const surfaceHeight = surfaceHeightAt(env, centerPosition.x, centerPosition.z);
     worldPoint.copy(heli.hub).applyQuaternion(state.quaternion).add(centerPosition);
-    const hubHeight = worldPoint.y - Math.max(env.groundHeight(worldPoint.x, worldPoint.z), env.waterLevel);
+    const hubHeight = worldPoint.y - surfaceHeightAt(env, worldPoint.x, worldPoint.z);
 
     forceBody.set(0, 0, 0);
     momentBody.set(0, 0, 0);

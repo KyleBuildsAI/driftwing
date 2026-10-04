@@ -138,14 +138,16 @@ function quickLook(world, x, z) {
 }
 
 /** Largest rise or dip along the take-off run (m), and whether the run stays dry. */
-function runway(world, x, z, heading, center, waterLevel) {
+function runway(world, x, z, heading, center, waterLevel, isWater) {
   const direction = vectorFromHeading(heading);
   let deviation = 0;
   let dry = true;
   for (let distance = FLAT.RUNWAY_STEP; distance <= FLAT.RUNWAY_LENGTH; distance += FLAT.RUNWAY_STEP) {
-    const height = world.groundHeight(x + direction.x * distance, z + direction.z * distance);
+    const runX = x + direction.x * distance;
+    const runZ = z + direction.z * distance;
+    const height = world.groundHeight(runX, runZ);
     deviation = Math.max(deviation, Math.abs(height - center));
-    if (height < waterLevel + FLAT.MIN_DRY_HEIGHT) dry = false;
+    if (height < waterLevel + FLAT.MIN_DRY_HEIGHT || (isWater !== null && isWater(runX, runZ))) dry = false;
   }
   return { deviation, dry };
 }
@@ -154,16 +156,18 @@ function runway(world, x, z, heading, center, waterLevel) {
  * A long take-off strip: its bumpiness (m) about the straight line from the start to the end, plus
  * the height its grade climbs or falls beyond LONG_MAX_GRADE, and whether it stays dry.
  */
-function longRunway(world, x, z, heading, center, waterLevel, length) {
+function longRunway(world, x, z, heading, center, waterLevel, length, isWater) {
   const direction = vectorFromHeading(heading);
   const endHeight = world.groundHeight(x + direction.x * length, z + direction.z * length);
   let bump = 0;
   let dry = endHeight >= waterLevel + FLAT.MIN_DRY_HEIGHT;
   for (let distance = FLAT.LONG_STEP; distance < length; distance += FLAT.LONG_STEP) {
-    const height = world.groundHeight(x + direction.x * distance, z + direction.z * distance);
+    const runX = x + direction.x * distance;
+    const runZ = z + direction.z * distance;
+    const height = world.groundHeight(runX, runZ);
     const line = center + ((endHeight - center) * distance) / length;
     bump = Math.max(bump, Math.abs(height - line));
-    if (height < waterLevel + FLAT.MIN_DRY_HEIGHT) dry = false;
+    if (height < waterLevel + FLAT.MIN_DRY_HEIGHT || (isWater !== null && isWater(runX, runZ))) dry = false;
   }
   const gradeExcess = Math.max(0, Math.abs(endHeight - center) / length - FLAT.LONG_MAX_GRADE) * length;
   return { deviation: bump + gradeExcess, dry };
@@ -190,9 +194,10 @@ export function vegetationClearance(contacts, margin = 2, runwayLength = FLAT.RU
  * to the flattest dry spot seen when nothing within MAX_RADIUS passes. Returns { x, z, ground, slope,
  * runwayDeviation, flat, clearOfVegetation } (clearOfVegetation is null when it was not checked).
  * runwayLength (m, default 180) is the take-off run a craft needs; a longer strip (the jet's) must also
- * be smooth and gently graded (see longRunway).
+ * be smooth and gently graded (see longRunway). isWater(x, z) (the shared water query's) keeps the
+ * spot and its run out of local water bodies too (lakes, pools, frozen lakes) besides the sea.
  */
-export function findFlatSpot(world, x, z, { waterLevel = 0, headingFor = () => 0, clearance = null, runwayLength = FLAT.RUNWAY_LENGTH } = {}) {
+export function findFlatSpot(world, x, z, { waterLevel = 0, headingFor = () => 0, clearance = null, runwayLength = FLAT.RUNWAY_LENGTH, isWater = null } = {}) {
   const long = runwayLength > FLAT.RUNWAY_LENGTH;
   const maxDeviation = long ? FLAT.LONG_MAX_BUMP : FLAT.RUNWAY_MAX_DEVIATION;
   const vegetation = clearance && typeof world.scatterChunk === 'function' ? createVegetationProbe(world) : null;
@@ -206,7 +211,7 @@ export function findFlatSpot(world, x, z, { waterLevel = 0, headingFor = () => 0
       const candidateX = x + Math.cos(angle) * radius;
       const candidateZ = z + Math.sin(angle) * radius;
       const rough = quickLook(world, candidateX, candidateZ);
-      if (rough.center < waterLevel + FLAT.MIN_DRY_HEIGHT) continue;
+      if (rough.center < waterLevel + FLAT.MIN_DRY_HEIGHT || (isWater !== null && isWater(candidateX, candidateZ))) continue;
       if (rough.slope > FLAT.MAX_SLOPE * FLAT.QUICK_REJECT_FACTOR) {
         if (!gentlest || rough.slope < gentlest.slope) gentlest = { x: candidateX, z: candidateZ, slope: rough.slope };
         continue;
@@ -220,7 +225,7 @@ export function findFlatSpot(world, x, z, { waterLevel = 0, headingFor = () => 0
         continue;
       }
       const heading = headingFor(candidateX, candidateZ);
-      const run = long ? longRunway(world, candidateX, candidateZ, heading, foot.center, waterLevel, runwayLength) : runway(world, candidateX, candidateZ, heading, foot.center, waterLevel);
+      const run = long ? longRunway(world, candidateX, candidateZ, heading, foot.center, waterLevel, runwayLength, isWater) : runway(world, candidateX, candidateZ, heading, foot.center, waterLevel, isWater);
       const runScore = long ? run.deviation * FLAT.LONG_DEVIATION_WEIGHT + (run.dry ? 0 : FLAT.LONG_UNCHECKED_PENALTY) : run.deviation / FLAT.RUNWAY_LENGTH;
       const candidate = { x: candidateX, z: candidateZ, heading, ground: foot.center, slope: foot.slope, runwayDeviation: run.deviation, flat: run.dry && run.deviation <= maxDeviation, clearOfVegetation: null, score: score + runScore };
       if (candidate.flat) flatInRing.push(candidate);

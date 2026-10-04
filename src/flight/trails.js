@@ -2,6 +2,8 @@
 // glider's ballast spray). Same technique as v1's bursts (one Sprite drawn instanced with a
 // PointsNodeMaterial, camera-relative float32 offsets), but soft, sunlit and alpha-blended instead
 // of additive: vapour that streams from the nozzle, billows out, drifts off with the wind and fades.
+// Spray (the glider's ballast) falls: a puff that reaches the water it was dumped over (the shared
+// water query's static level there: a lake or the sea) is gone.
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { clamp } from '../core/util.js';
@@ -32,6 +34,7 @@ function randomRange(range) {
 
 export function createTrailSystem(ctx) {
   const { scene, uniforms } = ctx;
+  const waterQuery = ctx.waterQuery ?? null;
   const { Fn, float, vec3, mix, pow, saturate, uv, instancedDynamicBufferAttribute } = TSL;
 
   const offsets = new Float32Array(CAPACITY * 3);
@@ -86,6 +89,9 @@ export function createTrailSystem(ctx) {
   const red = new Float32Array(CAPACITY);
   const green = new Float32Array(CAPACITY);
   const blue = new Float32Array(CAPACITY);
+  /** The water level a falling puff ends at (-Infinity: none, smoke and puffs over dry land). */
+  const floor = new Float64Array(CAPACITY).fill(-Infinity);
+  const floorScratch = new Float64Array(1);
   const emitDebt = { smoke: 0, spray: 0 };
   const lastEmit = { smoke: new THREE.Vector3(), spray: new THREE.Vector3() };
   const hasLastEmit = { smoke: false, spray: false };
@@ -105,8 +111,9 @@ export function createTrailSystem(ctx) {
   }
 
   /** One puff; `age` is how long ago within this frame it left the nozzle (keeps the stream even). */
-  function spawn(style, x, y, z, craftVelocity, wind, startAge) {
+  function spawn(style, x, y, z, craftVelocity, wind, startAge, waterFloor) {
     const index = claim();
+    floor[index] = waterFloor;
     const shade = 0.94 + Math.random() * 0.06;
     positionX[index] = x;
     positionY[index] = y;
@@ -147,9 +154,11 @@ export function createTrailSystem(ctx) {
       const count = Math.floor(emitDebt[kind]);
       emitDebt[kind] -= count;
       const from = hasLastEmit[kind] ? lastEmit[kind] : position;
+      floorScratch[0] = -Infinity;
+      if (style.rise < 0 && count > 0 && waterQuery !== null) waterQuery.staticLevelInto(position.x, position.z, floorScratch, 0);
       for (let puff = 0; puff < count; puff++) {
         const t = (puff + 1) / count;
-        spawn(style, from.x + (position.x - from.x) * t, from.y + (position.y - from.y) * t, from.z + (position.z - from.z) * t, craftVelocity, wind, (1 - t) * dt);
+        spawn(style, from.x + (position.x - from.x) * t, from.y + (position.y - from.y) * t, from.z + (position.z - from.z) * t, craftVelocity, wind, (1 - t) * dt, floorScratch[0]);
       }
       lastEmit[kind].copy(position);
       hasLastEmit[kind] = true;
@@ -193,6 +202,10 @@ export function createTrailSystem(ctx) {
           positionX[index] += velocityX[index] * dt;
           positionY[index] += velocityY[index] * dt;
           positionZ[index] += velocityZ[index] * dt;
+          if (positionY[index] < floor[index]) {
+            life[index] = 0;
+            continue;
+          }
         }
         const offsetX = positionX[index] - cameraPosition.x;
         const offsetY = positionY[index] - cameraPosition.y;

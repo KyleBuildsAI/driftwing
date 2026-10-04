@@ -12,6 +12,7 @@ import { createAerotow, createRopeMaterial, createRopeStandIn, findNearestPeak, 
 import { findFlatSpot, groundPose, vegetationClearance } from './placement.js';
 import { createTrailSystem } from './trails.js';
 import { createParkingBrake } from './parkingBrake.js';
+import { createWaterSampleScratch } from './waterSurface.js';
 import { countTriangles } from '../craft/kit.js';
 
 /**
@@ -106,6 +107,9 @@ export function createFlightController(ctx) {
    */
   tickControls.quietActions = new Set();
   const groundSurfaces = ctx.groundSurfaces ?? null;
+  /** The shared water query (ocean swell and local water bodies); null in the node labs' flat worlds. */
+  const waterQuery = ctx.waterQuery ?? null;
+  const outcomeWater = createWaterSampleScratch();
   /** The height (m) extra ground surfaces are looked for below: the ticking craft's height + reach. */
   const groundReference = new Float64Array([Infinity]);
   /** Terrain, or an extra ground surface above it no higher than the reference height. */
@@ -120,6 +124,10 @@ export function createFlightController(ctx) {
     wind: { vel: new THREE.Vector3(), turbulence: 0 },
     groundHeight: contactHeight,
     waterLevel: CONFIG.WATER_LEVEL,
+    // The shared water query at the tick time (waterSurface.js reads them); without one the models
+    // keep the flat sea at waterLevel.
+    waterHeight: waterQuery !== null ? (x, z) => waterQuery.heightAt(x, z, env.time) : null,
+    waterSample: waterQuery !== null ? (x, z, out) => waterQuery.sample(x, z, env.time, out) : null,
     rho: SEA_LEVEL_DENSITY,
     world,
     craftState,
@@ -180,11 +188,19 @@ export function createFlightController(ctx) {
     bus.emit('notify', { text, kind });
   }
 
+  /**
+   * The water surface at (x, z) now: the shared water query (the ocean's swell, local water bodies;
+   * -Infinity on dry land), or the flat sea without one.
+   */
+  function waterHeightNow(x, z) {
+    return waterQuery !== null ? waterQuery.heightAt(x, z) : CONFIG.WATER_LEVEL;
+  }
+
   /** The highest ground at (x, z): terrain, water or any extra ground surface (island tops). */
   function surfaceHeight(x, z) {
     const terrain = world.groundHeight(x, z);
     const surface = groundSurfaces !== null && groundSurfaces.count > 0 ? groundSurfaces.surfaceBelow(x, z, Infinity) : -Infinity;
-    return Math.max(terrain, surface, CONFIG.WATER_LEVEL);
+    return Math.max(terrain, surface, waterHeightNow(x, z));
   }
 
   function catalogEntry(id) {
@@ -444,6 +460,7 @@ export function createFlightController(ctx) {
   function placeOnGround(x, z, preferred = null) {
     const spot = preferred ? { x, z } : findFlatSpot(world, x, z, {
       waterLevel: CONFIG.WATER_LEVEL,
+      isWater: waterQuery !== null ? waterQuery.isWater : null,
       headingFor: (spotX, spotZ) => windHeadingAt(spotX, spotZ),
       clearance: vegetationClearance(craft.simProfile.contacts, undefined, craft.spawn.runwayLength),
       runwayLength: craft.spawn.runwayLength,
@@ -616,7 +633,7 @@ export function createFlightController(ctx) {
   function crashFloorHeight(x, y, z) {
     const terrain = world.groundHeight(x, z);
     const surface = groundSurfaces !== null && groundSurfaces.count > 0 ? groundSurfaces.surfaceBelow(x, z, y + SURFACE_REACH) : -Infinity;
-    return Math.max(terrain, surface, CONFIG.WATER_LEVEL);
+    return Math.max(terrain, surface, waterHeightNow(x, z));
   }
 
   /**
@@ -699,11 +716,17 @@ export function createFlightController(ctx) {
     if (contact.touchdown && Number.isFinite(contact.touchdown.sinkRate) && contact.touchdown.sinkRate > limits.crashSinkRate) {
       return { reason: 'hard landing', impactSpeed: contact.touchdown.sinkRate };
     }
+    // Any water the craft cannot float on: the ocean or a local body (contact.water covers both).
     if (contact.water && !limits.floats) return { reason: 'water', impactSpeed: model.state.velocity.length() };
     if (Number.isFinite(contact.penetration) && contact.penetration > PENETRATION_LIMIT) return { reason: 'terrain', impactSpeed: model.state.velocity.length() };
     // Last-resort guards on the shared height function and the sea, whatever the model reported.
     if (position.y < world.groundHeight(position.x, position.z) - PENETRATION_LIMIT) return { reason: 'terrain', impactSpeed: model.state.velocity.length() };
-    if (!limits.floats && position.y < CONFIG.WATER_LEVEL - PENETRATION_LIMIT) return { reason: 'water', impactSpeed: model.state.velocity.length() };
+    if (!limits.floats) {
+      if (waterQuery !== null) waterQuery.sample(position.x, position.z, env.time, outcomeWater);
+      const waterSurface = waterQuery !== null ? outcomeWater.height : CONFIG.WATER_LEVEL;
+      // Ice is solid ground at its level: sinking through it is a terrain strike, not a ditching.
+      if (position.y < waterSurface - PENETRATION_LIMIT) return { reason: waterQuery !== null && outcomeWater.material === 'ice' ? 'terrain' : 'water', impactSpeed: model.state.velocity.length() };
+    }
     return null;
   }
 
@@ -736,13 +759,13 @@ export function createFlightController(ctx) {
 
   function launchFromPeak() {
     const position = sim.state.position;
-    const peak = findNearestPeak(world, position.x, position.z);
+    const peak = findNearestPeak(world, position.x, position.z, { waterHeight: waterHeightNow });
     if (!peak) {
       notify('No high peak nearby, so we start from the air.', 'info');
       return airstart();
     }
     const dive = craft.spawn.peakDive;
-    const launch = planPeakLaunch(world, peak, dive ? { diveAngle: dive.angle } : undefined);
+    const launch = planPeakLaunch(world, peak, dive ? { diveAngle: dive.angle, waterHeight: waterHeightNow } : undefined);
     const pose = airbornePose(launch.position, launch.heading);
     // Craft with a peak dive leave the edge nose down at their launch speed instead of level at cruise.
     if (dive && Number.isFinite(launch.pitch)) {
@@ -776,6 +799,7 @@ export function createFlightController(ctx) {
       scene,
       world,
       waterLevel: CONFIG.WATER_LEVEL,
+      waterHeight: waterHeightNow,
       start: pose.position,
       startQuaternion: pose.quaternion,
       heading,
@@ -1318,7 +1342,7 @@ export function createFlightController(ctx) {
     groundReference[0] = position.y + SURFACE_REACH;
     const ground = contactHeight(position.x, position.z);
     telemetry.altitude = position.y;
-    telemetry.agl = position.y - Math.max(ground, CONFIG.WATER_LEVEL);
+    telemetry.agl = position.y - Math.max(ground, waterHeightNow(position.x, position.z));
     telemetry.radarAltitude = telemetry.agl;
     telemetry.verticalSpeed = telemetry.velocity.y;
     telemetry.heading = player.heading;
@@ -1370,6 +1394,7 @@ export function createFlightController(ctx) {
       sim.writeTelemetry(telemetry);
       telemetry.onGround = Boolean(sim.contact && sim.contact.onGround);
     }
+    telemetry.onWater = !tow && Boolean(sim.contact && (sim.contact.water || sim.contact.floating));
     const assistSetting = settings.get('assists');
     telemetry.assists = override.active ? 1 : assistSetting && Number.isFinite(assistSetting[craftId]) ? assistSetting[craftId] : 1;
     telemetry.activeAssists = [...stageContext.activeAssists];

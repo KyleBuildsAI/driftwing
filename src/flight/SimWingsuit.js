@@ -40,6 +40,7 @@ import { createGroundContact } from './groundContact.js';
 import { createLandingMonitor } from './landing.js';
 import { registerAssistCatalog, registerAssistHandler, stallWarningActive } from './assists.js';
 import { registerAutopilotHandler } from './autopilot.js';
+import { surfaceHeightAt } from './waterSurface.js';
 
 const MAX_ANGULAR_SPEED = 14;
 const MAX_SPEED = 120;
@@ -112,7 +113,7 @@ function probePath(position, velocity, env, result) {
   for (let time = tuning.SAMPLE; time <= tuning.LOOKAHEAD + 1e-6; time += tuning.SAMPLE) {
     const x = position.x + velocity.x * time;
     const z = position.z + velocity.z * time;
-    const floor = Math.max(env.groundHeight(x, z), env.waterLevel);
+    const floor = surfaceHeightAt(env, x, z);
     const gap = position.y + velocity.y * time - floor;
     if (gap < clearance) clearance = gap;
     if (gap <= 0 && time < impactSeconds) impactSeconds = time;
@@ -225,7 +226,7 @@ function lowerSideOf(env, position, headingDegrees) {
   for (const distance of [600, 1200]) {
     for (const side of [-1, 1]) {
       const direction = (headingDegrees + side * AUTOPILOT.EVADE_HEADING) * DEG;
-      const height = Math.max(env.groundHeight(position.x + Math.sin(direction) * distance, position.z - Math.cos(direction) * distance), env.waterLevel);
+      const height = surfaceHeightAt(env, position.x + Math.sin(direction) * distance, position.z - Math.cos(direction) * distance);
       if (side < 0) left = Math.max(left, height);
       else right = Math.max(right, height);
     }
@@ -739,7 +740,7 @@ export function createSimWingsuitModel({ profile, craft, bus, craftState: initia
     const turbulence = env.wind && Number.isFinite(env.wind.turbulence) ? env.wind.turbulence : 0;
     airWorld.copy(state.velocity);
     if (env.wind && env.wind.vel) airWorld.sub(env.wind.vel);
-    const surface = Math.max(env.groundHeight(state.position.x, state.position.z), env.waterLevel);
+    const surface = surfaceHeightAt(env, state.position.x, state.position.z);
     const agl = state.position.y - surface;
     previousQuaternion.copy(state.quaternion);
     forceBody.set(0, 0, 0);
