@@ -25,10 +25,14 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 - Done: `src/core/origin.js` (`createRenderOrigin`, the 4096 m lattice, `onRebase`, `toRender` /
   `toWorld`, the TSL helpers `worldPositionNode` / `worldCameraPositionNode`), the `originRebased`
-  typed event, `uniforms.renderOrigin`, the origin in `ctx` and the loop's first-in-frame update.
-- Next: the node lab, the shader lines (a.5), the CPU render-frame readers (a.6), the float32 buffers
-  (a.7), audio in the render frame, the rebase step file and the verification runs.
-- Open issues: none yet.
+  typed event, `uniforms.renderOrigin`, the origin in `ctx` and the loop's first-in-frame update;
+  `tools/lab/origin.mjs` (32/32). Shader lines of a.5: terrain (cloud UV, water level x3, vegetation
+  focus), cloudShading (height fraction, centre), vortex (fragment height, radial, haze kit), weather
+  volume rain shafts (streak noise), celestial rainbow centre, sky fog layer (camera height).
+- Next: the CPU render-frame readers (a.6), the float32 buffers (a.7), audio in the render frame,
+  the rebase step file and the verification runs.
+- Open issues: `src/render/water.js` (`surfaceNoise`, `shadowUV`) is the water engineer's (contract
+  0.1); they apply `worldPositionNode` there in the integration pass.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 

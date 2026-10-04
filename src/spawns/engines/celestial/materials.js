@@ -180,7 +180,9 @@ export function createRainbowMesh(THREE, TSL, { uniforms, capacity }) {
   const anchor = uniform(new THREE.Vector3());
   const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, side: THREE.BackSide });
   const direction = normalize(positionWorld.sub(cameraPosition));
-  const centre = volumeData.xyz.add(anchor);
+  // The anchor is world and cameraPosition render frame (src/core/origin.js): the centre moves into
+  // the render frame (anchor - renderOrigin, a small value) before the ray test.
+  const centre = volumeData.xyz.add(anchor.sub(uniforms.renderOrigin));
   const radius = volumeData.w;
   const offset = cameraPosition.sub(centre);
   const b = dot(offset, direction);

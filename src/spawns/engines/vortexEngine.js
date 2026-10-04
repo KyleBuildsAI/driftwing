@@ -297,21 +297,24 @@ export function createVortexEngine() {
       for (let offset = 0; offset < SLOT_VECTORS; offset++) block[`d${offset}`] = element(base, offset);
       return block;
     };
+    // The slot data holds WORLD positions; cameraPosition is render frame (src/core/origin.js), so the
+    // kit compares world positions with the camera's world position.
+    const worldCamera = cameraPosition.add(ctx.uniforms.renderOrigin);
     /** The haze share at a world position (heightShare: its height over the cloud base). */
     const hazeAt = (worldPosition, heightShare) => {
       const globals = data.element(0);
-      const distance = length(worldPosition.sub(cameraPosition));
+      const distance = length(worldPosition.sub(worldCamera));
       const air = smoothstep(globals.y, globals.z, distance).mul(HAZE_MAX);
       const ground = smoothstep(globals.y, globals.w, distance).mul(float(1).sub(smoothstep(0.05, 0.3, heightShare)));
       return air.max(ground);
     };
     /** The sky colour behind a world position (the sky's own function, as the fog and clouds use). */
     const skyBehind = (worldPosition) => {
-      const ray = normalize(worldPosition.sub(cameraPosition));
+      const ray = normalize(worldPosition.sub(worldCamera));
       const skyColorNode = ctx.sky && typeof ctx.sky.skyColorNode === 'function' ? ctx.sky.skyColorNode : null;
       return skyColorNode ? skyColorNode(ray) : mix(ctx.uniforms.fogColor, ctx.uniforms.skyZenithColor, smoothstep(0.03, 0.6, saturate(ray.y)));
     };
-    return { readBlock, axisOffset, funnelRadius, hazeAt, skyBehind };
+    return { readBlock, axisOffset, funnelRadius, hazeAt, skyBehind, worldCamera };
   }
 
   function buildShellMaterial(THREE, TSL, uniforms) {
@@ -353,10 +356,12 @@ export function createVortexEngine() {
     // and a silver rim against the sun, a dusty foot over land, denser at the silhouette.
     const fragmentBlock = kit.readBlock(slot);
     const fragmentBase = max(fragmentBlock.d1.z, 1);
-    const fragmentHeight = positionWorld.y.sub(fragmentBlock.d0.y);
+    // The fragment's WORLD position (positionWorld is render frame), compared with the world slot data.
+    const fragmentWorld = positionWorld.add(uniforms.renderOrigin);
+    const fragmentHeight = fragmentWorld.y.sub(fragmentBlock.d0.y);
     const fragmentShare = clamp(fragmentHeight.div(fragmentBase), 0, 1.2);
     const fragmentAxis = kit.axisOffset(fragmentBlock, fragmentShare);
-    const radial = normalize(vec3(positionWorld.x.sub(fragmentBlock.d0.x.add(fragmentAxis.x)), 0.0001, positionWorld.z.sub(fragmentBlock.d0.z.add(fragmentAxis.y))));
+    const radial = normalize(vec3(fragmentWorld.x.sub(fragmentBlock.d0.x.add(fragmentAxis.x)), 0.0001, fragmentWorld.z.sub(fragmentBlock.d0.z.add(fragmentAxis.y))));
     const viewDirection = normalize(cameraPosition.sub(positionWorld));
     // The surface normal of the tapering tube: the radial direction tipped down by the radius slope.
     const taper = fragmentBlock.d2.x;
@@ -382,7 +387,7 @@ export function createVortexEngine() {
     const dust = pow(float(1).sub(clamp(fragmentShare, 0, 1)), 3).mul(float(1).sub(fragmentBlock.d4.w)).mul(0.6);
     const dusty = fragmentBlock.d8.xyz.mul(uniforms.sunColor.mul(wrap.mul(sunUp).mul(0.7).add(0.3)));
     const shaded = mix(body.add(ambient), dusty.add(ambient.mul(0.5)), dust).add(silver).mul(night).mul(bands);
-    material.colorNode = vec4(mix(shaded, kit.skyBehind(positionWorld), kit.hazeAt(positionWorld, fragmentShare)), 1);
+    material.colorNode = vec4(mix(shaded, kit.skyBehind(fragmentWorld), kit.hazeAt(fragmentWorld, fragmentShare)), 1);
     const footFade = smoothstep(0, 0.06, row);
     const collarFade = float(1).sub(smoothstep(0, 0.8, collarShare.add(streaks.mul(0.1))));
     // Thinner near the ground (condensation thins where the air warms), opaque aloft.
@@ -397,7 +402,7 @@ export function createVortexEngine() {
   function buildParticles(THREE, TSL, uniforms, rng) {
     const {
       float, vec2, vec3, vec4, sin, cos, pow, mix, smoothstep, saturate, fract, max, min, step, dot, clamp, normalize,
-      uv, instancedBufferAttribute, varying, cameraPosition, PI,
+      uv, instancedBufferAttribute, varying, PI,
     } = TSL;
     const count = MAX_VORTICES * BLOCK;
     const seeds = new Float32Array(count * 4);
@@ -491,8 +496,9 @@ export function createVortexEngine() {
     const puffColor = mix(block.d6.xyz, block.d7.xyz, inCollar.mul(0.55));
     const albedo = mix(mix(debrisColor, sprayColor, spray), puffColor, isPuff);
     // Against the sun the ring and the puffs darken like the shell (the lit side faces away).
+    // The sprite sits at the world origin, so its positionNode is the particle's WORLD position.
     const worldPosition = material.positionNode;
-    const backlit = saturate(dot(normalize(worldPosition.sub(cameraPosition)), sunDirection)).mul(sunUp);
+    const backlit = saturate(dot(normalize(worldPosition.sub(kit.worldCamera)), sunDirection)).mul(sunUp);
     const shade = mix(block.d7.xyz.mul(0.8), albedo.mul(uniforms.sunColor).mul(1.3), wrap.mul(sunUp).mul(0.8).add(0.2).mul(float(1).sub(backlit.mul(0.6))));
     const night = mix(float(1), float(0.3), uniforms.nightFactor);
     const lit = shade.add(ambient.mul(albedo.add(0.3))).mul(night);

@@ -241,7 +241,7 @@ function createCloudOptics(TSL, { viewRay, sunDirection, glory, bow, lit, sunKey
 
 /**
  * The light response of a cloud puff (TSL). inputs: look (createCloudLook), uniforms (the shared ones:
- * sunDirection, moonDirection, cloudGlory, cloudBow), shape and centre (instanced nodes, see the
+ * sunDirection, moonDirection, cloudGlory, cloudBow, renderOrigin), shape and centre (instanced nodes, see the
  * header), anchor (uniform Vector3: the mesh anchor), and for weather volumes optional storm (0..1),
  * tint (albedo multiplier, vec3) and glow (added light, vec3) nodes. Returns { radiance, viewRay,
  * cameraDistance }.
@@ -257,8 +257,10 @@ export function createCloudRadiance(TSL, { look, uniforms, shape, centre, anchor
   const rimColor = storm ? look.rimColor.mul(oneMinus(storm.mul(0.7))) : look.rimColor;
   const { moonColor, silverStrength } = look;
 
-  const heightFraction = saturate(positionWorld.y.sub(shape.y).div(max(shape.z.sub(shape.y), 1)));
-  const fromCentre = positionWorld.sub(anchor).sub(centre.xyz);
+  // positionWorld is render frame (src/core/origin.js); shape heights and the anchor are world, so
+  // they move into the render frame (world - renderOrigin) before the comparison.
+  const heightFraction = saturate(positionWorld.y.sub(shape.y.sub(uniforms.renderOrigin.y)).div(max(shape.z.sub(shape.y), 1)));
+  const fromCentre = positionWorld.sub(anchor.sub(uniforms.renderOrigin)).sub(centre.xyz);
   const clusterNormal = normalize(fromCentre.mul(vec3(1, CLUSTER_NORMAL_LIFT, 1)));
   const shadingNormal = normalize(mix(normalWorld, clusterNormal, SOFT_NORMAL_WEIGHT));
   const viewRay = positionView.transformDirection(cameraViewMatrix);

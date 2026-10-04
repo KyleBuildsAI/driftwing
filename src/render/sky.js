@@ -484,8 +484,10 @@ export function createSkySystem(ctx) {
     // Low haze is densest near the ground under the glider: attenuate it by the view ray's mid height
     // so looking down from altitude stays clear. The edge term ignores height, so the world edge always
     // melts into the sky.
-    const fragmentHeight = cameraPosition.y.add(offset.y);
-    const rayMidHeight = cameraPosition.y.add(fragmentHeight).mul(0.5).sub(sky.fogLayerBase);
+    // cameraPosition is render frame (src/core/origin.js); the layer base is a world height.
+    const cameraHeight = cameraPosition.y.add(uniforms.renderOrigin.y);
+    const fragmentHeight = cameraHeight.add(offset.y);
+    const rayMidHeight = cameraHeight.add(fragmentHeight).mul(0.5).sub(sky.fogLayerBase);
     const layerDensity = mix(float(FOG_HIGH_DENSITY), float(1), exp(max(rayMidHeight, 0.0).div(FOG_SCALE_HEIGHT).negate()));
     const layerHaze = smoothstep(sky.fogNear, sky.fogFar, hazeDistance);
     const edgeHaze = smoothstep(sky.fogFar.mul(FOG_EDGE_START), sky.fogFar, hazeDistance);
