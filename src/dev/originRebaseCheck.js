@@ -124,11 +124,18 @@ export function installOriginRebaseCheck(dw) {
     add('water', nearestNamed((name) => name === 'water'));
     add('contrail', nearestNamed((name) => name === 'contrail'));
     if (spawnId !== null) {
-      const anchor = ctx.systems.spawns.getInstance(spawnId)?.anchor ?? null;
+      const anchor = ctx.systems.spawns.getInstance(spawnId)?.position ?? null;
       if (anchor) {
+        // The spawn's mesh nearest its anchor (within 60 m: a part may stand off it).
         let spawnMesh = null;
+        let nearest = 60;
         scene.traverse((node) => {
-          if (!spawnMesh && node.isMesh && node.visible && worldOf(node, scratch.d).distanceTo(anchor) < 1) spawnMesh = node;
+          if (!node.isMesh || !node.visible) return;
+          const distance = worldOf(node, scratch.d).distanceTo(anchor);
+          if (distance < nearest) {
+            nearest = distance;
+            spawnMesh = node;
+          }
         });
         add('spawn', spawnMesh);
       }
@@ -266,14 +273,20 @@ export function installOriginRebaseCheck(dw) {
      * frame indices at which the dev hook forces a rebase one lattice step east (the next update moves
      * it back when the craft is out of range).
      */
-    async beginLeg(id, pose, { forceAt = [] } = {}) {
+    async beginLeg(id, pose, { forceAt = [], spawn = null } = {}) {
       placeCraft(pose);
       const settled = await settleTerrain(8000);
+      if (spawn) {
+        if (spawnId !== null) ctx.systems.spawns.deactivate(spawnId, 'debug');
+        spawnId = ctx.systems.spawns.forceSpawn(spawn, { distance: 2500, force: true });
+        await stepRenderedFrames(3);
+      }
       leg = {
         id,
         frame: 0,
         forced: new Set(forceAt),
         forcedCount: forceAt.length,
+        wantSpawn: spawn !== null,
         startVersion: origin.version,
         startX: state.player.position.x,
         startZ: state.player.position.z,
@@ -341,7 +354,7 @@ export function installOriginRebaseCheck(dw) {
       const distanceKm = Math.hypot(state.player.position.x - leg.startX, state.player.position.z - leg.startZ) / 1000;
       const rebases = origin.version - leg.startVersion;
       const passed = worst.relative <= RELATIVE_TOLERANCE && worst.screen <= SCREEN_TOLERANCE && worst.nonFinite === 0 && worst.sceneMismatch === 0
-        && rebases >= 2 && leg.checkedAtRebase > 0 && leg.names.has('craft') && leg.names.has('terrain') && leg.maxRenderDistance < ORIGIN_REBASE_DISTANCE + 2000;
+        && rebases >= 2 && leg.checkedAtRebase > 0 && leg.names.has('craft') && leg.names.has('terrain') && (!leg.wantSpawn || leg.names.has('spawn')) && leg.maxRenderDistance < ORIGIN_REBASE_DISTANCE + 2000;
       const line = `${leg.frame} frames, ${distanceKm.toFixed(1)} km flown, up to ${Math.round(leg.maxAltitude)} m; ${rebases} rebases (${leg.rebaseFrames} rebase frames, ${leg.forcedCount} forced); `
         + `camera-relative render vs world: worst ${(worst.relative * 1000).toFixed(4)} mm (${worst.relativeName || 'none'}), at rebase frames ${(worst.relativeAtRebase * 1000).toFixed(4)} mm over ${leg.checkedAtRebase} object checks, tolerance 1 mm; `
         + `far point on screen: worst ${worst.screen.toExponential(2)} px, at rebase frames ${worst.screenAtRebase.toExponential(2)} px, tolerance 0.5 px; `
