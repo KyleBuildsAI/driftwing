@@ -18,8 +18,19 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | not started |
 | 3 | Local water bodies (basin, crater, terraces stamps; lake and ice material), the shared water-height query and the caller migration; region overlays; vegetation species 6-12 with WindField sway and trunk colliders | `p3/water-regions` | c, d | not started |
 | 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | not started |
-| 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | not started |
+| 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | in progress |
 | I1 | Integration pass: merge in the order origin, high altitude, water/regions, colliders, fauna/challenges; the follow-ups of contract appendix A; every lab and step file once on both backends | `v2-phase3` | appendix A | not started |
+
+### Wave 1 - p3/high-altitude
+
+- **Done:** `src/env/atmosphere.js` (the one density model re-exported from telemetry; `skyState()`
+  writes every render input from the camera altitude, exactly neutral below 3 km),
+  `src/render/curvature.js` (CPU drop, rigid drop, the TSL curvature nodes, the planet radius
+  setting's clamp), `tools/lab/atmosphere.mjs` 28/28.
+- **Next:** the sky (state.atmosphere, darkening, daylight stars, limb, sun, column haze, far plane),
+  the per-craft ceiling, terrain curvature and the handoff API, the far field, clouds / lures /
+  rigid drops, the near plane, the planet radius setting, `tools/steps/high-altitude.json`.
+- **Open issues:** none yet.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
