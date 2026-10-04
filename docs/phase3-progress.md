@@ -40,7 +40,10 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   glowPoints.js (camera to the metre), ribbons.js (slot mesh at the strike), the structure engine's
   pooled meshes (at the anchor), weather volume puffs and shafts (2048 m grid), celestial (camera or
   2048 m grid), fauna (floating anchor). Reported, not edited: clouds.js (anchored by the field).
-- Next: audio in the render frame, the rebase step file and the verification runs.
+- Audio in the render frame: the spatializer and the spawn voices keep world positions (doppler,
+  distances, camera velocity) and feed the Web Audio graph `world - offset`; after a rebase the
+  listener and every panner are snapped (`snapParameter`), never glided.
+- Next: the rebase step file with the dev hook, and the verification runs.
 - Open issues: `src/render/water.js` (`surfaceNoise`, `shadowUV`) is the water engineer's (contract
   0.1); they apply `worldPositionNode` there in the integration pass.
 

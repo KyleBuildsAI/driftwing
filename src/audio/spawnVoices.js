@@ -35,6 +35,10 @@
 // scheduled at the exact moment, solving for the listener's radial speed. A listener flying toward
 // or away from the storm during the delay hears it when the front really reaches them.
 //
+// Frames (Phase 3 floating origin, src/core/origin.js): voice positions, distances and the doppler are
+// WORLD; only the panners in the graph get render-frame positions (world - the spatializer's
+// renderOffset), snapped rather than glided in the update after a rebase, so the pan never sweeps.
+//
 // Nothing here allocates in the per-update path: vectors are reused, voices are ranked by an
 // insertion sort in a reused array, the thunder queue is a fixed pool. Nodes are created only when
 // a voice is realized, a trigger fires a one-shot, or a strike arrives.
@@ -42,7 +46,7 @@ import { clamp } from '../core/util.js';
 import { playDiscoveryChime } from './recipes/discovery.js';
 import { RECIPES, RECIPE_NAMES } from './recipes/index.js';
 import { THUNDER_SPATIAL, playThunderStrike } from './recipes/thunder.js';
-import { SPEED_OF_SOUND, dopplerFactor } from './spatial.js';
+import { SPEED_OF_SOUND, dopplerFactor, snapParameter } from './spatial.js';
 import { createScaffold, glide, holdAt, smoothstep } from './synthKit.js';
 
 export const DEFAULT_VOICE_BUDGET = 10;
@@ -116,11 +120,13 @@ export function resolveSpatial(base, params) {
 
 /**
  * Builds a voice's node graph in any BaseAudioContext (the live one, or an OfflineAudioContext for
- * the auditions). env: { context, noise, destination, send (or null), nyquist, trackOneShot };
- * voice: { recipe, params, spatial, position, intensity }. Returns the realized voice.
+ * the auditions). env: { context, noise, destination, send (or null), nyquist, trackOneShot,
+ * renderOffset? (the render origin's offset; the panner gets world - renderOffset) };
+ * voice: { recipe, params, spatial, position (world), intensity }. Returns the realized voice.
  */
 export function buildVoiceGraph(env, voice, time) {
   const { context } = env;
+  const offset = env.renderOffset || null;
   const spatial = voice.spatial;
   const absorption = new BiquadFilterNode(context, { type: 'lowpass', frequency: env.nyquist, Q: 0.5 });
   const scaffold = createScaffold(context, absorption);
@@ -132,9 +138,9 @@ export function buildVoiceGraph(env, voice, time) {
     refDistance: spatial.refDistance,
     rolloffFactor: spatial.distanceModel === 'linear' ? Math.min(spatial.rolloffFactor, 1) : spatial.rolloffFactor,
     maxDistance: spatial.maxDistance,
-    positionX: voice.position.x,
-    positionY: voice.position.y,
-    positionZ: voice.position.z,
+    positionX: voice.position.x - (offset ? offset.x : 0),
+    positionY: voice.position.y - (offset ? offset.y : 0),
+    positionZ: voice.position.z - (offset ? offset.z : 0),
   }));
   absorption.connect(panGain);
   panGain.connect(panner);
@@ -188,13 +194,24 @@ export function buildVoiceGraph(env, voice, time) {
 
 /**
  * Applies a voice's placement to its realized graph: panner position, air absorption, spread,
- * reverb send and doppler (cents).
+ * reverb send and doppler (cents). placement.position is world; renderOffset (optional, the render
+ * origin's offset) moves it into the graph's render frame, and snap (after a rebase) sets the panner
+ * at once instead of gliding it.
  */
-export function applyPlacement(realized, placement, time, timeConstant) {
+export function applyPlacement(realized, placement, time, timeConstant, renderOffset = null, snap = false) {
   const { position } = placement;
-  glide(realized.panner.positionX, position.x, time, timeConstant);
-  glide(realized.panner.positionY, position.y, time, timeConstant);
-  glide(realized.panner.positionZ, position.z, time, timeConstant);
+  const x = position.x - (renderOffset ? renderOffset.x : 0);
+  const y = position.y - (renderOffset ? renderOffset.y : 0);
+  const z = position.z - (renderOffset ? renderOffset.z : 0);
+  if (snap) {
+    snapParameter(realized.panner.positionX, x, time);
+    snapParameter(realized.panner.positionY, y, time);
+    snapParameter(realized.panner.positionZ, z, time);
+  } else {
+    glide(realized.panner.positionX, x, time, timeConstant);
+    glide(realized.panner.positionY, y, time, timeConstant);
+    glide(realized.panner.positionZ, z, time, timeConstant);
+  }
   glide(realized.absorption.frequency, placement.cutoff, time, 0.15);
   glide(realized.panGain.gain, 1 - 0.6 * placement.spread, time, 0.2);
   glide(realized.spreadGain.gain, SPREAD_LEVEL * placement.spread * placement.gain, time, 0.2);
@@ -382,7 +399,7 @@ export function createSpawnVoices({ THREE, onIssue }) {
     }
     counters.nodesLive += voice.realized.nodeCount;
     counters.realizations++;
-    applyPlacement(voice.realized, voice, time, 0.01);
+    applyPlacement(voice.realized, voice, time, 0.01, env.renderOffset, listener.rebased);
   }
 
   function release(voice, time, reason) {
@@ -491,7 +508,7 @@ export function createSpawnVoices({ THREE, onIssue }) {
       const voice = voices[index];
       const realized = voice.realized;
       if (!realized) continue;
-      applyPlacement(realized, voice, time, timeConstant);
+      applyPlacement(realized, voice, time, timeConstant, env.renderOffset, listener.rebased);
       if (realized.appliedIntensity !== voice.intensity) {
         realized.appliedIntensity = voice.intensity;
         realized.synth.setIntensity(voice.intensity, time, false);
@@ -698,7 +715,12 @@ export function createSpawnVoices({ THREE, onIssue }) {
       spread: voice.spread,
       spatial: { ...voice.spatial },
       nodes: realized ? realized.nodeCount : 0,
-      panner: realized ? { x: realized.panner.positionX.value, y: realized.panner.positionY.value, z: realized.panner.positionZ.value } : null,
+      // World frame, like position (the graph holds render-frame values).
+      panner: realized ? {
+        x: realized.panner.positionX.value + (env && env.renderOffset ? env.renderOffset.x : 0),
+        y: realized.panner.positionY.value + (env && env.renderOffset ? env.renderOffset.y : 0),
+        z: realized.panner.positionZ.value + (env && env.renderOffset ? env.renderOffset.z : 0),
+      } : null,
       dopplerCents: realized ? realized.doppler.offset.value : 0,
       synth: realized ? realized.synth.describe() : null,
     };
@@ -765,7 +787,7 @@ export function createSpawnVoices({ THREE, onIssue }) {
       interiorFilter = new BiquadFilterNode(context, { type: 'lowpass', frequency: nyquist, Q: 0.6 });
       submix.connect(interiorFilter);
       interiorFilter.connect(mixer.input('environment'));
-      env = { context, noise, mixer, destination: submix, send: mixer.send('environment'), nyquist, trackOneShot };
+      env = { context, noise, mixer, destination: submix, send: mixer.send('environment'), nyquist, trackOneShot, renderOffset: spatializer.renderOffset ?? null };
       listener = spatializer;
       lastUpdateRealTime = null;
     },

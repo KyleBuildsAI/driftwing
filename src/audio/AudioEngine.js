@@ -124,7 +124,7 @@ export function createAudioSystem(ctx) {
     mixer.initLevels(settings.get('mixer'));
     const kit = { context, noise, mixer };
     const voices = createVoices(kit);
-    const spatializer = createSpatializer({ context, destination: mixer.input('engine'), THREE });
+    const spatializer = createSpatializer({ context, destination: mixer.input('engine'), THREE, origin: ctx.origin ?? null });
     spawnVoices.attach({ context, noise, mixer, spatializer });
     return {
       context,

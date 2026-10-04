@@ -17,6 +17,12 @@
 //
 // The spawn voices (spawnVoices.js) hear the world through the same listener: they read its
 // position, orientation and cut-aware velocity here and use the same dopplerFactor().
+//
+// Frames (Phase 3 floating origin, src/core/origin.js): every position this module keeps and hands
+// out (listenerPosition, the doppler and the camera velocity) is WORLD. Only the Web Audio graph is
+// fed RENDER-frame positions (world - origin.offset), so panning stays precise far from the world
+// origin. When the origin has moved since the last update, the listener and the panners are snapped
+// (scheduled values cancelled, set at once) instead of glided, so a rebase never sweeps the pan.
 import { clamp } from '../core/util.js';
 import { glide } from './synthKit.js';
 
@@ -43,8 +49,21 @@ export function dopplerFactor(listenerPosition, listenerVelocity, sourcePosition
   return clamp((SPEED_OF_SOUND + listenerTowardSource) / denominator, DOPPLER_RANGE[0], DOPPLER_RANGE[1]);
 }
 
-/** deps: { context, destination, THREE }. */
-export function createSpatializer({ context, destination, THREE }) {
+/**
+ * Moves an AudioParam to value at time at once, dropping any glide still scheduled (a render origin
+ * rebase moves every position by thousands of metres in one step).
+ */
+export function snapParameter(parameter, value, time) {
+  if (!Number.isFinite(value)) return;
+  parameter.cancelScheduledValues(time);
+  parameter.setValueAtTime(value, time);
+}
+
+/**
+ * deps: { context, destination, THREE, origin? }. origin: the render origin (src/core/origin.js); without
+ * it the render frame is the world frame.
+ */
+export function createSpatializer({ context, destination, THREE, origin = null }) {
   const input = context.createGain();
   const directGain = context.createGain();
   const externalGain = context.createGain();
@@ -82,6 +101,12 @@ export function createSpatializer({ context, destination, THREE }) {
   const toSource = new THREE.Vector3();
   const scratch = new THREE.Vector3();
   const sourceVelocity = new THREE.Vector3();
+  // Render-frame positions for the audio graph, and the origin's offset (a live reference).
+  const listenerRender = new THREE.Vector3();
+  const sourceRender = new THREE.Vector3();
+  const renderOffset = origin ? origin.offset : new THREE.Vector3();
+  let originVersion = origin ? origin.version : 0;
+  let rebased = false;
   let hasLastListener = false;
   let cutPending = false;
   let lastUpdateTime = 0;
@@ -91,9 +116,15 @@ export function createSpatializer({ context, destination, THREE }) {
 
   function placeListener(time, timeConstant) {
     if (hasListenerParams) {
-      glide(listener.positionX, listenerPosition.x, time, timeConstant);
-      glide(listener.positionY, listenerPosition.y, time, timeConstant);
-      glide(listener.positionZ, listenerPosition.z, time, timeConstant);
+      if (rebased) {
+        snapParameter(listener.positionX, listenerRender.x, time);
+        snapParameter(listener.positionY, listenerRender.y, time);
+        snapParameter(listener.positionZ, listenerRender.z, time);
+      } else {
+        glide(listener.positionX, listenerRender.x, time, timeConstant);
+        glide(listener.positionY, listenerRender.y, time, timeConstant);
+        glide(listener.positionZ, listenerRender.z, time, timeConstant);
+      }
       glide(listener.forwardX, listenerForward.x, time, timeConstant);
       glide(listener.forwardY, listenerForward.y, time, timeConstant);
       glide(listener.forwardZ, listenerForward.z, time, timeConstant);
@@ -101,15 +132,23 @@ export function createSpatializer({ context, destination, THREE }) {
       glide(listener.upY, listenerUp.y, time, timeConstant);
       glide(listener.upZ, listenerUp.z, time, timeConstant);
     } else {
-      listener.setPosition(listenerPosition.x, listenerPosition.y, listenerPosition.z);
+      listener.setPosition(listenerRender.x, listenerRender.y, listenerRender.z);
       listener.setOrientation(listenerForward.x, listenerForward.y, listenerForward.z, listenerUp.x, listenerUp.y, listenerUp.z);
     }
   }
 
+  /** Places the craft's panner at a WORLD position (fed to the graph in the render frame). */
   function placeSource(position, time, timeConstant) {
-    glide(panner.positionX, position.x, time, timeConstant);
-    glide(panner.positionY, position.y, time, timeConstant);
-    glide(panner.positionZ, position.z, time, timeConstant);
+    sourceRender.subVectors(position, renderOffset);
+    if (rebased) {
+      snapParameter(panner.positionX, sourceRender.x, time);
+      snapParameter(panner.positionY, sourceRender.y, time);
+      snapParameter(panner.positionZ, sourceRender.z, time);
+      return;
+    }
+    glide(panner.positionX, sourceRender.x, time, timeConstant);
+    glide(panner.positionY, sourceRender.y, time, timeConstant);
+    glide(panner.positionZ, sourceRender.z, time, timeConstant);
   }
 
   /**
@@ -147,8 +186,14 @@ export function createSpatializer({ context, destination, THREE }) {
   return {
     input,
 
-    /** The listener (camera) as of the last update: read-only, reused vectors. */
+    /** The listener (camera) as of the last update, WORLD frame: read-only, reused vectors. */
     listenerPosition,
+    /** The render origin's offset (live, world m): a graph position is world - renderOffset. */
+    renderOffset,
+    /** True when the render origin moved before this update: the graph positions snap, not glide. */
+    get rebased() {
+      return rebased;
+    },
     listenerForward,
     listenerUp,
     /** The camera's velocity (m/s) with camera cuts handled (see the header). Read-only. */
@@ -173,8 +218,14 @@ export function createSpatializer({ context, destination, THREE }) {
       glide(interiorGain.gain, route === 'interior' ? 1 : 0, time, ROUTE_TIME_CONSTANT);
       if (route === 'interior') glide(interiorFilter.frequency, profile.interiorCutoff, time, ROUTE_TIME_CONSTANT);
 
+      if (origin) {
+        rebased = origin.version !== originVersion;
+        originVersion = origin.version;
+      }
+      // getWorldPosition() is render frame: the listener's world position adds the offset back.
       camera.updateWorldMatrix(true, false);
-      camera.getWorldPosition(listenerPosition);
+      camera.getWorldPosition(listenerRender);
+      listenerPosition.addVectors(listenerRender, renderOffset);
       camera.getWorldQuaternion(listenerQuaternion);
       listenerForward.set(0, 0, -1).applyQuaternion(listenerQuaternion);
       listenerUp.set(0, 1, 0).applyQuaternion(listenerQuaternion);
@@ -202,7 +253,8 @@ export function createSpatializer({ context, destination, THREE }) {
         distance,
         panningModel: panner.panningModel,
         gains: { direct: directGain.gain.value, external: externalGain.gain.value, interior: interiorGain.gain.value },
-        source: { x: panner.positionX.value, y: panner.positionY.value, z: panner.positionZ.value },
+        // World frame, like the listener (the graph holds render-frame values).
+        source: { x: panner.positionX.value + renderOffset.x, y: panner.positionY.value + renderOffset.y, z: panner.positionZ.value + renderOffset.z },
         listener: { x: listenerPosition.x, y: listenerPosition.y, z: listenerPosition.z },
         listenerVelocity: { x: listenerVelocity.x, y: listenerVelocity.y, z: listenerVelocity.z },
       };
