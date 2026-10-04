@@ -238,6 +238,11 @@ export function createSpawnManager(options) {
 
   /** Frame state of the view: the frame count. */
   const view = { frame: 0 };
+  // High altitude (contract g.5): above FAR_LURE_ALTITUDE (down again below FAR_LURE_EXIT) heavy spawns
+  // keep their lures by horizontal distance, at the far tier.
+  const FAR_LURE_ALTITUDE = 12000;
+  const FAR_LURE_EXIT = 11500;
+  let farLureView = false;
 
   /**
    * This frame's camera position and view cone (the frustum's four side planes), every frame the
@@ -934,7 +939,11 @@ export function createSpawnManager(options) {
     const slot = record.slot;
     const distance = Math.sqrt(offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ);
     distances[slot] = distance;
-    const rank = nextTierRank(record, distances, lodScale);
+    // From high altitude (contract g.5) a heavy spawn stays alive while its HORIZONTAL distance is
+    // within lod.far, at the far tier (only its lure draws); discovery and inView keep the 3D distance.
+    const farLure = farLureView && preset.heavy === true;
+    const rangeDistance = farLure ? Math.sqrt(offsetX * offsetX + offsetZ * offsetZ) : distance;
+    const rank = farLure ? 2 : nextTierRank(record, distances, lodScale);
     if (rank !== record.tierRank) {
       record.tierRank = rank;
       counters.tierChanges++;
@@ -971,7 +980,7 @@ export function createSpawnManager(options) {
     outOfView[slot] = record.inView ? 0 : outOfView[slot] + realDt;
     if (record.source === 'site') {
       const hysteresis = preset.lifetime.despawn.hysteresis;
-      if (distance > preset.lod.far + hysteresis) {
+      if (rangeDistance > preset.lod.far + hysteresis) {
         removeRecordAt(index, 'range');
         return false;
       }
@@ -992,11 +1001,11 @@ export function createSpawnManager(options) {
     }
     if (record.source === 'debug') return true;
     const despawn = preset.lifetime.despawn;
-    if (distance > preset.lod.far * (1 + LOD_HYSTERESIS)) {
+    if (rangeDistance > preset.lod.far * (1 + LOD_HYSTERESIS)) {
       removeRecordAt(index, 'range');
       return false;
     }
-    if (distance > despawn.distance + despawn.hysteresis && outOfView[slot] >= despawn.outOfViewSeconds) {
+    if (rangeDistance > despawn.distance + despawn.hysteresis && outOfView[slot] >= despawn.outOfViewSeconds) {
       removeRecordAt(index, 'despawn');
       return false;
     }
@@ -1009,6 +1018,7 @@ export function createSpawnManager(options) {
     scanSites();
     if (records.length > 0) {
       refreshCamera();
+      farLureView = cameraPosition.y > (farLureView ? FAR_LURE_EXIT : FAR_LURE_ALTITUDE);
       // Backwards: a record removed during the pass swaps in one already updated.
       for (let index = records.length - 1; index >= 0; index--) updateRecord(records[index], index, simDt, realDt);
       let checks = 0;

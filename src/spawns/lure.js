@@ -22,6 +22,11 @@
 // Render order 1: after the water (render order -1) and the opaque world, before the near effects
 // (trails, rings, bursts: 3 and up), which must draw over it.
 //
+// Curvature (Phase 3): from high altitude a lure's foot drops with the planet curvature like the
+// ground under it (render/curvature.js: d^2 / 2R times uniforms.curvatureAmount, exactly 0 below
+// 5 km). The drop is applied to the true position on the CPU, before the projection, so the
+// projected quad keeps the exact direction of the curved spot.
+//
 // Zero allocations per frame: slot data lives in typed arrays and the instance matrices and
 // attributes are written in place. Each slot keeps a reference to its spawn's anchor (moved in place
 // by its engine) and fades its own weight, so the per-frame path passes no doubles across calls (V8
@@ -265,8 +270,9 @@ export function createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, vie
   const visible = new Uint8Array(capacity);
   const weight = new Float32Array(capacity);
   const distance = new Float32Array(capacity);
-  // This frame's camera position, projection limit and fog far distance (read by writeSlot).
-  const view = new Float64Array(5);
+  // This frame's camera position, projection limit, fog far distance, curvature blend and planet radius
+  // (read by writeSlot).
+  const view = new Float64Array(7);
   const scratchColor = new THREE.Color();
   const stats = { active: 0, drawn: 0, projected: 0, capacity };
   let highWater = 0;
@@ -294,8 +300,11 @@ export function createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, vie
     const sunDirection = uniforms.sunDirection.value;
     const anchor = anchors[slot];
     const baseX = anchor.x;
-    const baseY = anchor.y + altitude[slot];
     const baseZ = anchor.z;
+    const curvature = view[5];
+    const flatX = baseX - cameraX;
+    const flatZ = baseZ - cameraZ;
+    const baseY = anchor.y + altitude[slot] - (curvature > 0 ? ((flatX * flatX + flatZ * flatZ) / (2 * view[6])) * curvature : 0);
     const deltaX = baseX - cameraX;
     const deltaY = baseY - cameraY;
     const deltaZ = baseZ - cameraZ;
@@ -485,6 +494,8 @@ export function createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, vie
       }
       view[4] = scene.fog ? scene.fog.far : camera.far * 0.5;
       view[3] = view[4] * PROJECT_SHARE;
+      view[5] = uniforms.curvatureAmount ? uniforms.curvatureAmount.value : 0;
+      view[6] = uniforms.planetRadius ? uniforms.planetRadius.value : 1e6;
       const step = realDt / FADE_SECONDS;
       for (let slot = 0; slot < highWater; slot++) {
         if (!active[slot]) continue;

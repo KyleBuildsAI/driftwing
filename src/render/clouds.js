@@ -3,6 +3,7 @@ import * as TSL from 'three/tsl';
 import { CONFIG } from '../core/config.js';
 import { MathUtils, DEG, clamp, damp, isFiniteVector } from '../core/util.js';
 import { NEAR_DISSOLVE_END, NEAR_DISSOLVE_START, buildCloudPuffGeometry, createCloudLook, createCloudRadiance } from './cloudShading.js';
+import { rigidCurvatureDrop } from './curvature.js';
 
 /**
  * CLOUDS: world-anchored low-poly cumulus that drift with the wind.
@@ -44,6 +45,11 @@ import { NEAR_DISSOLVE_END, NEAR_DISSOLVE_START, buildCloudPuffGeometry, createC
  *   small cumulus cap at the top of its leaning column, built from the same puff
  *   template, drawn by the same mesh, shadowed and flown through like the rest.
  *   Its fullness follows the thermal's strength (none at night).
+ * - High altitude (Phase 3): every cluster takes the planet curvature's rigid drop
+ *   (render/curvature.js, exactly 0 below 5 km), the haze range lifts with the camera's
+ *   height above the cloud band so the field stays visible from above, and from 4 km up
+ *   the field's edge fades by shrinking instead of into the sky colour (the far field's
+ *   cloud shell, which reads getCoverageProbability, carries the layer on to the horizon).
  */
 export function createCloudSystem(ctx) {
   const { THREE: T, scene, camera, state, uniforms, textures, world, bus } = ctx;
@@ -84,6 +90,11 @@ export function createCloudSystem(ctx) {
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
   const EVICT_INTERVAL_FRAMES = 30;
   const HAZE_MAX = 0.96;
+  // High altitude: the haze range lifts by the camera's height above this (m), and the edge's sky fade
+  // hands over to shrinking over this camera altitude band (m).
+  const HAZE_LIFT_START = 3000;
+  const EDGE_SHRINK_START = 4000;
+  const EDGE_SHRINK_FULL = 7000;
 
   // ---- Cluster records (pooled) -----------------------------------------------------------
   function createClusterRecord() {
@@ -322,8 +333,10 @@ export function createCloudSystem(ctx) {
     const edgeVisibility = 1 - MathUtils.smoothstep(distance, EDGE_FADE_START, VIEW_RANGE);
     cluster.visibleScale = cluster.growth * edgeVisibility;
     cluster.sizeScale = (0.6 + 0.4 * cluster.growth) * (0.8 + 0.2 * edgeVisibility);
-    cluster.skyFade = Math.max(1 - edgeVisibility, 1 - MathUtils.smoothstep(cluster.growth, 0, 0.25));
+    cluster.skyFade = Math.max((1 - edgeVisibility) * edgeSkyFade, 1 - MathUtils.smoothstep(cluster.growth, 0, 0.25));
   }
+  // 1 near the ground (the edge melts into the sky colour), 0 from high above (it shrinks away instead).
+  let edgeSkyFade = 1;
 
   // ---- Thermal caps --------------------------------------------------------------------------
   // Every thermal the wind field reports (wind.thermalsNear) wears a small cumulus cap at the top of
@@ -550,22 +563,25 @@ export function createCloudSystem(ctx) {
   let cameraCloud = 0;
 
   function writeCluster(cluster, startIndex) {
-    const top = cluster.base + cluster.height * cluster.sizeScale;
+    // The planet curvature lowers the whole cluster rigidly (0 below 5 km camera altitude).
+    const drop = rigidCurvatureDrop(ctx, cluster.worldX, cluster.worldZ);
+    const base = cluster.base - drop;
+    const top = base + cluster.height * cluster.sizeScale;
     const centreX = cluster.worldX - anchorX;
-    const centreY = cluster.base + cluster.height * cluster.sizeScale * 0.3;
+    const centreY = base + cluster.height * cluster.sizeScale * 0.3;
     const centreZ = cluster.worldZ - anchorZ;
     let index = startIndex;
     for (let puff = 0; puff < cluster.puffCount && index < CAPACITY; puff++) {
       if (!resolvePuff(cluster, puff, puffScratch)) continue;
       const offset = puff * PUFF_STRIDE;
-      instancePosition.set(puffScratch.x - anchorX, puffScratch.y, puffScratch.z - anchorZ);
+      instancePosition.set(puffScratch.x - anchorX, puffScratch.y - drop, puffScratch.z - anchorZ);
       instanceQuaternion.set(0, cluster.puffs[offset + 5], 0, cluster.puffs[offset + 6]);
       instanceScale.set(puffScratch.radius, puffScratch.halfHeight, puffScratch.radius);
       instanceMatrix.compose(instancePosition, instanceQuaternion, instanceScale);
       mesh.setMatrixAt(index, instanceMatrix);
       const dataOffset = index * 4;
       shapeArray[dataOffset] = (cluster.base - puffScratch.y) / puffScratch.halfHeight;
-      shapeArray[dataOffset + 1] = cluster.base;
+      shapeArray[dataOffset + 1] = base;
       shapeArray[dataOffset + 2] = top;
       shapeArray[dataOffset + 3] = cluster.puffs[offset + 7];
       centreArray[dataOffset] = centreX;
@@ -772,8 +788,12 @@ export function createCloudSystem(ctx) {
 
   function updateLook(realDt) {
     look.update(state, uniforms, readModifierLevels());
-    hazeNear.value = Math.max(350, scene.fog.near * 0.9);
-    hazeFar.value = VIEW_RANGE * 1.1;
+    // From high above, the field lies a long way down: the haze range lifts with the height (0 below
+    // 3 km, where the field keeps its v1 haze).
+    const lift = Math.max(0, camera.position.y - HAZE_LIFT_START);
+    hazeNear.value = Math.max(350, scene.fog.near * 0.9) + lift;
+    hazeFar.value = Math.max(VIEW_RANGE * 1.1 + lift, hazeNear.value + 500);
+    edgeSkyFade = 1 - MathUtils.smoothstep(camera.position.y, EDGE_SHRINK_START, EDGE_SHRINK_FULL);
 
     const target = insideMeasure(camera.position.x, camera.position.y, camera.position.z);
     cameraCloud = damp(cameraCloud, target, target > cameraCloud ? 5 : 2.5, realDt);
@@ -884,6 +904,14 @@ export function createCloudSystem(ctx) {
     },
     getCoverageAt(x, z) {
       return coverageAt(x, z);
+    },
+    /**
+     * The field's deterministic coverage probability (0..1) at world (x, z) now: the weather field the
+     * clusters grow from, without the cache (the far field's cloud shell samples it out to the
+     * horizon). Allocation-free.
+     */
+    getCoverageProbability(x, z) {
+      return coverageProbability(x - drift.x, z - drift.z, state.time.elapsed);
     },
     /** The thermal caps around the camera: where they stand, their base and how full they are. */
     getCaps() {
