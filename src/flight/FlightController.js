@@ -40,6 +40,7 @@ import { countTriangles } from '../craft/kit.js';
  * previous value back, then emits craftChanged.
  */
 
+/** The default altitude ceiling (m): a craft's limits.ceiling overrides it (the spaceplane's 150 km). */
 export const FLIGHT_CEILING = 15000;
 /** A reset outside the craft's safe speed range eases into it over this time (s). */
 const BLEND_SECONDS = 0.5;
@@ -1162,10 +1163,17 @@ export function createFlightController(ctx) {
     return false;
   }
 
+  /** The active craft's altitude ceiling (m): its limits.ceiling, else FLIGHT_CEILING. */
+  function activeCeiling() {
+    const ceiling = craft && craft.limits ? craft.limits.ceiling : undefined;
+    return Number.isFinite(ceiling) && ceiling > 0 ? ceiling : FLIGHT_CEILING;
+  }
+
   function enforceSimCeiling() {
     const modelState = sim.state;
-    if (modelState.position.y <= FLIGHT_CEILING) return;
-    modelState.position.y = FLIGHT_CEILING;
+    const ceiling = activeCeiling();
+    if (modelState.position.y <= ceiling) return;
+    modelState.position.y = ceiling;
     if (modelState.velocity.y > 0) modelState.velocity.y = 0;
   }
 
@@ -1500,8 +1508,9 @@ export function createFlightController(ctx) {
     getModel() {
       return sim;
     },
+    /** The active craft's altitude ceiling (m): limits.ceiling, else FLIGHT_CEILING (contract g.6). */
     getCeiling() {
-      return FLIGHT_CEILING;
+      return activeCeiling();
     },
     isTowing() {
       return tow !== null;

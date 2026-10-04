@@ -114,6 +114,7 @@ export function createSettingsPanel({ panel, ctx, toast, seedLinks }) {
     if (kind === 'degrees') return `${Math.round(Number(value))}°`;
     if (kind === 'rate') return `${Math.round(Number(value))}°/s`;
     if (kind === 'decimal') return Number(value).toFixed(2);
+    if (kind === 'kilometres') return `${Math.round(Number(value))} km`;
     return String(value);
   }
 

@@ -26,7 +26,7 @@
 import { airDensity, SEA_LEVEL_DENSITY, DENSITY_SCALE_HEIGHT, speedOfSound } from '../flight/telemetry.js';
 import { DEFAULT_PLANET_RADIUS } from '../render/curvature.js';
 
-export { airDensity, SEA_LEVEL_DENSITY, speedOfSound };
+export { airDensity, SEA_LEVEL_DENSITY, DENSITY_SCALE_HEIGHT, speedOfSound };
 
 /** The far plane and the far field never reach beyond this (m): the WebGL2 depth range (contract g.2). */
 export const MAX_VIEW_DISTANCE = 600000;

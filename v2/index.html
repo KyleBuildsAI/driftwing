@@ -405,6 +405,11 @@
           <div class="dw-row"><span>Dynamic resolution</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="Dynamic resolution" data-setting="dynamicResolution"><span></span></button></div>
           <p class="dw-note dw-live-note" id="dw-scale-note">Rendering at full resolution.</p>
           <div class="dw-row"><span>Show FPS and stats</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Show FPS and stats" data-setting="showFps"><span></span></button></div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-planet-radius">Planet radius</label><span class="dw-row-value" data-value-for="planetRadiusKm">1000 km</span></div>
+            <input class="dw-range" id="dw-set-planet-radius" type="range" min="200" max="6371" step="1" data-setting="planetRadiusKm" data-kind="kilometres">
+          </div>
+          <p class="dw-note">How round the world looks from high altitude: smaller planets curve away sooner.</p>
         </div>
         <div class="dw-group">
           <h3 class="dw-micro">Field of view</h3>

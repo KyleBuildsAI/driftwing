@@ -163,6 +163,18 @@ async function boot() {
     // around the antisolar point on every cloud puff (src/render/cloudShading.js).
     cloudGlory: uniform(0),
     cloudBow: uniform(0),
+    // High altitude (contract g.1), written by the sky every frame from state.atmosphere: air density
+    // at the camera, the sky's darkening, daylight stars, limb and sun sharpness (0..1), the curvature
+    // blend (0..1), the planet radius (m), the horizon dip (rad) and the camera altitude (m MSL).
+    atmosphereDensity: uniform(1.225),
+    skyDarkness: uniform(0),
+    starVisibility: uniform(0),
+    limbStrength: uniform(0),
+    sunSharpness: uniform(0),
+    curvatureAmount: uniform(0),
+    planetRadius: uniform(1000000),
+    horizonDip: uniform(0),
+    atmosphereAltitude: uniform(0),
   };
 
   // ---- World + spawn ------------------------------------------------------------------

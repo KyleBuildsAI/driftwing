@@ -21,7 +21,8 @@ const FADE_CAP_MS = 8000;
 /**
  * Safety net: NaN attitude, terrain, altitude ceiling. The flight model has real ground contact, so
  * here it only keeps the last-resort guard: sinking more than 1 m into the shared height function is
- * a soft crash. The ceiling comes from the flight controller (15000 m). Returns enforce().
+ * a soft crash. The ceiling comes from the flight controller (the active craft's limits.ceiling,
+ * 15000 m by default). Returns enforce().
  */
 function createSafetyNet(ctx, spawnHeading) {
   const { state, world, CONFIG } = ctx;
