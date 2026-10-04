@@ -32,8 +32,15 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 - CPU render-frame readers (a.6): the spawn manager's matrix camera path, the director's isInView, the
   lure fallback, the glass HUD and ui.js projections, the spawn test kit; the game ctx in the engine
   ctx (0.4); the node labs' fake uniforms gain renderOrigin.
-- Next: the float32 buffers (a.7), audio in the render frame,
-  the rebase step file and the verification runs.
+- float32 buffers (a.7): the lure mesh now stands at the camera with instance offsets relative to
+  it; the weather volume's local rain stands at the render origin with the drift folded into its
+  offset uniform (world-fixed across a rebase). Anchored already, unchanged: fx.js (contrails, wind
+  streaks, bursts: mesh at the camera), trails.js, waterEffects.js (grid anchor, droplets and pools
+  on a 64 m grid, trailOrigin wrapped), waypoints.js (Object3D positions), particleSystem.js and
+  glowPoints.js (camera to the metre), ribbons.js (slot mesh at the strike), the structure engine's
+  pooled meshes (at the anchor), weather volume puffs and shafts (2048 m grid), celestial (camera or
+  2048 m grid), fauna (floating anchor). Reported, not edited: clouds.js (anchored by the field).
+- Next: audio in the render frame, the rebase step file and the verification runs.
 - Open issues: `src/render/water.js` (`surfaceNoise`, `shadowUV`) is the water engineer's (contract
   0.1); they apply `worldPositionNode` there in the integration pass.
 

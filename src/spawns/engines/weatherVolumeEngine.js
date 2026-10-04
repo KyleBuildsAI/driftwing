@@ -118,6 +118,9 @@ export function createWeatherVolumeEngine() {
   const modifierValues = { weight: 0, fogDensity: 1, fogColor: null, fogColorAmount: 0, darkness: 0, sunIntensity: 1, ambient: 1 };
   const canopyFlow = { x: 0, y: 1 };
   const scratchColor = { value: null };
+  // The streak field's drift (m, world, wrapped to the box), kept in float64: the shader's offset is
+  // this minus the render origin, wrapped (createLocalRain places the streaks in the render frame).
+  const rainDrift = new Float64Array(3);
 
   // ---- Frame bookkeeping ------------------------------------------------------------------------
   function isFirstPerson() {
@@ -206,10 +209,24 @@ export function createWeatherVolumeEngine() {
     uniforms.kind.value = kind;
     const wind = ctx.uniforms.windDirection.value;
     const drift = kind === 2 ? 9 : 2.5;
+    rainDrift[0] = (rainDrift[0] + wind.x * drift * dt) % LOCAL_RAIN_BOX[0];
+    rainDrift[1] = (rainDrift[1] - shown.rainFall * dt) % LOCAL_RAIN_BOX[1];
+    rainDrift[2] = (rainDrift[2] + wind.y * drift * dt) % LOCAL_RAIN_BOX[2];
+    // The field's vertices come out in the render frame (cameraPosition is render frame), so the mesh
+    // stands at the render origin (its world matrix is then the identity) and the drift is taken
+    // relative to that origin, which keeps the streaks world-fixed across a rebase (src/core/origin.js).
+    const renderOrigin = ctx.game && ctx.game.origin ? ctx.game.origin.offset : null;
     const offset = uniforms.offset.value;
-    offset.x = (offset.x + wind.x * drift * dt) % LOCAL_RAIN_BOX[0];
-    offset.y = (offset.y - shown.rainFall * dt) % LOCAL_RAIN_BOX[1];
-    offset.z = (offset.z + wind.y * drift * dt) % LOCAL_RAIN_BOX[2];
+    if (renderOrigin) {
+      localRain.mesh.position.copy(renderOrigin);
+      offset.x = (rainDrift[0] - renderOrigin.x) % LOCAL_RAIN_BOX[0];
+      offset.y = (rainDrift[1] - renderOrigin.y) % LOCAL_RAIN_BOX[1];
+      offset.z = (rainDrift[2] - renderOrigin.z) % LOCAL_RAIN_BOX[2];
+    } else {
+      offset.x = rainDrift[0];
+      offset.y = rainDrift[1];
+      offset.z = rainDrift[2];
+    }
     const velocity = ctx.state.player.velocity;
     uniforms.relative.value.set(wind.x * drift - velocity.x, -shown.rainFall - velocity.y, wind.y * drift - velocity.z);
     // Lit like the rain curtains: the shadow palette plus a little sun.

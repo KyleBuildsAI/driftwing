@@ -107,6 +107,7 @@ function createLab() {
     nightFactor: uniform(0),
     windDirection: uniform(new THREE.Vector2(0.8, 0.6).normalize()),
     windStrength: uniform(1),
+    renderOrigin: uniform(new THREE.Vector3()),
   };
   const state = {
     seed: 'LAB',
@@ -333,7 +334,8 @@ function testLure() {
   const lureStats = lab.manager.lures.getStats();
   check('lure', 'the lure is drawn and projected', lureStats.drawn === 1 && lureStats.projected === 1, JSON.stringify(lureStats));
   const matrix = new THREE.Matrix4().fromArray(lab.manager.lures.mesh.instanceMatrix.array, 0);
-  const position = new THREE.Vector3().setFromMatrixPosition(matrix);
+  // The lure mesh stands at the camera and each instance holds its offset from it (float32-safe).
+  const position = new THREE.Vector3().setFromMatrixPosition(matrix).add(lab.manager.lures.mesh.position);
   const limit = lab.scene.fog.far * 0.92;
   const drawnDistance = position.distanceTo(lab.camera.position);
   check('lure', 'drawn at the projection limit (inside the fog far and camera far)', Math.abs(drawnDistance - limit) < 1 && drawnDistance < lab.camera.far, `${drawnDistance.toFixed(1)} m, limit ${limit.toFixed(1)} m`);
@@ -578,6 +580,7 @@ function createCouplingLab(audio) {
     nightFactor: uniform(0),
     windDirection: uniform(new THREE.Vector2(0.8, 0.6).normalize()),
     windStrength: uniform(1),
+    renderOrigin: uniform(new THREE.Vector3()),
     cloudGlory: uniform(0),
     cloudBow: uniform(0),
   };

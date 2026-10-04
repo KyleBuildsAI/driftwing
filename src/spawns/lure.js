@@ -22,6 +22,10 @@
 // Render order 1: after the water (render order -1) and the opaque world, before the near effects
 // (trails, rings, bursts: 3 and up), which must draw over it.
 //
+// Precision (Phase 3 floating origin, src/core/origin.js): the mesh sits at this frame's camera
+// position (world, float64) and each instance matrix holds its quad's offset from it, so the float32
+// instance data stays small at any distance from the world origin.
+//
 // Zero allocations per frame: slot data lives in typed arrays and the instance matrices and
 // attributes are written in place. Each slot keeps a reference to its spawn's anchor (moved in place
 // by its engine) and fades its own weight, so the per-frame path passes no doubles across calls (V8
@@ -225,11 +229,12 @@ function createLureMaterial({ THREE, TSL, uniforms, skyColorNode, shapeAttribute
 
 /**
  * Creates the lure system. sky: the sky system (its skyColorNode tints the lures; without it the fog
- * colour stands in). viewPosition (optional): a Vector3 kept at this frame's camera position by the
- * caller; without it the camera's world matrix is read. Returns { mesh, acquire, setVisible, setHeading, weightOf, release, update,
+ * colour stands in). viewPosition (optional): a Vector3 kept at this frame's WORLD camera position by
+ * the caller; without it the camera's world matrix is read (render frame) and moved back to world by
+ * origin (optional: the render origin, src/core/origin.js). Returns { mesh, acquire, setVisible, setHeading, weightOf, release, update,
  * getStats, dispose }.
  */
-export function createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, viewPosition = null, capacity = DEFAULT_CAPACITY }) {
+export function createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, viewPosition = null, origin = null, capacity = DEFAULT_CAPACITY }) {
   const shapeData = new Float32Array(capacity * 4);
   const tintData = new Float32Array(capacity * 4);
   const glowData = new Float32Array(capacity * 4);
@@ -308,9 +313,10 @@ export function createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, vie
     }
     const scale = trueDistance > limit ? limit / trueDistance : 1;
     if (scale < 1) stats.projected++;
-    let positionX = cameraX + deltaX * scale;
-    let positionY = cameraY + deltaY * scale;
-    let positionZ = cameraZ + deltaZ * scale;
+    // Relative to the mesh, which stands at the camera.
+    let positionX = deltaX * scale;
+    let positionY = deltaY * scale;
+    let positionZ = deltaZ * scale;
     const quadWidth = width[slot] * scale;
     const quadHeight = height[slot] * scale;
     // Toward the camera, unit length.
@@ -479,10 +485,12 @@ export function createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, vie
         view[2] = viewPosition.z;
       } else {
         const cameraElements = camera.matrixWorld.elements;
-        view[0] = cameraElements[12];
-        view[1] = cameraElements[13];
-        view[2] = cameraElements[14];
+        const renderOffset = origin ? origin.offset : null;
+        view[0] = cameraElements[12] + (renderOffset ? renderOffset.x : 0);
+        view[1] = cameraElements[13] + (renderOffset ? renderOffset.y : 0);
+        view[2] = cameraElements[14] + (renderOffset ? renderOffset.z : 0);
       }
+      mesh.position.set(view[0], view[1], view[2]);
       view[4] = scene.fog ? scene.fog.far : camera.far * 0.5;
       view[3] = view[4] * PROJECT_SHARE;
       const step = realDt / FADE_SECONDS;
