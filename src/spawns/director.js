@@ -1041,6 +1041,8 @@ export function createGameDirector(ctx, { spawnManager, presets, placement = nul
   const frustum = new THREE.Frustum();
   const viewProjection = new THREE.Matrix4();
   const sphere = new THREE.Sphere();
+  // The camera matrices are in the render frame (src/core/origin.js): world points move into it.
+  const origin = ctx.origin ?? null;
   let frustumFrame = -1;
   return createDirector({
     seedHash: world.seedHash >>> 0,
@@ -1058,6 +1060,7 @@ export function createGameDirector(ctx, { spawnManager, presets, placement = nul
         frustum.setFromProjectionMatrix(viewProjection, camera.coordinateSystem, camera.reversedDepth);
       }
       sphere.center.set(x, y, z);
+      if (origin) origin.toRender(sphere.center, sphere.center);
       sphere.radius = radius;
       return frustum.intersectsSphere(sphere);
     },

@@ -40,6 +40,8 @@ function requireElement(root, id) {
 
 export function createGlassHud(ctx) {
   const { THREE, camera, state, settings } = ctx;
+  // The camera matrices are in the render frame (src/core/origin.js): world points move into it first.
+  const origin = ctx.origin ?? null;
   const root = document.getElementById('ui-root');
   if (!root) throw new Error('DRIFTWING glass HUD: the #ui-root element is missing from the page.');
   const dom = {
@@ -235,7 +237,9 @@ export function createGlassHud(ctx) {
   function projectToScreen(point, out) {
     const width = window.innerWidth;
     const height = window.innerHeight;
-    projected.copy(point).applyMatrix4(camera.matrixWorldInverse);
+    projected.copy(point);
+    if (origin) origin.toRender(projected, projected);
+    projected.applyMatrix4(camera.matrixWorldInverse);
     const behind = projected.z > -0.5;
     const cameraX = projected.x;
     const cameraY = projected.y;

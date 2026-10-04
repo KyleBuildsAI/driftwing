@@ -361,10 +361,20 @@ export function installSpawnTestKit(system) {
   ctx.bus.onTyped('windSourceAdded', (payload) => { if (payload.kind === 'test-updraft') windEvents.push({ type: 'added', id: payload.id }); });
   ctx.bus.onTyped('windSourceRemoved', (payload) => { if (payload.kind === 'test-updraft') windEvents.push({ type: 'removed', id: payload.id }); });
 
+  /**
+   * The camera's WORLD position: getWorldPosition() is render frame (src/core/origin.js), so the render
+   * origin's offset is added back (the game ctx's origin; none in the node labs).
+   */
+  function cameraWorldPosition() {
+    const position = ctx.camera.getWorldPosition(new ctx.THREE.Vector3());
+    const renderOrigin = ctx.game && ctx.game.origin ? ctx.game.origin : null;
+    return renderOrigin ? renderOrigin.toWorld(position, position) : position;
+  }
+
   /** A point distance metres from the camera, bearing degrees right of its horizontal forward. */
   function pointFromCamera(distance, bearing = 0, height = null) {
     const camera = ctx.camera;
-    const origin = camera.getWorldPosition(new ctx.THREE.Vector3());
+    const origin = cameraWorldPosition();
     const forward = camera.getWorldDirection(new ctx.THREE.Vector3());
     forward.y = 0;
     if (forward.lengthSq() < 1e-6) forward.set(0, 0, -1);
@@ -382,7 +392,7 @@ export function installSpawnTestKit(system) {
    * terrain, or null. The discovery proofs place their spawns there.
    */
   function visiblePointAhead({ minDistance = 350, maxDistance = 1400, lift = 15 } = {}) {
-    const origin = ctx.camera.getWorldPosition(new ctx.THREE.Vector3());
+    const origin = cameraWorldPosition();
     for (let distance = minDistance; distance <= maxDistance; distance += 50) {
       for (const bearing of [0, -8, 8, -16, 16]) {
         const point = pointFromCamera(distance, bearing);
@@ -431,7 +441,7 @@ export function installSpawnTestKit(system) {
     },
     /** Moves a spawn's anchor to distance metres straight ahead of the camera, at the camera's height. */
     moveAhead(id, distance) {
-      const position = pointFromCamera(distance, 0, ctx.camera.getWorldPosition(new ctx.THREE.Vector3()).y);
+      const position = pointFromCamera(distance, 0, cameraWorldPosition().y);
       const parts = api.parts(id);
       for (const part of parts) part.anchor.set(position.x, position.y, position.z);
       return parts.length;

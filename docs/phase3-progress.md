@@ -29,7 +29,10 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   `tools/lab/origin.mjs` (32/32). Shader lines of a.5: terrain (cloud UV, water level x3, vegetation
   focus), cloudShading (height fraction, centre), vortex (fragment height, radial, haze kit), weather
   volume rain shafts (streak noise), celestial rainbow centre, sky fog layer (camera height).
-- Next: the CPU render-frame readers (a.6), the float32 buffers (a.7), audio in the render frame,
+- CPU render-frame readers (a.6): the spawn manager's matrix camera path, the director's isInView, the
+  lure fallback, the glass HUD and ui.js projections, the spawn test kit; the game ctx in the engine
+  ctx (0.4); the node labs' fake uniforms gain renderOrigin.
+- Next: the float32 buffers (a.7), audio in the render frame,
   the rebase step file and the verification runs.
 - Open issues: `src/render/water.js` (`surfaceNoise`, `shadowUV`) is the water engineer's (contract
   0.1); they apply `worldPositionNode` there in the integration pass.
