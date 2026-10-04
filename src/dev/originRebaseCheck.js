@@ -14,7 +14,8 @@
 //              1 mm, and a far static point projects to the same pixel within 0.5 px from the render
 //              matrices as from a world-frame camera. Rebases happen on the way, plus forced ones (the
 //              dev hook) mid-leg; the craft state stays finite.
-//   image      at fixed poses (coast, mountains, a spawn in view, 13 km up), the frame is captured with
+//   image      at fixed poses (low over the spawn area, with a structure, a tornado and a supercell in
+//              view, and 10 km up with a vertical rebase), the frame is captured with
 //              the origin on one lattice point, again (the control: what two identical frames differ
 //              by), then with the origin on the neighbouring lattice point: the rebased frame must
 //              differ from the previous one no more than the control does, plus a small allowance for
@@ -253,11 +254,17 @@ export function installOriginRebaseCheck(dw) {
       return `origin check ready: loop paused, craft ${flight.getCraft()}, origin ${JSON.stringify(origin.getStats().offset)}`;
     },
 
-    /** Force-spawns presetId distance metres ahead (its mesh joins the tracked objects). */
-    async spawnAhead(presetId, distance = 1600) {
+    /**
+     * Force-spawns presetId distance metres ahead, ending the last one (its mesh joins the tracked
+     * objects), and lets the flight clock run growSeconds so an event has formed.
+     */
+    async spawnAhead(presetId, distance = 1600, growSeconds = 0) {
+      if (spawnId !== null) ctx.systems.spawns.deactivate(spawnId, 'debug');
       spawnId = ctx.systems.spawns.forceSpawn(presetId, { distance, force: true });
-      await stepRenderedFrames(5);
-      return `spawned ${presetId}: ${spawnId}`;
+      // Events build up on the flight clock: let it run (100 ms frames) before the check.
+      await stepRenderedFrames(Math.max(5, Math.round(growSeconds * 10)), growSeconds > 0 ? 100 : 1000 / 60);
+      const instance = spawnId === null ? null : ctx.systems.spawns.getInstance(spawnId);
+      return `spawned ${presetId}: ${spawnId} (${instance ? `${instance.tier}, ${Math.round(instance.distance)} m, in view ${instance.inView}` : 'gone'})`;
     },
 
     /** Moves the craft to pose ({ x, y, z, heading }) and waits for the terrain there. */

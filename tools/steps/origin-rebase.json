@@ -18,6 +18,18 @@
     "shot": "origin-image-spawn"
   },
   {
+    "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const x = mid(spawn.x); const z = spawn.z; const pose = { x, y: Math.max(ground(x, z) + 700, 1000), z, heading: spawn.heading }; await window.__dwOrigin.goTo(pose); const line = await window.__dwOrigin.spawnAhead('tornado', 2600, 40); return line + ' | ' + await window.__dwOrigin.imageCheck('image-vortex', pose); } catch (error) { console.error('[origin check] image-vortex failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "shot": "origin-image-vortex"
+  },
+  {
+    "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const x = mid(spawn.x); const z = spawn.z; const pose = { x, y: Math.max(ground(x, z) + 700, 1000), z, heading: spawn.heading }; await window.__dwOrigin.goTo(pose); const line = await window.__dwOrigin.spawnAhead('supercell', 5000, 40); return line + ' | ' + await window.__dwOrigin.imageCheck('image-storm', pose); } catch (error) { console.error('[origin check] image-storm failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "shot": "origin-image-storm"
+  },
+  {
     "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const x = mid(spawn.x); const z = spawn.z - 30000; return await window.__dwOrigin.imageCheck('image-high', { x, y: 10180, z, heading: 0, speed: 260 }, { x: 1, y: 1, z: 0 }); } catch (error) { console.error('[origin check] image-high failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
   },
   {
