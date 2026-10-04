@@ -6,6 +6,8 @@ import { createControlState, copyControlState } from '../input/controlState.js';
 import { airDensity, speedOfSound, createFlightTelemetry, SEA_LEVEL_DENSITY } from './telemetry.js';
 import { flightModels as defaultFlightModels } from './models.js';
 import { trimModel } from './trim.js';
+import { setLandingSurfaceResolver } from './landing.js';
+import { createProbeSet, LANDABLE_NORMAL_Y } from '../world/colliders.js';
 import { primeAssists } from './assists.js';
 import { createCrashFade } from './crashFade.js';
 import { createAerotow, createRopeMaterial, createRopeStandIn, findNearestPeak, planPeakLaunch } from './relaunch.js';
@@ -127,6 +129,7 @@ export function createFlightController(ctx) {
     handsOff: false,
     autopilot: player.autopilot,
     telemetry,
+    colliders: ctx.colliders ?? null,
   };
   const interpolation = {
     previousPosition: new THREE.Vector3(),
@@ -629,7 +632,8 @@ export function createFlightController(ctx) {
   function holdAtContact() {
     const position = sim.state.position;
     if (!isFiniteVector(position)) return;
-    const floor = crashFloorHeight(position.x, position.y, position.z);
+    // A structure strike holds the craft where it struck: no ground surface above it may lift it there.
+    const floor = crashFloorHeight(position.x, crash.reason === STRUCTURE_STRIKE ? position.y - SURFACE_REACH : position.y, position.z);
     if (position.y < floor) position.y = floor;
     interpolation.position.copy(position);
     interpolation.previousPosition.copy(position);
@@ -648,6 +652,7 @@ export function createFlightController(ctx) {
     const x = Number.isFinite(position.x) ? position.x : player.position.x;
     const z = Number.isFinite(position.z) ? position.z : player.position.z;
     const spawnPosition = new THREE.Vector3(x, surfaceHeight(x, z) + RESPAWN_AGL, z);
+    liftClearOfStructures(spawnPosition);
     resetActiveModel(airbornePose(spawnPosition, heading));
     player.heading = heading;
     syncVisual();
@@ -706,6 +711,233 @@ export function createFlightController(ctx) {
     if (!limits.floats && position.y < CONFIG.WATER_LEVEL - PENETRATION_LIMIT) return { reason: 'water', impactSpeed: model.state.velocity.length() };
     return null;
   }
+
+  // ============================================================================================
+  // STRUCTURE COLLISION (ctx.colliders, src/world/colliders.js; Phase 3 contract b.4)
+  // ============================================================================================
+  /**
+   * The craft carries collision probes: spheres at body points (craft.collision.probes, or derived
+   * from simProfile.contacts at CONTACT_PROBE_RADIUS plus the centre of mass at CENTER_PROBE_RADIUS,
+   * with fill probes every PROBE_FILL_SPACING along each line from the centre to a contact, so a wing
+   * never slices past a mast or a kite string between its tip and the fuselage). Every tick, after the
+   * model step, every probe sweeps from its previous to its current world position in one batch
+   * (colliders.sweepProbes: nothing tunnels at any speed), and the earliest hit decides:
+   * - over limits.bodyStrikeSpeed (relative to a moving collider): the craft goes back to the hit pose
+   *   plus RESOLVE_OFFSET along the normal and soft-crashes 'structure strike' there;
+   * - under it: the probe is set on the surface plus RESOLVE_OFFSET, the inward velocity removed with
+   *   RESTITUTION and the slide braked with FRICTION: a scrape, a bump or a perch approach;
+   * - a landable top is ground: gear probes ignore it, and a slow touch by a body probe is left to the
+   *   ground contact, which stands on it through ctx.groundSurfaces;
+   * - a sensor (a kite string) emits colliderSensor once per entry and re-arms when every probe has
+   *   left it; it never resolves and never crashes.
+   * Every solid hit emits colliderHit (a scrape at most every HIT_EVENT_SECONDS per collider).
+   */
+  const colliders = ctx.colliders ?? null;
+  const STRUCTURE_STRIKE = 'structure strike';
+  const CONTACT_PROBE_RADIUS = 0.35;
+  const CENTER_PROBE_RADIUS = 0.6;
+  const PROBE_FILL_SPACING = 0.7;
+  const MAX_PROBES = 128;
+  const RESOLVE_OFFSET = 0.05;
+  const RESTITUTION = 0.15;
+  const FRICTION = 0.35;
+  const HIT_EVENT_SECONDS = 0.25;
+  /** A respawn inside a collider's bounds rises this far (m) above its top. */
+  const RESPAWN_STRUCTURE_CLEARANCE = 50;
+  const probeSet = createProbeSet(MAX_PROBES);
+  /** Probe centres in body axes relative to the centre of mass (xyz per probe). */
+  const probeOffsets = new Float64Array(MAX_PROBES * 3);
+  let probeCraft = null;
+  const sensorsInside = new Set();
+  const lastHitEvent = { id: '', time: -Infinity };
+  const probeScratch = new THREE.Vector3();
+  const strikeQuaternion = new THREE.Quaternion();
+  counters.structureStrikes = 0;
+  counters.structureContacts = 0;
+  counters.sensorEntries = 0;
+
+  /** Builds the active craft's probe set (once per craft). */
+  function buildCollisionProbes() {
+    probeCraft = craft;
+    let count = 0;
+    const centre = craft.simProfile && craft.simProfile.centerOfMass ? craft.simProfile.centerOfMass : [0, 0, 0];
+    const add = (x, y, z, radius, gear) => {
+      if (count >= MAX_PROBES) return;
+      probeOffsets[count * 3] = x;
+      probeOffsets[count * 3 + 1] = y;
+      probeOffsets[count * 3 + 2] = z;
+      probeSet.radii[count] = radius;
+      probeSet.gear[count] = gear ? 1 : 0;
+      count++;
+    };
+    const declared = craft.collision && Array.isArray(craft.collision.probes) ? craft.collision.probes : null;
+    if (declared && declared.length > 0) {
+      for (const probe of declared) add(probe.position[0] - centre[0], probe.position[1] - centre[1], probe.position[2] - centre[2], probe.radius, probe.gear === true);
+    } else {
+      add(0, 0, 0, CENTER_PROBE_RADIUS, false);
+      const contacts = craft.simProfile && Array.isArray(craft.simProfile.contacts) ? craft.simProfile.contacts : [];
+      for (const contact of contacts) {
+        const x = contact.position[0] - centre[0];
+        const y = contact.position[1] - centre[1];
+        const z = contact.position[2] - centre[2];
+        add(x, y, z, CONTACT_PROBE_RADIUS, contact.gear === true && contact.kind !== 'body');
+        const length = Math.hypot(x, y, z);
+        const steps = Math.ceil(length / PROBE_FILL_SPACING);
+        for (let step = 1; step < steps; step++) {
+          const share = step / steps;
+          if (share * length > CENTER_PROBE_RADIUS) add(x * share, y * share, z * share, CONTACT_PROBE_RADIUS, false);
+        }
+      }
+    }
+    probeSet.count = count;
+  }
+
+  /** Writes the probes' world centres for a pose into target (probeSet.from or .to). */
+  function placeProbes(position, quaternion, target) {
+    for (let probe = 0; probe < probeSet.count; probe++) {
+      probeScratch.set(probeOffsets[probe * 3], probeOffsets[probe * 3 + 1], probeOffsets[probe * 3 + 2]).applyQuaternion(quaternion).add(position);
+      target[probe * 3] = probeScratch.x;
+      target[probe * 3 + 1] = probeScratch.y;
+      target[probe * 3 + 2] = probeScratch.z;
+    }
+  }
+
+  /** colliders.sweepProbes' sensor callback: the first entry into a sensor reports it. */
+  function onProbeSensor(record, probe) {
+    if (sensorsInside.has(record.id)) return;
+    sensorsInside.add(record.id);
+    counters.sensorEntries++;
+    const base = probe * 3;
+    bus.emitTyped('colliderSensor', {
+      id: record.id,
+      owner: record.owner,
+      tag: record.tags.miss ?? 'sensor',
+      craft: craftId,
+      position: { x: probeSet.to[base], y: probeSet.to[base + 1], z: probeSet.to[base + 2] },
+    });
+  }
+
+  /** A sensor re-arms once no probe touches it any more. */
+  function rearmSensor(id) {
+    if (!colliders.probesTouch(id, probeSet)) sensorsInside.delete(id);
+  }
+
+  function emitColliderHit(hit, speed, crashed) {
+    const time = state.time.elapsed;
+    if (!crashed && hit.id === lastHitEvent.id && time - lastHitEvent.time < HIT_EVENT_SECONDS) return;
+    lastHitEvent.id = hit.id;
+    lastHitEvent.time = time;
+    bus.emitTyped('colliderHit', {
+      id: hit.id, owner: hit.owner, craft: craftId, speed, normal: vectorLiteral(hit.normal), position: vectorLiteral(hit.point), crashed, surface: hit.tags.surface,
+    });
+  }
+
+  /** Over the limit: back to the hit pose (the contact point plus RESOLVE_OFFSET) and a soft crash there. */
+  function strikeStructure(hit, impactSpeed) {
+    const position = sim.state.position;
+    const quaternion = sim.state.quaternion;
+    position.lerpVectors(interpolation.previousPosition, position, hit.t).addScaledVector(hit.normal, RESOLVE_OFFSET);
+    strikeQuaternion.copy(interpolation.previousQuaternion).slerp(quaternion, hit.t);
+    quaternion.copy(strikeQuaternion);
+    counters.structureStrikes++;
+    emitColliderHit(hit, impactSpeed, true);
+    interpolation.previousPosition.copy(position);
+    interpolation.previousQuaternion.copy(quaternion);
+    triggerSoftCrash(STRUCTURE_STRIKE, { impactSpeed });
+  }
+
+  /**
+   * Under the limit: the probe goes to the surface plus RESOLVE_OFFSET (a probe already touching at
+   * the start of the tick is eased out along the normal), the velocity into the surface is reflected
+   * with RESTITUTION and the slide along it braked with FRICTION (Coulomb).
+   */
+  function resolveStructureContact(probe, hit, impactSpeed) {
+    const base = probe * 3;
+    const normal = hit.normal;
+    const position = sim.state.position;
+    const radius = probeSet.radii[probe];
+    if (hit.t > 0) {
+      const share = hit.t;
+      position.x += probeSet.from[base] + (probeSet.to[base] - probeSet.from[base]) * share + normal.x * RESOLVE_OFFSET - probeSet.to[base];
+      position.y += probeSet.from[base + 1] + (probeSet.to[base + 1] - probeSet.from[base + 1]) * share + normal.y * RESOLVE_OFFSET - probeSet.to[base + 1];
+      position.z += probeSet.from[base + 2] + (probeSet.to[base + 2] - probeSet.from[base + 2]) * share + normal.z * RESOLVE_OFFSET - probeSet.to[base + 2];
+    } else {
+      position.addScaledVector(normal, radius * 0.5 + RESOLVE_OFFSET);
+    }
+    const velocity = sim.state.velocity;
+    const colliderVelocity = hit.velocity;
+    const relativeX = velocity.x - (colliderVelocity ? colliderVelocity.x : 0);
+    const relativeY = velocity.y - (colliderVelocity ? colliderVelocity.y : 0);
+    const relativeZ = velocity.z - (colliderVelocity ? colliderVelocity.z : 0);
+    const inward = relativeX * normal.x + relativeY * normal.y + relativeZ * normal.z;
+    if (inward < 0) {
+      const change = -(1 + RESTITUTION) * inward;
+      velocity.addScaledVector(normal, change);
+      const slideX = relativeX - normal.x * inward;
+      const slideY = relativeY - normal.y * inward;
+      const slideZ = relativeZ - normal.z * inward;
+      const slide = Math.sqrt(slideX * slideX + slideY * slideY + slideZ * slideZ);
+      if (slide > 1e-9) {
+        const brake = Math.min(slide, FRICTION * change) / slide;
+        velocity.x -= slideX * brake;
+        velocity.y -= slideY * brake;
+        velocity.z -= slideZ * brake;
+      }
+    }
+    counters.structureContacts++;
+    emitColliderHit(hit, impactSpeed, false);
+  }
+
+  /**
+   * The tick's structure collision (called right after enforceSimCeiling). Returns true when the craft
+   * struck a structure and soft-crashed (the tick loop stops, as for a ground strike).
+   */
+  function sweepStructures() {
+    if (colliders === null || (colliders.count === 0 && colliders.providerCount === 0)) return false;
+    if (probeCraft !== craft) buildCollisionProbes();
+    placeProbes(interpolation.previousPosition, interpolation.previousQuaternion, probeSet.from);
+    placeProbes(sim.state.position, sim.state.quaternion, probeSet.to);
+    const probe = colliders.sweepProbes(probeSet, onProbeSensor);
+    if (sensorsInside.size > 0) sensorsInside.forEach(rearmSensor);
+    if (probe < 0) return false;
+    const hit = probeSet.hit;
+    const velocity = sim.state.velocity;
+    const colliderVelocity = hit.velocity;
+    const normal = hit.normal;
+    const closing = (velocity.x - (colliderVelocity ? colliderVelocity.x : 0)) * normal.x
+      + (velocity.y - (colliderVelocity ? colliderVelocity.y : 0)) * normal.y
+      + (velocity.z - (colliderVelocity ? colliderVelocity.z : 0)) * normal.z;
+    const impactSpeed = closing < 0 ? -closing : 0;
+    const limit = Number.isFinite(craft.limits.bodyStrikeSpeed) ? craft.limits.bodyStrikeSpeed : DEFAULT_BODY_STRIKE_SPEED;
+    // A slow touch of a landable top is the ground contact's (touchdown, rolling, parking, grades).
+    if (hit.tags.landable && normal.y > LANDABLE_NORMAL_Y && impactSpeed <= limit) return false;
+    if (impactSpeed > limit) {
+      strikeStructure(hit, impactSpeed);
+      return true;
+    }
+    resolveStructureContact(probe, hit, impactSpeed);
+    return false;
+  }
+
+  /** A respawn point inside a collider's bounds rises above it (contract b.4). */
+  function liftClearOfStructures(position) {
+    if (colliders === null || colliders.count === 0) return;
+    const clear = colliders.liftClear(position.x, position.y, position.z);
+    if (clear > position.y) position.y = clear + RESPAWN_STRUCTURE_CLEARANCE;
+  }
+
+  /** The probe set (body offsets from the centre of mass, radii, gear flags), for tests and tools. */
+  function getCollisionProbes() {
+    if (craft && probeCraft !== craft) buildCollisionProbes();
+    return { count: probeSet.count, offsets: probeOffsets.slice(0, probeSet.count * 3), radii: probeSet.radii.slice(0, probeSet.count), gear: probeSet.gear.slice(0, probeSet.count) };
+  }
+
+  // A landing on a landable collider top is graded like any other, as surface 'structure'.
+  setLandingSurfaceResolver(bus, (position) => {
+    if (colliders === null || groundSurfaces === null || groundSurfaces.count === 0) return null;
+    const id = groundSurfaces.surfaceIdBelow(position.x, position.z, position.y + SURFACE_REACH);
+    return id !== null && colliders.has(id) ? 'structure' : null;
+  });
 
   // ============================================================================================
   // RELAUNCH (aerotow, peak launch, airstart)
@@ -1193,6 +1425,7 @@ export function createFlightController(ctx) {
       sim.step(stepSeconds, tickControls, env);
       if (!guardModel()) continue;
       enforceSimCeiling();
+      if (sweepStructures()) break;
       const outcome = contactOutcome(sim);
       if (outcome) {
         interpolation.previousPosition.copy(sim.state.position);
@@ -1500,6 +1733,8 @@ export function createFlightController(ctx) {
     getModel() {
       return sim;
     },
+    /** The active craft's structure collision probes (contract b.4): { count, offsets, radii, gear }. */
+    getCollisionProbes,
     getCeiling() {
       return FLIGHT_CEILING;
     },

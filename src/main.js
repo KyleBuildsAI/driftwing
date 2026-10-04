@@ -45,6 +45,7 @@ import { createWindModifierEngine } from './spawns/engines/windModifierEngine.js
 import { createWindOverlaySystem } from './dev/windOverlay.js';
 import { createWorldGen } from './world/worldgen.js';
 import { createGroundSurfaces } from './world/groundSurfaces.js';
+import { createColliderWorld } from './world/colliders.js';
 import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName } from './core/util.js';
 import { EventBus } from './core/eventBus.js';
 import { attachTypedEvents } from './core/events.js';
@@ -85,7 +86,9 @@ const SPAWN_ENGINE_FACTORIES = Object.freeze([
  * ?test=terrain (terrain stamps: seams, worker parity, collision), ?test=sites (the terrain
  * fixtures' stamped world with no harness, for engine step files that need real stamped sites),
  * ?test=determinism (the same seed and scripted path in two page loads: site list and director log)
- * and ?test=spawns (each of the 30 presets force-spawned ahead, shown and disposed back to baseline).
+ * ?test=spawns (each of the 30 presets force-spawned ahead, shown and disposed back to baseline) and
+ * ?test=collision (every collider type and retrofitted structure flown into at speed: soft crashes, no
+ * pass-through, sensors counted).
  * Loaded on demand from dev builds only, so none exists in production builds. Returns
  * { databaseName, createSystem(ctx), worldPresets? } or null; worldPresets (fixture presets) replace
  * the preset list in worldgen on both threads.
@@ -98,6 +101,7 @@ async function loadDevTest(params) {
   if (test === 'sites') return (await import('./dev/structureTestKit.js')).prepareSiteWorld();
   if (test === 'determinism') return (await import('./dev/determinismTest.js')).prepareDeterminismTest({ params });
   if (test === 'spawns') return (await import('./dev/spawnsTest.js')).prepareSpawnsTest({ params });
+  if (test === 'collision') return (await import('./dev/collisionTest.js')).prepareCollisionTest({ params });
   return null;
 }
 
@@ -278,6 +282,7 @@ async function boot() {
   window.addEventListener('touchstart', onFirstGesture, true);
 
   ctx.wind = createWindField({ world, uniforms, state, bus });
+  ctx.colliders = createColliderWorld({ groundSurfaces: ctx.groundSurfaces, bus });
 
   const perf = createPerfGovernor(ctx, { devHooks });
   ctx.perf = perf;
