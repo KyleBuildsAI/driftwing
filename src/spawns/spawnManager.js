@@ -160,7 +160,7 @@ export function createSpawnManager(options) {
   const {
     THREE, TSL, scene, camera, renderer, backend, wind, audio, world, state, sky, bus, perf, settings, uniforms,
     registry, presets = [], seed = '', registerPrewarm = null, maxLights = MAX_REAL_LIGHTS, engineBudgets = null,
-    water = null, surfaces = null, weatherState = null,
+    water = null, surfaces = null, weatherState = null, game = null,
   } = options;
   const presetById = new Map();
   for (const preset of presets) presetById.set(preset.id, preset);
@@ -418,6 +418,8 @@ export function createSpawnManager(options) {
     surfaces,
     /** () => the player's regional weather state or null (allocates: call it at create, not per frame). */
     weatherState: typeof weatherState === 'function' ? weatherState : () => null,
+    /** The game ctx: Phase 3 services (origin, colliders, waterQuery, systems.challenges, ...). */
+    game,
     /** Registers an object for the pipeline prewarm behind the loading fade (engines call it in init). */
     registerPrewarm: typeof registerPrewarm === 'function' ? registerPrewarm : null,
     pools: Object.freeze({

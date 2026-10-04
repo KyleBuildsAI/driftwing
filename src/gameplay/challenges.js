@@ -267,7 +267,7 @@ export function crossGate(gate, from, to, out) {
 }
 
 // ---- Preset challenge blocks (pure data, validated by the preset schema) ----------------------------
-const BLOCK_FIELDS = Object.freeze(['name', 'gates', 'medals', 'missed', 'sensors', 'start', 'abandonDistance', 'teleportDistance', 'timeLimit', 'record', 'frames', 'collider']);
+const BLOCK_FIELDS = Object.freeze(['name', 'gates', 'medals', 'missed', 'sensors', 'start', 'abandonDistance', 'teleportDistance', 'timeLimit', 'record', 'frames']);
 const BLOCK_GATE_FIELDS = Object.freeze(['id', 'role', 'along', 'across', 'height', 'heading', 'pitch', 'shape', 'radius', 'halfWidth', 'halfHeight']);
 
 /**
@@ -275,8 +275,9 @@ const BLOCK_GATE_FIELDS = Object.freeze(['id', 'role', 'along', 'across', 'heigh
  * heading): { name?, gates: [{ id?, role, along, across?, height (m above the ground), heading?
  * (deg, relative to the site heading), pitch? (deg, nose up), shape, radius | halfWidth +
  * halfHeight }], medals?, missed?, sensors?, start?, abandonDistance?, teleportDistance?,
- * timeLimit?, record?, frames? (draw gate frames, default true), collider? (solid frames, default
- * false) }. Throws naming the preset and the field; returns true.
+ * timeLimit?, record?, frames? (the structure recipe draws gate frames, default true) }. The frames
+ * are visual only; a preset that wants solid frames adds its own colliders. Throws naming the preset
+ * and the field; returns true.
  */
 export function validateChallengeBlock(block, presetId) {
   const fail = (field, message) => {
@@ -293,7 +294,7 @@ export function validateChallengeBlock(block, presetId) {
     for (const field of ['across', 'heading', 'pitch']) if (gate[field] !== undefined && !Number.isFinite(gate[field])) fail(`gates[${index}].${field}`, 'must be a finite number when present');
     if (gate.id !== undefined && (typeof gate.id !== 'string' || !gate.id)) fail(`gates[${index}].id`, 'must be a non-empty string when present');
   });
-  for (const field of ['frames', 'collider', 'record']) if (block[field] !== undefined && typeof block[field] !== 'boolean') fail(field, 'must be a boolean when present');
+  for (const field of ['frames', 'record']) if (block[field] !== undefined && typeof block[field] !== 'boolean') fail(field, 'must be a boolean when present');
   // The rest is the course definition's own validation, on a course built at the origin.
   try {
     validateCourseDefinition(buildSiteCourse(block, { presetId, siteId: 'validation', presetName: presetId, anchor: { x: 0, y: 0, z: 0 }, heading: 0, ground: () => 0 }));

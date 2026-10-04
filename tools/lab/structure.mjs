@@ -21,6 +21,9 @@
 //   wind         the wind farm's wake is a WindField source at the near and mid tiers (slower, turbulent
 //                air downwind of a rotor), gone at the far tier and after dispose
 //   lod          detail shows only near; heavy islands hide at far (the lure takes over)
+//   challenge    the challengeGates recipe registers its preset's course with the challenge system (in
+//                the site frame, gates above the ground), draws the gate frames, the course flies to a
+//                challengeFinished, and dispose unregisters it
 //   memory       every per-instance geometry is disposed and every pooled slot returned
 //   cost         per recipe: update() CPU time per instance, triangles, instanced parts, draw calls
 //   allocation   after a JIT warm-up, 100 000 frames of six structures (turbines turning, windsock,
@@ -43,6 +46,7 @@ import { createGroundSurfaces } from '../../src/world/groundSurfaces.js';
 import { createStructureEngine } from '../../src/spawns/engines/structureEngine.js';
 import { buildTestSite, createStructureTestPresets } from '../../src/dev/structureTestKit.js';
 import { RECIPE_STAMP_TYPES, structureStamps } from '../../src/spawns/engines/structure/stamps.js';
+import { buildSiteCourse, createChallengeSystem, validateCourseDefinition } from '../../src/gameplay/challenges.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -96,6 +100,30 @@ const SITES = PRESETS.map((preset, index) => buildTestSite(preset, { x: index * 
 for (const site of SITES) for (const stamp of site.stamps) stamps.push(stamp);
 const siteOf = (presetId) => SITES.find((site) => site.presetId === presetId);
 
+/** A challenge course preset for the challengeGates recipe (the lab adds it to its managers). */
+const CHALLENGE_BLOCK = Object.freeze({
+  name: 'Dev gate run',
+  gates: Object.freeze([
+    Object.freeze({ role: 'start', along: 0, height: 30, shape: 'rect', halfWidth: 30, halfHeight: 15 }),
+    Object.freeze({ role: 'checkpoint', along: 400, across: 40, height: 45, heading: 10, shape: 'circle', radius: 22 }),
+    Object.freeze({ role: 'checkpoint', along: 800, across: -20, height: 40, pitch: 5, shape: 'rect', halfWidth: 25, halfHeight: 18 }),
+    Object.freeze({ role: 'finish', along: 1200, height: 35, shape: 'circle', radius: 26 }),
+  ]),
+  medals: Object.freeze({ gold: 20, silver: 26, bronze: 34 }),
+});
+function challengePreset(id, params) {
+  const base = PRESETS.find((preset) => preset.id === 'devCanyonGates');
+  return Object.freeze({
+    ...base,
+    id,
+    name: 'Dev gate run',
+    stamps: Object.freeze([]),
+    engines: Object.freeze([Object.freeze({ engine: 'structure', params: Object.freeze({ recipe: 'challengeGates', ...params }) })]),
+    challenge: CHALLENGE_BLOCK,
+  });
+}
+const CHALLENGE_PRESETS = [challengePreset('devChallengeGates', {}), challengePreset('devChallengeBare', { frames: false })];
+
 function createLab() {
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const scene = new THREE.Scene();
@@ -115,9 +143,18 @@ function createLab() {
   };
   const state = {
     seed: 'LAB',
-    time: { elapsed: 0, sunElevation: 30, dayTime: 0.4, nightFactor: 0, goldenFactor: 0 },
-    player: { position: new THREE.Vector3(0, 400, 1200), forward: new THREE.Vector3(0, 0, -1), heading: 0, speed: 60 },
+    time: { elapsed: 0, frameDt: 0, sunElevation: 30, dayTime: 0.4, nightFactor: 0, goldenFactor: 0 },
+    player: { position: new THREE.Vector3(0, 400, 1200), quaternion: new THREE.Quaternion(), forward: new THREE.Vector3(0, 0, -1), heading: 0, speed: 60 },
   };
+  // The game ctx the engines reach through ctx.game (contract 0.4): here only the challenge system.
+  const storageMap = new Map();
+  const game = { systems: {} };
+  game.systems.challenges = createChallengeSystem({
+    bus,
+    state,
+    systems: game.systems,
+    storage: { read: (key, fallback) => (storageMap.has(key) ? storageMap.get(key) : fallback), write: (key, value) => { storageMap.set(key, value); return true; } },
+  });
   const wind = createWindField({ world, uniforms, state, bus });
   const memory = { geometries: 0, textures: 0, attributes: 0, programs: 0, total: 0 };
   const voices = [];
@@ -141,10 +178,10 @@ function createLab() {
   const registry = createEngineRegistry();
   const manager = createSpawnManager({
     THREE, TSL, scene, camera, renderer: { info: { memory } }, backend: 'WebGPU', wind, audio, world, state, sky: null,
-    bus, perf: null, settings: null, uniforms, registry, presets: [], seed: 'LAB', surfaces,
+    bus, perf: null, settings: null, uniforms, registry, presets: [], seed: 'LAB', surfaces, game,
   });
   const engine = manager.register(createStructureEngine());
-  for (const preset of PRESETS) manager.addPreset(preset);
+  for (const preset of [...PRESETS, ...CHALLENGE_PRESETS]) manager.addPreset(preset);
   manager.init();
   const events = { gates: [], achievements: [], courses: [], landings: [], notify: [], windAdded: [], windRemoved: [], journal: [] };
   bus.on('structure:gate', (payload) => events.gates.push(payload));
@@ -158,7 +195,9 @@ function createLab() {
   function step(frames = 1, dt = 1 / 60) {
     for (let frame = 0; frame < frames; frame++) {
       state.time.elapsed += dt;
+      state.time.frameDt = dt;
       manager.update(dt, dt);
+      game.systems.challenges.update(dt, dt);
     }
   }
   function spawnSite(presetId) {
@@ -182,7 +221,7 @@ function createLab() {
     camera.position.set(point.x, point.y, point.z);
     step(1);
   }
-  return { bus, scene, camera, uniforms, state, wind, memory, voices, surfaces, registry, manager, engine, events, step, spawnSite, spawnFree, fly, teleport };
+  return { bus, scene, camera, uniforms, state, wind, memory, voices, surfaces, registry, manager, engine, events, step, spawnSite, spawnFree, fly, teleport, challenges: game.systems.challenges };
 }
 
 function expectThrow(fn, pattern) {
@@ -418,6 +457,41 @@ function testCourse() {
   const run = lab.events.journal;
   check('course', 'the clean run alone reaches the journal (op min, seconds)', run.length === 1 && run[0].key === 'devCanyonRun' && run[0].op === 'min' && Math.abs(run[0].value - lab.events.courses[0].time) < 0.01 && run[0].presetId === 'devCanyonGates', JSON.stringify(run));
   lab.manager.deactivate(id, 'test');
+}
+
+// ---- challenge -------------------------------------------------------------------------------------------
+function testChallengeGates() {
+  const lab = createLab();
+  const finished = [];
+  lab.bus.onTyped('challengeFinished', (payload) => finished.push(payload));
+  const x = 3000;
+  const z = -9000;
+  const heading = 25;
+  const id = lab.spawnFree('devChallengeGates', x, z, heading);
+  const listed = lab.challenges.list();
+  check('challenge', 'the recipe registers its course with the challenge system', id && lab.challenges.count() === 1 && listed[0].gates === 4 && listed[0].courseKey.startsWith('LAB:devChallengeGates:devChallengeGates:') && listed[0].name === 'Dev gate run' && listed[0].presetId === 'devChallengeGates', JSON.stringify(listed));
+  const parts = partsOf(lab, id);
+  const body = parts.data.meshes.body;
+  const bodyTriangles = body ? (body.geometry.index ? body.geometry.index.count : body.geometry.attributes.position.count) / 3 : 0;
+  check('challenge', 'the gates get frames (posts, lintels, hoops, pennants) and the spawn radius covers the course', bodyTriangles > 100 && parts.radius >= 1200, `${bodyTriangles} triangles, radius ${parts.radius}`);
+  // The course the recipe registered, rebuilt from the same inputs: fly through every gate centre.
+  const course = validateCourseDefinition(buildSiteCourse(CHALLENGE_BLOCK, { presetId: 'devChallengeGates', siteId: 'check', presetName: 'Dev gate run', anchor: { x, y: groundHeight(x, z), z }, heading, ground: (gx, gz) => Math.max(groundHeight(gx, gz), WATER_LEVEL) }));
+  const second = course.gates[1];
+  check('challenge', 'gates sit in the site frame at their height above the ground', Math.abs(second.cy - (groundHeight(second.cx, second.cz) + 45)) < 1e-6, `checkpoint at ${second.cy.toFixed(1)} m over ground ${groundHeight(second.cx, second.cz).toFixed(1)} m`);
+  const through = (gate, offset) => ({ x: gate.cx + gate.nx * offset, y: gate.cy + gate.ny * offset, z: gate.cz + gate.nz * offset });
+  lab.teleport(through(course.gates[0], -80));
+  for (let index = 0; index < course.gates.length; index++) {
+    const gate = course.gates[index];
+    lab.fly(through(gate, -40), through(gate, 40), 40);
+    if (index + 1 < course.gates.length) lab.fly(through(gate, 40), through(course.gates[index + 1], -40), 200);
+  }
+  check('challenge', 'flying the gates finishes the course (the start gate starts it, every gate passed)', finished.length === 1 && finished[0].valid && finished[0].missed === 0 && finished[0].time > 0, JSON.stringify(finished));
+  lab.manager.deactivate(id, 'test');
+  check('challenge', 'dispose unregisters the course', lab.challenges.count() === 0, String(lab.challenges.count()));
+  const bare = lab.spawnFree('devChallengeBare', x, z, heading);
+  check('challenge', 'frames: false registers the course without frames', lab.challenges.count() === 1 && partsOf(lab, bare).data.meshes.body === null, `body ${partsOf(lab, bare).data.meshes.body ? 'built' : 'none'}`);
+  lab.manager.deactivate(bare, 'test');
+  check('challenge', 'no course left behind', lab.challenges.count() === 0);
 }
 
 // ---- landing ----------------------------------------------------------------------------------------------
@@ -664,6 +738,7 @@ testParams();
 testStamps();
 testGates();
 testCourse();
+testChallengeGates();
 testLanding();
 testSurfaces();
 testGroundStart();

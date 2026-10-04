@@ -49,6 +49,7 @@ The frame: a compass `heading` (degrees) from the activation; `along` is forward
 | `spires` | a cluster of glowing crystal spires with shards and boulders | none | chime gates between spires, approach-driven hum |
 | `gates` | a timed course: start and finish gates marked by cairns with pennants, an optional river down the canyon floor | `carve` | a timed course, a journal best run, an optional corridor |
 | `waterfall` | a river spilling over the cliff step as a wide curtain of falling strands into the plunge pool, the river on downstream, boulders and mist puffs | `cliffStep` | a voice at the pool (the `waterfall` recipe) |
+| `challengeGates` | the gate frames of the preset's `challenge` course: posts and a lintel for rectangle gates, a hoop on a post for circle gates, pennants (white start, red checkpoints, chequered finish) | none | a challenge course registered with the challenge system (start prompt, splits, medals, bests per craft) |
 
 Without its stamp (a debug spawn, or a site whose preset lists none) every recipe still builds:
 the bridge spans `span` metres across the heading on trestles, the strip is draped along the
@@ -217,6 +218,24 @@ The curtain reads the stamp's lip, top and pool levels (`topY`, `bottomY`, `pool
 `channelWidth`), so it pours from the stamped river channel into the stamped plunge pool. Pair it with
 the waterEffect `plungePool`, an emitter mist at the pool, the celestial `rainbow` and a windModifier
 `curtain` (the mega-waterfall preset).
+
+## challengeGates
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `frames` | bool | | the block's `frames` (true) | draw the gate frames; without them the course is flown through the HUD's glowing gate markers alone |
+| `style` | | `timber`, `stone` | `timber` | the frames' material |
+| `post` | m | 0.3..6 | 1.2 | post and beam thickness |
+
+The course comes from the preset's `challenge` block (src/gameplay/challenges.js
+`validateChallengeBlock`, checked by the preset schema): gates in the spawn's frame (`along` the
+heading, `across` to the right, `height` above the ground, `heading` and `pitch` relative to the
+spawn, `shape` circle with `radius` or rect with `halfWidth` and `halfHeight`), plus the course rules
+(`medals`, `missed`, `sensors`, `start`, `abandonDistance`, `teleportDistance`, `timeLimit`, `record`).
+The recipe resolves it to a world course with the id `${presetId}:${siteId}` (`${presetId}:${seed}` for
+an event) and hands it to the engine as `out.challenge`; the engine registers it with
+`ctx.game.systems.challenges` at create (`data.challengeKeys`) and unregisters it at dispose. The
+frames are visual only: a preset that wants solid frames adds its own collider boxes.
 
 ## Generic features
 
