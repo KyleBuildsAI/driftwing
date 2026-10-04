@@ -48,8 +48,8 @@ const MAX_CANYON_LIFT = 1.2;
 const ISLAND_LOBE_MAX = 0.2;
 /** A basin's shoreline swings between 1 - BASIN_LOBE_MAX and 1 + BASIN_LOBE_MAX of its radius (3 and 5 lobes). */
 const BASIN_LOBE_MAX = 0.14;
-/** A basin fits only where its berm lifts the lowest rim ground at most this many depths (and at least 24 m is allowed). */
-const BASIN_MAX_LIFT = 1.6;
+/** A basin fits only where its berm lifts the lowest rim ground at most this many depths (and at least 36 m is allowed). */
+const BASIN_MAX_LIFT = 2.2;
 /** ...and where it cuts at most this many depths below the highest ground inside its rim. */
 const BASIN_MAX_CUT = 4;
 /** The rim crest sits this far (m) above the highest ground sampled on the rim. */
@@ -610,7 +610,7 @@ function resolveBasin(stamp, spec, random, context) {
   const floorY = rimY - depth;
   stamp.rimY = rimY;
   stamp.floorY = floorY;
-  stamp.fits = rimY - ringLow <= Math.max(24, depth * BASIN_MAX_LIFT) && innerHigh - floorY <= depth * BASIN_MAX_CUT;
+  stamp.fits = rimY - ringLow <= Math.max(36, depth * BASIN_MAX_LIFT) && innerHigh - floorY <= depth * BASIN_MAX_CUT;
   stamp.outerRadius = (radius + rim + falloff) * (1 + BASIN_LOBE_MAX);
   circleBounds(stamp, stamp.outerRadius);
   stamp.keyPoints = [

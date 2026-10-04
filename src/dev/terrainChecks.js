@@ -14,6 +14,8 @@
 //   collision  the collision height (worldgen.groundHeight) against the rendered LOD0 mesh, sampled
 //              through the chunk's own triangles.
 
+import { VEGETATION_TYPE_COUNT } from '../world/vegetationSpecies.js';
+
 /** Height tolerance for vertices that must coincide (float32 positions of equal heights). */
 export const SHARED_TOLERANCE = 1e-3;
 
@@ -25,8 +27,8 @@ export function terrainBuilderConfig(config) {
     lodResolutions: resolutions,
     skirtDepths: resolutions.map((resolution, lod) => config.SKIRT_DEPTH * Math.pow(1.5, lod)),
     maxInstances: 640,
-    headerFloats: 36,
-    vegetationTypes: 6,
+    headerFloats: VEGETATION_TYPE_COUNT * 6,
+    vegetationTypes: VEGETATION_TYPE_COUNT,
   };
 }
 
@@ -36,12 +38,18 @@ export function drainSteps(steps) {
   while (!progress.done) progress = steps.next();
 }
 
-/** Builds one chunk mesh with a chunk builder: { cx, cz, lod, resolution, positions, colors, vertexCount, minY, maxY }. */
+/**
+ * Builds one chunk mesh with a chunk builder: { cx, cz, lod, resolution, positions, colors, overlays
+ * (the region-overlay attribute, 4 floats per vertex), vertexCount, minY, maxY }.
+ */
 export function buildChunkMesh(builder, config, cx, cz, lod) {
   const floats = builder.vertexCount(lod) * 3;
-  const output = { positions: new Float32Array(floats), normals: new Float32Array(floats), colors: new Float32Array(floats), minY: 0, maxY: 0, vertexCount: 0 };
+  const output = {
+    positions: new Float32Array(floats), normals: new Float32Array(floats), colors: new Float32Array(floats), overlays: new Float32Array((floats / 3) * 4),
+    minY: 0, maxY: 0, vertexCount: 0,
+  };
   drainSteps(builder.buildMesh({ cx, cz, lod }, output));
-  return { cx, cz, lod, resolution: config.lodResolutions[lod], positions: output.positions, colors: output.colors, vertexCount: output.vertexCount, minY: output.minY, maxY: output.maxY };
+  return { cx, cz, lod, resolution: config.lodResolutions[lod], positions: output.positions, colors: output.colors, overlays: output.overlays, vertexCount: output.vertexCount, minY: output.minY, maxY: output.maxY };
 }
 
 /**
@@ -220,6 +228,14 @@ export function compareMeshBuffers(first, second) {
   for (let index = 0; index < first.colors.length; index++) {
     const diff = Math.abs(first.colors[index] - second.colors[index]);
     if (diff > worst) worst = diff;
+  }
+  // The region-overlay attribute, when both carry it.
+  if (first.overlays && second.overlays) {
+    if (first.overlays.length !== second.overlays.length) return Infinity;
+    for (let index = 0; index < first.overlays.length; index++) {
+      const diff = Math.abs(first.overlays[index] - second.overlays[index]);
+      if (diff > worst) worst = diff;
+    }
   }
   return worst;
 }

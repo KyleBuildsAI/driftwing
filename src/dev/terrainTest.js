@@ -343,6 +343,7 @@ function createTerrainTestSystem(ctx, { capture, set }) {
         resolution: builderConfig.lodResolutions[lod],
         positions: child.geometry.attributes.position.array,
         colors: child.geometry.attributes.color.array,
+        overlays: child.geometry.attributes.overlay.array,
       });
     }
     return found;

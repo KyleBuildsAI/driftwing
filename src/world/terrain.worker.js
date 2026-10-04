@@ -23,10 +23,12 @@ self.onmessage = (event) => {
       message.position = floatBuffer(message.position, floats);
       message.normal = floatBuffer(message.normal, floats);
       message.color = floatBuffer(message.color, floats);
+      message.overlay = floatBuffer(message.overlay, (floats / 3) * 4);
       const output = {
         positions: new Float32Array(message.position),
         normals: new Float32Array(message.normal),
         colors: new Float32Array(message.color),
+        overlays: new Float32Array(message.overlay),
         minY: 0,
         maxY: 0,
         vertexCount: 0,
@@ -35,7 +37,7 @@ self.onmessage = (event) => {
       message.minY = output.minY;
       message.maxY = output.maxY;
       message.buildMs = performance.now() - started;
-      self.postMessage(message, [message.position, message.normal, message.color]);
+      self.postMessage(message, [message.position, message.normal, message.color, message.overlay]);
     } else if (message.type === 'scatter') {
       const started = performance.now();
       message.data = floatBuffer(message.data, message.floats);
