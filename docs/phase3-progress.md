@@ -124,11 +124,23 @@ presets (92-100) use the wave 2 combo scheduling.
 
 ## What's next
 
-1. Wave 1: create the five worktrees (see How to resume) and start the five engineers on
-   `p3/origin`, `p3/colliders`, `p3/water-regions`, `p3/fauna-challenges` and `p3/high-altitude`,
-   each with the contract sections listed above and appendix A's file ownership.
+PAUSED HERE (2026-10-03, at the owner's request). Wave 1 was stopped mid-build. Each engineer's
+work is committed and pushed on its branch; nothing from wave 1 is merged into `v2-phase3` yet.
+
+| Branch | Worktree | State at the pause |
+| --- | --- | --- |
+| `p3/origin` | `.claude/worktrees/p3-origin` | 10 commits, clean |
+| `p3/colliders` | `.claude/worktrees/p3-colliders` | 8 commits, clean |
+| `p3/water-regions` | `.claude/worktrees/p3-water-regions` | 7 commits, clean |
+| `p3/fauna-challenges` | `.claude/worktrees/p3-fauna-challenges` | 6 commits, clean |
+| `p3/high-altitude` | `.claude/worktrees/p3-high-altitude` | 7 commits plus one "save in-progress" commit (unverified sky.js and high-altitude.json) |
+
+To resume:
+1. Relaunch wave 1 with `.claude/orchestration/p3-wave1.js`. Each engineer runs `git status` and
+   `git log v2-phase3..HEAD` first, reviews what the previous run left, and continues its scope.
+   Each branch's own subsection in this file records its done / next state.
 2. Before migrating the rings, engineer 4 records `tools/lab/fixtures/rings-golden.json` from the
-   unmodified Phase 2 code.
+   unmodified Phase 2 code (check whether it already exists on `p3/fauna-challenges`).
 3. Wave 1 integration pass (I1), then wave 2 step 2.0.
 
 ## Open issues
