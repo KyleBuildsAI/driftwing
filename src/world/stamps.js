@@ -1100,6 +1100,34 @@ export function basinReach(stamp, x, z) {
 }
 
 /**
+ * Whether (x, z) lies inside a basin's lobed shoreline (basinReach < radius), computed without
+ * returning a double from any call (the water query's hot path stays allocation-free).
+ */
+export function basinContains(stamp, x, z) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const distanceSq = dx * dx + dz * dz;
+  const limit = stamp.radius * (1 + BASIN_LOBE_MAX);
+  if (distanceSq >= limit * limit) return false;
+  if (distanceSq === 0) return true;
+  const distance = Math.sqrt(distanceSq);
+  const cosAngle = dx / distance;
+  const sinAngle = dz / distance;
+  // The 3- and 5-lobe waves of basinLobe, written out.
+  let real = 1;
+  let imaginary = 0;
+  let waveA = 0;
+  for (let step = 1; step <= 5; step++) {
+    const nextReal = real * cosAngle - imaginary * sinAngle;
+    imaginary = real * sinAngle + imaginary * cosAngle;
+    real = nextReal;
+    if (step === 3) waveA = imaginary * stamp.lobeCosA + real * stamp.lobeSinA;
+  }
+  const waveB = imaginary * stamp.lobeCosB + real * stamp.lobeSinB;
+  return distance < stamp.radius * (1 + BASIN_LOBE_MAX * (0.6 * waveA + 0.4 * waveB));
+}
+
+/**
  * Blends the ground toward a bowl profile: where the ground is higher it is cut toward the profile
  * by cutMask, where lower it is lifted by liftMask (each 0..1). With both masks at 1 the result IS
  * the profile; with both at 0 it is the ground, so the edits fade out smoothly.

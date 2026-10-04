@@ -21,7 +21,7 @@
 // flatten (thin films on the strip).
 //
 // Pure: imports only stamps.js, no DOM, so the terrain worker runs exactly this code.
-import { basinReach, terraceShelfAt } from './stamps.js';
+import { basinContains, basinReach, terraceShelfAt } from './stamps.js';
 
 export const WATER_KINDS = Object.freeze(['lake', 'pool', 'thin']);
 export const WATER_LEVEL_MODES = Object.freeze(['basin', 'absolute', 'aboveGround']);
@@ -169,7 +169,7 @@ export function waterOutlineContains(record, x, z) {
   if (x < bounds.minX || x > bounds.maxX || z < bounds.minZ || z > bounds.maxZ) return false;
   const stamp = record.basin;
   switch (stamp.kind) {
-    case 6: return basinReach(stamp, x, z) < stamp.radius;
+    case 6: return basinContains(stamp, x, z);
     case 7: {
       const dx = x - stamp.x;
       const dz = z - stamp.z;

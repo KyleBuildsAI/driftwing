@@ -112,14 +112,9 @@ export function oceanSwellScale(t) {
   return scale < 0.7 ? 0.7 : scale > 1.2 ? 1.2 : scale;
 }
 
-/** A wave's phase (rad) at surface parameter (x, z) and time t. */
-function wavePhase(wave, x, z, t) {
-  const cycles = (wave.angularSpeed * t) / TWO_PI + wave.phaseSeed;
-  return TWO_PI * (x * wave.frequencyX + z * wave.frequencyZ - cycles);
-}
-
-// The surface parameter found by inverting the swell's horizontal displacement (see swellParameter).
-const parameter = new Float64Array(2);
+// The surface parameter found by inverting the swell's horizontal displacement (see swellParameter),
+// and the swell height (oceanHeightInto): doubles kept in a typed array, never returned.
+const parameter = new Float64Array(3);
 
 /**
  * The undisplaced surface parameter whose displaced position is (x, z): the Gerstner swell moves
@@ -135,7 +130,8 @@ function swellParameter(x, z, t, swellScale, waves) {
     let shiftZ = 0;
     for (let index = 0; index < waves.swell.length; index++) {
       const wave = waves.swell[index];
-      const horizontal = Math.cos(wavePhase(wave, px, pz, t)) * wave.amplitude * swellScale * wave.steepness;
+      const theta = TWO_PI * (px * wave.frequencyX + pz * wave.frequencyZ - (wave.angularSpeed * t) / TWO_PI - wave.phaseSeed);
+      const horizontal = Math.cos(theta) * wave.amplitude * swellScale * wave.steepness;
       shiftX += horizontal * wave.directionX;
       shiftZ += horizontal * wave.directionZ;
     }
@@ -152,13 +148,20 @@ function swellParameter(x, z, t, swellScale, waves) {
  * waves the ocean shader displaces its vertices by.
  */
 export function oceanHeight(x, z, t, swellScale, waves) {
+  oceanHeightInto(x, z, t, swellScale, waves);
+  return parameter[2];
+}
+
+/** oceanHeight written into parameter[2] (the query's hot path returns no double, so boxes none). */
+function oceanHeightInto(x, z, t, swellScale, waves) {
   swellParameter(x, z, t, swellScale, waves);
   let height = 0;
   for (let index = 0; index < waves.swell.length; index++) {
     const wave = waves.swell[index];
-    height += Math.sin(wavePhase(wave, parameter[0], parameter[1], t)) * wave.amplitude * swellScale;
+    const theta = TWO_PI * (parameter[0] * wave.frequencyX + parameter[1] * wave.frequencyZ - (wave.angularSpeed * t) / TWO_PI - wave.phaseSeed);
+    height += Math.sin(theta) * wave.amplitude * swellScale;
   }
-  return height;
+  parameter[2] = height;
 }
 
 /**
@@ -176,7 +179,7 @@ export function oceanSample(x, z, t, swellScale, waves, out) {
   let velocityZ = 0;
   for (let index = 0; index < waves.swell.length; index++) {
     const wave = waves.swell[index];
-    const theta = wavePhase(wave, parameter[0], parameter[1], t);
+    const theta = TWO_PI * (parameter[0] * wave.frequencyX + parameter[1] * wave.frequencyZ - (wave.angularSpeed * t) / TWO_PI - wave.phaseSeed);
     const sine = Math.sin(theta);
     const cosine = Math.cos(theta);
     const amplitude = wave.amplitude * swellScale;
@@ -232,45 +235,59 @@ export function createWaterQuery({ world, effects = null, windDirection, clock =
   const latticeKeys = new Float64Array(LATTICE_WINDOW * LATTICE_WINDOW).fill(NaN);
   const latticeHeights = new Float64Array(LATTICE_WINDOW * LATTICE_WINDOW);
   // Doubles written per query live in a typed array (no boxing): the ground and the funnel dip.
-  const scratch = new Float64Array(2);
+  const scratch = new Float64Array(3);
   const GROUND = 0;
+  const DIP = 1;
+  const SWELL = 2;
   const swellScratch = { height: 0, normalX: 0, normalY: 1, normalZ: 0, velocityX: 0, velocityY: 0, velocityZ: 0 };
   const counters = { queries: 0, samples: 0, latticeMisses: 0 };
 
-  /** worldgen's heightAt on the LOD0 lattice point (i, j), cached. */
-  function latticeHeight(i, j) {
+  /**
+   * The cache slot of LOD0 lattice point (i, j), holding worldgen's heightAt there (latticeHeights;
+   * filled on a miss). Slots are small integers, so nothing is boxed.
+   */
+  function latticeSlot(i, j) {
     const key = i * 1048576 + j;
     const slot = ((i & (LATTICE_WINDOW - 1)) << 6) | (j & (LATTICE_WINDOW - 1));
-    if (latticeKeys[slot] === key) return latticeHeights[slot];
-    counters.latticeMisses++;
-    const height = heightAtLattice(i * gridStep, j * gridStep);
-    latticeKeys[slot] = key;
-    latticeHeights[slot] = height;
-    return height;
+    if (latticeKeys[slot] !== key) {
+      counters.latticeMisses++;
+      latticeHeights[slot] = heightAtLattice(i * gridStep, j * gridStep);
+      latticeKeys[slot] = key;
+    }
+    return slot;
   }
 
-  /** worldgen.groundHeight (the collision surface) through the lattice cache: the same two triangles. */
-  function groundAt(x, z) {
+  /**
+   * worldgen.groundHeight (the collision surface) through the lattice cache, with the same two
+   * triangles and the same arithmetic (bit-identical), written into scratch[GROUND].
+   */
+  function groundInto(x, z) {
     const gx = x / gridStep;
     const gz = z / gridStep;
     const i = Math.floor(gx);
     const j = Math.floor(gz);
     const fx = gx - i;
     const fz = gz - j;
-    const h10 = latticeHeight(i + 1, j);
-    const h01 = latticeHeight(i, j + 1);
+    const slot10 = latticeSlot(i + 1, j);
+    const slot01 = latticeSlot(i, j + 1);
     if (fx + fz <= 1) {
-      const h00 = latticeHeight(i, j);
-      return h00 + (h10 - h00) * fx + (h01 - h00) * fz;
+      const h00 = latticeHeights[latticeSlot(i, j)];
+      scratch[GROUND] = h00 + (latticeHeights[slot10] - h00) * fx + (latticeHeights[slot01] - h00) * fz;
+      return;
     }
-    const h11 = latticeHeight(i + 1, j + 1);
-    return h11 + (h01 - h11) * (1 - fx) + (h10 - h11) * (1 - fz);
+    const h11 = latticeHeights[latticeSlot(i + 1, j + 1)];
+    scratch[GROUND] = h11 + (latticeHeights[slot01] - h11) * (1 - fx) + (latticeHeights[slot10] - h11) * (1 - fz);
   }
 
-  /** The ground at (x, z), measured once per query (scratch[GROUND] is NaN until then). */
-  function queryGround(x, z) {
-    if (scratch[GROUND] !== scratch[GROUND]) scratch[GROUND] = groundAt(x, z);
+  /** worldgen.groundHeight through the lattice cache (callers outside the hot path). */
+  function groundAt(x, z) {
+    groundInto(x, z);
     return scratch[GROUND];
+  }
+
+  /** Measures the ground at (x, z) once per query into scratch[GROUND] (NaN until then). */
+  function measureGround(x, z) {
+    if (scratch[GROUND] !== scratch[GROUND]) groundInto(x, z);
   }
 
   /** The highest local body whose surface covers (x, z) at its static level, or null. */
@@ -283,15 +300,22 @@ export function createWaterQuery({ world, effects = null, windDirection, clock =
       const bounds = record.bounds;
       if (x < bounds.minX || x > bounds.maxX || z < bounds.minZ || z > bounds.maxZ) continue;
       if (!waterOutlineContains(record, x, z)) continue;
-      if (queryGround(x, z) < record.level) best = record;
+      measureGround(x, z);
+      if (scratch[GROUND] < record.level) best = record;
     }
     return best;
   }
 
-  /** The whirlpool funnels' dip (m, >= 0) at (x, z). */
-  function funnelDip(x, z) {
-    if (waterEffects === null || !(waterEffects.activeVortices > 0)) return 0;
-    return seaLevel - waterEffects.surfaceHeightAt(x, z);
+  /** The whirlpool funnels' dip (m, >= 0) at (x, z), into scratch[DIP]. */
+  function funnelDipInto(x, z) {
+    scratch[DIP] = waterEffects === null || !(waterEffects.activeVortices > 0) ? 0 : seaLevel - waterEffects.surfaceHeightAt(x, z);
+  }
+
+  /** The swell scale at flight time t (oceanSwellScale, written out), into scratch[SWELL]. */
+  function swellInto(t) {
+    const strength = 1 + 0.1 * Math.sin(t * 0.011) + 0.05 * Math.sin(t * 0.037 + 1.7);
+    const scale = 0.75 + 0.35 * strength;
+    scratch[SWELL] = scale < 0.7 ? 0.7 : scale > 1.2 ? 1.2 : scale;
   }
 
   /**
@@ -305,8 +329,12 @@ export function createWaterQuery({ world, effects = null, windDirection, clock =
     scratch[GROUND] = NaN;
     const lake = world.hasWaters ? lakeAt(x, z) : null;
     let height = lake === null ? -Infinity : lake.level;
-    if (queryGround(x, z) < seaLevel) {
-      const ocean = seaLevel + oceanHeight(x, z, t, oceanSwellScale(t), waves) - funnelDip(x, z);
+    measureGround(x, z);
+    if (scratch[GROUND] < seaLevel) {
+      swellInto(t);
+      oceanHeightInto(x, z, t, scratch[SWELL], waves);
+      funnelDipInto(x, z);
+      const ocean = seaLevel + parameter[2] - scratch[DIP];
       if (ocean > height) height = ocean;
     }
     return height;
@@ -323,11 +351,14 @@ export function createWaterQuery({ world, effects = null, windDirection, clock =
     counters.samples++;
     scratch[GROUND] = NaN;
     const lake = world.hasWaters ? lakeAt(x, z) : null;
-    const ground = queryGround(x, z);
+    measureGround(x, z);
+    const ground = scratch[GROUND];
     let oceanSurface = -Infinity;
     if (ground < seaLevel) {
-      oceanSample(x, z, t, oceanSwellScale(t), waves, swellScratch);
-      oceanSurface = seaLevel + swellScratch.height - funnelDip(x, z);
+      swellInto(t);
+      oceanSample(x, z, t, scratch[SWELL], waves, swellScratch);
+      funnelDipInto(x, z);
+      oceanSurface = seaLevel + swellScratch.height - scratch[DIP];
     }
     if (lake !== null && lake.level >= oceanSurface) {
       out.height = lake.level;
@@ -381,14 +412,16 @@ export function createWaterQuery({ world, effects = null, windDirection, clock =
   function isWater(x, z) {
     scratch[GROUND] = NaN;
     if (world.hasWaters && lakeAt(x, z) !== null) return true;
-    return queryGround(x, z) < seaLevel;
+    measureGround(x, z);
+    return scratch[GROUND] < seaLevel;
   }
 
   /** Whether (x, z) is open ocean: the sea, with no local body over it (static, no time). */
   function isOcean(x, z) {
     scratch[GROUND] = NaN;
     if (world.hasWaters && lakeAt(x, z) !== null) return false;
-    return queryGround(x, z) < seaLevel;
+    measureGround(x, z);
+    return scratch[GROUND] < seaLevel;
   }
 
   /**
@@ -399,7 +432,10 @@ export function createWaterQuery({ world, effects = null, windDirection, clock =
     scratch[GROUND] = NaN;
     const lake = world.hasWaters ? lakeAt(x, z) : null;
     if (lake !== null) out[offset] = lake.level;
-    else out[offset] = queryGround(x, z) < seaLevel ? seaLevel : -Infinity;
+    else {
+      measureGround(x, z);
+      out[offset] = scratch[GROUND] < seaLevel ? seaLevel : -Infinity;
+    }
   }
 
   return {
