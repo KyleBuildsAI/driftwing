@@ -4,6 +4,8 @@ import * as TSL from 'three/tsl';
 import { clamp } from '../core/util.js';
 import { CONFIG } from '../core/config.js';
 import { createChunkBuilder } from './chunkBuilder.js';
+import { curvedPositionNode } from '../render/curvature.js';
+import { handoffDitherNode, handoffPresenceNode } from './farField.js';
 
 /**
  * TERRAIN: the infinite streamed world surface.
@@ -19,6 +21,13 @@ import { createChunkBuilder } from './chunkBuilder.js';
  * - Terrain material: vertex colours, per-face normals, cloud shadows on the
  *   sun term only, a soft underwater depth gradient (faceted lighting and colour
  *   steps eased out below the waterline) and an animated shoreline foam band.
+ * - High altitude (Phase 3, contract g.3 / g.4): while the curvature blend is on (camera above 5 km)
+ *   or the far field takes over, the chunks draw with variants of the two materials that lower every
+ *   vertex by the planet curvature and keep only their share of the handoff band
+ *   (setFarFieldHandoff: the far field takes the rest through the complementary dither). Above the
+ *   band (innerRadius 0) the terrain stops drawing, and its streaming pauses more than 20 km above the
+ *   ground (a descent finds the ground ready; collision never depended on it). Below 5 km the chunks
+ *   keep the original materials, so the golden-hour opening is untouched.
  */
 export function createTerrainSystem(ctx) {
   const { scene, camera, world, state, bus, uniforms } = ctx;
@@ -83,6 +92,10 @@ export function createTerrainSystem(ctx) {
   // keep a crisp white rim through the haze.
   const FOAM_FADE_NEAR = 350;
   const FOAM_FADE_FAR = 1300;
+  // High altitude: the streaming pauses with the terrain hidden this far above the ground (m), and the
+  // vegetation hides once the handoff band comes within this margin of its reach (m).
+  const STREAMING_PAUSE_HEIGHT = 20000;
+  const VEGETATION_HANDOFF_MARGIN = 400;
 
   const builderConfig = {
     chunkSize: CHUNK_SIZE,
@@ -232,6 +245,32 @@ export function createTerrainSystem(ctx) {
   fadeMaterial.opacityNode = lodFadeOpacity;
   fadeMaterial.alphaTestNode = lodFadeThreshold;
   fadeMaterial.name = 'terrain-lod-fade';
+
+  // High-altitude variants (curvature and the far-field handoff band). The band's uniforms are the
+  // terrain's: the far field reads them for its complementary dither (terrain.handoffUniforms).
+  const handoffUniforms = {
+    innerRadius: uniform(1e9),
+    fade: uniform(1),
+    weight: uniform(0),
+  };
+  const handoffKeep = Fn(() => {
+    const offsetX = positionWorld.x.sub(cameraPosition.x);
+    const offsetZ = positionWorld.z.sub(cameraPosition.z);
+    const distance = offsetX.mul(offsetX).add(offsetZ.mul(offsetZ)).sqrt();
+    return handoffDitherNode(TSL).greaterThanEqual(handoffPresenceNode(TSL, handoffUniforms, distance));
+  })();
+  const curvedPosition = curvedPositionNode(ctx);
+  const highMaterial = material.clone();
+  highMaterial.positionNode = curvedPosition;
+  highMaterial.maskNode = handoffKeep;
+  highMaterial.name = 'terrain-high';
+  const highFadeMaterial = fadeMaterial.clone();
+  highFadeMaterial.positionNode = curvedPosition;
+  highFadeMaterial.maskNode = handoffKeep;
+  highFadeMaterial.name = 'terrain-lod-fade-high';
+  // The materials chunks draw with now (the originals, or the high-altitude variants).
+  let activeMaterial = material;
+  let activeFadeMaterial = fadeMaterial;
 
   // Vegetation is GPU-instanced through per-instance geometry attributes (placement, scale, tint)
   // on pooled per-chunk meshes: every mesh of a type then shares ONE node build. (An InstancedMesh
@@ -722,7 +761,7 @@ export function createTerrainSystem(ctx) {
     geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(floats), 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(floats), 3));
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(CHUNK_SIZE / 2, 0, CHUNK_SIZE / 2), CHUNK_SIZE);
-    const mesh = new THREE.Mesh(geometry, material);
+    const mesh = new THREE.Mesh(geometry, activeMaterial);
     mesh.name = `terrain-lod${lod}`;
     mesh.matrixAutoUpdate = false;
     mesh.receiveShadow = true;
@@ -740,7 +779,7 @@ export function createTerrainSystem(ctx) {
   }
   function releaseChunkMesh(mesh) {
     mesh.visible = false;
-    mesh.material = material;
+    mesh.material = activeMaterial;
     mesh.userData.fadeOpacity = 1;
     meshPools[mesh.userData.terrainLod].push(mesh);
   }
@@ -797,6 +836,8 @@ export function createTerrainSystem(ctx) {
   const smoothedVelocity = new THREE.Vector3();
   const lastFocus = new THREE.Vector3(NaN, 0, NaN);
   const settingsView = { viewRings: 8, vegetationRings: 2, vegetationDensity: 1 };
+  // High altitude: the material mode, the hidden terrain, the paused streaming, the hidden vegetation.
+  const high = { on: false, hidden: false, paused: false, vegetationHidden: false, switches: 0 };
 
   function chunkKey(chunkX, chunkZ) {
     return (chunkX + 32768) * 65536 + (chunkZ + 32768);
@@ -1018,7 +1059,7 @@ export function createTerrainSystem(ctx) {
     chunk.vegetationDensity = -1;
   }
   function refreshVegetationVisibility(chunk) {
-    const terrainShown = chunk.displayedLod >= 0;
+    const terrainShown = chunk.displayedLod >= 0 && !high.vegetationHidden;
     const castsShadow = chunk.ring <= VEGETATION_SHADOW_RINGS;
     for (const mesh of chunk.vegetationMeshes) {
       const isFlower = mesh.userData.vegetationType === VEGETATION.FLOWERS;
@@ -1032,10 +1073,10 @@ export function createTerrainSystem(ctx) {
   function beginLodFade(chunk, incoming) {
     finishLodFade(chunk);
     const outgoing = chunk.mesh;
-    outgoing.material = fadeMaterial;
+    outgoing.material = activeFadeMaterial;
     outgoing.userData.fadeOpacity = 1;
     outgoing.userData.fadeFlip = 1;
-    incoming.material = fadeMaterial;
+    incoming.material = activeFadeMaterial;
     incoming.userData.fadeOpacity = 0;
     incoming.userData.fadeFlip = 0;
     chunk.fadeMesh = outgoing;
@@ -1052,7 +1093,7 @@ export function createTerrainSystem(ctx) {
     releaseChunkMesh(chunk.fadeMesh);
     chunk.fadeMesh = null;
     if (chunk.mesh !== null) {
-      chunk.mesh.material = material;
+      chunk.mesh.material = activeMaterial;
       chunk.mesh.userData.fadeOpacity = 1;
     }
   }
@@ -1499,9 +1540,13 @@ export function createTerrainSystem(ctx) {
   // Two empty (degenerate) shadow-casting chunk meshes do the same for the terrain material and its
   // LOD-fade variant, so the first streamed chunks and the first LOD swap never wait on a compile.
   const warmupMeshes = [];
-  const terrainWarmupMeshes = [acquireChunkMesh(1), acquireChunkMesh(1)];
+  const terrainWarmupMeshes = [acquireChunkMesh(1), acquireChunkMesh(1), acquireChunkMesh(1), acquireChunkMesh(1)];
   terrainWarmupMeshes[1].material = fadeMaterial;
   terrainWarmupMeshes[1].userData.fadeOpacity = 0.5;
+  // The high-altitude variants compile behind the loading fade too, so the 5 km switch never hitches.
+  terrainWarmupMeshes[2].material = highMaterial;
+  terrainWarmupMeshes[3].material = highFadeMaterial;
+  terrainWarmupMeshes[3].userData.fadeOpacity = 0.5;
   for (const mesh of terrainWarmupMeshes) {
     mesh.frustumCulled = false;
     mesh.visible = true;
@@ -1541,6 +1586,45 @@ export function createTerrainSystem(ctx) {
     qualityDirty = true;
   });
 
+  // ---- High altitude ---------------------------------------------------------------------------------
+
+  /** Puts every chunk mesh (and the pool) on the original or the high-altitude materials. */
+  function setHighMode(on) {
+    if (high.on === on) return;
+    high.on = on;
+    high.switches++;
+    activeMaterial = on ? highMaterial : material;
+    activeFadeMaterial = on ? highFadeMaterial : fadeMaterial;
+    for (const chunk of chunks.values()) {
+      if (chunk.mesh !== null) chunk.mesh.material = chunk.fadeMesh !== null ? activeFadeMaterial : activeMaterial;
+      if (chunk.fadeMesh !== null) chunk.fadeMesh.material = activeFadeMaterial;
+    }
+    for (const pool of meshPools) {
+      for (const mesh of pool) mesh.material = activeMaterial;
+    }
+  }
+
+  function setVegetationHidden(hidden) {
+    if (high.vegetationHidden === hidden) return;
+    high.vegetationHidden = hidden;
+    for (const chunk of chunks.values()) refreshVegetationVisibility(chunk);
+  }
+
+  /** Per frame: the material mode, the hidden terrain and the paused streaming. Returns true to stream. */
+  function updateHighAltitude() {
+    const handoffActive = handoffUniforms.innerRadius.value < 1e8;
+    setHighMode(uniforms.curvatureAmount.value > 0 || handoffActive);
+    const hidden = handoffActive && handoffUniforms.innerRadius.value <= 0;
+    if (hidden !== high.hidden) {
+      high.hidden = hidden;
+      group.visible = !hidden;
+    }
+    setVegetationHidden(handoffActive && handoffUniforms.innerRadius.value < vegetationFadeRadius.value + VEGETATION_HANDOFF_MARGIN);
+    const ground = Math.max(world.groundHeight(camera.position.x, camera.position.z), CONFIG.WATER_LEVEL);
+    high.paused = hidden && camera.position.y - ground > STREAMING_PAUSE_HEIGHT;
+    return !high.paused;
+  }
+
   const statsFrustum = new THREE.Frustum();
   const statsMatrix = new THREE.Matrix4();
 
@@ -1560,6 +1644,28 @@ export function createTerrainSystem(ctx) {
 
   return {
     material,
+    /** The far-field handoff band's uniforms ({ innerRadius, fade, weight }), shared with the far field. */
+    handoffUniforms,
+
+    /**
+     * The radius (m) around the player the streamed chunks always cover: the view rings. The far field
+     * lays its handoff band inside it.
+     */
+    getCoverageRadius() {
+      return settingsView.viewRings * CHUNK_SIZE;
+    },
+
+    /**
+     * Hands the ground beyond innerRadius (m, horizontal from the camera) to the far field, dissolving
+     * over the fade (m) inside it, with the far field's weight (0..1, its own fade-in; default 1).
+     * innerRadius Infinity gives the whole ground back to the terrain (the original materials once the
+     * curvature is off too); 0 hides the terrain.
+     */
+    setFarFieldHandoff({ innerRadius, fade = 1, weight = 1 } = {}) {
+      handoffUniforms.innerRadius.value = Number.isFinite(innerRadius) ? Math.max(0, innerRadius) : 1e9;
+      handoffUniforms.fade.value = Math.max(1, Number.isFinite(fade) ? fade : 1);
+      handoffUniforms.weight.value = Number.isFinite(weight) ? clamp(weight, 0, 1) : 1;
+    },
 
     update(dt, realDt) {
       newVegetationMeshesThisFrame = 0;
@@ -1570,12 +1676,18 @@ export function createTerrainSystem(ctx) {
         if (warmupFramesLeft === 0) finishWarmup();
       }
       if (qualityDirty) readQuality();
+      const streaming = updateHighAltitude();
       if (scene.fog) {
         foamFogNear.value = scene.fog.near;
         foamFogFar.value = Math.max(scene.fog.far, scene.fog.near + 1);
       }
       const centerChanged = updateFocus(dt, realDt);
       replanTimer -= realDt;
+      if (!streaming) {
+        // Far above a hidden terrain: nothing new is planned or built until the craft comes down.
+        updateLodFades(realDt);
+        return;
+      }
       if (centerChanged || qualityDirty) {
         qualityDirty = false;
         replanTimer = REPLAN_INTERVAL;
@@ -1651,6 +1763,7 @@ export function createTerrainSystem(ctx) {
         avgBuildMs: Math.round(buildMsAverage * 100) / 100,
         viewRings: settingsView.viewRings,
         readyAtMs: firstReadyAtMs < 0 ? null : Math.round(firstReadyAtMs),
+        high: { on: high.on, hidden: high.hidden, paused: high.paused, vegetationHidden: high.vegetationHidden, switches: high.switches, innerRadius: Math.round(Math.min(handoffUniforms.innerRadius.value, 1e9)) },
         readyAfterCreateMs: firstReadyAtMs < 0 ? null : Math.round(firstReadyAtMs - createdAtMs),
       };
     },
@@ -1669,6 +1782,8 @@ export function createTerrainSystem(ctx) {
       for (const vegetationMaterial of vegetationMaterials) vegetationMaterial.dispose();
       material.dispose();
       fadeMaterial.dispose();
+      highMaterial.dispose();
+      highFadeMaterial.dispose();
       chunks.clear();
       fadingChunks.length = 0;
       readyResults.length = 0;

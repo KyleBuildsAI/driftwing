@@ -17,6 +17,7 @@ import { createEmitterEngine } from './spawns/engines/emitterEngine.js';
 import { createLightEffectEngine } from './spawns/engines/lightEffectEngine.js';
 import { createFlightController } from './flight/FlightController.js';
 import { createFaunaEngine } from './spawns/engines/faunaEngine.js';
+import { createFarFieldSystem } from './world/farField.js';
 import { createFxSystem } from './render/fx.js';
 import { createInputSystem } from './input/InputManager.js';
 import { createFrameLoop } from './core/loop.js';
@@ -373,6 +374,7 @@ async function boot() {
     // The regional weather drives the sky through a sky modifier, so it comes right after it.
     ['weather', createWeatherSystem],
     ['terrain', createTerrainSystem],
+    ['farField', createFarFieldSystem],
     ['water', createWaterSystem],
     ['clouds', createCloudSystem],
     ['birds', createBirdSystem],
@@ -430,7 +432,7 @@ async function boot() {
   beginPrewarm();
   const fadeStatus = document.getElementById('fade-status');
   if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
-  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'weather', 'sky', 'water', 'clouds', 'birds', 'spawns', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind', 'spawnDebugger'];
+  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'farField', 'weather', 'sky', 'water', 'waterBodies', 'clouds', 'birds', 'spawns', 'landmarks', 'journal', 'waypoints', 'rings', 'challenges', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'challengeHud', 'windOverlay', 'debugWind', 'spawnDebugger'];
 
   // ---- Flight-state snapshot for the copilot (local or remote brain) -----------------
   ctx.getFlightState = () => {
