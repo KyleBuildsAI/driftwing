@@ -18,6 +18,14 @@ export const PAGES = Object.freeze({
   v2: resolve(ROOT, 'v2/index.html'),
 });
 
+/**
+ * One three.js core: the bare specifier 'three' (imported by three-mesh-bvh and by three's own
+ * addons such as BufferGeometryUtils) resolves to 'three/webgpu', the build the game itself imports.
+ * Only the exact specifier is aliased: 'three/webgpu', 'three/tsl' and 'three/addons/...' are left
+ * alone. Applies to the dev server, its dependency optimizer, both builds and the workers.
+ */
+const THREE_ALIAS = Object.freeze([{ find: /^three$/, replacement: 'three/webgpu' }]);
+
 /** Game directories whose bare URL (/v1, /v2) redirects to the directory URL (/v1/, /v2/). */
 const GAME_DIRECTORIES = Object.freeze(['v1', 'v2']);
 
@@ -60,6 +68,7 @@ export default defineConfig(({ mode }) => {
   const single = mode === 'single';
   return {
     appType: 'mpa',
+    resolve: { alias: THREE_ALIAS },
     server: ORIGIN,
     preview: ORIGIN,
     build: {

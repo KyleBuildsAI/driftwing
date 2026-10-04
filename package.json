@@ -34,7 +34,8 @@
     "lab:terrain": "node tools/lab/terrain.mjs"
   },
   "dependencies": {
-    "three": "0.184.0"
+    "three": "0.184.0",
+    "three-mesh-bvh": "0.9.15"
   },
   "devDependencies": {
     "puppeteer-core": "24.43.1",

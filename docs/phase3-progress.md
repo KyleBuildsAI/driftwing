@@ -104,8 +104,20 @@ presets (92-100) use the wave 2 combo scheduling.
 
 - Branch `v2-phase3` created from tag `v2-phase2`.
 - The Phase 3 contracts: docs/specs/phase3-contract.md, listed in docs/specs/README.md.
-- In progress: three-mesh-bvh 0.9.15 (exact) and the `'three'` -> `'three/webgpu'` alias in
-  `vite.config.js`, with its dev and build checks (contract b.7); committed next.
+- three-mesh-bvh 0.9.15 installed (exact) and the `'three'` -> `'three/webgpu'` alias
+  (contract b.7), verified once each (2026-10-03):
+  - dev server (port from `findFreePort`): V2 smoke 0 errors and 0 warnings, screenshots differ,
+    and three-mesh-bvh imported inside the running game built a BVH over the game's own
+    `BoxGeometry`; `raycastFirst` hit at 45 m with a point that is an instance of the game's
+    `THREE.Vector3` (one core), `window.__THREE__` "184";
+  - `npm run build:single`: V1 SHA-256 matches; built V2 and the built shell smoke with 0 errors and
+    0 warnings, screenshots differ; the V2 bundle holds one three.js core (one `Multiple instances`
+    guard string);
+  - a production build of a probe page importing `three/webgpu`, BufferGeometryUtils (bare
+    `'three'`) and three-mesh-bvh through the project's own alias: one core, the raycast correct,
+    0 console errors or warnings, no duplicate-three warning (the probe page is kept outside git,
+    in `.claude/orchestration/bvh-probe/`);
+  - `npm run test:v1` 2/2.
 
 ## What's next
 
