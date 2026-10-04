@@ -5,11 +5,11 @@
 //
 // Messages in:
 //   { type: 'init', seed, options }                  the world (the same options as the terrain worker)
-//   { type: 'tile', id, x, z, size, resolution, fields, cache }
+//   { type: 'tile', id, x, z, size, resolution, fields, stamps, cache }   (stamps false: the bare world)
 // Messages out:
 //   { type: 'ready', cache: 'indexeddb' | 'off', cacheError? }
 //   { type: 'cache', cache: 'off', cacheError }       the cache failed later; tiles go on without it
-//   { type: 'tile', id, height?, color?, biome?, fromCache, buildMs }   (the arrays' buffers transferred)
+//   { type: 'tile', id, height?, color?, biome?, surface?, albedo?, fromCache, buildMs }   (buffers transferred)
 //   { type: 'error', id?, message, stack }
 import { createWorldGen } from './worldgen.js';
 import { createMapTileGenerator, mapTileCacheTag, normalizeTileRequest } from './mapTileGen.js';
@@ -21,9 +21,13 @@ const STORE = 'tiles';
 const MAX_CACHED_TILES = 1200;
 /** Writes between two prunes of the cache. */
 const PRUNE_EVERY = 64;
-const FIELD_TYPES = Object.freeze({ height: Float32Array, color: Uint8ClampedArray, biome: Uint8Array });
+const FIELD_TYPES = Object.freeze({ height: Float32Array, color: Uint8ClampedArray, biome: Uint8Array, surface: Float32Array, albedo: Uint8ClampedArray });
+/** Fields with four bytes (RGBA) per sample. */
+const RGBA_FIELDS = Object.freeze(['color', 'albedo']);
 
 let generator = null;
+/** The same world without site stamps, for coarse tiles (mapTileGen.js, the stamps request flag). */
+let bareGenerator = null;
 let cacheTag = '';
 let database = null;
 let writesSincePrune = 0;
@@ -47,7 +51,7 @@ function openDatabase() {
 }
 
 function tileKey(request) {
-  return `${cacheTag}|${request.x}|${request.z}|${request.size}|${request.resolution}|${request.fields.join('+')}`;
+  return `${cacheTag}|${request.x}|${request.z}|${request.size}|${request.resolution}|${request.fields.join('+')}${request.stamps ? '' : '|bare'}`;
 }
 
 async function readCached(key) {
@@ -100,7 +104,7 @@ function fromRecord(record, request) {
   for (const field of request.fields) {
     const value = record[field];
     const Type = FIELD_TYPES[field];
-    if (!(value instanceof Type) || value.length !== (field === 'color' ? count * 4 : count)) return null;
+    if (!(value instanceof Type) || value.length !== (RGBA_FIELDS.includes(field) ? count * 4 : count)) return null;
     tile[field] = value;
   }
   return tile;
@@ -118,6 +122,7 @@ function postError(id, error) {
 
 async function initialise(message) {
   generator = createMapTileGenerator(createWorldGen(message.seed, message.options));
+  bareGenerator = createMapTileGenerator(createWorldGen(message.seed, { ...message.options, presets: [] }));
   cacheTag = mapTileCacheTag(message.seed, Array.isArray(message.options.presets) ? message.options.presets : PRESETS);
   try {
     database = await openDatabase();
@@ -145,7 +150,7 @@ async function makeTile(message) {
     }
   }
   if (!tile) {
-    tile = generator.generate(request);
+    tile = (request.stamps ? generator : bareGenerator).generate(request);
     if (useCache && database) {
       try {
         await writeCached(key, tile);

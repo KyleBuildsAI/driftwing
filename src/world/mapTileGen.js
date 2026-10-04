@@ -9,11 +9,22 @@
 //   color   Uint8ClampedArray RGBA, sRGB: the terrain's own face colours (faceColor) under a shaded relief
 //           lit from the north-west, and water tinted by depth
 //   biome   Uint8Array     dominant biome index (world.BIOMES order) from the shared climate
+//   surface Float32Array   the visible surface height (m): the terrain, or the water level over it (the
+//           sea, and from Phase 3 the static level of a local water body, world.waterBodyAt)
+//   albedo  Uint8ClampedArray RGBA, sRGB: the terrain's face colours WITHOUT the relief shading (a lit 3D
+//           mesh shades itself; the far-field planet tiles use it), water by depth; alpha 0 marks water
+//           and 255 land
 // Neighbouring tiles line up: every sample is a pure function of its world position (the relief reads a
 // one-sample border beyond the tile), so a tile set has no seams.
+//
+// stamps (default true): false samples the bare world (no site stamps, no stamp paint). A stamp is at
+// most a few km across, so on a coarse tile (samples kilometres apart) it is a sub-sample detail, while
+// each new 2 km site cell a sample lands in costs a placement pass (about 1.4 ms): the far field's
+// coarse planet tiles ask for the bare world and stay fast. The worker keeps a bare world beside the
+// stamped one; the generator itself always samples the world it was given.
 import { PRESETS } from '../spawns/presets/index.js';
 
-export const MAP_TILE_FIELDS = Object.freeze(['height', 'color', 'biome']);
+export const MAP_TILE_FIELDS = Object.freeze(['height', 'color', 'biome', 'surface', 'albedo']);
 /** Bumped when the tile look changes, so cached tiles from an older look are not reused. */
 export const MAP_TILE_VERSION = 1;
 export const MAP_TILE_MAX_RESOLUTION = 512;
@@ -56,7 +67,7 @@ export function mapTileCacheTag(seed, presets = PRESETS) {
   return `${String(seed).toUpperCase()}|v${MAP_TILE_VERSION}|${hashText(JSON.stringify(placement))}`;
 }
 
-/** Validates a tile request; returns a clean { x, z, size, resolution, fields } or throws. */
+/** Validates a tile request; returns a clean { x, z, size, resolution, fields, stamps } or throws. */
 export function normalizeTileRequest(request) {
   const x = Number(request?.x);
   const z = Number(request?.z);
@@ -69,7 +80,7 @@ export function normalizeTileRequest(request) {
   for (const field of fields) {
     if (!MAP_TILE_FIELDS.includes(field)) throw new Error(`map tile: unknown field "${field}"`);
   }
-  return { x, z, size, resolution, fields: MAP_TILE_FIELDS.filter((field) => fields.includes(field)) };
+  return { x, z, size, resolution, fields: MAP_TILE_FIELDS.filter((field) => fields.includes(field)), stamps: request.stamps !== false };
 }
 
 /**
@@ -86,6 +97,9 @@ export function createMapTileGenerator(world) {
   }
   const faceRgb = new Float32Array(3);
   const climateScratch = { temperature: 0, moisture: 0 };
+  // Local water bodies (Phase 3): world.waterBodyAt(x, z) returns the static body over a point (with its
+  // level, m MSL) or null; a world without it has the sea only.
+  const waterBodyAt = typeof world.waterBodyAt === 'function' ? world.waterBodyAt : null;
   const weightScratch = new Float64Array(5);
 
   function toSrgb(linear) {
@@ -122,6 +136,20 @@ export function createMapTileGenerator(world) {
       result.height = height;
     }
     if (fields.includes('color')) result.color = shade(lattice, x, z, step, resolution, border);
+    if (fields.includes('surface') || fields.includes('albedo')) {
+      const levels = waterLevels(x, z, step, resolution);
+      if (fields.includes('surface')) {
+        const surface = new Float32Array(resolution * resolution);
+        for (let row = 0; row < resolution; row++) {
+          for (let column = 0; column < resolution; column++) {
+            const index = row * resolution + column;
+            surface[index] = Math.max(lattice[(row + 1) * border + column + 1], levels[index]);
+          }
+        }
+        result.surface = surface;
+      }
+      if (fields.includes('albedo')) result.albedo = albedo(lattice, levels, x, z, step, resolution, border);
+    }
     if (fields.includes('biome')) {
       const biome = new Uint8Array(resolution * resolution);
       for (let row = 0; row < resolution; row++) {
@@ -131,6 +159,58 @@ export function createMapTileGenerator(world) {
       result.biome = biome;
     }
     return result;
+  }
+
+  /** The water level (m) over every sample: the sea, or a local body's static level where it is higher. */
+  function waterLevels(x, z, step, resolution) {
+    const levels = new Float64Array(resolution * resolution).fill(waterLevel);
+    if (!waterBodyAt) return levels;
+    for (let row = 0; row < resolution; row++) {
+      const sampleZ = z + (row + 0.5) * step;
+      for (let column = 0; column < resolution; column++) {
+        const body = waterBodyAt(x + (column + 0.5) * step, sampleZ);
+        if (body && Number.isFinite(body.level) && body.level > waterLevel) levels[row * resolution + column] = body.level;
+      }
+    }
+    return levels;
+  }
+
+  /** Writes the water colour for depth metres of water into color at out (sRGB, alpha untouched). */
+  function writeWater(color, out, depth) {
+    const toOpen = smoothstep(0, 6, depth);
+    const toDeep = smoothstep(8, 70, depth);
+    for (let channel = 0; channel < 3; channel++) {
+      const open = WATER_SHALLOW[channel] + (WATER_OPEN[channel] - WATER_SHALLOW[channel]) * toOpen;
+      color[out + channel] = open + (WATER_DEEP[channel] - open) * toDeep;
+    }
+  }
+
+  /** RGBA sRGB face colours without relief, water by depth (alpha 0 water, 255 land). */
+  function albedo(lattice, levels, x, z, step, resolution, border) {
+    const color = new Uint8ClampedArray(resolution * resolution * 4);
+    for (let row = 0; row < resolution; row++) {
+      const sampleZ = z + (row + 0.5) * step;
+      for (let column = 0; column < resolution; column++) {
+        const centre = (row + 1) * border + column + 1;
+        const index = row * resolution + column;
+        const height = lattice[centre];
+        const out = index * 4;
+        if (height < levels[index]) {
+          writeWater(color, out, levels[index] - height);
+          color[out + 3] = 0;
+          continue;
+        }
+        const slopeX = (lattice[centre + 1] - lattice[centre - 1]) / (2 * step);
+        const slopeZ = (lattice[centre + border] - lattice[centre - border]) / (2 * step);
+        const trueLength = Math.sqrt(slopeX * slopeX + slopeZ * slopeZ + 1);
+        world.faceColor(x + (column + 0.5) * step, sampleZ, height, 1 - 1 / trueLength, -slopeX / trueLength, -slopeZ / trueLength, 0.5, faceRgb, 0);
+        color[out] = toSrgb(faceRgb[0]);
+        color[out + 1] = toSrgb(faceRgb[1]);
+        color[out + 2] = toSrgb(faceRgb[2]);
+        color[out + 3] = 255;
+      }
+    }
+    return color;
   }
 
   /** RGBA sRGB colours: face colours with a shaded relief (exaggerated on coarse tiles), water by depth. */
