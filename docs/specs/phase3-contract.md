@@ -61,7 +61,7 @@ it **verbatim**: paste it exactly (same text, same place). Git merges identical 
 
 | file | rule |
 | --- | --- |
-| `src/core/events.js` | new typed events go in `EVENT_TYPES` right AFTER your anchor entry (with its doc comment): origin -> after `craftChanged`; colliders -> after `softCrash`; water/regions -> after `windSourceRemoved`; challenges/fauna -> after `achievement`; high altitude -> after `weatherChanged` |
+| `src/core/events.js` | new typed events go in `EVENT_TYPES` right AFTER your anchor entry (with its doc comment): origin -> after `relaunched`; colliders -> after `softCrash`; water/regions -> after `windSourceRemoved`; challenges/fauna -> after `achievement`; high altitude -> after `weatherChanged` |
 | `src/main.js` uniforms literal | origin: insert `renderOrigin` after the `playerPosition` line. High altitude: insert its uniforms after the `cloudBow` line (the end) |
 | `src/main.js` services | colliders: `ctx.colliders = ...` on the line after `ctx.wind = createWindField(...)`. Water: `ctx.waterQuery = ...` on the line after `ctx.perf = perf;`. Origin: `ctx.origin = ...` on the line after the closing `};` of the `uniforms` literal |
 | `src/main.js` `factories` | farField after `['terrain', ...]`; waterBodies after `['water', ...]`; challenges after `['rings', ...]`; challengeHud after `['copilot', ...]` |
@@ -150,6 +150,9 @@ Simulation state stays in float64 WORLD coordinates. The render origin is applie
 out in the render frame, computed in float64 on the CPU, while `Object3D.position` of every scene
 child (and `camera.position`) keeps meaning WORLD. No system re-positions its objects on a rebase;
 the scene transform moves them all at once, exactly, in the same frame, so there is no pop.
+Objects with `matrixAutoUpdate = false` (terrain chunks, frozen landmark parts) keep working:
+their local matrix holds world values, and the scene's changed matrix forces every `matrixWorld`
+down the tree on a rebase. No code may write `matrixWorld` directly.
 
 Only three kinds of thing need work, and the origin engineer does all of them in wave 1:
 1. shaders that compare `positionWorld` with absolute world values (a.5);

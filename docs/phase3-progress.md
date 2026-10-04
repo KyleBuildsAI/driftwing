@@ -104,6 +104,9 @@ presets (92-100) use the wave 2 combo scheduling.
 
 - Branch `v2-phase3` created from tag `v2-phase2`.
 - The Phase 3 contracts: docs/specs/phase3-contract.md, listed in docs/specs/README.md.
+- Contract review: the origin engineer's events anchor is `relaunched` (clear of the water
+  engineer's `landed` edit), and the floating origin section notes that objects with
+  `matrixAutoUpdate = false` follow a rebase (nothing writes `matrixWorld` directly).
 - three-mesh-bvh 0.9.15 installed (exact) and the `'three'` -> `'three/webgpu'` alias
   (contract b.7), verified once each (2026-10-03):
   - dev server (port from `findFreePort`): V2 smoke 0 errors and 0 warnings, screenshots differ,
