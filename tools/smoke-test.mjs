@@ -3,12 +3,24 @@
 // takes screenshots. Exits non-zero on any console error or warning.
 //
 // Usage:
-//   node tools/smoke-test.mjs [--file index.html] [--query "seed=42&renderer=webgl"]
-//     [--seconds 8] [--out <dir>] [--steps '<json array>' | --steps-file steps.json]
+//   node tools/smoke-test.mjs [--file dist-single/index.html] [--root <dir>]
+//     [--query "seed=42&renderer=webgl"] [--seconds 8] [--out <dir>]
+//     [--steps '<json array>' | --steps-file steps.json]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--file-protocol]
 //
+// --file is served from the local static server rooted at --root (default: the file's own
+// directory) and opened at its path there, as a directory URL for an index.html. The single-file
+// build is dist-single/ with the launcher shell at /, V1 at /v1/ and V2 at /v2/:
+//   --file dist-single/index.html                          the shell (and the game it opens)
+//   --root dist-single --file dist-single/v2/index.html    V2 at /v2/
 // --file-protocol opens the page from file:// (as a double-click would) instead
 // of serving it from the local static server.
+// --url <address> loads an already-running server instead (e.g. the Vite dev server at
+// http://127.0.0.1:5199/ for the shell, /v2/ for V2); --query is appended to it.
+//
+// The game is the page's window.DRIFTWING or, on the launcher shell, the game running in its
+// iframe (window.DRIFTWING_SHELL.game). Ready, frames and stats are read from it; console
+// messages from the shell and the game both count.
 //
 // Steps (JSON array, run in order after the game reports ready):
 //   { "wait": 1000 }                         sleep ms
@@ -18,27 +30,28 @@
 //   { "move": [x, y] }                       mouse move
 //   { "eval": "window.DRIFTWING.state.player.speed" }  evaluate, result is logged
 //   { "shot": "name" }                       screenshot to <out>/<name>.png
+//
+// Reusable step files live in tools/steps/; their checks call console.error on a failure, so
+// the run fails. hotplug.json (run with --query test=hotas) unplugs and replugs the mock T.16000M
+// and TWCS in flight: sources by deviceKey, the hands-off hold, the throttle kept on a TWCS
+// dropout, and the release on reconnect. view-physics.json (a dev server, or any build with
+// ?debug=1) proves the view never changes the flight: it pauses the frame loop, steps frames by
+// hand and flies every craft through the same scripted keyboard and free-look inputs in the
+// cockpit, in chase and while switching views, and needs the same trajectory at every tick.
 import puppeteer from 'puppeteer-core';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { findBrowser } from './browser.mjs';
 import { startStaticServer } from './serve.mjs';
 
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BROWSER_CANDIDATES = [
-  process.env.CHROME_PATH,
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-].filter(Boolean);
 
 function parseArgs(argv) {
   const options = {
-    file: 'index.html',
+    file: 'dist-single/index.html',
+    root: null,
     query: '',
     seconds: 8,
     out: join(tmpdir(), 'driftwing-smoke'),
@@ -48,12 +61,14 @@ function parseArgs(argv) {
     headful: false,
     browser: null,
     fileProtocol: false,
+    url: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const flag = argv[index];
     const next = () => argv[++index];
     switch (flag) {
       case '--file': options.file = next(); break;
+      case '--root': options.root = next(); break;
       case '--query': options.query = next().replace(/^\?/, ''); break;
       case '--seconds': options.seconds = Number(next()); break;
       case '--out': options.out = next(); break;
@@ -64,6 +79,7 @@ function parseArgs(argv) {
       case '--headful': options.headful = true; break;
       case '--browser': options.browser = next(); break;
       case '--file-protocol': options.fileProtocol = true; break;
+      case '--url': options.url = next(); break;
       default: throw new Error(`Unknown flag ${flag}`);
     }
   }
@@ -71,6 +87,16 @@ function parseArgs(argv) {
 }
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+
+/** Page-side expression for the game handle: the page's own, or the one inside the shell's iframe. */
+const GAME = '(window.DRIFTWING ?? window.DRIFTWING_SHELL?.game ?? null)';
+
+/** The served URL path of filePath under rootDir ('/v2/' for <root>/v2/index.html). */
+function servedPath(rootDir, filePath) {
+  const relativePath = relative(rootDir, filePath).split(sep).join('/');
+  if (relativePath.startsWith('..')) throw new Error(`--file ${filePath} is outside --root ${rootDir}`);
+  return `/${relativePath.replace(/(^|\/)index\.html$/, '$1')}`;
+}
 
 async function runSteps(page, steps, options, report) {
   for (const step of steps) {
@@ -94,19 +120,23 @@ async function runSteps(page, steps, options, report) {
 async function main() {
   const options = parseArgs(process.argv);
   mkdirSync(options.out, { recursive: true });
-  const executablePath = options.browser ?? BROWSER_CANDIDATES.find((candidate) => existsSync(candidate));
-  if (!executablePath) throw new Error('No Chrome/Edge found; set CHROME_PATH');
+  const executablePath = findBrowser(options.browser);
 
   const filePath = resolve(PROJECT_ROOT, options.file);
   const query = options.query ? `?${options.query}` : '';
   let server = null;
   let url;
-  if (options.fileProtocol) {
+  if (options.url) {
+    const base = new URL(options.url);
+    for (const [key, value] of new URLSearchParams(options.query)) base.searchParams.set(key, value);
+    url = base.href;
+  } else if (options.fileProtocol) {
     url = `${pathToFileURL(filePath).href}${query}`;
   } else {
-    const started = await startStaticServer({ port: 0, root: dirname(filePath), quiet: true });
+    const rootDir = options.root ? resolve(PROJECT_ROOT, options.root) : dirname(filePath);
+    const started = await startStaticServer({ port: 0, root: rootDir, quiet: true });
     server = started.server;
-    url = `http://localhost:${started.port}/${filePath.split(/[\\/]/).pop()}${query}`;
+    url = `http://localhost:${started.port}${servedPath(rootDir, filePath)}${query}`;
   }
 
   const profileDir = join(tmpdir(), `driftwing-profile-${process.pid}`);
@@ -163,13 +193,13 @@ async function main() {
     await page.goto(url, { waitUntil: 'load', timeout: 60000 });
     const readyDeadline = Date.now() + 30000;
     while (Date.now() < readyDeadline) {
-      report.ready = await page.evaluate(() => Boolean(window.DRIFTWING && window.DRIFTWING.ready)).catch(() => false);
+      report.ready = await page.evaluate(`Boolean(${GAME}?.ready)`).catch(() => false);
       if (report.ready) break;
       await sleep(250);
     }
-    report.backend = await page.evaluate(() => window.DRIFTWING?.backend ?? null).catch(() => null);
+    report.backend = await page.evaluate(`${GAME}?.backend ?? null`).catch(() => null);
 
-    const frameBefore = await page.evaluate(() => window.DRIFTWING?.frame ?? null).catch(() => null);
+    const frameBefore = await page.evaluate(`${GAME}?.frame ?? null`).catch(() => null);
     await sleep(Math.max(1000, options.seconds * 1000 - 2500));
     const firstShot = await page.screenshot({ path: join(options.out, 'smoke-a.png') });
     report.screenshots.push(join(options.out, 'smoke-a.png'));
@@ -181,10 +211,10 @@ async function main() {
 
     await runSteps(page, options.steps, options, report);
 
-    const frameAfter = await page.evaluate(() => window.DRIFTWING?.frame ?? null).catch(() => null);
+    const frameAfter = await page.evaluate(`${GAME}?.frame ?? null`).catch(() => null);
     report.framesAdvanced = frameBefore !== null && frameAfter !== null ? frameAfter - frameBefore : null;
     report.stats = await page
-      .evaluate(() => (window.DRIFTWING?.getStats ? window.DRIFTWING.getStats() : null))
+      .evaluate(`${GAME}?.getStats ? ${GAME}.getStats() : null`)
       .catch((error) => `getStats failed: ${error.message}`);
   } finally {
     await browser.close().catch((error) => process.stderr.write(`browser close failed: ${error.message}\n`));

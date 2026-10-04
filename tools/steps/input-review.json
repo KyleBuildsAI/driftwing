@@ -1,0 +1,68 @@
+[
+  {
+    "wait": 1500
+  },
+  {
+    "eval": "(() => { const fire = (target, type, init) => { const event = new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, pointerId: 1, pointerType: 'mouse', isPrimary: true, ...init }); target.dispatchEvent(event); return event; }; const game = window.DRIFTWING; const canvas = game.ctx.renderer.domElement; const held = () => game.ctx.controls.held.has('recenterView');\n    fire(canvas, 'pointerdown', { button: 1, buttons: 4 }); const pressed = held();\n    fire(canvas, 'pointermove', { button: -1, buttons: 6 }); fire(canvas, 'pointermove', { button: -1, buttons: 2 }); const releasedWhileRightHeld = !held();\n    fire(canvas, 'pointerup', { button: 2, buttons: 0 });\n    fire(canvas, 'pointerdown', { button: 2, buttons: 2 }); fire(canvas, 'pointermove', { button: -1, buttons: 6 }); const chordPressed = held();\n    fire(canvas, 'pointermove', { button: -1, buttons: 2 }); const chordReleased = !held(); fire(canvas, 'pointerup', { button: 2, buttons: 0 });\n    const result = { pressed, releasedWhileRightHeld, chordPressed, chordReleased };\n    return (Object.values(result).every(Boolean) ? 'PASS' : 'FAIL') + ' chorded mouse buttons ' + JSON.stringify(result); })()"
+  },
+  {
+    "eval": "(async () => { const fire = (target, type, init) => { const event = new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, pointerId: 1, pointerType: 'mouse', isPrimary: true, ...init }); target.dispatchEvent(event); return event; }; const fireMouse = (target, type, button) => { const event = new MouseEvent(type, { bubbles: true, cancelable: true, composed: true, button }); target.dispatchEvent(event); return event; }; const input = window.DRIFTWING.ctx.systems.input; const panel = document.getElementById('dw-panel-controls'); const settle = (promise) => Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve({ ok: false, reason: 'no answer' }), 1500))]);\n    const middle = input.listen({ target: 'recenterView', device: ['keyboard', 'mouse'] }); const middleDown = fire(panel, 'pointerdown', { button: 1, buttons: 4 }); const middleResult = await settle(middle);\n    fire(panel, 'pointerup', { button: 1, buttons: 0 }); const middleAux = fireMouse(panel, 'auxclick', 1);\n    const right = input.listen({ target: 'viewBack', device: ['keyboard', 'mouse'] }); fire(panel, 'pointerdown', { button: 2, buttons: 2 }); const rightResult = await settle(right);\n    fire(panel, 'pointerup', { button: 2, buttons: 0 }); const menu = fireMouse(panel, 'contextmenu', 2);\n    await new Promise((resolve) => setTimeout(resolve, 700)); const laterMenu = fireMouse(panel, 'contextmenu', 2);\n    const result = { middleBound: middleResult.ok && middleResult.ref?.type === 'mouseButton' && middleResult.ref.button === 1, middleDownCancelled: middleDown.defaultPrevented, middleAuxCancelled: middleAux.defaultPrevented, rightBound: rightResult.ok && rightResult.ref?.button === 2, menuCancelled: menu.defaultPrevented, laterMenuNotCancelled: !laterMenu.defaultPrevented, listening: input.getListenState().active === false };\n    return (Object.values(result).every(Boolean) ? 'PASS' : 'FAIL') + ' mouse buttons while listening over the panel ' + JSON.stringify(result); })()"
+  },
+  {
+    "eval": "(() => { const fire = (target, type, init) => { const event = new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, pointerId: 1, pointerType: 'mouse', isPrimary: true, ...init }); target.dispatchEvent(event); return event; }; const fireMouse = (target, type, button) => { const event = new MouseEvent(type, { bubbles: true, cancelable: true, composed: true, button }); target.dispatchEvent(event); return event; }; const input = window.DRIFTWING.ctx.systems.input; const canvas = window.DRIFTWING.ctx.renderer.domElement;\n    const unboundUp = fireMouse(canvas, 'mouseup', 3);\n    input.bindings.bind({ device: 'mouse', target: 'viewBack', ref: { type: 'mouseButton', button: 3 } });\n    fire(canvas, 'pointerdown', { button: 3, buttons: 8 }); const held = window.DRIFTWING.ctx.controls.held.has('viewBack'); const pointerUp = fire(canvas, 'pointerup', { button: 3, buttons: 0 }); const mouseUp = fireMouse(canvas, 'mouseup', 3); const aux = fireMouse(canvas, 'auxclick', 3); const forwardUp = fireMouse(canvas, 'mouseup', 4);\n    input.bindings.clearOverride({ device: 'mouse', target: 'viewBack' });\n    const result = { unboundBackLeftAlone: !unboundUp.defaultPrevented, boundBackPressed: held, pointerUpCancelled: pointerUp.defaultPrevented, mouseUpCancelled: mouseUp.defaultPrevented, auxclickCancelled: aux.defaultPrevented, unboundForwardLeftAlone: !forwardUp.defaultPrevented, released: !window.DRIFTWING.ctx.controls.held.has('viewBack') };\n    return (Object.values(result).every(Boolean) ? 'PASS' : 'FAIL') + ' back / forward navigation ' + JSON.stringify(result); })()"
+  },
+  {
+    "press": "Comma"
+  },
+  {
+    "wait": 700
+  },
+  {
+    "eval": "(() => { const button = document.querySelector('[data-setting=\"units\"] [aria-checked=\"true\"]'); button.focus(); return (document.activeElement === button ? 'PASS' : 'FAIL') + ' units option focused: ' + button.dataset.value; })()"
+  },
+  {
+    "down": "ArrowRight"
+  },
+  {
+    "eval": "(() => { const settings = window.DRIFTWING.ctx.settings; const active = document.activeElement; const result = { units: settings.get('units'), focused: active?.dataset?.value, arrowReachedFlight: window.DRIFTWING.ctx.systems.input.readKeyboard().held.includes('ArrowRight') }; return (result.units === 'aviation' && result.focused === 'aviation' && !result.arrowReachedFlight ? 'PASS' : 'FAIL') + ' ArrowRight picks the next option ' + JSON.stringify(result); })()"
+  },
+  {
+    "up": "ArrowRight"
+  },
+  {
+    "shot": "settings-units-keyboard"
+  },
+  {
+    "press": "ArrowRight"
+  },
+  {
+    "eval": "(() => { const value = window.DRIFTWING.ctx.settings.get('units'); return (value === 'metric' ? 'PASS' : 'FAIL') + ' ArrowRight wraps to the first option: ' + value; })()"
+  },
+  {
+    "press": "End"
+  },
+  {
+    "eval": "(() => { const value = window.DRIFTWING.ctx.settings.get('units'); return (value === 'aviation' && document.activeElement?.dataset?.value === 'aviation' ? 'PASS' : 'FAIL') + ' End picks the last option: ' + value; })()"
+  },
+  {
+    "press": "ArrowUp"
+  },
+  {
+    "eval": "(() => { const value = window.DRIFTWING.ctx.settings.get('units'); return (value === 'metric' ? 'PASS' : 'FAIL') + ' ArrowUp picks the previous option: ' + value; })()"
+  },
+  {
+    "press": "Tab"
+  },
+  {
+    "eval": "(() => { const active = document.activeElement; const panel = document.getElementById('dw-panel-settings'); const inGroup = Boolean(active?.closest('[data-setting=\"units\"]')); return (!inGroup && panel.contains(active) ? 'PASS' : 'FAIL') + ' Tab leaves the group to: ' + (active?.getAttribute('aria-label') || active?.textContent?.trim().slice(0, 30) || active?.tagName); })()"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "wait": 400
+  },
+  {
+    "shot": "after-input-steps"
+  }
+]

@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1b1522">
+<meta name="description" content="DRIFTWING: an ambient infinite-flight exploration game. Pilot a low-poly glider over an endless procedural world at golden hour.">
+<title>DRIFTWING</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M4 38 L32 26 L60 38 L32 32 Z' fill='%23f3c77a'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --font-ui: "Inter", "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Mono", ui-monospace, Consolas, monospace;
+  }
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    background: #0a0a0f;
+    color: #f4efe6;
+    font-family: var(--font-ui);
+    touch-action: none;
+    overscroll-behavior: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  canvas#view {
+    position: fixed;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    outline: none;
+    touch-action: none;
+  }
+  #fade {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: #0a0a0f;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 1s ease;
+  }
+  #fade.clear { opacity: 0; }
+  #fade {
+    display: grid;
+    place-content: center;
+    gap: 14px;
+    text-align: center;
+  }
+  #fade .fade-title {
+    font: 500 15px/1 var(--font-ui);
+    letter-spacing: 0.62em;
+    margin-right: -0.62em;
+    color: #f3c77a;
+  }
+  #fade .fade-status {
+    font: 400 12px/1.4 var(--font-ui);
+    letter-spacing: 0.08em;
+    color: rgba(244, 239, 230, 0.55);
+    animation: fade-breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes fade-breathe { 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) { #fade .fade-status { animation: none; } }
+  #boot-error {
+    position: fixed;
+    inset: 0;
+    z-index: 1001;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: #0a0a0f;
+    color: #f4efe6;
+    font: 15px/1.6 var(--font-ui);
+    text-align: center;
+  }
+  #boot-error[hidden] { display: none; }
+  #boot-error h1 { font-weight: 600; letter-spacing: 0.3em; font-size: 20px; margin: 0 0 12px; }
+  #boot-error p { max-width: 460px; margin: 0 auto; opacity: 0.8; }
+</style>
+<link rel="stylesheet" href="/src/ui/ui.css">
+<link rel="stylesheet" href="/src/ui/controlsPanel.css">
+</head>
+<body>
+<div id="fade" role="status" aria-live="polite">
+  <div class="fade-title">DRIFTWING</div>
+  <div class="fade-status" id="fade-status">Shaping the world</div>
+</div>
+<div id="boot-error" hidden>
+  <div>
+    <h1>DRIFTWING</h1>
+    <p id="boot-error-message">This browser could not start a WebGPU or WebGL2 renderer.</p>
+  </div>
+</div>
+<div id="ui-root" class="dw-root">
+  <svg class="dw-sprites" width="0" height="0" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="dw-i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></symbol>
+      <symbol id="dw-i-ask" viewBox="0 0 24 24"><path d="M4 12.2c0-4.3 3.6-7.4 8-7.4s8 3.1 8 7.4-3.6 7.4-8 7.4c-1.2 0-2.3-.2-3.3-.6l-4.2 1.4 1.1-3.5C4.6 15.6 4 14 4 12.2z"/><path fill="currentColor" stroke="none" d="M12 8.6l.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9z"/></symbol>
+      <symbol id="dw-i-journal" viewBox="0 0 24 24"><path d="M4.5 5.6c2.6-1 5.2-.9 7.5.6 2.3-1.5 4.9-1.6 7.5-.6v12.9c-2.6-1-5.2-.9-7.5.6-2.3-1.5-4.9-1.6-7.5-.6zM12 6.2v12.8"/></symbol>
+      <symbol id="dw-i-settings" viewBox="0 0 24 24"><path d="M10.37 4.58L10.75 2.08L13.25 2.08L13.63 4.58A7.6 7.6 0 0 1 16.10 5.60L18.13 4.10L19.90 5.87L18.40 7.90A7.6 7.6 0 0 1 19.42 10.37L21.92 10.75L21.92 13.25L19.42 13.63A7.6 7.6 0 0 1 18.40 16.10L19.90 18.13L18.13 19.90L16.10 18.40A7.6 7.6 0 0 1 13.63 19.42L13.25 21.92L10.75 21.92L10.37 19.42A7.6 7.6 0 0 1 7.90 18.40L5.87 19.90L4.10 18.13L5.60 16.10A7.6 7.6 0 0 1 4.58 13.63L2.08 13.25L2.08 10.75L4.58 10.37A7.6 7.6 0 0 1 5.60 7.90L4.10 5.87L5.87 4.10L7.90 5.60A7.6 7.6 0 0 1 10.37 4.58Z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="dw-i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.8"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.9.7c0 1.8-2.5 2.1-2.5 3.8"/><circle fill="currentColor" stroke="none" cx="12" cy="16.9" r="0.9"/></symbol>
+      <symbol id="dw-i-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+      <symbol id="dw-i-map" viewBox="0 0 24 24"><path d="M3.5 6.2l5.4-2.1 6.2 2.1 5.4-2.1v13.7l-5.4 2.1-6.2-2.1-5.4 2.1z"/><path d="M8.9 4.1v13.7M15.1 6.2v13.7"/></symbol>
+      <symbol id="dw-i-link" viewBox="0 0 24 24"><path d="M10.2 13.8a3.9 3.9 0 0 0 5.5 0l3-3a3.9 3.9 0 0 0-5.5-5.5l-1.1 1.1"/><path d="M13.8 10.2a3.9 3.9 0 0 0-5.5 0l-3 3a3.9 3.9 0 0 0 5.5 5.5l1.1-1.1"/></symbol>
+      <symbol id="dw-i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M3.6 12h16.8M12 3.4c2.3 2.3 3.5 5.2 3.5 8.6s-1.2 6.3-3.5 8.6c-2.3-2.3-3.5-5.2-3.5-8.6s1.2-6.3 3.5-8.6z"/></symbol>
+      <symbol id="dw-i-camera" viewBox="0 0 24 24"><path d="M4 8.4h3.1l1.6-2.5h6.6l1.6 2.5H20v10.2H4z"/><circle cx="12" cy="13.3" r="3.3"/></symbol>
+      <symbol id="dw-i-send" viewBox="0 0 24 24"><path d="M5 12h13.5M13 6.2l5.8 5.8-5.8 5.8"/></symbol>
+      <symbol id="dw-i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.8"/><path d="M12 2.8v2.1M12 19.1v2.1M2.8 12h2.1M19.1 12h2.1M5.5 5.5l1.5 1.5M17 17l1.5 1.5M5.5 18.5L7 17M17 7l1.5-1.5"/></symbol>
+      <symbol id="dw-i-sunset" viewBox="0 0 24 24"><path d="M3.5 17.5h17M7 17.5a5 5 0 0 1 10 0M12 7.2v2.3M5.8 10.4l1.5 1.4M18.2 10.4l-1.5 1.4M8.5 20.5h7"/></symbol>
+      <symbol id="dw-i-moon" viewBox="0 0 24 24"><path d="M18.8 14.6A7.4 7.4 0 0 1 9.4 5.2a7.4 7.4 0 1 0 9.4 9.4z"/></symbol>
+      <symbol id="dw-i-autopilot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path fill="currentColor" stroke="none" d="M12 6.4l2.3 5.6-2.3 5.6-2.3-5.6z"/></symbol>
+      <symbol id="dw-i-ring" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2"/></symbol>
+      <symbol id="dw-i-menu" viewBox="0 0 24 24"><path d="M5 8h14M5 12h14M5 16h14"/></symbol>
+      <symbol id="dw-i-diamond" viewBox="0 0 24 24"><path d="M12 3.5l6 8.5-6 8.5-6-8.5z"/></symbol>
+      <symbol id="dw-i-chevron" viewBox="0 0 24 24"><path fill="currentColor" fill-opacity="0.28" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M4.5 4.2L21 12 4.5 19.8 8.4 12z"/></symbol>
+      <symbol id="dw-i-arch" viewBox="0 0 24 24"><path d="M4 20v-8.5a8 8 0 0 1 16 0V20M8.2 20v-8a3.8 3.8 0 0 1 7.6 0v8"/></symbol>
+      <symbol id="dw-i-monoliths" viewBox="0 0 24 24"><path d="M5 20v-10M9.5 20V7M14.5 20V7M19 20v-10M8 6.5h8M3.5 20h17"/></symbol>
+      <symbol id="dw-i-lighthouse" viewBox="0 0 24 24"><path d="M9.4 20.5l1.2-11h2.8l1.2 11zM9.8 9.5h4.4M10.6 9.5V6.8h2.8v2.7M12 4.2v1.6M5.5 6.3l3.2 1.1M18.5 6.3l-3.2 1.1"/></symbol>
+      <symbol id="dw-i-balloons" viewBox="0 0 24 24"><path d="M12 3a5.6 5.6 0 0 0-5.6 5.6c0 3.3 3.2 6.1 4.4 7.4h2.4c1.2-1.3 4.4-4.1 4.4-7.4A5.6 5.6 0 0 0 12 3zM10.6 16l.5 3.2h1.8l.5-3.2"/></symbol>
+      <symbol id="dw-i-streak" viewBox="0 0 24 24"><path d="M12 3.5l2.4 5.6 6 .5-4.6 3.9 1.4 5.9L12 16.3l-5.2 3.1 1.4-5.9-4.6-3.9 6-.5z"/></symbol>
+    </defs>
+  </svg>
+
+  <!-- Waypoint / next-ring marker projected into the view -->
+  <div class="dw-target" id="dw-target" aria-hidden="true">
+    <div class="dw-target-on">
+      <svg class="dw-target-reticle" viewBox="0 0 48 48"><circle class="dw-target-halo" cx="24" cy="24" r="17"/><path class="dw-target-diamond" d="M24 13l8 11-8 11-8-11z"/><g class="dw-target-ringmark"><circle cx="24" cy="24" r="9.5"/><path d="M24 9.5v4M24 34.5v4M9.5 24h4M34.5 24h4"/></g></svg>
+      <div class="dw-target-label" id="dw-target-label"><span class="dw-target-name" id="dw-target-name">Waypoint</span><span class="dw-target-distance" id="dw-target-distance">0 m</span></div>
+    </div>
+    <div class="dw-target-off">
+      <svg class="dw-target-chevron" id="dw-target-chevron" viewBox="0 0 24 24"><path d="M4.5 4.2L21 12 4.5 19.8 8.4 12z"/></svg>
+      <span class="dw-target-edge-distance" id="dw-target-edge-distance">0 m</span>
+    </div>
+  </div>
+
+  <!-- HUD layer: never captures pointer events except on its controls -->
+  <div class="dw-hud" id="dw-hud">
+    <!-- Glass HUD flight path marker (glassHud.js): velocity vector and nose symbol, under the cards -->
+    <div class="dw-fpm dw-fade dw-glass" id="dw-fpm" aria-hidden="true">
+      <svg class="dw-fpm-nose" id="dw-fpm-nose" viewBox="-17 -4 34 14"><path d="M-16 0H-8L-4 6L0 0L4 6L8 0H16"/></svg>
+      <svg class="dw-fpm-marker" id="dw-fpm-marker" viewBox="-22 -22 44 44"><circle cx="0" cy="0" r="6.5"/><path d="M-6.5 0H-19M6.5 0H19M0 -6.5V-14"/></svg>
+    </div>
+
+    <div class="dw-compass dw-fade dw-glass" id="dw-compass">
+      <div class="dw-compass-strip glass" id="dw-compass-strip">
+        <div class="dw-compass-window"><div class="dw-compass-tape" id="dw-compass-tape"></div></div>
+        <div class="dw-compass-markers" id="dw-compass-markers"></div>
+        <div class="dw-compass-notch"></div>
+      </div>
+      <div class="dw-compass-readout"><span class="dw-heading" id="dw-heading">000</span><span class="dw-heading-deg">&deg;</span><span class="dw-heading-name" id="dw-heading-name">N</span></div>
+    </div>
+
+    <!-- Craft picker (filled by craftPicker.js) -->
+    <div class="dw-modebar dw-fade" id="dw-modebar">
+      <div class="glass" id="dw-craft-picker"></div>
+    </div>
+
+    <div class="dw-chips" id="dw-chips">
+      <div class="dw-chip glass dw-fade dw-time-chip" id="dw-time-chip" title="Time of day (T cycles presets)">
+        <svg class="dw-icon dw-time-icon dw-time-sun"><use href="#dw-i-sun"/></svg>
+        <svg class="dw-icon dw-time-icon dw-time-sunset"><use href="#dw-i-sunset"/></svg>
+        <svg class="dw-icon dw-time-icon dw-time-moon"><use href="#dw-i-moon"/></svg>
+        <span class="dw-chip-text" id="dw-time-label">Golden hour</span>
+        <span class="dw-chip-sep"></span>
+        <span class="dw-chip-num" id="dw-time-clock">18:00</span>
+      </div>
+      <button type="button" class="dw-chip glass dw-fade dw-autopilot-chip" id="dw-autopilot-chip" data-action="autopilot-off" data-tip="Disengage autopilot (O)" data-tip-pos="right">
+        <span class="dw-pulse-dot"></span>
+        <span class="dw-chip-label">Autopilot</span>
+        <span class="dw-chip-text" id="dw-autopilot-detail">Holding course</span>
+      </button>
+      <div class="dw-ring-chip glass" id="dw-ring-chip" role="status" aria-live="polite">
+        <svg class="dw-icon dw-ring-icon"><use href="#dw-i-ring"/></svg>
+        <div class="dw-ring-main">
+          <span class="dw-micro">Ring</span>
+          <span class="dw-ring-count"><span id="dw-ring-index">1</span><span class="dw-ring-total">/<span id="dw-ring-total">10</span></span></span>
+        </div>
+        <div class="dw-ring-side">
+          <span class="dw-ring-time" id="dw-ring-time">0:00.0</span>
+          <span class="dw-ring-streak" id="dw-ring-streak"><svg class="dw-icon"><use href="#dw-i-streak"/></svg><span id="dw-ring-streak-value">0</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="dw-topbar glass dw-fade" id="dw-topbar">
+      <button type="button" class="dw-icon-button" data-action="open-command" id="dw-command-button" aria-label="Ask WREN" data-tip="Ask WREN (Enter)" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-ask"/></svg></button>
+      <button type="button" class="dw-icon-button" data-action="toggle-map" id="dw-map-button" aria-label="World map" data-tip="World map (M)" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-map"/></svg></button>
+      <button type="button" class="dw-icon-button" data-action="toggle-journal" id="dw-journal-button" aria-label="Journal" data-tip="Journal (J)" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-journal"/></svg></button>
+      <button type="button" class="dw-icon-button" data-action="toggle-settings" id="dw-settings-button" aria-label="Settings" data-tip="Settings" data-tip-pos="bottom"><svg class="dw-icon"><use href="#dw-i-settings"/></svg></button>
+      <button type="button" class="dw-icon-button" data-action="toggle-help" id="dw-help-button" aria-label="Help" data-tip="Help (H)" data-tip-pos="bottom-left"><svg class="dw-icon"><use href="#dw-i-help"/></svg></button>
+    </div>
+
+    <div class="dw-debug glass" id="dw-debug" aria-hidden="true">
+      <div class="dw-debug-fps"><span id="dw-debug-fps">60</span><span class="dw-debug-unit">fps</span><span class="dw-debug-ms" id="dw-debug-ms">16.7 ms</span></div>
+      <div class="dw-debug-line" id="dw-debug-backend">WebGPU</div>
+      <div class="dw-debug-line" id="dw-debug-draws">0 draws</div>
+      <div class="dw-debug-line" id="dw-debug-chunks">0 chunks</div>
+    </div>
+
+    <div class="dw-flight glass dw-fade dw-glass" id="dw-flight">
+      <div class="dw-stall" id="dw-stall" role="status" aria-live="polite" data-kind=""><span class="dw-stall-dot"></span><span id="dw-stall-text"></span><span class="dw-stall-aoa" id="dw-stall-aoa" aria-hidden="true"></span></div>
+      <div class="dw-readout dw-readout-attitude glass" title="Attitude"><canvas class="dw-attitude" id="dw-attitude" width="96" height="96" aria-hidden="true"></canvas></div>
+      <div class="dw-flight-divider dw-attitude-divider"></div>
+      <div class="dw-readout dw-readout-speed">
+        <div class="dw-micro">Airspeed</div>
+        <div class="dw-value"><span id="dw-speed">0</span><span class="dw-unit" id="dw-speed-unit">km/h</span></div>
+        <div class="dw-throttle" title="Throttle (W / S)">
+          <div class="dw-throttle-track"><div class="dw-throttle-fill" id="dw-throttle-fill"></div></div>
+          <span class="dw-throttle-value" id="dw-throttle-value">55%</span>
+        </div>
+      </div>
+      <div class="dw-flight-divider"></div>
+      <div class="dw-readout dw-readout-alt">
+        <div class="dw-micro">Altitude</div>
+        <div class="dw-value"><span id="dw-altitude">0</span><span class="dw-unit" id="dw-altitude-unit">m</span></div>
+        <div class="dw-alt-sub">
+          <span class="dw-agl"><span class="dw-sub-label">AGL</span> <span id="dw-agl">0</span></span>
+          <span class="dw-vsi" id="dw-vsi"><svg class="dw-vsi-arrow" viewBox="0 0 10 10"><path d="M5 1.5L8.5 7h-7z"/></svg><span id="dw-vsi-value">0.0</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="dw-corner dw-fade" id="dw-corner">
+      <div class="dw-seed glass" id="dw-seed">
+        <div class="dw-seed-text"><span class="dw-micro">Seed</span><span class="dw-seed-value" id="dw-seed-value">------</span></div>
+        <button type="button" class="dw-text-button" data-action="copy-link" aria-label="Copy a link to this world" data-tip="Opens this world at this time of day" data-tip-pos="top"><svg class="dw-icon"><use href="#dw-i-link"/></svg><span>Copy link</span></button>
+        <button type="button" class="dw-text-button" id="dw-new-world" data-action="new-world" aria-label="Start a new world"><svg class="dw-icon"><use href="#dw-i-globe"/></svg><span id="dw-new-world-label">New world</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mic: shared between desktop corner and touch cluster -->
+  <button type="button" class="dw-mic glass dw-fade" id="dw-mic" data-action="mic" data-state="idle" aria-label="Talk to WREN (Shift+M)" data-tip="Talk to WREN (Shift+M)" data-tip-pos="top-left">
+    <span class="dw-mic-pulse"></span>
+    <span class="dw-mic-spinner"></span>
+    <svg class="dw-icon"><use href="#dw-i-mic"/></svg>
+  </button>
+
+  <!-- Transient messages -->
+  <div class="dw-toasts" id="dw-toasts" aria-live="polite" aria-atomic="false"></div>
+  <div class="dw-banner" id="dw-banner" aria-live="polite">
+    <div class="dw-banner-label" id="dw-banner-label"></div>
+    <div class="dw-banner-title" id="dw-banner-title"></div>
+    <div class="dw-banner-detail" id="dw-banner-detail"></div>
+    <div class="dw-banner-palette" id="dw-banner-palette"></div>
+  </div>
+
+  <div class="dw-speech" id="dw-speech">
+    <div class="dw-hint glass" id="dw-hint" aria-live="polite"></div>
+    <div class="dw-transcript" id="dw-transcript" aria-live="polite"><span class="dw-transcript-label">You</span><span class="dw-transcript-text" id="dw-transcript-text"></span><span class="dw-listening-dots"><i></i><i></i><i></i></span></div>
+    <div class="dw-subtitle glass dw-gone" id="dw-subtitle" aria-live="polite">
+      <span class="dw-subtitle-label"><span id="dw-subtitle-label">WREN</span><span class="dw-remote-dot" title="Remote brain"></span></span>
+      <span class="dw-subtitle-text" id="dw-subtitle-text"></span>
+    </div>
+  </div>
+
+  <!-- Command bar -->
+  <div class="dw-command glass" id="dw-command" role="dialog" aria-label="Ask WREN" aria-hidden="true">
+    <div class="dw-command-head">
+      <span class="dw-micro dw-gold">Ask WREN</span>
+      <span class="dw-command-keys"><kbd>Enter</kbd> send <kbd>Esc</kbd> close</span>
+    </div>
+    <div class="dw-command-groups">
+      <div class="dw-command-group">
+        <span class="dw-micro">Find</span>
+        <div class="dw-chip-row">
+          <button type="button" class="dw-quick" data-command="find mountains">Mountains</button>
+          <button type="button" class="dw-quick" data-command="find the ocean">Ocean</button>
+          <button type="button" class="dw-quick" data-command="find the desert">Desert</button>
+          <button type="button" class="dw-quick" data-command="find a forest">Forest</button>
+          <button type="button" class="dw-quick" data-command="find meadows">Meadows</button>
+          <button type="button" class="dw-quick" data-command="find a landmark">A landmark</button>
+        </div>
+      </div>
+      <div class="dw-command-group">
+        <span class="dw-micro">Fly</span>
+        <div class="dw-chip-row">
+          <button type="button" class="dw-quick" id="dw-quick-waypoint" data-command="set a waypoint ahead">Set waypoint</button>
+          <button type="button" class="dw-quick" id="dw-quick-autopilot" data-command="autopilot on">Autopilot on</button>
+          <button type="button" class="dw-quick" data-command="climb">Climb</button>
+          <button type="button" class="dw-quick" data-command="descend">Descend</button>
+          <button type="button" class="dw-quick" id="dw-quick-rings" data-command="start a ring course">Ring course</button>
+        </div>
+      </div>
+      <div class="dw-command-group">
+        <span class="dw-micro">Sky</span>
+        <div class="dw-chip-row">
+          <button type="button" class="dw-quick" data-command="make it dawn">Dawn</button>
+          <button type="button" class="dw-quick" data-command="golden hour">Golden hour</button>
+          <button type="button" class="dw-quick" data-command="make it night">Night</button>
+        </div>
+      </div>
+      <div class="dw-command-group">
+        <span class="dw-micro">More</span>
+        <div class="dw-chip-row">
+          <button type="button" class="dw-quick" data-command="where am I">Where am I</button>
+          <button type="button" class="dw-quick" data-command="photo mode">Photo mode</button>
+          <button type="button" class="dw-quick" data-command="open the journal">Journal</button>
+          <button type="button" class="dw-quick" data-command="what can you do">What can you do</button>
+        </div>
+      </div>
+    </div>
+    <form class="dw-command-form" id="dw-command-form" autocomplete="off">
+      <input class="dw-command-input" id="dw-command-input" type="text" maxlength="200" placeholder="Ask WREN..." aria-label="Message to WREN" spellcheck="false" enterkeyhint="send">
+      <button type="button" class="dw-icon-button dw-command-mic" id="dw-command-mic" data-action="mic" aria-label="Speak instead (Shift+M)"><svg class="dw-icon"><use href="#dw-i-mic"/></svg></button>
+      <button type="submit" class="dw-icon-button dw-send" aria-label="Send"><svg class="dw-icon"><use href="#dw-i-send"/></svg></button>
+    </form>
+  </div>
+
+  <!-- Panels -->
+  <section class="dw-panel glass" id="dw-panel-journal" data-panel="journal" role="dialog" aria-labelledby="dw-journal-title" aria-hidden="true">
+    <header class="dw-panel-head">
+      <div><div class="dw-micro" id="dw-journal-seed">Seed</div><h2 id="dw-journal-title">Journal</h2></div>
+      <button type="button" class="dw-icon-button" data-action="close-panel" aria-label="Close journal"><svg class="dw-icon"><use href="#dw-i-close"/></svg></button>
+    </header>
+    <div class="dw-panel-body" id="dw-journal-body"></div>
+  </section>
+
+  <section class="dw-panel glass dw-settings" id="dw-panel-settings" data-panel="settings" role="dialog" aria-labelledby="dw-settings-title" aria-hidden="true">
+    <header class="dw-panel-head">
+      <div><div class="dw-micro">Preferences</div><h2 id="dw-settings-title">Settings</h2></div>
+      <button type="button" class="dw-icon-button" data-action="close-panel" aria-label="Close settings"><svg class="dw-icon"><use href="#dw-i-close"/></svg></button>
+    </header>
+    <div class="dw-tabs" role="tablist" aria-label="Settings sections" id="dw-settings-tabs">
+      <button type="button" role="tab" id="dw-tab-flight" aria-controls="dw-tabpanel-flight" aria-selected="true" data-tab="flight">Flight</button>
+      <button type="button" role="tab" id="dw-tab-graphics" aria-controls="dw-tabpanel-graphics" aria-selected="false" tabindex="-1" data-tab="graphics">Graphics</button>
+      <button type="button" role="tab" id="dw-tab-sound" aria-controls="dw-tabpanel-sound" aria-selected="false" tabindex="-1" data-tab="sound">Sound</button>
+      <button type="button" role="tab" id="dw-tab-controls" aria-controls="dw-tabpanel-controls" aria-selected="false" tabindex="-1" data-tab="controls">Controls</button>
+      <button type="button" role="tab" id="dw-tab-general" aria-controls="dw-tabpanel-general" aria-selected="false" tabindex="-1" data-tab="general">General</button>
+    </div>
+    <div class="dw-panel-body" id="dw-settings-body">
+      <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-flight" aria-labelledby="dw-tab-flight" data-tabpanel="flight">
+        <div class="dw-group">
+          <h3 class="dw-micro">Assists</h3>
+          <div class="dw-field dw-assist-field">
+            <div class="dw-row"><label for="dw-set-assists" id="dw-assist-label">Glider assists</label><span class="dw-row-value" data-value-for="assists.@craft">100%</span></div>
+            <input class="dw-range" id="dw-set-assists" type="range" min="0" max="1" step="0.05" data-setting="assists.@craft" data-kind="percent" aria-describedby="dw-assist-tip">
+            <div class="dw-tooltip" role="tooltip" id="dw-assist-tip">No assists active</div>
+            <p class="dw-note">0% is raw physics. 50% keeps coordination, trim and a stall warning. 100% adds the stall and G limiters, auto-level and hover holds. Each craft remembers its own setting. The first HOTAS you connect sets 50% on every craft you have not set yourself.</p>
+          </div>
+          <div class="dw-row"><span>Start on the ground</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Start on the ground" data-setting="startOnGround"><span></span></button></div>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">Units</h3>
+          <div class="dw-segmented dw-segmented-2" role="radiogroup" aria-label="Units" data-setting="units">
+            <button type="button" role="radio" data-value="metric">km/h · m</button>
+            <button type="button" role="radio" data-value="aviation">knots · ft</button>
+          </div>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">HUD</h3>
+          <div class="dw-row"><span>Glass HUD in the cockpit</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Glass HUD in the cockpit" data-setting="hud.cockpitGlass"><span></span></button></div>
+          <div class="dw-row"><span>Flight path marker</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="Flight path marker" data-setting="hud.flightPathMarker"><span></span></button></div>
+          <p class="dw-note">Outside views always show the glass HUD: airspeed, altitude, heading, attitude, throttle and the stall warning. The flight path marker shows where the craft is really going, so sideslip and angle of attack read from outside. The drone's FPV camera and the wingsuit keep the glass HUD, as they have no instrument panel.</p>
+          <div class="dw-row"><span>Instrument HUD overlay</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Instrument HUD overlay" data-setting="hud.overlay"><span></span></button></div>
+          <div class="dw-row"><span>Landing callouts</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Landing callouts" data-setting="hud.landingCallouts"><span></span></button></div>
+          <div class="dw-row"><span>Hide HUD when idle</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="Hide HUD when idle" data-setting="hudAutoHide"><span></span></button></div>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">FPV drone</h3>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fpv-uptilt">Camera uptilt</label><span class="dw-row-value" data-value-for="fpv.uptilt">25°</span></div>
+            <input class="dw-range" id="dw-set-fpv-uptilt" type="range" min="0" max="40" step="1" data-setting="fpv.uptilt" data-kind="degrees">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fpv-rate">Max rate</label><span class="dw-row-value" data-value-for="fpv.rate">670°/s</span></div>
+            <input class="dw-range" id="dw-set-fpv-rate" type="range" min="200" max="1200" step="10" data-setting="fpv.rate" data-kind="rate">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fpv-expo">Expo</label><span class="dw-row-value" data-value-for="fpv.expo">0.30</span></div>
+            <input class="dw-range" id="dw-set-fpv-expo" type="range" min="0" max="1" step="0.05" data-setting="fpv.expo" data-kind="decimal">
+          </div>
+          <p class="dw-note">These apply to the FPV drone: the camera tilt, and the rate curve (the rotation rate at full stick, and how soft the stick is around centre).</p>
+        </div>
+      </div>
+
+      <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-graphics" aria-labelledby="dw-tab-graphics" data-tabpanel="graphics" hidden>
+        <div class="dw-group">
+          <h3 class="dw-micro">Graphics</h3>
+          <div class="dw-field">
+            <div class="dw-row"><span>Preset</span><span class="dw-row-value" id="dw-quality-note">Auto</span></div>
+            <div class="dw-segmented" role="radiogroup" aria-label="Graphics preset" data-setting="quality">
+              <button type="button" role="radio" data-value="auto">Auto</button>
+              <button type="button" role="radio" data-value="minimal">Min</button>
+              <button type="button" role="radio" data-value="low">Low</button>
+              <button type="button" role="radio" data-value="medium">Med</button>
+              <button type="button" role="radio" data-value="high">High</button>
+              <button type="button" role="radio" data-value="ultra">Ultra</button>
+            </div>
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><span>Frame target</span><span class="dw-row-value" id="dw-frame-note">Auto</span></div>
+            <div class="dw-segmented" role="radiogroup" aria-label="Frame target" data-setting="frameTarget">
+              <button type="button" role="radio" data-value="auto">Auto</button>
+              <button type="button" role="radio" data-value="60">60</button>
+              <button type="button" role="radio" data-value="120">120</button>
+              <button type="button" role="radio" data-value="144">144</button>
+              <button type="button" role="radio" data-value="240">240</button>
+              <button type="button" role="radio" data-value="uncapped" aria-label="Uncapped">Uncap</button>
+            </div>
+          </div>
+          <div class="dw-row"><span>Dynamic resolution</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="Dynamic resolution" data-setting="dynamicResolution"><span></span></button></div>
+          <p class="dw-note dw-live-note" id="dw-scale-note">Rendering at full resolution.</p>
+          <div class="dw-row"><span>Show FPS and stats</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Show FPS and stats" data-setting="showFps"><span></span></button></div>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">Field of view</h3>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fov-chase">Chase</label><span class="dw-row-value" data-value-for="fov.chase">60°</span></div>
+            <input class="dw-range" id="dw-set-fov-chase" type="range" min="40" max="100" step="1" data-setting="fov.chase" data-kind="degrees">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fov-cockpit">Cockpit</label><span class="dw-row-value" data-value-for="fov.cockpit">74°</span></div>
+            <input class="dw-range" id="dw-set-fov-cockpit" type="range" min="50" max="110" step="1" data-setting="fov.cockpit" data-kind="degrees">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fov-wing">Wing</label><span class="dw-row-value" data-value-for="fov.wing">68°</span></div>
+            <input class="dw-range" id="dw-set-fov-wing" type="range" min="40" max="110" step="1" data-setting="fov.wing" data-kind="degrees">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fov-flyby">Flyby</label><span class="dw-row-value" data-value-for="fov.flyby">50°</span></div>
+            <input class="dw-range" id="dw-set-fov-flyby" type="range" min="20" max="90" step="1" data-setting="fov.flyby" data-kind="degrees">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-fov-fpv">FPV drone</label><span class="dw-row-value" data-value-for="fov.fpv">120°</span></div>
+            <input class="dw-range" id="dw-set-fov-fpv" type="range" min="90" max="150" step="1" data-setting="fov.fpv" data-kind="degrees">
+          </div>
+        </div>
+      </div>
+
+      <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-sound" aria-labelledby="dw-tab-sound" data-tabpanel="sound" hidden>
+        <div class="dw-group">
+          <h3 class="dw-micro">Mixer</h3>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-volume">Master</label><span class="dw-row-value" data-value-for="mixer.master">70%</span></div>
+            <input class="dw-range" id="dw-set-volume" type="range" min="0" max="1" step="0.01" data-setting="mixer.master" data-kind="percent">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mix-engine">Engine</label><span class="dw-row-value" data-value-for="mixer.engine">90%</span></div>
+            <input class="dw-range" id="dw-set-mix-engine" type="range" min="0" max="1" step="0.01" data-setting="mixer.engine" data-kind="percent">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mix-environment">Environment</label><span class="dw-row-value" data-value-for="mixer.environment">85%</span></div>
+            <input class="dw-range" id="dw-set-mix-environment" type="range" min="0" max="1" step="0.01" data-setting="mixer.environment" data-kind="percent">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mix-ui">Interface</label><span class="dw-row-value" data-value-for="mixer.ui">80%</span></div>
+            <input class="dw-range" id="dw-set-mix-ui" type="range" min="0" max="1" step="0.01" data-setting="mixer.ui" data-kind="percent">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mix-copilot">Copilot</label><span class="dw-row-value" data-value-for="mixer.copilot">100%</span></div>
+            <input class="dw-range" id="dw-set-mix-copilot" type="range" min="0" max="1" step="0.01" data-setting="mixer.copilot" data-kind="percent">
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mix-music">Music</label><span class="dw-row-value" data-value-for="mixer.music">70%</span></div>
+            <input class="dw-range" id="dw-set-mix-music" type="range" min="0" max="1" step="0.01" data-setting="mixer.music" data-kind="percent">
+          </div>
+          <p class="dw-note">Everything else ducks while WREN speaks.</p>
+        </div>
+      </div>
+
+      <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-controls" aria-labelledby="dw-tab-controls" data-tabpanel="controls" hidden>
+        <div class="dw-group">
+          <h3 class="dw-micro">Bindings and calibration</h3>
+          <p class="dw-note dw-live-note" id="dw-controllers-note">No controllers connected.</p>
+          <button type="button" class="dw-text-button dw-solid dw-wide" data-action="open-controls"><span>Open the controls panel</span></button>
+          <button type="button" class="dw-text-button dw-wide dw-tight" data-action="calibrate-controls"><span>Calibrate controllers</span></button>
+          <p class="dw-note">Rebind every action on the keyboard, mouse, gamepads and HOTAS, per craft if you like, tune each axis and export or import your profile. Shortcut: <kbd>.</kbd></p>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">Mouse</h3>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-mouse">Mouse sensitivity</label><span class="dw-row-value" data-value-for="mouseSensitivity">1.00x</span></div>
+            <input class="dw-range" id="dw-set-mouse" type="range" min="0.25" max="3" step="0.05" data-setting="mouseSensitivity" data-kind="factor">
+          </div>
+          <div class="dw-row"><span>Invert pitch</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Invert pitch" data-setting="invertPitch"><span></span></button></div>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">HOTAS</h3>
+          <div class="dw-field">
+            <div class="dw-row"><span>Stick twist yaw</span></div>
+            <div class="dw-segmented dw-segmented-3" role="radiogroup" aria-label="Stick twist yaw" data-setting="twistYaw">
+              <button type="button" role="radio" data-value="auto">Auto</button>
+              <button type="button" role="radio" data-value="on">On</button>
+              <button type="button" role="radio" data-value="off">Off</button>
+            </div>
+            <p class="dw-note">Auto turns twist yaw off once the pedal rudder axis moves.</p>
+          </div>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-detent">Afterburner detent</label><span class="dw-row-value" data-value-for="afterburnerDetent">95%</span></div>
+            <input class="dw-range" id="dw-set-detent" type="range" min="0.8" max="1" step="0.01" data-setting="afterburnerDetent" data-kind="percent">
+          </div>
+        </div>
+      </div>
+
+      <div class="dw-tabpanel" role="tabpanel" id="dw-tabpanel-general" aria-labelledby="dw-tab-general" data-tabpanel="general" hidden>
+        <div class="dw-group">
+          <h3 class="dw-micro">Time</h3>
+          <div class="dw-field">
+            <div class="dw-row"><label for="dw-set-day-length">Day length</label><span class="dw-row-value" data-value-for="dayLength">6 min</span></div>
+            <input class="dw-range" id="dw-set-day-length" type="range" min="2" max="30" step="1" data-setting="dayLength" data-kind="minutes">
+          </div>
+          <div class="dw-row"><span>Freeze time</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Freeze time" data-setting="timeFrozen"><span></span></button></div>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">Copilot</h3>
+          <div class="dw-row"><span>WREN voice</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="WREN voice" data-setting="copilotVoice"><span></span></button></div>
+          <div class="dw-row"><span>WREN chatter</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="WREN chatter" data-setting="copilotChatter"><span></span></button></div>
+          <div class="dw-row"><span>Tour-guide callouts</span><button type="button" class="dw-switch" role="switch" aria-checked="true" aria-label="WREN tour-guide callouts" data-setting="copilotCallouts"><span></span></button></div>
+          <div class="dw-row"><span>Remote brain</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Remote copilot brain" data-setting="remoteCopilot"><span></span></button></div>
+          <div class="dw-field">
+            <label class="dw-field-label" for="dw-set-endpoint">Endpoint</label>
+            <input class="dw-text-input" id="dw-set-endpoint" type="url" spellcheck="false" autocomplete="off" data-setting="remoteEndpoint">
+            <p class="dw-field-error" id="dw-endpoint-error">Enter a full http:// or https:// address.</p>
+            <p class="dw-note">Run <code>npm run copilot-server</code> to give WREN a remote brain (it can use Claude when <code>ANTHROPIC_API_KEY</code> is set). If the server is unreachable, WREN quietly falls back to the built-in brain.</p>
+          </div>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">World</h3>
+          <div class="dw-row"><span>This world</span><span class="dw-seed-current"><span class="dw-row-value" id="dw-seed-current">------</span><button type="button" class="dw-text-button" data-action="copy-link"><svg class="dw-icon"><use href="#dw-i-link"/></svg><span>Copy link</span></button></span></div>
+          <p class="dw-note">The link opens this world at this time of day, in the launcher with V2. The world you fly is remembered for next time.</p>
+          <form class="dw-field dw-seed-form" id="dw-seed-form" autocomplete="off">
+            <label class="dw-field-label" for="dw-seed-input">Fly a specific seed</label>
+            <div class="dw-inline">
+              <input class="dw-text-input" id="dw-seed-input" type="text" maxlength="24" spellcheck="false" placeholder="Seed, for example ARCH1" aria-describedby="dw-seed-error">
+              <button type="submit" class="dw-text-button dw-solid">Fly</button>
+            </div>
+            <p class="dw-field-error" id="dw-seed-error">Use up to 24 letters, digits or dashes.</p>
+          </form>
+        </div>
+        <div class="dw-group">
+          <h3 class="dw-micro">Developer</h3>
+          <div class="dw-row"><span>Status badge</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Developer status badge" data-setting="devBadge"><span></span></button></div>
+          <p class="dw-note">Backend, frame times against the target, render scale and connected controllers.</p>
+          <div class="dw-row"><span>Wind arrows</span><button type="button" class="dw-switch" role="switch" aria-checked="false" aria-label="Wind arrow overlay" data-setting="windOverlay"><span></span></button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="dw-panel glass dw-controls" id="dw-panel-controls" data-panel="controls" role="dialog" aria-labelledby="dw-controls-title" aria-hidden="true">
+    <header class="dw-panel-head">
+      <div><div class="dw-micro">Bindings and calibration</div><h2 id="dw-controls-title">Controls</h2></div>
+      <button type="button" class="dw-icon-button" data-action="close-panel" aria-label="Close controls"><svg class="dw-icon"><use href="#dw-i-close"/></svg></button>
+    </header>
+    <div class="dw-controls-root" id="dw-controls-root"></div>
+  </section>
+
+  <section class="dw-panel glass" id="dw-panel-help" data-panel="help" role="dialog" aria-labelledby="dw-help-title" aria-hidden="true">
+    <header class="dw-panel-head">
+      <div><div class="dw-micro">Flight notes</div><h2 id="dw-help-title">Help</h2></div>
+      <button type="button" class="dw-icon-button" data-action="close-panel" aria-label="Close help"><svg class="dw-icon"><use href="#dw-i-close"/></svg></button>
+    </header>
+    <div class="dw-panel-body">
+      <p class="dw-lede">Drift anywhere. There is nothing to crash into and nowhere you need to be. WREN rides along and can steer, find places and change the sky for you.</p>
+      <p class="dw-help-mode" id="dw-help-mode"></p>
+      <div class="dw-group">
+        <h3 class="dw-micro">Keyboard</h3>
+        <dl class="dw-keys" id="dw-help-flight"></dl>
+        <p class="dw-note">Nothing levels itself unless assists are on (Settings, Flight). Keys follow your bindings in the controls panel.</p>
+      </div>
+      <div class="dw-group">
+        <h3 class="dw-micro">Mouse</h3>
+        <dl class="dw-keys">
+          <dt><span class="dw-key-word">Click</span></dt><dd>Capture the mouse as a virtual stick that stays where you leave it: its offset from the centre is the deflection. <kbd>Esc</kbd> releases it</dd>
+          <dt><span class="dw-key-word">Drag</span></dt><dd>Steer without capturing the pointer</dd>
+          <dt><span class="dw-key-word">Wheel</span></dt><dd>Throttle lever in 5% steps (scroll up for more)</dd>
+          <dt><span class="dw-key-word">Right-drag</span></dt><dd>Free look; let go to look ahead again</dd>
+          <dt><span class="dw-key-word">Middle click</span></dt><dd>Recenter the view</dd>
+        </dl>
+      </div>
+      <div class="dw-group dw-help-touch">
+        <h3 class="dw-micro">Touch</h3>
+        <dl class="dw-keys">
+          <dt><span class="dw-key-word">Left side</span></dt><dd>Drag anywhere to bank and pitch</dd>
+          <dt><span class="dw-key-word">Right slider</span></dt><dd>Throttle</dd>
+          <dt><span class="dw-key-word">Buttons</span></dt><dd>WREN and the menu</dd>
+        </dl>
+      </div>
+      <div class="dw-group">
+        <h3 class="dw-micro">Photo mode</h3>
+        <dl class="dw-keys">
+          <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move the camera</dd>
+          <dt><kbd>Q</kbd><kbd>E</kbd></dt><dd>Down / up</dd>
+          <dt><kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd></dt><dd>Look around</dd>
+          <dt><span class="dw-key-word">Mouse</span></dt><dd>Look around (drag, or move while captured)</dd>
+          <dt><span class="dw-key-word">Wheel</span></dt><dd>Zoom</dd>
+          <dt><kbd>Shift</kbd></dt><dd>Move faster</dd>
+          <dt><kbd>K</kbd></dt><dd>Capture a photo</dd>
+        </dl>
+      </div>
+      <div class="dw-group">
+        <h3 class="dw-micro">Shortcuts</h3>
+        <dl class="dw-keys" id="dw-help-shortcuts"></dl>
+      </div>
+      <div class="dw-group">
+        <h3 class="dw-micro">Things to ask WREN</h3>
+        <ul class="dw-phrases">
+          <li>Where are we?</li>
+          <li>Find the mountains</li>
+          <li>Take us to a lighthouse</li>
+          <li>Set a waypoint ahead</li>
+          <li>Autopilot on, head west</li>
+          <li>Climb / descend</li>
+          <li>Make it night</li>
+          <li>Start a ring course</li>
+          <li>Switch to version one</li>
+          <li>Photo mode</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="dw-panel glass dw-menu" id="dw-panel-menu" data-panel="menu" role="dialog" aria-labelledby="dw-menu-title" aria-hidden="true">
+    <header class="dw-panel-head">
+      <div><div class="dw-micro" id="dw-menu-seed">Seed</div><h2 id="dw-menu-title">DRIFTWING</h2></div>
+      <button type="button" class="dw-icon-button" data-action="close-panel" aria-label="Close menu"><svg class="dw-icon"><use href="#dw-i-close"/></svg></button>
+    </header>
+    <div class="dw-panel-body">
+      <div class="dw-menu-grid">
+        <button type="button" class="dw-menu-item" data-action="open-command"><svg class="dw-icon"><use href="#dw-i-ask"/></svg><span>Ask WREN</span></button>
+        <button type="button" class="dw-menu-item" data-action="toggle-map"><svg class="dw-icon"><use href="#dw-i-map"/></svg><span>Map</span></button>
+        <button type="button" class="dw-menu-item" data-action="toggle-journal"><svg class="dw-icon"><use href="#dw-i-journal"/></svg><span>Journal</span></button>
+        <button type="button" class="dw-menu-item" data-action="photo-mode"><svg class="dw-icon"><use href="#dw-i-camera"/></svg><span>Photo mode</span></button>
+        <button type="button" class="dw-menu-item" data-action="toggle-settings"><svg class="dw-icon"><use href="#dw-i-settings"/></svg><span>Settings</span></button>
+        <button type="button" class="dw-menu-item" data-action="toggle-help"><svg class="dw-icon"><use href="#dw-i-help"/></svg><span>Help</span></button>
+      </div>
+      <div class="dw-menu-row">
+        <button type="button" class="dw-text-button dw-wide" data-action="copy-link"><svg class="dw-icon"><use href="#dw-i-link"/></svg><span>Copy link</span></button>
+        <button type="button" class="dw-text-button dw-wide" data-action="new-world" id="dw-menu-new-world"><svg class="dw-icon"><use href="#dw-i-globe"/></svg><span>New world</span></button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Touch controls -->
+  <div class="dw-touch-controls" id="dw-touch-controls" aria-hidden="true">
+    <div class="dw-stick-zone" id="dw-stick-zone">
+      <div class="dw-stick" id="dw-stick"><div class="dw-stick-ring"></div><div class="dw-stick-knob" id="dw-stick-knob"></div></div>
+    </div>
+    <div class="dw-throttle-slider glass" id="dw-throttle-slider" role="slider" aria-label="Throttle" aria-valuemin="0" aria-valuemax="100" aria-valuenow="55">
+      <div class="dw-slider-fill" id="dw-slider-fill"></div>
+      <div class="dw-slider-thumb" id="dw-slider-thumb"></div>
+      <span class="dw-slider-label">THR</span>
+    </div>
+    <div class="dw-action-cluster" id="dw-action-cluster">
+      <button type="button" class="dw-touch-button glass dw-touch-menu" data-action="open-menu" aria-label="Menu"><svg class="dw-icon"><use href="#dw-i-menu"/></svg></button>
+    </div>
+  </div>
+
+  <!-- Photo mode chrome -->
+  <div class="dw-photo" id="dw-photo" aria-hidden="true">
+    <div class="dw-letterbox dw-letterbox-top">
+      <div class="dw-photo-title"><span class="dw-micro dw-gold">Photo mode</span><span class="dw-photo-meta" id="dw-photo-meta"></span></div>
+    </div>
+    <div class="dw-letterbox dw-letterbox-bottom">
+      <div class="dw-photo-bar">
+        <div class="dw-photo-hint" id="dw-photo-hint"></div>
+        <button type="button" class="dw-shutter" data-action="capture" aria-label="Capture photo (K)" data-tip="Capture (K)" data-tip-pos="top"><span></span></button>
+        <div class="dw-photo-actions"><button type="button" class="dw-text-button" data-action="exit-photo">Exit <kbd>P</kbd></button></div>
+      </div>
+    </div>
+  </div>
+  <div class="dw-flash" id="dw-flash"></div>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

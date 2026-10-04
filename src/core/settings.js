@@ -1,0 +1,288 @@
+// Player settings: a versioned, validated schema persisted through core/storage (IndexedDB).
+//
+// Flat keys hold scalars; a few keys hold small objects (assists and views per craft, whether the
+// player set the assists, FOV per view, the audio mixer, HUD preferences, the FPV drone's camera and
+// rates).
+// get/set work on whole keys; update(key, patch) merges into an object key. Every change emits
+// 'settings:changed' { key, value, settings }.
+//
+// Bindings and calibration are not settings: the input system keeps them in their own storage keys
+// (driftwing-v2.input.bindings, driftwing-v2.input.calibration.<device>) so a device profile can be
+// exported on its own.
+import { CONFIG } from './config.js';
+import { SEED_PATTERN } from './seed.js';
+import { storage } from './storage.js';
+
+export const SETTINGS_VERSION = 5;
+const STORAGE_KEY = 'driftwing-v2.settings';
+
+export const CRAFT_IDS = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv']);
+export const VIEW_IDS = Object.freeze(['chase', 'cockpit', 'wing', 'flyby']);
+/** The third-person view slots; 'cockpit' is the first-person slot (the FPV camera on the drone). */
+export const THIRD_PERSON_VIEW_IDS = Object.freeze(['chase', 'wing', 'flyby']);
+export const UNIT_SYSTEMS = Object.freeze(['metric', 'aviation']);
+export const QUALITY_PREFERENCES = Object.freeze(['auto', 'minimal', 'low', 'medium', 'high', 'ultra']);
+export const FRAME_TARGETS = Object.freeze(['auto', 60, 120, 144, 240, 'uncapped']);
+export const MIXER_BUSES = Object.freeze(['master', 'engine', 'environment', 'ui', 'copilot', 'music']);
+/** FPV drone setup: camera uptilt (deg, 0-40), rate-curve expo (0-1), rate at full stick (deg/s). */
+export const FPV_SETTING_LIMITS = Object.freeze({
+  uptilt: Object.freeze({ min: 0, max: 40 }),
+  expo: Object.freeze({ min: 0, max: 1 }),
+  rate: Object.freeze({ min: 200, max: 1200 }),
+});
+
+const unitRange = (min, max) => (value) => Number.isFinite(value) && value >= min && value <= max;
+const oneOf = (list) => (value) => list.includes(value);
+const isBoolean = (value) => typeof value === 'boolean';
+
+function perCraft(value) {
+  return Object.freeze(Object.fromEntries(CRAFT_IDS.map((id) => [id, value])));
+}
+
+/**
+ * The schema: default value and validator for every key. Object-valued keys list a validator per
+ * field; unknown fields are dropped and invalid ones fall back to the default field value.
+ */
+const SCHEMA = Object.freeze({
+  // v1 keys, unchanged.
+  dayLength: { default: CONFIG.DAY_LENGTH_DEFAULT, validate: unitRange(60, 3600) },
+  timeFrozen: { default: false, validate: isBoolean },
+  quality: { default: 'auto', validate: oneOf(QUALITY_PREFERENCES) },
+  mouseSensitivity: { default: 1, validate: unitRange(0.2, 4) },
+  invertPitch: { default: false, validate: isBoolean },
+  copilotVoice: { default: true, validate: isBoolean },
+  copilotChatter: { default: true, validate: isBoolean },
+  // v2: WREN's proactive tour-guide callouts ("Supercell building 9 km north-west. Want a heading?").
+  copilotCallouts: { default: true, validate: isBoolean },
+  remoteCopilot: { default: false, validate: isBoolean },
+  remoteEndpoint: { default: CONFIG.REMOTE_COPILOT_DEFAULT_ENDPOINT, validate: (value) => typeof value === 'string' && /^https?:\/\/[^\s]+$/i.test(value) },
+  showFps: { default: false, validate: isBoolean },
+  hudAutoHide: { default: true, validate: isBoolean },
+
+  // v2: flight. assists: 0..1 per craft (the only difficulty control); assistsSetByPlayer: which
+  // craft the player chose assists for (src/flight/assistDefaults.js leaves those alone);
+  // hotasAssistsApplied: the one-time HOTAS default (50 %) has been applied.
+  craft: { default: 'glider', validate: oneOf(CRAFT_IDS) },
+  assists: { default: perCraft(1), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, unitRange(0, 1)])) },
+  assistsSetByPlayer: { default: perCraft(false), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, isBoolean])) },
+  hotasAssistsApplied: { default: false, validate: isBoolean },
+  startOnGround: { default: false, validate: isBoolean },
+  fpv: {
+    default: Object.freeze({ uptilt: 25, expo: 0.3, rate: 670 }),
+    fields: Object.fromEntries(Object.entries(FPV_SETTING_LIMITS).map(([field, range]) => [field, unitRange(range.min, range.max)])),
+  },
+  units: { default: 'metric', validate: oneOf(UNIT_SYSTEMS) },
+
+  // v2: views per craft. views: the slot the player last flew each craft in (the FPV camera is
+  // stored as 'cockpit', the first-person slot); a first launch starts in the chase view.
+  // thirdPersonViews: the last third-person slot per craft, where viewToggle1P3P goes back to.
+  views: { default: perCraft('chase'), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, oneOf(VIEW_IDS)])) },
+  thirdPersonViews: { default: perCraft('chase'), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, oneOf(THIRD_PERSON_VIEW_IDS)])) },
+  fov: {
+    default: Object.freeze({ chase: CONFIG.CAMERA.FOV_BASE, cockpit: 74, wing: 68, flyby: 50, fpv: 120 }),
+    fields: { chase: unitRange(40, 100), cockpit: unitRange(50, 110), wing: unitRange(40, 110), flyby: unitRange(20, 90), fpv: unitRange(90, 150) },
+  },
+  // HUD: overlay (the instrument tiles), landingCallouts, cockpitGlass (the glass HUD in a cockpit
+  // with an instrument panel; third-person views always show it) and flightPathMarker (the
+  // velocity-vector symbol, part of the glass HUD).
+  hud: {
+    default: Object.freeze({ overlay: false, landingCallouts: false, cockpitGlass: false, flightPathMarker: true }),
+    fields: { overlay: isBoolean, landingCallouts: isBoolean, cockpitGlass: isBoolean, flightPathMarker: isBoolean },
+  },
+
+  // v2: input behaviour (bindings and calibration live in input storage keys).
+  twistYaw: { default: 'auto', validate: oneOf(['auto', 'on', 'off']) },
+  afterburnerDetent: { default: 0.95, validate: unitRange(0.8, 1) },
+
+  // v2: graphics and performance.
+  frameTarget: { default: 'auto', validate: oneOf(FRAME_TARGETS) },
+  dynamicResolution: { default: true, validate: isBoolean },
+
+  // v2: audio mixer (0..1 per bus).
+  mixer: {
+    default: Object.freeze({ master: 0.7, engine: 0.9, environment: 0.85, ui: 0.8, copilot: 1, music: 0.7 }),
+    fields: Object.fromEntries(MIXER_BUSES.map((bus) => [bus, unitRange(0, 1)])),
+  },
+
+  // v2: the world. seed: the world flown last ('' before the first flight); a link or ?seed= wins over
+  // it at boot (src/core/seed.js), and every boot writes the world it opened back here.
+  seed: { default: '', validate: (value) => value === '' || (typeof value === 'string' && SEED_PATTERN.test(value)) },
+
+  // v2: developer aids.
+  devBadge: { default: false, validate: isBoolean },
+  windOverlay: { default: false, validate: isBoolean },
+});
+
+/** Keys that read and write a field of an object key, kept so v1-era callers keep working. */
+const ALIASES = Object.freeze({
+  masterVolume: { key: 'mixer', field: 'master' },
+});
+
+export const DEFAULT_SETTINGS = Object.freeze(Object.fromEntries(Object.entries(SCHEMA).map(([key, entry]) => [key, entry.default])));
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Returns the sanitized value for key, or undefined when value cannot be used at all. */
+function sanitize(key, value) {
+  const entry = SCHEMA[key];
+  if (!entry) return undefined;
+  if (entry.fields) {
+    if (!isPlainObject(value)) return undefined;
+    const result = {};
+    for (const [field, validate] of Object.entries(entry.fields)) {
+      result[field] = validate(value[field]) ? value[field] : entry.default[field];
+    }
+    return result;
+  }
+  return entry.validate(value) ? value : undefined;
+}
+
+export function isValidSetting(key, value) {
+  const alias = ALIASES[key];
+  if (alias) return SCHEMA[alias.key].fields[alias.field](value);
+  const entry = SCHEMA[key];
+  if (!entry) return false;
+  if (entry.fields) return isPlainObject(value) && Object.entries(value).every(([field, fieldValue]) => entry.fields[field]?.(fieldValue));
+  return entry.validate(value);
+}
+
+/** Upgrades a stored record of any older version to the current flat shape. */
+function migrate(stored) {
+  const record = isPlainObject(stored) ? { ...stored } : {};
+  let version = Number.isInteger(record.version) ? record.version : 1;
+  if (version < 2) {
+    // v1 kept one volume slider; v2 mixes per bus with that slider as the master.
+    if (Number.isFinite(record.masterVolume)) record.mixer = { ...SCHEMA.mixer.default, master: record.masterVolume };
+    delete record.masterVolume;
+    version = 2;
+  }
+  if (version < 3) {
+    // v3 adds the FPV drone setup; records from before it take the defaults (sanitize keeps any
+    // valid fields a newer build may already have written).
+    if (!isPlainObject(record.fpv)) record.fpv = { ...SCHEMA.fpv.default };
+    version = 3;
+  }
+  if (version < 4) {
+    // v4: V2 has no CLASSIC | SIM mode. The mode, the per-mode views and the "HOTAS connected in
+    // CLASSIC" prompt answer go (the Phase 1 import already dropped mode from imported records);
+    // the SIM view becomes the one remembered view. Assists a record already moved off the default
+    // were the player's choice, so the one-time HOTAS default leaves them alone.
+    const views = isPlainObject(record.views) ? record.views : null;
+    if (views && VIEW_IDS.includes(views.sim)) record.view = views.sim;
+    delete record.mode;
+    delete record.views;
+    delete record.hotasPrompt;
+    const assists = isPlainObject(record.assists) ? record.assists : {};
+    record.assistsSetByPlayer = Object.fromEntries(CRAFT_IDS.map((id) => [id, Number.isFinite(assists[id]) && assists[id] !== SCHEMA.assists.default[id]]));
+    version = 4;
+  }
+  if (version < 5) {
+    // v5: the view is remembered per craft. The one remembered view seeds every craft, and a
+    // third-person one is also where the first / third person swap returns to. Records without a
+    // view (a first run) keep the defaults: the chase view everywhere.
+    const view = VIEW_IDS.includes(record.view) ? record.view : null;
+    if (view) {
+      record.views = Object.fromEntries(CRAFT_IDS.map((id) => [id, view]));
+      if (THIRD_PERSON_VIEW_IDS.includes(view)) record.thirdPersonViews = Object.fromEntries(CRAFT_IDS.map((id) => [id, view]));
+    }
+    delete record.view;
+    version = 5;
+  }
+  record.version = version;
+  return record;
+}
+
+function loadValues() {
+  const record = migrate(storage.read(STORAGE_KEY, null));
+  const values = {};
+  for (const key of Object.keys(SCHEMA)) {
+    const sanitized = key in record ? sanitize(key, record[key]) : undefined;
+    values[key] = sanitized === undefined ? structuredClone(SCHEMA[key].default) : sanitized;
+  }
+  return values;
+}
+
+function valuesEqual(first, second) {
+  if (isPlainObject(first) && isPlainObject(second)) {
+    const keys = Object.keys(first);
+    return keys.length === Object.keys(second).length && keys.every((key) => first[key] === second[key]);
+  }
+  return first === second;
+}
+
+export function createSettings(bus) {
+  const values = loadValues();
+  let saveFailureReported = false;
+
+  function reportSaveFailure() {
+    if (saveFailureReported) return;
+    saveFailureReported = true;
+    bus.emit('notify', { text: 'This browser is blocking storage, so settings will reset next visit.', kind: 'warning' });
+  }
+
+  function save() {
+    if (!storage.write(STORAGE_KEY, { version: SETTINGS_VERSION, ...values })) reportSaveFailure();
+  }
+  // A background write can still fail after write() returned true (the database was closed and
+  // would not reopen): the player hears about it the same way.
+  storage.onWriteFailure(reportSaveFailure);
+
+  function commit(key, next) {
+    if (valuesEqual(values[key], next)) return true;
+    values[key] = next;
+    save();
+    const published = isPlainObject(next) ? { ...next } : next;
+    bus.emit('settings:changed', { key, value: published, settings: snapshot() });
+    const alias = Object.entries(ALIASES).find(([, target]) => target.key === key);
+    if (alias) bus.emit('settings:changed', { key: alias[0], value: next[alias[1].field], settings: snapshot() });
+    return true;
+  }
+
+  function snapshot() {
+    const copy = {};
+    for (const [key, value] of Object.entries(values)) copy[key] = isPlainObject(value) ? { ...value } : value;
+    copy.masterVolume = values.mixer.master;
+    return copy;
+  }
+
+  // Make sure a first run and an older record (a Phase 1 import included) land in the current format.
+  if (storage.read(STORAGE_KEY, null)?.version !== SETTINGS_VERSION) save();
+
+  return {
+    /** Current value. Object values are returned as copies. */
+    get(key) {
+      const alias = ALIASES[key];
+      if (alias) return values[alias.key][alias.field];
+      const value = values[key];
+      return isPlainObject(value) ? { ...value } : value;
+    },
+    all: snapshot,
+
+    /** Replaces a key (a whole object for object keys). Returns false when the value is invalid. */
+    set(key, value) {
+      const alias = ALIASES[key];
+      if (alias) return this.update(alias.key, { [alias.field]: value });
+      if (!isValidSetting(key, value)) return false;
+      const entry = SCHEMA[key];
+      const next = entry.fields ? { ...values[key], ...value } : value;
+      return commit(key, next);
+    },
+
+    /** Merges fields into an object key, e.g. update('assists', { jet: 0.5 }). */
+    update(key, patch) {
+      const entry = SCHEMA[key];
+      if (!entry?.fields || !isValidSetting(key, patch)) return false;
+      return commit(key, { ...values[key], ...patch });
+    },
+
+    /** Restores one key, or every key when none is given, to its default. */
+    reset(key) {
+      const keys = key ? [key] : Object.keys(SCHEMA);
+      for (const name of keys) {
+        if (SCHEMA[name]) commit(name, structuredClone(SCHEMA[name].default));
+      }
+    },
+  };
+}

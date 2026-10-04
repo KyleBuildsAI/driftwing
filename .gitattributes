@@ -1,2 +1,5 @@
 * text=auto eol=lf
 *.png binary
+
+# V1 is frozen byte-for-byte (tests/v1-checksum.test.mjs): never let git convert its line endings.
+public/v1/index.html binary

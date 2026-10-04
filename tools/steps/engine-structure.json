@@ -1,0 +1,148 @@
+[
+  {"eval":"(() => { const debug = window.DRIFTWING.ctx.systems.spawns.debug; if (!debug) throw new Error('this step file needs the spawns dev hook (a dev server, or a build with ?dev=1)'); return 'game presets held for the engine checks: ' + debug.holdGamePresets().length; })()"},
+  {
+    "eval": "(async () => { try { const kit = await import('/src/dev/structureTestKit.js'); const api = kit.installStructureChecks(window.DRIFTWING); return 'dev server only: imports /src/dev/structureTestKit.js | ' + api.setup(); } catch (error) { console.error('[structure check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.show('devWindFarm', {\"distance\":950,\"height\":170,\"lift\":70,\"bearing\":30}); } catch (error) { console.error('[structure check] show devWindFarm failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "structure-wind-farm"
+  },
+  {
+    "eval": "(async () => { try { return JSON.stringify(window.__dwStructure.stats()); } catch (error) { console.error('[structure check] stats devWindFarm failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.end('devWindFarm'); } catch (error) { console.error('[structure check] end devWindFarm failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.show('devRopeBridge', {\"distance\":190,\"height\":26,\"lift\":8,\"bearing\":35,\"spawnDistance\":900}); } catch (error) { console.error('[structure check] show devRopeBridge failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "structure-rope-bridge"
+  },
+  {
+    "eval": "(async () => { try { return JSON.stringify(window.__dwStructure.stats()); } catch (error) { console.error('[structure check] stats devRopeBridge failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.end('devRopeBridge'); } catch (error) { console.error('[structure check] end devRopeBridge failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.show('devRopeBridge', {\"distance\":190,\"height\":26,\"lift\":8,\"bearing\":35,\"spawnDistance\":900}); } catch (error) { console.error('[structure check] show devRopeBridge again failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.gateUnderBridge(); } catch (error) { console.error('[structure check] bridge gate failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.end('devRopeBridge'); } catch (error) { console.error('[structure check] end devRopeBridge again failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.show('devAirfield', {\"distance\":650,\"height\":90,\"lift\":0,\"bearing\":20,\"spawnDistance\":1300}); } catch (error) { console.error('[structure check] show devAirfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "structure-airfield"
+  },
+  {
+    "eval": "(async () => { try { return JSON.stringify(window.__dwStructure.stats()); } catch (error) { console.error('[structure check] stats devAirfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.end('devAirfield'); } catch (error) { console.error('[structure check] end devAirfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.show('devIslands', {\"distance\":1250,\"height\":230,\"lift\":230,\"bearing\":25,\"spawnDistance\":1600}); } catch (error) { console.error('[structure check] show devIslands failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "structure-floating-islands"
+  },
+  {
+    "eval": "(async () => { try { return JSON.stringify(window.__dwStructure.stats()); } catch (error) { console.error('[structure check] stats devIslands failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.end('devIslands'); } catch (error) { console.error('[structure check] end devIslands failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { window.__dwDayTime = window.DRIFTWING.state.time.dayTime; return window.__dwStructure.setTime(0.97); } catch (error) { console.error('[structure check] night failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.show('devIslands', {\"distance\":1250,\"height\":230,\"lift\":230,\"bearing\":25,\"spawnDistance\":1600}); } catch (error) { console.error('[structure check] show devIslands at night failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "structure-floating-islands-night"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.end('devIslands'); } catch (error) { console.error('[structure check] end devIslands at night failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwStructure.setTime(window.__dwDayTime); } catch (error) { console.error('[structure check] day failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.show('devSpires', {\"distance\":330,\"height\":55,\"lift\":45,\"bearing\":30,\"spawnDistance\":900}); } catch (error) { console.error('[structure check] show devSpires failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "structure-crystal-spires"
+  },
+  {
+    "eval": "(async () => { try { return JSON.stringify(window.__dwStructure.stats()); } catch (error) { console.error('[structure check] stats devSpires failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.end('devSpires'); } catch (error) { console.error('[structure check] end devSpires failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { window.__dwDayTime = window.DRIFTWING.state.time.dayTime; return window.__dwStructure.setTime(0.97); } catch (error) { console.error('[structure check] night failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.show('devSpires', {\"distance\":330,\"height\":55,\"lift\":45,\"bearing\":30,\"spawnDistance\":900}); } catch (error) { console.error('[structure check] show devSpires at night failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "structure-crystal-spires-night"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.end('devSpires'); } catch (error) { console.error('[structure check] end devSpires at night failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwStructure.setTime(window.__dwDayTime); } catch (error) { console.error('[structure check] day failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.show('devCanyonGates', {\"distance\":140,\"height\":30,\"lift\":4,\"bearing\":40,\"spawnDistance\":700}); } catch (error) { console.error('[structure check] show devCanyonGates failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "structure-course-markers"
+  },
+  {
+    "eval": "(async () => { try { return JSON.stringify(window.__dwStructure.stats()); } catch (error) { console.error('[structure check] stats devCanyonGates failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwStructure.end('devCanyonGates'); } catch (error) { console.error('[structure check] end devCanyonGates failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwStructure.finish(); } catch (error) { console.error('[structure check] finish failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 1500
+  },
+  {"eval":"'game presets released: ' + window.DRIFTWING.ctx.systems.spawns.debug.releaseGamePresets().length"}
+]

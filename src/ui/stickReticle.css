@@ -1,0 +1,41 @@
+  /* Virtual-stick reticle: a faint ring for full deflection around the screen centre, a centre
+     mark, and a small gold dot (with a hairline from the centre) at the mouse stick's deflection.
+     Shown only with the mouse captured; hidden in photo mode. */
+  #ui-root .dw-stick-reticle {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    z-index: 7;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 0.25s ease;
+  }
+  #ui-root .dw-stick-reticle[hidden] { display: none; }
+  #ui-root.dw-photo-on .dw-stick-reticle { opacity: 0; }
+  #ui-root .dw-stick-reticle svg {
+    position: absolute;
+    overflow: visible;
+    left: 0;
+    top: 0;
+  }
+  #ui-root .dw-stick-reticle .dw-reticle-ring {
+    fill: none;
+    stroke: rgba(246, 239, 228, 0.16);
+    stroke-width: 1;
+    stroke-dasharray: 3 6;
+  }
+  #ui-root .dw-stick-reticle .dw-reticle-centre {
+    stroke: rgba(246, 239, 228, 0.42);
+    stroke-width: 1.2;
+  }
+  #ui-root .dw-stick-reticle .dw-reticle-line {
+    stroke: rgba(243, 199, 122, 0.36);
+    stroke-width: 1;
+  }
+  #ui-root .dw-stick-reticle .dw-reticle-dot {
+    fill: rgba(243, 199, 122, 0.9);
+    stroke: rgba(20, 16, 26, 0.55);
+    stroke-width: 1.5;
+  }

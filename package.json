@@ -1,19 +1,46 @@
 {
   "name": "driftwing",
-  "version": "1.0.0",
+  "version": "2.0.0-phase.2",
   "private": true,
-  "description": "DRIFTWING: an ambient infinite-flight exploration game in a single index.html (three.js WebGPU)",
+  "description": "DRIFTWING: an ambient infinite-flight exploration game (three.js WebGPU, Vite)",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
-    "serve": "node tools/serve.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "build:single": "node tools/build-single.mjs",
+    "preview": "vite preview",
+    "serve:single": "node tools/serve.mjs 5199 dist-single",
     "copilot-server": "node tools/copilot-server.mjs",
-    "test": "node tools/smoke-test.mjs"
+    "test": "npm run test:v1 && npm run build:single && node tools/smoke-test.mjs --file dist-single/index.html",
+    "test:v1": "node --test tests/v1-checksum.test.mjs",
+    "test:shell": "npm run build:single && node tools/shell-test.mjs",
+    "test:flight": "node tools/run-harness.mjs --test 1",
+    "test:flight:webgl": "node tools/run-harness.mjs --test 1 --backend webgl",
+    "test:hotas": "node tools/run-harness.mjs --test hotas",
+    "test:hotas:webgl": "node tools/run-harness.mjs --test hotas --backend webgl",
+    "test:terrain": "node tools/run-harness.mjs --test terrain",
+    "test:terrain:webgl": "node tools/run-harness.mjs --test terrain --backend webgl",
+    "test:terrain:real": "node tools/run-harness.mjs --test terrain --presets real",
+    "test:terrain:real:webgl": "node tools/run-harness.mjs --test terrain --presets real --backend webgl",
+    "test:spawns": "node tools/run-harness.mjs --test spawns",
+    "test:spawns:webgl": "node tools/run-harness.mjs --test spawns --backend webgl",
+    "test:determinism": "node tools/run-harness.mjs --test determinism",
+    "test:determinism:webgl": "node tools/run-harness.mjs --test determinism --backend webgl",
+    "test:soak": "node tools/run-harness.mjs --test soak",
+    "test:soak:webgl": "node tools/run-harness.mjs --test soak --backend webgl",
+    "lab:terrain": "node tools/lab/terrain.mjs"
+  },
+  "dependencies": {
+    "three": "0.184.0",
+    "three-mesh-bvh": "0.9.15"
   },
   "devDependencies": {
-    "puppeteer-core": "^24.0.0"
+    "puppeteer-core": "24.43.1",
+    "vite": "7.3.6",
+    "vite-plugin-singlefile": "2.3.3"
   },
   "license": "UNLICENSED"
 }

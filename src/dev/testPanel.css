@@ -1,0 +1,135 @@
+/* ==========================================================================
+   Dev test harness UI (?test=1, ?test=hotas): progress pill and summary panel
+   in the v1 glass style. Loaded only by the dev-only harness modules.
+   ========================================================================== */
+#ui-root .dw-test-progress {
+  pointer-events: none;
+  position: absolute;
+  z-index: 60;
+  top: calc(var(--dw-top) + 54px);
+  right: var(--dw-right);
+  width: min(320px, calc(100vw - 32px));
+  padding: 10px 14px 12px;
+  font-variant-numeric: tabular-nums;
+}
+#ui-root .dw-test-progress[hidden] { display: none; }
+#ui-root .dw-test-progress-label { margin-top: 4px; font-size: 13.5px; color: #fffaf1; }
+#ui-root .dw-test-progress-detail { margin-top: 2px; font-size: 12px; color: var(--dw-text-dim); }
+#ui-root .dw-test-progress-bar {
+  margin-top: 8px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 240, 220, 0.12);
+  overflow: hidden;
+}
+#ui-root .dw-test-progress-bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--dw-gold);
+  transition: width 0.4s var(--dw-ease);
+}
+
+#ui-root .dw-test-summary {
+  pointer-events: auto;
+  position: absolute;
+  z-index: 60;
+  top: 16px;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1180px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(36, 28, 44, 0.84), rgba(20, 16, 26, 0.8));
+}
+#ui-root .dw-test-summary[hidden] { display: none; }
+/* The sound pill lives outside #ui-root above its layer; it would cover the table's right columns. */
+body:has(#ui-root .dw-test-summary:not([hidden])) .dw-sound-pill { visibility: hidden; }
+#ui-root .dw-test-head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 22px 12px;
+  border-bottom: 1px solid var(--dw-hairline);
+}
+#ui-root .dw-test-head h2 { margin: 3px 0 0; font-size: 21px; font-weight: 350; color: #fffaf1; }
+#ui-root .dw-test-subtitle { margin-top: 3px; font-size: 12px; color: var(--dw-text-dim); }
+#ui-root .dw-test-verdict {
+  flex: none;
+  min-width: 96px;
+  padding: 9px 16px;
+  border-radius: 12px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+#ui-root .dw-test-verdict.dw-test-pass { color: #b9f0cf; background: rgba(96, 196, 140, 0.16); border: 1px solid rgba(120, 220, 160, 0.42); }
+#ui-root .dw-test-verdict.dw-test-fail { color: #ffc2a8; background: rgba(242, 120, 84, 0.16); border: 1px solid rgba(242, 140, 100, 0.48); }
+#ui-root .dw-test-head-actions { margin-left: auto; display: flex; gap: 8px; }
+#ui-root .dw-test-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 22px 18px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 240, 220, 0.2) transparent;
+}
+#ui-root .dw-test-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--dw-text-dim);
+}
+#ui-root .dw-test-meta b { font-weight: 500; color: var(--dw-text); }
+#ui-root .dw-test-section { margin-top: 14px; }
+#ui-root .dw-test-section > h3 { margin: 0 0 6px; color: var(--dw-gold); opacity: 0.9; }
+#ui-root .dw-test-criteria {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+}
+#ui-root .dw-test-criterion {
+  padding: 8px 11px;
+  border-radius: 11px;
+  border: 1px solid var(--dw-hairline);
+  background: rgba(255, 240, 220, 0.04);
+}
+#ui-root .dw-test-criterion-label { font-size: 12px; color: var(--dw-text-dim); }
+#ui-root .dw-test-criterion-value { margin-top: 2px; font-size: 15px; font-variant-numeric: tabular-nums; }
+#ui-root .dw-test-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+#ui-root .dw-test-table th {
+  position: sticky;
+  top: 0;
+  padding: 5px 7px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dw-text-dim);
+  background: rgba(28, 22, 34, 0.96);
+  border-bottom: 1px solid var(--dw-hairline-strong);
+}
+#ui-root .dw-test-table td {
+  padding: 3px 7px;
+  border-bottom: 1px solid rgba(255, 240, 220, 0.06);
+  white-space: nowrap;
+}
+#ui-root .dw-test-table td.dw-test-wrap { white-space: normal; min-width: 150px; max-width: 400px; overflow-wrap: anywhere; }
+#ui-root .dw-test-table .dw-test-num { text-align: right; }
+#ui-root .dw-test-table tfoot td { border-top: 1px solid var(--dw-hairline-strong); color: #fffaf1; font-weight: 500; }
+#ui-root .dw-test-pass-text { color: #9fe6bd; }
+#ui-root .dw-test-fail-text { color: #ffab8a; }
+#ui-root .dw-test-muted-text { color: var(--dw-text-faint); }
+#ui-root .dw-test-notes { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: var(--dw-text-dim); }
+#ui-root .dw-test-notes li { margin: 2px 0; }

@@ -7,38 +7,41 @@
 //   PORT=3000                      listen port
 //   HOST=...                       listen address (default: both loopbacks, 127.0.0.1 and ::1)
 //   ANTHROPIC_API_KEY=...          optional: ask Claude first, fall back to the built-in rules
-//   COPILOT_MODEL=...              optional model id (default claude-haiku-4-5-20251001, chosen for latency)
+//   COPILOT_MODEL=...              optional model id (default claude-haiku-4-5, chosen for latency)
 //   COPILOT_CLAUDE_BUDGET_MS=700   optional: time allowed for Claude before the rules answer instead
 //   COPILOT_WARMUP=0               optional: skip the start-up request that primes the JSON-schema cache
 //   ANTHROPIC_BASE_URL=...         optional: alternative API base URL (e.g. a local proxy)
+//   ALLOW_FILE_ORIGIN=1            optional: also accept Origin "null" (index.html opened from a file)
 //
 // In the game: open Settings, turn on "Remote copilot" and keep the endpoint
 // http://localhost:3000/copilot. The game allows 800 ms per request and falls
 // back to its own local grammar on timeout, network error or an invalid reply.
 //
-// Protocol:
+// Protocol (the full contract, with every flightState field and action, is docs/copilot-api.md):
 //   POST /copilot  body {flightState, transcript}  ->  {speech, action}
-//   GET  /health   -> {ok, brain, model}
+//   GET  /health   -> {ok, brain, model, actions}
 //   Testing aid (only with COPILOT_TEST_DELAY=1): POST /copilot?delay=1500 waits 1.5 s
 //   before answering, which exercises the game's timeout + local fallback path.
 //
-// Security: only the game's own origins may call it (file:// pages send Origin "null",
-// plus http(s)://localhost, 127.0.0.1 and [::1] on any port). Add more with
-// ALLOWED_ORIGINS=https://example.com,https://other.example. Other origins get 403, so
-// an unrelated website cannot spend your Claude key through this server.
+// Security: only the game's own origins may call it: http(s)://localhost, 127.0.0.1 and [::1]
+// on any port. Add more with ALLOWED_ORIGINS=https://example.com,https://other.example. Other
+// origins get 403, so an unrelated website cannot spend your Claude key through this server.
+// Origin "null" is refused unless ALLOW_FILE_ORIGIN=1: file:// pages send it, but so do
+// sandboxed iframes and data: documents on any website.
 import { createServer } from 'node:http';
 
 const PORT = Number.parseInt(process.env.PORT ?? '3000', 10) || 3000;
 const HOST = process.env.HOST || '';
 const API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const API_BASE = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '');
-const MODEL = process.env.COPILOT_MODEL || 'claude-haiku-4-5-20251001';
+const MODEL = process.env.COPILOT_MODEL || 'claude-haiku-4-5';
 const CLAUDE_BUDGET_MS = clamp(Number.parseInt(process.env.COPILOT_CLAUDE_BUDGET_MS ?? '700', 10) || 700, 100, 10000);
 const WARMUP = process.env.COPILOT_WARMUP !== '0';
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_TEST_DELAY_MS = 5000;
 const TEST_DELAY_ENABLED = process.env.COPILOT_TEST_DELAY === '1';
 const EXTRA_ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map((origin) => origin.trim()).filter(Boolean);
+const ALLOW_FILE_ORIGIN = process.env.ALLOW_FILE_ORIGIN === '1';
 const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 const MAX_SPEECH_LENGTH = 400;
 const MAX_LABEL_LENGTH = 48;
@@ -46,13 +49,24 @@ const MAX_LABEL_LENGTH = 48;
 // ---- Shared action schema (mirrors Copilot.sanitizeAction in the game) --------------------
 const ACTION_TYPES = [
   'waypoint', 'clearWaypoint', 'autopilot', 'time', 'ringCourse', 'cancelRingCourse',
-  'barrelRoll', 'boost', 'find', 'describe', 'photoMode', 'journal', 'none',
+  'find', 'describe', 'photoMode', 'journal', 'none',
+  'setCraft', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate', 'switchVersion',
+  'nearby', 'goTo', 'findThermal', 'chaseStorm', 'nextDiscovery',
 ];
+/** Tour-guide actions that take an optional autopilot flag. */
+const GUIDE_ACTIONS = ['goTo', 'findThermal', 'chaseStorm', 'nextDiscovery'];
+const MAX_GOTO_NAME_LENGTH = 48;
+const MAX_GOTO_ID_LENGTH = 96;
 const FIND_TARGETS = [
   'mountains', 'snow', 'ocean', 'archipelago', 'islands', 'desert', 'dunes', 'forest', 'pine',
   'meadows', 'flowers', 'landmark', 'arch', 'monoliths', 'lighthouse', 'balloons',
 ];
 const TIME_PRESETS = ['dawn', 'sunrise', 'morning', 'noon', 'golden', 'sunset', 'dusk', 'night', 'midnight'];
+const CRAFT_IDS = ['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv'];
+/** switchVersion can only ask for V1: V2 hands over to the original game, the shell switches back. */
+const SWITCH_VERSIONS = ['v1'];
+const ASSIST_CHANGES = ['up', 'down', 'full', 'off'];
+const VIEWS = ['cockpit', 'chase', 'wing', 'flyby', 'outside'];
 
 const ACTION_JSON_SCHEMA = {
   type: 'object',
@@ -70,9 +84,15 @@ const ACTION_JSON_SCHEMA = {
     preset: { type: 'string', enum: TIME_PRESETS },
     dayTime: { type: 'number' },
     count: { type: 'integer' },
-    direction: { type: 'string', enum: ['left', 'right'] },
     target: { type: 'string', enum: FIND_TARGETS },
     autopilot: { type: 'boolean' },
+    craft: { type: 'string', enum: CRAFT_IDS },
+    version: { type: 'string', enum: SWITCH_VERSIONS },
+    level: { type: 'number' },
+    change: { type: 'string', enum: ASSIST_CHANGES },
+    view: { type: 'string', enum: VIEWS },
+    name: { type: 'string' },
+    id: { type: 'string' },
   },
   required: ['type'],
   additionalProperties: false,
@@ -91,7 +111,7 @@ const SYSTEM_PROMPT = `You are WREN, the calm, warm AI copilot riding along in D
 
 Each user message is JSON: {"flightState": {...}, "transcript": "what the pilot said"}. Reply with JSON {"speech": string, "action": object or null}.
 
-speech: one or two short sentences, at most 25 words, calm and friendly, plain text, no emoji, metres and km/h. When your action is "describe", "find", "waypoint" or "journal", the game appends the precise facts after your speech, so keep speech to a brief lead-in (or an empty string) instead of guessing numbers.
+speech: one or two short sentences, at most 25 words, calm and friendly, plain text, no emoji, in the pilot's units (flightState.units: "metric" is metres and km/h, "aviation" is feet and knots). When your action is "describe", "find", "waypoint" or "journal", the game appends the precise facts after your speech, so keep speech to a brief lead-in (or an empty string) instead of guessing numbers.
 
 action: at most one, or null for pure conversation. Types:
 - {"type":"find","target":one of ${FIND_TARGETS.join('/')},"autopilot":true if the pilot wants to go there} finds the nearest such place and sets a waypoint.
@@ -100,9 +120,18 @@ action: at most one, or null for pure conversation. Types:
 - {"type":"autopilot","enabled":bool,"heading":deg,"altitude":m,"followWaypoint":bool}; "take us there" means enabled true with followWaypoint true; climb/descend means altitude = current altitude +/- 200.
 - {"type":"time","preset":one of ${TIME_PRESETS.join('/')}}
 - {"type":"ringCourse","count":3-24} starts a fly-through ring course; {"type":"cancelRingCourse"} stops it.
-- {"type":"barrelRoll","direction":"left" or "right"}, {"type":"boost"}
 - {"type":"describe"} for where-am-I questions, {"type":"photoMode","enabled":bool}, {"type":"journal"}, {"type":"none"}.
-Use flightState to answer questions about altitude, speed, heading, time and nearby landmarks. When you mention where we are, use flightState.place (what the ground below actually looks like, e.g. "the foothills of the Snow Peaks"); the biome name alone can be misleading. If the request is unclear, reply kindly with a couple of example commands and action null.`;
+Aircraft actions (the game reports whether each one worked, so keep speech to a short lead-in or an empty string):
+- {"type":"setCraft","craft":one of ${CRAFT_IDS.join('/')}} (sailplane = glider, cub or taildragger = bushplane, fighter = jet, heli or chopper = helicopter, drone or quad = fpv). flightState.availableCraft lists what is installed.
+- {"type":"setAssists","change":"up"/"down"/"full"/"off"} or {"type":"setAssists","level":0..1}: flight assists for the current craft (the only difficulty control; every craft flies the real flight model); up and down move 25 percent.
+- {"type":"switchVersion","version":"v1"}: switch to version one, the original DRIFTWING ("version one", "v1", "play the original"). This game is version two.
+- {"type":"setView","view":"cockpit"/"chase"/"wing"/"flyby"/"outside"} ("cockpit" is first person, the FPV camera on the drone; "outside" or "third person" returns to the last outside view), {"type":"deployChute"}, {"type":"engine","enabled":bool}, {"type":"relaunch"} (aerotow for the glider), {"type":"calibrate"} (opens the controls panel's calibration wizard).
+Tour-guide actions (the game adds the distances, directions and headings, so keep speech to a short lead-in or an empty string):
+- {"type":"nearby"} for "what's nearby": the game lists the closest spawns (flightState.nearby) with distance, direction and state.
+- {"type":"goTo","name":"rope bridge","autopilot":bool} or {"type":"goTo","id":an id from flightState.nearby or flightState.activeEvents,"autopilot":bool} for "take me to the ...": a waypoint on the named place, event or category (weather, wildlife, structure, ...). autopilot only when the pilot asks you to fly there.
+- {"type":"findThermal","autopilot":bool} finds the nearest working thermal. {"type":"chaseStorm","autopilot":bool} guides to the nearest active storm or honestly says none is active. {"type":"nextDiscovery","autopilot":bool} guides to the nearest place not in the journal yet.
+flightState.nearby lists spawns within 15 km (state active, dormant (only a possibility), site (not discovered yet) or discovered); flightState.activeEvents the live events; flightState.weather.state the regional weather (clear, building, storm, clearing). Never claim a storm or an event that is not listed.
+Use flightState to answer questions about altitude, speed, heading, time and nearby landmarks. For airspeed use flightState.airspeed (indicated, in flightState.units: knots for "aviation", km/h for "metric"); for landings use flightState.lastLanding and bestLanding (grade butter/smooth/firm/hard, sinkRate m/s); flightState.windAtCraft.fromName is where the wind blows from. There are no penalties: after a soft crash the craft is simply back in the air. When you mention where we are, use flightState.place (what the ground below actually looks like, e.g. "the foothills of the Snow Peaks"); the biome name alone can be misleading. If the request is unclear, reply kindly with a couple of example commands and action null.`;
 
 // ---- Small helpers ----------------------------------------------------------------------------------
 function clamp(value, min, max) {
@@ -183,19 +212,55 @@ function sanitizeAction(raw) {
       return present(raw.dayTime) && copyNumber('dayTime', (value) => ((value % 1) + 1) % 1) ? action : null;
     case 'ringCourse':
       return copyNumber('count', (value) => clamp(Math.round(value), 3, 24)) ? action : null;
-    case 'barrelRoll':
-      if (present(raw.direction)) {
-        if (raw.direction !== 'left' && raw.direction !== 'right') return null;
-        action.direction = raw.direction;
-      }
-      return action;
     case 'find':
       if (!FIND_TARGETS.includes(raw.target)) return null;
       action.target = raw.target;
       return copyBoolean('autopilot') ? action : null;
     case 'photoMode':
       return copyBoolean('enabled') ? action : null;
+    case 'setCraft':
+      if (!CRAFT_IDS.includes(raw.craft)) return null;
+      action.craft = raw.craft;
+      return action;
+    case 'switchVersion':
+      if (!SWITCH_VERSIONS.includes(raw.version)) return null;
+      action.version = raw.version;
+      return action;
+    case 'setAssists':
+      // Exactly one of level (0..1) or change.
+      if (present(raw.level) === present(raw.change)) return null;
+      if (present(raw.level)) {
+        if (!finite(raw.level) || raw.level < 0 || raw.level > 1) return null;
+        action.level = Math.round(raw.level * 100) / 100;
+        return action;
+      }
+      if (!ASSIST_CHANGES.includes(raw.change)) return null;
+      action.change = raw.change;
+      return action;
+    case 'setView':
+      if (!VIEWS.includes(raw.view)) return null;
+      action.view = raw.view;
+      return action;
+    case 'engine':
+      if (typeof raw.enabled !== 'boolean') return null;
+      action.enabled = raw.enabled;
+      return action;
+    case 'goTo': {
+      // Exactly one of name (a preset name, synonym or category) or id (from nearby / activeEvents).
+      if (present(raw.name) === present(raw.id)) return null;
+      if (present(raw.name)) {
+        if (typeof raw.name !== 'string') return null;
+        const name = cleanText(raw.name, MAX_GOTO_NAME_LENGTH);
+        if (!name) return null;
+        action.name = name;
+      } else {
+        if (typeof raw.id !== 'string' || !raw.id.trim() || raw.id.length > MAX_GOTO_ID_LENGTH) return null;
+        action.id = raw.id.trim();
+      }
+      return copyBoolean('autopilot') ? action : null;
+    }
     default:
+      if (GUIDE_ACTIONS.includes(raw.type)) return copyBoolean('autopilot') ? action : null;
       return action;
   }
 }
@@ -259,6 +324,79 @@ function parseDistance(text) {
   return /^k/.test(match[2]) ? value * 1000 : value;
 }
 
+const CRAFT_RULES = [
+  ['glider', /\b(glider|sailplane)\b/],
+  ['bushplane', /\b(bush ?plane|cub|tail ?dragger)\b/],
+  ['jet', /\b(jet|fighter)\b/],
+  ['helicopter', /\b(helicopter|heli|chopper)\b/],
+  ['wingsuit', /\bwing ?suit\b/],
+  ['fpv', /\b(fpv|drone|quad)\b/],
+];
+
+/** Speed in the pilot's units from flightState.airspeed (m/s fields). */
+function speedText(metresPerSecond, units) {
+  const value = Number.isFinite(metresPerSecond) ? metresPerSecond : 0;
+  return units === 'aviation' ? `${Math.round(value * 1.943844)} knots` : `${Math.round(value * 3.6)} km/h`;
+}
+
+/** The v2 aircraft rules: version one, craft, assists, views, chute, engine, relaunch, calibration, airspeed, landings. */
+function aircraftRule(text, flight) {
+  if (/\b(version (one|1)|v ?1|the original( game| version)?)\b/.test(text)) return { speech: '', action: { type: 'switchVersion', version: 'v1' } };
+  if (/\b(how was my landing|landing (grade|report)|how did i land|best landing)\b/.test(text)) {
+    const last = flight.lastLanding;
+    if (!last || typeof last.grade !== 'string') return { speech: 'No landings yet. Find a flat field and ease her on.', action: null };
+    const best = flight.bestLanding && flight.bestLanding.grade ? ` Best so far: ${flight.bestLanding.grade}.` : '';
+    const sink = Number.isFinite(Number(last.sinkRate)) ? Number(last.sinkRate) : 0;
+    const sinkText = flight.units === 'aviation' ? `${Math.round((sink * 196.85) / 10) * 10} feet a minute` : `${sink.toFixed(1)} metres a second`;
+    return { speech: `A ${last.grade} landing, ${sinkText} at touchdown.${best}`, action: null };
+  }
+  if (/\b(air ?speed|how fast|ground ?speed|mach)\b/.test(text) && flight.airspeed && typeof flight.airspeed === 'object') {
+    const units = flight.units === 'aviation' ? 'aviation' : 'metric';
+    const mach = Number(flight.airspeed.mach) >= 0.5 ? `, Mach ${Number(flight.airspeed.mach).toFixed(2)}` : '';
+    return { speech: `Indicated ${speedText(flight.airspeed.indicatedMs, units)}, ground speed ${speedText(flight.airspeed.groundSpeedMs, units)}${mach}.`, action: null };
+  }
+  if (/\bcalibrat(e|ion)\b/.test(text)) return { speech: '', action: { type: 'calibrate' } };
+  if (/\b(re-?launch|aero ?tow|tow me up|respawn)\b/.test(text)) return { speech: '', action: { type: 'relaunch' } };
+  if (/\b(chute|parachute)\b/.test(text)) return { speech: '', action: { type: 'deployChute' } };
+  if (/\b(engine|motor)s?\b.*\b(off|cut|kill|stop)\b|\b(cut|kill|stop|shut ?down)\b.*\b(engine|motor)s?\b/.test(text)) return { speech: '', action: { type: 'engine', enabled: false } };
+  if (/\b(engine|motor)s?\b.*\b(on|start)\b|\b(start|restart)\b.*\b(engine|motor)s?\b/.test(text)) return { speech: '', action: { type: 'engine', enabled: true } };
+  if (/\b(cockpit|first person)\b/.test(text)) return { speech: '', action: { type: 'setView', view: 'cockpit' } };
+  if (/\bchase (view|cam|camera)\b|^chase$/.test(text)) return { speech: '', action: { type: 'setView', view: 'chase' } };
+  if (/\bwing (view|cam|camera)\b/.test(text)) return { speech: '', action: { type: 'setView', view: 'wing' } };
+  if (/\bfly ?by (view|cam|camera)\b/.test(text)) return { speech: '', action: { type: 'setView', view: 'flyby' } };
+  if (/\b(third person|outside view)\b/.test(text)) return { speech: '', action: { type: 'setView', view: 'outside' } };
+  if (/\bassists?\b/.test(text)) {
+    const percent = text.match(/\b(\d{1,3})\s*(percent)?\b/);
+    if (percent && Number(percent[1]) <= 100) return { speech: '', action: { type: 'setAssists', level: Number(percent[1]) / 100 } };
+    if (/\b(off|none|no|zero)\b/.test(text)) return { speech: '', action: { type: 'setAssists', change: 'off' } };
+    if (/\b(full|max|all)\b/.test(text)) return { speech: '', action: { type: 'setAssists', change: 'full' } };
+    if (/\b(up|more|increase)\b/.test(text)) return { speech: '', action: { type: 'setAssists', change: 'up' } };
+    if (/\b(down|less|decrease|lower)\b/.test(text)) return { speech: '', action: { type: 'setAssists', change: 'down' } };
+    const level = flight.assists && Number.isFinite(flight.assists.percent) ? `${flight.assists.percent} percent` : 'unknown';
+    return { speech: `Assists are at ${level}.`, action: null };
+  }
+  const craft = matchFirst(CRAFT_RULES, text);
+  if (craft && /\b(switch|change|fly|take|use|try|give me|to the)\b|^\S+$/.test(text)) return { speech: '', action: { type: 'setCraft', craft } };
+  return null;
+}
+
+/** The tour-guide rules: what's nearby, take me to, thermals, the storm chase and the next discovery. */
+function guideRule(text, flight) {
+  const autopilot = /\b(autopilot|fly (me|us)|you fly)\b/.test(text);
+  if (/\b(find|where'?s|any|nearest|need)\b.*\b(thermals?|updrafts?)\b|^(a )?thermals?$/.test(text)) return { speech: '', action: { type: 'findThermal', autopilot } };
+  if (/\bstorm ?chas(e|er|ing)\b|\bchase\b.*\b(storms?|tornado(es)?|supercells?)\b|\b(find|any|where'?s)\b.*\bstorms?\b/.test(text)) return { speech: '', action: { type: 'chaseStorm', autopilot } };
+  if (/\bnext (discovery|find)\b|\bsomething new\b|\bundiscovered\b/.test(text)) return { speech: '', action: { type: 'nextDiscovery', autopilot } };
+  if (/\b(what'?s|what is|anything) (nearby|around( here)?|close by|out there)\b/.test(text)) return { speech: '', action: { type: 'nearby' } };
+  const travel = text.match(/\b(take (me|us) to|fly (me |us )?to|head (to|for)|go to|guide (me|us) to)\b(.*)$/);
+  const places = Array.isArray(flight.nearby) ? flight.nearby.concat(Array.isArray(flight.activeEvents) ? flight.activeEvents : []) : [];
+  if (travel && places.length) {
+    const wanted = travel[travel.length - 1];
+    const match = places.find((place) => typeof place.name === 'string' && place.state !== 'dormant' && wanted.includes(place.name.toLowerCase()));
+    if (match && typeof match.id === 'string') return { speech: '', action: { type: 'goTo', id: match.id, autopilot } };
+  }
+  return null;
+}
+
 function ruleReply(flightState, transcript) {
   const text = String(transcript || '').toLowerCase().replace(/[^a-z0-9.\-'\s]/g, ' ').replace(/\s+/g, ' ').trim();
   const flight = flightState && typeof flightState === 'object' ? flightState : {};
@@ -268,8 +406,12 @@ function ruleReply(flightState, transcript) {
 
   if (!text) return { speech: "I'm here whenever you need me.", action: null };
   if (/\b(help|what can you do|commands)\b/.test(text)) {
-    return { speech: "I can find places, set waypoints, fly us on autopilot, change the time, and lay out ring courses. Try 'find the ocean' or 'make it dusk'.", action: null };
+    return { speech: "From the ground station I can find places, set waypoints, fly the autopilot, change the time and lay out ring courses, switch craft, assists, views, the engine, the chute, relaunch and back to version one, and guide you: what's nearby, take me to, find a thermal, chase the storm, next discovery.", action: null };
   }
+  const guide = guideRule(text, flight);
+  if (guide) return guide;
+  const aircraft = aircraftRule(text, flight);
+  if (aircraft) return aircraft;
   if (/\b(cancel|stop|end|quit)\b.*\b(course|rings?|race)\b/.test(text)) return { speech: 'Course called off.', action: { type: 'cancelRingCourse' } };
   if (/\bauto ?pilot\b.*\b(off|disengage|stop)\b|\b(disengage|stop|turn off)\b.*\bauto ?pilot\b|\bi have (the )?controls?\b/.test(text)) {
     return { speech: 'Autopilot off. Your aircraft.', action: { type: 'autopilot', enabled: false } };
@@ -284,13 +426,6 @@ function ruleReply(flightState, transcript) {
     if (count) action.count = clamp(Number(count[1]), 3, 24);
     return { speech: pick(['A fresh course, just for you.', 'Rings are up.']), action };
   }
-  if (/\b(barrel ?roll|do a roll|flip|loop)\b/.test(text)) {
-    const action = { type: 'barrelRoll' };
-    if (/\bleft\b/.test(text)) action.direction = 'left';
-    if (/\bright\b/.test(text)) action.direction = 'right';
-    return { speech: pick(['Hang on.', 'Here we go.']), action };
-  }
-  if (/\b(boost|faster|speed up|punch it)\b/.test(text)) return { speech: 'Boosting.', action: { type: 'boost' } };
 
   const target = matchFirst(TARGET_RULES, text);
   if (target) {
@@ -359,6 +494,29 @@ function summarizeFlightState(flight) {
           biomesVisited: Array.isArray(journal.biomesVisited) ? journal.biomesVisited.length : 0,
         }
       : null,
+    // v2 aircraft fields (docs/copilot-api.md).
+    craft: state.craft,
+    availableCraft: Array.isArray(state.availableCraft) ? state.availableCraft.slice(0, 12) : undefined,
+    units: state.units,
+    view: state.view,
+    capabilities: state.capabilities,
+    assists: state.assists ? { percent: state.assists.percent, active: state.assists.active } : undefined,
+    airspeed: state.airspeed,
+    aoa: state.aoa,
+    gLoad: state.gLoad,
+    agl: state.agl,
+    windAtCraft: state.windAtCraft ? { speed: state.windAtCraft.speed, fromName: state.windAtCraft.fromName, vertical: state.windAtCraft.vertical } : undefined,
+    gear: state.gear,
+    flaps: state.flaps,
+    onGround: state.onGround,
+    engineOn: state.engineOn,
+    lastLanding: state.lastLanding,
+    bestLanding: state.bestLanding,
+    // v2 tour-guide fields (docs/copilot-api.md).
+    nearby: Array.isArray(state.nearby) ? state.nearby.slice(0, 6) : undefined,
+    activeEvents: Array.isArray(state.activeEvents) ? state.activeEvents.slice(0, 6) : undefined,
+    weather: state.weather,
+    callouts: state.callouts,
   };
 }
 
@@ -403,7 +561,8 @@ async function askClaude(flightState, transcript, budgetMs) {
 
 // ---- HTTP ---------------------------------------------------------------------------------------------------
 function isAllowedOrigin(origin) {
-  return origin === 'null' || LOCAL_ORIGIN_PATTERN.test(origin) || EXTRA_ALLOWED_ORIGINS.includes(origin);
+  if (origin === 'null') return ALLOW_FILE_ORIGIN;
+  return LOCAL_ORIGIN_PATTERN.test(origin) || EXTRA_ALLOWED_ORIGINS.includes(origin);
 }
 
 /** CORS for the game's own origins only. Returns false when the request must be refused. */
@@ -497,7 +656,8 @@ async function handleCopilot(request, response, url) {
   }
   if (!reply) reply = sanitizeReply(ruleReply(flightState, transcript)) ?? { speech: "I'm here.", action: null };
   if (!response.writableEnded && !response.destroyed) sendJson(response, 200, reply);
-  log(`POST /copilot -> ${brain}${reply.action ? ` ${reply.action.type}` : ''} in ${Date.now() - started} ms${delay ? ` (test delay ${delay} ms)` : ''}`);
+  const flying = typeof flightState.craft === 'string' ? ` [${flightState.craft}]` : '';
+  log(`POST /copilot${flying} -> ${brain}${reply.action ? ` ${reply.action.type}` : ''} in ${Date.now() - started} ms${delay ? ` (test delay ${delay} ms)` : ''}`);
 }
 
 function handleRequest(request, response) {
@@ -512,7 +672,7 @@ function handleRequest(request, response) {
     return;
   }
   if (url.pathname === '/health' && request.method === 'GET') {
-    sendJson(response, 200, { ok: true, brain: API_KEY ? 'claude+rules' : 'rules', model: API_KEY ? MODEL : null });
+    sendJson(response, 200, { ok: true, brain: API_KEY ? 'claude+rules' : 'rules', model: API_KEY ? MODEL : null, actions: ACTION_TYPES });
     return;
   }
   if (url.pathname !== '/copilot') {
@@ -570,6 +730,7 @@ if (API_KEY && WARMUP) {
     .then(() => log('Claude warm-up done (response schema cached).'))
     .catch((error) => log(`Claude warm-up skipped: ${error.message}`));
 }
+if (ALLOW_FILE_ORIGIN) log('ALLOW_FILE_ORIGIN=1: accepting Origin "null" (file:// pages, but also sandboxed frames on any site).');
 
 function shutdown() {
   let open = servers.length;

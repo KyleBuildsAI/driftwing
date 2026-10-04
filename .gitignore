@@ -23,3 +23,7 @@ npm-debug.log*
 
 # Local editor/agent configuration
 .claude/
+
+# Build output
+dist/
+dist-single/

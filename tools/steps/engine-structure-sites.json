@@ -1,0 +1,59 @@
+[
+  {
+    "eval": "(async () => { try { const kit = await import('/src/dev/structureTestKit.js'); const api = kit.installSiteChecks(window.DRIFTWING); return 'dev server with ?test=sites only: imports /src/dev/structureTestKit.js | ' + await api.setup(); } catch (error) { console.error('[sites check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwSites.show('fixtureAirfield', {\"distance\":750,\"height\":140,\"bearing\":160,\"lift\":0}); } catch (error) { console.error('[sites check] show fixtureAirfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "sites-airfield"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwSites.prove('fixtureAirfield'); } catch (error) { console.error('[sites check] prove fixtureAirfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwSites.show('fixtureRopeBridge', {\"distance\":280,\"height\":45,\"bearing\":15,\"lift\":-25}); } catch (error) { console.error('[sites check] show fixtureRopeBridge failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "sites-rope-bridge"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwSites.prove('fixtureRopeBridge'); } catch (error) { console.error('[sites check] prove fixtureRopeBridge failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwSites.show('fixtureFloatingIslands', {\"distance\":1300,\"height\":120,\"bearing\":200,\"lift\":0}); } catch (error) { console.error('[sites check] show fixtureFloatingIslands failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "sites-floating-islands"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwSites.prove('fixtureFloatingIslands'); } catch (error) { console.error('[sites check] prove fixtureFloatingIslands failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwSites.show('fixtureSlotCanyon', {\"distance\":260,\"height\":80,\"bearing\":180,\"lift\":0}); } catch (error) { console.error('[sites check] show fixtureSlotCanyon failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 600
+  },
+  {
+    "shot": "sites-canyon-course"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwSites.prove('fixtureSlotCanyon'); } catch (error) { console.error('[sites check] prove fixtureSlotCanyon failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwSites.finish(); } catch (error) { console.error('[sites check] finish failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 1500
+  }
+]

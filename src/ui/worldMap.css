@@ -1,0 +1,99 @@
+/* World map (worldMap.js): a large glass panel between the top bar and the flight card, centred and at
+   most 1200 px wide; the flight stays visible around it. Touch screens use the panels' bottom sheet. */
+#ui-root .dw-panel.dw-map {
+  top: calc(var(--dw-top) + 54px);
+  bottom: calc(var(--dw-bottom) + 104px);
+  left: max(var(--dw-left), calc(50% - 600px));
+  right: max(var(--dw-right), calc(50% - 600px));
+  width: auto;
+  transform: translateY(14px);
+}
+#ui-root .dw-panel.dw-map.dw-open { transform: none; }
+#ui-root .dw-map .dw-panel-head { align-items: center; padding: 12px 12px 10px 20px; }
+#ui-root .dw-map .dw-panel-head h2 { font-size: 19px; }
+#ui-root .dw-map-tools { display: flex; align-items: center; gap: 6px; }
+#ui-root .dw-map-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin: 0 12px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: #1c1722;
+  box-shadow: inset 0 0 0 1px var(--dw-hairline);
+  outline: none;
+  touch-action: none;
+}
+#ui-root .dw-map-view:focus-visible { box-shadow: inset 0 0 0 2px rgba(243, 199, 122, 0.6); }
+#ui-root .dw-map-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
+#ui-root .dw-map-zoom {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+}
+#ui-root .dw-map-zoom .dw-icon-button { font-size: 18px; font-weight: 500; line-height: 1; }
+#ui-root .dw-map-readout {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  max-width: calc(100% - 80px);
+  padding: 0 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #fffaf1;
+  text-shadow: 0 1px 3px rgba(10, 7, 14, 0.9), 0 0 8px rgba(10, 7, 14, 0.6);
+  pointer-events: none;
+}
+#ui-root .dw-map-scale {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #fffaf1;
+  text-shadow: 0 1px 3px rgba(10, 7, 14, 0.9);
+  pointer-events: none;
+}
+#ui-root .dw-map-scale i { display: block; height: 5px; border: 1.5px solid #fffaf1; border-top: 0; box-shadow: 0 1px 3px rgba(10, 7, 14, 0.7); }
+#ui-root .dw-map-status {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(20, 16, 26, 0.7);
+  font-size: 11.5px;
+  color: var(--dw-text-dim);
+  pointer-events: none;
+}
+#ui-root .dw-map-status[hidden] { display: none; }
+#ui-root .dw-map-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 20px 12px;
+  font-size: 12px;
+  color: var(--dw-text-faint);
+}
+#ui-root .dw-map-count { color: var(--dw-text-dim); white-space: nowrap; }
+#ui-root .dw-map-help { text-align: right; }
+@media (max-width: 760px) {
+  #ui-root .dw-map-help { display: none; }
+}
+/* Touch: the bottom sheet the other panels use, taller for the map. */
+#ui-root.dw-touch .dw-panel.dw-map { top: auto; left: 8px; right: 8px; bottom: 8px; width: auto; height: min(82vh, 760px); }
+#ui-root.dw-touch .dw-map-help { display: none; }
+@media (orientation: landscape) and (max-height: 460px) {
+  #ui-root.dw-touch .dw-panel.dw-map { top: 8px; height: auto; }
+}

@@ -1,0 +1,416 @@
+# Phase 2 progress
+
+Spec: [docs/specs/phase2.md](specs/phase2.md). Contracts: [docs/specs/phase2-contract.md](specs/phase2-contract.md).
+Branch: `v2-phase2`, cut from tag `v2-structure`. Read this file first when resuming.
+
+## Plan
+
+| Wave | Work | Branches | Status |
+| --- | --- | --- | --- |
+| 1 | Milestone A placement and terrain stamps, Milestone B engine framework and F9 debugger, Milestone C director and regional weather, Milestone D spawn audio | `p2/placement`, `p2/framework`, `p2/director`, `p2/audio` | done |
+| 2 | The ten engines: vortex, emitter, weatherVolume, fauna, structure, celestial, waterEffect, lightEffect, windModifier, setPiece | `p2/engines-*` | done |
+| 3 | Milestone E presets 1-10, 11-20, 21-30 (verified and committed per batch) | `p2/presets-*` | done |
+| 4 | Milestone F discovery loop: journal, copilot tour guide, world map, seed links | `p2/discovery`, `p2/copilot-guide` | done |
+| 5 | Milestone G verification: ?test=spawns, ?test=determinism, ?test=terrain, 10-minute soak; docs/spawns.md with the preset template, architecture, controls, copilot API, CHANGELOG; review and fixes; tag `v2-phase2` (the owner tags) | `p2/g-fixes`, `p2/g-tests`, `p2/g-docs` | done |
+| 6 | Release: the 8 review findings fixed, version 2.0.0-phase.2, CHANGELOG, manual checklist, final verification | `v2-phase2` | done: ready to tag |
+
+## Decisions
+
+- **No CLASSIC mode (the structure correction wins).** Spawns apply their full WindField forces in V2; the assists are the safety net. "Both modes" in the soak test means the first person and third person views.
+- **Map key.** M opens the world map (mapToggle). The mic toggle moves to Shift+M.
+- **Machine load (owner's rule).** Ignore PC load entirely: never wait for quiet, never build load tooling, never chase spikes the busy machine causes. Run each test once and report its numbers. Correctness criteria still hold.
+- **One director name.** `createGameDirector(ctx, options)` (src/spawns/director.js) wires the director to the game; `createDirector(options)` is its headless core for the lab. The spawns system creates the game director itself when it starts and exposes it as `ctx.systems.spawns.director`; there is no `attachDirector`.
+- **The director ticks itself.** The spawns system calls `director.update()` every frame and the director ticks at 2 Hz on the flight clock (`DIRECTOR_TICK_SECONDS`), so its activation log depends only on the seed and the flown path.
+- **One budget view.** The SpawnManager's `budgets` (heavy limit 2, real-light cap 4, per-engine caps from `engine.budget`, else `DIRECTOR_BUDGETS.engines`) is both the engines' `ctx.budgets` and the director's budgets.
+- **Dev presets bypass the director.** `spawns.forceSpawn` goes through `director.forceSpawn` for the director's own presets (`PRESETS`), and straight through the manager for presets added with `debug.addPreset`, so dev test presets are never scheduled by the director.
+- **Shedding only when it helps.** The director's load shedder refuses a level with nothing to take away (no heavy candidates and no live spawns), so with no content the governor behaves exactly as in Phase 1.
+
+## Done
+
+- Branch `v2-phase2` created from `v2-structure`; the owner specs and the Phase 2 contracts are in docs/specs/.
+- **Wave 1 merged** (each with `git merge --no-ff`):
+  - `f524f20` chore: merge placement and terrain stamps (Milestone A)
+  - `19f1f4c` chore: merge spawn audio (Milestone D)
+  - `0657a32` chore: merge spawn engine framework and f9 debugger (Milestone B)
+  - `2d6c16e` chore: merge event director and regional weather (Milestone C)
+  - Conflicts resolved: one `weatherChanged` in src/core/events.js (`state` and `previous` enums, `region` the string `"rx:rz"`; the weather system never emits `previous: null`), the framework's spawn and achievement events kept; src/main.js keeps the terrain dev test and world options, `SPAWN_ENGINE_FACTORIES`, and the weather, spawns and spawnDebugger factories and update order; src/spawns/presets/index.js; docs/architecture.md.
+- **Wave 1 wiring:**
+  - `36fda6e` feat: the SpawnManager honours the director's `opts.duration`, gains `setLodBias(bias)` / `getLodBias()` / `spawnCount()`, and exposes the shared budget view.
+  - `e13c93d` feat: the spawns system creates and drives the director (placement feed, discovered check, budgets, `getNearby` for the copilot).
+  - `ad3ad89` feat: the F9 debugger's Director section shows the real `getState()` and `getNearby()`.
+  - `7d4956f` test: tools/steps/director-game.json runs beside the live director.
+  - `5642867` docs: architecture for the wiring.
+  - Already joined by the merges: the placement feed reaches the manager as `world.placement`; a typed `discovery` with a `presetId` plays the audio discovery chime (once).
+- **Verified on the integrated tree:**
+  - `npm run build`, `npm run build:single` (V1 SHA-256 matches; no dev test kit or fixtures in the bundle), `npm run test:v1` 2/2.
+  - Labs: flight 82/82, fpv 87/87, helicopter 46/46, jet 57/57, wingsuit 37/37, input 34/34, settings 28/28, storage 54/54, copilot 56/56, copilot-server 8/8, terrain 162/162, spawns 88/88, director 47/47 (24 h), audio 177/177 on both backends.
+  - `tools/spawn-check.mjs` 53/53 on WebGPU and WebGL2.
+  - `node tools/run-harness.mjs --test terrain`: PASS on both backends (0 cracks, 483 worker chunks identical, collision 0.00001 m, 0/0 console, site-list hash 990ea5d1c3b00efe).
+  - Reduced flight harness (seeds INTEG-A and INTEG-B, glider and jet, both views, 45 s): hard criteria pass on both backends (0 NaN, 0 penetrations, 0/0 console, heap growth at most 21.3 MB, 24/24 scripted checks). Frames over 50 ms: 8 on WebGPU and 3 on WebGL2, every one main-thread work with 0 systems time and 0 GC, while 43-90 % of the machine's CPU was other processes'.
+  - Smokes, 0 errors and 0 warnings: built V2 and the shell on both backends, built V2 with `?dev=1` (the director in the F9 panel), the dev server's weather-sky and director-game steps on both backends.
+  - Live director check on the dev server, both backends: the test engines through the dev hook, the F9 Spawn button and `forceSpawn` fire `spawnActivated`, the End buttons fire `spawnEnded`, `getState()` ticks at 2 Hz on the flight clock, the shedder drives the manager's LOD bias (1, 0.7, 0.5 and back), the weather state machine follows clear -> building -> storm -> clearing at the player and forced states emit `weatherChanged` with the `"rx:rz"` region.
+
+## Done (Milestone F)
+
+- Discovery loop merged from `p2/discovery`:
+  - the journal records spawn discoveries and journalStat/achievement records;
+  - the glass discovery card;
+  - the world map on M, with worker map tiles (src/world/mapTileGen.js and mapTiles.worker.js, reusable for Phase 3's far field);
+  - seed links (`/?v=2#seed=X&t=`), the seed setting and Copy link;
+  - the mic moved to Shift+M.
+- Copilot tour guide merged from `p2/copilot-guide`:
+  - src/copilot/tourGuide.js: nearby, go-to, find a thermal, chase the storm and next discovery;
+  - proactive callouts, with the setting copilotCallouts;
+  - remote flightState nearby[] and activeEvents[];
+  - docs/copilot-api.md.
+- Verified on the merged tree: labs discovery 39/39, copilot 225/225, settings, input, storage, spawns and director all pass; build:single; built V2 smoke on WebGPU and WebGL2 with 0 errors and 0 warnings.
+
+## Done (wave 2: the ten engines, Milestone B)
+
+- **Merged** into `v2-phase2` in this order, each with `git merge --no-ff`:
+  - `8170e35` chore: merge the vortex and windModifier engines (Milestone B)
+  - `84fbbc9` chore: merge the emitter and lightEffect engines (Milestone B)
+  - `b0fb587` chore: merge the weatherVolume and celestial engines (Milestone B)
+  - `4594d13` chore: merge the fauna and waterEffect engines (Milestone B)
+  - `a07cc73` chore: merge the structure and setPiece engines (Milestone B)
+  - Conflicts were resolved so that both sides survive:
+    - src/main.js: one import and one `SPAWN_ENGINE_FACTORIES` line per engine, in ENGINE_NAMES order (vortex, emitter, weatherVolume, fauna, structure, celestial, waterEffect, lightEffect, windModifier, setPiece).
+    - src/spawns/spawnManager.js: four branches had each added `registerPrewarm`. One is kept (a function or null), next to `water`, `surfaces` and `weatherState`.
+    - src/core/events.js: both `journalStat` and `wildlifeQuiet` are kept.
+    - tools/spawn-check.mjs: the stricter debugger row check is kept (one row per engine). A new check confirms that the ten game engines are registered once each, in ENGINE_NAMES order.
+    - docs/architecture.md: every engine row, section and test row is kept. Duplicates are folded together: the sky modifier priorities, the engine ctx paragraph and the achievement event row.
+  - sky.js, clouds.js, the audio hooks and the copilot hooks merged without conflicts.
+- **Wiring** (committed on `v2-phase2`):
+  - `7b55af8` feat: the fauna engine honours `wildlifeQuiet`. While any source holds it, the fauna make no calls, breach calls or scatter cries, and their voice is eased out. `stats().quiet` reports the state.
+  - `b8df207` refactor: each shared engine helper now has one implementation, in `src/spawns/engines/engineKit.js`:
+    - `createWindSample`, used by every engine's wind source (windSources.js, weatherVolume, structure and fauna);
+    - the param readers: `params.js` is folded into engineKit as `createParamView` (reads by name), built on `createParamReader` (reads by value). Every engine that uses them reports a bad param as `[DRIFTWING] <engine> preset "<id>": param "<path>" <problem>`;
+    - `roll` and `rollInteger`, plus `smoothstep` for windSources.js.
+  - `66340d1` feat: a vortex over open water writes a foam and excitation trail into the water effects layer every 0.25 s. A waterspout therefore leaves a wake, which glows in a bioluminescent bay.
+  - `8e9af26` docs: the engine factories register once each, in ENGINE_NAMES order.
+  - `243a4d8` feat: one voice per preset, through engineKit's `ownsPresetAudio`. An entry's `voice`, `sound` or `ownsAudio` flag decides. Without a flag, the preset's first engine entry opens `preset.audio`. Before this change, five engines opened the voice by default and the waterEffect engine never did.
+  - `4bbebb3` fix: the terrain fixture volcano and waterfall carried emitter params from before the engine existed (`kind`). The real emitter refused them, which failed ?test=sites.
+  - `64b3207` test: spawn-check now waits for the GPU counters to settle before taking its memory baseline. Terrain chunks that landed during cycle 1 were read as a leak on WebGPU.
+  - `f007d6c` test: the sites checks expect all six fixtures, now that the emitter is registered.
+- **Verified on the integrated tree** (each test run once, per the owner's rule):
+  - `npm run build` and `npm run build:single` succeed. The V1 SHA-256 matches, and no dev kit is in the bundle. `npm run test:v1` passes 2/2.
+  - Labs:
+    - flight 82/82, fpv 87/87, helicopter 46/46, jet 57/57, wingsuit 37/37;
+    - input 34/34, settings 28/28, storage 54/54, copilot 225/225, copilot-server 17/17, discovery 39/39;
+    - terrain 162/162, spawns 88/88, director 47/47;
+    - structure 67/67, setpiece 47/47, wind-engines 55/55;
+    - audio 177/177 on both backends.
+  - `tools/spawn-check.mjs`: 55/55 on WebGPU and 55/55 on WebGL2. The first run, before `64b3207`, gave 52/54 on WebGPU (cycle 1 memory) and 54/54 on WebGL2.
+  - Every engine step file ran on both backends against a dev server on port 5263, with 0 errors and 0 warnings each time:
+    - vortex 9, windModifier 9, emitter 13, lightEffect 13, weatherVolume 19 and celestial 11 checks;
+    - fauna 11 (`seed=ENGINEFAUNA`) and waterEffect 9 (`seed=ENGINEWATER`);
+    - structure 20; structure-sites 9/9 (`test=sites`, passing after `4bbebb3` and `f007d6c`); setPiece 10/10.
+  - An integration step file (kept in the scratchpad, not in the repo) passed 4/4 on both backends. It checks three things:
+    - the waterspout writes its wake into the water layer;
+    - the fauna fall quiet while `wildlifeQuiet` holds;
+    - the wind sources return to baseline after dispose.
+  - `node tools/run-harness.mjs --test terrain`: PASS on both backends. 0 cracks, 483 worker chunks identical, collision 0.00001 m, 0/0 console, site-list hash 990ea5d1c3b00efe.
+  - Reduced flight harness (INTEG-A and INTEG-B, glider and jet, both views, 45 s), on both backends:
+    - Passed: 0 NaN, 0/0 console, scripts 24/24, 0 frames over 50 ms, and heap growth of at most 22.7 MB (WebGPU) and 22.1 MB (WebGL2).
+    - Failed: one penetration on each backend, both in the same run (see Open issues).
+  - Smokes of built V2 and of the shell on both backends: 0 errors and 0 warnings.
+
+## Done (wave 3: the 30 presets, Milestone E)
+
+- **Merged** into `v2-phase2` in this order, each with `git merge --no-ff`:
+  - `9d1b348` feat: merge spawn presets 1-10 (Milestone E batch 1): tornado, supercell, waterspout, lenticular, microburst, glory, volcano, geyserField, slotCanyon, megaWaterfall.
+  - `83da9c0` feat: merge spawn presets 11-20 (Milestone E batch 2): whalePod, maelstrom, bioluminescentBay, starlingMurmuration, geeseFormation, thermalHawks, fireflies, eagleWingman, windFarm, ropeBridge.
+  - `4aba4c1` feat: merge spawn presets 21-30 (Milestone E batch 3): abandonedAirfield, meteorShower, totalSolarEclipse, comet, skyLanternFestival, floatingIslands, skyWhale, crystalSpires, jetStream, stormChase.
+- **Conflicts resolved** so that every preset and every engine extension survives, with one implementation of each:
+  - src/spawns/presets/index.js: all 30 imports and entries in spec order (1-30), under one comment per batch. `validatePresets(PRESETS)` passes.
+  - src/spawns/engines/faunaEngine.js: batches 2 and 3 had each added `fadeOut`. One implementation is kept (`endWithDuration`, batch 2): default 6 s, an event fades out over its last `fadeOut` seconds and ends at its duration, and a wingman ends this way only while it is still waiting. Batch 3's range check (0..600 s) is kept. docs/engines/fauna.md has one merged row.
+  - src/dev/presetChecks.js: both batches had added a kit under this name, with different APIs. Batch 3's kit stays at `presetChecks.js` (tools/steps/presets-21-30.json). Batch 2's kit moved to `src/dev/presetChecksBatch2.js` (tools/steps/presets-batch2.json now imports it). Both install `window.__dwPresets`; only one is installed per run.
+  - tools/lab/terrain.mjs: all three batches had retargeted the phase1 test. Batch 2's version is kept. It covers both other versions: Phase 1 digests with no site presets, bit-identity outside every real stamp, and the placement, determinism, shape, falloff, paint, seam and collision checks around every stamped real preset.
+  - tools/lab/director.mjs: `--presets stub|real`. The `mixed` mode and its guessed `STUB_REAL_IDS` are dropped, since all 30 real presets now exist. Real mode runs batch 2's real-sites pacing and batch 3's per-preset report; stub mode adds batch 3's `near` filter check.
+  - tools/lab/discovery.mjs, docs/architecture.md and docs/engines/*.md: both sides kept. Every merged test, kit and step file has a row.
+- **Wiring** (committed on `v2-phase2`):
+  - `5712503` fix: the storm chase's children send no journal stats of their own (`journal: []` on the supercell's weatherVolume and the tornado's vortex). The set piece alone sends `closestTornado` and `stormsChased`, so a chase counts once.
+  - `6def090` and `73b992e` test: the director and preset pacing labs pass `landmarkSitesNear` to the director as the game does. Without it the sky lantern festival (`filters.near`) never activated in the labs.
+  - `a5d7955` test: the new dev hooks `spawns.debug.holdGamePresets()` / `releaseGamePresets()` take the game's own presets out of the manager and put them back. Every engine step file holds them, so it runs its test presets in an empty game. With the real presets, live sites and director events had broken the engine files' baselines (instances, wind sources, the glory uniforms).
+  - `9964c9d` test: presets-21-30's dispose check counts only wind sources added since the create. A live site's source that went away during the check failed floatingIslands, jetStream and stormChase before this fix.
+  - `bb8a518` test: `run-harness.mjs --test terrain --presets real` defaults to seed `TERRAIN-REAL-8`. That world has every real stamp type within 40 km of its spawn. P2-TERRAIN has no volcano cone in range, which failed 5/6 types.
+  - `12e2d92` and `e27903c` test: the audio lab's browser part holds the game presets, and so do discovery.json and copilot-guide.json. The copilot guide step also waits out the 45 s callout gap of a game callout made before the hold.
+- **Verified on the integrated tree** (each test run once, per the owner's rule):
+  - `npm run build` and `npm run build:single` succeed. The V1 SHA-256 matches, and no dev kit is in the bundle (`__dwPresets`, `installPresetChecks`, `testMarker`, `terrainFixtures`: 0 each). `npm run test:v1` passes 2/2.
+  - Labs:
+    - flight 82/82, fpv 87/87, helicopter 46/46, jet 57/57, wingsuit 37/37;
+    - input 34/34, settings 28/28, storage 54/54, copilot 225/225, copilot-server 17/17, discovery 39/39;
+    - terrain 291/291, spawns 88/88, structure 68/68, setpiece 47/47;
+    - director 49/49 (stub);
+    - preset-flight 13/13, preset-wind 12/12;
+    - audio 191/191 on both backends (the first run, before `12e2d92`, gave 182/189).
+  - Labs that failed:
+    - wind-engines 54/55: vortex `advanceStage` allocated 0.638 B/frame. Milestone E does not touch that code; the same tiering noise is in Open issues.
+    - preset-pacing 3/4 in its default 3 h: the volcano's eruption never started (see Open issues). With `--hours 6` it passes 4/4, with 1 eruption.
+  - Pacing with the real presets (`director.mjs --presets real`, 6/6):
+    - first notable at 65.5-69.5 s;
+    - with no sites, droughts that end within 90 s: glider 100 %, bush plane 98.1 % (longest 107.5 s), jet 100 %;
+    - with the real sites (6 h, bush plane): 100 %, with every common and the lantern festival activating.
+  - `tools/spawn-check.mjs`: 55/55 on WebGPU and 55/55 on WebGL2.
+  - Step files on a dev server on port 5263, on both backends, with 0 errors and 0 warnings:
+    - presets-batch1 58/58 (`seed=DRIFTWING`) and presets-batch2 30/30 (`seed=HARNESS-1`);
+    - presets-21-30 50/50, after `9964c9d` (47/50 and 49/50 before it);
+    - vortex 9, windModifier 9, emitter 13, lightEffect 13, weatherVolume 19, celestial 11;
+    - fauna 24 checks (`seed=ENGINEFAUNA`) and waterEffect 18 checks (`seed=ENGINEWATER`);
+    - structure 20/20, structure-sites 9/9 (`test=sites`), setPiece 10/10.
+    - Before `a5d7955`, windModifier, emitter, lightEffect, celestial (WebGPU), fauna and waterEffect had failed.
+  - Other step files:
+    - director-game and weather-sky passed on WebGPU, with 0/0 console.
+    - seed-link passed 7/7 on the shell (`/?v=2#seed=LINKTEST&t=0.300`).
+    - copilot-guide passed on both backends after `e27903c`.
+    - discovery passed on WebGPU with no failed check. On WebGL2 it failed 1 check (the chime sample; see Open issues).
+  - `node tools/run-harness.mjs --test terrain`, on both backends:
+    - fixtures: PASS, site-list hash 990ea5d1c3b00efe (unchanged);
+    - `--presets real` (TERRAIN-REAL-8): PASS with 6/6 stamp types, 0 cracks, 555 worker chunks identical, collision 0.00003 m, every LOD seen for every type, 0/0 console. Site-list hash 66961973cb983903.
+  - Reduced flight harness (INTEG-A and INTEG-B, glider and jet, both views, 45 s) with the director live on the real presets:
+    - hard criteria pass on both backends: 0 NaN, 0 penetrations, 0/0 console, scripts 24/24;
+    - heap growth at most 24.03 MB (WebGPU) and 21.67 MB (WebGL2);
+    - soft crashes: 0 on WebGPU, 2 on WebGL2 (jet);
+    - frames over 50 ms: 1 on WebGPU (110.4 ms) and 5 on WebGL2 (up to 700.7 ms). Each had 0 systems time and 0 GC (4 main thread, 1 delayed), so the harness marks those runs FAIL. They are reported, not investigated.
+    - The wave 2 jet penetration did not recur.
+  - Smokes of built V2 and of the shell on WebGPU and WebGL2: 0 errors and 0 warnings, and the screenshots differ.
+
+## Done (Milestone G: verification, docs and fixes)
+
+- **Merged** into `v2-phase2` in this order, each with `git merge --no-ff`:
+  - `b6e8edf` chore: merge soft-crash hold, declined activations and triage fixes (Milestone G), from `p2/g-fixes`: the soft crash holds the craft at the surface of its contact point and a strike during the fade-out is a new soft crash; director activations whose engines all end at create are declined (refusal `declined`); the preset pacing lab counts heavy spawns as the game does; discovery.json counts `chimesPlayed`; the sun disc fades out fully under storm overcast; the storm chase's tornado child brings only a lowering, not a second storm tower.
+  - `cff2884` chore: merge spawns, determinism and soak tests with the shared spawn check kit (Milestone G), from `p2/g-tests`: `?test=spawns` (src/dev/spawnsTest.js, spawnScenarios.js), `?test=determinism` (src/dev/determinismTest.js, with `spawns.debug.restartSpawns()` and `SpawnManager.resetForReplay()`), the 10-minute soak (`?test=1&testPlan=soak`), the real-preset terrain test needing all six stamp types, src/dev/spawnCheckKit.js (one kit for spawnsTest, presetChecks.js, presetChecksBatch2.js and structureTestKit's helpers), the run-harness modes and the npm scripts.
+  - `8e58d42` chore: merge spawn preset reference and phase 2 docs (Milestone G), from `p2/g-docs`: docs/spawns.md with both templates, the architecture restructure, controls, copilot API, vortex page, specs index, CHANGELOG, README and tools/docs-check.mjs.
+  - One conflict, in docs/architecture.md's `src/dev` table: the docs engineer's structure is kept, the testHarness row joins both descriptions (the soak and the helper files), and the geometryTracker, spawnCheckKit, spawnsTest and determinismTest rows are all kept. Every other row the fix and tests branches added survived the automatic merge.
+- **Wiring** (committed on `v2-phase2`):
+  - `7d59a62` test: the spawns test counts director activations of a re-added preset that the manager declines (`directorDeclined` per row, listed in the notes), and the soak reports `declined` per world. The spawns test itself spawns through the debug path, which is never declined.
+  - `5692061`, `cb07fca` docs: the README scripts table and test harness list, and the CHANGELOG, list ?test=spawns, ?test=determinism, the soak, the real-preset terrain test and the spawn check kit (the architecture rows came with the tests merge).
+  - `72a6dc2` docs: CHANGELOG "Fixed" entries for the soft-crash hold, the fade-out re-strike, declined activations, the storm-overcast sun disc and the storm chase tornado tower; the known issues follow (rare-tier turns rewritten, the storm chase tower removed).
+  - `4c90840` docs: docs/spawns.md matches the fix branch's storm chase tornado child (its weatherVolume override: base 1150 m, height 600 m, radius 900 m, 36 puffs, no anvil, overshoot or rain, a 520 m wall cloud dropping 300 m), and describes declined activations (pacing rules, thermal hawks, whale pod).
+  - `ea391cd` fix: a slow terrain worker start is no longer a console error. The terrain waited 6 s of clamped frame time and logged "terrain worker failed" when Vite compiled the worker's module graph slowly on WebGL2. It now waits 30 s of wall clock and at least 120 frames from its first frame, then builds on the main thread with a `console.info` note. Error events, worker error messages and a missing Worker are still reported with `console.error`. `getStats().workerFallback` is `null`, `slow start` or `failure`. The dev flag `?terrainWorkerStart=slow` ignores the workers' ready messages; tools/steps/terrain-worker-start.json proves the fallback (main-thread terrain ready around the craft, streaming after a 4 km move, 0 errors and 0 warnings). In that simulation the 120 startup frames took 14.2 s (WebGPU) and 22.5 s (WebGL2) on the dev server.
+  - Step files fixed when the full set ran on the merged tree:
+    - `fe02ad6` weather-sky.json: live game spawns register dormant sky modifiers (an emitter's immersion, a light effect's flash), so the opening has more than the weather's one. The checks now need the weather modifier and an inactive sky, and compare the count with their own baseline.
+    - `95799be` discovery.json: on a world whose terrain blocked every test-site spot 450-1100 m ahead (WebGL2, seed XK22YC), the search widens to 300-1400 m with a 30 m sight target.
+    - `fde5147` hotplug.json: on the dev server `?test=hotas` also runs the HOTAS test, whose mocks hold the plain device keys, so the step's own devices carry `#2`; it matches by vendor and product.
+    - `ef6ce02` presets-batch1.json: the discovery card wait is 30 s (cards queue 7 s each); the waterspout's card was still queued at 12 s on WebGL2.
+- **Verified on the merged tree** (each test run once, per the owner's rule; the step files fixed above were re-run on both backends after their fix):
+
+| Check | WebGPU | WebGL2 |
+| --- | --- | --- |
+| `npm run build`, `npm run build:single` | succeed; V1 SHA-256 matches; no dev kit in the bundle (spawnScenarios, prepareSpawnsTest, prepareDeterminismTest, createDisposeCheck, `__dwPresets`, testMarker, terrainFixtures, installPresetChecks, terrainWorkerStart: 0 each) | |
+| `npm run test:v1` | 2/2 | |
+| `node tools/docs-check.mjs` | 223/223 | |
+| Labs | flight 82/82, jet 60/60, helicopter 46/46, fpv 87/87, wingsuit 37/37, input 34/34, settings 28/28, storage 54/54, copilot 225/225, copilot-server 17/17, discovery 39/39, terrain 291/291, director 49/49 (stub) and 6/6 (real), preset-flight 13/13, preset-wind 12/12, spawns 90/90, structure 68/68, setpiece 47/47 (`--expose-gc` for the last three), preset-pacing 4/4 (volcano eruption 1, tornado 4, comet 20, sky whale 29, lantern festival 14) | |
+| Lab that failed | wind-engines 54/55: the vortex `update` allocated 0.556 B/frame (vortexEngine.js:955), the known V8 tiering noise | |
+| Audio lab | 191/191 (node and both browsers) | |
+| `tools/spawn-check.mjs` | 55/55 | 55/55 |
+| Step files on the dev server (24 files) | all pass, 0/0 console: copilot-guide 13, director-game 3, discovery 17, celestial 11, emitter 13, fauna 25, lightEffect 13, setPiece, structure 21, structure-sites 10, vortex 9, waterEffect 19, weatherVolume 19, windModifier 9, env-fixes, golden-frame, hotplug 6, input-review 9, presets-21-30 51, presets-batch1 58, presets-batch2 31, terrain-worker-start 4, view-physics 6, weather-sky 5 | the same, all pass, 0/0 console |
+| First full run, before the step fixes | hotplug (2 key checks) and weather-sky (2 modifier-count checks) failed | discovery (no test-site spot), hotplug (2 key checks) and presets-batch1 (the waterspout card) failed |
+| golden-frame A/B (`png-diff`, with and without the weather modifier) | identical | 1 pixel differs by 1 level of 921,600 |
+| seed-link.json on the shell | 7/7 | |
+| `run-harness --test terrain` (fixtures) | PASS: 0 cracks, 483 worker chunks identical, collision 0.00001 m, 21/21 poses, 0/0, hash 990ea5d1c3b00efe | the same |
+| `run-harness --test terrain --presets real` | PASS: 6/6 stamp types, 0 cracks, 555 chunks identical, collision 0.00003 m, 0/0, hash 66961973cb983903 | the same |
+| `run-harness --test determinism` | PASS: site-list hash d85384433861a1b0 in both runs and a fresh world, director log 4 entries hash 1093b8c1, spawn events 74d3d2fa (24), path 55b1a55f, 28.66 km, 0/0 | PASS with the same hashes |
+| `run-harness --test spawns` (30 presets) | PASS 30/30 on every criterion, 0/0, 30 screenshots; lowest avg 71.6 fps, worst p99 34.3 ms (reported) | PASS 30/30, 0/0, 30 screenshots; lowest avg 72.3 fps, worst p99 28.8 ms |
+| `run-harness --test soak` | FAIL on p99 only: 0 NaN, 0 penetrations, 0/0, heap 25.68 MB max, 0 frames over 50 ms, 10/10 runs, 32/32 scripts, director live 5/5 (5 activations, 37 spawns, 0 declined); worst p99 21.9 ms against 16.67 ms; avg 96.2 fps; 4 soft crashes | FAIL on p99 and frames: 0 NaN, 0 penetrations, 0/0, heap 22.7 MB max, 10/10, 32/32, director live 5/5 (4 activations, 36 spawns, 0 declined); worst p99 24.6 ms; 2 frames over 50 ms (59.2 ms main thread, 52.3 ms delayed; 0 systems, 0 GC); avg 90.1 fps; 4 soft crashes |
+| Built `dist-single/v2` smoke | 0/0, screenshots differ | 0/0, screenshots differ |
+| Built `dist-single/index.html` (shell) smoke | 0/0, screenshots differ | 0/0, screenshots differ |
+
+## Done (release: review fixes and release prep)
+
+- **Review findings (8), each confirmed in the code and fixed with a lab check** (the check fails on the code before its fix):
+  - `de8143f` fix: the celestial engine opens its voice only with an audio service, and a voice that throws at create removes the instance's sky modifier.
+  - `cc05361` fix: the weatherVolume engine opens its voice only with an audio service (the microburst's weatherVolume owns its voice).
+  - `eff3e61` fix: the fauna engine returns the agent range to the species pool when create throws after allocating it.
+  - `a0c8253` test: the spawns lab's `couplings` checks run the real celestial, weatherVolume and fauna engines with no audio service and with one that refuses the recipe.
+  - `97485e0` fix, `4a16acc` test: the WindField drops a hash cell once its last source leaves it (`sourceCellCount`); a source moved 20 km keeps at most 4 cells and 0 after removal (238 before the fix).
+  - `62eef0b` fix, `b3d099c` test: a director disposed while shedding puts the manager's LOD bias back to 1 (director lab 50/50; 49/50 before the fix).
+  - `2f8f25c` fix, `584108d` test: the tour guide removes an ended event's key from `calledOut`; site keys stay (copilot lab 226/226).
+  - `3614743` fix, `368ddd3` test, `8f5a6f4` docs: an always-on heavy site (the floating islands) holds a heavy slot while it exists (`holdsHeavy`); an `activeState` site still counts only while active. The preset pacing lab's stand-in counts the same way. Its default 3 h run still passes 4/4: volcano eruption 1, tornado 1 (was 4), comet 8 (was 20), sky whale 21 (was 29), lantern festival 32.
+  - The two celestial findings (null audio, modifier leak) were one fix.
+- **Release prep:**
+  - `cfaa994`: the CHANGELOG lists the review fixes.
+  - `9daf515`: the entry is `## [2.0.0-phase.2] - 2026-10-03` with the Milestone G verification numbers.
+  - `c887256`, `2bf9193`: package.json, package-lock.json and `CONFIG.VERSION` are at 2.0.0-phase.2.
+  - `9a6e4db`: [docs/phase2-manual-checklist.md](phase2-manual-checklist.md).
+- **Release verification on the final tree** (each test run once, per the owner's rule):
+
+| Check | WebGPU | WebGL2 |
+| --- | --- | --- |
+| `npm run build`, `npm run build:single` | succeed; V1 SHA-256 matches; dev kit strings 0 each in the bundle | |
+| `npm run test:v1` | 2/2 | |
+| `node tools/docs-check.mjs` | 223/223 | |
+| Labs | flight 82/82, jet 60/60, helicopter 46/46, fpv 87/87, wingsuit 37/37, input 34/34, settings 28/28, storage 54/54, copilot 226/226, copilot-server 17/17, discovery 39/39, terrain 291/291, director 50/50 (stub) and 6/6 (real), preset-flight 13/13, preset-wind 12/12, spawns 98/98, structure 68/68, setpiece 47/47, preset-pacing 4/4 | |
+| Lab that failed | wind-engines 55/56: the allocation check, 0.509 B/frame in windModifierEngine.js:435 `update` (the known V8 tiering noise; that file is untouched) | |
+| Audio lab (`--backend both`) | 190/191: "camera cuts do not swoop the pitch" failed on WebGPU (listener speed max 55.2 m/s against craft 26, shift 210.5 cents against a 126.5 bound); passed on WebGL2. No audio or camera code changed | |
+| `tools/spawn-check.mjs` | 55/55 | 55/55 |
+| Step files exercising the fixes (dev server, port 5263) | all pass, 0/0 console: celestial 11, weatherVolume 19, fauna 14 (`seed=ENGINEFAUNA`), windModifier 9, director-game 3, copilot-guide 7, presets-21-30 49 (counts are unique PASS lines) | the same |
+| `run-harness --test spawns` | PASS 30/30 on every criterion, 0/0; lowest avg 48.5 fps (starling murmuration), worst p99 49.7 ms (slot canyon) (reported) | PASS 30/30, 0/0; lowest avg 21.9 fps (eagle wingman), worst p99 1091.6 ms (microburst; max 1455.6 ms) (reported, not judged) |
+| `run-harness --test determinism` | PASS: site list d85384433861a1b0, director log 4 entries 1093b8c1, spawn events 74d3d2fa (24), path 55b1a55f, 28.66 km, 0/0 | PASS with the same hashes |
+| Built `dist-single/v2` smoke | 0/0, screenshots differ | 0/0, screenshots differ |
+| Built `dist-single/index.html` (shell) smoke | 0/0, screenshots differ | 0/0, screenshots differ |
+
+## Current state (resume from here)
+
+- **Phase 2 is ready to tag.** `v2-phase2` holds Phase 1, Milestones A to G, the review fixes and the release prep (version 2.0.0-phase.2, CHANGELOG entry `[2.0.0-phase.2] - 2026-10-03`). Everything is committed locally. Nothing is pushed and nothing is tagged; the owner pushes and tags `v2-phase2`.
+- The owner's manual checks before the tag are in [docs/phase2-manual-checklist.md](phase2-manual-checklist.md): the listening pass, the faint presets and lures, the storm chase touchdown, both views, the map and journal, and seed links.
+- These branches and worktrees can be removed once the owner is happy with them:
+  - the three `p2/presets-*` branches and their `.claude/worktrees/p2-b*` worktrees;
+  - the five `p2/engines-*` branches and their `.claude/worktrees/p2-e-*` worktrees;
+  - `p2/g-fixes`, `p2/g-tests` and `p2/g-docs` and their `.claude/worktrees/p2-g-*` worktrees.
+  - Unlink each worktree's node_modules junction first.
+- Then Phase 3 (docs/specs/phase3.md, with its own docs/phase3-progress.md), then Phase 4.
+- References for preset work:
+  - docs/engines/<name>.md, the reference for every param;
+  - the preset authoring notes below;
+  - docs/specs/phase2-engine-api.md.
+
+**Contract additions from wave 3** (all additive and documented in docs/engines/ and docs/architecture.md):
+- **Schema:**
+  - `activeState: { duration }` (sites), `cooldown`, and `anchor: { seek: 'peak', radius, align: 'downwind' }` (events);
+  - `filters.near: { landmarks: [arch | monoliths | lighthouse | balloons], radius <= 20000 }`, with `LANDMARK_TYPES`;
+  - the time-of-day classes `midday` (sun at least 14 degrees up) and `golden` (-3 to 14 degrees, now matched).
+- **SpawnManager:**
+  - an `activeState` site starts dormant (`instance.active = false`, lure hidden) until `setSiteActive(id, true)`;
+  - `preset.anchor` is applied at activation;
+  - `setPartLOD` keeps the particle count in step (the particle budget drift fix);
+  - **site hours:** a site preset with `filters.timeOfDay` exists only in those hours. It is removed with reason `hours` once it has been out of view. Only the bioluminescent bay uses it.
+- **Director:**
+  - `filters.near` moves a candidate onto a landmark, or rejects it as `near`;
+  - `createGameDirector` passes `terrain.landmarkSitesNear`, and a headless director needs it too.
+- **engineKit:** `createApproachJournal(label, spec)`, used by the vortex and weatherVolume `journal` param.
+- **Engines:**
+  - emitter: `snapToGround`. A `windSource` stands under anchor + `offset`.
+  - structure: the `waterfall` recipe (cliffStep); `gates` `corridor` / `river` / `riverWidth`; a teleport spoils a course; windFarm `wake.gust`.
+  - fauna:
+    - `fadeOut` (default 6 s);
+    - `altitude.mode 'player'` with `altitude.ceiling`;
+    - `pod.seekWater`;
+    - `circling.requireThermal`.
+  - waterEffect: `splash.waterOnly`.
+  - celestial: `untilDawn` and `dawnElevation`.
+  - weatherVolume: `instance.control.wallCloud`.
+- **Audio:** the `raptor` and `goose` recipes (trigger `call`).
+- **Dev hooks:**
+  - `spawns.debug.holdGamePresets()` / `releaseGamePresets()`;
+  - `?test=terrain&presets=real`;
+  - `createBrowserHelpers` (structureTestKit);
+  - geometryTracker entries carry `uuid`.
+
+**Preset authoring notes (contract additions from wave 2):**
+- **How an engines entry reaches create().** The entry `{ engine, params }` arrives as `engine.create(preset, params, rng)`. The `params` object is built in three layers:
+  - the entry's own params;
+  - then the overrides from `activate(..., { params: { [engine]: overrides } })` (a set piece child's `params`);
+  - then the activation fields: `position` (a new Vector3), `heading`, `site`, `startTime`, `scale`, `duration` and `seed`.
+- Each entry gets its own seeded rng.
+- Strict engines refuse an unknown param and name it: vortex, windModifier, emitter, lightEffect, structure and setPiece.
+- **Renamed wind params.** An updraft's speed is `updraft` (not `strength`), and a slipstream's lane start is `behind` (not `offset`). The emitter's own `windSource` block is separate and keeps its own names: its updraft speed is still `strength`.
+- **One voice per preset.** On a multi-engine preset, set `voice`, `sound` or `ownsAudio` explicitly when the first entry should not own `preset.audio`.
+- **Live control for set pieces:**
+  - vortex: `instance.control.{ intensity, ropeOut }`;
+  - windModifier: `control.{ strength, strengths[i] }`;
+  - structure: `instance.params.{ glow, sway, rotorSpeed, audio }` and `setParam`.
+- **Events:**
+  - typed `wildlifeQuiet { source, quiet }`, emitted by the celestial eclipse; the v1 birds, the audio cues and the fauna listen;
+  - `fauna:formation`, `fauna:scatter` and `fauna:call`;
+  - `structure:gate`, `structure:course` and `structure:landing`;
+  - `setPiece:stage`, `setPiece:narrate` and `setPiece:ended`;
+  - typed `achievement` and `journalStat`, with the journal keys `stormsChased`, `closestTornado` and `bestCanyonRun`.
+- **Engine ctx additions:**
+  - `registerPrewarm` (or null);
+  - `water`: the water effects layer, or null;
+  - `surfaces`: the extra ground surfaces;
+  - `weatherState()`: call it at create only.
+- **Sky and cloud additions:**
+  - the uniforms `cloudGlory` and `cloudBow`, and `sky.getModifierLevels()`;
+  - the sky modifier priorities: weather 10, weatherVolume 15, emitter immersion 20, lightning flash 30, eclipse 30.
+- **Other APIs:**
+  - `spawns.findGroundStart(x, z)` and the optional engine hook `groundStart(preset, params, site)`;
+  - `structureStamps(recipe, options)`, which builds preset stamps that are safe in the terrain worker;
+  - `createGateSet` and `crossGates`, in src/spawns/engines/gateDetector.js.
+
+**Standing rules:**
+- The structure correction is the source of truth (no CLASSIC mode in V2).
+- Ignore PC load entirely: run each test once and report its numbers.
+- Before any `git worktree remove`, unlink the worktree's node_modules junction first.
+- Push with full refspecs (`refs/heads/...`), because branch and tag names repeat.
+- Never edit source files while a browser run is using the dev server: Vite reloads the page in the middle of the run.
+- Agents share one scratchpad: give every smoke or harness run its own `--out` directory.
+- Engine and dev step files run in an empty game: hold the game's presets first (`spawns.debug.holdGamePresets()`), or count only the spawns the check made.
+
+## Open issues
+
+- **Milestone G (carried over to the tag and Phase 3):**
+  - **Soak frame-time criteria.** Both soak runs miss the p99 criterion: worst p99 21.9 ms (WebGPU) and 24.6 ms (WebGL2) against the perf governor's 16.67 ms target, which is 60 Hz under automation while headless Chrome runs uncapped at 90-96 fps. WebGL2 also had 2 frames over 50 ms (59.2 ms main thread, 52.3 ms delayed; 0 game systems, 0 GC). Every hard criterion passed on both backends (0 NaN, 0 penetrations, 0/0 console, heap at most 25.68 MB). Reported per the owner's rule, not chased.
+  - **The full 36-run flight matrix** (`npm run test:flight`) was not run in Milestone G; the soak covers every craft in both views on 5 seeds with the director live.
+  - **golden-frame on WebGL2:** the A/B pair (with and without the weather modifier) differs in 1 pixel by 1 level of 921,600; WebGPU is identical. Earlier waves reported both identical.
+  - **The spawns test's frame spikes:** the abandoned airfield (167.4 / 244.8 ms) and the crystal spires (137.1 / 234.2 ms) had one slow frame each while live, on WebGPU / WebGL2. Reported, not judged.
+  - **One-time warm-up heap:** several presets keep 0.5-5.8 MB on their first held create (the supercell, the meteor shower and the eagle wingman most), then stay flat; the spawns test lists them. The cause was not identified.
+  - **The rare tier** goes to whichever eligible rare preset comes first; the sky whale takes most daytime turns and the volcano erupts once in 54 simulated hours of the pacing lab. A per-preset fairness term is a design choice.
+  - **The storm chase funnel** reads only as a faint column in storm haze from 2.6 km (the fix engineer's touchdown screenshot); the framing and haze predate Milestone G.
+  - **docs-check** compares the preset table's identity columns, links, templates and wind params; numbers in each preset's prose and the emitter, lightEffect and structure param tables are checked by hand.
+  - **spawns.debug.restartSpawns** and **SpawnManager.resetForReplay** ship in the production bundle, like the other spawns debug hooks; only the test kits are kept out.
+  - **presets-batch1.json** keeps its checks inline; the other preset kits use src/dev/spawnCheckKit.js.
+  - The dev-server step files that start a random world (discovery.json and others with no `seed=`) depend on that world's terrain; discovery.json's test-site search was widened after one such world blocked it.
+- **Wave 3 (presets) issues, for Milestone G:**
+  - **Rare-tier balance (fixed in the lab, Milestone G).** The lab's stand-in manager reported no heavy count, so the director counted every heavy site spawn in reach, dormant or not: a dormant volcano and the floating islands filled the heavy budget and refused the eruption, the tornado, the comet and the sky whale. The game's manager counts a site only while its active state runs, and the lab now does too. The default 3 h run passes 4/4: volcano eruption 1, tornado 4, comet 20, sky whale 29, sky lantern festival 14 (was 0 / 1 / 4 / 12 / 41).
+    - The rare tier is shared by first come: the sky whale (anywhere, any time) takes most daytime rare turns, so a volcano eruption needs a volcano ahead when the tier is due. That matches the spec (the active state is rare); a per-preset fairness term is a design choice for later.
+  - **The storm chase's look with the real children (fixed, Milestone G).** The real `tornado` preset brings its own storm tower (an anvil, wall cloud and rain), 800 m from the supercell's centre. The storm chase's tornado child now overrides its weatherVolume to a dark turning lowering on the funnel (no anvil, overshoot or rain; its wall cloud ends at the funnel's cloud base), so no second tower grows at touchdown.
+    - In the integration run, the touchdown screenshot on WebGPU had the funnel hidden behind a ridge (seed E29ZR4), as batch 3 also saw.
+  - **One preset check kit (done, Milestone G).** src/dev/spawnCheckKit.js is the one kit for ?test=spawns, presetChecks.js (21-30), presetChecksBatch2.js (11-20) and structureTestKit's browser helpers; batch 1's checks stay inline in its step file.
+  - **discovery.json on WebGL2 (fixed, Milestone G):** "the discovery chime played" sampled live one-shot nodes, which live under a second, and the window opened after the chimes. The spawn voices now count `chimesPlayed` (audio `getStats().spawn`), and the check counts the chimes since the spawns were placed.
+  - The jet stream tube is straight (bend 0), so its wisps line up with the air. A seeded meander cannot be matched by an emitter shape yet.
+  - A 38 m/s jet stream core can stall a 30 m/s glider that enters it abruptly, as real shear would. Joining through the taper or across the edge is gentle.
+  - The comet holds a heavy slot for the rest of the night. Its declared lure only draws at the FAR tier, which a sky-anchored spawn does not reach.
+  - The thermal hawks (fixed, Milestone G): an activation that found no working thermal ended at once but still counted as a notable. The SpawnManager now declines a director activation whose engines all end at create (refusal `declined`), so the director counts no notable, cooldown or tier turn and retries the candidate in its next bucket. The whale pod with no open water gets the same.
+  - The meteor shower and the eclipse use `discovery.requireInView: false`, so they are discovered as soon as they start.
+  - The waterspout is mild for the glider: peak vertical speed 3.1 m/s against 2.0 m/s in calm air. The spec asks for it to be milder than the tornado.
+  - The maelstrom's pull is modest in the SIM rig: 700 m abeam, drift goes from -23 to -53 m.
+  - The jet barely feels the wind farm wakes at 220 m/s.
+  - The waterfall rainbow and the glory show only with the sun behind the viewer. The supercell's rain shafts are subtle from a distance.
+  - The canyon checks carry the craft in 30 m steps, so they prove the timing rules, not a flyable route.
+  - The new raptor and goose recipes are verified by measurement only. A listening pass by Kyle is worthwhile.
+  - Spawns lab allocation checks (batch 1) and the wind-engines vortex allocation check fail now and then from V8 tiering noise. This run: spawns 88/88; wind-engines 54/55 (`advanceStage`, 0.638 B/frame).
+- **Wave 2 reports, for the preset wave and Milestone G:**
+  - Emitter on WebGPU: its frame update measured 0.5-5.4 B/frame across runs; WebGL2 measured 0-0.2. This looks like V8 re-optimisation.
+    - tools/engine-alloc.mjs's pass limit went from 0.1 to 1 B/frame. That is a change of policy, and the lead should review it.
+    - Event paths (a strike, bursts, eruption triggers, wind-grid probes, voice levels) allocate a few hundred bytes per event before V8 optimises them. They are reported separately (`--events`).
+  - Water effects layer on WebGPU: 0.098 heap samples per frame against the 0.1 limit, all from splash events.
+  - Allocations in shared code outside the engines:
+    - each WindField terrain probe allocates about 10 KB in worldgen's noise (the emitter rations its probes to about 2 KB/frame);
+    - the fauna's terrain queries allocate about 345 B/frame;
+    - the WindField allocates about 184 B per 3 samples with sources present, against 146 B in calm air;
+    - three's compute dispatch allocates 0.3-0.65 KB/frame on WebGPU;
+    - sky.js `set()` allocates about 12 B/frame while a flash or an immersion eases.
+  - In the running game, a fractional number written to a THREE.Vector3, a Color or a shared `{ x, y, z }` literal is boxed. engineKit's `createWindSample` and typed arrays avoid it, and new engine code must as well.
+  - Fauna cost: an 8000-starling murmuration costs 6-7 ms of engine CPU per frame. Use 2500-4000 starlings per preset.
+  - Per-instance GPU frame time cannot be measured headless (vsync-paced frames on the busy machine). The engine docs give draw calls and triangles instead.
+  - The engine audio (the tornado and turbine voices, the cockpit rattle, thunder, the whale calls) is verified by measured levels only. A listening pass by Kyle is worthwhile.
+  - The node labs' allocation checks measure node's tiering, not Chrome's. A Float64Array value passed to a call V8 does not inline gets boxed. The set-piece lab catches this about half the time, and every time with `--no-maglev`.
+  - The vortex, windModifier, weatherVolume, celestial, fauna and waterEffect engines still validate params with their own local readers, so their message wording differs slightly from the engineKit format. Folding them into `createParamView` is a Milestone G cleanup. Every one of them names the field.
+  - Dev fixtures: spawnTestKit's testUpdraft and terrainFixtures' `wind` entries use `strength` / `speed`. No windModifier part reads them, so nothing refuses them today.
+  - The in-game waterspout check forces `surface: 'water'` over the test seed's mountains. The wake check (scratchpad) proved the write path, and the lab covers the land and water blend.
+  - The debug airfield without a flatten stamp can extend over water. Real airfield presets use the stamp.
+  - spawn-check on WebGPU needed the settle wait (`64b3207`). Its first cycle saw 6 late geometries (terrain chunks) before it.
+
+- **Storm clouds.** Since wave 2 the v1 cloud field follows the sky modifiers (`cloudShading.js`): darker blue-grey undersides in a storm and dimmed by an eclipse. Storm cloud masses come from the weatherVolume engine. The faint sun disc (about 1 %) under storm overcast is gone (Milestone G): the disc also fades out between overcast 0.6 and 0.85.
+- **First query of a stamped cell** resolves placement once (3-10 ms on the loaded machine), in the worker for chunks and on the main thread for the first collision query there.
+- **Real lights cost shading while they exist.** The light pool holds only the lights engines declare (`budget.lights`, capped at 4). Meshes on shared materials must be pooled (`createMeshPool` / `createInstancedPool`), or three r184 keeps each disposed mesh alive (about 8 KB each).
+- **Occlusion rays allocate a little** (worldgen noise, 0.02-0.03 B/frame after warm-up); the spawn code itself measures about 0.02 B/frame.
+- **Audio recipes are verified by measurement only**, not by listening; a listening pass by Kyle is worthwhile. Inverse-law recipes stay above the audibility floor to about 60 km (presets cull at lod.far). V8 boxes doubles passed to AudioParams (about 40-60 KB/s with 10 voices), which code cannot avoid.
+- **The audio lab's trigger-dynamics check is randomised.** The thunder strike uses `Math.random`, so "thunder trigger stands out" (> 6 dB) measured 5.7 dB once on WebGPU during integration and 7.7-9.5 dB in the three runs after it. Seeding the recipe randomness for offline renders would make it deterministic.
+- **Lure silhouettes** were tuned on the test presets. The real heavy presets have their lures now (the supercell's anvil was checked at 36 km, the volcano's plume with its eruption); compare the others (funnel, whale, islands, comet) against horizon screenshots.
+- **performance.memory** heap figures exist only in Chrome and are coarse.
+- **Golden-frame comparisons across runs** are not pixel-exact (vegetation sway, birds, cloud drift); the exact proof is the same-frame A/B in tools/steps/golden-frame.json.
+- **Full harness matrix.** Only reduced flight harnesses ran in waves 1 to 3, and Milestone G ran the 10-minute soak instead (see the Milestone G issues above).
+- **Penetration at a high-speed terrain strike (fixed, Milestone G).** The soft crash froze the pose of the tick that struck, which a fast strike can end metres inside a steep slope. The flight controller now holds the craft at the surface of its contact point (the shared height function, a struck ground surface or the sea) at the strike and on every fade-in frame, and a strike during the fade-out is a new soft crash that fades back to black. `node tools/lab/jet.mjs --only=crashhold` checks a 286 m/s strike into a 12:1 wall (28.2 m deep for 26 frames before the fix, 0 after), a cliff struck again during the fade-out and the safety net's late trigger. The history:
+  - In the wave 2 integration harness, the same run failed on both backends: INTEG-A, jet, first person, run 4 of 8.
+  - It did not recur in the wave 3 integration harness: 0 penetrations on both backends, with the director live on the real presets. The jet had 2 soft crashes on WebGL2.
+  - The scripted jet hit terrain at about 44.5 s and 286 m/s, and the soft crash fired.
+  - At that strike it penetrated 8.96 m (WebGPU) and 13.56 m (WebGL2), for 37 frames each.
+  - The same run flown alone passed with no crash.
+  - The wave 2 base (478cda7, the same harness and seeds, WebGPU) had no penetration. Its jet crashed softly at 226-227 m/s in runs 3 and 7.
+  - The engine branches change nothing in flight while no spawn and no extra ground surface exists. The harness flies no spawns, and a same-seed frame comparison of base and integrated builds is identical (233 against 234 draw calls, 181 fps).
+  - The flown path depends on the run order and the frame timing. The p2/engines-structure-setpiece engineer reproduced the same class of penetration on the base (STRUCT-A, jet, third person, 250 m/s, 1.21 m deep).
+  - The Phase 1 contact code let a strike above about 250 m/s sink in, and the soft-crash fade then held that pose.
+  - Other soft crashes (not a hard criterion): 2 on WebGPU and 1 on WebGL2 in the same harness, all jet strikes.

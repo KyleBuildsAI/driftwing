@@ -1,0 +1,68 @@
+/* ==========================================================================
+   Sound-off pill: a small warm glass button. On desktop it sits bottom right, just above the
+   mic button (the bottom centre belongs to the subtitles and the control hints); on touch
+   screens, where the corners hold the touch controls, it sits top centre under the compass.
+   Matches the v1 glass tokens (see ui.css) without depending on #ui-root.
+   ========================================================================== */
+.dw-sound-pill {
+  --dw-sound-pill-text: #f6efe4;
+  --dw-sound-pill-gold: #f3c77a;
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 18px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 88px);
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 8px 12px;
+  border: 1px solid rgba(255, 240, 220, 0.2);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(34, 27, 40, 0.58), rgba(20, 16, 26, 0.48));
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 10px 30px rgba(10, 7, 14, 0.24), 0 2px 6px rgba(10, 7, 14, 0.12), inset 0 1px 0 rgba(255, 246, 232, 0.07);
+  color: var(--dw-sound-pill-text);
+  font: 500 13px/1.2 var(--font-ui, system-ui, sans-serif);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.35s cubic-bezier(0.22, 0.8, 0.26, 1), transform 0.35s cubic-bezier(0.22, 0.8, 0.26, 1), border-color 0.2s ease;
+  -webkit-font-smoothing: antialiased;
+}
+.dw-sound-pill[hidden] { display: none; }
+.dw-sound-pill.dw-sound-pill-shown {
+  opacity: 1;
+  transform: translateY(0);
+}
+.dw-sound-pill:hover { border-color: rgba(243, 199, 122, 0.55); }
+.dw-sound-pill:focus-visible {
+  outline: 2px solid var(--dw-sound-pill-gold);
+  outline-offset: 2px;
+}
+.dw-sound-pill-icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  fill: none;
+  stroke: var(--dw-sound-pill-gold);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (pointer: coarse) {
+  .dw-sound-pill {
+    right: auto;
+    left: 50%;
+    bottom: auto;
+    top: calc(env(safe-area-inset-top, 0px) + 64px);
+    transform: translate(-50%, -8px);
+  }
+  .dw-sound-pill.dw-sound-pill-shown { transform: translate(-50%, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dw-sound-pill, .dw-sound-pill.dw-sound-pill-shown { transition: opacity 0.2s linear; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) and (pointer: coarse) {
+  .dw-sound-pill, .dw-sound-pill.dw-sound-pill-shown { transform: translateX(-50%); }
+}
