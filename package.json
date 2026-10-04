@@ -31,6 +31,9 @@
     "test:determinism:webgl": "node tools/run-harness.mjs --test determinism --backend webgl",
     "test:soak": "node tools/run-harness.mjs --test soak",
     "test:soak:webgl": "node tools/run-harness.mjs --test soak --backend webgl",
+    "test:collision": "node tools/run-harness.mjs --test collision",
+    "test:collision:webgl": "node tools/run-harness.mjs --test collision --backend webgl",
+    "lab:colliders": "node --expose-gc tools/lab/colliders.mjs",
     "lab:terrain": "node tools/lab/terrain.mjs"
   },
   "dependencies": {
