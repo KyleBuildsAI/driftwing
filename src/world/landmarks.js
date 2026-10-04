@@ -80,6 +80,102 @@ export function createLandmarkSystem(ctx) {
     return copy;
   }
 
+  // ---- Colliders (Phase 3 contract b.8) ---------------------------------------------------------------
+  // Every landmark lists its colliders while it is built, in its own local frame (the group's position
+  // and its rotation about +y), and buildNext registers them with ctx.colliders (owner
+  // 'landmark:<siteId>'); removeInstance removes them with the geometry. The shapes follow the rock
+  // and the stone as built: arches are box legs and capsule ribs that keep the opening clear, standing
+  // stones and lintels are boxes (lintels landable perches), boulders are hulls of their own vertices,
+  // the lighthouse is stacked cylinders, and every balloon is two hulls and a basket box that move
+  // with it. Props under 2 m tall (paving, path stones, edge rubble below the turf) carry none.
+  const colliderWorld = ctx.colliders ?? null;
+  const colliderScratch = new THREE.Vector3();
+  const colliderBasis = new THREE.Matrix4();
+  const colliderTurn = new THREE.Quaternion();
+
+  /**
+   * A landmark's collider list in its local frame. add*(part, ...) take local THREE.Vector3 points;
+   * specs holds world collider specs (ids 'landmark:<siteId>:<part><n>').
+   */
+  function createColliderSet(site, originX, originY, originZ, yaw) {
+    const origin = new THREE.Vector3(originX, originY, originZ);
+    const turn = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, yaw);
+    const owner = `landmark:${site.id}`;
+    const specs = [];
+    let serial = 0;
+    const toWorld = (local) => {
+      colliderScratch.copy(local).applyQuaternion(turn).add(origin);
+      return { x: colliderScratch.x, y: colliderScratch.y, z: colliderScratch.z };
+    };
+    const quaternionLiteral = (quaternion) => ({ x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w });
+    const push = (part, spec) => {
+      spec.id = `${owner}:${part}${serial++}`;
+      spec.owner = owner;
+      specs.push(spec);
+      return spec;
+    };
+    return {
+      specs,
+      owner,
+      toWorld,
+      /** An oriented box: local centre, half extents and local rotation (null: the landmark's own). */
+      box(part, center, halfX, halfY, halfZ, quaternion, tags) {
+        colliderTurn.copy(turn);
+        if (quaternion) colliderTurn.multiply(quaternion);
+        return push(part, { type: 'box', center: toWorld(center), halfExtents: { x: halfX, y: halfY, z: halfZ }, quaternion: quaternionLiteral(colliderTurn), tags });
+      },
+      /** A box from its local centre and three local unit axes (a right-handed set), as builder.box. */
+      boxAxes(part, center, axisX, axisY, axisZ, halfX, halfY, halfZ, tags) {
+        colliderBasis.makeBasis(axisX, axisY, axisZ);
+        const local = new THREE.Quaternion().setFromRotationMatrix(colliderBasis);
+        return this.box(part, center, halfX, halfY, halfZ, local, tags);
+      },
+      /** An upright cylinder (axis local +y). */
+      cylinder(part, center, radius, halfHeight, tags) {
+        return push(part, { type: 'cylinder', center: toWorld(center), radius, halfHeight, quaternion: quaternionLiteral(turn), tags });
+      },
+      capsule(part, a, b, radius, tags) {
+        return push(part, { type: 'capsule', a: toWorld(a), b: toWorld(b), radius, tags });
+      },
+      /** A hull of local points (at most 64); moving: points stay local to a centre the owner updates. */
+      hull(part, points, tags) {
+        const flat = new Float64Array(points.length * 3);
+        points.forEach((point, index) => {
+          const world = toWorld(point);
+          flat[index * 3] = world.x;
+          flat[index * 3 + 1] = world.y;
+          flat[index * 3 + 2] = world.z;
+        });
+        return push(part, { type: 'hull', points: flat, tags });
+      },
+      /** A hull that moves: points (local to the moving centre), placed later with setPose. */
+      movingHull(part, points, center, tags) {
+        const flat = new Float64Array(points.length * 3);
+        points.forEach((point, index) => flat.set([point.x, point.y, point.z], index * 3));
+        return push(part, { type: 'hull', points: flat, center: toWorld(center), quaternion: quaternionLiteral(turn), tags });
+      },
+    };
+  }
+
+  /** Registers a built landmark's colliders; on a failure removes the ones added and rethrows. */
+  function registerColliders(set) {
+    const ids = [];
+    if (!colliderWorld || !set) return ids;
+    try {
+      for (const spec of set.specs) ids.push(colliderWorld.add(spec));
+    } catch (error) {
+      for (const id of ids) colliderWorld.remove(id);
+      throw error;
+    }
+    return ids;
+  }
+
+  function removeColliders(instance) {
+    if (!colliderWorld || !instance.colliderIds) return;
+    for (const id of instance.colliderIds) colliderWorld.remove(id);
+    instance.colliderIds.length = 0;
+  }
+
   // ---- Colours (vertex colours are LINEAR; alpha = emissive gain) ---------------------
   const colorScratch = new THREE.Color();
   function linear(hex, alpha = 0) {
@@ -517,6 +613,8 @@ export function createLandmarkSystem(ctx) {
         return new THREE.Vector3(center.x + rotatedX * scale, center.y + vertex.y * scale * squash, center.z + rotatedZ * scale);
       });
       for (const [indexA, indexB, indexC] of shape.faces) triangle(points[indexA], points[indexB], points[indexC], paint, center);
+      // The vertices (builder space, before any transform): a boulder's collider hull.
+      return points;
     }
 
     function build() {
@@ -778,7 +876,7 @@ export function createLandmarkSystem(ctx) {
    * Weathered rock masses along the outer flanks break the silhouette (kept off the
    * inner edge so the opening matches the threading outline).
    */
-  function addArchMasses(builder, arch, frames, paintRock) {
+  function addArchMasses(builder, arch, frames, paintRock, rocks) {
     const { random } = arch;
     const massCenter = new THREE.Vector3();
     for (let frameIndex = 2; frameIndex < frames.length - 2; frameIndex += 3) {
@@ -790,18 +888,18 @@ export function createLandmarkSystem(ctx) {
       const lateral = Math.sin(around) * frame.depth * reach;
       massCenter.set(frame.x + frame.nx * radial, frame.y + frame.ny * radial, frame.z + lateral);
       const radius = Math.min(frame.thickness, frame.depth) * (0.34 + 0.14 * random());
-      builder.rock(massCenter, radius, random, paintRock, { squash: 0.55 + 0.25 * random(), jitter: 0.28 });
+      rocks.push(builder.rock(massCenter, radius, random, paintRock, { squash: 0.55 + 0.25 * random(), jitter: 0.28 }));
     }
   }
 
   /** Massive boulders merged into the feet and outer flanks, then loose rubble. */
-  function addArchRubble(builder, arch, paintRock) {
+  function addArchRubble(builder, arch, paintRock, rocks) {
     const { random, halfSpan, legThickness, legDepth, baseY, worldX, worldZ } = arch;
     const rubbleCenter = new THREE.Vector3();
     const addRubble = (localX, localZ, radius, buryFraction) => {
       const ground = world.groundHeight(worldX(localX, localZ), worldZ(localX, localZ)) - baseY;
       rubbleCenter.set(localX, ground + radius * (0.35 - buryFraction), localZ);
-      builder.rock(rubbleCenter, radius, random, paintRock, { squash: 0.8, jitter: 0.26 });
+      rocks.push(builder.rock(rubbleCenter, radius, random, paintRock, { squash: 0.8, jitter: 0.26 }));
     };
     for (let sideIndex = 0; sideIndex < 2; sideIndex++) {
       const side = sideIndex === 0 ? -1 : 1;
@@ -856,6 +954,67 @@ export function createLandmarkSystem(ctx) {
     };
   }
 
+  /**
+   * The arch's colliders, from the rings as built: per segment between two frames, a cross-section
+   * from the ring points (radial and lateral extents around the frame's centre line). Steep segments
+   * (the legs) are oriented boxes; the rest of the span is rows of capsules (ribs) across its depth.
+   * Every piece keeps its inner face at the ring's innermost point, so the opening stays clear and
+   * landmark:threaded is unchanged.
+   */
+  function addArchColliders(set, frames, rings, rocks) {
+    const sections = frames.map((frame, index) => {
+      let radialMin = Infinity;
+      let radialMax = -Infinity;
+      let lateralMin = Infinity;
+      let lateralMax = -Infinity;
+      for (const point of rings[index]) {
+        const radial = (point.x - frame.x) * frame.nx + (point.y - frame.y) * frame.ny;
+        const lateral = point.z - frame.z;
+        radialMin = Math.min(radialMin, radial);
+        radialMax = Math.max(radialMax, radial);
+        lateralMin = Math.min(lateralMin, lateral);
+        lateralMax = Math.max(lateralMax, lateral);
+      }
+      return { radialMin, radialMax, lateralMin, lateralMax };
+    });
+    const zAxis = new THREE.Vector3(0, 0, 1);
+    const tags = { surface: 'stone' };
+    for (let index = 0; index < frames.length - 1; index++) {
+      const first = frames[index];
+      const second = frames[index + 1];
+      const sectionA = sections[index];
+      const sectionB = sections[index + 1];
+      const radius = Math.max(sectionA.radialMax - sectionA.radialMin, sectionB.radialMax - sectionB.radialMin) * 0.5;
+      // The axis sits one radius out from each end's innermost point.
+      const axisA = sectionA.radialMin + radius;
+      const axisB = sectionB.radialMin + radius;
+      const width = Math.max(sectionA.lateralMax - sectionA.lateralMin, sectionB.lateralMax - sectionB.lateralMin);
+      const lateralA = (sectionA.lateralMin + sectionA.lateralMax) * 0.5;
+      const lateralB = (sectionB.lateralMin + sectionB.lateralMax) * 0.5;
+      const ax = first.x + first.nx * axisA;
+      const ay = first.y + first.ny * axisA;
+      const bx = second.x + second.nx * axisB;
+      const by = second.y + second.ny * axisB;
+      const dx = bx - ax;
+      const dy = by - ay;
+      if (Math.abs(dy) > 2 * Math.abs(dx)) {
+        const length = Math.hypot(dx, dy);
+        const along = new THREE.Vector3(dx / length, dy / length, 0);
+        const radial = new THREE.Vector3(-along.y, along.x, 0);
+        const center = new THREE.Vector3((ax + bx) * 0.5, (ay + by) * 0.5, (first.z + lateralA + second.z + lateralB) * 0.5);
+        set.boxAxes('leg', center, along, radial, zAxis, length * 0.5 + radius * 0.5, radius, width * 0.5, tags);
+        continue;
+      }
+      const rows = Math.max(1, Math.ceil(width / (2 * radius)));
+      const spread = Math.max(0, width * 0.5 - radius);
+      for (let row = 0; row < rows; row++) {
+        const offset = rows === 1 ? 0 : -spread + (2 * spread * row) / (rows - 1);
+        set.capsule('rib', new THREE.Vector3(ax, ay, first.z + lateralA + offset), new THREE.Vector3(bx, by, second.z + lateralB + offset), radius, tags);
+      }
+    }
+    for (const points of rocks) set.hull('rock', points, tags);
+  }
+
   function buildArch(site) {
     const arch = createArchShape(site);
     Object.assign(arch, seatArch(arch, chooseArchRotation(arch)));
@@ -864,9 +1023,13 @@ export function createLandmarkSystem(ctx) {
     const paintRock = createArchPaint(arch);
     const builder = createBuilder();
     builder.loft(rings, paintRock, { capStart: true, capEnd: true });
-    addArchMasses(builder, arch, frames, paintRock);
-    addArchRubble(builder, arch, paintRock);
-    return createArchInstance(arch, builder.build(), innerOutline);
+    const rocks = [];
+    addArchMasses(builder, arch, frames, paintRock, rocks);
+    addArchRubble(builder, arch, paintRock, rocks);
+    const instance = createArchInstance(arch, builder.build(), innerOutline);
+    instance.colliders = createColliderSet(site, site.x, arch.baseY, site.z, arch.rotation);
+    addArchColliders(instance.colliders, frames, rings, rocks);
+    return instance;
   }
 
   // ---- Monolith circle ---------------------------------------------------------------------
@@ -945,6 +1108,7 @@ export function createLandmarkSystem(ctx) {
       builder: createBuilder(),
       stoneBase: style.bases[0],
       paintStone: null,
+      colliders: createColliderSet(site, site.x, baseY, site.z, 0),
     };
     circle.paintStone = (face) => {
       let factor = 0.9 + 0.16 * random();
@@ -969,6 +1133,17 @@ export function createLandmarkSystem(ctx) {
     }
   }
 
+  /**
+   * The collider of the stone just built with stoneMatrix: a box from below its sunk base to its top
+   * (its peak for a pointed stone), as wide and deep as its base. Tall stones are perches.
+   */
+  function addStoneCollider(circle, spec) {
+    const top = spec.height + (spec.flatTop ? 0 : 0.9);
+    const center = new THREE.Vector3(0, (top - spec.sink) * 0.5, 0).applyMatrix4(stoneMatrix);
+    const tags = { surface: 'stone', perch: spec.height > 12 && spec.sink > 1 };
+    circle.colliders.box('stone', center, spec.width * 0.54, (top + spec.sink) * 0.5, spec.depth * 0.525, stoneQuaternion, tags);
+  }
+
   /** Stands a stone on the ground at (localX, localZ), leaning and facing yaw. */
   function placeStone(circle, localX, localZ, yaw, leanForward, leanSide, spec, runes) {
     const { builder, random, style } = circle;
@@ -980,6 +1155,7 @@ export function createLandmarkSystem(ctx) {
     const depthAt = addStandingStone(builder, random, spec, circle.paintStone);
     if (runes) carveStoneRunes(circle, spec, depthAt);
     builder.clearTransform();
+    addStoneCollider(circle, spec);
   }
 
   /** Which ring slots hold trilithons or a fallen stone, and where the tall side faces. */
@@ -1022,6 +1198,7 @@ export function createLandmarkSystem(ctx) {
     const inward = new THREE.Vector3(-Math.cos(angle), 0, -Math.sin(angle));
     const lintelCenter = new THREE.Vector3(centerX, top + 0.85, centerZ);
     builder.box(lintelCenter, along, Y_AXIS, inward, offset + width * 0.5 + 0.35, 0.85, depth * 0.46, circle.paintStone);
+    circle.colliders.boxAxes('lintel', lintelCenter, along, Y_AXIS, inward, offset + width * 0.5 + 0.35, 0.85, depth * 0.46, { surface: 'stone', landable: true, perch: true });
     runeOrigin.copy(lintelCenter).addScaledVector(inward, depth * 0.46).addScaledVector(Y_AXIS, -0.62);
     carveGlyph(builder, RUNE_GLYPHS[4], runeOrigin, along.clone().negate(), new THREE.Vector3(0, 0.78, 0), inward, 1);
   }
@@ -1042,8 +1219,10 @@ export function createLandmarkSystem(ctx) {
       stoneQuaternion.setFromEuler(stoneEuler.set(Math.PI / 2 - 0.05, pieceYaw, (random() - 0.5) * 0.2, 'YXZ'));
       stoneMatrix.compose(stonePosition, stoneQuaternion, UNIT_SCALE);
       builder.setTransform(stoneMatrix);
-      addStandingStone(builder, random, { width, depth, height: pieceLength, sink: 0.4, flatTop }, circle.paintStone);
+      const pieceSpec = { width, depth, height: pieceLength, sink: 0.4, flatTop };
+      addStandingStone(builder, random, pieceSpec, circle.paintStone);
       builder.clearTransform();
+      addStoneCollider(circle, pieceSpec);
     };
     lie(0, length * 0.55, outwardYaw, true);
     lie(length * 0.55 + 1.2, length * 0.4, outwardYaw + (random() - 0.5) * 0.4, false);
@@ -1093,6 +1272,8 @@ export function createLandmarkSystem(ctx) {
     circle.stoneBase = style.bases[1];
     builder.box(new THREE.Vector3(0, altarGround + 0.1, 0), axisX, Y_AXIS, axisZ, 3.3, 0.5, 2.4, paintStone);
     builder.box(new THREE.Vector3(0, altarGround + 1.05, 0), axisX, Y_AXIS, axisZ, 2.2, 0.5, 1.35, paintStone);
+    circle.colliders.boxAxes('plinth', new THREE.Vector3(0, altarGround + 0.1, 0), axisX, Y_AXIS, axisZ, 3.3, 0.5, 2.4, { surface: 'stone' });
+    circle.colliders.boxAxes('altar', new THREE.Vector3(0, altarGround + 1.05, 0), axisX, Y_AXIS, axisZ, 2.2, 0.5, 1.35, { surface: 'stone', landable: true });
     runeOrigin.set(0, altarGround + 1.55, 0).addScaledVector(axisZ, -0.62);
     carveGlyph(builder, pickFrom(RUNE_GLYPHS, random), runeOrigin.clone().addScaledVector(axisX, -1.1), axisX, axisZ, Y_AXIS, 0.75);
     carveGlyph(builder, RUNE_GLYPHS[4], runeOrigin, axisX, axisZ, Y_AXIS, 0.75);
@@ -1133,7 +1314,7 @@ export function createLandmarkSystem(ctx) {
       const boulderZ = Math.sin(angle) * boulderRadius;
       const size = 1.2 + 1.8 * random();
       circle.stoneBase = pickFrom(style.bases, random);
-      builder.rock(new THREE.Vector3(boulderX, circle.localGround(boulderX, boulderZ) + size * 0.15, boulderZ), size, random, circle.paintStone);
+      circle.colliders.hull('boulder', builder.rock(new THREE.Vector3(boulderX, circle.localGround(boulderX, boulderZ) + size * 0.15, boulderZ), size, random, circle.paintStone), { surface: 'stone' });
     }
   }
 
@@ -1169,6 +1350,7 @@ export function createLandmarkSystem(ctx) {
       animate,
       balloons: null,
       thread: null,
+      colliders: circle.colliders,
     };
   }
 
@@ -1237,6 +1419,7 @@ export function createLandmarkSystem(ctx) {
       localGround: (localX, localZ) => world.groundHeight(site.x + localX, site.z + localZ) - baseY,
       scheme,
       cottageAngle: site.rotation + 0.9 + random() * 0.6,
+      colliders: createColliderSet(site, site.x, baseY, site.z, 0),
     };
   }
 
@@ -1249,6 +1432,27 @@ export function createLandmarkSystem(ctx) {
       return scaled(towerBandAt(scheme, face.y) % 2 === 0 ? TOWER_WHITE : TOWER_RED, 0.97 + 0.05 * random());
     };
     builder.loft(scheme.map((y) => circleRing(0, y, 0, towerRadiusAt(y), 16)), paintTower, { capEnd: true });
+    addLighthouseColliders(light);
+  }
+
+  /**
+   * The plinth, the tapering tower as three stacked cylinders (each as wide as its foot), the gallery
+   * with its railing (perch points on the deck) and the lantern room up to the finial.
+   */
+  function addLighthouseColliders(light) {
+    const set = light.colliders;
+    const tags = { surface: 'stone' };
+    set.cylinder('plinth', new THREE.Vector3(0, -0.1, 0), 5.8, 1.7, tags);
+    const towerTop = 33.8;
+    const towerFoot = 1.6;
+    for (let piece = 0; piece < 3; piece++) {
+      const bottom = towerFoot + ((towerTop - towerFoot) * piece) / 3;
+      const top = towerFoot + ((towerTop - towerFoot) * (piece + 1)) / 3;
+      set.cylinder('tower', new THREE.Vector3(0, (bottom + top) * 0.5, 0), towerRadiusAt(bottom), (top - bottom) * 0.5, tags);
+    }
+    const perches = [0, 1, 2, 3].map((quarter) => set.toWorld(new THREE.Vector3(Math.cos(quarter * Math.PI * 0.5 + 0.4) * 4.2, 34.35, Math.sin(quarter * Math.PI * 0.5 + 0.4) * 4.2)));
+    set.cylinder('gallery', new THREE.Vector3(0, 34.85, 0), 5.1, 1.15, { surface: 'metal', perch: perches });
+    set.cylinder('lantern', new THREE.Vector3(0, 38.1, 0), 2.85, 3.8, { surface: 'metal' });
   }
 
   /** Door toward the cottage and small windows up the tower. */
@@ -1334,6 +1538,12 @@ export function createLandmarkSystem(ctx) {
     }
     builder.box(new THREE.Vector3(-4.22, 1.75, 0), Z_AXIS, Y_AXIS, X_AXIS, 0.5, 0.55, 0.08, WINDOW_COLOR);
     builder.clearTransform();
+    // Colliders: the walls, the gabled roof (a hull of its eaves and ridge) and the chimney.
+    const cottageTurn = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, -cottageAngle - Math.PI / 2);
+    const set = light.colliders;
+    set.box('cottage', new THREE.Vector3(0, 1.4, 0).applyMatrix4(cottageMatrix), 4.2, 2.2, 2.7, cottageTurn, { surface: 'stone' });
+    set.hull('roof', [...eaves, ...ridge].map((point) => point.clone().applyMatrix4(cottageMatrix)), { surface: 'wood' });
+    set.box('chimney', new THREE.Vector3(2.6, 5.6, -1.0).applyMatrix4(cottageMatrix), 0.45, 1.3, 0.45, cottageTurn, { surface: 'stone' });
   }
 
   /** Boulder clusters where the island meets the sea, leaving a gap for the dock. */
@@ -1358,7 +1568,7 @@ export function createLandmarkSystem(ctx) {
         const rockZ = Math.sin(memberAngle) * reach;
         const size = 1.4 + 3.6 * random() ** 2;
         rockBase = pickFrom(SHORE_ROCKS, random);
-        builder.rock(new THREE.Vector3(rockX, Math.max(light.localGround(rockX, rockZ), -1.4 - baseY) + size * 0.3, rockZ), size, random, paintShoreRock);
+        light.colliders.hull('rock', builder.rock(new THREE.Vector3(rockX, Math.max(light.localGround(rockX, rockZ), -1.4 - baseY) + size * 0.3, rockZ), size, random, paintShoreRock), { surface: 'stone' });
       }
     }
   }
@@ -1372,6 +1582,9 @@ export function createLandmarkSystem(ctx) {
       point.copy(direction).multiplyScalar(reach + 0.28).setY(deckTop - 0.12);
       builder.box(point, across, Y_AXIS, direction, 1.45, 0.12, 0.27, scaled(PLANKS[plank % PLANKS.length], 0.92 + 0.14 * random()));
     }
+    // The deck as one landable box (its posts stand under it, down to the sea bed).
+    const deckCenter = direction.clone().multiplyScalar((start + end) * 0.5 + 0.28).setY(deckTop - 0.12);
+    light.colliders.boxAxes('dock', deckCenter, across, Y_AXIS, direction.clone().negate(), 1.6, 0.12, (end - start) * 0.5 + 0.3, { surface: 'wood', landable: true });
     for (let reach = start + 0.6; reach <= end + 0.01; reach += 3) {
       for (const side of [-1, 1]) {
         const postX = direction.x * reach + across.x * side * 1.35;
@@ -1405,6 +1618,8 @@ export function createLandmarkSystem(ctx) {
     boat.position.set(direction.x * boatReach + across.x * 3.3, 0.25 - light.baseY, direction.z * boatReach + across.z * 3.3);
     boat.rotation.y = -dock.angle;
     boat.userData.baseY = boat.position.y;
+    // Its collider covers the bobbing (0.12 m) and the rocking.
+    light.colliders.box('boat', new THREE.Vector3(boat.position.x, boat.position.y + 0.25, boat.position.z), 2.3, 0.65, 0.75, boat.quaternion, { surface: 'wood' });
     return { boat, geometry };
   }
 
@@ -1488,6 +1703,7 @@ export function createLandmarkSystem(ctx) {
       animate,
       balloons: null,
       thread: null,
+      colliders: light.colliders,
     };
   }
 
@@ -1597,6 +1813,80 @@ export function createLandmarkSystem(ctx) {
     return { mesh, flame };
   }
 
+  /**
+   * One balloon's colliders, local to its mesh: the envelope as two hulls (the profile's rings below
+   * and above its widest one, on circumscribed octagons; the lower one reaches down to the basket rim,
+   * so the rigging and the burner are inside it) and the basket as a box. They move with the balloon
+   * (setPose every frame, with its drift velocity).
+   */
+  function addBalloonColliders(set, balloon, scale) {
+    const height = ENVELOPE_HEIGHT * scale;
+    const basketTop = -7.6 * scale;
+    const octagon = 1 / Math.cos(Math.PI / 8);
+    const ringPoints = (first, last) => {
+      const points = [];
+      for (let row = first; row <= last; row++) {
+        const [radius, y] = BALLOON_PROFILE[row];
+        if (radius === 0) {
+          points.push(new THREE.Vector3(0, y * height, 0));
+          continue;
+        }
+        for (let side = 0; side < 8; side++) {
+          const angle = (side / 8) * TWO_PI;
+          points.push(new THREE.Vector3(Math.cos(angle) * radius * height * octagon, y * height, Math.sin(angle) * radius * height * octagon));
+        }
+      }
+      return points;
+    };
+    const lower = ringPoints(0, 6);
+    for (let corner = 0; corner < 4; corner++) lower.push(new THREE.Vector3(corner & 1 ? 0.88 : -0.88, basketTop, corner & 2 ? 0.88 : -0.88));
+    const where = balloon.mesh.position;
+    const tags = { surface: 'cloth' };
+    balloon.colliderIds = [
+      set.movingHull('envelope', lower, where, tags).id,
+      set.movingHull('crown', ringPoints(6, BALLOON_PROFILE.length - 1), where, tags).id,
+      set.box('basket', new THREE.Vector3(where.x, where.y + basketTop - 0.65, where.z), 0.9, 0.75, 0.9, null, { surface: 'wood' }).id,
+    ];
+    balloon.basketOffset = new THREE.Vector3(0, basketTop - 0.65, 0);
+    balloon.pose = new Float64Array(7);
+    balloon.basketPose = new Float64Array(7);
+    balloon.colliderVelocity = new Float64Array(3);
+    balloon.lastCenter = new Float64Array([NaN, NaN, NaN]);
+  }
+
+  const balloonOffset = new THREE.Vector3();
+  /** Moves a balloon's colliders to its mesh (world: the fair's site plus the mesh's offset). */
+  function updateBalloonColliders(site, balloon, dt) {
+    if (!colliderWorld || !balloon.colliderIds) return;
+    const mesh = balloon.mesh;
+    const pose = balloon.pose;
+    const velocity = balloon.colliderVelocity;
+    const last = balloon.lastCenter;
+    pose[0] = site.x + mesh.position.x;
+    pose[1] = mesh.position.y;
+    pose[2] = site.z + mesh.position.z;
+    pose[3] = mesh.quaternion.x;
+    pose[4] = mesh.quaternion.y;
+    pose[5] = mesh.quaternion.z;
+    pose[6] = mesh.quaternion.w;
+    for (let axis = 0; axis < 3; axis++) {
+      velocity[axis] = dt > 0 && last[axis] === last[axis] ? (pose[axis] - last[axis]) / dt : 0;
+      last[axis] = pose[axis];
+    }
+    colliderWorld.setPose(balloon.colliderIds[0], pose, velocity);
+    colliderWorld.setPose(balloon.colliderIds[1], pose, velocity);
+    balloonOffset.copy(balloon.basketOffset).applyQuaternion(mesh.quaternion);
+    const basket = balloon.basketPose;
+    basket[0] = pose[0] + balloonOffset.x;
+    basket[1] = pose[1] + balloonOffset.y;
+    basket[2] = pose[2] + balloonOffset.z;
+    basket[3] = pose[3];
+    basket[4] = pose[4];
+    basket[5] = pose[5];
+    basket[6] = pose[6];
+    colliderWorld.setPose(balloon.colliderIds[2], basket, velocity);
+  }
+
   /** Seeded drift, height and burner timing for one balloon of the fair. */
   function createBalloonState(fair, index, mesh, flame, scale) {
     const { site, random, count, heightOrder } = fair;
@@ -1674,6 +1964,7 @@ export function createLandmarkSystem(ctx) {
       for (let index = 0; index < balloons.length; index++) {
         driftBalloon(site, balloons[index], index, wind, dt, time);
         updateBalloonBurner(balloons[index], dt, time);
+        updateBalloonColliders(site, balloons[index], dt);
       }
     };
   }
@@ -1715,7 +2006,10 @@ export function createLandmarkSystem(ctx) {
     }
     const animate = createBalloonAnimation(site, balloons);
     animate(0, state.time.elapsed);
-    return { group, geometries, triangles, measure: createBalloonMeasure(site, balloons), animate, balloons, thread: null };
+    // Colliders from the first pose (the fair's group sits at the site, unturned).
+    const colliders = createColliderSet(site, site.x, 0, site.z, 0);
+    balloons.forEach((balloon) => addBalloonColliders(colliders, balloon, balloon.scale));
+    return { group, geometries, triangles, measure: createBalloonMeasure(site, balloons), animate, balloons, thread: null, colliders };
   }
 
   const BUILDERS = { arch: buildArch, monoliths: buildMonoliths, lighthouse: buildLighthouse, balloons: buildBalloons };
@@ -1746,6 +2040,7 @@ export function createLandmarkSystem(ctx) {
     activeInstances.splice(index, 1);
     instances.delete(instance.site.id);
     scene.remove(instance.group);
+    removeColliders(instance);
     for (const geometry of instance.geometries) geometry.dispose();
   }
 
@@ -1784,6 +2079,7 @@ export function createLandmarkSystem(ctx) {
     let instance;
     try {
       instance = BUILDERS[site.type](site, descriptor);
+      instance.colliderIds = registerColliders(instance.colliders);
     } catch (error) {
       failedIds.add(site.id);
       console.error(`[DRIFTWING] landmark ${site.id} (${site.type}) failed to build`, error);

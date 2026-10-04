@@ -12,6 +12,8 @@
 //                surfaceHeightAt), moving with their collider and removed with it
 //   providers    procedural colliders on demand (compiled once per spec), perch points and providers
 //   service      validation, update and refiling, removeOwner, insideSolid, liftClear, boundsOccupied
+//   landmarks    the retrofitted v1-derived landmarks built by the real landmark system on a real world:
+//                struck where solid, the arch's opening clear, landable lintels, moving balloons, dispose
 //   determinism  a shuffled insertion order gives bit-identical results over a sweep battery
 //   cost         a sweep of 30 probes against 2000 colliders under 0.1 ms
 //   allocation   100 000 sweeps, overlaps, raycasts and updates allocate nothing
@@ -20,10 +22,16 @@
 import { PerformanceObserver } from 'node:perf_hooks';
 import v8 from 'node:v8';
 import * as THREE from 'three/webgpu';
+import * as TSL from 'three/tsl';
 import { createColliderWorld, createProbeSet, LANDABLE_NORMAL_Y } from '../../src/world/colliders.js';
 import { createGroundSurfaces } from '../../src/world/groundSurfaces.js';
 import { createMeshCollider } from '../../src/world/colliderMesh.js';
 import { RIM_OVERREACH } from '../../src/world/colliderMath.js';
+import { createWorldGen } from '../../src/world/worldgen.js';
+import { createLandmarkSystem } from '../../src/world/landmarks.js';
+import { WORLD_OPTIONS } from '../../src/core/config.js';
+import { EventBus } from '../../src/core/eventBus.js';
+import { attachTypedEvents } from '../../src/core/events.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -43,6 +51,8 @@ console.error = (...args) => {
 };
 
 const TICK = 1 / 120;
+/** A world with every landmark type near its origin (landmarks section). */
+const LANDMARK_SEED = 'COLLIDERS-LAB';
 const near = (value, expected, tolerance = 1e-6) => Math.abs(value - expected) <= tolerance;
 const fmt = (value) => (Number.isFinite(value) ? value.toFixed(4) : String(value));
 
@@ -406,6 +416,107 @@ function testService() {
   world.dispose();
 }
 
+// ---- landmarks ---------------------------------------------------------------------------------------
+/**
+ * The v1-derived landmarks in V2 with their retrofitted colliders (src/world/landmarks.js), built by
+ * the real landmark system on a real world: each type's nearest site, its colliders registered under
+ * 'landmark:<siteId>', struck where it is solid, the arch's opening clear along the threading line,
+ * the lintels and the altar published as landable tops, the balloons' colliders following their
+ * drift, and everything removed when the landmark streams out.
+ */
+function testLandmarks() {
+  const world = createWorldGen(LANDMARK_SEED, WORLD_OPTIONS);
+  const bus = attachTypedEvents(new EventBus(), { validate: true });
+  const surfaces = createGroundSurfaces();
+  const colliders = createColliderWorld({ groundSurfaces: surfaces });
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 1, 9000);
+  const { uniform } = TSL;
+  const state = {
+    time: { elapsed: 0, sunElevation: 30 },
+    player: { position: new THREE.Vector3() },
+  };
+  const ctx = {
+    THREE, TSL, scene, camera, world, state, bus, colliders,
+    uniforms: { time: uniform(0), windDirection: uniform(new THREE.Vector2(0.8, 0.6).normalize()) },
+    quality: { viewRings: 3 }, systems: {},
+  };
+  const system = createLandmarkSystem(ctx);
+  const out = createOut();
+  const sites = {};
+  for (const radius of [8000, 20000, 40000, 80000]) {
+    for (const site of world.landmarkSitesNear(0, 0, radius)) {
+      if (!sites[site.type] || Math.hypot(site.x, site.z) < Math.hypot(sites[site.type].x, sites[site.type].z)) sites[site.type] = site;
+    }
+    if (['arch', 'monoliths', 'lighthouse', 'balloons'].every((type) => sites[type])) break;
+  }
+  const visit = (site) => {
+    state.player.position.set(site.x, world.groundHeight(site.x, site.z) + 200, site.z);
+    for (let frame = 0; frame < 6; frame++) system.update(1 / 60, 1.2);
+    const built = system.getBuilt().find((entry) => entry.id === site.id) ?? null;
+    const own = colliders.list().filter((entry) => entry.owner === `landmark:${site.id}`);
+    return { built, own };
+  };
+  const sweepAt = (from, to, radius = 0.6) => (colliders.sweepSphere(from, to, radius, null, out) ? out.id : null);
+  check('landmarks', 'every landmark type found within 80 km of the lab seed', Object.keys(sites).length === 4, Object.keys(sites).join(', '));
+
+  if (sites.arch) {
+    const { built, own } = visit(sites.arch);
+    const aim = built.aim;
+    const along = { x: Math.sin(built.rotation), z: Math.cos(built.rotation) };
+    const before = { x: aim.x - along.x * 150, y: aim.y, z: aim.z - along.z * 150 };
+    const after = { x: aim.x + along.x * 150, y: aim.y, z: aim.z + along.z * 150 };
+    const through = sweepAt(before, after);
+    const across = { x: Math.cos(built.rotation), z: -Math.sin(built.rotation) };
+    const legHit = sweepAt({ x: aim.x - across.x * 200, y: built.baseY + 6, z: aim.z - across.z * 200 }, { x: aim.x, y: built.baseY + 6, z: aim.z });
+    const crown = sweepAt({ x: aim.x - along.x * 150, y: built.baseY + aim.height * 0.97, z: aim.z - along.z * 150 }, { x: aim.x + along.x * 150, y: built.baseY + aim.height * 0.97, z: aim.z + along.z * 150 });
+    const kinds = new Set(own.map((entry) => entry.type));
+    check('landmarks', 'arch: box legs, capsule ribs and boulder hulls registered', kinds.has('box') && kinds.has('capsule') && kinds.has('hull'), `${own.length} colliders: ${[...kinds].join(', ')}`);
+    check('landmarks', 'arch: a 0.6 m probe flies through the opening at its aim point untouched', through === null, through ?? 'clear');
+    check('landmarks', 'arch: the legs and the crown are solid', legHit !== null && crown !== null, `${legHit} / ${crown}`);
+  }
+  if (sites.monoliths) {
+    const site = sites.monoliths;
+    const { own } = visit(site);
+    const ground = world.groundHeight(site.x, site.z);
+    let struck = 0;
+    for (let bearing = 0; bearing < 24; bearing++) {
+      const angle = (bearing / 24) * Math.PI * 2;
+      if (sweepAt({ x: site.x, y: ground + 4, z: site.z }, { x: site.x + Math.cos(angle) * 80, y: ground + 4, z: site.z + Math.sin(angle) * 80 }, 0.35)) struck++;
+    }
+    const landable = surfaces.list().filter((surface) => surface.id.startsWith(`landmark:${site.id}:`));
+    const perched = [];
+    colliders.perchesNear(site.x, ground + 15, site.z, 80, (x, y, z, kind, source) => perched.push(source));
+    check('landmarks', 'monoliths: stones block most bearings out of the circle at 4 m', struck >= 6, `${struck} of 24 bearings, ${own.length} colliders`);
+    check('landmarks', 'monoliths: lintels and the altar top are landable, lintels and tall stones perches', landable.some((surface) => surface.id.includes(':lintel')) && landable.some((surface) => surface.id.includes(':altar')) && perched.some((id) => id.includes(':lintel')), `${landable.length} landable tops, ${perched.length} perches`);
+  }
+  if (sites.lighthouse) {
+    const site = sites.lighthouse;
+    const { built, own } = visit(site);
+    const tower = sweepAt({ x: site.x - 100, y: built.baseY + 20, z: site.z }, { x: site.x + 100, y: built.baseY + 20, z: site.z });
+    const lantern = sweepAt({ x: site.x, y: built.baseY + 80, z: site.z }, { x: site.x, y: built.baseY + 30, z: site.z });
+    const perched = [];
+    colliders.perchesNear(site.x, built.baseY + 34, site.z, 10, (x, y, z, kind, source) => perched.push(source));
+    check('landmarks', 'lighthouse: the tower and the lantern are solid, the gallery holds perches', tower !== null && tower.includes(':tower') && lantern !== null && lantern.includes(':lantern') && perched.filter((id) => id.includes(':gallery')).length === 4, `${tower} / ${lantern}, ${perched.length} perches, ${own.length} colliders`);
+  }
+  if (sites.balloons) {
+    const site = sites.balloons;
+    const { built, own } = visit(site);
+    const first = built.balloons[0];
+    const envelope = sweepAt({ x: first.x - 120, y: first.y + 12, z: first.z }, { x: first.x + 120, y: first.y + 12, z: first.z });
+    for (let second = 0; second < 30; second++) {
+      state.time.elapsed += 1;
+      system.update(1, 1);
+    }
+    const moved = system.getBuilt().find((entry) => entry.id === site.id).balloons[0];
+    const follow = sweepAt({ x: moved.x - 120, y: moved.y + 12, z: moved.z }, { x: moved.x + 120, y: moved.y + 12, z: moved.z });
+    check('landmarks', 'balloons: envelope hulls and baskets, struck where the balloon is and again after 30 s of drift', own.length === built.balloons.length * 3 && envelope !== null && follow !== null && Math.hypot(moved.x - first.x, moved.z - first.z) > 1, `${own.length} colliders, drifted ${Math.round(Math.hypot(moved.x - first.x, moved.z - first.z))} m, ${envelope} / ${follow}`);
+    check('landmarks', 'balloons: a moving collider carries its drift velocity', out.velocity !== null && Number.isFinite(out.velocity.x), out.velocity ? `${out.velocity.x.toFixed(2)}, ${out.velocity.z.toFixed(2)} m/s` : 'none');
+  }
+  system.dispose();
+  check('landmarks', 'dispose removes every landmark collider and landable top', colliders.count === 0 && surfaces.count === 0, `${colliders.count} colliders, ${surfaces.count} surfaces`);
+}
+
 // ---- determinism --------------------------------------------------------------------------------------
 function randomSpecs(seed, count) {
   const random = mulberry32(seed);
@@ -574,6 +685,7 @@ testRules();
 testSurfaces();
 testProviders();
 testService();
+testLandmarks();
 testDeterminism();
 testCost();
 
