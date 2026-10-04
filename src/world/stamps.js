@@ -1202,9 +1202,10 @@ function terraceProfile(stamp, along, across) {
     const nextFloor = crestY - stamp.stepDrop - stamp.lip;
     profile = crestY + (nextFloor - crestY) * smoothstep(TERRACE_LIP_END, 1, share);
   }
-  // The side walls close the pools at the lip crest's height.
+  // The side walls close the pools at the lip crest's height, stepping down along the riser to the
+  // next shelf's crest (continuous from shelf to shelf).
   const wall = smoothstep(stamp.width / 2 - TERRACE_SIDE_WALL, stamp.width / 2 - TERRACE_SIDE_WALL * 0.4, Math.abs(across));
-  const wallY = share < TERRACE_LIP_END ? crestY : profile;
+  const wallY = share < TERRACE_LIP_END ? crestY : crestY - stamp.stepDrop * smoothstep(TERRACE_LIP_END, 1, share);
   return profile + (Math.max(profile, wallY) - profile) * wall;
 }
 
