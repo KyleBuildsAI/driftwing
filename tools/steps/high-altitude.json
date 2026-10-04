@@ -1,0 +1,95 @@
+[
+  {
+    "wait": 1500
+  },
+  {
+    "eval": "(() => {\n  const game = window.DRIFTWING;\n  if (!game.debug) throw new Error('high-altitude needs the dev hooks (a dev server, or a build with ?debug=1)');\n  const { ctx, state } = game;\n  const flight = ctx.systems.flight;\n  const sky = ctx.systems.sky;\n  const farField = ctx.systems.farField;\n  const terrain = ctx.systems.terrain;\n  const THREE = ctx.THREE;\n  const results = [];\n  const check = (name, ok, detail) => {\n    results.push(name);\n    if (!ok) console.error('[high-altitude check] ' + name + ' failed: ' + detail);\n    return (ok ? 'PASS ' : 'FAIL ') + name + ': ' + detail;\n  };\n  const originalCeiling = flight.getCeiling;\n  // The test climbs with the glider: lift the loop's safety-net ceiling for it (the spaceplane's own\n  // limits.ceiling does this in flight). The frames are stepped by hand with the clock paused, so the\n  // flight model never ticks and only the safety net reads the ceiling.\n  flight.getCeiling = () => 150000;\n  game.debug.pauseLoop();\n  state.paused = true;\n  const spawn = state.spawn;\n  ctx.systems.sky.setDayTime(ctx.util.dayTimeForSunElevation(ctx.CONFIG.START_SUN_ELEVATION_DEG, true), { transition: 0 });\n  const target = new THREE.RenderTarget(320, 180, { type: THREE.UnsignedByteType });\n  const magenta = new THREE.Color(1, 0, 1);\n  const pose = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion(), euler: new THREE.Euler(0, 0, 0, 'YXZ') };\n  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));\n  function at(altitude, frames = 24) {\n    flight.resetTo({ x: spawn.x, y: altitude, z: spawn.z, heading: spawn.heading });\n    game.debug.stepFrames(frames);\n  }\n  function shell() {\n    return ctx.scene.getObjectByName('far-field-cloud-shell');\n  }\n  /** Points the camera from the craft: pitch (deg, negative down) along the spawn heading. */\n  function applyPose(pitch) {\n    pose.position.copy(state.player.position);\n    pose.euler.set(pitch * Math.PI / 180, -spawn.heading * Math.PI / 180, 0, 'YXZ');\n    pose.quaternion.setFromEuler(pose.euler);\n    ctx.camera.position.copy(pose.position);\n    ctx.camera.quaternion.copy(pose.quaternion);\n    ctx.camera.updateMatrixWorld();\n  }\n  /** Steps frames until the far field and the terrain have built what this view needs (or the time runs out). */\n  async function settle(pitch, limitMs = 90000) {\n    const started = performance.now();\n    let stats = null;\n    while (performance.now() - started < limitMs) {\n      game.debug.stepFrames(2);\n      if (pitch !== null) {\n        applyPose(pitch);\n        terrain.update(0, 1 / 60);\n        farField.update(0, 1 / 60);\n        sky.update(0, 0);\n      }\n      stats = farField.getStats();\n      const terrainStats = terrain.getStats();\n      const farReady = !stats.active || (stats.holes === 0 && stats.pending === 0);\n      if (farReady && (terrainStats.high.hidden || terrainStats.pending === 0)) return { stats, waitedMs: Math.round(performance.now() - started) };\n      await sleep(200);\n    }\n    return { stats, waitedMs: Math.round(performance.now() - started), timedOut: true };\n  }\n  /** Renders the scene (sky dome off, magenta background, cloud shell off) and counts magenta pixels. */\n  async function probe() {\n    const dome = sky.dome;\n    const background = ctx.scene.background;\n    const cloudShell = shell();\n    const shellVisible = cloudShell ? cloudShell.visible : false;\n    dome.visible = false;\n    if (cloudShell) cloudShell.visible = false;\n    ctx.scene.background = magenta;\n    ctx.renderer.setRenderTarget(target);\n    ctx.renderer.render(ctx.scene, ctx.camera);\n    ctx.renderer.setRenderTarget(null);\n    const pixels = await ctx.renderer.readRenderTargetPixelsAsync(target, 0, 0, target.width, target.height);\n    dome.visible = true;\n    if (cloudShell) cloudShell.visible = shellVisible;\n    ctx.scene.background = background;\n    let holes = 0;\n    let red = 0;\n    let green = 0;\n    let blue = 0;\n    const count = target.width * target.height;\n    for (let index = 0; index < count; index++) {\n      const r = pixels[index * 4];\n      const g = pixels[index * 4 + 1];\n      const b = pixels[index * 4 + 2];\n      if (r > 180 && b > 180 && g < 40) holes++;\n      red += r;\n      green += g;\n      blue += b;\n    }\n    return { holes, pixels: count, mean: [red / count, green / count, blue / count] };\n  }\n  function atmosphere() {\n    const a = state.atmosphere;\n    return { altitude: Math.round(a.altitude), darkness: +a.skyDarkness.toFixed(3), stars: +a.starVisibility.toFixed(3), limb: +a.limb.toFixed(3), sharpness: +a.sunSharpness.toFixed(3), curvature: +a.curvature.toFixed(3), haze: +a.hazeBlend.toFixed(3), handoff: +a.handoff.toFixed(3), horizonKm: Math.round(a.horizonDistance / 1000), viewKm: Math.round(a.viewDistance / 1000), far: Math.round(ctx.camera.far), near: ctx.camera.near };\n  }\n  function restore() {\n    flight.getCeiling = originalCeiling;\n    target.dispose();\n  }\n  window.__dwHA = { game, ctx, state, check, at, applyPose, settle, probe, atmosphere, restore, results, means: {} };\n  return 'high-altitude helpers ready, ceiling lifted for the test, loop paused';\n})()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(3000); const settled = await h.settle(null); h.game.debug.stepFrames(4); return JSON.stringify({ label: '3km', atmosphere: h.atmosphere(), waitedMs: settled.waitedMs, timedOut: Boolean(settled.timedOut), farField: settled.stats && { active: settled.stats.active, drawn: settled.stats.drawn, holes: settled.stats.holes, levels: settled.stats.levels, inner: settled.stats.inner } }); })()"
+  },
+  {
+    "shot": "high-altitude-3km"
+  },
+  {
+    "eval": "(() => { const h = window.__dwHA; const a = h.state.atmosphere; const stats = h.ctx.systems.farField.getStats(); const terrain = h.ctx.systems.terrain.getStats(); return h.check('3 km: the far field is off, the terrain draws, the sky is near neutral', !stats.active && !terrain.high.on && !terrain.high.hidden && a.curvature === 0 && a.skyDarkness < 0.01 && a.starVisibility === 0, JSON.stringify({ far: stats.active, high: terrain.high, atmosphere: h.atmosphere() })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(8000); const settled = await h.settle(null); h.game.debug.stepFrames(4); return JSON.stringify({ label: '8km', atmosphere: h.atmosphere(), waitedMs: settled.waitedMs, timedOut: Boolean(settled.timedOut), farField: settled.stats && { active: settled.stats.active, drawn: settled.stats.drawn, holes: settled.stats.holes, levels: settled.stats.levels, inner: settled.stats.inner } }); })()"
+  },
+  {
+    "shot": "high-altitude-8km"
+  },
+  {
+    "eval": "(() => { const h = window.__dwHA; const stats = h.ctx.systems.farField.getStats(); const terrain = h.ctx.systems.terrain.getStats(); return h.check('8 km: the far field fills the annulus, the curved terrain keeps the middle', stats.active && stats.drawn > 0 && stats.holes === 0 && terrain.high.on && !terrain.high.hidden && h.state.atmosphere.curvature === 1, JSON.stringify({ drawn: stats.drawn, holes: stats.holes, handoff: stats.handoff, terrain: terrain.high })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(8000); const settled = await h.settle(-48); const result = await h.probe(); h.means['8km-oblique'] = result.mean; return h.check('no holes 8km-oblique (pitch -48)', !settled.timedOut && result.holes === 0, JSON.stringify({ magentaPixels: result.holes, of: result.pixels, waitedMs: settled.waitedMs, farField: { drawn: settled.stats.drawn, holes: settled.stats.holes, pending: settled.stats.pending, levels: settled.stats.levels } })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(15000); const settled = await h.settle(null); h.game.debug.stepFrames(4); return JSON.stringify({ label: '15km', atmosphere: h.atmosphere(), waitedMs: settled.waitedMs, timedOut: Boolean(settled.timedOut), farField: settled.stats && { active: settled.stats.active, drawn: settled.stats.drawn, holes: settled.stats.holes, levels: settled.stats.levels, inner: settled.stats.inner } }); })()"
+  },
+  {
+    "shot": "high-altitude-15km"
+  },
+  {
+    "eval": "(() => { const h = window.__dwHA; const stats = h.ctx.systems.farField.getStats(); const terrain = h.ctx.systems.terrain.getStats(); const a = h.state.atmosphere; return h.check('15 km: the terrain has handed off, the limb glows, the far plane reaches the horizon', terrain.high.hidden && stats.holes === 0 && a.limb > 0.2 && h.ctx.camera.far >= a.viewDistance && h.ctx.camera.near > 1, JSON.stringify({ terrain: terrain.high, atmosphere: h.atmosphere() })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(15000); const settled = await h.settle(-89); const result = await h.probe(); h.means['15km-nadir'] = result.mean; return h.check('no holes 15km-nadir (pitch -89)', !settled.timedOut && result.holes === 0, JSON.stringify({ magentaPixels: result.holes, of: result.pixels, waitedMs: settled.waitedMs, farField: { drawn: settled.stats.drawn, holes: settled.stats.holes, pending: settled.stats.pending, levels: settled.stats.levels } })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(15000); const settled = await h.settle(-40); const result = await h.probe(); h.means['15km-oblique'] = result.mean; return h.check('no holes 15km-oblique (pitch -40)', !settled.timedOut && result.holes === 0, JSON.stringify({ magentaPixels: result.holes, of: result.pixels, waitedMs: settled.waitedMs, farField: { drawn: settled.stats.drawn, holes: settled.stats.holes, pending: settled.stats.pending, levels: settled.stats.levels } })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(35000); const settled = await h.settle(null); h.game.debug.stepFrames(4); return JSON.stringify({ label: '35km', atmosphere: h.atmosphere(), waitedMs: settled.waitedMs, timedOut: Boolean(settled.timedOut), farField: settled.stats && { active: settled.stats.active, drawn: settled.stats.drawn, holes: settled.stats.holes, levels: settled.stats.levels, inner: settled.stats.inner } }); })()"
+  },
+  {
+    "shot": "high-altitude-35km"
+  },
+  {
+    "eval": "(() => { const h = window.__dwHA; const a = h.state.atmosphere; const day = h.state.time.sunElevation > 0; return h.check('35 km: stars by day, a black sky, the limb', day && a.starVisibility > 0.85 && a.skyDarkness > 0.95 && a.limb > 0.9, JSON.stringify({ sunElevation: +h.state.time.sunElevation.toFixed(2), atmosphere: h.atmosphere() })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(35000); const settled = await h.settle(-89); const result = await h.probe(); h.means['35km-nadir'] = result.mean; return h.check('no holes 35km-nadir (pitch -89)', !settled.timedOut && result.holes === 0, JSON.stringify({ magentaPixels: result.holes, of: result.pixels, waitedMs: settled.waitedMs, farField: { drawn: settled.stats.drawn, holes: settled.stats.holes, pending: settled.stats.pending, levels: settled.stats.levels } })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(35000); const settled = await h.settle(-45); const result = await h.probe(); h.means['35km-oblique'] = result.mean; return h.check('no holes 35km-oblique (pitch -45)', !settled.timedOut && result.holes === 0, JSON.stringify({ magentaPixels: result.holes, of: result.pixels, waitedMs: settled.waitedMs, farField: { drawn: settled.stats.drawn, holes: settled.stats.holes, pending: settled.stats.pending, levels: settled.stats.levels } })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(100000); const settled = await h.settle(null); h.game.debug.stepFrames(4); return JSON.stringify({ label: '100km', atmosphere: h.atmosphere(), waitedMs: settled.waitedMs, timedOut: Boolean(settled.timedOut), farField: settled.stats && { active: settled.stats.active, drawn: settled.stats.drawn, holes: settled.stats.holes, levels: settled.stats.levels, inner: settled.stats.inner } }); })()"
+  },
+  {
+    "shot": "high-altitude-100km"
+  },
+  {
+    "eval": "(() => { const h = window.__dwHA; const a = h.state.atmosphere; const stats = h.ctx.systems.farField.getStats(); const finite = Number.isFinite(h.state.player.position.x) && Number.isFinite(h.state.player.position.y) && Number.isFinite(h.ctx.camera.position.y); return h.check('100 km: the planet out to its horizon, 0 NaN', finite && stats.holes === 0 && stats.drawn > 0 && h.ctx.camera.far <= 600000 && a.viewDistance > 400000, JSON.stringify({ atmosphere: h.atmosphere(), drawn: stats.drawn, levels: stats.levels, shell: stats.shell })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(100000); const settled = await h.settle(-89); const result = await h.probe(); h.means['100km-nadir'] = result.mean; return h.check('no holes 100km-nadir (pitch -89)', !settled.timedOut && result.holes === 0, JSON.stringify({ magentaPixels: result.holes, of: result.pixels, waitedMs: settled.waitedMs, farField: { drawn: settled.stats.drawn, holes: settled.stats.holes, pending: settled.stats.pending, levels: settled.stats.levels } })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(100000); const settled = await h.settle(-62); const result = await h.probe(); h.means['100km-oblique'] = result.mean; return h.check('no holes 100km-oblique (pitch -62)', !settled.timedOut && result.holes === 0, JSON.stringify({ magentaPixels: result.holes, of: result.pixels, waitedMs: settled.waitedMs, farField: { drawn: settled.stats.drawn, holes: settled.stats.holes, pending: settled.stats.pending, levels: settled.stats.levels } })); })()"
+  },
+  {
+    "eval": "(async () => {\n    const h = window.__dwHA;\n    const samples = [];\n    let worstHoles = 0;\n    for (let altitude = 10800; altitude <= 13200; altitude += 200) {\n      h.at(altitude, 6);\n      const settled = await h.settle(-55, 60000);\n      const result = await h.probe();\n      worstHoles = Math.max(worstHoles, result.holes);\n      samples.push({ altitude, mean: result.mean.map((value) => +value.toFixed(2)), holes: result.holes, timedOut: Boolean(settled.timedOut) });\n    }\n    let worstStep = 0;\n    for (let index = 1; index < samples.length; index++) {\n      const previous = samples[index - 1].mean;\n      const current = samples[index].mean;\n      worstStep = Math.max(worstStep, Math.abs(current[0] - previous[0]), Math.abs(current[1] - previous[1]), Math.abs(current[2] - previous[2]));\n    }\n    return h.check('the 11-13 km handoff band is steady and has no holes', worstHoles === 0 && worstStep < 6 && samples.every((sample) => !sample.timedOut), JSON.stringify({ worstStepLevels: +worstStep.toFixed(2), worstHoles, samples }));\n  })()"
+  },
+  {
+    "eval": "(() => { const h = window.__dwHA; const means = Object.values(h.means).map((mean) => mean.map((value) => Math.round(value)).join(',')); const distinct = new Set(means).size; return h.check('the views at each altitude differ', distinct === means.length, JSON.stringify(h.means)); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(600); const settled = await h.settle(null); h.game.debug.stepFrames(4); return JSON.stringify({ label: 'ground', atmosphere: h.atmosphere(), waitedMs: settled.waitedMs, timedOut: Boolean(settled.timedOut), farField: settled.stats && { active: settled.stats.active, drawn: settled.stats.drawn, holes: settled.stats.holes, levels: settled.stats.levels, inner: settled.stats.inner } }); })()"
+  },
+  {
+    "shot": "high-altitude-ground"
+  },
+  {
+    "eval": "(() => { const h = window.__dwHA; const a = h.state.atmosphere; const stats = h.ctx.systems.farField.getStats(); const terrain = h.ctx.systems.terrain.getStats(); return h.check('back at 600 m: far field off, original terrain materials, neutral sky', !stats.active && !terrain.high.on && !terrain.high.hidden && !terrain.high.paused && a.curvature === 0 && a.hazeBlend === 0 && a.skyDarkness === 0 && h.ctx.camera.near === h.ctx.CONFIG.CAMERA.NEAR && h.ctx.uniforms.curvatureAmount.value === 0, JSON.stringify({ terrain: terrain.high, atmosphere: h.atmosphere() })); })()"
+  },
+  {
+    "eval": "(() => { const h = window.__dwHA; h.restore(); h.game.debug.resumeLoop(); h.state.paused = false; return 'restored: ' + h.results.length + ' checks ran'; })()"
+  },
+  {
+    "wait": 1500
+  }
+]

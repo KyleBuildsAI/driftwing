@@ -86,18 +86,18 @@ export function createSkySystem(ctx) {
   const DEFAULT_TRANSITION_SECONDS = 2.5;
   // High altitude (state.atmosphere): the limb's thickness (sine of the angle above the rendered
   // horizon), the band above it that darkens to black (wide at first, narrow in space), the column
-  // haze's extinction per metre of sea-level air (about 30 % haze straight down from 100 km, a bright
+  // haze's extinction per metre of sea-level air (about 20 % haze straight down from 100 km, a bright
   // horizon band), the share of the view distance where the clipped rim starts to melt into the haze,
   // the overcast fade above the cloud decks, and the limb tint (sRGB).
   const LIMB_WIDTH = 0.032;
   const SPACE_RISE_LOW = 0.38;
   const SPACE_RISE_HIGH = 0.05;
-  const HAZE_EXTINCTION = 4.2e-5;
+  const HAZE_EXTINCTION = 2.6e-5;
   const HAZE_MIN_RISE = 1;
   const RIM_HAZE_START = 0.86;
   const CLOUD_DECK_TOP = 9000;
   const ABOVE_WEATHER = 14000;
-  const LIMB_TINT = new THREE.Color(0x6fb2ff);
+  const LIMB_TINT = new THREE.Color(0x4a93ff);
   const SPACE_SUN_LIGHT = new THREE.Color(0xfff6ec);
   const SPACE_SUN_INTENSITY = 3.1;
   const CELESTIAL_POLE = new THREE.Vector3(0, Math.sin(CELESTIAL_POLE_ELEVATION_DEG * DEG), -Math.cos(CELESTIAL_POLE_ELEVATION_DEG * DEG)).normalize();
@@ -352,11 +352,13 @@ export function createSkySystem(ctx) {
     If(sky.highAltitude.greaterThan(0.5), () => {
       const horizonUp = up.add(sky.dipSin).div(sky.dipSin.add(1.0));
       // Seen from thin air the horizon band is the lit atmosphere edge-on: it takes the limb's blue.
-      const edgeOn = mix(horizonHere, sky.limbColor, uniforms.limbStrength.mul(0.55));
+      const edgeOn = mix(horizonHere, sky.limbColor, uniforms.limbStrength.mul(0.8));
+      // ...and the haze over the ground below turns from the low air's tint to the same scattered blue.
+      const highGround = mix(groundHere, sky.limbColor.mul(0.7), uniforms.limbStrength.mul(0.45));
       const highAbove = mix(sky.zenith, edgeOn, pow(float(1).sub(saturate(horizonUp)), sky.horizonFalloff));
       const space = smoothstep(0.0, sky.spaceRise, horizonUp);
       const darkAbove = highAbove.mul(float(1).sub(uniforms.skyDarkness.mul(space)));
-      const highBase = mix(darkAbove, groundHere, smoothstep(0.0, 0.3, horizonUp.negate()));
+      const highBase = mix(darkAbove, highGround, smoothstep(0.0, 0.3, horizonUp.negate()));
       const highBoost = mix(0.45, 1.0, exp(abs(horizonUp).mul(-5.0)));
       const broad = float(1).sub(uniforms.sunSharpness.mul(0.9));
       const tightHalo = pow(sunClose, 1600.0).mul(uniforms.sunSharpness).mul(0.9);
@@ -1068,7 +1070,7 @@ export function createSkySystem(ctx) {
     sky.rayStrength.value *= 1 - sharpness;
     const daylight = 0.06 + 0.94 * smoothRange(-8, 4, apparent);
     tintScratch.copy(LIMB_TINT).lerp(scratch.horizon, 0.5 * state.time.goldenFactor);
-    displayToRadiance(tintScratch, sky.limbColor.value).multiplyScalar(1.6 * daylight);
+    displayToRadiance(tintScratch, sky.limbColor.value).multiplyScalar(1.25 * daylight);
   }
 
   /** Thin air: the sunlight whitens to its full strength above the rim; the black sky lends little fill. */
