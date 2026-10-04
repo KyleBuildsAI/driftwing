@@ -1,11 +1,13 @@
-// Spawn preset validator (contract section 1). Pure: no imports, so the labs, the terrain worker
-// and the main thread can all use it.
+// Spawn preset validator (contract section 1). Pure: it imports only pure modules (no three.js, no
+// DOM), so the labs, the terrain worker and the main thread can all use it.
 //
 // validatePreset(preset, options) throws an Error naming the preset and the field at fault, for
 // example: [DRIFTWING] preset "tornado": field "lod.mid" must be greater than lod.near (1500), got 900.
 // validatePresets(list, options) validates each preset and also checks the ids are unique.
 // options.engineNames (optional): the registered engine names; an engine entry naming any other
 // engine is refused. Main runs it at startup in dev builds; the labs run it too.
+
+import { validateChallengeBlock } from '../gameplay/challenges.js';
 
 export const PRESET_CATEGORIES = Object.freeze(['weather', 'geo', 'ocean', 'wildlife', 'structure', 'celestial', 'fantasy', 'flightplay', 'setpiece']);
 export const PRESET_KINDS = Object.freeze(['site', 'event']);
@@ -33,6 +35,7 @@ export const PRESET_FIELDS = Object.freeze([
   'id', 'name', 'category', 'kind', 'rarity', 'heavy', 'placement', 'candidates', 'filters', 'stamps', 'engines',
   'lod', 'lure', 'wind', 'audio', 'journal', 'discovery', 'callouts', 'lifetime', 'achievements',
   'activeState', 'cooldown', 'anchor',
+  'overlays', 'waters', 'challenge', 'tags', 'combo', 'override',
 ]);
 
 const ID_PATTERN = /^[a-z][A-Za-z0-9]*$/;
@@ -368,6 +371,9 @@ export function validatePreset(preset, { engineNames = null } = {}) {
   validateActiveState(check, preset.activeState, preset.kind);
   if (preset.cooldown !== undefined) check.number(preset.cooldown, 'cooldown', { min: 0 });
   validateAnchor(check, preset.anchor, preset.kind);
+  // challenge: a gate course in the spawn's frame (src/gameplay/challenges.js validateChallengeBlock),
+  // built and registered by the structure recipe challengeGates.
+  if (preset.challenge !== undefined && preset.challenge !== null) validateChallengeBlock(preset.challenge, preset.id);
   return preset;
 }
 

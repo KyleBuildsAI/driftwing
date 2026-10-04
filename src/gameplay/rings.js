@@ -9,8 +9,14 @@ import { CONFIG } from '../core/config.js';
  * valleys), keeps every ring >= 60 m above the rendered ground sampled along the
  * path and above the autopilot's terrain look-ahead floor, limits climbs and
  * dives to moderate grades (so "follow the rings" can fly it), and orients each
- * ring along the path tangent. Pass detection tests the segment flown this frame against
- * the current ring's plane. Sound comes from the audio system's own listeners
+ * ring along the path tangent. Pass and miss detection, timing and the course lifecycle run on
+ * the challenge core (src/gameplay/challenges.js, contract f.4): start() registers the course there
+ * as a legacy course (procedural, so no records and no typed challenge events) and the core hands
+ * every crossing, overshoot and cancel back through the adapter hooks below, which keep the Phase 2
+ * events (rings:started, ring:passed, ring:missed, rings:finished, rings:cancelled), state.ringCourse
+ * and getStats().lastCrossing bit for bit (tools/lab/challenges.mjs replays the Phase 2 golden logs).
+ * The ring meshes are anchored at the course's first ring (instance matrices relative to it), so
+ * their float32 buffers stay precise anywhere in the world (contract a.7). Sound comes from the audio system's own listeners
  * for ring:passed (pitch rising with streak, panned), ring:missed and
  * rings:finished; calling audio.chime() directly here would suppress those
  * richer cues through its direct-cue guard. Rendering is two InstancedMeshes (solid flat-shaded
@@ -29,9 +35,11 @@ export function createRingCourseSystem(ctx) {
   const DEFAULT_RINGS = 10;
   const RING_RADIUS = 16;
   const PASS_RADIUS = RING_RADIUS + 1.5;
+  // The challenge core's rules for the ring course (Phase 2's numbers).
   const MISS_DISTANCE_PAST = 150;
   const ABANDON_DISTANCE = 4500;
   const TELEPORT_DISTANCE = 400;
+  const COURSE_ID = 'rings';
   const CLEARANCE = 60;
   // Courses must be flyable by WREN's autopilot ("follow the rings"), which tracks onto each
   // ring's axis banking up to 40 deg, times its climb / descent (up to 12 deg) to reach the
@@ -151,7 +159,6 @@ export function createRingCourseSystem(ctx) {
     visible: false,
   };
   const origin = new T.Vector3();
-  const previousPosition = new T.Vector3().copy(state.player.position);
   const nextRingPosition = { x: 0, y: 0, z: 0 };
   const nextRingNormal = { x: 0, y: 0, z: 1 };
   const forwardZ = new T.Vector3(0, 0, 1);
@@ -160,7 +167,6 @@ export function createRingCourseSystem(ctx) {
   const scratchPosition = new T.Vector3();
   const scratchScale = new T.Vector3();
   const scratchMatrix = new T.Matrix4();
-  const scratchHit = new T.Vector3();
   const scratchOffset = new T.Vector3();
 
   const ringCourse = state.ringCourse;
@@ -368,9 +374,49 @@ export function createRingCourseSystem(ctx) {
     gate.flashAge = GATE_FLASH_SECONDS;
   }
 
+  /** The challenge core, which detects passes and misses and times the course. */
+  function challengeCore() {
+    const challenges = ctx.systems.challenges;
+    if (!challenges || typeof challenges.register !== 'function' || challenges.failed) {
+      console.error('[DRIFTWING] the ring course needs the challenge system (ctx.systems.challenges)');
+      return null;
+    }
+    return challenges;
+  }
+
+  /** The course as a challenge definition: one circle gate per ring, the last one the finish. */
+  function courseDefinition(total) {
+    const gates = [];
+    for (let index = 0; index < total; index++) {
+      const ring = rings[index];
+      gates.push({
+        id: `r${index}`,
+        role: index === total - 1 ? 'finish' : 'checkpoint',
+        center: { x: ring.center.x, y: ring.center.y, z: ring.center.z },
+        normal: { x: ring.normal.x, y: ring.normal.y, z: ring.normal.z },
+        shape: 'circle',
+        radius: PASS_RADIUS,
+      });
+    }
+    return {
+      id: COURSE_ID,
+      name: 'Ring course',
+      gates,
+      legacyRings: true,
+      record: false,
+      medals: null,
+      start: { mode: 'immediate' },
+      missed: { mode: 'count', outsideCrossing: 'miss', skipDistance: MISS_DISTANCE_PAST },
+      abandonDistance: ABANDON_DISTANCE,
+      teleportDistance: TELEPORT_DISTANCE,
+    };
+  }
+
   function start(options = {}) {
     const requested = Number(options?.count);
     const total = clamp(Math.round(Number.isFinite(requested) ? requested : DEFAULT_RINGS), MIN_RINGS, CAPACITY);
+    const challenges = challengeCore();
+    if (!challenges) return 0;
     if (course.active) cancel();
     const plan = planHeadings(total);
     planAltitudes(plan);
@@ -378,9 +424,10 @@ export function createRingCourseSystem(ctx) {
     buildCourse(plan);
     course.active = true;
     course.visible = true;
-    previousPosition.copy(state.player.position);
     bus.emit('rings:started', { total });
     writeState();
+    const courseKey = challenges.register(courseDefinition(total), { owner: 'rings', legacy: legacyHooks });
+    challenges.start(courseKey, { source: 'rings' });
     return total;
   }
 
@@ -394,13 +441,20 @@ export function createRingCourseSystem(ctx) {
     }
   }
 
+  /** Cancels the course (the R key, the UI chip, the copilot): the core ends the run and calls back. */
   function cancel() {
     if (!course.active) return false;
+    const challenges = challengeCore();
+    if (!challenges || !challenges.cancel('cancelled')) endCourse();
+    return true;
+  }
+
+  /** The Phase 2 cancel: retire the rings left, publish, announce. */
+  function endCourse() {
     course.active = false;
     retireRemaining(course.nextIndex);
     writeState();
     bus.emit('rings:cancelled', {});
-    return true;
   }
 
   function finish() {
@@ -454,34 +508,40 @@ export function createRingCourseSystem(ctx) {
     advance('ring:missed', { index });
   }
 
-  /** Tests the segment flown this frame against the current ring's plane. */
-  function detectPass(from, to) {
-    const index = course.nextIndex;
-    const ring = rings[index];
-    const before = scratchOffset.subVectors(from, ring.center).dot(ring.normal);
-    const after = scratchPosition.subVectors(to, ring.center).dot(ring.normal);
-    if (before < 0 && after >= 0) {
-      const t = before / (before - after);
-      scratchHit.lerpVectors(from, to, t);
-      const offset = scratchHit.distanceTo(ring.center);
+  /**
+   * The challenge core's legacy adapter (contract f.4). The core runs Phase 2's detection on the
+   * segment flown each frame, ring by ring, and calls:
+   *   tick(elapsed)                          the course clock (frame dt summed), before detection
+   *   crossed(index, offset, vertical, pass) the ring's plane was crossed `offset` m from its centre,
+   *                                          `vertical` m above it; inside PASS_RADIUS it is a pass
+   *   overshot(index)                        flown MISS_DISTANCE_PAST beyond the plane, no crossing
+   *   cancelled(reason)                      abandoned past ABANDON_DISTANCE, or cancel()
+   *   publish()                              the end of each running frame: state.ringCourse
+   */
+  const legacyHooks = Object.freeze({
+    tick(elapsed) {
+      course.elapsed = elapsed;
+    },
+    crossed(index, offset, vertical, passed) {
       lastCrossing.index = index;
       lastCrossing.offset = Math.round(offset * 10) / 10;
-      lastCrossing.vertical = Math.round((scratchHit.y - ring.center.y) * 10) / 10;
-      lastCrossing.result = offset <= PASS_RADIUS ? 'passed' : 'missed';
-      if (offset <= PASS_RADIUS) passRing(index);
+      lastCrossing.vertical = Math.round(vertical * 10) / 10;
+      lastCrossing.result = passed ? 'passed' : 'missed';
+      if (passed) passRing(index);
       else missRing(index);
-      return;
-    }
-    if (after > MISS_DISTANCE_PAST) {
+    },
+    overshot(index) {
       lastCrossing.index = index;
       lastCrossing.result = 'overshot';
       missRing(index);
-      return;
-    }
-    if (to.distanceTo(ring.center) > ABANDON_DISTANCE) {
-      cancel();
-    }
-  }
+    },
+    cancelled() {
+      if (course.active) endCourse();
+    },
+    publish() {
+      writeState();
+    },
+  });
 
   // ---- Visuals ---------------------------------------------------------------------------------------
   function easeOutCubic(t) {
@@ -629,12 +689,7 @@ export function createRingCourseSystem(ctx) {
 
   return {
     update(dt) {
-      const player = state.player.position;
-      if (course.active && dt > 0) {
-        course.elapsed += dt;
-        if (previousPosition.distanceTo(player) < TELEPORT_DISTANCE) detectPass(previousPosition, player);
-      }
-      previousPosition.copy(player);
+      // Detection and timing run in the challenge system right after this one (UPDATE_ORDER).
       if (course.visible) updateVisuals(dt);
       writeState();
     },

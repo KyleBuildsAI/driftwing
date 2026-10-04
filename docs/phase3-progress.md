@@ -29,8 +29,20 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   writes `tools/lab/fixtures/rings-golden.json` (every bus event with its frame, a float64 digest
   of `state.ringCourse` and `lastCrossing` per frame, full snapshots on event frames, the journal
   calls). Re-recording reproduces the file byte for byte.
-- **Next:** PathFollower, the challenge core, the ring migration proven against the goldens, the
-  challenge HUD, the fauna ground and surface modes, labs and step files.
+- **Done:** `src/world/pathFollower.js` (createPath, createPathFollower with loop / pingpong / once,
+  waits and trailing cars, buildGroundPath as an A* over slope- and water-checked steps) and
+  `tools/lab/path.mjs` (37/37: arc length within 0.01 % of a fine polyline, continuity at 120 Hz,
+  modes, waits, cars, ground, determinism, ground routes, zero allocation).
+- **Done:** the challenge core `src/gameplay/challenges.js` (course validation, sequential gate
+  crossings interpolated inside the frame on the flight clock, penalty / void / count misses, sensor
+  misses, splits and deltas, medals and medal pace, bests per craft under `driftwing-v2.challenges`,
+  the best run's 10 Hz path under `driftwing-v2.challengePath.*`, start gate / armed / immediate
+  starts, Y = `challengeStart`, abandon, time limit, crash and unregister cancels, `state.challenge`),
+  the four typed events, the preset `challenge` field (validated in schema.js), the ring course
+  migrated onto the core through a legacy adapter (identical to the six Phase 2 goldens), the
+  challenge HUD (`src/ui/challengeHud.js`: prompt, edge chevron and 3D gate frame, timer with splits,
+  miss flash, medal toast), the journal's Challenges section, and `tools/lab/challenges.mjs` (68/68).
+- **Next:** the structure recipe `challengeGates`, the fauna ground and surface modes, the step files.
 - **Open issues:** none yet.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)

@@ -26,6 +26,7 @@ import { createPerfGovernor, measureDisplayRefresh } from './core/perf.js';
 import { createGEffectsSystem, createPostStack } from './render/post.js';
 import { createRenderer } from './render/renderer.js';
 import { createRingCourseSystem } from './gameplay/rings.js';
+import { createChallengeSystem } from './gameplay/challenges.js';
 import { createSettings } from './core/settings.js';
 import { createShellBridge } from './shell/bridge.js';
 import { createSkySystem } from './render/sky.js';
@@ -35,6 +36,7 @@ import { createSetPieceEngine } from './spawns/engines/setPieceEngine.js';
 import { createStructureEngine } from './spawns/engines/structureEngine.js';
 import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
+import { createChallengeHud } from './ui/challengeHud.js';
 import { createVortexEngine } from './spawns/engines/vortexEngine.js';
 import { createWaterSystem } from './render/water.js';
 import { createWaterEffectEngine } from './spawns/engines/waterEffectEngine.js';
@@ -370,11 +372,13 @@ async function boot() {
     ['landmarks', createLandmarkSystem],
     ['waypoints', createWaypointSystem],
     ['rings', createRingCourseSystem],
+    ['challenges', createChallengeSystem],
     ['flight', createFlightController],
     ['camera', createCameraSystem],
     ['fx', createFxSystem],
     ['gEffects', createGEffectsSystem],
     ['copilot', createCopilotSystem],
+    ['challengeHud', createChallengeHud],
     ['windOverlay', createWindOverlaySystem],
     // Dev-only: the spawn debugger (F9).
     ...(spawnDevTools ? [['spawnDebugger', createSpawnDebugger]] : []),
@@ -418,7 +422,7 @@ async function boot() {
   beginPrewarm();
   const fadeStatus = document.getElementById('fade-status');
   if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
-  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'weather', 'sky', 'water', 'clouds', 'birds', 'spawns', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind', 'spawnDebugger'];
+  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'farField', 'weather', 'sky', 'water', 'waterBodies', 'clouds', 'birds', 'spawns', 'landmarks', 'journal', 'waypoints', 'rings', 'challenges', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'challengeHud', 'windOverlay', 'debugWind', 'spawnDebugger'];
 
   // ---- Flight-state snapshot for the copilot (local or remote brain) -----------------
   ctx.getFlightState = () => {

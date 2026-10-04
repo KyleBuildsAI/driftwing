@@ -87,6 +87,7 @@ a few seconds; move the pointer to the top-left corner to bring it back. From V2
 | Autopilot | O |
 | Time of day forward / back | T / Shift+T |
 | Ring course | R |
+| Start / cancel the nearest challenge | Y |
 | Journal | J |
 | World map (mapToggle) | M |
 | Photo mode | P |
@@ -390,7 +391,7 @@ A short checklist for the first session with the real T.16000M FCS Flight Pack:
 
 `copilotPTT, craftAbility, waypointNearest, waypointAhead, photoMode, viewCycle, viewToggle1P3P,
 viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, craftSelect1-6,
-gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack, ringCourse,
+gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack, ringCourse, challengeStart,
 journal, mapToggle, settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`. Each press
 and release is published as `input:action { id, phase, source, device }`.
 

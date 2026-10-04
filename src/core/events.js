@@ -62,6 +62,23 @@ export const EVENT_TYPES = Object.freeze({
   /** An achievement was earned (V-formation, Thread the Needle, ...). */
   achievement: { id: 'string', title: 'string' },
   /**
+   * A challenge run started (src/gameplay/challenges.js): its clock runs from the start-gate crossing
+   * (or from now for an immediate start). id is the course key `${seed}:${courseId}`; gates counts them.
+   */
+  challengeStarted: { id: 'string', name: 'string', craft: 'string', gates: 'number', presetId: { type: 'string', optional: true } },
+  /**
+   * A challenge gate was passed or missed. time is the run time (s) at the crossing; split (passed
+   * checkpoints and the finish) adds the penalties so far; delta compares it with this craft's best split.
+   */
+  challengeGate: { id: 'string', index: 'number', role: ['start', 'checkpoint', 'finish'], time: 'number', split: { type: 'number', optional: true }, delta: { type: 'number', optional: true }, missed: 'boolean' },
+  /**
+   * A challenge run crossed its finish. time includes the penalties; best is this craft's best time
+   * after the run (null when none is stored); valid is false for a void run (no best is stored).
+   */
+  challengeFinished: { id: 'string', craft: 'string', time: 'number', medal: ['gold', 'silver', 'bronze', 'none'], best: 'defined', improved: 'boolean', missed: 'number', penalties: 'number', valid: 'boolean' },
+  /** A challenge run ended without a finish (cancelled, abandoned, crash, timeLimit, replaced, removed). */
+  challengeCancelled: { id: 'string', reason: 'string' },
+  /**
    * A journal statistic from a preset or an engine (src/gameplay/journal.js keeps the global records).
    * op says how value folds into the record: 'add' sums (stormsChased, value 1), 'min' keeps the
    * lowest (closestTornado in metres, bestCanyonRun in seconds for clean runs only), 'max' the highest.

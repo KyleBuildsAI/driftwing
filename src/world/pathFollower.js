@@ -242,7 +242,7 @@ export function createPath({ points, closed = false, smoothing = 'catmullRom', s
  * [{ distance, seconds }] (stations, a caravan's rest), honoured on every pass (both directions on a
  * ping-pong). `ground(x, z)` (optional) puts the follower on the terrain plus `groundOffset`.
  *
- * Returns { at(time, out), carAt(time, offset, out), length, duration, period }: out receives
+ * Returns { at(time, out), atFrom(buffer, index, out), carAt(time, offset, out), length, duration, period }: out receives
  * { x, y, z, tx, ty, tz, heading (deg), distance, speed (m/s now: 0 while waiting), done }.
  * carAt is a trailing car `offset` metres behind the head along the track it travelled (train cars,
  * camels); duration is Infinity for loop and ping-pong; period is one cycle in seconds.
@@ -421,6 +421,14 @@ export function createPathFollower({
     period,
     at(time, out) {
       located[3] = time;
+      locate();
+      out.speed = located[1];
+      out.done = located[2] === 1;
+      return write(out);
+    },
+    /** at() with the time read from buffer[index] (allocation-free callers keep doubles in typed arrays). */
+    atFrom(buffer, index, out) {
+      located[3] = buffer[index];
       locate();
       out.speed = located[1];
       out.done = located[2] === 1;

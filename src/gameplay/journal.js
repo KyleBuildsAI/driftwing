@@ -534,6 +534,12 @@ export function createJournal(ctx) {
     return { ...entry };
   }
 
+  /** The challenge system's stored bests (src/gameplay/challenges.js), or null when it is absent. */
+  function challengeRecords() {
+    const challenges = ctx.systems.challenges;
+    return challenges && typeof challenges.getRecords === 'function' ? challenges.getRecords() : null;
+  }
+
   function flushOnHide() {
     if (document.visibilityState === 'hidden') save();
   }
@@ -544,6 +550,10 @@ export function createJournal(ctx) {
   bus.onTyped('discovery', (payload) => recordSpawnDiscovery(payload));
   bus.onTyped('journalStat', (payload) => recordStat(payload));
   bus.onTyped('achievement', (payload) => recordAchievement(payload));
+  // Challenges: the challenge system keeps the bests (driftwing-v2.challenges); a new best refreshes the panel.
+  bus.onTyped('challengeFinished', (payload) => {
+    if (payload?.improved) markChanged('challenge');
+  });
   visitBiome(state.player.biome?.key);
   // The spawns this world's journal already holds are discovered: they never announce again.
   ctx.systems.spawns?.manager?.markDiscovered?.(data.spawnsFound.map((entry) => entry.id));
@@ -564,11 +574,17 @@ export function createJournal(ctx) {
       }
     },
 
-    /** The journal (the persisted shape) plus the global records and the spawn collection counts. */
+    /**
+     * The journal (the persisted shape) plus the global records, the spawn collection counts and the
+     * challenge bests (every world; the challenge system's records, or null without it).
+     */
     getData() {
       const { found, total } = collection();
-      return { ...snapshot(), records: recordsSnapshot(), collection: { found, total } };
+      return { ...snapshot(), records: recordsSnapshot(), collection: { found, total }, challenges: challengeRecords() };
     },
+
+    /** The challenge bests: { version, courses: { courseKey: { name, presetId, best: { craft: { time, medal, splits, missed, date } } } } } or null. */
+    getChallengeRecords: challengeRecords,
 
     /** The global records: { stats: { key: { value, op, at, seed, presetId } }, achievements, bestLanding }. */
     getRecords() {

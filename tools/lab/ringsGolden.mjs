@@ -153,7 +153,7 @@ function createFlightLab(createSystems) {
     world: createStubWorld(),
     uniforms: { time: TSL.uniform(0), playerPosition: TSL.uniform(new THREE.Vector3()) },
     settings: { get: () => undefined, set: () => {} },
-    storage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    storage: { read: (key, fallback) => fallback, write: () => true, remove: () => true },
     systems: {
       journal: {
         recordRingCourse(result) {

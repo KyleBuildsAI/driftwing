@@ -85,6 +85,7 @@ const KEYBOARD = {
     timeForward: [key('KeyT')],
     timeBack: [key('KeyT', { shift: true })],
     ringCourse: [key('KeyR')],
+    challengeStart: [key('KeyY')],
     journal: [key('KeyJ')],
     mapToggle: [key('KeyM', { shift: false })],
     settings: [key('Comma')],

@@ -1,0 +1,273 @@
+/* Challenge HUD (challengeHud.js): the start prompt (lower centre), the timer card (top centre, under
+   the compass), the gate arrow (screen edge, or a distance tag on the gate) and the medal toast
+   (centre). Glass, in the v1 HUD's warm palette; photo mode hides them all. */
+#ui-root .dw-challenge-label {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--dw-gold);
+}
+
+/* ---- Start prompt ---- */
+#ui-root .dw-challenge-prompt {
+  position: absolute;
+  z-index: 27;
+  left: 50%;
+  bottom: calc(var(--dw-bottom) + 132px);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: 'label key' 'name key' 'detail key';
+  column-gap: 16px;
+  row-gap: 2px;
+  align-items: center;
+  min-width: 250px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 11px 14px 12px 16px;
+  border-radius: var(--dw-radius);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, 10px);
+  transition: opacity 0.3s ease, transform 0.45s var(--dw-ease), visibility 0s linear 0.45s;
+}
+#ui-root .dw-challenge-prompt[data-state="shown"] {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition: opacity 0.3s ease, transform 0.45s var(--dw-ease), visibility 0s;
+}
+#ui-root .dw-challenge-prompt .dw-challenge-label { grid-area: label; }
+#ui-root .dw-challenge-prompt-name {
+  grid-area: name;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--dw-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#ui-root .dw-challenge-prompt-detail {
+  grid-area: detail;
+  font-size: 12px;
+  color: var(--dw-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+#ui-root .dw-challenge-prompt-key {
+  grid-area: key;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dw-text-faint);
+}
+#ui-root .dw-challenge-prompt[data-key="off"] .dw-challenge-prompt-key { display: none; }
+#ui-root .dw-challenge-prompt-key kbd {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  border: 1px solid rgba(243, 199, 122, 0.55);
+  background: var(--dw-gold-soft);
+  color: var(--dw-gold);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 14px rgba(243, 199, 122, 0.18);
+  animation: dw-challenge-key 2.4s ease-in-out infinite;
+}
+@keyframes dw-challenge-key { 50% { box-shadow: 0 0 22px rgba(243, 199, 122, 0.4); } }
+
+/* ---- Timer card ---- */
+#ui-root .dw-challenge-timer {
+  position: absolute;
+  z-index: 27;
+  left: 50%;
+  top: calc(var(--dw-top) + var(--dw-shell-inset) + 66px);
+  width: 214px;
+  padding: 10px 14px 11px;
+  border-radius: var(--dw-radius);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, -8px);
+  transition: opacity 0.3s ease, transform 0.45s var(--dw-ease), visibility 0s linear 0.45s, box-shadow 0.25s ease;
+}
+#ui-root .dw-challenge-timer[data-state="shown"] {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+  transition: opacity 0.3s ease, transform 0.45s var(--dw-ease), visibility 0s, box-shadow 0.25s ease;
+}
+#ui-root .dw-challenge-timer-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#ui-root .dw-challenge-timer-head .dw-challenge-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ui-root .dw-challenge-pace { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; color: var(--dw-text-dim); white-space: nowrap; }
+#ui-root .dw-challenge-pace i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+#ui-root .dw-challenge-pace[data-medal="off"] i { display: none; }
+#ui-root .dw-challenge-pace[data-medal="gold"] { color: #f3c77a; }
+#ui-root .dw-challenge-pace[data-medal="silver"] { color: #d5dde6; }
+#ui-root .dw-challenge-pace[data-medal="bronze"] { color: #d99a6c; }
+#ui-root .dw-challenge-pace[data-medal="none"] { color: var(--dw-text-faint); }
+#ui-root .dw-challenge-time {
+  margin-top: 2px;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--dw-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+#ui-root .dw-challenge-timer[data-phase="armed"] .dw-challenge-time { font-size: 17px; line-height: 1.6; color: var(--dw-teal); }
+#ui-root .dw-challenge-row,
+#ui-root .dw-challenge-split {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--dw-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+#ui-root .dw-challenge-penalty { color: var(--dw-warn); }
+#ui-root .dw-challenge-split:has(span:empty:first-child) { display: none; }
+#ui-root .dw-challenge-split[data-state="ahead"] .dw-challenge-split-delta { color: #8fe0a0; }
+#ui-root .dw-challenge-split[data-state="behind"] .dw-challenge-split-delta { color: #f28a7a; }
+#ui-root .dw-challenge-rival { font-size: 11.5px; color: var(--dw-teal); }
+#ui-root .dw-challenge-rival:empty { display: none; }
+#ui-root .dw-challenge-flash {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 3px 10px 4px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+#ui-root .dw-challenge-timer[data-flash="miss"] { box-shadow: var(--dw-shadow), inset 0 0 0 1px rgba(242, 138, 122, 0.8), 0 0 26px rgba(242, 138, 122, 0.35); }
+#ui-root .dw-challenge-timer[data-flash="ahead"] { box-shadow: var(--dw-shadow), inset 0 0 0 1px rgba(143, 224, 160, 0.7); }
+#ui-root .dw-challenge-timer[data-flash="behind"] { box-shadow: var(--dw-shadow), inset 0 0 0 1px rgba(242, 138, 122, 0.55); }
+#ui-root .dw-challenge-timer[data-flash="miss"] .dw-challenge-flash { opacity: 1; background: rgba(74, 28, 20, 0.86); color: #f6b3a6; }
+#ui-root .dw-challenge-timer[data-flash="ahead"] .dw-challenge-flash { opacity: 1; background: rgba(20, 52, 30, 0.82); color: #a8ebb5; }
+#ui-root .dw-challenge-timer[data-flash="behind"] .dw-challenge-flash { opacity: 1; background: rgba(60, 26, 22, 0.82); color: #f6b3a6; }
+
+/* ---- Gate arrow ---- */
+#ui-root .dw-challenge-arrow {
+  position: absolute;
+  z-index: 26;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  will-change: transform;
+}
+#ui-root .dw-challenge-arrow[data-state="shown"] { opacity: 1; visibility: visible; }
+#ui-root .dw-challenge-chevron {
+  position: absolute;
+  left: -15px;
+  top: -15px;
+  width: 30px;
+  height: 30px;
+  background: var(--dw-gold);
+  clip-path: polygon(15% 12%, 92% 50%, 15% 88%, 36% 50%);
+  filter: drop-shadow(0 0 7px rgba(243, 199, 122, 0.85));
+  will-change: transform;
+}
+#ui-root .dw-challenge-arrow[data-mode="on"] .dw-challenge-chevron { display: none; }
+#ui-root .dw-challenge-arrow-distance {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, 22px);
+  padding: 2px 8px 3px;
+  border-radius: 8px;
+  background: rgba(18, 14, 22, 0.5);
+  color: var(--dw-gold);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(8, 6, 12, 0.45);
+}
+#ui-root .dw-challenge-arrow[data-mode="edge"] .dw-challenge-arrow-distance { transform: translate(-50%, 20px); color: var(--dw-text); }
+
+/* ---- Medal toast ---- */
+#ui-root .dw-challenge-toast {
+  --dw-medal-color: var(--dw-gold);
+  position: absolute;
+  z-index: 30;
+  left: 50%;
+  top: 30%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 230px;
+  padding: 18px 26px 16px;
+  border-radius: 20px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, 12px) scale(0.96);
+  transition: opacity 0.35s ease, transform 0.55s var(--dw-ease), visibility 0s linear 0.55s;
+}
+#ui-root .dw-challenge-toast[data-state="shown"] {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0) scale(1);
+  transition: opacity 0.35s ease, transform 0.55s var(--dw-ease), visibility 0s;
+}
+#ui-root .dw-challenge-toast::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dw-medal-color) 45%, transparent);
+}
+#ui-root .dw-challenge-medal {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--dw-medal-color) 90%, white), var(--dw-medal-color) 60%, color-mix(in srgb, var(--dw-medal-color) 60%, black));
+  color: rgba(30, 20, 10, 0.75);
+  font-size: 20px;
+  font-weight: 800;
+  box-shadow: 0 0 24px color-mix(in srgb, var(--dw-medal-color) 45%, transparent);
+}
+#ui-root .dw-challenge-toast[data-medal="none"] .dw-challenge-medal { display: none; }
+#ui-root .dw-challenge-toast[data-state="shown"] .dw-challenge-medal { animation: dw-challenge-medal 0.9s var(--dw-ease) both; }
+@keyframes dw-challenge-medal { from { transform: scale(0.4) rotate(-25deg); } to { transform: none; } }
+#ui-root .dw-challenge-toast .dw-challenge-label { color: var(--dw-medal-color); }
+#ui-root .dw-challenge-toast-time { font-size: 32px; font-weight: 600; color: var(--dw-text); font-variant-numeric: tabular-nums; }
+#ui-root .dw-challenge-toast-detail { font-size: 12px; color: var(--dw-text-dim); }
+#ui-root .dw-challenge-toast-detail:empty { display: none; }
+
+/* Photo mode hides every piece. */
+#ui-root.dw-photo-on .dw-challenge-prompt,
+#ui-root.dw-photo-on .dw-challenge-timer,
+#ui-root.dw-photo-on .dw-challenge-arrow,
+#ui-root.dw-photo-on .dw-challenge-toast { opacity: 0; visibility: hidden; transition: none; }
+
+/* Touch: the flight card owns the top; the timer drops below it and the prompt clears the controls. */
+#ui-root.dw-touch .dw-challenge-timer { top: calc(var(--dw-top) + 128px); }
+#ui-root.dw-touch .dw-challenge-prompt { bottom: calc(var(--dw-bottom) + 190px); }
+@media (prefers-reduced-motion: reduce) {
+  #ui-root .dw-challenge-prompt-key kbd,
+  #ui-root .dw-challenge-toast[data-state="shown"] .dw-challenge-medal { animation: none; }
+}
