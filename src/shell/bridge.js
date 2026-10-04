@@ -33,9 +33,14 @@ function parentIsSameOrigin() {
   return true;
 }
 
-/** The shell URL that opens a version directly (/?v=1), keeping V2's own origin. */
+/**
+ * The shell URL that opens a version directly (?v=1): the shell page beside V2's folder, so it
+ * keeps V2's origin and any subpath the site is served from.
+ */
 export function shellUrlFor(version) {
-  return new URL(`/?v=${version.slice(1)}`, window.location.origin).href;
+  const shell = new URL(window.location.protocol === 'file:' ? '../index.html' : '../', window.location.href);
+  shell.search = `?v=${version.slice(1)}`;
+  return shell.href;
 }
 
 /**
