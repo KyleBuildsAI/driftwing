@@ -50,6 +50,12 @@ export const EVENT_TYPES = Object.freeze({
   deviceDisconnected: { deviceKey: 'string', kind: 'string', name: 'string' },
   /** The craft was put back into the air by a relaunch (aerotow, peak launch, respawn). */
   relaunched: { craft: 'string', method: 'string', position: 'vector3' },
+  /**
+   * The floating render origin moved (src/core/origin.js): offset is its new WORLD position, previous
+   * the old one and delta = offset - previous (m, multiples of 4096 on every axis). The payload object
+   * is reused, so a listener copies what it keeps.
+   */
+  originRebased: { offset: 'vector3', previous: 'vector3', delta: 'vector3', version: 'number' },
   /** A spawn instance was created (a site came within range, or the director or debugger started one). */
   spawnActivated: { id: 'string', presetId: 'string', category: 'string', kind: SPAWN_KINDS, position: 'vector3' },
   /** A spawn instance was disposed; reason says why (ended, expired, despawn, range, debug, replaced, ...). */

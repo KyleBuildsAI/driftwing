@@ -25,6 +25,7 @@ import { createLandmarkSystem } from './world/landmarks.js';
 import { createPerfGovernor, measureDisplayRefresh } from './core/perf.js';
 import { createGEffectsSystem, createPostStack } from './render/post.js';
 import { createRenderer } from './render/renderer.js';
+import { createRenderOrigin } from './core/origin.js';
 import { createRingCourseSystem } from './gameplay/rings.js';
 import { createSettings } from './core/settings.js';
 import { createShellBridge } from './shell/bridge.js';
@@ -158,12 +159,15 @@ async function boot() {
     windDirection: uniform(new THREE.Vector2(0.8, 0.6).normalize()),
     windStrength: uniform(1),
     playerPosition: uniform(new THREE.Vector3()),
+    // WORLD position of the floating render origin (src/core/origin.js): positionWorld + renderOrigin is world.
+    renderOrigin: uniform(new THREE.Vector3()),
     waterLevel: uniform(CONFIG.WATER_LEVEL),
     // Cloud optics (0..1), driven by the celestial engine: the glory and the full-circle rainbow
     // around the antisolar point on every cloud puff (src/render/cloudShading.js).
     cloudGlory: uniform(0),
     cloudBow: uniform(0),
   };
+  const origin = createRenderOrigin({ THREE, scene, uniforms, bus });
 
   // ---- World + spawn ------------------------------------------------------------------
   // The terrain worker receives the same options (ctx.worldOptions), so both threads place the same
@@ -250,6 +254,8 @@ async function boot() {
     perf: null,
     flightModels,
     uniforms,
+    // The floating render origin (src/core/origin.js): scene.position = -origin.offset.
+    origin,
     textures: { cloudShadow: cloudShadowTexture },
     quality: {},
     systems: {},

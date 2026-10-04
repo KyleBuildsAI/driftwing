@@ -14,12 +14,21 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 | # | Work | Branch | Contract | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Floating origin: `src/core/origin.js`, `scene.position = -offset`, the 4096 m lattice, the shader, CPU-matrix and float32-buffer fixes, audio in the render frame | `p3/origin` | a | not started |
+| 1 | Floating origin: `src/core/origin.js`, `scene.position = -offset`, the 4096 m lattice, the shader, CPU-matrix and float32-buffer fixes, audio in the render frame | `p3/origin` | a | in progress |
 | 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | not started |
 | 3 | Local water bodies (basin, crater, terraces stamps; lake and ice material), the shared water-height query and the caller migration; region overlays; vegetation species 6-12 with WindField sway and trunk colliders | `p3/water-regions` | c, d | not started |
 | 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | not started |
 | 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | not started |
 | I1 | Integration pass: merge in the order origin, high altitude, water/regions, colliders, fauna/challenges; the follow-ups of contract appendix A; every lab and step file once on both backends | `v2-phase3` | appendix A | not started |
+
+### Wave 1 - p3/origin
+
+- Done: `src/core/origin.js` (`createRenderOrigin`, the 4096 m lattice, `onRebase`, `toRender` /
+  `toWorld`, the TSL helpers `worldPositionNode` / `worldCameraPositionNode`), the `originRebased`
+  typed event, `uniforms.renderOrigin`, the origin in `ctx` and the loop's first-in-frame update.
+- Next: the node lab, the shader lines (a.5), the CPU render-frame readers (a.6), the float32 buffers
+  (a.7), audio in the render frame, the rebase step file and the verification runs.
+- Open issues: none yet.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
