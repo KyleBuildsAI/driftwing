@@ -26,7 +26,7 @@
 //   gorge       length, width (top), depth, falloff (end taper), pad (anchor pads) paint 'riverbed'
 //   flatten     length, width (the strip), margin (flat apron), shoulder (falloff) paint 'tarmac'
 //   islandBase  radius, height (above the water), falloff                          paint 'basalt'
-//   basin       radius (the lake bowl), depth (rim to floor), rim (berm width), falloff  paint 'mud'
+//   basin       radius (the lake bowl), depth (rim to floor), rim (berm width), falloff  paint 'sand'
 //   crater      radius (rim crest), depth (rim to floor), rimHeight (above the ground around),
 //               rimWidth (outer flank), floor (flat floor share of the radius, 0..0.8)  paint 'ash'
 //   terraces    length (downhill), width, steps (shelf count), lip (pool rim height), falloff
@@ -81,7 +81,7 @@ const DEFAULTS = Object.freeze({
   gorge: Object.freeze({ length: [700, 1100], width: [80, 130], depth: [80, 120], falloff: [150, 220], pad: [60, 90], paint: 'riverbed' }),
   flatten: Object.freeze({ length: [1100, 1500], width: [40, 60], margin: [30, 55], shoulder: [100, 170], paint: 'tarmac' }),
   islandBase: Object.freeze({ radius: [140, 240], height: [20, 45], falloff: [80, 130], paint: 'basalt' }),
-  basin: Object.freeze({ radius: [180, 320], depth: [14, 24], rim: [30, 50], falloff: [80, 130], paint: 'mud' }),
+  basin: Object.freeze({ radius: [180, 320], depth: [14, 24], rim: [30, 50], falloff: [80, 130], paint: 'sand' }),
   crater: Object.freeze({ radius: [320, 520], depth: [60, 110], rimHeight: [25, 45], rimWidth: [180, 300], floor: [0.25, 0.45], paint: 'ash' }),
   terraces: Object.freeze({ length: [320, 520], width: [140, 240], steps: [5, 8], lip: [1.2, 2.4], falloff: [60, 110], paint: 'travertine' }),
 });
@@ -1123,8 +1123,9 @@ function basinHeight(stamp, x, z, height) {
     const share = reach / radius;
     profile = stamp.floorY + stamp.depth * share * share * (3 - 2 * share);
   }
-  // Inside the rim the bowl replaces the ground; the berm lifts low ground to the crest and fades out.
-  const cutMask = 1 - smoothstep(radius, radius + stamp.rim * 0.5, reach);
+  // Inside the rim the bowl replaces the ground; outside it higher ground eases down toward the crest
+  // and the berm lifts lower ground up to it, both fading out over the rim and the falloff.
+  const cutMask = 1 - smoothstep(radius, outer, reach);
   const liftMask = 1 - smoothstep(radius + stamp.rim * 0.4, outer, reach);
   return bowlBlend(height, profile, cutMask, liftMask);
 }
@@ -1362,8 +1363,8 @@ function paintIslandBase(stamp, x, z, out) {
 
 function paintBasin(stamp, x, z, out) {
   const reach = basinReach(stamp, x, z);
-  // The lake bed and its shore, fading out over the inner half of the berm.
-  const weight = 1 - smoothstep(stamp.radius * 0.96, stamp.radius + stamp.rim * 0.5, reach);
+  // The lake bed and a beach along its shore, fading out just past the rim crest.
+  const weight = 1 - smoothstep(stamp.radius * 0.84, stamp.radius * 1.02, reach);
   if (weight > out.weight) {
     out.weight = weight;
     out.paintIndex = stamp.paintIndex;

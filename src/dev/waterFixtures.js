@@ -42,7 +42,7 @@ function fixture(id, name, category, fields) {
 
 export const FIXTURE_LAKE = fixture('fixtureLake', 'Fixture lake', 'geo', {
   placement: Object.freeze({ chance: 0.6, minSpacing: 8000, biomes: Object.freeze(['meadows', 'pine', 'dunes']), surface: 'land', terrain: Object.freeze({ minHeight: 10, maxHeight: 400, relief: 'any' }), clearance: 300 }),
-  stamps: Object.freeze([Object.freeze({ type: 'basin', radius: [200, 280], depth: [14, 20], rim: [30, 45], falloff: [80, 110], paint: 'mud' })]),
+  stamps: Object.freeze([Object.freeze({ type: 'basin', radius: [200, 280], depth: [14, 20], rim: [30, 45], falloff: [80, 110], paint: 'sand' })]),
   waters: Object.freeze([Object.freeze({ kind: 'lake', stamp: 0, level: Object.freeze({ mode: 'basin', fill: 0.82 }), material: 'water', waves: 0.3 })]),
   overlays: Object.freeze([Object.freeze({
     shape: Object.freeze({ kind: 'disc', radius: [700, 900], falloff: 220 }),

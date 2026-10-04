@@ -24,15 +24,20 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 ### Wave 1 - p3/water-regions
 
 - **Done:** the `basin`, `crater` and `terraces` stamps and the `salt`, `sand`, `travertine`, `mud`
-  and `ice` paints (src/world/stamps.js); local water bodies as data (src/world/waters.js) and region
-  overlays (src/world/overlays.js), resolved by placement after the stamps from the same per-site
-  stream, with per-cell lists and the site-list hash lines (a site without them hashes as in
-  Phase 2); the species table 6-12 (src/world/vegetationSpecies.js); worldgen's `waterBodyAt`,
-  `overlayAt`, `faceOverlay`, overlay colours and species in the scatter, `vegetationNear`. A world
-  without waters or overlays is bit-identical (scatter and site-list hash checked against the base).
-- **Next:** the water-height query and caller migration, the water material and the `waterBodies`
-  system, the chunk `overlay` attribute and terrain shading, the species meshes with WindField sway,
-  trunk colliders, labs and step files.
+  and `ice` paints; local water bodies as data (src/world/waters.js) and region overlays
+  (src/world/overlays.js), resolved by placement after the stamps; the species table 6-12
+  (src/world/vegetationSpecies.js); worldgen's `waterBodyAt`, `overlayAt`, `faceOverlay`,
+  `vegetationNear`. The shared water-height query (src/world/waterQuery.js, `ctx.waterQuery`) with
+  the ocean wave table and swell scale shared with the shader, and every caller migrated (flight
+  models through src/flight/waterSurface.js, the controller, loop, cameras, copilot, spray,
+  bioluminescence, relaunch, ground start, the harness). The ocean material moved to
+  src/render/waterMaterial.js with lake and ice variants; the `waterBodies` system draws them. The
+  chunk `overlay` attribute on both threads and its shading (tint sweeps, ice, stripes); the species
+  meshes; WindField sway (src/render/windSway.js); the vegetation collider and perch provider
+  (src/world/vegetationColliders.js). `?test=waters` and tools/steps/water-bodies.json (41/41 checks
+  on WebGPU, 0/0 console).
+- **Next:** tools/lab/water.mjs, the terrain lab and `?test=terrain` extensions, the remaining
+  verification runs on both backends.
 - **Open issues:** none yet.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
