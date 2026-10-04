@@ -1,0 +1,74 @@
+[
+  {
+    "wait": 1500
+  },
+  {
+    "eval": "(async () => { try { const kit = await import('/src/dev/originRebaseCheck.js'); const api = kit.installOriginRebaseCheck(window.DRIFTWING); return 'dev server only: imports /src/dev/originRebaseCheck.js | ' + await api.setup(); } catch (error) { console.error('[origin check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const x = mid(spawn.x); const z = spawn.z; return await window.__dwOrigin.imageCheck('image-start', { x, y: Math.max(ground(x, z) + 260, 420), z, heading: spawn.heading }); } catch (error) { console.error('[origin check] image-start failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "shot": "origin-image-start"
+  },
+  {
+    "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const x = mid(spawn.x); const z = spawn.z; const pose = { x, y: Math.max(ground(x, z) + 260, 420), z, heading: spawn.heading }; await window.__dwOrigin.goTo(pose); const line = await window.__dwOrigin.spawnAhead('crystalSpires', 1300); return line + ' | ' + await window.__dwOrigin.imageCheck('image-spawn', pose); } catch (error) { console.error('[origin check] image-spawn failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "shot": "origin-image-spawn"
+  },
+  {
+    "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const x = mid(spawn.x); const z = spawn.z - 30000; return await window.__dwOrigin.imageCheck('image-high', { x, y: 10180, z, heading: 0, speed: 260 }, { x: 1, y: 1, z: 0 }); } catch (error) { console.error('[origin check] image-high failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "shot": "origin-image-high"
+  },
+  {
+    "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const x = mid(spawn.x); const z = spawn.z; return await window.__dwOrigin.beginLeg('flight-low', { x, y: Math.max(ground(x, z) + 900, 2600), z, heading: 90, speed: 250 }, { forceAt: [300] }); } catch (error) { console.error('[origin check] flight-low failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwOrigin.flyFrames(300, 100); } catch (error) { console.error('[origin check] flight-low failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwOrigin.flyFrames(300, 100); } catch (error) { console.error('[origin check] flight-low failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwOrigin.flyFrames(300, 100); } catch (error) { console.error('[origin check] flight-low failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwOrigin.endLeg(); } catch (error) { console.error('[origin check] flight-low failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "shot": "origin-flight-low"
+  },
+  {
+    "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const x = mid(spawn.x) + 30000; const z = spawn.z + 20000; return await window.__dwOrigin.beginLeg('flight-high', { x, y: 13200, z, heading: 300, speed: 270 }, { forceAt: [450] }); } catch (error) { console.error('[origin check] flight-high failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwOrigin.flyFrames(300, 100); } catch (error) { console.error('[origin check] flight-high failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwOrigin.flyFrames(300, 100); } catch (error) { console.error('[origin check] flight-high failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwOrigin.flyFrames(300, 100); } catch (error) { console.error('[origin check] flight-high failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwOrigin.endLeg(); } catch (error) { console.error('[origin check] flight-high failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "shot": "origin-flight-high"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwOrigin.identity('identity'); } catch (error) { console.error('[origin check] identity failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwOrigin.finish(); } catch (error) { console.error('[origin check] finish failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 1500
+  },
+  {
+    "shot": "origin-after"
+  }
+]

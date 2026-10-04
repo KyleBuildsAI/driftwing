@@ -25,7 +25,7 @@ import { createLandmarkSystem } from './world/landmarks.js';
 import { createPerfGovernor, measureDisplayRefresh } from './core/perf.js';
 import { createGEffectsSystem, createPostStack } from './render/post.js';
 import { createRenderer } from './render/renderer.js';
-import { createRenderOrigin } from './core/origin.js';
+import { ORIGIN_QUANTUM, createRenderOrigin } from './core/origin.js';
 import { createRingCourseSystem } from './gameplay/rings.js';
 import { createSettings } from './core/settings.js';
 import { createShellBridge } from './shell/bridge.js';
@@ -633,6 +633,18 @@ async function boot() {
         stepper.paused = false;
         loop.resetTiming();
         renderer.setAnimationLoop(loop.frame);
+      },
+      /**
+       * Forces a floating render origin rebase now (src/core/origin.js): to the lattice point nearest
+       * point (world { x, y, z }), or by default one lattice step (4096 m) east of the current origin,
+       * whatever the threshold. The next frame's update moves it back when the craft is out of range.
+       * Returns the origin's stats.
+       */
+      rebaseOrigin(point = null) {
+        const target = point ?? { x: origin.offset.x + ORIGIN_QUANTUM, y: origin.offset.y, z: origin.offset.z };
+        origin.rebaseTo(target);
+        const stats = origin.getStats();
+        return { ...stats, offset: { ...stats.offset } };
       },
     };
   }
