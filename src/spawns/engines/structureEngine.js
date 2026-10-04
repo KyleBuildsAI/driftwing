@@ -21,7 +21,10 @@
 //   gates       pass-under / pass-through gates (gateDetector.js): 'structure:gate' events, optional
 //                achievements, crystal chimes, timed courses ('structure:course')
 //   landing      runway zones grade touchdowns ('structure:landing' and a toast)
-//   surfaces     landable tops registered as extra ground surfaces (src/world/groundSurfaces.js)
+//   surfaces     landable tops registered as extra ground surfaces (src/world/groundSurfaces.js); with
+//                the game's collider service the island tops are landable heightfield colliders
+//   colliders    the recipes' solid parts (out.colliders, structure/colliders.js) registered with
+//                ctx.game.colliders (instance.colliderIds); turbine nacelles and rotors turn with yaw
 //   groundStart  engine.groundStart(preset, params, site): ground-start spots a discovered site offers
 //   wind         the wind farm's wake turbulence source (removed at the far tier, where the player is
 //                kilometres from it and cannot fly through the wake)
@@ -36,6 +39,7 @@ import { RECIPES, RECIPE_NAMES } from './structure/recipes/index.js';
 import { islandOutline, islandTopHeight } from './structure/recipes/islands.js';
 import { GATE_TELEPORT_DISTANCE, createGateSet, crossGates } from './gateDetector.js';
 import { createParamView, createWindSample, ownsPresetAudio } from './engineKit.js';
+import { addStructureColliders, islandTopCollider, removeStructureColliders, updateTurbineColliders } from './structure/colliders.js';
 
 const ENGINE_NAME = 'structure';
 /** Structure spawns alive at once (the director's cap is the same). */
@@ -262,7 +266,7 @@ export function createStructureEngine() {
     const anchor = params.position;
     const wind = windDirection();
     const out = {
-      turbines: [], socks: [], puffs: [], gates: [], surfaces: [], zones: [], courses: [],
+      turbines: [], socks: [], puffs: [], gates: [], surfaces: [], zones: [], courses: [], colliders: [],
       wake: null, turbineSettings: null, sway: null, audioPoint: null, windProbe: null, approach: 0, radius: 20,
     };
     const context = {
@@ -380,11 +384,26 @@ export function createStructureEngine() {
     return slots;
   }
 
-  function registerSurfaces(data, surfaces, anchor) {
+  /** The game's collider service (Phase 3), or null (the node labs run the engine without one). */
+  function colliderWorld() {
+    return ctx.game && ctx.game.colliders ? ctx.game.colliders : null;
+  }
+
+  function registerSurfaces(data, surfaces, anchor, instance, prefix) {
     const registry = ctx.surfaces;
-    if (!registry || surfaces.length === 0) return;
+    const colliders = colliderWorld();
+    if ((!registry && !colliders) || surfaces.length === 0) return;
     for (let index = 0; index < surfaces.length; index++) {
       const surface = surfaces[index];
+      if (colliders) {
+        // A landable heightfield collider: it publishes the same exact top to the ground surfaces.
+        const id = `${prefix}:top${index}`;
+        colliders.add(islandTopCollider(surface, anchor, id, prefix));
+        instance.colliderIds.push(id);
+        data.surfaceIds.push(id);
+        counts.surfaces++;
+        continue;
+      }
       const centreX = anchor.x + surface.x;
       const centreZ = anchor.z + surface.z;
       const topY = anchor.y + surface.topY;
@@ -412,8 +431,10 @@ export function createStructureEngine() {
 
   function removeSurfaces(data) {
     const registry = ctx.surfaces;
+    const colliders = colliderWorld();
     for (const id of data.surfaceIds) {
-      if (registry && registry.remove(id)) counts.surfaces--;
+      if (colliders && colliders.remove(id)) counts.surfaces--;
+      else if (registry && registry.remove(id)) counts.surfaces--;
     }
     data.surfaceIds.length = 0;
   }
@@ -1002,6 +1023,7 @@ export function createStructureEngine() {
         movingHidden: false,
         animateTurbines: true,
         animateSocks: true,
+        turbineColliders: null,
       };
       // Probe point and audio position in world space; the ambient wind there, once.
       data.probe = [anchor.x + data.probe[0], anchor.y + data.probe[1], anchor.z + data.probe[2]];
@@ -1013,7 +1035,8 @@ export function createStructureEngine() {
       const audioPoint = out.audioPoint ?? [0, 5, 0];
       data.audioPosition.set(anchor.x + audioPoint[0], anchor.y + audioPoint[1], anchor.z + audioPoint[2]);
       // Live params (read every frame): the set-piece engine's ramps write them directly.
-      const instance = { anchor, radius: out.radius, windSourceIds: [], lights: 0, particles: 0, data, params: { glow: 1, sway: 1, rotorSpeed: 1, audio: 1 } };
+      const instance = { anchor, radius: out.radius, windSourceIds: [], colliderIds: [], lights: 0, particles: 0, data, params: { glow: 1, sway: 1, rotorSpeed: 1, audio: 1 } };
+      const colliderPrefix = `${preset.id}:${params.seed}:${serialNumber}`;
       data.params = instance.params;
       try {
         // Geometry on pooled meshes.
@@ -1088,11 +1111,12 @@ export function createStructureEngine() {
         }
         // Landing zones (world space).
         data.zones = out.zones.map((zone) => ({ ...zone, x: anchor.x + zone.x, z: anchor.z + zone.z, y: anchor.y + zone.y }));
-        registerSurfaces(data, out.surfaces, anchor);
+        registerSurfaces(data, out.surfaces, anchor, instance, colliderPrefix);
         // First pose of the moving parts (an instance may start at the far tier, where they freeze).
         updateWind(data, 0);
         if (data.turbineCount > 0) updateTurbines(data, 0);
         if (data.sockCount > 0) updateSocks(data);
+        addStructureColliders(colliderWorld(), instance, data, out, anchor, colliderPrefix);
         // The preset's voice (engineKit's ownsPresetAudio: params.voice, else the first engine entry).
         if (ownsPresetAudio(preset, ENGINE_NAME, read.boolean('voice', null)) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
           data.audioMode = read.choice('audioIntensity', recipe.audioIntensity, ['approach', 'wind', 'constant']);
@@ -1115,6 +1139,7 @@ export function createStructureEngine() {
       data.look.x = instance.params.glow;
       updateWind(data, dt);
       if (data.turbineCount > 0 && data.animateTurbines) updateTurbines(data, dt);
+      if (data.turbineColliders) updateTurbineColliders(colliderWorld(), data);
       if (data.sockCount > 0 && data.animateSocks) updateSocks(data);
       if (data.meshes.body !== null || data.meshes.detail !== null) updateSway(data);
       checkGates(instance);
@@ -1139,6 +1164,7 @@ export function createStructureEngine() {
       }
       removeWake(instance);
       removeSurfaces(data);
+      removeStructureColliders(colliderWorld(), instance, data);
       releaseMeshes(data);
       if (data.nacelleSlots.length > 0) {
         freeSlots(nacelles, data.nacelleSlots);

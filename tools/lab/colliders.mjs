@@ -14,6 +14,9 @@
 //   service      validation, update and refiling, removeOwner, insideSolid, liftClear, boundsOccupied
 //   landmarks    the retrofitted v1-derived landmarks built by the real landmark system on a real world:
 //                struck where solid, the arch's opening clear, landable lintels, moving balloons, dispose
+//   structures   the retrofitted Phase 2 structures in a real SpawnManager with the structure engine:
+//                turbines (masts, turning nacelles and rotor discs), the rope bridge, hangars, island
+//                tops as landable heightfields, spires; dispose without leaks; allocation-free turning
 //   determinism  a shuffled insertion order gives bit-identical results over a sweep battery
 //   cost         a sweep of 30 probes against 2000 colliders under 0.1 ms
 //   allocation   100 000 sweeps, overlaps, raycasts and updates allocate nothing
@@ -32,6 +35,11 @@ import { createLandmarkSystem } from '../../src/world/landmarks.js';
 import { WORLD_OPTIONS } from '../../src/core/config.js';
 import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
+import { createWindField } from '../../src/env/WindField.js';
+import { createEngineRegistry } from '../../src/spawns/engineRegistry.js';
+import { createSpawnManager } from '../../src/spawns/spawnManager.js';
+import { createStructureEngine } from '../../src/spawns/engines/structureEngine.js';
+import { createStructureTestPresets } from '../../src/dev/structureTestKit.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -517,6 +525,177 @@ function testLandmarks() {
   check('landmarks', 'dispose removes every landmark collider and landable top', colliders.count === 0 && surfaces.count === 0, `${colliders.count} colliders, ${surfaces.count} surfaces`);
 }
 
+// ---- structures ------------------------------------------------------------------------------------
+const STRUCTURE_BASE = 120;
+function structureGround(x, z) {
+  return STRUCTURE_BASE + 6 * Math.sin(x * 0.0021) * Math.cos(z * 0.0017);
+}
+
+/** A real SpawnManager with the structure engine, its engine ctx carrying a game ctx with colliders. */
+function createStructureLab() {
+  const bus = attachTypedEvents(new EventBus(), { validate: true });
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, 16 / 9, 1, 9000);
+  const { uniform } = TSL;
+  const uniforms = {
+    time: uniform(0),
+    sunDirection: uniform(new THREE.Vector3(0.3, 0.5, -0.8).normalize()),
+    sunColor: uniform(new THREE.Color(1, 0.85, 0.65)),
+    fogColor: uniform(new THREE.Color(0xe0b48c)),
+    nightFactor: uniform(0),
+    windDirection: uniform(new THREE.Vector2(0.8, 0.6).normalize()),
+    windStrength: uniform(1.4),
+  };
+  const state = {
+    seed: 'LAB',
+    time: { elapsed: 0, sunElevation: 30, dayTime: 0.4, nightFactor: 0, goldenFactor: 0 },
+    player: { position: new THREE.Vector3(0, 400, 1200), forward: new THREE.Vector3(0, 0, -1), heading: 0, speed: 60 },
+  };
+  const world = {
+    seedHash: 99, WATER_LEVEL: 0, heightAt: structureGround, groundHeight: structureGround,
+    biomeAt: () => ({ key: 'meadows', name: 'Flower Meadows' }),
+    hash2: (x, z, salt) => {
+      const value = Math.sin(x * 127.1 + z * 311.7 + salt * 74.7) * 43758.5453;
+      return value - Math.floor(value);
+    },
+  };
+  const wind = createWindField({ world, uniforms, state, bus });
+  const surfaces = createGroundSurfaces();
+  const colliders = createColliderWorld({ groundSurfaces: surfaces });
+  const registry = createEngineRegistry();
+  const manager = createSpawnManager({
+    THREE, TSL, scene, camera, renderer: { info: { memory: { geometries: 0, textures: 0 } } }, backend: 'WebGPU', wind, audio: null, world, state, sky: null,
+    bus, perf: null, settings: null, uniforms, registry, presets: [], seed: 'LAB', surfaces, game: { colliders },
+  });
+  const engine = manager.register(createStructureEngine());
+  for (const preset of createStructureTestPresets()) manager.addPreset(preset);
+  manager.init();
+  const step = (frames = 1, dt = 1 / 60) => {
+    for (let frame = 0; frame < frames; frame++) {
+      state.time.elapsed += dt;
+      manager.update(dt, dt);
+    }
+  };
+  const spawn = (presetId, x, z) => manager.activate(presetId, { position: { x, y: structureGround(x, z), z }, heading: 30, source: 'debug', force: true });
+  return { bus, state, surfaces, colliders, manager, engine, step, spawn, camera };
+}
+
+function testStructures() {
+  const lab = createStructureLab();
+  const out = createOut();
+  const sweepAt = (from, to, radius = 0.6) => (lab.colliders.sweepSphere(from, to, radius, null, out) ? out.id : null);
+  const own = (id) => lab.colliders.list().filter((entry) => entry.owner.startsWith(`${lab.manager.getActive().find((record) => record.id === id).presetId}:`));
+  const parts = (entries) => [...new Set(entries.map((entry) => entry.id.split(':')[3].replace(/[0-9]+$/, '')))].sort();
+  const heldStart = lab.colliders.count;
+
+  // Wind farm: masts, nacelles and rotor discs; the discs turn with the nacelles' yaw.
+  const farmId = lab.spawn('devWindFarm', 0, -4000);
+  lab.step(2);
+  const farmData = lab.manager.getParts(farmId)[0].data;
+  const farm = own(farmId);
+  const hub = { x: farmData.turbinePositions[0], y: farmData.turbinePositions[1], z: farmData.turbinePositions[2] };
+  const below = hub.y - farmData.turbineRadii[0] - 4;
+  const mast = sweepAt({ x: hub.x - 60, y: below, z: hub.z }, { x: hub.x + 60, y: below, z: hub.z });
+  const yaw = farmData.turbineState[0] * (Math.PI / 180);
+  const upwind = { x: Math.sin(yaw), z: -Math.cos(yaw) };
+  const disc = sweepAt({ x: hub.x + upwind.x * 120, y: hub.y + 20, z: hub.z + upwind.z * 120 }, { x: hub.x, y: hub.y + 20, z: hub.z });
+  check('structures', 'wind farm: masts, nacelles and rotor discs; a mast and a disc struck', parts(farm).join() === 'mast,nacelle,rotor' && mast !== null && mast.includes(':mast') && disc !== null && disc.includes(':rotor'), `${farm.length} colliders (${parts(farm).join(', ')}), ${mast} / ${disc}`);
+  farmData.turbineState[0] += 90;
+  lab.engine.update(lab.manager.getParts(farmId)[0], 0);
+  const turned = lab.colliders.get(farmData.turbineColliders.rotorIds[0]).bounds;
+  const turnedYaw = farmData.turbineState[0] * (Math.PI / 180);
+  const centreX = (turned[0] + turned[3]) / 2;
+  const expectedX = hub.x + Math.sin(turnedYaw) * (3.6 + 1.1) * (farmData.turbineRadii[0] / 40);
+  check('structures', 'wind farm: a rotor disc follows its nacelle\'s yaw', Math.abs(centreX - expectedX) < 0.01, `disc centre x ${centreX.toFixed(2)} vs ${expectedX.toFixed(2)}`);
+
+  // Rope bridge on trestles: deck boxes, ropes, posts; open under the deck.
+  const bridgeId = lab.spawn('devRopeBridge', 4000, -4000);
+  lab.step(2);
+  const bridge = own(bridgeId);
+  const bridgeData = lab.manager.getParts(bridgeId)[0].data;
+  const deck = lab.colliders.list().filter((entry) => entry.id.startsWith(bridge[0].id.split(':').slice(0, 3).join(':')) && entry.id.includes(':deck'));
+  const middle = deck[Math.floor(deck.length / 2)].bounds;
+  const deckCentre = { x: (middle.min.x + middle.max.x) / 2, y: (middle.min.y + middle.max.y) / 2, z: (middle.min.z + middle.max.z) / 2 };
+  const down = sweepAt({ x: deckCentre.x, y: deckCentre.y + 40, z: deckCentre.z }, { x: deckCentre.x, y: deckCentre.y - 40, z: deckCentre.z });
+  const under = sweepAt({ x: deckCentre.x - 0.01, y: deckCentre.y - 8, z: deckCentre.z - 60 }, { x: deckCentre.x + 0.01, y: deckCentre.y - 8, z: deckCentre.z + 60 }, 0.6);
+  check('structures', 'rope bridge: deck, ropes, posts, landings; struck from above, open below (rope surface on the ropes)', ['deck', 'guy', 'landing', 'lintel', 'post', 'rope'].every((part) => parts(bridge).includes(part)) && down !== null && down.includes(':deck') && under === null && lab.colliders.list().some((entry) => entry.id.includes(':rope') && entry.tags.surface === 'rope'), `${bridge.length} colliders, ${down} / under ${under ?? 'clear'}, ${bridgeData.gates ? 'gate' : 'no gate'}`);
+
+  // Airfield: hangar hulls with landable roofs, the hut, the windsock pole.
+  const fieldId = lab.spawn('devAirfield', 8000, -4000);
+  lab.step(2);
+  const field = own(fieldId);
+  const hangar = field.find((entry) => entry.id.includes(':hangar'));
+  const roofX = (hangar.bounds.min.x + hangar.bounds.max.x) / 2;
+  const roofZ = (hangar.bounds.min.z + hangar.bounds.max.z) / 2;
+  const roof = lab.surfaces.surfaceBelow(roofX, roofZ, Infinity);
+  check('structures', 'airfield: hangars (landable roof crests), hut and windsock pole', ['hangar', 'hut', 'tower', 'windsockPole'].every((part) => parts(field).includes(part)) && Math.abs(roof - hangar.bounds.max.y) < 0.6, `${field.length} colliders, roof ${roof.toFixed(1)} m vs crest ${hangar.bounds.max.y.toFixed(1)} m`);
+
+  // Floating islands: landable heightfield tops (the exact Phase 2 top), rock hulls, trees, roots.
+  const islandsId = lab.spawn('devIslands', 12000, -4000);
+  lab.step(2);
+  const islandData = lab.manager.getParts(islandsId)[0].data;
+  const islands = own(islandsId);
+  const tops = islands.filter((entry) => entry.type === 'heightfield');
+  const topIds = new Set(tops.map((entry) => entry.id));
+  const top = tops[0];
+  const topX = (top.bounds.min.x + top.bounds.max.x) / 2;
+  const topZ = (top.bounds.min.z + top.bounds.max.z) / 2;
+  const standing = lab.surfaces.surfaceBelow(topX, topZ, Infinity);
+  const fromBelow = sweepAt({ x: topX, y: standing - 400, z: topZ }, { x: topX, y: standing - 5, z: topZ });
+  const ontoTop = lab.colliders.sweepSphere({ x: topX + 3, y: standing + 30, z: topZ + 3 }, { x: topX + 3, y: standing - 3, z: topZ + 3 }, 0.6, null, out) ? out : null;
+  check('structures', 'islands: three landable heightfield tops, as the surfaces the engine lists (surfaceIds)', tops.length === 3 && islandData.surfaceIds.every((id) => topIds.has(id) && lab.surfaces.list().some((surface) => surface.id === id)), `${tops.length} tops, surfaceIds ${islandData.surfaceIds.length}`);
+  check('structures', 'islands: struck from below on the rock, and from above on the landable top', fromBelow !== null && fromBelow.includes(':rock') && ontoTop !== null && topIds.has(ontoTop.id) && ontoTop.normal.y > 0.7, `${fromBelow} / ${ontoTop ? ontoTop.id : 'none'}`);
+  check('structures', 'islands: trees, boulders and roots carry colliders', ['boulder', 'root', 'tree'].every((part) => parts(islands).includes(part)), parts(islands).join(', '));
+
+  // Crystal spires: hulls with perch points on the tips.
+  const spiresId = lab.spawn('devSpires', 16000, -4000);
+  lab.step(2);
+  const spires = own(spiresId);
+  const tallest = spires.filter((entry) => entry.id.includes(':spire')).sort((first, second) => second.bounds.max.y - first.bounds.max.y)[0];
+  const tips = [];
+  lab.colliders.perchesNear((tallest.bounds.min.x + tallest.bounds.max.x) / 2, tallest.bounds.max.y, (tallest.bounds.min.z + tallest.bounds.max.z) / 2, 40, (x, y, z, kind, source) => tips.push(source));
+  const crystal = sweepAt({ x: (tallest.bounds.min.x + tallest.bounds.max.x) / 2 - 60, y: tallest.bounds.min.y + 20, z: (tallest.bounds.min.z + tallest.bounds.max.z) / 2 }, { x: (tallest.bounds.min.x + tallest.bounds.max.x) / 2 + 60, y: tallest.bounds.min.y + 20, z: (tallest.bounds.min.z + tallest.bounds.max.z) / 2 });
+  check('structures', 'spires: crystal and shard hulls, boulders; struck, and a perch on the tallest tip', ['boulder', 'shard', 'spire'].every((part) => parts(spires).includes(part)) && crystal !== null && tips.includes(tallest.id), `${spires.length} colliders, ${crystal}, perches ${tips.length}`);
+
+  for (const record of lab.manager.getActive()) lab.manager.deactivate(record.id, 'test');
+  lab.step(2);
+  const leaks = lab.manager.getStats().leaks;
+  check('structures', 'dispose removes every structure collider and landable top (no leaks)', lab.colliders.count === heldStart && lab.surfaces.count === 0 && leaks.colliders === 0, `${lab.colliders.count} colliders, ${lab.surfaces.count} surfaces, leaks ${JSON.stringify(leaks)}`);
+
+}
+
+/** The structure engine's frame update with turning turbine colliders allocates nothing. */
+async function testStructureAllocation() {
+  const lab = createStructureLab();
+  const farmId = lab.spawn('devWindFarm', 0, -4000);
+  lab.step(2);
+  const part = lab.manager.getParts(farmId)[0];
+  const data = part.data;
+  lab.engine.setLOD(part, 'near');
+  const frame = (index) => {
+    lab.state.time.elapsed += 1 / 60;
+    // A wind that veers slowly, so every turbine yaws (and its colliders turn) every frame.
+    data.turbineYawOffsets[index % data.turbineCount] = Math.sin(index * 0.01) * 40;
+    lab.engine.update(part, 1 / 60);
+  };
+  for (let index = 0; index < 200000; index++) frame(index);
+  if (typeof globalThis.gc === 'function') globalThis.gc();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  let collections = 0;
+  const observer = new PerformanceObserver((list) => { collections += list.getEntries().length; });
+  observer.observe({ entryTypes: ['gc'] });
+  const youngUsed = () => v8.getHeapSpaceStatistics().find((space) => space.space_name === 'new_space').space_used_size;
+  const frames = 100000;
+  const before = youngUsed();
+  for (let index = 0; index < frames; index++) frame(index);
+  const after = youngUsed();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  observer.disconnect();
+  const perFrame = (after - before) / frames;
+  check('allocation', `the structure engine's update with ${data.turbineCount} turning turbines and their colliders allocates nothing`, collections === 0 && perFrame < 0.1, `${collections} collections, ${perFrame.toFixed(3)} B/frame`);
+  for (const record of lab.manager.getActive()) lab.manager.deactivate(record.id, 'test');
+}
+
 // ---- determinism --------------------------------------------------------------------------------------
 function randomSpecs(seed, count) {
   const random = mulberry32(seed);
@@ -679,6 +858,7 @@ async function testAllocation() {
 
 // The allocation measurement first, before the other tests leave garbage for the collector.
 await testAllocation();
+await testStructureAllocation();
 testShapes();
 testTunnelling();
 testRules();
@@ -686,6 +866,7 @@ testSurfaces();
 testProviders();
 testService();
 testLandmarks();
+testStructures();
 testDeterminism();
 testCost();
 

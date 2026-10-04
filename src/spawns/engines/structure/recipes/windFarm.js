@@ -6,6 +6,7 @@
 import { PALETTE, paint } from '../palette.js';
 import { frameFromHeading } from '../common.js';
 import { roll, rollInteger } from '../../engineKit.js';
+import { localCylinder } from '../colliders.js';
 
 export const WIND_FARM_DEFAULTS = Object.freeze({
   count: [5, 8],
@@ -89,7 +90,7 @@ export function buildWindFarm(context, read) {
       const ground = context.ground(x, z);
       const hubHeight = roll(hubRange, rng);
       const rotorRadius = Math.min(roll(rotorRange, rng), hubHeight * 0.9);
-      addTower(body, detail, x, ground, z, hubHeight, rotorRadius, towerPaint, rng);
+      addTower(body, detail, x, ground, z, hubHeight, rotorRadius, towerPaint, rng, out.colliders);
       out.turbines.push({
         x, y: ground + hubHeight, z, rotorRadius,
         phase: rng() * Math.PI * 2,
@@ -106,8 +107,11 @@ export function buildWindFarm(context, read) {
   out.windProbe = [0, hubSum / placed, 0];
 }
 
-/** A tapered tower on a concrete foundation, with a service door and a band near the base. */
-function addTower(body, detail, x, ground, z, hubHeight, rotorRadius, towerPaint, random) {
+/**
+ * A tapered tower on a concrete foundation, with a service door and a band near the base. Its collider
+ * is a cylinder as wide as its foot up to the nacelle (the engine adds the turning nacelle and rotor).
+ */
+function addTower(body, detail, x, ground, z, hubHeight, rotorRadius, towerPaint, random, colliders) {
   const baseRadius = Math.max(1.6, rotorRadius * 0.065);
   const topRadius = baseRadius * 0.58;
   const top = hubHeight - 2.2;
@@ -118,4 +122,5 @@ function addTower(body, detail, x, ground, z, hubHeight, rotorRadius, towerPaint
   // Service door and steps (near detail).
   detail.setPaint(PALETTE.metalDark).box(x, ground + 1.3, z + baseRadius * 0.98, 1.1, 2.2, 0.2);
   detail.setPaint(PALETTE.concreteDark).box(x, ground + 0.25, z + baseRadius + 0.8, 1.8, 0.5, 1.4);
+  colliders.push(localCylinder('mast', x, ground - 0.5, z, baseRadius, top + 0.5, { surface: 'metal' }));
 }

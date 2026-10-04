@@ -7,6 +7,7 @@
 // between the ground at both ends.
 import { PALETTE } from '../palette.js';
 import { findStamp, frameFromHeading, pick } from '../common.js';
+import { localBox, localBoxAxes, localCapsule } from '../colliders.js';
 
 export const ROPE_BRIDGE_DEFAULTS = Object.freeze({
   stamp: 0,
@@ -113,6 +114,7 @@ export function buildRopeBridge(context, read) {
     const deckY = end === 0 ? deckA : deckB;
     const outward = end === 0 ? -1 : 1;
     body.setSway(0).setPaint(pick(PALETTE.timber, rng)).box(px + unitX * outward * 2.4, deckY - 0.55, pz + unitZ * outward * 2.4, 5.4, 1.1, deckWidth + 1.8, spanYaw);
+    out.colliders.push(localBox('landing', px + unitX * outward * 2.4, deckY - 0.55, pz + unitZ * outward * 2.4, 5.4, 1.1, deckWidth + 1.8, spanYaw, { surface: 'wood' }));
     const pathLength = end === 0 ? lipA : lipB;
     for (let metre = 5; metre < pathLength; metre += 1.6) {
       const x = px + unitX * outward * metre;
@@ -123,15 +125,18 @@ export function buildRopeBridge(context, read) {
       const postX = px + sideX * side * (halfDeck + 0.35);
       const postZ = pz + sideZ * side * (halfDeck + 0.35);
       body.setPaint(PALETTE.timberDark).beam(postX, baseY - 1.5, postZ, postX, deckY + postHeight, postZ, 0.42, 0.42);
+      out.colliders.push(localCapsule('post', postX, baseY - 1.5, postZ, postX, deckY + postHeight, postZ, 0.3, { surface: 'wood' }));
       // Guy rope from the post top back to a stake behind it.
       const stakeX = postX + unitX * outward * (postHeight * 1.3) + sideX * side * 1.2;
       const stakeZ = postZ + unitZ * outward * (postHeight * 1.3) + sideZ * side * 1.2;
       const stakeY = context.ground(stakeX, stakeZ);
       detail.setPaint(PALETTE.rope).beam(postX, deckY + postHeight - 0.2, postZ, stakeX, stakeY + 0.3, stakeZ, 0.09, 0.09);
+      out.colliders.push(localCapsule('guy', postX, deckY + postHeight - 0.2, postZ, stakeX, stakeY + 0.3, stakeZ, 0.08, { surface: 'rope' }));
       detail.setPaint(PALETTE.timberDark).beam(stakeX, stakeY - 0.4, stakeZ, stakeX, stakeY + 0.6, stakeZ, 0.2, 0.2);
     }
     // Lintel across the post tops.
     body.setPaint(PALETTE.timberDark).beam(px - sideX * (halfDeck + 0.6), deckY + postHeight - 0.3, pz - sideZ * (halfDeck + 0.6), px + sideX * (halfDeck + 0.6), deckY + postHeight - 0.3, pz + sideZ * (halfDeck + 0.6), 0.3, 0.3);
+    out.colliders.push(localCapsule('lintel', px - sideX * (halfDeck + 0.6), deckY + postHeight - 0.3, pz - sideZ * (halfDeck + 0.6), px + sideX * (halfDeck + 0.6), deckY + postHeight - 0.3, pz + sideZ * (halfDeck + 0.6), 0.22, { surface: 'wood' }));
   }
 
   // Ropes: two deck ropes under the plank ends and two hand ropes, in segments.
@@ -150,12 +155,34 @@ export function buildRopeBridge(context, read) {
       body.setPaint(PALETTE.rope).setSway(swayAt(s0));
       body.beam(x0 + offsetX, d0 - 0.12, z0 + offsetZ, x1 + offsetX, d1 - 0.12, z1 + offsetZ, 0.14, 0.14);
       body.beam(x0 + offsetX, d0 + handLift(s0), z0 + offsetZ, x1 + offsetX, d1 + handLift(s1), z1 + offsetZ, 0.11, 0.11);
+      // The hand rope's collider grows by how far the rope sways at this point of the span.
+      const swayReach = swayAmplitude * swayAt((s0 + s1) * 0.5);
+      out.colliders.push(localCapsule('rope', x0 + offsetX, d0 + handLift(s0), z0 + offsetZ, x1 + offsetX, d1 + handLift(s1), z1 + offsetZ, 0.06 + swayReach, { surface: 'rope' }));
       // Suspender every other segment, from the hand rope to the deck edge.
       if (segment % 2 === 0 && segment > 0) {
         detail.setPaint(PALETTE.rope).setSway(swayAt(s0));
         detail.beam(x0 + offsetX, d0, z0 + offsetZ, x0 + offsetX, d0 + handLift(s0), z0 + offsetZ, 0.05, 0.05);
       }
     }
+  }
+
+  // The deck's colliders: one thin box per rope segment, covering the planks, the deck ropes under
+  // their ends and the sideways sway at that point of the span.
+  for (let segment = 0; segment < segments; segment++) {
+    const s0 = segment / segments;
+    const s1 = (segment + 1) / segments;
+    const [x0, z0] = pointAt(s0);
+    const [x1, z1] = pointAt(s1);
+    const dx = x1 - x0;
+    const dy = deckAt(s1) - deckAt(s0);
+    const dz = z1 - z0;
+    const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const along = [dx / length, dy / length, dz / length];
+    const side = [sideX, 0, sideZ];
+    // up = side x along keeps (along, up, side) right-handed.
+    const up = [side[1] * along[2] - side[2] * along[1], side[2] * along[0] - side[0] * along[2], side[0] * along[1] - side[1] * along[0]];
+    const middle = [(x0 + x1) * 0.5, (deckAt(s0) + deckAt(s1)) * 0.5 - 0.06, (z0 + z1) * 0.5];
+    out.colliders.push(localBoxAxes('deck', middle, along, up, side, length * 0.5 + 0.05, 0.2, halfDeck + 0.26 + swayAmplitude * swayAt((s0 + s1) * 0.5), { surface: 'wood' }));
   }
 
   // Planks.

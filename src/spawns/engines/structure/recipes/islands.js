@@ -9,6 +9,7 @@ import { PALETTE } from '../palette.js';
 import { addBoulder, addPine, addRoundTree, pick, stampsOfType } from '../common.js';
 import { mixPaint, shade } from '../meshBuilder.js';
 import { roll, rollInteger } from '../../engineKit.js';
+import { localCapsule, localHull, localSphere, ringPoints } from '../colliders.js';
 
 export const ISLANDS_DEFAULTS = Object.freeze({
   count: [3, 4],
@@ -166,6 +167,18 @@ function buildIsland(context, island, options) {
   }
   const tipY = topY - depth;
   const last = underRings.length - 1;
+  // The rock body's colliders: four wedge hulls of its actual ring vertices (a quarter of the sides
+  // each, with the axis at every ring level and the tip), so the hull follows the jagged outline.
+  const wedgeSides = TOP_SIDES / 4;
+  for (let wedge = 0; wedge < 4; wedge++) {
+    const points = [[x, tipY, z]];
+    for (let ring = 0; ring < underRings.length; ring++) {
+      const axisY = ring === 0 ? topY - RIM_BEVEL : topY + underRings[ring][1] * depth;
+      points.push([x, axisY, z]);
+      for (let side = wedge * wedgeSides; side <= (wedge + 1) * wedgeSides; side++) points.push(ringPoint(ring, side % TOP_SIDES));
+    }
+    out.colliders.push(localHull('rock', points, { surface: 'stone' }));
+  }
   for (let side = 0; side < TOP_SIDES; side++) {
     const next = (side + 1) % TOP_SIDES;
     const a = ringPoint(last, side);
@@ -185,19 +198,27 @@ function buildIsland(context, island, options) {
     const pz = z - Math.cos(angle) * reach;
     const py = topY + islandTopHeight(share, options.dome);
     const height = (6 + rng() * 7) * treeScale;
-    if (rng() < 0.6) addPine(body, px, py, pz, height, rng);
+    const pine = rng() < 0.6;
+    if (pine) addPine(body, px, py, pz, height, rng);
     else addRoundTree(body, px, py, pz, height * 0.85, rng);
+    out.colliders.push(treeCollider(px, py, pz, pine ? height : height * 0.85, pine));
   }
   for (let boulder = 0; boulder < 3; boulder++) {
     const angle = rng() * Math.PI * 2;
     const reach = outline(angle) * (0.7 + rng() * 0.2);
-    addBoulder(detail, x + Math.sin(angle) * reach, topY + islandTopHeight(0.8, options.dome), z - Math.cos(angle) * reach, 1.5 + rng() * 2.5, rng);
+    const boulderRadius = 1.5 + rng() * 2.5;
+    const boulderY = topY + islandTopHeight(0.8, options.dome);
+    addBoulder(detail, x + Math.sin(angle) * reach, boulderY, z - Math.cos(angle) * reach, boulderRadius, rng);
+    out.colliders.push(localSphere('boulder', x + Math.sin(angle) * reach, boulderY + boulderRadius * 0.3, z - Math.cos(angle) * reach, boulderRadius * 1.05, { surface: 'stone' }));
   }
   for (let root = 0; root < options.roots; root++) {
     const side = Math.floor(rng() * TOP_SIDES);
     const start = ringPoint(1, side);
     const length = 5 + rng() * 16;
-    detail.setSway(0.2).setPaint(PALETTE.trunk).beam(start[0], start[1] + 1, start[2], start[0] + (rng() - 0.5) * 3, start[1] - length, start[2] + (rng() - 0.5) * 3, 0.35, 0.35);
+    const endX = start[0] + (rng() - 0.5) * 3;
+    const endZ = start[2] + (rng() - 0.5) * 3;
+    detail.setSway(0.2).setPaint(PALETTE.trunk).beam(start[0], start[1] + 1, start[2], endX, start[1] - length, endZ, 0.35, 0.35);
+    out.colliders.push(localCapsule('root', start[0], start[1] + 1, start[2], endX, start[1] - length, endZ, 0.3, { surface: 'wood' }));
     detail.setSway(0);
   }
 
@@ -274,6 +295,28 @@ function buildIsland(context, island, options) {
       out.puffs.push({ x: x + Math.sin(angle) * reach, y: topY - depth * (0.55 + rng() * 0.35), z: z - Math.cos(angle) * reach, radius: radius * (0.35 + rng() * 0.2), brightness: 0.9 });
     }
   }
+}
+
+/**
+ * A tree's collider: the hull of its trunk foot and its crown (a pine's cone, or a round tree's crown
+ * rings at their widest), as common.js builds them.
+ */
+function treeCollider(x, y, z, height, pine) {
+  const tags = { surface: 'foliage' };
+  if (pine) {
+    const trunkHeight = height * 0.22;
+    return localHull('tree', [...ringPoints(x, y - 0.5, z, height * 0.05, 4), ...ringPoints(x, y + trunkHeight, z, height * 0.3, 7), [x, y + height * 1.05, z]], tags);
+  }
+  const trunkHeight = height * 0.4;
+  const crown = height * 0.34;
+  const base = y + trunkHeight - crown * 0.2;
+  return localHull('tree', [
+    ...ringPoints(x, y - 0.5, z, height * 0.06, 4),
+    ...ringPoints(x, base, z, crown * 0.55 * 1.1, 7),
+    ...ringPoints(x, base + crown * 0.55, z, crown * 1.05 * 1.1, 7),
+    ...ringPoints(x, base + crown * 1.25, z, crown * 0.95 * 1.1, 7),
+    [x, base + crown * 2, z],
+  ], tags);
 }
 
 /** A deterministic hash in [0, 1) of an integer (vertex jag). */

@@ -9,6 +9,7 @@
 import { PALETTE, paint } from '../palette.js';
 import { findStamp, frameFromHeading, headingOf, pick } from '../common.js';
 import { mixPaint } from '../meshBuilder.js';
+import { localBox, localCylinder, localHull } from '../colliders.js';
 
 export const AIRFIELD_DEFAULTS = Object.freeze({
   stamp: 0,
@@ -225,6 +226,8 @@ export function buildAirfield(context, read) {
     const y = groundAt(along, apronAcross + 6);
     const yaw = Math.atan2(rightZ, rightX);
     body.setPaint(PALETTE.concrete).box(x, y + 1.3, z, 6, 3.6, 5, yaw);
+    out.colliders.push(localBox('hut', x, y + 1.6, z, 6.6, 4.2, 5.6, yaw, { surface: 'stone', landable: true }));
+    out.colliders.push(localBox('tower', x, y + 4.8, z, 4, 2.4, 4, yaw, { surface: 'stone', landable: true }));
     body.setPaint(PALETTE.concreteDark).box(x, y + 3.3, z, 6.6, 0.4, 5.6, yaw);
     // Lookout cab with dark, glassless windows.
     body.setPaint(PALETTE.concrete).box(x, y + 4.6, z, 3.4, 2.2, 3.4, yaw);
@@ -241,6 +244,7 @@ export function buildAirfield(context, read) {
     const poleHeight = 7.5;
     body.setPaint(PALETTE.concrete).prism(x, y - 0.6, z, 6, 0.9, 0.8, 0.9);
     body.setPaint(PALETTE.metalDark).prism(x, y, z, 6, 0.12, 0.09, poleHeight);
+    out.colliders.push(localCylinder('windsockPole', x, y - 0.6, z, 0.2, poleHeight + 0.6, { surface: 'metal' }));
     detail.setPaint(PALETTE.metalDark).beam(x, y + poleHeight - 0.1, z, x + 0.5, y + poleHeight - 0.1, z, 0.08, 0.08);
     out.socks.push({ x, y: y + poleHeight - 0.1, z, length: 4.2, radius: 0.5 });
     out.windProbe = [x, y + poleHeight, z];
@@ -334,6 +338,11 @@ function addHangar(context, at, groundAt, along, apronAcross, hangarLength, hang
     return [x, baseY + Math.sin(theta) * (radius - inset) * lift, z];
   };
   // Floor slab, sunk so a gentle slope never shows under it.
+  // Its collider: the hull of the half-barrel's end arches (ruined panels and all: a hangar is solid),
+  // landable where its roof is flat enough (contract b.8).
+  const arch = [];
+  for (const bay of [0, bays]) for (let panel = 0; panel <= panels; panel++) arch.push(point(bay, panel));
+  context.out.colliders.push(localHull('hangar', arch, { surface: 'metal', landable: true }));
   const [slabX, slabZ] = at(along, apronAcross + hangarLength * 0.5);
   const slabYaw = Math.atan2(dirZ, dirX);
   body.setPaint(PALETTE.concreteDark).box(slabX, baseY - 1.2, slabZ, hangarWidth + 1, 2.6, hangarLength + 1, slabYaw);
