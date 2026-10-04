@@ -155,12 +155,15 @@ function copyReading(target, source) {
  *                            'building' | 'storm' | 'clearing') or null (engine ctx `weatherState`);
  *                            the typed weatherChanged event reports changes only, so an engine reads
  *                            the state it starts in here
+ *   game                     optional: the game ctx (engine ctx `game`): the Phase 3 services. An
+ *                            engine lists the colliders it adds in instance.colliderIds; any still
+ *                            registered after its dispose are removed and counted in leaks.colliders
  */
 export function createSpawnManager(options) {
   const {
     THREE, TSL, scene, camera, renderer, backend, wind, audio, world, state, sky, bus, perf, settings, uniforms,
     registry, presets = [], seed = '', registerPrewarm = null, maxLights = MAX_REAL_LIGHTS, engineBudgets = null,
-    water = null, surfaces = null, weatherState = null,
+    water = null, surfaces = null, weatherState = null, game = null,
   } = options;
   const presetById = new Map();
   for (const preset of presets) presetById.set(preset.id, preset);
@@ -190,7 +193,7 @@ export function createSpawnManager(options) {
   const distances = new Float64Array(MAX_SPAWNS);
   const outOfView = new Float64Array(MAX_SPAWNS);
   const nextVisibilityFrame = new Int32Array(MAX_SPAWNS);
-  const leaks = { windSources: 0, lights: 0 };
+  const leaks = { windSources: 0, lights: 0, colliders: 0 };
   const counters = { activated: 0, ended: 0, tierChanges: 0, discoveries: 0, lureRefused: 0, visibilityChecks: 0 };
   let heavyActive = 0;
   let visibilityCursor = 0;
@@ -418,6 +421,8 @@ export function createSpawnManager(options) {
     surfaces,
     /** () => the player's regional weather state or null (allocates: call it at create, not per frame). */
     weatherState: typeof weatherState === 'function' ? weatherState : () => null,
+    /** The game ctx: Phase 3 services (origin, colliders, waterQuery, systems.challenges, ...). */
+    game,
     /** Registers an object for the pipeline prewarm behind the loading fade (engines call it in init). */
     registerPrewarm: typeof registerPrewarm === 'function' ? registerPrewarm : null,
     pools: Object.freeze({
@@ -516,6 +521,15 @@ export function createSpawnManager(options) {
         if (wind && wind.removeSource(windIds[windIndex])) {
           leaks.windSources++;
           console.error(`[DRIFTWING] spawn engine "${part.engine.name}" left wind source "${windIds[windIndex]}" of ${record.id} behind; the manager removed it`);
+        }
+      }
+      // Colliders (Phase 3 contract b.5): any id still registered after dispose is a leak.
+      const colliderIds = Array.isArray(part.instance.colliderIds) ? part.instance.colliderIds : [];
+      const colliderWorld = game && game.colliders ? game.colliders : null;
+      for (let colliderIndex = 0; colliderIndex < colliderIds.length; colliderIndex++) {
+        if (colliderWorld && colliderWorld.remove(colliderIds[colliderIndex])) {
+          leaks.colliders++;
+          console.error(`[DRIFTWING] spawn engine "${part.engine.name}" left collider "${colliderIds[colliderIndex]}" of ${record.id} behind; the manager removed it`);
         }
       }
     }
