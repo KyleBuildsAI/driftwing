@@ -112,6 +112,25 @@ const WINGSUIT = Object.freeze({
   checks: [CHECK.autopilot, CHECK.dive, CHECK.relaunch, { id: 'canopy', label: 'canopy open', test: (seen) => seen.canopy }],
 });
 
+/**
+ * Hot air balloon (100 % assists): the autopilot's altitude, hands off under the altitude hold, the
+ * burner lever, the rotation vents, a vent pull, then the autopilot again. It drifts with the wind
+ * throughout: there is no bank to hold.
+ */
+const BALLOON = Object.freeze({
+  steps: [
+    { at: 0, label: 'autopilot altitude', run: (pilot) => cruise(pilot) },
+    { at: 0.28, label: 'autopilot off, hands off (the altitude hold)', run: (pilot) => { handsOff(pilot); pilot.throttle(0); } },
+    { at: 0.36, label: 'burner lever full', run: (pilot) => pilot.throttle(1) },
+    { at: 0.46, label: 'burner lever closed', run: (pilot) => pilot.throttle(0) },
+    { at: 0.5, label: 'rotation vents right', run: (pilot) => pilot.stick({ roll: 0.8, pitch: 0, yaw: 0 }) },
+    { at: 0.62, label: 'rotation vents closed', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
+    { at: 0.66, label: 'parachute vent pull', run: (pilot) => pilot.action('craftAbilityAlt') },
+    { at: 0.76, label: 'autopilot altitude', run: (pilot) => cruise(pilot) },
+  ],
+  checks: [CHECK.autopilot, { id: 'vent', label: 'parachute vent opened', test: (seen) => seen.maxAirbrake >= 0.5 }],
+});
+
 const SCRIPTS = Object.freeze({
   glider: GLIDER,
   bushplane: BUSHPLANE,
@@ -119,6 +138,7 @@ const SCRIPTS = Object.freeze({
   helicopter: HOVER,
   wingsuit: WINGSUIT,
   fpv: HOVER,
+  balloon: BALLOON,
 });
 
 /** The script for a craft ({ steps, checks }), or null when none exists. */
@@ -127,4 +147,4 @@ export function flightScriptFor(craft) {
 }
 
 /** Every craft id with a script, in the harness's run order. */
-export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv']);
+export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'balloon']);
