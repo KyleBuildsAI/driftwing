@@ -24,6 +24,7 @@ import { createHeliSynth } from './heli.js';
 import { createJetSynth } from './jet.js';
 import { createPropSynth } from './prop.js';
 import { createWingsuitSynth } from './wingsuit.js';
+import { createBurnerSynth } from './burner.js';
 
 const COMMON_DEFAULTS = Object.freeze({
   airflowSpeed: 60,
@@ -79,6 +80,7 @@ export const ENGINE_FAMILIES = Object.freeze({
     // flutterHz (fabric flap rate at 40 m/s), proximityRange (m AGL where terrain rush starts).
     defaults: { flutterHz: 14, proximityRange: 90, airflowSpeed: 60, interiorCutoff: 0, touchdown: 'body', callouts: false },
   },
+  burner: { create: createBurnerSynth, defaults: { roarHz: 320, creakRate: 1.2, airflowSpeed: 25, interiorCutoff: 0, touchdown: 'body', callouts: false } },
 });
 
 const PROFILE_CACHE = new WeakMap();
