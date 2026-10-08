@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { clamp, damp, isFiniteVector } from '../core/util.js';
 import { CONFIG } from '../core/config.js';
+import { airDensity, SEA_LEVEL_DENSITY } from '../flight/telemetry.js';
 
 /**
  * FX: wingtip vapour contrails, wind streaks at speed and golden particle bursts.
@@ -339,7 +340,9 @@ export function createFxSystem(ctx) {
     const pull = smooth01((player.gForce - 1.6) / 1.1);
     const maxSpeed = effectsMaxSpeed();
     const fast = smooth01((player.speed - 0.85 * maxSpeed) / (0.15 * maxSpeed));
-    return Math.max(bank, pull, fast);
+    // Vapour needs air: the trails thin out above the airliners and are gone by about 27 km (the spaceplane).
+    const air = clamp((airDensity(player.position.y) / SEA_LEVEL_DENSITY - 0.04) / 0.08, 0, 1);
+    return Math.max(bank, pull, fast) * air;
   }
 
   function updateContrails(dt) {
