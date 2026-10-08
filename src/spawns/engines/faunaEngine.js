@@ -2631,7 +2631,17 @@ export function createFaunaEngine() {
     const dt = frameStep[0];
     const g = data.g;
     const herd = data.params.herd;
-    if (data.instance.tier === 'far') return;
+    if (data.instance.tier === 'far') {
+      // Out of sight the herd holds its place, but a running stampede and its cooldown keep their
+      // clocks, so a herd left mid-run has settled to a walk when the player comes back.
+      if (g[G.STAMPEDE] > 0) g[G.STAMPEDE] -= dt;
+      else {
+        g[G.STAMPEDE_COOLDOWN] -= dt;
+        g[G.SPEED] = herd.gaits.walk * (1 - herd.graze * 0.6);
+        g[G.GAIT] = 0;
+      }
+      return;
+    }
     checkStampede(data);
     const stampeding = g[G.STAMPEDE] > 0;
     const runSpeed = data.runSpeed;

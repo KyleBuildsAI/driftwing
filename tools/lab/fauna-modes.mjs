@@ -282,6 +282,19 @@ function testStampede() {
   check('stampede', 'the cooldown holds a second buzz off', lab.events.stampede.length === 1, String(lab.events.stampede.length));
   const parts = lab.manager.getParts(id)[0];
   check('stampede', "setParam 'stampede' (the event trigger) starts one; unknown params are refused", lab.fauna.setParam(parts, 'stampede', 1) && lab.events.stampede.at(-1).trigger === 'event' && !lab.fauna.setParam(parts, 'flush', 1), JSON.stringify(lab.events.stampede.at(-1)));
+  // Left mid-run at the far tier, the stampede's clock keeps running: back near, the herd has settled.
+  const runCenter = lab.fauna.describe(id).center;
+  lab.state.player.position.set(runCenter.x + 20000, runCenter.y + 900, runCenter.z);
+  lab.follow();
+  let farTier = false;
+  lab.step(60 * 16, 1 / 60, () => {
+    if (lab.manager.getInstance(id).tier === 'far') farTier = true;
+  });
+  lab.state.player.position.set(runCenter.x, runCenter.y + 900, runCenter.z + 1500);
+  lab.follow();
+  lab.step(30);
+  const returned = lab.fauna.describe(id);
+  check('stampede', 'a stampede left at the far tier runs out there: back near, the herd walks', farTier && !returned.stampede && returned.gait < 0.12 && !returned.hidden, JSON.stringify({ farTier, stampede: returned.stampede, gait: returned.gait, hidden: returned.hidden }));
   lab.manager.deactivate(id, 'lab');
   // Predators: an eagle starts a stampede from farther away (radius x sqrt(2.5)).
   const reaches = {};
