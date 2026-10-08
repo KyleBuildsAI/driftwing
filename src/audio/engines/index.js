@@ -23,6 +23,7 @@ import { createGliderSynth } from './glider.js';
 import { createHeliSynth } from './heli.js';
 import { createJetSynth } from './jet.js';
 import { createPropSynth } from './prop.js';
+import { createRocketSynth } from './rocket.js';
 import { createWingsuitSynth } from './wingsuit.js';
 
 const COMMON_DEFAULTS = Object.freeze({
@@ -78,6 +79,12 @@ export const ENGINE_FAMILIES = Object.freeze({
     create: createWingsuitSynth,
     // flutterHz (fabric flap rate at 40 m/s), proximityRange (m AGL where terrain rush starts).
     defaults: { flutterHz: 14, proximityRange: 90, airflowSpeed: 60, interiorCutoff: 0, touchdown: 'body', callouts: false },
+  },
+  rocket: {
+    create: createRocketSynth,
+    // roarHz (the roar's resonant body), rumbleHz (the structure-borne sub tone); airflowBasis
+    // 'equivalent' makes the airflow beds follow the dynamic pressure (silent in vacuum).
+    defaults: { roarHz: 95, rumbleHz: 34, airflowBasis: 'equivalent', airflowSpeed: 280, interiorCutoff: 600, stallHorn: true, stallHornStyle: 'beep', motorPitch: 0.8 },
   },
 });
 
