@@ -14,12 +14,12 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 | # | Work | Branch | Contract | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Floating origin: `src/core/origin.js`, `scene.position = -offset`, the 4096 m lattice, the shader, CPU-matrix and float32-buffer fixes, audio in the render frame | `p3/origin` | a | merged |
-| 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | merged |
-| 3 | Local water bodies (basin, crater, terraces stamps; lake and ice material), the shared water-height query and the caller migration; region overlays; vegetation species 6-12 with WindField sway and trunk colliders | `p3/water-regions` | c, d | merged |
-| 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | merged |
-| 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | merged |
-| I1 | Integration pass: merge in the order origin, high altitude, water/regions, colliders, fauna/challenges; the follow-ups of contract appendix A; every lab and step file once on both backends | `v2-phase3` | appendix A | in progress |
+| 1 | Floating origin: `src/core/origin.js`, `scene.position = -offset`, the 4096 m lattice, the shader, CPU-matrix and float32-buffer fixes, audio in the render frame | `p3/origin` | a | done |
+| 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | done |
+| 3 | Local water bodies (basin, crater, terraces stamps; lake and ice material), the shared water-height query and the caller migration; region overlays; vegetation species 6-12 with WindField sway and trunk colliders | `p3/water-regions` | c, d | done |
+| 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | done |
+| 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | done |
+| I1 | Integration pass: merge in the order origin, high altitude, water/regions, colliders, fauna/challenges; the follow-ups of contract appendix A; every lab and step file once on both backends | `v2-phase3` | appendix A | done |
 
 ### Wave 1 - p3/origin
 
@@ -404,6 +404,40 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 - **Docs:** the architecture test table lists the wave 1 labs (origin, water, challenges and the
   ring goldens, path, fauna modes) and step files (origin-rebase, water-bodies, challenge,
   engine-fauna-modes, shadow-resize).
+- **Integration commits** (first parent, after `1a741b8`): merges `c6bdb2b`, `da03000`, `b33ab09`,
+  `a2ed145`, `afcdb33`; wiring and fixes `685f2c4` (water origin and curvature), `5a28211`
+  (weather volume and fauna curvature, fauna water mode), `66d0076` (vegetation sway and
+  curvature), `be00adf` (vegetation perches), `292187f` (challenge courses in the dispose checks),
+  `5fc8e27` (anchored best path), `c20409c` (island crown perches), `71c63ec` (shadow map
+  resize), `ef6fb2a` (LOD bias pin, live spawns' wind sources), `6fe23f8` (docs), `11e0710`
+  (far-field stand-in), `3eb04b9` (wading shallows), `49be17e` (spawn check frame waits), and
+  this file's own updates.
+- **Verified on the merged tree (2026-10-08, each once on both backends; reruns named):**
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `npm run build:single` (V1 SHA-256 matches), `npm run test:v1`, `node tools/docs-check.mjs` | built; 2/2; 235/235 | (same build) |
+  | V2 bundle | one three.js core (one `Multiple instances` guard); no dev kit module (collisionTest, spawnCheckKit, shadowResizeCheck); three-mesh-bvh tree-shaken until preset 77 | |
+  | Labs (`--expose-gc`): flight-lab 82, atmosphere 28, challenges 70, colliders 84, copilot 226, copilot-server 17, director 50, discovery 39, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden 6/6 goldens identical, setpiece 47, settings 28, spawns 98, storage 54, structure 75, terrain 404, water 34, wind-engines 56, wingsuit 37, audio 191 (alone) | all pass | |
+  | Wave 1 step files: origin-rebase 10, high-altitude 20, water-bodies 41, challenge 23, engine-fauna-modes 20, shadow-resize 5 | all pass, 0/0 | all pass, 0/0 (fauna-modes after `11e0710` and `3eb04b9`; high-altitude rerun after `11e0710`) |
+  | Phase 2 step files: golden-frame (A/B pair identical), weather-sky 5, view-physics 6, director-game 3, discovery 17, copilot-guide 13, engine-celestial 11, engine-emitter 13, engine-fauna 25, engine-lightEffect 13, engine-setPiece, engine-structure 21, engine-structure-sites 10, engine-vortex 9, engine-waterEffect 19, engine-weatherVolume 19, engine-windModifier 9, env-fixes, input-review 9, hotplug 6, terrain-worker-start 4, presets-batch1 58, presets-batch2 31, presets-21-30 51, seed-link 7 | all pass, 0/0 | all pass, 0/0 (engine-fauna, engine-structure, engine-waterEffect and engine-windModifier failed their strict GPU baselines by one geometry on the first run, the far-field stand-in release; all pass after `11e0710`) |
+  | `tools/spawn-check.mjs` | 55/55 (51/55 and 52/55 before `49be17e`: the cold-compile stall) | 55/55 |
+  | `run-harness --test terrain` (fixtures) | PASS: 9/9 stamp types, 5/5 overlay kinds, 0 cracks, worker parity 1002 chunks, collision 0.00001 m, 51/51 poses | PASS, same numbers |
+  | `run-harness --test terrain --presets real` | PASS: 6/6 types (basin, crater, terraces wait for wave 3), worker parity 555 chunks (first attempt: navigation timeout on the cold server) | PASS, same (first attempt: navigation aborted) |
+  | `run-harness --test collision` | PASS: 98/98 strikes, 15/15 targets, 0 pass-throughs, 0 penetrations, bump, deck, dives, tunnel, arch, 15/15 kite misses, one core (first attempt: navigation timeout) | PASS, same |
+  | `run-harness --test determinism` | PASS: site list d85384433861a1b0, director log 1093b8c1, water digest 61f315c9, spawn events 74d3d2fa, path 55b1a55f (the Phase 2 hashes; nothing to re-record) | PASS, identical hashes |
+  | `run-harness --test spawns` (30 presets) | PASS 30/30 on every criterion incl. colliders and challenge courses; lowest avg 50 fps, worst p99 61.2 ms (reported) | PASS 30/30; 58.4 fps, p99 44.1 ms |
+  | `run-harness --test 1` (INTEG-A/B, glider and jet, both views, 45 s) | 0 NaN, 0 penetrations, 0/0, 8/8 runs, 24/24 manoeuvres, heap growth 20.51 MB max; FAIL on frames over 50 ms: 351 (INTEG-B glider: 219 and 126, the rest 0-2) | same criteria pass, heap 24.59 MB max; frames over 50 ms 11 |
+  | Built `dist-single/v2` and `dist-single/index.html` smoke | 0/0 each, screenshots differ | 0/0 each |
+
+- **Heap growth (reported problem):** measured on the merged tree at 20.51 MB (WebGPU) and
+  24.59 MB (WebGL2) against the 50 MB limit; per-run deltas -0.4 to 19.9 MB with no trend across
+  runs or views. No retention found; the high-altitude branch's one 54.8 MB run (44.7 MB on its
+  rerun, base 33.8 MB) reads as run-to-run noise.
+- **Frame time (owner's rule, one line):** the WebGPU INTEG-B glider runs had 219 and 126 frames
+  over 50 ms with the slow frames spread over whatever system was running (input, camera, birds,
+  terrain, spawns at 30-65 ms each), while the same runs on WebGL2 had 0-2; the machine ran at
+  about 90 % CPU with another program's game during the harness work.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
@@ -508,35 +542,41 @@ presets (92-100) use the wave 2 combo scheduling.
 
 ## What's next
 
-PAUSED HERE (2026-10-03, at the owner's request). Wave 1 was stopped mid-build. Each engineer's
-work is committed and pushed on its branch; nothing from wave 1 is merged into `v2-phase3` yet.
+Wave 1 is done: the five branches are merged into `v2-phase3`, wired and verified (the
+integration subsection above). Not pushed or tagged (the owner pushes).
 
-| Branch | Worktree | State at the pause |
-| --- | --- | --- |
-| `p3/origin` | `.claude/worktrees/p3-origin` | 10 commits, clean |
-| `p3/colliders` | `.claude/worktrees/p3-colliders` | 8 commits, clean |
-| `p3/water-regions` | `.claude/worktrees/p3-water-regions` | 7 commits, clean |
-| `p3/fauna-challenges` | `.claude/worktrees/p3-fauna-challenges` | 6 commits, clean |
-| `p3/high-altitude` | `.claude/worktrees/p3-high-altitude` | 7 commits plus one "save in-progress" commit (unverified sky.js and high-altitude.json) |
-
-To resume:
-1. Relaunch wave 1 with `.claude/orchestration/p3-wave1.js`. Each engineer runs `git status` and
-   `git log v2-phase3..HEAD` first, reviews what the previous run left, and continues its scope.
-   Each branch's own subsection in this file records its done / next state.
-2. Before migrating the rings, engineer 4 records `tools/lab/fixtures/rings-golden.json` from the
-   unmodified Phase 2 code (check whether it already exists on `p3/fauna-challenges`).
-3. Wave 1 integration pass (I1), then wave 2 step 2.0.
+Next: **wave 2 step 2.0, the craft framework** (`p3/craft-framework`, contract h.9), cut from
+`v2-phase3` and merged alone before the eight craft branches and the picker / director branch
+start. The wave 1 worktrees under `.claude/worktrees/p3-*` can be removed (unlink each
+`node_modules` junction first). The craft engineers build against the merged APIs listed in the
+integration subsection and the contract (origin a, colliders and probes b, water query and
+`onWater` c, atmosphere and ceilings g, challenges f, PathFollower e.2, `faunaThreat` e.1).
 
 ## Open issues
+
+- **Wave 1 integration leftovers:** the WebGPU flight harness's frames over 50 ms on the busy
+  machine (above); the shadow-map warning burst never reproduced on demand, so the fix is proven by
+  the degrade path running clean, not by a before/after; golden-frame shot 1 (the first render of
+  the still) differs from shots 2 and 3 by up to 1 level on WebGPU and 19 on WebGL2, while the A/B
+  pair (2 and 3, with and without the weather modifier) is identical; fauna `pod` groups (whales)
+  still ride the flat sea level, not the swell (only the `water` altitude mode and wading birds read
+  the water query); the far field's tile geometry release after 20 s below 4.5 km still frees
+  geometries at a time no check controls (now only after a climb), so a strict GPU baseline taken
+  across that moment would move by those tiles; the presets-21-30 kit still counts a game site's
+  geometries that appear mid-check (its wind sources are excluded now).
+- **Cold pipeline compile on WebGPU** stalls the page for about 20 s after `ready` on this
+  machine (no animation frame runs): tools that start timed checks right after `ready` must wait
+  for frames to flow (`tools/spawn-check.mjs` and `tools/lab/audio.mjs` do).
 
 - **Carried from Phase 2** (docs/phase2-progress.md, Open issues): the soak's p99 against the
   16.67 ms target on the shared machine, the full 36-run flight matrix never run, the one-pixel
   WebGL2 golden-frame difference, the airfield and crystal spires' one slow frame each, the
   warm-up heap of a few presets, the rare-tier fairness, the faint storm chase funnel.
 - **WebGL2 depth range at altitude.** WebGPU uses reversed depth; WebGL2 does not. The far plane
-  grows to the horizon (up to 600 km) above 12 km, so the high-altitude engineer must prove the
-  WebGL2 fallback has no z-fighting at 15, 35 and 100 km (contract g.2 allows a larger near plane in
-  third person views above 12 km).
+  grows to the horizon (up to 600 km) above 12 km. Checked by the high-altitude branch: WebGL2
+  screenshots at 15, 35 and 100 km show no z-fighting with the third-person near plane at 1.2 / 2.6 /
+  3 m; the first-person views keep the Phase 2 near plane, so the spaceplane cockpit (wave 2) must
+  check its own views up there.
 - **Rigid curvature drop for discrete objects** (g.3) relies on every engine applying it; the
   wave 3 checklist must include it, or distant structures float above curved terrain from altitude.
 - **The ring course's identical behaviour** depends on the golden logs being recorded before any
