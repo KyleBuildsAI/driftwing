@@ -266,12 +266,14 @@ function buildCreatureView(builder) {
 // craftAbilityAlt: tuck the wings while held (Shift+Space); the copilot's "tuck" latches it.
 // ============================================================================================
 const FIRE = Object.freeze({ BURST: 0.6, COMMAND_BURST: 3, RISE: 7, FALL: 3.5, IGNITE_LEVEL: 0.45, REACH_MARGIN: 3 });
-const NEAREST_PERCH = Object.freeze({ INTERVAL: 1, RADIUS: 300 });
 /**
- * The copilot's perch search widens ring by ring (m) and stops at the first that finds one: the
- * vegetation perch provider scatters every 128 m cell a search covers (cached), so it stays small.
+ * The instrument's nearest perch: searched once a second, and only low and slow (where a perch is
+ * of use), over a small radius: the vegetation perch provider scatters every 128 m cell a search
+ * first covers (about 10 ms a cell), so a wide or constant search would cost frames.
  */
-const PERCH_COMMAND_RADII = Object.freeze([200, 600, 1500]);
+const NEAREST_PERCH = Object.freeze({ INTERVAL: 1, RADIUS: 120, BELOW_AGL: 120, BELOW_SPEED: 16 });
+/** The copilot's perch search widens ring by ring (m) and stops at the first that finds one. */
+const PERCH_COMMAND_RADII = Object.freeze([150, 300]);
 
 /** Scratch for the ability updates (one craft flies at a time): no allocation per frame. */
 const scratch = {
@@ -382,6 +384,11 @@ function updateNearestPerch(api, dt) {
   scratch.nearestTimer = NEAREST_PERCH.INTERVAL;
   const record = api.craftState.nearestPerch;
   if (!record) return;
+  const telemetry = api.telemetry;
+  if (!(telemetry.agl < NEAREST_PERCH.BELOW_AGL && telemetry.airspeed < NEAREST_PERCH.BELOW_SPEED)) {
+    record.found = false;
+    return;
+  }
   record.found = findNearestPerch(api, NEAREST_PERCH.RADIUS);
   if (!record.found) return;
   const position = api.player.position;
@@ -470,7 +477,7 @@ const copilot = Object.freeze({
       run(api) {
         const craftState = api.craftState;
         if (craftState.perched === true) return 'We are perched already. Raise the flap power to fly.';
-        if (!PERCH_COMMAND_RADII.some((radius) => findNearestPerch(api, radius))) return 'No perch within a kilometre and a half. Try near the trees or the rocks.';
+        if (!PERCH_COMMAND_RADII.some((radius) => findNearestPerch(api, radius))) return 'No perch within 300 metres. Fly low over the trees or the rocks and ask again.';
         const target = scratch.nearest;
         craftState.perchTarget = { x: target.x, y: target.y, z: target.z, kind: target.kind, id: target.id };
         const position = api.player.position;

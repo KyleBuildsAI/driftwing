@@ -1304,7 +1304,7 @@ Without a perch target its terrain look-ahead turns it aside from ground rising 
 climb, and it never pushes for speed within 40 m of the ground.
 
 The eagle module's copilot commands (`craftCommand`, contract h.6): `findPerch` ("find a perch":
-the nearest perch within 200, 600 or 1500 m, and the autopilot approach above), `takeOff`,
+the nearest perch within 150 or 300 m, and the autopilot approach above), `takeOff`,
 `screech` (the dragon roars), `fireBreath` (dragon only: a 3 s burst), `tuck` (latches the tuck on or
 off) and `glide` (flap power to zero, wings out); `copilot.status` says what the creature is doing.
 Its journal stats are `eaglePerches` (count), `eagleBestSoar` (metres climbed in one soaring climb
