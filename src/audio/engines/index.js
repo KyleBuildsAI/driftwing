@@ -23,6 +23,7 @@ import { createGliderSynth } from './glider.js';
 import { createHeliSynth } from './heli.js';
 import { createJetSynth } from './jet.js';
 import { createPropSynth } from './prop.js';
+import { createProprotorSynth } from './proprotor.js';
 import { createWingsuitSynth } from './wingsuit.js';
 
 const COMMON_DEFAULTS = Object.freeze({
@@ -74,6 +75,8 @@ export const ENGINE_FAMILIES = Object.freeze({
     // motors, idleHz (motor tone at zero thrust), maxHz (at full thrust).
     defaults: { motors: 4, idleHz: 190, maxHz: 880, airflowSpeed: 42, interiorCutoff: 0, touchdown: 'body', callouts: false },
   },
+  // blades, rotorRpm (helicopter-mode rpm), turbineHz; the thrum follows craftState.nacelleAngle.
+  proprotor: { create: createProprotorSynth, defaults: { blades: 3, rotorRpm: 397, turbineHz: 4300, airflowSpeed: 120, interiorCutoff: 850 } },
   wingsuit: {
     create: createWingsuitSynth,
     // flutterHz (fabric flap rate at 40 m/s), proximityRange (m AGL where terrain rush starts).
