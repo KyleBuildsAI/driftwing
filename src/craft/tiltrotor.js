@@ -759,6 +759,8 @@ export default Object.freeze({
     cockpit,
   }),
   instruments: Object.freeze(['airspeed', 'altitude', 'attitude', 'heading', 'vsi', 'nacelle', 'rotorRpm', 'torque', 'radarAlt', 'throttle']),
+  // The conversion corridor stays on the HUD in every view without a cockpit panel (instrumentHud.js).
+  hud: Object.freeze({ instruments: Object.freeze(['nacelle']) }),
   abilities: Object.freeze({ craftAbility }),
   capabilities: Object.freeze({ engine: true, chute: false }),
   spawn: Object.freeze({ cruise: 110, cruiseThrottle: 0.5, hover: true, relaunch: 'airstart', canStartOnGround: true }),
