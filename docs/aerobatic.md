@@ -42,8 +42,8 @@ No attitude protection at any level: loops, rolls and inverted flight stay possi
 
 | level | assists |
 | --- | --- |
-| 0 -> 50 % | auto-coordination and a yaw damper (both yield to the pedals), auto-trim (follows a gentle stick in near-level flight; hands off near wings level it holds the flight path within +-5 degrees), stall warning |
-| 50 -> 100 % | AoA limiter (both signs), G limiter (+8.5 / -6 g), auto-level when every axis is hands off (an inverted craft rolls back upright), overspeed protection (power back near Vne) |
+| 0 -> 50 % | auto-coordination and a yaw damper (both yield to the pedals), auto-trim (follows a gentle stick in near-level flight; hands off, within 75 degrees of bank and 40 of pitch, it holds the flight path captured within +-2 degrees, pulling at most 2 g to get back to it), stall warning |
+| 50 -> 100 % | AoA limiter (both signs), G limiter (+8.5 / -6 g), auto-level when every axis is hands off for 0.5 s (an inverted craft rolls back upright), overspeed protection (power back near Vne) |
 | 0 % | raw physics: snap rolls, spins, tumbles |
 
 The limiters set an elevator ceiling from the steady elevator that holds each limit (per rad of angle of

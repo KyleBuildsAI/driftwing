@@ -533,10 +533,32 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 - **Edits outside the craft's own files** (single lines unless noted): `src/craft/index.js`,
   `src/flight/models.js` (kind and `MODEL_KINDS`), `src/audio/engines/index.js`,
   `src/ui/instruments/index.js`, `src/dev/craftScenarios/index.js`, `src/core/events.js` (`figureFlown`
-  after `challengeCancelled`), `tools/steps/view-physics.json` (one step), `src/dev/testFlightScripts.js`
+  after `challengeCancelled`), `tools/steps/view-physics.json` (one step, and the closing count), `src/dev/testFlightScripts.js`
   (the script, its map entry and `SCRIPTED_CRAFT`), `src/dev/testHarness.js` (the `smokeSeconds`
   observation, three lines), `tools/lab/craft.mjs` (the catalog checks follow the registered craft) and
   `src/gameplay/journal.js` (the module-stat cache rebuilds when a module is replaced).
+- **Fixes found on the way:** the journal's module-stat cache keyed on craft ids only, so a module
+  replaced under the same id (the craft lab's test craft) kept stale stats; it now keys on the module
+  objects. The view-physics step's closing check expected exactly six craft; it now expects every
+  flyable craft. A figure's score was computed after its window was cleared (the Cuban eight's lobe
+  symmetry read no markers); it is scored first now.
+- **Verified 2026-10-08** (each once unless noted; reruns named):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1`, `docs-check` 240/240 | built; the V2 bundle holds no craft scenarios, one three.js core | |
+  | Labs: aerobatic 81/81 (`--expose-gc`), craft 66, discovery 43, copilot 240, copilot-server 17, settings 45, flight-lab 82, jet 60, helicopter 46, wingsuit 37, fpv 87, input 34, atmosphere 28, colliders 84, director 50, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden 6, setpiece 47, spawns 98, storage 54, structure 75, terrain 404, wind-engines 56; challenges 70, origin 32, fauna-modes 44 (their allocation checks need `--expose-gc`: 68/70, 31/32, 42/44 without it, all pass with it); water 33/34 (its open-ocean `heightAt` cost check, 1.29 us against 1 us, under the machine's load; water code untouched) | as listed | |
+  | `run-harness --test craft --crafts aerobatic` at the branch head (general test in both views, loop and roll in both views, smoke, snap) | PASS 8/8 runs, 25/25 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0 | PASS, same |
+  | `run-harness --test craft` (all seven craft, 33 runs) | an earlier head: 81/86 checks, the aerobatic's roll and snap scripts and one general-test dive at p99 147-266 ms (machine at 100 %); the scripts were made frame-proof and the hands-off levelling faster, then the aerobatic set passed on both backends (row above) | PASS 33/33 runs, 86/86 checks, 0/0 (before those fixes) |
+  | `run-harness --test 1` reduced (HARNESS-1/2, aerobatic, both views, 20 s) | 0 NaN, 0 penetrations, 0/0, heap growth 2.49 MB, 12/12 manoeuvres (smoke included); frames over 50 ms: 75 (main thread 52, delayed 15, gc 5, systems 3; machine CPU 100 %) | same criteria pass, heap 6.18 MB; frames over 50 ms: 410 at 25 fps (another Chrome at 63 % CPU; slow frames led by camera, terrain, flight, birds) |
+  | `tools/steps/view-physics.json` on built V2 (`?debug=1`) | 7/7 craft identical in every view, 0/0 | 7/7, 0/0 |
+  | Built `dist-single/v2` and the built shell smoke | 0/0, screenshots differ (shell too) | 0/0, screenshots differ |
+
+- **Next:** I2 merges this branch after 2.0, in catalog order (aerobatic is the first new craft).
+- **Open issues:** the reduced flight harness's frames over 50 ms (machine load; a node benchmark puts
+  the aerobatic's physics tick at about 50 us warm against the bush plane's 30 us, the recognizer and
+  the autorotation included); the journal panel's Figures section (counts per figure from
+  `figureFlown`) and the copilot's cross-craft "smoke on / off" are Milestone O's (j.1, j.2).
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
