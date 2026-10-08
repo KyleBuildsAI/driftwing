@@ -212,7 +212,7 @@ const AUTOPILOT = Object.freeze({
    * The perch approach: speeds far and near, the glide slope (height per metre of distance) and the
    * band above it, the final height over the perch, and the circle (radius, m) flown to lose height.
    */
-  APPROACH: Object.freeze({ FAR: 140, NEAR: 35, SPEED_FAR: 12.5, SPEED_NEAR: 10, SLOPE: 0.06, MIN_ABOVE: 2, MAX_ABOVE: 60, FINAL_ABOVE: 1.5, HIGH_MARGIN: 12, CIRCLE: 55 }),
+  APPROACH: Object.freeze({ FAR: 140, NEAR: 35, SPEED_FAR: 12.5, SPEED_NEAR: 10, SLOPE: 0.06, MIN_ABOVE: 2, MAX_ABOVE: 60, FINAL_ABOVE: 1.5, HIGH_MARGIN: 12, CIRCLE: 55, TERRAIN_CLEARANCE: 10 }),
 });
 
 const flapperAutopilot = Object.freeze({
@@ -266,6 +266,14 @@ const flapperAutopilot = Object.freeze({
       }
       // Down the slope at the rate that arrives there with the remaining distance.
       climb = clamp(heightError * Math.max(speed / Math.max(distance, 8), AUTOPILOT.CLIMB_PER_METRE), -AUTOPILOT.MAX_DESCENT, AUTOPILOT.MAX_CLIMB);
+      // Short of the final, never below TERRAIN_CLEARANCE over the ground ahead (a ridge before the perch).
+      if (env && distance > tuning.NEAR) {
+        const velocity = model.state.velocity;
+        let floor = -Infinity;
+        for (const seconds of AUTOPILOT.LOOKAHEAD) floor = Math.max(floor, surfaceHeightAt(env, position.x + velocity.x * seconds, position.z + velocity.z * seconds));
+        const below = floor + tuning.TERRAIN_CLEARANCE - position.y;
+        if (below > 0) climb = Math.max(climb, Math.min(AUTOPILOT.MAX_CLIMB, below * AUTOPILOT.CLIMB_PER_METRE * 3));
+      }
     } else {
       let altitude = Number.isFinite(autopilot.altitude) ? autopilot.altitude : position.y;
       // Terrain look-ahead: keep CLEARANCE above the ground or water along the next few seconds.
