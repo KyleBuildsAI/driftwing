@@ -291,10 +291,11 @@ function testCatalog() {
   check('catalog', 'the six groups of contract h.1, in order', Object.entries(expected).every(([group, list], index) => Object.keys(CRAFT_GROUPS)[index] === group && CRAFT_GROUPS[group].join() === list), JSON.stringify(CRAFT_GROUPS));
   check('catalog', 'every entry names its group and has a silhouette', CRAFT_CATALOG.every((entry) => CRAFT_GROUPS[entry.group].includes(entry.id) && entry.silhouette.length > 0 && entry.silhouette.every((part) => typeof part.d === 'string' && /^M/.test(part.d))));
   check('catalog', 'the Phase 1 hotkeys stay (informational), the new craft have none', CRAFT_CATALOG.slice(0, 6).every((entry, index) => entry.hotkey === `Digit${index + 1}`) && CRAFT_CATALOG.slice(6).every((entry) => entry.hotkey === null));
+  // The Phase 1 six always fly; each Phase 3 craft is available exactly when its module has registered.
   const available = gameRegistry.list().filter((entry) => entry.available).map((entry) => entry.id);
-  check('catalog', 'the six game modules register; the new craft wait for theirs', available.join() === 'glider,bushplane,jet,helicopter,wingsuit,fpv', available.join(', '));
+  check('catalog', 'the six game modules register; a new craft is available once its module does', ['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv'].every((id) => available.includes(id)) && gameRegistry.list().every((entry) => entry.available === gameRegistry.has(entry.id)), available.join(', '));
   const groups = gameRegistry.groups();
-  check('catalog', 'registry.groups() lists the groups with availability', groups.length === 6 && groups[0].label === 'Planes' && groups[0].craft.map((entry) => `${entry.id}:${entry.available}`).join() === 'glider:true,bushplane:true,aerobatic:false,seaplane:false,jet:true', JSON.stringify(groups[0]));
+  check('catalog', 'registry.groups() lists the groups with availability', groups.length === 6 && groups[0].label === 'Planes' && groups[0].craft.map((entry) => entry.id).join() === 'glider,bushplane,aerobatic,seaplane,jet' && groups.every((group) => group.craft.every((entry) => entry.available === gameRegistry.has(entry.id))), JSON.stringify(groups[0].craft.map((entry) => `${entry.id}:${entry.available}`)));
 }
 
 // ---- validation -----------------------------------------------------------------------------------------
