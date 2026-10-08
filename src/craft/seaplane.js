@@ -11,7 +11,7 @@
 // against the shared water query (the ocean's swell and every lake), the hump near 45 km/h and
 // planing on the step, porpoising at the wrong trim, the water rudders, the gear advisory, the
 // wheels-down nose-over and the wheels-up skid on land. Its flight profile describes the real
-// thing (stall about 83 km/h with full flaps, cruise about 195 km/h, climb about 4.5 m/s, a long
+// thing (stall about 83 km/h with full flaps, cruise about 195 km/h, climb about 5.3 m/s, a long
 // water run at the hump, then quick acceleration on the step).
 import * as THREE from 'three/webgpu';
 import { DEG, clamp, damp, wrapDegrees } from '../core/util.js';
@@ -90,7 +90,7 @@ const simProfile = Object.freeze({
     stallSpeedFullFlaps: 23, // m/s = 83 km/h, power off
     stallSpeedClean: 28.3, // m/s = 102 km/h, power off (follows from the wing, not a spec target)
     cruiseSpeed: 54, // m/s = 194 km/h at 70 % power
-    climbRate: 4.5, // m/s at full power, best climb speed
+    climbRate: 5.3, // m/s at full power, best climb speed (about 1050 fpm)
     vne: 72, // m/s = 259 km/h
     humpSpeed: 12.5, // m/s = 45 km/h: peak water resistance, then planing on the step
   }),
@@ -128,9 +128,9 @@ const simProfile = Object.freeze({
   }),
   controls: Object.freeze({
     aileron: 18,
-    elevator: 26,
+    elevator: 24,
     rudder: 25,
-    effectiveness: Object.freeze({ aileron: 0.45, elevator: 0.9, rudder: 0.6 }),
+    effectiveness: Object.freeze({ aileron: 0.45, elevator: 0.85, rudder: 0.6 }),
     trimRange: 0.45,
     servoRate: 4.5,
   }),
@@ -710,8 +710,12 @@ function buildMesh(ctx) {
 // ============================================================================================
 /** Spray droplets per second at full spray from each chine (and from the prop wash at full power). */
 const SPRAY_RATE = Object.freeze({ chine: 110, bow: 45, propWash: 60 });
-/** A gear advisory re-arms after its warning has been clear this long (s). */
-const ADVISORY_REARM_SECONDS = 4;
+/**
+ * A gear advisory speaks once per approach: it re-arms when the craft climbs above REARM_AGL (m), the
+ * gear is moved, or its warning has been clear for ADVISORY_REARM_SECONDS (s).
+ */
+const ADVISORY_REARM_SECONDS = 20;
+const ADVISORY_REARM_AGL = 200;
 const ADVISORY = Object.freeze({
   noseOver: 'Gear is down! Wheels in the water will flip us. Gear up for a water landing.',
   skid: 'Gear is up for a land landing. Wheels down for the runway, or the floats will skid.',
@@ -728,7 +732,7 @@ const outwardWorld = new THREE.Vector3();
 function abilityMemory(craftState) {
   let memory = abilityMemories.get(craftState);
   if (!memory) {
-    memory = { chine: 0, bow: 0, propWash: 0, noseOverClear: ADVISORY_REARM_SECONDS, skidClear: ADVISORY_REARM_SECONDS, noseOverArmed: true, skidArmed: true, ruddersReminded: false };
+    memory = { chine: 0, bow: 0, propWash: 0, noseOverClear: ADVISORY_REARM_SECONDS, skidClear: ADVISORY_REARM_SECONDS, noseOverArmed: true, skidArmed: true, ruddersReminded: false, gearDown: null };
     abilityMemories.set(craftState, memory);
   }
   return memory;
@@ -796,6 +800,13 @@ function advise(api, text) {
 
 function updateAdvisories(api, dt, memory) {
   const craftState = api.craftState;
+  const telemetry = api.telemetry;
+  const gearDown = Boolean(telemetry.gear && telemetry.gear.down);
+  if (memory.gearDown !== gearDown || (Number.isFinite(telemetry.agl) && telemetry.agl > ADVISORY_REARM_AGL)) {
+    memory.gearDown = gearDown;
+    memory.noseOverArmed = true;
+    memory.skidArmed = true;
+  }
   if (craftState.noseOverWarning === true) {
     memory.noseOverClear = 0;
     if (memory.noseOverArmed) {

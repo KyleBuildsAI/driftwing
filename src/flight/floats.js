@@ -18,8 +18,9 @@
 //                 immersed volume, which peaks at the hump speed (profile hump.speed, about 45 km/h)
 //                 and falls away as the planing lift empties the floats: lower drag on the step
 //   side force    the floats' keels resist sideslip (cross-flow drag and keel lift), so they track
-// Porpoising: on the step, a trim angle outside the stable band (hump.trimLow .. trimHigh) feeds a
-// pitch-heave oscillation that grows while the attitude stays wrong and dies away once it is right
+// Porpoising: on the step, a trim attitude outside the stable band (hump.trimLow .. trimHigh; the
+// attitude the pilot holds, the trim averaged over about a porpoise period) feeds a pitch-heave
+// oscillation that grows while the attitude stays wrong and dies away once it is right
 // (craftState.porpoise is its amplitude, 0..1). The water rudders (craftState.waterRudders, down)
 // steer from the pedals and the differential toe brakes; they only bite while the sterns are wet,
 // so at low speed. The amphibian wheels (the gear toggle) retract into the floats:
@@ -66,6 +67,10 @@ const SUCTION_SHARE = 0.25;
 /** On the step: above this share of the hump speed with the planing lift carrying this share of the water load. */
 const STEP_SPEED_SHARE = 0.85;
 const STEP_LIFT_SHARE = 0.5;
+/** After a reset on the ground or the water, a settle onto the floats this long (s) is not a touchdown. */
+const SETTLE_SECONDS = 1;
+/** The held trim (porpoising's input) averages the trim over this long (s): about a porpoise period. */
+const HELD_TRIM_SECONDS = 0.8;
 /** A run on the step this long (s) or longer goes to the journal. */
 const STEP_RECORD_SECONDS = 3;
 /** The gear selector refuses to raise wheels that carry the craft on land. */
@@ -211,10 +216,14 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
     drag: 0,
     waterSpeed: 0,
     trim: 0,
+    /** The trim averaged over about a porpoise period: the attitude held, without the oscillation. */
+    heldTrim: 0,
     spray: 0,
     porpoisePhase: 0,
     porpoise: 0,
     wheelSeconds: 0,
+    /** The fastest wet wheel's speed through the water (m/s). */
+    wheelSpeed: 0,
     wheelsWet: false,
     overWater: false,
     onLand: false,
@@ -222,6 +231,8 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
     noseOverWarning: false,
     skidWarning: false,
     resolveGear: false,
+    /** After a reset on the ground or water, the craft settles onto its floats this long (s) without a touchdown. */
+    settleSeconds: 0,
   };
   const touchdown = { sinkRate: 0, part: '', groundSpeed: 0 };
   const strike = { part: '', speed: 0 };
@@ -325,6 +336,7 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
     const groundBelow = env.groundHeight(position.x, position.z);
     waterSampleAt(env, position.x, position.z, sample);
     hydro.overWater = isOpenWater(sample, groundBelow);
+    resolveGearAfterReset(systems);
     const surfaceBelow = Math.max(groundBelow, sample.height);
     const landGear = report.gearContacts > 0;
     hydro.wasFloating = hydro.floating;
@@ -434,7 +446,7 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
     }
     if (!hydro.floating) hydro.waterSpeed = 0;
     hydro.trim = flightData.pitch / DEG - floats.keelIncidence;
-    resolveGearAfterReset(systems);
+    hydro.heldTrim += (hydro.trim - hydro.heldTrim) * Math.min(1, dt / HELD_TRIM_SECONDS);
     completeReport(tick, report, wetFloats, sinkRate, touchPart, landGear);
     updateStep(dt);
     hydro.spray = hydro.floating ? clamp(smoothstep(2.5, 9, Math.abs(hydro.waterSpeed)) * ((hydro.planingLift + 0.4 * hydro.buoyancy * smoothstep(4, humpSpeed, Math.abs(hydro.waterSpeed))) / weight), 0, 1) : 0;
@@ -478,6 +490,7 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
       hydro.wheelSeconds = 0;
       return;
     }
+    let wheelSpeed = 0;
     for (const wheel of wheels) {
       pointState(tick, wheel.relative);
       const ground = tick.env.groundHeight(pointWorld.x, pointWorld.z);
@@ -493,8 +506,10 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
       const speed = bodyVelocity.length();
       stationForce.copy(bodyVelocity).multiplyScalar(-0.5 * waterDensity * floats.wheelDrag * wheel.area * wet * extension * speed);
       addBodyForce(stationForce, wheel.relative, momentBody);
+      wheelSpeed = Math.max(wheelSpeed, Math.abs(bodyVelocity.z));
     }
-    if (hydro.wheelsWet && Math.abs(hydro.waterSpeed) > noseOverSpeed) hydro.wheelSeconds += tick.dt;
+    hydro.wheelSpeed = wheelSpeed;
+    if (hydro.wheelsWet && wheelSpeed > noseOverSpeed) hydro.wheelSeconds += tick.dt;
     else hydro.wheelSeconds = 0;
   }
 
@@ -519,7 +534,7 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
    */
   function porpoiseForces(tick, momentBody, dt) {
     const settings = floats.hump;
-    const outside = Math.max(0, (hydro.trim - settings.trimHigh) / settings.band, (settings.trimLow - hydro.trim) / settings.band);
+    const outside = Math.max(0, (hydro.heldTrim - settings.trimHigh) / settings.band, (settings.trimLow - hydro.heldTrim) / settings.band);
     const excess = hydro.onStep ? Math.min(outside, 1.5) : 0;
     if (excess > 0) hydro.porpoise += settings.porpoiseGrowth * excess * (1 - hydro.porpoise) * dt;
     else hydro.porpoise -= hydro.porpoise * Math.min(1, settings.porpoiseDecay * (hydro.floating ? 1 : 3) * dt);
@@ -532,11 +547,15 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
     forceSum.add(stationForce);
   }
 
-  /** A reset on the water starts in the water configuration (wheels up); one on land keeps them down. */
+  /**
+   * A reset on the water starts in the water configuration (wheels up); one on land keeps them down.
+   * Decided on the first tick by the water under the centre of mass (a placement afloat may start
+   * with the floats a little above the surface).
+   */
   function resolveGearAfterReset(systems) {
     if (!hydro.resolveGear) return;
     hydro.resolveGear = false;
-    if (!hydro.floating) return;
+    if (!hydro.overWater) return;
     systems.gearDown = false;
     systems.gearPosition = 0;
   }
@@ -554,7 +573,7 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
       report.onGround = true;
       report.contacts += wetFloats;
       report.gearContacts += wetFloats;
-      if (!hydro.wasFloating && !landGear && hydro.airborneSeconds >= TOUCHDOWN_AIRBORNE_SECONDS && !report.touchdown) {
+      if (!hydro.wasFloating && !landGear && hydro.airborneSeconds >= TOUCHDOWN_AIRBORNE_SECONDS && hydro.settleSeconds <= 0 && !report.touchdown) {
         touchdown.sinkRate = sinkRate;
         touchdown.part = touchPart;
         touchdown.groundSpeed = groundSpeed;
@@ -562,9 +581,10 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
       }
     }
     hydro.airborneSeconds = hydro.floating || landGear ? 0 : hydro.airborneSeconds + tick.dt;
+    hydro.settleSeconds = Math.max(0, hydro.settleSeconds - tick.dt);
     if (hydro.wheelSeconds >= NOSE_OVER_SECONDS) {
       strike.part = 'nose-over';
-      strike.speed = Math.abs(hydro.waterSpeed);
+      strike.speed = hydro.wheelSpeed;
       report.bodyStrike = strike;
     } else if (landGear && systems.gearPosition < 0.5 && groundSpeed > skidCrashSpeed && (!report.bodyStrike || report.bodyStrike.speed < groundSpeed)) {
       strike.part = 'floats on land';
@@ -623,6 +643,7 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
       systems.gearDown = onGround;
       systems.gearPosition = onGround ? 1 : 0;
       hydro.resolveGear = onGround;
+      hydro.settleSeconds = onGround ? SETTLE_SECONDS : 0;
       hydro.floating = false;
       hydro.wasFloating = false;
       hydro.airborneSeconds = onGround ? 0 : TOUCHDOWN_AIRBORNE_SECONDS;
@@ -630,6 +651,7 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
       hydro.stepSeconds = 0;
       hydro.porpoise = 0;
       hydro.porpoisePhase = 0;
+      hydro.heldTrim = 0;
       hydro.wheelSeconds = 0;
       hydro.waterSpeed = 0;
       hydro.spray = 0;
@@ -647,9 +669,11 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
         stepSeconds: hydro.stepSeconds,
         porpoise: hydro.porpoise,
         porpoisePhase: hydro.porpoisePhase,
+        heldTrim: hydro.heldTrim,
         wheelSeconds: hydro.wheelSeconds,
         waterSpeed: hydro.waterSpeed,
         resolveGear: hydro.resolveGear,
+        settleSeconds: hydro.settleSeconds,
       };
     },
 
@@ -661,9 +685,11 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
       if (Number.isFinite(data.stepSeconds)) hydro.stepSeconds = data.stepSeconds;
       if (Number.isFinite(data.porpoise)) hydro.porpoise = data.porpoise;
       if (Number.isFinite(data.porpoisePhase)) hydro.porpoisePhase = data.porpoisePhase;
+      if (Number.isFinite(data.heldTrim)) hydro.heldTrim = data.heldTrim;
       if (Number.isFinite(data.wheelSeconds)) hydro.wheelSeconds = data.wheelSeconds;
       if (Number.isFinite(data.waterSpeed)) hydro.waterSpeed = data.waterSpeed;
       if (typeof data.resolveGear === 'boolean') hydro.resolveGear = data.resolveGear;
+      if (Number.isFinite(data.settleSeconds)) hydro.settleSeconds = data.settleSeconds;
     },
 
     /** Live hydrodynamic readouts (the lab's towing tank and the instruments' tests). */
