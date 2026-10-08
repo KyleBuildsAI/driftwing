@@ -4,7 +4,7 @@
  *
  * A 64 x 64 texture of 32 m cells covers a 2 km square around the streaming focus, laid toroidally
  * over the world (texel = world cell modulo 64, RepeatWrapping), re-centred on 32 m steps. Each texel
- * holds the wind at 10 m above the ground there, from wind.probe (allocation-free, into one sample
+ * holds the wind at 10 m above the terrain there, from wind.probe (allocation-free, into one sample
  * object): the horizontal wind (R, G: -25..25 m/s) and the turbulence and gusts (B: 0..1). A few rows
  * are refreshed per frame (the whole square every ROWS / ROWS_PER_FRAME frames), so a spawn's wind
  * source (a dust devil, a gust front, a microburst) visibly ripples the vegetation it reaches.
@@ -54,7 +54,7 @@ export function createWindSway(ctx) {
   /** The calm ambient wind at 10 m above the ground at (x, z) per unit windStrength (m/s). */
   function measureReference(x, z) {
     if (typeof wind?.ambientAt !== 'function') return;
-    const ambient = wind.ambientAt({ x, y: world.groundHeight(x, z) + PROBE_AGL, z });
+    const ambient = wind.ambientAt({ x, y: world.heightAt(x, z) + PROBE_AGL, z });
     const strength = uniforms.windStrength.value;
     if (ambient && Number.isFinite(ambient.speed) && ambient.speed > 0.05 && strength > 0.05) reference.value = ambient.speed / strength;
   }
@@ -62,7 +62,8 @@ export function createWindSway(ctx) {
   function writeCell(cellX, cellZ) {
     const x = (cellX + 0.5) * CELL;
     const z = (cellZ + 0.5) * CELL;
-    probePoint.set(x, world.groundHeight(x, z) + PROBE_AGL, z);
+    // worldgen's heightAt (not the triangulated groundHeight): close enough 10 m up, at a quarter of the cost.
+    probePoint.set(x, world.heightAt(x, z) + PROBE_AGL, z);
     wind.probe(probePoint, state.time.elapsed, sample);
     const column = ((cellX % SIZE) + SIZE) % SIZE;
     const row = ((cellZ % SIZE) + SIZE) % SIZE;
