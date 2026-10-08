@@ -51,9 +51,22 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   on the water query's swell and racing the craft's shadow; flamingos wading, flushed in a wave,
   flying as a flock and settling back); species bison, caribou, dolphin, flamingo; `faunaThreat`;
   `tools/lab/fauna-modes.mjs` (40/40).
-- **Next:** docs/engines/fauna.md, the step files (`engine-fauna-modes.json`, `challenge.json`) on
-  both backends, the builds, test:v1, the fauna / discovery / preset step files and the reduced
-  `?test=1` harness.
+- **Done:** docs/engines/fauna.md (the Phase 3 modes, params, events and far-tier behaviour); the
+  step files `tools/steps/engine-fauna-modes.json` (four species force-spawned, the herd on dry gentle
+  ground and its stampede and settle, the column on an auto route, dolphins on the swell racing the
+  shadow, flamingos wading, flushing in a wave and settling, dispose back to the memory, particle and
+  dust baselines; screenshots) and `tools/steps/challenge.json` (a fixture course: the prompt, Y arms
+  it, the arrow, splits ahead and behind, bronze then gold, a missed rect gate with +5 s, Y cancels,
+  the journal entry, cleanup; screenshots); `node tools/lab/ringsGolden.mjs` replays the six goldens
+  on the migrated code (6/6; `--record` is refused now that rings.js is migrated).
+- **Done (fixes found by the step files):** a herd's stampede clock and a flushed wader flock's flight
+  now run on at the far tier (they froze there); waders on a steep bank stand still inside its narrow
+  shallow band and spread along it instead of piling onto the centre; an unregistered course leaves
+  the start prompt at once; each challenge gate shape has its own marker mesh (swapping the geometry
+  between the ring and the rect frame broke the WebGPU post pipeline once). Labs: fauna-modes 44/44,
+  challenges 69/69, path 37/37, structure 75/75.
+- **Next:** the step files on WebGL2, the fauna / discovery / preset step files on both backends, the
+  reduced `?test=1` harness on both backends.
 - **Open issues:** none yet.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
