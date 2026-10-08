@@ -450,7 +450,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
 | 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
 | 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | not started |
-| 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | in progress |
+| 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | in progress (branch complete, awaiting I2) |
 | 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | not started |
 | P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | not started |
 | I2 | Integration pass: merge 2.0 first (before the craft branches start), then the craft branches in catalog order and the picker / director branch; `?test=craft` on both backends | `v2-phase3` | | not started |
@@ -521,9 +521,40 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
     directorProfile, faunaThreat 2.5, the creature first-person view, the perch camera orbit;
   - `src/audio/engines/creature.js`, `src/ui/instruments/perch.js`, `src/gameplay/ignition.js`
     (`ctx.ignition`), the typed `perched` event, `cameraRig.chase.orbitYaw` in the camera;
-  - `tools/lab/eagle.mjs`, `src/dev/craftScenarios/eagle.js` (perch and takeoff by hand and by the
-    copilot, ground takeoff, stoop, dragon fire).
-- **Next:** verification on both backends, then I2 merges it in catalog order.
+  - `tools/lab/eagle.mjs` (50 checks: glide polar, flapping climb, stoop, handling, thermal and
+    ridge soaring, perch capture / hold / takeoff / tailwind hop, peak and ground stands, placements,
+    the autopilot approach on flat ground, a hillside and the real CRAFT-1 tree tops, takeoffs and
+    fly-outs there, ignition, the step's allocation in a clean child process);
+  - `src/dev/craftScenarios/eagle.js` (hand-flown perch and takeoff, the copilot's "find a perch",
+    a perch placement, ground takeoff, stoop, dragon fire); the eagle script in the `?test=1`
+    harness (`testFlightScripts.js`); the eagle in `tools/steps/view-physics.json`.
+- **Edits outside the craft files** (each needed): `main.js` (`ctx.ignition`), `events.js` (`perched`
+  after `landed`), `FlightController.js` (the ability api's `ignition`), `cameraManager.js`
+  (`chase.orbitYaw`), `cockpit.js` (a custom view with `layout: []` has no panel), `craftTest.js`
+  (the perch start searched ring by ring: the 30 km search stalled the page),
+  `vegetationColliders.js` (perch queries wholly above the trees scatter nothing),
+  `testHarness.js` (comment), `tools/lab/craft.mjs` (the catalog check accepts new modules),
+  `view-physics.json` (expects every registered craft).
+- **Verified 2026-10-08** (each once unless noted; reruns named):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `run-harness --test craft` (all 14 catalog craft registered so far: 7; general test both views, every scenario) | PASS 39/39 runs, 121/121 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0 | PASS 39/39, 121/121, same |
+  | `run-harness --test craft --crafts eagle` (general + 6 scenarios, both views) | PASS 14/14, 60/60, 0/0 | PASS 14/14, 60/60, 0/0 |
+  | `run-harness --test 1` reduced (HARNESS-1/2, glider and eagle, both views, 20 s) | 0 NaN, 0 penetrations, 0 crashes, 0/0, heap growth 3.34 MB, 8/8 runs, 24/24 manoeuvres; frames over 50 ms: 89 (main thread 61, delayed 22, gc 6, systems 0; machine at 100 % CPU) | same criteria pass (heap 7.9 MB); frames over 50 ms: 146 (systems 7, run before the perch-search fix) |
+  | `run-harness --test hotas` | 140/140, 0/0 | |
+  | Step files view-physics (7/7 craft identical in every view), input-review, discovery, copilot-guide (failed once on a callout timing check while WREN was talking; passed on the rerun); creature audio in V2 (beats, screech, dragon roar and fire whoosh) | all pass, 0/0 | view-physics 7/7, creature audio, 0/0 |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 237/237; no dev kit in the V2 bundle; one three.js core | built | |
+  | Built `dist-single/v2` (eagle, dragon fire) and the built shell smoke | 0/0, screenshots differ | 0/0, screenshots differ |
+  | Labs: eagle 50, craft 66, flight-lab 82, settings 45, copilot 240, copilot-server 17, discovery 43, input 34, wingsuit 37, jet 60, helicopter 46, fpv 87, colliders 84, terrain 404 (403 first, a benchmark timing; 404 on the rerun), audio 191 (190 first, the murmuration trigger level; 191 on the rerun), fauna-modes 44, challenges 70, origin 32, water 34 (with `--expose-gc`), atmosphere 28, director 50, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden, setpiece 47, spawns 98, storage 54, structure 75, wind-engines 56 | all pass | |
+
+- **Next:** I2 merges this branch in catalog order (after the seaplane, tiltrotor, paraglider,
+  balloon and airship, before the spaceplane).
+- **Open issues:** the model step boxes about 40-50 bytes of doubles per tick (the shared ground
+  contact and landing monitor keep doubles in closures; the wingsuit measures 5-7 bytes in the same
+  child-process measure); the flame seen from straight behind reads as a glowing disc; no lantern or
+  torch registers with `ctx.ignition` until the wave 3 owners land; the per-craft copilot commands
+  and the HOTAS profile docs are Milestone O's.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
