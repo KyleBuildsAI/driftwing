@@ -1655,6 +1655,8 @@ export function createFlightController(ctx) {
     waterQuery,
     /** The WindField (ctx.wind): probe(pos), sample(pos), nearestThermal(pos), ambientAt(pos). */
     wind: ctx.wind ?? null,
+    /** What a flame can light (ctx.ignition, src/gameplay/ignition.js): the dragon's fire breath. */
+    ignition: ctx.ignition ?? null,
     notify,
     /** True while an action is held (hold-type abilities: the balloon's burner, the dragon's fire). */
     isHeld(actionId) {
