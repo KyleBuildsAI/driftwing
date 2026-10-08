@@ -232,17 +232,38 @@ function fuselageSections() {
   });
 }
 
-function buildFuselage(builder) {
-  builder.loft(fuselageSections(), (segment, face) => {
-    // Orange cowl with a charcoal anti-glare panel on its top, then a cream fuselage with an orange
-    // belly and a stripe down each side to the tail.
-    if (segment <= 1) return face === FACE.ROOF ? PALETTE.charcoal : PALETTE.orange;
-    if (segment === 2 && face === FACE.ROOF) return PALETTE.charcoal;
-    if (face === FACE.BELLY) return PALETTE.orange;
-    if (face === FACE.LOWER_LEFT || face === FACE.LOWER_RIGHT) return PALETTE.creamShade;
-    if ((face === FACE.LEFT || face === FACE.RIGHT) && segment >= 4 && segment <= 7) return PALETTE.orange;
-    return PALETTE.cream;
-  }, { capStart: PALETTE.charcoal, capEnd: PALETTE.orange });
+/** The fuselage's paint: an orange cowl with a charcoal anti-glare panel, a cream body with an orange belly and side stripes. */
+function fuselageTint(segment, face) {
+  if (segment <= 1) return face === FACE.ROOF ? PALETTE.charcoal : PALETTE.orange;
+  if (segment === 2 && face === FACE.ROOF) return PALETTE.charcoal;
+  if (face === FACE.BELLY) return PALETTE.orange;
+  if (face === FACE.LOWER_LEFT || face === FACE.LOWER_RIGHT) return PALETTE.creamShade;
+  if ((face === FACE.LEFT || face === FACE.RIGHT) && segment >= 4 && segment <= 7) return PALETTE.orange;
+  return PALETTE.cream;
+}
+
+/** Segments under the canopy, whose top faces are the cockpit deck (hidden in the cockpit view: the pilot sits in the opening). */
+const DECK_SEGMENTS = Object.freeze([3, 4]);
+const DECK_FACES = Object.freeze([FACE.UPPER_RIGHT, FACE.ROOF, FACE.UPPER_LEFT]);
+
+/** The fuselage loft into `builder`, its cockpit deck faces into `deck`. */
+function buildFuselage(builder, deck) {
+  const sections = fuselageSections();
+  const centres = sections.map((ring) => [0, 1, 2].map((axis) => ring.reduce((sum, point) => sum + point[axis], 0) / ring.length));
+  for (let segment = 0; segment < sections.length - 1; segment++) {
+    const inside = [0, 1, 2].map((axis) => (centres[segment][axis] + centres[segment + 1][axis]) / 2);
+    for (let face = 0; face < FUSELAGE_SIDES; face++) {
+      const next = (face + 1) % FUSELAGE_SIDES;
+      const target = DECK_SEGMENTS.includes(segment) && DECK_FACES.includes(face) ? deck : builder;
+      target.quad(sections[segment][face], sections[segment][next], sections[segment + 1][next], sections[segment + 1][face], fuselageTint(segment, face), inside);
+    }
+  }
+  const last = sections.length - 1;
+  for (let face = 0; face < FUSELAGE_SIDES; face++) {
+    const next = (face + 1) % FUSELAGE_SIDES;
+    builder.triangle(centres[0], sections[0][face], sections[0][next], PALETTE.charcoal, centres[1]);
+    builder.triangle(centres[last], sections[last][face], sections[last][next], PALETTE.orange, centres[last - 1]);
+  }
 }
 
 // Bubble canopy: [z, half width, height above the fuselage top]; arcs from sill to sill.
@@ -417,7 +438,8 @@ function buildMesh(ctx) {
   root.name = 'aerobatic';
 
   const airframe = createMeshBuilder();
-  buildFuselage(airframe);
+  const deck = createMeshBuilder();
+  buildFuselage(airframe, deck);
   buildWingHalf(airframe, 1);
   buildWingHalf(airframe, -1);
   buildTail(airframe);
@@ -427,6 +449,8 @@ function buildMesh(ctx) {
   // The bubble would sit around the pilot's head: the cockpit view draws its own canopy frame.
   const canopy = addSolid(root, buildCanopy(), materials.canopy);
   canopy.userData.hideInCockpit = true;
+  const cockpitDeck = addSolid(root, deck.toGeometry(null), bodyMaterial);
+  cockpitDeck.userData.hideInCockpit = true;
 
   const aileronRight = addPivot(root, buildAileron(1), bodyMaterial);
   const aileronLeft = addPivot(root, buildAileron(-1), bodyMaterial);
