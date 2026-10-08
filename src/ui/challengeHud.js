@@ -138,13 +138,21 @@ export function createChallengeHud(ctx) {
   const circleGeometry = new THREE.RingGeometry(0.93, 1, 72, 1);
   remapRingUv(circleGeometry);
   const rectGeometry = buildRectFrameGeometry(0.06);
-  const marker = new THREE.Mesh(circleGeometry, markerMaterial);
-  marker.name = 'challenge-gate-marker';
-  marker.renderOrder = 3;
-  marker.visible = false;
-  marker.frustumCulled = false;
-  scene.add(marker);
-  ctx.registerPrewarm?.(marker);
+  // One mesh per frame shape (the shapes have different attributes, so a mesh never swaps its
+  // geometry): the one matching the next gate shows.
+  const circleMarker = createMarker(circleGeometry, 'challenge-gate-marker-circle');
+  const rectMarker = createMarker(rectGeometry, 'challenge-gate-marker-rect');
+
+  function createMarker(geometry, name) {
+    const mesh = new THREE.Mesh(geometry, markerMaterial);
+    mesh.name = name;
+    mesh.renderOrder = 3;
+    mesh.visible = false;
+    mesh.frustumCulled = false;
+    scene.add(mesh);
+    ctx.registerPrewarm?.(mesh);
+    return mesh;
+  }
 
   /** RingGeometry's uv is planar; the glow wants v across the band: v = (r - inner) / (outer - inner). */
   function remapRingUv(geometry) {
@@ -302,14 +310,16 @@ export function createChallengeHud(ctx) {
   // ---- Arrow and 3D marker ---------------------------------------------------------------------------------
   function updateMarker(challenge) {
     const gate = challenge.active ? challenge.nextGate : null;
-    marker.visible = Boolean(gate);
     if (!gate) {
+      circleMarker.visible = false;
+      rectMarker.visible = false;
       markerStrength.value = 0;
       return;
     }
     const isRect = gate.shape === 'rect';
-    const geometry = isRect ? rectGeometry : circleGeometry;
-    if (marker.geometry !== geometry) marker.geometry = geometry;
+    const marker = isRect ? rectMarker : circleMarker;
+    (isRect ? circleMarker : rectMarker).visible = false;
+    marker.visible = true;
     marker.position.set(gate.x, gate.y, gate.z);
     basisNormal.set(gate.nx, gate.ny, gate.nz);
     basisUp.set(gate.ux, gate.uy, gate.uz);
@@ -448,14 +458,14 @@ export function createChallengeHud(ctx) {
         splitState: shown.splitState,
         arrow: shown.arrow === true,
         arrowMode: shown.arrowMode,
-        marker: marker.visible,
+        marker: circleMarker.visible || rectMarker.visible,
         toast: shown.toast === true,
         toastText: shown.toast ? `${parts.toastLabel.textContent} ${parts.toastTime.textContent}` : '',
         flash: shown.flash,
       };
     },
     dispose() {
-      scene.remove(marker);
+      scene.remove(circleMarker, rectMarker);
       circleGeometry.dispose();
       rectGeometry.dispose();
       markerMaterial.dispose();
