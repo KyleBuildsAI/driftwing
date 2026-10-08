@@ -426,14 +426,6 @@ export class Copilot {
     else place.phrase = ground > snowLine - 60 ? 'the high slopes just below the snowline' : 'the foothills of the Snow Peaks';
   }
 
-  /**
-   * Visually honest description of the ground around (x, z), always a noun phrase that reads after
-   * "over" or "above". The dominant biome alone misleads: 'snow' ground below the snow line is drawn
-   * as grey-green foothills, pine ground above it is white, and strong blends look like both, so the
-   * blend partner is named when its weight shows. With a heading, land is judged a little ahead
-   * (PLACE_LEAD metres), where the pilot is actually looking, unless that point is water. Returns
-   * { phrase, key, snowy, foothills, overWater, peaksNearby }.
-   */
   /** The local water body (lake, pool, film, frozen lake) at (x, z), or null (worldgen.waterBodyAt). */
   static lakeAt(world, x, z) {
     return typeof world.waterBodyAt === 'function' ? world.waterBodyAt(x, z) : null;
@@ -447,6 +439,15 @@ export class Copilot {
     return `a lake in the ${name}`;
   }
 
+  /**
+   * Visually honest description of the ground around (x, z), always a noun phrase that reads after
+   * "over" or "above". The dominant biome alone misleads: 'snow' ground below the snow line is drawn
+   * as grey-green foothills, pine ground above it is white, and strong blends look like both, so the
+   * blend partner is named when its weight shows. With a heading, land is judged a little ahead
+   * (PLACE_LEAD metres), where the pilot is actually looking, unless that point is water (the sea or a
+   * local water body, which is named as such). Returns
+   * { phrase, key, snowy, foothills, overWater, peaksNearby }.
+   */
   static describePlace(world, x, z, groundHeight, heading) {
     const PLACE_LEAD = 300;
     const groundBelow = Number.isFinite(groundHeight) ? groundHeight : world.groundHeight(x, z);
