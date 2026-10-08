@@ -84,7 +84,7 @@ export const TILTROTOR_TUNING = Object.freeze({
     RING_SAFE_SHARE: 0.2,
   }),
   /** Heading: rad/s of yaw rate per rad of error, the rate loop (pedal per rad/s) and its integral. */
-  HEADING: Object.freeze({ P: 0.8, RATE_P: 4, I: 1.5, MAX_RATE: 15 * DEG, INTEGRAL_LIMIT: 0.5, COORDINATION_SPEEDS: Object.freeze([20, 35]), SIDESLIP_GAIN: 2 }),
+  HEADING: Object.freeze({ P: 0.8, RATE_P: 4, I: 1.5, MAX_RATE: 15 * DEG, INTEGRAL_LIMIT: 0.5, COORDINATION_SPEEDS: Object.freeze([20, 35]), SIDESLIP_GAIN: 2, YAW_DAMPER: 3 }),
   PICKUP: Object.freeze({ MOVE: 0.03, SLEW: 0.5 }),
 });
 
@@ -304,7 +304,10 @@ function headingToPedal(memory, data, pedal, dt) {
     memory.headingIntegral = clamp(memory.headingIntegral + tuning.I * rateError * dt, -tuning.INTEGRAL_LIMIT, tuning.INTEGRAL_LIMIT);
   }
   const hover = memory.headingIntegral + hold;
-  const coordinated = pedal + tuning.SIDESLIP_GAIN * data.sideslip;
+  // At speed: the ball centred, and a yaw damper against the yaw rate the bank does not explain (the
+  // Dutch roll of a big, lightly damped airframe).
+  const turnRate = (9.81 * Math.tan(clamp(data.bank, -1.2, 1.2))) / Math.max(data.airspeed, 20);
+  const coordinated = pedal + tuning.SIDESLIP_GAIN * data.sideslip - tuning.YAW_DAMPER * (data.yawRate - turnRate);
   if (coordination > 0.5 || data.onGround) memory.headingTarget = heading;
   return clamp(hover + (coordinated - hover) * coordination, -1, 1);
 }
@@ -457,7 +460,8 @@ const tiltrotorAssistHandler = Object.freeze({
 
     // ---- Pedals: heading hold in the hover, coordination at speed, yaw damping -------------------------------
     let yaw = controls.yaw;
-    if (stability > 0) yaw = clamp(yaw - tuning.STABILITY.YAW_DAMPING * stability * data.hoverShare * data.yawRate, -1, 1);
+    // Yaw damping in every mode (scheduled with the control power).
+    if (stability > 0) yaw = clamp(yaw - tuning.STABILITY.YAW_DAMPING * stability * gainScale(data) * data.yawRate, -1, 1);
     if (headingWeight > 0) {
       const held = headingToPedal(memory, data, controls.yaw, dt);
       yaw = yaw + (held - yaw) * headingWeight;

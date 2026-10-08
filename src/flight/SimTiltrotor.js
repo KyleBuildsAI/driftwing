@@ -329,11 +329,13 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     aileron: 0, elevator: 0, rudder: 0, propSpeed: 0, groundSpeed: 0,
     discLeft: 0, discRight: 0, coning: tilt.coningPerLoad, rotorShare: 1, nacelle: Math.PI / 2, flaps: 1, gearPosition: 1,
   };
-  let time = 0;
   let resetCount = 0;
-  let smoothedLoad = 1;
-  /** 1: the lever spans the helicopter collective range; 0: the airplane range (updateLeverBlend). */
-  let leverBlend = 1;
+  /**
+   * Per-tick scalars, kept as fields (a double stored in a closure variable is boxed on every write):
+   * the model time (s), the smoothed load factor and the lever blend (1: the lever spans the helicopter
+   * collective range; 0: the airplane range, updateLeverBlend).
+   */
+  const scalars = { time: 0, smoothedLoad: 1, leverBlend: 1 };
   const warnings = { overspeed: false, wingStall: false, lowRpm: false, groundLimit: false, scheduleHold: false };
   /** Conversion tracking for the journal: where the current conversion started and when. */
   const conversion = { from: '', startTime: 0, lastMode: '' };
@@ -413,6 +415,8 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
   const contactBody = { position: centerPosition, velocity: state.velocity, quaternion: state.quaternion, angularVelocity: state.angularVelocity };
   const contactInputs = { brakeLeft: 0, brakeRight: 0, steering: 0, gearDown: true };
   const wingStallScratch = { left: 0, right: 0 };
+  /** The landing monitor's per-tick sample (reused). */
+  const landingSample = { dt: 0, agl: Infinity, position: state.position };
 
   function notify(text, kind = 'info') {
     bus.emit('notify', { text, kind });
@@ -601,7 +605,7 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
    */
   function updateLeverBlend(airspeed, rho) {
     const capacity = (0.5 * rho * airspeed * airspeed * tilt.corridor.wingArea * tilt.corridor.clUse * LEVER_LIFT_SHARE) / weight;
-    leverBlend = 1 - smoothstep(0, 1, capacity);
+    scalars.leverBlend = 1 - smoothstep(0, 1, capacity);
   }
 
   function proprotorForces(entry, rho, hubHeight, hoverShare, angle, dt) {
@@ -647,12 +651,13 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     // Blade pitch: the lever, the bias for the axial inflow through the disc, the governor trim and the
     // differential collective. The bias is scheduled for the governed tip speed (like a slow
     // constant-speed governor, so a rotor running fast meets the air at a higher blade angle and slows
-    // itself); an upflow (the disc tilted back into the airflow) gets none. Like the blades' built-in
-    // twist, the bias is not amplified by the edgewise flow.
+    // itself) and comes in with the airplane range of the lever (in the hover a climb's inflow is the
+    // pilot's to answer with the collective, as in a helicopter); an upflow (the disc tilted back into
+    // the airflow) gets none. Like the blades' built-in twist, it is not amplified by the edgewise flow.
     const governedTip = rotor.governed * tilt.radius;
-    const bias = Math.min(tilt.maxBias, (1.5 * Math.max(0, climb)) / governedTip);
+    const bias = Math.min(tilt.maxBias, (1.5 * Math.max(0, climb)) / governedTip) * (1 - scalars.leverBlend);
     entry.bias = bias;
-    const pitch = leverPitch(controlsActual.collective, leverBlend) + bias + rotor.governorTrim
+    const pitch = leverPitch(controlsActual.collective, scalars.leverBlend) + bias + rotor.governorTrim
       - entry.side * controlsActual.roll * tilt.differentialCollective * hoverShare;
     entry.pitch = pitch;
 
@@ -677,7 +682,7 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
 
     let thrust = thrustCoefficient * thrustScale;
     thrust *= 1 - vrs.thrustLoss * entry.vortexRing - stall.thrustLoss * bladeStall - 0.55 * lowRpmStall;
-    thrust += entry.vortexRing * vrs.roughness * (weight / 2) * noise(time, 0.7 + entry.index * 2.1, 2.3);
+    thrust += entry.vortexRing * vrs.roughness * (weight / 2) * noise(scalars.time, 0.7 + entry.index * 2.1, 2.3);
     thrust = clamp(thrust, -0.4 * weight, 1.6 * weight);
     thrustCoefficient = thrust / thrustScale;
     entry.thrust = thrust;
@@ -702,8 +707,8 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     momentBody.x += tilt.hubStiffness * entry.flap * stiffShare;
     if (bladeStall > 0) {
       const stallMoment = bladeStall * Math.abs(thrust) * tilt.radius;
-      momentBody.x += stall.pitchMoment * stallMoment * (1 + 0.3 * noise(time, 1.9 + entry.index, 6));
-      momentBody.z += entry.side * stall.rollMoment * 0.3 * stallMoment * noise(time, 3.1 + entry.index, 5);
+      momentBody.x += stall.pitchMoment * stallMoment * (1 + 0.3 * noise(scalars.time, 1.9 + entry.index, 6));
+      momentBody.z += entry.side * stall.rollMoment * 0.3 * stallMoment * noise(scalars.time, 3.1 + entry.index, 5);
     }
     // The rotor's torque reacts on the airframe about its shaft.
     momentBody.addScaledVector(entry.shaft, -tilt.rotations[entry.index] * entry.torque);
@@ -942,7 +947,7 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
 
   function step(dt, controls, env) {
     if (!(dt > 0)) return;
-    time += dt;
+    scalars.time += dt;
     ensureCraftState();
     adoptOutsideCommands();
     const rho = Number.isFinite(env.rho) ? env.rho : SEA_LEVEL_DENSITY;
@@ -981,9 +986,9 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     const wingStall = Math.max(wingStallScratch.left, wingStallScratch.right) * smoothstep(15, 25, airspeed);
     const shake = weight * 0.04 * (ring + 1.2 * bladeStall + 0.8 * wingStall + 0.2 * turbulence);
     if (shake > 0) {
-      momentBody.x += shake * noise(time, 0.3, 4.5);
-      momentBody.z += shake * 0.6 * noise(time, 4.2, 5.5);
-      momentBody.y += shake * 0.3 * noise(time, 2.1, 3.1);
+      momentBody.x += shake * noise(scalars.time, 0.3, 4.5);
+      momentBody.z += shake * 0.6 * noise(scalars.time, 4.2, 5.5);
+      momentBody.y += shake * 0.3 * noise(scalars.time, 2.1, 3.1);
     }
 
     contactInputs.brakeLeft = controlsActual.brakeLeft;
@@ -999,7 +1004,7 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     forceWorld.y -= weight;
     bodyAxis.set(0, 1, 0).applyQuaternion(state.quaternion);
     const load = nonGravity.dot(bodyAxis) / weight;
-    smoothedLoad += (load - smoothedLoad) * (1 - Math.exp(-LOAD_SMOOTHING * dt));
+    scalars.smoothedLoad += (load - scalars.smoothedLoad) * (1 - Math.exp(-LOAD_SMOOTHING * dt));
 
     angularMomentum.copy(state.angularVelocity).applyMatrix3(inertia);
     gyro.crossVectors(state.angularVelocity, angularMomentum);
@@ -1034,7 +1039,9 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     surfaces.flaps = systems.flaps;
     surfaces.gearPosition = systems.gearPosition;
     surfaces.groundSpeed = contactReport.onGround ? flightData.groundSpeed : 0;
-    landing.observe(contactReport, { dt, agl: flightData.agl, position: state.position });
+    landingSample.dt = dt;
+    landingSample.agl = flightData.agl;
+    landing.observe(contactReport, landingSample);
   }
 
   function updateFlightData(env, surfaceHeight, airspeed, hoverShare, wingStall) {
@@ -1045,7 +1052,7 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     flightData.verticalSpeed = state.velocity.y;
     flightData.aoa = Math.atan2(-bodyAir.y, -bodyAir.z);
     flightData.sideslip = airspeed > 0.5 ? Math.asin(clamp(bodyAir.x / airspeed, -1, 1)) : 0;
-    flightData.gLoad = smoothedLoad;
+    flightData.gLoad = scalars.smoothedLoad;
     flightData.rollRate = -state.angularVelocity.z;
     flightData.pitchRate = state.angularVelocity.x;
     flightData.yawRate = -state.angularVelocity.y;
@@ -1093,8 +1100,8 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     const advance = entry.advance;
     // The pitch above the bias that gives that coefficient (the bias is not amplified by the edgewise flow).
     const loadingPitch = (coefficient / tilt.thrustSlope + entry.inflow / 2 - entry.bias / 3) / (1 / 3 + (advance * advance) / 2);
-    const zero = leverPitch(0, leverBlend);
-    const span = leverPitch(1, leverBlend) - zero;
+    const zero = leverPitch(0, scalars.leverBlend);
+    const span = leverPitch(1, scalars.leverBlend) - zero;
     return clamp((loadingPitch - rotor.governorTrim - zero) / span, 0, 1);
   }
 
@@ -1130,12 +1137,12 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     if (band === '') {
       if (conversion.lastMode !== '' && conversion.from === '') {
         conversion.from = conversion.lastMode;
-        conversion.startTime = time;
+        conversion.startTime = scalars.time;
       }
       return;
     }
     if (conversion.from !== '' && band !== conversion.from && !contactReport.onGround) {
-      const seconds = time - conversion.startTime;
+      const seconds = scalars.time - conversion.startTime;
       bus.emitTyped('journalStat', { key: 'tiltrotorConversions', value: 1, op: 'add' });
       if (band === 'airplane') bus.emitTyped('journalStat', { key: 'tiltrotorFastestConversion', value: Math.round(seconds * 10) / 10, op: 'min' });
       notify(band === 'airplane' ? 'Conversion complete: airplane mode.' : 'Conversion complete: helicopter mode.', 'success');
@@ -1213,7 +1220,7 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     systems.gearPosition = systems.gearDown ? 1 : 0;
     systems.flaps = 1 - smoothstep(FLAP_SPEEDS[0], FLAP_SPEEDS[1], speed);
     engine.power = onGround ? tilt.engine.accessoryPower : 0.6 * tilt.engine.ratedPower;
-    smoothedLoad = 1;
+    scalars.smoothedLoad = 1;
     updateLeverBlend(speed, SEA_LEVEL_DENSITY);
     warnings.overspeed = false;
     warnings.wingStall = false;
@@ -1282,8 +1289,8 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
       engine: { ...engine },
       controls: { ...controlsActual },
       systems: { ...systems },
-      load: smoothedLoad,
-      time,
+      load: scalars.smoothedLoad,
+      time: scalars.time,
       contact: contact.snapshot(),
       landing: landing.snapshot(),
     };
@@ -1304,8 +1311,8 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     Object.assign(engine, data.engine);
     Object.assign(controlsActual, data.controls);
     Object.assign(systems, data.systems);
-    smoothedLoad = Number.isFinite(data.load) ? data.load : 1;
-    time = Number.isFinite(data.time) ? data.time : time;
+    scalars.smoothedLoad = Number.isFinite(data.load) ? data.load : 1;
+    scalars.time = Number.isFinite(data.time) ? data.time : scalars.time;
     contact.restore(data.contact);
     landing.restore(data.landing);
     syncOrigin();

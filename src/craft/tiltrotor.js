@@ -32,10 +32,10 @@ const simProfile = Object.freeze({
   targets: Object.freeze({
     hoverCollective: 0.5, // thrust lever share for an out-of-ground-effect hover at sea level
     hoverPower: 0.7, // share of the engines' rated power in that hover
-    verticalClimb: 6, // m/s at full lever, no airspeed (power limited)
+    verticalClimb: 12, // m/s at full lever, no airspeed (power limited)
     stallSpeed: 63, // m/s: the corridor's lower edge reaches 0 degrees (flaperons drooped)
     maxLevelSpeed: 135, // m/s in airplane mode at full lever, sea level
-    cruiseLever: 0.5, // thrust lever for 110 m/s in airplane mode
+    cruiseLever: 0.6, // thrust lever for 110 m/s in airplane mode at 1000 m
     conversionSeconds: 30, // hover to airplane mode with the auto-nacelle schedule and full lever
   }),
   mass: Object.freeze({ empty: 15000, pilot: 200, fuel: 2000, payload: 800 }), // 18 t: a light mission weight
@@ -108,11 +108,11 @@ const simProfile = Object.freeze({
   }),
   tail: Object.freeze({
     horizontal: Object.freeze({ position: Object.freeze([0, 1.0, 7.9]), area: 8.2, aspectRatio: 4.1, incidence: 1.5, elevator: 20, effect: 0.5, trimRange: 0.3 }),
-    vertical: Object.freeze({ positions: Object.freeze([Object.freeze([-3.0, 2.0, 8.3]), Object.freeze([3.0, 2.0, 8.3])]), area: 3.4, aspectRatio: 1.6, rudder: 22, effect: 0.45 }),
+    vertical: Object.freeze({ positions: Object.freeze([Object.freeze([-3.0, 2.0, 8.3]), Object.freeze([3.0, 2.0, 8.3])]), area: 4.6, aspectRatio: 1.6, rudder: 22, effect: 0.45 }),
   }),
   fuselage: Object.freeze({
     // Flat-plate drag areas (m^2) broadside, from above and head-on.
-    dragAreas: Object.freeze([26, 34, 1.8]),
+    dragAreas: Object.freeze([26, 34, 2.6]),
     dragCenter: Object.freeze([0, 0, 0.4]),
   }),
   gear: Object.freeze({ retractable: true, transitSeconds: 6, dragArea: 1 }),
