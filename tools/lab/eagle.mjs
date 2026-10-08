@@ -24,7 +24,9 @@
 //   ground      a slow touchdown on flat ground stands (graded as a landing, no perched event); a
 //               fast dive into the ground strikes the body (the soft crash)
 //   placement   a resting reset at a perch point stands on it; at a ground point stands on the ground
-//   autopilot   the copilot's perch approach (craftState.perchTarget) flies to the perch and lands
+//   autopilot   the copilot's perch approach (craftState.perchTarget) flies to the perch and lands,
+//               on flat ground, on a hillside, and at the real tree-top perches around the spawn of
+//               the CRAFT-1 world (the game's world generator and vegetation perch provider)
 //   ignition    the ignition service: add, cone, ignite once, extinguish, remove, refusals
 //   allocation  young-generation bytes per model step in flapping flight, slow flight scanning for
 //               perches and on a perch (a child process with clean type feedback; the wingsuit's step
@@ -45,6 +47,12 @@ import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
 import { createIgnitionService } from '../../src/gameplay/ignition.js';
 import { DEG, clamp } from '../../src/core/util.js';
+import { createWorldGen } from '../../src/world/worldgen.js';
+import { createColliderWorld } from '../../src/world/colliders.js';
+import { registerVegetationColliders } from '../../src/world/vegetationColliders.js';
+import { findSpawn } from '../../src/world/spawn.js';
+import { sunDirectionForDayTime, dayTimeForSunElevation } from '../../src/core/sun.js';
+import { CONFIG, WORLD_OPTIONS } from '../../src/core/config.js';
 
 const DT = 1 / 120;
 const SEA_LEVEL_RHO = 1.225;
@@ -513,6 +521,81 @@ function autopilotTest() {
   record('autopilot perch approach on a hillside, clear of the ground', hillPerchedAt === null ? -1 : hillPerchedAt, 120, { unit: 's', compare: hillPerchedAt !== null && !touched && sloped.craftState.perchKind === 'tree', decimals: 1, note: `touched the ground: ${touched}, kind ${sloped.craftState.perchKind}` });
 }
 
+/** The approach start `distance` out from a perch and `above` over it, on the side whose ground stays lowest. */
+function lowSideStart(surface, perch, distance, above) {
+  let best = null;
+  for (let index = 0; index < 16; index++) {
+    const heading = index * 22.5;
+    const radians = heading * DEG;
+    let margin = Infinity;
+    for (let along = 5; along <= distance; along += 5) {
+      margin = Math.min(margin, perch.y + (above * along) / distance - surface(perch.x - Math.sin(radians) * along, perch.z + Math.cos(radians) * along));
+    }
+    if (!best || margin > best.margin) best = { heading, margin, x: perch.x - Math.sin(radians) * distance, z: perch.z + Math.cos(radians) * distance };
+  }
+  return best;
+}
+
+function realWorldTest() {
+  const world = createWorldGen('CRAFT-1', WORLD_OPTIONS);
+  const colliders = createColliderWorld({});
+  registerVegetationColliders(colliders, world);
+  const spawn = findSpawn(world, sunDirectionForDayTime(dayTimeForSunElevation(CONFIG.START_SUN_ELEVATION_DEG, true)));
+  const ground = (x, z) => world.groundHeight(x, z);
+  const surface = (x, z) => Math.max(ground(x, z), CONFIG.WATER_LEVEL);
+  const flightWorld = { groundHeight: ground, heightAt: ground, WATER_LEVEL: CONFIG.WATER_LEVEL };
+  const perches = [];
+  colliders.perchesNear(spawn.x, ground(spawn.x, spawn.z), spawn.z, 600, (x, y, z, kind, id) => perches.push({ x, y, z, kind, id }));
+  perches.sort((first, second) => Math.hypot(first.x - spawn.x, first.z - spawn.z) - Math.hypot(second.x - spawn.x, second.z - spawn.z));
+  let tried = 0;
+  let landed = 0;
+  let touched = 0;
+  for (const perch of perches.slice(0, 12)) {
+    const start = lowSideStart(surface, perch, 160, 30);
+    if (start.margin < 4) continue;
+    tried++;
+    const rig = createRig({ assists: 1, world: flightWorld, colliders });
+    rig.env.waterLevel = CONFIG.WATER_LEVEL;
+    rig.airborne({ speed: 12.5, altitude: perch.y + 30, x: start.x, z: start.z, heading: start.heading });
+    rig.pilot.throttle = 0.3;
+    rig.craftState.perchTarget = { x: perch.x, y: perch.y, z: perch.z, kind: perch.kind, id: perch.id };
+    Object.assign(rig.autopilot, { enabled: true, heading: start.heading, altitude: perch.y + 30, speed: 12 });
+    let hit = false;
+    rig.run(110, (current) => {
+      if (current.model.phase === 'flight' && current.model.contact.onGround) hit = true;
+      return current.model.phase === 'perched';
+    });
+    if (hit) touched++;
+    else if (rig.model.phase === 'perched' && rig.craftState.perchKind === 'tree') landed++;
+    log(`real world ${perch.id}: ${rig.model.phase} ${rig.craftState.perchKind} after ${rig.time.toFixed(1)} s, ground ${hit}`);
+  }
+  record('autopilot perch approaches, CRAFT-1 tree tops around the spawn', landed, Math.ceil(tried * 0.9), { compare: tried >= 6 && landed >= Math.ceil(tried * 0.9) && touched === 0, decimals: 0, note: `${landed}/${tried} perched, ${touched} touched the ground` });
+  // From each tree top: flap off the perch, then the autopilot flies out over the low side, climbing.
+  let flown = 0;
+  let clean = 0;
+  for (const perch of perches.slice(0, 8)) {
+    const start = lowSideStart(surface, perch, 160, 30);
+    if (start.margin < 4) continue;
+    flown++;
+    const rig = createRig({ assists: 1, world: flightWorld, colliders });
+    rig.env.waterLevel = CONFIG.WATER_LEVEL;
+    rig.model.reset({ position: new THREE.Vector3(perch.x, perch.y, perch.z), quaternion: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -((start.heading + 180) % 360) * DEG), velocity: new THREE.Vector3(), onGround: true });
+    rig.pilot.throttle = 0.1;
+    rig.run(1);
+    rig.pilot.throttle = 0.85;
+    rig.run(1);
+    Object.assign(rig.autopilot, { enabled: true, heading: (start.heading + 180) % 360, altitude: perch.y + 80, speed: 13 });
+    let hit = false;
+    rig.run(25, (current) => {
+      if (current.model.contact.onGround && current.model.phase === 'flight') hit = true;
+      return false;
+    });
+    const position = rig.state().position;
+    if (!hit && rig.model.phase === 'flight' && position.y - surface(position.x, position.z) > 20) clean++;
+  }
+  record('takeoff from CRAFT-1 tree tops, then the autopilot climbs out', clean, flown, { compare: flown >= 4 && clean === flown, decimals: 0, note: `${clean}/${flown} clear of the ground` });
+}
+
 function ignitionTest() {
   const ignition = createIgnitionService();
   const lit = [];
@@ -668,6 +751,7 @@ peakTest();
 groundTest();
 placementTest();
 autopilotTest();
+realWorldTest();
 ignitionTest();
 allocationTest();
 const passed = printTable();

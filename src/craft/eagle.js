@@ -77,14 +77,16 @@ const simProfile = Object.freeze({
   roll: Object.freeze({ authority: 0.05, damping: 0.5, dihedral: 0.06, tuckLoss: 0.7 }),
   yaw: Object.freeze({ weathervane: 0.05, damping: 0.25, authority: 0.02, adverse: 0.004 }),
   // The perch (SimFlapper, "PERCH"): the feet below the centre of mass, the capture box (m: radius,
-  // above and below the bird's feet) and speed, the landing's length (s) and flare (deg), the takeoff
-  // gate (throttle) and hop, the stand and peak rules.
+  // above and below the bird's feet), the speed and the flap power under which a bird is landing,
+  // the landing's length (s) and flare (deg), the takeoff gate (throttle) and hop, the stand and
+  // peak rules.
   perch: Object.freeze({
     feet: FEET,
     captureRadius: 14,
     captureAbove: 14,
     captureBelow: 3,
     captureSpeed: 12,
+    captureFlap: 0.5,
     underRadius: 4,
     aheadCosine: 0.15,
     landSeconds: Object.freeze([0.9, 2.8]),

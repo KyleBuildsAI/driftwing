@@ -1281,8 +1281,8 @@ along the body axis drooped 6 degrees, up to 14 m, cut short by a solid collider
 ### The eagle's perch (`SimFlapper.js`)
 
 The flapper model looks for a perch every 0.1 s while the bird flies slower than `perch.captureSpeed`
-(12 m/s, below its 12.6 m/s glide): the collider service's perch points (`colliders.perchesNear`:
-tagged structure tops, the vegetation provider's tree tops) and terrain peaks (a local top higher
+(12 m/s, below its 12.6 m/s glide) and not flapping hard (under half power): the collider
+service's perch points (`colliders.perchesNear`: tagged structure tops, the vegetation provider's tree tops) and terrain peaks (a local top higher
 than two rings of samples around it and standing 3 m out of the outer one), within 14 m ahead and
 from 14 m above to 3 m below its feet, with a clear line of flight (`colliders.raycast`). A perch
 point inside a solid (a railing's volume) moves up onto its top (`liftClear`). The auto-landing is a
@@ -1295,6 +1295,13 @@ the same way (kind `ground`: a graded landing, no `perched` event); a fast one i
 resting placement (`mode: 'perch'` or `'ground'`) stands on the surface when it is at most a leg above
 it, else with its feet on the given point. The chase rig's `orbitYaw` orbits the camera round the
 perched bird after 1.5 s and eases back behind it on takeoff.
+
+The flapper autopilot's perch approach (the copilot's "find a perch", `craftState.perchTarget`)
+flies toward the perch down a shallow slope, slowing to 9.5 m/s with a light wingbeat on the final.
+Too high to glide into the capture box, after a pass without a catch, or with the ground ahead
+rising into it, it holds on a 45 m circle 85 m out over the lowest side and comes in from there.
+Without a perch target its terrain look-ahead turns it aside from ground rising faster than it can
+climb, and it never pushes for speed within 40 m of the ground.
 
 ### WindField (`ctx.wind`, `src/env/WindField.js`)
 

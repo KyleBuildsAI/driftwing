@@ -201,6 +201,8 @@ const AUTOPILOT = Object.freeze({
   PATH_DAMPING: 1.2,
   PITCH_MIN: -0.4,
   PITCH_MAX: 0.7,
+  /** Below this height over the ground (m, the feet) the push for speed fades out. */
+  PUSH_HEIGHT: 40,
   CLIMB_PER_METRE: 0.08,
   MAX_CLIMB: 2.5,
   MAX_DESCENT: 2,
@@ -213,16 +215,37 @@ const AUTOPILOT = Object.freeze({
   OUTPUT_SLEW: 2.5,
   LOOKAHEAD: Object.freeze([2, 4, 7, 10]),
   CLEARANCE: 40,
+  /** Ground ahead within this (less the climb the wingbeat manages by then) turns it EVADE_HEADING aside. */
+  EVADE_CLEARANCE: 12,
+  EVADE_HEADING: 70,
   /**
    * The perch approach: speeds far and near, the glide slope (height per metre of distance) and the
-   * band above it, the final height over the perch, and the holding circle flown to lose height (its
-   * speed, radius, offset from the perch and the ground samples that choose its side).
+   * band above it, the final height over the perch, the holding circle flown to lose height (its
+   * speed, radius, offset from the perch, how far under the reachable height it holds, the
+   * hysteresis, and the ground samples that choose its side), the glide ratio the reachable height
+   * assumes, when to turn in from the circle, and the go-around distance past the perch.
    */
   /** Holding circle law: degrees of turn toward the circle per metre off it, at most HOLD_CORRECTION. */
   HOLD_GAIN: 1.5,
   HOLD_CORRECTION: 60,
-  APPROACH: Object.freeze({ FAR: 140, NEAR: 35, SPEED_FAR: 12.5, SPEED_NEAR: 9.5, SLOPE: 0.06, MIN_ABOVE: 2, MAX_ABOVE: 60, FINAL_ABOVE: 1.5, HIGH_MARGIN: 12, SPEED_HOLD: 13.5, CIRCLE: 45, HOLD_OFFSET: 85, HOLD_ABOVE: 3, INBOUND_ANGLE: 40, GO_AROUND: 15, HOLD_SAMPLES: Object.freeze([40, 80, 120]), TERRAIN_CLEARANCE: 10 }),
+  APPROACH: Object.freeze({ FAR: 140, NEAR: 35, SPEED_FAR: 12.5, SPEED_NEAR: 9.5, SLOPE: 0.06, MIN_ABOVE: 2, MAX_ABOVE: 60, FINAL_ABOVE: 1.5, SPEED_HOLD: 13.5, CIRCLE: 45, HOLD_OFFSET: 85, HOLD_BELOW_REACH: 3, HOLD_HYSTERESIS: 4, GLIDE: 12, INBOUND_ANGLE: 40, INBOUND_MARGIN: 2, GO_AROUND: 15, FINAL_FLAP: 0.4, HOLD_SAMPLES: Object.freeze([40, 80, 120]), TERRAIN_CLEARANCE: 10 }),
 });
+
+/** +1 when the ground to the right (150-300 m out, 60 degrees aside) is lower than to the left, else -1. */
+function lowerSide(env, position, headingDegrees) {
+  let left = -Infinity;
+  let right = -Infinity;
+  for (let step = 1; step <= 2; step++) {
+    const distance = step * 150;
+    for (let side = -1; side <= 1; side += 2) {
+      const direction = (headingDegrees + side * 60) * DEG;
+      const height = surfaceHeightAt(env, position.x + Math.sin(direction) * distance, position.z - Math.cos(direction) * distance);
+      if (side < 0) left = Math.max(left, height);
+      else right = Math.max(right, height);
+    }
+  }
+  return right <= left ? 1 : -1;
+}
 
 /** The holding point of a perch approach: HOLD_OFFSET out on the side whose ground stays lowest. */
 function chooseHoldingPoint(env, target, memory) {
@@ -243,12 +266,19 @@ function chooseHoldingPoint(env, target, memory) {
       memory.holdZ = target.z + dz * tuning.HOLD_OFFSET;
     }
   }
+  // The highest ground under the holding circle (sampled round it).
+  let floor = -Infinity;
+  for (let sample = 0; sample < 12; sample++) {
+    const angle = (sample / 12) * Math.PI * 2;
+    for (const radius of [0, tuning.CIRCLE]) floor = Math.max(floor, surfaceHeightAt(env, memory.holdX + Math.sin(angle) * radius, memory.holdZ - Math.cos(angle) * radius));
+  }
+  memory.holdFloor = floor;
   memory.holdFor = target;
 }
 
 const flapperAutopilot = Object.freeze({
   createMemory() {
-    return { resetCount: -1, engaged: false, speedIntegral: 0, flapIntegral: 0, roll: 0, pitch: 0, yaw: 0, flap: 0, circling: false, holdFor: null, holdX: 0, holdZ: 0, closest: Infinity };
+    return { resetCount: -1, engaged: false, speedIntegral: 0, flapIntegral: 0, roll: 0, pitch: 0, yaw: 0, flap: 0, evadeSide: 0, circling: false, holdFor: null, holdX: 0, holdZ: 0, holdFloor: -Infinity, closest: Infinity };
   },
 
   apply(controls, context, memory) {
@@ -310,11 +340,18 @@ const flapperAutopilot = Object.freeze({
       // perch, so the approach comes in from the low side.
       memory.closest = Math.min(memory.closest, distance);
       const passed = memory.closest < tuning.NEAR && distance > memory.closest + tuning.GO_AROUND;
-      if (!memory.circling && ((heightError < -tuning.HIGH_MARGIN && distance < tuning.FAR * 1.5) || passed || terrainBelow > 0)) memory.circling = true;
+      // The most height (over the perch's top) the bird can still lose gliding in before the
+      // auto-landing's capture box: the box's own height plus a glide from here to the final.
+      const reachable = data.captureAbove - tuning.INBOUND_MARGIN + Math.max(0, distance - tuning.NEAR) / tuning.GLIDE;
+      const tooHigh = position.y - feet > reachable + tuning.HOLD_HYSTERESIS && distance < tuning.FAR * 1.5;
+      if (!memory.circling && (tooHigh || passed || terrainBelow > 0)) memory.circling = true;
       if (memory.circling) {
-        const holdHeight = feet + clamp(tuning.HOLD_OFFSET * tuning.SLOPE, tuning.MIN_ABOVE, tuning.MAX_ABOVE) + tuning.HOLD_ABOVE;
+        // The circle's height: low enough to go in from it, and clear of the ground under it.
+        const holdReach = data.captureAbove - tuning.INBOUND_MARGIN + (tuning.HOLD_OFFSET - tuning.NEAR) / tuning.GLIDE;
+        const holdHeight = Math.max(feet + holdReach - tuning.HOLD_BELOW_REACH, memory.holdFloor + tuning.TERRAIN_CLEARANCE);
+        const lowEnough = position.y - feet < reachable;
         const toPerch = wrapSignedDegrees(heading - data.heading);
-        if (position.y - holdHeight < tuning.HIGH_MARGIN * 0.3 && Math.abs(toPerch) < tuning.INBOUND_ANGLE && terrainBelow <= 0 && distance > tuning.NEAR * 1.5) {
+        if (lowEnough && Math.abs(toPerch) < tuning.INBOUND_ANGLE && terrainBelow <= 0 && distance > tuning.NEAR * 1.5) {
           memory.circling = false;
           memory.closest = distance;
         } else {
@@ -330,14 +367,22 @@ const flapperAutopilot = Object.freeze({
       if (terrainBelow > 0) climb = Math.max(climb, Math.min(AUTOPILOT.MAX_CLIMB, terrainBelow * AUTOPILOT.CLIMB_PER_METRE * 3));
     } else {
       let altitude = Number.isFinite(autopilot.altitude) ? autopilot.altitude : position.y;
-      // Terrain look-ahead: keep CLEARANCE above the ground or water along the next few seconds.
+      // Terrain look-ahead: keep CLEARANCE above the ground or water along the next few seconds;
+      // ground rising faster than the wingbeat can climb (within EVADE_CLEARANCE ahead) turns it
+      // toward the lower side until the way ahead is clear again.
+      let threatened = false;
       if (env) {
         const velocity = model.state.velocity;
-        for (const seconds of AUTOPILOT.LOOKAHEAD) {
+        for (let index = 0; index < AUTOPILOT.LOOKAHEAD.length; index++) {
+          const seconds = AUTOPILOT.LOOKAHEAD[index];
           const floor = surfaceHeightAt(env, position.x + velocity.x * seconds, position.z + velocity.z * seconds);
           altitude = Math.max(altitude, floor + AUTOPILOT.CLEARANCE);
+          if (floor + AUTOPILOT.EVADE_CLEARANCE - AUTOPILOT.MAX_CLIMB * seconds > position.y) threatened = true;
         }
+        if (threatened && memory.evadeSide === 0) memory.evadeSide = lowerSide(env, position, data.heading);
       }
+      if (!threatened) memory.evadeSide = 0;
+      if (memory.evadeSide !== 0) heading = data.heading + memory.evadeSide * AUTOPILOT.EVADE_HEADING;
       climb = clamp((altitude - position.y) * AUTOPILOT.CLIMB_PER_METRE, -AUTOPILOT.MAX_DESCENT, AUTOPILOT.MAX_CLIMB);
     }
     const slew = AUTOPILOT.OUTPUT_SLEW * dt;
@@ -345,17 +390,21 @@ const flapperAutopilot = Object.freeze({
     const bankTarget = clamp(headingError * AUTOPILOT.BANK_PER_DEGREE, -AUTOPILOT.MAX_BANK, AUTOPILOT.MAX_BANK);
     const rollTarget = clamp(AUTOPILOT.BANK_GAIN * (bankTarget - data.bank) - AUTOPILOT.ROLL_RATE_GAIN * data.rollRate, -AUTOPILOT.ROLL_LIMIT, AUTOPILOT.ROLL_LIMIT);
     // Speed by pitch: too slow -> push, too fast -> pull; the flight path rate damps the phugoid.
+    // Close to the ground it never pushes for speed (the wingbeat gains it instead).
+    const pitchMin = AUTOPILOT.PITCH_MIN * clamp(data.agl / AUTOPILOT.PUSH_HEIGHT, 0, 1);
     const speedError = data.airspeed - speed;
     const pitchUnclamped = memory.speedIntegral + AUTOPILOT.SPEED_P * speedError - AUTOPILOT.PATH_DAMPING * data.flightPathRate;
-    const pitchSaturated = (pitchUnclamped >= AUTOPILOT.PITCH_MAX && speedError > 0) || (pitchUnclamped <= AUTOPILOT.PITCH_MIN && speedError < 0);
-    if (!pitchSaturated) memory.speedIntegral = clamp(memory.speedIntegral + AUTOPILOT.SPEED_I * speedError * dt, AUTOPILOT.PITCH_MIN, AUTOPILOT.PITCH_MAX);
-    const pitchTarget = clamp(pitchUnclamped, AUTOPILOT.PITCH_MIN, AUTOPILOT.PITCH_MAX);
+    const pitchSaturated = (pitchUnclamped >= AUTOPILOT.PITCH_MAX && speedError > 0) || (pitchUnclamped <= pitchMin && speedError < 0);
+    if (!pitchSaturated) memory.speedIntegral = clamp(memory.speedIntegral + AUTOPILOT.SPEED_I * speedError * dt, pitchMin, AUTOPILOT.PITCH_MAX);
+    const pitchTarget = clamp(pitchUnclamped, pitchMin, AUTOPILOT.PITCH_MAX);
     // Total energy by flap power: the climb rate error plus the height the speed error is worth.
     const climbError = climb - data.verticalSpeed - AUTOPILOT.ENERGY_SPEED * speedError;
     const flapUnclamped = memory.flapIntegral + AUTOPILOT.FLAP_P * climbError;
     const flapSaturated = (flapUnclamped >= 1 && climbError > 0) || (flapUnclamped <= 0 && climbError < 0);
     if (!flapSaturated) memory.flapIntegral = clamp(memory.flapIntegral + AUTOPILOT.FLAP_I * climbError * dt, 0, 1);
-    const flapTarget = clamp(flapUnclamped, 0, 1);
+    // On the final of a perch approach the wingbeat stays light, so the auto-landing can catch it.
+    const flapCap = target && planar(target.x - position.x, target.z - position.z) < AUTOPILOT.APPROACH.NEAR * 1.5 ? AUTOPILOT.APPROACH.FINAL_FLAP : 1;
+    const flapTarget = clamp(flapUnclamped, 0, flapCap);
     memory.roll = moveToward(memory.roll, rollTarget, slew);
     memory.pitch = moveToward(memory.pitch, pitchTarget, slew);
     memory.yaw = moveToward(memory.yaw, clamp(AUTOPILOT.SIDESLIP_GAIN * data.sideslip, -AUTOPILOT.YAW_LIMIT, AUTOPILOT.YAW_LIMIT), slew);
@@ -510,6 +559,8 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     mass,
     cruise,
     feetHeight,
+    /** How far above a perch's top the auto-landing still catches the bird (m, its feet). */
+    captureAbove: perchProfile.captureAbove,
     resetCount: 0,
     // Read by the shared autopilot and HUD paths that look for fixed-wing fields.
     hasEngine: true,
@@ -1136,7 +1187,8 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
         if (perch.scanTimer <= 0) {
           perch.scanTimer = SCAN_SECONDS;
           const report = groundContact.report;
-          if (!report.onGround && wingData.airspeed < perchProfile.captureSpeed) scanForPerch(env, agl);
+          // A slow bird that is not flapping hard is coming in to land; a climbing one is not.
+          if (!report.onGround && wingData.airspeed < perchProfile.captureSpeed && wings.power < perchProfile.captureFlap) scanForPerch(env, agl);
         }
       }
     } else if (phase === 'landing') {
