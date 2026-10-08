@@ -65,7 +65,7 @@ function continuityHolds(api) {
   return disagreement <= CONTINUITY_TOLERANCE;
 }
 
-/** Counts far-field frames above 11 km and those with a selected tile missing. */
+/** Counts far-field frames above 11 km and those with a selected tile missing (once it has settled). */
 function watchFarField(api) {
   const memo = api.memo;
   const farField = api.ctx.systems.farField;
@@ -75,6 +75,9 @@ function watchFarField(api) {
   if (api.flight.altitude < 11000) return;
   const stats = farField.getStats();
   if (!stats.active) return;
+  // A start placed high up (a teleport) loads the far field first: count from its first complete frame.
+  if (!memo.farSettled && stats.holes > 0) return;
+  memo.farSettled = true;
   memo.farFrames++;
   if (stats.holes > 0) memo.holeFrames++;
 }
