@@ -19,7 +19,9 @@ import { MAX_VIEW_DISTANCE } from '../env/atmosphere.js';
  *   drawn keeps its ancestors cached, so the coverage only ever refines. The roots (a few 256 km tiles)
  *   load first, from 4.5 km camera altitude, before the far field draws at 6 km. The children being
  *   gathered for a split are kept with the tiles in use (never evicted before their siblings arrive),
- *   and refinement stops short of the mesh budget, so the cache never thrashes.
+ *   and refinement stops short of the mesh budget, so the cache never thrashes. After RELEASE_SECONDS
+ *   below the prefetch altitude every tile mesh is disposed (CPU arrays and GPU buffers); the next climb
+ *   rebuilds them from the worker's IndexedDB cache.
  * - Handoff with the terrain: from 6 km the far field fills the annulus beyond the terrain's coverage.
  *   In the overlap band both draw: the far-field ground sits FAR_SINK (0.2 %) of the distance lower and
  *   the two cross-fade with complementary screen-door dithers (handoffPresenceNode: the far field keeps
@@ -63,6 +65,8 @@ const SKIRT_SHARE = 0.025;
 const SKIRT_FLOOR = 40;
 /** The roots are requested from this camera altitude (m), ahead of the 6 km far-field band. */
 const PREFETCH_ALTITUDE = 4500;
+/** Below PREFETCH_ALTITUDE this long (s), the tiles give their memory back (a climb rebuilds them). */
+const RELEASE_SECONDS = 20;
 /** Reselect at least this often (s), or when the camera moved this share of its altitude. */
 const SELECT_INTERVAL = 0.25;
 const SELECT_MOVE_SHARE = 0.02;
@@ -271,7 +275,7 @@ export function createFarFieldSystem(ctx) {
   let pendingCount = 0;
   let readySinceSelect = false;
   let serviceFailed = false;
-  const counters = { requested: 0, arrived: 0, dropped: 0, evicted: 0, failed: 0 };
+  const counters = { requested: 0, arrived: 0, dropped: 0, evicted: 0, failed: 0, released: 0 };
 
   function tileKey(level, tileX, tileZ) {
     return (level * 1048576 + (tileX + 524288)) * 1048576 + (tileZ + 524288);
@@ -729,7 +733,31 @@ export function createFarFieldSystem(ctx) {
   let disposed = false;
   let active = false;
   let reprioritizeTimer = 0;
+  let lowSeconds = 0;
   const atmosphereFallback = { altitude: 0, farField: 0, handoff: 0, horizonDistance: 0 };
+
+  /**
+   * Gives every tile's memory back: drops the queued requests (answers still in flight find their
+   * record gone and are ignored), disposes every tile mesh's geometry and forgets the records. The
+   * shared index buffer and the material stay (the material's pipeline stays compiled).
+   */
+  function releaseTiles() {
+    tiles.reprioritize(() => null);
+    for (let index = 0; index < previouslyDrawnCount; index++) previouslyDrawn[index] = null;
+    previouslyDrawnCount = 0;
+    for (let index = 0; index < selectedCount; index++) selected[index] = null;
+    selectedCount = 0;
+    drawn = 0;
+    for (const mesh of group.children) mesh.geometry.dispose();
+    group.clear();
+    meshPool.length = 0;
+    meshesCreated = 0;
+    records.clear();
+    pendingCount = 0;
+    readySinceSelect = false;
+    lastSelect.timer = 0;
+    counters.released++;
+  }
 
   /** This frame's handoff band (m): its inner edge and width; the terrain's own disc is view.inner. */
   const band = { inner: 0, fade: HANDOFF_MIN_FADE };
@@ -756,8 +784,11 @@ export function createFarFieldSystem(ctx) {
         terrain.setFarFieldHandoff({ innerRadius: Infinity, fade: 0, weight: 0 });
       }
       shell.visible = false;
+      lowSeconds += realDt;
+      if (lowSeconds >= RELEASE_SECONDS && (meshesCreated > 0 || records.size > 0)) releaseTiles();
       return;
     }
+    lowSeconds = 0;
     computeBand(atmosphere);
     if (atmosphere.farField > 0) {
       if (!active) {
