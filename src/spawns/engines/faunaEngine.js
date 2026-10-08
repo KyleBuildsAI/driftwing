@@ -2442,6 +2442,17 @@ export function createFaunaEngine() {
     return waterSurface(x, z);
   }
 
+  /** The still water level at (x, z) (no swell): a lake's level, sea level over the sea, else -Infinity. */
+  const stillLevel = new Float64Array(1);
+  function stillWaterLevelAt(x, z) {
+    const query = ctx.game && ctx.game.waterQuery;
+    if (query && typeof query.staticLevelInto === 'function') {
+      query.staticLevelInto(x, z, stillLevel, 0);
+      return stillLevel[0];
+    }
+    return ctx.terrain.waterLevel;
+  }
+
   // ---- A herd's fine ground grid ----------------------------------------------------------------
   function createFineGround(spacing) {
     const cells = FINE_GRID * FINE_GRID;
@@ -3204,7 +3215,8 @@ export function createFaunaEngine() {
 
   // ---- wading birds ------------------------------------------------------------------------------
   /**
-   * Finds shallow water to stand in: depth (water height minus ground) within (0.06, depthMax), at
+   * Finds shallow water to stand in: depth (the still water level minus the ground: the swell passing
+   * over a spot must not move the shallows) within (0.06, depthMax), at
    * the anchor or the nearest point within searchRadius (rings 60 m apart, 24 bearings). Writes the
    * wading centre into HOME_X / HOME_Z and the agents' home offsets; false when there is none.
    */
@@ -3214,7 +3226,7 @@ export function createFaunaEngine() {
     const shallowAt = (x, z) => {
       const ground = groundAt(data, x, z);
       if (!isWaterAt(x, z, ground)) return false;
-      const depth = waterHeightAt(x, z) - ground;
+      const depth = stillWaterLevelAt(x, z) - ground;
       return depth > 0.06 && depth < wade.depthMax;
     };
     let found = shallowAt(Math.round(g[G.ANCHOR_X]), Math.round(g[G.ANCHOR_Z]));
