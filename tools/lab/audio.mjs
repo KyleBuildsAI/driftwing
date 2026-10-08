@@ -857,6 +857,15 @@ async function runBackend(server, port, backend, executablePath) {
       if (await page.evaluate(() => Boolean(window.DRIFTWING?.ready)).catch(() => false)) break;
       await sleep(500);
     }
+    // ready can come from the loading fade's time cap while the first pipelines still compile (a
+    // loaded machine): the live checks need the frame loop running, so wait until frames flow.
+    const flowDeadline = Date.now() + 300000;
+    while (Date.now() < flowDeadline) {
+      const startFrame = await page.evaluate(() => window.DRIFTWING?.state?.frame ?? 0).catch(() => 0);
+      await sleep(1000);
+      const endFrame = await page.evaluate(() => window.DRIFTWING?.state?.frame ?? 0).catch(() => 0);
+      if (endFrame - startFrame >= 20) break;
+    }
     summary.backend = await page.evaluate(() => window.DRIFTWING?.backend ?? null);
     check('boot', `${label} V2 ready on the requested backend`, summary.backend === (backend === 'webgl' ? 'WebGL2' : 'WebGPU'), String(summary.backend));
     await page.evaluate(installPageHelpers);
