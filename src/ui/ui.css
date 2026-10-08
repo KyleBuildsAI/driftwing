@@ -306,7 +306,8 @@
      keep that corner free, and the shell places its pill clear of the HUD in every layout. */
   html.dw-embedded #ui-root { --dw-shell-inset: 46px; }
 
-  /* Craft picker (top-left), status chips below it */
+  /* Craft picker (top-left), status chips below it. The 14 catalog craft (26 px each) fit beside the
+     compass from 1280 px up; the picker / director branch regroups them (contract h.7). */
   #ui-root .dw-modebar {
     position: absolute;
     top: calc(var(--dw-top) + var(--dw-shell-inset));
@@ -328,7 +329,7 @@
     position: relative;
     display: grid;
     place-items: center;
-    width: 32px;
+    width: 26px;
     height: 28px;
     padding: 0;
     border: 0;
@@ -343,7 +344,7 @@
   #ui-root .dw-craft-icon { width: 19px; height: 19px; overflow: visible; filter: drop-shadow(0 1px 1px rgba(8, 6, 12, 0.35)); }
   #ui-root .dw-craft-key {
     position: absolute;
-    right: 3px;
+    right: 1px;
     bottom: 1px;
     font-size: 8.5px;
     font-weight: 700;
