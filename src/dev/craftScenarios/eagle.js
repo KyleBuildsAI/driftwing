@@ -5,25 +5,28 @@
 //                         then raised flap power takes off and flies away
 //   eagle-find-perch      the copilot's "find a perch" from 160 m out: the autopilot flies the
 //                         approach, the bird perches and the approach lets go; "take off" leaves
+//   eagle-perch-placement a 'perch' placement on the nearest perch point stands on it, turns on the spot,
+//                         and flaps off; the autopilot flies out over the low side
 //   eagle-ground-takeoff  a ground placement stands on its feet; full flap power takes off and climbs
 //   eagle-stoop           the screech, then the tuck (held) folds the wings into a fast dive; released,
 //                         the wings come out again
 //   dragon-fire           the dragon skin (settings.craftSkins), fire breath held: the flame burns, the
 //                         lantern in front of it lights through ctx.ignition and the one off to the
 //                         side does not, the borrowed light comes and goes; back to the eagle after
-// Perch starts begin on the perch point at a speed too fast to catch it, then the script moves the
-// bird to its approach (flight.startAt) on the first frame, from a side where the ground stays low.
+// The perch runs start high above the world's spawn, then the script picks a perch near the spawn
+// (the same one every run of the seed: of the nearest ones, the one whose approach keeps the ground
+// lowest) and moves the bird to its approach (flight.startAt) on the first frame.
 const APPROACH_HEADINGS = 16;
+const PERCH_SEARCH = Object.freeze({ radius: 600, candidates: 12 });
 
-/** The perch nearest to the bird (colliders.perchesNear within radius), or null. */
-function nearestPerch(api, radius) {
-  const position = api.player.position;
-  let best = null;
-  api.colliders?.perchesNear?.(position.x, position.y, position.z, radius, (x, y, z, kind, id) => {
-    const distance = Math.hypot(x - position.x, y - position.y, z - position.z);
-    if (!best || distance < best.distance) best = { x, y, z, kind, id, distance };
+/** The perches near the world's spawn, nearest first (colliders.perchesNear). */
+function perchesNearSpawn(api) {
+  const spawn = api.ctx.state.spawn;
+  const found = [];
+  api.colliders?.perchesNear?.(spawn.x, api.surfaceHeight(spawn.x, spawn.z), spawn.z, PERCH_SEARCH.radius, (x, y, z, kind, id) => {
+    found.push({ x, y, z, kind, id, distance: Math.hypot(x - spawn.x, z - spawn.z) });
   });
-  return best;
+  return found.sort((first, second) => first.distance - second.distance).slice(0, PERCH_SEARCH.candidates);
 }
 
 /**
@@ -46,7 +49,7 @@ function approachStart(api, perch, distance, above) {
     if (!best || margin > best.margin) best = { heading, margin, x: perch.x - Math.sin(radians) * distance, z: perch.z + Math.cos(radians) * distance };
   }
   if (!best || best.margin < 4) return null;
-  return { mode: 'air', position: { x: best.x, y: perch.y + above, z: best.z }, heading: best.heading, speed: 10.5 };
+  return { mode: 'air', position: { x: best.x, y: perch.y + above, z: best.z }, heading: best.heading, speed: 10.5, margin: best.margin };
 }
 
 /** Bank toward a point: the roll that turns the bird onto its bearing (wings level once on it). */
@@ -72,17 +75,20 @@ function setUpApproach(api, distance, above) {
   if (api.memo.setUpFailed) throw new Error(api.memo.setUpFailed);
   if (api.memo.perch) return true;
   if (!api.once('approach')) return false;
-  const perch = nearestPerch(api, 12);
-  if (!perch) {
-    api.memo.setUpFailed = 'no perch at the start point';
-    throw new Error(api.memo.setUpFailed);
+  let perch = null;
+  let placement = null;
+  for (const candidate of perchesNearSpawn(api)) {
+    const start = approachStart(api, candidate, distance, above);
+    if (start && (!placement || start.margin > placement.margin)) {
+      perch = candidate;
+      placement = start;
+    }
   }
-  const placement = approachStart(api, perch, distance, above);
   if (!placement) {
-    api.memo.setUpFailed = `no clear approach to the ${perch.kind} perch ${perch.id}`;
+    api.memo.setUpFailed = 'no perch with a clear approach near the spawn';
     throw new Error(api.memo.setUpFailed);
   }
-  api.controller.startAt(placement);
+  api.controller.startAt({ mode: placement.mode, position: placement.position, heading: placement.heading, speed: placement.speed });
   api.memo.perch = perch;
   // The way out: back along the approach, over the low ground it was chosen for.
   api.memo.exitHeading = (placement.heading + 180) % 360;
@@ -97,7 +103,7 @@ export default Object.freeze({
     Object.freeze({
       id: 'eagle-perch-takeoff',
       views: ['third', 'first'],
-      start: { at: 'perch', mode: 'air', speed: 15 },
+      start: { at: 'spawn', mode: 'air', agl: 300, speed: 15 },
       seconds: 36,
       script(t, api) {
         const memo = api.memo;
@@ -127,7 +133,7 @@ export default Object.freeze({
     Object.freeze({
       id: 'eagle-find-perch',
       views: ['third', 'first'],
-      start: { at: 'perch', mode: 'air', speed: 15 },
+      start: { at: 'spawn', mode: 'air', agl: 300, speed: 15 },
       seconds: 100,
       script(t, api) {
         const memo = api.memo;
@@ -143,6 +149,33 @@ export default Object.freeze({
         { id: 'perched', label: 'the autopilot brings it onto a perch', until: 90, test: (api) => perched(api) },
         { id: 'released', label: 'the approach lets go once perched', until: 91, test: (api) => perched(api) && api.player.autopilot.enabled === false && api.craftState.perchTarget === null },
         { id: 'takeoff', label: '"take off" leaves the perch', until: 97, test: (api) => api.memo.takeOff?.ok === true && api.craftState.perched === false },
+      ],
+    }),
+    Object.freeze({
+      id: 'eagle-perch-placement',
+      views: ['third', 'first'],
+      // A 'perch' placement on the nearest perch point (flight.startAt, as a situate hook returns it).
+      start: { at: 'perch', mode: 'perch' },
+      seconds: 16,
+      script(t, api) {
+        const memo = api.memo;
+        if (!memo.exit && api.once('exit')) {
+          // The way out: over the side whose ground stays lowest round this perch.
+          const position = api.player.position;
+          const perch = { x: position.x, y: position.y - 0.25, z: position.z };
+          const start = approachStart(api, perch, 120, 30);
+          memo.perch = perch;
+          memo.exitHeading = start ? (start.heading + 180) % 360 : api.flight.heading;
+          memo.exit = true;
+        }
+        if (t >= 4 && api.craftState.perched === false && t >= 5) flyOut(api);
+        return { roll: 0, pitch: 0, yaw: t >= 1.5 && t < 2.5 ? 0.6 : 0, throttle: t < 4 ? 0.1 : 0.85 };
+      },
+      checks: [
+        { id: 'perched', label: 'stands on the perch point (tree, ledge or peak)', until: 1.5, test: (api) => perched(api) && api.flight.onGround && api.flight.groundSpeed < 0.05 },
+        { id: 'turns', label: 'turns on the spot with the pedals', from: 1.5, until: 3.5, test: (api) => api.craftState.perched === true && Math.abs(((api.flight.heading - api.start.heading + 540) % 360) - 180) > 20 },
+        { id: 'takeoff', label: 'flap power takes off', from: 4, until: 6, test: (api) => api.craftState.perched === false && !api.flight.onGround },
+        { id: 'away', label: 'climbs away from the perch', from: 4, until: 16, test: (api) => api.craftState.perched === false && api.memo.perch && Math.hypot(api.player.position.x - api.memo.perch.x, api.player.position.z - api.memo.perch.z) > 15 },
       ],
     }),
     Object.freeze({
