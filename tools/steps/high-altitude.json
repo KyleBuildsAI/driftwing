@@ -72,6 +72,18 @@
     "eval": "(async () => { const h = window.__dwHA; h.at(100000); const settled = await h.settle(-62); const result = await h.probe(); h.means['100km-oblique'] = result.mean; return h.check('no holes 100km-oblique (pitch -62)', !settled.timedOut && result.holes === 0, JSON.stringify({ magentaPixels: result.holes, of: result.pixels, waitedMs: settled.waitedMs, farField: { drawn: settled.stats.drawn, holes: settled.stats.holes, pending: settled.stats.pending, levels: settled.stats.levels } })); })()"
   },
   {
+    "eval": "(async () => { const h = window.__dwHA; h.at(120000); const settled = await h.settle(null); h.game.debug.stepFrames(4); return JSON.stringify({ label: '120km', atmosphere: h.atmosphere(), waitedMs: settled.waitedMs, timedOut: Boolean(settled.timedOut), farField: settled.stats && { active: settled.stats.active, drawn: settled.stats.drawn, holes: settled.stats.holes, levels: settled.stats.levels, inner: settled.stats.inner } }); })()"
+  },
+  {
+    "shot": "high-altitude-120km"
+  },
+  {
+    "eval": "(() => { const h = window.__dwHA; const a = h.state.atmosphere; const stats = h.ctx.systems.farField.getStats(); const finite = Number.isFinite(h.state.player.position.y) && Number.isFinite(h.ctx.camera.position.y) && Number.isFinite(h.ctx.camera.far); return h.check('120 km: the top of the climb, space black, 0 NaN', finite && stats.holes === 0 && stats.drawn > 0 && a.skyDarkness > 0.99 && a.starVisibility > 0.99 && h.ctx.camera.far <= 600000, JSON.stringify({ atmosphere: h.atmosphere(), drawn: stats.drawn, levels: stats.levels })); })()"
+  },
+  {
+    "eval": "(async () => { const h = window.__dwHA; h.at(120000); const settled = await h.settle(-89); const result = await h.probe(); h.means['120km-nadir'] = result.mean; return h.check('no holes 120km-nadir (pitch -89)', !settled.timedOut && result.holes === 0, JSON.stringify({ magentaPixels: result.holes, of: result.pixels, waitedMs: settled.waitedMs, farField: { drawn: settled.stats.drawn, holes: settled.stats.holes, pending: settled.stats.pending, levels: settled.stats.levels } })); })()"
+  },
+  {
     "eval": "(async () => {\n    const h = window.__dwHA;\n    const samples = [];\n    let worstHoles = 0;\n    for (let altitude = 10800; altitude <= 13200; altitude += 200) {\n      h.at(altitude, 6);\n      const settled = await h.settle(-55, 60000);\n      const result = await h.probe();\n      worstHoles = Math.max(worstHoles, result.holes);\n      samples.push({ altitude, mean: result.mean.map((value) => +value.toFixed(2)), holes: result.holes, timedOut: Boolean(settled.timedOut) });\n    }\n    let worstStep = 0;\n    for (let index = 1; index < samples.length; index++) {\n      const previous = samples[index - 1].mean;\n      const current = samples[index].mean;\n      worstStep = Math.max(worstStep, Math.abs(current[0] - previous[0]), Math.abs(current[1] - previous[1]), Math.abs(current[2] - previous[2]));\n    }\n    return h.check('the 11-13 km handoff band is steady and has no holes', worstHoles === 0 && worstStep < 6 && samples.every((sample) => !sample.timedOut), JSON.stringify({ worstStepLevels: +worstStep.toFixed(2), worstHoles, samples }));\n  })()"
   },
   {
