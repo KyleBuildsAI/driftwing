@@ -112,6 +112,21 @@ const WINGSUIT = Object.freeze({
   checks: [CHECK.autopilot, CHECK.dive, CHECK.relaunch, { id: 'canopy', label: 'canopy open', test: (seen) => seen.canopy }],
 });
 
+/** Eagle / dragon: autopilot cruise (it works the flap power), a manual bank, a stoop and pull-out. */
+const EAGLE = Object.freeze({
+  steps: [
+    { at: 0, label: 'autopilot cruise (the autopilot works the flap power)', run: (pilot) => cruise(pilot) },
+    { at: 0.3, label: 'autopilot turn 90 deg right', run: (pilot) => cruise(pilot, 90) },
+    { at: 0.48, label: 'autopilot off, manual bank right', run: (pilot) => { handsOff(pilot); pilot.throttle(0.3); pilot.stick({ roll: 0.5, pitch: 0.1, yaw: 0 }); } },
+    { at: 0.53, label: 'hands off (assists level the wings)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
+    { at: 0.6, label: 'stoop: stick pushed hard, the wings fold', run: (pilot) => { pilot.throttle(0); pilot.stick({ roll: 0, pitch: -0.9, yaw: 0 }); } },
+    { at: 0.66, label: 'pull out, wings out', run: (pilot) => pilot.stick({ roll: 0, pitch: 0.3, yaw: 0 }) },
+    { at: 0.72, label: 'hands off, flapping', run: (pilot) => { pilot.stick({ roll: 0, pitch: 0, yaw: 0 }); pilot.throttle(0.6); } },
+    { at: 0.8, label: 'autopilot cruise, turn back', run: (pilot) => cruise(pilot, -90) },
+  ],
+  checks: [CHECK.autopilot, CHECK.bank, CHECK.dive],
+});
+
 const SCRIPTS = Object.freeze({
   glider: GLIDER,
   bushplane: BUSHPLANE,
@@ -119,6 +134,7 @@ const SCRIPTS = Object.freeze({
   helicopter: HOVER,
   wingsuit: WINGSUIT,
   fpv: HOVER,
+  eagle: EAGLE,
 });
 
 /** The script for a craft ({ steps, checks }), or null when none exists. */
@@ -127,4 +143,4 @@ export function flightScriptFor(craft) {
 }
 
 /** Every craft id with a script, in the harness's run order. */
-export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv']);
+export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'eagle']);
