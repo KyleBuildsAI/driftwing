@@ -7,11 +7,11 @@
 // settings.assistsSetByPlayer records, per craft, that the player chose the assists: any change to
 // settings.assists this module did not make itself (the settings slider, WREN, a dev tool) marks
 // the craft it changed.
-import { CRAFT_IDS } from '../core/settings.js';
+import { CRAFT_IDS, HOTAS_ASSIST_LEVEL } from '../core/settings.js';
 import { HOTAS_KINDS } from '../input/hotas/devices.js';
 
-/** Assists for craft the player has not set, once a HOTAS has been seen. */
-export const HOTAS_ASSIST_LEVEL = 0.5;
+/** Assists for craft the player has not set, once a HOTAS has been seen (settings v6 applies it to new craft). */
+export { HOTAS_ASSIST_LEVEL };
 export const HOTAS_ASSIST_TOAST = 'HOTAS detected - assists set to 50%. Change them in Settings.';
 
 export function createAssistDefaults(ctx) {

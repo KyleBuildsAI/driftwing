@@ -1,9 +1,10 @@
 // Player settings: a versioned, validated schema persisted through core/storage (IndexedDB).
 //
-// Flat keys hold scalars; a few keys hold small objects (assists and views per craft, whether the
-// player set the assists, FOV per view, the audio mixer, HUD preferences, the FPV drone's camera and
-// rates).
-// get/set work on whole keys; update(key, patch) merges into an object key. Every change emits
+// Flat keys hold scalars; a few keys hold small objects (assists, views and skins per craft, whether
+// the player set the assists, FOV per view, the audio mixer, HUD preferences, the FPV drone's camera
+// and rates) and one holds a fixed-length list (the ten craft favorites).
+// get/set work on whole keys; update(key, patch) merges into an object key; list keys are replaced
+// whole (get returns a copy). Every change emits
 // 'settings:changed' { key, value, settings }.
 //
 // Bindings and calibration are not settings: the input system keeps them in their own storage keys
@@ -14,10 +15,27 @@ import { PLANET_RADIUS_KM } from '../render/curvature.js';
 import { SEED_PATTERN } from './seed.js';
 import { storage } from './storage.js';
 
-export const SETTINGS_VERSION = 5;
+export const SETTINGS_VERSION = 6;
 const STORAGE_KEY = 'driftwing-v2.settings';
 
-export const CRAFT_IDS = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv']);
+/**
+ * Every catalog craft (src/craft/registry.js), append-only: the Phase 1 six, then the eight Phase 3
+ * craft (contract h.1). Per-craft settings keep a field for each, whether its module is installed or not.
+ */
+export const CRAFT_IDS = Object.freeze([
+  'glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv',
+  'aerobatic', 'seaplane', 'tiltrotor', 'paraglider', 'balloon', 'airship', 'eagle', 'spaceplane',
+]);
+/** The craft of Phase 1 (settings records before version 6 hold these only). */
+const PHASE1_CRAFT_IDS = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv']);
+/** The number of craft favorites (keys 1-9 and 0, actions craftSelect1-10). */
+export const FAVORITE_SLOTS = 10;
+/** The favorites a first run starts with: keys 1-6 keep their Phase 1 craft (contract h.7). */
+export const DEFAULT_CRAFT_FAVORITES = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic', 'seaplane', 'eagle', 'spaceplane']);
+/** Assists for craft the player has not set, once a HOTAS has been seen (src/flight/assistDefaults.js). */
+export const HOTAS_ASSIST_LEVEL = 0.5;
+/** A skin id (craftSkins): camelCase; '' means the craft's own default skin. */
+const SKIN_PATTERN = /^[a-z][A-Za-z0-9]{0,31}$/;
 export const VIEW_IDS = Object.freeze(['chase', 'cockpit', 'wing', 'flyby']);
 /** The third-person view slots; 'cockpit' is the first-person slot (the FPV camera on the drone). */
 export const THIRD_PERSON_VIEW_IDS = Object.freeze(['chase', 'wing', 'flyby']);
@@ -35,6 +53,18 @@ export const FPV_SETTING_LIMITS = Object.freeze({
 const unitRange = (min, max) => (value) => Number.isFinite(value) && value >= min && value <= max;
 const oneOf = (list) => (value) => list.includes(value);
 const isBoolean = (value) => typeof value === 'boolean';
+const isSkinId = (value) => value === '' || (typeof value === 'string' && SKIN_PATTERN.test(value));
+/** Ten slots, each a catalog craft id or null (an empty slot), no craft twice. */
+function isFavoriteList(value) {
+  if (!Array.isArray(value) || value.length !== FAVORITE_SLOTS) return false;
+  const seen = new Set();
+  for (const slot of value) {
+    if (slot === null) continue;
+    if (!CRAFT_IDS.includes(slot) || seen.has(slot)) return false;
+    seen.add(slot);
+  }
+  return true;
+}
 
 function perCraft(value) {
   return Object.freeze(Object.fromEntries(CRAFT_IDS.map((id) => [id, value])));
@@ -68,6 +98,10 @@ const SCHEMA = Object.freeze({
   assistsSetByPlayer: { default: perCraft(false), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, isBoolean])) },
   hotasAssistsApplied: { default: false, validate: isBoolean },
   startOnGround: { default: false, validate: isBoolean },
+  // Phase 3: the ten craft favorites on the number keys (craftSelect1-10; craftNext / craftPrev cycle
+  // them, skipping empty slots) and the skin chosen per craft ('' = the module's default skin).
+  craftFavorites: { default: DEFAULT_CRAFT_FAVORITES, validate: isFavoriteList, list: true },
+  craftSkins: { default: perCraft(''), fields: Object.fromEntries(CRAFT_IDS.map((id) => [id, isSkinId])) },
   fpv: {
     default: Object.freeze({ uptilt: 25, expo: 0.3, rate: 670 }),
     fields: Object.fromEntries(Object.entries(FPV_SETTING_LIMITS).map(([field, range]) => [field, unitRange(range.min, range.max)])),
@@ -127,6 +161,12 @@ function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** A copy of a value the caller may keep (object and list keys are never handed out live). */
+function copyValue(value) {
+  if (Array.isArray(value)) return value.slice();
+  return isPlainObject(value) ? { ...value } : value;
+}
+
 /** Returns the sanitized value for key, or undefined when value cannot be used at all. */
 function sanitize(key, value) {
   const entry = SCHEMA[key];
@@ -139,7 +179,7 @@ function sanitize(key, value) {
     }
     return result;
   }
-  return entry.validate(value) ? value : undefined;
+  return entry.validate(value) ? copyValue(value) : undefined;
 }
 
 export function isValidSetting(key, value) {
@@ -193,6 +233,21 @@ function migrate(stored) {
     delete record.view;
     version = 5;
   }
+  if (version < 6) {
+    // v6 (Phase 3): eight more craft and the ten favorites. The new craft take the defaults for every
+    // per-craft key (sanitize fills them in), except that a player who already had the one-time HOTAS
+    // default applied gets it on the new craft too; the favorites start at the default list (keys 1-6
+    // keep their Phase 1 craft).
+    if (record.hotasAssistsApplied === true) {
+      const assists = isPlainObject(record.assists) ? { ...record.assists } : {};
+      for (const id of CRAFT_IDS) {
+        if (!PHASE1_CRAFT_IDS.includes(id) && !Number.isFinite(assists[id])) assists[id] = HOTAS_ASSIST_LEVEL;
+      }
+      record.assists = assists;
+    }
+    if (!isFavoriteList(record.craftFavorites)) record.craftFavorites = DEFAULT_CRAFT_FAVORITES.slice();
+    version = 6;
+  }
   record.version = version;
   return record;
 }
@@ -208,6 +263,7 @@ function loadValues() {
 }
 
 function valuesEqual(first, second) {
+  if (Array.isArray(first) && Array.isArray(second)) return first.length === second.length && first.every((value, index) => value === second[index]);
   if (isPlainObject(first) && isPlainObject(second)) {
     const keys = Object.keys(first);
     return keys.length === Object.keys(second).length && keys.every((key) => first[key] === second[key]);
@@ -236,7 +292,7 @@ export function createSettings(bus) {
     if (valuesEqual(values[key], next)) return true;
     values[key] = next;
     save();
-    const published = isPlainObject(next) ? { ...next } : next;
+    const published = copyValue(next);
     bus.emit('settings:changed', { key, value: published, settings: snapshot() });
     const alias = Object.entries(ALIASES).find(([, target]) => target.key === key);
     if (alias) bus.emit('settings:changed', { key: alias[0], value: next[alias[1].field], settings: snapshot() });
@@ -245,7 +301,7 @@ export function createSettings(bus) {
 
   function snapshot() {
     const copy = {};
-    for (const [key, value] of Object.entries(values)) copy[key] = isPlainObject(value) ? { ...value } : value;
+    for (const [key, value] of Object.entries(values)) copy[key] = copyValue(value);
     copy.masterVolume = values.mixer.master;
     return copy;
   }
@@ -254,22 +310,21 @@ export function createSettings(bus) {
   if (storage.read(STORAGE_KEY, null)?.version !== SETTINGS_VERSION) save();
 
   return {
-    /** Current value. Object values are returned as copies. */
+    /** Current value. Object and list values are returned as copies. */
     get(key) {
       const alias = ALIASES[key];
       if (alias) return values[alias.key][alias.field];
-      const value = values[key];
-      return isPlainObject(value) ? { ...value } : value;
+      return copyValue(values[key]);
     },
     all: snapshot,
 
-    /** Replaces a key (a whole object for object keys). Returns false when the value is invalid. */
+    /** Replaces a key (a whole object for object keys, the whole list for list keys). Returns false when the value is invalid. */
     set(key, value) {
       const alias = ALIASES[key];
       if (alias) return this.update(alias.key, { [alias.field]: value });
       if (!isValidSetting(key, value)) return false;
       const entry = SCHEMA[key];
-      const next = entry.fields ? { ...values[key], ...value } : value;
+      const next = entry.fields ? { ...values[key], ...value } : copyValue(value);
       return commit(key, next);
     },
 

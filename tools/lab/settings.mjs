@@ -14,6 +14,12 @@
 //   migrateV4       a version 4 record (one remembered view) seeds every craft's view from it; a
 //                   first-person view leaves the third-person memory on chase, a third-person one
 //                   seeds it too; the old key is gone
+//   migrateV5       a version 5 record (the six Phase 1 craft) gains the eight Phase 3 craft at their
+//                   defaults (at the HOTAS default when it was already applied) and the default
+//                   favorites, keys 1-6 on their Phase 1 craft; everything else is kept
+//   favorites       the ten favorites: get returns a copy, a list with a duplicate, an unknown craft
+//                   or the wrong length is refused, empty slots (null) are fine, and the list
+//                   survives a reload; skins per craft default to '' and take camelCase ids only
 //   viewsPerCraft   a view chosen for one craft leaves the others alone and survives a reload
 //   playerChange    an assists change made outside assistDefaults marks that craft as set by the
 //                   player (the slider, WREN)
@@ -23,7 +29,7 @@
 //
 // Usage: node tools/lab/settings.mjs [--verbose]
 // Prints one line per check and exits non-zero if any check fails.
-import { CRAFT_IDS, SETTINGS_VERSION, createSettings } from '../../src/core/settings.js';
+import { CRAFT_IDS, DEFAULT_CRAFT_FAVORITES, FAVORITE_SLOTS, SETTINGS_VERSION, createSettings } from '../../src/core/settings.js';
 import { storage } from '../../src/core/storage.js';
 import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
@@ -123,6 +129,55 @@ function testMigrateV4() {
   check('migrateV4', 'a third-person view seeds both memories', everyCraft(second.settings.get('views'), 'flyby') && everyCraft(second.settings.get('thirdPersonViews'), 'flyby'), JSON.stringify(second.settings.get('thirdPersonViews')));
 }
 
+const PHASE1_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv']);
+const PHASE3_CRAFT = Object.freeze(CRAFT_IDS.filter((id) => !PHASE1_CRAFT.includes(id)));
+
+function testMigrateV5() {
+  storage.write(SETTINGS_KEY, {
+    version: 5,
+    craft: 'wingsuit',
+    assists: { glider: 1, bushplane: 0.8, jet: 1, helicopter: 1, wingsuit: 1, fpv: 1 },
+    views: { glider: 'cockpit', bushplane: 'chase', jet: 'wing', helicopter: 'chase', wingsuit: 'chase', fpv: 'cockpit' },
+    units: 'aviation',
+  });
+  const { settings } = boot();
+  const stored = storage.read(SETTINGS_KEY, null);
+  check('migrateV5', `the record is saved as version ${SETTINGS_VERSION}`, stored?.version === SETTINGS_VERSION, `version ${stored?.version}`);
+  check('migrateV5', `${CRAFT_IDS.length} craft ids, the Phase 1 six first`, CRAFT_IDS.length === 14 && PHASE1_CRAFT.every((id, index) => CRAFT_IDS[index] === id), CRAFT_IDS.join(', '));
+  check('migrateV5', 'the new craft take the defaults (assists 100 %, chase view, default skin)', PHASE3_CRAFT.every((id) => settings.get('assists')[id] === 1 && settings.get('views')[id] === 'chase' && settings.get('craftSkins')[id] === ''), levels(settings));
+  check('migrateV5', 'everything else is kept', settings.get('craft') === 'wingsuit' && settings.get('assists').bushplane === 0.8 && settings.get('views').jet === 'wing' && settings.get('units') === 'aviation', `craft ${settings.get('craft')}, ${levels(settings)}`);
+  const favorites = settings.get('craftFavorites');
+  check('migrateV5', 'the default favorites, keys 1-6 on their Phase 1 craft', favorites.length === FAVORITE_SLOTS && favorites.every((id, index) => id === DEFAULT_CRAFT_FAVORITES[index]) && PHASE1_CRAFT.every((id, index) => favorites[index] === id), favorites.join(', '));
+
+  storage.write(SETTINGS_KEY, { version: 5, hotasAssistsApplied: true, assists: { glider: 0.5, bushplane: 0.5, jet: 0.9, helicopter: 0.5, wingsuit: 0.5, fpv: 0.5 } });
+  const hotas = boot();
+  check('migrateV5', `with the HOTAS default applied, the new craft start at ${HOTAS_ASSIST_LEVEL * 100} %`, PHASE3_CRAFT.every((id) => hotas.settings.get('assists')[id] === HOTAS_ASSIST_LEVEL) && hotas.settings.get('assists').jet === 0.9, levels(hotas.settings));
+  check('migrateV5', 'and they are not marked as set by the player', PHASE3_CRAFT.every((id) => hotas.settings.get('assistsSetByPlayer')[id] === false), JSON.stringify(hotas.settings.get('assistsSetByPlayer')));
+}
+
+function testFavorites() {
+  storage.remove(SETTINGS_KEY);
+  const first = boot();
+  const copy = first.settings.get('craftFavorites');
+  copy[0] = 'jet';
+  check('favorites', 'get returns a copy', first.settings.get('craftFavorites')[0] === 'glider', first.settings.get('craftFavorites').join(', '));
+  const custom = ['eagle', 'glider', null, 'jet', null, 'fpv', 'balloon', null, 'spaceplane', 'paraglider'];
+  check('favorites', 'a list with empty slots is accepted', first.settings.set('craftFavorites', custom) === true, JSON.stringify(first.settings.get('craftFavorites')));
+  custom[0] = 'airship';
+  check('favorites', "the stored list is not the caller's array", first.settings.get('craftFavorites')[0] === 'eagle', String(first.settings.get('craftFavorites')[0]));
+  const refused = [
+    ['a duplicate craft', ['glider', 'glider', null, null, null, null, null, null, null, null]],
+    ['an unknown craft', ['glider', 'zeppelin', null, null, null, null, null, null, null, null]],
+    ['nine slots', ['glider', null, null, null, null, null, null, null, null]],
+    ['not a list', { 0: 'glider' }],
+  ];
+  for (const [label, value] of refused) check('favorites', `${label} is refused`, first.settings.set('craftFavorites', value) === false, JSON.stringify(value));
+  const reloaded = boot();
+  check('favorites', 'the favorites survive a reload', JSON.stringify(reloaded.settings.get('craftFavorites')) === JSON.stringify(['eagle', 'glider', null, 'jet', null, 'fpv', 'balloon', null, 'spaceplane', 'paraglider']), JSON.stringify(reloaded.settings.get('craftFavorites')));
+  check('favorites', "skins default to the craft's own ('')", everyCraft(reloaded.settings.get('craftSkins'), ''), JSON.stringify(reloaded.settings.get('craftSkins')));
+  check('favorites', 'a camelCase skin id is kept, anything else refused', reloaded.settings.update('craftSkins', { eagle: 'dragon' }) === true && reloaded.settings.update('craftSkins', { eagle: 'Red Dragon' }) === false && reloaded.settings.get('craftSkins').eagle === 'dragon', JSON.stringify(reloaded.settings.get('craftSkins')));
+}
+
 function testViewsPerCraft() {
   storage.remove(SETTINGS_KEY);
   const first = boot();
@@ -165,6 +220,8 @@ function testPlayerChangeAndHotasDefault() {
 testFirstRun();
 testMigrateV3();
 testMigrateV4();
+testMigrateV5();
+testFavorites();
 testViewsPerCraft();
 testPlayerChangeAndHotasDefault();
 

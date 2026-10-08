@@ -1,5 +1,7 @@
-// Registers every craft module with the craft registry. The catalog in registry.js lists all six
-// craft; the ones without a registered module show as unavailable until their module lands here.
+// Registers every craft module with the craft registry. The catalog in registry.js lists all 14
+// craft; the ones without a registered module show as unavailable (disabled in the picker, refused
+// with a notice) until their module lands here. A new craft adds its import and its register line,
+// in catalog order (docs/architecture.md, "How to add a craft").
 import { craftRegistry } from './registry.js';
 import glider from './glider.js';
 import bushplane from './bushplane.js';

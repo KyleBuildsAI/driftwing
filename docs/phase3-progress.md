@@ -443,7 +443,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 | # | Work | Branch | Contract | Status |
 | --- | --- | --- | --- | --- |
-| 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | not started |
+| 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | in progress |
 | 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | not started |
 | 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | not started |
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | not started |
@@ -454,6 +454,19 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | not started |
 | P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | not started |
 | I2 | Integration pass: merge 2.0 first (before the craft branches start), then the craft branches in catalog order and the picker / director branch; `?test=craft` on both backends | `v2-phase3` | | not started |
+
+### Wave 2 - p3/craft-framework
+
+- **Done:** the catalog (`src/craft/registry.js`): the eight Phase 3 entries with their picker
+  silhouettes, `group` on every entry, `CRAFT_GROUPS` / `CRAFT_GROUP_LABELS`, `registry.groups()`,
+  `registry.entry(id)`, `createCraftRegistry(catalog, groups)` for labs, and the optional-field
+  validation of contract h.2 (abilities, inputProfile values, limits, custom cockpit, skins,
+  bindings, collision, situate, copilot, journal, directorProfile, faunaThreat, capabilities);
+  settings v6 (`CRAFT_IDS` with 14 ids, `craftFavorites` with ten slots, `craftSkins`, the
+  migration: new craft at their defaults, at 50 % when the one-time HOTAS default was applied);
+  `tools/lab/settings.mjs` 45/45.
+- **Next:** favorites actions and bindings, the controller hooks (situate, abilities, craftCommand,
+  skins), custom cockpits, the copilot action, the journal, `?test=craft`, docs.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
