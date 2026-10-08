@@ -268,10 +268,14 @@ export function createStructureEngine() {
     const wind = windDirection();
     const out = {
       turbines: [], socks: [], puffs: [], gates: [], surfaces: [], zones: [], courses: [], colliders: [],
+      challenge: null,
       wake: null, turbineSettings: null, sway: null, audioPoint: null, windProbe: null, approach: 0, radius: 20,
     };
     const context = {
       presetId: preset.id,
+      presetName: preset.name,
+      /** The preset's challenge block (recipe challengeGates), or null. */
+      challenge: preset.challenge ?? null,
       recipe: recipeName,
       params,
       site: params.site ?? null,
@@ -294,6 +298,24 @@ export function createStructureEngine() {
       },
     };
     return context;
+  }
+
+  /**
+   * A recipe's challenge course (out.challenge, a course definition in the world frame) joins the
+   * challenge system (ctx.game.systems.challenges) for the instance's life; dispose unregisters it.
+   */
+  function registerChallenge(data, definition, preset, params) {
+    if (!definition) return;
+    const challenges = ctx.game?.systems?.challenges;
+    if (!challenges || typeof challenges.register !== 'function') return;
+    data.challengeKeys.push(challenges.register(definition, { owner: `${preset.id}:${params.seed}` }));
+  }
+
+  function unregisterChallenge(data) {
+    if (data.challengeKeys.length === 0) return;
+    const challenges = ctx.game?.systems?.challenges;
+    for (const key of data.challengeKeys) challenges?.unregister?.(key);
+    data.challengeKeys = [];
   }
 
   /** Extra gates any preset adds through params.gates (site frame, relative to the ground). */
@@ -1008,6 +1030,8 @@ export function createStructureEngine() {
         previousPlayer: new Float64Array(3),
         hasPrevious: 0,
         courses: out.courses.map((course) => ({ ...course, startGate: -1, startTime: 0, crashed: false })),
+        /** Challenge course keys registered with the challenge system (recipe challengeGates). */
+        challengeKeys: [],
         zones: [],
         surfaceIds: [],
         wake: out.wake,
@@ -1113,6 +1137,7 @@ export function createStructureEngine() {
         // Landing zones (world space).
         data.zones = out.zones.map((zone) => ({ ...zone, x: anchor.x + zone.x, z: anchor.z + zone.z, y: anchor.y + zone.y }));
         registerSurfaces(data, out.surfaces, anchor, instance, colliderPrefix);
+        registerChallenge(data, out.challenge, preset, params);
         // First pose of the moving parts (an instance may start at the far tier, where they freeze).
         updateWind(data, 0);
         if (data.turbineCount > 0) updateTurbines(data, 0);
@@ -1167,6 +1192,7 @@ export function createStructureEngine() {
       removeWake(instance);
       removeSurfaces(data);
       removeStructureColliders(colliderWorld(), instance, data);
+      unregisterChallenge(data);
       releaseMeshes(data);
       if (data.nacelleSlots.length > 0) {
         freeSlots(nacelles, data.nacelleSlots);

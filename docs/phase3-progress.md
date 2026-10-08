@@ -257,6 +257,82 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   degrades and craft switches in a probe never reproduced it. The collision test now holds the
   quality at high; the shadow resize path (sky.js `applyShadowQuality`) needs a look by its owner.
 
+| 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | in progress |
+| 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | not started |
+| I1 | Integration pass: merge in the order origin, high altitude, water/regions, colliders, fauna/challenges; the follow-ups of contract appendix A; every lab and step file once on both backends | `v2-phase3` | appendix A | not started |
+
+### Wave 1 - p3/fauna-challenges
+
+- **Done:** the ring golden logs (contract f.4), recorded from the unmodified Phase 2 `rings.js`
+  before any change to it: `tools/lab/ringsGolden.mjs --record` flies six scripted flights (clean,
+  misses, abandon, teleport, cancel, restart) on a stub world with a seeded `Math.random`, and
+  writes `tools/lab/fixtures/rings-golden.json` (every bus event with its frame, a float64 digest
+  of `state.ringCourse` and `lastCrossing` per frame, full snapshots on event frames, the journal
+  calls). Re-recording reproduces the file byte for byte.
+- **Done:** `src/world/pathFollower.js` (createPath, createPathFollower with loop / pingpong / once,
+  waits and trailing cars, buildGroundPath as an A* over slope- and water-checked steps) and
+  `tools/lab/path.mjs` (37/37: arc length within 0.01 % of a fine polyline, continuity at 120 Hz,
+  modes, waits, cars, ground, determinism, ground routes, zero allocation).
+- **Done:** the challenge core `src/gameplay/challenges.js` (course validation, sequential gate
+  crossings interpolated inside the frame on the flight clock, penalty / void / count misses, sensor
+  misses, splits and deltas, medals and medal pace, bests per craft under `driftwing-v2.challenges`,
+  the best run's 10 Hz path under `driftwing-v2.challengePath.*`, start gate / armed / immediate
+  starts, Y = `challengeStart`, abandon, time limit, crash and unregister cancels, `state.challenge`),
+  the four typed events, the preset `challenge` field (validated in schema.js), the ring course
+  migrated onto the core through a legacy adapter (identical to the six Phase 2 goldens), the
+  challenge HUD (`src/ui/challengeHud.js`: prompt, edge chevron and 3D gate frame, timer with splits,
+  miss flash, medal toast), the journal's Challenges section, and `tools/lab/challenges.mjs` (68/68).
+- **Done:** the structure recipe `challengeGates` (gate frames from a preset's `challenge` block, the
+  course registered with the challenge system for the instance's life; structure lab 75/75), and the
+  engine ctx `game` handle (contract 0.4, verbatim lines).
+- **Done:** FaunaEngine ground and water-surface modes: `herd` (altitude mode `ground`, a fine ground
+  grid, slope and water avoidance, grazing, player / timer / event stampedes, pooled dust sprites),
+  `column` (PathFollower walkers, 'auto' paths from buildGroundPath), `surface` (dolphins porpoising
+  on the water query's swell and racing the craft's shadow; flamingos wading, flushed in a wave,
+  flying as a flock and settling back); species bison, caribou, dolphin, flamingo; `faunaThreat`;
+  `tools/lab/fauna-modes.mjs` (40/40).
+- **Done:** docs/engines/fauna.md (the Phase 3 modes, params, events and far-tier behaviour); the
+  step files `tools/steps/engine-fauna-modes.json` (four species force-spawned, the herd on dry gentle
+  ground and its stampede and settle, the column on an auto route, dolphins on the swell racing the
+  shadow, flamingos wading, flushing in a wave and settling, dispose back to the memory, particle and
+  dust baselines; screenshots) and `tools/steps/challenge.json` (a fixture course: the prompt, Y arms
+  it, the arrow, splits ahead and behind, bronze then gold, a missed rect gate with +5 s, Y cancels,
+  the journal entry, cleanup; screenshots); `node tools/lab/ringsGolden.mjs` replays the six goldens
+  on the migrated code (6/6; `--record` is refused now that rings.js is migrated).
+- **Done (fixes found by the step files):** a herd's stampede clock and a flushed wader flock's flight
+  now run on at the far tier (they froze there); waders on a steep bank stand still inside its narrow
+  shallow band and spread along it instead of piling onto the centre; an unregistered course leaves
+  the start prompt at once; each challenge gate shape has its own marker mesh (swapping the geometry
+  between the ring and the rect frame broke the WebGPU post pipeline once). Labs: fauna-modes 44/44,
+  challenges 69/69, path 37/37, structure 75/75.
+- **Verified (2026-10-07, dev server, one run each, reruns noted):**
+  - `tools/smoke-test.mjs`: `engine-fauna-modes.json` WebGPU and WebGL2 11/11, 0/0 console,
+    screenshots differ; `challenge.json` WebGPU 12/12 0/0; on WebGL2 the first run failed only the
+    armed check's `distance > 500` (the craft had already closed to 472 m; the threshold is now
+    100 m) and the rerun passed 12/12 0/0 (scratch streaming driver; smoke-test.mjs's Chrome
+    shutdown took 10-25 minutes per run on this machine).
+  - The same steps through a scratch driver that streams each check (identical evals, console
+    capture): `engine-fauna.json` (`seed=ENGINEFAUNA`) 11 checks, `discovery.json` 7,
+    `presets-batch1.json` (`seed=DRIFTWING`) 25, `presets-batch2.json` (`seed=HARNESS-1`) 31,
+    `presets-21-30.json` 51, all PASS with 0/0 console on both backends. Reruns: batch 2 WebGL2
+    (a WebGL context loss under GPU load on the first run), presets 21-30 on both backends (the
+    first worlds had a live waterfall site whose curtain wind source and geometries came into range
+    during three dispose checks; a navigation timeout once), challenge WebGPU (a navigation timeout).
+  - Reduced flight harness (INTEG-A and INTEG-B, glider and jet, both views, 45 s): 0 NaN, 0
+    penetrations, 0/0 console, heap growth 38.3 MB (WebGPU) and 23.4 MB (WebGL2), 8/8 runs, 24/24
+    manoeuvres. Frames over 50 ms: 18 on WebGPU and 198 on WebGL2 (INTEG-A's WebGL2 runs at a
+    65-80 ms median), nearly all main-thread / GPU time; the systems-attributed ones are flight
+    41 ms and terrain 88 ms frames each with a 10-23 MB GC inside, none in the challenge, HUD or
+    fauna systems.
+  - `npm run build`, `npm run build:single` (V1 SHA-256 matches), `npm run test:v1` 2/2,
+    `tools/docs-check.mjs` 233/233; labs: fauna-modes 44/44, challenges 69/69, path 37/37,
+    structure 75/75, spawns 98/98, discovery 39/39, ringsGolden 6/6.
+- **Next:** none on this branch (ready for the wave 1 integration pass).
+- **Open issues:** the challenge core keeps its own plane test (`crossGate`, the Phase 2 ring
+  course's math operation for operation, with rect gates) instead of `gateDetector.crossGates`,
+  which the golden logs need; the integration pass adds `challenges.count()` to the spawn check
+  kit's dispose baseline and the rigid curvature drop to the fauna group roots (contract appendix A).
+
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
 | # | Work | Branch | Contract | Status |

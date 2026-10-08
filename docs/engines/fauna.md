@@ -2,12 +2,17 @@
 
 The fauna engine draws and simulates groups of animals: instanced boids with per-preset rule sets.
 It covers the starling murmuration, the geese V-formation, thermal hawks, the eagle wingman, the
-whale pod and the sky whale. Phase 3 adds species (ground herds, dolphins, flamingos, bats,
-butterflies) and behaviours on the same engine.
+whale pod and the sky whale, and since Phase 3 the ground and water surface: terrain-following
+herds that stampede with dust (bison), columns of walkers along a path (caribou), dolphins that
+ride the swell and race your shadow, and flamingos that wade and flush in a wave. Bats,
+butterflies and camels join with their presets in wave 3.
 
 - Code: `src/spawns/engines/faunaEngine.js` (behaviours, buffers, shader).
 - Species meshes and animation constants: `src/spawns/engines/faunaSpecies.js`.
-- Test steps: `tools/steps/engine-fauna.json`. Cost and allocation check: `tools/engine-cost.mjs --engine fauna`.
+- Test steps: `tools/steps/engine-fauna.json` and `tools/steps/engine-fauna-modes.json` (the Phase 3
+  modes). Labs: `tools/lab/fauna-modes.mjs` (herds, stampedes, columns, flamingos, dolphins,
+  allocation) and `tools/lab/path.mjs` (the PathFollower). Cost and allocation check:
+  `tools/engine-cost.mjs --engine fauna`.
 
 Preset authors use this page as the reference. A preset names the engine as
 `{ engine: 'fauna', params: { ... } }`. One engine entry is one group of one species following one
@@ -26,7 +31,13 @@ A bad `species`, `behavior` or `count` throws a clear error that names the field
 - **Animation in the vertex shader.** The shader builds each agent's basis (forward, banked right,
   up). Birds fold their wings at the hinge and flap about the body axis like the v1 birds, bending
   more toward the tips, and hold a glide dihedral between flaps. Whales undulate from the tail start
-  to the flukes as a travelling wave, and their pectoral fins sweep.
+  to the flukes as a travelling wave, and their pectoral fins sweep. Quadrupeds swing their legs
+  about the hip in diagonal pairs, wider from walk to run, and bob; standing still freezes them. A
+  wading bird folds (wings tucked, legs down, neck up) when its gate goes below 0, and in flight its
+  legs trail straight back and its neck reaches forward.
+- **Dust.** Herds and columns raise soft dust puffs from one shared sprite (2048 billboards, one
+  draw call). Each group owns a block of slots (at most 256), counted in its particles; when the
+  pool is full a new group simply raises none.
 - **Far visibility.** Far away a small agent is drawn at least `minPixels` tall, so a murmuration
   reads as a dark cloud from kilometres out.
 - **Floating origin.** Positions reach the GPU relative to an origin near the camera, so they stay
@@ -52,6 +63,9 @@ A bad `species`, `behavior` or `count` throws a clear error that names the field
 | `pod` | whales travel at the surface: they spout, dive fluke-up and sometimes breach in full with a splash. They leave wakes in the water layer, which glow inside a bioluminescent bay | whale pod |
 | `wingman` | a large bird waits, joins off the player's wing, matches speed within its limits for `escortSeconds`, then peels off with a call | eagle wingman |
 | `drift` | colossal animals drift along their heading at a cruise altitude with a slow bob and undulation. An optional slipstream wind source trails the leader as a speed and lift lane | sky whale |
+| `herd` | a terrain-following herd (altitude mode `ground`): grazing and walking on the ground, never onto slopes over `herd.slopeLimit` (rise over 6 m) or into water within `herd.waterMargin`. A stampede (the player buzzing it, a timer, or `setParam('stampede', 1)`) runs it away from the trigger, bent downhill, raising dust | herd stampede (49), migration convergence (97) |
+| `column` | a long line of walkers along a PathFollower path (src/world/pathFollower.js): a path given in the spawn frame, or `'auto'` (buildGroundPath around slopes and water). Lanes, spacing and jitter; a pure function of flight time | caribou migration (52), oasis caravan (58) |
+| `surface` | animals on the water surface of `ctx.game.waterQuery` (the ocean and local lakes, with the swell). Swimmers (a whale kind: dolphins) porpoise and race the craft's shadow when it flies low over the water; wading birds (flamingos) stand in the shallows, take off in a wave when buzzed, fly as a flock and settle back | dolphin pod (44), flamingo lake (50) |
 
 ## Species
 
@@ -63,14 +77,21 @@ A bad `species`, `behavior` or `count` throws a clear error that names the field
 | `eagle` | bird | 2.1 span | 18 | 9..36 | 3 | 8 |
 | `whale` | whale | 14 long | 3 | 0.8..7 | 0 | 24 |
 | `skyWhale` | whale | 1 long (scale it with `size`) | 7 | 2..16 | 0 | 4 |
+| `bison` | quadruped | 3.1 long | 1.2 | 0..14 | 1.6 | 512 |
+| `caribou` | quadruped | 2.0 long | 1.6 | 0..16 | 1.4 | 2048 |
+| `dolphin` | whale | 2.4 long | 5 | 1..11 | 1.3 | 128 |
+| `flamingo` | bird (wading) | 1.5 span | 14 | 0..22 | 1.8 | 512 |
 
 - **Capacity is per species, across every live group.** A `create()` that does not fit throws
   `fauna: no room for N more <species>`, and the SpawnManager refuses the spawn.
 - **The engine budget** (`DIRECTOR_BUDGETS.engines.fauna`, 8 instances and 12000 particles) caps
   the total. Each group counts its agents as particles.
-- **Adding a species (Phase 3).** Add an entry to `SPECIES` in faunaSpecies.js with the fields
-  listed in that file's header (`kind` is `bird` or `whale`). Its pool is built in `init()`
-  automatically.
+- **Adding a species.** Add an entry to `SPECIES` in faunaSpecies.js with the fields listed in that
+  file's header (`kind` is `bird`, `whale` or `quadruped`; a bird with `wade` wades). Its pool is
+  built in `init()` automatically.
+- **Kinds and behaviours.** Quadrupeds only `herd` or walk in a `column` (altitude mode `ground`);
+  `surface` takes a whale kind (swimming) or a wading bird. Anything else is refused with an error
+  naming the field.
 
 ## Parameters
 
@@ -88,7 +109,7 @@ accept a range, drawn once per group from the spawn's seeded generator.
 | `size` | factor | 0.1..400 | 1 | scales the species mesh: a sky whale uses about 200-260, which makes it 200-260 m long. The activation's `scale` multiplies it |
 | `sizeJitter` | fraction | 0..0.5 | 0.15 | each agent's size varies by up to plus or minus this share |
 | `speed` | m/s | > 0 | the species' cruise | cruise speed. The species' top speed rises to 1.2 x this when it is higher |
-| `altitude` | `{ mode, value, spread, ceiling }` | | `{ mode: 'agl', value: 120, spread: 20, ceiling: 2500 }` | `mode`: `'agl'` (m above the ground), `'msl'` (m above sea level, kept at least `floor` + 10 m above the ground), `'water'` (on the water surface) or `'player'` (the player's own height when the group is created, plus `value` and the `spread` jitter, kept between `floor` + 30 m and `ceiling` m above the ground there; from then on the group holds that height above sea level, so a flock you are flying toward is at your height). `spread`: the agl and player start heights vary by plus or minus this many metres. Pods always sit on the water |
+| `altitude` | `{ mode, value, spread, ceiling }` | | `{ mode: 'agl', value: 120, spread: 20, ceiling: 2500 }` | `mode`: `'agl'` (m above the ground), `'msl'` (m above sea level, kept at least `floor` + 10 m above the ground), `'water'` (on the water surface: the shared water query's ocean and lakes, with the swell, where the game has one), `'ground'` (standing on the ground and the extra ground surfaces; herds and columns, their default) or `'player'` (the player's own height when the group is created, plus `value` and the `spread` jitter, kept between `floor` + 30 m and `ceiling` m above the ground there; from then on the group holds that height above sea level, so a flock you are flying toward is at your height). `spread`: the agl and player start heights vary by plus or minus this many metres. Pods always sit on the water |
 | `floor` | m AGL | 0..500 | 15 | agents steer up before going below this height over the ground |
 | `wander` | factor | 0..1 | 0.06 | how much the group's heading meanders |
 | `leash` | m | 50..20000 | 600 | how far a wandering group (murmuration, flock) may stray from its anchor before it curves back. A formation that is not following the player turns back at 4 x leash |
@@ -237,6 +258,76 @@ fades in with `fadeIn`. The source kind is `'slipstream'` and its id is
 | `trigger` | trigger name | `'call'` | the voice trigger for songs and calls |
 | `interval` | s or `[min, max]` or null | null | periodic calls for every behaviour except pod (which uses `pod.callInterval`). A sky whale preset sets it, for example `[20, 45]` |
 
+### herd
+
+| field | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `slopeLimit` | rise over run | 0..5 | 0.45 | no animal steps onto ground steeper than this (rise over 6 m, the gradient on the herd's fine ground grid) |
+| `waterMargin` | m | >= 0 | 8 | the herd keeps this far from water (the shared water query, or the sea) |
+| `gaits` | `{ walk, trot, run }` m/s | rising | `{ walk: 1.3, trot: 4, run: 11 }` | the legs' stride widens from walk to run; dust rises above 0.8 x trot |
+| `cohesion` | gain | >= 0 | 0.5 | |
+| `spacing` | m | > 0 | 6 | between animals (a loose sunflower around the herd's goal, turned to its heading) |
+| `graze` | 0..1 | | 0.55 | the share of the time an animal stands grazing; the herd drifts at walk x (1 - 0.6 graze) |
+| `stampede` | object | | see below | |
+| `dust` | `{ rate, size, color }` | | `{ rate: 5, size: 5, color: 0xb39876 }` | puffs a second per running animal (0..60), their size (m) and sRGB colour |
+
+`stampede`: `{ trigger: 'player' | 'timer' | 'event', radius: 260, speed: null (gaits.run), duration: 22, interval: 120, cooldown: 45, downhill: 0.6, maxAltitude: 350 }`.
+`player`: the craft within `radius` (horizontal, times the square root of the craft's
+`faunaThreat`) and under `maxAltitude` m above the herd starts it; `timer`: one every `interval`
+seconds from a side that turns with the group clock; `event`: only `setParam('stampede', 1)` (a set
+piece). It runs `duration` seconds away from the trigger, bent downhill by `downhill`, then the herd
+settles back to a walk; `cooldown` seconds pass before the next. A stampede's clock keeps running
+while the herd is hidden at the far tier, so a herd left mid-run is walking when the player returns.
+
+A herd reads the ground through its own fine grid (9 x 9 cells of 8 m or more, sized to the herd),
+re-centred on the herd in whole cells, one cell probed every fourth frame (every second while it
+stampedes), at integer coordinates. A herd whose anchor stands on steep ground or water looks for
+clear ground within 1.5 km; with none it ends at once.
+
+### column
+
+| field | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `path` | `'auto'` or `{ points: [[along, across], ...], closed?, smoothing? }` | | `'auto'` | the route in the spawn frame (metres along the heading and across to the right); `'auto'` plans one with buildGroundPath from the anchor `length` metres along the heading, around slopes over `maxSlope` and water. The route is resampled every `resample` metres onto the ground |
+| `length` | m | > 0 | 2600 | the 'auto' route's reach |
+| `spacing` | m | > 0 | 5 | between rows |
+| `lanes` | count | 1..8 | 2 | animals abreast |
+| `laneWidth` | m | >= 0 | 3.2 | |
+| `speed` | m/s | > 0 or null | the species' cruise | |
+| `jitter` | m | >= 0 | 0.6 | each walker's own offset across (and twice along) the line, and a slow sway |
+| `mode` | `'loop'`, `'pingpong'`, `'once'` | | `'pingpong'` | the PathFollower mode (a closed path loops) |
+| `maxSlope` | rise over run | > 0 or null | `herd.slopeLimit` | for the 'auto' route |
+| `resample` | m | >= 2 | 8 | |
+| `dust` | `{ rate, size, color }` | | `{ rate: 0, size: 4, color: 0xc4ab84 }` | a caravan in sand sets a rate |
+
+The column is a pure function of flight time: the PathFollower places every walker (`carAtFrom`),
+so two runs (or two clients) at the same flight time see the same column.
+
+### surface
+
+| field | unit | default | notes |
+| --- | --- | --- | --- |
+| `spread` | m | 10 | swimmers' lanes around the group |
+| `porpoise` | `{ height, interval }` | `{ height: 2, interval: [3, 7] }` | swimmers leap `height` metres every `interval` seconds, with splashes on the water layer |
+| `raceShadow` | `{ radius, boost, maxAltitude }` | `{ radius: 700, boost: 1.8, maxAltitude: 260 }` | with the craft within `maxAltitude` m of the water and its shadow (along the sun) over open water within `radius` m, the swimmers head for the shadow at up to `boost` x cruise (`fauna:race`) |
+| `wade` | object | see below | wading birds |
+
+`wade`: `{ depthMax: 0.6, flushRadius: 150, takeoffWave: { delay: 0.35, spread: 0.6 }, flySeconds: [25, 45], flyAltitude: 45, flyRadius: 260, spacing: 2.2, searchRadius: 1600 }`.
+The flock finds shallow water (depth under `depthMax`) at the anchor or within `searchRadius` and
+stands there, each bird on its own spot (shuffling about it, or still where the shallow band is under
+a couple of metres wide). The craft within `flushRadius` (times its `faunaThreat`)
+flushes it: every bird takes off `delay` seconds per 10 m from the craft later than the nearest
+(plus a seeded `spread`), runs along the water with splashes, climbs, flies as a flock on a circle of
+`flyRadius` over the water at `flyAltitude` for `flySeconds`, then glides back and settles; 20 s
+later it can be flushed again. A flock flushed and left at the far tier lands at home once the
+longest `flySeconds` and 25 s of glide are over. With no shallows in reach the group ends at once.
+
+### Predators
+
+The scatter radius (and a herd's stampede reach, and a wading flock's flush radius) scale with the
+active craft module's `faunaThreat` (a number, default 1; the eagle sets 2.5): the scatter radius by
+the threat, the burst by up to 2x, a stampede's reach by its square root. `stats().threat` reports it.
+
 ### Behaviour defaults
 
 Each behaviour applies these under the preset's own values:
@@ -247,6 +338,8 @@ Each behaviour applies these under the preset's own values:
 | `formation` | `scatter: { radius: 7, burst: 14, recover: 2.5, spread: 0.6 }` |
 | `circling` | `scatter: { radius: 35, burst: 12, recover: 3, spread: 0 }` |
 | `pod`, `wingman`, `drift` | `scatter: null` (they never scatter) |
+| `herd`, `column` | `scatter: null`, `altitude: { mode: 'ground', value: 0, spread: 0 }`, `fadeIn: 0.8`, `sizeJitter: 0.08` |
+| `surface` | `scatter: null`, `altitude: { mode: 'water', value: 0, spread: 0 }` |
 
 ## Allocation
 
@@ -268,7 +361,14 @@ measured 0.86 B per frame (0.02 heap samples, under the 0.1 limit) with every be
 
 What the engine calls can still allocate, and the check reports it separately. The terrain height
 function (worldgen) allocates about 1 KB per query. The ground probe asks for one height every 16
-frames per group, at integer coordinates, which comes to about 400 B per frame with six groups.
+frames per group, at integer coordinates, which comes to about 400 B per frame with six groups. A
+herd's fine grid asks for one every fourth frame (every second while it stampedes), and a swimming
+group refreshes one animal's water height every second frame (the query returns a double). The
+dolphins' shadow check probes the terrain twice a second. The frame's time step reaches the Phase 3
+helpers through a typed register (`frameStep`), never as an argument: the engine's update inlines a
+great deal, and a double handed to a call it cannot inline any more is boxed. The fauna modes lab
+measures the new behaviours at or below a Phase 2 group's own per-group cost (0.5 B against 1.8 B
+per group and frame on its stub world).
 
 ## LOD
 
@@ -301,6 +401,7 @@ voice is disposed with the instance.
 | `whale` | pod | `call` on `pod.callInterval` and on every breach |
 | `skyWhale` | drift | `call` on `calls.interval` |
 | any | wingman | `wingman.trigger` on joining and peeling off |
+| any | herd | none; the voice level follows the herd's gait (0.3 at a walk, 1 in a stampede: the rumble) |
 
 **Quiet wildlife.** While any source holds the typed `wildlifeQuiet` event (the celestial engine's
 eclipse through totality), every fauna group falls silent: no calls, breach calls or scatter cries,
@@ -315,6 +416,9 @@ and the voice level drops to 0 (the audio engine eases it out). The animals keep
 | `fauna:formation` | `{ id, presetId, state: 'enter' \| 'leave' \| 'complete', seconds, slot: { x, y, z } }` | the player enters or leaves the slot, or completes the hold |
 | `fauna:call` | `{ id, presetId, species, reason: 'join' \| 'peel', position }` | the wingman joins or peels off (the copilot can voice it) |
 | typed `achievement` | `{ id, title }` | a formation with `formation.achievement` completes (once per spawn) |
+| `fauna:stampede` | `{ id, presetId, species, trigger: 'player' \| 'timer' \| 'event', position }` | a herd starts a stampede |
+| `fauna:flush` | `{ id, presetId, species, count, position }` | a wading flock is flushed |
+| `fauna:race` | `{ id, presetId, species, racing }` | swimmers start or stop racing the craft's shadow |
 
 The engine object (`ctx.systems.spawns.manager.registry.get('fauna')`) has two read-only queries:
 
@@ -323,8 +427,11 @@ The engine object (`ctx.systems.spawns.manager.registry.get('fauna')`) has two r
   Read it, and never keep it past the spawn. Its numbers are accessors over the group's live state,
   so read them when you need them. A preset's achievement logic, the HUD or the copilot can poll it,
   or listen to `fauna:formation`.
-- `describe(spawnId)` returns `{ species, behavior, count, center, radius, excited, mode, playerDistance, hidden, wind }`
+- `describe(spawnId)` returns `{ species, behavior, count, center, radius, excited, mode, playerDistance, hidden, wind, stampede, gait, dust, pathLength, airborne, leaping, flushed, racing }`
   for dev tools and tests. Wingman `mode` is 0 waiting, 1 joining, 2 escorting or 3 peeling.
+- `setParam(instance, name, value)` (the set-piece engine's live params): `'stampede'` (a value of
+  0.5 or more starts a herd's stampede from the player's side: the `event` trigger) and `'flush'`
+  (takes a wading flock off). Returns whether the param is known for that group.
 
 ## Example params
 
@@ -341,6 +448,14 @@ The engine object (`ctx.systems.spawns.manager.registry.get('fauna')`) has two r
 { engine: 'fauna', params: { species: 'whale', behavior: 'pod', count: [3, 6], pod: { breachChance: 0.3 } } }
 // Sky whale with its slipstream lane
 { engine: 'fauna', params: { species: 'skyWhale', behavior: 'drift', count: [1, 3], size: 230, altitude: { mode: 'msl', value: 1400 }, drift: { slipstream: true }, calls: { interval: [20, 45] } } }
+// Bison herd that stampedes when buzzed
+{ engine: 'fauna', params: { species: 'bison', behavior: 'herd', count: [30, 60], herd: { stampede: { trigger: 'player', radius: 260 } } } }
+// Caribou migration on a planned route
+{ engine: 'fauna', params: { species: 'caribou', behavior: 'column', count: [150, 300], column: { path: 'auto', length: 4000, lanes: 3 } } }
+// Dolphins that race your shadow
+{ engine: 'fauna', params: { species: 'dolphin', behavior: 'surface', count: [5, 9], surface: { raceShadow: { radius: 800 } } } }
+// Flamingos wading in a lake's shallows
+{ engine: 'fauna', params: { species: 'flamingo', behavior: 'surface', count: [40, 80], surface: { wade: { depthMax: 0.5 } } } }
 ```
 
 ## Cost

@@ -23,7 +23,7 @@ const BINDING_GROUPS = Object.freeze([
   { id: 'flight', label: 'Flight', targets: ['craftAbility', 'gearToggle', 'flapsDown', 'flapsUp', 'airbrake', 'engineToggle', 'chuteDeploy', 'autopilotToggle'] },
   { id: 'view', label: 'View', targets: ['viewCycle', 'viewToggle1P3P', 'viewForward', 'viewBack', 'viewLeft', 'viewRight', 'recenterView', 'photoMode'] },
   { id: 'craft', label: 'Craft', targets: ['craftNext', 'craftPrev', 'craftSelect1', 'craftSelect2', 'craftSelect3', 'craftSelect4', 'craftSelect5', 'craftSelect6', 'relaunch'] },
-  { id: 'gameplay', label: 'Gameplay', targets: ['copilotPTT', 'waypointAhead', 'waypointNearest', 'ringCourse', 'timeForward', 'timeBack'] },
+  { id: 'gameplay', label: 'Gameplay', targets: ['copilotPTT', 'waypointAhead', 'waypointNearest', 'ringCourse', 'challengeStart', 'timeForward', 'timeBack'] },
   { id: 'ui', label: 'Interface', targets: ['journal', 'mapToggle', 'settings', 'controlsPanel', 'versionToggle'] },
 ]);
 const KIND_ORDER = Object.freeze({ keyboard: 0, gamepad: 1, 'hotas-stick': 2, 'hotas-throttle': 3, 'hotas-pedals': 4 });

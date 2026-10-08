@@ -1,7 +1,8 @@
 // The journal panel's body (J, the 'journal' action): this world's totals, its spawn discoveries
 // with the collection count (x / N over the implemented presets), the global records (storms chased,
 // closest tornado, best canyon run, best landing and any other statistic a preset sends), the
-// achievements, the biomes, the Phase 1 landmarks, ring courses and this world's landings. Everything
+// achievements, the challenge bests (per course and craft, with medals), the biomes, the Phase 1
+// landmarks, ring courses and this world's landings. Everything
 // is read from the journal system (src/gameplay/journal.js); the panel shell and its opening belong
 // to ui.js.
 import './journalPanel.css';
@@ -162,6 +163,35 @@ export function createJournalPanel({ body, seedLabel, ctx }) {
     return html.join('');
   }
 
+  // ---- Challenges (every world) -----------------------------------------------------------------------
+  const MEDAL_LABELS = { gold: 'Gold', silver: 'Silver', bronze: 'Bronze' };
+  /** Best time and medal per course and craft, newest best first; the course key's seed names the world. */
+  function challengesHtml(records) {
+    const courses = records && records.courses && typeof records.courses === 'object' ? Object.entries(records.courses) : [];
+    const rows = [];
+    for (const [courseKey, course] of courses) {
+      for (const [craft, best] of Object.entries(course?.best ?? {})) {
+        if (!best || !Number.isFinite(best.time)) continue;
+        rows.push({ courseKey, name: course.name || courseKey, craft, best, seed: courseKey.split(':')[0] });
+      }
+    }
+    rows.sort((a, b) => (b.best.date || 0) - (a.best.date || 0));
+    const medals = rows.filter((row) => MEDAL_LABELS[row.best.medal]).length;
+    const html = [`<div class="dw-group dw-challenges"><div class="dw-group-head"><h3 class="dw-micro">Challenges · every world</h3>${rows.length > 0 ? `<span class="dw-collection" data-stat="challenge-medals">${medals} ${medals === 1 ? 'medal' : 'medals'}</span>` : ''}</div>`];
+    if (rows.length === 0) {
+      html.push('<p class="dw-empty">No challenge flown yet. Gate courses wait at some sites: fly through the start gate, or press the challenge key near one, and your best time per craft is kept here.</p></div>');
+      return html.join('');
+    }
+    html.push('<ul class="dw-challenge-list">');
+    for (const row of rows.slice(0, MAX_LISTED)) {
+      const medal = MEDAL_LABELS[row.best.medal] ? row.best.medal : 'none';
+      const meta = [craftNameFor(row.craft), row.best.missed > 0 ? `${row.best.missed} missed` : 'clean', row.seed ? `seed ${row.seed}` : '', formatWhen(row.best.date)].filter(Boolean).join(' · ');
+      html.push(`<li class="dw-challenge-entry" data-challenge="${escapeHtml(row.courseKey)}" data-craft="${escapeHtml(row.craft)}"><span class="dw-challenge-badge dw-medal-${medal}">${medal === 'none' ? '' : MEDAL_LABELS[medal].charAt(0)}</span><span class="dw-find-text"><span class="dw-find-name">${escapeHtml(row.name)}</span><span class="dw-find-meta">${escapeHtml(meta)}</span></span><span class="dw-challenge-best">${escapeHtml(formatRunTime(row.best.time))}</span></li>`);
+    }
+    html.push('</ul></div>');
+    return html.join('');
+  }
+
   // ---- Render ------------------------------------------------------------------------------------
   function render() {
     seedLabel.textContent = `Seed ${state.seed}`;
@@ -189,6 +219,7 @@ export function createJournalPanel({ body, seedLabel, ctx }) {
     html.push(discoveriesHtml(data));
     html.push(recordsHtml(data.records));
     html.push(achievementsHtml(data.records));
+    html.push(challengesHtml(data.challenges));
 
     html.push('<div class="dw-group"><h3 class="dw-micro">Biomes</h3><div class="dw-biomes">');
     for (const biome of world.BIOMES) {

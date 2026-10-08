@@ -28,6 +28,7 @@ import { createGEffectsSystem, createPostStack } from './render/post.js';
 import { createRenderer } from './render/renderer.js';
 import { ORIGIN_QUANTUM, createRenderOrigin } from './core/origin.js';
 import { createRingCourseSystem } from './gameplay/rings.js';
+import { createChallengeSystem } from './gameplay/challenges.js';
 import { createSettings } from './core/settings.js';
 import { createShellBridge } from './shell/bridge.js';
 import { createSkySystem } from './render/sky.js';
@@ -37,6 +38,7 @@ import { createSetPieceEngine } from './spawns/engines/setPieceEngine.js';
 import { createStructureEngine } from './spawns/engines/structureEngine.js';
 import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
+import { createChallengeHud } from './ui/challengeHud.js';
 import { createVortexEngine } from './spawns/engines/vortexEngine.js';
 import { createWaterSystem } from './render/water.js';
 import { createWaterBodySystem } from './render/waterBodies.js';
@@ -401,11 +403,13 @@ async function boot() {
     ['landmarks', createLandmarkSystem],
     ['waypoints', createWaypointSystem],
     ['rings', createRingCourseSystem],
+    ['challenges', createChallengeSystem],
     ['flight', createFlightController],
     ['camera', createCameraSystem],
     ['fx', createFxSystem],
     ['gEffects', createGEffectsSystem],
     ['copilot', createCopilotSystem],
+    ['challengeHud', createChallengeHud],
     ['windOverlay', createWindOverlaySystem],
     // Dev-only: the spawn debugger (F9).
     ...(spawnDevTools ? [['spawnDebugger', createSpawnDebugger]] : []),

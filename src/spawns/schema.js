@@ -1,6 +1,6 @@
-// Spawn preset validator (contract section 1). Pure: it imports only the pure water-body and
-// overlay validators (src/world/waters.js, overlays.js), so the labs, the terrain worker and the main
-// thread can all use it.
+// Spawn preset validator (contract section 1). Pure: it imports only pure modules (the water-body,
+// overlay and challenge-block validators; no three.js, no DOM), so the labs, the terrain worker and the
+// main thread can all use it.
 //
 // validatePreset(preset, options) throws an Error naming the preset and the field at fault, for
 // example: [DRIFTWING] preset "tornado": field "lod.mid" must be greater than lod.near (1500), got 900.
@@ -9,6 +9,7 @@
 // engine is refused. Main runs it at startup in dev builds; the labs run it too.
 import { validateWaterSpec } from '../world/waters.js';
 import { validateOverlaySpec } from '../world/overlays.js';
+import { validateChallengeBlock } from '../gameplay/challenges.js';
 
 export const PRESET_CATEGORIES = Object.freeze(['weather', 'geo', 'ocean', 'wildlife', 'structure', 'celestial', 'fantasy', 'flightplay', 'setpiece']);
 export const PRESET_KINDS = Object.freeze(['site', 'event']);
@@ -395,6 +396,9 @@ export function validatePreset(preset, { engineNames = null } = {}) {
   validateActiveState(check, preset.activeState, preset.kind);
   if (preset.cooldown !== undefined) check.number(preset.cooldown, 'cooldown', { min: 0 });
   validateAnchor(check, preset.anchor, preset.kind);
+  // challenge: a gate course in the spawn's frame (src/gameplay/challenges.js validateChallengeBlock),
+  // built and registered by the structure recipe challengeGates.
+  if (preset.challenge !== undefined && preset.challenge !== null) validateChallengeBlock(preset.challenge, preset.id);
   return preset;
 }
 
