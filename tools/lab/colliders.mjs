@@ -59,6 +59,9 @@ console.error = (...args) => {
 };
 
 const TICK = 1 / 120;
+/** Steady-state allocation measurement: at least MIN and at most MAX rounds of 100 000 frames. */
+const MIN_ALLOCATION_ROUNDS = 3;
+const MAX_ALLOCATION_ROUNDS = 6;
 /** A world with every landmark type near its origin (landmarks section). */
 const LANDMARK_SEED = 'COLLIDERS-LAB';
 const near = (value, expected, tolerance = 1e-6) => Math.abs(value - expected) <= tolerance;
@@ -679,20 +682,8 @@ async function testStructureAllocation() {
     lab.engine.update(part, 1 / 60);
   };
   for (let index = 0; index < 200000; index++) frame(index);
-  if (typeof globalThis.gc === 'function') globalThis.gc();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  let collections = 0;
-  const observer = new PerformanceObserver((list) => { collections += list.getEntries().length; });
-  observer.observe({ entryTypes: ['gc'] });
-  const youngUsed = () => v8.getHeapSpaceStatistics().find((space) => space.space_name === 'new_space').space_used_size;
-  const frames = 100000;
-  const before = youngUsed();
-  for (let index = 0; index < frames; index++) frame(index);
-  const after = youngUsed();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  observer.disconnect();
-  const perFrame = (after - before) / frames;
-  check('allocation', `the structure engine's update with ${data.turbineCount} turning turbines and their colliders allocates nothing`, collections === 0 && perFrame < 0.1, `${collections} collections, ${perFrame.toFixed(3)} B/frame`);
+  const { collections, perFrame, rounds } = await measureSteadyState(frame, 100000);
+  check('allocation', `the structure engine's update with ${data.turbineCount} turning turbines and their colliders allocates nothing`, collections === 0 && perFrame < 0.1, `${collections} collections, ${perFrame.toFixed(3)} B/frame, ${rounds.length} round${rounds.length === 1 ? '' : 's'}`);
   for (const record of lab.manager.getActive()) lab.manager.deactivate(record.id, 'test');
 }
 
@@ -749,6 +740,40 @@ function testDeterminism() {
 }
 
 // ---- cost and allocation ----------------------------------------------------------------------------------
+/** Young-generation bytes in use. */
+function youngUsed() {
+  return v8.getHeapSpaceStatistics().find((space) => space.space_name === 'new_space').space_used_size;
+}
+
+/**
+ * Measures frame(index) over rounds of `frames` calls, each after a forced collection, until a round
+ * reaches the steady state (no collection and under 0.1 byte per frame) or MAX_ALLOCATION_ROUNDS have
+ * run: the optimising compiler finishes on a background thread, so on a busy machine its code can
+ * arrive a round later. At least MIN_ALLOCATION_ROUNDS run. Returns the judged (last) round's
+ * { collections, perFrame } and every round.
+ */
+async function measureSteadyState(frame, frames) {
+  const rounds = [];
+  for (let round = 0; round < MAX_ALLOCATION_ROUNDS; round++) {
+    if (typeof globalThis.gc === 'function') globalThis.gc();
+    // The forced collection's own performance entry arrives asynchronously: let it pass first.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    let collections = 0;
+    const observer = new PerformanceObserver((list) => { collections += list.getEntries().length; });
+    observer.observe({ entryTypes: ['gc'] });
+    const before = youngUsed();
+    for (let index = 0; index < frames; index++) frame(index);
+    const after = youngUsed();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    observer.disconnect();
+    const perFrame = (after - before) / frames;
+    rounds.push({ collections, perFrame });
+    if (round + 1 >= MIN_ALLOCATION_ROUNDS && collections === 0 && perFrame < 0.1) break;
+  }
+  const judged = rounds[rounds.length - 1];
+  return { collections: judged.collections, perFrame: judged.perFrame, rounds };
+}
+
 function costWorld() {
   const world = createColliderWorld({});
   for (const spec of randomSpecs(23, 2000)) world.add(spec);
@@ -832,28 +857,10 @@ async function testAllocation() {
   };
   // A long warm-up: rare paths (a lane meeting a hull or a cylinder rim) keep teaching the JIT for a while.
   for (let index = 0; index < 450000; index++) frame(index);
-  const youngUsed = () => v8.getHeapSpaceStatistics().find((space) => space.space_name === 'new_space').space_used_size;
   const frames = 100000;
-  const rounds = [];
-  let collections = 0;
-  for (let round = 0; round < 3; round++) {
-    if (typeof globalThis.gc === 'function') globalThis.gc();
-    // The forced collection's own performance entry arrives asynchronously: let it pass first.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    let roundCollections = 0;
-    const observer = new PerformanceObserver((list) => { roundCollections += list.getEntries().length; });
-    observer.observe({ entryTypes: ['gc'] });
-    const before = youngUsed();
-    for (let index = 0; index < frames; index++) frame(index);
-    const after = youngUsed();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    observer.disconnect();
-    rounds.push((after - before) / frames);
-    collections = roundCollections;
-  }
-  const perFrame = rounds[rounds.length - 1];
+  const { collections, perFrame, rounds } = await measureSteadyState(frame, frames);
   check('allocation', `no garbage collection during ${frames} frames of sweepProbes (30 probes), probesTouch, a moving hull, an overlap, a raycast and perches`, collections === 0, `${collections} collections, ${hits} probe hits, ${sensed} sensor reports, ${visits} visits`);
-  check('allocation', 'young generation grows under 0.1 byte per frame (steady state)', collections === 0 && perFrame < 0.1, `rounds ${rounds.map((value) => value.toFixed(3)).join(' / ')} B/frame`);
+  check('allocation', 'young generation grows under 0.1 byte per frame (steady state)', collections === 0 && perFrame < 0.1, `rounds ${rounds.map((round) => `${round.perFrame.toFixed(3)}${round.collections > 0 ? ` (${round.collections} gc)` : ''}`).join(' / ')} B/frame`);
 }
 
 // The allocation measurement first, before the other tests leave garbage for the collector.

@@ -27,9 +27,17 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   mesh; spatial hash, providers, perches, landable tops published to the ground surfaces, sensors) with
   its narrow phase `src/world/colliderMath.js` and the integer cell grid `src/world/cellGrid.js`;
   `src/world/colliderMesh.js` (three-mesh-bvh); `groundSurfaces.js` on the cell grid with `setBounds`
-  and `surfaceIdBelow`; `node --expose-gc tools/lab/colliders.mjs` 62/62.
-- **Next:** main.js wiring and events, the flight controller's sweep, spawn manager leaks and the check
-  kit, the landmark and structure retrofits, `?test=collision` and its harness mode.
+  and `surfaceIdBelow`; `ctx.colliders` in main.js and the `colliderHit` / `colliderSensor` events;
+  the flight controller's per-tick probe sweep (section STRUCTURE COLLISION: strike over
+  `bodyStrikeSpeed` -> soft crash held at the contact, slow contact resolve, landable tops left to the
+  ground contact, sensors once per entry, respawn lifted clear, `landed.surface = 'structure'`); the
+  engine ctx `game` (0.4) and the SpawnManager's collider leak count; the spawn check kit's collider
+  baseline; the retrofits on the arches, monolith circles, lighthouses, balloons and the five Phase 2
+  structures; `?test=collision` with `tools/run-harness.mjs --test collision`;
+  docs/architecture.md and docs/engines/structure.md. The lab's allocation checks judge the steady
+  state over up to six rounds (a cold first run once missed it while the JIT warmed up).
+- **Next:** the verification runs (labs, structure and preset step files and `?test=collision` on
+  both backends, the `?test=spawns` subset, the reduced `?test=1` harness), recorded here.
 - **Open issues:** none yet.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
