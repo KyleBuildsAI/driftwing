@@ -103,8 +103,11 @@ export function createWaterBodySystem(ctx) {
     return distance < LOD_NEAR_RADIUS ? NEAR_GRID : FAR_GRID;
   }
 
-  /** Starts (or restarts at another LOD) a body's mesh build. */
-  function startBody(record, grid) {
+  /**
+   * Starts (or restarts at another LOD) a body's mesh build. previous: the mesh drawn at the old LOD,
+   * kept visible until the new one is complete (no gap while it builds), or null.
+   */
+  function startBody(record, grid, previous = null) {
     const mesh = acquireMesh(grid);
     const frame = waterOutlineFrame(record);
     const look = mesh.userData.water;
@@ -115,7 +118,7 @@ export function createWaterBodySystem(ctx) {
     mesh.updateMatrix();
     mesh.geometry.boundingSphere.center.set(0, 0, 0);
     mesh.geometry.boundingSphere.radius = Math.hypot(frame.halfAlong, frame.halfAcross) + 2;
-    const entry = { record, frame, mesh, grid, row: 0, ready: false };
+    const entry = { record, frame, mesh, grid, row: 0, ready: false, previous };
     live.set(record.id, entry);
     buildQueue.push(entry);
     return entry;
@@ -126,6 +129,19 @@ export function createWaterBodySystem(ctx) {
     const queued = buildQueue.indexOf(entry);
     if (queued >= 0) buildQueue.splice(queued, 1);
     releaseMesh(entry.mesh);
+    if (entry.previous !== null) releaseMesh(entry.previous);
+  }
+
+  /** Rebuilds a live body at another LOD, its current mesh drawn until the new one is complete. */
+  function switchLod(entry, grid) {
+    live.delete(entry.record.id);
+    const queued = buildQueue.indexOf(entry);
+    if (queued >= 0) buildQueue.splice(queued, 1);
+    // A body switching back before its last switch finished keeps the older, complete mesh.
+    const shown = entry.ready ? entry.mesh : entry.previous;
+    if (shown !== entry.mesh) releaseMesh(entry.mesh);
+    if (entry.previous !== null && entry.previous !== shown) releaseMesh(entry.previous);
+    startBody(entry.record, grid, shown);
   }
 
   /** Builds one row of a body's grid: positions (mesh-local) and the shore attribute. */
@@ -157,6 +173,10 @@ export function createWaterBodySystem(ctx) {
       mesh.geometry.attributes.position.needsUpdate = true;
       mesh.geometry.attributes.waterShore.needsUpdate = true;
       mesh.visible = true;
+      if (entry.previous !== null) {
+        releaseMesh(entry.previous);
+        entry.previous = null;
+      }
     }
   }
 
@@ -183,10 +203,7 @@ export function createWaterBodySystem(ctx) {
       else if (entry.grid !== grid) {
         // Switch LOD only past the hysteresis band, then rebuild at the new grid.
         const distance = Math.hypot(record.x - camera.position.x, record.z - camera.position.z);
-        if (Math.abs(distance - LOD_NEAR_RADIUS) > LOD_HYSTERESIS) {
-          stopBody(entry);
-          startBody(record, grid);
-        }
+        if (Math.abs(distance - LOD_NEAR_RADIUS) > LOD_HYSTERESIS) switchLod(entry, grid);
       }
     });
     for (const entry of [...live.values()]) {

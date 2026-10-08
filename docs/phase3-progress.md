@@ -36,8 +36,14 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   meshes; WindField sway (src/render/windSway.js); the vegetation collider and perch provider
   (src/world/vegetationColliders.js). `?test=waters` and tools/steps/water-bodies.json (41/41 checks
   on WebGPU, 0/0 console).
-- **Next:** tools/lab/water.mjs, the terrain lab and `?test=terrain` extensions, the remaining
-  verification runs on both backends.
+  tools/lab/water.mjs (29/29), the terrain lab's Phase 3 section (404/404 in all), `?test=terrain`
+  and `?test=determinism` cover the water stamps and every overlay kind. Review fixes: a water body
+  switching LOD keeps its old mesh drawn until the new one is built; the sway texture probes at
+  worldgen's `heightAt` (a quarter of `groundHeight`'s cost, 128 probes a frame); redwood trunk
+  colliders no longer tag a perch (the perch provider publishes each tree top once).
+- **Next:** the verification runs on both backends (builds, test:v1, labs, the water-bodies,
+  golden-frame, discovery, waterEffect and preset step files, `?test=terrain`, `?test=determinism`,
+  a reduced `?test=1`), their numbers here.
 - **Open issues:** none yet.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
