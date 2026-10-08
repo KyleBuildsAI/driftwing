@@ -24,6 +24,7 @@ import { createHeliSynth } from './heli.js';
 import { createJetSynth } from './jet.js';
 import { createPropSynth } from './prop.js';
 import { createWingsuitSynth } from './wingsuit.js';
+import { createAirshipPropSynth } from './airshipProp.js';
 
 const COMMON_DEFAULTS = Object.freeze({
   airflowSpeed: 60,
@@ -79,6 +80,7 @@ export const ENGINE_FAMILIES = Object.freeze({
     // flutterHz (fabric flap rate at 40 m/s), proximityRange (m AGL where terrain rush starts).
     defaults: { flutterHz: 14, proximityRange: 90, airflowSpeed: 60, interiorCutoff: 0, touchdown: 'body', callouts: false },
   },
+  airshipProp: { create: createAirshipPropSynth, defaults: { cylinders: 4, blades: 4, maxRpm: 2300, idleRpm: 700, airflowSpeed: 30, interiorCutoff: 900, touchdown: 'wheels', callouts: false } },
 });
 
 const PROFILE_CACHE = new WeakMap();
