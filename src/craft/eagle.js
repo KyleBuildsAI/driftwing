@@ -169,17 +169,19 @@ const EYE = [...EYES.eagle];
  * The chase framing (read by the chase camera every frame): a little wider for the dragon's tail, and
  * on a perch an orbit (orbitYaw, degrees) that starts after a moment and eases back on takeoff.
  */
-const chaseFraming = { orbit: 0, orbitRate: 0, perchedSeconds: 0, perched: false };
-const ORBIT = Object.freeze({ DELAY: 1.5, RATE: 11, EASE_IN: 0.35, RETURN: 2.2 });
+const chaseFraming = { orbit: 0, orbitRate: 0, perch: 0 };
+const ORBIT = Object.freeze({ DELAY: 1.5, RATE: 11, EASE_IN: 0.35, RETURN: 2.2, CLOSE_IN: 1.5 });
+/** On a perch the chase camera closes in to these shares of its distance, height and look-ahead. */
+const PERCH_FRAMING = Object.freeze({ distance: 0.62, height: 0.75, lookAhead: 0.1 });
 const chaseRig = Object.freeze({
   get distance() {
-    return view.skin === 'dragon' ? 6 : 5.4;
+    return (view.skin === 'dragon' ? 6 : 5.4) * (1 - (1 - PERCH_FRAMING.distance) * chaseFraming.perch);
   },
   get height() {
-    return 1.3;
+    return 1.3 * (1 - (1 - PERCH_FRAMING.height) * chaseFraming.perch);
   },
   get lookAhead() {
-    return 7;
+    return 7 * (1 - (1 - PERCH_FRAMING.lookAhead) * chaseFraming.perch);
   },
   /** The idle camera: degrees of orbit round the craft added to the chase view (cameraManager). */
   get orbitYaw() {
@@ -191,6 +193,7 @@ const chaseRig = Object.freeze({
 function updateChaseOrbit(craftState, dt) {
   const perched = craftState.perched === true;
   const seconds = Number(craftState.perchedSeconds) || 0;
+  chaseFraming.perch = damp(chaseFraming.perch, perched ? 1 : 0, ORBIT.CLOSE_IN, dt);
   if (perched && seconds > ORBIT.DELAY) {
     chaseFraming.orbitRate = damp(chaseFraming.orbitRate, ORBIT.RATE, ORBIT.EASE_IN, dt);
     chaseFraming.orbit = (chaseFraming.orbit + chaseFraming.orbitRate * dt) % 360;
@@ -208,6 +211,7 @@ function buildMesh(ctx, { skin } = {}) {
   for (let index = 0; index < 3; index++) EYE[index] = EYES[chosen][index];
   chaseFraming.orbit = 0;
   chaseFraming.orbitRate = 0;
+  chaseFraming.perch = 0;
   const mesh = chosen === 'dragon' ? buildDragonMesh(ctx) : buildEagleMesh(ctx);
   const update = mesh.update;
   mesh.update = (visual, dt) => {
@@ -225,18 +229,26 @@ function buildMesh(ctx, { skin } = {}) {
  */
 function buildCreatureView(builder) {
   if (view.skin === 'dragon') {
-    const ridge = [[-0.04, -0.035, -0.04], [0.04, -0.035, -0.04], [0.026, -0.07, -0.2], [-0.026, -0.07, -0.2]];
-    builder.quad(ridge[0], ridge[1], ridge[2], ridge[3], PALETTE.orange, [0, -0.2, -0.12]);
-    builder.triangle([-0.026, -0.07, -0.2], [0.026, -0.07, -0.2], [0, -0.085, -0.235], PALETTE.orange, [0, -0.2, -0.2]);
+    // The snout ridge low in the view, its nostrils at the tip, the brow horns at the top corners.
+    const ridge = [[-0.016, -0.062, -0.09], [0.016, -0.062, -0.09], [0.011, -0.085, -0.24], [-0.011, -0.085, -0.24]];
+    builder.quad(ridge[0], ridge[1], ridge[2], ridge[3], PALETTE.orange, [0, -0.2, -0.16]);
+    builder.triangle([-0.011, -0.085, -0.24], [0.011, -0.085, -0.24], [0, -0.095, -0.27], PALETTE.orange, [0, -0.2, -0.25]);
     for (const side of [-1, 1]) {
-      builder.triangle([side * 0.012, -0.072, -0.205], [side * 0.022, -0.068, -0.2], [side * 0.016, -0.06, -0.215], PALETTE.charcoal, [side * 0.016, -0.2, -0.2]);
+      builder.triangle([side * 0.004, -0.086, -0.245], [side * 0.01, -0.084, -0.24], [side * 0.007, -0.08, -0.255], PALETTE.charcoal, [side * 0.007, -0.2, -0.25]);
       builder.triangle([side * 0.03, 0.035, -0.035], [side * 0.075, 0.04, -0.02], [side * 0.05, 0.075, 0.0], PALETTE.charcoal, [side * 0.05, 0.2, -0.02]);
     }
     return null;
   }
-  const beak = [[-0.018, -0.03, -0.05], [0.018, -0.03, -0.05], [0.01, -0.05, -0.12], [-0.01, -0.05, -0.12]];
-  builder.quad(beak[0], beak[1], beak[2], beak[3], PALETTE.orange, [0, -0.2, -0.09]);
-  builder.triangle([-0.01, -0.05, -0.12], [0.01, -0.05, -0.12], [0, -0.075, -0.135], PALETTE.orange, [0, -0.2, -0.13]);
+  // The hooked beak: a ridge with two sloping faces, low in the view, and its hooked tip.
+  const ridgeBase = [0, -0.042, -0.06];
+  const ridgeTip = [0, -0.056, -0.125];
+  const hook = [0, -0.08, -0.132];
+  for (const side of [-1, 1]) {
+    const base = [side * 0.013, -0.06, -0.066];
+    const tip = [side * 0.005, -0.066, -0.12];
+    builder.quad(ridgeBase, base, tip, ridgeTip, PALETTE.orange, [0, -0.09, -0.09]);
+    builder.triangle(ridgeTip, tip, hook, PALETTE.orange, [0, -0.09, -0.125]);
+  }
   for (const side of [-1, 1]) {
     builder.triangle([side * 0.022, 0.024, -0.03], [side * 0.06, 0.02, -0.01], [side * 0.034, 0.04, -0.005], PALETTE.cream, [side * 0.04, 0.2, -0.02]);
   }

@@ -25,7 +25,7 @@ import * as TSL from 'three/tsl';
 import { DEG, clamp, damp } from '../core/util.js';
 import { PALETTE, createMeshBuilder, getCraftMaterials, addSolid, disposeCraftMesh, smooth01 } from './kit.js';
 
-const { uniform, color, float, uv, sin, mix, smoothstep, saturate } = TSL;
+const { uniform, color, float, uv, sin, mix, smoothstep, saturate, positionView } = TSL;
 
 /** The feet stand this far below the centre of mass (the model's perch.feet). */
 export const FEET = 0.25;
@@ -472,13 +472,15 @@ function createFireJet() {
     const flow = sin(along.mul(17).sub(clock.mul(speed)).add(uv().x.mul(25.13))).mul(0.5).add(0.5);
     const lick = sin(along.mul(7.3).sub(clock.mul(speed * 0.62)).add(uv().x.mul(12.57).mul(coreShare + 1))).mul(0.5).add(0.5);
     const flicker = flow.mul(0.55).add(lick.mul(0.45));
-    const fade = smoothstep(float(0), float(0.08), along).mul(float(1).sub(smoothstep(float(0.55), float(1), along)));
+    const fade = smoothstep(float(0.02), float(0.2), along).mul(float(1).sub(smoothstep(float(0.5), float(1), along)));
+    // Thin close to the camera, so the rider's-eye view looks along the flame instead of into it.
+    const near = smoothstep(float(0.8), float(4), positionView.z.negate());
     material.colorNode = mix(color(tintNear), color(tintFar), saturate(along.mul(1.4))).mul(strength);
-    material.opacityNode = intensity.mul(fade).mul(flicker.mul(0.7).add(0.3));
+    material.opacityNode = intensity.mul(fade).mul(near).mul(flicker.mul(0.6).add(0.2));
     return material;
   }
-  const outer = new THREE.Mesh(geometry, flameMaterial(0, 0xffb347, 0xc8341a, 1.6, 11));
-  const inner = new THREE.Mesh(geometry, flameMaterial(1, 0xfff1c2, 0xff8a2a, 2.4, 15));
+  const outer = new THREE.Mesh(geometry, flameMaterial(0, 0xffa040, 0xb8301a, 0.9, 11));
+  const inner = new THREE.Mesh(geometry, flameMaterial(1, 0xffe0a0, 0xff7a24, 1.3, 15));
   for (const mesh of [outer, inner]) {
     mesh.frustumCulled = false;
     mesh.castShadow = false;
@@ -582,7 +584,9 @@ export function buildDragonMesh(ctx) {
   // The fire's light: borrowed from the spawn light pool while the flame burns.
   const lightPool = ctx.systems?.spawns?.manager?.lights ?? null;
   let light = null;
-  const mouthLocal = new THREE.Vector3(DRAGON_MOUTH[0], DRAGON_MOUTH[1], DRAGON_MOUTH[2] - 2.5);
+  // The light sits in the flame a few metres out and a little under it: it lights what the flame
+  // passes and the dragon's belly, not the top of its own snout.
+  const mouthLocal = new THREE.Vector3(DRAGON_MOUTH[0], DRAGON_MOUTH[1] - 0.8, DRAGON_MOUTH[2] - 4.5);
   const lightPosition = new THREE.Vector3();
   function revokeLight() {
     light = null;
@@ -661,8 +665,8 @@ export function buildDragonMesh(ctx) {
       if (light) {
         lightPosition.copy(mouthLocal).applyQuaternion(root.quaternion).add(root.position);
         light.position.copy(lightPosition);
-        light.intensity = 900 * level;
-        light.distance = 40;
+        light.intensity = 200 * level;
+        light.distance = 35;
         light.decay = 2;
       }
     },
