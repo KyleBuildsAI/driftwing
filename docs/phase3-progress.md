@@ -446,7 +446,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | in progress (branch complete, awaiting I2) |
 | 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | not started |
 | 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | not started |
-| 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | in progress (built; verification running) |
+| 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | in progress (branch complete, awaiting I2) |
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
 | 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
 | 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | not started |
@@ -508,22 +508,53 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 ### Wave 2 - p3/craft-tiltrotor
 
-- **Built** (contract h; spec Milestone D item 9):
-  - model kind `tiltrotor` (`src/flight/SimTiltrotor.js`): tilting nacelles (0-97 degrees, 8 deg/s,
-    detents 0 / 60 / 90, 60 degrees minimum on the wheels), two blade-element proprotors with flapping
-    and SimHelicopter's inflow, the FCS collective schedule (helicopter to airplane lever range with
-    the wing's capacity, an axial-inflow bias, a governor trim), the rpm schedule (100 % to 84 %), a
-    wing in the rotor wash (download in the hover), flaperons, H tail, nacelle drag, retractable gear,
-    rotor strikes; the corridor maths in `src/flight/tiltrotorCorridor.js`; assists, autopilot and
-    trim in `src/flight/tiltrotorAssists.js`;
-  - the craft module `src/craft/tiltrotor.js` (mesh with tilting nacelles, proprotors and blur discs,
-    flaperons, elevator, rudders, folding gear; cabin cockpit; auto-nacelle ability; situate; copilot
-    `nacelle`, `airplaneMode`, `hoverMode`, `autoNacelle`; journal `tiltrotorConversions`,
-    `tiltrotorFastestConversion`; per-craft keyboard bindings), the `proprotor` sound family, the
-    `nacelle` corridor instrument, pinned on the HUD through the new optional module field `hud`;
-  - tests: `tools/lab/tiltrotor.mjs`, `src/dev/craftScenarios/tiltrotor.js` (full conversion both
-    ways, overspeed, wing stall), the view-physics step file flies it.
-- **Next:** the verification runs (both backends), then I2.
+- **Done** (contract h; spec Milestone D item 9):
+  - model kind `tiltrotor` (`src/flight/SimTiltrotor.js`): nacelles 0-97 degrees at 8 deg/s with the
+    detents 0 / 60 / 90 (flap buttons step them, the HOTAS antenna sets them, 60 degrees minimum on
+    the wheels); two counter-rotating blade-element proprotors with flapping, blowback and
+    SimHelicopter's inflow (vortex ring per rotor, blade stall, ground effect); the FCS collective
+    schedule (the lever spans the helicopter range until the wing carries the weight, then the
+    airplane range; an axial-inflow bias; a governor trim at the engines' limits), 100 % to 84 % rpm;
+    the wing in the rotor wash (7 % download in the hover), drooping flaperons, H tail with downwash,
+    nacelle and gear drag, rotor strikes; hover: stick = cyclic + differential collective, pedals =
+    differential cyclic; airplane mode: flaperons, elevator, rudders;
+  - the conversion corridor (`src/flight/tiltrotorCorridor.js`): lower edge from the wing's lift at
+    0.9 x flapped CLmax plus the rotors at 1.15 x weight, upper edge from a 55 m/s edgewise limit;
+    the auto-nacelle schedule holds the selection 5 degrees inside it; outside it the wing-stall or
+    rotor-overspeed state, warnings and real consequences (the wing stalls and the craft sinks; the
+    raised discs blow back, the retreating blades stall, the craft slows hard and pitches up);
+  - assists, autopilot (converts on the schedule, climbs clear of terrain first) and trim in
+    `src/flight/tiltrotorAssists.js`;
+  - the craft module `src/craft/tiltrotor.js` (Osprey-style mesh: tilting nacelles, proprotors and blur
+    discs, flaperons, elevator, rudders, folding gear; cabin cockpit; auto-nacelle ability; situate
+    (hover when slow or low, else airplane mode on the schedule, ground when landed); copilot
+    `nacelle`, `airplaneMode`, `hoverMode`, `autoNacelle` and a status line; journal
+    `tiltrotorConversions`, `tiltrotorFastestConversion`; Page Up / Page Down keyboard bindings), the
+    `proprotor` sound family (slap with the nacelles up, drone tilted forward, rotor beat), the
+    `nacelle` corridor instrument, pinned on the HUD through the new optional module field `hud`
+    (`src/ui/instrumentHud.js`, one line in `src/camera/cameraManager.js`);
+  - tests: `tools/lab/tiltrotor.mjs` (41 checks), `src/dev/craftScenarios/tiltrotor.js` (full
+    conversion both ways, overspeed, wing stall), the view-physics step file (now counts every
+    registered craft), the `?test=1` flight scripts; the craft lab accepts newly registered modules.
+- **Verified 2026-10-08** (each once unless noted):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 236/236 | built; no dev kit in the bundle, one three.js core | |
+  | Labs: tiltrotor 41/41, craft 66, flight-lab 82, helicopter 46, jet 60, wingsuit 37, fpv 87, settings 45, copilot 240, copilot-server 17, discovery 43, atmosphere 28, challenges 70, colliders 84, director 50, input 34, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden, setpiece 47, spawns 98, storage 54, structure 75, wind-engines 56; origin 32, fauna-modes 44, water 34, terrain 404 (their allocation checks need `--expose-gc`; without it they miss one each) | all pass | |
+  | Audio lab (alone, three runs) | 190/191 each time, a different check: the WebGL2 camera-cut doppler twice, the murmuration loudness once; the base sources passed 191/191 in one run; src/audio only gains the unused-elsewhere `proprotor` family | |
+  | `run-harness --test craft --crafts tiltrotor` | PASS 7/7 runs, 31/31 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0 | PASS 7/7, 31/31, same |
+  | `run-harness --test craft` (all seven craft) | PASS 32/32 runs, 92/92 checks, 0/0 | |
+  | View-physics step file | 7/7 craft identical in every view, 0/0 (dev server) | 7/7, 0/0 (built, `?debug=1`) |
+  | `run-harness --test 1 --crafts tiltrotor` (HARNESS-1/2, both views, 60 s) | 0 NaN, 0 penetrations, 0 soft crashes, 0/0, heap +14.7 MB max, script 12/12; frames over 50 ms: 650 (machine CPU 100 %, other processes 63 %; main thread 413, systems 136 spread over camera, terrain, flight, spawns) | same criteria pass, heap +8.1 MB; frames over 50 ms: 574 |
+  | `run-harness --test hotas`, input-review step file | 140/140, 0/0; input-review 0/0 | |
+  | Built V2 smoke flying the tiltrotor (hover, airplane mode, cockpit); built shell smoke | 0/0, screenshots differ | 0/0, screenshots differ |
+
+- **Next:** I2 merges this branch after the framework.
+- **Open issues:** the flight model tick boxes doubles across calls V8 does not inline (about
+  1.4 KB per tick against the helicopter's 1 KB in node; no per-tick objects), as every flight model
+  does; Milestone O's copilot "switch to the tiltrotor" synonyms and the remote `flightState`
+  nacelle field (h.3, j.2).
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
