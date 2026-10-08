@@ -210,6 +210,8 @@ function bandLevel(profile, altitude) {
 
 /** A combo whose members cannot all start within this long after their start time drops the rest (s). */
 export const COMBO_MEMBER_PATIENCE = 60;
+/** A refused waiting member is tried again this often (s). */
+const COMBO_MEMBER_RETRY = 2;
 /** siteActive preconditions look this far (m) from the candidate when the combo names no near radius. */
 const COMBO_SITE_RADIUS = 20000;
 const COMBO_MEMBER_SALT = 0x51ed;
@@ -625,7 +627,7 @@ export function createDirector({
    * TRACK_MIN_SPEED (a hover, a calm), smoothed over TRACK_SMOOTHING_SECONDS. advance is true on a
    * director tick only, so API calls between ticks never move the smoothing (the log stays a pure
    * function of the seed and the path). Without a velocity (the labs' scripted paths) the track is
-   * the heading.
+   * the heading itself, unsmoothed, exactly as before the ground track existed.
    */
   function updateTrack(current, advance) {
     const velocity = current.velocity;
@@ -643,7 +645,7 @@ export function createDirector({
       targetX = Math.sin(radians);
       targetZ = -Math.cos(radians);
     }
-    if (!trackDirection.ready) {
+    if (!trackDirection.ready || !velocity) {
       trackDirection.x = targetX;
       trackDirection.z = targetZ;
       trackDirection.ready = true;
@@ -1215,7 +1217,7 @@ export function createDirector({
     for (let index = 0; index < members.length; index++) {
       const member = members[index];
       if (member.delay > 0 || !startMember(combo, index)) {
-        combo.pending.push({ index, at: time + member.delay });
+        combo.pending.push({ index, at: time + member.delay, nextTry: time + member.delay });
         reserveMember(member.info, 1);
       }
     }
@@ -1284,9 +1286,10 @@ export function createDirector({
   }
 
   /**
-   * Once per tick: waiting members start when their delay is up (a refusal retries next tick, for
-   * up to COMBO_MEMBER_PATIENCE s, then the member is dropped and logged); a combo whose own spawn has
-   * ended drops its waiting members; a combo with nothing live and nothing waiting is over.
+   * Once per tick: waiting members start when their delay is up (a refusal retries every
+   * COMBO_MEMBER_RETRY s, for up to COMBO_MEMBER_PATIENCE s, then the member is dropped and logged);
+   * a combo whose own spawn has ended drops its waiting members; a combo with nothing live and nothing
+   * waiting is over.
    */
   function processCombos() {
     for (let comboIndex = combos.length - 1; comboIndex >= 0; comboIndex--) {
@@ -1294,7 +1297,7 @@ export function createDirector({
       const mainAlive = isLive(combo.mainId);
       for (let index = combo.pending.length - 1; index >= 0; index--) {
         const entry = combo.pending[index];
-        if (mainAlive && time < entry.at) continue;
+        if (mainAlive && time < entry.nextTry) continue;
         const member = combo.info.combo.members[entry.index];
         let done = false;
         if (mainAlive && startMember(combo, entry.index)) {
@@ -1306,6 +1309,8 @@ export function createDirector({
         if (done) {
           reserveMember(member.info, -1);
           combo.pending.splice(index, 1);
+        } else {
+          entry.nextTry = time + COMBO_MEMBER_RETRY;
         }
       }
       if (combo.live <= 0 && combo.pending.length === 0) combos.splice(comboIndex, 1);

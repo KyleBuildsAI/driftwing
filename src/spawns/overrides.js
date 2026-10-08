@@ -14,10 +14,11 @@
 //
 // nightWindow eases in through the evening while the sun is still well up (dayTime 0.64 -> 0.70) and
 // out after the morning (0.30 -> 0.36), so nothing visible changes while it ramps. The region weight
-// is 1 everywhere for `region: null` (the blood moon), else the share of the named biomes (their
-// climate weights, src/world/worldgen.js biomeAt) averaged over a disc of blendKm around the player
-// on a fixed 2 km lattice and eased, so the midnight sun fades in over about blendKm as the player
-// flies into the polar snow.
+// is 1 everywhere for `region: null` (the blood moon). For a region (the midnight sun's snow) it is
+// 1 inside the region and fades to 0 over blendKm outside it: the region is the cells of a fixed
+// 2 km lattice where the named biomes hold at least half the climate weight (src/world/worldgen.js
+// biomeAt), and the weight is 1 - smoothstep(0, blendKm, distance to the nearest region cell). The
+// distance is to the cell's square, so the weight changes continuously as the player flies.
 //
 // The midnight sun bends the sun's path (applyMidnightSun): the elevation is raised to a skim line
 // that sits 1.5 degrees above the horizon at midnight (due north) and 5 degrees at the usual sunset,
@@ -31,10 +32,10 @@ export const OVERRIDE_KINDS = Object.freeze(['bloodMoon', 'midnightSun']);
 export const NIGHT_WINDOW = Object.freeze({ inStart: 0.64, inEnd: 0.7, outStart: 0.3, outEnd: 0.36 });
 /** The midnight sun's skim line (degrees above the horizon): at midnight, and at sunset / sunrise. */
 export const MIDNIGHT_SUN_SKIM = Object.freeze({ midnight: 1.5, horizon: 5 });
-/** Region weights are sampled on this lattice (m) and cached per cell. */
+/** Regions are sampled on this lattice (m) and cached per cell. */
 export const REGION_CELL = 2000;
-/** The averaged biome share maps to a weight through smoothstep(REGION_EDGE[0], REGION_EDGE[1]). */
-const REGION_EDGE = Object.freeze([0.2, 0.8]);
+/** A lattice cell belongs to a region when the region's biomes hold at least this share of its climate. */
+export const REGION_SHARE = 0.5;
 const REGION_CACHE_LIMIT = 65536;
 const OVERRIDE_SALT = 0x6b43a9b5;
 const DEG = Math.PI / 180;
@@ -110,14 +111,14 @@ export function applyMidnightSun(dayTime, direction, weight) {
 /**
  * The region weight field of one override region: weightAt(x, z) in 0..1. biomeAt(x, z) is worldgen's
  * ({ key, weights }); with biomeKeys (the keys of weights in order, worldgen's BIOMES) the climate
- * weights of the named biomes add up, else the dominant biome counts 1 or 0.
- * Lattice cells are sampled once and cached (the cache only grows when the player reaches new cells),
- * so a quiet call allocates nothing.
+ * weights of the named biomes add up, else the dominant biome counts 1 or 0. Lattice cells are
+ * sampled once and cached (the cache only grows when the player reaches new cells), so a quiet call
+ * allocates nothing.
  */
 export function createRegionField({ biomes, blendKm, biomeAt, biomeKeys = null }) {
   const cells = new Map();
-  const radiusCells = Math.max(1, Math.round((blendKm * 1000) / 2 / REGION_CELL));
-  const radiusSq = radiusCells * radiusCells;
+  const blend = blendKm * 1000;
+  const radiusCells = Math.ceil(blend / REGION_CELL) + 1;
 
   function cellShare(cellX, cellZ) {
     const key = cellX * 1048576 + cellZ;
@@ -137,20 +138,24 @@ export function createRegionField({ biomes, blendKm, biomeAt, biomeKeys = null }
   }
 
   return {
-    /** The eased share of the region's biomes around (x, z): 0 outside, 1 deep inside. */
+    /** 1 inside the region, easing to 0 at blendKm from its nearest cell. */
     weightAt(x, z) {
       const centreX = Math.floor(x / REGION_CELL);
       const centreZ = Math.floor(z / REGION_CELL);
-      let sum = 0;
-      let count = 0;
+      let nearest = Infinity;
       for (let offsetZ = -radiusCells; offsetZ <= radiusCells; offsetZ++) {
+        const cellZ = centreZ + offsetZ;
+        const dz = Math.max(cellZ * REGION_CELL - z, 0, z - (cellZ + 1) * REGION_CELL);
+        if (dz >= nearest) continue;
         for (let offsetX = -radiusCells; offsetX <= radiusCells; offsetX++) {
-          if (offsetX * offsetX + offsetZ * offsetZ > radiusSq) continue;
-          sum += cellShare(centreX + offsetX, centreZ + offsetZ);
-          count++;
+          const cellX = centreX + offsetX;
+          const dx = Math.max(cellX * REGION_CELL - x, 0, x - (cellX + 1) * REGION_CELL);
+          const distance = Math.hypot(dx, dz);
+          if (distance >= nearest || distance > blend) continue;
+          if (cellShare(cellX, cellZ) >= REGION_SHARE) nearest = distance;
         }
       }
-      return smoothstep(REGION_EDGE[0], REGION_EDGE[1], sum / count);
+      return nearest === Infinity ? 0 : 1 - smoothstep(0, blend, nearest);
     },
     get cachedCells() {
       return cells.size;

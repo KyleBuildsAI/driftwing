@@ -35,6 +35,20 @@
 //   near          filters.near: every activation of a preset gathered at landmarks lies exactly on a
 //                 Phase 1 landmark of its types (the real world generator's landmarkSitesNear), still
 //                 ahead and inside its distance band; without landmarkSitesNear it never activates
+//   track         (Phase 3, contract i.1) a craft drifting east with its nose north gets its content
+//                 within 60 degrees of the drift line; a hover keeps the nose; a turn of the track eases
+//                 over about a second
+//   craft         (i.2) craftWeight's favour, above bands and clamp; seaplane, eagle, balloon and a high
+//                 spaceplane each raise the mean weight of what starts on the same path, every log entry
+//                 records the craft, and a module's own directorProfile replaces the default
+//   combos        (i.3) dev fixtures: combos start with their preconditions holding (night and biome, a
+//                 monolith circle, an erupting volcano), members on their ring and delay with the combo
+//                 as parent, the log and comboStarted list them in order, budgets and exclusivity hold,
+//                 the logs are deterministic, and forceSpawn starts one by day
+//   overrides     (i.4) the night index and window, the per-night schedule, the midnight sun's bend, the
+//                 regional blend on the real world, and the director's wiring (never candidates, the
+//                 scheduled nights exactly, the sink, the once-a-night spawn, forceSpawn)
+//   schema        the validator accepts a full combo and override and refuses broken blocks
 //
 // Usage: node tools/lab/director.mjs [--hours 24] [--verbose] [--presets stub|real]
 // --presets real runs the pacing checks against the game's own presets (src/spawns/presets/index.js)
@@ -54,8 +68,13 @@ import { createPerfGovernor } from '../../src/core/perf.js';
 import { createWorldGen } from '../../src/world/worldgen.js';
 import { PRESETS as GAME_PRESETS } from '../../src/spawns/presets/index.js';
 import {
-  DIRECTOR_BUDGETS, DROUGHT_BAND, MAX_OFF_AXIS, MAX_OFF_AXIS_WIDE, PACING_WINDOW_MAX, RARITY_COOLDOWNS, RARITY_TIERS, createDirector,
+  COMBO_MEMBER_PATIENCE, CRAFT_WEIGHT_RANGE, DEFAULT_DIRECTOR_PROFILES, DIRECTOR_BUDGETS, DROUGHT_BAND, MAX_OFF_AXIS, MAX_OFF_AXIS_WIDE,
+  PACING_WINDOW_MAX, RARITY_COOLDOWNS, RARITY_TIERS, craftWeight, createDirector, matchesTimeOfDay,
 } from '../../src/spawns/director.js';
+import {
+  MIDNIGHT_SUN_SKIM, applyMidnightSun, createRegionField, nightIndex, nightWindow, scheduledNights,
+} from '../../src/spawns/overrides.js';
+import { validatePresets } from '../../src/spawns/schema.js';
 import { angleBetween, bearingDegrees, hashString, mix32, rehash, unitFromHash } from '../../src/spawns/candidates.js';
 import {
   WEATHER_BUCKET_SECONDS, WEATHER_CYCLE_BUCKETS, WEATHER_REGION_SIZE, WEATHER_STATES, createWeatherModel, createWeatherSample,
@@ -97,7 +116,7 @@ const CANDIDATES_BY_RARITY = Object.freeze({
   legendary: { cellSize: 10000, bucketSeconds: 900, chance: 0.5 },
 });
 
-function eventPreset(id, category, rarity, { heavy = false, engines = ['emitter'], filters = {}, candidates = null, duration = [120, 240] } = {}) {
+function eventPreset(id, category, rarity, { heavy = false, engines = ['emitter'], filters = {}, candidates = null, duration = [120, 240], tags = [] } = {}) {
   return Object.freeze({
     id,
     name: id,
@@ -105,13 +124,14 @@ function eventPreset(id, category, rarity, { heavy = false, engines = ['emitter'
     kind: 'event',
     rarity,
     heavy,
+    tags,
     candidates: candidates || CANDIDATES_BY_RARITY[rarity],
     filters: { minDistance: 3000, maxDistance: 8000, ...filters },
     engines: engines.map((engine) => ({ engine, params: {} })),
     lifetime: { duration, despawn: DESPAWN },
   });
 }
-function sitePreset(id, category, rarity, { heavy = false, activeState = null, engines = ['structure'] } = {}) {
+function sitePreset(id, category, rarity, { heavy = false, activeState = null, engines = ['structure'], tags = [] } = {}) {
   return Object.freeze({
     id,
     name: id,
@@ -119,6 +139,7 @@ function sitePreset(id, category, rarity, { heavy = false, activeState = null, e
     kind: 'site',
     rarity,
     heavy,
+    tags,
     activeState,
     filters: activeState ? { minDistance: 3000, maxDistance: 20000 } : {},
     engines: engines.map((engine) => ({ engine, params: {} })),
@@ -127,32 +148,32 @@ function sitePreset(id, category, rarity, { heavy = false, activeState = null, e
 }
 
 const STUB_PRESETS = Object.freeze([
-  eventPreset('tornado', 'weather', 'rare', { heavy: true, engines: ['vortex', 'emitter', 'windModifier'], filters: { weather: ['storm'], surface: 'land' }, duration: [240, 360] }),
-  eventPreset('supercell', 'weather', 'uncommon', { heavy: true, engines: ['weatherVolume', 'lightEffect', 'windModifier'], filters: { weather: ['building', 'storm'], minDistance: 6000, maxDistance: 20000 }, candidates: { cellSize: 12000, bucketSeconds: 450, chance: 0.5 }, duration: [300, 480] }),
-  eventPreset('waterspout', 'ocean', 'uncommon', { engines: ['vortex', 'emitter'], filters: { surface: 'water', weather: ['building', 'storm'] } }),
-  eventPreset('lenticular', 'weather', 'common', { engines: ['weatherVolume', 'windModifier'], filters: { biomes: ['snow', 'pine'] } }),
-  eventPreset('microburst', 'weather', 'uncommon', { engines: ['weatherVolume', 'windModifier'], filters: { weather: ['building', 'storm'] } }),
-  eventPreset('glory', 'weather', 'common', { engines: ['celestial'], filters: { timeOfDay: ['day'], altitude: { min: 600 } } }),
-  eventPreset('whalePod', 'ocean', 'common', { engines: ['fauna', 'waterEffect'], filters: { surface: 'coast' } }),
-  eventPreset('murmuration', 'wildlife', 'uncommon', { engines: ['fauna'], filters: { timeOfDay: ['dusk'], biomes: ['meadows', 'pine'] } }),
+  eventPreset('tornado', 'weather', 'rare', { heavy: true, engines: ['vortex', 'emitter', 'windModifier'], filters: { weather: ['storm'], surface: 'land' }, duration: [240, 360], tags: ['spectacle', 'farLure'] }),
+  eventPreset('supercell', 'weather', 'uncommon', { heavy: true, engines: ['weatherVolume', 'lightEffect', 'windModifier'], filters: { weather: ['building', 'storm'], minDistance: 6000, maxDistance: 20000 }, candidates: { cellSize: 12000, bucketSeconds: 450, chance: 0.5 }, duration: [300, 480], tags: ['spectacle', 'farLure'] }),
+  eventPreset('waterspout', 'ocean', 'uncommon', { engines: ['vortex', 'emitter'], filters: { surface: 'water', weather: ['building', 'storm'] }, tags: ['water', 'spectacle'] }),
+  eventPreset('lenticular', 'weather', 'common', { engines: ['weatherVolume', 'windModifier'], filters: { biomes: ['snow', 'pine'] }, tags: ['calm', 'slow', 'spectacle', 'snow'] }),
+  eventPreset('microburst', 'weather', 'uncommon', { engines: ['weatherVolume', 'windModifier'], filters: { weather: ['building', 'storm'] }, tags: ['challenge'] }),
+  eventPreset('glory', 'weather', 'common', { engines: ['celestial'], filters: { timeOfDay: ['day'], altitude: { min: 600 } }, tags: ['calm', 'slow', 'spectacle'] }),
+  eventPreset('whalePod', 'ocean', 'common', { engines: ['fauna', 'waterEffect'], filters: { surface: 'coast' }, tags: ['water', 'coast', 'calm', 'slow', 'spectacle'] }),
+  eventPreset('murmuration', 'wildlife', 'uncommon', { engines: ['fauna'], filters: { timeOfDay: ['dusk'], biomes: ['meadows', 'pine'] }, tags: ['murmuration', 'calm', 'slow', 'spectacle'] }),
   // The pacing floor: a common event the terrain, weather and hour never rule out, dense enough that
   // a candidate usually waits in the cone ahead (about 2 in the 45 degree cone, 3 in the 60 degree one).
-  eventPreset('geese', 'wildlife', 'common', { engines: ['fauna'], candidates: { cellSize: 3500, bucketSeconds: 300, chance: 0.6 } }),
-  eventPreset('hawks', 'wildlife', 'common', { engines: ['fauna'], filters: { timeOfDay: ['day'], surface: 'land' } }),
-  eventPreset('fireflies', 'wildlife', 'common', { engines: ['fauna', 'lightEffect'], filters: { timeOfDay: ['night'], biomes: ['meadows', 'archipelago'], altitude: { max: 1500 } } }),
-  eventPreset('eagle', 'wildlife', 'uncommon', { engines: ['fauna'] }),
-  eventPreset('meteorShower', 'celestial', 'uncommon', { engines: ['celestial', 'lightEffect'], filters: { timeOfDay: ['night'] } }),
-  eventPreset('eclipse', 'celestial', 'legendary', { engines: ['celestial'], filters: { timeOfDay: ['day'] }, duration: [150, 210] }),
-  eventPreset('comet', 'celestial', 'rare', { heavy: true, engines: ['celestial'], filters: { timeOfDay: ['night'] }, duration: [300, 400] }),
-  eventPreset('lanterns', 'celestial', 'rare', { engines: ['emitter', 'lightEffect'], filters: { timeOfDay: ['night', 'dusk'] } }),
-  eventPreset('skyWhale', 'fantasy', 'rare', { heavy: true, engines: ['fauna', 'windModifier'], duration: [240, 360] }),
-  eventPreset('jetStream', 'flightplay', 'uncommon', { engines: ['windModifier'], filters: { altitude: { min: 2500 } } }),
-  eventPreset('stormChase', 'setpiece', 'legendary', { heavy: true, engines: ['setPiece'], filters: { weather: ['building', 'storm'] }, duration: [420, 540] }),
-  sitePreset('volcano', 'geo', 'rare', { heavy: true, activeState: { duration: [180, 300] }, engines: ['structure', 'emitter'] }),
-  sitePreset('geyserField', 'geo', 'common', { engines: ['emitter'] }),
-  sitePreset('windFarm', 'structure', 'common'),
-  sitePreset('airfield', 'structure', 'common'),
-  sitePreset('crystalSpires', 'fantasy', 'uncommon', { engines: ['structure', 'lightEffect'] }),
+  eventPreset('geese', 'wildlife', 'common', { engines: ['fauna'], candidates: { cellSize: 3500, bucketSeconds: 300, chance: 0.6 }, tags: ['murmuration', 'calm', 'slow'] }),
+  eventPreset('hawks', 'wildlife', 'common', { engines: ['fauna'], filters: { timeOfDay: ['day'], surface: 'land' }, tags: ['thermal', 'calm'] }),
+  eventPreset('fireflies', 'wildlife', 'common', { engines: ['fauna', 'lightEffect'], filters: { timeOfDay: ['night'], biomes: ['meadows', 'archipelago'], altitude: { max: 1500 } }, tags: ['night', 'calm', 'slow', 'forest'] }),
+  eventPreset('eagle', 'wildlife', 'uncommon', { engines: ['fauna'], tags: ['thermal', 'calm'] }),
+  eventPreset('meteorShower', 'celestial', 'uncommon', { engines: ['celestial', 'lightEffect'], filters: { timeOfDay: ['night'] }, tags: ['celestial', 'night', 'calm', 'spectacle'] }),
+  eventPreset('eclipse', 'celestial', 'legendary', { engines: ['celestial'], filters: { timeOfDay: ['day'] }, duration: [150, 210], tags: ['celestial', 'calm', 'spectacle'] }),
+  eventPreset('comet', 'celestial', 'rare', { heavy: true, engines: ['celestial'], filters: { timeOfDay: ['night'] }, duration: [300, 400], tags: ['celestial', 'night', 'farLure', 'spectacle'] }),
+  eventPreset('lanterns', 'celestial', 'rare', { engines: ['emitter', 'lightEffect'], filters: { timeOfDay: ['night', 'dusk'] }, tags: ['night', 'calm', 'slow', 'spectacle'] }),
+  eventPreset('skyWhale', 'fantasy', 'rare', { heavy: true, engines: ['fauna', 'windModifier'], duration: [240, 360], tags: ['calm', 'slow', 'spectacle', 'farLure'] }),
+  eventPreset('jetStream', 'flightplay', 'uncommon', { engines: ['windModifier'], filters: { altitude: { min: 2500 } }, tags: ['challenge'] }),
+  eventPreset('stormChase', 'setpiece', 'legendary', { heavy: true, engines: ['setPiece'], filters: { weather: ['building', 'storm'] }, duration: [420, 540], tags: ['spectacle', 'challenge'] }),
+  sitePreset('volcano', 'geo', 'rare', { heavy: true, activeState: { duration: [180, 300] }, engines: ['structure', 'emitter'], tags: ['spectacle', 'farLure'] }),
+  sitePreset('geyserField', 'geo', 'common', { engines: ['emitter'], tags: ['spectacle', 'water'] }),
+  sitePreset('windFarm', 'structure', 'common', { tags: ['slow'] }),
+  sitePreset('airfield', 'structure', 'common', { tags: ['calm', 'perch'] }),
+  sitePreset('crystalSpires', 'fantasy', 'uncommon', { engines: ['structure', 'lightEffect'], tags: ['perch', 'spectacle'] }),
 ]);
 /** The presets the director runs on: the stubs, or the game's own with --presets real. */
 const REAL_MODE = OPTIONS.presets === 'real';
@@ -416,6 +437,7 @@ function createStubSpawnManager({ bus, player, getTime, placement, isInView, bud
       if (refused === 'lights') counters.refusedLights++;
       if (refused) return null;
       const instance = createInstance(preset, { ...options, heavy: countsHeavy });
+      records[records.length - 1].id = instance.id;
       return instance.id;
     },
     deactivate(id, reason) {
@@ -988,6 +1010,540 @@ async function testShedding() {
 }
 
 // ============================================================================================
+// PHASE 3 (contract i): the ground track, craft weighting, combos and global overrides
+// ============================================================================================
+/**
+ * Flies a director over a custom path. player: { position, heading, speed, velocity? } (moved by
+ * step(dt, time, player)); presets: the director's list (the stub manager knows the same list).
+ * Returns { log, state, manager, events, world, sun, overrideEntries }.
+ */
+function runCustom({
+  seed, presets = PRESETS, hours, player, step, siteChance = 0, getCraft = null, profileFor = undefined, sunStart = 0.72,
+  naturalEnds = true, overrideSink = null, onStep = null, devHooks = true,
+}) {
+  const presetById = new Map(presets.map((preset) => [preset.id, preset]));
+  const bus = attachTypedEvents(new EventBus(), { validate: true });
+  const world = createWorldGen(seed, WORLD_OPTIONS);
+  const weather = createWeatherModel(world.seedHash >>> 0);
+  const placement = createStubPlacement(world.seedHash >>> 0, siteChance);
+  const sun = createSun(sunStart);
+  let time = 0;
+  const getTime = () => time;
+  const isInView = createView(player);
+  const manager = createStubSpawnManager({ bus, player, getTime, placement, isInView, naturalEnds, presetById });
+  const events = { comboStarted: [], globalOverride: [] };
+  bus.onTyped('comboStarted', (payload) => events.comboStarted.push({ time, ...payload }));
+  bus.onTyped('globalOverride', (payload) => events.globalOverride.push({ time, ...payload }));
+  const director = createDirector({
+    seedHash: world.seedHash >>> 0,
+    presets,
+    spawnManager: manager,
+    weather,
+    terrain: {
+      heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL, landmarkSitesNear: world.landmarkSitesNear,
+      biomeKeys: world.BIOMES.map((biome) => biome.key),
+    },
+    getPlayer: () => player,
+    getTime,
+    getSun: () => sun.sun,
+    isInView,
+    placement,
+    bus,
+    getCraft,
+    ...(profileFor !== undefined ? { profileFor } : {}),
+    overrideSink,
+    devHooks,
+  });
+  const totalSteps = Math.round((hours * 3600) / STEP_SECONDS);
+  let nextManagerTick = 0;
+  for (let index = 0; index <= totalSteps; index++) {
+    time = index * STEP_SECONDS;
+    step(STEP_SECONDS, time, player);
+    sun.update(time);
+    if (time >= nextManagerTick) {
+      nextManagerTick += 0.5;
+      manager.update();
+    }
+    director.update();
+    if (onStep) onStep(director, time, sun.sun);
+  }
+  const state = director.getState();
+  const log = director.getLog();
+  const overrideEntries = director.getOverrides();
+  director.dispose();
+  return { log, state, manager, events, world, sun, overrideEntries, presetById };
+}
+
+/** A path step for a flight that moves along its velocity (the drift) whatever the nose says. */
+function driftStep(dt, time, player) {
+  player.position.x += player.velocity.x * dt;
+  player.position.z += player.velocity.z * dt;
+}
+
+/** A createFlightPath wanderer with a velocity along its heading (ground track = heading). */
+function wanderingPlayer(pathSeed, speed, altitude) {
+  const path = createFlightPath({ pathSeed, speed, altitude });
+  const player = path.player;
+  player.velocity = { x: 0, y: 0, z: -speed };
+  return {
+    player,
+    step(dt, time) {
+      path.step(dt, time);
+      const radians = (player.heading * Math.PI) / 180;
+      player.velocity.x = Math.sin(radians) * speed;
+      player.velocity.z = -Math.cos(radians) * speed;
+    },
+  };
+}
+
+function testTrack() {
+  // A balloon drifting east on the wind, nose to the north: its content belongs on the drift line.
+  const drifting = { position: { x: 0, y: 900, z: 0 }, heading: 0, speed: 1, velocity: { x: 8, y: 0, z: 0 } };
+  const drift = runCustom({ seed: 'TRACK', hours: 3, player: drifting, step: driftStep, siteChance: TYPICAL_SITE_CHANCE });
+  const records = drift.manager.records.filter((record) => record.source === 'director' && !record.site);
+  const offTrack = records.map((record) => angleBetween(record.bearing, 90));
+  const offNose = records.map((record) => angleBetween(record.bearing, 0));
+  check('track', 'drifting east, nose north: every activation within 60 deg of the ground track', records.length > 0 && Math.max(...offTrack) <= MAX_OFF_AXIS_WIDE + 1e-9, `${records.length} activations, worst ${Math.max(...offTrack).toFixed(1)} deg off the track`);
+  const besideNose = offNose.filter((angle) => angle > MAX_OFF_AXIS_WIDE).length;
+  check('track', 'drifting: most activations lie outside the cone of the nose (the drift line wins)', besideNose > records.length * 0.5, `${besideNose}/${records.length} more than 60 deg off the nose`);
+
+  // A hover (below 2 m/s over the ground) keeps the nose heading.
+  const hovering = { position: { x: 0, y: 400, z: 0 }, heading: 200, speed: 0.6, velocity: { x: 0.6, y: 0, z: 0 } };
+  const hover = runCustom({ seed: 'TRACK', hours: 1, player: hovering, step: driftStep });
+  const hoverRecords = hover.manager.records.filter((record) => record.source === 'director');
+  const hoverWorst = Math.max(...hoverRecords.map((record) => angleBetween(record.bearing, 200)));
+  check('track', 'hovering (0.6 m/s): activations follow the nose heading', hoverRecords.length > 0 && hoverWorst <= MAX_OFF_AXIS_WIDE + 1e-9, `${hoverRecords.length} activations, worst ${hoverWorst.toFixed(1)} deg off the nose`);
+
+  // Smoothing: a 90 degree turn of the ground track (east to north) settles over about a second.
+  const turning = { position: { x: 0, y: 900, z: 0 }, heading: 90, speed: 30, velocity: { x: 30, y: 0, z: 0 } };
+  const samples = [];
+  runCustom({
+    seed: 'TRACK', hours: 20 / 3600, player: turning,
+    step(dt, time, player) {
+      if (time >= 10) {
+        player.velocity.x = 0;
+        player.velocity.z = -30;
+        player.heading = 0;
+      }
+      driftStep(dt, time, player);
+    },
+    onStep(director, time) {
+      if (Math.abs(time - 9.5) < 1e-6 || Math.abs(time - 10.5) < 1e-6 || Math.abs(time - 14) < 1e-6) samples.push(director.getState().track);
+    },
+  });
+  const [before, first, settled] = samples;
+  check('track', 'a 90 degree turn: the track eases over 1 s (part way after one tick, settled after 4 s)', before === 90 && first < 90 && first > 0 && Math.min(settled, 360 - settled) <= 2, `track ${samples.join(' > ')} deg`);
+}
+
+/**
+ * How much a log's director activations suit a profile: the mean craft weight of their presets (the
+ * share above 1 is reported too).
+ */
+function favouredShare(log, profile, altitude) {
+  const entries = log.filter((entry) => entry.reason === 'schedule' || entry.reason === 'drought');
+  const values = entries.map((entry) => craftWeight(PRESET_BY_ID.get(entry.presetId), profile, altitude));
+  const mean = values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  return { mean, share: values.length > 0 ? values.filter((value) => value > 1).length / values.length : 0, count: entries.length };
+}
+
+function testCraftWeighting() {
+  const profiles = DEFAULT_DIRECTOR_PROFILES;
+  const byId = (id) => PRESET_BY_ID.get(id);
+  const units = [
+    ['seaplane on a whale pod (water, coast)', craftWeight(byId('whalePod'), profiles.seaplane, 500), 1.8 * 1.4],
+    ['eagle on thermal hawks (thermal)', craftWeight(byId('hawks'), profiles.eagle, 500), 2],
+    ['eagle on a murmuration (murmuration)', craftWeight(byId('murmuration'), profiles.eagle, 500), 1.8],
+    ['spaceplane below 20 km on a comet', craftWeight(byId('comet'), profiles.spaceplane, 15000), 1],
+    ['spaceplane above 20 km on a comet (celestial x farLure, clamped)', craftWeight(byId('comet'), profiles.spaceplane, 25000), CRAFT_WEIGHT_RANGE.max],
+    ['spaceplane above 20 km on geese (wildlife, clamped)', craftWeight(byId('geese'), profiles.spaceplane, 25000), CRAFT_WEIGHT_RANGE.min],
+    ['balloon on a glory (calm x slow x spectacle, clamped)', craftWeight(byId('glory'), profiles.balloon, 800), CRAFT_WEIGHT_RANGE.max],
+    ['no profile', craftWeight(byId('comet'), null, 25000), 1],
+  ];
+  const wrong = units.filter(([, value, expected]) => Math.abs(value - expected) > 1e-9);
+  check('craft', 'craftWeight: profile favour, above bands and the 0.25..3 clamp', wrong.length === 0, wrong.length ? wrong.map(([name, value, expected]) => `${name}: ${value} (expected ${expected})`).join('; ') : units.map(([name, value]) => `${name} ${Math.round(value * 100) / 100}`).join(', '));
+
+  // The same seed and path flown by different craft: the favoured share rises.
+  const cases = [
+    { craft: 'seaplane', speed: 55, altitude: [150, 600], hours: 6 },
+    { craft: 'eagle', speed: 25, altitude: [300, 1200], hours: 6 },
+    { craft: 'balloon', speed: 8, altitude: [600, 1500], hours: 6 },
+    { craft: 'spaceplane', speed: 220, altitude: [24000, 30000], hours: 6 },
+  ];
+  for (const entry of cases) {
+    const fly = (craft) => {
+      const wanderer = wanderingPlayer(`craft-${entry.craft}`, entry.speed, entry.altitude);
+      return runCustom({ seed: 'CRAFT-WEIGHT', hours: entry.hours, player: wanderer.player, step: (dt, time) => wanderer.step(dt, time), siteChance: TYPICAL_SITE_CHANCE, getCraft: () => craft });
+    };
+    const baseline = fly('glider');
+    const weighted = fly(entry.craft);
+    const altitude = (entry.altitude[0] + entry.altitude[1]) / 2;
+    const before = favouredShare(baseline.log, profiles[entry.craft], altitude);
+    const after = favouredShare(weighted.log, profiles[entry.craft], altitude);
+    const tiersBefore = tierIntervals(baseline.log.filter((item) => item.reason !== 'debug'), entry.hours);
+    const tiersAfter = tierIntervals(weighted.log.filter((item) => item.reason !== 'debug'), entry.hours);
+    const tierText = RARITY_TIERS.map((tier) => `${tier} ${tiersBefore[tier].count}>${tiersAfter[tier].count}`).join(', ');
+    check('craft', `${entry.craft}: favoured presets win more often than for the glider on the same path (${entry.hours} h)`, after.mean > before.mean && after.count > 0,
+      `mean craft weight ${before.mean.toFixed(3)} > ${after.mean.toFixed(3)} (favoured ${(before.share * 100).toFixed(1)} % > ${(after.share * 100).toFixed(1)} %) of ${before.count} / ${after.count} activations; tiers ${tierText}`);
+    check('craft', `${entry.craft}: every log entry records the craft`, weighted.log.length > 0 && weighted.log.every((item) => item.craft === entry.craft), `${weighted.log.length} entries`);
+    if (entry.craft === 'seaplane') {
+      const again = fly('seaplane');
+      check('craft', 'seaplane twice on the same path: identical logs; the glider: a different hash', JSON.stringify(again.log) === JSON.stringify(weighted.log) && weighted.state.logHash !== baseline.state.logHash, `hash ${weighted.state.logHash} / ${again.state.logHash}, glider ${baseline.state.logHash}`);
+    }
+  }
+
+  // A module's own directorProfile wins over the defaults.
+  const own = { favor: { tags: { celestial: 3 } } };
+  const wanderer = wanderingPlayer('craft-module', 55, [300, 900]);
+  const moduleRun = runCustom({ seed: 'CRAFT-WEIGHT', hours: 4, player: wanderer.player, step: (dt, time) => wanderer.step(dt, time), siteChance: TYPICAL_SITE_CHANCE, getCraft: () => 'seaplane', profileFor: () => own });
+  check('craft', "a module's directorProfile replaces the default profile", Object.keys(moduleRun.state.craftWeights).every((id) => (PRESET_BY_ID.get(id).tags || []).includes('celestial')) && Object.keys(moduleRun.state.craftWeights).length > 0, `weighted presets: ${JSON.stringify(moduleRun.state.craftWeights)}`);
+}
+
+// ---- Combos ---------------------------------------------------------------------------------------
+const COMBO_DESPAWN = Object.freeze({ distance: 14000, hysteresis: 3000, outOfViewSeconds: 30 });
+function comboPreset(id, block, { engines = ['lightEffect'], filters = {}, candidates = { cellSize: 5000, bucketSeconds: 300, chance: 0.9 }, duration = [240, 300] } = {}) {
+  return Object.freeze({
+    ...eventPreset(id, 'celestial', 'legendary', { engines, filters: { minDistance: 3000, maxDistance: 9000, ...filters }, candidates, duration, tags: ['spectacle'] }),
+    lifetime: { duration, despawn: COMBO_DESPAWN },
+    combo: block,
+  });
+}
+const COMBO_NIGHT_SKY = comboPreset('comboNightSky', {
+  preconditions: { timeOfDay: ['night'], biomes: ['snow', 'pine', 'meadows'] },
+  members: [{ presetId: 'meteorShower', role: 'anchor' }, { presetId: 'comet', place: { bearing: 30, distance: 4000, jitter: 600 }, delay: 20 }],
+  exclusive: true,
+  heavySlots: 1,
+});
+const COMBO_MONOLITH = comboPreset('comboMonolith', {
+  preconditions: { timeOfDay: ['day'], near: { landmarks: ['monoliths'], radius: 6000 } },
+  members: [{ presetId: 'eclipse', role: 'anchor' }, { presetId: 'glory', place: { bearing: -40, distance: 2500, jitter: 300 } }],
+});
+const COMBO_VOLCANO = comboPreset('comboVolcano', {
+  preconditions: { siteActive: ['volcano'] },
+  members: [{ presetId: 'microburst', place: { bearing: 0, distance: 1500 } }, { presetId: 'lanterns', place: { bearing: 90, distance: 2000, jitter: 200 }, delay: 45 }],
+}, { filters: { minDistance: 3000, maxDistance: 12000 } });
+// The volcano fixture erupts often (common, its active state on most of its buckets), so a combo
+// waiting for an active volcano gets its chances in a few hours.
+const FREQUENT_VOLCANO = Object.freeze({ ...sitePreset('volcano', 'geo', 'common', { heavy: true, activeState: { duration: [600, 900] }, engines: ['structure', 'emitter'], tags: ['spectacle', 'farLure'] }) });
+const COMBO_PRESETS = Object.freeze([...STUB_PRESETS.map((preset) => (preset.id === 'volcano' ? FREQUENT_VOLCANO : preset)), COMBO_NIGHT_SKY, COMBO_MONOLITH, COMBO_VOLCANO]);
+
+/** Combo starts in a run: each with its member records (by parent) and its spawn ids. */
+function combosOf(run) {
+  const starts = run.log.filter((entry) => entry.members);
+  return starts.map((entry) => {
+    const records = run.manager.records.filter((record) => record.parent === entry.combo && !record.refused);
+    const main = records.find((record) => record.presetId === entry.presetId);
+    const members = records.filter((record) => record !== main);
+    const ids = new Set(records.map((record) => record.id));
+    const endTimes = run.manager.ends.filter((end) => ids.has(end.id)).map((end) => end.time);
+    return { entry, main, members, end: endTimes.length === records.length && endTimes.length > 0 ? Math.max(...endTimes) : Infinity };
+  });
+}
+
+/** The angle-free checks of a member's placement: the anchor at the combo point, others in their ring. */
+function placementError(combo, presetById, log) {
+  const block = presetById.get(combo.entry.presetId).combo;
+  for (let index = 0; index < block.members.length; index++) {
+    const member = block.members[index];
+    const record = combo.members.find((candidate) => candidate.presetId === member.presetId);
+    const dropped = log.some((entry) => entry.reason === 'comboMemberDropped' && entry.candidateId === `${combo.entry.combo}#${index}`);
+    if (!record && dropped) continue;
+    if (!record) return `member ${member.presetId} never started`;
+    const distance = Math.hypot(record.x - combo.main.x, record.z - combo.main.z);
+    if (member.role === 'anchor' || !member.place) {
+      if (distance > 1e-6) return `anchor ${member.presetId} ${distance.toFixed(1)} m from the combo`;
+      continue;
+    }
+    const jitter = member.place.jitter || 0;
+    if (distance < member.place.distance - jitter - 1 || distance > member.place.distance + jitter + 1) return `${member.presetId} at ${distance.toFixed(0)} m (wanted ${member.place.distance} +- ${jitter})`;
+  }
+  return '';
+}
+
+function testCombos() {
+  const flyNight = () => {
+    const wanderer = wanderingPlayer('combo-night', 55, [400, 1400]);
+    return runCustom({ seed: 'COMBO', presets: COMBO_PRESETS, hours: 12, player: wanderer.player, step: (dt, time) => wanderer.step(dt, time), siteChance: TYPICAL_SITE_CHANCE });
+  };
+  const run = flyNight();
+  const presetById = run.presetById;
+  const combos = combosOf(run);
+  const byPreset = (id) => combos.filter((combo) => combo.entry.presetId === id);
+  check('combos', 'combos start in a long flight (night sky, monoliths, volcano fixtures)', byPreset('comboNightSky').length > 0 && byPreset('comboMonolith').length > 0,
+    `${combos.length} combos in 12 h: ${['comboNightSky', 'comboMonolith', 'comboVolcano'].map((id) => `${id} ${byPreset(id).length}`).join(', ')}`);
+
+  // Preconditions at the start.
+  const preconditionBreaks = [];
+  for (const combo of combos) {
+    const time = combo.entry.time;
+    const dayTime = (0.72 + time / CONFIG.DAY_LENGTH_DEFAULT) % 1;
+    const elevation = Math.sin((dayTime - 0.25) * Math.PI * 2) * CONFIG.SUN_MAX_ELEVATION_DEG;
+    const preconditions = presetById.get(combo.entry.presetId).combo.preconditions;
+    if (preconditions.timeOfDay && !matchesTimeOfDay(preconditions.timeOfDay, elevation, dayTime)) preconditionBreaks.push(`${combo.entry.combo} timeOfDay`);
+    if (preconditions.biomes && !preconditions.biomes.includes(run.world.biomeAt(combo.main.x, combo.main.z).key)) preconditionBreaks.push(`${combo.entry.combo} biome`);
+    if (preconditions.near && !run.world.landmarkSitesNear(combo.main.x, combo.main.z, 1).some((site) => preconditions.near.landmarks.includes(site.type) && site.x === combo.main.x && site.z === combo.main.z)) preconditionBreaks.push(`${combo.entry.combo} not on a monolith`);
+  }
+  check('combos', 'every combo started with its preconditions holding (night / biome; day / on a monolith circle)', preconditionBreaks.length === 0 && combos.length > 0, preconditionBreaks.join(', ') || `${combos.length} checked`);
+
+  // Members: placement, parents, delays, log order and the event.
+  const placementBreaks = combos.map((combo) => placementError(combo, presetById, run.log)).filter(Boolean);
+  check('combos', 'members placed deterministically: the anchor on the combo point, the others on their ring (distance +- jitter)', placementBreaks.length === 0 && combos.length > 0, placementBreaks.join('; ') || `${combos.reduce((sum, combo) => sum + combo.members.length, 0)} members`);
+  const parentBreaks = combos.filter((combo) => !combo.main || combo.main.parent !== combo.entry.combo || combo.members.some((record) => record.parent !== combo.entry.combo));
+  check('combos', "the combo and its members start through the manager with source 'director' and the combo id as parent", parentBreaks.length === 0 && combos.every((combo) => combo.main.source === 'director'), `${parentBreaks.length} with a wrong parent`);
+  const delayBreaks = [];
+  for (const combo of combos) {
+    const block = presetById.get(combo.entry.presetId).combo;
+    for (const member of block.members) {
+      const record = combo.members.find((candidate) => candidate.presetId === member.presetId);
+      if (!record) continue;
+      const late = record.time - combo.entry.time - (member.delay || 0);
+      if (late < -1e-6 || late > COMBO_MEMBER_PATIENCE) delayBreaks.push(`${member.presetId} ${late.toFixed(1)} s`);
+    }
+  }
+  check('combos', 'members start at their delay (comet 20 s and lanterns 45 s after their combo)', delayBreaks.length === 0 && combos.length > 0, delayBreaks.join(', ') || 'all on time');
+  const logBreaks = combos.filter((combo) => {
+    const block = presetById.get(combo.entry.presetId).combo;
+    const memberEntries = run.log.filter((entry) => entry.combo === combo.entry.combo && (entry.reason === 'comboMember' || entry.reason === 'comboMemberDropped'));
+    return JSON.stringify(combo.entry.members) !== JSON.stringify(block.members.map((member) => member.presetId)) || memberEntries.length !== block.members.length;
+  });
+  const eventBreaks = combos.filter((combo) => !run.events.comboStarted.some((event) => event.id === combo.entry.combo && event.presetId === combo.entry.presetId && JSON.stringify(event.members) === JSON.stringify(combo.entry.members)));
+  check('combos', 'the log records each combo with its members in order (and a comboMember or comboMemberDropped entry each); comboStarted fires', logBreaks.length === 0 && eventBreaks.length === 0 && run.events.comboStarted.length === combos.length, `${combos.length} combos, ${run.events.comboStarted.length} comboStarted events`);
+
+  // Budgets and exclusivity.
+  // A combo starts only when the budgets admit every member; a waiting member's heavy slot stays
+  // reserved against the director's own activations, but a site coming into range may still take it
+  // (the manager never refuses a site): then the member retries, and is dropped (logged) after
+  // COMBO_MEMBER_PATIENCE.
+  const memberRefusals = run.manager.records.filter((record) => record.parent !== null && record.refused);
+  const dropped = run.log.filter((entry) => entry.reason === 'comboMemberDropped');
+  const droppedOk = dropped.every((entry) => memberRefusals.some((record) => record.parent === entry.combo && record.presetId === entry.presetId && record.refused === 'heavy'));
+  const reservationBreaks = [];
+  for (const combo of combos) {
+    const block = presetById.get(combo.entry.presetId).combo;
+    block.members.forEach((member, index) => {
+      if (!(member.delay > 0) || !presetById.get(member.presetId).heavy) return;
+      const startedAt = combo.members.find((record) => record.presetId === member.presetId)?.time ?? dropped.find((entry) => entry.candidateId === `${combo.entry.combo}#${index}`)?.time ?? Infinity;
+      for (const entry of run.log) {
+        if ((entry.reason === 'schedule' || entry.reason === 'drought') && entry.time > combo.entry.time && entry.time < startedAt && presetById.get(entry.presetId).heavy) reservationBreaks.push(`${entry.presetId} at ${entry.time} s`);
+      }
+    });
+  }
+  check('combos', "budgets admit every member at the start; a waiting heavy member's slot is kept from the director's own heavy activations", run.manager.counters.maxHeavy <= DIRECTOR_BUDGETS.maxHeavy && droppedOk && reservationBreaks.length === 0,
+    `peak heavy ${run.manager.counters.maxHeavy}; ${memberRefusals.length} member retries refused (${[...new Set(memberRefusals.map((record) => record.refused))].join(', ') || 'none'}), ${dropped.length} dropped after a site took the slot; ${reservationBreaks.length} director heavy starts while a member waited`);
+  const legendaryStarts = run.log.filter((entry) => (entry.reason === 'schedule' || entry.reason === 'drought') && presetById.get(entry.presetId).rarity === 'legendary');
+  const exclusiveBreaks = [];
+  for (const combo of combos) {
+    if (!presetById.get(combo.entry.presetId).combo.exclusive) continue;
+    for (const entry of legendaryStarts) if (entry !== combo.entry && entry.time > combo.entry.time && entry.time < combo.end) exclusiveBreaks.push(`${entry.presetId} at ${entry.time} s inside ${combo.entry.combo}`);
+  }
+  check('combos', 'an exclusive combo keeps every other legendary out while it runs', exclusiveBreaks.length === 0 && byPreset('comboNightSky').length > 0, exclusiveBreaks.join(', ') || `${byPreset('comboNightSky').length} exclusive combos, ${legendaryStarts.length} legendary starts in all`);
+
+  // The active-volcano precondition.
+  // Only the volcano combo is legendary here, so every legendary turn waits for an eruption.
+  const volcanoPresets = COMBO_PRESETS.filter((preset) => preset.rarity !== 'legendary' || preset.id === 'comboVolcano');
+  const volcanoRun = (() => {
+    const wanderer = wanderingPlayer('combo-volcano', 55, [400, 1400]);
+    return runCustom({ seed: 'COMBO-VOLCANO', presets: volcanoPresets, hours: 12, player: wanderer.player, step: (dt, time) => wanderer.step(dt, time), siteChance: 0.2 });
+  })();
+  const volcanoCombos = combosOf(volcanoRun).filter((combo) => combo.entry.presetId === 'comboVolcano');
+  const eruptions = volcanoRun.manager.records.filter((record) => record.presetId === 'volcano' && record.source === 'director' && !record.refused);
+  const volcanoBreaks = volcanoCombos.filter((combo) => !eruptions.some((record) => record.time <= combo.entry.time && Math.hypot(record.x - combo.main.x, record.z - combo.main.z) <= 20000
+    && !volcanoRun.manager.ends.some((end) => end.id === record.id && end.time <= combo.entry.time)));
+  check('combos', 'siteActive: a volcano combo starts only with an erupting volcano within 20 km', volcanoCombos.length > 0 && volcanoBreaks.length === 0, `${volcanoCombos.length} volcano combos, ${eruptions.length} eruptions, ${volcanoBreaks.length} without one`);
+
+  // Determinism and the forced combo.
+  const again = flyNight();
+  check('combos', 'same seed and path: identical logs with the combos', JSON.stringify(again.log) === JSON.stringify(run.log) && again.state.logHash === run.state.logHash, `${run.log.length} entries, hash ${run.state.logHash} / ${again.state.logHash}`);
+  let forcedId = null;
+  const forcedPlayer = { position: { x: 0, y: 800, z: 0 }, heading: 45, speed: 50, velocity: { x: 35.4, y: 0, z: -35.4 } };
+  const forced = runCustom({
+    seed: 'COMBO-FORCE', presets: COMBO_PRESETS, hours: 120 / 3600, player: forcedPlayer, step: driftStep, sunStart: 0.4,
+    onStep(director, time) {
+      if (forcedId === null && time >= 5) forcedId = director.forceSpawn('comboNightSky', { distance: 4000, force: true });
+    },
+  });
+  const forcedMembers = forced.manager.records.filter((record) => record.parent === forcedId);
+  const forcedComet = forcedMembers.find((record) => record.presetId === 'comet');
+  check('combos', "forceSpawn starts a combo by day, its preconditions ignored (the F9 debugger's path), members on their delay", forcedId === 'combo:debug:1' && forcedMembers.length === 3 && forcedComet && Math.abs(forcedComet.time - 25) <= 0.6 && forced.log.some((entry) => entry.reason === 'debug' && entry.members),
+    `${forcedId}: ${forcedMembers.map((record) => `${record.presetId} ${record.source} at ${record.time} s`).join(', ')}`);
+}
+
+// ---- Global overrides -------------------------------------------------------------------------------
+const BLOOD_MOON_FIXTURE = Object.freeze({
+  ...eventPreset('bloodMoonFixture', 'celestial', 'rare', { engines: ['celestial'], tags: ['celestial', 'night', 'spectacle'] }),
+  override: { kind: 'bloodMoon', nightChance: 0.5, region: null },
+});
+const MIDNIGHT_SUN_FIXTURE = Object.freeze({
+  ...eventPreset('midnightSunFixture', 'celestial', 'legendary', { engines: ['celestial'], tags: ['celestial', 'snow'] }),
+  override: { kind: 'midnightSun', nightChance: 0.5, region: { biomes: ['snow'], blendKm: 3 } },
+});
+const OVERRIDE_PRESETS = Object.freeze([...STUB_PRESETS, BLOOD_MOON_FIXTURE, MIDNIGHT_SUN_FIXTURE]);
+
+function testOverrides() {
+  const nights = [[0.72, 1], [1.49, 1], [1.51, 2], [3.2, 3]].filter(([days, night]) => nightIndex(days) !== night);
+  const windowValues = [0.5, 0.6, 0.67, 0.75, 0, 0.25, 0.33, 0.4].map((dayTime) => Math.round(nightWindow(dayTime) * 100) / 100);
+  check('overrides', 'night index (noon to noon) and the night window (eased in by 0.70, out from 0.30)', nights.length === 0 && windowValues.join(',') === '0,0,0.5,1,1,1,0.5,0', `window at 0.5, 0.6, 0.67, 0.75, 0, 0.25, 0.33, 0.4: ${windowValues.join(', ')}`);
+
+  const seedHash = hashString('OVERRIDES');
+  const first = scheduledNights(seedHash, 'bloodMoon', 0.04, 0, 19999);
+  const second = scheduledNights(seedHash, 'bloodMoon', 0.04, 0, 19999);
+  const otherSeed = scheduledNights(hashString('OTHER'), 'bloodMoon', 0.04, 0, 19999);
+  check('overrides', 'the schedule is deterministic per seed and preset, at its night chance (0.04 over 20000 nights)', JSON.stringify(first) === JSON.stringify(second) && JSON.stringify(first) !== JSON.stringify(otherSeed) && Math.abs(first.length / 20000 - 0.04) < 0.005,
+    `${first.length} nights (${(first.length / 200).toFixed(2)} %); first ${first.slice(0, 6).join(', ')}`);
+
+  // The midnight sun's bend: never below the skim line at full weight, continuous, untouched by day.
+  const direction = { x: 0, y: 0, z: 0 };
+  let lowest = Infinity;
+  let largestStep = 0;
+  let previous = null;
+  let dayChanged = 0;
+  for (let index = 0; index <= 10000; index++) {
+    const dayTime = index / 10000;
+    const angle = (dayTime - 0.25) * Math.PI * 2;
+    const elevation = Math.sin(angle) * CONFIG.SUN_MAX_ELEVATION_DEG * (Math.PI / 180);
+    const azimuth = Math.PI / 2 + angle;
+    direction.x = Math.sin(azimuth) * Math.cos(elevation);
+    direction.y = Math.sin(elevation);
+    direction.z = -Math.cos(azimuth) * Math.cos(elevation);
+    const baseY = direction.y;
+    applyMidnightSun(dayTime, direction, 1);
+    const bent = (Math.asin(direction.y) * 180) / Math.PI;
+    lowest = Math.min(lowest, bent);
+    if (previous !== null) largestStep = Math.max(largestStep, Math.abs(bent - previous));
+    previous = bent;
+    if (Math.sin(elevation) > Math.sin(10 * (Math.PI / 180)) && direction.y !== baseY) dayChanged++;
+  }
+  check('overrides', 'the midnight sun skims the horizon: never below 1.5 deg at full weight, a continuous path, the day untouched', lowest >= MIDNIGHT_SUN_SKIM.midnight - 1e-9 && largestStep < 0.2 && dayChanged === 0, `lowest ${lowest.toFixed(2)} deg, largest step ${largestStep.toFixed(3)} deg per 0.0001 day, ${dayChanged} day samples changed`);
+
+  // The regional blend over the real world: 1 in the snow, 0 beyond blendKm of it, a smooth ramp
+  // between (the world's snow patches are 1.5-8 km across, so presets keep blendKm to a few km).
+  const world = createWorldGen('OVERRIDE-REGION', WORLD_OPTIONS);
+  const field = createRegionField({ biomes: ['snow'], blendKm: 3, biomeAt: world.biomeAt, biomeKeys: world.BIOMES.map((biome) => biome.key) });
+  let snowPoint = null;
+  let farPoint = null;
+  for (let radius = 0; radius <= 400000 && (!snowPoint || !farPoint); radius += 2000) {
+    for (let angle = 0; angle < 360 && (!snowPoint || !farPoint); angle += 15) {
+      const x = Math.sin((angle * Math.PI) / 180) * radius;
+      const z = -Math.cos((angle * Math.PI) / 180) * radius;
+      const weight = field.weightAt(x, z);
+      if (!snowPoint && weight === 1 && world.biomeAt(x, z).key === 'snow') snowPoint = { x, z };
+      if (!farPoint && weight === 0) farPoint = { x, z };
+    }
+  }
+  let rampStep = 0;
+  let coverage = 0;
+  if (snowPoint && farPoint) {
+    const distance = Math.hypot(farPoint.x - snowPoint.x, farPoint.z - snowPoint.z);
+    let last = null;
+    for (let travelled = 0; travelled <= distance; travelled += 100) {
+      const blend = travelled / distance;
+      const weight = field.weightAt(snowPoint.x + (farPoint.x - snowPoint.x) * blend, snowPoint.z + (farPoint.z - snowPoint.z) * blend);
+      if (last !== null) rampStep = Math.max(rampStep, Math.abs(weight - last));
+      last = weight;
+    }
+    for (let index = 0; index < 400; index++) if (field.weightAt((index % 20) * 7919 - 79190, Math.floor(index / 20) * 7919 - 79190) === 1) coverage++;
+  }
+  check('overrides', 'regional blend (snow, 3 km): 1 over the snow, 0 beyond the blend, no step over 0.08 per 100 m between', snowPoint !== null && farPoint !== null && rampStep < 0.08,
+    `snow ${JSON.stringify(snowPoint)}, clear ${JSON.stringify(farPoint)}, largest step ${rampStep.toFixed(3)}; full weight on ${(coverage / 4).toFixed(1)} % of a 150 km grid; ${field.cachedCells} cells cached`);
+
+  // The director: overrides are never candidates; events, the sink and the once-a-night spawn follow
+  // the schedule.
+  const sinkLog = [];
+  const sink = {
+    apply(entry) {
+      sinkLog.push({ id: entry.id, night: entry.night, weight: entry.weight, region: entry.region, scheduled: entry.scheduled });
+    },
+    disposed: false,
+    dispose() {
+      this.disposed = true;
+    },
+  };
+  const wanderer = wanderingPlayer('override-path', 55, [400, 1400]);
+  const hours = 2;
+  const run = runCustom({ seed: 'OVERRIDES', presets: OVERRIDE_PRESETS, hours, player: wanderer.player, step: (dt, time) => wanderer.step(dt, time), overrideSink: sink });
+  const overrideIds = new Set(['bloodMoonFixture', 'midnightSunFixture']);
+  const asCandidates = run.log.filter((entry) => overrideIds.has(entry.presetId) && entry.reason !== 'override');
+  check('overrides', 'override presets are never director candidates (only override entries in the log)', asCandidates.length === 0, `${run.log.filter((entry) => overrideIds.has(entry.presetId)).length} override entries, ${asCandidates.length} as candidates`);
+  const lastNight = nightIndex(0.72 + (hours * 3600) / CONFIG.DAY_LENGTH_DEFAULT);
+  const expected = scheduledNights(run.world.seedHash >>> 0, 'bloodMoonFixture', 0.5, 1, lastNight);
+  const bloodStarts = run.events.globalOverride.filter((event) => event.id === 'override:bloodMoonFixture' && event.active && !run.events.globalOverride.some((other) => other.id === event.id && other.time < event.time && other.time > event.time - 60));
+  const bloodNights = [...new Set(sinkLog.filter((entry) => entry.id === 'override:bloodMoonFixture' && entry.weight > 0).map((entry) => entry.night))];
+  check('overrides', 'the blood moon shows exactly on its scheduled nights (globalOverride on start, half weight and end)', JSON.stringify(bloodNights) === JSON.stringify(expected.filter((night) => bloodNights.includes(night) || night < lastNight)) && bloodStarts.length > 0,
+    `scheduled nights ${expected.join(', ')}; shown ${bloodNights.join(', ')}; ${run.events.globalOverride.filter((event) => event.id === 'override:bloodMoonFixture').length} events`);
+  const fullAtMidnight = sinkLog.filter((entry) => entry.id === 'override:bloodMoonFixture' && entry.scheduled && entry.weight === 1).length > 0;
+  const quietOff = sinkLog.filter((entry) => !entry.scheduled && entry.weight !== 0).length === 0;
+  check('overrides', 'the sink gets every entry: full weight in a scheduled night, 0 on the others; disposed with the director', fullAtMidnight && quietOff && sink.disposed, `${sinkLog.length} sink calls`);
+  const regionBreaks = sinkLog.filter((entry) => entry.id === 'override:midnightSunFixture' && entry.scheduled && entry.weight > entry.region + 1e-9);
+  check('overrides', 'the midnight sun is weighted by its region (never above the snow share at the player)', regionBreaks.length === 0, `${sinkLog.filter((entry) => entry.id === 'override:midnightSunFixture' && entry.weight > 0).length} weighted ticks, region at the end ${run.overrideEntries.find((entry) => entry.presetId === 'midnightSunFixture').region.toFixed(3)}`);
+  const bloodSpawns = run.manager.records.filter((record) => record.presetId === 'bloodMoonFixture' && !record.refused);
+  const bloodEnds = run.manager.ends.filter((end) => end.presetId === 'bloodMoonFixture');
+  const highNights = [...new Set(sinkLog.filter((entry) => entry.id === 'override:bloodMoonFixture' && entry.weight >= 0.5).map((entry) => entry.night))];
+  check('overrides', "the override's own preset starts once per night from half weight (its discovery) and ends with it", bloodSpawns.length === highNights.length && bloodEnds.every((end) => end.reason === 'override' || end.reason === 'ended' || end.reason === 'dispose'), `${bloodSpawns.length} spawns for ${highNights.length} nights; ends ${JSON.stringify(bloodEnds.map((end) => end.reason))}`);
+
+  // forceSpawn: the debugger forces an override on the current night.
+  let forcedId = null;
+  const forcedSink = [];
+  const unscheduled = (() => {
+    for (let night = 1; night < 400; night++) if (!scheduledNights(createWorldGen('OVERRIDES-FORCE', WORLD_OPTIONS).seedHash >>> 0, 'bloodMoonFixture', 0.5, night, night).length) return night;
+    return null;
+  })();
+  const forcedPlayer = { position: { x: 0, y: 800, z: 0 }, heading: 0, speed: 40, velocity: { x: 0, y: 0, z: -40 } };
+  runCustom({
+    seed: 'OVERRIDES-FORCE', presets: OVERRIDE_PRESETS, hours: 300 / 3600, player: forcedPlayer, step: driftStep, sunStart: unscheduled - 1 + 0.6,
+    overrideSink: { apply(entry) { if (entry.id === 'override:bloodMoonFixture') forcedSink.push(entry.weight); }, dispose() {} },
+    onStep(director, time) {
+      if (forcedId === null && time >= 1) forcedId = director.forceSpawn('bloodMoonFixture');
+    },
+  });
+  check('overrides', 'forceSpawn forces an override on an unscheduled night (it shows from the evening)', forcedId === 'override:bloodMoonFixture' && Math.max(...forcedSink) === 1, `night ${unscheduled}: ${forcedId}, peak weight ${Math.max(...forcedSink)}`);
+}
+
+/** The preset validator's combo, override and tags rules, on full presets cloned from the game's. */
+function testComboSchema() {
+  const meteor = GAME_PRESETS.find((preset) => preset.id === 'meteorShower');
+  const base = { ...meteor, id: 'comboSchemaTest', rarity: 'legendary' };
+  const valid = Object.freeze({
+    ...base,
+    tags: ['celestial', 'night'],
+    combo: {
+      preconditions: { timeOfDay: ['night'], biomes: ['snow'], siteActive: ['volcano'], near: { landmarks: ['monoliths'], sites: ['crystalSpires'], radius: 6000 } },
+      members: [{ presetId: 'meteorShower', role: 'anchor' }, { presetId: 'comet', place: { bearing: 30, distance: 4000, jitter: 600 }, delay: 20 }],
+      exclusive: true,
+      heavySlots: 2,
+    },
+  });
+  const override = Object.freeze({ ...meteor, id: 'overrideSchemaTest', override: { kind: 'midnightSun', nightChance: 0.04, region: { biomes: ['snow'], blendKm: 20 } } });
+  let validError = '';
+  try {
+    validatePresets([...GAME_PRESETS, valid, override]);
+  } catch (error) {
+    validError = error.message;
+  }
+  check('schema', 'a full combo and an override preset validate with the 30 game presets', validError === '', validError || 'valid');
+  const broken = [
+    ['a combo that is not legendary', { ...valid, rarity: 'rare' }],
+    ['a member that names no preset', { ...valid, combo: { ...valid.combo, members: [{ presetId: 'nothingHere', role: 'anchor' }] } }],
+    ['a member that is a site', { ...valid, combo: { ...valid.combo, members: [{ presetId: 'volcano', role: 'anchor' }] } }],
+    ['two anchors', { ...valid, combo: { ...valid.combo, members: [{ presetId: 'meteorShower', role: 'anchor' }, { presetId: 'comet', role: 'anchor' }] } }],
+    ['siteActive on a site without an active state', { ...valid, combo: { ...valid.combo, preconditions: { siteActive: ['geyserField'] } } }],
+    ['a member without a place', { ...valid, combo: { ...valid.combo, members: [{ presetId: 'comet' }] } }],
+    ['an unknown tag', { ...valid, tags: ['banana'] }],
+    ['a repeated tag', { ...valid, tags: ['night', 'night'] }],
+    ['an override on a combo', { ...valid, override: { kind: 'bloodMoon', nightChance: 0.1, region: null } }],
+    ['an unknown override kind', { ...override, override: { kind: 'aurora', nightChance: 0.1, region: null } }],
+  ];
+  const accepted = [];
+  for (const [label, preset] of broken) {
+    try {
+      validatePresets([...GAME_PRESETS, Object.freeze(preset)]);
+      accepted.push(label);
+    } catch (error) {
+      verbose(`schema refuses ${label}: ${error.message}`);
+    }
+  }
+  check('schema', `the validator refuses broken combo, override and tags blocks (${broken.length} cases)`, accepted.length === 0, accepted.length ? `accepted: ${accepted.join(', ')}` : 'all refused');
+}
+
+// ============================================================================================
 // RUN
 // ============================================================================================
 /** Real mode: pacing in a world with the real presets' sites (their real placement), bush plane speed. */
@@ -1097,6 +1653,11 @@ if (REAL_MODE) {
   testWeather();
   await testShedding();
   testNearFilter();
+  testTrack();
+  testCraftWeighting();
+  testCombos();
+  testOverrides();
+  testComboSchema();
 }
 const wallSeconds = (Date.now() - started) / 1000;
 
