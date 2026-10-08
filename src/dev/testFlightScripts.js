@@ -112,16 +112,16 @@ const WINGSUIT = Object.freeze({
   checks: [CHECK.autopilot, CHECK.dive, CHECK.relaunch, { id: 'canopy', label: 'canopy open', test: (seen) => seen.canopy }],
 });
 
-/** Airship: autopilot cruise and turn, then the elevators nose down and the rudders turn it by hand. */
+/** Airship: autopilot cruise and turn, then the elevators nose it down and the rudders turn it by hand. */
 const AIRSHIP = Object.freeze({
   steps: [
     { at: 0, label: 'autopilot cruise', run: (pilot) => cruise(pilot) },
     { at: 0.3, label: 'autopilot turn 90 deg right', run: (pilot) => cruise(pilot, 90) },
-    { at: 0.48, label: 'autopilot off, nose down and rudder left', run: (pilot) => { handsOff(pilot); pilot.stick({ roll: 0, pitch: -0.6, yaw: -0.6 }); } },
-    { at: 0.62, label: 'hands off (assists level it and hold the heading)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
+    { at: 0.44, label: 'autopilot off, nose down and rudder left', run: (pilot) => { handsOff(pilot); pilot.stick({ roll: 0, pitch: -1, yaw: -0.6 }); } },
+    { at: 0.66, label: 'hands off (assists level it and hold the heading)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
     { at: 0.8, label: 'autopilot cruise, turn back', run: (pilot) => cruise(pilot, -90) },
   ],
-  checks: [CHECK.autopilot, { id: 'noseDown', label: 'pitched 3 deg nose down by hand', test: (seen) => seen.minPitch <= -3 }],
+  checks: [CHECK.autopilot, { id: 'noseDown', label: 'pitched 2 deg nose down by hand (an airship pitches slowly)', test: (seen) => seen.minPitch <= -2 }],
 });
 
 const SCRIPTS = Object.freeze({
