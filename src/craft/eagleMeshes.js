@@ -151,7 +151,7 @@ function buildLeg(builder, thighTint, shankTint, clawTint, thighRadius) {
 
 /** Smoothed pose shared by both skins (damped toward the craft state every frame). */
 function createPose() {
-  return { fold: 0, flare: 0, legs: 0, perch: 0, spread: 0, head: 0, headLift: 0, jaw: 0, screech: 0, lastScreech: -1, lastRoar: -1, look: 0 };
+  return { fold: 0, flare: 0, legs: 0, perch: 0, spread: 0, jaw: 0, screech: 0, lastScreech: -1, look: 0 };
 }
 
 /** The common animation targets from the visual and the craft state. */
