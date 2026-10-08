@@ -71,12 +71,18 @@ function createFlatWorld(ground = 0) {
   return { groundHeight: () => ground, heightAt: () => ground, WATER_LEVEL };
 }
 
+/** A world with a ridge: flat at 0, rising to `height` east of x = `from` (m). */
+function createRidgeWorld(from, height) {
+  const heightAt = (x) => (x > from ? Math.min(height, (x - from) * 2) : 0);
+  return { groundHeight: heightAt, heightAt, WATER_LEVEL };
+}
+
 /**
  * One tiltrotor in the lab: the model, the pilot's ControlState (the throttle axis is the thrust
  * lever, mapped to the collective as the input profile says), the tick copy the control stages
  * shape, the environment and the craft state. override(controls, rig) runs after the stages.
  */
-function createRig({ assists = 0, ground = 0 } = {}) {
+function createRig({ assists = 0, ground = 0, world: givenWorld = null } = {}) {
   const craft = tiltrotor;
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const events = { notify: [], landed: [], stats: [] };
@@ -84,7 +90,7 @@ function createRig({ assists = 0, ground = 0 } = {}) {
   bus.onTyped('landed', (payload) => events.landed.push(payload));
   bus.onTyped('journalStat', (payload) => events.stats.push(payload));
   const craftState = craft.abilities.craftAbility.initialState();
-  const world = createFlatWorld(ground);
+  const world = givenWorld ?? createFlatWorld(ground);
   const model = flightModels.create(craft.simProfile.model, { profile: craft.simProfile, craft, world, bus, state: null, craftState });
   const pilot = createControlState();
   pilot.throttle = 0.5;
@@ -519,6 +525,18 @@ function testAutopilot() {
   Object.assign(hold.autopilot, { enabled: true, heading: 0, altitude: 400, speed: 0, followWaypoint: false });
   hold.run(30);
   record('autopilot hover hold', hold.data.groundSpeed, 1, { unit: 'm/s', compare: 'max', note: `${hold.position().y.toFixed(1)} m` });
+  // A ridge 600 m high ahead: the autopilot climbs in helicopter mode before it converts toward it.
+  const ridge = createRig({ assists: 1, world: createRidgeWorld(400, 600) });
+  ridge.airborne({ altitude: 250 });
+  Object.assign(ridge.autopilot, { enabled: true, heading: 90, altitude: 250, speed: 110, followWaypoint: false });
+  let clearance = Infinity;
+  let struck = false;
+  ridge.run(90, (lab) => {
+    const position = lab.position();
+    clearance = Math.min(clearance, position.y - lab.world.groundHeight(position.x, position.z));
+    if (lab.model.contact.bodyStrike || lab.model.contact.onGround) struck = true;
+  });
+  record('autopilot toward a ridge: climbs before converting, clears it', clearance, 40, { unit: 'm', compare: struck ? false : 'min', decimals: 0, note: `${ridge.data.airspeed.toFixed(0)} m/s at ${ridge.position().y.toFixed(0)} m, nacelles ${ridge.craftState.nacelleAngle}` });
 }
 
 function testCatalog() {

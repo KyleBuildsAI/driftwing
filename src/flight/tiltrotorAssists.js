@@ -503,6 +503,8 @@ const AUTOPILOT = Object.freeze({
   MAX_CLIMB: 5,
   /** Climb limit (m/s) while the nacelles come down: the thrust goes into the acceleration. */
   CONVERSION_CLIMB: 1.5,
+  /** A conversion waits while the terrain floor ahead (clearance included) is more than this above the craft (m). */
+  CONVERSION_MARGIN: 20,
   MAX_DESCENT: 4,
   LOOKAHEAD: Object.freeze([0, 200, 400, 800, 1400, 2200]),
   LOOKAHEAD_REFRESH: 0.5,
@@ -569,10 +571,12 @@ const tiltrotorAutopilot = Object.freeze({
 
     const headingError = wrapSignedRadians((headingTarget - data.heading) * DEG);
     const frame = headingFrameVelocity(data, velocityScratch);
-    // Airplane mode only once the nose points the way to go (a hover turns on the spot first).
+    // Airplane mode only once the nose points the way to go (a hover turns on the spot first) and, still
+    // in helicopter mode, once the craft is above the terrain ahead (it climbs out vertically first).
     const wantAirplane = speedTarget >= AUTOPILOT.AIRPLANE_SPEED;
     const aligned = Math.abs(headingError) < AUTOPILOT.ALIGN_ANGLE || data.airspeed > AUTOPILOT.TURN_SPEED * 2;
-    const converting = wantAirplane && aligned;
+    const terrainAhead = memory.terrainFloor > position.y + AUTOPILOT.CONVERSION_MARGIN && data.hoverShare > 0.5;
+    const converting = wantAirplane && aligned && !terrainAhead;
 
     // ---- Nacelles: hover, or airplane mode on the auto-nacelle schedule ----------------------------------
     const craftState = env && env.craftState ? env.craftState : null;
@@ -591,7 +595,7 @@ const tiltrotorAutopilot = Object.freeze({
     const heliCollective = verticalSpeedToCollective(memory, data, verticalTarget, dt);
     let heliPitch;
     let heliBank;
-    if (hovering || (wantAirplane && !aligned)) {
+    if (hovering || (wantAirplane && !converting)) {
       velocityToAttitude(memory, data, position, 0, 0, dt, tiltOut);
       heliPitch = tiltOut.pitch;
       heliBank = tiltOut.bank;
