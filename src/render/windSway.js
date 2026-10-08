@@ -10,7 +10,9 @@
  * 128 frames, about two seconds, for about 0.3 ms a frame), so a spawn's wind source (a dust devil, a
  * gust front, a microburst) visibly ripples the vegetation it reaches.
  *
- * swaySample(worldXZ) -> vec3(wind x, wind z, gust): the wind in units of the calm prevailing wind at
+ * swaySample(renderXZ) -> vec3(wind x, wind z, gust), at a RENDER-frame xz (positionWorld; the floating
+ * origin, src/core/origin.js: the texture repeats every 2048 m, which divides the origin's 4096 m
+ * lattice, and the window centre moves into the render frame): the wind in units of the calm prevailing wind at
  * 10 m (so the calm ambient gives exactly windDirection x windStrength, the Phase 1 sway), and the
  * gust share. Outside the square (shrunk by the focus's drift during a sweep) it falls back to the
  * global windDirection / windStrength uniforms.
@@ -82,18 +84,20 @@ export function createWindSway(ctx) {
     bytes[offset + 2] = Math.round(Math.min(Math.max(sample.turbulence, 0), 1) * 255);
   }
 
-  /** The vegetation sway's wind at a world-space xz node: vec3(wind x, wind z, gust), see above. */
-  const swaySample = Fn(([worldXZ]) => {
-    const texel = texture(swayTexture, worldXZ.div(SPAN));
+  /** The window centre in the render frame (world - renderOrigin; small near the camera). */
+  const centreRender = uniforms.renderOrigin ? centre.sub(uniforms.renderOrigin.xz) : centre;
+  /** The vegetation sway's wind at a render-frame xz node: vec3(wind x, wind z, gust), see above. */
+  const swaySample = Fn(([renderXZ]) => {
+    const texel = texture(swayTexture, renderXZ.div(SPAN));
     const decoded = texel.rg.mul(2).sub(1).mul(WIND_RANGE).div(max(reference, 0.05));
-    const offset = abs(worldXZ.sub(centre));
+    const offset = abs(renderXZ.sub(centreRender));
     const inside = step(max(offset.x, offset.y), validHalf).mul(ready);
     const fallback = vec3(uniforms.windDirection.x.mul(uniforms.windStrength), uniforms.windDirection.y.mul(uniforms.windStrength), 0);
     return mix(fallback, vec3(decoded, texel.b), inside);
   });
 
   return {
-    swaySample: (worldXZ) => swaySample(vec2(worldXZ)),
+    swaySample: (renderXZ) => swaySample(vec2(renderXZ)),
     texture: swayTexture,
     /** Every frame: re-centres on the focus (world xz) and refreshes CELLS_PER_FRAME texels from the WindField. */
     update(focusX, focusZ) {

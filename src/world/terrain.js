@@ -4,7 +4,7 @@ import * as TSL from 'three/tsl';
 import { clamp } from '../core/util.js';
 import { CONFIG } from '../core/config.js';
 import { createChunkBuilder } from './chunkBuilder.js';
-import { curvedPositionNode } from '../render/curvature.js';
+import { curvatureDropNode, curvedPositionNode } from '../render/curvature.js';
 import { handoffDitherNode, handoffPresenceNode } from './farField.js';
 import { OVERLAY_SWEEP_SLOTS } from './overlays.js';
 import { VEGETATION_TYPE_COUNT as SPECIES_TYPE_COUNT, speciesById } from './vegetationSpecies.js';
@@ -359,12 +359,15 @@ export function createTerrainSystem(ctx) {
       );
       const local = rotated.add(placement.xyz).toVar();
       const heightInModel = positionGeometry.y.max(0.0);
-      const sunk = local.sub(vec3(0.0, heightInModel.mul(stretch.y).mul(1.15).mul(oneMinus(grow)), 0.0));
+      // The planet curvature (render/curvature.js; exactly 0 below 5 km), as for the chunk under it.
+      const curvature = curvatureDropNode(ctx, baseWorld);
+      const sunk = local.sub(vec3(0.0, heightInModel.mul(stretch.y).mul(1.15).mul(oneMinus(grow)).add(curvature), 0.0));
       if (swayStrength <= 0) return sunk;
       const wrapped = mod(baseWorld.xz, WRAP_PERIOD);
       const phase = uniforms.time.mul(1.25).add(wrapped.x.mul(0.043)).add(wrapped.y.mul(0.037));
       const gust = sin(phase).mul(0.7).add(sin(phase.mul(2.3).add(1.7)).mul(0.3)).add(0.55);
-      // The WindField's wind here (calm ambient = windDirection x windStrength) and its gusts.
+      // The WindField's wind here (calm ambient = windDirection x windStrength) and its gusts; baseWorld
+      // is render frame, which the sway texture reads directly (windSway.js).
       const wind = windSway.swaySample(baseWorld.xz);
       const sway = gust.add(wind.z.mul(gustFactor)).mul(heightInModel.mul(heightInModel)).mul(swayStrength);
       return sunk.add(vec3(wind.x.mul(sway), 0.0, wind.y.mul(sway)));
