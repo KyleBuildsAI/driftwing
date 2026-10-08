@@ -1,0 +1,26 @@
+[
+  {
+    "wait": 1500
+  },
+  {
+    "eval": "(async () => { try { const kit = await import('/src/dev/shadowResizeCheck.js'); window.__dwShadow = kit.installShadowResizeCheck(window.DRIFTWING); return 'dev server only: imports /src/dev/shadowResizeCheck.js | ' + await window.__dwShadow.setup(); } catch (error) { console.error('[shadow check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwShadow.degradeByGovernor(); } catch (error) { console.error('[shadow check] governor degrade failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "shot": "shadow-degraded"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwShadow.craftTour(); } catch (error) { console.error('[shadow check] craft tour failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwShadow.nightResize(); } catch (error) { console.error('[shadow check] night resize failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwShadow.restore(); } catch (error) { console.error('[shadow check] restore failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "shot": "shadow-restored"
+  }
+]

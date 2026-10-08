@@ -626,9 +626,37 @@ export function createSkySystem(ctx) {
   const renderOffset = ctx.origin ? ctx.origin.offset : new THREE.Vector3();
   scene.add(hemisphereLight);
 
+  /** Shadow map resizes applied (quality changes: the settings or the perf governor). */
+  const shadowResize = { count: 0, lastSize: 0 };
+
+  /**
+   * A new shadow map size, applied at once, between frames ('quality:changed' fires from the perf
+   * governor's update or a settings change, never inside a render). three r184 would otherwise resize
+   * the shadow render target inside the shadow pass (ShadowNode.renderShadow -> RenderTarget.setSize,
+   * which destroys its GPU textures there), and a pass or a cached bind group still holding the old
+   * depth texture then submits a destroyed texture (a WebGPU warning burst seen after a governor
+   * degrade). Here the render target is resized (its GPU textures destroyed) before any pass of the
+   * next frame is recorded; the 'dispose' event on its depth texture resets every sampler binding that
+   * reads it, so each one rebinds the new texture on its next use; and needsUpdate re-renders the map
+   * in the next frame even while the shadows are not live (night), so nothing samples a texture that
+   * was destroyed and not rebuilt. The shadow pass's own setSize then finds the size already set.
+   */
+  function resizeShadowMap(size) {
+    sunLight.shadow.mapSize.set(size, size);
+    const map = sunLight.shadow.map;
+    if (map) {
+      const depthTexture = map.depthTexture;
+      map.setSize(size, size, map.depth);
+      if (depthTexture) depthTexture.dispatchEvent({ type: 'dispose' });
+    }
+    sunLight.shadow.needsUpdate = true;
+    shadowResize.count++;
+    shadowResize.lastSize = size;
+  }
+
   function applyShadowQuality() {
     const size = ctx.quality.shadowMapSize || 2048;
-    if (sunLight.shadow.mapSize.x !== size) sunLight.shadow.mapSize.set(size, size);
+    if (sunLight.shadow.mapSize.x !== size) resizeShadowMap(size);
     const texel = (2 * SHADOW_EXTENT) / size;
     sunLight.shadow.bias = -SHADOW_BIAS_METERS / (sunLight.shadow.camera.far - sunLight.shadow.camera.near);
     sunLight.shadow.normalBias = texel * 1.4;
@@ -1319,6 +1347,14 @@ export function createSkySystem(ctx) {
      */
     getModifierLevels() {
       return combined;
+    },
+    /**
+     * The sun's shadow map for tests: { size (mapSize), target (the render target's width, or null
+     * before the first shadow pass), resizes (applied), autoUpdate (live shadows) }.
+     */
+    getShadowState() {
+      const map = sunLight.shadow.map;
+      return { size: sunLight.shadow.mapSize.x, target: map ? map.width : null, resizes: shadowResize.count, autoUpdate: sunLight.shadow.autoUpdate };
     },
     /** The modifiers folded together as of the last frame, for the debugger and tests (a copy). */
     getModifierState() {

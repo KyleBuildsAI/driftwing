@@ -369,6 +369,19 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
     `{ hz, anchor, frames }` (contract f.1 updated; a stored path without an anchor reads with 0);
   - floating island tops (landable heightfields) also tag their crown as a perch, beside the
     lintels, tall stones, lighthouse gallery and spire tips the colliders branch tagged.
+- **Fixes:**
+  - the shadow map resize (the WebGPU burst "Destroyed texture [Texture "ShadowDepthTexture"]
+    used in a submit" after a governor degrade): `sky.js` now resizes the sun's shadow render target
+    itself when the quality changes (between frames, never inside the shadow pass, where three r184
+    resizes it), dispatches `dispose` on the old depth texture so every sampler binding rebinds the
+    new one, and forces one shadow pass (`needsUpdate`, also at night when the shadows are not
+    live). `sky.getShadowState()` reports it. Proof: `tools/steps/shadow-resize.json`
+    (`src/dev/shadowResizeCheck.js`) drives the governor's own degrade (quality auto, a simulated
+    45 ms load) to a 1024 map, tours five craft with view swaps, resizes at night and at dawn and
+    grows back; WebGPU 5/5, 0 errors, 0 warnings. The burst never reproduced on demand before the
+    fix either (two probes: a plain degrade plus craft switches, and the collision test's special
+    runs with the governor forced down to 1024 mid-run: 0 warnings each), so the proof is that the
+    path now runs clean, not a before/after.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
