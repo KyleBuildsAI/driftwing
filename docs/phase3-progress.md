@@ -444,7 +444,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | # | Work | Branch | Contract | Status |
 | --- | --- | --- | --- | --- |
 | 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | in progress (branch complete, awaiting I2) |
-| 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | not started |
+| 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | in progress (branch complete, awaiting I2) |
 | 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | not started |
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | not started |
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
@@ -505,6 +505,38 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   name: "dragon") are Milestone O's (j.2), as are the journal panel's Craft section and the remote
   `flightState` craft fields of h.3; the picker shows the 14 craft in one strip until the picker
   branch regroups them.
+
+### Wave 2 - p3/craft-aerobatic
+
+- **Done** (contract h; the craft's reference is [docs/aerobatic.md](aerobatic.md)):
+  - the module `src/craft/aerobatic.js`: an Extra 330 class mesh (low tapered symmetric wing with
+    near-full-span ailerons and their spades, bubble canopy, big rudder and elevator, wheel pants,
+    three-blade prop; ailerons, spades, elevator, rudder, tail wheel and prop animate; the cockpit deck
+    hides in first person), its profile, Space smoke / Shift+Space colour, `situate`, per-craft
+    bindings (the gamepad's and T.16000M's gear button cycles the colour: fixed gear), copilot
+    commands (`smoke`, `smokeColor`, `lastFigure`, `figures`) and status, a `canopy` cockpit with the
+    new `smoke` and `figure` instruments, journal stats (each figure's best score, op `max`);
+  - the model kind `aerobatic` (SimFixedWing; `src/flight/aerobaticAssists.js`): no attitude
+    protections at any level; coordination, yaw damper, auto-trim and stall warning to 50 %; AoA
+    limiter (both signs), G limiter (+8.5 / -6 g), auto-level and overspeed protection to 100 %; the
+    fixed-wing autopilot and trim reused;
+  - the extension `aerobaticAero` (`src/flight/aerobaticAero.js`): the stalled wing's roll-damping
+    reversal (snap rolls), and the figure judging on the 120 Hz flight clock;
+  - the recognizer `src/flight/maneuverRecognizer.js` (pure, allocation-free): the 12 figures, each
+    scored 0-100, the lomcevak credited only at 25 % assists or less; the typed event `figureFlown`,
+    a toast and a `journalStat` per figure; `craftState.figureInProgress` / `lastFigure`;
+  - the smoke ribbon `src/render/smokeRibbon.js` (one pooled 1024-sample mesh, sunlit, camera-facing,
+    drifting with the wind, fading over 30 s, re-anchored every 2 km) plus puffs at the nozzle;
+  - the audio family `aerobaticProp` (the prop family plus the high-rpm snarl and the smoke hiss);
+  - tests: `tools/lab/aerobatic.mjs` (79 checks), `src/dev/craftScenarios/aerobatic.js` (loop, aileron
+    roll, smoke, snap roll), the `?test=1` flight script, the view-physics step.
+- **Edits outside the craft's own files** (single lines unless noted): `src/craft/index.js`,
+  `src/flight/models.js` (kind and `MODEL_KINDS`), `src/audio/engines/index.js`,
+  `src/ui/instruments/index.js`, `src/dev/craftScenarios/index.js`, `src/core/events.js` (`figureFlown`
+  after `challengeCancelled`), `tools/steps/view-physics.json` (one step), `src/dev/testFlightScripts.js`
+  (the script, its map entry and `SCRIPTED_CRAFT`), `src/dev/testHarness.js` (the `smokeSeconds`
+  observation, three lines), `tools/lab/craft.mjs` (the catalog checks follow the registered craft) and
+  `src/gameplay/journal.js` (the module-stat cache rebuilds when a module is replaced).
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
