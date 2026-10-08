@@ -80,7 +80,11 @@ const OCEAN_SEARCH = Object.freeze({ radius: 40000, step: 500, angles: 16, minDe
 const LAKE_SEARCH_RADIUS = 60000;
 const THERMAL_RING = Object.freeze({ radius: 6000, samples: 8, minStrength: 1 });
 const SLOPE_SEARCH = Object.freeze({ radius: 20000, step: 400, angles: 16, minGrade: 0.25, maxGrade: 1, minHeight: 60, probe: 20 });
-const PERCH_SEARCH_RADIUS = 30000;
+/**
+ * Perch searches widen ring by ring (m) and stop at the first that finds one: the vegetation perch
+ * provider scatters every 128 m cell it covers, so one wide search would stall the page.
+ */
+const PERCH_SEARCH_RADII = Object.freeze([150, 400, 1000, 2500]);
 /** start.clearRadius: the highest ground within it is sampled on this grid (m) and cleared by start.clearance. */
 const CLEAR_STEP = 250;
 const DEFAULT_CLEARANCE = 250;
@@ -436,10 +440,13 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
 
   function findPerch(origin) {
     let best = null;
-    ctx.colliders?.perchesNear?.(origin.x, origin.y, origin.z, PERCH_SEARCH_RADIUS, (x, y, z, kind, sourceId) => {
-      const distance = Math.hypot(x - origin.x, z - origin.z);
-      if (!best || distance < best.distance) best = { x, y, z, kind, sourceId, distance };
-    });
+    for (const radius of PERCH_SEARCH_RADII) {
+      ctx.colliders?.perchesNear?.(origin.x, origin.y, origin.z, radius, (x, y, z, kind, sourceId) => {
+        const distance = Math.hypot(x - origin.x, z - origin.z);
+        if (!best || distance < best.distance) best = { x, y, z, kind, sourceId, distance };
+      });
+      if (best) return best;
+    }
     return best;
   }
 

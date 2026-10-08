@@ -2,7 +2,7 @@
 // (the throttle axis; empty is a glide) and the wing tuck (the stoop). Below them the perch line:
 // PERCHED on what, LANDING through the auto-landing, or the nearest perch point (kind, distance and
 // height) with an arrow pointing to it relative to the heading (the ability keeps
-// craftState.nearestPerch, 600 m around). A soaring climb with the flap power at zero shows its gain.
+// craftState.nearestPerch, 300 m around). A soaring climb with the flap power at zero shows its gain.
 import { CENTER, drawPlate, label, digital, roundRect, clamp } from './gaugeKit.js';
 import { grouped } from './units.js';
 

@@ -252,8 +252,12 @@ function buildCreatureView(builder) {
 // craftAbilityAlt: tuck the wings while held (Shift+Space); the copilot's "tuck" latches it.
 // ============================================================================================
 const FIRE = Object.freeze({ BURST: 0.6, COMMAND_BURST: 3, RISE: 7, FALL: 3.5, IGNITE_LEVEL: 0.45, REACH_MARGIN: 3 });
-const NEAREST_PERCH = Object.freeze({ INTERVAL: 1, RADIUS: 600 });
-const PERCH_COMMAND_RADIUS = 3000;
+const NEAREST_PERCH = Object.freeze({ INTERVAL: 1, RADIUS: 300 });
+/**
+ * The copilot's perch search widens ring by ring (m) and stops at the first that finds one: the
+ * vegetation perch provider scatters every 128 m cell a search covers (cached), so it stays small.
+ */
+const PERCH_COMMAND_RADII = Object.freeze([200, 600, 1500]);
 
 /** Scratch for the ability updates (one craft flies at a time): no allocation per frame. */
 const scratch = {
@@ -452,7 +456,7 @@ const copilot = Object.freeze({
       run(api) {
         const craftState = api.craftState;
         if (craftState.perched === true) return 'We are perched already. Raise the flap power to fly.';
-        if (!findNearestPerch(api, PERCH_COMMAND_RADIUS)) return 'No perch within three kilometres. Try near the trees or the peaks.';
+        if (!PERCH_COMMAND_RADII.some((radius) => findNearestPerch(api, radius))) return 'No perch within a kilometre and a half. Try near the trees or the rocks.';
         const target = scratch.nearest;
         craftState.perchTarget = { x: target.x, y: target.y, z: target.z, kind: target.kind, id: target.id };
         const position = api.player.position;
