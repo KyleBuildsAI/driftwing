@@ -292,7 +292,8 @@ function testCatalog() {
   check('catalog', 'every entry names its group and has a silhouette', CRAFT_CATALOG.every((entry) => CRAFT_GROUPS[entry.group].includes(entry.id) && entry.silhouette.length > 0 && entry.silhouette.every((part) => typeof part.d === 'string' && /^M/.test(part.d))));
   check('catalog', 'the Phase 1 hotkeys stay (informational), the new craft have none', CRAFT_CATALOG.slice(0, 6).every((entry, index) => entry.hotkey === `Digit${index + 1}`) && CRAFT_CATALOG.slice(6).every((entry) => entry.hotkey === null));
   const available = gameRegistry.list().filter((entry) => entry.available).map((entry) => entry.id);
-  check('catalog', 'the six game modules register; the new craft wait for theirs', available.join() === 'glider,bushplane,jet,helicopter,wingsuit,fpv', available.join(', '));
+  const phaseOne = ['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv'];
+  check('catalog', 'the six Phase 1 modules register; every available craft has its module', phaseOne.every((id) => available.includes(id)) && available.every((id) => gameRegistry.get(id) !== null) && CRAFT_CATALOG.every((entry) => available.includes(entry.id) === gameRegistry.has(entry.id)), available.join(', '));
   const groups = gameRegistry.groups();
   check('catalog', 'registry.groups() lists the groups with availability', groups.length === 6 && groups[0].label === 'Planes' && groups[0].craft.map((entry) => `${entry.id}:${entry.available}`).join() === 'glider:true,bushplane:true,aerobatic:false,seaplane:false,jet:true', JSON.stringify(groups[0]));
 }
