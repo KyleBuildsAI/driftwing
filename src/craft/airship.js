@@ -545,26 +545,11 @@ function buildGondolaCockpit(builder) {
     }
     cabinBox(builder, [Math.min(x, x - side * 0.1), SILL - 0.04, FRONT + 0.4], [Math.max(x, x - side * 0.1), SILL + 0.02, BACK], CABIN_TINT.frame);
   }
-  // The raked windshield: corner posts from the sill to the roof, a centre post, the lower nose panel.
+  // The raked windshield: slim corner posts from the sill to the window top, the lower nose panel.
   for (const side of [-1, 1]) {
     cabinBox(builder, [side * noseHalf - 0.04, SILL, FRONT - 0.04], [side * noseHalf + 0.04, SILL + 0.06, FRONT + 0.04], CABIN_TINT.frame);
   }
-  const post = (fromX, toX) => {
-    const steps = 6;
-    for (let index = 0; index < steps; index++) {
-      const share = index / steps;
-      const nextShare = (index + 1) / steps;
-      const y0 = SILL + (TOP - SILL) * share;
-      const y1 = SILL + (TOP - SILL) * nextShare;
-      const z0 = FRONT + 0.3 * share;
-      const z1 = FRONT + 0.3 * nextShare;
-      const x0 = fromX + (toX - fromX) * share;
-      const x1 = fromX + (toX - fromX) * nextShare;
-      cabinBox(builder, [Math.min(x0, x1) - 0.035, y0, Math.min(z0, z1) - 0.035], [Math.max(x0, x1) + 0.035, y1, Math.max(z0, z1) + 0.035], CABIN_TINT.frame);
-    }
-  };
-  post(-noseHalf, -HALF);
-  post(noseHalf, HALF);
+  for (const side of [-1, 1]) addStrut(builder, [side * noseHalf, SILL, FRONT], [side * HALF, TOP, FRONT + 0.3], 0.035, CABIN_TINT.frame);
   cabinQuad(builder, [-noseHalf, FLOOR + 0.3, FRONT], [noseHalf, FLOOR + 0.3, FRONT], [noseHalf, SILL, FRONT], [-noseHalf, SILL, FRONT], CABIN_TINT.wallLow);
   cabinQuad(builder, [-HALF, ROOF, FRONT + 0.25], [HALF, ROOF, FRONT + 0.25], [noseHalf, TOP, FRONT + 0.3], [-noseHalf, TOP, FRONT + 0.3], CABIN_TINT.frame);
   // Rear bulkhead with a door.
