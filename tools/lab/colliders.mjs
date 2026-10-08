@@ -102,6 +102,51 @@ function boxMesh(size, position) {
   return { geometry, collider: createMeshCollider(geometry, matrix) };
 }
 
+/**
+ * Mesh depth on a solid with a hole (a torus: the ring is solid, its hole and the bore of a tunnel
+ * are not), turned and moved, with the winding reversed on half of it: inside or outside must agree
+ * with the analytic torus everywhere except within the tessellation's reach of the surface.
+ */
+function testTorusDepth() {
+  const ringRadius = 30;
+  const tubeRadius = 8;
+  const geometry = new THREE.TorusGeometry(ringRadius, tubeRadius, 24, 48);
+  const index = geometry.index.array;
+  for (let face = 0; face < index.length / 3; face += 2) {
+    const swap = index[face * 3 + 1];
+    index[face * 3 + 1] = index[face * 3 + 2];
+    index[face * 3 + 2] = swap;
+  }
+  const turn = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(1, 2, 0.5).normalize(), 0.7).setPosition(500, 120, -300);
+  const collider = createMeshCollider(geometry, Float64Array.from(turn.elements));
+  const local = new THREE.Vector3();
+  // Mulberry32: a fixed sample of points around the torus.
+  let seed = 7;
+  const random = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let value = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+  let checked = 0;
+  let wrong = 0;
+  for (let sample = 0; sample < 400; sample++) {
+    local.set((random() * 2 - 1) * 45, (random() * 2 - 1) * 15, (random() * 2 - 1) * 45);
+    // TorusGeometry lies in the xy plane: the ring around z.
+    const signed = tubeRadius - Math.hypot(Math.hypot(local.x, local.y) - ringRadius, local.z);
+    if (Math.abs(signed) < 0.3) continue;
+    const world = local.clone().applyMatrix4(turn);
+    const depth = collider.depth(world.x, world.y, world.z);
+    checked++;
+    if ((depth > 0) !== (signed > 0) || Math.abs(Math.abs(depth) - Math.abs(signed)) > 0.3) wrong++;
+  }
+  const hole = new THREE.Vector3(0, 0, 0).applyMatrix4(turn);
+  const ring = new THREE.Vector3(ringRadius, 0, 0).applyMatrix4(turn);
+  check('shapes', 'mesh: depth by parity on a turned torus with mixed winding (the hole outside, the ring inside)', wrong === 0 && collider.depth(hole.x, hole.y, hole.z) < -20 && collider.depth(ring.x, ring.y, ring.z) > 7.5, `${checked - wrong} of ${checked} points agree with the analytic torus; hole ${fmt(collider.depth(hole.x, hole.y, hole.z))}, ring ${fmt(collider.depth(ring.x, ring.y, ring.z))}`);
+  collider.dispose();
+  geometry.dispose();
+}
+
 // ---- shapes ---------------------------------------------------------------------------------------------
 function testShapes() {
   const world = createColliderWorld({});
@@ -177,6 +222,7 @@ function testShapes() {
   result = sweep({ x: -20, y: 200, z: 0 }, { x: 20, y: 200, z: 0 }, 1);
   check('shapes', 'mesh (three-mesh-bvh): face hit', result && near(result.t, 0.35, 1e-6) && near(result.normal.x, -1, 1e-6), result ? `t ${fmt(result.t)}` : 'miss');
   check('shapes', 'mesh: depth inside and outside', mesh.collider.depth(0, 200, 0) > 4.9 && mesh.collider.depth(0, 200, 8) < 0, `${fmt(mesh.collider.depth(0, 200, 0))} / ${fmt(mesh.collider.depth(0, 200, 8))}`);
+  testTorusDepth();
   world.remove('mesh');
   mesh.collider.dispose();
   mesh.geometry.dispose();

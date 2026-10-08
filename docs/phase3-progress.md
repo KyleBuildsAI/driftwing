@@ -35,7 +35,9 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   baseline; the retrofits on the arches, monolith circles, lighthouses, balloons and the five Phase 2
   structures; `?test=collision` with `tools/run-harness.mjs --test collision`;
   docs/architecture.md and docs/engines/structure.md. The lab's allocation checks judge the steady
-  state over up to six rounds (a cold first run once missed it while the JIT warmed up).
+  state over up to six rounds (a cold first run once missed it while the JIT warmed up). Mesh
+  colliders tell inside from outside by ray parity (three rays, majority), independent of winding;
+  the lab checks it on a turned torus with mixed winding.
 - **Next:** the verification runs (labs, structure and preset step files and `?test=collision` on
   both backends, the `?test=spawns` subset, the reduced `?test=1` harness), recorded here.
 - **Open issues:** none yet.

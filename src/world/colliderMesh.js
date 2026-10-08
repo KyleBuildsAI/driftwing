@@ -7,15 +7,26 @@
 // and translation, float64) and its inverse. A sweep moves the segment into the local frame, walks the
 // BVH with shapecast (the box of the swept sphere against the nodes, then the sphere against each
 // triangle's face and edges, colliderMath.js) and hands the normal back in the world frame. Triangles
-// are two-sided, so the winding of the source geometry does not matter for sweeps; depth() (inside
-// or outside) needs outward winding. The BVH is built once when the collider is created
-// (deterministic geometry from the site seed) and released by dispose().
+// are two-sided, so the winding of the source geometry does not matter for sweeps, nor for depth()
+// (inside or outside by ray parity, which needs a closed mesh). The BVH is built once when the
+// collider is created (deterministic geometry from the site seed) and released by dispose().
 import * as THREE from 'three/webgpu';
 import { MeshBVH } from 'three-mesh-bvh';
 import { SWEEP, TRIANGLE, VECTOR, createSweepResult, rotateRegister, sweepTriangle } from './colliderMath.js';
 
 /** The rotation part of a world matrix must be orthonormal within this (a rigid transform). */
 const RIGID_TOLERANCE = 1e-6;
+/**
+ * depth()'s parity rays: three fixed directions off every axis and diagonal (a ray grazing an edge or
+ * a vertex can count a crossing twice or not at all; the majority of three settles it).
+ */
+const PARITY_DIRECTIONS = Object.freeze([
+  new THREE.Vector3(0.5714, 0.6143, 0.5442).normalize(),
+  new THREE.Vector3(-0.7311, 0.2087, 0.6495).normalize(),
+  new THREE.Vector3(0.1362, -0.8891, -0.4369).normalize(),
+]);
+/** Two parity hits closer than this (m) along a ray are one crossing (a shared edge). */
+const PARITY_MERGE = 1e-7;
 
 /** The rotation of a column-major 4x4 matrix as a unit quaternion (x, y, z, w) into out. */
 function quaternionFromMatrix(m, out) {
@@ -127,14 +138,10 @@ export function createMeshCollider(geometry, worldMatrixElements, { maxLeafSize 
     },
   };
 
-  // depth(): the closest point, then a ray toward it tells inside from outside by the face it meets.
+  // depth(): the distance to the closest point, inside or outside by the parity of ray crossings.
   const queryPoint = new THREE.Vector3();
   const closest = { point: new THREE.Vector3(), distance: 0, faceIndex: 0 };
   const ray = new THREE.Ray();
-  const faceA = new THREE.Vector3();
-  const faceB = new THREE.Vector3();
-  const faceC = new THREE.Vector3();
-  const faceNormal = new THREE.Vector3();
 
   /** VECTOR = the world point (x, y, z) in the local frame. */
   function pointToLocal(x, y, z) {
@@ -144,17 +151,19 @@ export function createMeshCollider(geometry, worldMatrixElements, { maxLeafSize 
     rotateRegister(rotation, true);
   }
 
-  /** The outward normal of a face of the BVH's geometry (counter-clockwise winding). */
-  function readFace(faceIndex) {
-    const index = bvh.geometry.index;
-    const position = bvh.geometry.attributes.position;
-    const a = index ? index.getX(faceIndex * 3) : faceIndex * 3;
-    const b = index ? index.getX(faceIndex * 3 + 1) : faceIndex * 3 + 1;
-    const c = index ? index.getX(faceIndex * 3 + 2) : faceIndex * 3 + 2;
-    faceA.fromBufferAttribute(position, a);
-    faceB.fromBufferAttribute(position, b).sub(faceA);
-    faceC.fromBufferAttribute(position, c).sub(faceA);
-    return faceNormal.crossVectors(faceB, faceC).normalize();
+  /** Whether a ray from queryPoint along direction crosses the surface an odd number of times. */
+  function oddCrossings(direction) {
+    ray.origin.copy(queryPoint);
+    ray.direction.copy(direction);
+    const hits = bvh.raycast(ray, THREE.DoubleSide);
+    hits.sort((first, second) => first.distance - second.distance);
+    let crossings = 0;
+    let last = -Infinity;
+    for (const hit of hits) {
+      if (hit.distance - last > PARITY_MERGE) crossings++;
+      last = hit.distance;
+    }
+    return crossings % 2 === 1;
   }
 
   return {
@@ -205,7 +214,8 @@ export function createMeshCollider(geometry, worldMatrixElements, { maxLeafSize 
 
     /**
      * How deep (m) the world point lies inside the closed mesh (positive), or minus its distance
-     * outside. Needs outward winding. For checks and tests (three-mesh-bvh allocates a ray hit).
+     * outside: the distance to the closest point, inside when most of three parity rays cross the
+     * surface an odd number of times. For checks and tests (three-mesh-bvh allocates its ray hits).
      */
     depth(x, y, z) {
       if (!bvh) return -Infinity;
@@ -213,11 +223,9 @@ export function createMeshCollider(geometry, worldMatrixElements, { maxLeafSize 
       queryPoint.set(VECTOR[0], VECTOR[1], VECTOR[2]);
       if (!bvh.closestPointToPoint(queryPoint, closest)) return -Infinity;
       if (closest.distance < 1e-9) return 0;
-      ray.origin.copy(queryPoint);
-      ray.direction.subVectors(closest.point, queryPoint).normalize();
-      const hit = bvh.raycastFirst(ray, THREE.DoubleSide);
-      const facing = readFace(hit ? hit.faceIndex : closest.faceIndex).dot(ray.direction);
-      return facing > 0 ? closest.distance : -closest.distance;
+      let odd = 0;
+      for (const direction of PARITY_DIRECTIONS) if (oddCrossings(direction)) odd++;
+      return odd >= 2 ? closest.distance : -closest.distance;
     },
 
     /** Releases the BVH (the geometry stays the caller's to dispose). */
