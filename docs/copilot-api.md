@@ -153,9 +153,9 @@ Numbers are rounded as shown, and a value that cannot be read is sent as `0` or 
 
 | field | type | meaning |
 | --- | --- | --- |
-| `craft` | string | active craft id: `glider`, `bushplane`, `jet`, `helicopter`, `wingsuit` or `fpv` |
+| `craft` | string | active craft id: `glider`, `bushplane`, `jet`, `helicopter`, `wingsuit`, `fpv`, or (as their modules land in Phase 3) `aerobatic`, `seaplane`, `tiltrotor`, `paraglider`, `balloon`, `airship`, `eagle`, `spaceplane` |
 | `craftName` | string | display name, for example `Bush plane` |
-| `availableCraft` | string[] | the craft installed in this build (all six in Phase 1). `setCraft` to anything else is refused |
+| `availableCraft` | string[] | the craft installed in this build (the catalog lists 14; a craft whose module is not installed yet is not here). `setCraft` to anything else is refused |
 | `units` | `'metric'` \| `'aviation'` | the pilot's units. Metric is km/h and metres; aviation is knots and feet. Speak in them |
 | `view` | string or `null` | last camera view the game reported (`chase`, `cockpit`, `wing`, `flyby`, `fpv`). `null` until the first view change |
 | `capabilities` | `{ engine, chute, flaps, throttle }` booleans | what the craft has |
@@ -191,6 +191,8 @@ Numbers are rounded as shown, and a value that cannot be read is sent as `0` or 
 | `lastLanding` | `{ grade, sinkRate, groundSpeed, craft }` or `null` | sink rate at touchdown in m/s (2 decimals), ground speed in m/s |
 | `bestLanding` | same shape or `null` | best landing this session: best grade first, then the lowest sink rate |
 | `landingCount` | integer | graded landings this session |
+| `craftCommands` | `{ id, phrases }[]` | the active craft's own commands (its module's `copilot.commands`; `phrases` are regex sources the local brain matches). Answer one with a `craftCommand` action. Empty for craft without commands |
+| `craftStatus` | string | the active craft's own spoken status (its module's `copilot.status`), or `''` |
 
 Landing grades come from the sink rate at touchdown: butter up to 0.5 m/s (100 fpm), smooth up
 to 1.2 m/s, firm up to 2.2 m/s, and hard above that. Beyond the craft's limit it is a soft crash:
@@ -250,7 +252,7 @@ instead. Optional parameters may be omitted or `null`. Extra unknown keys are ig
 
 | type | parameters | validation | effect and outcome |
 | --- | --- | --- | --- |
-| `setCraft` | `craft`: `glider` \| `bushplane` \| `jet` \| `helicopter` \| `wingsuit` \| `fpv` (case-insensitive) | any other value is invalid | writes the `craft` setting. The flight controller applies it or refuses it. A craft that is not in `availableCraft` is refused with a friendly line that names the installed craft |
+| `setCraft` | `craft`: a catalog id, `glider` \| `bushplane` \| `jet` \| `helicopter` \| `wingsuit` \| `fpv` \| `aerobatic` \| `seaplane` \| `tiltrotor` \| `paraglider` \| `balloon` \| `airship` \| `eagle` \| `spaceplane` (case-insensitive) | any other value is invalid | writes the `craft` setting. The flight controller applies it or refuses it. A craft that is not in `availableCraft` is refused with a friendly line that names the installed craft |
 | `setAssists` | exactly one of: `level` (number 0..1, rounded to 0.01) or `change` (`up` \| `down` \| `full` \| `off`) | both or neither, a level outside 0..1, or an unknown change is invalid | sets the assists of the active craft. `up` and `down` move to the next 25 % step, `full` is 100 % and `off` is 0 %. WREN reports the new level and what is active ("auto-coordination, auto-trim and stall warning, with AoA limiter at part strength"). It counts as the pilot's own choice, so the one-time HOTAS default (50 %) leaves that craft alone |
 | `setView` | `view`: `cockpit` \| `chase` \| `wing` \| `flyby` \| `outside` | any other value is invalid | `cockpit` (first person), `chase` and `outside` (the craft's last third-person view: chase, wing or flyby) send the `viewForward`, `viewBack` or `viewToggle1P3P` input action (`input:action`, source `copilot`); `wing` and `flyby` set the active craft's entry in `settings.views`. WREN then waits up to 1.2 s for the camera to confirm the change. On the FPV drone the first-person view is its FPV camera (`view: 'fpv'`), which counts as the cockpit. Asking for the view already on screen is answered without an action. If the camera does not switch, WREN says so |
 | `deployChute` | none | | refused with "No chute on the ..." when the craft has no chute. Otherwise sends `chuteDeploy` and confirms only when the canopy is open (`craftState.canopy`) |
@@ -258,6 +260,7 @@ instead. Optional parameters may be omitted or `null`. Extra unknown keys are ig
 | `relaunch` | none | | the craft's relaunch: aerotow to 1000 m above the ground for the glider (refused from 950 m above the ground, or while on tow), a dive from the nearest high peak for the wingsuit, or an airstart 300 m up for the others (the helicopter and the drone come back hovering). Refused during a soft-crash reset |
 | `calibrate` | `calibrate` (boolean, optional; the wizard always opens) | a non-boolean value is invalid | opens the controls panel with the calibration wizard (`ui:openControls { calibrate: true }`). It is refused honestly when this build has no controls panel |
 | `switchVersion` | `version`: `v1` (required, case-insensitive) | a missing version or any other value (`v2` included) is invalid | switches to version one, the original DRIFTWING, by sending the `versionToggle` input action (source `copilot`). Inside the launcher shell (`/`) the shell switches; V2 opened on its own at `/v2/` opens the shell with `?v=1`. On a page that is not the launcher it is refused ("Switching to version one works from the DRIFTWING launcher page."). The confirmation is spoken as the switch starts; this game is version two, so there is nothing to switch back to from here |
+| `craftCommand` | `craft` (a catalog id, case-insensitive), `command` (camelCase id, required), `value` (optional: a finite number, a boolean, or a string of at most 48 characters) | an unknown craft, a missing or malformed command, or any other value type is invalid | runs one of the active craft's own commands (`craftCommands`) through the flight controller's `runCraftCommand`, which calls the module's `run(api, value)` and speaks its reply. Refused when another craft is flying ("That one is for the seaplane, and we're flying the glider.") or when the craft has no such command. Locally, a phrase's first capture group is the value ("hold 1200" gives `1200`) |
 
 ### v2 tour-guide actions
 
@@ -411,7 +414,8 @@ do". The keys shown are the defaults, and WREN reads the live bindings:
 
 | command | equivalent |
 | --- | --- |
-| switch to [craft] | keys 1-6, `[` / `]`, the craft picker |
+| switch to [craft] | the favorites on keys 1-9 and 0, `[` / `]` (cycle the favorites), the craft picker |
+| a craft's own commands (`craftCommands`, "systems check") | the craft ability keys: Space (`craftAbility`) and Shift+Space (`craftAbilityAlt`), as each craft documents |
 | switch to version one ("version one", "v1", "play the original") | F8, T.16000M base button 10, the launcher's V1 \| V2 pill |
 | assists up / down / full / off | the assists slider in Settings (`,`) |
 | cockpit view / chase view | Numpad 8 / Numpad 2, the stick hat up / down |

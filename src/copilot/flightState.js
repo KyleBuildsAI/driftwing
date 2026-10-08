@@ -115,5 +115,9 @@ export function buildFlightFields(ctx, extras = {}) {
     lastLanding,
     bestLanding: landingRecord(telemetry.bestLanding),
     landingCount: Number.isFinite(extras.landingCount) ? extras.landingCount : 0,
+    // The active craft's own copilot commands (contract h.6): [{ id, phrases }] (phrases are regex
+    // sources); a remote brain answers with { type: 'craftCommand', craft, command, value? }.
+    craftCommands: typeof flight?.getCraftCommands === 'function' ? flight.getCraftCommands() : [],
+    craftStatus: typeof flight?.getCraftStatus === 'function' ? flight.getCraftStatus() : '',
   };
 }

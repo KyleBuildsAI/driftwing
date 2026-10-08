@@ -3,15 +3,20 @@ import { CRAFT_IDS } from '../core/settings.js';
 
 /**
  * WREN's v2 grammar: the aircraft commands (craft, assists, views, chute, engine, relaunch,
- * calibration, switching to version one) and the flight questions (airspeed, landing), plus the strict schema of the
+ * calibration, switching to version one, and each craft's own commands through craftCommand) and
+ * the flight questions (airspeed, landing, the craft's status), plus the strict schema of the
  * matching remote actions. Everything here is pure: the matchers turn a normalized transcript and
  * the flight-state snapshot into { speech, action }, and the executor (flightActions.js) carries the
  * actions out and reports what really happened.
  */
 
 export const FLIGHT_ACTION_TYPES = Object.freeze([
-  'setCraft', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate', 'switchVersion',
+  'setCraft', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate', 'switchVersion', 'craftCommand',
 ]);
+/** A craft command id (module copilot.commands[].id, contract h.6). */
+const COMMAND_PATTERN = /^[a-z][A-Za-z0-9]{0,31}$/;
+/** The longest string value a craftCommand carries. */
+const MAX_COMMAND_VALUE_LENGTH = 48;
 /** The versions switchVersion can ask for: V2 can only hand over to V1 (the shell switches back). */
 export const SWITCH_VERSIONS = Object.freeze(['v1']);
 export const ASSIST_CHANGES = Object.freeze(['up', 'down', 'full', 'off']);
@@ -82,6 +87,22 @@ export function sanitizeFlightAction(raw) {
     case 'calibrate':
       if (present(raw.calibrate) && typeof raw.calibrate !== 'boolean') return null;
       return action;
+    case 'craftCommand': {
+      // A craft module's own command (contract h.6): the craft it is for, the command id, and an
+      // optional value (a finite number, a boolean, or a short string).
+      const craft = typeof raw.craft === 'string' ? raw.craft.toLowerCase() : '';
+      if (!CRAFT_IDS.includes(craft) || typeof raw.command !== 'string' || !COMMAND_PATTERN.test(raw.command)) return null;
+      action.craft = craft;
+      action.command = raw.command;
+      if (present(raw.value)) {
+        const value = raw.value;
+        if (typeof value === 'number' && Number.isFinite(value)) action.value = value;
+        else if (typeof value === 'boolean') action.value = value;
+        else if (typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_COMMAND_VALUE_LENGTH) action.value = value.trim();
+        else return null;
+      }
+      return action;
+    }
     case 'switchVersion': {
       // version is required and must name V1 exactly (case aside).
       const version = typeof raw.version === 'string' ? raw.version.toLowerCase() : '';
@@ -181,6 +202,49 @@ export function describeLanding(flight, pick) {
  * phrasing without repeating the last one; helpLine() is the live help answer.
  */
 export function createFlightGrammar({ pick, helpLine }) {
+  /** Compiled craft-command phrases, by regex source (modules send sources; contract h.6). */
+  const phraseCache = new Map();
+  function phrasePattern(source) {
+    let pattern = phraseCache.get(source);
+    if (!pattern) {
+      pattern = new RegExp(source, 'i');
+      phraseCache.set(source, pattern);
+    }
+    return pattern;
+  }
+
+  /**
+   * The active craft's own commands (flight.craftCommands: [{ id, phrases }]): the first phrase that
+   * matches runs the command through craftCommand. A phrase's first capture group, when it has one,
+   * is the value (a number when it reads as one).
+   */
+  function matchCraftCommand(text, flight) {
+    const commands = Array.isArray(flight.craftCommands) ? flight.craftCommands : [];
+    for (const command of commands) {
+      if (!command || !Array.isArray(command.phrases)) continue;
+      for (const source of command.phrases) {
+        const match = phrasePattern(source).exec(text);
+        if (!match) continue;
+        const action = { type: 'craftCommand', craft: flight.craft, command: command.id };
+        const captured = typeof match[1] === 'string' ? match[1].trim() : '';
+        if (captured) {
+          const number = Number(captured);
+          action.value = Number.isFinite(number) ? number : captured.slice(0, MAX_COMMAND_VALUE_LENGTH);
+        }
+        return { speech: '', action };
+      }
+    }
+    return null;
+  }
+
+  /** "Craft status", "systems check": the active craft's own report (module copilot.status). */
+  function matchCraftStatus(text, flight) {
+    if (!/\b(craft status|systems? (check|status|report)|status of the (craft|aircraft)|how('s| is) (the|our) (craft|aircraft|machine) doing)\b/.test(text)) return null;
+    const status = typeof flight.craftStatus === 'string' ? flight.craftStatus.trim() : '';
+    if (status) return { speech: status, action: null };
+    return { speech: `All normal on ${flight.craftName ? `the ${flight.craftName.toLowerCase()}` : 'board'}. ${describeAirspeed(flight)}`, action: null };
+  }
+
   function matchHelp(text) {
     if (!/\b(help|what can you do|what do you do|what can i (say|ask)|commands|how does (this|it) work|instructions|options|capabilities)\b/.test(text)) return null;
     return { speech: helpLine(), action: null };
@@ -276,7 +340,7 @@ export function createFlightGrammar({ pick, helpLine }) {
   return {
     matchHelp,
     /** In priority order; they run before the v1 matchers. */
-    matchers: [matchVersion, matchLanding, matchCalibrate, matchRelaunch, matchChute, matchEngine, matchView, matchAssists, matchCraft],
+    matchers: [matchVersion, matchCraftCommand, matchCraftStatus, matchLanding, matchCalibrate, matchRelaunch, matchChute, matchEngine, matchView, matchAssists, matchCraft],
   };
 }
 

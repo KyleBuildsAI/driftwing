@@ -50,7 +50,7 @@ const MAX_LABEL_LENGTH = 48;
 const ACTION_TYPES = [
   'waypoint', 'clearWaypoint', 'autopilot', 'time', 'ringCourse', 'cancelRingCourse',
   'find', 'describe', 'photoMode', 'journal', 'none',
-  'setCraft', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate', 'switchVersion',
+  'setCraft', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate', 'switchVersion', 'craftCommand',
   'nearby', 'goTo', 'findThermal', 'chaseStorm', 'nextDiscovery',
 ];
 /** Tour-guide actions that take an optional autopilot flag. */
@@ -62,7 +62,14 @@ const FIND_TARGETS = [
   'meadows', 'flowers', 'landmark', 'arch', 'monoliths', 'lighthouse', 'balloons',
 ];
 const TIME_PRESETS = ['dawn', 'sunrise', 'morning', 'noon', 'golden', 'sunset', 'dusk', 'night', 'midnight'];
-const CRAFT_IDS = ['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv'];
+/** The craft catalog (src/core/settings.js CRAFT_IDS); flightState.availableCraft lists the installed ones. */
+const CRAFT_IDS = [
+  'glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv',
+  'aerobatic', 'seaplane', 'tiltrotor', 'paraglider', 'balloon', 'airship', 'eagle', 'spaceplane',
+];
+/** A craft command id (flightState.craftCommands[].id) and the longest string value it carries. */
+const COMMAND_PATTERN = /^[a-z][A-Za-z0-9]{0,31}$/;
+const MAX_COMMAND_VALUE_LENGTH = 48;
 /** switchVersion can only ask for V1: V2 hands over to the original game, the shell switches back. */
 const SWITCH_VERSIONS = ['v1'];
 const ASSIST_CHANGES = ['up', 'down', 'full', 'off'];
@@ -93,6 +100,8 @@ const ACTION_JSON_SCHEMA = {
     view: { type: 'string', enum: VIEWS },
     name: { type: 'string' },
     id: { type: 'string' },
+    command: { type: 'string' },
+    value: { anyOf: [{ type: 'number' }, { type: 'boolean' }, { type: 'string' }] },
   },
   required: ['type'],
   additionalProperties: false,
@@ -125,6 +134,7 @@ Aircraft actions (the game reports whether each one worked, so keep speech to a 
 - {"type":"setCraft","craft":one of ${CRAFT_IDS.join('/')}} (sailplane = glider, cub or taildragger = bushplane, fighter = jet, heli or chopper = helicopter, drone or quad = fpv). flightState.availableCraft lists what is installed.
 - {"type":"setAssists","change":"up"/"down"/"full"/"off"} or {"type":"setAssists","level":0..1}: flight assists for the current craft (the only difficulty control; every craft flies the real flight model); up and down move 25 percent.
 - {"type":"switchVersion","version":"v1"}: switch to version one, the original DRIFTWING ("version one", "v1", "play the original"). This game is version two.
+- {"type":"craftCommand","craft":flightState.craft,"command":an id from flightState.craftCommands,"value":optional number, boolean or short string}: the current craft's own commands (smoke, water rudders, scenic cruise, ...); each lists the phrases it answers. flightState.craftStatus is the craft's own status line.
 - {"type":"setView","view":"cockpit"/"chase"/"wing"/"flyby"/"outside"} ("cockpit" is first person, the FPV camera on the drone; "outside" or "third person" returns to the last outside view), {"type":"deployChute"}, {"type":"engine","enabled":bool}, {"type":"relaunch"} (aerotow for the glider), {"type":"calibrate"} (opens the controls panel's calibration wizard).
 Tour-guide actions (the game adds the distances, directions and headings, so keep speech to a short lead-in or an empty string):
 - {"type":"nearby"} for "what's nearby": the game lists the closest spawns (flightState.nearby) with distance, direction and state.
@@ -221,6 +231,16 @@ function sanitizeAction(raw) {
     case 'setCraft':
       if (!CRAFT_IDS.includes(raw.craft)) return null;
       action.craft = raw.craft;
+      return action;
+    case 'craftCommand':
+      if (!CRAFT_IDS.includes(raw.craft) || typeof raw.command !== 'string' || !COMMAND_PATTERN.test(raw.command)) return null;
+      action.craft = raw.craft;
+      action.command = raw.command;
+      if (present(raw.value)) {
+        if (finite(raw.value) || typeof raw.value === 'boolean') action.value = raw.value;
+        else if (typeof raw.value === 'string' && raw.value.trim() && raw.value.length <= MAX_COMMAND_VALUE_LENGTH) action.value = raw.value.trim();
+        else return null;
+      }
       return action;
     case 'switchVersion':
       if (!SWITCH_VERSIONS.includes(raw.version)) return null;

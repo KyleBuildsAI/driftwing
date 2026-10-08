@@ -32,6 +32,9 @@
 //                nextDiscovery) place the right waypoints and say honestly when nothing is there
 //   remote       the remote schema: the five new action types and their parameters, and the
 //                snapshot's nearby[], activeEvents[], weather and callouts fields
+//   craftCommands  a craft's own phrases (flight.craftCommands) become craftCommand actions, with the
+//                first capture group as the value; "systems check" speaks the craft's status; the
+//                craftCommand schema (craft, camelCase command, a number, boolean or short string)
 //
 // Usage: node tools/lab/copilot.mjs [--verbose]
 // Prints one line per check and exits non-zero if any check fails.
@@ -600,10 +603,51 @@ check('remote', 'a reply with a goTo action validates', reply && reply.action.ty
   check('remote', 'the snapshot fields survive JSON (what the endpoint receives)', same(JSON.parse(JSON.stringify(fields)), fields), '');
 }
 
+// ---- craftCommands: each craft's own commands through craftCommand (contract h.6) ---------------------------
+{
+  const commandFlight = {
+    ...FLIGHT,
+    craft: 'bushplane',
+    craftName: 'Bush plane',
+    craftCommands: [
+      { id: 'smoke', phrases: ['\\bsmoke (on|off)\\b'] },
+      { id: 'altitudeHold', phrases: ['\\bhold (\\d+)( m| metres| meters)?\\b'] },
+      { id: 'scenicCruise', phrases: ['\\bscenic cruise\\b'] },
+    ],
+    craftStatus: 'Smoke is off, oil pressure in the green.',
+  };
+  const commandFor = (transcript) => brain.interpret(commandFlight, transcript);
+  const smoke = commandFor('smoke on').action;
+  check('craftCommands', '"smoke on" -> craftCommand smoke, value "on" (the capture group)', smoke && smoke.type === 'craftCommand' && smoke.craft === 'bushplane' && smoke.command === 'smoke' && smoke.value === 'on', JSON.stringify(smoke));
+  const hold = commandFor('WREN, hold 1200 metres').action;
+  check('craftCommands', 'a numeric capture becomes a number value', hold && hold.command === 'altitudeHold' && hold.value === 1200, JSON.stringify(hold));
+  const cruise = commandFor('start the scenic cruise').action;
+  check('craftCommands', 'a phrase without a capture carries no value', cruise && cruise.command === 'scenicCruise' && !('value' in cruise), JSON.stringify(cruise));
+  check('craftCommands', 'without craft commands in the snapshot the phrase is not a craft command', actionFor('scenic cruise')?.type !== 'craftCommand', JSON.stringify(actionFor('scenic cruise')));
+  const craftSwitch = commandFor('switch to the jet').action;
+  check('craftCommands', 'the shared grammar still answers around them', craftSwitch && craftSwitch.type === 'setCraft' && craftSwitch.craft === 'jet', JSON.stringify(craftSwitch));
+  const status = commandFor('systems check');
+  check('craftCommands', '"systems check" speaks the craft\'s own status', status.action === null && status.speech === 'Smoke is off, oil pressure in the green.', status.speech);
+  const plainStatus = brain.interpret({ ...FLIGHT, craftName: 'Glider', airspeed: { indicatedMs: 30, groundSpeedMs: 30, mach: 0.09 } }, 'craft status');
+  check('craftCommands', 'a craft without its own status gets the general one', plainStatus.action === null && /glider/i.test(plainStatus.speech), plainStatus.speech);
+  const cleanCommand = Copilot.sanitizeAction({ type: 'craftCommand', craft: 'Seaplane', command: 'waterRudders', value: true, extra: 1 });
+  check('craftCommands', 'schema: craft (any case), a camelCase command and a boolean value; extra fields dropped', cleanCommand && cleanCommand.craft === 'seaplane' && cleanCommand.command === 'waterRudders' && cleanCommand.value === true && !('extra' in cleanCommand), JSON.stringify(cleanCommand));
+  for (const raw of [
+    { type: 'craftCommand', craft: 'zeppelin', command: 'smoke' },
+    { type: 'craftCommand', craft: 'aerobatic', command: 'Smoke On' },
+    { type: 'craftCommand', craft: 'aerobatic' },
+    { type: 'craftCommand', craft: 'aerobatic', command: 'smoke', value: { colour: 'red' } },
+    { type: 'craftCommand', craft: 'aerobatic', command: 'smoke', value: Number.NaN },
+    { type: 'craftCommand', craft: 'aerobatic', command: 'smoke', value: 'x'.repeat(49) },
+  ]) {
+    check('craftCommands', `schema refused: ${JSON.stringify(raw).slice(0, 90)}`, Copilot.sanitizeAction(raw) === null, JSON.stringify(Copilot.sanitizeAction(raw)));
+  }
+}
+
 let failed = 0;
 for (const result of results) {
   if (!result.pass) failed++;
-  if (!result.pass || VERBOSE) process.stdout.write(`${result.pass ? 'PASS' : 'FAIL'}  ${result.test.padEnd(11)} ${result.name}${result.detail ? `  (${result.detail})` : ''}\n`);
+  if (!result.pass || VERBOSE) process.stdout.write(`${result.pass ? 'PASS' : 'FAIL'}  ${result.test.padEnd(13)} ${result.name}${result.detail ? `  (${result.detail})` : ''}\n`);
 }
 process.stdout.write(`\n${failed === 0 ? 'PASS' : 'FAIL'}: ${results.length - failed}/${results.length} copilot grammar checks\n`);
 process.exitCode = failed === 0 ? 0 : 1;

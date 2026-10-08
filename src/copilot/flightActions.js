@@ -256,6 +256,21 @@ export function createFlightActionHandlers(ctx, helpers) {
       return succeed(pick('versionOne', ['Switching to version one, the original game.', 'Back to version one. See you on the other side.']));
     },
 
+    /**
+     * A craft module's own command (contract h.6) through the flight controller's runCraftCommand,
+     * which runs the module's run(api, value) and returns the spoken reply. Refused when another craft
+     * is flying than the one it was for.
+     */
+    craftCommand(action) {
+      const system = flight();
+      if (typeof system?.runCraftCommand !== 'function') return fail("The flight controller isn't answering right now.");
+      const current = system.getCraft();
+      if (current !== action.craft) return fail(`That one is for ${craftName(action.craft)}, and we're flying ${craftName(current)}.`);
+      const result = system.runCraftCommand(action.command, action.value);
+      if (!result.ok) return fail(result.text);
+      return succeed(result.text || 'Done.');
+    },
+
     calibrate() {
       if (!hasListeners(bus, 'ui:openControls')) {
         return fail('The controls panel is not available in this build, so I cannot open the calibration wizard.');

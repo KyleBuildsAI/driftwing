@@ -6,8 +6,15 @@
 // -z forward):
 //   style       'canopy' (sailplane tub, canopy rim and rear bow), 'cabin' (enclosed cabin: walls,
 //               windshield pillars, door frames, roof rails), 'bubble' (helicopter bubble: low sill,
-//               spine and door bows), 'open' (open cockpit: padded coaming, small windscreen frame)
-//               or 'none' (no geometry, no panel: wingsuit, FPV)
+//               spine and door bows), 'open' (open cockpit: padded coaming, small windscreen frame),
+//               'custom' (the craft draws its own: build below) or 'none' (no geometry, no panel:
+//               wingsuit, FPV)
+//   build       style 'custom' only: build(builder, spec, THREE) draws the interior (a gondola, a
+//               basket, a harness, a rider's view of the creature) into the shared flat-shaded mesh
+//               builder (createMeshBuilder, frame relative to the eye) and may return
+//               { objects?: Object3D[], dispose?() }: extra objects (a burner flame, a lamp) added to
+//               the cockpit group; their geometries and materials are disposed with it, then dispose()
+//               runs. The instrument panel (panel.layout) is still built, with its housing.
 //   width       inner width at the shoulders (default 0.64)
 //   sill        sill / window-line height (default -0.14)
 //   floor       floor height (default -0.62)
@@ -16,13 +23,14 @@
 //   panel       { width, center: [x, y, z], tilt (deg, face toward the eye by default), layout:
 //               [[ids], [ids]] rows (default: the craft's instruments in two rows) }
 //   frameColor  canopy frame / pillar / coaming colour (default the v1 charcoal)
-//   stick       draw a control stick that follows the pilot's input (default true except bubble)
+//   stick       draw a control stick that follows the pilot's input (default true except bubble,
+//               custom and none)
 //   near        camera near plane in this cockpit (default 0.08)
 // Craft mesh parts that would clip the eye set userData.hideInCockpit = true in buildMesh.
 import * as THREE from 'three/webgpu';
 import { PALETTE, createMeshBuilder } from '../craft/kit.js';
 
-export const COCKPIT_STYLES = Object.freeze(['canopy', 'cabin', 'bubble', 'open', 'none']);
+export const COCKPIT_STYLES = Object.freeze(['canopy', 'cabin', 'bubble', 'open', 'none', 'custom']);
 
 const DEG = Math.PI / 180;
 const DEFAULTS = Object.freeze({
@@ -61,7 +69,9 @@ function finite(value, fallback) {
 export function resolveCockpitDescriptor(rig) {
   if (!rig || !Array.isArray(rig.eye)) return null;
   const source = rig.cockpit || {};
-  const style = COCKPIT_STYLES.includes(source.style) ? source.style : source.style === undefined ? 'none' : DEFAULTS.style;
+  let style = COCKPIT_STYLES.includes(source.style) ? source.style : source.style === undefined ? 'none' : DEFAULTS.style;
+  // The registry refuses a custom cockpit without build(); a descriptor built by hand falls back to none.
+  if (style === 'custom' && typeof source.build !== 'function') style = 'none';
   const panelSource = source.panel || {};
   const center = Array.isArray(panelSource.center) && panelSource.center.length === 3 && panelSource.center.every(Number.isFinite)
     ? panelSource.center
@@ -76,8 +86,9 @@ export function resolveCockpitDescriptor(rig) {
     back: finite(source.back, DEFAULTS.back),
     roof: finite(source.roof, DEFAULTS.roof),
     frameColor: new THREE.Color(Number.isFinite(source.frameColor) ? source.frameColor : DEFAULTS.frameColor),
-    stick: source.stick !== undefined ? Boolean(source.stick) : style !== 'bubble' && style !== 'none',
+    stick: source.stick !== undefined ? Boolean(source.stick) : style !== 'bubble' && style !== 'none' && style !== 'custom',
     near: finite(source.near, DEFAULTS.near),
+    build: style === 'custom' ? source.build : null,
     panel: {
       width: finite(panelSource.width, DEFAULT_PANEL.width),
       center,
@@ -374,10 +385,18 @@ export function buildCockpit(spec, instrumentIds) {
   }
 
   const builder = createMeshBuilder();
-  const glare = buildPanelHousing(builder, spec, faceHeight);
-  const tubOptions = spec.style === 'cabin' ? { wallTop: spec.roof, taperFront: 0.92 } : spec.style === 'bubble' ? { taperFront: 0.9 } : {};
-  buildTub(builder, spec, tubOptions);
-  buildSeat(builder, spec);
+  const glare = rows.length > 0 || spec.style !== 'custom' ? buildPanelHousing(builder, spec, faceHeight) : null;
+  const extraObjects = [];
+  let customDispose = null;
+  if (spec.style === 'custom') {
+    const result = spec.build(builder, spec, THREE);
+    if (result && Array.isArray(result.objects)) extraObjects.push(...result.objects);
+    if (result && typeof result.dispose === 'function') customDispose = result.dispose;
+  } else {
+    const tubOptions = spec.style === 'cabin' ? { wallTop: spec.roof, taperFront: 0.92 } : spec.style === 'bubble' ? { taperFront: 0.9 } : {};
+    buildTub(builder, spec, tubOptions);
+    buildSeat(builder, spec);
+  }
   if (spec.style === 'canopy') {
     buildSillRails(builder, spec, spec.frameColor);
     buildCanopyFrame(builder, spec, glare, spec.frameColor);
@@ -395,6 +414,14 @@ export function buildCockpit(spec, instrumentIds) {
   const shell = new THREE.Mesh(shellGeometry, shellMaterial);
   shell.name = 'cockpit-shell';
   group.add(shell);
+  for (const object of extraObjects) {
+    group.add(object);
+    object.traverse((node) => {
+      if (node.geometry) disposables.push(node.geometry);
+      const materials = Array.isArray(node.material) ? node.material : node.material ? [node.material] : [];
+      for (const material of materials) disposables.push(material);
+    });
+  }
 
   let stick = null;
   if (spec.stick) {
@@ -454,6 +481,7 @@ export function buildCockpit(spec, instrumentIds) {
     dispose() {
       group.removeFromParent();
       for (const item of disposables) item.dispose();
+      if (customDispose) customDispose();
     },
   };
 }
