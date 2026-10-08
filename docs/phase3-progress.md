@@ -445,7 +445,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | --- | --- | --- | --- | --- |
 | 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | in progress (branch complete, awaiting I2) |
 | 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | not started |
-| 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | not started |
+| 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | in progress |
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | not started |
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
 | 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
@@ -505,6 +505,20 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   name: "dragon") are Milestone O's (j.2), as are the journal panel's Craft section and the remote
   `flightState` craft fields of h.3; the picker shows the 14 craft in one strip until the picker
   branch regroups them.
+
+### Wave 2 - p3/craft-seaplane
+
+- **Done so far:** the floats extension (`src/flight/floats.js`: per-station buoyancy of two
+  V-bottomed floats against the shared water query, planing with the keel slopes and a Froude onset,
+  displacement drag with the hump near 40-45 km/h, porpoising from the held trim, water rudders,
+  wheel drag and the nose-over, the wheels-up skid on land, water strikes, the gear advisory, the
+  water handling assist above 50 %); a `contactForces` hook in SimFixedWing (plus tick fields and the
+  extension's `dispose`); the seaplane module (`src/craft/seaplane.js`: Beaver-style mesh with
+  animated gear legs and water rudders, sim profile, situate, copilot commands, journal stats,
+  bindings); the `radial` audio family; the `waterRudder` instrument; `tools/lab/seaplane.mjs`
+  (92/92); the craft lab's catalog checks now follow the registered modules.
+- **Next:** `?test=craft` scenarios (ocean and lake takeoff and landing, nose-over), docs, the full
+  verification list.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
