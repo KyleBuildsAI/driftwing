@@ -889,9 +889,10 @@ export default Object.freeze({
       style: 'custom',
       build: buildBasketView,
       near: 0.05,
+      // The instrument pack hangs on the front right upright just above the rim, clear of the view ahead.
       panel: Object.freeze({
-        width: 0.46,
-        center: Object.freeze([0.3, BASKET_RIM_Y - EYE[1] + 0.12, -0.78]),
+        width: 0.32,
+        center: Object.freeze([0.3, BASKET_RIM_Y - EYE[1] + 0.2, -0.62]),
         layout: Object.freeze([Object.freeze(['envelope', 'altitude', 'vsi']), Object.freeze(['windColumn', 'radarAlt', 'heading'])]),
       }),
     }),
