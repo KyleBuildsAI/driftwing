@@ -431,8 +431,10 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
         if (!wetHull[station.hull]) {
           wetHull[station.hull] = true;
           wetFloats++;
-          // The first touch: the sink rate into the water at the touching station.
-          const sink = -(pointVelocity.x * sample.normalX + pointVelocity.y * sample.normalY + pointVelocity.z * sample.normalZ);
+          // The first touch: the airframe's sink rate into the water (the centre of mass against the
+          // water's own motion; a float that slaps down as the nose pitches is not a hard landing).
+          const velocity = tick.velocity;
+          const sink = -((velocity.x - sample.velocityX) * sample.normalX + (velocity.y - sample.velocityY) * sample.normalY + (velocity.z - sample.velocityZ) * sample.normalZ);
           if (sink > sinkRate || touchPart === '') {
             sinkRate = Math.max(0, sink);
             touchPart = station.hull === 0 ? 'leftFloat' : 'rightFloat';
@@ -582,7 +584,9 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
       report.onGround = true;
       report.contacts += wetFloats;
       report.gearContacts += wetFloats;
-      if (!hydro.wasFloating && !landGear && hydro.airborneSeconds >= TOUCHDOWN_AIRBORNE_SECONDS && hydro.settleSeconds <= 0 && !report.touchdown) {
+      // A touch with the wheels already dragging in the water is the start of the nose-over, not a
+      // landing to grade.
+      if (!hydro.wasFloating && !landGear && hydro.wheelSeconds <= 0 && hydro.airborneSeconds >= TOUCHDOWN_AIRBORNE_SECONDS && hydro.settleSeconds <= 0 && !report.touchdown) {
         touchdown.sinkRate = sinkRate;
         touchdown.part = touchPart;
         touchdown.groundSpeed = groundSpeed;
