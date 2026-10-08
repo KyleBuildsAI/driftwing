@@ -256,7 +256,7 @@ export function installPresetChecks(game) {
       const gone = manager.getInstance(entry.id) === null;
       return check(`${presetId}: dispose returns GPU memory and removes its wind sources`, result.ok && gone, {
         before: result.before, after: result.after, worldFirstDrawn: result.worldFirstDrawn, leftBehind: result.leftBehind,
-        windSources: result.windSources, windLeft: result.windLeft, skyModifiers: result.skyModifiers, lights: result.lights, leaks: result.leaks, gone,
+        windSources: result.windSources, windLeft: result.windLeft, colliders: result.colliders, collidersLeft: result.collidersLeft, skyModifiers: result.skyModifiers, lights: result.lights, leaks: result.leaks, gone,
       });
     },
 

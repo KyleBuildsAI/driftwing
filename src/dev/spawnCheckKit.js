@@ -12,7 +12,7 @@
 //     proves GPU memory back (no geometry an engine created still alive, the count moved by no more
 //     than the world's own first draws, textures exactly back), every wind source added since the
 //     baseline removed, every collider a spawn added since the baseline removed (landmark colliders
-//     stream with the craft and are not a spawn's), the sky modifiers and the real lights back to their
+//     stream with the craft and are not a spawn's, and a live spawn's are its own), the sky modifiers and the real lights back to their
 //     counts, the SpawnManager's leak counters unchanged, and on request the JS heap within a tolerance.
 import { createGeometryTracker, splitFresh } from './geometryTracker.js';
 import { heapAvailable, readHeapMB, round } from './testStats.js';
@@ -176,6 +176,17 @@ export function createDisposeCheck(ctx, framing) {
     return ctx.colliders.list().filter((entry) => !entry.owner.startsWith('landmark:')).map((entry) => entry.id);
   }
 
+  /** The colliders live spawns still list (a site the feed built meanwhile is not the disposed spawn's). */
+  function heldColliderIds() {
+    const held = new Set();
+    for (const spawn of manager.getActive()) {
+      for (const part of manager.getParts(spawn.id)) {
+        if (Array.isArray(part.colliderIds)) for (const id of part.colliderIds) held.add(id);
+      }
+    }
+    return held;
+  }
+
   function lightsInUse() {
     const lights = manager.getStats().lights;
     return lights ? lights.active : 0;
@@ -236,7 +247,8 @@ export function createDisposeCheck(ctx, framing) {
       // spawn's leftovers show as leftBehind or as a count above the world's first draws.
       const worldFresh = split.world + (split.leftBehind.length - leftBehind.length);
       const windLeft = ctx.wind.listSources().filter((source) => !baseline.windIds.has(source.id)).map((source) => source.id);
-      const collidersLeft = spawnColliderIds().filter((id) => !baseline.colliderIds.has(id));
+      const heldColliders = heldColliderIds();
+      const collidersLeft = spawnColliderIds().filter((id) => !baseline.colliderIds.has(id) && !heldColliders.has(id));
       const sky = ctx.systems.sky.getModifierState().count;
       const lights = lightsInUse();
       const leaks = manager.getStats().leaks;
