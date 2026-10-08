@@ -39,6 +39,11 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   colliders tell inside from outside by ray parity (three rays, majority), independent of winding;
   the lab checks it on a turned torus with mixed winding. A heightfield no longer extends its last
   cell past its far x and z edges (a probe just beyond them read as inside, under the top).
+  `?test=collision` reworked so every criterion holds: time-based run limits, approaches aimed at
+  the target collider itself, set-up crashes attributed, a terrain-clear arch run-in, kite strings
+  inside the wingspan, a landable deck (the real bush plane stands on it; real-model dives crash on
+  it), the spawn's own collider ids checked after dispose, `?testParts` / `--parts`, a fixed quality
+  level. WebGPU run: 98/98 strikes, 15/15 targets, 0 pass-throughs, 0 penetrations.
 - **Next:** the verification runs (labs, structure and preset step files and `?test=collision` on
   both backends, the `?test=spawns` subset, the reduced `?test=1` harness), recorded here.
 - **Open issues:** none yet.

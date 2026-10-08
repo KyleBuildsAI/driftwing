@@ -10,7 +10,7 @@
 //   node tools/run-harness.mjs --test 1|soak|hotas|terrain|determinism|spawns|collision [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
 //     [--crafts glider,jet] [--views first,third] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
-//     [--presets real | --presets tornado,comet] [--leak-cycles N]
+//     [--presets real | --presets tornado,comet] [--leak-cycles N] [--parts fixture,special,landmarks,structures]
 //
 // The terrain test runs on one seed (the first of --seeds; by default P2-TERRAIN, or TERRAIN-REAL-8
 // with --presets real, a world with every real stamp type near its spawn) in the late
@@ -37,7 +37,9 @@
 // The collision test (/v2/?test=collision) flies the jet and the bush plane into a fixture of every
 // collider type, the retrofitted landmarks and the Phase 2 structures at 60, 250 and 1500 m/s on one
 // seed (the first of --seeds, by default COLLIDERS-LAB, whose spawn has every landmark type in reach),
-// with the slow bump, the tunnel centreline, the arch opening and the kite strings.
+// with the slow bump, the landable deck, the tunnel centreline, the arch opening and the kite strings.
+// --parts a,b runs some of its parts only (fixture, special, landmarks, structures; the criteria of the
+// others are muted).
 //
 // --alloc-profile N (diagnostic): once the first flight-test run is flying, samples every JS
 // allocation for N seconds with the sampling heap profiler (collected objects included, so it is
@@ -122,6 +124,7 @@ function parseArgs(argv) {
     allocProfileSeconds: null,
     presets: null,
     leakCycles: null,
+    parts: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -139,6 +142,7 @@ function parseArgs(argv) {
       case '--views': options.views = next(); break;
       case '--presets': options.presets = next(); break;
       case '--leak-cycles': options.leakCycles = Number(next()); break;
+      case '--parts': options.parts = next(); break;
       case '--out': options.out = next(); break;
       case '--timeout-minutes': options.timeoutMinutes = Number(next()); break;
       case '--width': options.width = Number(next()); break;
@@ -328,7 +332,10 @@ function harnessUrl(port, options) {
     if (options.presets === 'real') url.searchParams.set('presets', 'real');
   }
   if (options.test === 'determinism') url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : DETERMINISM_SEED);
-  if (options.test === 'collision') url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : COLLISION_SEED);
+  if (options.test === 'collision') {
+    url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : COLLISION_SEED);
+    if (options.parts) url.searchParams.set('testParts', options.parts);
+  }
   if (options.test === 'spawns') {
     url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : SPAWNS_SEED);
     url.searchParams.set('testShots', '1');

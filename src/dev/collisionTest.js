@@ -2,7 +2,8 @@
 // contract k.2 and spec Milestone P item 4, for the parts that exist now.
 //
 // A fixture of one collider of every type (box, cylinder, capsule, hull, heightfield and a mesh BVH
-// "tunnel mountain": a winding ridge with a bore through it) high above the terrain near the spawn,
+// "tunnel mountain": a winding ridge with a bore through it) plus a landable deck high above the
+// terrain near the spawn,
 // a kite-string slalom of sensor capsules, every retrofitted v1-derived landmark (the nearest arch,
 // monolith circle, lighthouse and balloon fair, streamed in by the real landmark system) and every
 // Phase 2 structure preset (wind farm, rope bridge, airfield, crystal spires, floating islands,
@@ -12,8 +13,10 @@
 //     reason 'structure strike' and never pass through; with the real flight model, the bush plane
 //     and the jet at cruise into the box and the tunnel mountain's flank do the same;
 //   - penetration: no collision probe ever ends a tick inside a solid collider (checked every tick
-//     and at the crash pose);
+//     and at the crash pose; a probe just under a landable top stands on ground);
 //   - a slow bump: the bush plane at 3 m/s into the box resolves (colliderHit, no crash);
+//   - a landable deck: the real bush plane stands on it through the ground contact, and real-model
+//     dives onto it crash on it;
 //   - the tunnel: a centreline run through the bore (a path sampled along its curve) at 60 m/s
 //     completes with no hit;
 //   - the arch: a run through its opening along the threading line touches nothing and threads it;
@@ -23,13 +26,15 @@
 //     THREE.Vector3.
 // A scripted run drives the model kinematically: its step() is replaced for the run by a constant
 // velocity and attitude, so the controller's own sweep, strike and crash code is what is tested; the
-// real-model runs keep the model. Reports per target type, on either backend (tools/run-harness.mjs
-// --test collision). The test runs in its own IndexedDB database and changes no player setting.
+// real-model runs keep the model. ?testParts=fixture,special,landmarks,structures runs some parts only.
+// Reports per target type, on either backend (tools/run-harness.mjs --test collision). The test runs in its own IndexedDB database at a fixed quality level and changes
+// no player setting.
 import { MeshBVH } from 'three-mesh-bvh';
 import { createMeshCollider } from '../world/colliderMesh.js';
 import { installConsoleCapture } from './testConsole.js';
 import { createTestPanel } from './testPanel.js';
 import { PRESETS } from '../spawns/presets/index.js';
+import { groundPose } from '../flight/placement.js';
 
 export const TEST_DATABASE = 'driftwing-v2-test-collision';
 const REPORT_KIND = 'driftwing-collision-test';
@@ -42,19 +47,51 @@ const FIXTURE_OWNER = 'test:collision';
 const FIXTURE_CLEARANCE = 1400;
 /** A probe deeper than this (m) inside a solid collider is a penetration. */
 const PENETRATION_TOLERANCE = 0.05;
+/** A probe at most this far (m) under a landable top stands on it (ground contact, springs compressed). */
+const LANDABLE_SINK = 0.5;
 const LANDMARK_TYPES = Object.freeze(['arch', 'monoliths', 'lighthouse', 'balloons']);
 const LANDMARK_SEARCH = Object.freeze([12000, 30000, 60000, 120000]);
 const STRUCTURE_PRESETS = Object.freeze(['windFarm', 'ropeBridge', 'abandonedAirfield', 'crystalSpires', 'floatingIslands']);
 const TUNNEL_BORE = 16;
 const TUNNEL_OUTER = 70;
 const KITE_STRINGS = 5;
-const TIMEOUT_FRAMES = 900;
+/** Kite strings stand this far (m) either side of the slalom lane: inside both craft's wingspans. */
+const KITE_OFFSET = 1.2;
+/** A run gives up after its expected flight time times this plus TIMEOUT_MARGIN seconds (flight time). */
+const TIMEOUT_FACTOR = 1.5;
+const TIMEOUT_MARGIN = 4;
+/** And after this many frames whatever the flight clock says (a stalled page). */
+const MAX_RUN_FRAMES = 20000;
+/** The parts of the test (?testParts=a,b picks some): the fixture's strikes and special runs, the landmarks, the structures. */
+const TEST_PARTS = Object.freeze(['fixture', 'special', 'landmarks', 'structures']);
+/** The bump starts this far (m) short of the box face (centre of mass) and pushes on for BUMP_SECONDS. */
+const BUMP_START = 8;
+const BUMP_SECONDS = 6;
+/** The arch run starts up to ARCH_RUN_IN m out along the arch's axis, on a line this far (m) above the ground. */
+const ARCH_RUN_IN = 250;
+const ARCH_TERRAIN_CLEARANCE = 4;
+/** Real-model dives onto the landable deck ([craft, m/s]) at DECK_DIVE_PITCH (radians below level). */
+const DECK_DIVES = Object.freeze([['jet', 60], ['jet', 250], ['bushplane', 60]]);
+const DECK_DIVE_PITCH = 0.7;
+/** The deck run leaves the bush plane standing on the deck for this long (s of flight time). */
+const DECK_SECONDS = 4;
 
-export function prepareCollisionTest() {
+/** The parts named by ?testParts (all of them when absent); throws on an unknown name. */
+function readParts(params) {
+  const raw = params && typeof params.get === 'function' ? params.get('testParts') : null;
+  if (!raw) return new Set(TEST_PARTS);
+  const parts = raw.split(',').map((part) => part.trim()).filter(Boolean);
+  const unknown = parts.filter((part) => !TEST_PARTS.includes(part));
+  if (unknown.length > 0) throw new Error(`[DRIFTWING test] unknown testParts ${unknown.join(', ')} (known: ${TEST_PARTS.join(', ')})`);
+  return new Set(parts);
+}
+
+export function prepareCollisionTest({ params } = {}) {
   const capture = installConsoleCapture();
+  const parts = readParts(params);
   return {
     databaseName: TEST_DATABASE,
-    createSystem: (ctx) => createCollisionTestSystem(ctx, { capture }),
+    createSystem: (ctx) => createCollisionTestSystem(ctx, { capture, parts }),
   };
 }
 
@@ -62,7 +99,7 @@ function round(value, digits = 2) {
   return Number.isFinite(value) ? Number(value.toFixed(digits)) : value;
 }
 
-function createCollisionTestSystem(ctx, { capture }) {
+function createCollisionTestSystem(ctx, { capture, parts }) {
   const { THREE, bus, state, world, settings, scene } = ctx;
   const colliders = ctx.colliders;
   const panel = createTestPanel({ title: 'Collision test' });
@@ -90,6 +127,9 @@ function createCollisionTestSystem(ctx, { capture }) {
   bus.onTyped('colliderHit', (payload) => events.hits.push(payload));
   bus.onTyped('colliderSensor', (payload) => events.sensors.push(payload));
   bus.on('landmark:threaded', (payload) => events.threaded.push(payload));
+  // The perf governor's quality changes during the run (a quality change resizes the shadow map).
+  const qualityChanges = [];
+  bus.on('quality:changed', (quality) => qualityChanges.push({ at: new Date().toISOString(), name: quality.name, reason: quality.reason }));
   function clearEvents() {
     events.crashes.length = 0;
     events.hits.length = 0;
@@ -115,18 +155,26 @@ function createCollisionTestSystem(ctx, { capture }) {
     const penetrations = runs.reduce((sum, run) => sum + run.penetrations, 0);
     const counts = capture.counts;
     const types = new Set(strikes.map((run) => run.kind));
-    const expectedTypes = ['box', 'cylinder', 'capsule', 'hull', 'heightfield', 'mesh', ...LANDMARK_TYPES.map((type) => `landmark ${type}`), ...STRUCTURE_PRESETS.map((id) => `structure ${id}`)];
+    const expectedTypes = [
+      ...(parts.has('fixture') ? ['box', 'cylinder', 'capsule', 'hull', 'heightfield', 'mesh'] : []),
+      ...(parts.has('landmarks') ? LANDMARK_TYPES.map((type) => `landmark ${type}`) : []),
+      ...(parts.has('structures') ? STRUCTURE_PRESETS.map((id) => `structure ${id}`) : []),
+    ];
     const kite = special.kite;
     const bump = special.bump;
+    // A criterion of a part this run left out (?testParts) is muted.
+    const only = (part, criterion) => (parts.has(part) ? criterion : { ...criterion, value: 'not in this run', status: 'muted' });
     return [
       { id: 'strikes', label: 'Strikes end in a soft crash (structure strike)', value: `${struck.length} / ${strikes.length}`, status: strikes.length > 0 && struck.length === strikes.length ? 'pass' : 'fail' },
       { id: 'coverage', label: 'Every collider type, landmark and structure flown into', value: `${expectedTypes.filter((type) => types.has(type)).length} / ${expectedTypes.length}${expectedTypes.some((type) => !types.has(type)) ? ` (missing ${expectedTypes.filter((type) => !types.has(type)).join(', ')})` : ''}`, status: expectedTypes.every((type) => types.has(type)) ? 'pass' : 'fail' },
       { id: 'through', label: 'Never passed through', value: `${through.length} pass-throughs`, status: runs.length > 0 && through.length === 0 ? 'pass' : 'fail' },
       { id: 'penetration', label: `Probes inside a solid collider at a tick's end (> ${PENETRATION_TOLERANCE} m)`, value: `${penetrations}`, status: runs.length > 0 && penetrations === 0 ? 'pass' : 'fail' },
-      { id: 'bump', label: 'A 3 m/s bump resolves without a crash', value: bump ? `${bump.contacts} contacts, ${bump.crashed ? 'crashed' : 'no crash'}` : 'not run', status: bump && bump.contacts > 0 && !bump.crashed && bump.penetrations === 0 ? 'pass' : 'fail' },
-      { id: 'tunnel', label: 'Tunnel centreline run completes with 0 hits', value: special.tunnel ? `${special.tunnel.completed ? 'completed' : 'stopped'}, ${special.tunnel.hits} hits` : 'not run', status: special.tunnel && special.tunnel.completed && special.tunnel.hits === 0 ? 'pass' : 'fail' },
-      { id: 'arch', label: 'Through the arch: no hit, threaded', value: special.arch ? `${special.arch.hits} hits, ${special.arch.threaded ? 'threaded' : 'not threaded'}` : 'not run', status: special.arch && special.arch.hits === 0 && special.arch.threaded && !special.arch.crashed ? 'pass' : 'fail' },
-      { id: 'kite', label: 'Kite strings register misses and never crash', value: kite ? `${kite.misses} / ${kite.expected} misses, ${kite.crashes} crashes, ${kite.hits} hits` : 'not run', status: kite && kite.misses === kite.expected && kite.crashes === 0 && kite.hits === 0 ? 'pass' : 'fail' },
+      only('special', { id: 'bump', label: 'A 3 m/s bump resolves without a crash', value: bump ? `${bump.contacts} contacts, ${bump.crashed ? 'crashed' : 'no crash'}` : 'not run', status: bump && bump.contacts > 0 && !bump.crashed && bump.penetrations === 0 ? 'pass' : 'fail' }),
+      only('special', { id: 'deck', label: 'A landable top is ground (the real bush plane stands on the deck)', value: special.deck ? `${special.deck.onGround ? 'on the ground' : 'not on the ground'} (${special.deck.surface ?? 'no surface'}, ${special.deck.aboveTop} m above the top), ${special.deck.crashed ? `crashed (${special.deck.reason})` : 'no crash'}, ${special.deck.strikes} strikes` : 'not run', status: special.deck && special.deck.onGround && special.deck.surface === 'test:deck' && !special.deck.crashed && special.deck.strikes === 0 && special.deck.aboveTop > 0 && special.deck.penetrations === 0 ? 'pass' : 'fail' }),
+      only('special', { id: 'deckDives', label: 'Dives onto the landable top crash on it (real flight model)', value: (() => { const dives = runs.filter((run) => run.kind === 'landable deck dive'); return dives.length > 0 ? dives.map((run) => `${run.craft} ${run.speed}: ${run.crashed ? run.reason : 'no crash'}${run.belowTop ? ', below the top' : ''}`).join('; ') : 'not run'; })(), status: (() => { const dives = runs.filter((run) => run.kind === 'landable deck dive'); return dives.length === DECK_DIVES.length && dives.every((run) => run.crashed && !run.belowTop && run.penetrations === 0) ? 'pass' : 'fail'; })() }),
+      only('special', { id: 'tunnel', label: 'Tunnel centreline run completes with 0 hits', value: special.tunnel ? `${special.tunnel.completed ? 'completed' : 'stopped'}, ${special.tunnel.hits} hits` : 'not run', status: special.tunnel && special.tunnel.completed && special.tunnel.hits === 0 ? 'pass' : 'fail' }),
+      only('landmarks', { id: 'arch', label: 'Through the arch: no hit, threaded', value: special.arch ? `${special.arch.hits} hits, ${special.arch.threaded ? 'threaded' : 'not threaded'}` : 'not run', status: special.arch && special.arch.hits === 0 && special.arch.threaded && !special.arch.crashed ? 'pass' : 'fail' }),
+      only('special', { id: 'kite', label: 'Kite strings register misses and never crash', value: kite ? `${kite.misses} / ${kite.expected} misses, ${kite.crashes} crashes, ${kite.hits} hits` : 'not run', status: kite && kite.misses === kite.expected && kite.crashes === 0 && kite.hits === 0 ? 'pass' : 'fail' }),
       { id: 'core', label: 'One three.js core (three-mesh-bvh answers with the game\'s Vector3)', value: singleCore === null ? 'not run' : singleCore ? 'yes' : 'NO', status: singleCore ? 'pass' : 'fail' },
       { id: 'console', label: 'Console errors / warnings', value: `${counts.errors} / ${counts.warnings}`, status: counts.errors === 0 && counts.warnings === 0 ? 'pass' : 'fail' },
     ];
@@ -165,6 +213,7 @@ function createCollisionTestSystem(ctx, { capture }) {
       runs,
       special,
       colliderStats: colliders.getStats(),
+      qualityChanges: qualityChanges.slice(0, 50),
       console: capture.entries.slice(0, 200),
       harnessErrors: harnessErrors.slice(),
     });
@@ -223,22 +272,24 @@ function createCollisionTestSystem(ctx, { capture }) {
     const vertex = (base, segment, side) => base + segment * sides + (side % sides);
     for (let segment = 0; segment < segments; segment++) {
       for (let side = 0; side < sides; side++) {
-        // Outward faces outside, faces toward the axis (outward of the solid) inside.
-        indices.push(vertex(outer, segment, side), vertex(outer, segment + 1, side), vertex(outer, segment, side + 1));
-        indices.push(vertex(outer, segment + 1, side), vertex(outer, segment + 1, side + 1), vertex(outer, segment, side + 1));
-        indices.push(vertex(inner, segment, side), vertex(inner, segment, side + 1), vertex(inner, segment + 1, side));
-        indices.push(vertex(inner, segment + 1, side), vertex(inner, segment, side + 1), vertex(inner, segment + 1, side + 1));
+        // Counter-clockwise seen from outside the solid (the collider's depth() needs outward faces):
+        // the outer skin faces away from the axis, the bore's wall toward it.
+        indices.push(vertex(outer, segment, side), vertex(outer, segment, side + 1), vertex(outer, segment + 1, side));
+        indices.push(vertex(outer, segment + 1, side), vertex(outer, segment, side + 1), vertex(outer, segment + 1, side + 1));
+        indices.push(vertex(inner, segment, side), vertex(inner, segment + 1, side), vertex(inner, segment, side + 1));
+        indices.push(vertex(inner, segment + 1, side), vertex(inner, segment + 1, side + 1), vertex(inner, segment, side + 1));
       }
     }
-    // The end walls: rings joining the outer and inner circles.
+    // The end walls: rings joining the outer and inner circles, facing back along the curve at its
+    // start and forward at its end.
     for (const segment of [0, segments]) {
       for (let side = 0; side < sides; side++) {
         const a = vertex(outer, segment, side);
         const b = vertex(outer, segment, side + 1);
         const c = vertex(inner, segment, side);
         const d = vertex(inner, segment, side + 1);
-        if (segment === 0) indices.push(a, b, c, b, d, c);
-        else indices.push(a, c, b, b, c, d);
+        if (segment === 0) indices.push(a, c, b, b, c, d);
+        else indices.push(a, b, c, b, d, c);
       }
     }
     const geometry = new THREE.BufferGeometry();
@@ -295,7 +346,7 @@ function createCollisionTestSystem(ctx, { capture }) {
     const cols = 31;
     const heights = new Float32Array(cols * cols);
     for (let row = 0; row < cols; row++) for (let column = 0; column < cols; column++) heights[row * cols + column] = base + 12 + 2 * Math.sin(column * 0.4) * Math.cos(row * 0.3);
-    add({ id: 'test:heightfield', type: 'heightfield', x0: fieldCorner.x, z0: fieldCorner.z, cell: 2, cols, rows: cols, heights, bottom: base, tags: { surface: 'stone', landable: true } });
+    add({ id: 'test:heightfield', type: 'heightfield', x0: fieldCorner.x, z0: fieldCorner.z, cell: 2, cols, rows: cols, heights, bottom: base, tags: { surface: 'stone' } });
     const fieldGeometry = new THREE.PlaneGeometry(60, 60, cols - 1, cols - 1).rotateX(-Math.PI / 2);
     const fieldPositions = fieldGeometry.attributes.position;
     for (let index = 0; index < fieldPositions.count; index++) {
@@ -307,6 +358,11 @@ function createCollisionTestSystem(ctx, { capture }) {
     show(fieldGeometry, new THREE.Vector3(fieldCorner.x + 30, base, fieldCorner.z + 30));
     targets.push({ kind: 'heightfield', id: 'test:heightfield', owner: FIXTURE_OWNER });
     targets.push({ kind: 'heightfield', id: 'test:heightfield', owner: FIXTURE_OWNER, dive: true });
+
+    // A landable deck (a box whose top is ground): the real bush plane settles on it.
+    const deckCentre = spot(5);
+    add({ id: 'test:deck', type: 'box', center: deckCentre, halfExtents: { x: 30, y: 1, z: 30 }, tags: { surface: 'wood', landable: true } });
+    show(new THREE.BoxGeometry(60, 2, 60), deckCentre);
 
     // The tunnel mountain (mesh BVH), farther east along a winding curve.
     const tunnelStart = spot(6);
@@ -326,7 +382,7 @@ function createCollisionTestSystem(ctx, { capture }) {
     const laneStart = new THREE.Vector3(originX, base, originZ + 700);
     const strings = [];
     for (let index = 0; index < KITE_STRINGS; index++) {
-      const anchor = laneStart.clone().add(new THREE.Vector3(80 + index * 60, -120, (index % 2 === 0 ? -6 : 6)));
+      const anchor = laneStart.clone().add(new THREE.Vector3(80 + index * 60, -120, index % 2 === 0 ? -KITE_OFFSET : KITE_OFFSET));
       const kite = anchor.clone().add(new THREE.Vector3(10, 240, 0));
       add({ id: `test:kite${index}`, type: 'capsule', a: anchor, b: kite, radius: 0.08, tags: { surface: 'rope', sensor: true, miss: 'kiteString' } });
       const length = anchor.distanceTo(kite);
@@ -349,9 +405,22 @@ function createCollisionTestSystem(ctx, { capture }) {
     return points;
   }
 
-  function countPenetrations(model, probes) {
+  /**
+   * Probes inside a solid collider deeper than PENETRATION_TOLERANCE. A probe less than
+   * LANDABLE_SINK under a landable top is not one: that top is ground, and the ground contact (not the
+   * sweep) stands the craft on it, its springs compressed (a wheel, the fuselage just above it).
+   */
+  function countPenetrations(model, probes, seen = null) {
     let count = 0;
-    for (const point of probePositions(model, probes)) if (colliders.insideSolid(point.x, point.y, point.z, PENETRATION_TOLERANCE) !== null) count++;
+    const surfaces = ctx.groundSurfaces;
+    for (const point of probePositions(model, probes)) {
+      const id = colliders.insideSolid(point.x, point.y, point.z, PENETRATION_TOLERANCE);
+      if (id === null) continue;
+      const record = colliders.get(id);
+      if (record && record.tags.landable && surfaces && surfaces.surfaceIdBelow(point.x, point.z, point.y + LANDABLE_SINK) === id) continue;
+      count++;
+      if (seen && seen.size < 4) seen.add(id);
+    }
     return count;
   }
 
@@ -363,8 +432,9 @@ function createCollisionTestSystem(ctx, { capture }) {
     return flight().getCraft() === craft;
   }
 
+  /** Waits (at most MAX_RUN_FRAMES frames) until the fade and respawn of a crash are over. */
   async function waitForCrashToEnd() {
-    for (let frame = 0; frame < 240 && state.flight.crash.active; frame++) await nextFrame();
+    for (let frame = 0; frame < MAX_RUN_FRAMES && state.flight.crash.active; frame++) await nextFrame();
   }
 
   /** Heading (degrees) and pitch (radians) of a direction. */
@@ -375,32 +445,42 @@ function createCollisionTestSystem(ctx, { capture }) {
   /**
    * One run: the craft placed at start facing along direction, then flown (kinematic: at a constant
    * speed and attitude; real: by its flight model) until it crashes, passes `beyond` metres past the
-   * aim, or times out. path: an optional (seconds) -> { position, direction } for a curved run.
+   * aim, flies `seconds` of flight time, or runs out of time (expected: the flight time the run should
+   * take, from which its time limit follows). path: an optional (seconds) -> { position, direction }
+   * for a curved run; velocity and quaternion (optional) replace the start's velocity along direction
+   * and level attitude; onFrame(playerPosition) is called after every frame. Returns the run's result.
    */
-  async function flyRun({ craft, speed, start, direction, kinematic = true, aim = null, beyond = 200, path = null, seconds = null }) {
-    const result = { craft, speed, crashed: false, reason: null, impactSpeed: null, penetrations: 0, passedThrough: false, hits: 0, contacts: 0, sensors: [], threaded: 0, ticks: 0, timedOut: false, craftOk: true };
+  async function flyRun({ craft, speed, start, direction, kinematic = true, aim = null, beyond = 200, path = null, seconds = null, expected = null, velocity: startVelocity = null, quaternion = null, onFrame = null }) {
+    const result = { craft, speed, crashed: false, reason: null, impactSpeed: null, penetrations: 0, passedThrough: false, hits: 0, contacts: 0, sensors: [], threaded: 0, ticks: 0, flightSeconds: 0, timedOut: false, craftOk: true, firstHit: null };
     if (!(await useCraft(craft))) {
       result.craftOk = false;
       return result;
     }
     await waitForCrashToEnd();
+    if (state.flight.crash.active) harnessErrors.push(`a ${craft} run started while the previous crash was still on`);
     const { heading, pitch } = attitudeOf(direction);
+    // The run's events start here, so a crash during the set-up is this run's too.
+    clearEvents();
+    // resetTo, then this run's state at once: no tick of the airborne pose resetTo gives runs first.
     flight().resetTo({ x: start.x, y: start.y, z: start.z, heading });
-    await waitFrames(1);
     const model = flight().getModel();
     const probes = flight().getCollisionProbes();
     const velocity = direction.clone().normalize().multiplyScalar(speed);
-    const attitude = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, (-heading * Math.PI) / 180, 0, 'YXZ'));
+    const attitude = quaternion ? quaternion.clone() : new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, (-heading * Math.PI) / 180, 0, 'YXZ'));
     const original = model.step;
     let elapsed = 0;
     model.state.position.copy(start);
     model.state.quaternion.copy(attitude);
-    model.state.velocity.copy(velocity);
+    model.state.velocity.copy(startVelocity ?? velocity);
+    if (model.state.angularVelocity) model.state.angularVelocity.set(0, 0, 0);
+    const inside = new Set();
     model.step = (dt, controls, env) => {
-      result.penetrations += countPenetrations(model, probes);
+      const found = countPenetrations(model, probes, inside);
+      if (found > 0 && result.firstInsideTick === undefined) result.firstInsideTick = result.ticks;
+      result.penetrations += found;
       result.ticks++;
-      if (!kinematic) return original.call(model, dt, controls, env);
       elapsed += dt;
+      if (!kinematic) return original.call(model, dt, controls, env);
       if (path) {
         const pose = path(elapsed);
         model.state.position.copy(pose.position);
@@ -423,16 +503,22 @@ function createCollisionTestSystem(ctx, { capture }) {
       }
       return undefined;
     };
-    clearEvents();
     const aimPoint = aim ?? start.clone().addScaledVector(direction, 1e6);
     const forward = direction.clone().normalize();
+    const planned = seconds ?? expected ?? (aimPoint.distanceTo(start) + beyond) / Math.max(speed, 1);
+    const limit = planned * TIMEOUT_FACTOR + TIMEOUT_MARGIN;
+    const reached = new THREE.Vector3();
     try {
-      for (let frame = 0; frame < TIMEOUT_FRAMES; frame++) {
+      for (let frame = 0; frame < MAX_RUN_FRAMES; frame++) {
         await nextFrame();
+        if (onFrame) onFrame(state.player.position);
         if (events.crashes.length > 0) break;
         if (seconds !== null && elapsed >= seconds) break;
-        if (seconds === null && model.state.position.clone().sub(aimPoint).dot(forward) > beyond) break;
-        if (frame === TIMEOUT_FRAMES - 1) result.timedOut = true;
+        if (seconds === null && reached.copy(model.state.position).sub(aimPoint).dot(forward) > beyond) break;
+        if (elapsed > limit || frame === MAX_RUN_FRAMES - 1) {
+          result.timedOut = true;
+          break;
+        }
       }
     } finally {
       model.step = original;
@@ -441,29 +527,62 @@ function createCollisionTestSystem(ctx, { capture }) {
     result.crashed = crash !== null;
     result.reason = crash ? crash.reason : null;
     result.impactSpeed = crash ? round(crash.impactSpeed, 1) : null;
+    result.flightSeconds = round(elapsed, 2);
     // At the crash the controller holds the craft at its contact point: no probe may be inside there.
-    if (crash) result.penetrations += countPenetrations(model, probes);
+    if (crash) result.penetrations += countPenetrations(model, probes, inside);
+    result.insideIds = [...inside];
+    result.at = new Date().toISOString();
     result.hits = events.hits.filter((hit) => hit.crashed).length;
     result.contacts = events.hits.filter((hit) => !hit.crashed).length;
     result.hitIds = [...new Set(events.hits.map((hit) => hit.id))].slice(0, 4);
+    const firstHit = events.hits[0];
+    if (firstHit) result.firstHit = { id: firstHit.id, speed: round(firstHit.speed, 1), crashed: firstHit.crashed, normal: { x: round(firstHit.normal.x, 3), y: round(firstHit.normal.y, 3), z: round(firstHit.normal.z, 3) } };
     result.sensors = events.sensors.map((sensor) => `${sensor.id}:${sensor.tag}`);
     result.threaded = events.threaded.length;
+    result.start = { x: round(start.x, 1), y: round(start.y, 1), z: round(start.z, 1) };
+    result.end = { x: round(model.state.position.x, 1), y: round(model.state.position.y, 1), z: round(model.state.position.z, 1) };
     await waitForCrashToEnd();
     return result;
   }
 
   /**
-   * A straight approach into the target: from a bearing where the line to the aim point meets the
-   * target's own owner first and stays clear of the terrain.
+   * A point inside the target collider itself: its bounds' centre when that is inside it, else the
+   * first point of a grid through its bounds that is (a leaning spire's box centre can be in the air).
+   */
+  function interiorPoint(record) {
+    const bounds = record.bounds;
+    const centre = new THREE.Vector3((bounds[0] + bounds[3]) / 2, (bounds[1] + bounds[4]) / 2, (bounds[2] + bounds[5]) / 2);
+    if (colliders.insideSolid(centre.x, centre.y, centre.z) === record.id) return centre;
+    const steps = 8;
+    for (let column = 1; column < steps; column++) {
+      for (let layer = 1; layer < steps; layer++) {
+        for (let row = 1; row < steps; row++) {
+          const x = bounds[0] + ((bounds[3] - bounds[0]) * column) / steps;
+          const y = bounds[1] + ((bounds[4] - bounds[1]) * layer) / steps;
+          const z = bounds[2] + ((bounds[5] - bounds[2]) * row) / steps;
+          if (colliders.insideSolid(x, y, z) === record.id) return new THREE.Vector3(x, y, z);
+        }
+      }
+    }
+    return centre;
+  }
+
+  /**
+   * A straight approach into the target: from a bearing where the line to a point inside it stays
+   * clear of the terrain and meets the target collider itself first. Returns { start, direction,
+   * aim } with aim the point where that line meets the target's surface, or null.
    */
   function approachFor(target, speed) {
     const record = colliders.get(target.id);
     if (!record) return null;
     const bounds = record.bounds;
-    const centre = target.aim ? target.aim.clone() : new THREE.Vector3((bounds[0] + bounds[3]) / 2, (bounds[1] + bounds[4]) / 2, (bounds[2] + bounds[5]) / 2);
+    const centre = target.aim ? target.aim.clone() : interiorPoint(record);
     // A low target (a hangar, a stone) is aimed near its top, so the approach clears the ground.
     const height = bounds[4] - bounds[1];
-    if (!target.aim && height < 15) centre.y = Math.max(centre.y, bounds[4] - Math.min(3, height * 0.3));
+    if (!target.aim && height < 15) {
+      const high = centre.clone().setY(Math.max(centre.y, bounds[4] - Math.min(3, height * 0.3)));
+      if (colliders.insideSolid(high.x, high.y, high.z) === record.id) centre.copy(high);
+    }
     const size = Math.hypot(bounds[3] - bounds[0], bounds[4] - bounds[1], bounds[5] - bounds[2]) * 0.5;
     const distance = Math.max(180, speed * 0.35) + size;
     const out = { t: 0, point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 }, id: null, owner: null, tags: null, velocity: null, distance: 0 };
@@ -479,8 +598,8 @@ function createCollisionTestSystem(ctx, { capture }) {
           if (point.y < Math.max(world.groundHeight(point.x, point.z), world.WATER_LEVEL) + 4) clear = false;
         }
         if (!clear || colliders.insideSolid(start.x, start.y, start.z) !== null) continue;
-        if (!colliders.raycast(start, direction, distance + size, null, out) || out.owner !== record.owner) continue;
-        return { start, direction, aim: centre };
+        if (!colliders.raycast(start, direction, distance + size, null, out) || out.id !== record.id) continue;
+        return { start, direction, aim: new THREE.Vector3(out.point.x, out.point.y, out.point.z) };
       }
     }
     return null;
@@ -567,14 +686,46 @@ function createCollisionTestSystem(ctx, { capture }) {
   }
 
   /** Through the arch's opening along its threading line (bush plane, 60 m/s, kinematic). */
+  /**
+   * How far (m, up to `limit`) a level line from point along direction stays ARCH_TERRAIN_CLEARANCE
+   * above the terrain and the sea.
+   */
+  function clearRun(point, direction, limit) {
+    for (let distance = 5; distance <= limit; distance += 5) {
+      const x = point.x + direction.x * distance;
+      const z = point.z + direction.z * distance;
+      if (point.y < Math.max(world.groundHeight(x, z), world.WATER_LEVEL) + ARCH_TERRAIN_CLEARANCE) return distance - 5;
+    }
+    return limit;
+  }
+
+  /**
+   * Through the arch's opening along its threading line (bush plane, 60 m/s, kinematic), from the side
+   * with the longer run-in clear of the ground (an arch stands in rock: the line may meet a slope).
+   */
   async function archRun(built) {
     done++;
     progress('Arch', 'through the opening');
-    const along = new THREE.Vector3(Math.sin(built.rotation), 0, Math.cos(built.rotation));
+    const axis = new THREE.Vector3(Math.sin(built.rotation), 0, Math.cos(built.rotation));
     const aim = new THREE.Vector3(built.aim.x, built.aim.y, built.aim.z);
-    const start = aim.clone().addScaledVector(along, -250);
-    const result = await flyRun({ craft: 'bushplane', speed: 60, start, direction: along, aim, beyond: 150 });
-    special.arch = { hits: result.hits + result.contacts, threaded: result.threaded > 0, crashed: result.crashed, penetrations: result.penetrations, hitIds: result.hitIds };
+    const behind = clearRun(aim, axis.clone().negate(), ARCH_RUN_IN);
+    const ahead = clearRun(aim, axis, ARCH_RUN_IN);
+    const along = behind >= ahead ? axis : axis.clone().negate();
+    const runIn = Math.max(behind, ahead);
+    const runOut = Math.min(behind, ahead);
+    const start = aim.clone().addScaledVector(along, -runIn);
+    // Where the craft crossed the arch's plane, in the arch's frame (x across the span, y above its base).
+    const crossing = { previous: null, local: null, built: null };
+    const onFrame = (position) => {
+      const localZ = (position.x - built.x) * axis.x + (position.z - built.z) * axis.z;
+      if (crossing.previous !== null && crossing.local === null && (crossing.previous < 0) !== (localZ < 0)) {
+        crossing.local = { x: round((position.x - built.x) * axis.z - (position.z - built.z) * axis.x, 2), y: round(position.y - built.baseY, 2) };
+        crossing.built = ctx.systems.landmarks.getBuilt().some((entry) => entry.id === built.id);
+      }
+      crossing.previous = localZ;
+    };
+    const result = await flyRun({ craft: 'bushplane', speed: 60, start, direction: along, aim, beyond: Math.max(20, runOut - 10), onFrame });
+    special.arch = { hits: result.hits + result.contacts, threaded: result.threaded > 0, crashed: result.crashed, penetrations: result.penetrations, hitIds: result.hitIds, crossing: crossing.local, builtAtCrossing: crossing.built, runIn, runOut };
     runs.push({ ...result, kind: 'arch opening', target: built.id, expect: 'clear', passedThrough: false });
   }
 
@@ -588,7 +739,10 @@ function createCollisionTestSystem(ctx, { capture }) {
         harnessErrors.push(`preset ${presetId} is missing`);
         continue;
       }
-      if (!manager.getPreset(presetId)) manager.addPreset(preset);
+      // The preset joins the manager for this structure only (a site of it may stream in meanwhile;
+      // removePreset ends those too).
+      const added = !manager.getPreset(presetId);
+      if (added) manager.addPreset(preset);
       const x = ahead.x + index * 5000;
       const z = ahead.z;
       const ground = Math.max(world.groundHeight(x, z), world.WATER_LEVEL);
@@ -600,16 +754,21 @@ function createCollisionTestSystem(ctx, { capture }) {
         continue;
       }
       await waitFrames(4);
-      const own = colliders.list().filter((entry) => entry.owner.startsWith(`${presetId}:`) && !entry.tags.sensor);
+      // This spawn's own colliders (instance.colliderIds of its engine parts).
+      const ownIds = new Set(manager.getParts(spawnId).flatMap((instance) => (Array.isArray(instance.colliderIds) ? instance.colliderIds : [])));
+      const own = colliders.list().filter((entry) => ownIds.has(entry.id) && !entry.tags.sensor);
       const part = { windFarm: ':mast', ropeBridge: ':deck', abandonedAirfield: ':hangar', crystalSpires: ':spire', floatingIslands: ':rock' }[presetId];
       const pieces = own.filter((entry) => entry.id.includes(part));
       const pick = pieces.sort((first, second) => (second.bounds.max.y - second.bounds.min.y) - (first.bounds.max.y - first.bounds.min.y))[0];
       if (!pick) harnessErrors.push(`${presetId} registered no ${part.slice(1)} collider`);
       else await strikeRuns({ kind: `structure ${presetId}`, id: pick.id, owner: pick.owner }, crafts);
       manager.deactivate(spawnId, 'collision test');
+      if (added) manager.removePreset(presetId);
       await waitFrames(4);
-      const left = colliders.list().filter((entry) => entry.owner.startsWith(`${presetId}:`));
-      if (left.length > 0) harnessErrors.push(`${presetId} left ${left.length} colliders after dispose`);
+      const left = [...ownIds].filter((id) => colliders.has(id));
+      if (left.length > 0) harnessErrors.push(`${presetId} left ${left.length} of its ${ownIds.size} colliders after dispose`);
+      special.disposed = special.disposed ?? {};
+      special.disposed[presetId] = { colliders: ownIds.size, left: left.length };
     }
   }
 
@@ -617,11 +776,14 @@ function createCollisionTestSystem(ctx, { capture }) {
   async function bumpRun() {
     done++;
     progress('Bump', 'bush plane at 3 m/s into the box');
-    const record = colliders.get('test:box');
-    const centre = new THREE.Vector3((record.bounds[0] + record.bounds[3]) / 2, (record.bounds[1] + record.bounds[4]) / 2, (record.bounds[2] + record.bounds[5]) / 2);
     const approach = approachFor({ id: 'test:box' }, 3);
-    const start = centre.clone().addScaledVector(approach.direction, -(Math.hypot(record.bounds[3] - record.bounds[0], record.bounds[5] - record.bounds[2]) * 0.5 + 12));
-    const result = await flyRun({ craft: 'bushplane', speed: 3, start, direction: approach.direction, seconds: 6 });
+    if (!approach) {
+      harnessErrors.push('no clear approach to the box for the bump');
+      return;
+    }
+    // BUMP_START metres short of the face: the nose meets it within a couple of seconds at 3 m/s.
+    const start = approach.aim.clone().addScaledVector(approach.direction, -BUMP_START);
+    const result = await flyRun({ craft: 'bushplane', speed: 3, start, direction: approach.direction, seconds: BUMP_SECONDS });
     special.bump = { contacts: result.contacts, crashed: result.crashed, penetrations: result.penetrations };
     runs.push({ ...result, kind: 'box bump', target: 'test:box', expect: 'contact', passedThrough: false });
   }
@@ -665,6 +827,61 @@ function createCollisionTestSystem(ctx, { capture }) {
       runs.push({ ...result, kind: 'kite strings', target: record ? record.id : 'none', expect: 'sensor', passedThrough: false });
     }
     special.kite = { misses, expected, crashes, hits };
+  }
+
+  /**
+   * A landable top is ground: the real bush plane, set at rest on its wheels on the deck (its own
+   * resting attitude, src/flight/placement.js groundPose) and left to its flight model for
+   * DECK_SECONDS, stands on the deck through the ground contact (ctx.groundSurfaces), with no strike.
+   */
+  async function deckRun() {
+    done++;
+    progress('Landable top', 'bush plane standing on the deck');
+    const record = colliders.get('test:deck');
+    const module = ctx.craftRegistry.get('bushplane');
+    const top = record.bounds[4];
+    const x = (record.bounds[0] + record.bounds[3]) / 2 - 15;
+    const z = (record.bounds[2] + record.bounds[5]) / 2;
+    const heading = 90;
+    const pose = groundPose({ groundHeight: () => top }, module.simProfile.contacts, x, z, heading, module.simProfile.centerOfMass?.[2] ?? 0);
+    const direction = new THREE.Vector3(1, 0, 0);
+    const result = await flyRun({ craft: 'bushplane', speed: 0, start: pose.position, direction, kinematic: false, seconds: DECK_SECONDS, velocity: new THREE.Vector3(), quaternion: pose.quaternion });
+    const model = flight().getModel();
+    const end = result.end;
+    const surfaces = ctx.groundSurfaces;
+    special.deck = {
+      crashed: result.crashed,
+      reason: result.reason,
+      strikes: result.hits,
+      onGround: !result.crashed && Boolean(model.contact && model.contact.onGround),
+      surface: surfaces ? surfaces.surfaceIdBelow(end.x, end.z, end.y + 5) : null,
+      aboveTop: round(end.y - top, 2),
+      start: result.start,
+      end,
+      penetrations: result.penetrations,
+    };
+    runs.push({ ...result, kind: 'landable deck', target: 'test:deck', expect: 'ground', model: 'real', passedThrough: false });
+  }
+
+  /**
+   * Dives onto the landable deck with the real flight model (DECK_DIVES): its top is ground, so the
+   * gear meets it through the ground contact and the airframe through the sweep. Every dive must end
+   * in a soft crash (a structure strike or the ground contact's) with no probe inside and the craft
+   * never below the top.
+   */
+  async function deckDives() {
+    const record = colliders.get('test:deck');
+    const top = record.bounds[4];
+    const centre = new THREE.Vector3((record.bounds[0] + record.bounds[3]) / 2, top, (record.bounds[2] + record.bounds[5]) / 2);
+    for (const [craft, speed] of DECK_DIVES) {
+      done++;
+      progress('Landable top', `${craft} diving onto the deck at ${speed} m/s`);
+      const direction = new THREE.Vector3(Math.cos(DECK_DIVE_PITCH), -Math.sin(DECK_DIVE_PITCH), 0);
+      const start = centre.clone().addScaledVector(direction, -Math.max(60, speed * 0.6));
+      const result = await flyRun({ craft, speed, start, direction, kinematic: false, aim: centre, beyond: 20 });
+      result.belowTop = result.end.y < top - 1;
+      runs.push({ ...result, kind: 'landable deck dive', target: 'test:deck', expect: 'ground crash', model: 'real', passedThrough: !result.crashed || result.belowTop });
+    }
   }
 
   async function realModelRuns(fixture) {
@@ -712,21 +929,31 @@ function createCollisionTestSystem(ctx, { capture }) {
   async function run() {
     colliders.profile(true);
     settings.set('timeFrozen', true);
+    // A fixed quality level, as the determinism test holds it: the perf governor's level changes on a
+    // busy machine (they resize the shadow map) are no part of what this test measures.
+    settings.set('quality', 'high');
     ctx.systems.spawns.debug.holdGamePresets();
     const crafts = STRIKE_CRAFT.filter((id) => ctx.craftRegistry.has(id));
     const fixture = buildFixture();
-    total = fixture.targets.length * crafts.length * SPEEDS.length + (LANDMARK_TYPES.length + STRUCTURE_PRESETS.length) * crafts.length * SPEEDS.length + SPEEDS.length + 5;
+    const strikesPer = crafts.length * SPEEDS.length;
+    total = (parts.has('fixture') ? fixture.targets.length * strikesPer : 0) + (parts.has('special') ? SPEEDS.length + 5 + DECK_DIVES.length : 0)
+      + (parts.has('landmarks') ? LANDMARK_TYPES.length * strikesPer + 1 : 0) + (parts.has('structures') ? STRUCTURE_PRESETS.length * strikesPer : 0);
     if (!crafts.includes('spaceplane')) special.notes = ['the spaceplane is not registered yet (wave 2): its strike runs join automatically once it is'];
     checkSingleCore();
     phase = 'fixture';
-    for (const target of fixture.targets) await strikeRuns(target, crafts);
-    await bumpRun();
-    await tunnelRun();
-    await kiteRuns(fixture);
-    await realModelRuns(fixture);
+    if (parts.has('fixture')) for (const target of fixture.targets) await strikeRuns(target, crafts);
+    if (parts.has('special')) {
+      phase = 'special';
+      await bumpRun();
+      await deckRun();
+      await deckDives();
+      await tunnelRun();
+      await kiteRuns(fixture);
+      await realModelRuns(fixture);
+    }
     teardownFixture();
-    await landmarkRuns(crafts);
-    await structureRuns(crafts);
+    if (parts.has('landmarks')) await landmarkRuns(crafts);
+    if (parts.has('structures')) await structureRuns(crafts);
     ctx.systems.spawns.debug.releaseGamePresets();
   }
 
