@@ -15,7 +15,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | # | Work | Branch | Contract | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Floating origin: `src/core/origin.js`, `scene.position = -offset`, the 4096 m lattice, the shader, CPU-matrix and float32-buffer fixes, audio in the render frame | `p3/origin` | a | not started |
-| 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | in progress |
+| 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | done (branch; awaiting merge) |
 | 3 | Local water bodies (basin, crater, terraces stamps; lake and ice material), the shared water-height query and the caller migration; region overlays; vegetation species 6-12 with WindField sway and trunk colliders | `p3/water-regions` | c, d | not started |
 | 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | not started |
 | 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | not started |
@@ -47,9 +47,29 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   `tools/lab/wind-engines.mjs` warms its allocation check up for 90 000 frames instead of 30 000:
   the two new typed events alone moved one JIT re-optimisation into its measured window (bisected:
   the Phase 2 events.js passes, this branch's fails at 30 000 and passes at 90 000).
-- **Next:** the verification runs (labs, structure and preset step files and `?test=collision` on
-  both backends, the `?test=spawns` subset, the reduced `?test=1` harness), recorded here.
-- **Open issues:** none yet.
+  The spawn check kit leaves live spawns' colliders out (a site built during a check had been
+  blamed); the preset kits print the colliders.
+- **Verified (2026-10-08, once each; reruns only where the page never loaded):** `npm run build`,
+  `npm run build:single` (V1 SHA-256 matches; one `Multiple instances` guard in the V2 bundle; no
+  dev test code in it), `npm run test:v1` 2/2; labs: colliders 84/84, structure 68/68, spawns 98/98,
+  flight-lab 82/82, terrain 291/291, wind-engines 56/56, director 50/50, setpiece 47/47 and every
+  other node lab passing; the audio lab 189/191 (browser-rendered thunder and waterfall levels,
+  no audio file changed here). `?test=collision` PASS on WebGPU and WebGL2 (98/98 strikes, 15/15
+  targets, 0 pass-throughs, 0 penetrations, bump, deck, deck dives, tunnel, arch, 15/15 kite misses,
+  one three.js core, 0/0 console). Step files on both backends, 0 errors and 0 warnings:
+  engine-structure, engine-structure-sites, presets-batch1, presets-batch2, presets-21-30.
+  `?test=spawns` for windFarm, ropeBridge, abandonedAirfield, crystalSpires, floatingIslands PASS on
+  both backends (colliders back after every dispose). Reduced `?test=1` (HARNESS-1, glider, bush
+  plane, jet, both views, 30 s): 0 NaN, 0 penetrations, 0/0 console, 18/18 manoeuvres; 26 frames
+  over 50 ms (main thread, GC and delayed frames on the busy machine; the one "systems" frame is
+  clouds 37 ms). dist-single smoke of V2 and the shell on both backends: 0 errors, 0 warnings.
+- **Next:** the wave 1 integration pass (merge order: origin, high altitude, water/regions,
+  colliders, fauna/challenges).
+- **Open issues:** a burst of WebGPU warnings `Destroyed texture [Texture "ShadowDepthTexture"]
+  used in a submit` appeared in 3 of 11 collision runs, always after the perf governor had
+  auto-degraded the quality (shadow map 2048 -> 1024) and at the next craft switch; forced
+  degrades and craft switches in a probe never reproduced it. The collision test now holds the
+  quality at high; the shadow resize path (sky.js `applyShadowQuality`) needs a look by its owner.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
