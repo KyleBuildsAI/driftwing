@@ -13,6 +13,10 @@
 // limit still hides it through the depth test (a ridge in front hides the plume's foot); the terrain
 // behind the limit is nearly fully fogged and the lure draws over it, which is exactly "above the fog".
 //
+// Precision (Phase 3 floating origin, src/core/origin.js): the mesh sits at this frame's camera
+// position (world, float64) and each instance matrix holds its quad's offset from it, so the float32
+// instance data stays small at any distance from the world origin.
+//
 // Look: the material ignores fog (fog: false). Its shading comes from the sky itself: ambient from the
 // sky's zenith radiance, the sun's colour on the sunward side, a silver lining when the sun is behind
 // it, and an aerial-perspective blend toward the sky colour in its own direction (the same sky
@@ -21,10 +25,6 @@
 //
 // Render order 1: after the water (render order -1) and the opaque world, before the near effects
 // (trails, rings, bursts: 3 and up), which must draw over it.
-//
-// Precision (Phase 3 floating origin, src/core/origin.js): the mesh sits at this frame's camera
-// position (world, float64) and each instance matrix holds its quad's offset from it, so the float32
-// instance data stays small at any distance from the world origin.
 //
 // Zero allocations per frame: slot data lives in typed arrays and the instance matrices and
 // attributes are written in place. Each slot keeps a reference to its spawn's anchor (moved in place
