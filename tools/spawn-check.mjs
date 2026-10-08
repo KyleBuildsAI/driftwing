@@ -64,6 +64,30 @@ function check(test, name, pass, detail = '') {
   process.stdout.write(`${pass ? 'PASS' : 'FAIL'}  ${test.padEnd(10)} ${name}${detail ? `  (${detail})` : ''}\n`);
 }
 
+/**
+ * Waits until the page renders again (at least 20 animation frames in a second; at most 300 s). On a
+ * busy machine the first pipelines compile for many seconds after ready (and again when the test kit's
+ * engines first draw), and no frame runs meanwhile, so a check timed by sleeps alone would read a
+ * standing world. Returns the seconds waited.
+ */
+async function waitForFrames(evaluate) {
+  const started = Date.now();
+  while (Date.now() - started < 300000) {
+    const frames = await evaluate(() => new Promise((resolve) => {
+      let count = 0;
+      const end = performance.now() + 1000;
+      const tick = () => {
+        count++;
+        if (performance.now() < end) requestAnimationFrame(tick);
+        else resolve(count);
+      };
+      requestAnimationFrame(tick);
+    })).catch(() => 0);
+    if (frames >= 20) break;
+  }
+  return Math.round((Date.now() - started) / 100) / 10;
+}
+
 /** Polls the GPU counters once a second until three reads in a row agree (at most 30 s). */
 async function waitForGpuSettle(readGpu) {
   const started = Date.now();
@@ -120,6 +144,7 @@ async function main() {
     while (Date.now() < deadline && !(await evaluate(() => Boolean(window.DRIFTWING?.ready)).catch(() => false))) await sleep(250);
     report.backend = await evaluate(() => window.DRIFTWING?.backend ?? null);
     check('boot', `V2 ready on ${report.backend}`, report.backend !== null && (options.backend === 'webgl' ? report.backend === 'WebGL2' : true), report.backend);
+    report.numbers.framesAfterReady = await waitForFrames(evaluate);
     const kit = await evaluate(async () => window.DRIFTWING.ctx.systems.spawns.debug.loadTestKit());
     check('boot', 'test kit registered its engines and presets', kit.engines.length === 2 && kit.presets.length >= 9, `${kit.engines.join(', ')}; ${kit.presets.length} presets`);
     await sleep(1500);
@@ -141,6 +166,7 @@ async function main() {
     // why). One full cycle builds them, and the baseline follows.
     const warmUpIds = await evaluate((count) => window.DRIFTWING.ctx.systems.spawns.debug.testKit.createMany(count, { minDistance: 200, maxDistance: 800, spread: 50 }), MEMORY_INSTANCES);
     await sleep(1500);
+    report.numbers.framesAfterWarmUp = await waitForFrames(evaluate);
     const warmUp = await evaluate((ids) => window.DRIFTWING.ctx.systems.spawns.debug.testKit.deactivateAll(ids), warmUpIds);
     await sleep(1500);
     check('memory', `warm-up: engine session resources built (${MEMORY_INSTANCES} instances created and disposed)`, warmUp === MEMORY_INSTANCES);
@@ -160,6 +186,7 @@ async function main() {
         return window.__spawnCheckIds.length;
       }, MEMORY_INSTANCES);
       await sleep(1500);
+      await waitForFrames(evaluate);
       const peak = { ...(await readGpu()), heap: await heapUsed() };
       const stats = await evaluate(() => {
         const spawnStats = window.DRIFTWING.ctx.systems.spawns.getStats();

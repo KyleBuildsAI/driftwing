@@ -397,6 +397,10 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   - wading birds choose their shallows by the still water level (`waterQuery.staticLevelInto`: a
     lake's level or sea level), not the instantaneous swell, so a spot 1 m deep no longer reads as
     shallow under a passing trough (engine-fauna-modes' wade check failed on WebGL2 that way).
+  - `tools/spawn-check.mjs` waits for frames to flow (20 animation frames in a second) after ready,
+    after loading the test kit and after each create: on WebGPU the cold pipeline compile stalls the
+    page for about 20 s after ready (no animation frame runs), and the memory cycles read a standing
+    world ("0 near", 3 of 55 failed). It measured 51/55 and 52/55 before, 55/55 after.
 - **Docs:** the architecture test table lists the wave 1 labs (origin, water, challenges and the
   ring goldens, path, fauna modes) and step files (origin-rebase, water-bodies, challenge,
   engine-fauna-modes, shadow-resize).
