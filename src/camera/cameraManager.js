@@ -448,16 +448,23 @@ export function createCameraSystem(ctx) {
     if (Math.abs(look.pitch) < 1e-4 && targetPitch === 0) look.pitch = 0;
   }
 
-  /** Chase free look: orbits the v1 chase pose around the craft (identity when centred). */
+  /** The craft's idle orbit (cameraRig.chase.orbitYaw, degrees: the eagle on a perch), else 0. */
+  function idleOrbitYaw() {
+    const yaw = currentRig()?.chase?.orbitYaw;
+    return Number.isFinite(yaw) ? yaw : 0;
+  }
+
+  /** Chase free look: orbits the v1 chase pose around the craft (identity when centred), plus the idle orbit. */
   function applyChaseOrbit() {
-    if (look.yaw === 0 && look.pitch === 0) return;
+    const idleYaw = idleOrbitYaw();
+    if (look.yaw === 0 && look.pitch === 0 && idleYaw === 0) return;
     // Only on top of a pose the rig wrote this frame (it keeps the last good frame on bad data).
     if (!camera.position.equals(chaseRig.getPose().position)) return;
     const root = currentRoot();
     orbit.pivot.copy(root ? root.position : player.position);
     orbit.right.set(1, 0, 0).applyQuaternion(camera.quaternion);
     orbit.pitch.setFromAxisAngle(orbit.right, look.pitch * DEG);
-    orbit.yaw.setFromAxisAngle(worldUp, -look.yaw * DEG);
+    orbit.yaw.setFromAxisAngle(worldUp, -(look.yaw + idleYaw) * DEG);
     orbit.rotation.copy(orbit.yaw).multiply(orbit.pitch);
     orbit.offset.copy(camera.position).sub(orbit.pivot).applyQuaternion(orbit.rotation);
     camera.position.copy(orbit.pivot).add(orbit.offset);
