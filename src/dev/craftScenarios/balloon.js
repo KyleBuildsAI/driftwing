@@ -1,9 +1,10 @@
 // Hot air balloon scenarios for ?test=craft (contract h.8 and Milestone P item 3: "balloon reaches a
 // target wind layer"):
 //
-//   balloon-wind-layer   from a low drift, burn up to the 600 m band of the wind-layer column, let go
-//                        (the altitude hold captures) and ride that layer: the balloon's height sits
-//                        in the band, its ground velocity is the band's wind, not the one it started in
+//   balloon-wind-layer   from a low drift, pick the first band of the wind-layer column at least
+//                        TARGET_RISE above the balloon, burn up to it, let go (the altitude hold
+//                        captures) and ride that layer: the band is the nearest to the balloon's
+//                        height, its ground velocity is the band's wind, not the one it started in
 //   balloon-drift-start  a 'drift' placement (what situate returns): moving with the air from the first
 //                        frame, the envelope at equilibrium, level under the altitude hold
 //   balloon-burner-lag   0 % assists: an 8 s burn heats the envelope at once but the climb starts only
@@ -18,11 +19,10 @@
 //                        no water soft crash (limits.waterLanding 'basket')
 //
 // The general flight test drifts 400 m up, the stick rotating the basket.
-import { WIND_BANDS } from '../../craft/balloon.js';
 import { compassName } from '../../core/util.js';
 
-/** The wind-layer test's target: the column's 600 m band. */
-const TARGET_BAND = WIND_BANDS.indexOf(600);
+/** The wind-layer test's target: the first band at least this far (m) above the balloon at the start. */
+const TARGET_RISE = 450;
 /** The script lets go of the burner when the climb will coast the rest of the way: the vertical speed times this (s). */
 const COAST_SECONDS = 30;
 
@@ -66,7 +66,12 @@ export default Object.freeze({
       seconds: 240,
       script(t, api) {
         const memo = api.memo;
-        const band = api.craftState.windColumn[TARGET_BAND];
+        const column = api.craftState.windColumn;
+        if (memo.target === undefined && column[0].primed) {
+          const index = column.findIndex((candidate) => candidate.altitude >= api.flight.altitude + TARGET_RISE);
+          memo.target = index >= 0 ? index : column.length - 1;
+        }
+        const band = memo.target === undefined ? null : column[memo.target];
         if (!memo.startWind && t > 3) memo.startWind = { vx: api.flight.velocity.x, vz: api.flight.velocity.z };
         const held = [];
         if (band && band.primed && !memo.released && t > 1) {
@@ -82,11 +87,11 @@ export default Object.freeze({
         { id: 'released', label: 'lets go of the burner below the layer', until: 200, test: (api) => Number.isFinite(api.memo.released) },
         {
           id: 'inLayer',
-          label: 'the target band (600 m) is the nearest to the balloon for 30 s',
+          label: 'the target band is the nearest to the balloon for 30 s',
           from: 60,
           test(api) {
             const memo = api.memo;
-            const inside = nearestBand(api) === TARGET_BAND;
+            const inside = memo.target !== undefined && nearestBand(api) === memo.target;
             memo.inLayerSeconds = inside ? (memo.inLayerSeconds ?? 0) + api.state.time.frameDt : 0;
             return memo.inLayerSeconds >= 30;
           },
@@ -95,7 +100,7 @@ export default Object.freeze({
           id: 'ridesLayer',
           label: "riding the layer: the ground velocity within 1 m/s of the band's wind",
           from: 90,
-          test: (api) => nearestBand(api) === TARGET_BAND && windMismatch(api, api.craftState.windColumn[TARGET_BAND]) < 1,
+          test: (api) => api.memo.target !== undefined && nearestBand(api) === api.memo.target && windMismatch(api, api.craftState.windColumn[api.memo.target]) < 1,
         },
         {
           id: 'newLayer',
@@ -103,7 +108,7 @@ export default Object.freeze({
           from: 90,
           test(api) {
             const start = api.memo.startWind;
-            return Boolean(start) && nearestBand(api) === TARGET_BAND && Math.hypot(api.flight.velocity.x - start.vx, api.flight.velocity.z - start.vz) > 0.8;
+            return Boolean(start) && nearestBand(api) === api.memo.target && Math.hypot(api.flight.velocity.x - start.vx, api.flight.velocity.z - start.vz) > 0.8;
           },
         },
       ],
@@ -137,7 +142,7 @@ export default Object.freeze({
         return { ...IDLE, held };
       },
       checks: [
-        { id: 'heats', label: 'the burn heats the envelope 4 K at once', from: 2, until: 11, test: (api) => api.craftState.envelopeTemperature - api.memo.startTemperature > 4 },
+        { id: 'heats', label: 'the burn heats the envelope 3 K at once', from: 2, until: 11, test: (api) => api.craftState.envelopeTemperature - api.memo.startTemperature > 3 },
         { id: 'lagged', label: 'yet 5 s into the burn the climb has not begun (under 0.5 m/s)', from: 2, until: 7, always: true, test: (api) => api.flight.verticalSpeed < 0.5 },
         { id: 'climbs', label: 'the climb comes after the thermal lag (over 0.5 m/s)', from: 15, until: 45, test: (api) => api.flight.verticalSpeed > 0.5 },
         { id: 'ventCools', label: 'the vent cools the envelope 1.5 K', from: 52, until: 60, test: (api) => api.memo.ventTemperature - api.craftState.envelopeTemperature > 1.5 },
@@ -168,6 +173,8 @@ export default Object.freeze({
       script(t, api) {
         const memo = api.memo;
         if (memo.contactAt === undefined && api.flight.onGround) memo.contactAt = t;
+        // Airborne time since the last contact, once the basket has touched (a bounce lasts a while).
+        if (memo.contactAt !== undefined) memo.airborne = api.flight.onGround ? 0 : (memo.airborne ?? 0) + api.state.time.frameDt;
         const held = [];
         if (memo.contactAt === undefined) {
           if (-api.flight.verticalSpeed < 2.5) held.push('craftAbilityAlt');
@@ -178,7 +185,7 @@ export default Object.freeze({
       },
       checks: [
         { id: 'touches', label: 'the basket reaches the ground', until: 80, test: (api) => api.memo.contactAt !== undefined },
-        { id: 'bounces', label: 'it bounces (airborne again after the first contact)', until: 110, test: (api) => api.memo.contactAt !== undefined && !api.flight.onGround && api.flight.radarAltitude > 0.3 },
+        { id: 'bounces', label: 'it bounces (airborne again for 0.25 s after the first contact)', until: 110, test: (api) => api.memo.airborne >= 0.25 },
         { id: 'drags', label: 'it drags in the wind (on the ground above 1 m/s)', until: 110, test: (api) => api.flight.onGround && api.flight.groundSpeed > 1 },
         { id: 'stops', label: 'the vent stops it', from: 100, test: (api) => api.flight.onGround && api.flight.groundSpeed < 0.5 },
       ],

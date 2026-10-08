@@ -37,6 +37,8 @@
 //                drags and the rig leans, no soft crash (sink and strike under the craft limits);
 //                the vent stops it
 //   water        a basket touchdown on the sea floats (no penetration, floating contact)
+//   hillside     0 %: drifting at 6 m/s into a steep slope, the envelope and basket brush it: no
+//                strike over the craft's limit and no contact sinks in a metre (the soft crash's)
 //   ground       a ground start sits in a 4 m/s breeze on its quick-release line (the basket moves
 //                under 1 m); the burner lifts it off within 70 s; a lever left at 50 % (the boot default) lights nothing until the pilot
 //                moves it, and does not keep the altitude hold off
@@ -445,6 +447,25 @@ function waterTest() {
   record('afloat, never sinking in', deepest, 0.5, { unit: 'm', compare: 'max', decimals: 2 });
 }
 
+function hillsideTest() {
+  const world = createSlopeWorld(0.7, 200);
+  const rig = createRig({ assists: 0, world, wind: new THREE.Vector3(6, 0, 0) });
+  rig.airborne({ altitude: 60 });
+  let deepest = 0;
+  let fastest = 0;
+  let touched = false;
+  rig.run(90, (current) => {
+    current.pilot.throttle = current.levelLever();
+    const report = current.model.contact;
+    if (report.onGround) touched = true;
+    deepest = Math.max(deepest, report.penetration);
+    if (report.bodyStrike) fastest = Math.max(fastest, report.bodyStrike.speed);
+  });
+  record('drifting into a steep slope: it touches', touched ? 1 : 0, 1, { compare: touched });
+  record('drifting into a steep slope: no contact sinks 1 m', deepest, 0.9, { unit: 'm', compare: 'max', decimals: 2 });
+  record('drifting into a steep slope: no strike over the limit', fastest, balloon.limits.bodyStrikeSpeed, { unit: 'm/s', compare: 'max', decimals: 2 });
+}
+
 function groundTest() {
   const rig = createRig({ assists: 1, wind: new THREE.Vector3(4, 0, 0) });
   rig.grounded();
@@ -708,6 +729,7 @@ terrainTest();
 landingTest();
 bounceTest();
 waterTest();
+hillsideTest();
 groundTest();
 snapshotTest();
 columnTest();

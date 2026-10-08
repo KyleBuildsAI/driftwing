@@ -100,6 +100,8 @@ const BASKET_CORNER = 0.66;
 const RIM_CORNER = 0.72;
 const ENVELOPE_RING_Y = ROTATION_VENT_SHARE * ENVELOPE_HEIGHT + MOUTH_Y;
 const LOWER_RING_SHARE = 0.32;
+const ENVELOPE_SPRING = 90000;
+const ENVELOPE_DAMPING = 40000;
 
 function basketContacts() {
   const contacts = [];
@@ -109,18 +111,20 @@ function basketContacts() {
   for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
     contacts.push(Object.freeze({ id: `rim${x < 0 ? 'Left' : 'Right'}${z < 0 ? 'Front' : 'Back'}`, kind: 'skid', gear: false, position: Object.freeze([x * RIM_CORNER, BASKET_RIM_Y, z * RIM_CORNER]), spring: 60000, damping: 5000, friction: 0.7 }));
   }
-  // The envelope: soft fabric that brushes a hillside or a lake rather than striking it.
+  // The envelope: fabric that brushes a hillside or a lake rather than striking it (a slow drift into
+  // a slope is a bump, never a strike); stiff and well damped, as the whole moving mass (about 6 t)
+  // leans on a few points, so the contact never sinks a metre in.
   const equator = envelopeRadiusAt(ENVELOPE_HEIGHT, ROTATION_VENT_SHARE * ENVELOPE_HEIGHT) * 0.99;
   for (let index = 0; index < 8; index++) {
     const angle = (index / 8) * Math.PI * 2;
-    contacts.push(Object.freeze({ id: `envelope${index}`, kind: 'body', position: Object.freeze([Math.cos(angle) * equator, ENVELOPE_RING_Y, Math.sin(angle) * equator]), spring: 8000, damping: 3000, friction: 0.4 }));
+    contacts.push(Object.freeze({ id: `envelope${index}`, kind: 'body', position: Object.freeze([Math.cos(angle) * equator, ENVELOPE_RING_Y, Math.sin(angle) * equator]), spring: ENVELOPE_SPRING, damping: ENVELOPE_DAMPING, friction: 0.4 }));
   }
   const lower = envelopeRadiusAt(ENVELOPE_HEIGHT, LOWER_RING_SHARE * ENVELOPE_HEIGHT) * 0.99;
   for (let index = 0; index < 4; index++) {
     const angle = (index / 4 + 0.125) * Math.PI * 2;
-    contacts.push(Object.freeze({ id: `envelopeLow${index}`, kind: 'body', position: Object.freeze([Math.cos(angle) * lower, MOUTH_Y + LOWER_RING_SHARE * ENVELOPE_HEIGHT, Math.sin(angle) * lower]), spring: 8000, damping: 3000, friction: 0.4 }));
+    contacts.push(Object.freeze({ id: `envelopeLow${index}`, kind: 'body', position: Object.freeze([Math.cos(angle) * lower, MOUTH_Y + LOWER_RING_SHARE * ENVELOPE_HEIGHT, Math.sin(angle) * lower]), spring: ENVELOPE_SPRING, damping: ENVELOPE_DAMPING, friction: 0.4 }));
   }
-  contacts.push(Object.freeze({ id: 'crown', kind: 'body', position: Object.freeze([0, CROWN_Y, 0]), spring: 8000, damping: 3000, friction: 0.4 }));
+  contacts.push(Object.freeze({ id: 'crown', kind: 'body', position: Object.freeze([0, CROWN_Y, 0]), spring: ENVELOPE_SPRING, damping: ENVELOPE_DAMPING, friction: 0.4 }));
   return Object.freeze(contacts);
 }
 
