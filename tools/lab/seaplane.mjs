@@ -1094,11 +1094,12 @@ function flyScenario(scenario, waterWorld, wind) {
   };
 }
 
-/** Steady winds the dry-run flies in: calm, and 6 m/s from two directions. */
+/** Steady winds the dry-run flies in: calm, 6 m/s from two directions and 9 m/s from a third. */
 const SCENARIO_WINDS = Object.freeze([
   Object.freeze({ speed: 0, fromDegrees: 0 }),
   Object.freeze({ speed: 6, fromDegrees: 40 }),
   Object.freeze({ speed: 6, fromDegrees: 230 }),
+  Object.freeze({ speed: 9, fromDegrees: 130 }),
 ]);
 
 function testScenarios() {

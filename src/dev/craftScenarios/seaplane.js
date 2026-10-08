@@ -31,9 +31,15 @@ const MAX_CHORD = 1500;
 const MIN_DEPTH = 1.2;
 /** Ground beyond each shore is sampled this far (m): the climb-out and the final approach. */
 const RIM_RANGE = 800;
-/** The run needs this much water ahead (m); a taxi back makes it up, stopping this far (m) from the back shore. */
-const RUN_NEEDED = 450;
+/**
+ * The run wants this much water (m) from its start; a taxi back makes up what the water ahead lacks,
+ * stopping BACK_MARGIN (m) from the back shore. A run shorter than RUN_MINIMUM is a last resort, and
+ * each m/s of headwind counts as HEADWIND_METRES of extra water.
+ */
+const RUN_NEEDED = 700;
+const RUN_MINIMUM = 320;
 const BACK_MARGIN = 75;
+const HEADWIND_METRES = 30;
 /** Taxi power, slowing for the last 40 m before the turn; the turn's power. */
 const TAXI_THROTTLE = Object.freeze({ cruise: 0.25, slow: 0.1, turn: 0.2 });
 /**
@@ -146,11 +152,13 @@ function planCircuit(api) {
     const behind = waterAhead(api, start.x, start.z, heading + 180);
     const rim = Math.max(rimBeyond(api, start.x, start.z, heading, ahead, level), rimBeyond(api, start.x, start.z, heading + 180, behind, level));
     const headwind = wind.speed * Math.cos(headingError(heading, wind.fromDegrees) * DEG);
-    const score = Math.min(ahead + behind, RUN_NEEDED + 400) + 60 * headwind - 8 * rim;
-    if (!best || score > best.score) best = { heading, ahead, behind, rim, headwind, score };
+    const back = clamp(RUN_NEEDED - ahead, 0, Math.max(0, behind - BACK_MARGIN));
+    const run = ahead + back;
+    const score = Math.min(run, RUN_NEEDED) + HEADWIND_METRES * headwind - 8 * rim - (run < RUN_MINIMUM ? 1000 : 0);
+    if (!best || score > best.score) best = { heading, ahead, behind, back, run, rim, headwind, score };
   }
   const [dx, dz] = headingVector(best.heading);
-  const back = clamp(RUN_NEEDED - best.ahead, 0, Math.max(0, best.behind - BACK_MARGIN));
+  const back = best.back;
   const runStart = { x: start.x - dx * back, z: start.z - dz * back };
   // The circuit turns to the side whose downwind leg (400 m off the chord) has the lower ground.
   let side = 1;
@@ -158,8 +166,8 @@ function planCircuit(api) {
   for (const candidate of [1, -1]) {
     let highest = -Infinity;
     for (let along = -CIRCUIT.base; along <= CIRCUIT.upwind; along += 100) {
-      const x = runStart.x + dx * along - dz * candidate * 400;
-      const z = runStart.z + dz * along + dx * candidate * 400;
+      const x = runStart.x + dx * along - dz * candidate * DOWNWIND_OFFSET;
+      const z = runStart.z + dz * along + dx * candidate * DOWNWIND_OFFSET;
       highest = Math.max(highest, api.world.groundHeight(x, z));
     }
     if (highest < lowest) {
@@ -176,6 +184,26 @@ function planCircuit(api) {
     aim: { x: runStart.x + dx * TOUCHDOWN_AFTER_START, z: runStart.z + dz * TOUCHDOWN_AFTER_START },
     fix: { x: runStart.x + dx * (TOUCHDOWN_AFTER_START - CIRCUIT.fix), z: runStart.z + dz * (TOUCHDOWN_AFTER_START - CIRCUIT.fix) },
   };
+}
+
+/** The downwind leg flies this far (m) off the chord; the legs steer this many degrees per m off their line. */
+const DOWNWIND_OFFSET = 400;
+const TRACK_GAIN = 0.08;
+const TRACK_LIMIT = 35;
+
+/** How far (m) the craft is to the right of the chord (seen along the takeoff heading). */
+function acrossChord(api, plan) {
+  const position = api.player.position;
+  return -(position.x - plan.runStart.x) * plan.direction[1] + (position.z - plan.runStart.z) * plan.direction[0];
+}
+
+/**
+ * The heading that flies a leg parallel to the chord (outbound: along the takeoff heading, else back)
+ * at `offset` m to the right of it, steering back onto the line against the wind's drift.
+ */
+function legHeading(api, plan, offset, outbound) {
+  const correction = clamp(TRACK_GAIN * (offset - acrossChord(api, plan)), -TRACK_LIMIT, TRACK_LIMIT);
+  return wrapDegrees(outbound ? plan.heading + correction : plan.heading + 180 - correction);
 }
 
 /** How far (m) the craft is along the chord from the run's start (negative behind it). */
@@ -205,7 +233,9 @@ function flyFinal(api, dt, plan) {
   const memo = api.memo;
   if (memo.touched || flight.onGround) {
     memo.touched = true;
-    return { ...steerWater(api, dt, plan.heading, 0), pitch: 0 };
+    if (flight.onGround) return { ...steerWater(api, dt, plan.heading, 0), pitch: 0 };
+    // Bounced off a swell: settle back gently with a little power, the stick on a slow sink.
+    return { roll: clamp(-0.05 * flight.roll, -0.5, 0.5), pitch: clamp(0.1 * (-0.5 - flight.verticalSpeed), -0.45, 0.45), yaw: 0, throttle: 0.25 };
   }
   if (!memo.passedFix && (Math.hypot(plan.fix.x - player.position.x, plan.fix.z - player.position.z) < 200 || alongChord(api, plan) > TOUCHDOWN_AFTER_START - CIRCUIT.fix + 100)) memo.passedFix = true;
   const target = memo.passedFix ? plan.aim : plan.fix;
@@ -271,7 +301,7 @@ function waterCircuitScript(t, api) {
       if (!flight.onGround && flight.agl > 3) memo.phase = 'upwind';
       break;
     case 'upwind':
-      controls = flyAir(api, dt, { heading: plan.heading, verticalSpeed: circuitClimb(api), airspeed: CIRCUIT.cruiseSpeed });
+      controls = flyAir(api, dt, { heading: legHeading(api, plan, 0, true), verticalSpeed: circuitClimb(api), airspeed: CIRCUIT.cruiseSpeed });
       if (along > CIRCUIT.upwind && flight.agl > 40) memo.phase = 'crosswind';
       break;
     case 'crosswind':
@@ -279,7 +309,7 @@ function waterCircuitScript(t, api) {
       if (Math.abs(headingError(plan.heading + 90 * plan.side, flight.heading)) < 15) memo.phase = 'downwind';
       break;
     case 'downwind':
-      controls = flyAir(api, dt, { heading: wrapDegrees(plan.heading + 180), verticalSpeed: circuitClimb(api), airspeed: CIRCUIT.cruiseSpeed });
+      controls = flyAir(api, dt, { heading: legHeading(api, plan, plan.side * DOWNWIND_OFFSET, false), verticalSpeed: circuitClimb(api), airspeed: CIRCUIT.cruiseSpeed });
       if (along < TOUCHDOWN_AFTER_START - CIRCUIT.base) memo.phase = 'final';
       break;
     default:
