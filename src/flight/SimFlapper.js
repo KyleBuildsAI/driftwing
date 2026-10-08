@@ -1101,14 +1101,16 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     return candidate.found || (env.colliders && typeof env.colliders.insideSolid === 'function' && env.colliders.insideSolid(perch.x, perch.y - 0.1, perch.z, 0) !== null);
   }
 
-  /** A hop forward and up, wings out: the flight model takes over. */
+  /** A hop forward and up into the air mass, wings out: the flight model takes over. */
   function takeOff() {
     const wasPerch = PERCH_KINDS.includes(perch.kind);
     const heading = perch.heading;
     const forwardX = Math.sin(heading * DEG);
     const forwardZ = -Math.cos(heading * DEG);
     state.position.y += perchProfile.takeoffRise;
+    // The hop is into the air mass: relative to the wind, so a tailwind never leaves it without airspeed.
     state.velocity.set(forwardX * perchProfile.takeoffSpeed, perchProfile.takeoffUp, forwardZ * perchProfile.takeoffSpeed);
+    if (lastEnv && lastEnv.wind && lastEnv.wind.vel) state.velocity.add(lastEnv.wind.vel);
     levelAttitude(heading, perchProfile.takeoffPitch * DEG, state.quaternion);
     state.angularVelocity.set(0, 0, 0);
     perch.cooldownId = perch.id;

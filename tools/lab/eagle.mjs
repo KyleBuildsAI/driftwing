@@ -419,6 +419,17 @@ function perchTest() {
   rig.run(5);
   const away = Math.hypot(rig.state().position.x - perch.x, rig.state().position.z - perch.z);
   record('flies away without catching the perch again', away, 20, { unit: 'm', compare: rig.model.phase === 'flight' && away >= 20, decimals: 0, note: `height ${(rig.state().position.y - perch.y).toFixed(1)} m over the perch` });
+  // In a 7 m/s tailwind the hop is into the moving air: it flies off with airspeed, not backwards.
+  const tailwind = approachPerch(perch);
+  tailwind.rig.env.wind.vel.set(0, 0, -7);
+  const facing = tailwind.rig.data.heading;
+  tailwind.rig.pilot.throttle = 0.7;
+  tailwind.rig.run(0.1);
+  let lowest = Infinity;
+  tailwind.rig.run(4, (current) => {
+    lowest = Math.min(lowest, current.state().position.y - perch.y);
+  });
+  record('tailwind takeoff keeps its airspeed (lowest under the perch)', -lowest, 6, { unit: 'm', compare: 'max', note: `airspeed ${tailwind.rig.data.airspeed.toFixed(1)} m/s after 4 s, facing ${facing.toFixed(0)} deg` });
 
   const fast = approachPerch(perch, { speed: 16, pitch: -0.1 });
   record('a fast pass does not land', fast.landingAt === null ? 0 : 1, 0, { compare: fast.landingAt === null });
