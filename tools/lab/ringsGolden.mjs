@@ -9,15 +9,16 @@
 // for its duration: the courses are the same on every run.
 //
 // The fixture tools/lab/fixtures/rings-golden.json was recorded from the Phase 2 rings (before the
-// migration onto the challenge core) with `node tools/lab/ringsGolden.mjs --record`. The challenges
-// lab (tools/lab/challenges.mjs) replays the same flights on the current code and needs equality.
+// migration onto the challenge core) with `node tools/lab/ringsGolden.mjs --record` at commit c192065.
+// The challenges lab (tools/lab/challenges.mjs) replays the same flights on the current code and needs
+// equality; `node tools/lab/ringsGolden.mjs` replays them on their own.
 //
 // Flights: clean (every ring flown through, a paused stretch), misses (horizontal and vertical
 // outside crossings, an edge pass, an overshoot after a skipped segment, a missed last ring), abandon
 // (flown away past the abandon distance), teleport (a skipped jump, a jump back and a paused pass
 // that becomes an overshoot), cancel (the R key mid-course, then a second cancel that does nothing)
 // and restart (a start over a live course, a clamped ring count, the default count).
-import { writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
@@ -423,23 +424,37 @@ export function compareFlight(golden, replay) {
   return null;
 }
 
-// ---- CLI: --record writes the fixture from the code as it is now ----------------------------------------
+// ---- CLI: replays the current code against the fixture ----------------------------------------------------
+// The fixture was recorded from the Phase 2 rings.js with `--record` (commit c192065). rings.js now runs on
+// the challenge core, so recording again would capture the migrated code and prove nothing: `--record` is
+// refused here (check out c192065 to re-record). Without flags, the six flights replay on the current
+// rings.js and challenges.js, and the run fails on the first difference.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const flags = process.argv.slice(2);
-  for (const flag of flags) {
-    if (flag !== '--record') throw new Error(`Unknown flag ${flag}`);
+  if (flags.includes('--record')) {
+    throw new Error('--record captures the Phase 2 rings only: rings.js is migrated, check out c192065 to re-record');
   }
+  for (const flag of flags) throw new Error(`Unknown flag ${flag}`);
   const { createRingCourseSystem } = await import('../../src/gameplay/rings.js');
+  const { createChallengeSystem } = await import('../../src/gameplay/challenges.js');
   const createSystems = (ctx) => {
+    const challenges = createChallengeSystem(ctx);
+    ctx.systems.challenges = challenges;
     const rings = createRingCourseSystem(ctx);
     ctx.systems.rings = rings;
-    return { rings, order: [rings] };
+    return { rings, order: [rings, challenges] };
   };
+  const fixture = JSON.parse(readFileSync(RING_GOLDEN_FIXTURE, 'utf8'));
   const logs = runRingFlights(createSystems);
-  for (const log of logs) process.stdout.write(`${summarizeFlight(log)}\n`);
-  if (flags.includes('--record')) {
-    const fixture = { version: RING_GOLDEN_VERSION, recordedFrom: 'Phase 2 rings.js (before the challenge migration)', flights: logs };
-    writeFileSync(RING_GOLDEN_FIXTURE, `${JSON.stringify(fixture)}\n`);
-    process.stdout.write(`wrote ${RING_GOLDEN_FIXTURE}\n`);
-  }
+  let differences = 0;
+  logs.forEach((log, index) => {
+    const difference = compareFlight(fixture.flights[index], log);
+    if (difference) differences++;
+    process.stdout.write(`${difference ? 'FAIL' : 'PASS'}  ${difference ?? summarizeFlight(log)}
+`);
+  });
+  process.stdout.write(`
+${logs.length - differences}/${logs.length} golden flights replay identically
+`);
+  if (differences) process.exitCode = 1;
 }
