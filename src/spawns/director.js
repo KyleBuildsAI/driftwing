@@ -219,6 +219,8 @@ const COMBO_MEMBER_SALT = 0x51ed;
 const BLOOD_MOON_SKY = Object.freeze({ darkness: 0.32, ambient: 0.8, moonTint: 0xc8442a, moonTintAmount: 0.88 });
 /** An override's own preset starts this far (m) ahead on the ground track (its discovery). */
 const OVERRIDE_SPAWN_DISTANCE = 3000;
+/** A refused override spawn is tried again after this long (s). */
+const OVERRIDE_SPAWN_RETRY = 10;
 /** Coast: land and water both within this distance (m) of the point. */
 const COAST_PROBE = 1200;
 const SURFACE_CACHE_LIMIT = 4096;
@@ -463,7 +465,7 @@ export function createDirector({
   const craftState = { id: '', profile: null, band: 0 };
   const overrides = createOverrideSchedule({ seedHash, presets, biomeAt: terrain.biomeAt, biomeKeys: terrain.biomeKeys ?? null });
   /** Per override entry: whether it is on, above half weight, and the spawn it started (discovery). */
-  const overrideStatus = overrides.entries.map(() => ({ active: false, high: false, spawnId: null, spawnedNight: null }));
+  const overrideStatus = overrides.entries.map(() => ({ active: false, high: false, spawnId: null, spawnedNight: null, retryAt: -Infinity }));
 
   const pool = createCandidatePool(128);
   /** candidate hash -> { surface bits, biome key } (a candidate's ground never changes). */
@@ -1355,14 +1357,18 @@ export function createDirector({
       }
       return;
     }
-    if (!status.high || status.spawnedNight === entry.night) return;
+    if (!status.high || status.spawnedNight === entry.night || time < status.retryAt) return;
     const info = infoById.get(entry.presetId);
     const radians = (player.track * Math.PI) / 180;
     const x = player.x + Math.sin(radians) * OVERRIDE_SPAWN_DISTANCE;
     const z = player.z - Math.cos(radians) * OVERRIDE_SPAWN_DISTANCE;
     const seed = rehash(baseHash, hashString(entry.id) ^ Math.imul(entry.night | 0, 0x27d4eb2d));
     const id = spawnManager.activate(info.id, { position: { x, y: groundY(x, z), z }, heading: player.track, source: 'director', seed, duration: durationFor(info, seed) });
-    if (id === null || id === undefined) return;
+    if (id === null || id === undefined) {
+      // Refused (a budget, or engines with nothing to draw here): try again a little later.
+      status.retryAt = time + OVERRIDE_SPAWN_RETRY;
+      return;
+    }
     status.spawnId = id;
     status.spawnedNight = entry.night;
   }
