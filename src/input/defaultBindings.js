@@ -52,13 +52,15 @@ const axis = (index, extra = {}) => ({ type: 'axis', axis: index, ...extra });
 /**
  * Keyboard: one layer. v1's keys stay where v1 had them (P, J, T, R, O; Enter, /, H, ?, Esc, X,
  * K, I, Tab stay UI keys in ui.js), except that G is the gear (the waypoint moves to N), C cycles
- * the view and Space runs the craft ability. Plain V swaps first and third person; Shift+V stays
- * the WREN voice toggle. Plain M opens the world map; the mic (v1's M) is the UI key Shift+M.
+ * the view and Space runs the craft ability (Shift+Space its second ability). Plain V swaps first
+ * and third person; Shift+V stays the WREN voice toggle. Plain M opens the world map; the mic (v1's
+ * M) is the UI key Shift+M. The number keys 1-9 and 0 pick the ten craft favorites.
  */
 const KEYBOARD = {
   actions: {
     copilotPTT: [key('Backquote')],
     craftAbility: [key('Space')],
+    craftAbilityAlt: [key('Space', { shift: true })],
     waypointNearest: [key('KeyN', { shift: true })],
     waypointAhead: [key('KeyN', { shift: false })],
     photoMode: [key('KeyP')],
@@ -77,6 +79,10 @@ const KEYBOARD = {
     craftSelect4: [key('Digit4')],
     craftSelect5: [key('Digit5')],
     craftSelect6: [key('Digit6')],
+    craftSelect7: [key('Digit7')],
+    craftSelect8: [key('Digit8')],
+    craftSelect9: [key('Digit9')],
+    craftSelect10: [key('Digit0')],
     gearToggle: [key('KeyG')],
     flapsUp: [key('KeyF', { shift: true })],
     flapsDown: [key('KeyF', { shift: false })],
@@ -113,7 +119,11 @@ const MOUSE = {
   axes: {},
 };
 
-/** Standard-mapping (Xbox-style) gamepads. View (back, button 8) swaps first and third person. */
+/**
+ * Standard-mapping (Xbox-style) gamepads. View (back, button 8) swaps first and third person. Every
+ * button is taken, so craftAbilityAlt and the favorites have no gamepad default (bind them in the
+ * controls panel); the D-pad cycles the favorites.
+ */
 const STANDARD_GAMEPAD = {
   actions: {
     craftAbility: [button(0)],
@@ -177,8 +187,9 @@ const T16000M = {
 
 /**
  * Thrustmaster TWCS throttle (with the TFRP pedals on its RJ12 port). Button 8 (index 7), beside
- * the view cycle on button 3, swaps first and third person, and button 9 (index 8) opens the world
- * map. The throttle hat is left unbound on purpose: it is reserved for the Phase 4 music controls.
+ * the view cycle on button 3, swaps first and third person, button 9 (index 8) opens the world map
+ * and button 10 (index 9) runs the craft's second ability. The throttle hat is left unbound on
+ * purpose: it is reserved for the Phase 4 music controls.
  */
 const TWCS = {
   actions: {
@@ -191,6 +202,7 @@ const TWCS = {
     controlsPanel: [button(6)],
     viewToggle1P3P: [button(7)],
     mapToggle: [button(8)],
+    craftAbilityAlt: [button(9)],
   },
   axes: {
     lookX: [axis(0, { deadzone: 0.12, smoothing: 0.15 })],

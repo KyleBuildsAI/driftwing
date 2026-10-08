@@ -9,7 +9,9 @@
 //     crafts: { [craftId]: { [device]: { [target]: Ref[] } } } }
 //
 // Resolution for a target on a device while flying a craft: the craft override if present, else
-// the global override, else the profile default. An empty list is a deliberate "unbound".
+// the global override, else the craft module's own default for that device profile (the module's
+// optional `bindings`, contract h.2), else the profile default. An empty list is a deliberate
+// "unbound".
 // Stored in IndexedDB under 'driftwing-v2.input.bindings'; exported / imported as JSON.
 
 import { ACTION_IDS, ACTIONS } from './controlState.js';
@@ -291,10 +293,12 @@ function sanitizeProfile(raw) {
 }
 
 /**
- * Creates the binding store. storage: core/storage (read / write). Listeners registered with
- * onChange run after every change with { reason }.
+ * Creates the binding store. storage: core/storage (read / write). craftDefaults(craft) returns a
+ * craft module's per-craft default bindings ({ [profileId]: { actions?, axes? } }) or null; they are
+ * sanitized once per craft and profile, and a reference that does not fit its target is dropped with
+ * an error (a module bug). Listeners registered with onChange run after every change with { reason }.
  */
-export function createBindingStore({ storage }) {
+export function createBindingStore({ storage, craftDefaults = null }) {
   const loaded = sanitizeProfile(storage.read(BINDINGS_STORAGE_KEY, emptyProfile()));
   let profile = loaded.profile;
   let version = 0;
@@ -305,8 +309,36 @@ export function createBindingStore({ storage }) {
     return BUILT_IN_DEVICES[device]?.profile ?? profile.devices[device]?.profile ?? 'generic';
   }
 
-  function defaultRefs(device, target) {
-    const defaults = DEFAULT_BINDINGS[profileIdFor(device)];
+  /** Sanitized per-craft module defaults, by `${craft}|${profileId}`: { [target]: Ref[] }. */
+  const craftDefaultCache = new Map();
+
+  function craftDefaultLayer(craft, profileId) {
+    const key = `${craft}|${profileId}`;
+    if (craftDefaultCache.has(key)) return craftDefaultCache.get(key);
+    const source = typeof craftDefaults === 'function' ? craftDefaults(craft)?.[profileId] : null;
+    let layer = null;
+    if (source) {
+      layer = {};
+      for (const kind of ['actions', 'axes']) {
+        for (const [target, refs] of Object.entries(source[kind] ?? {})) {
+          const known = kind === 'axes' ? AXIS_SET.has(target) : ACTION_SET.has(target);
+          const clean = known && Array.isArray(refs) ? refs.map((ref) => sanitizeRef(ref, target)).filter(Boolean) : [];
+          if (!known || !Array.isArray(refs) || clean.length !== refs.length) {
+            console.error(`[DRIFTWING] craft "${craft}" default binding for ${target} on ${profileId} is not valid; the invalid references are ignored`);
+          }
+          if (known) layer[target] = clean;
+        }
+      }
+    }
+    craftDefaultCache.set(key, layer);
+    return layer;
+  }
+
+  function defaultRefs(device, target, craft = null) {
+    const profileId = profileIdFor(device);
+    const craftLayer = craft ? craftDefaultLayer(craft, profileId) : null;
+    if (craftLayer && craftLayer[target]) return craftLayer[target];
+    const defaults = DEFAULT_BINDINGS[profileId];
     if (!defaults) return [];
     return (isAxisTarget(target) ? defaults.axes[target] : defaults.actions[target]) ?? [];
   }
@@ -331,7 +363,7 @@ export function createBindingStore({ storage }) {
     if (craftRefs) return craftRefs;
     const globalRefs = profile.global[device]?.[target];
     if (globalRefs) return globalRefs;
-    return defaultRefs(device, target);
+    return defaultRefs(device, target, craft);
   }
 
   /** Where the effective binding comes from: 'craft' | 'global' | 'default'. */
@@ -467,9 +499,9 @@ export function createBindingStore({ storage }) {
     sourceOf,
     getEffective,
 
-    /** Default references of a target on a device (for "reset this binding" in the UI). */
-    getDefaultRefs(device, target) {
-      return copyRefs(defaultRefs(device, target));
+    /** Default references of a target on a device, for a craft when given (for "reset this binding" in the UI). */
+    getDefaultRefs(device, target, craft = null) {
+      return copyRefs(defaultRefs(device, target, craft));
     },
 
     /**

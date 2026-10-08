@@ -37,7 +37,8 @@ export function createInputManager(ctx) {
   const debug = params.get('debug') === '1';
   const mock = params.get('test') === 'hotas' ? installMockGamepads() : null;
 
-  const bindings = createBindingStore({ storage });
+  // A craft module's own default bindings (contract h.2) sit between the player's and the profile's.
+  const bindings = createBindingStore({ storage, craftDefaults: (craft) => ctx.craftRegistry?.get(craft)?.bindings ?? null });
   const calibration = createCalibrationStore({ storage });
   if (bindings.loadErrors.length > 0) {
     bus.emit('notify', { text: 'Some saved control bindings could not be read and were reset to defaults.', kind: 'warning' });
@@ -426,6 +427,19 @@ export function createInputManager(ctx) {
       if (!soft(levers.throttle)) return false;
       controls.throttle = 0;
       controls.afterburner = false;
+      return true;
+    },
+
+    /**
+     * Sets the throttle lever to value (0..1) when no physical lever holds it (keys, the wheel,
+     * touch): a craft switch that spawns the craft at full power (contract h.4). A HOTAS lever keeps
+     * its own position. Returns true when the lever moved.
+     */
+    presetThrottle(value) {
+      const soft = (lever) => SOFT_LEVER_OWNERS.has(lever.owner) || !deviceFrame.positions.some((candidate) => candidate.key === lever.owner);
+      if (!Number.isFinite(value) || !soft(levers.throttle)) return false;
+      controls.throttle = Math.min(1, Math.max(0, value));
+      controls.afterburner = controls.throttle >= controls.afterburnerDetent;
       return true;
     },
 

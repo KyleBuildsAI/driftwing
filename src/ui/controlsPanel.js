@@ -20,9 +20,9 @@ import { createCalibrationWizardView } from './calibrationWizard.js';
 /** Binding groups in list order. Axis functions first, then the discrete actions. */
 const BINDING_GROUPS = Object.freeze([
   { id: 'axes', label: 'Flight axes', targets: AXIS_TARGET_IDS },
-  { id: 'flight', label: 'Flight', targets: ['craftAbility', 'gearToggle', 'flapsDown', 'flapsUp', 'airbrake', 'engineToggle', 'chuteDeploy', 'autopilotToggle'] },
+  { id: 'flight', label: 'Flight', targets: ['craftAbility', 'craftAbilityAlt', 'gearToggle', 'flapsDown', 'flapsUp', 'airbrake', 'engineToggle', 'chuteDeploy', 'autopilotToggle'] },
   { id: 'view', label: 'View', targets: ['viewCycle', 'viewToggle1P3P', 'viewForward', 'viewBack', 'viewLeft', 'viewRight', 'recenterView', 'photoMode'] },
-  { id: 'craft', label: 'Craft', targets: ['craftNext', 'craftPrev', 'craftSelect1', 'craftSelect2', 'craftSelect3', 'craftSelect4', 'craftSelect5', 'craftSelect6', 'relaunch'] },
+  { id: 'craft', label: 'Craft', targets: ['craftNext', 'craftPrev', 'craftSelect1', 'craftSelect2', 'craftSelect3', 'craftSelect4', 'craftSelect5', 'craftSelect6', 'craftSelect7', 'craftSelect8', 'craftSelect9', 'craftSelect10', 'relaunch'] },
   { id: 'gameplay', label: 'Gameplay', targets: ['copilotPTT', 'waypointAhead', 'waypointNearest', 'ringCourse', 'challengeStart', 'timeForward', 'timeBack'] },
   { id: 'ui', label: 'Interface', targets: ['journal', 'mapToggle', 'settings', 'controlsPanel', 'versionToggle'] },
 ]);
@@ -203,8 +203,13 @@ export function createControlsPanel({ panel, ctx }) {
   const activeTab = () => tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
 
   function targetLabel(target) {
-    const selectMatch = /^craftSelect(\d)$/.exec(target);
-    if (selectMatch) return `Craft ${selectMatch[1]}: ${ACTIONS[target]}`;
+    // A favorite names the craft in its slot (settings.craftFavorites): "Favorite 7: Aerobatic".
+    const selectMatch = /^craftSelect(\d{1,2})$/.exec(target);
+    if (selectMatch) {
+      const favorites = settings.get('craftFavorites');
+      const craftId = Array.isArray(favorites) ? favorites[Number(selectMatch[1]) - 1] : null;
+      return `${ACTIONS[target]}: ${craftId ? craftName(craftId) : 'empty'}`;
+    }
     return ACTIONS[target] ?? AXIS_TARGETS[target]?.label ?? target;
   }
 
@@ -1286,7 +1291,7 @@ export function createControlsPanel({ panel, ctx }) {
     bus.onTyped('deviceDisconnected', () => scheduleRender());
     bus.onTyped('craftChanged', () => scheduleRender());
     bus.on('settings:changed', (payload) => {
-      if (payload?.key === 'craft') scheduleRender();
+      if (payload?.key === 'craft' || payload?.key === 'craftFavorites') scheduleRender();
     });
   }
 

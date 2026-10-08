@@ -1106,7 +1106,9 @@ export function createUISystem(ctx) {
   // Key lists (first-run hint, help), read from the keyboard bindings
   // ---------------------------------------------------------------------------
   const ARROW_GLYPHS = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→' };
-  const CRAFT_SELECT_TARGETS = ['craftSelect1', 'craftSelect2', 'craftSelect3', 'craftSelect4', 'craftSelect5', 'craftSelect6'];
+  const CRAFT_SELECT_TARGETS = ['craftSelect1', 'craftSelect2', 'craftSelect3', 'craftSelect4', 'craftSelect5', 'craftSelect6', 'craftSelect7', 'craftSelect8', 'craftSelect9', 'craftSelect10'];
+  /** The digit each favorite's default key shows (1-9, then 0 for the tenth). */
+  const FAVORITE_DIGITS = Object.freeze(['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']);
   const HELP_FLIGHT = [
     { targets: ['throttle'], text: 'Throttle lever up / down' },
     { targets: ['roll'], order: 'negative', text: 'Bank with the ailerons' },
@@ -1119,10 +1121,11 @@ export function createUISystem(ctx) {
     { targets: ['viewCycle'], text: 'Cycle the view: chase, cockpit, wing, flyby' },
     { targets: ['viewToggle1P3P'], text: 'Swap between the cockpit and your last outside view' },
     { targets: ['craftAbility'], text: () => `Craft ability: ${abilityLabel()}` },
+    { targets: ['craftAbilityAlt'], abilityAlt: true, text: () => `Second ability: ${abilityAltLabel()}` },
   ];
   const HELP_SHORTCUTS = [
-    { craftKeys: true, text: 'Glider, bush plane, jet, helicopter, wingsuit, FPV drone' },
-    { targets: ['craftPrev', 'craftNext'], text: 'Previous / next craft' },
+    { craftKeys: true, text: () => `Favorites: ${favoritesText()}` },
+    { targets: ['craftPrev', 'craftNext'], text: 'Previous / next favorite' },
     { targets: ['versionToggle'], text: 'Switch to V1, the original game' },
     { keys: [['Enter'], ['/']], text: 'Ask WREN' },
     { keys: [['Shift', 'M']], text: 'Talk to WREN' },
@@ -1161,6 +1164,19 @@ export function createUISystem(ctx) {
     const module = ctx.craftRegistry.get(settings.get('craft'));
     return module?.abilities?.craftAbility?.label ?? 'Craft ability';
   }
+  /** The active craft's second ability (Shift+Space), or null when it has none. */
+  function abilityAltLabel() {
+    const module = ctx.craftRegistry.get(settings.get('craft'));
+    const ability = module?.abilities?.craftAbilityAlt;
+    return ability ? ability.label ?? 'Second ability' : null;
+  }
+  /** "glider, bush plane, ..., empty": the ten favorites in key order. */
+  function favoritesText() {
+    const favorites = settings.get('craftFavorites');
+    if (!Array.isArray(favorites)) return 'none';
+    const lowerName = (name) => (/^[A-Z]{2}/.test(name) ? name : name.charAt(0).toLowerCase() + name.slice(1));
+    return favorites.map((id) => (id ? lowerName(ctx.craftRegistry.entry(id)?.name ?? id) : 'empty')).join(', ');
+  }
   /** Keyboard references of a target for the current craft (none before input starts). */
   function keyboardRefs(target) {
     const bindings = ctx.systems.input?.bindings;
@@ -1196,11 +1212,11 @@ export function createUISystem(ctx) {
     // Each combination or pair stays on one line when the list wraps.
     return parts.map((part) => `<span class="dw-key-group">${part}</span>`).join('<span class="dw-key-sep">/</span>');
   }
-  /** The six craft keys, as "1-6" when they are the digit row. */
+  /** The ten favorite keys, as "1-0" when they are the digit row. */
   function craftKeysHtml() {
     const groups = CRAFT_SELECT_TARGETS.map((target) => targetKeyGroups([target])[0] ?? null);
-    const digits = groups.every((names, index) => names && names.length === 1 && names[0] === String(index + 1));
-    if (digits) return '<kbd>1</kbd><span class="dw-key-sep">-</span><kbd>6</kbd>';
+    const digits = groups.every((names, index) => names && names.length === 1 && names[0] === FAVORITE_DIGITS[index]);
+    if (digits) return '<kbd>1</kbd><span class="dw-key-sep">-</span><kbd>0</kbd>';
     return keyGroupsHtml(groups.filter(Boolean));
   }
   function helpRowHtml(entry) {
@@ -1218,7 +1234,8 @@ export function createUISystem(ctx) {
     const swapKey = keyGroupsHtml(targetKeyGroups(['viewToggle1P3P'])) || 'First / third person (unbound)';
     dom.helpMode.innerHTML = `Every craft flies the full flight model. The assists (Settings) steady it as much as you like, from 100% down to raw physics. Fly from outside (chase, wing and flyby) or from the cockpit: ${cycleKey} cycles the views and ${swapKey} swaps at once between the cockpit and your last outside view. Each craft remembers its own view, and the view never changes how it flies. ${versionKey} switches to V1, the original game.`;
     const throttle = craftHasThrottle();
-    dom.helpFlight.innerHTML = HELP_FLIGHT.filter((entry) => throttle || !(entry.targets && entry.targets.includes('throttle'))).map((entry) => helpRowHtml(entry)).join('');
+    const abilityAlt = abilityAltLabel() !== null;
+    dom.helpFlight.innerHTML = HELP_FLIGHT.filter((entry) => (throttle || !(entry.targets && entry.targets.includes('throttle'))) && (abilityAlt || !entry.abilityAlt)).map((entry) => helpRowHtml(entry)).join('');
     dom.helpShortcuts.innerHTML = HELP_SHORTCUTS.map((entry) => helpRowHtml(entry)).join('');
   }
   let helpBindingsWired = false;
@@ -2418,6 +2435,7 @@ export function createUISystem(ctx) {
       displayUnits = unitsFor(payload.value);
       if (activePanel === 'journal') journalPanel.render();
     }
+    if (payload.key === 'craftFavorites' && activePanel === 'help') renderHelp();
   });
   bus.onTyped('craftChanged', () => {
     applyThrottleVisibility();
