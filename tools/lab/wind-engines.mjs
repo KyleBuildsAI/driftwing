@@ -720,7 +720,9 @@ async function testAllocationAndCost() {
       probes[index].x += 0.2;
     }
   };
-  for (let index = 0; index < 30000; index++) frame();
+  // A long JIT warm-up: how soon the optimising compiler settles on these paths shifts with unrelated
+  // code (two more typed events left one re-optimisation inside a 30 000-frame warm-up's window).
+  for (let index = 0; index < 90000; index++) frame();
   const frames = 20000;
   const sampled = await sampleAllocations(() => {
     for (let index = 0; index < frames; index++) frame();

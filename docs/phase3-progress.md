@@ -44,6 +44,9 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   inside the wingspan, a landable deck (the real bush plane stands on it; real-model dives crash on
   it), the spawn's own collider ids checked after dispose, `?testParts` / `--parts`, a fixed quality
   level. WebGPU run: 98/98 strikes, 15/15 targets, 0 pass-throughs, 0 penetrations.
+  `tools/lab/wind-engines.mjs` warms its allocation check up for 90 000 frames instead of 30 000:
+  the two new typed events alone moved one JIT re-optimisation into its measured window (bisected:
+  the Phase 2 events.js passes, this branch's fails at 30 000 and passes at 90 000).
 - **Next:** the verification runs (labs, structure and preset step files and `?test=collision` on
   both backends, the `?test=spawns` subset, the reduced `?test=1` harness), recorded here.
 - **Open issues:** none yet.
