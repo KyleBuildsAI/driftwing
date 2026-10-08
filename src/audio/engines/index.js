@@ -24,6 +24,7 @@ import { createHeliSynth } from './heli.js';
 import { createJetSynth } from './jet.js';
 import { createPropSynth } from './prop.js';
 import { createWingsuitSynth } from './wingsuit.js';
+import { createParagliderSynth } from './paraglider.js';
 
 const COMMON_DEFAULTS = Object.freeze({
   airflowSpeed: 60,
@@ -78,6 +79,11 @@ export const ENGINE_FAMILIES = Object.freeze({
     create: createWingsuitSynth,
     // flutterHz (fabric flap rate at 40 m/s), proximityRange (m AGL where terrain rush starts).
     defaults: { flutterHz: 14, proximityRange: 90, airflowSpeed: 60, interiorCutoff: 0, touchdown: 'body', callouts: false },
+  },
+  paraglider: {
+    create: createParagliderSynth,
+    // flutterHz (canopy flutter rate at trim; folded fabric flaps faster). The variometer is on by default.
+    defaults: { flutterHz: 3.2, airflowSpeed: 16, interiorCutoff: 0, touchdown: 'body', callouts: false, vario: true, varioLift: 0.1, varioSink: -2.5 },
   },
 });
 
