@@ -443,7 +443,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 | # | Work | Branch | Contract | Status |
 | --- | --- | --- | --- | --- |
-| 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | in progress |
+| 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | in progress (branch complete, awaiting I2) |
 | 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | not started |
 | 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | not started |
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | not started |
@@ -484,8 +484,27 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
     h.10.
 - **Labs** (new or extended): `tools/lab/craft.mjs` 66/66 (new), settings 45/45 (migrateV5,
   favorites), copilot 240/240 (craftCommands), discovery 43/43 (craftTime).
+- **Fixes found on the way:** the 14-button picker overlapped the compass at 1280 px (buttons now
+  26 px wide; the picker / director branch regroups them); the HOTAS test's persistence binding
+  moved from TWCS index 9 (now `craftAbilityAlt`) to index 10.
+- **Verified 2026-10-08** (each once, both backends unless noted; reruns named):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 236/236 | built, no dev kit in the V2 bundle (craftTest, craftScenarios, collisionTest, spawnCheckKit, shadowResizeCheck), one three.js core | |
+  | Labs: craft 66, settings 45, copilot 240, copilot-server 17, discovery 43, flight-lab 82, atmosphere 28, challenges 70, colliders 84, director 50, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden (goldens identical), setpiece 47, spawns 98, storage 54, structure 75, terrain 404, water 34, wind-engines 56, wingsuit 37, audio 191 (alone; 190/191 on the first run, the WebGPU waterfall distance law 1.22 dB, 191/191 on the rerun; src/audio untouched) | all pass | |
+  | `run-harness --test craft` (six craft: the general test in both views and 13 scenario runs) | PASS 25/25 runs, 61/61 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0 | PASS 25/25, same |
+  | `run-harness --test hotas` | 140/140 | 140/140 |
+  | Step files view-physics, copilot-guide, input-review, discovery, hotplug | all pass, 0/0 (hotplug: the first WebGPU run failed its device-source checks with a duplicate stick key, `044f-b10a#2`, while the HOTAS harness was still plugging; passed on the rerun) | all pass, 0/0 |
+  | `run-harness --test 1` reduced (HARNESS-1/2, glider and jet, both views, 20 s) | 0 NaN, 0 penetrations, 0/0, heap 18.93 MB, 8/8 runs, 24/24 manoeuvres; frames over 50 ms: 1 (mainThread) | same criteria pass, heap 9.04 MB; frames over 50 ms: 5 (mainThread, gc) |
+  | Built `dist-single/v2` and the built shell smoke | 0/0, screenshots differ | 0/0, screenshots differ (V2) |
+
 - **Next:** I2 merges this branch alone; then the eight craft branches and the picker / director
   branch start from it.
+- **Open issues:** the copilot's "switch to [craft]" synonyms for the eight new craft (and skins by
+  name: "dragon") are Milestone O's (j.2), as are the journal panel's Craft section and the remote
+  `flightState` craft fields of h.3; the picker shows the 14 craft in one strip until the picker
+  branch regroups them.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
