@@ -19,6 +19,19 @@ function trackRoll(api) {
   return rollRate;
 }
 
+/**
+ * The bank rolled through so far (deg, right positive), unwrapped from the attitude frame by frame: exact
+ * however long a frame takes (a frame never turns the bank by half a turn at 400 deg/s), unlike a sum
+ * of rates. Used near the horizon, where the bank angle is well defined.
+ */
+function trackBank(api) {
+  const memo = api.memo;
+  const bank = api.flight.roll;
+  if (Number.isFinite(memo.lastBank)) memo.banked = (memo.banked ?? 0) + ((((bank - memo.lastBank + 180) % 360) + 360) % 360) - 180;
+  memo.lastBank = bank;
+  return memo.banked ?? 0;
+}
+
 /** Aileron that keeps the body's roll at `reference` degrees of the integrated roll. */
 function holdRoll(api, reference, rollRate) {
   return clamp(-0.04 * (api.memo.roll - reference) - 0.15 * rollRate, -1, 1);
@@ -65,17 +78,18 @@ export default Object.freeze({
       id: 'aerobatic-roll',
       views: ['third', 'first'],
       start: { at: 'spawn', mode: 'air', agl: 900, clearRadius: 2000, speed: 80, throttle: 0.8 },
-      seconds: 12,
+      seconds: 14,
       script(t, api) {
         trackRoll(api);
+        const banked = trackBank(api);
         // Full aileron, easing off over the last 60 degrees so a slow frame cannot overshoot the stop.
-        const roll = t >= 3 ? clamp((355 - api.memo.roll) / 60, 0, 1) : 0;
+        const roll = t >= 3 ? clamp((358 - banked) / 60, 0, 1) : 0;
         return { roll: roll > 0.05 ? roll : 0, pitch: 0, yaw: 0, throttle: 0.8 };
       },
       checks: [
         { id: 'rate', label: 'rolls faster than 300 deg/s', from: 3, until: 6, test: (api) => api.memo.peakRollRate > 300 },
-        { id: 'aileronRoll', label: 'the recognizer names the aileron roll', until: 12, test: (api) => lastFigure(api) === 'aileronRoll' },
-        { id: 'one', label: 'one figure, no other', from: 11, until: 12, test: (api) => api.events.count('figureFlown') === 1 },
+        { id: 'aileronRoll', label: 'the recognizer names the aileron roll', until: 14, test: (api) => lastFigure(api) === 'aileronRoll' },
+        { id: 'one', label: 'one figure, no other', from: 13, until: 14, test: (api) => api.events.count('figureFlown') === 1 },
       ],
     }),
     Object.freeze({
