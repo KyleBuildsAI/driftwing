@@ -200,6 +200,8 @@ const WADE_LAND = 3;
 /** Metres a standing wader shuffles about its home: with shallows all round it, and on a narrow band. */
 const WADE_SHUFFLE = 1;
 const WADE_SHUFFLE_NARROW = 0;
+/** Shallow-water probes the ring scan for wader homes may spend at create (a narrow band's spots). */
+const WADE_HOME_PROBES = 2500;
 /** Seconds a flushed flock needs to glide home after its longest flight (the far tier's settle). */
 const WADER_RETURN_SECONDS = 25;
 const SWIM = 0;
@@ -3232,26 +3234,60 @@ export function createFaunaEngine() {
       }
     }
     if (!found) return false;
-    // Homes: a golden-angle spiral around the centre, kept only in the shallows (else on the centre).
+    // Homes: a golden-angle spiral around the centre, kept only in the shallows. On a narrow band (a
+    // steep shore) the spiral mostly misses, so one scan of the rings around the centre collects free
+    // shallow spots along the band for the birds it missed; only with none left does a bird share the
+    // centre. (Create time only: the scan allocates and probes at most WADE_HOME_PROBES points.)
     const pool = data.pool;
     const legHeight = pool.def.wade.legHeight;
+    const taken = new Set();
+    const free = (x, z) => !taken.has(`${x},${z}`) && shallowAt(x, z);
+    const unplaced = [];
     for (let index = data.start; index < data.start + data.count; index++) {
       const k = index - data.start;
-      let homeX = 0;
-      let homeZ = 0;
-      for (let attempt = 0; attempt < 6; attempt++) {
+      pool.homeX[index] = 0;
+      pool.homeZ[index] = 0;
+      let placed = false;
+      for (let attempt = 0; attempt < 6 && !placed; attempt++) {
         const ring = Math.sqrt(k + 1 + attempt * data.count) * wade.spacing;
         const angle = (k + attempt * 7) * 2.399963;
         const x = Math.round(g[G.HOME_X] + Math.cos(angle) * ring);
         const z = Math.round(g[G.HOME_Z] + Math.sin(angle) * ring);
-        if (shallowAt(x, z)) {
-          homeX = x - g[G.HOME_X];
-          homeZ = z - g[G.HOME_Z];
-          break;
+        if (free(x, z)) {
+          pool.homeX[index] = x - g[G.HOME_X];
+          pool.homeZ[index] = z - g[G.HOME_Z];
+          taken.add(`${x},${z}`);
+          placed = true;
         }
       }
-      pool.homeX[index] = homeX;
-      pool.homeZ[index] = homeZ;
+      if (!placed) unplaced.push(index);
+    }
+    // The centre (shallow: the search found it) is the first free spot (a bird left there keeps its
+    // zero offset), then the rings.
+    const centreKey = `${g[G.HOME_X]},${g[G.HOME_Z]}`;
+    if (unplaced.length > 0 && !taken.has(centreKey)) {
+      taken.add(centreKey);
+      unplaced.pop();
+    }
+    const ringLimit = Math.ceil(Math.sqrt(data.count) * 8);
+    let probes = WADE_HOME_PROBES;
+    for (let ringIndex = 1; ringIndex <= ringLimit && unplaced.length > 0 && probes > 0; ringIndex++) {
+      const ring = ringIndex * wade.spacing;
+      const steps = Math.max(12, Math.ceil((TWO_PI * ring) / wade.spacing));
+      for (let step = 0; step < steps && unplaced.length > 0 && probes-- > 0; step++) {
+        const angle = (step / steps) * TWO_PI;
+        const x = Math.round(g[G.HOME_X] + Math.cos(angle) * ring);
+        const z = Math.round(g[G.HOME_Z] + Math.sin(angle) * ring);
+        if (!free(x, z)) continue;
+        const index = unplaced.pop();
+        pool.homeX[index] = x - g[G.HOME_X];
+        pool.homeZ[index] = z - g[G.HOME_Z];
+        taken.add(`${x},${z}`);
+      }
+    }
+    for (let index = data.start; index < data.start + data.count; index++) {
+      const homeX = pool.homeX[index];
+      const homeZ = pool.homeZ[index];
       // A narrow shallow band (a steep shore): the bird stands still, so it never wades out of it.
       const spotX = g[G.HOME_X] + homeX;
       const spotZ = g[G.HOME_Z] + homeZ;

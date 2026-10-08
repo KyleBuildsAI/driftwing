@@ -464,6 +464,10 @@ function testFlamingosSteepBank() {
     }
   });
   const group = lab.fauna.describe(id);
+  const bankData = lab.data(id);
+  const homes = new Set();
+  for (let index = bankData.start; index < bankData.start + bankData.count; index++) homes.add(`${bankData.pool.homeX[index]},${bankData.pool.homeZ[index]}`);
+  check('flamingos', 'on a steep bank each bird gets its own spot along the band (they do not pile up)', homes.size === bankData.count, `${homes.size} spots for ${bankData.count} birds`);
   check('flamingos', 'on a steep bank they stay in its narrow shallows (no deeper than depthMax)', bankX !== null && group && group.airborne === 0 && deepest < 0.6 + 0.05 && dry === 0, `bank at ${bankX}, ${bankZ}, deepest ${deepest.toFixed(2)} m, ${dry} dry samples`);
   if (group) lab.manager.deactivate(id, 'lab');
 }
