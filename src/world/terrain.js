@@ -104,7 +104,8 @@ export function createTerrainSystem(ctx) {
   const cloudShadowTexture = ctx.textures.cloudShadow;
   /** Cloud cover over this fragment (0..1), faded to 0 at the texture border. */
   const cloudCover = Fn(() => {
-    const cloudUv = positionWorld.xz.sub(uniforms.cloudShadowCenter).div(uniforms.cloudShadowWorldSize).add(0.5);
+    // positionWorld is render frame: the centre is moved into it (world - renderOrigin, a small value).
+    const cloudUv = positionWorld.xz.sub(uniforms.cloudShadowCenter.sub(uniforms.renderOrigin.xz)).div(uniforms.cloudShadowWorldSize).add(0.5);
     const cover = texture(cloudShadowTexture, cloudUv).r;
     const edgeDistance = min(min(cloudUv.x, cloudUv.y), min(oneMinus(cloudUv.x), oneMinus(cloudUv.y)));
     return cover.mul(smoothstep(0.0, 0.035, edgeDistance));
@@ -152,7 +153,7 @@ export function createTerrainSystem(ctx) {
    */
   const shoreFoam = Fn(() => {
     const seconds = uniforms.time;
-    const heightAboveWater = positionWorld.y.sub(uniforms.waterLevel);
+    const heightAboveWater = positionWorld.y.sub(uniforms.waterLevel.sub(uniforms.renderOrigin.y));
     const heightStep = fwidth(heightAboveWater).mul(0.75);
     const groundStep = fwidth(positionWorld.xz).length();
     const wrapped = mod(positionWorld.xz, WRAP_PERIOD);
@@ -186,7 +187,7 @@ export function createTerrainSystem(ctx) {
    * -> deep blue, ~85% by 12 m) and the lighting normal is eased toward straight up, so the seabed
    * shades as one soft gradient. The first ~3 m keep the sandy turquoise lift of the reef flats.
    */
-  const seabedDepth = uniforms.waterLevel.sub(positionWorld.y).max(0.0);
+  const seabedDepth = uniforms.waterLevel.sub(uniforms.renderOrigin.y).sub(positionWorld.y).max(0.0);
   const seabedDepthColor = mix(shallowWaterColor.mul(0.82), deepWaterColor, smoothstep(1.5, 12.0, seabedDepth));
   const seabedFade = oneMinus(exp(seabedDepth.sub(0.8).max(0.0).div(-5.5))).mul(0.95);
   const seabedCalm = smoothstep(0.2, 2.5, seabedDepth).mul(0.92);
@@ -195,7 +196,7 @@ export function createTerrainSystem(ctx) {
 
   const terrainColorNode = Fn(() => {
     const base = vertexColor().rgb;
-    const heightAboveWater = positionWorld.y.sub(uniforms.waterLevel);
+    const heightAboveWater = positionWorld.y.sub(uniforms.waterLevel.sub(uniforms.renderOrigin.y));
     const depth = seabedDepth;
     const wetSand = oneMinus(smoothstep(0.15, 1.6, heightAboveWater)).mul(smoothstep(-0.3, 0.0, heightAboveWater));
     const dried = base.mul(oneMinus(wetSand.mul(0.34)));
@@ -261,7 +262,8 @@ export function createTerrainSystem(ctx) {
       const placement = attribute('vegetationPlacement', 'vec4');
       const stretch = attribute('vegetationScale', 'vec3');
       const baseWorld = modelWorldMatrix.mul(vec4(placement.xyz, 1.0)).xyz;
-      const distanceToFocus = baseWorld.sub(vegetationFocus).length();
+      // baseWorld is render frame and the focus world: the focus moves into the render frame.
+      const distanceToFocus = baseWorld.sub(vegetationFocus.sub(uniforms.renderOrigin)).length();
       const distanceGrow = oneMinus(smoothstep(fadeRadius.sub(vegetationFadeBand), fadeRadius, distanceToFocus));
       const timeGrow = smoothstep(0.0, 1.0, vegetationGrowth);
       const grow = min(distanceGrow, timeGrow);

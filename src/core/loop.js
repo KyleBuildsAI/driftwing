@@ -158,6 +158,9 @@ export function createFrameLoop(ctx, { updateOrder, render, spawnHeading, prewar
     state.time.realElapsed += realDt;
     uniforms.time.value = state.time.elapsed;
     uniforms.playerPosition.value.copy(state.player.position);
+    // The floating render origin follows the craft first in the frame, so every system sees this
+    // frame's origin (src/core/origin.js); only caches from earlier frames listen for a rebase.
+    if (ctx.origin) ctx.origin.update(state.player.position);
 
     const cpuStart = performance.now();
     updateSystems(simDt, realDt);

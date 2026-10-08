@@ -25,6 +25,9 @@ import { unitsFor } from './instruments/units.js';
  */
 export function createUISystem(ctx) {
   const { THREE: T, state, bus, settings, world, camera, renderer } = ctx;
+  // The camera matrices are in the render frame (src/core/origin.js): world points move into it before
+  // a projection.
+  const origin = ctx.origin ?? null;
   const root = document.getElementById('ui-root');
   if (!root) throw new Error('DRIFTWING UI: the #ui-root element is missing from the page.');
 
@@ -695,7 +698,9 @@ export function createUISystem(ctx) {
     }
 
     camera.updateMatrixWorld();
-    projected.copy(targetWorld).applyMatrix4(camera.matrixWorldInverse);
+    projected.copy(targetWorld);
+    if (origin) origin.toRender(projected, projected);
+    projected.applyMatrix4(camera.matrixWorldInverse);
     const cameraX = projected.x;
     const cameraY = projected.y;
     const depth = -projected.z;
@@ -1448,7 +1453,9 @@ export function createUISystem(ctx) {
   function measureGliderSpan() {
     const player = state.player;
     if (!isFiniteVector(player.position) || !isFiniteQuaternion(player.quaternion)) return false;
-    projected.copy(player.position).project(camera);
+    projected.copy(player.position);
+    if (origin) origin.toRender(projected, projected);
+    projected.project(camera);
     if (!(projected.z < 1)) return false;
     const centreX = (projected.x + 1) * 0.5 * view.width;
     const centreY = (1 - projected.y) * 0.5 * view.height;
@@ -1456,7 +1463,9 @@ export function createUISystem(ctx) {
     let bottom = centreY;
     for (const [x, y, z] of GLIDER_OUTLINE) {
       gliderPoint.set(x, y, z).applyQuaternion(player.quaternion).add(player.position);
-      projected.copy(gliderPoint).project(camera);
+      projected.copy(gliderPoint);
+      if (origin) origin.toRender(projected, projected);
+      projected.project(camera);
       if (!(projected.z < 1)) continue;
       const screenX = (projected.x + 1) * 0.5 * view.width;
       let screenY = (1 - projected.y) * 0.5 * view.height;

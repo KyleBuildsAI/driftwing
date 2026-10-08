@@ -160,7 +160,7 @@ export function createSpawnManager(options) {
   const {
     THREE, TSL, scene, camera, renderer, backend, wind, audio, world, state, sky, bus, perf, settings, uniforms,
     registry, presets = [], seed = '', registerPrewarm = null, maxLights = MAX_REAL_LIGHTS, engineBudgets = null,
-    water = null, surfaces = null, weatherState = null,
+    water = null, surfaces = null, weatherState = null, game = null,
   } = options;
   const presetById = new Map();
   for (const preset of presets) presetById.set(preset.id, preset);
@@ -285,10 +285,16 @@ export function createSpawnManager(options) {
     }
   }
 
-  /** The general case: w + x, w - x, w + y and w - y of the view-projection matrix, normalised. */
+  /**
+   * The general case: w + x, w - x, w + y and w - y of the view-projection matrix, normalised. The
+   * matrices are in the render frame (src/core/origin.js), so the camera position and the planes move
+   * back to world: p_world = p_render + offset, and a plane n.p + d = 0 becomes d - n.offset.
+   */
   function refreshCameraFromMatrix() {
     camera.updateMatrixWorld();
     cameraPosition.setFromMatrixPosition(camera.matrixWorld);
+    const renderOffset = game && game.origin ? game.origin.offset : null;
+    if (renderOffset) cameraPosition.add(renderOffset);
     viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     const m = viewProjection.elements;
     for (let plane = 0; plane < 4; plane++) {
@@ -297,7 +303,8 @@ export function createSpawnManager(options) {
       const nx = m[3] + sign * m[row];
       const ny = m[7] + sign * m[4 + row];
       const nz = m[11] + sign * m[8 + row];
-      const d = m[15] + sign * m[12 + row];
+      const renderD = m[15] + sign * m[12 + row];
+      const d = renderOffset ? renderD - (nx * renderOffset.x + ny * renderOffset.y + nz * renderOffset.z) : renderD;
       const inverseLength = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
       sidePlanes[plane * 4] = nx * inverseLength;
       sidePlanes[plane * 4 + 1] = ny * inverseLength;
@@ -367,7 +374,7 @@ export function createSpawnManager(options) {
     for (const engine of registry.list()) wanted += engine.budget?.lights ?? 0;
     lightPool.ensure(Math.min(maxLights, wanted));
   }
-  const lures = createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, viewPosition: cameraPosition });
+  const lures = createLureSystem({ THREE, TSL, scene, camera, sky, uniforms, viewPosition: cameraPosition, origin: game ? game.origin : null });
   if (typeof registerPrewarm === 'function') registerPrewarm(lures.mesh);
 
   function countersFor(name) {
@@ -418,6 +425,8 @@ export function createSpawnManager(options) {
     surfaces,
     /** () => the player's regional weather state or null (allocates: call it at create, not per frame). */
     weatherState: typeof weatherState === 'function' ? weatherState : () => null,
+    /** The game ctx: Phase 3 services (origin, colliders, waterQuery, systems.challenges, ...). */
+    game,
     /** Registers an object for the pipeline prewarm behind the loading fade (engines call it in init). */
     registerPrewarm: typeof registerPrewarm === 'function' ? registerPrewarm : null,
     pools: Object.freeze({

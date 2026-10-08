@@ -96,6 +96,7 @@ function createLab(seed, { sunElevation = 50 } = {}) {
     nightFactor: uniform(sunElevation < 0 ? 1 : 0),
     windDirection: uniform(new THREE.Vector2(0.8, 0.6).normalize()),
     windStrength: uniform(1),
+    renderOrigin: uniform(new THREE.Vector3()),
   };
   const state = {
     seed,

@@ -81,6 +81,7 @@ function createWorld() {
     skyHorizonColor: TSL.uniform(new THREE.Color(0xf2c48e)),
     fogColor: TSL.uniform(new THREE.Color(0xe0b48c)),
     nightFactor: TSL.uniform(0),
+    renderOrigin: TSL.uniform(new THREE.Vector3()),
   };
   const state = { frame: 0, time: { elapsed: 0, sunElevation: -10 }, player: { position: new THREE.Vector3() } };
   const wind = createWindField({ world, uniforms, state, bus });

@@ -93,8 +93,10 @@ export function createShaftMesh(THREE, TSL, { look, uniforms, skyColorNode, capa
   const around = uv().x;
   const up = uv().y;
   const fall = uniforms.time.mul(shaftData.y).div(420);
-  const streaks = mx_noise_float(vec3(around.mul(26), positionWorld.y.div(420).add(fall), shaftColour.w)).mul(0.5).add(0.5);
-  const fine = mx_noise_float(vec3(around.mul(90), positionWorld.y.div(90).add(fall.mul(4.6)), shaftColour.w.add(7))).mul(0.5).add(0.5);
+  // The streak noise runs on the WORLD height (positionWorld is render frame, src/core/origin.js).
+  const worldHeight = positionWorld.y.add(uniforms.renderOrigin.y);
+  const streaks = mx_noise_float(vec3(around.mul(26), worldHeight.div(420).add(fall), shaftColour.w)).mul(0.5).add(0.5);
+  const fine = mx_noise_float(vec3(around.mul(90), worldHeight.div(90).add(fall.mul(4.6)), shaftColour.w.add(7))).mul(0.5).add(0.5);
   const texture = streaks.mul(0.65).add(fine.mul(0.35));
   const verticalFade = smoothstep(0, 0.06, up).mul(float(1).sub(smoothstep(0.78, 1, up)));
   const kind = shaftData.z;
@@ -174,7 +176,8 @@ export function createLocalRain(THREE, TSL, { count, box }) {
   const seed = attribute('seed', 'vec4');
   const corner = attribute('corner', 'vec2');
   // World-fixed positions wrapped into the box around the camera (x - size * floor(x / size) wraps
-  // the same way on both backends).
+  // the same way on both backends). cameraPosition is render frame, so the vertices are too: the
+  // engine keeps the mesh at the render origin and folds the origin into the offset uniform.
   const moving = seed.xyz.mul(boxSize).add(controls.offset).sub(cameraPosition);
   const wrapped = moving.sub(boxSize.mul(floor(moving.div(boxSize)))).sub(boxSize.mul(0.5));
   const centre = cameraPosition.add(wrapped);

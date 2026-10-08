@@ -14,12 +14,66 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 | # | Work | Branch | Contract | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Floating origin: `src/core/origin.js`, `scene.position = -offset`, the 4096 m lattice, the shader, CPU-matrix and float32-buffer fixes, audio in the render frame | `p3/origin` | a | not started |
+| 1 | Floating origin: `src/core/origin.js`, `scene.position = -offset`, the 4096 m lattice, the shader, CPU-matrix and float32-buffer fixes, audio in the render frame | `p3/origin` | a | in progress |
 | 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | not started |
 | 3 | Local water bodies (basin, crater, terraces stamps; lake and ice material), the shared water-height query and the caller migration; region overlays; vegetation species 6-12 with WindField sway and trunk colliders | `p3/water-regions` | c, d | not started |
 | 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | not started |
 | 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | not started |
 | I1 | Integration pass: merge in the order origin, high altitude, water/regions, colliders, fauna/challenges; the follow-ups of contract appendix A; every lab and step file once on both backends | `v2-phase3` | appendix A | not started |
+
+### Wave 1 - p3/origin
+
+- Done: `src/core/origin.js` (`createRenderOrigin`, the 4096 m lattice, `onRebase`, `toRender` /
+  `toWorld`, the TSL helpers `worldPositionNode` / `worldCameraPositionNode`), the `originRebased`
+  typed event, `uniforms.renderOrigin`, the origin in `ctx` and the loop's first-in-frame update;
+  `tools/lab/origin.mjs` (32/32). Shader lines of a.5: terrain (cloud UV, water level x3, vegetation
+  focus), cloudShading (height fraction, centre), vortex (fragment height, radial, haze kit), weather
+  volume rain shafts (streak noise), celestial rainbow centre, sky fog layer (camera height).
+- CPU render-frame readers (a.6): the spawn manager's matrix camera path, the director's isInView, the
+  lure fallback, the glass HUD and ui.js projections, the spawn test kit; the game ctx in the engine
+  ctx (0.4); the node labs' fake uniforms gain renderOrigin.
+- float32 buffers (a.7): the lure mesh now stands at the camera with instance offsets relative to
+  it; the weather volume's local rain stands at the render origin with the drift folded into its
+  offset uniform (world-fixed across a rebase). Anchored already, unchanged: fx.js (contrails, wind
+  streaks, bursts: mesh at the camera), trails.js, waterEffects.js (grid anchor, droplets and pools
+  on a 64 m grid, trailOrigin wrapped), waypoints.js (Object3D positions), particleSystem.js and
+  glowPoints.js (camera to the metre), ribbons.js (slot mesh at the strike), the structure engine's
+  pooled meshes (at the anchor), weather volume puffs and shafts (2048 m grid), celestial (camera or
+  2048 m grid), fauna (floating anchor). Reported, not edited: clouds.js (anchored by the field).
+  The dev wind overlay (`windOverlay.js`) now stands at the render origin with its arrows relative
+  to it, shifted back by the delta on a rebase.
+- Audio in the render frame: the spatializer and the spawn voices keep world positions (doppler,
+  distances, camera velocity) and feed the Web Audio graph `world - offset`; after a rebase the
+  listener and every panner are snapped (`snapParameter`), never glided.
+- Found by the step file's image check: three's HemisphereLight takes its up direction from its own
+  render-frame position, so after a rebase the sky fill lit everything sideways (a 44 % pixel pop
+  near the ground). The sky now keeps it 1 m above the render origin (`sky.js`, `updateDome`).
+- Dev hook `DRIFTWING.debug.rebaseOrigin(point?)`; `src/dev/originRebaseCheck.js` and
+  `tools/steps/origin-rebase.json` (image checks at fixed poses, with the wind overlay on and 400 km
+  out, two flight legs of 900 rendered frames with forced rebases, terrain and site identity over
+  21 x 21 site cells). Run 2026-10-07 on both backends: 10/10, 0 errors, 0 warnings; worst
+  camera-relative error 0.0000 mm, far point 5.5e-8 px; `tools/lab/origin.mjs` 32/32 (needs
+  `--expose-gc`).
+- Verified 2026-10-07 (each once, both backends unless noted): `npm run build`, `build:single` (V1
+  SHA-256 matches), `test:v1` 2/2; every lab passes (wind-engines 56/56 on a rerun with
+  `--expose-gc`: the first run's sampled allocation check blamed `windModifierEngine.js`, which
+  this branch does not touch); step files terrain-worker-start, engine-vortex, engine-weatherVolume,
+  engine-celestial, director-game, engine-structure-sites (9/9), presets-batch1 (58/58) all 0/0
+  (weatherVolume on WebGL2 passed on a rerun: the first run's director load shedder held the LOD
+  bias at 0.5, so the 12 and 18 km supercells showed their far tier); `?test=terrain` PASS (the
+  WebGPU run passed on a rerun after a 120 s navigation timeout); `?test=1` reduced (HARNESS-1,
+  glider and jet, both views, 20 s): 0 NaN, 0 penetrations, 0/0, heap 17 / 12 MB, maneuvers 12/12,
+  frames over 50 ms 11 / 37 (machine load: `mainThread`, `gc` and `delayed`, none `systems`); the
+  built V2 smoke 0/0 on both backends and the built shell 0/0 (WebGPU).
+- Next: nothing in this branch's scope; the integration pass merges it first.
+- Open issues: `src/render/water.js` (`surfaceNoise`, `shadowUV`) is the water engineer's (contract
+  0.1); they apply `worldPositionNode` there in the integration pass. Two edits outside this
+  branch's ownership: `sky.js` (the fog layer's camera height and the hemisphere light, owned by
+  `p3/high-altitude`; merges cleanly with it today) and `src/dev/windOverlay.js`. The vortex slot
+  data holds world positions in float32 (about 6 cm at 1000 km, far below what a funnel shows); not
+  on the a.7 list, left as is. Trial merges: `p3/water-regions` conflicts in `terrain.js`
+  `terrainColorNode` (keep its `overlayShade(...)` line and this branch's `renderOrigin` water-level
+  line); every branch conflicts in this file's wave 1 subsections (keep all).
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
