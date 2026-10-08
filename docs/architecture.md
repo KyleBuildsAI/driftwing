@@ -1503,8 +1503,9 @@ below 3 km: `skyDarkness` (half at 20 km, black by 35 km), `sunSharpness`, `limb
 - **Far field** (`farField.js`, after the terrain): a quadtree of 1-256 km map-tile worker tiles out to
   the horizon (a node splits only once its four children are built, so it never opens a hole; the
   children being gathered stay cached with the tiles in use, and refinement stops short of the
-  720-mesh budget, so a still view settles with nothing left to build), drawn from 6 km beyond the
-  terrain's coverage. In the handoff band the far-field ground sits 0.2 % of the
+  720-mesh budget, so a still view settles with nothing left to build; 20 s below 4.5 km every tile
+  mesh is disposed and a new climb rebuilds them from the worker's tile cache), drawn from 6 km beyond
+  the terrain's coverage. In the handoff band the far-field ground sits 0.2 % of the
   distance lower and the two cross-fade with complementary screen-door dithers; from 11 to 13 km the
   band closes to the nadir and the terrain stops drawing (`terrain.setFarFieldHandoff`,
   `terrain.getCoverageRadius`, `terrain.handoffUniforms`), its streaming paused more than 20 km above

@@ -55,8 +55,26 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
     protocol timeout and kept moving the camera into the next stage);
   - `tools/lab/audio.mjs` waits for the frame loop to flow after `ready` (the fade's 8 s cap can set
     it while the first pipelines still compile on the loaded machine).
-- **Next:** the step files and the golden frame on both backends, `?test=terrain`, the reduced
-  `?test=1` harness, then the final report.
+  - The far field gives its tiles back after 20 s below 4.5 km (every geometry disposed; a new climb
+    rebuilds from the tile cache), checked in the step file with the rebuild (`d5edd1f`).
+- **Verified (2026-10-08, dev server unless noted):**
+  - `tools/steps/high-altitude.json` (3 / 8 / 15 / 35 / 100 / 120 km and back): 18/18 on WebGPU and
+    18/18 on WebGL2, 0 errors / 0 warnings each; no magenta pixel below the horizon at any altitude,
+    the 11-13 km band steps at most 0.36 levels, stars 0.91 at 35 km by day; below 3 km the forced
+    high-altitude inputs change 0 of 230 400 bytes. WebGL2 screenshots at 15, 35 and 100 km show no
+    z-fighting (near 1.2 / 2.6 / 3 m). The release and rebuild checks passed in a separate run.
+  - Golden frame: the A/B pair is identical on both backends; across builds the branch-to-base
+    difference (38-44 % of pixels, max 224-230, the sky within 1-2 levels) matches base-to-base
+    (50 %, max 221, the sky within 1-2 levels): birds, cloud drift and the chase pose, not the sky.
+  - `weather-sky.json`: 5/5 on both backends, 0/0 (one earlier WebGL2 run lost its device once
+    under load; the rerun was clean).
+  - `?test=terrain`: PASS, 0/0. Reduced `?test=1` (INTEG-A/B, glider and jet, both views, 45 s):
+    0 NaN, 0 penetrations, 0/0, 24/24; heap growth 54.8 MB on the first run, 44.7 MB on the second
+    (base 33.8 MB); frames over 50 ms 209 and 32 (base 359), all main thread or GC on the busy machine.
+  - Labs: atmosphere 28/28, flight-lab 82/82, terrain 291/291, structure 68/68, preset-flight 13/13,
+    every other lab as on the base; audio 189/191 (the WebGPU doppler and WebGL2 thunder checks fail
+    on the base too). Builds, `test:v1` 2/2, docs-check 234/234.
+- **Next:** the dist-single smokes and the final step-file runs, then the final report.
 - **Contract additions (g):** `atmosphere.js` also exports `DENSITY_SCALE_HEIGHT`,
   `MAX_VIEW_DISTANCE`, `ATMOSPHERE_NEUTRAL_BELOW`, the band constants, `scaleHeightsAbove`,
   `horizonDistance`, `horizonDip`, `createAtmosphereState`, and `skyState` takes the planet radius as
