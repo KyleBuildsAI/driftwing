@@ -52,6 +52,7 @@ import { createWindOverlaySystem } from './dev/windOverlay.js';
 import { createWorldGen } from './world/worldgen.js';
 import { createGroundSurfaces } from './world/groundSurfaces.js';
 import { createColliderWorld } from './world/colliders.js';
+import { createIgnitionService } from './gameplay/ignition.js';
 import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName } from './core/util.js';
 import { EventBus } from './core/eventBus.js';
 import { attachTypedEvents } from './core/events.js';
@@ -314,6 +315,8 @@ async function boot() {
   const perf = createPerfGovernor(ctx, { devHooks });
   ctx.perf = perf;
   ctx.waterQuery = createWaterQuery({ world, windDirection: uniforms.windDirection.value, clock: state.time });
+  // What a flame can light (the dragon's fire breath; lantern and torch owners register): contract h.5.
+  ctx.ignition = createIgnitionService();
   refreshProbe.then(
     (result) => perf.setMeasuredRefresh(result),
     (error) => {
