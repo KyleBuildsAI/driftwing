@@ -12,7 +12,10 @@ export default Object.freeze({
       id: 'airship-scenic-cruise',
       views: ['third', 'first'],
       // Above the spawn and clear of the hills around it; the cruise climbs to its own altitude.
-      start: { at: 'spawn', mode: 'air', agl: 400, clearRadius: 2500, clearance: 280, speed: 18 },
+      // The second view's run starts with the first run's craft state (the same craft stays installed):
+      // the harness turns the autopilot off at the start, which ends that cruise, and the press at 2 s
+      // starts a new one (its visit count from zero), so the visits are checked from 3 s on.
+      start: { at: 'spawn', mode: 'air', agl: 400, clearRadius: 2500, clearance: 280, speed: 18, craftState: { ballonetTarget: 0.5, vectorTarget: 0 } },
       seconds: 480,
       script(t, api) {
         return { roll: 0, pitch: 0, yaw: 0, actions: t >= 2 && api.once('cruise') ? ['craftAbility'] : [] };
@@ -21,9 +24,9 @@ export default Object.freeze({
         {
           id: 'planned',
           label: 'the scenic cruise plans a chain of three sites and engages the autopilot',
-          from: 2,
+          from: 3,
           until: 12,
-          test: (api) => api.craftState.scenicCruise.active && api.craftState.scenicCruise.waypoints.length >= 3 && api.flight.autopilot.enabled,
+          test: (api) => api.craftState.scenicCruise.active && api.craftState.scenicCruise.visited === 0 && api.craftState.scenicCruise.waypoints.length >= 3 && api.flight.autopilot.enabled,
         },
         {
           id: 'flying',
@@ -32,7 +35,7 @@ export default Object.freeze({
           always: true,
           test: (api) => api.craftState.scenicCruise.active || api.craftState.scenicCruise.visited >= 3,
         },
-        { id: 'visited', label: 'visits three sites', test: (api) => api.craftState.scenicCruise.visited >= 3 },
+        { id: 'visited', label: 'visits three sites', from: 3, test: (api) => api.craftState.scenicCruise.visited >= 3 },
         { id: 'aloft', label: 'clear of the ground all the way', from: 2, always: true, test: (api) => !api.flight.onGround && api.agl() > 60 },
       ],
     }),
