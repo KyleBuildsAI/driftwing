@@ -11,24 +11,33 @@ const CIRCLE_RADIUS = 22;
 const SEARCH_RADIUS = 900;
 const RESEARCH_SECONDS = 5;
 const WORKING = 2.5;
+const LOOKAHEAD = 120;
+/** Noon (sky day time) and how far the sky may move from it before the test puts it back. */
+const NOON = 0.5;
+const NOON_TOLERANCE = 0.004;
 
 function wrapSigned(degrees) {
   return ((((degrees + 180) % 360) + 360) % 360) - 180;
 }
 
 /**
- * The thermal to climb in: the nearest one working well (a core of WORKING m/s or more, the life cycle
- * of a thermal waxes and wanes over its 15-25 minutes), else the strongest near the pilot.
+ * The thermal to climb in: a thermal's core waxes and wanes over its 15-25 minute life cycle, so the
+ * choice is the near one whose core stays strongest from now until LOOKAHEAD seconds on (the weaker of
+ * the two readings), a working one (WORKING m/s) before any other.
  */
 function findThermal(api) {
   const position = api.player.position;
+  const now = api.state.time.elapsed;
+  const later = new Map();
+  api.wind.thermalsNear(position.x, position.z, SEARCH_RADIUS, (thermal) => later.set(thermal.id, thermal.strength), now + LOOKAHEAD);
   let best = null;
   api.wind.thermalsNear(position.x, position.z, SEARCH_RADIUS, (thermal) => {
-    if (thermal.strength < 1) return;
+    const strength = Math.min(thermal.strength, later.get(thermal.id) ?? 0);
+    if (strength < 1) return;
     const distance = Math.hypot(thermal.x - position.x, thermal.z - position.z);
-    const score = (thermal.strength >= WORKING ? 10 : 0) + thermal.strength - distance / 300;
+    const score = (strength >= WORKING ? 10 : 0) + strength - distance / 300;
     if (!best || score > best.score) best = { ...thermal, score };
-  });
+  }, now);
   return best;
 }
 
@@ -46,6 +55,12 @@ function coreAt(thermal, height, out) {
  * (the tangent heading, turning in when wide and out when tight) with weight shift and the inner
  * brake, re-reading the thermal every few seconds.
  */
+/** Holds the sun at noon for the whole run. */
+function holdNoon(api) {
+  const sky = api.ctx.systems.sky;
+  if (Math.abs(sky.getDayTime() - NOON) > NOON_TOLERANCE) sky.setDayTime(NOON, { transition: 0 });
+}
+
 function thermalPilot(t, api) {
   const memo = api.memo;
   if (!memo.thermal || t - memo.searchedAt > RESEARCH_SECONDS) {
@@ -80,12 +95,16 @@ export default Object.freeze({
     Object.freeze({
       id: 'paraglider-thermal-climb',
       views: ['third', 'first'],
-      // Midday: the thermals are at full strength (the WindField's sun factor). The start is low in the
-      // column, where it is strong (a thermal tops out 600-1300 m above its ground).
-      time: 0.5,
+      // Midday: the thermals are at full strength (the WindField's sun factor); the script holds the sun
+      // there (the sky warps through midday in about a minute). The start is low in the column, where it
+      // is strong (a thermal tops out 600-1300 m above its ground).
+      time: NOON,
       start: { at: 'thermal', mode: 'air', agl: 250 },
       seconds: 150,
-      script: thermalPilot,
+      script(t, api) {
+        holdNoon(api);
+        return thermalPilot(t, api);
+      },
       checks: [
         {
           id: 'circling',
