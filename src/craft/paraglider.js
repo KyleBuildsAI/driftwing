@@ -151,8 +151,9 @@ const MAX_FLAP = 42 * DEG;
 const EARS_HINGE = 1 - 2 * 0.17;
 const EARS_ANGLE = 150 * DEG;
 const COLLAPSE_ANGLE = 165 * DEG;
-/** Line attachments on every rib: A and C rows (chord fractions, on the lower surface). */
+/** Line attachments on every other rib: A and C rows (chord fractions, on the lower surface). */
 const LINE_STATIONS = Object.freeze([0.12, 0.62]);
+const LINE_RIB_STEP = 2;
 /** Brake lines from these ribs' trailing edges to the hands. */
 const BRAKE_RIBS = Object.freeze([0, 1, 2, 3, 4, 12, 13, 14, 15, 16]);
 const RISER_TOPS = Object.freeze([Object.freeze([-0.2, 0.68, 0.02]), Object.freeze([0.2, 0.68, 0.02])]);
@@ -162,7 +163,7 @@ const HIPS = Object.freeze([Object.freeze([-0.1, -0.13, -0.02]), Object.freeze([
 const ARM = Object.freeze({ UPPER: 0.3, FOREARM: 0.3 });
 const LEG = Object.freeze({ THIGH: 0.44, SHIN: 0.44 });
 const TUBE_SIDES = 6;
-const SEGMENT_COUNT = RIBS * LINE_STATIONS.length + BRAKE_RIBS.length + 2 + 2;
+const SEGMENT_COUNT = Math.ceil(RIBS / LINE_RIB_STEP) * LINE_STATIONS.length + BRAKE_RIBS.length + 2 + 2;
 
 /** Upper-surface colours per cell (mirrored): the v1 orange and cream; the lower surface is shaded. */
 const SHADED_ORANGE = PALETTE.orange.clone().multiplyScalar(0.84);
@@ -219,7 +220,7 @@ function buildBody() {
   const builder = createMeshBuilder();
   // Back protector and seat: a deep charcoal shell behind and under the pilot, orange piping.
   const shell = (y, front, back, halfWidth) => [[-halfWidth, y, back], [halfWidth, y, back], [halfWidth, y, front], [-halfWidth, y, front]];
-  builder.loft([shell(-0.36, -0.12, 0.34), shell(-0.28, -0.2, 0.36), shell(-0.05, -0.08, 0.32), shell(0.28, 0.12, 0.3)], (segment, face) => (face === 0 && segment === 1 ? PALETTE.orange : PALETTE.charcoal), { capStart: PALETTE.charcoal, capEnd: PALETTE.orange });
+  builder.loft([shell(-0.36, -0.12, 0.34, 0.2), shell(-0.28, -0.2, 0.36, 0.23), shell(-0.05, -0.08, 0.32, 0.22), shell(0.28, 0.12, 0.3, 0.19)], (segment, face) => (face === 0 && segment === 1 ? PALETTE.orange : PALETTE.charcoal), { capStart: PALETTE.charcoal, capEnd: PALETTE.orange });
   // Torso: hips to shoulders, [y, centre z, half width, half depth].
   builder.loft(ellipseSections([[-0.12, 0.06, 0.15, 0.11], [0.05, 0.05, 0.16, 0.12], [0.25, 0.06, 0.19, 0.12], [0.42, 0.07, 0.2, 0.11], [0.48, 0.07, 0.1, 0.07]], 9), (segment, face) => {
     if (segment === 2 && (face === 6 || face === 7)) return PALETTE.cream;
@@ -470,7 +471,8 @@ function buildMesh(ctx) {
   const linePositionAttribute = new THREE.BufferAttribute(linePositions, 3).setUsage(THREE.DynamicDrawUsage);
   lineGeometry.setAttribute('position', linePositionAttribute);
   lineGeometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 3.5, 0), 9);
-  const lineMaterial = new THREE.LineBasicNodeMaterial({ color: 0x4a4c55 });
+  // Thin lines read as a faint fan from outside, not a curtain.
+  const lineMaterial = new THREE.LineBasicNodeMaterial({ color: 0x4a4c55, transparent: true, opacity: 0.55, depthWrite: false });
   const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
   lines.name = 'paraglider-lines';
   root.add(lines);
@@ -665,7 +667,7 @@ function buildMesh(ctx) {
   function drawLines(bar) {
     segment = 0;
     pilot.updateMatrix();
-    for (let rib = 0; rib < RIBS; rib++) {
+    for (let rib = 0; rib < RIBS; rib += LINE_RIB_STEP) {
       const side = ribLayout[rib].along < 0 ? 0 : 1;
       riserTop.fromArray(RISER_TOPS[side]).applyMatrix4(pilot.matrix);
       for (const station of LINE_STATIONS) {
@@ -840,7 +842,9 @@ function launchFromSlope(api) {
     craftState.launchRequested = true;
     return 'Inflating. Run!';
   }
-  const slope = findLaunchSlope(heights, position.x, position.z);
+  const wind = api.wind;
+  const intoWind = wind && typeof wind.ambientAt === 'function' ? (x, z) => wind.ambientAt({ x, y: heights.ground(x, z) + 10, z }).fromDegrees : null;
+  const slope = findLaunchSlope(heights, position.x, position.z, intoWind);
   if (!slope || !flight || typeof flight.startAt !== 'function') {
     api.relaunch();
     return 'No launch slope near here, so we start from the nearest peak.';
@@ -1028,8 +1032,8 @@ export default Object.freeze({
       near: 0.05,
       build: buildHarnessView,
       panel: Object.freeze({
-        width: 0.36,
-        center: Object.freeze([0, -0.4, -0.46]),
+        width: 0.24,
+        center: Object.freeze([0, -0.5, -0.4]),
         layout: Object.freeze([Object.freeze(['vario', 'speedBar']), Object.freeze(['airspeed', 'altitude'])]),
       }),
     }),
