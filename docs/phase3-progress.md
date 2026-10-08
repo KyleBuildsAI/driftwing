@@ -43,9 +43,33 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
     projection), spawnManager g.5 (heavy spawns by horizontal distance at the far tier above 12 km),
     landmark and structure rigid drops, the third-person near plane above 12 km.
   - `tools/lab/atmosphere.mjs` 28/28; `tools/steps/high-altitude.json`; docs/architecture.md.
-- **Next:** run the step files on both backends, the golden frame against the base build, the
-  verification list, then finish.
-- **Open issues:** none yet.
+- **Resumed (2026-10-07):** reviewed the paused work, then fixed what the verification found:
+  - the rigid curvature drop threw for engine contexts without the curvature blend (the node labs'
+    wind farm); it is now 0 there (`5dbf85b`);
+  - the far-field tile cache thrashed (children being gathered for a split were evicted before their
+    siblings arrived, 1500 tile builds in 40 s over a still view, the queue never empty): gathered
+    children stay with the tiles in use, refinement stops short of the mesh budget, the split factor
+    is 2.2 (`80f21aa`); a still view now settles with nothing pending;
+  - `tools/steps/high-altitude.json`: climbs to 120 km, settles on full coverage, counts magenta only
+    below the rendered horizon, one eval per handoff-band sample (the single band eval outran the
+    protocol timeout and kept moving the camera into the next stage);
+  - `tools/lab/audio.mjs` waits for the frame loop to flow after `ready` (the fade's 8 s cap can set
+    it while the first pipelines still compile on the loaded machine).
+- **Next:** the step files and the golden frame on both backends, `?test=terrain`, the reduced
+  `?test=1` harness, then the final report.
+- **Contract additions (g):** `atmosphere.js` also exports `DENSITY_SCALE_HEIGHT`,
+  `MAX_VIEW_DISTANCE`, `ATMOSPHERE_NEUTRAL_BELOW`, the band constants, `scaleHeightsAbove`,
+  `horizonDistance`, `horizonDip`, `createAtmosphereState`, and `skyState` takes the planet radius as
+  a third argument; `state.atmosphere` adds `horizonDip`, `hazeBlend`, `farField`, `handoff`,
+  `planetRadius`; the uniform `atmosphereAltitude` follows `horizonDip`; `curvature.js` adds
+  `PLANET_RADIUS_KM`, `planetRadiusFromSetting`, `applyRigidDrop`, `curvatureDropNode`; the terrain
+  adds `handoffUniforms`, a `weight` in `setFarFieldHandoff` and `getStats().high`; `farField.js`
+  exports `handoffDitherNode` / `handoffPresenceNode`; `clouds.getCoverageProbability(x, z)`; map tiles
+  gain the fields `surface` and `albedo` and the request flag `stamps`.
+- **Integration notes:** the curvature node still has to go into `waterMaterial.js` (ocean and
+  bodies) and the weather volume materials, and the rigid drop into the fauna group roots (contract
+  appendix A).
+- **Open issues:** none.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
