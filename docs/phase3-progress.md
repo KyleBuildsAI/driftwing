@@ -34,19 +34,50 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   src/render/waterMaterial.js with lake and ice variants; the `waterBodies` system draws them. The
   chunk `overlay` attribute on both threads and its shading (tint sweeps, ice, stripes); the species
   meshes; WindField sway (src/render/windSway.js); the vegetation collider and perch provider
-  (src/world/vegetationColliders.js). `?test=waters` and tools/steps/water-bodies.json (41/41 checks
-  on WebGPU, 0/0 console).
-  tools/lab/water.mjs (29/29), the terrain lab's Phase 3 section (404/404 in all), `?test=terrain`
-  and `?test=determinism` cover the water stamps and every overlay kind. Review fixes: a water body
-  switching LOD keeps its old mesh drawn until the new one is built; the sway texture probes at
-  worldgen's `heightAt` (a quarter of `groundHeight`'s cost, 128 probes a frame); redwood trunk
-  colliders no longer tag a perch (the perch provider publishes each tree top once). The map tiles
-  colour every local water body in its tint (worldgen `waterBodyAt`), and their cache tag covers
-  waters and overlays (unchanged for presets without them); the water lab checks both (32/32).
-- **Next:** the verification runs on both backends (builds, test:v1, labs, the water-bodies,
-  golden-frame, discovery, waterEffect and preset step files, `?test=terrain`, `?test=determinism`,
-  a reduced `?test=1`), their numbers here.
-- **Open issues:** none yet.
+  (src/world/vegetationColliders.js); lakes on the map tiles (their cache tag unchanged for presets
+  without waters or overlays). `?test=waters` and tools/steps/water-bodies.json; tools/lab/water.mjs;
+  the terrain lab, `?test=terrain` and `?test=determinism` cover the water stamps and every overlay
+  kind.
+  Review fixes: a water body switching LOD keeps its old mesh drawn until the new one is built;
+  redwood trunk colliders no longer tag a perch (the perch provider publishes each tree top once);
+  the sway texture refreshes 32 texels a frame (it probed the WindField 128 times a frame, over 1 ms,
+  which made the perf governor drop the spawn LOD bias to 0.5 and failed presets-batch1's tornado
+  and volcano wind checks; with the fix the bias stays 1 and both pass), and only trusts the square
+  every texel of a sweep agrees on.
+- **Verification (2026-10-07/08, once each; rerun only where noted):**
+  - `npm run build`, `npm run build:single` (V1 SHA-256 matches), no dev kit names in the bundle, one
+    three.js core; `npm run test:v1` 2/2; docs-check 233/233.
+  - labs: water 32/32 (ocean height vs the shader within 3 cm, heightAt 0.42 us open ocean / 0.30 us
+    with a lake, 3 KB retained after 1 000 000 queries), terrain 404/404, flight-lab, jet, helicopter,
+    fpv 87/87, wingsuit, preset-flight 13/13, preset-wind 12/12, preset-pacing 4/4, director 50/50,
+    discovery 39/39, copilot 226/226, copilot-server 17/17, input 34/34, settings 28/28, storage
+    54/54, setpiece 47/47, structure 68/68, spawns 98/98 (after moving its "bad stamp type" to one
+    that stays unknown), wind-engines 56/56 (55/56 on its first run: a 0.44 B/frame allocation
+    sample in windModifierEngine, not touched here; 56/56 on the rerun), audio 191/191 (185/191 when
+    it overlapped a browser run; alone 191/191).
+  - smoke on the dev server, both backends, 0 errors / 0 warnings each: plain V2; water-bodies.json
+    41/41 (both); golden-frame.json; engine-waterEffect.json; discovery.json; presets-batch2.json
+    (30/30); presets-21-30.json (WebGL2 rerun after a 60 s navigation timeout); presets-batch1.json
+    after the sway fix (WebGPU and WebGL2, with the LOD bias logged at 1); view-physics.json
+    (WebGPU). The built shell and the built V2 (dist-single) 0/0.
+  - `run-harness --test terrain` WebGPU and WebGL2 PASS (9/9 stamp types, 5/5 overlay kinds with
+    the attribute live, worker = main 1002 chunks max diff 0, 0 cracks); `--presets real` PASS
+    (6/6 Phase 2 types; basin, crater, terraces await wave 3 presets). The first attempts timed out
+    navigating a cold dev server (120 s) and passed on the rerun.
+  - `run-harness --test determinism` WebGPU and WebGL2 PASS with the Phase 2 hashes unchanged (site
+    list d85384433861a1b0, director log 1093b8c1, spawn events 74d3d2fa, path 55b1a55f) and the new
+    water-height digest equal across loads.
+  - reduced `run-harness --test 1` (HARNESS-1, 30 s, all six craft): WebGPU third person and WebGL2
+    first person: 0 NaN, 0 penetrations, 0 soft crashes, 0/0 console, heap growth 12.8 / 12.5 MB,
+    script 19/19. Frame time misses: WebGPU 9 frames over 50 ms (systems 0, main thread 7, gc 2),
+    WebGL2 242 (systems 1, main thread 212) on the shared machine.
+- **Next:** nothing on this branch; the integration pass applies the origin and curvature helpers in
+  waterMaterial.js (appendix A).
+- **Open issues:** the golden frame's ocean is not pixel-compared against Phase 2: the swell scale
+  now follows the flight clock (contract c.2) instead of the damped windStrength uniform, and the
+  vegetation sways from the WindField, so a Phase 2 frame would differ by design. In photo mode the
+  sun's 640 m shadow-map square shows its edge where the camera is far from the parked craft (a
+  Phase 2 shadow setting, seen in the frozen-lake screenshot on WebGPU).
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
