@@ -1064,6 +1064,76 @@ running the general flight test for every registered craft, in both views). Craf
 the eight new ids register as the craft branches merge; a catalog craft without a module stays
 visible but disabled (Phase 1 behaviour).
 
+### h.10 The framework as built (step 2.0, additive to h.1-h.9 and k.1)
+
+Merged from `p3/craft-framework`; docs/architecture.md ("Craft modules", "FlightController",
+"How to add a craft") is the reference. Everything here extends the sections above; nothing above
+changed meaning.
+
+- **Registry** (`src/craft/registry.js`): `CRAFT_CATALOG` holds all 14 entries (`group`, an
+  informational `hotkey`: `Digit1`-`Digit6` for the Phase 1 six, `null` for the new eight, and a
+  picker silhouette each), `CRAFT_GROUPS` and `CRAFT_GROUP_LABELS`; the registry adds `entry(id)`,
+  `groups()` and `createCraftRegistry(catalog, groups)` (labs). `register()` validates every
+  optional field of h.2 that is present, throwing `craft "<id>" <field>: <problem>`.
+  `INPUT_PROFILE_VALUES` lists the accepted inputProfile values, with the implicit defaults spelled
+  out: `antenna: 'flaps'`, `rocker: 'trim'`, `stickX: 'roll'`. The controller maps only `throttle:
+  'none'` and `'collective'`; every other throttle value passes the axis through for the model.
+- **Settings v6**: `CRAFT_IDS` is the catalog order (14); `craftFavorites` is a list key (exactly ten
+  slots, a catalog id or `null`, no duplicates; replaced whole, read back as a copy); `craftSkins`
+  is `{ craftId: skinId | '' }` (`''` = the module's default). The migration gives the new craft the
+  defaults, at 50 % assists when `hotasAssistsApplied` was already true. `HOTAS_ASSIST_LEVEL` now
+  lives in settings.js (assistDefaults.js re-exports it).
+- **Actions**: `craftSelect1-10` are the favorites (an empty slot answers "Favorite N is empty", a
+  craft without a module "isn't ready to fly yet"); `craftNext` / `craftPrev` skip both and wrap, and
+  fall back to the catalog order only when no favorite can fly. `craftAbilityAlt` defaults: keyboard
+  Shift+Space, TWCS button 10 (index 9); the standard gamepad has no free button, so it is unbound
+  there (as are the favorites). A module's `bindings` sit between the player's bindings and the
+  profile defaults, for that craft only; an invalid module reference is dropped with one error.
+- **Placements** (h.4): the situation adds `velocity`, `airspeed`, `surfaceHeight` and `dayTime`;
+  the second argument is a read-only api (`world`, `waterQuery`, `colliders`, `windField`, `state`,
+  `craft`, `ceiling`, `groundHeight`, `surfaceHeight`, `waterHeight`, `windAt`, `perchesNear`,
+  `nearestPeak`, `headingIntoWind`). Mode meanings: `air` / `climb` fly at an airspeed riding on the
+  wind (`climb`: 45 degrees and full power by default), `hover` holds still over the ground,
+  `drift` moves with the air, `ground` stands exactly at `position` or on the nearest flat spot
+  (`flatSpot: true`, or no position), `water` floats with its contacts on the water surface (over dry
+  ground it flies instead), `perch` stands still at `position`. A placement `throttle` (or a climb)
+  presets a soft throttle lever through `input.presetThrottle(value)`; a HOTAS lever keeps its own.
+  A placement without a mode keeps the Phase 1 rules plus its `craftState`; a hook that throws or
+  answers nonsense logs one error and falls back. `flight.startAt(placement)` applies the same
+  placements on demand (tests, tools, commands).
+- **Abilities** (h.5): both slots' `initialState` merge; both `update`s run every frame. The api also
+  has `module`, `skin`, `state`, `systems`, `world`, `runAbility(slot)` and `setAutopilot(options)`;
+  `emitTrail(kind, anchor, dt, color?)` tints `smokeColor` with `color` or `craftState.smokeColor`
+  (an index into `SMOKE_COLORS`, src/flight/trails.js). `flight.runAbility(slot)` takes the slot.
+- **Copilot** (h.6): `flight.runCraftCommand(command, value)` returns `{ ok, text }` (the reply, or
+  why it did not run); `getCraftCommands()` and `getCraftStatus()` feed `flightState.craftCommands`
+  (`[{ id, phrases }]`) and `flightState.craftStatus`. The `craftCommand` value is a finite number,
+  a boolean or a string of at most 48 characters; locally a phrase's first capture group is the value
+  (a number when it reads as one). "Systems check" / "craft status" speaks `copilot.status`.
+- **Skins**: `buildMesh(ctx, { skin })`; the controller keeps `craftState.skin`, rebuilds the mesh
+  only on a `craftSkins` change and emits the untyped `craft:skinChanged { craft, skin }`.
+- **State**: `state.flight.ceiling` (m); `visual.craftState` (read only); `env.windField` (the
+  WindField); `limits.waterLanding` `'floats'` or `'basket'` (or `limits.floats`) lets a craft touch
+  water without a soft crash. A floating ground contact still comes from `limits.floats: true`.
+- **Custom cockpits**: `cockpit.build(builder, spec, THREE)` may return `{ objects?, dispose? }`; the
+  objects join the cockpit group and their geometries and materials are disposed with it. The panel
+  and its housing are still built from `panel.layout`; the stick defaults off.
+- **Journal**: records version 2 adds `craftTime { craftId: seconds }` (every frame of flight, saved
+  with the throttled saves); `journalStatInfo(key)` knows `JOURNAL_STATS` and every registered
+  module's `journal.stats` (their op wins, their unit is shown: `count`, `metres`, `seconds` are
+  formatted, any other unit follows the number).
+- **`?test=craft`** (k.1): a scenario file default-exports `{ craft, general?, scenarios }`.
+  Scenarios add `world: 'game' | 'waters'` (the water fixtures' lakes), `time` (day time 0..1),
+  `assists`, `allowCrash`; `start` adds `at: 'here' | 'spawn'`, `agl`, `speed`, `pitch`, `throttle`,
+  `craftState`, `flatSpot`; checks add `from`, `label` and `always: true` (must hold on every frame
+  of the window); a script returns ControlState fields plus `actions` (one press each) and `held`.
+  The api has `t`, `seconds`, `flight` (state.flight), `craftState`, `player`, `module`,
+  `controller`, `world`, `waterQuery`, `colliders`, `wind`, `controls`, `memo`, `start`,
+  `once(key)`, `events.count(type)` / `events.last(type)` (every typed event), `surfaceHeight`,
+  `agl()`, `distanceFromStart()` and `press(actionId)`. `general` tunes the general flight test
+  (`start`, `stick`, `throttle`, `seconds`). `tools/run-harness.mjs --test craft` takes `--crafts`,
+  `--views`, `--scenarios` and `--seconds`; npm `test:craft`, `test:craft:webgl`.
+
 ---
 
 ## i. Director updates (wave 2, picker / director engineer)

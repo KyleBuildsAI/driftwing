@@ -217,12 +217,12 @@ system, and then starts the frame loop.
 | `trails.js` | smoke and ballast-spray particle trails from craft anchors |
 | `telemetry.js` | `state.flight`: the one read-only description of the craft, plus atmosphere helpers |
 
-### `src/craft`: the six craft
+### `src/craft`: the craft catalog and modules
 
 | file | what |
 | --- | --- |
-| `registry.js` | `CRAFT_CATALOG` (id, name, role, hotkey, picker silhouette) and `craftRegistry` |
-| `index.js` | registers every craft module |
+| `registry.js` | `CRAFT_CATALOG` (the 14 craft of Phase 3: id, name, role, group, informational hotkey, picker silhouette), `CRAFT_GROUPS`, `craftRegistry` and the module validation |
+| `index.js` | registers every craft module (six so far; each Phase 3 craft adds its line as it lands) |
 | `kit.js` | the procedural mesh kit and shared materials (v1 palette, nav lights, prop disc) |
 | `glider.js`, `bushplane.js`, `jet.js`, `helicopter.js`, `wingsuit.js`, `fpv.js` | one craft module each (schema below) |
 
@@ -583,12 +583,15 @@ single-file build on the same address.
 The API is `get(key)` (object values come back as copies), `set(key, value)` (whole value; returns
 false when invalid), `update(key, patch)` (merges into an object key), `reset(key?)` and `all()`.
 Every change emits `settings:changed { key, value, settings }`. The record is versioned
-(`SETTINGS_VERSION` 5) and migrated. Unknown fields are dropped, and an invalid field falls back to
+(`SETTINGS_VERSION` 6) and migrated. Unknown fields are dropped, and an invalid field falls back to
 its default. Version 4 removed the CLASSIC | SIM `mode`, the per-mode `views` and `hotasPrompt`: the
 SIM view became `view`, and craft whose assists a record had moved off 100 % count as set by the
 player. Version 5 remembers the view per craft: `view` seeds every craft's `views` entry (and
 `thirdPersonViews` when it is a third-person view), and a first run starts every craft in chase
-(`tools/lab/settings.mjs` checks the migrations).
+Version 6 (Phase 3) adds the eight new craft to every per-craft key (at the defaults, or at 50 %
+assists when the one-time HOTAS default had already run), the ten `craftFavorites` and `craftSkins`
+(`tools/lab/settings.mjs` checks the migrations). List keys (`craftFavorites`) are replaced whole and
+read back as copies.
 
 | key | default | values |
 | --- | --- | --- |
@@ -599,7 +602,9 @@ player. Version 5 remembers the view per craft: `view` seeds every craft's `view
 | `copilotCallouts` | true | boolean: WREN's proactive tour-guide callouts (Phase 2) |
 | `remoteCopilot`, `remoteEndpoint` | false, `http://localhost:3000/copilot` | boolean; http(s) URL (v1) |
 | `showFps`, `hudAutoHide` | false, true | boolean (v1) |
-| `craft` | `glider` | `glider` \| `bushplane` \| `jet` \| `helicopter` \| `wingsuit` \| `fpv` |
+| `craft` | `glider` | a catalog id (`CRAFT_IDS`: the six Phase 1 craft, then `aerobatic`, `seaplane`, `tiltrotor`, `paraglider`, `balloon`, `airship`, `eagle`, `spaceplane`); the controller refuses a craft whose module is not registered |
+| `craftFavorites` | `glider, bushplane, jet, helicopter, wingsuit, fpv, aerobatic, seaplane, eagle, spaceplane` | ten slots, each a catalog id or `null` (empty), no craft twice: keys 1-9 and 0 (`craftSelect1-10`), cycled by `craftNext` / `craftPrev` |
+| `craftSkins` | `''` for every craft | `{ craftId: skinId }` (camelCase; `''` is the module's default skin): a skin change rebuilds the mesh only |
 | `assists` | 1 for every craft | `{ craftId: 0..1 }`: the only difficulty control |
 | `assistsSetByPlayer` | false for every craft | `{ craftId: boolean }`: the player chose that craft's assists (any change `assistDefaults.js` did not make) |
 | `hotasAssistsApplied` | false | boolean: the one-time HOTAS default has run |
@@ -694,9 +699,9 @@ v2 adds these untyped events:
 
 Every action is rebindable on every device:
 
-`copilotPTT, craftAbility, waypointNearest, waypointAhead, photoMode, viewCycle, viewToggle1P3P,
-viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, craftSelect1` ..
-`craftSelect6, gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack,
+`copilotPTT, craftAbility, craftAbilityAlt, waypointNearest, waypointAhead, photoMode, viewCycle,
+viewToggle1P3P, viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev,
+craftSelect1` .. `craftSelect10` (the ten favorites, "Favorite 1" .. "Favorite 10"), `gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack,
 ringCourse, journal, mapToggle, settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`.
 Stored or imported bindings for the retired `modeToggle` and `boost`, and Phase 1 references
 limited to the CLASSIC key layer, are dropped quietly on load.
@@ -706,7 +711,7 @@ performs it:
 
 | owner | actions |
 | --- | --- |
-| flight (`FlightController.js`) | craftAbility, craftNext, craftPrev, craftSelect1-6, gearToggle, flapsUp, flapsDown, airbrake (held), relaunch, engineToggle, chuteDeploy. The flight model itself handles gearToggle, flapsUp, flapsDown, airbrake, engineToggle and chuteDeploy (they reach it in `controls.actions` on the frame's first tick, and held ones in `controls.held`) |
+| flight (`FlightController.js`) | craftAbility, craftAbilityAlt, craftNext, craftPrev (cycle the favorites, skipping empty slots and craft without a module), craftSelect1-10 (the favorites), gearToggle, flapsUp, flapsDown, airbrake (held), relaunch, engineToggle, chuteDeploy. The flight model itself handles gearToggle, flapsUp, flapsDown, airbrake, engineToggle and chuteDeploy (they reach it in `controls.actions` on the frame's first tick, and held ones in `controls.held`) |
 | camera (`cameraManager.js`) | viewCycle, viewToggle1P3P, viewForward, viewBack, viewLeft, viewRight, recenterView |
 | ui (`ui.js`) | waypointAhead, waypointNearest, photoMode, autopilotToggle, timeForward, timeBack, ringCourse, journal, mapToggle, settings, controlsPanel |
 | copilot (`copilot.js`) | copilotPTT (held) |
@@ -778,11 +783,15 @@ v1 methods keep their v1 meaning.
 | `getCraft()`, `setCraft(id)` | `setCraft` goes through the settings channel and returns whether the craft is now flying |
 | `getCraftModule()`, `getCameraRig()`, `getEyeAnchor()` | the active craft module, its `cameraRig`, and the mesh eye anchor |
 | `getModel()` | the active FlightModel |
-| `getCeiling()` | 15000 m (`FLIGHT_CEILING`) |
+| `getCeiling()` | the active craft's `limits.ceiling`, else 15000 m (`FLIGHT_CEILING`) |
 | `isTowing()`, `isAssistOverridden()` | aerotow in progress; hands-off hold active |
 | `relaunch()` | the craft's relaunch: aerotow to 1000 m AGL (glider), a dive from the nearest peak (wingsuit), or a 300 m airstart (hovering for rotorcraft) |
 | `triggerSoftCrash(reason)` | 0.4 s fade, respawn 300 m AGL at the same XZ and heading, level, at cruise (hovering for rotorcraft; the wingsuit restarts from a peak) |
-| `runAbility()` | the craft ability |
+| `runAbility(slot?)` | the craft ability: `'craftAbility'` (default) or `'craftAbilityAlt'` |
+| `runCraftCommand(command, value)` | one of the active craft's copilot commands (`copilot.commands`): `{ ok, text }`, the spoken reply or why it did not run |
+| `getCraftCommands()`, `getCraftStatus()` | the active craft's commands as `[{ id, phrases }]`, and its own status line (`copilot.status`) |
+| `getSkin()` | the active craft's skin id, or `null` without skins |
+| `startAt(placement)` | places the active craft as a situate placement says (below); returns the mode applied. Tests, tools and commands use it |
 
 The controller boots straight into the craft's flight model at the spawn: level at its cruise, or
 on the ground with "Start on ground", which prefers the nearest discovered site offering a
@@ -798,6 +807,34 @@ controller disconnect in flight, the hands-off hold forces assists to 100 % and 
 altitude. It releases on reconnect, or when another device holds the stick past 35 %
 for 0.25 s.
 
+**Placements (`situate`, contract h.4).** A craft switch asks the new module's
+`situate(situation, api)` where and how to start. `situation` is `{ position, heading,
+trackHeading, groundSpeed, velocity, airspeed, agl, surfaceHeight, overWater, waterBody, waterHeight,
+wasOnGround, wasOnWater, previousCraft, wind: { vel, turbulence }, time, dayTime }`; `api` gives the
+world queries (`world`, `waterQuery`, `colliders`, `windField`, `state`, `craft`, `ceiling`,
+`groundHeight`, `surfaceHeight`, `waterHeight`, `windAt(position, out?)`, `perchesNear(x, y, z,
+radius, visit)`, `nearestPeak(x, z)`, `headingIntoWind(x, z)`). It returns a placement `{ mode,
+position?, heading?, speed?, pitch?, throttle?, craftState?, flatSpot? }` or `null`:
+
+| mode | the craft starts |
+| --- | --- |
+| `air` | flying at `speed` (default its cruise, an airspeed riding on the wind), `pitch` degrees nose up (default 0), trimmed |
+| `climb` | the same at `pitch` 45 degrees and full power by default |
+| `hover` | still over the ground (no airspeed, no wind drift) |
+| `drift` | moving with the air at its height (no airspeed) |
+| `ground` | standing on its gear: exactly at `position`, or on the nearest flat, dry spot with `flatSpot: true` or without a position |
+| `water` | afloat (its contacts on the water surface), moving at `speed` (default 0); over dry ground it flies instead |
+| `perch` | standing at `position` with no speed (the model decides what perched means) |
+
+A field left out keeps the Phase 1 default (the old craft's place and heading, the craft's cruise and
+cruise throttle); an airborne start without a position is lifted clear of the ground as Phase 1 did,
+and never starts inside the ground or a collider. A `throttle` (or a climb) presets a soft lever
+(keys, wheel, touch; `input.presetThrottle`), while a HOTAS lever keeps its own position. The
+`craftState` fields merge into the craft state. A placement without a mode keeps the Phase 1 rules
+and only adds its `craftState`; a hook that throws or returns something unusable logs one
+`[DRIFTWING]` error and the Phase 1 rules place the craft. `getStats()` counts `situateCalls`,
+`situateErrors` and `placements`.
+
 ### FlightModel interface (`src/flight/models.js`)
 
 A model is created by a factory registered per kind: `flightModels.register(kind, factory)`. It is
@@ -809,7 +846,7 @@ called with `{ profile, craft, world, bus, state, craftState, settings }`, where
 | --- | --- |
 | `kind` | the model kind |
 | `reset(pose)` | `pose = { position, velocity, quaternion, angularVelocity, throttle, onGround, engineOn }` |
-| `step(dt, controls, env)` | one tick. `controls` is the shaped ControlState copy (plus `powerLimit` 0..1 for the jet). `env = { time, wind: { vel, turbulence }, groundHeight(x, z), waterLevel, rho, world, craftState, assists, handsOff, autopilot, telemetry }` |
+| `step(dt, controls, env)` | one tick. `controls` is the shaped ControlState copy (plus `powerLimit` 0..1 for the jet). `env = { time, wind: { vel, turbulence }, groundHeight(x, z), waterLevel, waterHeight(x, z), waterSample(x, z, out), rho, world, craftState, assists, handsOff, autopilot, telemetry, colliders, windField }` (`windField` is `ctx.wind`, for probing the air elsewhere: a balloon's wind layers, a paraglider's thermals) |
 | `state` | `{ position, velocity, quaternion, angularVelocity }`: live and SI; world frame, except the angular velocity, which is in body axes |
 | `contact` | the last tick's ground contact: `{ onGround, touchdown: { sinkRate } \| null, bodyStrike: { part, speed } \| null, water, penetration }` |
 | `writeTelemetry(flight)` | fills the `state.flight` fields the model owns |
@@ -823,7 +860,8 @@ A soft crash triggers when:
 - `bodyStrike.speed` exceeds `limits.bodyStrikeSpeed` (default 5 m/s);
 - a collision probe strikes a collider faster than `limits.bodyStrikeSpeed` (reason `structure strike`, below);
 - `touchdown.sinkRate` exceeds `limits.crashSinkRate`;
-- a craft that cannot float touches water;
+- a craft that cannot float touches water (`limits.floats`, or `limits.waterLanding` `'floats'` or
+  `'basket'`, lets it);
 - the penetration exceeds 1 m.
 
 The fade-in freezes the pose, so the controller holds the craft at its contact point, never below
@@ -943,7 +981,7 @@ read it and never write it.
 | air data | `airspeed` (true), `indicatedAirspeed`, `groundSpeed`, `mach`, `altitude`, `agl`, `radarAltitude`, `verticalSpeed`, `vario` (total energy), `heading`, `pitch`, `roll`, `aoa`, `sideslip`, `gLoad`, `glideRatio` |
 | engine | `throttle`, `afterburner`, `engineOn`, `rpm` (0..1 of rated), `rotorRpm` (1 = governed), `torque` (1 = rated) |
 | configuration | `flaps`, `flapNotch`, `gear { retractable, down, transit }`, `airbrake`, `brakes`, `trim` |
-| state | `onGround`, `contacts`, `stall { warning, stalled, buffet }`, `overspeed`, `crash { active, reason, progress }` |
+| state | `onGround`, `contacts`, `onWater` (afloat, or touching water), `ceiling` (the active craft's altitude ceiling, m), `stall { warning, stalled, buffet }`, `overspeed`, `crash { active, reason, progress }` |
 | assists | `assists`, `activeAssists[]`, `autopilot { enabled, heading, altitude, speed }` |
 | landings | `lastLanding`, `bestLanding` (from the `landed` event) |
 | craft | `craftState` (below) |
@@ -959,30 +997,44 @@ height; `stall.warning` is the low-rotor-rpm horn.
 - wingsuit: `canopy`, `phase` (`flight` \| `deploying` \| `canopy` \| `landed`), `deploy`,
   `brakeLeft` / `brakeRight`, `proximityWarning`, `proximity`, `clearance`, `impactSeconds`,
   `windStreaks`, ...;
-- FPV drone: `droneMode` (`rate` \| `angle`), `altitudeHold`, `modeOverride`, `turtle`.
+- FPV drone: `droneMode` (`rate` \| `angle`), `altitudeHold`, `modeOverride`, `turtle`;
+- a craft with skins: `skin` (set by the controller);
+- the Phase 3 craft: the fields of contract h.3 (aerobatic `smoke`, `smokeColor`, ...; seaplane
+  `onStep`, `waterRudders`, ...; and so on), written by their own models and abilities.
 
 A deployed chute is `craftState.canopy === true`.
 
 ### Craft modules (`src/craft/<id>.js`)
 
 Each craft file default-exports a frozen module, and `src/craft/index.js` registers it.
-`craftRegistry.register()` checks the required fields (`buildMesh`, `simProfile`, `inputProfile`, `audioProfile`, `cameraRig`, `instruments`, `abilities`, `spawn`, `limits`). The
-registry API is `catalog`, `register`, `get`, `has`, `list()` (with `available`) and
-`step(id, direction)`.
+`craftRegistry.register()` checks the required fields (`buildMesh`, `simProfile`, `inputProfile`, `audioProfile`, `cameraRig`, `instruments`, `abilities`, `spawn`, `limits`)
+and validates every optional field of contract h.2 that is present, throwing a readable error
+(`craft "x" field: problem`) on the first that breaks it. The registry API is `catalog`,
+`register`, `get`, `has`, `entry(id)`, `list()` (with `available`), `groups()` (the six picker
+groups with their entries) and `step(id, direction)` (catalog order); `createCraftRegistry(catalog,
+groups)` builds one over another catalog (the labs).
 
 | field | contents |
 | --- | --- |
 | `id`, `name` | as in `CRAFT_CATALOG` |
-| `buildMesh(ctx)` | returns `{ root, update(visual, dt), wingtips, eyeAnchor, anchors, dispose() }`. The mesh is procedural, low-poly and flat-shaded in the v1 palette, with animated surfaces, prop disc, rotor and gear. `visual = { aileron, elevator, rudder, flaps, throttle, propSpeed, engineOn, onGround, gearDown, airbrake, groundSpeed, time }`. `anchors` are named local points (`towHook`, `smoke`, `tail`, ...). Parts with `userData.hideInCockpit` hide in the cockpit view |
+| `buildMesh(ctx, { skin })` | returns `{ root, update(visual, dt), wingtips, eyeAnchor, anchors, dispose() }`. The mesh is procedural, low-poly and flat-shaded in the v1 palette, with animated surfaces, prop disc, rotor and gear. `skin` is the module's skin id (null without skins). `visual = { aileron, elevator, rudder, flaps, throttle, propSpeed, engineOn, onGround, gearDown, airbrake, groundSpeed, time, craftState }` (`craftState` read only, for craft-specific parts). `anchors` are named local points (`towHook`, `smoke`, `tail`, ...). Parts with `userData.hideInCockpit` hide in the cockpit view |
 | `simProfile` | `{ model, targets, mass, inertia, centerOfMass, contacts, ... }` plus the model's own blocks: fixedWing `wing, aero, fuselage, tail, controls, flaps, spoilers, gear, engine, ballast`; jet adds `jet, extension, maxSpeed, vneBasis, gEffects`; helicopter `rotor, tailRotor, engine, fuselage, stabilizers, vortexRing, bladeStall`; wingsuit `suit, pitch, roll, yaw, canopy, deploy, radarOffset`; quad `thrustToWeight, motors, motor, aero, controller` |
-| `inputProfile` | `{ throttle: 'throttle' \| 'none' \| 'collective' \| 'thrust', antenna?: 'zoom', flapNotches, toeBrakes: 'wheels' \| 'wheelsAndSpoilers' \| 'canopyToggles' \| 'none', spoilers?, rudderSteersTailwheel?, afterburnerDetent?, rates? }` (`rates`: Betaflight `{ rcRate, superRate, expo }` per axis for the quad) |
+| `inputProfile` | `{ throttle: 'throttle' \| 'none' \| 'collective' \| 'thrust' \| 'burner' \| 'flapPower' \| 'speedBar' \| 'rocket', antenna?: 'flaps' \| 'zoom' \| 'nacelle' \| 'ballonet', rocker?: 'trim' \| 'vector', stickX?: 'roll' \| 'weightShift' \| 'rotationVents', flapNotches, toeBrakes: 'wheels' \| 'wheelsAndSpoilers' \| 'canopyToggles' \| 'none' \| 'waterRudders' \| 'paragliderBrakes', spoilers?, rudderSteersTailwheel?, afterburnerDetent?, rates? }` (`rates`: Betaflight `{ rcRate, superRate, expo }` per axis for the quad). The controller maps only `none` (no throttle) and `collective`; every other value passes the throttle axis through for the model to read (`INPUT_PROFILE_VALUES` in registry.js lists what the registry accepts) |
 | `audioProfile` | `{ engine: family, ...parameters }` (below) |
 | `cameraRig` | `{ eye, chase, wing, fpv, cockpit }` (below) |
 | `instruments` | ordered instrument ids for the panel and HUD (below) |
-| `abilities` | `{ craftAbility: { label, initialState?(), run(api), update?(api, dt) } }`. `api = { craftState, craft, telemetry, player, notify(text), relaunch(), emitTrail(kind, anchor, dt) }` |
+| `abilities` | `{ craftAbility, craftAbilityAlt? }`, each `{ label, initialState?(), run(api), update?(api, dt) }`: Space and Shift+Space. Both initial states merge into the craft state; both updates run every frame. `api = { craftState, craft, module, skin, telemetry, player, state, controls (this tick's shaped ControlState, read only), systems, world, colliders, waterQuery, wind (the WindField), notify(text), isHeld(actionId), setCraftState(field, value), relaunch(), runAbility(slot), setAutopilot(options), emitTrail(kind, anchor, dt, color?) }`; `emitTrail` kinds are `smoke`, `spray` and `smokeColor` (tinted by `color` [r, g, b] or by `craftState.smokeColor`, an index into `SMOKE_COLORS` in trails.js) |
 | `spawn` | `{ cruise (airspeed, m/s), cruiseThrottle? (craft with an engine), hover, relaunch: 'aerotow' \| 'peak' \| 'airstart', respawn?: 'peak', canStartOnGround, runwayLength?, peakDive?: { angle, speed } }` |
-| `limits` | `{ vne, vneMach?, gLimit, crashSinkRate, bodyStrikeSpeed?, floats }` |
-| `capabilities` (optional) | `{ engine?, chute? }`; otherwise inferred from the profiles (copilot, UI) |
+| `limits` | `{ vne, vneMach?, gLimit, crashSinkRate, bodyStrikeSpeed?, floats, ceiling? (m), waterLanding?: 'floats' \| 'basket' \| null, noseOverSpeed?, skidCrashSpeed? }` |
+| `capabilities` (optional) | `{ engine?, chute?, smoke?, water?, perch?, space? }` booleans; otherwise inferred from the profiles (copilot, UI) |
+| `skins` (optional) | `{ default, list: [{ id, name, silhouette? }] }`: `settings.craftSkins[id]` picks one, a change rebuilds the mesh only |
+| `bindings` (optional) | per-craft default bindings, `{ [profileId]: { actions?, axes? } }` with the reference shapes of `defaultBindings.js`; they sit between the player's bindings and the profile defaults, for this craft only |
+| `collision` (optional) | `{ probes: [{ id, position: [x, y, z], radius, gear? }] }` (structure collision, below) |
+| `situate` (optional) | `situate(situation, api) -> placement`: where and how the craft starts after a switch (FlightController, "Placements") |
+| `copilot` (optional) | `{ commands: [{ id, phrases: [regex sources], run(api, value) -> reply }], status?(craftState, telemetry) -> string }`: WREN's `craftCommand` action (docs/copilot-api.md) |
+| `journal` (optional) | `{ stats: [{ key, label, unit, op: 'add' \| 'min' \| 'max' }] }`: the craft's journal stats, known to the journal like its own (`journalStatInfo`) |
+| `directorProfile` (optional) | `{ favor: { tags, categories }, above: [{ altitude, favor }] }`: the director's craft weighting (contract i.2) |
+| `faunaThreat` (optional) | number: fauna scatter radius and burst scale (the eagle's 2.5) |
 
 **`cameraRig`.**
 
@@ -993,10 +1045,14 @@ registry API is `catalog`, `register`, `get`, `has`, `list()` (with `available`)
   wingtip.
 - `fpv`: `{ position, uptilt (0-40, default 25), near }`. Its presence makes the first-person slot
   the FPV view.
-- `cockpit`: `{ style: 'canopy' \| 'cabin' \| 'bubble' \| 'open' \| 'none', width, sill, floor,
-  front, back, roof, panel: { width, center, tilt, layout: [[ids], ...] }, frameColor, stick,
-  near }`. All fields are optional, in metres relative to the eye. A craft with an eye but no
-  cockpit gets style `none`.
+- `cockpit`: `{ style: 'canopy' \| 'cabin' \| 'bubble' \| 'open' \| 'custom' \| 'none', width, sill,
+  floor, front, back, roof, panel: { width, center, tilt, layout: [[ids], ...] }, frameColor, stick,
+  near, build? }`. All fields are optional, in metres relative to the eye. A craft with an eye but no
+  cockpit gets style `none`. Style `custom` (the gondola, the basket, the harness, the rider's view)
+  calls `build(builder, spec, THREE)`: it draws the interior into the shared flat-shaded mesh
+  builder (`createMeshBuilder` from kit.js, frame relative to the eye) and may return `{ objects?:
+  Object3D[], dispose?() }`, extra objects added to the cockpit and disposed with it. The panel
+  (with its housing) is still built from `panel.layout`; the stick is off by default.
 
 **`audioProfile`** (`src/audio/engines/index.js`). Missing parameters take the family defaults, so
 `{ engine: 'jet' }` is enough.
@@ -1018,7 +1074,9 @@ heading, vsi, aoa, g, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld
 proximity`. A renderer is `{ id, label, draw(pen, source, theme, memory), createMemory?,
 update?(memory, dt, source), reset? }`. It draws in a 200 x 200 design box in a `panel` theme (steam
 gauge on the cockpit CanvasTexture) and a `glass` theme (HUD tile). Units follow `settings.units`.
-Unknown ids are skipped and reported in the camera stats.
+Unknown ids are skipped and reported in the camera stats. A new instrument is one file,
+`src/ui/instruments/<id>.js`, plus its import and its entry in `index.js`; both the cockpit panel and
+the HUD overlay draw it from then on.
 
 | craft | model kind | instruments |
 | --- | --- | --- |
@@ -1028,6 +1086,45 @@ Unknown ids are skipped and reported in the camera stats.
 | helicopter | helicopter | airspeed, altitude, attitude, heading, vsi, rotorRpm, torque, radarAlt, throttle |
 | wingsuit | wingsuit | airspeed, altitude, heading, vsi, glide, proximity |
 | fpv | quad | throttle, droneMode, airspeed, altitude, attitude, heading, vsi |
+
+### How to add a craft
+
+The catalog already lists all 14 craft (`src/craft/registry.js`), so a Phase 3 craft lands as its
+own files plus single lines in shared list files; nothing else changes. A craft whose module is not
+registered stays in the picker, disabled, and the controller refuses it with a notice.
+
+1. **The module**: `src/craft/<id>.js` default-exports a frozen module with the required fields and
+   any optional ones (the tables above; contract h.2). Build the mesh with the kit in `kit.js`,
+   animate craft-specific parts from `visual.craftState`, and give every first-person view an `eye`
+   (a `custom` cockpit for a gondola, basket, harness or rider).
+2. **Register it**: one import and one `craftRegistry.register(<id>)` line in `src/craft/index.js`.
+   The registry validates the module at boot; a validation error names the field.
+3. **The flight model**: reuse a kind (`fixedWing` with an extension block, `helicopter`, ...) or
+   add one: `src/flight/Sim<Kind>.js` and one `flightModels.register('<kind>', factory)` line (plus
+   its id in `MODEL_KINDS`) in `src/flight/models.js`, with `registerAssistCatalog` /
+   `registerAssistHandler`, `registerAutopilotHandler` and `registerTrimHandler` for the kind when it
+   needs them. Write craft-specific state into `craftState` (contract h.3); `state.flight.onWater`
+   and `ceiling` are the controller's.
+4. **Spawning sensibly**: a `situate(situation, api)` hook returns the placement after a craft
+   switch (FlightController, "Placements").
+5. **Abilities**: `abilities.craftAbility` (Space) and `abilities.craftAbilityAlt` (Shift+Space)
+   with the ability api; hold-type abilities read `api.isHeld('craftAbility')` in `update`.
+6. **Input**: `inputProfile` values tell the model what the axes mean; `bindings` adds per-craft
+   default keys or HOTAS buttons (docs/controls.md gets the craft's HOTAS profile in Milestone O).
+7. **Audio**: a new engine family is `src/audio/engines/<family>.js` plus one line in
+   `src/audio/engines/index.js`; the module names it in `audioProfile.engine`.
+8. **Instruments**: new ids are `src/ui/instruments/<id>.js` plus their import and list entry in
+   `src/ui/instruments/index.js`; list them in `instruments` and the cockpit `panel.layout`.
+9. **Copilot**: `copilot.commands` (phrases are regex sources; the first capture group is the value)
+   and `copilot.status`; WREN reaches them through `craftCommand` locally and from the remote brain
+   (`flightState.craftCommands`).
+10. **Journal**: `journal.stats` declares the craft's stat keys; emit them with
+    `bus.emitTyped('journalStat', { key, value, op })`. Flight time per craft is counted for every
+    craft (`records.craftTime`).
+11. **Tests**: `tools/lab/<id>.mjs` (the handling targets) and `src/dev/craftScenarios/<id>.js`
+    (`?test=craft` scenarios) plus one import line and one list line in
+    `src/dev/craftScenarios/index.js`. `?test=craft` then flies the general flight test of the craft
+    in both views and its scenarios (`npm run test:craft`, `test:craft:webgl`).
 
 ### Camera (`ctx.systems.camera`)
 
@@ -1677,6 +1774,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `?test=1` | dev builds: the flight-test harness (`src/dev/testHarness.js`). It flies each of the six craft for 60 s in first person and in third person across 3 seeds (36 runs), and logs average fps, p99 frame time, NaN events, terrain penetrations, soft crashes, heap growth and console errors. It shows an on-screen summary and offers a JSON report (`window.DRIFTWING.testReport`). URL options: `testSeeds`, `testSeconds`, `testCraft`, `testViews` (`first`, `third`) |
 | `?test=1&testPlan=soak` | dev builds: the 10-minute soak, the flight-test harness with its soak plan: 5 seeds (`SOAK-1` to `SOAK-5`), one craft per seed (the six in turn), both views, 60 s each, the event director live as in the game. Its criteria add heap growth under 75 MB per world, the worst p99 frame time within the perf governor's frame target, and the director live on every world (its activations, the activations the SpawnManager declined with refusal `declined` and the spawns started are listed per world) to the flight test's |
 | `?test=collision` | dev builds: the collision test (`src/dev/collisionTest.js`): a fixture of every collider type (with a mesh BVH tunnel mountain) and a kite-string slalom high above the terrain, the nearest landmark of every type and every Phase 2 structure preset; the jet and the bush plane (and the spaceplane once registered) fly scripted lines into each at 60, 250 and 1500 m/s and must soft-crash with `structure strike`, never pass through, and never end a tick with a probe inside a solid collider (a probe within 0.5 m under a landable top stands on ground); the real flight model at cruise into the box and the tunnel's flank; a 3 m/s bump resolves; a landable deck is ground (the real bush plane stands on it, and real-model dives onto it crash on it); the tunnel centreline and the arch opening are flown clean (the arch threads); every kite string crossed is one miss; the tunnel's BVH answers with the game's own `THREE.Vector3` (one three.js core). It holds the quality level at high; `&testParts=fixture,special,landmarks,structures` runs some parts (the others' criteria muted) |
+| `?test=craft` | dev builds: the craft test (`src/dev/craftTest.js`, contract k.1): every registered craft flies the general flight test (hands off, a roll each way, a gentle pull; it must respond and fly) in the first and third person views from the world's spawn, then every scenario in `src/dev/craftScenarios/<craft>.js` (a placement through `flight.startAt`, a script writing the ControlState through the test input path, timed checks). Each run must be flown in its planned craft and view on every frame with 0 NaN, 0 penetrations, 0 soft crashes (unless the scenario allows them), 0 console errors or warnings and every check passed; frame times are reported, not judged. Scenarios on another seed or on the water fixtures' world (`world: 'waters'`) reload the page. `&testCraft=`, `&testViews=`, `&testScenarios=` (ids, `general`, `general-<craft>`), `&testSeconds=` (the general test's length, 30 s) |
 | `?test=spawns` | dev builds: the spawns test (`src/dev/spawnsTest.js`, scenarios in `spawnScenarios.js`). The game's presets are held and the site feed detached; each of the 30 presets goes back in for its own show: force-spawned ahead of the craft (a site preset on its nearest real placed site, with its stamps), frame times recorded over its live window, a staging step where one is named (totality, the wall cloud, meteors in flight, the eagle on the wing), framed by the photo camera, screenshot, disposed; then, with the simulation held, one warm-up create and dispose (a one-time cache it keeps is reported, not judged) and 3 more with the heap read after each. GPU memory (with the geometry tracker), wind sources, real lights, sky modifiers and leak counters must be back after each, and the JS heap within 1 MB across the judged held cycles. The test spawns through the debug path, which is never declined; a director activation of the re-added preset that the manager declines (refusal `declined`) is listed in the notes. URL options: `testPresets=a,b` (a subset), `testShots=1` (wait for the runner's screenshots), `testLeakCycles=N` (a longer heap trend) |
 | `?test=determinism` | dev builds: the determinism test (`src/dev/determinismTest.js`). Two page loads, each with a freshly deleted database: frames stepped by hand at 30 per second, the time of day and the perf governor's frame time held, the flight clock set to 1200 s, then `spawns.debug.restartSpawns()` and a 480 s autopilot path in the bush plane clear of the terrain. The site-list hashes (live and freshly built) and the director activation log must be identical; the spawn events and the flown path are compared as evidence |
 | `tools/run-harness.mjs` | runs a harness headlessly on a spare port (`--test 1\|soak\|hotas\|terrain\|determinism\|spawns`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--presets real` for the terrain test or `--presets a,b` and `--leak-cycles N` for the spawns test, `--out`), prints its tables, takes the spawns test's screenshots when the page asks, and exits 0 on PASS |
@@ -1709,7 +1807,9 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` | the flight models, settings migrations, storage, input, WREN's grammar, the copilot server |
 | `node --expose-gc tools/lab/spawns.mjs` | the spawn framework headless: the preset validator, the engine registry, the pools, LOD hysteresis, budgets (heavy sites included), lures, discovery (view cone, terrain occlusion, once per world), sites from a feed, wind sources and lights removed on dispose, leak clean-up, lifetimes, the real celestial, weatherVolume and fauna engines with no audio service and with a refused voice recipe (nothing left behind), and a manager frame update that allocates nothing (young-generation growth over 100 000 frames with 40 spawns) |
 | `node --expose-gc tools/lab/colliders.mjs` (`npm run lab:colliders`) | the collider service headless: every shape against sweeps, overlaps and rays with analytic answers, tunnelling at 10, 300 and 2000 m/s at normal and grazing incidence, the earliest-hit and tie rules, sensors, landable tops on the ground surfaces, providers and perches, validation, determinism under shuffled insertion, 30 probes against 2000 colliders under 0.1 ms, zero allocation, the retrofitted landmarks on a real world and the Phase 2 structures in a real SpawnManager |
+| `node tools/lab/craft.mjs` (`npm run lab:craft`) | the craft framework headless through the real controller: the catalog and groups, the registry's optional-field validation, favorites and craftNext / craftPrev, situate and every placement mode with its fallbacks, both ability slots and the ability api, craft commands (and the copilot handler), skins, `state.flight.ceiling`, `visual.craftState`, basket water landings, per-craft default bindings and craft journal stats |
 | `npm run test:collision`, `test:collision:webgl` | `?test=collision` headless (seed `COLLIDERS-LAB`, every landmark type within reach): per target type the strikes, pass-throughs and penetrations; `node tools/run-harness.mjs --test collision --parts landmarks` runs a subset |
+| `npm run test:craft`, `test:craft:webgl` | `?test=craft` headless (seed `CRAFT-1`): the run table (start mode, checks, NaN, penetrations, soft crashes, console, p99); `--crafts`, `--views`, `--scenarios`, `--seconds` narrow it |
 | `node --expose-gc tools/lab/origin.mjs` | the floating origin headless: the 4096 m lattice, the 5 km threshold, listener order before the typed event, the exact `toRender` / `toWorld` round trip and no allocation over 100 000 updates |
 | `node --expose-gc tools/lab/water.mjs` | the water query headless: the ocean equals the shader's wave table, basin clipping, ice is solid, `heightAt` / `sample` cost and zero retention, worker / main agreement of `waterBodyAt`, the map tiles' body tints, and the vegetation trunk and perch providers (alone and registered with the real collider service) |
 | `node --expose-gc tools/lab/challenges.mjs`, `node tools/lab/ringsGolden.mjs` | the challenge core: the ring course replays its six Phase 2 golden logs identically, gate crossing interpolation, splits, medals, miss modes, sensor misses, bests per craft, the anchored 10 Hz best path and its storage round trip, no allocation per frame |
@@ -1829,15 +1929,11 @@ pipeline prewarm, and add their own typed events to `EVENT_TYPES` in `src/core/e
   - Combos of existing presets are set pieces: data for the setPiece engine.
   - The map-tile generator (`src/world/mapTileGen.js`) is generic; the far field (Phase 3) uses it
     through its own map-tile service.
-- **More craft (Phase 3).**
-  - Append an entry to `CRAFT_CATALOG` (id, name, role, hotkey, silhouette), add
-    `src/craft/<id>.js` with the module schema above, and register it in `src/craft/index.js`.
-  - Add the id to `CRAFT_IDS` in `settings.js`.
-  - Reuse a model kind, or add one: `flightModels.register(kind, factory)`, plus optional
-    `registerAssistCatalog` / `registerAssistHandler`, `registerAutopilotHandler` and
-    `registerTrimHandler` for that kind.
-  - The picker, the copilot (`availableCraft`, capabilities), the instruments, the audio families
-    and the cameras all read the module, so none of them change.
+- **More craft (Phase 3).** The catalog, groups, settings, favorites, abilities, placements,
+  copilot commands, custom cockpits and the craft test exist (wave 2 step 2.0); a craft is its own
+  files plus single lines in the list files: [How to add a craft](#how-to-add-a-craft). The picker,
+  the copilot (`availableCraft`, capabilities), the instruments, the audio families and the cameras
+  all read the module, so none of them change.
 - **Spotify and music (Phase 4).**
   - Connect the player to `ctx.systems.audio.getBus('music')`. It already has a mixer slider
     (`settings.mixer.music`) and ducks under the copilot.

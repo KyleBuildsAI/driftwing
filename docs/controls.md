@@ -71,6 +71,7 @@ a few seconds; move the pointer to the top-left corner to bring it back. From V2
 | Rudder (yaw) | Q / E |
 | Throttle | W / S move the lever (50% per second) |
 | Craft ability | Space |
+| Second craft ability (craftAbilityAlt; craft that have one) | Shift+Space |
 | Pitch trim | Home / End (40% per second) |
 | Waypoint 1.5 km ahead | N |
 | Waypoint to the nearest landmark | Shift+N |
@@ -82,8 +83,8 @@ a few seconds; move the pointer to the top-left corner to bring it back. From V2
 | View forward (cockpit) / back (chase) | Numpad 8 / Numpad 2 |
 | Look left / right 90 deg | Numpad 4 / Numpad 6 |
 | Recenter view | Numpad 5 |
-| Craft 1-6 (glider, bush plane, jet, helicopter, wingsuit, FPV drone) | 1-6 |
-| Next / previous craft | ] / [ |
+| Craft favorites 1-10 (craftSelect1-10; by default glider, bush plane, jet, helicopter, wingsuit, FPV drone, aerobatic, seaplane, eagle, spaceplane) | 1-9, 0 |
+| Next / previous favorite (skips empty slots and craft not installed yet) | ] / [ |
 | Autopilot | O |
 | Time of day forward / back | T / Shift+T |
 | Ring course | R |
@@ -214,10 +215,14 @@ controls panel.
 | X | landing gear |
 | Y | cycle view |
 | D-pad up / down | flaps up / down |
-| D-pad left / right | previous / next craft |
+| D-pad left / right | previous / next favorite |
 | View (back) | first / third person |
 | Menu (start) | settings |
 | L3 (left stick click) | waypoint to nearest landmark |
+
+Every button is taken, so the second craft ability (`craftAbilityAlt`) and the ten favorites
+(`craftSelect1-10`) have no gamepad default: bind them in the controls panel. The D-pad cycles the
+favorites.
 
 ## HOTAS: Thrustmaster T.16000M FCS Flight Pack
 
@@ -248,7 +253,7 @@ the best published layout. If your hardware reports them differently, rebind in 
 | Hat up / down | view forward (cockpit) / chase |
 | Hat left / right | look left / right 90 deg |
 | Base 5 / 6 / 7 | landing gear / flaps up / flaps down |
-| Base 8 / 9 | previous / next craft |
+| Base 8 / 9 | previous / next favorite |
 | Base 10 | switch to V1 (versionToggle) |
 | Base 11 | autopilot |
 | Base 12 / 13 | time of day forward / back |
@@ -275,6 +280,7 @@ the best published layout. If your hardware reports them differently, rebind in 
 | Button 7 | controls panel |
 | Button 8 | first / third person |
 | Button 9 | world map |
+| Button 10 | second craft ability (craftAbilityAlt) |
 | Throttle hat | unbound (reserved for music controls in a later phase) |
 
 TFRP pedals on their own USB lead (normally they come through the TWCS) default to rudder and toe
@@ -389,8 +395,8 @@ A short checklist for the first session with the real T.16000M FCS Flight Pack:
 
 ## Actions
 
-`copilotPTT, craftAbility, waypointNearest, waypointAhead, photoMode, viewCycle, viewToggle1P3P,
-viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, craftSelect1-6,
+`copilotPTT, craftAbility, craftAbilityAlt, waypointNearest, waypointAhead, photoMode, viewCycle, viewToggle1P3P,
+viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev, craftSelect1-10,
 gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack, ringCourse, challengeStart,
 journal, mapToggle, settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`. Each press
 and release is published as `input:action { id, phase, source, device }`.
