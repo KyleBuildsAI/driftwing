@@ -197,6 +197,8 @@ const WADE_STAND = 0;
 const WADE_TAKEOFF = 1;
 const WADE_FLY = 2;
 const WADE_LAND = 3;
+/** Seconds a flushed flock needs to glide home after its longest flight (the far tier's settle). */
+const WADER_RETURN_SECONDS = 25;
 const SWIM = 0;
 const SWIM_LEAP = 1;
 /** A herd's fine ground grid: FINE_GRID x FINE_GRID cells around the herd. */
@@ -3263,6 +3265,12 @@ export function createFaunaEngine() {
     g[G.STAMPEDE_COOLDOWN] -= dt;
     if (g[G.FLUSH] > 0) {
       g[G.FLUSH] += dt;
+      // Out of sight (the far tier) the birds are not simulated: once the longest flight and the glide
+      // back are over, the flock is home, so a player who comes back finds it wading.
+      if (data.instance.tier === 'far' && g[G.FLUSH] > wade.flySeconds[1] + WADER_RETURN_SECONDS) {
+        settleWadersUnseen(data);
+        return;
+      }
       const angle = data.phaseSeed * TWO_PI + g[G.FLUSH] * (data.cruise / wade.flyRadius);
       g[G.X] = g[G.HOME_X] + Math.sin(angle) * wade.flyRadius;
       g[G.Z] = g[G.HOME_Z] - Math.cos(angle) * wade.flyRadius;
@@ -3285,6 +3293,20 @@ export function createFaunaEngine() {
     const reach = wade.flushRadius * threat[0];
     if (dx * dx + dy * dy + dz * dz > reach * reach) return;
     flushWaders(data, player.x, player.y, player.z);
+  }
+
+  /** The flock lands at home at once (the far tier): every bird standing, re-armed after the usual rest. */
+  function settleWadersUnseen(data) {
+    const g = data.g;
+    const pool = data.pool;
+    g[G.FLUSH] = 0;
+    g[G.STAMPEDE_COOLDOWN] = 20;
+    g[G.X] = g[G.HOME_X];
+    g[G.Y] = g[G.HOME_Y];
+    g[G.Z] = g[G.HOME_Z];
+    g[G.VX] = 0;
+    g[G.VZ] = 0;
+    for (let index = data.start; index < data.start + data.count; index++) pool.mode[index] = WADE_STAND;
   }
 
   /** Every bird gets its take-off delay: farther from the trigger, later (the wave), plus a seeded spread. */

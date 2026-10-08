@@ -276,7 +276,8 @@ fades in with `fadeIn`. The source kind is `'slipstream'` and its id is
 `faunaThreat`) and under `maxAltitude` m above the herd starts it; `timer`: one every `interval`
 seconds from a side that turns with the group clock; `event`: only `setParam('stampede', 1)` (a set
 piece). It runs `duration` seconds away from the trigger, bent downhill by `downhill`, then the herd
-settles back to a walk; `cooldown` seconds pass before the next.
+settles back to a walk; `cooldown` seconds pass before the next. A stampede's clock keeps running
+while the herd is hidden at the far tier, so a herd left mid-run is walking when the player returns.
 
 A herd reads the ground through its own fine grid (9 x 9 cells of 8 m or more, sized to the herd),
 re-centred on the herd in whole cells, one cell probed every fourth frame (every second while it
@@ -317,7 +318,8 @@ stands there, each bird on its own spot. The craft within `flushRadius` (times i
 flushes it: every bird takes off `delay` seconds per 10 m from the craft later than the nearest
 (plus a seeded `spread`), runs along the water with splashes, climbs, flies as a flock on a circle of
 `flyRadius` over the water at `flyAltitude` for `flySeconds`, then glides back and settles; 20 s
-later it can be flushed again. With no shallows in reach the group ends at once.
+later it can be flushed again. A flock flushed and left at the far tier lands at home once the
+longest `flySeconds` and 25 s of glide are over. With no shallows in reach the group ends at once.
 
 ### Predators
 

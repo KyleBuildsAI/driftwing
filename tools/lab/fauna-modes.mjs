@@ -415,6 +415,23 @@ function testFlamingos() {
   const back = agents(lab, id);
   const backShallow = back.every((agent) => groundHeight(agent.x, agent.z) < 0 && groundHeight(agent.x, agent.z) > -0.6);
   check('flamingos', 'and settle back into the shallows', lab.fauna.describe(id).airborne === 0 && backShallow, JSON.stringify(lab.fauna.describe(id)));
+  // Flushed, then left at the far tier: after the longest flight and the glide back the flock is home.
+  lab.state.player.position.set(center.x, center.y + 60, center.z + 120);
+  lab.follow();
+  lab.step(1);
+  lab.fauna.setParam(lab.manager.getParts(id)[0], 'flush', 1);
+  lab.step(60 * 6);
+  const aloft = lab.fauna.describe(id).airborne;
+  lab.state.player.position.set(center.x + 20000, 900, center.z);
+  lab.follow();
+  lab.step(60 * 70);
+  const farTier = lab.manager.getInstance(id).tier === 'far';
+  const away = lab.fauna.describe(id);
+  lab.state.player.position.set(center.x + 3000, 900, center.z + 3000);
+  lab.follow();
+  lab.step(30);
+  const returned = lab.fauna.describe(id);
+  check('flamingos', 'a flock flushed and left at the far tier is home when the player comes back', aloft > 0 && farTier && away.airborne === 0 && !away.flushed && returned.airborne === 0 && !returned.hidden, JSON.stringify({ aloft, farTier, away: { airborne: away.airborne, flushed: away.flushed }, returned: { airborne: returned.airborne, hidden: returned.hidden } }));
   lab.manager.deactivate(id, 'lab');
 }
 
