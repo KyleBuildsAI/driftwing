@@ -1032,8 +1032,8 @@ export default Object.freeze({
       near: 0.05,
       build: buildHarnessView,
       panel: Object.freeze({
-        width: 0.24,
-        center: Object.freeze([0, -0.5, -0.4]),
+        width: 0.26,
+        center: Object.freeze([0, -0.4, -0.44]),
         layout: Object.freeze([Object.freeze(['vario', 'speedBar']), Object.freeze(['airspeed', 'altitude'])]),
       }),
     }),
