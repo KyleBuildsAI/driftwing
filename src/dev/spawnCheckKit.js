@@ -12,8 +12,10 @@
 //     proves GPU memory back (no geometry an engine created still alive, the count moved by no more
 //     than the world's own first draws, textures exactly back), every wind source added since the
 //     baseline removed, every collider a spawn added since the baseline removed (landmark colliders
-//     stream with the craft and are not a spawn's, and a live spawn's are its own), the sky modifiers and the real lights back to their
-//     counts, the SpawnManager's leak counters unchanged, and on request the JS heap within a tolerance.
+//     stream with the craft and are not a spawn's, and a live spawn's are its own), every challenge
+//     course a spawn registered since the baseline unregistered (the ring course and live spawns'
+//     courses are not the spawn's), the sky modifiers and the real lights back to their counts, the
+//     SpawnManager's leak counters unchanged, and on request the JS heap within a tolerance.
 import { createGeometryTracker, splitFresh } from './geometryTracker.js';
 import { heapAvailable, readHeapMB, round } from './testStats.js';
 
@@ -187,6 +189,24 @@ export function createDisposeCheck(ctx, framing) {
     return held;
   }
 
+  /** Challenge courses (ctx.systems.challenges) that are not the ring course's. */
+  function spawnCourseKeys() {
+    const challenges = ctx.systems.challenges;
+    if (!challenges || typeof challenges.list !== 'function') return [];
+    return challenges.list().filter((entry) => entry.owner !== 'rings').map((entry) => entry.courseKey);
+  }
+
+  /** The courses live spawns still hold (a site the feed built meanwhile is not the disposed spawn's). */
+  function heldCourseKeys() {
+    const held = new Set();
+    for (const spawn of manager.getActive()) {
+      for (const part of manager.getParts(spawn.id)) {
+        if (part.data && Array.isArray(part.data.challengeKeys)) for (const key of part.data.challengeKeys) held.add(key);
+      }
+    }
+    return held;
+  }
+
   function lightsInUse() {
     const lights = manager.getStats().lights;
     return lights ? lights.active : 0;
@@ -220,6 +240,7 @@ export function createDisposeCheck(ctx, framing) {
         windIds: new Set(ctx.wind.listSources().map((source) => source.id)),
         windCount: ctx.wind.sourceCount,
         colliderIds: new Set(spawnColliderIds()),
+        courseKeys: new Set(spawnCourseKeys()),
         sky: ctx.systems.sky.getModifierState().count,
         lights: lightsInUse(),
         leaks: { ...manager.getStats().leaks },
@@ -232,7 +253,7 @@ export function createDisposeCheck(ctx, framing) {
      * Compares the state after a dispose with its baseline. options: { presetIds (the presets under
      * test: a structure geometry can only be theirs when one has a structure part), heapToleranceMB
      * (judge the heap; the baseline must have read it), waitTerrain = true }. Returns the readings
-     * with gpuOk, windOk, collidersOk, skyOk, lightsOk, leaksOk, heapOk and ok (all of them).
+     * with gpuOk, windOk, collidersOk, challengesOk, skyOk, lightsOk, leaksOk, heapOk and ok (all of them).
      */
     async compare(baseline, { presetIds = [], heapToleranceMB = null, waitTerrain = true } = {}) {
       await frames(SETTLE_FRAMES);
@@ -249,6 +270,8 @@ export function createDisposeCheck(ctx, framing) {
       const windLeft = ctx.wind.listSources().filter((source) => !baseline.windIds.has(source.id)).map((source) => source.id);
       const heldColliders = heldColliderIds();
       const collidersLeft = spawnColliderIds().filter((id) => !baseline.colliderIds.has(id) && !heldColliders.has(id));
+      const heldCourses = heldCourseKeys();
+      const challengesLeft = spawnCourseKeys().filter((key) => !baseline.courseKeys.has(key) && !heldCourses.has(key));
       const sky = ctx.systems.sky.getModifierState().count;
       const lights = lightsInUse();
       const leaks = manager.getStats().leaks;
@@ -271,6 +294,9 @@ export function createDisposeCheck(ctx, framing) {
         colliders: `${baseline.colliderIds.size} -> ${baseline.colliderIds.size + collidersLeft.length}`,
         collidersLeft,
         collidersOk: collidersLeft.length === 0,
+        challenges: `${baseline.courseKeys.size} -> ${baseline.courseKeys.size + challengesLeft.length}`,
+        challengesLeft,
+        challengesOk: challengesLeft.length === 0,
         skyModifiers: `${baseline.sky} -> ${sky}`,
         skyOk: sky === baseline.sky,
         lights: `${baseline.lights} -> ${lights}`,
@@ -282,7 +308,7 @@ export function createDisposeCheck(ctx, framing) {
         heapDeltaMB,
         heapOk: !judgeHeap || (heapDeltaMB === null ? !heapAvailable() : heapDeltaMB <= heapToleranceMB),
       };
-      result.ok = result.gpuOk && result.windOk && result.collidersOk && result.skyOk && result.lightsOk && result.leaksOk && result.heapOk;
+      result.ok = result.gpuOk && result.windOk && result.collidersOk && result.challengesOk && result.skyOk && result.lightsOk && result.leaksOk && result.heapOk;
       return result;
     },
 
