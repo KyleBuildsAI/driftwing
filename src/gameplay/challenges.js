@@ -501,6 +501,8 @@ export function createChallengeSystem(ctx) {
     unregisterQuietly(entry);
     if (run.entry === entry) clearRun();
     writeLive();
+    // The prompt drops a removed course now, not on the next frame.
+    writePrompt();
     return true;
   }
 

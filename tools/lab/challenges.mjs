@@ -440,6 +440,13 @@ function testLifecycle() {
   flyNorth(again, { startZ: 50, endZ: -200, speed: 50, frames: [1 / 60] });
   again.challenges.unregister(againKey);
   check('lifecycle', 'unregister cancels an active run (reason removed) and removes the course', again.typed('challengeCancelled')[0]?.reason === 'removed' && again.challenges.count() === 0 && !again.challenges.getState().active);
+  const idle = createLab();
+  const idleKey = idle.challenges.register(straightCourse('idle', [100, 400]), { owner: 'lab' });
+  idle.state.player.position.set(0, 100, 600);
+  idle.step(1 / 60);
+  const promptBefore = idle.challenges.getState().prompt?.courseKey ?? null;
+  idle.challenges.unregister(idleKey);
+  check('lifecycle', 'unregister drops the course from the start prompt at once (not on the next frame)', promptBefore === idleKey && idle.challenges.getState().prompt === null, String(promptBefore));
   const lonely = createLab();
   lonely.bus.emit('input:action', { id: 'challengeStart', phase: 'press', source: 'keyboard' });
   check('lifecycle', 'Y with no course nearby only says so', lonely.events.some((event) => event.type === 'notify') && !lonely.challenges.getState().active);
