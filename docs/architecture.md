@@ -1064,7 +1064,8 @@ groups)` builds one over another catalog (the labs).
   calls `build(builder, spec, THREE)`: it draws the interior into the shared flat-shaded mesh
   builder (`createMeshBuilder` from kit.js, frame relative to the eye) and may return `{ objects?:
   Object3D[], dispose?() }`, extra objects added to the cockpit and disposed with it. The panel
-  (with its housing) is still built from `panel.layout`; the stick is off by default.
+  (with its housing) is still built from `panel.layout` (an empty layout, `[]`, builds none: the glass
+  HUD shows, as in the eagle's view); the stick is off by default.
 
 **`audioProfile`** (`src/audio/engines/index.js`). Missing parameters take the family defaults, so
 `{ engine: 'jet' }` is enough.

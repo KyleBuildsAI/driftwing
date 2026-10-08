@@ -21,7 +21,8 @@
 //   front, back tub extent along z (defaults -0.95 and 0.55)
 //   roof        cabin roof / canopy bow height (default 0.26)
 //   panel       { width, center: [x, y, z], tilt (deg, face toward the eye by default), layout:
-//               [[ids], [ids]] rows (default: the craft's instruments in two rows) }
+//               [[ids], [ids]] rows (default: the craft's instruments in two rows); a custom view
+//               with layout [] has no panel at all }
 //   frameColor  canopy frame / pillar / coaming colour (default the v1 charcoal)
 //   stick       draw a control stick that follows the pilot's input (default true except bubble,
 //               custom and none)
@@ -376,7 +377,9 @@ export function buildCockpit(spec, instrumentIds) {
   const shellMaterial = new THREE.MeshStandardNodeMaterial({ vertexColors: true, flatShading: true, roughness: 0.78, metalness: 0 });
   const disposables = [shellMaterial];
 
-  const rows = panelRows(instrumentIds, spec.panel.layout);
+  // A custom view with an explicitly empty layout has no panel (a creature's eye: the glass HUD shows).
+  const noPanel = spec.style === 'custom' && Array.isArray(spec.panel.layout) && spec.panel.layout.length === 0;
+  const rows = noPanel ? [] : panelRows(instrumentIds, spec.panel.layout);
   let panelSurface = null;
   let faceHeight = spec.panel.width * 0.4;
   if (rows.length > 0) {
