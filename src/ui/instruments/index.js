@@ -26,9 +26,10 @@ import ld from './ld.js';
 import droneMode from './droneMode.js';
 import glide from './glide.js';
 import proximity from './proximity.js';
+import speedBar from './speedBar.js';
 
 export const INSTRUMENTS = Object.freeze(Object.fromEntries(
-  [airspeed, altitude, attitude, heading, vsi, aoa, gMeter, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide, proximity]
+  [airspeed, altitude, attitude, heading, vsi, aoa, gMeter, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide, proximity, speedBar]
     .map((instrument) => [instrument.id, instrument]),
 ));
 export const INSTRUMENT_IDS = Object.freeze(Object.keys(INSTRUMENTS));
