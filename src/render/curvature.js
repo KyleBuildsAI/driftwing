@@ -34,11 +34,13 @@ export function curvatureDrop(dx, dz, radius) {
 /**
  * The rigid drop (m) for a discrete object at world (worldX, worldZ) this frame: curvatureDrop of its
  * horizontal distance to the camera times uniforms.curvatureAmount; exactly 0 while that is 0.
- * ctx needs uniforms.curvatureAmount, uniforms.planetRadius and camera (the game ctx or a spawn
- * engine's ctx). Allocation-free.
+ * ctx is the game ctx or a spawn engine's ctx (uniforms.curvatureAmount, uniforms.planetRadius,
+ * camera). A ctx whose uniforms carry no curvature blend (the node labs' engine contexts) renders a
+ * flat world: the drop is 0. Allocation-free.
  */
 export function rigidCurvatureDrop(ctx, worldX, worldZ) {
-  const amount = ctx.uniforms.curvatureAmount.value;
+  const blend = ctx.uniforms.curvatureAmount;
+  const amount = blend === undefined ? 0 : blend.value;
   if (!(amount > 0)) return 0;
   const camera = ctx.camera.position;
   return curvatureDrop(worldX - camera.x, worldZ - camera.z, ctx.uniforms.planetRadius.value) * amount;
