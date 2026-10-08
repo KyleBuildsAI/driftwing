@@ -449,7 +449,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | not started |
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
 | 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
-| 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | in progress |
+| 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | in progress (branch complete, awaiting I2) |
 | 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | not started |
 | 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | not started |
 | P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | not started |
@@ -548,7 +548,26 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   `tools/lab/craft.mjs` (its catalog check accepted only the Phase 1 six: it now accepts every
   registered catalog module); `src/dev/testFlightScripts.js` (the AIRSHIP script, its SCRIPTS entry
   and SCRIPTED_CRAFT).
-- **Verification:** in progress (this file is updated when the runs finish).
+- **Verified 2026-10-08** (each once unless noted; the machine ran at about 91 % CPU from other
+  programs throughout):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 236/236 | built; no dev kit (craftTest, craftScenarios, testFlightScripts) in the V2 bundle | |
+  | `tools/lab/airship.mjs` 47/47: pressure height 2397 m, heaviness +/-262 kg, neutral 0.0 m in 60 s, static climb 3.07 / sink 3.17 m/s, static ceiling within 3 m, cruise 21.9 m/s at 0.43, top 30.3 m/s, 17 s to 15 m/s, 238 s engines-off coast, vectored climb 5.6 m/s, turn 2.2 deg/s, fins 1.9 % at 3 m/s, stern thruster 3.3 deg/s at rest, drift 9.3 m/s after 300 s, pendulum, 0 % stability, 100 % holds, autopilot, crab, ridge, cruise (3 sites, photo pace 13.6 m/s), landing, copilot, situate; step 16 B/tick over the shared calls, assists 0 B, autopilot 32 B/tick (look-ahead queries) | all pass | |
+  | Labs: craft 66, atmosphere 28, challenges 70, colliders 84, copilot 240, copilot-server 17, director 50, discovery 43, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden (identical), setpiece 47, settings 45, spawns 98, storage 54, structure 75, terrain 404, wingsuit 37, flight-lab 82, wind-engines 56 (55/56 on the first run, 56/56 on the rerun) | all pass | |
+  | water lab | 33/34: only `[cost] heightAt over the open ocean` 1.12 us against 1 us (machine load; no water code touched) | |
+  | audio lab | 188/191 and 189/191: thunder trigger 4.9-6.0 dB over the median against 6 (a recipe render, no recipe touched) and the WebGL2 doppler camera-cut check; the base commit 81594f2 failed the same WebGL2 doppler check (190/191) | |
+  | `run-harness --test craft --crafts airship` (general in both views, `airship-scenic-cruise` and `airship-vector-ballonet` in both views) | PASS 6/6 runs, 24/24 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0; the cruise visited 3 sites at 355 s (third) and 244 s (first) | PASS 6/6, 24/24, same; 3 sites at 355 s and 221 s |
+  | `run-harness --test 1 --seeds HARNESS-1,HARNESS-2 --crafts airship --seconds 20` | 0 NaN, 0 penetrations, 0/0, heap 8.99 MB, 4/4 runs, 8/8 manoeuvres; frames over 50 ms: 183 (14 attributed to systems, spread over spawns, camera, waypoints, birds: machine load) | same criteria pass, heap 4.37 MB; frames over 50 ms: 209 (28 to systems, spread over input, camera, terrain, flight, journal) |
+  | Built `dist-single/v2` smoke with the airship (switch, scenic cruise, gondola and pod views) and the built shell | 0/0, screenshots differ | 0/0, screenshots differ |
+
+- **Next:** I2 merges this branch in catalog order.
+- **Open issues:** the ability api has no event bus, so the cruise records its journal stats through
+  `systems.journal.recordStat` (no typed `journalStat` event); docs/controls.md (the airship's HOTAS
+  profile), docs/copilot-api.md (the three craft commands) and docs/architecture.md (model kind,
+  instrument, craftState fields) are Milestone O's; a stand-alone T.16000M has no default vector
+  binding (the TWCS rocker is the vector lever).
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
