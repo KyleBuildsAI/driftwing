@@ -506,6 +506,51 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   `flightState` craft fields of h.3; the picker shows the 14 craft in one strip until the picker
   branch regroups them.
 
+### Wave 2 - p3/craft-spaceplane
+
+- **Done** (spec Milestone E item 14, contract h; every file below is new unless marked):
+  - flight model: kind `spaceplane` (SimFixedWing + `src/flight/spaceplaneAero.js`, registered in
+    models.js): an air-augmented rocket (core 0.6 g in vacuum, ram-air augmentation with the mass
+    flow, fading past Mach 4-6, no fuel limit) tuned so a full-power 65 degree climb tops out at
+    115 km (50 degrees: 105 km, 80 degrees: 120 km); RCS on all three axes blended in as the dynamic
+    pressure falls (150 Pa .. 6 kPa), the yaw jets kept on at entry angles of attack, the pedals on
+    the yaw jets; wave drag to Mach 8; heating index rho V^3 / 9e6 gated by Mach 2.8-4.0 with a
+    2.5 s skin lag; re-entry buffet; the apogee prediction (powered while the thrust cannot hold
+    the climb, else ballistic); stall cues need air and stay quiet in the entry;
+  - flight control system `src/flight/spaceplaneFcs.js`: rate loops through the control power
+    (jets plus q x surfaces) with integrators; rate damping and coordination (0-50 %), rate
+    command with attitude hold, the AoA and G limiters and auto re-entry arming (50-100 %); the
+    pilot's attitude hold and auto re-entry switches at any level; the entry guidance (40 degrees
+    AoA, pilot bank, zero sideslip) and the hypersonic glide (14 degrees) handing back below Mach
+    1.5 or 20 km; the fixed-wing autopilot; a trim that leaves ballistic states alone;
+  - craft `src/craft/spaceplane.js`: procedural mesh (lifting body with the black heat-shield belly,
+    double delta, dorsal fin, bell nozzle, RCS ports) with animated elevons, body flap, split
+    rudder / speed brake, nozzle gimbal, gear; effects `src/render/spaceplaneEffects.js` (plume
+    tight in dense air and ballooning in vacuum, instanced RCS puffs, the plasma sheath on the skin
+    plus its wake); canopy cockpit with the space panel; abilities (auto re-entry, attitude hold),
+    the flight log (space crossings, apogees, the comms blackout and the `reentry` events, journal
+    stats, WREN's lines), copilot commands (`autoReentry`, `attitudeHold`, `apogee`, `mach`) and
+    status, journal stats (`spaceplaneApogee`, `spaceplaneMaxMach`, `spaceplaneSpaceFlights`,
+    `spaceplaneReentries`), situate (climb: 45 degrees, 250 m/s, full thrust), per-craft gamepad and
+    T.16000M bindings for attitude hold, the director profile above 20 km;
+  - audio family `rocket` (`src/audio/engines/rocket.js`): roar and crackle thinning with the air,
+    the structure-borne rumble that stays in the cockpit, RCS hiss / thump, the re-entry roar;
+  - instruments `mach`, `apogee`, `heating`, `rcs`;
+  - tests: `tools/lab/spaceplane.mjs` (24 checks), `?test=craft` scenarios `spaceplane-climb` and
+    `spaceplane-reentry` (continuity of camera-relative positions at every rebase, far-field holes
+    every frame above 11 km, readback probes in the handoff band and from space), the flight-test
+    script (`?test=1`) and the view-physics step file.
+- **Edits outside the craft's files:** single lines in craft/index.js, models.js, audio
+  engines/index.js, instruments/index.js, craftScenarios/index.js, events.js (`reentry` after
+  `viewChanged`); `abilityApi.bus` in FlightController.js; the comms-blackout hold in copilot.js;
+  `airflowBasis: 'equivalent'` in airflow.js; far-field root prefetch past the reach (farField.js);
+  the WebGL2 cockpit near plane above 12 km (cameraManager.js); contrails fade out in thin air
+  (fx.js); the craft lab's catalog check; testFlightScripts.js and view-physics.json.
+- **Verified:** see the table below (each once, both backends unless noted).
+- **Next:** I2 merges this branch in catalog order.
+- **Open issues:** none blocking; Milestone O documents the spaceplane's HOTAS profile and its
+  remote `flightState` fields (h.3: `apogee` is in `craftState`).
+
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
 | # | Presets | Branch | Status |

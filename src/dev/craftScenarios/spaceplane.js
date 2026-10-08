@@ -219,10 +219,13 @@ export default Object.freeze({
         let pitch = 0;
         const held = [];
         if (memo.handBackAt !== undefined) {
-          // The pilot takes her home: a 30 degree dive with the speed brake, rounding out near 3 km.
-          const target = altitude > 3800 ? -30 : -8;
+          // The pilot takes her home: a 30 degree dive with the speed brake, rounding out near 3 km
+          // (or 1.5 km above high ground), then holding a shallow descent clear of the terrain.
+          const agl = api.agl();
+          const diving = altitude > 3800 && agl > 1500;
+          const target = diving ? -30 : agl < 900 ? 6 : -4;
           pitch = Math.min(0.6, Math.max(-0.6, (target - flightPath(api.flight)) * 0.045));
-          if (altitude > 3800) held.push('airbrake');
+          if (diving) held.push('airbrake');
         }
         return { throttle: 0, roll: 0, yaw: 0, pitch, actions, held };
       },
@@ -234,7 +237,7 @@ export default Object.freeze({
         { id: 'blackout', label: 'the comms blackout: reentry heating, blackout and clear', test: (api) => api.memo.sawBlackout === true && api.events.count('reentry') >= 3 && api.events.last('reentry')?.phase === 'clear' && api.craftState.commsBlackout === false },
         { id: 'silent', label: 'WREN stays silent in the blackout', from: 40, test: (api) => api.memo.sawBlackout === true && api.memo.blackoutSpeech === '' },
         { id: 'glide', label: 'the hypersonic glide, then the hand-back', test: (api) => api.memo.sawGlide === true && api.memo.handBackAt !== undefined },
-        { id: 'down', label: 're-enters to 3 km', test: (api) => api.flight.altitude < 3000 },
+        { id: 'down', label: 're-enters to 3 km (or under 1.2 km above high ground)', test: (api) => api.flight.altitude < 3000 || api.agl() < 1200 },
         { id: 'load', label: 'the load stays inside 6.5 g', from: 400, test: (api) => api.memo.maxLoad <= 6.5 },
         { id: 'rebases', label: 'the render origin rebased on the way down (10 or more)', test: (api) => api.events.count('originRebased') >= 10 },
         continuityCheck,
