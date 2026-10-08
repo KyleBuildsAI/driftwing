@@ -457,16 +457,35 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 ### Wave 2 - p3/craft-framework
 
-- **Done:** the catalog (`src/craft/registry.js`): the eight Phase 3 entries with their picker
-  silhouettes, `group` on every entry, `CRAFT_GROUPS` / `CRAFT_GROUP_LABELS`, `registry.groups()`,
-  `registry.entry(id)`, `createCraftRegistry(catalog, groups)` for labs, and the optional-field
-  validation of contract h.2 (abilities, inputProfile values, limits, custom cockpit, skins,
-  bindings, collision, situate, copilot, journal, directorProfile, faunaThreat, capabilities);
-  settings v6 (`CRAFT_IDS` with 14 ids, `craftFavorites` with ten slots, `craftSkins`, the
-  migration: new craft at their defaults, at 50 % when the one-time HOTAS default was applied);
-  `tools/lab/settings.mjs` 45/45.
-- **Next:** favorites actions and bindings, the controller hooks (situate, abilities, craftCommand,
-  skins), custom cockpits, the copilot action, the journal, `?test=craft`, docs.
+- **Done** (contract h.9; what was built, beyond the letter of h, is in contract h.10):
+  - catalog (`src/craft/registry.js`): the eight Phase 3 entries with picker silhouettes, `group`
+    on every entry, `CRAFT_GROUPS` / `CRAFT_GROUP_LABELS`, `registry.groups()`, `entry(id)`,
+    `createCraftRegistry(catalog, groups)` (labs) and the optional-field validation of h.2;
+  - settings v6: `CRAFT_IDS` (14), `craftFavorites` (ten slots, a list key), `craftSkins`, the
+    migration (new craft at their defaults, at 50 % when the HOTAS default had run);
+  - actions: `craftSelect1-10` ("Favorite 1-10", keys 1-9 and 0), `craftAbilityAlt` (Shift+Space,
+    TWCS button 10; no gamepad default: every button is taken); favorites and cycling in
+    `performAction`; a module's `bindings` as per-craft defaults in the binding store;
+  - the controller: `situate(situation, api)` with seven placement modes and `flight.startAt`,
+    `input.presetThrottle`, both ability slots and the ability api (`isHeld`, `controls`,
+    `colliders`, `waterQuery`, `wind`, `setCraftState`, `emitTrail(..., 'smokeColor')`, ...),
+    `runCraftCommand` / `getCraftCommands` / `getCraftStatus`, skins (`buildMesh(ctx, { skin })`,
+    mesh-only rebuild), `visual.craftState`, `env.windField`, `state.flight.ceiling`,
+    `limits.waterLanding`;
+  - custom cockpits (`style: 'custom'`, `build(builder, spec, THREE)`);
+  - the copilot: `craftCommand` (schema, local phrase matching with the capture group as the value,
+    the executor, `flightState.craftCommands` / `craftStatus`, "systems check"), the reference
+    server and docs/copilot-api.md;
+  - the journal: records v2 with `craftTime` per craft, `journalStatInfo` for module stats;
+  - `?test=craft` (`src/dev/craftTest.js`, `src/dev/craftScenarios/` with a file per existing craft),
+    `run-harness --test craft`, npm `test:craft` / `test:craft:webgl`, `lab:craft`;
+  - help panel and controls panel follow the favorites; docs: architecture.md ("How to add a
+    craft", the module, controller and settings tables, the test tables), controls.md, the contract's
+    h.10.
+- **Labs** (new or extended): `tools/lab/craft.mjs` 66/66 (new), settings 45/45 (migrateV5,
+  favorites), copilot 240/240 (craftCommands), discovery 43/43 (craftTime).
+- **Next:** I2 merges this branch alone; then the eight craft branches and the picker / director
+  branch start from it.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
