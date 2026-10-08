@@ -66,7 +66,7 @@ import { WORLD_OPTIONS } from '../../src/core/config.js';
 import { createWorldGen } from '../../src/world/worldgen.js';
 import { createWaterQuery } from '../../src/world/waterQuery.js';
 import { WATER_FIXTURES } from '../../src/dev/waterFixtures.js';
-import { prevailingWindDirection } from '../../src/env/WindField.js';
+import { createWindField, prevailingWindDirection } from '../../src/env/WindField.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 const ONLY = (process.argv.find((flag) => flag.startsWith('--only=')) ?? '').slice(7);
@@ -439,8 +439,9 @@ function testHump() {
 }
 
 /** A water takeoff at full power, flaps 2: returns the liftoff and what the run saw. */
-function waterTakeoff({ assists, stick = 0, rotate = 0.15, swell = null }) {
-  const rig = createRig({ assists, swell });
+function waterTakeoff({ assists, stick = 0, rotate = 0.15, swell = null, headwind = 0 }) {
+  // The takeoff runs north (-z): a headwind blows from the north (+z).
+  const rig = createRig({ assists, swell, wind: headwind ? new THREE.Vector3(0, 0, headwind) : null });
   rig.afloat();
   rig.run(3);
   rig.selectFlaps(2);
@@ -483,6 +484,11 @@ function testTakeoff() {
     check('takeoff', `${label}: liftoff near 1.05-1.25 x the flaps-2 stall (24-30 m/s)`, liftoff.speed > 24 && liftoff.speed < 30, `${round(liftoff.speed, 1)} m/s`);
     check('takeoff', `${label}: the water run is under 330 m (a lake's length)`, liftoff.distance < 330, `${round(liftoff.distance, 0)} m`);
     check('takeoff', `${label}: spray off the floats, no strikes, no runaway porpoise`, run.maxSpray > 0.3 && run.strikes === 0 && run.maxPorpoise < 0.5, `spray ${round(run.maxSpray, 2)}, strikes ${run.strikes}, porpoise ${round(run.maxPorpoise, 2)}`);
+  }
+  for (const headwind of [6, 10]) {
+    const run = waterTakeoff({ assists: 1, headwind });
+    const liftoff = run.liftoff;
+    check('takeoff', `a ${headwind} m/s headwind at 100 % assists: airborne at the liftoff airspeed in a shorter run`, liftoff !== null && liftoff.speed < 30 && liftoff.distance < 300, liftoff ? `${round(liftoff.distance, 0)} m, ${round(liftoff.speed * KMH, 0)} km/h airspeed, ${round(liftoff.time, 1)} s` : 'never lifted off');
   }
 }
 
@@ -867,6 +873,12 @@ function createGame(waterWorld = null, steadyWind = null) {
     },
     registerPrewarm() {},
   };
+  if (steadyWind && steadyWind.field) {
+    // The game's own WindField (gusts, ridge lift, thermals) at the world's prevailing wind.
+    ctx.uniforms.windDirection = uniform(prevailingWindDirection(waterWorld.world));
+    ctx.uniforms.windStrength = uniform(steadyWind.strength);
+    ctx.wind = createWindField({ world: waterWorld.world, uniforms: ctx.uniforms, state, bus });
+  }
   const flight = createFlightController(ctx);
   ctx.systems.flight = flight;
   const game = { flight, state, controls, events, ctx, settings: ctx.settings, sprays, bus };
@@ -1028,7 +1040,7 @@ function createWaterWorld() {
  */
 function flyScenario(scenario, waterWorld, wind) {
   const windVector = new THREE.Vector3(-Math.sin(wind.fromDegrees * DEG), 0, Math.cos(wind.fromDegrees * DEG)).multiplyScalar(wind.speed);
-  const game = createGame(waterWorld, { vel: windVector, speed: wind.speed, fromDegrees: wind.fromDegrees });
+  const game = createGame(waterWorld, wind.field ? wind : { vel: windVector, speed: wind.speed, fromDegrees: wind.fromDegrees });
   game.settings.set('craft', 'seaplane');
   game.run(0.5);
   const start = scenario.start;
@@ -1074,7 +1086,7 @@ function flyScenario(scenario, waterWorld, wind) {
     const controls = scenario.script(run.t, api);
     for (const axis of axes) if (Number.isFinite(controls[axis])) lab.controls[axis] = controls[axis];
     for (const action of controls.actions ?? []) lab.controls.actions.add(action);
-    if (process.env.SEA_DEBUG && Math.round(run.t * 60) % 60 === 0) log('   ', scenario.id, round(run.t, 0), memo.phase, 'x', round(player.position.x, 0), 'z', round(player.position.z, 0), 'agl', round(api.agl(), 1), 'v', round(game.state.flight.airspeed, 1), 'vs', round(game.state.flight.verticalSpeed, 1), 'hdg', round(game.state.flight.heading, 0), 'thr', round(game.state.flight.throttle, 2), 'onG', game.state.flight.onGround, memo.plan ? `plan ${memo.plan.heading} ahead ${memo.plan.ahead} behind ${memo.plan.behind} rim ${round(memo.plan.rim, 1)} side ${memo.plan.side}` : '');
+    if (process.env.SEA_DEBUG && Math.round(run.t * 60) % (Number(process.env.SEA_DEBUG) > 1 ? 15 : 60) === 0) log('   ', scenario.id, round(run.t, 2), memo.phase, 'x', round(player.position.x, 0), 'z', round(player.position.z, 0), 'agl', round(api.agl(), 1), 'v', round(game.state.flight.airspeed, 1), 'vs', round(game.state.flight.verticalSpeed, 1), 'hdg', round(game.state.flight.heading, 0), 'roll', round(game.state.flight.roll, 0), 'thr', round(game.state.flight.throttle, 2), 'onG', game.state.flight.onGround, 'u', game.state.flight.craftState.waterSpeed, 'trim', game.state.flight.craftState.trim, 'porp', game.state.flight.craftState.porpoise, 'step', game.state.flight.craftState.onStep, 'turb', round(game.state.flight.turbulence, 2), 'pitchCmd', round(game.state.flight.trim, 2), memo.plan ? `plan ${memo.plan.heading} ahead ${memo.plan.ahead} behind ${memo.plan.behind} obstruction ${round(memo.plan.obstruction, 1)} side ${memo.plan.side}` : '');
     scenario.checks.forEach((check, index) => {
       const state = states[index];
       const from = Number.isFinite(check.from) ? check.from : 0;
@@ -1094,23 +1106,35 @@ function flyScenario(scenario, waterWorld, wind) {
   };
 }
 
-/** Steady winds the dry-run flies in: calm, 6 m/s from two directions and 9 m/s from a third. */
+/**
+ * Winds the dry-run flies in: the game's own WindField (gusts, ridge lift, thermals, lee sink) at the
+ * game's strength and at 1.2 x, calm, steady 6 m/s from two directions and 9 m/s from a third.
+ */
 const SCENARIO_WINDS = Object.freeze([
+  Object.freeze({ field: true, strength: 1 }),
+  Object.freeze({ field: true, strength: 1.2 }),
   Object.freeze({ speed: 0, fromDegrees: 0 }),
   Object.freeze({ speed: 6, fromDegrees: 40 }),
   Object.freeze({ speed: 6, fromDegrees: 230 }),
   Object.freeze({ speed: 9, fromDegrees: 130 }),
 ]);
 
+/** A dry-run wind as the checks name it (and as SEA_ONLY=id:label picks one). */
+function windLabel(wind) {
+  return wind.field ? `WindField x${wind.strength}` : `${wind.speed} m/s from ${wind.fromDegrees}`;
+}
+
 function testScenarios() {
-  const waterWorld = createWaterWorld();
   for (const scenario of seaplaneScenarios.scenarios) {
     for (const wind of SCENARIO_WINDS) {
-      if (process.env.SEA_ONLY && process.env.SEA_ONLY !== `${scenario.id}:${wind.fromDegrees}:${wind.speed}`) continue;
-      const result = flyScenario(scenario, waterWorld, wind);
+      const label = windLabel(wind);
+      if (process.env.SEA_ONLY && !process.env.SEA_ONLY.split(',').includes(`${scenario.id}:${label}`)) continue;
+      // A fresh world per flight: the world's height caches fill in query order, so a shared one
+      // makes each flight depend on the ones before it.
+      const result = flyScenario(scenario, createWaterWorld(), wind);
       const failed = result.checks.filter((check) => !check.passed).map((check) => check.id);
       const crashesOk = scenario.allowCrash || result.crashes.length === 0;
-      check('scenarios', `${scenario.id} (wind ${wind.speed} m/s from ${wind.fromDegrees}): every check passes${scenario.allowCrash ? '' : ' with no soft crash'}`, failed.length === 0 && crashesOk, `failed [${failed.join(', ')}], crashes ${JSON.stringify(result.crashes.map((crash) => crash.reason))}, phase ${result.memo.phase}`);
+      check('scenarios', `${scenario.id} (${label}): every check passes${scenario.allowCrash ? '' : ' with no soft crash'}`, failed.length === 0 && crashesOk, `failed [${failed.join(', ')}], crashes ${JSON.stringify(result.crashes.map((crash) => `${crash.reason} ${round(crash.impactSpeed, 1)}`))}, phase ${result.memo.phase}`);
     }
   }
 }
