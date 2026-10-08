@@ -39,7 +39,9 @@ import { WORLD_OPTIONS } from '../../src/core/config.js';
 import { createWorldGen } from '../../src/world/worldgen.js';
 import { createWaterQuery, createOceanWaves, oceanHeight, oceanSample, oceanSwellScale, OCEAN_WAVES, WAVE_TILE } from '../../src/world/waterQuery.js';
 import { waterOutlineContains } from '../../src/world/waters.js';
-import { createVegetationColliders } from '../../src/world/vegetationColliders.js';
+import { createVegetationColliders, registerVegetationColliders } from '../../src/world/vegetationColliders.js';
+import { createColliderWorld } from '../../src/world/colliders.js';
+import { createGroundSurfaces } from '../../src/world/groundSurfaces.js';
 import { VEGETATION_IDS } from '../../src/world/vegetationSpecies.js';
 import { WATER_FIXTURES } from '../../src/dev/waterFixtures.js';
 import { createMapTileGenerator, mapTileCacheTag, MAP_TILE_VERSION } from '../../src/world/mapTileGen.js';
@@ -393,8 +395,21 @@ function testVegetation() {
   const orphans = trunks.filter((spec) => !drawnPoints.some(([x, z]) => Math.abs(x - spec.center.x) < 0.15 && Math.abs(z - spec.center.z) < 0.15)).length;
   check('vegetation', 'every trunk collider stands under a drawn redwood, even at the lowest vegetation density', orphans === 0, `${orphans} without a tree`);
   const perches = [];
-  providers[0].perchProvider.near(redwoods.x, 80, redwoods.z, 700, (point) => perches.push(point));
+  providers[0].perchProvider.near(redwoods.x, 80, redwoods.z, 700, (x, y, z, kind, id) => perches.push({ x, y, z, kind, id }));
   check('vegetation', 'perches: the redwood tops (60-110 m above their base)', perches.some((point) => point.id.startsWith('perch:redwood') && point.y - world.groundHeight(point.x, point.z) > 55), `${perches.length} perches`);
+  // The same providers registered with the real collider service (contract b.2, d.4).
+  const service = createColliderWorld({ groundSurfaces: createGroundSurfaces() });
+  const unregister = registerVegetationColliders(service, world);
+  const trunk = trunks[0];
+  const servicePerches = [];
+  service.perchesNear(redwoods.x, 80, redwoods.z, 700, (x, y, z, kind, id) => servicePerches.push({ x, y, z, kind, id }));
+  const from = { x: trunk.center.x - 40, y: trunk.center.y, z: trunk.center.z };
+  const to = { x: trunk.center.x + 40, y: trunk.center.y, z: trunk.center.z };
+  const hit = { t: 0, point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 }, id: '', owner: '', tags: null, velocity: null };
+  const struck = service.sweepSphere(from, to, 0.5, { sensors: false }, hit);
+  check('vegetation', 'with the real collider service: a sweep into a redwood hits its trunk, and perchesNear lists the tree tops', struck && hit.owner === 'vegetation' && hit.id === trunk.id && servicePerches.some((point) => point.kind === 'tree' && point.id.startsWith('perch:redwood')), `hit ${struck ? hit.id : 'none'}, ${servicePerches.length} perches`);
+  unregister();
+  check('vegetation', 'unregistering removes the trunk provider and the perch provider', service.providerCount === 0 && service.getStats().perchProviders === 0, `${service.providerCount} providers, ${service.getStats().perchProviders} perch providers`);
   // vegetationNear equals the chunk scatter (full density) in one chunk.
   const cx = Math.floor(redwoods.x / 256);
   const cz = Math.floor(redwoods.z / 256);

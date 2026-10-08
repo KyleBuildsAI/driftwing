@@ -132,7 +132,7 @@ export function createVegetationColliders(world) {
 
   const perchProvider = {
     id: 'vegetation',
-    /** Contract b.2: visit(point) for every tree-top perch within radius of (x, y, z). */
+    /** Contract b.2 (colliders.perchesNear): visit(x, y, z, kind, sourceId) for every tree-top perch within radius. */
     near(x, y, z, radius, visit) {
       const firstX = Math.floor((x - radius) / CELL);
       const lastX = Math.floor((x + radius) / CELL);
@@ -146,7 +146,7 @@ export function createVegetationColliders(world) {
             const dx = point.x - x;
             const dy = point.y - y;
             const dz = point.z - z;
-            if (dx * dx + dy * dy + dz * dz <= radius * radius) visit(point);
+            if (dx * dx + dy * dy + dz * dz <= radius * radius) visit(point.x, point.y, point.z, point.kind, point.id);
           }
         }
       }
