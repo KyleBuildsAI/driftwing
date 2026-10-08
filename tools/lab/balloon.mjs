@@ -35,7 +35,8 @@
 //                its stats
 //   bounce       a pilot's descent at 2.5 m/s into the ground in a 5 m/s wind: the basket bounces,
 //                drags and the rig leans, no soft crash (sink and strike under the craft limits);
-//                the vent stops it
+//                the vent stops it and the emptied envelope lies down around a standing basket, with
+//                no strike as it collapses
 //   water        a basket touchdown on the sea floats (no penetration, floating contact)
 //   hillside     0 %: drifting at 6 m/s into a steep slope, the envelope and basket brush it: no
 //                strike over the craft's limit and no contact sinks in a metre (the soft crash's)
@@ -401,6 +402,7 @@ function bounceTest() {
   let leaned = 0;
   let maxSink = 0;
   let vented = false;
+  let strikeMax = 0;
   rig.run(150, (current) => {
     // Hold about 2.5 m/s down until the first contact (the envelope cooled by the vent), then let it bounce and drag.
     if (firstContact === null) {
@@ -415,6 +417,7 @@ function bounceTest() {
       current.held.delete('craftAbilityAlt');
     }
     const report = current.model.contact;
+    if (report.bodyStrike) strikeMax = Math.max(strikeMax, report.bodyStrike.speed);
     if (firstContact === null && report.onGround) firstContact = current.time;
     if (firstContact !== null && !report.onGround && current.data.radarAltitude > 0.3) bounced = true;
     if (report.onGround && current.data.groundSpeed > 1) dragged += DT;
@@ -429,6 +432,8 @@ function bounceTest() {
   const strike = rig.model.contact.bodyStrike;
   record('no soft crash (sink under the limit)', touchdowns.reduce((worst, landing) => Math.max(worst, landing.sinkRate), 0), balloon.limits.crashSinkRate, { unit: 'm/s', compare: 'max', decimals: 2, note: strike ? `strike ${strike.speed.toFixed(1)} m/s` : 'no strike' });
   record('the vent stops it', rig.data.groundSpeed, 0.4, { unit: 'm/s', compare: 'max', decimals: 2, note: `inflation ${rig.data.inflation.toFixed(2)}` });
+  record('the emptied envelope lies down, the basket stands', rig.data.tilt, 10, { unit: 'deg', compare: 'max', note: `${rig.events.landed.length} graded touchdowns` });
+  record('nothing struck while it collapsed', strikeMax, balloon.limits.bodyStrikeSpeed, { unit: 'm/s', compare: 'max', decimals: 2 });
 }
 
 function waterTest() {

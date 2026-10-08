@@ -75,6 +75,12 @@ const GROUND_START_DEFICIT = 25;
 /** The envelope never cools below the air by more than this (K, numerical floor). */
 const BELOW_AMBIENT_LIMIT = 2;
 const MAX_SPEED = 70;
+/**
+ * The collapse on the ground: the fabric's contacts drop out below CONTACTS_OFF inflation (back above
+ * CONTACTS_ON), and below UPRIGHT_FROM an upright spring (N m/rad) and damper (N m s/rad) take over
+ * from the buoyancy that held the rig up.
+ */
+const COLLAPSE = Object.freeze({ CONTACTS_OFF: 0.4, CONTACTS_ON: 0.6, UPRIGHT_FROM: 0.7, UPRIGHT_STIFFNESS: 400000, UPRIGHT_DAMPING: 250000 });
 /** The quick-release line of a ground start: spring (N/m) and damping (N s/m) at the basket, released at this net lift (kg). */
 const TETHER = Object.freeze({ SPRING: 20000, DAMPING: 9000, RELEASE_LIFT: 10 });
 /** The burner lever counts after a reset once it moves this far, or when it sits at or below LEVER_IDLE. */
@@ -489,7 +495,11 @@ export function createSimBalloonModel({ profile, craft, bus, craftState: initial
     vent: 0,
     rotation: 0,
   };
-  const groundContact = createGroundContact(profile.contacts, { centerOfMass: origin, floats: true, mass: structureMass + geometry.volume });
+  const contactMass = structureMass + geometry.volume;
+  const inflatedContact = createGroundContact(profile.contacts, { centerOfMass: origin, floats: true, mass: contactMass });
+  // A collapsed envelope lies on the ground as loose fabric: only the basket's points touch then.
+  const collapsedContact = createGroundContact(profile.contacts.filter((contact) => contact.kind !== 'body'), { centerOfMass: origin, floats: true, mass: contactMass });
+  let groundContact = inflatedContact;
   const landing = createLandingMonitor({ bus, craftId, limits });
   /** What the assists and the autopilot command this tick (cleared after every step). */
   const autoControls = { burner: 0, vent: 0, burnerLimit: 1 };
@@ -635,6 +645,10 @@ export function createSimBalloonModel({ profile, craft, bus, craftState: initial
     if (envelope.burner > 0.2) envelope.inflation += (envelope.burner * dt) / profile.deflation.inflateSeconds;
     else if (!grounded) envelope.inflation += dt / profile.deflation.inflateSeconds;
     envelope.inflation = clamp(envelope.inflation, MIN_INFLATION, 1);
+    // The fabric's contact points count only while the envelope stands (with some hysteresis).
+    const collapsed = groundContact === collapsedContact;
+    if (!collapsed && envelope.inflation < COLLAPSE.CONTACTS_OFF) switchContact(collapsedContact);
+    else if (collapsed && envelope.inflation > COLLAPSE.CONTACTS_ON) switchContact(inflatedContact);
 
     // What the controllers need: the full-vent loss, the lift per kelvin, the equilibrium.
     flightData.heatCapacity = capacity;
@@ -643,6 +657,13 @@ export function createSimBalloonModel({ profile, craft, bus, craftState: initial
     flightData.ventPower = ventMassFlow(ventProfile.area, crownHeight, rho, rhoHot, ventProfile.discharge) * AIR_CP * Math.max(excess, 0);
     flightData.liftPerKelvin = volume > 0 ? (rho * ambient * volume * GRAVITY) / (envelope.temperature * envelope.temperature) : 0;
     flightData.equilibrium = volume > 0 ? equilibriumTemperature(rho, ambient, volume, structureMass) : Infinity;
+  }
+
+  /** Swaps the contact set (the basket stays where it is: no touchdown is reported for the swap). */
+  function switchContact(next) {
+    const onGround = groundContact.report.onGround;
+    groundContact = next;
+    groundContact.reset(onGround);
   }
 
   // ---- Rotation ------------------------------------------------------------------------------------
@@ -659,6 +680,16 @@ export function createSimBalloonModel({ profile, craft, bus, craftState: initial
     const jet = 2 * rotationProfile.discharge * rotationProfile.area * pressure;
     torque.y -= envelope.rotation * jet * rotationArm;
     torque.y += turbulence * profile.damping.turbulentYaw * noise(time, 0.7, 0.05);
+    // A collapsing envelope no longer holds the rig up from above: the basket stands on its own
+    // (an upright spring and damper growing as the envelope empties), the fabric lies around it.
+    const slack = 1 - smooth01(envelope.inflation / COLLAPSE.UPRIGHT_FROM);
+    if (slack > 0) {
+      up.set(0, 1, 0).applyQuaternion(state.quaternion);
+      torqueWorld.crossVectors(up, WORLD_UP).multiplyScalar(COLLAPSE.UPRIGHT_STIFFNESS * slack);
+      torque.add(torqueWorld.applyQuaternion(inverseQuaternion));
+      torque.x -= COLLAPSE.UPRIGHT_DAMPING * slack * omega.x;
+      torque.z -= COLLAPSE.UPRIGHT_DAMPING * slack * omega.z;
+    }
     // Air damping.
     const damping = profile.damping;
     torque.x -= damping.tilt * omega.x;
@@ -889,7 +920,9 @@ export function createSimBalloonModel({ profile, craft, bus, craftState: initial
     autoControls.burner = 0;
     autoControls.vent = 0;
     autoControls.burnerLimit = 1;
+    groundContact = inflatedContact;
     groundContact.reset(onGround);
+    collapsedContact.reset(onGround);
     landing.reset(onGround);
     startFlightRecord();
     if (!onGround) flight.maxAltitude = state.position.y;
@@ -954,6 +987,7 @@ export function createSimBalloonModel({ profile, craft, bus, craftState: initial
       tether: { ...tether },
       lever: [leverBaseline, leverArmed ? 1 : 0],
       contact: groundContact.snapshot(),
+      collapsed: groundContact === collapsedContact,
       landing: landing.snapshot(),
     };
   }
@@ -974,6 +1008,7 @@ export function createSimBalloonModel({ profile, craft, bus, craftState: initial
       leverBaseline = data.lever[0];
       leverArmed = data.lever[1] === 1;
     }
+    groundContact = data.collapsed === true ? collapsedContact : inflatedContact;
     groundContact.restore(data.contact);
     landing.restore(data.landing);
     writtenTemperature = NaN;
@@ -1018,8 +1053,10 @@ export function createSimBalloonModel({ profile, craft, bus, craftState: initial
     dispose() {
       // Put away mid-flight: the flight so far still counts in the journal.
       if (!groundContact.report.onGround && flight.airborneSeconds > 60) emitFlightStats(false);
-      groundContact.report.touchdown = null;
-      groundContact.report.bodyStrike = null;
+      for (const contact of [inflatedContact, collapsedContact]) {
+        contact.report.touchdown = null;
+        contact.report.bodyStrike = null;
+      }
       if (craftState) {
         craftState.burnerHeld = false;
         craftState.ventHeld = false;
