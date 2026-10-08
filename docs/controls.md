@@ -83,7 +83,7 @@ a few seconds; move the pointer to the top-left corner to bring it back. From V2
 | View forward (cockpit) / back (chase) | Numpad 8 / Numpad 2 |
 | Look left / right 90 deg | Numpad 4 / Numpad 6 |
 | Recenter view | Numpad 5 |
-| Craft favorites 1-10 (craftSelect1-10; by default glider, bush plane, jet, helicopter, wingsuit, FPV drone, aerobatic, seaplane, eagle, spaceplane) | 1-9, 0 |
+| Craft favorites 1-10 (craftSelect1-10; by default glider, bush plane, jet, helicopter, wingsuit, FPV drone, aerobatic, seaplane, eagle, spaceplane; assign them in the craft picker's roster: the grid button at the end of the picker, or right-click a craft, then drag a craft onto a number or pick its key) | 1-9, 0 |
 | Next / previous favorite (skips empty slots and craft not installed yet) | ] / [ |
 | Autopilot | O |
 | Time of day forward / back | T / Shift+T |

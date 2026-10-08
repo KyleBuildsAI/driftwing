@@ -816,6 +816,12 @@ export default Object.freeze({
   // true: counts toward the limit of 2 heavy spawns and needs a `lure`. Keep false unless the spawn
   // is big enough to be seen from 30 km.
   heavy: false,
+  // Optional: what the director's craft weighting favours (contract i.2): water | lake | coast |
+  // thermal | perch | murmuration | celestial | farLure (heavy, with a lure) | calm | slow |
+  // spectacle | challenge | night | snow | desert | forest. A seaplane favours water and lake, an
+  // eagle thermal, perch and murmuration, a spaceplane above 20 km celestial and farLure, a balloon
+  // calm, slow and spectacle.
+  tags: ['spectacle'],
   // Events only: deterministic candidates. cellSize (m): one roll per cell and bucket; bucketSeconds:
   // how long a candidate stays put; chance: the probability per cell and bucket (0 < chance <= 1).
   candidates: { cellSize: 5000, bucketSeconds: 450, chance: 0.4 },
@@ -908,6 +914,8 @@ export default Object.freeze({
   // A heavy site gets a FAR lure. It holds a heavy slot while it exists, or with an activeState
   // only while that state runs.
   heavy: false,
+  // Optional: the craft weighting's tags (see the event template).
+  tags: ['perch', 'spectacle'],
   // Sites only: rolled once per 2 km cell with hash(seed, cellX, cellZ, id). chance: per cell after
   // the filters. minSpacing (m): between two sites of this preset. biomes: the dominant biome from
   // the terrain's own biome function (null = any). surface: land | water | coast | any. Optional
@@ -1001,11 +1009,66 @@ export default Object.freeze({
 | `activeState` | site | optional | `{ duration: [min, max] }`: a dormant site the director wakes | director, SpawnManager |
 | `cooldown` | both | optional | seconds before it may run again | director |
 | `anchor` | event | optional | `{ seek: 'peak', radius, align: 'downwind' }` | SpawnManager |
+| `tags` | both | optional | distinct names from `PRESET_TAGS` (schema.js): the craft weighting's vocabulary | director (contract i.2) |
+| `combo` | event | optional, legendary only | `{ preconditions?, members, exclusive?, heavySlots? }` ([Combos](#combos-legendary-presets-92-97-99-and-100)) | director (contract i.3) |
+| `override` | event | optional, not with `combo` | `{ kind: bloodMoon \| midnightSun, nightChance, region: null \| { biomes, blendKm } }` ([Global overrides](#global-overrides-the-blood-moon-and-the-midnight-sun)) | director, sky (contract i.4) |
 
 Any other top-level field is refused as a typo. A preset must be frozen
 (`export default Object.freeze({ ... })`) and pure data: it may import only other pure-data modules
 (the existing presets import `structureStamps` from `src/spawns/engines/structure/stamps.js`), because
 the terrain worker imports the preset list to place sites and apply stamps without messaging.
+
+### Combos (legendary presets 92-97, 99 and 100)
+
+A combo is a legendary event whose `combo` block names the presets it brings together. The director
+schedules it as a legendary candidate whose preconditions all hold at the candidate, starts it only
+when the budgets admit every member at once, and places the members deterministically around it
+([architecture.md](architecture.md#event-director-srcspawnsdirectorjs)):
+
+```js
+combo: {
+  // All optional; each must hold at the candidate. siteActive: a live active state of one of these
+  // site presets within near.radius (else 20 km). near: landmarks and / or sites within radius (m);
+  // the candidate moves onto the nearest landmark, else the site.
+  preconditions: { biomes: ['snow'], timeOfDay: ['night'], weather: ['storm'], siteActive: ['volcano'],
+                   near: { landmarks: ['monoliths'], sites: ['crystalSpires'], radius: 6000 } },
+  // Event presets of the list (not combos or overrides), in order. The anchor (at most one) stands at
+  // the candidate; every other member needs a place: distance (m) on bearing (degrees from the line
+  // of sight: 0 is straight beyond the anchor as the player sees it), moved by up to jitter (m).
+  // delay (s, up to 600) starts it later; its budget share stays reserved meanwhile.
+  members: [{ presetId: 'meteorShower', role: 'anchor' }, { presetId: 'comet', place: { bearing: 30, distance: 4000, jitter: 600 }, delay: 20 }],
+  exclusive: true,   // no other legendary while it runs
+  heavySlots: 2,     // heavy slots it needs at once (0-2; at least its heavy members)
+},
+```
+
+The combo's own preset (its engines) starts at the candidate too; the combo and its members carry
+the combo id as `parent` on their SpawnManager records, the log lists the combo with its member ids
+in order, and `comboStarted` fires. F9's Spawn button forces a combo by day or anywhere: the
+preconditions are skipped (the manual check of a legendary combo). A set piece (the storm chase) is
+the other way to orchestrate presets: its own timeline starts and steers its children.
+
+### Global overrides (the blood moon and the midnight sun)
+
+A preset with an `override` block is never a director candidate. Its schedule is per night: night n
+(noon to noon) is active when hash(seed, n, id) < `nightChance`, so roughly one night in
+1 / `nightChance` has it, the same nights for everyone on the seed. On an active night its weight at
+the player eases in through the evening (while the sun is still well up) and out after the morning,
+times the region weight: 1 everywhere for `region: null`, else 1 over the named biomes, fading to 0
+over `blendKm` beyond them. Snow patches in this world are 1.5-8 km across, so a midnight sun keeps
+`blendKm` to a few km (20 km reaches nearly the whole world).
+
+```js
+override: { kind: 'bloodMoon', nightChance: 0.04, region: null },
+override: { kind: 'midnightSun', nightChance: 0.05, region: { biomes: ['snow'], blendKm: 4 } },
+```
+
+The director drives the sky: the blood moon reddens the moon (disc, halo and moon light) and
+darkens the night; the midnight sun bends the sun's path so it skims the horizon, 1.5 degrees up at
+midnight, and `state.time` (the night factor, the labels, the thermals, the time-of-day filters)
+follows it. The preset's own engines start once per night from half weight (its discovery and
+journal entry) and end with the override; `globalOverride` fires on start, end and half weight. F9's
+Spawn button schedules the override on the current night (set the time to night to see it).
 
 ### Engine reference pages
 

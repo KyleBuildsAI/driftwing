@@ -287,7 +287,8 @@ system, and then starts the frame loop.
 | --- | --- |
 | `index.js` | the `spawns` system: the SpawnManager, the engine registry, the site feed (`world.placement`, or `setSiteFeed`), the event director it creates and updates, and in dev builds the `debug` API |
 | `spawnManager.js` | activation within the budgets, LOD tiers with hysteresis, lures, lifetimes and the despawn rule, discovery, memory accounting, leak clean-up, stats (below) |
-| `director.js` | the event director (2 Hz): pacing, rarity, cooldowns, budgets, filters, lifetimes, despawn, load shedding, `getNearby`, `getState`, the activation log; `createGameDirector(ctx, ...)` wires it to the game |
+| `director.js` | the event director (2 Hz): pacing, rarity, cooldowns, budgets, filters, lifetimes, despawn, load shedding, the ground track, the craft weighting, combos, the global overrides' wiring, `getNearby`, `getState`, the activation log; `createGameDirector(ctx, ...)` wires it to the game, `createSkyOverrideSink(sky)` applies the overrides to the sky |
+| `overrides.js` | pure: the global overrides' per-night schedule, the night window, the regional blend and the midnight sun's bend (contract i.4) |
 | `candidates.js` | pure: deterministic event candidates from hash(seed, cellX, cellZ, timeBucket, presetId), the pooled candidate records, the ahead score and the candidates' total order |
 | `weather.js` | the pure regional weather model (clear -> building -> storm -> clearing per region cell and time bucket) and the `weather` system that drives the sky modifier and emits `weatherChanged` |
 | `engineRegistry.js` | the engine interface check, `ENGINE_NAMES`, `LOD_TIERS` |
@@ -315,7 +316,7 @@ system, and then starts the frame loop.
 | file | what |
 | --- | --- |
 | `ui.js`, `ui.css` | the v1 glass UI (HUD, compass, panels, toasts, command bar, help, journal) and the v2 chrome wiring |
-| `craftPicker.js` | the craft picker strip (keys 1-6) |
+| `craftPicker.js` | the craft picker: the installed craft in their six groups, each with its favorite key, and the roster panel (favorites 1-0 by drag or slot menu, skins) |
 | `settingsPanel.js` | the tabbed settings panel (Flight, Graphics, Sound, Controls, General) |
 | `controlsPanel.js`, `controlsPanel.css` | the controls panel: device tabs, live readings, bindings, tuning, export / import |
 | `calibrationWizard.js` | the calibration wizard screens |
@@ -630,7 +631,21 @@ not settings: they live in their own storage keys, so a device profile can be ex
 **Command channel for the craft.** The persisted setting `craft` is the source of truth. Any UI,
 input action or copilot command changes it with `settings.set`. The flight controller listens,
 applies the change (or refuses it and writes the previous value back), then emits `craftChanged`.
-The picker follows both, so a refused switch reverts on screen too.
+The picker follows both, so a refused switch reverts on screen too. The controller places the new
+craft through its module's `situate()` (a seaplane on the water, a balloon drifting, a spaceplane
+climbing), so a craft chosen in the picker starts in a sensible state for the situation.
+
+**The craft picker** (`src/ui/craftPicker.js`, contract h.7). The strip shows the installed craft in
+the six groups of `craftRegistry.groups()` (a hairline between groups; from 11 craft the buttons pack
+to 22 px so all 14 fit beside the compass at 1280 px), each with its favorite key (`craftFavorites`,
+1-9 and 0) and the chosen skin's silhouette, and a roster button at the end. The roster panel (the
+button, or a right click on a craft) shows the ten favorite slots and the installed craft by group:
+drag a craft onto a slot (its old slot swaps with the target's occupant), drag a slot onto another to
+swap them, pick a craft's key in its menu, or clear a slot with its x; skins sit under their craft
+(`craftSkins`, `''` for the module's default). Escape or a click outside closes it. The picker's
+`getState()`, `openPanel(craftId?)`, `closePanel()`, `assignFavorite(craftId, index)`,
+`clearFavorite(index)`, `setSkin(craftId, skinId)` and `select(craftId)` serve the tests
+(`tools/steps/craft-picker.json`).
 
 **Assist defaults** (`src/flight/assistDefaults.js`). Assists start at 100 % for keyboard and
 mouse. The first typed `deviceConnected` with a `hotas-*` kind sets 50 % on every craft whose
@@ -657,7 +672,9 @@ Typed events are emitted with `bus.emitTyped(name, payload)` and heard with
 | `deviceConnected` / `deviceDisconnected` | `{ deviceKey, kind, name }`; kind `gamepad` \| `hotas-stick` \| `hotas-throttle` \| `hotas-pedals` | gamepad registry |
 | `relaunched` | `{ craft, method, position }` | flight controller |
 | `spawnActivated` | `{ id, presetId, category, kind: site\|event, position }` | SpawnManager |
-| `spawnEnded` | `{ id, presetId, reason }`; reason `ended`, `expired`, `despawn`, `range`, `hours` (a site outside its hours), `error`, `removed`, `disposed`, or the `deactivate` caller's (default `deactivated`; the director's `lifetime`, `despawn`, `dispose`; the F9 debugger's `debug`) | SpawnManager |
+| `spawnEnded` | `{ id, presetId, reason }`; reason `ended`, `expired`, `despawn`, `range`, `hours` (a site outside its hours), `error`, `removed`, `disposed`, or the `deactivate` caller's (default `deactivated`; the director's `lifetime`, `despawn`, `dispose`, `override`; the F9 debugger's `debug`) | SpawnManager |
+| `comboStarted` | `{ id, presetId, members }`: a legendary combo started (contract i.3); `id` is the combo id its spawns carry as `parent`, `members` the member preset ids in order | director |
+| `globalOverride` | `{ id, kind: bloodMoon\|midnightSun, active, weight }`: a global override started, ended or crossed half weight at the player (contract i.4) | director |
 | `weatherChanged` | `{ state: clear\|building\|storm\|clearing, previous, region }`; fires only on a real change, so `previous` is always a state; `region` is the weather cell `"rx:rz"` | weather system |
 | `achievement` | `{ id, title }`; the journal keeps each id once, in every world | presets and engines |
 | `journalStat` | `{ key, value, op: min\|max\|add, presetId? }`: `stormsChased` (add 1), `closestTornado` (min, m), `bestCanyonRun` (min, s, clean runs only) and any other key (folded with its op) | presets and engines |
@@ -1090,8 +1107,9 @@ the HUD overlay draw it from then on.
 ### How to add a craft
 
 The catalog already lists all 14 craft (`src/craft/registry.js`), so a Phase 3 craft lands as its
-own files plus single lines in shared list files; nothing else changes. A craft whose module is not
-registered stays in the picker, disabled, and the controller refuses it with a notice.
+own files plus single lines in shared list files; nothing else changes. The picker shows only craft
+whose module is registered (within a second of registering, in its catalog group), and the
+controller refuses one without a module with a notice.
 
 1. **The module**: `src/craft/<id>.js` default-exports a frozen module with the required fields and
    any optional ones (the tables above; contract h.2). Build the mesh with the kit in `kit.js`,
@@ -1525,8 +1543,53 @@ flight time. It is `ctx.systems.spawns.director`.
   1800-3600 s and legendary 3600-7200 s; per-preset cooldowns (common 150 s, uncommon 1200 s,
   rare 2700 s, legendary 5400 s, or the preset's own `cooldown`); never the same preset twice in a
   row.
-- **Ahead.** Scheduled activations within 45 degrees of the heading, inside the preset's
-  `filters.minDistance` / `maxDistance` band (default 3-8 km); never behind.
+- **Ahead.** Scheduled activations within 45 degrees of the ground track, inside the preset's
+  `filters.minDistance` / `maxDistance` band (default 3-8 km); never behind. The ground track
+  (contract i.1) is the bearing of `state.player.velocity`'s horizontal part, smoothed over 1 s on the
+  director's ticks (`TRACK_SMOOTHING_SECONDS`), or the nose heading below 2 m/s over the ground
+  (`TRACK_MIN_SPEED`): a balloon, an airship or a crabbing craft gets its content along its drift line.
+  Drought fills, the cones and `forceSpawn` use it; `getNearby` bearings stay compass bearings. A
+  player without a velocity (the lab's scripted paths) keeps its heading, unsmoothed.
+- **Craft weighting** (contract i.2). The rank of an eligible candidate is its ahead score times
+  `craftWeight(preset, profile, altitude)`: the flying craft's `directorProfile` (its module's, else
+  `DEFAULT_DIRECTOR_PROFILES`: seaplane `water`, `lake`, `coast`; eagle `thermal`, `perch`,
+  `murmuration`; spaceplane above 20 km `celestial` and `farLure` up, wildlife, structures and
+  flight-play down; balloon and airship `calm`, `slow`, `spectacle`) multiplies the weights of the
+  preset's `tags` and its category, and every `above` band the altitude reached multiplies on top,
+  clamped to 0.25..3 (`CRAFT_WEIGHT_RANGE`). A due tier adds 10, so weighting reorders candidates
+  inside a tier, never across tiers. Weights are recomputed only when the craft, its profile or the
+  altitude band changes; every log entry records the craft.
+- **Combos** (contract i.3). A preset with a `combo` block (a legendary event) is a candidate whose
+  preconditions all hold at the candidate: `biomes`, `timeOfDay`, `weather` there, `siteActive` (a
+  live active state of one of those site presets within the near radius, else 20 km) and `near`
+  (`landmarks` and / or `sites` within `radius`; the candidate moves onto the nearest landmark, else
+  the site). It starts only when the budgets admit every member at once: `heavySlots` (at least its
+  heavy members), each engine's instances, the real lights, the load shedder; an exclusive combo
+  starts with no other legendary live and keeps every other legendary out while it runs. It starts
+  its own preset at the candidate and its members through the SpawnManager (source `director`,
+  `parent` the combo id): the `anchor` at the candidate, any other member `place.distance` metres from
+  it on `place.bearing` measured from the line of sight (0 straight beyond the anchor as seen from
+  where the player was), moved by up to `place.jitter` from hash(seed, candidate, member index). A
+  member with a `delay` starts that many seconds later, its budget share reserved against the
+  director's own activations meanwhile; refused, it retries every 2 s and is dropped (logged
+  `comboMemberDropped`) after 60 s (`COMBO_MEMBER_PATIENCE`). The log records the combo with its
+  member ids in order and a `comboMember` entry per member, and `comboStarted` fires.
+  `forceSpawn(comboId)` ignores the preconditions (the F9 debugger's spawn button).
+- **Global overrides** (contract i.4, `src/spawns/overrides.js`). A preset with an `override` block
+  (the blood moon, the midnight sun) is never a candidate. Night n (`nightIndex(state.time.days)`,
+  noon to noon) is active when hash(seed, n, presetId) < `nightChance`; the weight at the player is
+  `nightWindow(dayTime)` (eased in from dayTime 0.64 to 0.70, out from 0.30 to 0.36, while the sun
+  is well up) times the region weight: 1 for `region: null`, else 1 over the region's biomes (lattice
+  cells of 2 km where they hold half the climate) fading to 0 over `blendKm` from the nearest such
+  cell. `globalOverride` fires on start, end and crossing half weight; the override's own preset
+  starts once per night from half weight (its discovery) and ends with it; the game's
+  `overrideSink` (`createSkyOverrideSink`) drives the sky: the blood moon as a sky modifier (a
+  copper `moonTint` on the moon disc, its halo and light, `darkness` 0.32), the midnight sun as
+  `sky.addSunOverride` with `applyMidnightSun` (the sun raised to a skim line 1.5 degrees up at
+  midnight, 5 at sunset, so `state.time` follows a sun that never sets). The world's snow patches
+  are 1.5-8 km across, about one every 10 km, so a regional blend of a few km keeps the midnight sun
+  regional (20 km reaches nearly everywhere). `forceSpawn(overrideId)` schedules it on the current
+  night whatever its roll and region.
 - **Time-of-day classes** (`matchesTimeOfDay`, `filters.timeOfDay`): `day` (sun up), `night` (sun
   more than 6 degrees down), `dawn` / `dusk` (the low morning / evening sun, -10 to 14 degrees),
   `golden` (the sky's golden band, -3 to 14 degrees, morning or evening) and `midday` (14 degrees up
@@ -1555,13 +1618,17 @@ flight time. It is `ctx.systems.spawns.director`.
 - **API.** `getNearby(radiusKm)` returns `[{ id, name, category, distance (m), bearing (deg), state
   (active, dormant, site or discovered), etaSeconds }]`, nearest first; `getState()` for the
   debugger (drought, pacing record, budgets, heavy count, shed level, tier due times, cooldowns,
-  candidates with their rejection reasons, active spawns, the last 50 log entries and the log hash);
-  `getLog()` (every `{ time, presetId, candidateId, reason }`); `hasPreset(presetId)`;
+  candidates with their rejection reasons, active spawns, the last 50 log entries and the log hash,
+  and since Phase 3 `track`, `groundSpeed`, `craft`, `craftWeights`, `combos` and `overrides`);
+  `getLog()` (every `{ time, presetId, candidateId, reason, craft, combo?, members? }`; reasons
+  `schedule`, `drought`, `debug`, `comboMember`, `comboMemberDropped`, `override`);
+  `getOverrides()`; `hasPreset(presetId)`;
   `forceSpawn(presetId, { distance, bearingOffset, force })` in dev builds and with `?debug=1` or
   `?dev=1`; `shedder`; `dispose()`. Sites of presets it does not know (the terrain test's fixtures)
   are left out of `getNearby`.
 - **SpawnManager calls.** `activate(presetId, { position: { x, y, z }, heading, source, seed,
-  duration, site? })`, `deactivate(id, reason)` with reasons `lifetime`, `despawn` and `dispose`,
+  duration, site?, parent? })` (`parent`: a combo's id, kept on the record and in `getActive()`),
+  `deactivate(id, reason)` with reasons `lifetime`, `despawn`, `dispose` and `override`,
   `getActive()`, `getInstance(id)` (`anchor`, `radius`, `heavy`, `ended`), `getStats()` as
   `{ engines: { name: { instances, particles } }, total: { lights } }`, `setLodBias(bias)`,
   `spawnCount()`, and `canActivate`, `getSiteSpawn` / `setSiteActive` when offered.
@@ -1829,7 +1896,7 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/lab/discovery.mjs` | seed links (resolution order, times, world hashes, share links), the journal's spawn discoveries and collection count, the global records (add / min / max, known ops, bad payloads), achievements, and the map tiles (fields, determinism, no seams, water, cost) |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/discovery.json` | with the spawn test kit: forced discoveries give a toast, the chime and a journal entry and raise the count; journalStat and achievement events reach the records and the journal panel; M opens the map with the discovered site only, terrain tiles and the trail; a click sets the waypoint; Copy link is the shell link with the seed and time; the seed is saved |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-weatherVolume.json` (and `engine-celestial.json`; `--query renderer=webgl` for WebGL2) | each engine's forms and components force-spawned ahead of the craft with screenshots, their wind, inside and eclipse effects, and create/dispose with `renderer.info.memory`, wind sources and sky modifiers back to their baseline exactly |
-| `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders) |
+| `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders); Phase 3: the ground track (a drifting craft, a hover, a turn), the craft weighting (seaplane, eagle, balloon, a high spaceplane, a module's own profile), combos on dev fixtures (preconditions, placement, delays, parents, the log and `comboStarted`, budgets, exclusivity, determinism, a forced combo), the global overrides (schedule, night window, the midnight sun's bend, the regional blend, the director's wiring) and the combo / override / tags validation |
 | `node tools/lab/director.mjs --presets real` | the pacing checks against the game's own 30 presets: the first notable, the drought fill with no sites, a world with the real placement's sites, and a per-preset activation report per speed |
 | `node tools/lab/preset-pacing.mjs [--hours N]` | the game's presets under the real director with the real placement over simulated hours (3 seeds, 3 speeds, day and night): every event preset activates, the volcano's eruption starts, nothing activates behind; prints the drought shares and the activations per preset |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/copilot-guide.json` (add `--query renderer=webgl`) | WREN's tour guide in the game: a callout on `spawnActivated` with an open offer, the Guide chips, "yes" placing the waypoint, the 45 s rate limit, "take me to", "find a thermal" against the WindField, "chase the storm", "next discovery", "guide help", and the remote flight state's `nearby[]`, `activeEvents[]`, `weather` and `callouts` |
@@ -1844,7 +1911,9 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --query seed=HARNESS-1 --steps-file tools/steps/presets-batch2.json` (add `renderer=webgl`) | presets 11-20 in the game: each spawned at its time of day and framed (screenshots), discovered with the toast and a journal entry, disposed back to the GPU memory with its wind sources gone, and the geese slot achievement, the bridge's Thread the Needle, the bay's glowing trails and night hours, the eagle's join and peel, the hawks in their thermal, the turning wind farm and the maelstrom's wind |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/weather-sky.json` (or a build with `?debug=1`) | the opening is clear with the sky untouched, the sky modifier blend, the four weather states' sky (screenshots) and `weatherChanged` |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-emitter.json` (or `engine-lightEffect.json`; add `--query renderer=webgl` for WebGL2) | the emitter and lightEffect engines force-spawned ahead of the craft in their representative configurations (screenshots at golden hour and night), their wind sources, lights, LOD and budgets, their per-frame cost, and dispose back to the memory, wind, modifier and light baseline (see `docs/engines/`) |
-| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/director-game.json` | the game-wired director: its load shedder, `forceSpawn` ahead, `getNearby`, the camera frustum, the LOD bias and `dispose` |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/director-game.json` | the game-wired director: its load shedder, `forceSpawn` ahead on the ground track, `getNearby`, the camera frustum, the LOD bias and `dispose` |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/director-p3.json` (add `--query renderer=webgl` for WebGL2) | the live director's ground track and craft, a combo dev fixture forced through the real SpawnManager (parents, the delayed member, `comboStarted`, the log), the midnight sun's sun override at midnight and the blood moon's sky modifier, each removed again (screenshots) |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/craft-picker.json` (or a build with `?debug=1`; add `--query renderer=webgl` for WebGL2) | the craft picker: the installed craft in their groups with their keys, clear of the compass at 1280 px, choosing by click, number key and craftNext / craftPrev, favorites by slot menu, drag and clear, Escape, skins under the eagle (a stand-in module before the eagle lands), every installed craft spawning without a soft crash, and the 14-craft dense strip (stand-ins for the missing modules; screenshots) |
 | `node tools/lab/wind-engines.mjs [--verbose]` | the vortex and windModifier engines headless on a real WindField: every source type blows the right way, a moving source keeps only its own spatial hash cells, the vortex lifecycle and tracking, fades, windows, timelines and control hooks, refused params, the SIM glider and jet flown through every source (vertical speed, load factor, airspeed, drift logged), zero allocations in the engine updates and samplers, and the CPU cost |
 | `node tools/lab/preset-wind.mjs [--verbose]` | the game's own wind-affecting presets (their windModifier entries and `wind` lists, built by the real engine as the SpawnManager builds them): the SIM glider and jet flown with scripted inputs through each one and the same path in calm air, logging vertical speed, g, airspeed, ground speed, height, drift and sideslip (the jet stream's core and edge, the sky whale's slipstream lane), and dispose removing every source |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-vortex.json` (or `engine-windModifier.json`; add `--query renderer=webgl` for WebGL2) | the wind engines in V2: force-spawned ahead, their wind probed, screenshots, dispose back to the same GPU memory with every wind source removed; the windModifier file also checks the cockpit shake and rattle in rough air and both off in photo mode |
