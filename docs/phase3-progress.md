@@ -449,7 +449,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | not started |
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
 | 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
-| 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | not started |
+| 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | in progress |
 | 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | not started |
 | 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | not started |
 | P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | not started |
@@ -505,6 +505,50 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   name: "dragon") are Milestone O's (j.2), as are the journal panel's Craft section and the remote
   `flightState` craft fields of h.3; the picker shows the 14 craft in one strip until the picker
   branch regroups them.
+
+### Wave 2 - p3/craft-airship
+
+- **Done** (contract h, spec Milestone E item 12):
+  - flight model `src/flight/SimAirship.js` (kind `airship`): Archimedes on a fixed helium mass with
+    ballonets (neutral pressure height 2397 m, a static ceiling above it), the ballonet trim as the
+    static-heaviness control (helium into compression tanks, +/-262 kg at the end stops, the blowers
+    take 20 s end to end), added mass (k1 0.06, k2 0.82 of the displaced air), the gondola pendulum,
+    hull axial and crossflow drag, viscous hull lift and the Munk moment, four tail fins in their own
+    local flow (elevators, rudders: 2 % of their cruise authority at walking pace), two vectored props
+    (-45 to 120 degrees on the rocker, 30 deg/s servos, differential thrust on the rudder) and a
+    lateral stern thruster that fades out from 6 to 14 m/s, wind drift and gust shaking; assists
+    (pitch and yaw dampers from 0 %, heading hold from 50 %, altitude hold from 75 %) and an autopilot
+    (heading or crabbed ground track, altitude with a 60 s terrain look-ahead, speed through the
+    throttle, the scenic cruise's photo pace);
+  - craft `src/craft/airship.js`: a 62 m semi-rigid airship mesh (envelope with an orange belly band,
+    cruciform tail with moving elevators and rudders, glazed gondola, swivelling prop pods with
+    spinning pusher props, the stern ducted fan, landing wheels, nav lights, a breathing envelope), the
+    gondola as a custom cockpit (the instrument panel under a raked windshield, window band, seats,
+    levers), input profile (throttle, antenna `ballonet`, rocker `vector`; the flap keys / buttons held
+    fill or empty the ballonets; the standard gamepad swivels the pods on B / X), audio profile,
+    camera rig (chase at 92 m, a pod camera, the gondola), instruments, collision probes along the
+    hull, `situate` (trimmed neutral at the current height, under the pressure height, at most the
+    cruise, drifting when slow), copilot commands `scenicCruise`, `ballonet`, `vector` and the status
+    line, journal stats `airshipCruiseSites` and `airshipLongestCruise`, the director profile (calm,
+    slow, spectacle);
+  - the scenic cruise `src/craft/airshipCruise.js` (Space): plans a chain of three sites from the
+    director's `getNearby()` (live spawns first, sites; not dormant candidates or sky-wide events) and
+    the landmarks, aims each leg at a viewing point 260 m beside its site, one altitude clear of the
+    ground (470 m over balloon fairs) under the pressure height, a Catmull-Rom path (pathFollower
+    `createPath`); the autopilot chases a point 420 m ahead, crabbing into the wind; photo mode slows it
+    to 65 %; passing a site counts it and the next chain follows; the stick or the autopilot key ends it;
+  - audio family `airshipProp` (twin prop drone with its slow beat, stern fan, ballonet blowers, the
+    envelope creaking under load) and the `ballonet` instrument (ballonet fill and target, heaviness,
+    the pods' thrust line, the pressure height or the cruise's next site);
+  - tests: `tools/lab/airship.mjs`, `src/dev/craftScenarios/airship.js` (`airship-scenic-cruise`,
+    `airship-vector-ballonet`, the general test tuned to full 3 s pulses), the airship in the ?test=1
+    flight harness (`src/dev/testFlightScripts.js`).
+- **Edits outside the craft files:** the single lines of the framework notes (craft/index.js,
+  flight/models.js, audio/engines/index.js, ui/instruments/index.js, craftScenarios/index.js);
+  `tools/lab/craft.mjs` (its catalog check accepted only the Phase 1 six: it now accepts every
+  registered catalog module); `src/dev/testFlightScripts.js` (the AIRSHIP script, its SCRIPTS entry
+  and SCRIPTED_CRAFT).
+- **Verification:** in progress (this file is updated when the runs finish).
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
