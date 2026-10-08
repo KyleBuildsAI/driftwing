@@ -5,21 +5,53 @@
 // The pilot works the way a player would through the test input path: flaps and the water rudders by
 // their actions, the throttle, and the stick and pedals as closed loops on what the telemetry shows
 // (at 100 % assists the stick commands load and the hands-off stick holds the flight path; on the
-// water the water handling assist holds the planing trim). The lake run measures its lake first: it
-// takes off along the longest open chord whose far shore has low ground beyond it, taxis to the back
-// shore with the water rudders, turns, takes off, flies a circuit and lands back on the lake.
+// water the water handling assist holds the planing trim). Both water runs fly one circuit:
+//   survey     from the start, the open-water chord to take off along: long, into the wind, with low
+//              ground beyond both shores (the climb-out and the final approach);
+//   taxi       if the water ahead is too short for the run, taxi back on the water rudders, turn;
+//   run        water rudders up, two notches of flaps, full power, rotate at the liftoff speed;
+//   circuit    climb out to circuit height, a 180 degree turn to the side with the lower ground, the
+//              downwind leg, the base turn onto the extended chord behind the touchdown point;
+//   final      a 5 degree glide (never below a safe height over land), the flare over the water,
+//              power off and the run-out into the wind on the same chord.
+//
+// The starts are fixed points of the CRAFT-1 world with the water fixtures ('waters': the base
+// terrain and ocean, plus the fixture lakes), so every run of every view starts in the same place: a
+// fixture lake (about 400 m across in a shallow basin) and a long sea channel west of the spawn.
 import { clamp, wrapDegrees } from '../../core/util.js';
 
 const DEG = Math.PI / 180;
+/** The CRAFT-1 'waters' world: the fixture lake's centre and a point in the long channel west of the spawn. */
+const LAKE_START = Object.freeze({ x: 1411, z: -336 });
+const OCEAN_START = Object.freeze({ x: -8819, z: -288 });
 const SEARCH_HEADINGS = 36;
 const SHORE_STEP = 5;
-const MAX_SHORE = 1500;
-/** Ground beyond the far shore is sampled this far (m) for the climb-out. */
-const RIM_RANGE = 600;
+/** Open water counts this far (m) at most along a heading, and needs this much depth (m) for the keels. */
+const MAX_CHORD = 1500;
+const MIN_DEPTH = 1.2;
+/** Ground beyond each shore is sampled this far (m): the climb-out and the final approach. */
+const RIM_RANGE = 800;
+/** The run needs this much water ahead (m); a taxi back makes it up, stopping this far (m) from the back shore. */
+const RUN_NEEDED = 450;
+const BACK_MARGIN = 75;
 /** Taxi power, slowing for the last 40 m before the turn; the turn's power. */
 const TAXI_THROTTLE = Object.freeze({ cruise: 0.25, slow: 0.1, turn: 0.2 });
-/** The circuit: out to this far from the lake (m), 120 m up, back on a 4 degree glide path. */
-const CIRCUIT = Object.freeze({ outbound: 1500, height: 120, glide: 4 * DEG, approachSpeed: 26, climbRate: 3.5 });
+/**
+ * The circuit (m, m/s): upwind to this far past the run's start, circuit height above the surface,
+ * the base turn this far behind the touchdown point, the final fix on the extended chord, the glide.
+ */
+const CIRCUIT = Object.freeze({ upwind: 800, height: 80, base: 700, fix: 550, glide: 5 * DEG, approachSpeed: 26, climbRate: 3.5, cruiseSpeed: 32 });
+/** The touchdown point is this far (m) past the run's start along the chord. */
+const TOUCHDOWN_AFTER_START = 40;
+/**
+ * The approach keeps this high (m) over land until the water is below, and TERRAIN_CLEARANCE (m) above
+ * the ground under it while it is more than SHORT_FINAL (m) from the touchdown point; the flare starts
+ * FLARE_HEIGHT (m) over the water.
+ */
+const LAND_CLEARANCE = 9;
+const TERRAIN_CLEARANCE = 20;
+const SHORT_FINAL = 250;
+const FLARE_HEIGHT = 8;
 
 /** Signed heading error (deg, -180..180): positive means the target is to the right. */
 function headingError(target, heading) {
@@ -30,10 +62,6 @@ function headingError(target, heading) {
 function bearing(x, z, toX, toZ) {
   return wrapDegrees(Math.atan2(toX - x, -(toZ - z)) / DEG);
 }
-
-/** The approach keeps this high (m) over land until the water is below; the flare starts this high over it. */
-const LAND_CLEARANCE = 9;
-const FLARE_HEIGHT = 8;
 
 /** Unit vector [x, z] of a compass heading. */
 function headingVector(heading) {
@@ -80,33 +108,112 @@ function steerWater(api, dt, heading, throttle) {
   return { roll: clamp(-0.05 * flight.roll, -0.5, 0.5), pitch: 0, yaw: command, throttle, brakeL: command < -0.9 ? 1 : 0, brakeR: command > 0.9 ? 1 : 0 };
 }
 
-/** The flight path to a touchdown point: the vertical speed that tracks the glide slope at the airspeed. */
-function glideVerticalSpeed(api, aimX, aimZ, surface) {
+/** Water the floats can run on at (x, z): open water at least MIN_DEPTH deep. */
+function runnable(api, x, z) {
+  if (!api.waterQuery.isWater(x, z)) return false;
+  return api.waterQuery.heightAt(x, z) - api.world.groundHeight(x, z) >= MIN_DEPTH;
+}
+
+/** Distance (m) from (x, z) along a heading over runnable water, at most MAX_CHORD. */
+function waterAhead(api, x, z, heading) {
+  const [dx, dz] = headingVector(heading);
+  let distance = 0;
+  while (distance < MAX_CHORD && runnable(api, x + dx * distance, z + dz * distance)) distance += SHORE_STEP;
+  return distance;
+}
+
+/** The highest ground (m above the water level) within RIM_RANGE beyond `from` m along a heading. */
+function rimBeyond(api, x, z, heading, from, level) {
+  const [dx, dz] = headingVector(heading);
+  let rim = 0;
+  for (let beyond = from; beyond <= from + RIM_RANGE; beyond += 20) rim = Math.max(rim, api.world.groundHeight(x + dx * beyond, z + dz * beyond) - level);
+  return rim;
+}
+
+/**
+ * The circuit plan from the start: the takeoff heading (the longest open chord into the wind with the
+ * lowest ground beyond both shores), where the run starts (a taxi back when the water ahead is short),
+ * the touchdown point and the side of the circuit with the lower ground.
+ */
+function planCircuit(api) {
+  const start = api.player.position;
+  const level = api.waterQuery.heightAt(start.x, start.z);
+  const wind = api.wind && typeof api.wind.ambientAt === 'function' ? api.wind.ambientAt({ x: start.x, y: level + 10, z: start.z }) : { speed: 0, fromDegrees: 0 };
+  let best = null;
+  for (let index = 0; index < SEARCH_HEADINGS; index++) {
+    const heading = (index * 360) / SEARCH_HEADINGS;
+    const ahead = waterAhead(api, start.x, start.z, heading);
+    const behind = waterAhead(api, start.x, start.z, heading + 180);
+    const rim = Math.max(rimBeyond(api, start.x, start.z, heading, ahead, level), rimBeyond(api, start.x, start.z, heading + 180, behind, level));
+    const headwind = wind.speed * Math.cos(headingError(heading, wind.fromDegrees) * DEG);
+    const score = Math.min(ahead + behind, RUN_NEEDED + 400) + 60 * headwind - 8 * rim;
+    if (!best || score > best.score) best = { heading, ahead, behind, rim, headwind, score };
+  }
+  const [dx, dz] = headingVector(best.heading);
+  const back = clamp(RUN_NEEDED - best.ahead, 0, Math.max(0, best.behind - BACK_MARGIN));
+  const runStart = { x: start.x - dx * back, z: start.z - dz * back };
+  // The circuit turns to the side whose downwind leg (400 m off the chord) has the lower ground.
+  let side = 1;
+  let lowest = Infinity;
+  for (const candidate of [1, -1]) {
+    let highest = -Infinity;
+    for (let along = -CIRCUIT.base; along <= CIRCUIT.upwind; along += 100) {
+      const x = runStart.x + dx * along - dz * candidate * 400;
+      const z = runStart.z + dz * along + dx * candidate * 400;
+      highest = Math.max(highest, api.world.groundHeight(x, z));
+    }
+    if (highest < lowest) {
+      lowest = highest;
+      side = candidate;
+    }
+  }
+  return {
+    ...best,
+    level,
+    direction: [dx, dz],
+    runStart,
+    side,
+    aim: { x: runStart.x + dx * TOUCHDOWN_AFTER_START, z: runStart.z + dz * TOUCHDOWN_AFTER_START },
+    fix: { x: runStart.x + dx * (TOUCHDOWN_AFTER_START - CIRCUIT.fix), z: runStart.z + dz * (TOUCHDOWN_AFTER_START - CIRCUIT.fix) },
+  };
+}
+
+/** How far (m) the craft is along the chord from the run's start (negative behind it). */
+function alongChord(api, plan) {
+  const position = api.player.position;
+  return (position.x - plan.runStart.x) * plan.direction[0] + (position.z - plan.runStart.z) * plan.direction[1];
+}
+
+/** The vertical speed (m/s) that tracks the glide slope to the touchdown point, clear of the ground under it. */
+function glideVerticalSpeed(api, plan) {
   const player = api.player;
-  const distance = Math.hypot(aimX - player.position.x, aimZ - player.position.z);
-  const target = surface + 2.2 + distance * Math.tan(CIRCUIT.glide);
+  const distance = Math.hypot(plan.aim.x - player.position.x, plan.aim.z - player.position.z);
+  let target = plan.level + 2.2 + distance * Math.tan(CIRCUIT.glide);
+  if (distance > SHORT_FINAL) target = Math.max(target, api.world.groundHeight(player.position.x, player.position.z) + TERRAIN_CLEARANCE);
   const sink = CIRCUIT.approachSpeed * Math.sin(CIRCUIT.glide);
   return clamp(-sink + 0.25 * (target - player.position.y), -2.5, 1.5);
 }
 
 /**
- * The landing pilot: the glide slope, then the flare over the water, then power off and stick neutral
- * on the water. Over land it never sinks below LAND_CLEARANCE (the shore can stand above the lake).
+ * The final: toward the fix on the extended chord, then the touchdown point on the glide slope; the
+ * flare over the water; power off and stick neutral once the floats are on the water. Over land it
+ * never sinks below LAND_CLEARANCE (the shore can stand above the water).
  */
-function flyLanding(api, dt, aimX, aimZ, surface) {
+function flyFinal(api, dt, plan) {
   const flight = api.flight;
   const player = api.player;
-  if (api.memo.touched || flight.onGround) {
-    api.memo.touched = true;
-    return { roll: clamp(-0.05 * flight.roll, -0.5, 0.5), pitch: 0, yaw: 0, throttle: 0 };
+  const memo = api.memo;
+  if (memo.touched || flight.onGround) {
+    memo.touched = true;
+    return { ...steerWater(api, dt, plan.heading, 0), pitch: 0 };
   }
+  if (!memo.passedFix && (Math.hypot(plan.fix.x - player.position.x, plan.fix.z - player.position.z) < 200 || alongChord(api, plan) > TOUCHDOWN_AFTER_START - CIRCUIT.fix + 100)) memo.passedFix = true;
+  const target = memo.passedFix ? plan.aim : plan.fix;
   const overWater = api.waterQuery.isWater(player.position.x, player.position.z);
-  // The flare: over the water the sink rate eases off with the height (the keels are 2.2 m below).
   const flare = overWater && flight.agl < FLARE_HEIGHT;
-  let verticalSpeed = flare ? -Math.max(0.4, 0.3 * (flight.agl - 2.2)) : glideVerticalSpeed(api, aimX, aimZ, surface);
+  let verticalSpeed = flare ? -Math.max(0.4, 0.3 * (flight.agl - 2.2)) : glideVerticalSpeed(api, plan);
   if (!overWater && flight.agl < LAND_CLEARANCE) verticalSpeed = Math.max(verticalSpeed, 0.5);
-  const aimHeading = bearing(api.player.position.x, api.player.position.z, aimX, aimZ);
-  const controls = flyAir(api, dt, { heading: aimHeading, verticalSpeed, airspeed: CIRCUIT.approachSpeed });
+  const controls = flyAir(api, dt, { heading: bearing(player.position.x, player.position.z, target.x, target.z), verticalSpeed, airspeed: CIRCUIT.approachSpeed });
   if (flare) controls.throttle = Math.min(controls.throttle, 0.3);
   return controls;
 }
@@ -116,151 +223,90 @@ function press(api, key, action, actions) {
   if (api.once(key)) actions.push(action);
 }
 
-/** The landed event of this run on the water, or null. */
-function waterLanding(api) {
-  const landing = api.events.last('landed');
-  return landing && landing.surface === 'water' ? landing : null;
+/** The circuit's vertical speed: climb to circuit height, then hold it. */
+function circuitClimb(api) {
+  return api.flight.agl < CIRCUIT.height ? CIRCUIT.climbRate : clamp(0.1 * (CIRCUIT.height - api.flight.agl), -1.5, 1.5);
 }
 
-// ---- The lake survey ------------------------------------------------------------------------------
-/** Distance (m) from (x, z) to the shore along a heading (the water query's static outline). */
-function shoreDistance(api, x, z, heading) {
-  const [dx, dz] = headingVector(heading);
-  let distance = 0;
-  while (distance < MAX_SHORE && api.waterQuery.isWater(x + dx * distance, z + dz * distance)) distance += SHORE_STEP;
-  return distance;
-}
-
-/**
- * Picks the takeoff heading from the lake's centre: the longest chord whose far shore has the lowest
- * ground beyond it (the climb-out), and the back-shore point to start the run from.
- */
-function surveyLake(api) {
-  const centre = api.player.position;
-  const level = api.waterQuery.heightAt(centre.x, centre.z);
-  let best = null;
-  for (let index = 0; index < SEARCH_HEADINGS; index++) {
-    const heading = (index * 360) / SEARCH_HEADINGS;
-    const ahead = shoreDistance(api, centre.x, centre.z, heading);
-    const behind = shoreDistance(api, centre.x, centre.z, heading + 180);
-    const [dx, dz] = headingVector(heading);
-    let rim = 0;
-    for (let beyond = ahead; beyond <= ahead + RIM_RANGE; beyond += 20) rim = Math.max(rim, api.world.groundHeight(centre.x + dx * beyond, centre.z + dz * beyond) - level);
-    const score = ahead + behind - 6 * rim;
-    if (!best || score > best.score) best = { heading, ahead, behind, rim, score };
-  }
-  const [dx, dz] = headingVector(best.heading);
-  // The turn at the back shore swings about 25 m further out: it starts 75 m short of the shore.
-  const back = Math.max(0, best.behind - 75);
-  return {
-    ...best,
-    level,
-    centre: { x: centre.x, z: centre.z },
-    back: { x: centre.x - dx * back, z: centre.z - dz * back },
-    // The landing comes back the other way and touches down past the near (takeoff-side) shore.
-    aim: { x: centre.x + dx * best.ahead * 0.35, z: centre.z + dz * best.ahead * 0.35 },
-  };
-}
-
-function lakeScript(t, api) {
+/** The water circuit (both water scenarios): survey, taxi, run, circuit, final. */
+function waterCircuitScript(t, api) {
   const memo = api.memo;
   const dt = stepSeconds(api);
   const actions = [];
   const flight = api.flight;
   const player = api.player;
   if (!memo.plan) {
-    memo.plan = surveyLake(api);
-    memo.phase = 'taxi';
-    memo.taxiStart = flight.heading;
+    memo.plan = planCircuit(api);
+    const toRunStart = Math.hypot(memo.plan.runStart.x - player.position.x, memo.plan.runStart.z - player.position.z);
+    memo.phase = toRunStart > 10 ? 'taxi' : 'turn';
     memo.turned = 0;
   }
   const plan = memo.plan;
   const previousHeading = Number.isFinite(memo.headingSeen) ? memo.headingSeen : flight.heading;
   memo.turned += Math.abs(headingError(flight.heading, previousHeading));
   memo.headingSeen = flight.heading;
+  const along = alongChord(api, plan);
   let controls;
-  if (memo.phase === 'taxi') {
-    if (api.craftState.waterRudders !== true) press(api, 'ruddersDown', 'craftAbility', actions);
-    const toBack = Math.hypot(plan.back.x - player.position.x, plan.back.z - player.position.z);
-    controls = steerWater(api, dt, bearing(player.position.x, player.position.z, plan.back.x, plan.back.z), toBack > 40 ? TAXI_THROTTLE.cruise : TAXI_THROTTLE.slow);
-    if (toBack < 10) memo.phase = 'turn';
-  } else if (memo.phase === 'turn') {
-    controls = steerWater(api, dt, plan.heading, TAXI_THROTTLE.turn);
-    // The run's own steering finishes lining up: full power from 30 degrees off.
-    if (Math.abs(headingError(plan.heading, flight.heading)) < 30) memo.phase = 'run';
-  } else if (memo.phase === 'run') {
-    if (api.craftState.waterRudders === true) press(api, 'ruddersUp', 'craftAbility', actions);
-    else if (api.once('flaps1')) actions.push('flapsDown');
-    else if (api.once('flaps2')) actions.push('flapsDown');
-    controls = steerWater(api, dt, plan.heading, 1);
-    // Rotate at the liftoff speed (flaps 2): a gentle pull lifts it off the step.
-    if (flight.airspeed > 24) controls.pitch = 0.3;
-    if (!flight.onGround && flight.agl > 3) memo.phase = 'climb';
-  } else if (memo.phase === 'climb' || memo.phase === 'outbound') {
-    const out = Math.hypot(player.position.x - plan.centre.x, player.position.z - plan.centre.z);
-    const verticalSpeed = flight.agl < CIRCUIT.height ? CIRCUIT.climbRate : 0;
-    controls = flyAir(api, dt, { heading: plan.heading, verticalSpeed, airspeed: 32 });
-    if (out > CIRCUIT.outbound) memo.phase = 'reverse';
-  } else if (memo.phase === 'reverse') {
-    const inbound = bearing(player.position.x, player.position.z, plan.aim.x, plan.aim.z);
-    controls = flyAir(api, dt, { heading: inbound, verticalSpeed: 0, airspeed: 30 });
-    if (Math.abs(headingError(inbound, flight.heading)) < 10) memo.phase = 'approach';
-  } else {
-    if (api.once('flaps3')) actions.push('flapsDown');
-    controls = flyLanding(api, dt, plan.aim.x, plan.aim.z, plan.level);
-    if (memo.touched && Math.abs(api.craftState.waterSpeed) < 6 && api.craftState.waterRudders !== true) press(api, 'ruddersDownAfter', 'craftAbility', actions);
+  switch (memo.phase) {
+    case 'taxi': {
+      if (api.craftState.waterRudders !== true) press(api, 'ruddersDown', 'craftAbility', actions);
+      const toStart = Math.hypot(plan.runStart.x - player.position.x, plan.runStart.z - player.position.z);
+      controls = steerWater(api, dt, bearing(player.position.x, player.position.z, plan.runStart.x, plan.runStart.z), toStart > 40 ? TAXI_THROTTLE.cruise : TAXI_THROTTLE.slow);
+      if (toStart < 10) memo.phase = 'turn';
+      break;
+    }
+    case 'turn':
+      if (api.craftState.waterRudders !== true) press(api, 'ruddersDownTurn', 'craftAbility', actions);
+      controls = steerWater(api, dt, plan.heading, TAXI_THROTTLE.turn);
+      // The run's own steering finishes lining up: full power from 30 degrees off.
+      if (Math.abs(headingError(plan.heading, flight.heading)) < 30) memo.phase = 'run';
+      break;
+    case 'run':
+      if (api.craftState.waterRudders === true) press(api, 'ruddersUp', 'craftAbility', actions);
+      else if (api.once('flaps1')) actions.push('flapsDown');
+      else if (api.once('flaps2')) actions.push('flapsDown');
+      controls = steerWater(api, dt, plan.heading, 1);
+      // Rotate at the liftoff speed (flaps 2): a gentle pull lifts it off the step.
+      if (flight.airspeed > 24) controls.pitch = 0.3;
+      if (!flight.onGround && flight.agl > 3) memo.phase = 'upwind';
+      break;
+    case 'upwind':
+      controls = flyAir(api, dt, { heading: plan.heading, verticalSpeed: circuitClimb(api), airspeed: CIRCUIT.cruiseSpeed });
+      if (along > CIRCUIT.upwind && flight.agl > 40) memo.phase = 'crosswind';
+      break;
+    case 'crosswind':
+      controls = flyAir(api, dt, { heading: wrapDegrees(plan.heading + 90 * plan.side), verticalSpeed: circuitClimb(api), airspeed: CIRCUIT.cruiseSpeed });
+      if (Math.abs(headingError(plan.heading + 90 * plan.side, flight.heading)) < 15) memo.phase = 'downwind';
+      break;
+    case 'downwind':
+      controls = flyAir(api, dt, { heading: wrapDegrees(plan.heading + 180), verticalSpeed: circuitClimb(api), airspeed: CIRCUIT.cruiseSpeed });
+      if (along < TOUCHDOWN_AFTER_START - CIRCUIT.base) memo.phase = 'final';
+      break;
+    default:
+      if (api.once('flaps3')) actions.push('flapsDown');
+      controls = flyFinal(api, dt, plan);
+      if (memo.touched && Math.abs(api.craftState.waterSpeed) < 6 && api.craftState.waterRudders !== true) press(api, 'ruddersDownAfter', 'craftAbility', actions);
   }
   return { ...controls, actions };
 }
 
-// ---- The ocean ------------------------------------------------------------------------------------
-function oceanScript(t, api) {
-  const memo = api.memo;
-  const dt = stepSeconds(api);
-  const actions = [];
-  const flight = api.flight;
-  const player = api.player;
-  if (!memo.phase) {
-    memo.phase = 'run';
-    memo.heading = flight.heading;
-    memo.origin = { x: player.position.x, z: player.position.z };
-  }
-  let controls;
-  if (memo.phase === 'run') {
-    if (t > 0.3 && api.once('flaps1')) actions.push('flapsDown');
-    else if (t > 0.6 && api.once('flaps2')) actions.push('flapsDown');
-    controls = steerWater(api, dt, memo.heading, t > 1 ? 1 : 0);
-    if (flight.airspeed > 25) controls.pitch = 0.3;
-    if (!flight.onGround && flight.agl > 3) memo.phase = 'climb';
-  } else if (memo.phase === 'climb') {
-    const out = Math.hypot(player.position.x - memo.origin.x, player.position.z - memo.origin.z);
-    controls = flyAir(api, dt, { heading: memo.heading, verticalSpeed: flight.agl < CIRCUIT.height ? CIRCUIT.climbRate : 0, airspeed: 32 });
-    if (out > CIRCUIT.outbound + 600) {
-      memo.phase = 'reverse';
-      // Land back near where the run started, 300 m short of it.
-      const [dx, dz] = headingVector(memo.heading);
-      memo.aim = { x: memo.origin.x + dx * 300, z: memo.origin.z + dz * 300 };
-    }
-  } else if (memo.phase === 'reverse') {
-    const inbound = bearing(player.position.x, player.position.z, memo.aim.x, memo.aim.z);
-    controls = flyAir(api, dt, { heading: inbound, verticalSpeed: 0, airspeed: 30 });
-    if (Math.abs(headingError(inbound, flight.heading)) < 10) memo.phase = 'approach';
-  } else {
-    if (api.once('flaps3')) actions.push('flapsDown');
-    controls = flyLanding(api, dt, memo.aim.x, memo.aim.z, api.waterQuery.heightAt(memo.aim.x, memo.aim.z));
-  }
-  return { ...controls, actions };
+/** The landed event of this run on the water, or null. */
+function waterLanding(api) {
+  const landing = api.events.last('landed');
+  return landing && landing.surface === 'water' ? landing : null;
 }
 
 // ---- Wheels down on the water ---------------------------------------------------------------------
 function noseOverScript(t, api) {
   const dt = stepSeconds(api);
   const actions = [];
-  if (t > 0.5) press(api, 'gearDown', 'gearToggle', actions);
-  if (t > 0.8 && api.once('flaps1')) actions.push('flapsDown');
-  else if (t > 1.1 && api.once('flaps2')) actions.push('flapsDown');
-  else if (t > 1.4 && api.once('flaps3')) actions.push('flapsDown');
-  return { ...flyAir(api, dt, { heading: api.start.heading, verticalSpeed: -1.5, airspeed: CIRCUIT.approachSpeed }), actions };
+  if (t > 0.3 && api.once('flaps1')) actions.push('flapsDown');
+  else if (t > 0.6 && api.once('flaps2')) actions.push('flapsDown');
+  else if (t > 0.9 && api.once('flaps3')) actions.push('flapsDown');
+  else if (t > 1.2) press(api, 'gearDown', 'gearToggle', actions);
+  // Along the channel, slowing to the approach speed, then down at 1.5 m/s onto the water.
+  const verticalSpeed = t < 6 ? 0 : -1.5;
+  return { ...flyAir(api, dt, { heading: api.start.heading, verticalSpeed, airspeed: CIRCUIT.approachSpeed }), actions };
 }
 
 export default Object.freeze({
@@ -269,14 +315,16 @@ export default Object.freeze({
     Object.freeze({
       id: 'seaplane-ocean',
       views: ['third', 'first'],
-      start: { at: 'ocean', mode: 'water' },
-      seconds: 220,
-      script: oceanScript,
+      seed: 'CRAFT-1',
+      world: 'waters',
+      start: { at: OCEAN_START, mode: 'water', heading: 140 },
+      seconds: 260,
+      script: waterCircuitScript,
       checks: [
-        { id: 'afloat', label: 'starts afloat on the ocean, wheels up', until: 2, test: (api) => api.flight.onWater && api.craftState.onWater && api.flight.gear.down === false },
-        { id: 'step', label: 'over the hump and onto the step', until: 40, test: (api) => api.craftState.onStep === true },
-        { id: 'spray', label: 'spray off the floats on the run', until: 40, test: (api) => api.craftState.spray > 0.3 },
-        { id: 'airborne', label: 'takes off from the ocean (30 m up)', until: 90, test: (api) => !api.flight.onGround && api.agl() > 30 },
+        { id: 'afloat', label: 'starts afloat on the ocean, wheels up', until: 2, test: (api) => api.flight.onWater && api.craftState.onWater && api.flight.gear.down === false && api.waterQuery.isOcean(api.player.position.x, api.player.position.z) },
+        { id: 'step', label: 'over the hump and onto the step', until: 80, test: (api) => api.craftState.onStep === true },
+        { id: 'spray', label: 'spray off the floats on the run', until: 80, test: (api) => api.craftState.spray > 0.3 },
+        { id: 'airborne', label: 'takes off from the ocean and climbs out (40 m up)', until: 130, test: (api) => !api.flight.onGround && api.agl() > 40 },
         { id: 'landed', label: "lands back on the ocean (landed, surface 'water', open ocean)", from: 30, test: (api) => { const landing = waterLanding(api); return Boolean(landing) && api.waterQuery.isOcean(landing.position.x, landing.position.z); } },
         { id: 'stopped', label: 'slows to taxi speed afloat after the landing', from: 30, test: (api) => Boolean(waterLanding(api)) && api.craftState.onWater && Math.abs(api.craftState.waterSpeed) < 6 },
       ],
@@ -284,12 +332,13 @@ export default Object.freeze({
     Object.freeze({
       id: 'seaplane-lake',
       views: ['third', 'first'],
+      seed: 'CRAFT-1',
       world: 'waters',
-      start: { at: 'lake', mode: 'water', craftState: { waterRudders: true } },
+      start: { at: LAKE_START, mode: 'water', craftState: { waterRudders: true } },
       seconds: 330,
-      script: lakeScript,
+      script: waterCircuitScript,
       checks: [
-        { id: 'afloat', label: 'starts afloat on a lake', until: 2, test: (api) => api.flight.onWater && !api.waterQuery.isOcean(api.player.position.x, api.player.position.z) },
+        { id: 'afloat', label: 'starts afloat on a lake', until: 2, test: (api) => api.flight.onWater && api.waterQuery.isWater(api.player.position.x, api.player.position.z) && !api.waterQuery.isOcean(api.player.position.x, api.player.position.z) },
         { id: 'waterRudders', label: 'taxis and turns on the water rudders (more than 120 degrees of heading)', until: 150, test: (api) => api.memo.phase === 'run' && api.memo.turned > 120 },
         { id: 'airborne', label: 'takes off from the lake and climbs out (40 m up)', until: 220, test: (api) => !api.flight.onGround && api.agl() > 40 },
         { id: 'landed', label: "lands back on the lake (landed, surface 'water', not the ocean)", from: 30, test: (api) => { const landing = waterLanding(api); return Boolean(landing) && api.waterQuery.isWater(landing.position.x, landing.position.z) && !api.waterQuery.isOcean(landing.position.x, landing.position.z); } },
@@ -299,7 +348,9 @@ export default Object.freeze({
     Object.freeze({
       id: 'seaplane-nose-over',
       views: ['third'],
-      start: { at: 'ocean', mode: 'air', agl: 45, speed: 30 },
+      seed: 'CRAFT-1',
+      world: 'waters',
+      start: { at: OCEAN_START, mode: 'air', agl: 40, speed: 36, heading: 320 },
       seconds: 60,
       allowCrash: true,
       script: noseOverScript,

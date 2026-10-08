@@ -38,7 +38,8 @@
 //               their reasons, the gear advisory speaks once, the spray emits droplets, the mesh animates
 //               the wheels and water rudders, and dispose leaves no listener behind
 //   scenarios   the ?test=craft scripts (src/dev/craftScenarios/seaplane.js) fly through the controller
-//               over a synthetic ocean and a 205 m lake in flat land and pass their checks: takeoff and
+//               in their own world (CRAFT-1 with the water fixtures: the real terrain, sea channel and
+//               fixture lake) in calm air and two steady winds, and pass their checks: takeoff and
 //               landing on the ocean and on the lake, and the wheels-down nose-over
 //   allocation  20 000 ticks on the step allocate nothing that survives a full collection
 //
@@ -61,6 +62,11 @@ import { attachTypedEvents } from '../../src/core/events.js';
 import { CRAFT_IDS } from '../../src/core/settings.js';
 import { DEG, clamp, wrapDegrees } from '../../src/core/util.js';
 import seaplaneScenarios from '../../src/dev/craftScenarios/seaplane.js';
+import { WORLD_OPTIONS } from '../../src/core/config.js';
+import { createWorldGen } from '../../src/world/worldgen.js';
+import { createWaterQuery } from '../../src/world/waterQuery.js';
+import { WATER_FIXTURES } from '../../src/dev/waterFixtures.js';
+import { prevailingWindDirection } from '../../src/env/WindField.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 const ONLY = (process.argv.find((flag) => flag.startsWith('--only=')) ?? '').slice(7);
@@ -781,7 +787,7 @@ function ensureDocumentStandIn() {
  * The controller in a world: the flat sea south of SEA_SOUTH_OF with land at 40 m north of it, or a
  * synthetic water world { groundHeight, waterQuery } (createWaterWorld).
  */
-function createGame(waterWorld = null) {
+function createGame(waterWorld = null, steadyWind = null) {
   ensureDocumentStandIn();
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const events = { notify: [], softCrash: [], landed: [], speech: [], stats: [] };
@@ -840,7 +846,15 @@ function createGame(waterWorld = null) {
         return true;
       },
     },
-    wind: { sample(pos, t, out = { vel: new THREE.Vector3(), turbulence: 0 }) { out.vel.set(0, 0, 0); out.turbulence = 0; return out; }, ambientAt: () => ({ speed: 4, fromDegrees: 200 }) },
+    wind: {
+      sample(pos, t, out = { vel: new THREE.Vector3(), turbulence: 0 }) {
+        if (steadyWind) out.vel.copy(steadyWind.vel);
+        else out.vel.set(0, 0, 0);
+        out.turbulence = 0;
+        return out;
+      },
+      ambientAt: () => (steadyWind ? { speed: steadyWind.speed, fromDegrees: steadyWind.fromDegrees } : { speed: 4, fromDegrees: 200 }),
+    },
     systems: {
       camera: { snap() {} },
       input: { presetThrottle: (value) => { controls.throttle = value; return true; } },
@@ -995,51 +1009,28 @@ function testController() {
 }
 
 // ---- The ?test=craft scenarios, dry-run in node ------------------------------------------------
-const LAKE = Object.freeze({ x: 1500, z: -400, radius: 205, level: 42, bed: 28, land: 45 });
-const OCEAN_SOUTH_OF = 6000;
-
-/** Flat land at 45 m with a round 205 m lake (level 42 m) and the open sea south of z = 6000. */
+/** The scenarios' world: seed CRAFT-1 with the water fixtures, as the craft test builds it. */
 function createWaterWorld() {
-  const inLake = (x, z) => Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.radius;
-  const groundHeight = (x, z) => (z > OCEAN_SOUTH_OF ? -30 : inLake(x, z) ? LAKE.bed : LAKE.land);
-  const heightAt = (x, z) => (z > OCEAN_SOUTH_OF ? 0 : inLake(x, z) ? LAKE.level : -Infinity);
-  const waterQuery = {
-    seaLevel: 0,
-    heightAt,
-    sample(x, z, t, out) {
-      const height = heightAt(x, z);
-      out.height = height;
-      out.normalX = 0;
-      out.normalY = 1;
-      out.normalZ = 0;
-      out.velocityX = 0;
-      out.velocityY = 0;
-      out.velocityZ = 0;
-      out.kind = height === -Infinity ? 'none' : z > OCEAN_SOUTH_OF ? 'ocean' : 'lake';
-      out.bodyId = null;
-      out.body = null;
-      out.material = 'water';
-      out.depth = height === -Infinity ? 0 : height - groundHeight(x, z);
-      out.film = false;
-      return out;
-    },
-    isWater: (x, z) => heightAt(x, z) > -Infinity,
-    isOcean: (x, z) => z > OCEAN_SOUTH_OF,
-    staticLevelInto(x, z, out, offset) {
-      out[offset] = heightAt(x, z);
-    },
-  };
-  return { groundHeight, waterQuery };
+  const world = createWorldGen('CRAFT-1', { ...WORLD_OPTIONS, presets: WATER_FIXTURES });
+  const clock = { elapsed: 0 };
+  const waterQuery = createWaterQuery({ world, windDirection: prevailingWindDirection(world), clock });
+  return { groundHeight: (x, z) => world.groundHeight(x, z), waterQuery, clock, world };
 }
 
-/** Flies one scenario of the seaplane's ?test=craft file through the controller: { checks, crashes, memo }. */
-function flyScenario(scenario, waterWorld, heading) {
-  const game = createGame(waterWorld);
+/**
+ * Flies one scenario of the seaplane's ?test=craft file through the controller in a steady wind
+ * (m/s, blowing from fromDegrees): { checks, crashes, memo }. The start resolves as the craft test
+ * resolves it (a fixed point; afloat or `agl` above the surface).
+ */
+function flyScenario(scenario, waterWorld, wind) {
+  const windVector = new THREE.Vector3(-Math.sin(wind.fromDegrees * DEG), 0, Math.cos(wind.fromDegrees * DEG)).multiplyScalar(wind.speed);
+  const game = createGame(waterWorld, { vel: windVector, speed: wind.speed, fromDegrees: wind.fromDegrees });
   game.settings.set('craft', 'seaplane');
   game.run(0.5);
   const start = scenario.start;
-  const place = start.at === 'lake' ? { x: LAKE.x, z: LAKE.z, y: LAKE.level } : { x: 0, z: OCEAN_SOUTH_OF + 2000, y: 0 };
-  const placement = { mode: start.mode, heading, position: { x: place.x, y: start.mode === 'water' ? place.y : place.y + start.agl, z: place.z } };
+  const surface = Math.max(waterWorld.groundHeight(start.at.x, start.at.z), waterWorld.waterQuery.heightAt(start.at.x, start.at.z));
+  const heading = Number.isFinite(start.heading) ? start.heading : 300;
+  const placement = { mode: start.mode, heading, position: { x: start.at.x, y: start.mode === 'water' ? surface : surface + start.agl, z: start.at.z } };
   if (Number.isFinite(start.speed)) placement.speed = start.speed;
   if (start.craftState) placement.craftState = start.craftState;
   game.flight.startAt(placement);
@@ -1059,6 +1050,7 @@ function flyScenario(scenario, waterWorld, heading) {
     get player() { return game.state.player; },
     world: game.ctx.world,
     waterQuery: waterWorld.waterQuery,
+    wind: game.ctx.wind,
     memo,
     start: startPose,
     once(key) {
@@ -1074,10 +1066,11 @@ function flyScenario(scenario, waterWorld, heading) {
   const startElapsed = game.state.time.elapsed;
   game.run(scenario.seconds, (lab) => {
     run.t = lab.state.time.elapsed - startElapsed;
+    waterWorld.clock.elapsed = lab.state.time.elapsed;
     const controls = scenario.script(run.t, api);
     for (const axis of axes) if (Number.isFinite(controls[axis])) lab.controls[axis] = controls[axis];
     for (const action of controls.actions ?? []) lab.controls.actions.add(action);
-    if (process.env.SEA_DEBUG && Math.round(run.t * 60) % 60 === 0) log('   ', scenario.id, round(run.t, 0), memo.phase, 'd', round(Math.hypot(player.position.x - LAKE.x, player.position.z - LAKE.z), 0), 'agl', round(api.agl(), 1), 'v', round(game.state.flight.airspeed, 1), 'vs', round(game.state.flight.verticalSpeed, 1), 'hdg', round(game.state.flight.heading, 0), 'roll', round(game.state.flight.roll, 0), 'thr', round(game.state.flight.throttle, 2), 'onG', game.state.flight.onGround);
+    if (process.env.SEA_DEBUG && Math.round(run.t * 60) % 60 === 0) log('   ', scenario.id, round(run.t, 0), memo.phase, 'x', round(player.position.x, 0), 'z', round(player.position.z, 0), 'agl', round(api.agl(), 1), 'v', round(game.state.flight.airspeed, 1), 'vs', round(game.state.flight.verticalSpeed, 1), 'hdg', round(game.state.flight.heading, 0), 'thr', round(game.state.flight.throttle, 2), 'onG', game.state.flight.onGround, memo.plan ? `plan ${memo.plan.heading} ahead ${memo.plan.ahead} behind ${memo.plan.behind} rim ${round(memo.plan.rim, 1)} side ${memo.plan.side}` : '');
     scenario.checks.forEach((check, index) => {
       const state = states[index];
       const from = Number.isFinite(check.from) ? check.from : 0;
@@ -1097,15 +1090,22 @@ function flyScenario(scenario, waterWorld, heading) {
   };
 }
 
+/** Steady winds the dry-run flies in: calm, and 6 m/s from two directions. */
+const SCENARIO_WINDS = Object.freeze([
+  Object.freeze({ speed: 0, fromDegrees: 0 }),
+  Object.freeze({ speed: 6, fromDegrees: 40 }),
+  Object.freeze({ speed: 6, fromDegrees: 230 }),
+]);
+
 function testScenarios() {
   const waterWorld = createWaterWorld();
   for (const scenario of seaplaneScenarios.scenarios) {
-    // Two starting headings: the scripts pick their own runs (the lake's survey, the ocean's straight run).
-    for (const heading of [300, 70, 160]) {
-      const result = flyScenario(scenario, waterWorld, heading);
+    for (const wind of SCENARIO_WINDS) {
+      if (process.env.SEA_ONLY && process.env.SEA_ONLY !== `${scenario.id}:${wind.fromDegrees}:${wind.speed}`) continue;
+      const result = flyScenario(scenario, waterWorld, wind);
       const failed = result.checks.filter((check) => !check.passed).map((check) => check.id);
       const crashesOk = scenario.allowCrash || result.crashes.length === 0;
-      check('scenarios', `${scenario.id} (starting heading ${heading}): every check passes${scenario.allowCrash ? '' : ' with no soft crash'}`, failed.length === 0 && crashesOk, `failed [${failed.join(', ')}], crashes ${JSON.stringify(result.crashes.map((crash) => crash.reason))}, phase ${result.memo.phase}`);
+      check('scenarios', `${scenario.id} (wind ${wind.speed} m/s from ${wind.fromDegrees}): every check passes${scenario.allowCrash ? '' : ' with no soft crash'}`, failed.length === 0 && crashesOk, `failed [${failed.join(', ')}], crashes ${JSON.stringify(result.crashes.map((crash) => crash.reason))}, phase ${result.memo.phase}`);
     }
   }
 }
