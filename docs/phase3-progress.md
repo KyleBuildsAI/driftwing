@@ -389,6 +389,9 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
     `presetChecksBatch2.js`) pin it in their setup; the spawn check kit leaves live spawns' wind
     sources out of a dispose check, as it does for their colliders and courses (a game site the feed
     builds during a check is not the disposed spawn's).
+- **Docs:** the architecture test table lists the wave 1 labs (origin, water, challenges and the
+  ring goldens, path, fauna modes) and step files (origin-rebase, water-bodies, challenge,
+  engine-fauna-modes, shadow-resize).
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
