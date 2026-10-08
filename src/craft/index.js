@@ -9,6 +9,7 @@ import helicopter from './helicopter.js';
 import wingsuit from './wingsuit.js';
 import fpv from './fpv.js';
 import jet from './jet.js';
+import seaplane from './seaplane.js';
 
 craftRegistry.register(glider);
 craftRegistry.register(bushplane);
@@ -16,5 +17,6 @@ craftRegistry.register(helicopter);
 craftRegistry.register(wingsuit);
 craftRegistry.register(fpv);
 craftRegistry.register(jet);
+craftRegistry.register(seaplane);
 
 export { craftRegistry };
