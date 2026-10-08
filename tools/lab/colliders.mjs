@@ -208,6 +208,11 @@ function testShapes() {
   check('shapes', 'heightfield: side wall', result && near(result.t, 9 / 40) && near(result.normal.x, -1), result ? `t ${fmt(result.t)}` : 'miss');
   result = sweep({ x: 10, y: -20, z: 10 }, { x: 10, y: 20, z: 10 }, 1);
   check('shapes', 'heightfield: bottom', result && near(result.t, 19 / 40) && near(result.normal.y, -1), result ? `t ${fmt(result.t)}` : 'miss');
+  // Just beyond the far edges (x and z past the last column and row), below the top: outside.
+  const beyondX = sweep({ x: 20.5, y: 5, z: -5 }, { x: 20.5, y: 5, z: 25 }, 0.4);
+  const beyondZ = sweep({ x: -5, y: 5, z: 20.5 }, { x: 25, y: 5, z: 20.5 }, 0.4);
+  const besideX = sweep({ x: 20.5, y: 5, z: 10 }, { x: 20.5, y: 5, z: 11 }, 0.6);
+  check('shapes', 'heightfield: just beyond the far edges is outside (sweeps pass, insideSolid null), a wider sphere meets the wall', !beyondX && !beyondZ && world.insideSolid(20.5, 5, 10) === null && world.insideSolid(10, 5, 20.5) === null && besideX && near(besideX.normal.x, 1) && near(besideX.t, 0), `${beyondX ? 'hit' : 'pass'} / ${beyondZ ? 'hit' : 'pass'} / ${besideX ? `wall n.x ${fmt(besideX.normal.x)}` : 'miss'}`);
   world.remove('field');
 
   const holed = flatField('holed', 0, 0, 11, 11, 2, 10, 0);

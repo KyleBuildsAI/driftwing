@@ -37,7 +37,8 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   docs/architecture.md and docs/engines/structure.md. The lab's allocation checks judge the steady
   state over up to six rounds (a cold first run once missed it while the JIT warmed up). Mesh
   colliders tell inside from outside by ray parity (three rays, majority), independent of winding;
-  the lab checks it on a turned torus with mixed winding.
+  the lab checks it on a turned torus with mixed winding. A heightfield no longer extends its last
+  cell past its far x and z edges (a probe just beyond them read as inside, under the top).
 - **Next:** the verification runs (labs, structure and preset step files and `?test=collision` on
   both backends, the `?test=spawns` subset, the reduced `?test=1` harness), recorded here.
 - **Open issues:** none yet.

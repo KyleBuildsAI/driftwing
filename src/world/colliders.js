@@ -565,6 +565,8 @@ export function createColliderWorld({ groundSurfaces = null, cellSize = 256 } = 
   function fieldTop(field, x, z) {
     const u = (x - field.x0) / field.cell;
     const v = (z - field.z0) / field.cell;
+    // Off the grid on its far sides too (the clamp below only keeps the far edge itself in the last cell).
+    if (u > field.cols - 1 || v > field.rows - 1) return false;
     const column = Math.min(Math.floor(u), field.cols - 2);
     const row = Math.min(Math.floor(v), field.rows - 2);
     if (!cellSolidIn(field.heights, field.cols, field.rows, column, row)) return false;
