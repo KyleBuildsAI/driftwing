@@ -33,7 +33,7 @@ export default Object.freeze({
     Object.freeze({
       id: 'tiltrotor-conversion',
       views: ['third', 'first'],
-      start: { at: 'spawn', mode: 'hover', agl: 450, clearRadius: 6000, clearance: 350, throttle: 0.5 },
+      start: { at: 'spawn', mode: 'hover', agl: 450, clearRadius: 6000, clearance: 350, throttle: 0.5, craftState: { autoNacelle: true, nacelleAngle: 90, nacelleTarget: 90 } },
       seconds: 80,
       script(t, api) {
         const memo = api.memo;
@@ -77,7 +77,7 @@ export default Object.freeze({
     Object.freeze({
       id: 'tiltrotor-overspeed',
       views: ['third', 'first'],
-      start: { at: 'spawn', mode: 'air', agl: 900, speed: 120, throttle: 0.6, clearRadius: 3000, clearance: 600 },
+      start: { at: 'spawn', mode: 'air', agl: 900, speed: 120, throttle: 0.6, clearRadius: 3000, clearance: 600, craftState: { autoNacelle: true, nacelleAngle: 0, nacelleTarget: 0 } },
       seconds: 24,
       script(t, api) {
         const memo = api.memo;
