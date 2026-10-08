@@ -24,6 +24,9 @@
     "eval": "window.__viewPhysics.check('fpv')"
   },
   {
+    "eval": "window.__viewPhysics.check('eagle')"
+  },
+  {
     "eval": "(() => {\n  const { results } = window.__viewPhysics;\n  window.DRIFTWING.debug.resumeLoop();\n  window.DRIFTWING.ctx.settings.set('timeFrozen', false);\n  const failed = results.filter((result) => !result.passed).length;\n  if (results.length !== 6 || failed > 0) console.error(`[view physics] ${failed} of ${results.length} craft failed`);\n  return `view physics: ${results.length - failed}/${results.length} craft fly identically in every view`;\n})()"
   },
   {
