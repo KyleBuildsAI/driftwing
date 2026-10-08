@@ -41,6 +41,12 @@
 //                under 1 m); the burner lifts it off within 70 s; a lever left at 50 % (the boot default) lights nothing until the pilot
 //                moves it, and does not keep the altitude hold off
 //   snapshot     snapshot / restore replays the same flight to the bit
+//   column       layer steering picks the band whose wind goes the asked way, none in still air
+//   instruments  the envelope and wind-layer instruments draw in both themes and both unit systems
+//                (a recording 2D context), with a full and an empty column
+//   audio        the 'burner' family on a Web Audio stand-in: near silence when idle (the pilot
+//                lights only), the roar and rumble with the burner, the whump as it lights, the vent's
+//                rush, a creak at the touchdown and on a swing
 //
 // Usage: node tools/lab/balloon.mjs [--verbose]
 // Prints a PASS / FAIL table and exits non-zero if any check fails.
@@ -55,6 +61,10 @@ import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
 import { describeAssists } from '../../src/flight/assists.js';
 import { DEG } from '../../src/core/util.js';
+import { INSTRUMENTS } from '../../src/ui/instruments/index.js';
+import { THEMES } from '../../src/ui/instruments/gaugeKit.js';
+import { grouped, unitsFor } from '../../src/ui/instruments/units.js';
+import { ENGINE_FAMILIES, resolveAudioProfile } from '../../src/audio/engines/index.js';
 
 const DT = 1 / 120;
 const GRAVITY = 9.81;
@@ -497,6 +507,171 @@ function columnTest() {
   record('no layer when the air is still', bestLayerToward(column.map((band) => ({ ...band, speed: 0.2 })), 90) === null ? 1 : 0, 1, { compare: true });
 }
 
+/** A 2D context that records the text it draws (every other canvas method a gauge uses is a no-op). */
+function createRecordingPen() {
+  const calls = { fillText: [], total: 0 };
+  const gradient = { addColorStop() {} };
+  return new Proxy({ calls }, {
+    get(target, key) {
+      if (key in target) return target[key];
+      if (key === 'createLinearGradient' || key === 'createRadialGradient') return () => gradient;
+      if (key === 'fillText') {
+        return (text) => {
+          calls.fillText.push(String(text));
+          calls.total++;
+        };
+      }
+      return () => {
+        calls.total++;
+      };
+    },
+    set(target, key, value) {
+      target[key] = value;
+      return true;
+    },
+  });
+}
+
+function instrumentsTest() {
+  const rig = createRig({ wind: new THREE.Vector3(5, 0, -2) });
+  rig.airborne({ altitude: 700 });
+  rig.run(3, (current) => { current.held.add('craftAbility'); });
+  const column = rig.craftState.windColumn;
+  column.forEach((band, index) => {
+    band.altitude = 100 + band.agl;
+    band.speed = 2 + index;
+    band.towardDegrees = index * 20;
+    band.fromDegrees = (index * 20 + 180) % 360;
+    band.primed = true;
+  });
+  const flight = { altitude: 700, groundSpeed: 5.4, velocity: new THREE.Vector3(5, 0, -2), autopilot: { enabled: false }, craftState: rig.craftState, radarAltitude: 680 };
+  const failures = [];
+  let texts = 0;
+  for (const id of ['envelope', 'windColumn']) {
+    for (const theme of ['panel', 'glass']) {
+      for (const system of ['metric', 'aviation']) {
+        for (const state of [rig.craftState, { ...rig.craftState, windColumn: [], equilibriumTemperature: null, tempFlag: true }]) {
+          const pen = createRecordingPen();
+          try {
+            INSTRUMENTS[id].draw(pen, { flight: { ...flight, craftState: state }, craft: balloon, units: unitsFor(system) }, THEMES[theme], null);
+            texts += pen.calls.fillText.length;
+          } catch (error) {
+            failures.push(`${id}/${theme}/${system}: ${error.message}`);
+          }
+        }
+      }
+    }
+  }
+  record('envelope and wind-column instruments draw', failures.length, 0, { compare: failures.length === 0, note: failures.length ? failures[0] : `${texts} labels drawn` });
+  const pen = createRecordingPen();
+  INSTRUMENTS.windColumn.draw(pen, { flight, craft: balloon, units: unitsFor('metric') }, THEMES.glass, null);
+  const rows = WIND_BANDS.filter((agl) => pen.calls.fillText.includes(grouped(100 + agl))).length;
+  record('the wind column shows every band', rows, WIND_BANDS.length, { compare: rows === WIND_BANDS.length, decimals: 0 });
+}
+
+/**
+ * A minimal Web Audio graph: nodes connect, sources start and stop, and every parameter keeps its
+ * automation events (set, linear ramp, exponential approach) and reads its value at the context's
+ * current time, as an AudioParam does.
+ */
+function createAudioStandIn() {
+  const context = { currentTime: 0 };
+  const createParam = (initial) => {
+    const events = [];
+    let base = initial;
+    const valueAt = (now) => {
+      let value = base;
+      let previousTime = 0;
+      for (const event of events) {
+        if (event.time > now) {
+          if (event.kind === 'ramp') value += (event.value - value) * ((now - previousTime) / Math.max(event.time - previousTime, 1e-9));
+          break;
+        }
+        if (event.kind === 'target') {
+          const next = events[events.indexOf(event) + 1];
+          const until = next && next.time <= now ? next.time : now;
+          value = event.value + (value - event.value) * Math.exp(-(until - event.time) / event.constant);
+        } else {
+          value = event.value;
+        }
+        previousTime = event.time;
+      }
+      return value;
+    };
+    const add = (event) => {
+      events.push(event);
+      events.sort((first, second) => first.time - second.time);
+    };
+    return {
+      get value() { return valueAt(context.currentTime); },
+      set value(next) { base = next; events.length = 0; },
+      setTargetAtTime(value, time, constant) { add({ kind: 'target', value, time, constant }); },
+      setValueAtTime(value, time) { add({ kind: 'set', value, time }); },
+      linearRampToValueAtTime(value, time) { add({ kind: 'ramp', value, time }); },
+      cancelAndHoldAtTime(time) {
+        const held = valueAt(time);
+        for (let index = events.length - 1; index >= 0; index--) if (events[index].time >= time) events.splice(index, 1);
+        add({ kind: 'set', value: held, time });
+      },
+      cancelScheduledValues(time) {
+        for (let index = events.length - 1; index >= 0; index--) if (events[index].time >= time) events.splice(index, 1);
+      },
+    };
+  };
+  const node = (extra = {}) => ({ connect() {}, disconnect() {}, ...extra });
+  Object.assign(context, {
+    createGain: () => node({ gain: createParam(1) }),
+    createBiquadFilter: () => node({ type: 'lowpass', frequency: createParam(350), Q: createParam(1), gain: createParam(0) }),
+    createOscillator: () => node({ type: 'sine', frequency: createParam(440), start() {}, stop() {}, setPeriodicWave() {} }),
+    createBufferSource: () => node({ buffer: null, loop: false, playbackRate: createParam(1), start() {}, stop() {} }),
+    createPeriodicWave: () => ({}),
+  });
+  return { context, noise: { duration: 2 }, destination: node() };
+}
+
+function audioTest() {
+  const profile = resolveAudioProfile(balloon.audioProfile, balloon.instruments);
+  record('the balloon flies the burner family', profile.engine === 'burner' ? 1 : 0, 1, { compare: profile.engine === 'burner' && Boolean(ENGINE_FAMILIES.burner) });
+  const kit = createAudioStandIn();
+  const synth = ENGINE_FAMILIES.burner.create(kit, profile);
+  const craftState = { burner: 0, vent: 0 };
+  const flight = { craftState, angularVelocity: { x: 0, y: 0, z: 0 }, gLoad: 1, onGround: false, groundSpeed: 0 };
+  const frame = { time: 0, interval: 1 / 30, flight };
+  const runFrames = (count) => {
+    for (let index = 0; index < count; index++) {
+      frame.time += frame.interval;
+      kit.context.currentTime = frame.time;
+      synth.update(frame, 1);
+    }
+  };
+  runFrames(30);
+  const idle = synth.describe().layers;
+  record('idle: near silence, the pilot lights only', idle.roar + idle.rumble + idle.jet + idle.vent, 0.001, { compare: 'max', decimals: 3, note: `pilot ${idle.pilot.toFixed(3)}` });
+  craftState.burner = 1;
+  runFrames(1);
+  kit.context.currentTime += 0.04;
+  record('the burner lights with a whump', synth.describe().layers.whump, 0.5, { compare: 'min', decimals: 2 });
+  kit.context.currentTime -= 0.04;
+  runFrames(30);
+  const burning = synth.describe().layers;
+  record('the roar and rumble follow the burner', Math.min(burning.roar, burning.rumble), 0.5, { compare: 'min', decimals: 2 });
+  craftState.burner = 0;
+  craftState.vent = 1;
+  runFrames(30);
+  record('the vent rushes', synth.describe().layers.vent, 0.1, { compare: 'min', decimals: 2 });
+  const before = synth.describe().target.creaks;
+  flight.onGround = true;
+  runFrames(2);
+  const touchdown = synth.describe().target.creaks;
+  flight.onGround = false;
+  flight.angularVelocity.x = 0.08;
+  runFrames(300);
+  const swinging = synth.describe().target.creaks;
+  const creaked = touchdown > before && swinging > touchdown + 2;
+  record('the basket creaks at the touchdown and on a swing', creaked ? 1 : 0, 1, { compare: creaked, note: `${touchdown - before} at the touchdown, ${swinging - touchdown} in 10 s of swing` });
+  synth.stop(frame.time);
+}
+
 // ============================================================================================
 // REPORT
 // ============================================================================================
@@ -536,6 +711,8 @@ waterTest();
 groundTest();
 snapshotTest();
 columnTest();
+instrumentsTest();
+audioTest();
 const passed = printTable();
 process.stdout.write(`(${((performance.now() - started) / 1000).toFixed(1)} s)\n`);
 process.exit(passed ? 0 : 1);
