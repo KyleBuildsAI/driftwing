@@ -16,8 +16,14 @@
 // mirror) are per-object uniforms read from mesh.userData.water, so a new body never compiles a new
 // pipeline. Both backends (WebGPU, WebGL2) build the same node graphs.
 //
-// World positions: every absolute world-space read goes through worldXZ(), so the render origin's
-// offset (a floating origin) is added in one place.
+// World positions (the floating origin, src/core/origin.js): positionWorld is in the render frame.
+// Every absolute world-space read (noise) goes through worldXZ(), which adds uniforms.renderOrigin;
+// the cloud shadow moves its world centre into the render frame instead (a small, precise value); the
+// lake's wave phase wraps the render-frame position by 4096 m, which the origin lattice divides.
+// Curvature (src/render/curvature.js, contract g.3): every water surface is lowered by the planet
+// curvature drop of its horizontal distance to the camera, exactly 0 below 5 km camera altitude.
+
+import { curvatureDropNode, curvedPositionNode } from './curvature.js';
 
 /** Shading constants of the ocean (Phase 1 / 2 values). */
 const OCEAN_LOOK = Object.freeze({
@@ -113,16 +119,26 @@ export function createWaterMaterial(ctx, options) {
   throw new Error(`[DRIFTWING] createWaterMaterial: unknown kind "${options.kind}"`);
 }
 
-/** The fragment's world-space xz (positionWorld; the one place a render origin offset would apply). */
-function worldXZ(TSL) {
-  return TSL.positionWorld.xz;
+/**
+ * The fragment's WORLD xz: the render-frame positionWorld plus the render origin (for noise and other
+ * absolute world-space patterns). Without a render origin (no floating origin) it is positionWorld.
+ */
+function worldXZ(ctx) {
+  const { TSL, uniforms } = ctx;
+  return uniforms.renderOrigin ? TSL.positionWorld.xz.add(uniforms.renderOrigin.xz) : TSL.positionWorld.xz;
+}
+
+/** A world-space xz uniform node moved into the render frame (world - renderOrigin; small near the camera). */
+function toRenderXZ(ctx, worldNode) {
+  const { uniforms } = ctx;
+  return uniforms.renderOrigin ? worldNode.sub(uniforms.renderOrigin.xz) : worldNode;
 }
 
 /** Cloud cover over the fragment (0..1) from the shared cloud-shadow texture, 0 outside it. */
 function cloudShadowNode(ctx) {
   const { TSL, uniforms, textures } = ctx;
   const { texture, step } = TSL;
-  const shadowUV = worldXZ(TSL).sub(uniforms.cloudShadowCenter).div(uniforms.cloudShadowWorldSize).add(0.5);
+  const shadowUV = TSL.positionWorld.xz.sub(toRenderXZ(ctx, uniforms.cloudShadowCenter)).div(uniforms.cloudShadowWorldSize).add(0.5);
   const insideShadowMap = step(0, shadowUV.x).mul(step(shadowUV.x, 1)).mul(step(0, shadowUV.y)).mul(step(shadowUV.y, 1));
   return texture(textures.cloudShadow, shadowUV).r.mul(insideShadowMap);
 }
@@ -145,7 +161,7 @@ function createOceanMaterial(ctx, { waves, axis, gridHalfExtent, effects, clock,
   const {
     Fn, uniform, float, vec2, vec3, vec4, positionLocal, positionGeometry, positionView, positionWorld,
     cameraViewMatrix, varying, sin, cos, fract, dot, normalize, mix, smoothstep, saturate, pow, max, min,
-    reflect, length, oneMinus, sqrt, cameraPosition, mx_noise_vec3,
+    reflect, length, oneMinus, sqrt, cameraPosition, mx_noise_vec3, modelWorldMatrix,
   } = TSL;
   const halfSegments = axis.length - 1;
 
@@ -224,7 +240,9 @@ function createOceanMaterial(ctx, { waves, axis, gridHalfExtent, effects, clock,
     // shallows never z-fight with it on 24-bit depth.
     const cameraDistance = length(local.xz.sub(cameraOffset));
     const sink = min(cameraDistance.mul(cameraDistance).mul(OCEAN_LOOK.DEPTH_SINK_PER_SQUARE_METRE), OCEAN_LOOK.MAX_DEPTH_SINK);
-    return local.add(offset).add(vec3(0, effects.nodes.displacement(local.xz), 0)).sub(vec3(0, sink, 0));
+    // The planet curvature (0 below 5 km): the grid only translates, so local y is world y.
+    const curvature = curvatureDropNode(ctx, modelWorldMatrix.mul(vec4(local, 1)).xyz);
+    return local.add(offset).add(vec3(0, effects.nodes.displacement(local.xz), 0)).sub(vec3(0, sink.add(curvature), 0));
   })();
 
   // ---- Fragment stage: analytic normal at the undisplaced surface parameter -------------
@@ -235,7 +253,7 @@ function createOceanMaterial(ctx, { waves, axis, gridHalfExtent, effects, clock,
   const footprintDistance = viewDistance.div(sqrt(max(viewSteepness, 0.06)));
   // One low-frequency noise sample (3 channels): slow "cat's paw" gust patches that modulate the
   // short waves, and two phase-warp fields that bend their crests so they never form a lattice.
-  const surfaceNoise = mx_noise_vec3(vec3(worldXZ(TSL).mul(1 / 58), uniforms.time.mul(0.04)));
+  const surfaceNoise = mx_noise_vec3(vec3(worldXZ(ctx).mul(1 / 58), uniforms.time.mul(0.04)));
   const gust = saturate(surfaceNoise.x.mul(0.9).add(0.55));
   const detailScale = mix(float(0.35), float(1.3), gust);
   const crestWarpA = surfaceNoise.y.mul(OCEAN_LOOK.DETAIL_PHASE_WARP);
@@ -340,7 +358,7 @@ function createLakeMaterial(ctx, { waves, effects, clock, lighting, swellScale }
   const { THREE: T, TSL, uniforms } = ctx;
   const {
     Fn, float, vec2, vec3, sin, cos, fract, dot, normalize, mix, smoothstep, saturate, pow, max, attribute,
-    reflect, length, oneMinus, positionView, cameraViewMatrix, mx_noise_float, mx_noise_vec3, mod,
+    reflect, length, oneMinus, positionView, positionWorld, cameraViewMatrix, mx_noise_float, mx_noise_vec3, mod,
   } = TSL;
   const body = bodyUniforms(ctx);
   const waveScale = body.params.x;
@@ -353,12 +371,16 @@ function createLakeMaterial(ctx, { waves, effects, clock, lighting, swellScale }
 
   const material = new T.MeshStandardNodeMaterial({ roughness: 0.12, metalness: 0, transparent: true, depthWrite: true });
   material.name = 'water-lake';
+  // Body meshes only translate (their outline rotation is baked into the vertices).
+  material.positionNode = curvedPositionNode(ctx);
 
   // Waves scaled down: the swell (per body, times the ocean's swell scale) and the detail ripples
   // only shape the normal; the surface itself stays flat (the physics treats lakes as flat too).
-  const wrapped = mod(worldXZ(TSL), 4096);
+  // The render origin sits on a 4096 m lattice, so wrapping the render-frame position equals wrapping
+  // the world position, and stays precise far from the world origin.
+  const wrapped = mod(positionWorld.xz, 4096);
   const viewDistance = length(positionView);
-  const ripple = mx_noise_vec3(vec3(worldXZ(TSL).mul(1 / 41), uniforms.time.mul(0.05)));
+  const ripple = mx_noise_vec3(vec3(worldXZ(ctx).mul(1 / 41), uniforms.time.mul(0.05)));
   const gust = saturate(ripple.x.mul(0.9).add(0.5));
   const calm = oneMinus(mirror.mul(0.9));
   const all = [...waves.swell, ...waves.detail];
@@ -379,8 +401,8 @@ function createLakeMaterial(ctx, { waves, effects, clock, lighting, swellScale }
     return vec2(slopeX, slopeZ);
   })();
   // The craft's foam trail (the effects layer's trail buffer) and a lacy shoreline band.
-  const trailFoam = effects.nodes.trailFoam(worldXZ(TSL));
-  const lace = mx_noise_float(vec3(worldXZ(TSL).mul(0.32), uniforms.time.mul(0.22)));
+  const trailFoam = effects.nodes.trailFoam(positionWorld.xz);
+  const lace = mx_noise_float(vec3(worldXZ(ctx).mul(0.32), uniforms.time.mul(0.22)));
   const shoreBand = oneMinus(smoothstep(0, LAKE_FOAM_DEPTH, depth)).mul(smoothstep(0.02, 0.18, depth));
   const surge = sin(uniforms.time.mul(0.9).add(lace.mul(2.4))).mul(0.25).add(0.75);
   const foam = saturate(shoreBand.mul(smoothstep(-0.3, 0.35, lace)).mul(surge).mul(foamScale).add(trailFoam.mul(0.8)));
@@ -427,10 +449,11 @@ function createIceMaterial(ctx, { lighting }) {
   const shore = attribute('waterShore', 'vec2');
   const inside = shore.y;
   const depth = shore.x;
-  const xz = worldXZ(TSL);
+  const xz = worldXZ(ctx);
 
   const material = new T.MeshStandardNodeMaterial({ roughness: 0.45, metalness: 0 });
   material.name = 'water-ice';
+  material.positionNode = curvedPositionNode(ctx);
   // Rime and snow patches, long pressure ridges (stretched noise), and a web of thin cracks.
   const patches = mx_noise_float(vec3(xz.mul(0.018), 0.5));
   const rime = smoothstep(-0.15, 0.45, patches.add(mx_noise_float(vec3(xz.mul(0.09), 2.1)).mul(0.35)));

@@ -536,14 +536,16 @@ export function createWaterEffects(ctx) {
   });
 
   /**
-   * Foam (0..1) from the trail buffer at a world-space xz node (the lake material's craft trail): the
-   * same texels, lace and window fade as the ocean's trail foam, exactly zero while no row holds
-   * anything.
+   * Foam (0..1) from the trail buffer at a RENDER-frame xz node (positionWorld.xz; the lake material's
+   * craft trail): the same texels, lace and window fade as the ocean's trail foam, exactly zero while
+   * no row holds anything. The trail anchor (world) moves into the render frame first, so the
+   * difference stays small and precise at any distance from the world origin.
    */
-  const trailFoamFn = Fn(([worldXZ]) => {
+  const trailAnchorRender = ctx.uniforms.renderOrigin ? trailAnchor.sub(ctx.uniforms.renderOrigin.xz) : trailAnchor;
+  const trailFoamFn = Fn(([renderXZ]) => {
     const foam = float(0).toVar();
     If(trailsActive.greaterThan(0.5), () => {
-      const p = worldXZ.sub(trailAnchor);
+      const p = renderXZ.sub(trailAnchorRender);
       const trail = texture(trailTexture, p.add(trailOrigin).div(TRAIL_SPAN)).g;
       const window = max(abs(p.x), abs(p.y));
       const fade = oneMinus(smoothstep(TRAIL_SPAN * 0.38, TRAIL_SPAN * 0.48, window));
@@ -560,8 +562,8 @@ export function createWaterEffects(ctx) {
     surface: (waveHeight) => surfaceFn(gridPosition, waveHeight),
     /** Fragment stage: 0..1 darkening inside vortex funnels. */
     darken: () => funnelDarkenFn(gridPosition),
-    /** Fragment stage: the craft-trail foam (0..1) at a world-space xz node (local water bodies). */
-    trailFoam: (worldXZ) => trailFoamFn(worldXZ),
+    /** Fragment stage: the craft-trail foam (0..1) at a render-frame xz node (local water bodies). */
+    trailFoam: (renderXZ) => trailFoamFn(renderXZ),
     glowColor,
     foamColor,
   };

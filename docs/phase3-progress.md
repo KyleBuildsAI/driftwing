@@ -14,16 +14,12 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 | # | Work | Branch | Contract | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Floating origin: `src/core/origin.js`, `scene.position = -offset`, the 4096 m lattice, the shader, CPU-matrix and float32-buffer fixes, audio in the render frame | `p3/origin` | a | in progress |
-| 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | not started |
-| 3 | Local water bodies (basin, crater, terraces stamps; lake and ice material), the shared water-height query and the caller migration; region overlays; vegetation species 6-12 with WindField sway and trunk colliders | `p3/water-regions` | c, d | in progress |
-
-| 1 | Floating origin: `src/core/origin.js`, `scene.position = -offset`, the 4096 m lattice, the shader, CPU-matrix and float32-buffer fixes, audio in the render frame | `p3/origin` | a | not started |
-| 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | done (branch; awaiting merge) |
-| 3 | Local water bodies (basin, crater, terraces stamps; lake and ice material), the shared water-height query and the caller migration; region overlays; vegetation species 6-12 with WindField sway and trunk colliders | `p3/water-regions` | c, d | not started |
-| 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | not started |
-| 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | in progress |
-| I1 | Integration pass: merge in the order origin, high altitude, water/regions, colliders, fauna/challenges; the follow-ups of contract appendix A; every lab and step file once on both backends | `v2-phase3` | appendix A | not started |
+| 1 | Floating origin: `src/core/origin.js`, `scene.position = -offset`, the 4096 m lattice, the shader, CPU-matrix and float32-buffer fixes, audio in the render frame | `p3/origin` | a | merged |
+| 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | merged |
+| 3 | Local water bodies (basin, crater, terraces stamps; lake and ice material), the shared water-height query and the caller migration; region overlays; vegetation species 6-12 with WindField sway and trunk colliders | `p3/water-regions` | c, d | merged |
+| 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | merged |
+| 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | merged |
+| I1 | Integration pass: merge in the order origin, high altitude, water/regions, colliders, fauna/challenges; the follow-ups of contract appendix A; every lab and step file once on both backends | `v2-phase3` | appendix A | in progress |
 
 ### Wave 1 - p3/origin
 
@@ -332,6 +328,45 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   course's math operation for operation, with rect gates) instead of `gateDetector.crossGates`,
   which the golden logs need; the integration pass adds `challenges.count()` to the spawn check
   kit's dispose baseline and the rigid curvature drop to the fauna group roots (contract appendix A).
+
+### Wave 1 - integration (I1, on `v2-phase3`)
+
+- **Merged** in the contract's order with `--no-ff`: origin `c6bdb2b`, high altitude `da03000`,
+  water/regions `b33ab09`, colliders `a2ed145`, fauna/challenges `afcdb33`. Conflicts were only this
+  file (every subsection kept), `terrain.js` (both import sets, both header notes, the overlay shade
+  with the origin's water-level line, the high-altitude block beside the overlay sweep slots),
+  `mapTileGen.js` (both the far field's `surface` / `albedo` fields and the body tints; the albedo
+  now draws local bodies in their own tint and keeps ice opaque), `FlightController.js`
+  (`getCollisionProbes` beside `getCeiling`), `main.js` (the dev-test comment),
+  `structureEngine.js` (the rigid drop and the collider imports, `challenge: null` beside
+  `colliders: []`, `registerChallenge` after `registerSurfaces`, both dispose calls) and
+  `schema.js` (the three pure validator imports). The verbatim lines (`UPDATE_ORDER`,
+  `PRESET_FIELDS`, the game ctx) are exact after every merge.
+- **Wiring:**
+  - the water materials (`waterMaterial.js`): noise reads `worldXZ` (positionWorld plus
+    `renderOrigin`), the cloud shadow moves its centre into the render frame, the lake's wave phase
+    wraps the render-frame position (4096 m divides the origin lattice), the lake trail foam takes a
+    render-frame position (`waterEffects.js`); the curvature drop on the ocean grid
+    (`curvatureDropNode` in its position node) and on the lake and ice meshes (`curvedPositionNode`);
+  - weather volumes: each puff and shaft is drawn lowered by `rigidCurvatureDrop` of its own position
+    before the distance compression (the instanced meshes take the drop on the CPU, where their
+    instance matrices are written every frame);
+  - fauna: agents and dust are drawn lowered by `rigidCurvatureDrop` (the per-agent equivalent of a
+    group-root drop, since the species share pooled buffers); the `water` altitude mode reads
+    `ctx.game.waterQuery` (ocean swell and lakes; sea level where neither covers the point);
+  - vegetation: the WindField sway texture is read with the render-frame position (the window
+    centre moves into the render frame; the 2048 m texture repeat divides the origin lattice), and
+    the instances take the same curvature drop as the chunk under them;
+  - the vegetation perch provider reports `visit(x, y, z, kind, sourceId)` as `perchesNear` does
+    (it passed one object before); the water lab now registers the vegetation providers with the
+    real collider service (a sweep hits a redwood trunk, the tree tops are perches, unregistering
+    removes both);
+  - the spawn check kit counts challenge courses (`challenges.list()`, the ring course and live
+    spawns' courses excluded) in every dispose check: `challengesOk` joins `ok`, the spawns test's
+    "other" criterion and the harness table;
+  - the challenge best path stores positions relative to the first gate (`anchor`, float64), so the
+    float32 frames keep centimetre precision far from the world origin; `getBestPath` returns
+    `{ hz, anchor, frames }` (contract f.1 updated; a stored path without an anchor reads with 0).
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
