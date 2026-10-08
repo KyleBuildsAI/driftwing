@@ -36,6 +36,7 @@ import { RECIPES, RECIPE_NAMES } from './structure/recipes/index.js';
 import { islandOutline, islandTopHeight } from './structure/recipes/islands.js';
 import { GATE_TELEPORT_DISTANCE, createGateSet, crossGates } from './gateDetector.js';
 import { createParamView, createWindSample, ownsPresetAudio } from './engineKit.js';
+import { applyRigidDrop } from '../../render/curvature.js';
 
 const ENGINE_NAME = 'structure';
 /** Structure spawns alive at once (the director's cap is the same). */
@@ -1112,6 +1113,7 @@ export function createStructureEngine() {
 
     update(instance, dt) {
       const data = instance.data;
+      for (let kind = 0; kind < GEOMETRY_KINDS.length; kind++) applyRigidDrop(ctx, data.meshes[GEOMETRY_KINDS[kind]], instance.anchor.y);
       data.look.x = instance.params.glow;
       updateWind(data, dt);
       if (data.turbineCount > 0 && data.animateTurbines) updateTurbines(data, dt);

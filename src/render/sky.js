@@ -3,6 +3,8 @@ import * as TSL from 'three/tsl';
 import { CONFIG } from '../core/config.js';
 import { DEG, clamp, damp } from '../core/util.js';
 import { sunDirectionForDayTime, moonDirectionForDayTime, dayTimeForSunElevation } from '../core/sun.js';
+import { ATMOSPHERE_NEUTRAL_BELOW, DENSITY_SCALE_HEIGHT, createAtmosphereState, skyState } from '../env/atmosphere.js';
+import { planetRadiusFromSetting } from './curvature.js';
 
 /** Angular radius (rad) of the sun disc the dome draws; the celestial engine's eclipse moon matches it. */
 export const SUN_ANGULAR_RADIUS = 0.0175;
@@ -21,13 +23,22 @@ export const CELESTIAL_POLE_ELEVATION_DEG = 52;
  * - Sky modifiers (Phase 2): addModifier(id, { priority }) lets the regional weather and the celestial
  *   events darken, tint and fog the sky. They act on the CPU-side palette and lights only (no shader
  *   change), and with no modifier weighing in the sky runs exactly the Phase 1 path.
+ * - High altitude (Phase 3, contract g.2): state.atmosphere (src/env/atmosphere.js, from the camera
+ *   altitude every frame) drives the dome toward black above the limb band, the sharper sun disc and
+ *   narrower glow, daylight stars, the thin blue limb on the rendered horizon (its dip below the
+ *   horizontal follows the planet curvature), and a column haze (the air density integrated along
+ *   each view ray, the curvature undone) that takes over from the Phase 1 fog between 6 and 9 km, so
+ *   the far field reads to the horizon. camera.far follows state.atmosphere.viewDistance (600 km at
+ *   most). Every high-altitude term runs inside a shader branch on the sky's highAltitude uniform, which
+ *   stays off below 3 km, and the CPU side only writes neutral values there: the golden-hour opening
+ *   is pixel-identical.
  */
 export function createSkySystem(ctx) {
   const { scene, camera, renderer, state, uniforms, settings, bus, CONFIG: config } = ctx;
   const {
     Fn, If, Loop, uniform, float, int, vec2, vec3, positionWorldDirection, positionView, cameraViewMatrix, cameraPosition,
     dot, pow, exp, exp2, mix, smoothstep, saturate, sin, cos, abs, fract, floor, sqrt, length, clamp: clampNode, step, max,
-    fog, hash, screenCoordinate,
+    fog, hash, screenCoordinate, select, min,
   } = TSL;
 
   // ---- Tunables -----------------------------------------------------------------------------------
@@ -73,6 +84,22 @@ export function createSkySystem(ctx) {
   const WARP_GOLDEN_HIGH = 14;
   const WARP_EDGE = 4;
   const DEFAULT_TRANSITION_SECONDS = 2.5;
+  // High altitude (state.atmosphere): the limb's thickness (sine of the angle above the rendered
+  // horizon), the band above it that darkens to black (wide at first, narrow in space), the column
+  // haze's extinction per metre of sea-level air (about 20 % haze straight down from 100 km, a bright
+  // horizon band), the share of the view distance where the clipped rim starts to melt into the haze,
+  // the overcast fade above the cloud decks, and the limb tint (sRGB).
+  const LIMB_WIDTH = 0.032;
+  const SPACE_RISE_LOW = 0.38;
+  const SPACE_RISE_HIGH = 0.05;
+  const HAZE_EXTINCTION = 2.6e-5;
+  const HAZE_MIN_RISE = 1;
+  const RIM_HAZE_START = 0.86;
+  const CLOUD_DECK_TOP = 9000;
+  const ABOVE_WEATHER = 14000;
+  const LIMB_TINT = new THREE.Color(0x4a93ff);
+  const SPACE_SUN_LIGHT = new THREE.Color(0xfff6ec);
+  const SPACE_SUN_INTENSITY = 3.1;
   const CELESTIAL_POLE = new THREE.Vector3(0, Math.sin(CELESTIAL_POLE_ELEVATION_DEG * DEG), -Math.cos(CELESTIAL_POLE_ELEVATION_DEG * DEG)).normalize();
   const GALAXY_NORMAL = new THREE.Vector3(0.62, 0.31, -0.72).normalize();
   const AURORA_FILL = new THREE.Color(0x4fd6a8);
@@ -254,6 +281,14 @@ export function createSkySystem(ctx) {
     fogNear: uniform(400),
     fogFar: uniform(2400),
     fogVerticalScale: uniform(FOG_VERTICAL_SCALE),
+    // High altitude: the branch switch (0 below 3 km), the sine of the horizon dip, the darkening band,
+    // the limb colour (radiance) and the distance where the clipped rim has melted into the haze.
+    highAltitude: uniform(0),
+    dipSin: uniform(0),
+    spaceRise: uniform(SPACE_RISE_LOW),
+    limbColor: uniform(new THREE.Color()),
+    rimDistance: uniform(1e6),
+    hazeBlend: uniform(0),
   };
 
   const auroraLayerCount = uniform(AURORA_LAYERS, 'int');
@@ -291,6 +326,9 @@ export function createSkySystem(ctx) {
    * Base sky radiance for a unit world direction: gradient keyed by sun elevation, azimuth-tinted horizon,
    * haze below the horizon, Mie glow around the sun and a soft moon halo. No disc, stars or aurora: this is
    * also the fog colour, so anything fully fogged becomes exactly the sky behind it.
+   * High altitude (a branch, off below 3 km): the gradient is keyed to the rendered horizon (dipped by
+   * the curvature) instead of the horizontal, darkens toward black above the limb band, the broad glow
+   * narrows to a tight halo, and the thin blue limb glows along the horizon.
    */
   const skyBase = Fn(([direction]) => {
     const up = direction.y;
@@ -308,8 +346,31 @@ export function createSkySystem(ctx) {
     const glow = sky.glowColor.mul(glowShape.mul(horizonBoost).mul(sky.glowStrength));
     const moonClose = saturate(dot(direction, uniforms.moonDirection));
     const moonHalo = pow(moonClose, 14.0).mul(0.05).add(pow(moonClose, 240.0).mul(0.22));
+    const moonGlow = sky.moonGlowColor.mul(moonHalo.mul(sky.moonStrength));
     const auroraAmbient = sky.auroraGlow.mul(horizonBoost.mul(smoothstep(-0.25, 0.1, up)));
-    return baseColor.add(glow).add(sky.moonGlowColor.mul(moonHalo.mul(sky.moonStrength))).add(auroraAmbient);
+    const radiance = baseColor.add(glow).add(moonGlow).add(auroraAmbient).toVar();
+    If(sky.highAltitude.greaterThan(0.5), () => {
+      const horizonUp = up.add(sky.dipSin).div(sky.dipSin.add(1.0));
+      // Seen from thin air the horizon band is the lit atmosphere edge-on: it takes the limb's blue.
+      const edgeOn = mix(horizonHere, sky.limbColor, uniforms.limbStrength.mul(0.8));
+      // ...and the haze over the ground below turns from the low air's tint to the same scattered blue.
+      const highGround = mix(groundHere, sky.limbColor.mul(0.7), uniforms.limbStrength.mul(0.45));
+      const highAbove = mix(sky.zenith, edgeOn, pow(float(1).sub(saturate(horizonUp)), sky.horizonFalloff));
+      const space = smoothstep(0.0, sky.spaceRise, horizonUp);
+      const darkAbove = highAbove.mul(float(1).sub(uniforms.skyDarkness.mul(space)));
+      const highBase = mix(darkAbove, highGround, smoothstep(0.0, 0.3, horizonUp.negate()));
+      const highBoost = mix(0.45, 1.0, exp(abs(horizonUp).mul(-5.0)));
+      const broad = float(1).sub(uniforms.sunSharpness.mul(0.9));
+      const tightHalo = pow(sunClose, 1600.0).mul(uniforms.sunSharpness).mul(0.9);
+      const aureoleShare = float(1).sub(uniforms.sunSharpness.mul(0.7));
+      const highGlowShape = pow(sunClose, 4.0).mul(0.12).add(pow(sunClose, 24.0).mul(0.55)).mul(broad).add(aureole.mul(aureoleShare)).add(tightHalo);
+      const highGlow = sky.glowColor.mul(highGlowShape.mul(highBoost).mul(sky.glowStrength));
+      const limbBand = exp(max(horizonUp, 0.0).div(-LIMB_WIDTH)).mul(smoothstep(-LIMB_WIDTH * 0.5, 0.0, horizonUp));
+      const limb = sky.limbColor.mul(limbBand.mul(uniforms.limbStrength).mul(sunward.mul(0.45).add(0.55)));
+      const highAurora = sky.auroraGlow.mul(highBoost.mul(smoothstep(-0.25, 0.1, horizonUp)));
+      radiance.assign(highBase.add(highGlow).add(moonGlow).add(highAurora).add(limb));
+    });
+    return radiance;
   });
 
   /** 1 below low, 0 above high (smoothstep with reversed edges is undefined in GLSL/WGSL). */
@@ -352,12 +413,24 @@ export function createSkySystem(ctx) {
     const up = direction.y;
     const radiance = skyBase(direction).toVar();
     const time = uniforms.time;
+    // The height above the visible horizon: the horizontal below 3 km, the curved planet's rim above.
+    const skyUp = up.toVar();
+    If(sky.highAltitude.greaterThan(0.5), () => {
+      skyUp.assign(up.add(sky.dipSin).div(sky.dipSin.add(1.0)));
+    });
 
     // HDR sun disc with limb darkening, sinking behind the horizon line.
     const sunOffset = length(direction.sub(uniforms.sunDirection));
     const disc = fadeOut(SUN_ANGULAR_RADIUS * 0.8, SUN_ANGULAR_RADIUS, sunOffset);
     const limb = sqrt(saturate(float(1).sub(pow(sunOffset.div(SUN_ANGULAR_RADIUS), 2.0)))).mul(0.4).add(0.6);
-    radiance.addAssign(sky.sunDiscColor.mul(disc.mul(limb).mul(smoothstep(-0.003, 0.004, up))));
+    const sunTerm = sky.sunDiscColor.mul(disc.mul(limb).mul(smoothstep(-0.003, 0.004, up))).toVar();
+    If(sky.highAltitude.greaterThan(0.5), () => {
+      // Thin air: the edge sharpens (no scattering blur) and the disc sinks behind the curved rim.
+      const sharpEdge = mix(float(SUN_ANGULAR_RADIUS * 0.8), float(SUN_ANGULAR_RADIUS * 0.97), uniforms.sunSharpness);
+      const sharpDisc = fadeOut(sharpEdge, SUN_ANGULAR_RADIUS, sunOffset);
+      sunTerm.assign(sky.sunDiscColor.mul(sharpDisc.mul(limb).mul(smoothstep(-0.003, 0.004, skyUp))));
+    });
+    radiance.addAssign(sunTerm);
 
     // Radial god rays: irregular shafts fanning out of the sun, slowly evolving, only in the sky. The
     // pattern is noise sampled on a circle around the sun (no angular seam); bright shafts lift the
@@ -388,14 +461,15 @@ export function createSkySystem(ctx) {
       const lit = max(saturate(dot(surfaceNormal, uniforms.sunDirection).mul(0.9).add(0.1)), 0.05);
       const maria = smoothstep(-0.35, 0.45, valueNoise3(vec3(localX.mul(2.3), localY.mul(2.3), 7.1)));
       const albedo = mix(0.58, 1.0, maria);
-      const inside = fadeOut(MOON_ANGULAR_RADIUS * 0.9, MOON_ANGULAR_RADIUS, moonOffset).mul(smoothstep(-0.003, 0.004, up));
+      const inside = fadeOut(MOON_ANGULAR_RADIUS * 0.9, MOON_ANGULAR_RADIUS, moonOffset).mul(smoothstep(-0.003, 0.004, skyUp));
       moonCover.assign(inside);
       const moonColor = vec3(1.0, 0.97, 0.9).mul(1.35);
       radiance.addAssign(moonColor.mul(albedo.mul(lit).mul(inside).mul(sky.moonStrength)));
     });
 
-    // Stars: one candidate per direction cell, twinkling, denser along a faint milky way band.
-    If(sky.starStrength.greaterThan(0.001).and(up.greaterThan(-0.02)), () => {
+    // Stars: one candidate per direction cell, twinkling, denser along a faint milky way band; from
+    // about 30 km also by day (starStrength takes state.atmosphere.starVisibility).
+    If(sky.starStrength.greaterThan(0.001).and(skyUp.greaterThan(-0.02)), () => {
       const starDirection = sky.starRotation.mul(direction);
       const cellPosition = starDirection.mul(STAR_CELL_SCALE);
       const cell = floor(cellPosition);
@@ -412,7 +486,7 @@ export function createSkySystem(ctx) {
       const twinkleDepth = mix(0.55, 0.2, saturate(up.mul(2.5)));
       const twinkle = sin(time.mul(jitter.x.mul(3.0).add(1.4)).add(jitter.y.mul(6.2832))).mul(twinkleDepth).add(float(1).sub(twinkleDepth));
       const tint = mix(vec3(0.72, 0.82, 1.0), vec3(1.0, 0.86, 0.68), jitter.z);
-      const horizonFade = smoothstep(0.0, 0.24, up).mul(float(1).sub(moonCover));
+      const horizonFade = smoothstep(0.0, 0.24, skyUp).mul(float(1).sub(moonCover));
       const stars = tint.mul(core.mul(brightness).mul(twinkle).mul(present));
       const milkyNoise = valueNoise3(starDirection.mul(4.5)).mul(0.5).add(0.5);
       const milkyWay = vec3(0.05, 0.055, 0.085).mul(band.mul(milkyNoise.mul(milkyNoise)).mul(1.6));
@@ -472,6 +546,27 @@ export function createSkySystem(ctx) {
   scene.add(dome);
 
   // ---- Fog: same sky function, horizontally weighted distance so the world edge always melts away ----
+  /**
+   * The column haze (0..1) of a point offset metres from the camera: 1 - exp(-tau), tau the air
+   * density integrated along the straight ray (an exponential atmosphere, scale height 8.5 km) times
+   * HAZE_EXTINCTION. The point's altitude has the render curvature undone, so the far field's lowered
+   * rim counts as ground, not as air below the sea. Looking down from space the ground stays clear;
+   * toward the horizon the long, low ray turns into a bright band; the clipped rim (beyond the far
+   * plane) melts into the haze over the last share of the view distance.
+   */
+  const columnHaze = Fn(([offset]) => {
+    const horizontalSq = offset.x.mul(offset.x).add(offset.z.mul(offset.z));
+    const pathLength = length(offset);
+    const cameraAltitude = max(uniforms.atmosphereAltitude, 0.0);
+    const curvatureLift = horizontalSq.mul(uniforms.curvatureAmount).div(uniforms.planetRadius.mul(2.0));
+    const pointAltitude = max(cameraAltitude.add(offset.y).add(curvatureLift), 0.0);
+    const lowest = min(cameraAltitude, pointAltitude);
+    const rise = max(abs(cameraAltitude.sub(pointAltitude)), HAZE_MIN_RISE);
+    const meanDensity = exp(lowest.div(-DENSITY_SCALE_HEIGHT)).mul(float(1).sub(exp(rise.div(-DENSITY_SCALE_HEIGHT)))).mul(DENSITY_SCALE_HEIGHT).div(rise);
+    const column = float(1).sub(exp(pathLength.mul(meanDensity).mul(-HAZE_EXTINCTION)));
+    const rim = smoothstep(sky.rimDistance.mul(RIM_HAZE_START), sky.rimDistance, pathLength);
+    return max(column, rim);
+  });
   const viewDirectionWorld = positionView.transformDirection(cameraViewMatrix);
   const worldOffset = viewDirectionWorld.mul(length(positionView));
   /**
@@ -491,7 +586,10 @@ export function createSkySystem(ctx) {
     const layerDensity = mix(float(FOG_HIGH_DENSITY), float(1), exp(max(rayMidHeight, 0.0).div(FOG_SCALE_HEIGHT).negate()));
     const layerHaze = smoothstep(sky.fogNear, sky.fogFar, hazeDistance);
     const edgeHaze = smoothstep(sky.fogFar.mul(FOG_EDGE_START), sky.fogFar, hazeDistance);
-    return max(layerHaze.mul(layerHaze).mul(layerDensity), edgeHaze.mul(edgeHaze));
+    const lowHaze = max(layerHaze.mul(layerHaze).mul(layerDensity), edgeHaze.mul(edgeHaze));
+    // High altitude: the column haze takes over between 6 and 9 km (the branch is off below 3 km, so
+    // the Phase 1 value passes through untouched).
+    return select(sky.highAltitude.greaterThan(0.5), mix(lowHaze, columnHaze(offset), sky.hazeBlend), lowHaze);
   }
   scene.fogNode = fog(skyBase(viewDirectionWorld), fogAmount(worldOffset));
   const backgroundColor = new THREE.Color();
@@ -550,6 +648,12 @@ export function createSkySystem(ctx) {
   let appliedFar = 0;
   let appliedExposure = -1;
   let shadowsLive = true;
+  // High altitude: state.atmosphere (contract g.1), the planet radius (setting planetRadiusKm) and
+  // whether the high-altitude branch is on this frame (camera at or above 3 km).
+  const atmosphere = state.atmosphere ?? createAtmosphereState();
+  state.atmosphere = atmosphere;
+  let planetRadius = planetRadiusFromSetting(settings.get('planetRadiusKm'));
+  let highAltitude = false;
 
   const scratch = {
     zenith: new THREE.Color(),
@@ -666,6 +770,13 @@ export function createSkySystem(ctx) {
       compositeTint('fogColor', 'fogColorAmount', modifier.fogColor, values.fogColorAmount * weight);
       compositeTint('skyTint', 'skyTintAmount', modifier.skyTint, values.skyTintAmount * weight);
       active = true;
+    }
+    // Above the cloud decks there is no overcast and no low haze: a storm below a high craft no longer
+    // hides the sun or closes the fog (darkness and tints, an eclipse's too, still apply).
+    if (atmosphere.altitude > CLOUD_DECK_TOP) {
+      const below = 1 - smoothRange(CLOUD_DECK_TOP, ABOVE_WEATHER, atmosphere.altitude);
+      combined.overcast *= below;
+      combined.fogDensity = 1 + (combined.fogDensity - 1) * below;
     }
     // Neutral values weigh nothing: the sky then keeps its untouched Phase 1 path.
     combined.active = active && (
@@ -831,6 +942,7 @@ export function createSkySystem(ctx) {
     sky.sunDiscColor.value.copy(scratch.lightColor).multiplyScalar(discIntensity * sunVisibility);
     uniforms.sunColor.value.copy(scratch.lightColor).multiplyScalar(sunVisibility);
     sky.rayStrength.value = time.goldenFactor * sunVisibility * 0.38;
+    if (highAltitude) applyHighAltitudeSun(elevation, discIntensity);
     setBasis(time.sunDirection, sky.sunRight, sky.sunUp);
 
     const moonAbove = smoothRange(-0.04, 0.06, time.moonDirection.y);
@@ -849,6 +961,9 @@ export function createSkySystem(ctx) {
       sky.moonStrength.value *= clouded;
       sky.starStrength.value = Math.max(sky.starStrength.value * clouded, combined.stars);
     }
+
+    // From about 30 km the stars show by day (state.atmosphere.starVisibility).
+    if (highAltitude) sky.starStrength.value = Math.max(sky.starStrength.value, atmosphere.starVisibility);
 
     scratch.celestial.makeRotationAxis(CELESTIAL_POLE, -dayTime * Math.PI * 2);
     sky.starRotation.value.setFromMatrix4(scratch.celestial);
@@ -902,15 +1017,73 @@ export function createSkySystem(ctx) {
     }
     sky.fogNear.value = fogNearCurrent;
     sky.fogFar.value = fogFarCurrent;
-    scene.fog.near = fogNearCurrent;
-    scene.fog.far = fogFarCurrent;
-    // The far plane reaches the ground below and the terrain's rim from high up (100 m steps).
-    const desiredFar = high > 0 ? Math.ceil((viewDistance + CAMERA_FAR_MARGIN + cameraHeight * high) / FAR_STEP) * FAR_STEP : Math.round(viewDistance + CAMERA_FAR_MARGIN);
+    // scene.fog is what the other systems read (lure projection, cloud haze, sight lines): above the
+    // haze band it follows the column haze out to the horizon.
+    const hazeBlend = atmosphere.hazeBlend;
+    scene.fog.near = hazeBlend > 0 ? fogNearCurrent + (atmosphere.viewDistance * 0.3 - fogNearCurrent) * hazeBlend : fogNearCurrent;
+    scene.fog.far = hazeBlend > 0 ? fogFarCurrent + (atmosphere.viewDistance * 0.98 - fogFarCurrent) * hazeBlend : fogFarCurrent;
+    // The far plane reaches the ground below and the terrain's rim from high up (100 m steps), and from
+    // the far-field band on the planet's horizon (state.atmosphere.viewDistance, 600 km at most).
+    const phaseOneFar = high > 0 ? Math.ceil((viewDistance + CAMERA_FAR_MARGIN + cameraHeight * high) / FAR_STEP) * FAR_STEP : Math.round(viewDistance + CAMERA_FAR_MARGIN);
+    const desiredFar = atmosphere.viewDistance > 0 ? Math.max(phaseOneFar, Math.ceil(atmosphere.viewDistance / FAR_STEP) * FAR_STEP) : phaseOneFar;
     if (desiredFar !== appliedFar) {
       appliedFar = desiredFar;
       camera.far = desiredFar;
       camera.updateProjectionMatrix();
     }
+  }
+
+  /** state.atmosphere from the camera altitude, and the shared high-altitude uniforms (neutral below 3 km). */
+  function updateAtmosphere() {
+    const altitude = Number.isFinite(camera.position.y) ? camera.position.y : 0;
+    skyState(altitude, atmosphere, planetRadius);
+    highAltitude = altitude >= ATMOSPHERE_NEUTRAL_BELOW;
+    sky.highAltitude.value = highAltitude ? 1 : 0;
+    uniforms.atmosphereDensity.value = atmosphere.density;
+    uniforms.atmosphereAltitude.value = altitude;
+    uniforms.skyDarkness.value = atmosphere.skyDarkness;
+    uniforms.starVisibility.value = atmosphere.starVisibility;
+    uniforms.limbStrength.value = atmosphere.limb;
+    uniforms.sunSharpness.value = atmosphere.sunSharpness;
+    uniforms.curvatureAmount.value = atmosphere.curvature;
+    uniforms.planetRadius.value = planetRadius;
+    uniforms.horizonDip.value = atmosphere.horizonDip;
+    sky.dipSin.value = Math.sin(atmosphere.horizonDip);
+    sky.spaceRise.value = SPACE_RISE_LOW + (SPACE_RISE_HIGH - SPACE_RISE_LOW) * atmosphere.skyDarkness;
+    sky.hazeBlend.value = atmosphere.hazeBlend;
+    sky.rimDistance.value = atmosphere.viewDistance > 0 ? atmosphere.viewDistance : 1e6;
+  }
+
+  /** The sun's elevation (degrees) above the visible (curved) horizon. */
+  function apparentElevation(elevation) {
+    return elevation + atmosphere.horizonDip / DEG;
+  }
+
+  /**
+   * Thin air (high-altitude branch): the disc whitens, brightens and stays up until it sinks behind
+   * the curved rim, the god rays (sunlight broken by clouds) fade out, and the limb takes a daylight
+   * blue that dims after the sun sets below the rim.
+   */
+  function applyHighAltitudeSun(elevation, discIntensity) {
+    const sharpness = atmosphere.sunSharpness;
+    const apparent = apparentElevation(elevation);
+    const visible = smoothRange(-3.5, 0.5, apparent);
+    scratch.lightColor.lerp(SPACE_SUN_LIGHT, sharpness);
+    sky.sunDiscColor.value.copy(scratch.lightColor).multiplyScalar(discIntensity * (1 + 0.6 * sharpness) * visible);
+    uniforms.sunColor.value.copy(scratch.lightColor).multiplyScalar(visible);
+    sky.rayStrength.value *= 1 - sharpness;
+    const daylight = 0.06 + 0.94 * smoothRange(-8, 4, apparent);
+    tintScratch.copy(LIMB_TINT).lerp(scratch.horizon, 0.5 * state.time.goldenFactor);
+    displayToRadiance(tintScratch, sky.limbColor.value).multiplyScalar(1.25 * daylight);
+  }
+
+  /** Thin air: the sunlight whitens to its full strength above the rim; the black sky lends little fill. */
+  function applyHighAltitudeLights(elevation) {
+    const sharpness = atmosphere.sunSharpness;
+    const visible = smoothRange(-4, 0.5, apparentElevation(elevation));
+    sunLight.color.lerp(SPACE_SUN_LIGHT, sharpness);
+    sunLight.intensity += (SPACE_SUN_INTENSITY * visible - sunLight.intensity) * sharpness;
+    hemisphereLight.color.multiplyScalar(1 - 0.65 * atmosphere.skyDarkness);
   }
 
   function updateGrade(elevation) {
@@ -943,6 +1116,7 @@ export function createSkySystem(ctx) {
     sampleColor(KEYS.hemisphereSky, elevation, hemisphereLight.color).lerp(AURORA_FILL, 0.16 * sky.auroraStrength.value);
     sampleColor(KEYS.hemisphereGround, elevation, hemisphereLight.groundColor);
     hemisphereLight.intensity = sampleScalar(KEYS.hemisphereIntensity, elevation);
+    if (highAltitude) applyHighAltitudeLights(elevation);
     if (combined.active) {
       const dim = 1 - combined.darkness;
       sunLight.intensity *= combined.sunIntensity * dim;
@@ -1037,6 +1211,7 @@ export function createSkySystem(ctx) {
   }
 
   function refresh(realDt) {
+    updateAtmosphere();
     resolveModifiers();
     updateCelestialState();
     const elevation = state.time.sunElevation;
@@ -1050,6 +1225,9 @@ export function createSkySystem(ctx) {
   }
 
   bus.on('quality:changed', () => applyShadowQuality());
+  bus.on('settings:changed', ({ key, value }) => {
+    if (key === 'planetRadiusKm') planetRadius = planetRadiusFromSetting(value);
+  });
 
   refresh(0);
   lastLabel = state.time.label;

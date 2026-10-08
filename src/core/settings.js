@@ -10,6 +10,7 @@
 // (driftwing-v2.input.bindings, driftwing-v2.input.calibration.<device>) so a device profile can be
 // exported on its own.
 import { CONFIG } from './config.js';
+import { PLANET_RADIUS_KM } from '../render/curvature.js';
 import { SEED_PATTERN } from './seed.js';
 import { storage } from './storage.js';
 
@@ -97,6 +98,8 @@ const SCHEMA = Object.freeze({
   // v2: graphics and performance.
   frameTarget: { default: 'auto', validate: oneOf(FRAME_TARGETS) },
   dynamicResolution: { default: true, validate: isBoolean },
+  // Phase 3: the planet radius (km) the high-altitude curvature, horizon and far field render with.
+  planetRadiusKm: { default: PLANET_RADIUS_KM.default, validate: unitRange(PLANET_RADIUS_KM.min, PLANET_RADIUS_KM.max) },
 
   // v2: audio mixer (0..1 per bus).
   mixer: {

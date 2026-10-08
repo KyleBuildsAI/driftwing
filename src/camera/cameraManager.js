@@ -22,7 +22,9 @@
 // Lenses: settings.fov per view, live on settings:changed; the chase keeps v1's speed stretch
 // around its base FOV. When the craft's inputProfile maps the HOTAS antenna to 'zoom',
 // ControlState.antenna narrows the lens (up to 3x). Near planes are per view (cockpit 8 cm) and the
-// v1 near plane comes back for chase and photo mode.
+// v1 near plane comes back for chase and photo mode. Above 12 km the third-person cameras (chase,
+// flyby, photo) widen it with altitude, up to 3 m by 40 km (contract g.2), so the depth range spans the
+// planet out to its horizon (600 km) on the WebGL2 fallback too; below 12 km nothing changes.
 //
 // Turbulence shake (turbulenceShake.js): after the view writes its pose, the WindField's turbulence at
 // the craft (state.flight.turbulence) rotates the camera a little, per view (none on the flyby
@@ -68,6 +70,10 @@ const MAX_WIDENED_FOV = 115;
 /** Antenna zoom: at full antenna the lens is ZOOM_MAX times narrower (in tan(fov / 2)). */
 const ZOOM_MAX = 3;
 const REDRAW_HISTORY = 31;
+/** High altitude: the third-person near plane grows from 12 km to ALTITUDE_NEAR_MAX (m) at 40 km. */
+const ALTITUDE_NEAR_START = 12000;
+const ALTITUDE_NEAR_FULL = 40000;
+const ALTITUDE_NEAR_MAX = 3;
 
 export function createCameraSystem(ctx) {
   const { camera, state, settings, bus, world } = ctx;
@@ -252,7 +258,23 @@ export function createCameraSystem(ctx) {
     if (viewId === 'cockpit') return views.cockpit.near;
     if (viewId === 'fpv') return views.fpv.nearFor(currentRig());
     if (viewId === 'wing') return views.wing.near;
-    return CONFIG.CAMERA.NEAR;
+    return thirdPersonNear();
+  }
+
+  /** The v1 near plane, widened with the camera's altitude above ALTITUDE_NEAR_START (third person). */
+  function thirdPersonNear() {
+    const altitude = camera.position.y;
+    if (!(altitude > ALTITUDE_NEAR_START)) return CONFIG.CAMERA.NEAR;
+    const share = clamp((altitude - ALTITUDE_NEAR_START) / (ALTITUDE_NEAR_FULL - ALTITUDE_NEAR_START), 0, 1);
+    return Math.round((CONFIG.CAMERA.NEAR + (ALTITUDE_NEAR_MAX - CONFIG.CAMERA.NEAR) * share) * 10) / 10;
+  }
+
+  /** The chase and photo cameras write their own projection: keep their near plane on thirdPersonNear. */
+  function syncChaseNear() {
+    const near = thirdPersonNear();
+    if (camera.near === near) return;
+    camera.near = near;
+    camera.updateProjectionMatrix();
   }
 
   /** Applies a lens for a non-chase view (no portrait lens shift). */
@@ -587,6 +609,7 @@ export function createCameraSystem(ctx) {
     const instrumentTick = updateInstruments(realDt);
     reticle.update();
     if (!photo) updatePose(realDt);
+    if ((view === 'chase' || photo) && !returnFlight.active) syncChaseNear();
     const flight = state.flight;
     const steady = !photo && !returnFlight.active && (view !== 'chase' || chaseRig.getMode() === 'chase');
     turbulenceShake.apply(camera, dt, realDt, flight ? flight.turbulence : 0, flight ? flight.airspeed : 0, view, steady);

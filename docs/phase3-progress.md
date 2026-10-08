@@ -18,7 +18,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | not started |
 | 3 | Local water bodies (basin, crater, terraces stamps; lake and ice material), the shared water-height query and the caller migration; region overlays; vegetation species 6-12 with WindField sway and trunk colliders | `p3/water-regions` | c, d | not started |
 | 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | not started |
-| 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | not started |
+| 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | in progress |
 | I1 | Integration pass: merge in the order origin, high altitude, water/regions, colliders, fauna/challenges; the follow-ups of contract appendix A; every lab and step file once on both backends | `v2-phase3` | appendix A | not started |
 
 ### Wave 1 - p3/origin
@@ -74,6 +74,76 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   on the a.7 list, left as is. Trial merges: `p3/water-regions` conflicts in `terrain.js`
   `terrainColorNode` (keep its `overlayShade(...)` line and this branch's `renderOrigin` water-level
   line); every branch conflicts in this file's wave 1 subsections (keep all).
+
+### Wave 1 - p3/high-altitude
+
+- **Done:**
+  - `src/env/atmosphere.js`: the one density model (re-exported from telemetry) and `skyState()`,
+    every render input from the camera altitude, exactly neutral below 3 km; `state.atmosphere`.
+  - `src/render/curvature.js`: `curvatureDrop`, `rigidCurvatureDrop`, `applyRigidDrop`, the TSL
+    `curvatureDropNode` / `curvedPositionNode`, the `planetRadiusKm` clamp (setting + Graphics slider).
+  - Sky (`sky.js`): darkening to black above the limb band, sharper whiter sun, daylight stars, the
+    blue limb on the curved horizon, the column haze taking over from the Phase 1 fog (6-9 km),
+    `camera.far` to the horizon (600 km at most), overcast fading above the cloud decks; all in a
+    shader branch that is off below 3 km.
+  - The per-craft ceiling (`limits.ceiling`, `flight.getCeiling()`), FLIGHT_CEILING the default.
+  - Terrain: curved material variants from 5 km (the originals below), the handoff API
+    (`getCoverageRadius`, `setFarFieldHandoff`, `handoffUniforms`), hidden above 13 km, streaming
+    paused 20 km above the ground.
+  - `src/world/farField.js` (system `farField` after `terrain`): quadtree tiles from the map-tile
+    worker (new fields `surface` / `albedo`, a bare-world option for coarse tiles), skirts, curvature,
+    water glint, the dithered handoff, the cloud-layer shell (cumulus coverage + regional weather).
+  - Clouds (rigid drop, haze lift, edge shrink, `getCoverageProbability`), lures (CPU drop before the
+    projection), spawnManager g.5 (heavy spawns by horizontal distance at the far tier above 12 km),
+    landmark and structure rigid drops, the third-person near plane above 12 km.
+  - `tools/lab/atmosphere.mjs` 28/28; `tools/steps/high-altitude.json`; docs/architecture.md.
+- **Resumed (2026-10-07):** reviewed the paused work, then fixed what the verification found:
+  - the rigid curvature drop threw for engine contexts without the curvature blend (the node labs'
+    wind farm); it is now 0 there (`5dbf85b`);
+  - the far-field tile cache thrashed (children being gathered for a split were evicted before their
+    siblings arrived, 1500 tile builds in 40 s over a still view, the queue never empty): gathered
+    children stay with the tiles in use, refinement stops short of the mesh budget, the split factor
+    is 2.2 (`80f21aa`); a still view now settles with nothing pending;
+  - `tools/steps/high-altitude.json`: climbs to 120 km, settles on full coverage, counts magenta only
+    below the rendered horizon, one eval per handoff-band sample (the single band eval outran the
+    protocol timeout and kept moving the camera into the next stage);
+  - `tools/lab/audio.mjs` waits for the frame loop to flow after `ready` (the fade's 8 s cap can set
+    it while the first pipelines still compile on the loaded machine).
+  - The far field gives its tiles back after 20 s below 4.5 km (every geometry disposed; a new climb
+    rebuilds from the tile cache), checked in the step file with the rebuild (`d5edd1f`).
+- **Verified (2026-10-08, dev server unless noted):**
+  - `tools/steps/high-altitude.json` (3 / 8 / 15 / 35 / 100 / 120 km and back, the release and a new
+    climb): 20/20 on WebGPU and 20/20 on WebGL2, 0 errors / 0 warnings each; no magenta pixel below
+    the horizon at any altitude, the 11-13 km band steps at most 0.36 levels, stars 0.91 at 35 km by
+    day; below 3 km the forced high-altitude inputs change 0 of 230 400 bytes; the release disposes
+    all 648 tile geometries and the next climb rebuilds 552 tiles from the cache with no hole. WebGL2
+    screenshots at 15, 35 and 100 km show no z-fighting (near 1.2 / 2.6 / 3 m).
+  - dist-single: the shell, V2 on WebGPU and V2 on WebGL2 smoke with 0 errors / 0 warnings.
+  - Golden frame: the A/B pair is identical on both backends; across builds the branch-to-base
+    difference (38-44 % of pixels, max 224-230, the sky within 1-2 levels) matches base-to-base
+    (50 %, max 221, the sky within 1-2 levels): birds, cloud drift and the chase pose, not the sky.
+  - `weather-sky.json`: 5/5 on both backends, 0/0 (one earlier WebGL2 run lost its device once
+    under load; the rerun was clean).
+  - `?test=terrain`: PASS, 0/0. Reduced `?test=1` (INTEG-A/B, glider and jet, both views, 45 s):
+    0 NaN, 0 penetrations, 0/0, 24/24; heap growth 54.8 MB on the first run, 44.7 MB on the second
+    (base 33.8 MB); frames over 50 ms 209 and 32 (base 359), all main thread or GC on the busy machine.
+  - Labs: atmosphere 28/28, flight-lab 82/82, terrain 291/291, structure 68/68, preset-flight 13/13,
+    every other lab as on the base; audio 189/191 (a doppler camera-cut check and the WebGL2 thunder
+    trigger check, the same two kinds that fail on the base). Builds, `test:v1` 2/2, docs-check 234/234.
+- **Next:** nothing on this branch; ready for the wave 1 integration pass.
+- **Contract additions (g):** `atmosphere.js` also exports `DENSITY_SCALE_HEIGHT`,
+  `MAX_VIEW_DISTANCE`, `ATMOSPHERE_NEUTRAL_BELOW`, the band constants, `scaleHeightsAbove`,
+  `horizonDistance`, `horizonDip`, `createAtmosphereState`, and `skyState` takes the planet radius as
+  a third argument; `state.atmosphere` adds `horizonDip`, `hazeBlend`, `farField`, `handoff`,
+  `planetRadius`; the uniform `atmosphereAltitude` follows `horizonDip`; `curvature.js` adds
+  `PLANET_RADIUS_KM`, `planetRadiusFromSetting`, `applyRigidDrop`, `curvatureDropNode`; the terrain
+  adds `handoffUniforms`, a `weight` in `setFarFieldHandoff` and `getStats().high`; `farField.js`
+  exports `handoffDitherNode` / `handoffPresenceNode`; `clouds.getCoverageProbability(x, z)`; map tiles
+  gain the fields `surface` and `albedo` and the request flag `stamps`.
+- **Integration notes:** the curvature node still has to go into `waterMaterial.js` (ocean and
+  bodies) and the weather volume materials, and the rigid drop into the fauna group roots (contract
+  appendix A).
+- **Open issues:** none.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 

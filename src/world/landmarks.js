@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { clamp, damp, bearingTo } from '../core/util.js';
 import { CONFIG } from '../core/config.js';
+import { applyRigidDrop } from '../render/curvature.js';
 
 /**
  * LANDMARKS: procedural set pieces on the world generator's landmark sites.
@@ -1936,6 +1937,7 @@ export function createLandmarkSystem(ctx) {
       for (let index = 0; index < activeInstances.length; index++) {
         const instance = activeInstances[index];
         if (instance.animate) instance.animate(dt, time);
+        applyRigidDrop(ctx, instance.group);
         if (!instance.discovered && instance.measure(player) <= DISCOVERY_RADIUS[instance.site.type]) discover(instance);
         if (instance.thread && canThread) checkThread(instance, player, time);
       }

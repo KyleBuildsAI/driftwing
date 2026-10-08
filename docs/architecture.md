@@ -159,7 +159,8 @@ system, and then starts the frame loop.
 | `renderer.js` | renderer boot (`createRenderer(params)` returning `{ renderer, backend, uniformUploads }`): WebGPU device probe, `WebGPURenderer` creation, WebGL2 fallback and the rebuild after a late fallback |
 | `uniformUploads.js` | garbage-free uniform uploads: replaces three r184's per-uniform update ranges (new objects every frame for every render object) with one persistent whole-buffer range per uniform group |
 | `post.js` | the post stack (bloom, warm grade, vignette, grain, render scale) and the `gEffects` system (gray-out, tunnel vision, red-out) |
-| `sky.js` | sky dome, sun, moon, stars, aurora, god rays, fog colour and the day / night cycle (v1), and the sky modifiers the weather and celestial events use (Phase 2) |
+| `sky.js` | sky dome, sun, moon, stars, aurora, god rays, fog colour and the day / night cycle (v1), the sky modifiers the weather and celestial events use (Phase 2), and the high-altitude sky: `state.atmosphere`, the darkening, daylight stars, limb, sharper sun, column haze and far plane (Phase 3, [below](#high-altitude-stateatmosphere-srcenvatmospherejs)) |
+| `curvature.js` | the planet curvature (visual only): `curvatureDrop`, the rigid drop for discrete objects (`rigidCurvatureDrop`, `applyRigidDrop`), the TSL nodes (`curvatureDropNode`, `curvedPositionNode`) and the `planetRadiusKm` clamp |
 | `clouds.js` | instanced drifting clouds, cloud shadows (v1), plus a cumulus cap over every thermal; the palette follows the sky modifiers (storm undersides, eclipse) |
 | `cloudShading.js` | the cloud puff geometry, palette (`createCloudLook`) and light response (`createCloudRadiance`) shared by the v1 clouds and the weather volumes, and the cloud optics (glory and rainbow bands) |
 | `water.js` | animated water, sun glint and shoreline foam (v1), plus the local effects layer's terms |
@@ -178,10 +179,11 @@ system, and then starts the frame loop.
 | `stamps.js` | the terrain stamps (cone, carve, cliffStep, gorge, flatten, islandBase): resolution, height, paint, footprints; pure |
 | `groundSurfaces.js` | extra ground surfaces: landable ground that is not terrain (floating island tops; later decks and roofs). `add({ id, minX, maxX, minZ, maxZ, top, heightAt })`, `remove(id)`, `surfaceBelow(x, z, ceiling)`; allocation-free queries. The game's instance is `ctx.groundSurfaces` |
 | `terrain.worker.js` | the terrain Web Worker (Vite `?worker&inline`, so it also works in the single-file build) |
-| `mapTileGen.js` | map tiles from the shared height and biome functions: `generate({ x, z, size, resolution, fields })` returns `height` (Float32Array), `color` (RGBA sRGB, face colours under a shaded relief, water by depth) and `biome` (Uint8Array); seamless; pure, generic for Phase 3's far-field tiles |
+| `mapTileGen.js` | map tiles from the shared height and biome functions: `generate({ x, z, size, resolution, fields, stamps })` returns `height` (Float32Array), `color` (RGBA sRGB, face colours under a shaded relief, water by depth), `biome` (Uint8Array), and for the far field `surface` (the visible surface: terrain or water level, local bodies included) and `albedo` (face colours without relief, alpha 0 on water); `stamps: false` samples the bare world (the worker keeps one beside the stamped world: coarse tiles stay fast); seamless; pure |
 | `mapTiles.worker.js`, `mapTiles.js` | the map-tile worker (imports worldgen like the terrain worker, caches tiles in the IndexedDB database `driftwing-v2-maptiles`) and its main-thread service `createMapTileService({ seed, worldOptions })`: `request(spec, { priority })`, `reprioritize(fn)`, `stats()`, `dispose()` |
 | `chunkBuilder.js` | chunk meshes and vegetation scatter, in the worker or time-sliced on the main thread; stamp-aware skirts |
 | `terrain.js` | the chunk manager: ring LOD with skirts, pooled meshes, the worker queue (v1). A time-sliced main-thread builder takes over when workers are missing or fail (one `console.error`) or have not said ready 30 s (wall clock) and 120 frames after the terrain's first frame; a slow start is not an error, so it only logs a `console.info` note. `getStats()` reports `mode` (`workers` or `main-thread`) and `workerFallback` (`null`, `slow start` or `failure`) |
+| `farField.js` | the far-field planet (Phase 3): quadtree tiles from the map-tile worker out to the horizon from 6 km, with skirts, curvature and a water glint, the dithered handoff with the terrain, and a cloud-layer shell from the cumulus coverage and the regional weather |
 | `landmarks.js` | arches, monolith circles, lighthouses and balloons (v1) |
 | `spawn.js` | the golden-hour opening spawn (v1) |
 
@@ -273,6 +275,7 @@ system, and then starts the frame loop.
 | file | what |
 | --- | --- |
 | `WindField.js` | the wind field (ambient, ridge lift, thermals, turbulence, sources) and `createDebugUpdraft` |
+| `atmosphere.js` | the one air density model (re-exported from `flight/telemetry.js`) and `skyState(altitude, out, planetRadius)`: every high-altitude render input from the camera altitude (Phase 3) |
 
 ### `src/spawns`: spawns, the event director and the regional weather (Phase 2)
 
@@ -429,7 +432,7 @@ and `waypoints.js` (waypoint beacon and arrow), from v1.
 5. The scene, camera and shared TSL uniforms; the world generator and the opening spawn; the shared
    `state` and the `ctx` object.
 6. The wind field, then the perf governor (`ctx.perf`).
-7. Every system, created in this order: shell (the launcher bridge), audio, ui, assistDefaults, input, sky, weather, terrain, water, clouds, birds,
+7. Every system, created in this order: shell (the launcher bridge), audio, ui, assistDefaults, input, sky, weather, terrain, farField, water, clouds, birds,
    spawns, journal, landmarks, waypoints, rings, flight, camera, fx, gEffects, copilot, windOverlay,
    spawnDebugger (dev builds and `?dev=1` only) and debugWind (dev builds and `?debug=1` only). A
    factory that throws is logged and replaced by an inert system, so one failure never stops the
@@ -453,13 +456,14 @@ Every frame:
    `simDt` is `realDt`, or 0 while paused (photo mode). `state.time.frameDt` is the unclamped real
    frame time capped at 0.1 s: the fixed-step physics clock consumes it.
 2. **Systems.** Each system in `UPDATE_ORDER` runs `update(simDt, realDt)`: input, flight, camera,
-   terrain, weather, sky, water, clouds, birds, spawns, landmarks, journal, waypoints, rings, fx,
-   gEffects, copilot, audio, ui, windOverlay, debugWind, spawnDebugger. A system that throws is
-   disabled and logged; the rest carry on.
+   terrain, farField, weather, sky, water, clouds, birds, spawns, landmarks, journal, waypoints, rings,
+   fx, gEffects, copilot, audio, ui, windOverlay, debugWind, spawnDebugger (the Phase 3 order also
+   names waterBodies, challenges and challengeHud; the loop skips names with no system). A system
+   that throws is disabled and logged; the rest carry on.
 3. **Safety net, right after flight.** A non-finite pose is restored from the last good one and the
    model is reset from it. The flight model has real ground contact, so the net only keeps the
    last-resort guard: more than 1 m below the shared height function is a soft crash. The altitude
-   ceiling comes from the controller (15000 m).
+   ceiling comes from the controller: the active craft's `limits.ceiling`, 15000 m by default.
 4. **Telemetry.** `flight.publishTelemetry()` writes `state.flight` from the final, safety-checked
    pose.
 5. **Biome tracking** (`biome:changed`), then `perf.update({ frameMs, cpuMs })` with the real,
@@ -520,10 +524,10 @@ plus optional `prewarm()` / `endPrewarm()` hooks and whatever API it offers. `ct
 | `perf` | the perf governor |
 | `craftRegistry` | craft catalog and registered craft modules |
 | `flightModels` | the flight model and control-stage registry |
-| `state` | shared mutable game state (`frame`, `ready`, `paused`, `photoMode`, `seed`, `spawn`, `time`, `player`, `flight`, `waypoint`, `ringCourse`, `perf`) |
+| `state` | shared mutable game state (`frame`, `ready`, `paused`, `photoMode`, `seed`, `spawn`, `time`, `player`, `flight`, `waypoint`, `ringCourse`, `perf`, `atmosphere`) |
 | `controls` | the v2 ControlState |
 | `systems` | every system by name |
-| `uniforms`, `textures`, `quality`, `util` | shared TSL uniforms (including `cloudGlory` and `cloudBow`, the cloud optics the celestial engine drives), textures (cloud shadow), the current quality level, helpers |
+| `uniforms`, `textures`, `quality`, `util` | shared TSL uniforms (including `cloudGlory` and `cloudBow`, the cloud optics the celestial engine drives, and the high-altitude ones the sky writes: `atmosphereDensity`, `skyDarkness`, `starVisibility`, `limbStrength`, `sunSharpness`, `curvatureAmount`, `planetRadius`, `horizonDip`, `atmosphereAltitude`), textures (cloud shadow), the current quality level, helpers |
 | `registerPrewarm(object)` | registers a lazily shown object for the pipeline prewarm |
 | `executeAction`, `getFlightState`, `setPhotoMode`, `requestScreenshot`, `userHasInteracted` | v1 hooks shared by the UI, copilot and camera |
 
@@ -605,6 +609,7 @@ player. Version 5 remembers the view per craft: `view` seeds every craft's `view
 | `afterburnerDetent` | 0.95 | 0.8-1 |
 | `frameTarget` | `auto` | `auto` \| 60 \| 120 \| 144 \| 240 \| `uncapped` |
 | `dynamicResolution` | true | boolean |
+| `planetRadiusKm` | 1000 | 200-6371: the planet radius the high-altitude curvature, horizon and far field render with (Graphics tab) |
 | `mixer` | `{ master: 0.7, engine: 0.9, environment: 0.85, ui: 0.8, copilot: 1, music: 0.7 }` | 0..1 per bus |
 | `seed` | `''` | the world flown last (A-Z, 0-9, dashes; at most 24); a link or `?seed=` wins over it at boot |
 | `devBadge`, `windOverlay` | false, false | booleans |
@@ -1471,6 +1476,48 @@ exact look (an A/B of the old and new cloud module in one page is pixel-identica
 noon, low sun and night, on both backends). `SUN_ANGULAR_RADIUS` and `CELESTIAL_POLE_ELEVATION_DEG`
 are exported for the celestial engine.
 
+### High altitude (`state.atmosphere`, `src/env/atmosphere.js`)
+
+The sky computes `state.atmosphere` every frame from the camera altitude and the planet radius
+(`skyState`), and writes the high-altitude uniforms. Every input is a smooth function of the optical
+depth above the camera (`altitude / 8500 m`, the physics' own exponential density), exactly neutral
+below 3 km: `skyDarkness` (half at 20 km, black by 35 km), `sunSharpness`, `limb`, `starVisibility`
+(from about 30 km, 0.9 at 35 km), plus `hazeBlend` (6-9 km), `farField` (from 6 km), `handoff`
+(11-13 km), `curvature` (5-8 km), `fogScale`, `horizonDistance` (`sqrt(2 R h + h^2)`), `horizonDip`
+(the rendered parabola's `atan(sqrt(2 h / R))`) and `viewDistance` (past the rendered tangent point,
+600 km at most). `tools/lab/atmosphere.mjs` checks each against its formula.
+
+- **Sky** (`sky.js`): from 3 km a shader branch keys the dome's gradient to the curved horizon, darkens
+  it toward black above a narrowing band, narrows the glow to a tight halo, sharpens and whitens the
+  disc, shows the stars by day and draws the thin blue limb along the horizon. The fog node blends the
+  Phase 1 fog into a column haze (the density integrated along each view ray, the curvature undone),
+  so the ground stays clear straight down from space and the horizon turns into a bright band; the
+  clipped rim melts into it. `camera.far` follows `viewDistance`. Above the cloud decks (9-14 km) the
+  modifiers' overcast and fog density fade out (a storm below no longer hides the sun). Below 3 km the
+  branch is off and the CPU writes neutral values, so the golden-hour opening is pixel-identical.
+- **Curvature** (`curvature.js`): visual only. Terrain chunks (variant materials from 5 km), far-field
+  tiles and the cloud shell lower their vertices by `d^2 / 2R` times `curvatureAmount`; clusters of the
+  cloud field, lures (before their projection), landmark groups and structure meshes take the rigid
+  drop of their root. The water materials and the weather volumes take the TSL node in the integration
+  pass.
+- **Far field** (`farField.js`, after the terrain): a quadtree of 1-256 km map-tile worker tiles out to
+  the horizon (a node splits only once its four children are built, so it never opens a hole; the
+  children being gathered stay cached with the tiles in use, and refinement stops short of the
+  720-mesh budget, so a still view settles with nothing left to build; 20 s below 4.5 km every tile
+  mesh is disposed and a new climb rebuilds them from the worker's tile cache), drawn from 6 km beyond
+  the terrain's coverage. In the handoff band the far-field ground sits 0.2 % of the
+  distance lower and the two cross-fade with complementary screen-door dithers; from 11 to 13 km the
+  band closes to the nadir and the terrain stops drawing (`terrain.setFarFieldHandoff`,
+  `terrain.getCoverageRadius`, `terrain.handoffUniforms`), its streaming paused more than 20 km above
+  the ground. A cloud-layer shell carries the cumulus coverage and the regional weather (storm cells
+  dark) to the horizon around the real cloud field.
+- **Spawns**: above 12 km heavy spawns stay alive by horizontal distance within `lod.far`, at the far
+  tier, so only their lures draw (discovery and `spawns:inView` keep the 3D distance).
+- **Camera**: above 12 km the third-person near plane widens with altitude (3 m by 40 km), keeping the
+  WebGL2 depth range usable out to the horizon.
+- **Flight**: the ceiling is the active craft's `limits.ceiling` (`flight.getCeiling()`), 15 km by
+  default.
+
 ### Performance (`ctx.perf`, `src/core/perf.js`)
 
 - **Frame loop.** Rendering is uncapped through `setAnimationLoop`.
@@ -1635,6 +1682,8 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-vortex.json` (or `engine-windModifier.json`; add `--query renderer=webgl` for WebGL2) | the wind engines in V2: force-spawned ahead, their wind probed, screenshots, dispose back to the same GPU memory with every wind source removed; the windModifier file also checks the cockpit shake and rattle in rough air and both off in photo mode |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --query terrainWorkerStart=slow --steps-file tools/steps/terrain-worker-start.json` (add `renderer=webgl`) | a slow terrain worker start: the main-thread builder takes over (`workerFallback` `slow start`) with no console error or warning, the terrain is ready around the craft, and it streams new terrain after a 4 km move |
 | `tools/steps/golden-frame.json` with `node tools/png-diff.mjs a.png b.png` | a paused still frame of the opening, rendered with the weather's clear-sky modifier and without any modifier: pixel-identical |
+| `node tools/lab/atmosphere.mjs [--verbose]` | the atmosphere and curvature numbers against their formulas: density, the neutral ground, darkness, stars, limb, sharpness and the bands, horizon distances and dips, the view distance, the drops, and no allocation per call |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/high-altitude.json` (or a build with `?debug=1`; add `renderer=webgl`) | a stepped climb at 3, 8, 15, 35 and 100 km (screenshots): the far field fills in, the terrain hands off, stars by day at 35 km, the limb, the far plane, 0 NaN; renders with a magenta background find no hole in the ground looking down and toward the horizon; the 11-13 km band changes smoothly; back at the ground everything is on the Phase 1 path |
 
 **The flight-test harness** passes with 0 NaN events, 0 terrain penetrations, 0 console errors and
 warnings, heap growth under 50 MB per world, no frame over 50 ms after warmup, every run flown in
@@ -1710,7 +1759,8 @@ pipeline prewarm, and add their own typed events to `EVENT_TYPES` in `src/core/e
   - New lure silhouettes go into `LURE_TYPES` (`schema.js`) and `lure.js`; new stamp types into
     `stamps.js` (both threads run it); new audio recipes into `src/audio/recipes/index.js`.
   - Combos of existing presets are set pieces: data for the setPiece engine.
-  - The map-tile generator (`src/world/mapTileGen.js`) is generic, ready for far-field tiles.
+  - The map-tile generator (`src/world/mapTileGen.js`) is generic; the far field (Phase 3) uses it
+    through its own map-tile service.
 - **More craft (Phase 3).**
   - Append an entry to `CRAFT_CATALOG` (id, name, role, hotkey, silhouette), add
     `src/craft/<id>.js` with the module schema above, and register it in `src/craft/index.js`.

@@ -17,6 +17,7 @@ import { createEmitterEngine } from './spawns/engines/emitterEngine.js';
 import { createLightEffectEngine } from './spawns/engines/lightEffectEngine.js';
 import { createFlightController } from './flight/FlightController.js';
 import { createFaunaEngine } from './spawns/engines/faunaEngine.js';
+import { createFarFieldSystem } from './world/farField.js';
 import { createFxSystem } from './render/fx.js';
 import { createInputSystem } from './input/InputManager.js';
 import { createFrameLoop } from './core/loop.js';
@@ -166,6 +167,18 @@ async function boot() {
     // around the antisolar point on every cloud puff (src/render/cloudShading.js).
     cloudGlory: uniform(0),
     cloudBow: uniform(0),
+    // High altitude (contract g.1), written by the sky every frame from state.atmosphere: air density
+    // at the camera, the sky's darkening, daylight stars, limb and sun sharpness (0..1), the curvature
+    // blend (0..1), the planet radius (m), the horizon dip (rad) and the camera altitude (m MSL).
+    atmosphereDensity: uniform(1.225),
+    skyDarkness: uniform(0),
+    starVisibility: uniform(0),
+    limbStrength: uniform(0),
+    sunSharpness: uniform(0),
+    curvatureAmount: uniform(0),
+    planetRadius: uniform(1000000),
+    horizonDip: uniform(0),
+    atmosphereAltitude: uniform(0),
   };
   const origin = createRenderOrigin({ THREE, scene, uniforms, bus });
 
@@ -367,6 +380,7 @@ async function boot() {
     // The regional weather drives the sky through a sky modifier, so it comes right after it.
     ['weather', createWeatherSystem],
     ['terrain', createTerrainSystem],
+    ['farField', createFarFieldSystem],
     ['water', createWaterSystem],
     ['clouds', createCloudSystem],
     ['birds', createBirdSystem],
@@ -424,7 +438,7 @@ async function boot() {
   beginPrewarm();
   const fadeStatus = document.getElementById('fade-status');
   if (fadeStatus) fadeStatus.textContent = 'Warming up the sky';
-  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'weather', 'sky', 'water', 'clouds', 'birds', 'spawns', 'landmarks', 'journal', 'waypoints', 'rings', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'windOverlay', 'debugWind', 'spawnDebugger'];
+  const UPDATE_ORDER = ['input', 'test', 'flight', 'camera', 'terrain', 'farField', 'weather', 'sky', 'water', 'waterBodies', 'clouds', 'birds', 'spawns', 'landmarks', 'journal', 'waypoints', 'rings', 'challenges', 'fx', 'gEffects', 'copilot', 'audio', 'ui', 'challengeHud', 'windOverlay', 'debugWind', 'spawnDebugger'];
 
   // ---- Flight-state snapshot for the copilot (local or remote brain) -----------------
   ctx.getFlightState = () => {
