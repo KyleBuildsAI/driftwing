@@ -1,5 +1,7 @@
 // Instrument HUD overlay: the active craft's instruments (craft.instruments) as glass tiles in the
-// v1 HUD style, for readability in any view. Off by default (settings.hud.overlay).
+// v1 HUD style, for readability in any view. Off by default (settings.hud.overlay). With the overlay
+// off, a craft's own HUD readouts (module hudInstruments, ids from its instruments: the balloon's
+// wind-layer column) still show in the third-person views; the first-person panel has them.
 //
 // The tiles form a grid on the right edge. Its band runs between whatever v1 HUD element sits above
 // it (top bar, stats or dev badge, touch chips) and below it (seed card, mic, touch controls),
@@ -32,6 +34,9 @@ export function createInstrumentHud(ctx, instrumentSet) {
 
   const tiles = [];
   let tileIds = '';
+  const NO_IDS = Object.freeze([]);
+  /** The active craft's own HUD readouts (module hudInstruments that it lists in instruments). */
+  let craftHud = { craft: null, ids: NO_IDS };
   let enabled = readEnabled();
   let layoutTimer = 0;
   let layout = { size: 0, columns: 0, rows: 0, top: 0, right: 0 };
@@ -40,6 +45,16 @@ export function createInstrumentHud(ctx, instrumentSet) {
   function readEnabled() {
     const hud = settings.get('hud');
     return Boolean(hud && hud.overlay);
+  }
+
+  /** The tiles shown with the overlay off: the craft's hudInstruments, in the third-person views. */
+  function craftHudIds() {
+    const craft = instrumentSet.craft;
+    if (craft !== craftHud.craft) {
+      const listed = craft && Array.isArray(craft.hudInstruments) ? craft.hudInstruments : NO_IDS;
+      craftHud = { craft, ids: listed.filter((id) => instrumentSet.ids.includes(id)) };
+    }
+    return ctx.systems.camera?.isFirstPerson?.() === true ? NO_IDS : craftHud.ids;
   }
 
   function pixelRatio() {
@@ -140,9 +155,9 @@ export function createInstrumentHud(ctx, instrumentSet) {
   });
 
   return {
-    /** True while the overlay is switched on and the craft has instruments. */
+    /** True while tiles are on screen (the overlay, or the craft's own HUD readouts). */
     get visible() {
-      return enabled && tiles.length > 0;
+      return !container.hidden && tiles.length > 0;
     },
 
     /**
@@ -150,8 +165,8 @@ export function createInstrumentHud(ctx, instrumentSet) {
      * redraws the gauges when `redrawNow` (the 30 Hz instrument tick).
      */
     update(realDt, redrawNow) {
-      const ids = instrumentSet.ids;
-      if (!enabled || ids.length === 0) {
+      const ids = enabled ? instrumentSet.ids : craftHudIds();
+      if (ids.length === 0) {
         container.hidden = true;
         return;
       }
@@ -167,7 +182,7 @@ export function createInstrumentHud(ctx, instrumentSet) {
     },
 
     getStats() {
-      return { enabled, visible: enabled && tiles.length > 0, tiles: tiles.length, redraws, layout: { ...layout } };
+      return { enabled, visible: !container.hidden && tiles.length > 0, craftHud: craftHud.ids.length, tiles: tiles.length, redraws, layout: { ...layout } };
     },
   };
 }
