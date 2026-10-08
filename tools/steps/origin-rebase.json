@@ -12,6 +12,12 @@
     "shot": "origin-image-start"
   },
   {
+    "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const settings = window.DRIFTWING.ctx.settings; const x = mid(spawn.x); const z = spawn.z; settings.set('windOverlay', true); try { return await window.__dwOrigin.imageCheck('image-wind', { x, y: Math.max(ground(x, z) + 120, 260), z, heading: spawn.heading }); } finally { settings.set('windOverlay', false); } } catch (error) { console.error('[origin check] image-wind failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "shot": "origin-image-wind"
+  },
+  {
     "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const x = mid(spawn.x); const z = spawn.z; const pose = { x, y: Math.max(ground(x, z) + 260, 420), z, heading: spawn.heading }; await window.__dwOrigin.goTo(pose); const line = await window.__dwOrigin.spawnAhead('crystalSpires', 1300); return line + ' | ' + await window.__dwOrigin.imageCheck('image-spawn', pose); } catch (error) { console.error('[origin check] image-spawn failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
   },
   {
@@ -34,6 +40,12 @@
   },
   {
     "shot": "origin-image-high"
+  },
+  {
+    "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const x = mid(spawn.x + 400000); const z = mid(spawn.z - 120000); return await window.__dwOrigin.imageCheck('image-far', { x, y: Math.max(ground(x, z) + 300, 600), z, heading: 45 }); } catch (error) { console.error('[origin check] image-far failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "shot": "origin-image-far"
   },
   {
     "eval": "(async () => { try { const spawn = window.DRIFTWING.state.spawn; const Q = 4096; const mid = (value) => Math.floor(value / Q) * Q + Q / 2 - 60; const ground = (x, z) => Math.max(window.DRIFTWING.ctx.world.groundHeight(x, z), 0); const x = mid(spawn.x); const z = spawn.z; return await window.__dwOrigin.beginLeg('flight-low', { x, y: Math.max(ground(x, z) + 900, 2600), z, heading: 90, speed: 250 }, { forceAt: [300], spawn: 'crystalSpires' }); } catch (error) { console.error('[origin check] flight-low failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"

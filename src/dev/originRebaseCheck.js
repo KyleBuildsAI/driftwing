@@ -14,12 +14,13 @@
 //              1 mm, and a far static point projects to the same pixel within 0.5 px from the render
 //              matrices as from a world-frame camera. Rebases happen on the way, plus forced ones (the
 //              dev hook) mid-leg; the craft state stays finite.
-//   image      at fixed poses (low over the spawn area, with a structure, a tornado and a supercell in
-//              view, and 10 km up with a vertical rebase), the frame is captured with
-//              the origin on one lattice point, again (the control: what two identical frames differ
-//              by), then with the origin on the neighbouring lattice point: the rebased frame must
-//              differ from the previous one no more than the control does, plus a small allowance for
-//              float32 rounding at the new render coordinates.
+//   image      at fixed poses (low over the spawn area, with the wind overlay's arrows, a structure, a
+//              tornado and a supercell in view, 10 km up with a vertical rebase, and 400 km out from
+//              the world origin), the frame is captured with the origin on one lattice point, again
+//              (the control: what two identical frames differ by), then with the origin on the
+//              neighbouring lattice point: the rebased frame must differ from the previous one no more
+//              than the control does, plus a small allowance for float32 rounding at the new render
+//              coordinates.
 //   identity   terrain heights on a grid and the site list around the craft, and the terrain's chunk
 //              builds, are identical before and after forced rebases (no rebuild, no re-placement).
 import { ORIGIN_QUANTUM, ORIGIN_REBASE_DISTANCE } from '../core/origin.js';
@@ -34,6 +35,8 @@ const IMAGE_MEAN_ALLOWANCE = 0.35;
 const IMAGE_CHANGED_ALLOWANCE = 0.002;
 /** A pixel counts as changed when a channel differs by more than this (0..255). */
 const IMAGE_CHANGED_LEVEL = 24;
+/** Identity check: the site list covers this many site cells on each side of the craft's cell. */
+const SITE_REACH = 10;
 const IMAGE_WIDTH = 320;
 const IMAGE_HEIGHT = 180;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -419,8 +422,8 @@ export function installOriginRebaseCheck(dw) {
         const sites = [];
         const cellX = Math.floor(craft.x / SITE_CELL);
         const cellZ = Math.floor(craft.z / SITE_CELL);
-        for (let dz = -3; dz <= 3; dz++) {
-          for (let dx = -3; dx <= 3; dx++) {
+        for (let dz = -SITE_REACH; dz <= SITE_REACH; dz++) {
+          for (let dx = -SITE_REACH; dx <= SITE_REACH; dx++) {
             for (const site of world.sitesInCell(cellX + dx, cellZ + dz)) sites.push(`${site.id}@${site.x},${site.z}`);
           }
         }
@@ -439,9 +442,10 @@ export function installOriginRebaseCheck(dw) {
       state.paused = false;
       const rebases = origin.version - versionBefore;
       const same = (a, b) => a.heights === b.heights && a.sites === b.sites && a.meshes === b.meshes;
-      const passed = rebases >= 2 && same(before, during) && same(before, after);
+      const passed = rebases >= 2 && before.siteCount > 0 && same(before, during) && same(before, after);
+      const cells = SITE_REACH * 2 + 1;
       return report(id, passed, `${rebases} forced rebases; 256 terrain heights ${before.heights === during.heights && before.heights === after.heights ? 'identical' : 'DIFFER'}; `
-        + `${before.siteCount} sites in 7 x 7 cells ${before.sites === during.sites && before.sites === after.sites ? 'identical' : 'DIFFER'}; chunk meshes built ${before.meshes} -> ${after.meshes} (tracked ${before.tracked} -> ${after.tracked})`);
+        + `${before.siteCount} sites in ${cells} x ${cells} cells ${before.sites === during.sites && before.sites === after.sites ? 'identical' : 'DIFFER'}; chunk meshes built ${before.meshes} -> ${after.meshes} (tracked ${before.tracked} -> ${after.tracked})`);
     },
 
     /** Ends the check: the loop runs again, the day moves on. Returns the summary line. */
