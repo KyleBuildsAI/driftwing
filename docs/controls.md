@@ -144,6 +144,7 @@ The same ControlState drives every craft; each craft's input profile decides wha
 | Helicopter | collective | hover hold (locks position, height and heading; the stick moves the hold point) | at 100 % assists the lever is a climb / descend command around its centre; Z cuts the engine for autorotation practice |
 | Wingsuit | none | deploy the parachute (U does too) | under the canopy, stick roll, the rudder pedals and the toe brakes are the steering toggles; pull back to flare |
 | FPV drone | thrust | rate / angle mode (turtle mode when it lies upside down) | Z arms and disarms; at high assists the throttle asks for a climb rate around its centre (altitude hold) |
+| Eagle / Dragon | flap power (0 = glide) | eagle: screech; dragon: fire breath while held (a press gives a short burst) | the stick twists the wings and pitches body and tail, the pedals twist the tail; push hard or hold the tuck (Shift+Space or B; gamepad X; T.16000M base button 5, the gear's buttons on other craft; TWCS button 10) to fold the wings into a stoop. Fly slowly (under about 41 km/h) at a tree top, a ledge or a peak and it lands there by itself; on the perch the stick or pedals turn it on the spot and raising the flap power takes off. The skin is chosen in the picker |
 
 ## World map
 
