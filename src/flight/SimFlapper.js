@@ -98,6 +98,11 @@ function moveToward(current, target, maxStep) {
   return Math.max(target, current - maxStep);
 }
 
+/** The length of a planar vector (Math.hypot, without its boxed result in optimized code). */
+function planar(x, z) {
+  return Math.sqrt(x * x + z * z);
+}
+
 function finiteOr(value, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
@@ -248,7 +253,7 @@ const flapperAutopilot = Object.freeze({
     let climb;
     if (target) {
       const tuning = AUTOPILOT.APPROACH;
-      const distance = Math.hypot(target.x - position.x, target.z - position.z);
+      const distance = planar(target.x - position.x, target.z - position.z);
       heading = bearingTo(position.x, position.z, target.x, target.z);
       const feet = target.y + data.feetHeight;
       const above = distance <= tuning.NEAR ? tuning.FINAL_ABOVE : clamp(distance * tuning.SLOPE, tuning.MIN_ABOVE, tuning.MAX_ABOVE);
@@ -404,12 +409,17 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
   const landingVelocity = new THREE.Vector3();
   const landingEnd = new THREE.Vector3();
   const landingQuaternion = new THREE.Quaternion();
-  let time = 0;
   let resetCount = 0;
-  let smoothedLoad = 1;
-  let smoothedHorizontal = 0;
-  let smoothedSink = 0;
-  let previousFlightPath = 0;
+  /**
+   * The doubles every tick rewrites, as fields of one object: a closure variable holding a double
+   * would box a new number on every write, an object field keeps its box (no allocation per tick).
+   */
+  const tick = { time: 0.5, load: 1.5, horizontal: 0.5, sink: 0.5, flightPath: 0.5 };
+  tick.time = 0;
+  tick.load = 1;
+  tick.horizontal = 0;
+  tick.sink = 0;
+  tick.flightPath = 0;
   let pendingRest = false;
   let lastEnv = null;
   /** Soaring: the lowest height since the flap power last went to zero, and what was reported. */
@@ -492,6 +502,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
   const candidate = { found: false, x: 0, y: 0, z: 0, kind: '', id: '', score: Infinity };
   const scanFrom = { x: 0, y: 0, z: 0, vx: 0, vz: 0, speed: 0 };
   const peakScratch = { x: 0, z: 0, height: 0 };
+  const landingObservation = { dt: 0, agl: 0, position: state.position };
 
   function notify(text, kind = 'info') {
     bus.emit('notify', { text, kind });
@@ -573,7 +584,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
   function computeAttitude() {
     bodyAxis.set(0, 0, -1).applyQuaternion(state.quaternion);
     flightData.pitch = Math.asin(clamp(bodyAxis.y, -1, 1));
-    if (Math.hypot(bodyAxis.x, bodyAxis.z) > 0.05) flightData.heading = headingFromVector(bodyAxis.x, bodyAxis.z);
+    if (planar(bodyAxis.x, bodyAxis.z) > 0.05) flightData.heading = headingFromVector(bodyAxis.x, bodyAxis.z);
     const forwardY = bodyAxis.y;
     bodyAxis.set(1, 0, 0).applyQuaternion(state.quaternion);
     const rightY = bodyAxis.y;
@@ -676,9 +687,9 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
 
     if (turbulence > 0) {
       const shake = load * wing.chord * 0.015 * turbulence;
-      momentBody.x += shake * noise(time, 0.7, 1.3);
-      momentBody.y += shake * 0.6 * noise(time, 2.3, 0.9);
-      momentBody.z += shake * 1.6 * noise(time, 4.1, 1.5);
+      momentBody.x += shake * noise(tick.time, 0.7, 1.3);
+      momentBody.y += shake * 0.6 * noise(tick.time, 2.3, 0.9);
+      momentBody.z += shake * 1.6 * noise(tick.time, 4.1, 1.5);
     }
 
     wingData.cl = cl;
@@ -730,7 +741,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     if (above > perchProfile.captureAbove || above < -perchProfile.captureBelow) return;
     const dx = x - scanFrom.x;
     const dz = z - scanFrom.z;
-    const distance = Math.hypot(dx, dz);
+    const distance = planar(dx, dz);
     if (distance > perchProfile.captureRadius) return;
     // Ahead of the bird (or almost under it): never one it has already passed.
     if (distance > perchProfile.underRadius && scanFrom.speed > 1 && (dx * scanFrom.vx + dz * scanFrom.vz) / (distance * scanFrom.speed) < perchProfile.aheadCosine) return;
@@ -806,8 +817,8 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     scanFrom.z = position.z;
     scanFrom.vx = state.velocity.x;
     scanFrom.vz = state.velocity.z;
-    scanFrom.speed = Math.hypot(state.velocity.x, state.velocity.z);
-    const radius = Math.hypot(perchProfile.captureRadius, perchProfile.captureAbove + feetHeight);
+    scanFrom.speed = planar(state.velocity.x, state.velocity.z);
+    const radius = planar(perchProfile.captureRadius, perchProfile.captureAbove + feetHeight);
     if (env.colliders && typeof env.colliders.perchesNear === 'function') env.colliders.perchesNear(position.x, position.y, position.z, radius, visitPerch);
     if (agl < perchProfile.captureAbove + feetHeight && findPeak(env, position.x, position.z)) {
       considerPerch(peakScratch.x, peakScratch.height, peakScratch.z, 'peak', '');
@@ -833,7 +844,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     perch.z = z;
     landingStart.copy(state.position);
     landingEnd.set(x, y + feetHeight, z);
-    const horizontal = Math.hypot(state.velocity.x, state.velocity.z);
+    const horizontal = planar(state.velocity.x, state.velocity.z);
     perch.heading = horizontal > 1 ? headingFromVector(state.velocity.x, state.velocity.z) : flightData.heading;
     perch.startHeading = perch.heading;
     const distance = landingStart.distanceTo(landingEnd);
@@ -879,7 +890,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
       d00 * landingStart.z + d10 * landingVelocity.z + d01 * landingEnd.z,
     );
     // Turn toward the perch, flare (nose up, then level), wings level.
-    const horizontal = Math.hypot(state.velocity.x, state.velocity.z);
+    const horizontal = planar(state.velocity.x, state.velocity.z);
     if (horizontal > 0.8 && u < 0.85) perch.heading = headingFromVector(state.velocity.x, state.velocity.z);
     levelAttitude(perch.heading, flareAngle * Math.sin(Math.PI * Math.min(u * 1.15, 1)), targetQuaternion);
     state.quaternion.slerpQuaternions(landingQuaternion, targetQuaternion, smoothstep(0, 0.45, u)).normalize();
@@ -932,7 +943,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
       perch.id = perchIdFor(candidate.kind, candidate.id, candidate.x, candidate.z);
       return;
     }
-    if (findPeak(env, x, z) && Math.hypot(peakScratch.x - x, peakScratch.z - z) < perchProfile.standRadius) {
+    if (findPeak(env, x, z) && planar(peakScratch.x - x, peakScratch.z - z) < perchProfile.standRadius) {
       perch.kind = 'peak';
       perch.id = `peak:${Math.round(peakScratch.x)}:${Math.round(peakScratch.z)}`;
       return;
@@ -1021,7 +1032,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
   function updateCooldown(dt) {
     if (perch.cooldownSeconds <= 0) return;
     perch.cooldownSeconds -= dt;
-    if (Math.hypot(state.position.x - perch.cooldownX, state.position.z - perch.cooldownZ) > RECAPTURE_DISTANCE) perch.cooldownSeconds = Math.min(perch.cooldownSeconds, 0.5);
+    if (planar(state.position.x - perch.cooldownX, state.position.z - perch.cooldownZ) > RECAPTURE_DISTANCE) perch.cooldownSeconds = Math.min(perch.cooldownSeconds, 0.5);
     if (perch.cooldownSeconds <= 0) perch.cooldownId = '';
   }
 
@@ -1030,7 +1041,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
   // ============================================================================================
   function step(dt, controls, env) {
     if (!(dt > 0)) return;
-    time += dt;
+    tick.time += dt;
     lastEnv = env;
     if (env.craftState && env.craftState !== craftState) craftState = env.craftState;
     handleActions(controls);
@@ -1069,7 +1080,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
       bodyAxis.set(0, 1, 0).applyQuaternion(state.quaternion);
       const specificUp = forceWorld.x * bodyAxis.x + (forceWorld.y + weight) * bodyAxis.y + forceWorld.z * bodyAxis.z;
       const load = Number.isFinite(specificUp) ? specificUp / weight : loadForce / weight;
-      smoothedLoad += (load - smoothedLoad) * (1 - Math.exp(-LOAD_SMOOTHING * dt));
+      tick.load += (load - tick.load) * (1 - Math.exp(-LOAD_SMOOTHING * dt));
       updateGroundStand(env, dt);
       if (perch.phase === 'flight') {
         perch.scanTimer -= dt;
@@ -1084,19 +1095,21 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
       updateWings(controls, dt, false);
       stepLanding(dt);
       ratesFromAttitude(dt);
-      smoothedLoad += (1 - smoothedLoad) * (1 - Math.exp(-LOAD_SMOOTHING * dt));
+      tick.load += (1 - tick.load) * (1 - Math.exp(-LOAD_SMOOTHING * dt));
     } else {
       updateLimbs(controls, dt);
       updateWings(controls, dt, false);
       stepPerched(controls, env, dt);
       ratesFromAttitude(dt);
-      smoothedLoad += (1 - smoothedLoad) * (1 - Math.exp(-LOAD_SMOOTHING * dt));
+      tick.load += (1 - tick.load) * (1 - Math.exp(-LOAD_SMOOTHING * dt));
     }
     if (perch.phase !== 'perched' && craftState) craftState.takeoffRequest = false;
 
     const report = activeReport;
     updateFlightData(dt, agl, report);
-    landing.observe(report, { dt, agl: flightData.agl, position: state.position });
+    landingObservation.dt = dt;
+    landingObservation.agl = flightData.agl;
+    landing.observe(report, landingObservation);
     updateSoaring(dt);
     writeCraftState();
   }
@@ -1104,7 +1117,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
   /** After a touchdown on its feet: slow enough over the ground for a moment -> standing (perched). */
   function updateGroundStand(env, dt) {
     const report = groundContact.report;
-    const groundSpeed = Math.hypot(state.velocity.x, state.velocity.z);
+    const groundSpeed = planar(state.velocity.x, state.velocity.z);
     if (report.onGround && report.contacts > 0 && !report.water && groundSpeed < perchProfile.settleSpeed && wingData.airspeed < perchProfile.captureSpeed && !coolingDown(state.position.x, state.position.z)) {
       perch.standSeconds += dt;
       if (perch.standSeconds >= STAND_SECONDS) {
@@ -1174,12 +1187,12 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     flightData.stallMargin = flightData.aoaCritical - flightData.aoa;
     flightData.stalled = flying && flightData.stallDepth > STALLED_DEPTH;
     flightData.verticalSpeed = state.velocity.y;
-    const groundSpeed = Math.hypot(state.velocity.x, state.velocity.z);
+    const groundSpeed = planar(state.velocity.x, state.velocity.z);
     const flightPath = Math.atan2(state.velocity.y, Math.max(groundSpeed, 0.1));
-    flightData.flightPathRate = dt > 0 && flying ? (flightPath - previousFlightPath) / dt : 0;
-    previousFlightPath = flightPath;
+    flightData.flightPathRate = dt > 0 && flying ? (flightPath - tick.flightPath) / dt : 0;
+    tick.flightPath = flightPath;
     flightData.flightPath = flightPath;
-    flightData.gLoad = smoothedLoad;
+    flightData.gLoad = tick.load;
     flightData.rollRate = -state.angularVelocity.z;
     flightData.pitchRate = state.angularVelocity.x;
     flightData.yawRate = -state.angularVelocity.y;
@@ -1188,9 +1201,9 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     flightData.flapPower = wings.power;
     flightData.tuck = wings.tuck;
     const glideStep = 1 - Math.exp(-GLIDE_SMOOTHING * dt);
-    smoothedHorizontal += (groundSpeed - smoothedHorizontal) * glideStep;
-    smoothedSink += (-state.velocity.y - smoothedSink) * glideStep;
-    flightData.glideRatio = smoothedSink > 0.3 ? smoothedHorizontal / smoothedSink : 0;
+    tick.horizontal += (groundSpeed - tick.horizontal) * glideStep;
+    tick.sink += (-state.velocity.y - tick.sink) * glideStep;
+    flightData.glideRatio = tick.sink > 0.3 ? tick.horizontal / tick.sink : 0;
     surfaces.aileron = limbs.roll;
     surfaces.elevator = limbs.pitch;
     surfaces.rudder = limbs.yaw;
@@ -1239,7 +1252,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     perch.cooldownSeconds = 0;
     perch.standSeconds = 0;
     perch.scanTimer = SCAN_SECONDS;
-    smoothedLoad = 1;
+    tick.load = 1;
     soar.low = Infinity;
     soar.timer = 0;
     computeAttitude();
@@ -1279,15 +1292,15 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
       // Airborne: pitch the body to the glide's trim angle of attack on the flight path it was given.
       const speed = state.velocity.length();
       if (speed > 3) {
-        const horizontal = Math.hypot(state.velocity.x, state.velocity.z);
+        const horizontal = planar(state.velocity.x, state.velocity.z);
         const heading = horizontal > 0.5 ? headingFromVector(state.velocity.x, state.velocity.z) : flightData.heading;
         const path = Math.atan2(state.velocity.y, Math.max(horizontal, 0.1));
         levelAttitude(heading, clamp(path + trimAoa, -80 * DEG, 80 * DEG), state.quaternion);
       }
     }
-    smoothedHorizontal = Math.hypot(state.velocity.x, state.velocity.z);
-    smoothedSink = Math.max(0, -state.velocity.y);
-    previousFlightPath = Math.atan2(state.velocity.y, Math.max(smoothedHorizontal, 0.1));
+    tick.horizontal = planar(state.velocity.x, state.velocity.z);
+    tick.sink = Math.max(0, -state.velocity.y);
+    tick.flightPath = Math.atan2(state.velocity.y, Math.max(tick.horizontal, 0.1));
     airWorld.copy(state.velocity);
     computeAttitude();
     flightData.airspeed = state.velocity.length();
@@ -1337,9 +1350,9 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
       perch: { ...perch },
       landingCurve: [landingStart.x, landingStart.y, landingStart.z, landingVelocity.x, landingVelocity.y, landingVelocity.z, landingEnd.x, landingEnd.y, landingEnd.z],
       landingQuaternion: [landingQuaternion.x, landingQuaternion.y, landingQuaternion.z, landingQuaternion.w],
-      load: smoothedLoad,
-      glide: [smoothedHorizontal, smoothedSink],
-      time,
+      load: tick.load,
+      glide: [tick.horizontal, tick.sink],
+      time: tick.time,
       contact: groundContact.snapshot(),
       landing: landing.snapshot(),
     };
@@ -1358,9 +1371,10 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     landingVelocity.fromArray(data.landingCurve, 3);
     landingEnd.fromArray(data.landingCurve, 6);
     landingQuaternion.fromArray(data.landingQuaternion).normalize();
-    smoothedLoad = finiteOr(data.load, 1);
-    [smoothedHorizontal, smoothedSink] = data.glide;
-    time = finiteOr(data.time, time);
+    tick.load = finiteOr(data.load, 1);
+    tick.horizontal = finiteOr(data.glide[0], 0);
+    tick.sink = finiteOr(data.glide[1], 0);
+    tick.time = finiteOr(data.time, tick.time);
     groundContact.restore(data.contact);
     landing.restore(data.landing);
     setPhase(perch.phase);

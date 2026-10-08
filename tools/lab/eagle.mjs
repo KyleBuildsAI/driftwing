@@ -26,11 +26,18 @@
 //   placement   a resting reset at a perch point stands on it; at a ground point stands on the ground
 //   autopilot   the copilot's perch approach (craftState.perchTarget) flies to the perch and lands
 //   ignition    the ignition service: add, cone, ignite once, extinguish, remove, refusals
+//   allocation  young-generation bytes per model step in flapping flight, slow flight scanning for
+//               perches and on a perch (a child process with clean type feedback; the wingsuit's step
+//               is printed for comparison)
 //
 // Usage: node tools/lab/eagle.mjs [--verbose]
 // Prints a PASS / FAIL table and exits non-zero if any check fails.
+import * as v8 from 'node:v8';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import * as THREE from 'three/webgpu';
 import eagle from '../../src/craft/eagle.js';
+import wingsuit from '../../src/craft/wingsuit.js';
 import { flightModels } from '../../src/flight/models.js';
 import { createControlState, copyControlState } from '../../src/input/controlState.js';
 import { createFlightTelemetry } from '../../src/flight/telemetry.js';
@@ -45,8 +52,10 @@ const WATER_LEVEL = -60;
 const KMH = 3.6;
 const FEET = eagle.simProfile.perch.feet;
 const VERBOSE = process.argv.includes('--verbose');
+/** The allocation measure runs in a child process of its own (--allocation-child), with clean type feedback. */
+const ALLOCATION_CHILD = process.argv.includes('--allocation-child');
 for (const flag of process.argv.slice(2)) {
-  if (flag !== '--verbose') throw new Error(`Unknown flag ${flag}`);
+  if (flag !== '--verbose' && flag !== '--allocation-child') throw new Error(`Unknown flag ${flag}`);
 }
 
 function log(...parts) {
@@ -525,6 +534,80 @@ function ignitionTest() {
   record('ignition: owners remove theirs (count back to 0)', ignition.count, 0, { compare: removed && ignition.count === 0 });
 }
 
+/**
+ * Young-generation bytes per model step, the least of TRIALS trials after a long warm-up (the JIT
+ * and a busy machine add noise; the least is the step's own cost). Measured in a child process, so
+ * the type feedback is the game's (one environment shape), not that of the many rigs above.
+ */
+const ALLOCATION = Object.freeze({ WARMUP: 80000, TRIALS: 4, TICKS: 40000, LIMIT: 64 });
+function youngUsed() {
+  return v8.getHeapSpaceStatistics().find((space) => space.space_name === 'new_space').space_used_size;
+}
+
+function measureSteps(model, controls, env) {
+  const step = () => {
+    env.time += DT;
+    model.step(DT, controls, env);
+  };
+  for (let index = 0; index < ALLOCATION.WARMUP; index++) step();
+  let least = Infinity;
+  for (let trial = 0; trial < ALLOCATION.TRIALS; trial++) {
+    globalThis.gc();
+    const before = youngUsed();
+    for (let index = 0; index < ALLOCATION.TICKS; index++) step();
+    least = Math.min(least, (youngUsed() - before) / ALLOCATION.TICKS);
+  }
+  return least;
+}
+
+/** A rig's model stepped directly with its pilot controls (the control stages are every craft's). */
+function rigSteps(rig) {
+  copyControlState(rig.controls, rig.pilot);
+  return measureSteps(rig.model, rig.controls, rig.env);
+}
+
+/** The child's measure: bytes per tick in three states, and the wingsuit's step for comparison. */
+function measureAllocation() {
+  const perch = { x: 0, y: 30, z: 0, kind: 'tree', id: 'perch:stand' };
+  const colliders = createColliders([perch]);
+  const flapping = createRig({ assists: 1, colliders });
+  flapping.airborne({ altitude: 30000 });
+  flapping.pilot.throttle = 1;
+  flapping.pilot.roll = 0.05;
+  const flight = rigSteps(flapping);
+  // Slow flight: the perch scan every 0.1 s (the perch far below, out of reach).
+  const scanning = createRig({ assists: 1, colliders });
+  scanning.airborne({ altitude: 30000, speed: 10 });
+  scanning.pilot.throttle = 1;
+  scanning.pilot.pitch = 0.3;
+  const scan = rigSteps(scanning);
+  const standing = createRig({ colliders });
+  standing.model.reset({ position: new THREE.Vector3(perch.x, perch.y, perch.z), quaternion: new THREE.Quaternion(), velocity: new THREE.Vector3(), onGround: true });
+  standing.pilot.throttle = 0.1;
+  const perched = rigSteps(standing);
+  const suitBus = attachTypedEvents(new EventBus(), { validate: true });
+  const suitWorld = createFlatWorld();
+  const suitState = wingsuit.abilities.craftAbility.initialState();
+  const suit = flightModels.create('wingsuit', { profile: wingsuit.simProfile, craft: wingsuit, world: suitWorld, bus: suitBus, state: null, craftState: suitState });
+  suit.reset({ position: new THREE.Vector3(0, 30000, 0), quaternion: new THREE.Quaternion(), velocity: new THREE.Vector3(0, -20, -45), onGround: false });
+  const suitEnv = { time: 0, wind: { vel: new THREE.Vector3(), turbulence: 0 }, groundHeight: suitWorld.groundHeight, waterLevel: WATER_LEVEL, rho: SEA_LEVEL_RHO, world: suitWorld, craftState: suitState, assists: 1, handsOff: false, autopilot: { enabled: false }, telemetry: createFlightTelemetry(), colliders: null };
+  const wingsuitStep = measureSteps(suit, createControlState(), suitEnv);
+  return { flight, scan, perched, wingsuit: wingsuitStep, standing: standing.craftState.perched === true };
+}
+
+function allocationTest() {
+  let measured;
+  try {
+    const output = execFileSync(process.execPath, ['--expose-gc', fileURLToPath(import.meta.url), '--allocation-child'], { encoding: 'utf8', timeout: 600000 });
+    measured = JSON.parse(output.trim().split(/\r?\n/).pop());
+  } catch (error) {
+    record('allocation: the measuring child process', 0, 1, { compare: false, note: error.message.split(/\r?\n/)[0] });
+    return;
+  }
+  const worst = Math.max(measured.flight, measured.scan, measured.perched);
+  record('allocation: model step, young bytes per tick', worst, ALLOCATION.LIMIT, { unit: 'B', compare: 'max', decimals: 1, note: `flight ${measured.flight.toFixed(1)}, scanning ${measured.scan.toFixed(1)}, perched ${measured.perched.toFixed(1)} (${measured.standing ? 'perched' : 'NOT perched'}); wingsuit ${measured.wingsuit.toFixed(1)}` });
+}
+
 // ============================================================================================
 // REPORT
 // ============================================================================================
@@ -547,6 +630,13 @@ function printTable() {
   return failed === 0;
 }
 
+if (ALLOCATION_CHILD) {
+  if (typeof globalThis.gc !== 'function') throw new Error('the allocation child needs node --expose-gc');
+  process.stdout.write(`${JSON.stringify(measureAllocation())}
+`);
+  process.exit(0);
+}
+
 const started = performance.now();
 glideTest();
 polarTest();
@@ -560,6 +650,7 @@ groundTest();
 placementTest();
 autopilotTest();
 ignitionTest();
+allocationTest();
 const passed = printTable();
 process.stdout.write(`(${((performance.now() - started) / 1000).toFixed(1)} s)\n`);
 process.exit(passed ? 0 : 1);
