@@ -1,5 +1,5 @@
 // Craft trails: light particle trails emitted from a craft's anchors (the bush plane's smoke, the
-// glider's ballast spray). Same technique as v1's bursts (one Sprite drawn instanced with a
+// glider's ballast spray, coloured display smoke: 'smokeColor', tinted per emit). Same technique as v1's bursts (one Sprite drawn instanced with a
 // PointsNodeMaterial, camera-relative float32 offsets), but soft, sunlit and alpha-blended instead
 // of additive: vapour that streams from the nozzle, billows out, drifts off with the wind and fades.
 // Spray (the glider's ballast) falls: a puff that reaches the water it was dumped over (the shared
@@ -18,7 +18,25 @@ const CAPACITY = 720;
 const STYLES = Object.freeze({
   smoke: Object.freeze({ rate: 64, life: [3.8, 5.4], birthSize: [0.7, 1], deathSize: [10, 14], inherit: 0.12, spread: 1.1, rise: 0.3, drag: 1.3, fadeIn: 0.05, opacity: 0.62, tint: Object.freeze([0.96, 0.95, 0.93]) }),
   spray: Object.freeze({ rate: 55, life: [0.9, 1.5], birthSize: [0.25, 0.4], deathSize: [1.8, 2.8], inherit: 0.25, spread: 2.2, rise: -2.5, drag: 2.4, fadeIn: 0.08, opacity: 0.35, tint: Object.freeze([0.86, 0.92, 0.98]) }),
+  smokeColor: Object.freeze({ rate: 64, life: [3.8, 5.4], birthSize: [0.7, 1], deathSize: [9, 13], inherit: 0.12, spread: 1, rise: 0.25, drag: 1.3, fadeIn: 0.05, opacity: 0.7, tint: Object.freeze([0.96, 0.95, 0.93]) }),
 });
+const KINDS = Object.freeze(Object.keys(STYLES));
+
+/** Display smoke colours (craftState.smokeColor indexes them; the aerobatic's colour cycle steps through). */
+export const SMOKE_COLORS = Object.freeze([
+  Object.freeze({ id: 'white', tint: Object.freeze([0.96, 0.95, 0.93]) }),
+  Object.freeze({ id: 'red', tint: Object.freeze([0.88, 0.2, 0.16]) }),
+  Object.freeze({ id: 'blue', tint: Object.freeze([0.2, 0.38, 0.86]) }),
+  Object.freeze({ id: 'yellow', tint: Object.freeze([0.96, 0.82, 0.22]) }),
+  Object.freeze({ id: 'green', tint: Object.freeze([0.24, 0.7, 0.34]) }),
+  Object.freeze({ id: 'orange', tint: Object.freeze([0.94, 0.48, 0.18]) }),
+]);
+
+/** The tint of a smoke colour index (wrapping; white for anything that is not a whole number). */
+export function smokeColorTint(index) {
+  if (!Number.isInteger(index)) return SMOKE_COLORS[0].tint;
+  return SMOKE_COLORS[((index % SMOKE_COLORS.length) + SMOKE_COLORS.length) % SMOKE_COLORS.length].tint;
+}
 const NEAR_FADE_START = 2;
 const NEAR_FADE_RANGE = 8;
 const ZERO = Object.freeze({ x: 0, y: 0, z: 0 });
@@ -92,10 +110,10 @@ export function createTrailSystem(ctx) {
   /** The water level a falling puff ends at (-Infinity: none, smoke and puffs over dry land). */
   const floor = new Float64Array(CAPACITY).fill(-Infinity);
   const floorScratch = new Float64Array(1);
-  const emitDebt = { smoke: 0, spray: 0 };
-  const lastEmit = { smoke: new THREE.Vector3(), spray: new THREE.Vector3() };
-  const hasLastEmit = { smoke: false, spray: false };
-  const emittedThisFrame = { smoke: false, spray: false };
+  const emitDebt = Object.fromEntries(KINDS.map((kind) => [kind, 0]));
+  const lastEmit = Object.fromEntries(KINDS.map((kind) => [kind, new THREE.Vector3()]));
+  const hasLastEmit = Object.fromEntries(KINDS.map((kind) => [kind, false]));
+  const emittedThisFrame = Object.fromEntries(KINDS.map((kind) => [kind, false]));
   let cursor = 0;
   let live = 0;
 
@@ -110,8 +128,11 @@ export function createTrailSystem(ctx) {
     return index;
   }
 
-  /** One puff; `age` is how long ago within this frame it left the nozzle (keeps the stream even). */
-  function spawn(style, x, y, z, craftVelocity, wind, startAge, waterFloor) {
+  /**
+   * One puff; `age` is how long ago within this frame it left the nozzle (keeps the stream even);
+   * tint ([r, g, b]) overrides the style's colour.
+   */
+  function spawn(style, x, y, z, craftVelocity, wind, startAge, waterFloor, tint) {
     const index = claim();
     floor[index] = waterFloor;
     const shade = 0.94 + Math.random() * 0.06;
@@ -132,9 +153,10 @@ export function createTrailSystem(ctx) {
     drag[index] = style.drag;
     fadeIn[index] = style.fadeIn;
     peakOpacity[index] = style.opacity;
-    red[index] = style.tint[0] * shade;
-    green[index] = style.tint[1] * shade;
-    blue[index] = style.tint[2] * shade;
+    const colour = tint ?? style.tint;
+    red[index] = colour[0] * shade;
+    green[index] = colour[1] * shade;
+    blue[index] = colour[2] * shade;
   }
 
   return {
@@ -142,12 +164,13 @@ export function createTrailSystem(ctx) {
     get count() { return live; },
 
     /**
-     * Emits kind ('smoke' | 'spray') at a world position for dt seconds of flight. Puffs are spread
-     * along the segment since the previous frame's emitter position (each aged by when it left the
-     * nozzle) so fast craft leave a continuous trail; they relax toward `wind` (m/s, the air mass the
-     * craft flies in) so the trail drifts downwind.
+     * Emits kind ('smoke' | 'spray' | 'smokeColor') at a world position for dt seconds of flight.
+     * Puffs are spread along the segment since the previous frame's emitter position (each aged by
+     * when it left the nozzle) so fast craft leave a continuous trail; they relax toward `wind` (m/s,
+     * the air mass the craft flies in) so the trail drifts downwind. tint ([r, g, b] 0..1) colours
+     * the puffs (display smoke); null keeps the style's colour.
      */
-    emit(kind, position, craftVelocity, dt, wind = ZERO) {
+    emit(kind, position, craftVelocity, dt, wind = ZERO, tint = null) {
       const style = STYLES[kind];
       if (!style || !(dt > 0)) return;
       emitDebt[kind] += style.rate * dt;
@@ -158,7 +181,7 @@ export function createTrailSystem(ctx) {
       if (style.rise < 0 && count > 0 && waterQuery !== null) waterQuery.staticLevelInto(position.x, position.z, floorScratch, 0);
       for (let puff = 0; puff < count; puff++) {
         const t = (puff + 1) / count;
-        spawn(style, from.x + (position.x - from.x) * t, from.y + (position.y - from.y) * t, from.z + (position.z - from.z) * t, craftVelocity, wind, (1 - t) * dt, floorScratch[0]);
+        spawn(style, from.x + (position.x - from.x) * t, from.y + (position.y - from.y) * t, from.z + (position.z - from.z) * t, craftVelocity, wind, (1 - t) * dt, floorScratch[0], tint);
       }
       lastEmit[kind].copy(position);
       hasLastEmit[kind] = true;
@@ -171,14 +194,13 @@ export function createTrailSystem(ctx) {
       live = 0;
       sprite.count = 0;
       sprite.visible = false;
-      hasLastEmit.smoke = false;
-      hasLastEmit.spray = false;
+      for (const kind of KINDS) hasLastEmit[kind] = false;
     },
 
     /** Ages and moves the puffs, then writes camera-relative instance data (float32-safe far out). */
     update(dt, camera) {
       // A trail that paused restarts at the craft instead of bridging the gap.
-      for (const kind of Object.keys(emittedThisFrame)) {
+      for (const kind of KINDS) {
         if (!emittedThisFrame[kind] && dt > 0) hasLastEmit[kind] = false;
         emittedThisFrame[kind] = false;
       }

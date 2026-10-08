@@ -75,6 +75,8 @@ export function createFlightTelemetry() {
     contacts: 0,
     /** Touching water: floating on it, or (for a craft that cannot float) ditching in it (all craft). */
     onWater: false,
+    /** The active craft's altitude ceiling (m): its limits.ceiling, else 15000 (contract h.3). */
+    ceiling: 15000,
     stall: { warning: false, stalled: false, buffet: 0 },
     /** Airspeed above the craft's Vne: flutter shakes the airframe until it slows down. */
     overspeed: false,

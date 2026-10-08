@@ -12,10 +12,11 @@ import { primeAssists } from './assists.js';
 import { createCrashFade } from './crashFade.js';
 import { createAerotow, createRopeMaterial, createRopeStandIn, findNearestPeak, planPeakLaunch } from './relaunch.js';
 import { findFlatSpot, groundPose, vegetationClearance } from './placement.js';
-import { createTrailSystem } from './trails.js';
+import { createTrailSystem, smokeColorTint } from './trails.js';
 import { createParkingBrake } from './parkingBrake.js';
 import { createWaterSampleScratch } from './waterSurface.js';
 import { countTriangles } from '../craft/kit.js';
+import { DEFAULT_CRAFT_FAVORITES, FAVORITE_SLOTS } from '../core/settings.js';
 
 /**
  * FLIGHT CONTROLLER (ctx.systems.flight): owns the active craft and its flight model, and keeps
@@ -26,7 +27,13 @@ import { countTriangles } from '../craft/kit.js';
  *   the craft input profile and the registered control stages: assists, autopilot), samples the wind
  *   and air density per tick, guards against NaN / Infinity every tick (restoring the last good
  *   snapshot) and renders an interpolated pose.
- * - Craft switches rebuild the mesh and the model and respawn sensibly at the same place.
+ * - Craft switches rebuild the mesh and the model and respawn sensibly at the same place: the new
+ *   craft's situate(situation, api) hook places it (contract h.4: on the water, drifting, climbing,
+ *   hovering, perched...), else the Phase 1 rules do. The number keys pick the ten favorites
+ *   (settings.craftFavorites) and craftNext / craftPrev cycle them; a skin change (settings.craftSkins)
+ *   rebuilds the mesh only.
+ * - Craft abilities: craftAbility (Space) and craftAbilityAlt (Shift+Space) run the module's
+ *   abilities through the ability api; runCraftCommand runs a module's copilot command (h.5, h.6).
  * - Soft crash: fade, respawn 300 m above the ground at the same XZ and heading, no penalty.
  * - Relaunch: aerotow (glider), nearest peak (wingsuit) or airstart; start on ground (setting),
  *   which prefers the nearest discovered site offering a ground-start spot (an airfield's runway,
@@ -67,9 +74,11 @@ const GRAVITY = 9.81;
 const SPEED_BLEND_MIN_CHANGE = 0.5;
 
 /** Actions the flight controller performs (docs/architecture.md, ownership table). */
-const CRAFT_SELECT_ACTIONS = Object.freeze(['craftSelect1', 'craftSelect2', 'craftSelect3', 'craftSelect4', 'craftSelect5', 'craftSelect6']);
+const CRAFT_SELECT_ACTIONS = Object.freeze(Array.from({ length: FAVORITE_SLOTS }, (unused, index) => `craftSelect${index + 1}`));
+/** The ability slots and the actions that run them (contract h.5). */
+const ABILITY_ACTIONS = Object.freeze({ craftAbility: 'craftAbility', craftAbilityAlt: 'craftAbilityAlt' });
 const FLIGHT_ACTIONS = new Set([
-  'craftAbility', 'craftNext', 'craftPrev', ...CRAFT_SELECT_ACTIONS, 'gearToggle', 'flapsUp', 'flapsDown',
+  'craftAbility', 'craftAbilityAlt', 'craftNext', 'craftPrev', ...CRAFT_SELECT_ACTIONS, 'gearToggle', 'flapsUp', 'flapsDown',
   'airbrake', 'relaunch', 'engineToggle', 'chuteDeploy',
 ]);
 /** Flight actions the model itself handles (passed to it in the tick's controls.actions). */
@@ -77,6 +86,10 @@ const MODEL_ACTIONS = new Set(['gearToggle', 'flapsUp', 'flapsDown', 'airbrake',
 /** Telemetry fields a model owns; reset to defaults when the model changes so nothing stale shows. */
 const MODEL_TELEMETRY_FIELDS = Object.freeze(['aoa', 'sideslip', 'throttle', 'afterburner', 'engineOn', 'rpm', 'rotorRpm', 'torque', 'flaps', 'flapNotch', 'gear', 'airbrake', 'brakes', 'trim', 'stall', 'overspeed', 'activeAssists']);
 const LANDING_RANK = Object.freeze({ butter: 0, smooth: 1, firm: 2, hard: 3 });
+/** Placement modes a situate hook may return (contract h.4). */
+const PLACEMENT_MODES = Object.freeze(['air', 'ground', 'water', 'hover', 'drift', 'climb', 'perch']);
+/** A 'climb' placement without a pitch climbs at this angle (deg). */
+const CLIMB_PITCH = 45;
 
 export function createFlightController(ctx) {
   const { scene, state, bus, world, settings } = ctx;
@@ -100,6 +113,8 @@ export function createFlightController(ctx) {
   let mesh = null;
   let sim = null;
   let craftState = {};
+  /** The active craft's skin id (module.skins), or null for a craft without skins. */
+  let activeSkin = null;
 
   // ---- Fixed-step state ---------------------------------------------------------------------------
   const clock = createFixedStepClock();
@@ -139,6 +154,9 @@ export function createFlightController(ctx) {
     autopilot: player.autopilot,
     telemetry,
     colliders: ctx.colliders ?? null,
+    // The WindField itself (probe the air at other heights: a balloon's wind layers, a paraglider's
+    // thermals); env.wind is this tick's sample at the craft.
+    windField: ctx.wind ?? null,
   };
   const interpolation = {
     previousPosition: new THREE.Vector3(),
@@ -150,7 +168,7 @@ export function createFlightController(ctx) {
   };
   let lastGoodSnapshot = null;
   let nanReported = false;
-  const counters = { nanRestores: 0, softCrashes: 0, relaunches: 0, craftSwitches: 0, maxTicksPerFrame: 0 };
+  const counters = { nanRestores: 0, softCrashes: 0, relaunches: 0, craftSwitches: 0, maxTicksPerFrame: 0, situateCalls: 0, situateErrors: 0, placements: 0, craftCommands: 0 };
   // game: the shared state (ring course, waypoint) the autopilot follows.
   const stageContext = { dt: 0, model: null, craft: null, craftId: null, env, autopilot: player.autopilot, assists: 1, handsOff: false, telemetry, activeAssists: [], game: state };
 
@@ -258,10 +276,12 @@ export function createFlightController(ctx) {
   function installCraft(id) {
     craft = registry.get(id);
     craftId = id;
-    craftState = typeof craft.abilities?.craftAbility?.initialState === 'function' ? craft.abilities.craftAbility.initialState() : {};
+    craftState = initialCraftState(craft);
+    activeSkin = skinFor(craft);
+    if (activeSkin !== null) craftState.skin = activeSkin;
     env.craftState = craftState;
     telemetry.craftState = craftState;
-    mesh = craft.buildMesh(ctx);
+    mesh = craft.buildMesh(ctx, { skin: activeSkin });
     scene.add(mesh.root);
     try {
       sim = createSimModel(simKind());
@@ -272,6 +292,49 @@ export function createFlightController(ctx) {
       throw error;
     }
     resetModelTelemetry();
+  }
+
+  /** The craft state both abilities start from (craftAbility's initialState, then craftAbilityAlt's). */
+  function initialCraftState(module) {
+    const state = {};
+    for (const slot of Object.keys(ABILITY_ACTIONS)) {
+      const ability = module.abilities ? module.abilities[slot] : null;
+      if (ability && typeof ability.initialState === 'function') Object.assign(state, ability.initialState());
+    }
+    return state;
+  }
+
+  /** The skin a module flies in: settings.craftSkins when it names one of its skins, else its default; null without skins. */
+  function skinFor(module) {
+    if (!module || !module.skins) return null;
+    const stored = settings.get('craftSkins');
+    const wanted = stored && typeof stored === 'object' ? stored[module.id] : '';
+    return module.skins.list.some((skin) => skin.id === wanted) ? wanted : module.skins.default;
+  }
+
+  /**
+   * A skin change rebuilds the mesh only (same physics family, contract h.2): the model, its state
+   * and the pose carry on; the camera follows the new root on its next frame.
+   */
+  function applySkin() {
+    if (!craft || !mesh) return;
+    const skin = skinFor(craft);
+    if (skin === activeSkin) return;
+    let next;
+    try {
+      next = craft.buildMesh(ctx, { skin });
+    } catch (error) {
+      console.error(`[DRIFTWING] craft "${craftId}" failed to build its "${skin}" skin`, error);
+      notify(`The ${skin} skin could not be built, so the ${craftLabel(craftId)} keeps its current look.`, 'warning');
+      return;
+    }
+    mesh.dispose();
+    mesh = next;
+    scene.add(mesh.root);
+    activeSkin = skin;
+    craftState.skin = skin;
+    syncVisual();
+    bus.emit('craft:skinChanged', { craft: craftId, skin });
   }
 
   function disposeCraft() {
@@ -321,6 +384,7 @@ export function createFlightController(ctx) {
         angularVelocity: sim.state.angularVelocity ? sim.state.angularVelocity.clone() : new THREE.Vector3(),
         throttle: Number.isFinite(telemetry.throttle) ? telemetry.throttle : player.throttle,
         onGround: Boolean(sim.contact && sim.contact.onGround),
+        onWater: Boolean(sim.contact && (sim.contact.water || sim.contact.floating)),
       };
     }
     return {
@@ -330,6 +394,7 @@ export function createFlightController(ctx) {
       angularVelocity: new THREE.Vector3(),
       throttle: player.throttle,
       onGround: false,
+      onWater: false,
     };
   }
 
@@ -538,7 +603,6 @@ export function createFlightController(ctx) {
     releaseTow('craft change');
     const previous = craftId;
     const pose = capturePose();
-    const wasOnGround = pose.onGround;
     disposeCraft();
     try {
       installCraft(nextId);
@@ -546,14 +610,14 @@ export function createFlightController(ctx) {
       // A craft that fails to build must not take the flight system down: fly the previous one on.
       console.error(`[DRIFTWING] craft "${nextId}" failed to load`, error);
       installCraft(previous);
-      spawnAfterCraftChange(pose, wasOnGround);
+      spawnAfterCraftChange(pose, null);
       syncVisual();
       snapCamera();
       settings.set('craft', previous);
       notify(`The ${craftLabel(nextId)} could not be loaded, so you're still flying the ${craftLabel(previous)}.`, 'warning');
       return false;
     }
-    spawnAfterCraftChange(pose, wasOnGround);
+    spawnAfterCraftChange(pose, previous);
     counters.craftSwitches++;
     telemetry.craft = craftId;
     syncVisual();
@@ -563,11 +627,28 @@ export function createFlightController(ctx) {
   }
 
   /**
-   * A sensible start for the new craft at the old craft's place: peak launchers low down relaunch
-   * from a peak, ground starters go on the ground when asked (or when the old craft was landed),
-   * everything else flies level at cruise (hovering craft hover), lifted clear of the ground.
+   * A sensible start for the new craft at the old craft's place (contract h.4): the new craft's
+   * situate(situation, api) hook decides when the module has one, else (or when it returns nothing
+   * usable) the Phase 1 rules do. A placement without a mode keeps the Phase 1 rules and only adds
+   * its craftState.
    */
-  function spawnAfterCraftChange(pose, wasOnGround) {
+  function spawnAfterCraftChange(pose, previous) {
+    const placement = typeof craft.situate === 'function' ? situateCraft(pose, previous) : null;
+    if (placement && placement.mode) {
+      applyPlacement(placement, pose);
+      return;
+    }
+    spawnByPhase1Rules(pose);
+    if (placement) mergePlacementState(placement);
+  }
+
+  /**
+   * The Phase 1 rules: peak launchers low down relaunch from a peak, ground starters go on the
+   * ground when asked (or when the old craft was landed), everything else flies level at cruise
+   * (hovering craft hover), lifted clear of the ground.
+   */
+  function spawnByPhase1Rules(pose) {
+    const wasOnGround = pose.onGround;
     const heading = headingOfQuaternion(pose.quaternion, currentHeading());
     const position = pose.position;
     const agl = position.y - surfaceHeight(position.x, position.z);
@@ -586,6 +667,196 @@ export function createFlightController(ctx) {
     const spawnPosition = position.clone();
     if (agl < MIN_SPAWN_AGL) spawnPosition.y = surfaceHeight(position.x, position.z) + SPAWN_LIFT_AGL;
     resetActiveModel(airbornePose(spawnPosition, heading));
+  }
+
+  // ---- situate (contract h.4) ------------------------------------------------------------------
+  const situationWater = createWaterSampleScratch();
+  const situationWind = { vel: new THREE.Vector3(), turbulence: 0 };
+  /** What a situate hook may use besides the situation: the world queries, read only. */
+  const situateApi = Object.freeze({
+    world,
+    waterQuery,
+    colliders: ctx.colliders ?? null,
+    windField: ctx.wind ?? null,
+    state,
+    get craft() { return craft; },
+    get ceiling() { return activeCeiling(); },
+    groundHeight: (x, z) => world.groundHeight(x, z),
+    /** The highest ground at (x, z): terrain, water or an extra ground surface. */
+    surfaceHeight: (x, z) => surfaceHeight(x, z),
+    /** The water surface at (x, z) now (-Infinity on dry land with the water query). */
+    waterHeight: (x, z) => waterHeightNow(x, z),
+    /** The wind at a world point now: { vel: Vector3, turbulence } (into out when given). */
+    windAt(position, out = { vel: new THREE.Vector3(), turbulence: 0 }) {
+      if (ctx.wind && typeof ctx.wind.sample === 'function') return ctx.wind.sample(position, state.time.elapsed, out);
+      out.vel.set(0, 0, 0);
+      out.turbulence = 0;
+      return out;
+    },
+    /** The perches within radius of a point (colliders.perchesNear): visit(x, y, z, kind, sourceId). */
+    perchesNear(x, y, z, radius, visit) {
+      if (ctx.colliders && typeof ctx.colliders.perchesNear === 'function') ctx.colliders.perchesNear(x, y, z, radius, visit);
+    },
+    /** The nearest high peak to (x, z), as the wingsuit's relaunch finds it, or null. */
+    nearestPeak: (x, z) => findNearestPeak(world, x, z, { waterHeight: waterHeightNow }),
+    /** The heading into the ambient wind at (x, z) (degrees). */
+    headingIntoWind: (x, z) => windHeadingAt(x, z),
+  });
+
+  /** The situation of contract h.4 at the old craft's pose. */
+  function buildSituation(pose, previous) {
+    const position = pose.position;
+    const velocity = pose.velocity;
+    const heading = headingOfQuaternion(pose.quaternion, currentHeading());
+    const groundSpeed = Math.hypot(velocity.x, velocity.z);
+    const surface = surfaceHeight(position.x, position.z);
+    let overWater = false;
+    let waterHeight = null;
+    let waterBody = null;
+    if (waterQuery !== null) {
+      waterQuery.sample(position.x, position.z, state.time.elapsed, situationWater);
+      overWater = situationWater.kind !== 'none' && situationWater.material === 'water';
+      waterHeight = situationWater.kind !== 'none' ? situationWater.height : null;
+      waterBody = situationWater.body ?? null;
+    } else if (world.groundHeight(position.x, position.z) < CONFIG.WATER_LEVEL) {
+      overWater = true;
+      waterHeight = CONFIG.WATER_LEVEL;
+    }
+    situateApi.windAt(position, situationWind);
+    return {
+      position: position.clone(),
+      heading,
+      trackHeading: groundSpeed > 2 ? headingFromVector(velocity.x, velocity.z) : heading,
+      groundSpeed,
+      velocity: velocity.clone(),
+      airspeed: scratchVector.copy(velocity).sub(situationWind.vel).length(),
+      agl: position.y - surface,
+      surfaceHeight: surface,
+      overWater,
+      waterBody,
+      waterHeight,
+      wasOnGround: pose.onGround,
+      wasOnWater: Boolean(pose.onWater),
+      previousCraft: previous ?? null,
+      wind: { vel: situationWind.vel.clone(), turbulence: situationWind.turbulence },
+      time: state.time.elapsed,
+      dayTime: state.time.dayTime,
+    };
+  }
+
+  /** Calls the module's situate hook; a hook that throws or answers nonsense falls back to the Phase 1 rules. */
+  function situateCraft(pose, previous) {
+    counters.situateCalls++;
+    let placement;
+    try {
+      placement = craft.situate(buildSituation(pose, previous), situateApi);
+    } catch (error) {
+      counters.situateErrors++;
+      console.error(`[DRIFTWING] craft "${craftId}" situate() failed; the Phase 1 rules place it`, error);
+      return null;
+    }
+    if (placement === null || placement === undefined) return null;
+    const problem = placementProblem(placement);
+    if (problem) {
+      counters.situateErrors++;
+      console.error(`[DRIFTWING] craft "${craftId}" situate() returned ${problem}; the Phase 1 rules place it`);
+      return null;
+    }
+    return placement;
+  }
+
+  /** Why a placement cannot be used, or '' when it can. */
+  function placementProblem(placement) {
+    if (typeof placement !== 'object') return 'a non-object';
+    if (placement.mode !== undefined && !PLACEMENT_MODES.includes(placement.mode)) return `an unknown mode "${placement.mode}"`;
+    const position = placement.position;
+    if (position !== undefined && !(position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z))) return 'a position that is not { x, y, z }';
+    for (const field of ['heading', 'speed', 'pitch', 'throttle']) {
+      if (placement[field] !== undefined && !Number.isFinite(placement[field])) return `a ${field} that is not a number`;
+    }
+    if (placement.craftState !== undefined && (placement.craftState === null || typeof placement.craftState !== 'object')) return 'a craftState that is not an object';
+    return '';
+  }
+
+  /**
+   * Places the craft as a placement says (contract h.4; also startAt for tests and tools). Any field
+   * left out keeps the Phase 1 default: the old craft's place and heading, the craft's cruise and
+   * cruise throttle (a climb: 45 degrees at full power; hover, drift and perch: no airspeed). A
+   * 'water' placement over dry ground flies instead.
+   */
+  function applyPlacement(placement, pose) {
+    const heading = Number.isFinite(placement.heading) ? wrapDegrees(placement.heading) : headingOfQuaternion(pose.quaternion, currentHeading());
+    const position = placement.position ? new THREE.Vector3(placement.position.x, placement.position.y, placement.position.z) : pose.position.clone();
+    const surface = surfaceHeight(position.x, position.z);
+    const mode = placement.mode === 'water' && !(waterHeightNow(position.x, position.z) > world.groundHeight(position.x, position.z)) ? 'air' : placement.mode;
+    if (mode === 'ground') {
+      if (placement.position) placeOnGround(position.x, position.z, { heading });
+      else placeOnGround(position.x, position.z);
+    } else if (mode === 'water' || mode === 'perch') {
+      resetActiveModel(restingPose(position, heading, mode, placement));
+      player.heading = heading;
+    } else {
+      // Airborne: never inside the ground; without a position, lifted clear as the Phase 1 rules do.
+      if (!placement.position && position.y - surface < MIN_SPAWN_AGL) position.y = surface + SPAWN_LIFT_AGL;
+      if (position.y < surface + 1) position.y = surface + 1;
+      liftClearOfStructures(position);
+      resetActiveModel(flyingPose(position, heading, mode, placement));
+      player.heading = heading;
+    }
+    mergePlacementState(placement);
+    const throttle = Number.isFinite(placement.throttle) ? placement.throttle : mode === 'climb' ? 1 : null;
+    if (throttle !== null && craft.inputProfile?.throttle !== 'none') ctx.systems.input?.presetThrottle?.(throttle);
+    counters.placements++;
+    return mode;
+  }
+
+  /** A placement's craftState fields join the craft state the abilities started. */
+  function mergePlacementState(placement) {
+    if (placement.craftState && typeof placement.craftState === 'object') Object.assign(craftState, placement.craftState);
+  }
+
+  /** Airborne poses: 'air' and 'climb' fly at an airspeed, 'hover' holds still, 'drift' moves with the air. */
+  function flyingPose(position, heading, mode, placement) {
+    const quaternion = levelQuaternion(heading);
+    const pitch = Number.isFinite(placement.pitch) ? placement.pitch : mode === 'climb' ? CLIMB_PITCH : 0;
+    if (pitch !== 0) quaternion.multiply(scratchQuaternion.setFromAxisAngle(scratchRight.set(1, 0, 0), pitch * DEG));
+    situateApi.windAt(position, situationWind);
+    const still = mode === 'hover' || mode === 'drift';
+    const speed = Number.isFinite(placement.speed) ? Math.max(0, placement.speed) : still ? 0 : simCruise();
+    const velocity = new THREE.Vector3(0, 0, -speed).applyQuaternion(quaternion);
+    // An airspeed rides on the air's own motion; a hover holds its ground position.
+    if (mode !== 'hover' && isFiniteVector(situationWind.vel)) velocity.add(situationWind.vel);
+    return {
+      position: position.clone(),
+      quaternion,
+      velocity,
+      angularVelocity: new THREE.Vector3(),
+      throttle: Number.isFinite(placement.throttle) ? placement.throttle : mode === 'climb' ? 1 : cruiseThrottle(),
+      onGround: false,
+      engineOn: true,
+    };
+  }
+
+  /** Resting poses: afloat on the water ('water': the contacts on its surface) or standing on a perch. */
+  function restingPose(position, heading, mode, placement) {
+    const contacts = craft.simProfile && Array.isArray(craft.simProfile.contacts) ? craft.simProfile.contacts : [];
+    let quaternion = levelQuaternion(heading);
+    let rest = position.clone();
+    if (mode === 'water' && contacts.length > 0) {
+      const pose = groundPose({ groundHeight: (x, z) => waterHeightNow(x, z) }, contacts, position.x, position.z, heading, craft.simProfile.centerOfMass?.[2] ?? 0);
+      rest = pose.position;
+      quaternion = pose.quaternion;
+    }
+    const speed = Number.isFinite(placement.speed) ? Math.max(0, placement.speed) : 0;
+    return {
+      position: rest,
+      quaternion,
+      velocity: vectorFromHeading(heading).multiplyScalar(speed),
+      angularVelocity: new THREE.Vector3(),
+      throttle: Number.isFinite(placement.throttle) ? placement.throttle : 0,
+      onGround: true,
+      engineOn: true,
+    };
   }
 
   function onCraftSetting(value) {
@@ -709,6 +980,14 @@ export function createFlightController(ctx) {
     return crash.phase === 'fadeIn' ? progress * 0.5 : 0.5 + progress * 0.5;
   }
 
+  /**
+   * True when the craft may touch water without a soft crash: floats (limits.floats, or
+   * limits.waterLanding 'floats') or a basket that lands on water (limits.waterLanding 'basket').
+   */
+  function canTouchWater(limits) {
+    return limits.floats === true || limits.waterLanding === 'floats' || limits.waterLanding === 'basket';
+  }
+
   /** Reads the model's contact result after a tick; returns a crash reason or null. */
   function contactOutcome(model) {
     const contact = model.contact || {};
@@ -723,11 +1002,12 @@ export function createFlightController(ctx) {
       return { reason: 'hard landing', impactSpeed: contact.touchdown.sinkRate };
     }
     // Any water the craft cannot float on: the ocean or a local body (contact.water covers both).
-    if (contact.water && !limits.floats) return { reason: 'water', impactSpeed: model.state.velocity.length() };
+    const floats = canTouchWater(limits);
+    if (contact.water && !floats) return { reason: 'water', impactSpeed: model.state.velocity.length() };
     if (Number.isFinite(contact.penetration) && contact.penetration > PENETRATION_LIMIT) return { reason: 'terrain', impactSpeed: model.state.velocity.length() };
     // Last-resort guards on the shared height function and the sea, whatever the model reported.
     if (position.y < world.groundHeight(position.x, position.z) - PENETRATION_LIMIT) return { reason: 'terrain', impactSpeed: model.state.velocity.length() };
-    if (!limits.floats) {
+    if (!floats) {
       if (waterQuery !== null) waterQuery.sample(position.x, position.z, env.time, outcomeWater);
       const waterSurface = waterQuery !== null ? outcomeWater.height : CONFIG.WATER_LEVEL;
       // Ice is solid ground at its level: sinking through it is a terrain strike, not a ditching.
@@ -1050,7 +1330,7 @@ export function createFlightController(ctx) {
   }
 
   const ZERO_WIND = new THREE.Vector3();
-  const towVisual = { aileron: 0, elevator: 0, rudder: 0, flaps: 0, throttle: 0, propSpeed: NaN, engineOn: true, onGround: false, gearDown: true, airbrake: 0, time: state.time };
+  const towVisual = { aileron: 0, elevator: 0, rudder: 0, flaps: 0, throttle: 0, propSpeed: NaN, engineOn: true, onGround: false, gearDown: true, airbrake: 0, time: state.time, craftState };
 
   /** Towing: the tow drives the craft's pose; at release the model takes over at the tow's velocity. */
   function updateTow(dt) {
@@ -1058,6 +1338,7 @@ export function createFlightController(ctx) {
     writePlayerPose(status.position, status.quaternion, status.velocity, ZERO_WIND);
     towVisual.throttle = player.throttle;
     towVisual.time = state.time;
+    towVisual.craftState = craftState;
     if (dt > 0) mesh.update(towVisual, Math.min(dt, 0.05));
     if (!status.released) return;
     const releasePose = {
@@ -1284,60 +1565,185 @@ export function createFlightController(ctx) {
   function performAction(id) {
     switch (id) {
       case 'craftNext':
-      case 'craftPrev': {
-        const next = registry.step(craftId, id === 'craftNext' ? 1 : -1);
-        if (next && next !== craftId) settings.set('craft', next);
+      case 'craftPrev':
+        cycleFavorites(id === 'craftNext' ? 1 : -1);
         return;
-      }
       case 'relaunch':
         relaunch();
         return;
       case 'craftAbility':
-        runAbility();
+      case 'craftAbilityAlt':
+        runAbility(id);
         return;
       default: {
         const selectIndex = CRAFT_SELECT_ACTIONS.indexOf(id);
-        if (selectIndex >= 0) {
-          const entry = registry.catalog[selectIndex];
-          if (entry) selectCraft(entry.id);
-        }
+        if (selectIndex >= 0) selectFavorite(selectIndex);
       }
     }
   }
 
   // ============================================================================================
-  // CRAFT ABILITY
+  // FAVORITES (settings.craftFavorites: ten slots on the number keys, contract h.7)
   // ============================================================================================
+  /** The ten favorite slots (craft ids or null); the defaults when the setting is unusable. */
+  function favoriteSlots() {
+    const stored = settings.get('craftFavorites');
+    return Array.isArray(stored) && stored.length === FAVORITE_SLOTS ? stored : DEFAULT_CRAFT_FAVORITES;
+  }
+
+  /** True when a craft can be flown now: its module and its flight model kind are registered. */
+  function flyable(id) {
+    return typeof id === 'string' && registry.has(id) && modelAvailable(registry.get(id));
+  }
+
+  /** craftSelect1-10: the craft in that slot, or a notice for an empty slot. */
+  function selectFavorite(index) {
+    const id = favoriteSlots()[index];
+    if (!id) {
+      notify(`Favorite ${index + 1} is empty. Assign a craft to it in the craft picker.`, 'info');
+      return;
+    }
+    selectCraft(id);
+  }
+
+  /**
+   * craftNext / craftPrev: the next (1) or previous (-1) favorite that can fly, skipping empty slots
+   * and craft whose module is not installed. From a craft that is not a favorite, the first (or last)
+   * one. With no flyable favorite at all, the catalog order.
+   */
+  function cycleFavorites(direction) {
+    const slots = favoriteSlots();
+    if (!slots.some(flyable)) {
+      const next = registry.step(craftId, direction);
+      if (next && next !== craftId) settings.set('craft', next);
+      return;
+    }
+    const current = slots.indexOf(craftId);
+    const start = current >= 0 ? current : direction > 0 ? -1 : FAVORITE_SLOTS;
+    for (let step = 1; step <= FAVORITE_SLOTS; step++) {
+      const candidate = slots[(((start + direction * step) % FAVORITE_SLOTS) + FAVORITE_SLOTS) % FAVORITE_SLOTS];
+      if (candidate === craftId) return;
+      if (flyable(candidate)) {
+        settings.set('craft', candidate);
+        return;
+      }
+    }
+  }
+
+  // ============================================================================================
+  // CRAFT ABILITIES AND COPILOT COMMANDS (contract h.5, h.6)
+  // ============================================================================================
+  /**
+   * What abilities and copilot commands work through. Reads are live; craft-specific state goes in
+   * craftState (setCraftState), trails come from the mesh's named anchors.
+   */
   const abilityApi = {
     get craftState() { return craftState; },
     get craft() { return craftId; },
+    get module() { return craft; },
+    get skin() { return activeSkin; },
     get telemetry() { return telemetry; },
     get player() { return player; },
+    get state() { return state; },
+    /** This tick's shaped ControlState (read only). */
+    get controls() { return tickControls; },
+    get systems() { return ctx.systems; },
+    world,
+    colliders: ctx.colliders ?? null,
+    waterQuery,
+    /** The WindField (ctx.wind): probe(pos), sample(pos), nearestThermal(pos), ambientAt(pos). */
+    wind: ctx.wind ?? null,
     notify,
+    /** True while an action is held (hold-type abilities: the balloon's burner, the dragon's fire). */
+    isHeld(actionId) {
+      return liveControls.held.has(actionId);
+    },
+    /** Writes one craft-specific state field (state.flight.craftState; contract h.3). */
+    setCraftState(field, value) {
+      craftState[field] = value;
+    },
     /** The craft's relaunch (aerotow, peak launch, airstart), for abilities that bring the craft back up. */
     relaunch() {
       return relaunch();
     },
-    /** Emits a particle trail ('smoke' | 'spray') from one of the mesh's named anchors; it drifts with the wind. */
-    emitTrail(kind, anchorName, dt) {
+    /** Runs an ability slot ('craftAbility' or 'craftAbilityAlt'), as its key would. */
+    runAbility(slot = 'craftAbility') {
+      return runAbility(slot);
+    },
+    /** The autopilot (flight.setAutopilot), for commands that fly somewhere. */
+    setAutopilot(options) {
+      return setAutopilot(options);
+    },
+    /**
+     * Emits a particle trail ('smoke' | 'spray' | 'smokeColor') from one of the mesh's named anchors;
+     * it drifts with the wind. 'smokeColor' is tinted by color ([r, g, b] 0..1), else by
+     * craftState.smokeColor (an index into SMOKE_COLORS, src/flight/trails.js).
+     */
+    emitTrail(kind, anchorName, dt, color = null) {
       const anchor = mesh && mesh.anchors ? mesh.anchors[anchorName] : null;
       if (!anchor) return false;
       scratchVector.copy(anchor).applyQuaternion(mesh.root.quaternion).add(mesh.root.position);
-      trails.emit(kind, scratchVector, telemetry.velocity, dt, telemetry.wind);
+      const tint = kind === 'smokeColor' ? color ?? smokeColorTint(craftState.smokeColor) : null;
+      trails.emit(kind, scratchVector, telemetry.velocity, dt, telemetry.wind, tint);
       return true;
     },
   };
 
-  /** craftAbility: the craft's own ability (ballast, smoke, burner, hover hold, chute, flip). */
-  function runAbility() {
-    const ability = craft.abilities?.craftAbility;
+  /**
+   * craftAbility (Space) or craftAbilityAlt (Shift+Space): the craft's own ability (ballast, smoke,
+   * burner, hover hold, chute, flip...). False when the craft has none in that slot.
+   */
+  function runAbility(slot = 'craftAbility') {
+    const ability = craft.abilities ? craft.abilities[slot] : null;
     if (ability && typeof ability.run === 'function') return ability.run(abilityApi) !== false;
     return false;
   }
 
   function updateAbility(dt) {
-    const ability = craft.abilities?.craftAbility;
-    if (ability && typeof ability.update === 'function' && dt > 0) ability.update(abilityApi, dt);
+    if (!(dt > 0) || !craft.abilities) return;
+    for (const slot in ABILITY_ACTIONS) {
+      const ability = craft.abilities[slot];
+      if (ability && typeof ability.update === 'function') ability.update(abilityApi, dt);
+    }
+  }
+
+  /**
+   * Runs one of the active craft's copilot commands (module.copilot.commands, contract h.6): its
+   * run(api, value) with the ability api. Returns { ok, text }: the spoken reply, or why it did not
+   * run (no such command on this craft, or the command failed).
+   */
+  function runCraftCommand(command, value) {
+    const commands = craft.copilot && Array.isArray(craft.copilot.commands) ? craft.copilot.commands : [];
+    const entry = commands.find((candidate) => candidate.id === command);
+    if (!entry) return { ok: false, text: `The ${craftLabel(craftId)} has no ${command} command.` };
+    let reply;
+    try {
+      reply = entry.run(abilityApi, value);
+    } catch (error) {
+      console.error(`[DRIFTWING] craft "${craftId}" copilot command "${command}" failed`, error);
+      return { ok: false, text: 'That did not work. Try again?' };
+    }
+    counters.craftCommands++;
+    return { ok: true, text: typeof reply === 'string' ? reply : '' };
+  }
+
+  /** The active craft's copilot commands for the copilot: [{ id, phrases }] (contract h.6). */
+  function getCraftCommands() {
+    const commands = craft && craft.copilot && Array.isArray(craft.copilot.commands) ? craft.copilot.commands : [];
+    return commands.map((command) => ({ id: command.id, phrases: command.phrases.slice() }));
+  }
+
+  /** The active craft's own spoken status (module.copilot.status), or '' without one. */
+  function getCraftStatus() {
+    const status = craft && craft.copilot ? craft.copilot.status : null;
+    if (typeof status !== 'function') return '';
+    try {
+      const text = status(craftState, telemetry);
+      return typeof text === 'string' ? text : '';
+    } catch (error) {
+      console.error(`[DRIFTWING] craft "${craftId}" copilot status failed`, error);
+      return '';
+    }
   }
 
   // ============================================================================================
@@ -1479,7 +1885,8 @@ export function createFlightController(ctx) {
     }
   }
 
-  const simVisual = { aileron: 0, elevator: 0, rudder: 0, flaps: 0, throttle: 0, propSpeed: NaN, engineOn: true, onGround: false, gearDown: true, airbrake: 0, groundSpeed: 0, time: state.time };
+  // craftState (read only): craft-specific parts animate from it (nacelles, burner flame, envelope, legs on perch).
+  const simVisual = { aileron: 0, elevator: 0, rudder: 0, flaps: 0, throttle: 0, propSpeed: NaN, engineOn: true, onGround: false, gearDown: true, airbrake: 0, groundSpeed: 0, time: state.time, craftState };
 
   /** Control-surface deflections for the mesh: the model's own when it reports them, else the stick. */
   function writeSimVisual() {
@@ -1496,6 +1903,7 @@ export function createFlightController(ctx) {
     simVisual.airbrake = Number.isFinite(telemetry.airbrake) ? telemetry.airbrake : 0;
     simVisual.groundSpeed = surfaces && Number.isFinite(surfaces.groundSpeed) ? surfaces.groundSpeed : 0;
     simVisual.time = state.time;
+    simVisual.craftState = craftState;
   }
 
   /** state.player (v1 fields) from the interpolated model pose. */
@@ -1648,6 +2056,7 @@ export function createFlightController(ctx) {
     telemetry.crash.reason = crash.reason;
     telemetry.crash.progress = crashProgress();
     telemetry.parkingBrake = parkingBrake.engaged;
+    telemetry.ceiling = activeCeiling();
     telemetry.craftState = craftState;
   }
 
@@ -1716,6 +2125,7 @@ export function createFlightController(ctx) {
 
   bus.on('settings:changed', ({ key, value }) => {
     if (key === 'craft') onCraftSetting(value);
+    else if (key === 'craftSkins') applySkin();
   });
 
   // Behind the loading fade, compile the pipelines of things that first appear later.
@@ -1780,7 +2190,33 @@ export function createFlightController(ctx) {
     },
     relaunch,
     triggerSoftCrash,
+    /** Runs an ability slot of the active craft: 'craftAbility' (default) or 'craftAbilityAlt'. */
     runAbility,
+    /** Runs one of the active craft's copilot commands: { ok, text } (contract h.6). */
+    runCraftCommand,
+    /** The active craft's copilot commands, [{ id, phrases }], and its own spoken status. */
+    getCraftCommands,
+    getCraftStatus,
+    /** The active craft's skin id, or null for a craft without skins. */
+    getSkin() {
+      return activeSkin;
+    },
+    /**
+     * Places the active craft as a situate placement says ({ mode, position?, heading?, speed?,
+     * pitch?, throttle?, craftState? }, contract h.4): tests, tools and commands that start a craft
+     * in a given state. Returns the mode applied ('water' over dry ground flies: 'air'). Throws on a
+     * placement that cannot be used.
+     */
+    startAt(placement) {
+      const problem = placement && typeof placement === 'object' ? placementProblem(placement) : 'a non-object';
+      if (problem || !placement.mode) throw new Error(`flight.startAt: ${problem || 'a placement needs a mode'}`);
+      if (tow) releaseTow('reset');
+      if (crash.active) finishCrash();
+      const mode = applyPlacement(placement, capturePose());
+      syncVisual();
+      snapCamera();
+      return mode;
+    },
 
     getStats() {
       return {
