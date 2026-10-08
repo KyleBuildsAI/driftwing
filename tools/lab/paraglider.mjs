@@ -12,7 +12,8 @@
 //   brakes       half brakes: slower with a sink no worse than trim; both brakes deep: about 25 km/h
 //   stall        0 % assists, both brakes fully down: the wing stalls; released, it surges and flies
 //                again; at 100 % the stall protection keeps it flying
-//   turn         one brake fully down: a fast turn the right way; a full weight shift alone: a gentle one
+//   turn         one brake half down: a brisk turn the right way; fully down at 0 % it spins, at 100 % the
+//                spin protection holds it to a hard turn; a full weight shift alone: a gentle one
 //   ears         big ears: the sink at least doubles while the airspeed stays near trim
 //   pendulum     a brake pulse then release: the canopy swings ahead of the pilot (the two-body
 //                pendulum) and the swing damps out
@@ -272,29 +273,30 @@ function stallTest() {
   record('0 %: released, it surges and flies again', recovered ? 'flying' : 'stalled', 'flying', { compare: recovered && rig.data.airspeed > 8 });
 }
 
+/** A steady turn with one set of inputs from trim: settle, then the heading rate (deg/s) and the bank. */
+function steadyTurn(assists, inputs, settle = 4, seconds = 6) {
+  const rig = createRig({ assists });
+  rig.airborne({});
+  rig.run(10);
+  Object.assign(rig.pilot, inputs);
+  rig.run(settle);
+  let bank = 0;
+  const rate = measureTurn(rig, seconds, (current) => { bank = Math.max(bank, Math.abs(current.data.bank / DEG)); });
+  return { rate, bank };
+}
+
 function turnTest() {
-  const brakeRig = createRig({ assists: 0 });
-  brakeRig.airborne({});
-  brakeRig.run(10);
-  brakeRig.pilot.brakeR = 1;
-  brakeRig.run(4);
-  const brakeRate = measureTurn(brakeRig, 6);
-  const shiftRig = createRig({ assists: 0 });
-  shiftRig.airborne({});
-  shiftRig.run(10);
-  shiftRig.pilot.roll = -1;
-  shiftRig.run(4);
-  const shiftRate = measureTurn(shiftRig, 6);
-  const coordinatedRig = createRig({ assists: 1 });
-  coordinatedRig.airborne({});
-  coordinatedRig.run(10);
-  coordinatedRig.pilot.roll = 1;
-  coordinatedRig.run(4);
-  const coordinatedRate = measureTurn(coordinatedRig, 6);
-  log('turn', JSON.stringify({ brakeRate, shiftRate, coordinatedRate, bank: brakeRig.data.bank / DEG }));
-  record('right brake fully down: turn rate (right)', brakeRate, targets.fullBrakeTurn, { unit: 'deg/s', tolerance: 0.35 });
-  record('full weight shift left alone: turn rate (left)', -shiftRate, targets.weightShiftTurn, { unit: 'deg/s', tolerance: 0.45 });
-  record('100 %: weight shift with turn coordination turns faster', coordinatedRate, Math.abs(shiftRate) * 1.3, { unit: 'deg/s', compare: 'min' });
+  const half = steadyTurn(0, { brakeR: 0.5 });
+  const spin = steadyTurn(0, { brakeR: 1 });
+  const protectedTurn = steadyTurn(1, { brakeR: 1 });
+  const shift = steadyTurn(0, { roll: -1 });
+  const coordinated = steadyTurn(1, { roll: 1 });
+  log('turn', JSON.stringify({ half, spin, protectedTurn, shift, coordinated }));
+  record('right brake half down: turn rate (right)', half.rate, targets.halfBrakeTurn, { unit: 'deg/s', tolerance: 0.4 });
+  record('0 %: right brake held fully down spins the wing', spin.rate, 60, { unit: 'deg/s', compare: 'min' });
+  record('100 %: the same brake turns hard but never spins', Math.abs(protectedTurn.rate), 60, { unit: 'deg/s', compare: 'max', note: `peak bank ${protectedTurn.bank.toFixed(0)} deg` });
+  record('full weight shift left alone: turn rate (left)', -shift.rate, targets.weightShiftTurn, { unit: 'deg/s', tolerance: 0.45 });
+  record('100 %: weight shift with turn coordination turns faster', coordinated.rate, Math.abs(shift.rate) * 1.3, { unit: 'deg/s', compare: 'min' });
 }
 
 function earsTest(trim) {
@@ -358,6 +360,16 @@ function thermalTest() {
   const climb = (rig.state().position.y - start) / 60;
   log('thermal', JSON.stringify({ climb, distance: Math.hypot(rig.state().position.x, rig.state().position.z), bank: rig.data.bank / DEG }));
   record('4 m/s thermal: circling climb rate', climb, 1.5, { unit: 'm/s', compare: 'min', decimals: 2 });
+  const tracked = rig.craftState.climb.active && rig.craftState.climb.gain > 50;
+  // Out of the thermal on a straight glide: the climb ends and the journal hears its numbers.
+  rig.pilot.roll = 0;
+  rig.pilot.brakeL = 0;
+  rig.pilot.brakeR = 0;
+  rig.run(40);
+  const gain = rig.events.stats.find((stat) => stat.key === 'paragliderBestGain');
+  const best = rig.events.stats.find((stat) => stat.key === 'paragliderBestClimb');
+  record('the climb is tracked while circling (craftState.climb)', tracked ? 'tracking' : 'not tracking', 'tracking', { compare: tracked });
+  record('leaving it: the journal hears the height gain and best climb', gain && best ? `${gain.value} m, ${best.value} m/s` : 'nothing', 'both', { compare: Boolean(gain && best && gain.value > 50 && best.value > 1) });
 }
 
 function collapseRun(assists, seconds = 60) {

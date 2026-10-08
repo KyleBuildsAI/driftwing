@@ -8,21 +8,25 @@ const LEAN_PER_METRE = 0.35 / 2.5;
 const LEAN_LIMIT = 260;
 /** The circle the scripted pilot flies around the core (m) and how far it searches for a thermal. */
 const CIRCLE_RADIUS = 22;
-const SEARCH_RADIUS = 1500;
+const SEARCH_RADIUS = 900;
 const RESEARCH_SECONDS = 5;
+const WORKING = 2.5;
 
 function wrapSigned(degrees) {
   return ((((degrees + 180) % 360) + 360) % 360) - 180;
 }
 
-/** The strongest working thermal near the pilot (the one it starts in, unless a much stronger one is close). */
+/**
+ * The thermal to climb in: the nearest one working well (a core of WORKING m/s or more, the life cycle
+ * of a thermal waxes and wanes over its 15-25 minutes), else the strongest near the pilot.
+ */
 function findThermal(api) {
   const position = api.player.position;
   let best = null;
   api.wind.thermalsNear(position.x, position.z, SEARCH_RADIUS, (thermal) => {
     if (thermal.strength < 1) return;
     const distance = Math.hypot(thermal.x - position.x, thermal.z - position.z);
-    const score = thermal.strength - distance / 600;
+    const score = (thermal.strength >= WORKING ? 10 : 0) + thermal.strength - distance / 300;
     if (!best || score > best.score) best = { ...thermal, score };
   });
   return best;
@@ -56,17 +60,17 @@ function thermalPilot(t, api) {
   const offsetZ = position.z - core.z;
   const distance = Math.hypot(offsetX, offsetZ);
   const heading = api.flight.heading;
-  let desired;
-  if (distance > 120) desired = headingFromVector(-offsetX, -offsetZ);
-  else desired = headingFromVector(offsetX, offsetZ) + 90 + clamp(2.5 * (distance - CIRCLE_RADIUS), -70, 70);
+  const circling = distance <= 120;
+  const desired = circling ? headingFromVector(offsetX, offsetZ) + 90 + clamp(1.2 * (distance - CIRCLE_RADIUS), -70, 70) : headingFromVector(-offsetX, -offsetZ);
   const error = wrapSigned(desired - heading);
+  // Gentle gains: the canopy's yaw lags the brakes, and a hard-driven turn oscillates and sinks.
   return {
-    roll: clamp(0.5 * (distance > 120 ? 0 : 1) + error / 40, -1, 1),
+    roll: clamp((circling ? 0.7 : 0) + error / 120, -1, 1),
     pitch: 0,
     yaw: 0,
     throttle: 0,
-    brakeL: clamp(-error / 90, 0, 0.5),
-    brakeR: clamp((distance > 120 ? 0 : 0.3) + error / 90, 0, 0.8),
+    brakeL: clamp(-error / 200, 0, 0.5),
+    brakeR: clamp((circling ? 0.25 : 0) + error / 200, 0, 0.8),
   };
 }
 
@@ -79,14 +83,14 @@ export default Object.freeze({
       // Midday: the thermals are at full strength (the WindField's sun factor). The start is low in the
       // column, where it is strong (a thermal tops out 600-1300 m above its ground).
       time: 0.5,
-      start: { at: 'thermal', mode: 'air', agl: 150 },
-      seconds: 120,
+      start: { at: 'thermal', mode: 'air', agl: 250 },
+      seconds: 150,
       script: thermalPilot,
       checks: [
         {
           id: 'circling',
           label: 'circling the core (heading turns through 360 degrees)',
-          until: 120,
+          until: 150,
           test(api) {
             const memo = api.memo;
             const heading = api.flight.heading;
@@ -99,21 +103,21 @@ export default Object.freeze({
           id: 'variometer',
           label: 'the variometer reads lift (above +0.5 m/s, its climb beeps) while circling',
           from: 20,
-          until: 120,
+          until: 150,
           test: (api) => api.flight.vario > 0.5 && api.module.audioProfile.vario === true,
         },
         {
           id: 'climb',
-          label: 'climbs 60 m above the lowest point of the climb',
+          label: 'climbs 50 m above the lowest point of the climb',
           from: 20,
-          until: 120,
+          until: 150,
           test(api) {
             const memo = api.memo;
             memo.lowest = Math.min(memo.lowest ?? Infinity, api.flight.altitude);
-            return api.flight.altitude - memo.lowest > 60;
+            return api.flight.altitude - memo.lowest > 50;
           },
         },
-        { id: 'flying', label: 'flying the whole time (no landing)', until: 120, always: true, test: (api) => api.craftState.phase === 'flight' },
+        { id: 'flying', label: 'flying the whole time (no landing)', until: 150, always: true, test: (api) => api.craftState.phase === 'flight' },
       ],
     }),
     Object.freeze({
