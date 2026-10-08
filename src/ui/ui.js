@@ -2143,6 +2143,7 @@ export function createUISystem(ctx) {
     return null;
   }
   function handleEscape() {
+    if (craftPicker.closePanel()) return;
     if (commandOpen) closeCommandBar();
     else if (activePanel === 'controls' && controlsPanel.handleEscape()) return;
     else if (activePanel) showPanel(null);
