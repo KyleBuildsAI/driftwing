@@ -1,11 +1,14 @@
-// Spawn preset validator (contract section 1). Pure: no imports, so the labs, the terrain worker
-// and the main thread can all use it.
+// Spawn preset validator (contract section 1). Pure: it imports only the pure water-body and
+// overlay validators (src/world/waters.js, overlays.js), so the labs, the terrain worker and the main
+// thread can all use it.
 //
 // validatePreset(preset, options) throws an Error naming the preset and the field at fault, for
 // example: [DRIFTWING] preset "tornado": field "lod.mid" must be greater than lod.near (1500), got 900.
 // validatePresets(list, options) validates each preset and also checks the ids are unique.
 // options.engineNames (optional): the registered engine names; an engine entry naming any other
 // engine is refused. Main runs it at startup in dev builds; the labs run it too.
+import { validateWaterSpec } from '../world/waters.js';
+import { validateOverlaySpec } from '../world/overlays.js';
 
 export const PRESET_CATEGORIES = Object.freeze(['weather', 'geo', 'ocean', 'wildlife', 'structure', 'celestial', 'fantasy', 'flightplay', 'setpiece']);
 export const PRESET_KINDS = Object.freeze(['site', 'event']);
@@ -17,8 +20,8 @@ export const PLACEMENT_ALIGNMENTS = Object.freeze(['random', 'downhill', 'ridge'
 /** Time-of-day classes a preset may be limited to (filters.timeOfDay; director.js matchesTimeOfDay). */
 export const TIME_OF_DAY_CLASSES = Object.freeze(['dawn', 'day', 'golden', 'dusk', 'night', 'midday']);
 export const WEATHER_STATE_NAMES = Object.freeze(['clear', 'building', 'storm', 'clearing']);
-export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase']);
-export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed']);
+export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces']);
+export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed', 'salt', 'sand', 'travertine', 'mud', 'ice']);
 /** Phase 1 landmark types (src/world/worldgen.js) a filters.near block may name. */
 export const LANDMARK_TYPES = Object.freeze(['arch', 'monoliths', 'lighthouse', 'balloons']);
 /** FAR lure silhouettes drawn by src/spawns/lure.js. */
@@ -33,6 +36,7 @@ export const PRESET_FIELDS = Object.freeze([
   'id', 'name', 'category', 'kind', 'rarity', 'heavy', 'placement', 'candidates', 'filters', 'stamps', 'engines',
   'lod', 'lure', 'wind', 'audio', 'journal', 'discovery', 'callouts', 'lifetime', 'achievements',
   'activeState', 'cooldown', 'anchor',
+  'overlays', 'waters', 'challenge', 'tags', 'combo', 'override',
 ]);
 
 const ID_PATTERN = /^[a-z][A-Za-z0-9]*$/;
@@ -182,6 +186,28 @@ function validateStamps(check, stamps, kind) {
     check.oneOf(stamp.type, STAMP_TYPES, `${path}.type`);
     if (stamp.paint !== undefined && stamp.paint !== null) check.oneOf(stamp.paint, STAMP_PAINTS, `${path}.paint`);
   });
+}
+
+/**
+ * waters and overlays (sites only, optional; Phase 3): local water bodies clipped to a stamp's basin
+ * and region overlays. Their own modules check every field (src/world/waters.js, overlays.js); a
+ * failure is reported under the preset and the field like every other.
+ */
+function validateWatersAndOverlays(check, preset) {
+  for (const [field, validate] of [['waters', validateWaterSpec], ['overlays', validateOverlaySpec]]) {
+    const list = preset[field];
+    if (list === undefined) continue;
+    check.array(list, field);
+    if (preset.kind !== 'site' && list.length > 0) check.fail(field, 'is for sites only (they belong to a placed site)');
+    const stamps = Array.isArray(preset.stamps) ? preset.stamps : [];
+    list.forEach((spec, index) => {
+      try {
+        validate(spec, stamps, `${field}[${index}]`);
+      } catch (error) {
+        check.fail(`${field}[${index}]`, error.message);
+      }
+    });
+  }
 }
 
 function validateEngines(check, engines, engineNames) {
@@ -349,6 +375,7 @@ export function validatePreset(preset, { engineNames = null } = {}) {
   }
   validateFilters(check, preset.filters);
   validateStamps(check, preset.stamps, preset.kind);
+  validateWatersAndOverlays(check, preset);
   validateEngines(check, preset.engines, engineNames);
   validateLod(check, preset.lod);
   validateLure(check, preset.lure, preset.heavy);

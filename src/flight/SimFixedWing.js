@@ -51,6 +51,7 @@ import {
 import { createGroundContact } from './groundContact.js';
 import { createLandingMonitor } from './landing.js';
 import { stallWarningActive } from './assists.js';
+import { surfaceHeightAt } from './waterSurface.js';
 
 const DEFAULT_SERVO_RATE = 5;
 const TAIL_CL_MAX = 1.1;
@@ -742,7 +743,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     tick.aoa = Math.atan2(-bodyAir.y, -bodyAir.z);
     tick.sideslip = tick.airspeed > 0.5 ? Math.asin(clamp(bodyAir.x / tick.airspeed, -1, 1)) : 0;
 
-    const surfaceHeight = Math.max(env.groundHeight(centerPosition.x, centerPosition.z), env.waterLevel);
+    const surfaceHeight = surfaceHeightAt(env, centerPosition.x, centerPosition.z);
     const wingAgl = centerPosition.y + airframe.wingHeight - surfaceHeight;
     const groundEffect = groundEffectFactor(wingAgl, wingSpan);
 

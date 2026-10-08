@@ -26,8 +26,15 @@
 // terrain worker each build their own placement and agree without any messaging. Results are cached
 // per cell; the caches only save work, and clearing them never changes an answer.
 //
-// Pure: imports only stamps.js, no DOM, so the terrain worker runs exactly this code.
+// Each site also resolves its local water bodies (waters.js) and region overlays (overlays.js) right
+// after its stamps, from the same per-site seed stream. Neither changes placement: the filters and
+// rules above read only the stamps, so a world's sites are the same with or without them.
+//
+// Pure: imports only stamps.js, waters.js and overlays.js, no DOM, so the terrain worker runs exactly
+// this code.
 import { compareStampOrder, resolveStamp, stampFootprintDiscs, stampFootprintDistance, stampReach, validateStampSpec } from './stamps.js';
+import { resolveWaters, validateWaterSpec, waterHashLine } from './waters.js';
+import { overlayHashLine, overlayReach, resolveOverlays, validateOverlaySpec } from './overlays.js';
 
 /** Site grid cell size (m); the stamp spatial hash uses the same cells. */
 export const SITE_CELL = 2000;
@@ -111,14 +118,28 @@ export function validateSitePreset(preset) {
   const stamps = preset.stamps ?? EMPTY;
   if (!Array.isArray(stamps)) throw new Error(`${where}.stamps: must be an array`);
   stamps.forEach((spec, index) => validateStampSpec(spec, `${where} stamps[${index}]`));
+  const waters = preset.waters ?? EMPTY;
+  if (!Array.isArray(waters)) throw new Error(`${where}.waters: must be an array`);
+  waters.forEach((spec, index) => validateWaterSpec(spec, stamps, `${where} waters[${index}]`));
+  const overlays = preset.overlays ?? EMPTY;
+  if (!Array.isArray(overlays)) throw new Error(`${where}.overlays: must be an array`);
+  overlays.forEach((spec, index) => validateOverlaySpec(spec, stamps, `${where} overlays[${index}]`));
 }
 
 /**
  * Site-list hash (the determinism test's key): the sites sorted by id, each as its id and its
- * coordinates rounded to 1 cm, folded into two 32-bit FNV-1a lanes. Returns 16 hex digits.
+ * coordinates rounded to 1 cm, followed by its water bodies (id, level and bounds to 1 cm) and its
+ * overlays (id, priority and bounds to 1 cm), folded into two 32-bit FNV-1a lanes. Returns 16 hex
+ * digits. A site without waters or overlays hashes exactly as in Phase 2, so the hash of a world
+ * without them is unchanged.
  */
 export function hashSiteList(sites) {
-  const lines = sites.map((site) => `${site.id}@${Math.round(site.x * 100)},${Math.round(site.z * 100)}`);
+  const lines = sites.map((site) => {
+    let line = `${site.id}@${Math.round(site.x * 100)},${Math.round(site.z * 100)}`;
+    for (const water of site.waters ?? EMPTY) line += `|${waterHashLine(water)}`;
+    for (const overlay of site.overlays ?? EMPTY) line += `|${overlayHashLine(overlay)}`;
+    return line;
+  });
   lines.sort((first, second) => (first < second ? -1 : first > second ? 1 : 0));
   let low = 2166136261 >>> 0;
   let high = 0x811c9dc5 ^ 0x5bd1e995;
@@ -138,10 +159,11 @@ export function hashSiteList(sites) {
  * Creates the placement for one world.
  *   seed:    the world's uint32 seed hash (worldgen's seedHash)
  *   world:   the UNSTAMPED base functions: { heightAt(x, z), biomeIndexAt(x, z), waterLevel,
- *            landmarkSitesNear(x, z, radius) }
+ *            landmarkSitesNear(x, z, radius), prevailingWindAngle (radians, the downwind direction
+ *            overlays' tint sweeps may follow) }
  *   presets: the preset list; only site presets (kind 'site' with a placement block) are placed
- * Returns { sitePresets, maxReach, hasStamps, sitesInCell, sitesNear, stampsInCell, stampsOverlap,
- * clearCaches }.
+ * Returns { sitePresets, maxReach, hasStamps, hasWaters, hasOverlays, sitesInCell, sitesNear,
+ * stampsInCell, stampsOverlap, watersInCell, overlaysInCell, clearCaches }.
  */
 export function createPlacement({ seed, world, presets }) {
   const seedHash = seed >>> 0;
@@ -152,11 +174,14 @@ export function createPlacement({ seed, world, presets }) {
     validateSitePreset(preset);
     const stamps = preset.stamps ?? EMPTY;
     const reach = stamps.reduce((largest, spec) => Math.max(largest, stampReach(spec)), 0);
+    const overlays = preset.overlays ?? EMPTY;
+    const overlayExtent = overlays.reduce((largest, spec) => Math.max(largest, overlayReach(spec, (index) => stampReach(stamps[index]))), 0);
     entries.push({
       index: entries.length,
       preset,
       salt: hashText(preset.id),
       reach,
+      overlayReach: overlayExtent,
       clearance: preset.placement.clearance ?? 0,
       // The footprint probed for the surface filter: the stamps' own extent, within limits.
       surfaceRadius: Math.min(Math.max(reach * 0.5, 200), 1200),
@@ -166,11 +191,17 @@ export function createPlacement({ seed, world, presets }) {
   const maxReach = entries.reduce((largest, entry) => Math.max(largest, entry.reach), 0);
   const maxClearance = entries.reduce((largest, entry) => Math.max(largest, entry.clearance), 0);
   const hasStamps = entries.some((entry) => (entry.preset.stamps ?? EMPTY).length > 0);
+  const hasWaters = entries.some((entry) => (entry.preset.waters ?? EMPTY).length > 0);
+  const hasOverlays = entries.some((entry) => (entry.preset.overlays ?? EMPTY).length > 0);
   const stampCellReach = Math.ceil(maxReach / SITE_CELL);
+  const overlayCellReach = Math.ceil(entries.reduce((largest, entry) => Math.max(largest, entry.overlayReach), 0) / SITE_CELL);
+  const windAngle = Number.isFinite(world.prevailingWindAngle) ? world.prevailingWindAngle : 0;
 
   const candidateCache = new Map();
   const siteCellCache = new Map();
   const stampCellCache = new Map();
+  const waterCellCache = new Map();
+  const overlayCellCache = new Map();
 
   function cellKey(cellX, cellZ) {
     return (cellX + CELL_OFFSET) * CELL_SPAN + (cellZ + CELL_OFFSET);
@@ -436,11 +467,22 @@ export function createPlacement({ seed, world, presets }) {
       seed: fields.seed,
       biome: fields.biome,
       stamps: EMPTY,
+      waters: EMPTY,
+      overlays: EMPTY,
     };
+    // One seed per stamp, then per water body, then per overlay: the stream continues after the stamps.
+    const streamSeed = (slot) => mix32((site.seed ^ Math.imul(slot + 1, 0x632be5ab)) >>> 0);
     const specs = preset.stamps ?? EMPTY;
     if (specs.length > 0) {
       const context = { baseHeight: world.heightAt, waterLevel };
-      site.stamps = Object.freeze(specs.map((spec, index) => resolveStamp(spec, site, index, mulberry32(mix32((site.seed ^ Math.imul(index + 1, 0x632be5ab)) >>> 0)), context)));
+      site.stamps = Object.freeze(specs.map((spec, index) => resolveStamp(spec, site, index, mulberry32(streamSeed(index)), context)));
+    }
+    const waterSpecs = preset.waters ?? EMPTY;
+    if (waterSpecs.length > 0) site.waters = resolveWaters(site, waterSpecs, site.stamps, (index) => streamSeed(specs.length + index));
+    const overlaySpecs = preset.overlays ?? EMPTY;
+    if (overlaySpecs.length > 0) {
+      const firstSlot = specs.length + waterSpecs.length;
+      site.overlays = resolveOverlays(site, overlaySpecs, site.stamps, (index) => mulberry32(streamSeed(firstSlot + index)), (index) => streamSeed(firstSlot + index), windAngle);
     }
     return Object.freeze(site);
   }
@@ -524,6 +566,54 @@ export function createPlacement({ seed, world, presets }) {
     return stamps;
   }
 
+  /**
+   * Every resolved record of one kind ('waters' | 'overlays') whose bounds overlap cell (cellX,
+   * cellZ), from the sites within `reach` cells, sorted by id (a cached, frozen array; the same empty
+   * array when none).
+   */
+  function recordsInCell(cellX, cellZ, field, reach, cache) {
+    const key = cellKey(cellX, cellZ);
+    let records = cache.get(key);
+    if (records !== undefined) return records;
+    const minX = cellX * SITE_CELL;
+    const minZ = cellZ * SITE_CELL;
+    const maxX = minX + SITE_CELL;
+    const maxZ = minZ + SITE_CELL;
+    let list = null;
+    for (let offsetZ = -reach; offsetZ <= reach; offsetZ++) {
+      for (let offsetX = -reach; offsetX <= reach; offsetX++) {
+        for (const site of sitesInCell(cellX + offsetX, cellZ + offsetZ)) {
+          for (const record of site[field]) {
+            const bounds = record.bounds;
+            if (bounds.maxX < minX || bounds.minX > maxX || bounds.maxZ < minZ || bounds.minZ > maxZ) continue;
+            if (list === null) list = [];
+            list.push(record);
+          }
+        }
+      }
+    }
+    if (list === null) records = EMPTY;
+    else {
+      list.sort((first, second) => (first.id < second.id ? -1 : first.id > second.id ? 1 : 0));
+      records = Object.freeze(list);
+    }
+    if (cache.size >= CELL_CACHE_LIMIT) cache.clear();
+    cache.set(key, records);
+    return records;
+  }
+
+  /** The water bodies whose bounds overlap cell (cellX, cellZ), sorted by id (cached, frozen). */
+  function watersInCell(cellX, cellZ) {
+    if (!hasWaters) return EMPTY;
+    return recordsInCell(cellX, cellZ, 'waters', stampCellReach, waterCellCache);
+  }
+
+  /** The overlays whose bounds overlap cell (cellX, cellZ), sorted by id (cached, frozen). */
+  function overlaysInCell(cellX, cellZ) {
+    if (!hasOverlays) return EMPTY;
+    return recordsInCell(cellX, cellZ, 'overlays', overlayCellReach, overlayCellCache);
+  }
+
   /** True when any stamp's bounds overlap the rectangle (edges included). */
   function stampsOverlap(minX, minZ, maxX, maxZ) {
     if (!hasStamps) return false;
@@ -545,15 +635,21 @@ export function createPlacement({ seed, world, presets }) {
     sitePresets: Object.freeze(entries.map((entry) => entry.preset)),
     maxReach,
     hasStamps,
+    hasWaters,
+    hasOverlays,
     sitesInCell,
     sitesNear,
     stampsInCell,
     stampsOverlap,
+    watersInCell,
+    overlaysInCell,
     /** Drops every cache (answers never change; for memory tests and benchmarks). */
     clearCaches() {
       candidateCache.clear();
       siteCellCache.clear();
       stampCellCache.clear();
+      waterCellCache.clear();
+      overlayCellCache.clear();
     },
   };
 }

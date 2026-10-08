@@ -1,5 +1,12 @@
 // Builds terrain chunk meshes and vegetation scatter from the world generator. Runs inside the
 // terrain worker, and on the main thread as a time-sliced fallback when workers are unavailable.
+//
+// Region overlays (Phase 3): when the build output carries an `overlays` buffer, every vertex gets
+// the chunk attribute `overlay` (vec4 per face: tint-sweep slot + weight, sweep phase, material id,
+// stripe id; worldgen.faceOverlay), zeros outside every overlay. The species 6-12 are sized and tinted
+// from src/world/vegetationSpecies.js (rows take their stripe's colour).
+import { VEGETATION_SPECIES, speciesById } from './vegetationSpecies.js';
+
 export function createChunkBuilder(worldGen, config) {
   const chunkSize = config.chunkSize;
   const resolutions = config.lodResolutions;
@@ -10,7 +17,10 @@ export function createChunkBuilder(worldGen, config) {
   const kinds = worldGen.VEGETATION;
   const heightScratch = resolutions.map((resolution) => new Float64Array((resolution + 1) * (resolution + 1)));
   const edgeScratch = resolutions.map((resolution) => new Float32Array(resolution * 12));
+  const edgeOverlayScratch = resolutions.map((resolution) => new Float32Array(resolution * 16));
   const faceColorOut = new Float32Array(3);
+  const faceOverlayOut = new Float32Array(4);
+  const overlaySample = typeof worldGen.createOverlaySample === 'function' ? worldGen.createOverlaySample() : null;
   const typeCounts = new Int32Array(typeCount);
   const typeCursor = new Int32Array(typeCount);
   const climateScratch = { temperature: 0, moisture: 0 };
@@ -32,6 +42,8 @@ export function createChunkBuilder(worldGen, config) {
   const edgeMinima = new Float64Array(4 * coarsestResolution);
   // Per build: whether a stamp touches the chunk, segments per coarsest window, the lowest skirt vertex.
   let stampedBuild = false;
+  /** The LOD being built (the skirts read its edge overlays). */
+  let currentLod = 0;
   let segmentsPerWindow = 1;
   let skirtFloor = Infinity;
 
@@ -51,11 +63,24 @@ export function createChunkBuilder(worldGen, config) {
     [[0xe58fa6], [0xe58fa6], [0xe58fa6], [0xe58fa6], [0xe58fa6]],
   ].map((perBiome) => perBiome.map((variants) => variants.map(hexToLinearTriplet)));
   const FLOWER_TINTS = [0xe58fa6, 0xf2c94c, 0xa58fd8, 0xf2a7bd, 0xf6efe2].map(hexToLinearTriplet);
-  const SINK = [0.25, 0.25, 0.25, 0, 0.2, 0.05];
+  // The species' tints per biome, in the same layout as TINTS (types 6-12 follow types 0-5).
+  for (const species of VEGETATION_SPECIES) TINTS[species.id] = species.tints.map((variants) => variants.map(hexToLinearTriplet));
+  const SINK = [0.25, 0.25, 0.25, 0, 0.2, 0.05, ...VEGETATION_SPECIES.map((species) => species.sink)];
 
   function vertexCount(lod) {
     const resolution = resolutions[lod];
     return resolution * resolution * 6 + resolution * 24;
+  }
+
+  /** The overlay attribute of three (face) or six (skirt quad) vertices from `source` at sourceOffset. */
+  function writeOverlay(overlays, vertex, count, source, sourceOffset) {
+    for (let corner = 0; corner < count; corner++) {
+      const offset = (vertex + corner) * 4;
+      overlays[offset] = source[sourceOffset];
+      overlays[offset + 1] = source[sourceOffset + 1];
+      overlays[offset + 2] = source[sourceOffset + 2];
+      overlays[offset + 3] = source[sourceOffset + 3];
+    }
   }
 
   function writeVertex(positions, normals, colors, vertex, x, y, z, normalX, normalY, normalZ, red, green, blue) {
@@ -104,13 +129,21 @@ export function createChunkBuilder(worldGen, config) {
     writeVertex(output.positions, output.normals, output.colors, vertex, ax, ay, az, normalX, normalY, normalZ, red, green, blue);
     writeVertex(output.positions, output.normals, output.colors, vertex + 1, bx, by, bz, normalX, normalY, normalZ, red, green, blue);
     writeVertex(output.positions, output.normals, output.colors, vertex + 2, cx, cy, cz, normalX, normalY, normalZ, red, green, blue);
+    if (output.overlays) {
+      worldGen.faceOverlay((ax + bx + cx) / 3 + originX, (az + bz + cz) / 3 + originZ, faceHash, faceOverlayOut, 0);
+      writeOverlay(output.overlays, vertex, 3, faceOverlayOut, 0);
+    }
     return vertex + 3;
   }
 
-  function storeEdgeColor(edges, slot) {
+  function storeEdgeColor(edges, slot, edgeOverlays) {
     edges[slot * 3] = faceColorOut[0] * SKIRT_SHADE;
     edges[slot * 3 + 1] = faceColorOut[1] * SKIRT_SHADE;
     edges[slot * 3 + 2] = faceColorOut[2] * SKIRT_SHADE;
+    edgeOverlays[slot * 4] = faceOverlayOut[0];
+    edgeOverlays[slot * 4 + 1] = faceOverlayOut[1];
+    edgeOverlays[slot * 4 + 2] = faceOverlayOut[2];
+    edgeOverlays[slot * 4 + 3] = faceOverlayOut[3];
   }
 
   /**
@@ -171,6 +204,7 @@ export function createChunkBuilder(worldGen, config) {
       writeVertex(positions, normals, colors, vertex + 4, ax, lowA, az, outwardX, 0, outwardZ, red, green, blue);
       writeVertex(positions, normals, colors, vertex + 5, bx, lowB, bz, outwardX, 0, outwardZ, red, green, blue);
     }
+    if (output.overlays) writeOverlay(output.overlays, vertex, 6, edgeOverlayScratch[currentLod], slot * 4);
     return vertex + 6;
   }
 
@@ -187,6 +221,9 @@ export function createChunkBuilder(worldGen, config) {
     const originZ = job.cz * chunkSize;
     const heights = heightScratch[job.lod];
     const edges = edgeScratch[job.lod];
+    const edgeOverlays = edgeOverlayScratch[job.lod];
+    currentLod = job.lod;
+    faceOverlayOut.fill(0);
     const skirtDepth = skirtDepths[job.lod];
     let minY = Infinity;
     let maxY = -Infinity;
@@ -213,11 +250,11 @@ export function createChunkBuilder(worldGen, config) {
         const h01 = heights[(j + 1) * side + i];
         const h11 = heights[(j + 1) * side + i + 1];
         vertex = emitFace(output, vertex, x0, h00, z0, x0, h01, z1, x1, h10, z0, originX, originZ, quadBaseI + i, quadBaseJ + j, 0);
-        if (j === 0) storeEdgeColor(edges, i);
-        if (i === 0) storeEdgeColor(edges, resolution + j);
+        if (j === 0) storeEdgeColor(edges, i, edgeOverlays);
+        if (i === 0) storeEdgeColor(edges, resolution + j, edgeOverlays);
         vertex = emitFace(output, vertex, x1, h10, z0, x0, h01, z1, x1, h11, z1, originX, originZ, quadBaseI + i, quadBaseJ + j, 1);
-        if (j === resolution - 1) storeEdgeColor(edges, 2 * resolution + i);
-        if (i === resolution - 1) storeEdgeColor(edges, 3 * resolution + j);
+        if (j === resolution - 1) storeEdgeColor(edges, 2 * resolution + i, edgeOverlays);
+        if (i === resolution - 1) storeEdgeColor(edges, 3 * resolution + j, edgeOverlays);
       }
       yield;
     }
@@ -226,6 +263,7 @@ export function createChunkBuilder(worldGen, config) {
     if (stampedBuild) measureEdgeMinima(originX, originZ);
     // Every LOD step divides the coarsest step, so a segment never straddles two windows.
     segmentsPerWindow = resolution / coarsestResolution;
+    currentLod = job.lod;
     skirtFloor = Infinity;
     for (let i = 0; i < resolution; i++) {
       vertex = emitSkirt(output, vertex, skirtDepth, i * step, heights[i], 0, (i + 1) * step, heights[i + 1], 0, 0, -1, edges, i, 0, i);
@@ -266,7 +304,15 @@ export function createChunkBuilder(worldGen, config) {
     let scaleX = baseScale;
     let scaleY = baseScale;
     let scaleZ = baseScale;
-    if (type === kinds.PINE) {
+    const species = speciesById(type);
+    if (species !== null) {
+      // Rows keep their length (they tile along the stripe); everything else varies a little in girth.
+      if (species.rows) scaleX = 1;
+      else {
+        scaleX = baseScale * (0.9 + 0.2 * detail);
+        scaleZ = scaleX;
+      }
+    } else if (type === kinds.PINE) {
       scaleY = baseScale * (0.9 + 0.25 * detail);
     } else if (type === kinds.BROADLEAF) {
       scaleX = baseScale * (0.9 + 0.2 * detail);
@@ -288,6 +334,20 @@ export function createChunkBuilder(worldGen, config) {
   }
 
   function computeTint(type, variant, worldX, worldZ) {
+    const species = speciesById(type);
+    if (species !== null && species.rows && overlaySample !== null) {
+      // A row takes its stripe's colour.
+      worldGen.overlayAt(worldX, worldZ, overlaySample);
+      const stripes = overlaySample.overlay !== null ? overlaySample.overlay.stripes : null;
+      if (stripes !== null) {
+        const count = stripes.colors.length;
+        const color = stripes.colors[((overlaySample.stripe % count) + count) % count];
+        tint[0] = color[0];
+        tint[1] = color[1];
+        tint[2] = color[2];
+        return;
+      }
+    }
     if (type === kinds.FLOWERS) {
       const cellPick = worldGen.hash2(Math.floor(worldX / 60), Math.floor(worldZ / 60), 7);
       const detail = variant * 5.19 - Math.floor(variant * 5.19);

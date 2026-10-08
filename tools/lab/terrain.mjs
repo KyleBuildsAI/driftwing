@@ -37,6 +37,18 @@
 //   real          the real presets' stamps (Milestone E onward): placement filters, determinism (the
 //                 site-list hash twice and worker-cloned options), and around the nearest sites of every
 //                 stamped real preset the shapes, falloff, paint, seams and collision checks above
+//   phase3        the real presets (no waters, no overlays) build the Phase 2 world bit for bit: meshes of
+//                 every LOD, colours, scatter and the site-list hash, against digests recorded from the
+//                 Phase 2 code (commit f4c2a50)
+//   overlays      on the water and overlay fixtures (src/dev/waterFixtures.js): overlays change no
+//                 placement and never a height (heightAt and groundHeight bit-identical with and without
+//                 them), colours and scatter change only inside them, every species 6-12 grows in its
+//                 overlay and none outside, resolution is deterministic (a worker-cloned world asked in
+//                 the reverse order), the site-list hash covers them, and the chunk `overlay` attribute
+//                 is bit-identical on both threads and carries every kind
+//   water stamps  the basin, crater and terraces stamps (and the flatten strip a film lies on): shapes
+//                 (each bowl holds its water: the ground along its outline stands above its level),
+//                 falloff, paint, seams and collision, as for the Phase 2 stamps
 //   benchmark     heightAt and groundHeight on fixed point sets with no stamps nearby and with stamps
 //                 dense nearby, against the Phase 1 baseline measured from the same code with stamps
 //                 disabled (the empty preset list): within 10 %. After a JIT warmup, each slice of
@@ -54,6 +66,9 @@ import { hashSiteList, validateSitePreset } from '../../src/world/placement.js';
 import { STAMP_TYPES, stampReach } from '../../src/world/stamps.js';
 import { PRESETS } from '../../src/spawns/presets/index.js';
 import { FIXTURE_STAMP_TYPE, TERRAIN_FIXTURES } from '../../src/dev/terrainFixtures.js';
+import { WATER_FIXTURES } from '../../src/dev/waterFixtures.js';
+import { overlayHashLine } from '../../src/world/overlays.js';
+import { waterOutlineContains } from '../../src/world/waters.js';
 import {
   buildChunkMesh, checkSeam, checkSkirtAttachment, compareMeshBuffers, drainSteps, extractEdges, meshHeightAt, seamPairApplies, terrainBuilderConfig,
 } from '../../src/dev/terrainChecks.js';
@@ -238,7 +253,19 @@ function testValidation() {
   const volcano = TERRAIN_FIXTURES[0];
   expectThrow('a chance above 1 names the preset and placement.chance', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, placement: { ...volcano.placement, chance: 2 } }] }), ['fixtureVolcano', 'placement.chance']);
   expectThrow('an unknown biome names the field', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, placement: { ...volcano.placement, biomes: ['jungle'] } }] }), ['fixtureVolcano', 'placement.biomes', 'jungle']);
-  expectThrow('an unknown stamp type names stamps[0].type', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, stamps: [{ type: 'crater' }] }] }), ['fixtureVolcano', 'stamps[0].type']);
+  expectThrow('an unknown stamp type names stamps[0].type', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, stamps: [{ type: 'meteorCrater' }] }] }), ['fixtureVolcano', 'stamps[0].type']);
+  expectThrow('a water body on a stamp that cannot hold one names waters[0].stamp', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, waters: [{ kind: 'lake', stamp: 0, level: { mode: 'basin', fill: 0.5 } }] }] }), ['fixtureVolcano', 'waters[0].stamp', 'cone']);
+  expectThrow('an unknown overlay palette names overlays[0].palette', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, overlays: [{ shape: { kind: 'disc', radius: 500, falloff: 100 }, palette: 'neon' }] }] }), ['fixtureVolcano', 'overlays[0].palette', 'neon']);
+  expectThrow('an unknown species names overlays[0].vegetation.species', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, overlays: [{ shape: { kind: 'disc', radius: 500, falloff: 100 }, vegetation: { species: ['oak'], density: 0.5, mode: 'add' } }] }] }), ['overlays[0].vegetation.species', 'oak']);
+  for (const preset of WATER_FIXTURES) {
+    let problem = '';
+    try {
+      validateSitePreset(preset);
+    } catch (error) {
+      problem = error.message;
+    }
+    check('validation', `fixture ${preset.id} validates`, problem === '', problem);
+  }
   expectThrow('a descending size range names the field', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, stamps: [{ type: 'cone', radius: [900, 500] }] }] }), ['fixtureVolcano', 'stamps[0].radius']);
   expectThrow('an unknown paint names the field', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, stamps: [{ type: 'cone', paint: 'lava' }] }] }), ['stamps[0].paint', 'lava']);
 }
@@ -315,7 +342,8 @@ function testPlacement(presets = TERRAIN_FIXTURES, worldFor = fixtureWorld, labe
     }
     check('placement', `${label}${seed}: no stamp changes the ground at a Phase 1 landmark`, landmarkFailures === 0, `${landmarkFailures} failures`);
   }
-  if (presets === TERRAIN_FIXTURES) for (const type of STAMP_TYPES) check('placement', `stamp type ${type} is placed on some seed`, typesPlaced.has(type));
+  // The Phase 2 stamp types (the Phase 3 ones are placed by the water fixtures, testWaterStamps).
+  if (presets === TERRAIN_FIXTURES) for (const type of STAMP_TYPES.filter((name) => Object.values(FIXTURE_STAMP_TYPE).includes(name))) check('placement', `stamp type ${type} is placed on some seed`, typesPlaced.has(type));
 }
 
 // ---- determinism ---------------------------------------------------------------------------------------------
@@ -443,6 +471,38 @@ function testShapes(world, sites) {
         }
         check('shapes', `${label}: the strip is flat (heightAt within 1 cm)`, high - low <= 0.01, `${round(high - low, 4)} m over the strip`);
         check('shapes', `${label}: the strip is flat for collision (groundHeight within 1 cm)`, groundHigh - groundLow <= 0.01, `${round(groundHigh - groundLow, 4)} m over the strip`);
+      } else if (stamp.type === 'basin' || stamp.type === 'crater') {
+        const floor = world.heightAt(stamp.x, stamp.z);
+        check('shapes', `${label}: the bowl's floor lies at least 80 % of its depth below the rim`, stamp.rimY - floor >= stamp.depth * 0.8, `rim ${round(stamp.rimY, 1)} m, floor ${round(floor, 1)} m, depth ${round(stamp.depth, 1)} m`);
+        // The bowl holds its water: along the outline (just outside it) the ground stands above every level.
+        let lowestRim = Infinity;
+        for (const body of site.waters) {
+          for (let index = 0; index < 96; index++) {
+            const angle = (index / 96) * Math.PI * 2;
+            let reach = 0;
+            while (reach < stamp.radius * 1.3 && waterOutlineContains(body, stamp.x + Math.cos(angle) * reach, stamp.z + Math.sin(angle) * reach)) reach += 1;
+            lowestRim = Math.min(lowestRim, world.groundHeight(stamp.x + Math.cos(angle) * (reach + 1), stamp.z + Math.sin(angle) * (reach + 1)) - body.level);
+          }
+        }
+        check('shapes', `${label}: the ground just outside the water's outline stands above its level all round`, site.waters.length > 0 && lowestRim > 0, `lowest ${round(lowestRim, 2)} m above the level`);
+      } else if (stamp.type === 'terraces') {
+        let worstFlat = 0;
+        let stepsDown = true;
+        let previous = Infinity;
+        for (const shelf of stamp.shelves) {
+          const floors = [];
+          for (const across of [-stamp.width * 0.3, 0, stamp.width * 0.3]) {
+            for (const share of [0.15, 0.35, 0.55]) {
+              const point = localPoint(stamp, -stamp.length / 2 + stamp.stepLength * (shelf.index + share), across);
+              floors.push(world.heightAt(point.x, point.z));
+            }
+          }
+          worstFlat = Math.max(worstFlat, Math.max(...floors) - Math.min(...floors));
+          if (!(shelf.floorY < previous)) stepsDown = false;
+          previous = shelf.floorY;
+        }
+        check('shapes', `${label}: every shelf's pool floor is flat (within 1 cm)`, worstFlat <= 0.01, `${round(worstFlat, 4)} m`);
+        check('shapes', `${label}: the shelves step down the slope`, stepsDown, `${stamp.shelves.length} shelves, ${round(stamp.topY, 1)} -> ${round(stamp.bottomY, 1)} m`);
       } else {
         const top = world.heightAt(stamp.x, stamp.z);
         check('shapes', `${label}: the islet stands at least 70 % of its height above the sea`, top - WATER >= stamp.height * 0.7, `${round(top, 1)} m, height ${round(stamp.height, 1)} m`);
@@ -526,13 +586,19 @@ function testPaint(world, sites, seed = STAMP_SEED) {
   const plain = createWorldGen(seed, PHASE1_OPTIONS);
   const colour = new Float32Array(3);
   const plainColour = new Float32Array(3);
+  // The place each type's paint shows; the paint expected is the fixture's own (the Phase 2 fixtures
+  // paint ash, riverbed, wet rock, riverbed, tarmac and basalt; the water fixtures sand, ash,
+  // travertine, ice and salt).
   const expected = {
-    cone: (stamp) => [{ x: stamp.x, z: stamp.z }, 'ash'],
-    carve: (stamp) => [stamp.path[Math.floor(stamp.path.length / 2)], 'riverbed'],
-    cliffStep: (stamp) => [{ x: stamp.poolX, z: stamp.poolZ }, 'wetRock'],
-    gorge: (stamp) => [{ x: stamp.x, z: stamp.z }, 'riverbed'],
-    flatten: (stamp) => [{ x: stamp.x, z: stamp.z }, 'tarmac'],
-    islandBase: (stamp) => [{ x: stamp.x + stamp.dirX * stamp.radius * 0.8, z: stamp.z + stamp.dirZ * stamp.radius * 0.8 }, 'basalt'],
+    cone: (stamp) => [{ x: stamp.x, z: stamp.z }, stamp.paint],
+    carve: (stamp) => [stamp.path[Math.floor(stamp.path.length / 2)], stamp.paint],
+    cliffStep: (stamp) => [{ x: stamp.poolX, z: stamp.poolZ }, stamp.paint],
+    gorge: (stamp) => [{ x: stamp.x, z: stamp.z }, stamp.paint],
+    flatten: (stamp) => [{ x: stamp.x, z: stamp.z }, stamp.paint],
+    islandBase: (stamp) => [{ x: stamp.x + stamp.dirX * stamp.radius * 0.8, z: stamp.z + stamp.dirZ * stamp.radius * 0.8 }, stamp.paint],
+    basin: (stamp) => [{ x: stamp.x, z: stamp.z }, stamp.paint],
+    crater: (stamp) => [{ x: stamp.x, z: stamp.z }, stamp.paint],
+    terraces: (stamp) => [{ x: stamp.shelves[0].x, z: stamp.shelves[0].z }, stamp.paint],
   };
   for (const site of sites) {
     const stamp = site.stamps[0];
@@ -750,6 +816,190 @@ function testBenchmark() {
   bench('groundHeight, stamps dense nearby', baselineWorld.groundHeight, stampedWorld.groundHeight, denseX.subarray(0, 20000), denseZ.subarray(0, 20000));
 }
 
+// ---- phase 3: water-holding stamps, water bodies and region overlays ------------------------------------
+/** The Phase 2 real-preset world, recorded from the Phase 2 code (commit f4c2a50, before any Phase 3 change). */
+const PHASE2_REAL_DIGESTS = Object.freeze({
+  DRIFTWING: { meshes: '4ca2d12e93a5440a40928acd8f02754be8a76d96f1518bdd006e6e4cc3fb63e2', sites: '753c7ad07728b9a1' },
+  'HARNESS-1': { meshes: '01d73057fae7adf80e6b498c653d4933380eab87df71c702f242fa5f25c40e53', sites: '40179d8108de3ff2' },
+  'P2-TERRAIN': { meshes: '94f279ad6b775a08843693be7f693119cee66e2bb175589b7c4e4a003f8ea152', sites: '06628e3c54a53137' },
+});
+/** The seed the water and overlay fixtures are checked on (every one lies within 14 km of its origin). */
+const WATER_SEED = 'HARNESS-1';
+const WATER_OPTIONS = Object.freeze({ ...WORLD_OPTIONS, presets: WATER_FIXTURES });
+
+/** The real presets' world as Phase 2 built it: meshes of every LOD, scatter and the site-list hash. */
+function phase2RealDigest(world) {
+  const builder = createChunkBuilder(world, BUILDER_CONFIG);
+  const hash = createHash('sha256');
+  for (const [cx, cz] of [[0, 0], [3, -2], [-7, 5], [40, 11], [-23, -31], [12, 30]]) {
+    for (let lod = 0; lod < 4; lod++) {
+      const floats = builder.vertexCount(lod) * 3;
+      const output = { positions: new Float32Array(floats), normals: new Float32Array(floats), colors: new Float32Array(floats), minY: 0, maxY: 0, vertexCount: 0 };
+      drainSteps(builder.buildMesh({ cx, cz, lod }, output));
+      hash.update(Buffer.from(output.positions.buffer)).update(Buffer.from(output.normals.buffer)).update(Buffer.from(output.colors.buffer)).update(`${output.minY},${output.maxY},${output.vertexCount}`);
+    }
+    hash.update(Buffer.from(world.scatterChunk(cx, cz, 1).buffer));
+  }
+  return { meshes: hash.digest('hex'), sites: hashSiteList(world.sitesNear(0, 0, 30000)) };
+}
+
+/** The presets with their overlays removed (placement, stamps and waters unchanged). */
+function withoutOverlays(presets) {
+  return presets.map((preset) => {
+    const copy = { ...preset };
+    delete copy.overlays;
+    return Object.freeze(copy);
+  });
+}
+
+function testPhase3Worlds() {
+  for (const seed of SEEDS) {
+    const digest = phase2RealDigest(createWorldGen(seed, WORLD_OPTIONS));
+    const golden = PHASE2_REAL_DIGESTS[seed];
+    check('phase3', `${seed}: the real presets (no waters, no overlays): meshes, colours and scatter bit-identical to Phase 2`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
+    check('phase3', `${seed}: the real presets: the site-list hash unchanged from Phase 2`, digest.sites === golden.sites, digest.sites);
+  }
+}
+
+function testOverlays() {
+  const withOverlays = createWorldGen(WATER_SEED, WATER_OPTIONS);
+  const plain = createWorldGen(WATER_SEED, { ...WORLD_OPTIONS, presets: withoutOverlays(WATER_FIXTURES) });
+  const sitesA = withOverlays.sitesNear(0, 0, 25000);
+  const sitesB = plain.sitesNear(0, 0, 25000);
+  check('overlays', 'overlays change no placement: the same sites with and without them', sitesA.map((site) => `${site.id}@${site.x},${site.z}`).join('|') === sitesB.map((site) => `${site.id}@${site.x},${site.z}`).join('|'), `${sitesA.length} sites`);
+  const overlays = sitesA.flatMap((site) => site.overlays);
+  // Every overlay that can reach the chunks below (sites a little farther out included).
+  const allOverlays = withOverlays.sitesNear(0, 0, 45000).flatMap((site) => site.overlays);
+  // Heights and collision heights: bit-identical at 20,000 points, half of them inside overlays.
+  const random = mulberry32(99);
+  let heightDiffs = 0;
+  let groundDiffs = 0;
+  let inside = 0;
+  for (let index = 0; index < 20000; index++) {
+    let x;
+    let z;
+    if (index % 2 === 0) {
+      const overlay = overlays[index % overlays.length];
+      x = overlay.x + (random() - 0.5) * (overlay.bounds.maxX - overlay.bounds.minX);
+      z = overlay.z + (random() - 0.5) * (overlay.bounds.maxZ - overlay.bounds.minZ);
+      inside++;
+    } else {
+      x = (random() - 0.5) * 50000;
+      z = (random() - 0.5) * 50000;
+    }
+    if (withOverlays.heightAt(x, z) !== plain.heightAt(x, z)) heightDiffs++;
+    if (withOverlays.groundHeight(x, z) !== plain.groundHeight(x, z)) groundDiffs++;
+  }
+  check('overlays', `overlays never change height: 20,000 heights bit-identical (${inside} inside overlays)`, heightDiffs === 0, `${heightDiffs} differ`);
+  check('overlays', 'overlays never change the collision height: 20,000 groundHeight samples bit-identical', groundDiffs === 0, `${groundDiffs} differ`);
+  // Colours and scatter change only inside an overlay's bounds.
+  const sample = withOverlays.createOverlaySample();
+  const colourA = new Float32Array(3);
+  const colourB = new Float32Array(3);
+  let colourOutside = 0;
+  let colourInside = 0;
+  for (let index = 0; index < 20000; index++) {
+    const overlay = overlays[index % overlays.length];
+    const x = overlay.x + (random() - 0.5) * (overlay.bounds.maxX - overlay.bounds.minX) * 1.6;
+    const z = overlay.z + (random() - 0.5) * (overlay.bounds.maxZ - overlay.bounds.minZ) * 1.6;
+    const height = plain.heightAt(x, z);
+    const hash = random();
+    withOverlays.faceColor(x, z, height, 0.1, 0, 0, hash, colourA, 0);
+    plain.faceColor(x, z, height, 0.1, 0, 0, hash, colourB, 0);
+    const changed = colourA[0] !== colourB[0] || colourA[1] !== colourB[1] || colourA[2] !== colourB[2];
+    withOverlays.overlayAt(x, z, sample);
+    if (changed && sample.weight <= 0) colourOutside++;
+    if (changed) colourInside++;
+  }
+  check('overlays', 'face colours change only where an overlay has weight (and do change inside them)', colourOutside === 0 && colourInside > 2000, `${colourInside} changed inside, ${colourOutside} outside`);
+  let scatterOutside = 0;
+  let scatterChunks = 0;
+  for (const overlay of overlays) {
+    const cx = Math.floor(overlay.x / CHUNK);
+    const cz = Math.floor(overlay.z / CHUNK);
+    for (const [x, z] of [[cx, cz], [cx + 8, cz], [cx, cz - 9]]) {
+      const a = withOverlays.scatterChunk(x, z, 1);
+      const b = plain.scatterChunk(x, z, 1);
+      const chunkMinX = x * CHUNK;
+      const chunkMinZ = z * CHUNK;
+      const touches = allOverlays.some((other) => other.bounds.maxX >= chunkMinX && other.bounds.minX <= chunkMinX + CHUNK && other.bounds.maxZ >= chunkMinZ && other.bounds.minZ <= chunkMinZ + CHUNK);
+      const same = a.length === b.length && a.every((value, index) => value === b[index]);
+      if (!touches && !same) scatterOutside++;
+      scatterChunks++;
+    }
+  }
+  check('overlays', 'the vegetation scatter changes only in chunks an overlay reaches', scatterOutside === 0, `${scatterChunks} chunks, ${scatterOutside} changed outside`);
+  // The species each overlay plants grow there.
+  const speciesSeen = new Set();
+  for (const overlay of overlays) {
+    const cx = Math.floor(overlay.x / CHUNK);
+    const cz = Math.floor(overlay.z / CHUNK);
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const raw = withOverlays.scatterChunk(cx + dx, cz + dz, 1);
+        for (let index = 5; index < raw.length; index += 7) if (raw[index] >= 6) speciesSeen.add(raw[index]);
+      }
+    }
+  }
+  check('overlays', 'every Phase 3 species (6-12) grows in its overlays', [6, 7, 8, 9, 10, 11, 12].every((type) => speciesSeen.has(type)), [...speciesSeen].sort((a, b) => a - b).join(', '));
+  check('overlays', 'outside every overlay no Phase 3 species grows (the base biomes are unchanged)', (() => {
+    for (let index = 0; index < 40; index++) {
+      const cx = Math.floor((random() - 0.5) * 200);
+      const cz = Math.floor((random() - 0.5) * 200);
+      const chunkMinX = cx * CHUNK;
+      const chunkMinZ = cz * CHUNK;
+      if (allOverlays.some((other) => other.bounds.maxX >= chunkMinX && other.bounds.minX <= chunkMinX + CHUNK && other.bounds.maxZ >= chunkMinZ && other.bounds.minZ <= chunkMinZ + CHUNK)) continue;
+      const raw = withOverlays.scatterChunk(cx, cz, 1);
+      for (let at = 5; at < raw.length; at += 7) if (raw[at] >= 6) return false;
+    }
+    return true;
+  })());
+  // Overlay resolution determinism: a second world asked in the reverse order.
+  const reversed = createWorldGen(WATER_SEED, structuredClone(WATER_OPTIONS));
+  const far = reversed.sitesNear(0, 0, 25000).slice().reverse();
+  const lines = (list) => list.flatMap((site) => site.overlays.map((overlay) => overlayHashLine(overlay))).sort().join('|');
+  check('overlays', 'overlay resolution is deterministic (a worker-cloned world asked far cells first)', lines(far) === lines(sitesA) && hashSiteList(far) === hashSiteList(sitesA), `${overlays.length} overlays, site hash ${hashSiteList(sitesA)}`);
+  check('overlays', 'the site-list hash covers the overlays and waters (it differs without the overlays)', hashSiteList(sitesA) !== hashSiteList(sitesB));
+  // The overlay attribute: equal on both threads (worker-cloned options), non-zero in each overlay kind.
+  const mainBuilder = createChunkBuilder(withOverlays, BUILDER_CONFIG);
+  const workerBuilder = createChunkBuilder(createWorldGen(WATER_SEED, structuredClone(WATER_OPTIONS)), BUILDER_CONFIG);
+  let worst = 0;
+  const kinds = { sweep: 0, material: 0, stripe: 0 };
+  for (const overlay of overlays) {
+    const cx = Math.floor(overlay.x / CHUNK);
+    const cz = Math.floor(overlay.z / CHUNK);
+    for (const lod of [0, 2]) {
+      const a = buildChunkMesh(mainBuilder, BUILDER_CONFIG, cx, cz, lod);
+      const b = buildChunkMesh(workerBuilder, BUILDER_CONFIG, cx, cz, lod);
+      worst = Math.max(worst, compareMeshBuffers(a, b));
+      for (let index = 0; index < a.overlays.length; index += 4) {
+        if (a.overlays[index] - Math.floor(a.overlays[index]) > 0) kinds.sweep++;
+        if (a.overlays[index + 2] > 0.5) kinds.material++;
+        if (a.overlays[index + 3] > 0.5) kinds.stripe++;
+      }
+    }
+  }
+  check('overlays', 'the overlay attribute is bit-identical on both threads (with positions and colours)', worst === 0, `max difference ${worst}`);
+  check('overlays', 'the overlay attribute carries the tint sweep, the ice material and the stripes', kinds.sweep > 0 && kinds.material > 0 && kinds.stripe > 0, JSON.stringify(kinds));
+  const empty = buildChunkMesh(createChunkBuilder(createWorldGen(WATER_SEED, PHASE1_OPTIONS), BUILDER_CONFIG), BUILDER_CONFIG, 0, 0, 0);
+  check('overlays', 'without overlays the attribute is all zeros', empty.overlays.every((value) => value === 0));
+}
+
+function testWaterStamps() {
+  const world = createWorldGen(WATER_SEED, WATER_OPTIONS);
+  const near = world.sitesNear(0, 0, SEARCH_RADIUS);
+  const stamped = WATER_FIXTURES.filter((preset) => (preset.stamps ?? []).length > 0);
+  const sites = stamped.flatMap((preset) => near.filter((site) => site.presetId === preset.id).slice(0, SITES_PER_TYPE));
+  check('phase3', `every water fixture (${stamped.length}) has ${SITES_PER_TYPE} sites on ${WATER_SEED}`, stamped.every((preset) => sites.filter((site) => site.presetId === preset.id).length === SITES_PER_TYPE),
+    sites.map((site) => `${site.stamps[0].type} ${round(Math.hypot(site.x, site.z) / 1000, 1)} km`).join(', '));
+  const typesPlaced = new Set(sites.map((site) => site.stamps[0].type));
+  check('phase3', 'every Phase 3 stamp type (basin, crater, terraces) is placed', ['basin', 'crater', 'terraces'].every((type) => typesPlaced.has(type)), [...typesPlaced].join(', '));
+  testShapes(world, sites);
+  testFalloff(world, sites);
+  testPaint(world, sites, WATER_SEED);
+  testSeamsAndCollision(world, sites);
+}
+
 // ---- run ---------------------------------------------------------------------------------------------------------
 const started = Date.now();
 testPhase1();
@@ -765,6 +1015,9 @@ testFalloff(stampWorld, sites);
 testPaint(stampWorld, sites);
 testSeamsAndCollision(stampWorld, sites);
 testRealPresets();
+testPhase3Worlds();
+testOverlays();
+testWaterStamps();
 testBenchmark();
 
 let failed = 0;

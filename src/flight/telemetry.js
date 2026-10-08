@@ -73,6 +73,8 @@ export function createFlightTelemetry() {
 
     onGround: false,
     contacts: 0,
+    /** Touching water: floating on it, or (for a craft that cannot float) ditching in it (all craft). */
+    onWater: false,
     stall: { warning: false, stalled: false, buffet: 0 },
     /** Airspeed above the craft's Vne: flutter shakes the airframe until it slows down. */
     overspeed: false,

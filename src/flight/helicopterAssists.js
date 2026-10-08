@@ -22,6 +22,7 @@
 import { DEG, clamp } from '../core/util.js';
 import { registerAssistCatalog, registerAssistHandler } from './assists.js';
 import { registerAutopilotHandler } from './autopilot.js';
+import { waterHeightAt } from './waterSurface.js';
 
 export const HELICOPTER_ASSISTS = Object.freeze([
   Object.freeze({ key: 'stability', name: 'trim and stability augmentation', from: 0, full: 0.5 }),
@@ -337,7 +338,7 @@ function verticalSpeedToCollective(memory, data, verticalSpeedTarget, dt) {
 function terrainAround(env, position, data, out) {
   const tuning = HELI_TUNING.TERRAIN;
   const ground = env.groundHeight;
-  const water = Number.isFinite(env.waterLevel) ? env.waterLevel : -Infinity;
+  const water = waterHeightAt(env, position.x, position.z);
   const probe = tuning.SLOPE_PROBE;
   const eastWest = ground(position.x + probe, position.z) - ground(position.x - probe, position.z);
   const northSouth = ground(position.x, position.z + probe) - ground(position.x, position.z - probe);
@@ -349,7 +350,9 @@ function terrainAround(env, position, data, out) {
   let ahead = agl;
   const velocity = data.velocity;
   for (const seconds of tuning.LOOKAHEAD_SECONDS) {
-    const surface = Math.max(ground(position.x + velocity.x * seconds, position.z + velocity.z * seconds), water);
+    const aheadX = position.x + velocity.x * seconds;
+    const aheadZ = position.z + velocity.z * seconds;
+    const surface = Math.max(ground(aheadX, aheadZ), waterHeightAt(env, aheadX, aheadZ));
     ahead = Math.min(ahead, skids - surface);
   }
   out.heightAhead = ahead;
@@ -736,7 +739,9 @@ function refreshTerrainFloor(memory, env, position, headingDegrees, dt) {
   const directionZ = -Math.cos(headingDegrees * DEG);
   let floor = -Infinity;
   for (const distance of AUTOPILOT.LOOKAHEAD) {
-    const surface = Math.max(world.groundHeight(position.x + directionX * distance, position.z + directionZ * distance), env.waterLevel);
+    const aheadX = position.x + directionX * distance;
+    const aheadZ = position.z + directionZ * distance;
+    const surface = Math.max(world.groundHeight(aheadX, aheadZ), waterHeightAt(env, aheadX, aheadZ));
     floor = Math.max(floor, surface + AUTOPILOT.CLEARANCE);
   }
   memory.terrainFloor = floor;

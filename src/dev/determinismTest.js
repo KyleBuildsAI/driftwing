@@ -23,8 +23,10 @@
 //   4. flies PATH_SECONDS of the scripted path (autopilot heading changes at fixed path times),
 //      recording the director's activation log and its running hash, every spawnActivated, spawnEnded
 //      and discovery with its frame, and a digest of the craft's position every second;
-//   5. records the site-list hash of every site within SITE_RADIUS of the spawn and of the path's end,
-//      and the same hash from a freshly built world generator on the same seed.
+//   5. records the site-list hash of every site within SITE_RADIUS of the spawn and of the path's end
+//      (version 2: with the sites' water bodies and region overlays), the same hash from a freshly
+//      built world generator on the same seed, and a digest of the shared water query's heights on a
+//      32 x 32 grid around the spawn at three flight times (ocean swell and local water bodies).
 // The first run saves its record in sessionStorage and reloads the page; the second compares.
 //
 // Criteria: identical site-list hashes (live world, fresh world, both runs), an identical activation
@@ -193,6 +195,7 @@ function createDeterminismSystem(ctx, { capture, session }) {
     return {
       siteListHash: first.siteListHash === second.siteListHash && first.siteListHash === first.freshSiteListHash && second.siteListHash === second.freshSiteListHash,
       pathEndSiteListHash: first.pathEndSiteListHash === second.pathEndSiteListHash,
+      waterDigest: first.waterDigest === second.waterDigest,
       log: logDifference === -1 && first.logHash === second.logHash && first.logLength === second.logLength,
       logDifference: logDifference === -1 ? null : { index: logDifference, first: first.log[logDifference] ?? null, second: second.log[logDifference] ?? null },
       spawnEvents: eventDifference === -1,
@@ -217,6 +220,11 @@ function createDeterminismSystem(ctx, { capture, session }) {
         id: 'sites', label: `Site-list hash (${SITE_RADIUS / 1000} km): both runs and a fresh world`,
         value: runs.map((run) => run.siteListHash).join(' / ') || 'pending',
         status: comparison ? (comparison.siteListHash && comparison.pathEndSiteListHash ? 'pass' : 'fail') : pending('muted'),
+      },
+      {
+        id: 'water', label: 'Water heights (32 x 32 grid, three times) identical',
+        value: runs.map((run) => run.waterDigest).join(' / ') || 'pending',
+        status: comparison ? (comparison.waterDigest ? 'pass' : 'fail') : pending('muted'),
       },
       {
         id: 'log', label: 'Director activation log identical',
@@ -344,11 +352,30 @@ function createDeterminismSystem(ctx, { capture, session }) {
     return { position: [round(position.x, 3), round(position.y, 3), round(position.z, 3)], velocity: [round(velocity.x, 3), round(velocity.y, 3), round(velocity.z, 3)] };
   }
 
+  /** The water query's heights (to 1 mm) on a 32 x 32 grid of 96 m around the spawn at three flight times. */
+  function waterDigest() {
+    const spawn = state.spawn;
+    const lines = [];
+    for (const time of [0, 37.5, 120]) {
+      for (let row = 0; row < 32; row++) {
+        for (let column = 0; column < 32; column++) {
+          const height = ctx.waterQuery.heightAt(spawn.x + (column - 15.5) * 96, spawn.z + (row - 15.5) * 96, time);
+          lines.push(height === -Infinity ? '-' : String(Math.round(height * 1000)));
+        }
+      }
+    }
+    return hashText(lines.join(','));
+  }
+
   function siteHashes() {
     const spawn = state.spawn;
     const live = world.sitesNear(spawn.x, spawn.z, SITE_RADIUS);
     const fresh = createWorldGen(state.seed, ctx.worldOptions);
-    return { siteListHash: hashSiteList(live), siteCount: live.length, freshSiteListHash: hashSiteList(fresh.sitesNear(spawn.x, spawn.z, SITE_RADIUS)) };
+    return {
+      siteListVersion: 2,
+      siteListHash: hashSiteList(live), siteCount: live.length, freshSiteListHash: hashSiteList(fresh.sitesNear(spawn.x, spawn.z, SITE_RADIUS)),
+      waterDigest: waterDigest(),
+    };
   }
 
   async function flyPath() {

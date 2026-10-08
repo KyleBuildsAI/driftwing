@@ -16,6 +16,7 @@
 // limited, and on engagement every loop starts from the current stick, bank and flight path, so the
 // autopilot takes over smoothly from any attitude.
 import { DEG, clamp, bearingTo, headingFromVector } from '../core/util.js';
+import { waterHeightAt } from './waterSurface.js';
 
 export const AUTOPILOT_STAGE_ORDER = 20;
 
@@ -110,9 +111,9 @@ function createFixedWingMemory() {
   };
 }
 
-/** Surface height (ground or water) at a point from the shared height function. */
-function surfaceAt(world, waterLevel, x, z) {
-  return Math.max(world.groundHeight(x, z), waterLevel);
+/** Surface height (ground or water) at a point: the shared height function and the tick's water. */
+function surfaceAt(world, env, x, z) {
+  return Math.max(world.groundHeight(x, z), waterHeightAt(env, x, z));
 }
 
 /** Heading and altitude targets: the autopilot's, a waypoint, or a lead point on the next ring's axis (v1). */
@@ -176,7 +177,7 @@ function refreshTerrain(memory, env, position, headingDegrees, trackDegrees, spe
     const directionX = Math.sin(direction * DEG);
     const directionZ = -Math.cos(direction * DEG);
     const sample = (distance) => {
-      const needed = surfaceAt(world, env.waterLevel, position.x + directionX * distance, position.z + directionZ * distance) + clearance;
+      const needed = surfaceAt(world, env, position.x + directionX * distance, position.z + directionZ * distance) + clearance;
       floor = Math.max(floor, needed);
       if (distance > 60) gradient = Math.max(gradient, (needed - position.y) / distance);
     };
@@ -202,7 +203,7 @@ function lowerSide(env, position, headingDegrees) {
   for (const distance of [600, 1200, 2000]) {
     for (const side of [-1, 1]) {
       const direction = (headingDegrees + side * FIXED_WING.EVADE_HEADING) * DEG;
-      const height = surfaceAt(env.world, env.waterLevel, position.x + Math.sin(direction) * distance, position.z - Math.cos(direction) * distance);
+      const height = surfaceAt(env.world, env, position.x + Math.sin(direction) * distance, position.z - Math.cos(direction) * distance);
       if (side < 0) left = Math.max(left, height);
       else right = Math.max(right, height);
     }

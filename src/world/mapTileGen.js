@@ -6,8 +6,10 @@
 // and z) is (x, z), size metres on a side, at resolution x resolution points (cell centres, row-major,
 // rows running south: index = row * resolution + column). It returns the requested fields:
 //   height  Float32Array   terrain height (m), the shared heightAt, stamps included
-//   color   Uint8ClampedArray RGBA, sRGB: the terrain's own face colours (faceColor) under a shaded relief
-//           lit from the north-west, and water tinted by depth
+//   color   Uint8ClampedArray RGBA, sRGB: the terrain's own face colours (faceColor, region overlays
+//           included) under a shaded relief lit from the north-west, the sea tinted by depth, and the
+//           local water bodies (worldgen.waterBodyAt: lakes, pools, films, frozen lakes) in their own
+//           tint, deeper toward the middle
 //   biome   Uint8Array     dominant biome index (world.BIOMES order) from the shared climate
 //   surface Float32Array   the visible surface height (m): the terrain, or the water level over it (the
 //           sea, and from Phase 3 the static level of a local water body, world.waterBodyAt)
@@ -33,6 +35,8 @@ export const MAP_TILE_MAX_RESOLUTION = 512;
 const WATER_SHALLOW = Object.freeze([88, 168, 172]);
 const WATER_OPEN = Object.freeze([46, 116, 146]);
 const WATER_DEEP = Object.freeze([26, 70, 104]);
+// Local water bodies without a tint of their own (sRGB hex), as the waterBodies renderer draws them.
+const BODY_TINTS = Object.freeze({ lake: 0x2f8f9a, pool: 0x3fb5b0, thin: 0xbcd2d8, ice: 0xbcd6e6 });
 // Relief light: from the north-west (-x, -z), 45 degrees up.
 const LIGHT_X = -0.5;
 const LIGHT_Y = Math.SQRT1_2;
@@ -60,10 +64,16 @@ function hashText(text) {
 
 /**
  * A tag that changes whenever tiles of the same place would differ: the seed, the tile version and the
- * placement data of the presets (their sites and stamps shape the terrain).
+ * placement data of the presets (their sites and stamps shape the terrain; their water bodies and
+ * region overlays colour it). A preset without waters or overlays hashes as before Phase 3, so the
+ * tiles cached for such worlds stay valid.
  */
 export function mapTileCacheTag(seed, presets = PRESETS) {
-  const placement = presets.map((preset) => [preset.id, preset.kind, preset.placement ?? null, preset.stamps ?? null]);
+  const placement = presets.map((preset) => {
+    const entry = [preset.id, preset.kind, preset.placement ?? null, preset.stamps ?? null];
+    if (preset.waters || preset.overlays) entry.push(preset.waters ?? null, preset.overlays ?? null);
+    return entry;
+  });
   return `${String(seed).toUpperCase()}|v${MAP_TILE_VERSION}|${hashText(JSON.stringify(placement))}`;
 }
 
@@ -185,7 +195,10 @@ export function createMapTileGenerator(world) {
     }
   }
 
-  /** RGBA sRGB face colours without relief, water by depth (alpha 0 water, 255 land). */
+  /**
+   * RGBA sRGB face colours without relief, the sea by depth and a local water body in its own tint (as
+   * the relief colours draw it); alpha 0 marks liquid water, 255 land and ice (a frozen lake has no glint).
+   */
   function albedo(lattice, levels, x, z, step, resolution, border) {
     const color = new Uint8ClampedArray(resolution * resolution * 4);
     for (let row = 0; row < resolution; row++) {
@@ -196,8 +209,10 @@ export function createMapTileGenerator(world) {
         const height = lattice[centre];
         const out = index * 4;
         if (height < levels[index]) {
-          writeWater(color, out, levels[index] - height);
-          color[out + 3] = 0;
+          const body = levels[index] > waterLevel ? waterBodyAt(x + (column + 0.5) * step, sampleZ) : null;
+          if (body) shadeBody(body, levels[index] - height, color, out);
+          else writeWater(color, out, levels[index] - height);
+          color[out + 3] = body && body.material === 'ice' ? 255 : 0;
           continue;
         }
         const slopeX = (lattice[centre + 1] - lattice[centre - 1]) / (2 * step);
@@ -211,6 +226,20 @@ export function createMapTileGenerator(world) {
       }
     }
     return color;
+  }
+
+  /**
+   * A local water body's colour into color[out..out+2]: its tint (or the default of its kind), lighter
+   * over the shallows and darker toward the middle; ice is flat and pale.
+   */
+  function shadeBody(body, depth, color, out) {
+    const tint = body.tint ?? (body.material === 'ice' ? BODY_TINTS.ice : BODY_TINTS[body.kind] ?? BODY_TINTS.lake);
+    const toDeep = body.material === 'ice' ? 0 : smoothstep(0.5, 9, depth);
+    const shallow = body.material === 'ice' ? 1 : 1.12;
+    const scale = shallow + (0.62 - shallow) * toDeep;
+    color[out] = ((tint >> 16) & 255) * scale;
+    color[out + 1] = ((tint >> 8) & 255) * scale;
+    color[out + 2] = (tint & 255) * scale;
   }
 
   /** RGBA sRGB colours: face colours with a shaded relief (exaggerated on coarse tiles), water by depth. */
@@ -227,6 +256,13 @@ export function createMapTileGenerator(world) {
         const slopeZ = (lattice[centre + border] - lattice[centre - border]) / (2 * step);
         const out = (row * resolution + column) * 4;
         color[out + 3] = 255;
+        if (world.hasWaters) {
+          const body = world.waterBodyAt(x + (column + 0.5) * step, sampleZ);
+          if (body !== null && body.level > waterLevel) {
+            shadeBody(body, body.level - height, color, out);
+            continue;
+          }
+        }
         if (height < waterLevel) {
           const depth = waterLevel - height;
           const toOpen = smoothstep(0, 6, depth);

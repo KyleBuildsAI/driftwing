@@ -26,6 +26,13 @@
 // preset, which must cover all six stamp types (the volcano's cone, the slot canyon's carve, the
 // waterfall's cliff step, the rope bridge's gorge, the airfield's flatten strip and the floating
 // islands' islet bases); a type no real preset uses fails the coverage criterion by name.
+// Phase 3: the fixtures also hold the water and overlay fixtures of waterFixtures.js, so the basin,
+// crater and terraces stamps (and a salt-flat film on a flatten strip) get the same rows, and every
+// overlay-only fixture site gets a row of its own (its overlay's centre stands in for the stamp's
+// key point): offline seams, live parity (the chunk `overlay` attribute included), live seams and
+// collision around it. The overlays criterion needs every overlay kind (palette, vegetation,
+// material, tint sweep, stripes) found and its rows passed, and the overlay attribute seen live. With
+// ?presets=real the Phase 3 stamp types no real preset uses yet (wave 3 adds them) are listed, not failed.
 // Criteria: fixtures placed (every stamp type within SEARCH_RADIUS of the spawn), 0 offline and live
 // seam violations, worker parity exact, collision within 0.5 m, every LOD seen per stamp type, every
 // pose settled, 0 console errors and 0 warnings, and no harness problems.
@@ -41,6 +48,7 @@ import { STAMP_TYPES } from '../world/stamps.js';
 import { installConsoleCapture } from './testConsole.js';
 import { createTestPanel } from './testPanel.js';
 import { FIXTURE_STAMP_TYPE, TERRAIN_FIXTURES } from './terrainFixtures.js';
+import { OVERLAY_FIXTURE_KINDS, WATER_FIXTURES, WATER_FIXTURE_STAMP_TYPE } from './waterFixtures.js';
 import { PRESETS } from '../spawns/presets/index.js';
 import {
   buildChunkMesh, checkSeam, checkSkirtAttachment, compareMeshBuffers, extractEdges, meshHeightAt, seamPairApplies, terrainBuilderConfig,
@@ -48,7 +56,13 @@ import {
 
 export const TEST_DATABASE = 'driftwing-v2-test-terrain';
 const REPORT_KIND = 'driftwing-terrain-test';
-const REPORT_VERSION = 1;
+const REPORT_VERSION = 2;
+/** The fixtures' world: one site per stamp type, the water bodies and the overlays. */
+const ALL_FIXTURES = Object.freeze([...TERRAIN_FIXTURES, ...WATER_FIXTURES]);
+const ALL_STAMP_TYPES = Object.freeze({ ...FIXTURE_STAMP_TYPE, ...WATER_FIXTURE_STAMP_TYPE });
+/** Stamp types a real preset may not use yet: the Phase 3 ones, until the wave 3 presets land. */
+const PHASE3_STAMP_TYPES = Object.freeze(['basin', 'crater', 'terraces']);
+const OVERLAY_KINDS = Object.freeze(['palette', 'vegetation', 'material', 'tintSweep', 'stripes']);
 /** Fixture sites are looked for this far from the spawn (m). */
 const SEARCH_RADIUS = 40000;
 const COLLISION_LIMIT_M = 0.5;
@@ -72,14 +86,16 @@ const CHUNK = CONFIG.CHUNK_SIZE;
  */
 function testPresetSet() {
   const real = new URLSearchParams(window.location.search).get('presets') === 'real';
-  if (!real) return { real, presets: TERRAIN_FIXTURES, types: STAMP_TYPES, stampTypeOf: (presetId) => FIXTURE_STAMP_TYPE[presetId] };
+  if (!real) return { real, presets: ALL_FIXTURES, types: STAMP_TYPES, stampTypeOf: (presetId) => ALL_STAMP_TYPES[presetId] ?? 'overlay' };
   const presets = PRESETS.filter((preset) => preset.kind === 'site' && (preset.stamps ?? []).length > 0);
   const typeById = new Map(presets.map((preset) => [preset.id, preset.stamps[0].type]));
   // Every stamp type the terrain knows must be covered: a type no real preset uses fails the
   // coverage criterion by name (unusedTypes) instead of dropping out of the test unnoticed.
-  const types = STAMP_TYPES.slice();
-  const unusedTypes = STAMP_TYPES.filter((type) => !presets.some((preset) => preset.stamps.some((stamp) => stamp.type === type)));
-  return { real, presets, types, unusedTypes, stampTypeOf: (presetId) => typeById.get(presetId) };
+  const usedBy = (type) => presets.some((preset) => preset.stamps.some((stamp) => stamp.type === type));
+  const pendingTypes = PHASE3_STAMP_TYPES.filter((type) => !usedBy(type));
+  const types = STAMP_TYPES.filter((type) => !pendingTypes.includes(type));
+  const unusedTypes = types.filter((type) => !usedBy(type));
+  return { real, presets, types, unusedTypes, pendingTypes, stampTypeOf: (presetId) => typeById.get(presetId) };
 }
 
 /**
@@ -91,7 +107,7 @@ export function prepareTerrainTest() {
   const set = testPresetSet();
   return {
     databaseName: TEST_DATABASE,
-    worldPresets: set.real ? null : TERRAIN_FIXTURES,
+    worldPresets: set.real ? null : ALL_FIXTURES,
     createSystem: (ctx) => createTerrainTestSystem(ctx, { capture, set }),
   };
 }
@@ -159,11 +175,21 @@ function createTerrainTestSystem(ctx, { capture, set }) {
     const everyLod = set.types.every((type) => lodsByType.has(type) && lodsByType.get(type).size === LOD_COUNT);
     const unsettled = livePoses.filter((pose) => !pose.settled).length;
     const counts = capture.counts;
+    const overlayRows = rows.filter((row) => row.overlayKinds.length > 0);
+    const kindsFound = new Set(overlayRows.flatMap((row) => row.overlayKinds));
+    const attributeSeen = rows.reduce((seen, row) => ({ sweep: seen.sweep || row.live.overlaySeen.sweep, material: seen.material || row.live.overlaySeen.material, stripe: seen.stripe || row.live.overlaySeen.stripe }), { sweep: false, material: false, stripe: false });
+    const overlayCriterion = set.real ? [] : [{
+      id: 'overlays',
+      label: 'Overlay sites (every kind): rows passed, attribute seen live',
+      value: `${OVERLAY_KINDS.filter((kind) => kindsFound.has(kind)).length} / ${OVERLAY_KINDS.length} kinds, ${overlayRows.filter((row) => row.passed).length} / ${overlayRows.length} rows, live sweep ${attributeSeen.sweep ? 'yes' : 'no'}, ice ${attributeSeen.material ? 'yes' : 'no'}, stripes ${attributeSeen.stripe ? 'yes' : 'no'}`,
+      status: OVERLAY_KINDS.every((kind) => kindsFound.has(kind)) && overlayRows.every((row) => row.passed) && attributeSeen.sweep && attributeSeen.material && attributeSeen.stripe ? 'pass' : 'fail',
+    }];
     return [
+      ...overlayCriterion,
       {
         id: 'fixtures',
         label: set.real ? 'Real preset sites (every stamp type)' : 'Fixture sites (every stamp type)',
-        value: `${typesFound.size} / ${set.types.length} types${set.unusedTypes && set.unusedTypes.length > 0 ? ` (no real preset uses ${set.unusedTypes.join(', ')})` : ''}`,
+        value: `${set.types.filter((type) => typesFound.has(type)).length} / ${set.types.length} types${set.unusedTypes && set.unusedTypes.length > 0 ? ` (no real preset uses ${set.unusedTypes.join(', ')})` : ''}${set.pendingTypes && set.pendingTypes.length > 0 ? ` (awaiting the wave 3 presets: ${set.pendingTypes.join(', ')})` : ''}`,
         status: world.hasStamps && everyType ? 'pass' : 'fail',
       },
       { id: 'seams', label: 'Offline seams, every LOD pair', value: `${offlineViolations} cracks`, status: rows.length > 0 && offlineViolations === 0 ? 'pass' : 'fail' },
@@ -343,6 +369,7 @@ function createTerrainTestSystem(ctx, { capture, set }) {
         resolution: builderConfig.lodResolutions[lod],
         positions: child.geometry.attributes.position.array,
         colors: child.geometry.attributes.color.array,
+        overlays: child.geometry.attributes.overlay.array,
       });
     }
     return found;
@@ -363,6 +390,12 @@ function createTerrainTestSystem(ctx, { capture, set }) {
       const reference = buildChunkMesh(builder, builderConfig, chunk.cx, chunk.cz, chunk.lod);
       live.parityWorst = Math.max(live.parityWorst, compareMeshBuffers(chunk, reference));
       live.parityChunks++;
+      // The overlay attribute the worker filled: which kinds it carries here.
+      for (let index = 0; index < chunk.overlays.length; index += 4) {
+        if (chunk.overlays[index] - Math.floor(chunk.overlays[index]) > 0) live.overlaySeen.sweep = true;
+        if (chunk.overlays[index + 2] > 0.5) live.overlaySeen.material = true;
+        if (chunk.overlays[index + 3] > 0.5) live.overlaySeen.stripe = true;
+      }
     }
     // Seams between displayed neighbours, at whatever LODs they show.
     const edges = new Map();
@@ -434,6 +467,27 @@ function createTerrainTestSystem(ctx, { capture, set }) {
     };
   }
 
+  /**
+   * An overlay-only site's stand-in for a stamp: its overlay's centre as the key point and a square of
+   * 760 m around it as the bounds the live checks look at.
+   */
+  function overlayRegion(overlay) {
+    const half = 380;
+    return {
+      type: 'overlay',
+      index: 0,
+      x: overlay.x,
+      z: overlay.z,
+      dirX: 0,
+      dirZ: -1,
+      minX: overlay.x - half,
+      maxX: overlay.x + half,
+      minZ: overlay.z - half,
+      maxZ: overlay.z + half,
+      keyPoints: [{ x: overlay.x, z: overlay.z }],
+    };
+  }
+
   function newRow(site, stamp, index) {
     return {
       index,
@@ -441,9 +495,10 @@ function createTerrainTestSystem(ctx, { capture, set }) {
       presetId: site.presetId,
       type: stamp.type,
       stampIndex: stamp.index,
+      overlayKinds: OVERLAY_FIXTURE_KINDS[site.presetId] && stamp.index === 0 ? OVERLAY_FIXTURE_KINDS[site.presetId].slice() : [],
       distance: Math.round(Math.hypot(site.x - state.spawn.x, site.z - state.spawn.z)),
       offline: { chunks: 0, seams: 0, phase1Skipped: 0, violations: 0, maxSharedDiff: 0, maxGap: 0, worstCoverage: Infinity, worstAttachment: 0, collisionWorst: 0 },
-      live: { chunks: 0, seams: 0, seamViolations: 0, worstCoverage: Infinity, lodPairs: {}, lodsSeen: new Set(), parityChunks: 0, parityWorst: 0, collisionSamples: 0, collisionWorst: 0 },
+      live: { chunks: 0, seams: 0, seamViolations: 0, worstCoverage: Infinity, lodPairs: {}, lodsSeen: new Set(), parityChunks: 0, parityWorst: 0, collisionSamples: 0, collisionWorst: 0, overlaySeen: { sweep: false, material: false, stripe: false } },
       passed: false,
     };
   }
@@ -469,7 +524,7 @@ function createTerrainTestSystem(ctx, { capture, set }) {
     const near = world.sitesNear(state.spawn.x, state.spawn.z, SEARCH_RADIUS);
     siteListHash = hashSiteList(near);
     sites = set.presets.map((preset) => near.find((site) => site.presetId === preset.id)).filter(Boolean);
-    const stamps = sites.flatMap((site) => site.stamps.map((stamp) => ({ site, stamp })));
+    const stamps = sites.flatMap((site) => (site.stamps.length > 0 ? site.stamps.map((stamp) => ({ site, stamp })) : site.overlays.slice(0, 1).map((overlay) => ({ site, stamp: overlayRegion(overlay) }))));
     total = stamps.length * (1 + LIVE_OFFSETS.length);
     ctx.setPhotoMode(true);
     await waitFrames(3);

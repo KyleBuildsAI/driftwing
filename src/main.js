@@ -39,6 +39,8 @@ import { createTerrainSystem } from './world/terrain.js';
 import { createUISystem } from './ui/ui.js';
 import { createVortexEngine } from './spawns/engines/vortexEngine.js';
 import { createWaterSystem } from './render/water.js';
+import { createWaterBodySystem } from './render/waterBodies.js';
+import { createWaterQuery } from './world/waterQuery.js';
 import { createWaterEffectEngine } from './spawns/engines/waterEffectEngine.js';
 import { createWaypointSystem } from './gameplay/waypoints.js';
 import { createWeatherSystem } from './spawns/weather.js';
@@ -86,7 +88,8 @@ const SPAWN_ENGINE_FACTORIES = Object.freeze([
  * Dev-only verification harnesses: ?test=1 (flight test), ?test=hotas (HOTAS pipeline test),
  * ?test=terrain (terrain stamps: seams, worker parity, collision), ?test=sites (the terrain
  * fixtures' stamped world with no harness, for engine step files that need real stamped sites),
- * ?test=determinism (the same seed and scripted path in two page loads: site list and director log)
+ * ?test=waters (the water-body and overlay fixtures' world with no harness, for
+ * tools/steps/water-bodies.json), ?test=determinism (the same seed and scripted path in two page loads: site list and director log)
  * and ?test=spawns (each of the 30 presets force-spawned ahead, shown and disposed back to baseline).
  * Loaded on demand from dev builds only, so none exists in production builds. Returns
  * { databaseName, createSystem(ctx), worldPresets? } or null; worldPresets (fixture presets) replace
@@ -98,6 +101,7 @@ async function loadDevTest(params) {
   if (test === 'hotas') return (await import('./dev/hotasTest.js')).prepareHotasTest({ params });
   if (test === 'terrain') return (await import('./dev/terrainTest.js')).prepareTerrainTest({ params });
   if (test === 'sites') return (await import('./dev/structureTestKit.js')).prepareSiteWorld();
+  if (test === 'waters') return (await import('./dev/waterBodiesTest.js')).prepareWaterWorld();
   if (test === 'determinism') return (await import('./dev/determinismTest.js')).prepareDeterminismTest({ params });
   if (test === 'spawns') return (await import('./dev/spawnsTest.js')).prepareSpawnsTest({ params });
   return null;
@@ -300,6 +304,7 @@ async function boot() {
 
   const perf = createPerfGovernor(ctx, { devHooks });
   ctx.perf = perf;
+  ctx.waterQuery = createWaterQuery({ world, windDirection: uniforms.windDirection.value, clock: state.time });
   refreshProbe.then(
     (result) => perf.setMeasuredRefresh(result),
     (error) => {
@@ -382,6 +387,7 @@ async function boot() {
     ['terrain', createTerrainSystem],
     ['farField', createFarFieldSystem],
     ['water', createWaterSystem],
+    ['waterBodies', createWaterBodySystem],
     ['clouds', createCloudSystem],
     ['birds', createBirdSystem],
     // After wind (ctx.wind) and sky: spawn engines write wind sources and read the sky.

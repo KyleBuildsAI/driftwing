@@ -36,6 +36,7 @@ import { createWindField } from '../../src/env/WindField.js';
 import { createWorldGen } from '../../src/world/worldgen.js';
 import { createGroundSurfaces } from '../../src/world/groundSurfaces.js';
 import { createWaterEffects } from '../../src/render/waterEffects.js';
+import { createWaterQuery } from '../../src/world/waterQuery.js';
 import { createEngineRegistry } from '../../src/spawns/engineRegistry.js';
 import { createSpawnManager } from '../../src/spawns/spawnManager.js';
 import { createVortexEngine } from '../../src/spawns/engines/vortexEngine.js';
@@ -105,7 +106,9 @@ function createLab(seed, { sunElevation = 50 } = {}) {
     player: { position: new THREE.Vector3(), forward: new THREE.Vector3(0, 0, -1), right: new THREE.Vector3(1, 0, 0), up: new THREE.Vector3(0, 1, 0), velocity: new THREE.Vector3(), heading: 0, speed: 0 },
   };
   const wind = createWindField({ world, uniforms, state, bus });
-  const water = createWaterEffects({ THREE, TSL, scene, camera, state, uniforms, world, systems: {}, registerPrewarm() {} });
+  const waterQuery = createWaterQuery({ world, windDirection: uniforms.windDirection.value, clock: state.time });
+  const water = createWaterEffects({ THREE, TSL, scene, camera, state, uniforms, world, waterQuery, systems: {}, registerPrewarm() {} });
+  waterQuery.attachEffects(water);
   const registry = createEngineRegistry();
   const manager = createSpawnManager({
     THREE, TSL, scene, camera, renderer: { info: { memory: { geometries: 0, textures: 0 } } }, backend: 'WebGPU', wind, audio: null, world, state,

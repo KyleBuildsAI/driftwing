@@ -31,8 +31,11 @@ export const JOURNAL_STAT_OPS = Object.freeze(['min', 'max', 'add']);
 export const EVENT_TYPES = Object.freeze({
   /** A different craft is now flying. */
   craftChanged: { craft: 'string', previous: 'string' },
-  /** Touchdown graded by sink rate (m/s, positive down) and side load. */
-  landed: { grade: LANDING_GRADES, craft: 'string', sinkRate: 'number', groundSpeed: 'number', position: 'vector3' },
+  /**
+   * Touchdown graded by sink rate (m/s, positive down) and side load. surface (optional, 'ground' when
+   * absent): what it touched down on; a floating craft's touchdown on water is graded the same way.
+   */
+  landed: { grade: LANDING_GRADES, craft: 'string', sinkRate: 'number', groundSpeed: 'number', position: 'vector3', surface: { type: ['ground', 'water', 'structure', 'perch'], optional: true } },
   /** Terrain or water impact handled by fade and respawn. */
   softCrash: { craft: 'string', reason: 'string', impactSpeed: 'number', position: 'vector3' },
   /**

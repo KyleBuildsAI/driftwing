@@ -26,6 +26,10 @@ import { createInstancedPool, createSlotAllocator } from '../spawns/pools.js';
  *
  * With nothing registered and an empty trail buffer every added term is exactly zero, so the ocean
  * renders exactly as in Phase 1; the shader work is also skipped then (uniform branches).
+ * Water heights come from the shared water query (ctx.waterQuery): the craft's contact trail and its
+ * downwash stir the ocean AND the local water bodies (foam on a lake, glow only on the ocean, where
+ * bioluminescence lives), droplets fall back onto the water they rose from, and a splash on a lake
+ * starts at the lake's level. The lake material reads the trail buffer's foam through nodes.trailFoam.
  * Every spawn-facing call takes plain numbers or a descriptor object the caller built once, so the
  * callers' frame updates allocate nothing (the numeric shorthands box their arguments when V8 does
  * not inline the call, so frequent writers use the mark form). The layer's own frame work allocates
@@ -112,16 +116,19 @@ const SPRAY_NOISE_SIZE = 4096;
 
 /**
  * Creates the water effects layer. ctx: the game ctx (THREE, TSL, scene, camera, state, uniforms,
- * world, systems.sky, registerPrewarm).
+ * waterQuery, systems.sky, registerPrewarm).
  */
 export function createWaterEffects(ctx) {
-  const { THREE: T, TSL: L, scene, state, uniforms, world } = ctx;
+  const { THREE: T, TSL: L, scene, state, uniforms } = ctx;
   const {
     Fn, If, uniform, uniformArray, float, vec3, vec4, sin, cos, atan, log, exp, length, max, min,
     smoothstep, saturate, mix, texture, mx_noise_float, varying, positionGeometry, abs, uv, pow, oneMinus,
     instancedDynamicBufferAttribute, normalize, dot, reflect, cameraViewMatrix, positionView, color,
   } = L;
   const waterLevel = CONFIG.WATER_LEVEL;
+  const waterQuery = ctx.waterQuery;
+  // The static water level (lake or sea, -Infinity on land) of an emit or splash point, written here.
+  const levelScratch = new Float64Array(1);
 
   // =============================================================================================
   // TRAIL BUFFER
@@ -337,6 +344,8 @@ export function createWaterEffects(ctx) {
   const regionCount = uniform(0);
   const trailsActive = uniform(0);
   const trailOrigin = uniform(new T.Vector2());
+  // The ocean grid's anchor (world xz) the trail coordinates are relative to, for nodes.trailFoam.
+  const trailAnchor = uniform(new T.Vector2());
   // The flow clock (s, wrapped hourly) and the glow visibility (night): one vec2 updated in place.
   const effectClock = uniform(new T.Vector2());
   const flowTime = effectClock.x;
@@ -526,6 +535,24 @@ export function createWaterEffects(ctx) {
     return saturate(darken).mul(0.6);
   });
 
+  /**
+   * Foam (0..1) from the trail buffer at a world-space xz node (the lake material's craft trail): the
+   * same texels, lace and window fade as the ocean's trail foam, exactly zero while no row holds
+   * anything.
+   */
+  const trailFoamFn = Fn(([worldXZ]) => {
+    const foam = float(0).toVar();
+    If(trailsActive.greaterThan(0.5), () => {
+      const p = worldXZ.sub(trailAnchor);
+      const trail = texture(trailTexture, p.add(trailOrigin).div(TRAIL_SPAN)).g;
+      const window = max(abs(p.x), abs(p.y));
+      const fade = oneMinus(smoothstep(TRAIL_SPAN * 0.38, TRAIL_SPAN * 0.48, window));
+      const lace = mx_noise_float(vec3(p.add(trailOrigin).mul(0.35), flowTime.mul(0.25)));
+      foam.assign(trail.mul(saturate(lace.mul(0.8).add(0.65))).mul(fade));
+    });
+    return foam;
+  });
+
   const nodes = {
     /** Vertex stage: height offset (m) at the undisplaced grid-local xz. */
     displacement: (localXZ) => displacementFn(localXZ),
@@ -533,6 +560,8 @@ export function createWaterEffects(ctx) {
     surface: (waveHeight) => surfaceFn(gridPosition, waveHeight),
     /** Fragment stage: 0..1 darkening inside vortex funnels. */
     darken: () => funnelDarkenFn(gridPosition),
+    /** Fragment stage: the craft-trail foam (0..1) at a world-space xz node (local water bodies). */
+    trailFoam: (worldXZ) => trailFoamFn(worldXZ),
     glowColor,
     foamColor,
   };
@@ -585,6 +614,8 @@ export function createWaterEffects(ctx) {
   const dropletAlpha = new Float32Array(DROPLETS);
   const dropletGlow = new Float32Array(DROPLETS);
   const dropletSeed = new Float32Array(DROPLETS);
+  /** The water level a droplet falls back onto (its emit point's lake or sea; -Infinity over land). */
+  const dropletFloor = new Float32Array(DROPLETS);
   let dropletCursor = 0;
   let liveDroplets = 0;
   let dropletHighWater = 0;
@@ -621,6 +652,7 @@ export function createWaterEffects(ctx) {
    */
   function emitSpray(spray) {
     const count = Math.max(0, Math.floor(spray.count));
+    waterQuery.staticLevelInto(spray.x, spray.z, levelScratch, 0);
     let emitted = 0;
     for (let index = 0; index < count; index++) {
       const slot = claimDroplet();
@@ -652,6 +684,7 @@ export function createWaterEffects(ctx) {
       dropletAlpha[slot] = spray.alpha;
       dropletGlow[slot] = spray.glow;
       dropletSeed[slot] = sprayNoise[(noise + 6) & SPRAY_NOISE_MASK];
+      dropletFloor[slot] = levelScratch[0];
       if (slot + 1 > dropletHighWater) dropletHighWater = slot + 1;
       emitted++;
     }
@@ -692,7 +725,7 @@ export function createWaterEffects(ctx) {
       dropletX[index] += dropletVelocityX[index] * dt;
       dropletY[index] += dropletVelocityY[index] * dt;
       dropletZ[index] += dropletVelocityZ[index] * dt;
-      if (dropletY[index] < waterLevel && dropletVelocityY[index] < 0 && dropletGravity[index] > 0.3) {
+      if (dropletY[index] < dropletFloor[index] && dropletVelocityY[index] < 0 && dropletGravity[index] > 0.3) {
         // Back on the water: a glowing droplet leaves a small splat.
         if (dropletGlow[index] > 0.05 && splats < DROPLET_SPLATS_PER_FRAME) {
           splatMark.x = dropletX[index];
@@ -817,26 +850,31 @@ export function createWaterEffects(ctx) {
     get lastZ() { return contactState[CONTACT_LAST_Z]; },
   };
   const contactMark = { ...MARK_DEFAULTS, radius: CONTACT_RADIUS };
+  const contactSample = { height: 0, normalX: 0, normalY: 1, normalZ: 0, velocityX: 0, velocityY: 0, velocityZ: 0, kind: 'none', bodyId: null, body: null, material: 'water', depth: 0, film: false };
 
-  /** Writes the craft's trail when it touches (or low-flies over) open water. */
+  /**
+   * Writes the craft's trail when it touches (or low-flies over) open water: the ocean or a local
+   * body at least half a metre deep (never ice). Foam everywhere; the bioluminescent excitation only
+   * on the ocean. One water query per frame.
+   */
   function updateCraftContact() {
     const craft = state.flight?.position;
     if (!craft || !Number.isFinite(craft.x) || !Number.isFinite(craft.y) || !Number.isFinite(craft.z)) return;
     contact.touching = false;
     contact.stirring = false;
-    // Funnels only lower the surface: high above the sea the funnels need not be sampled at all.
-    const aboveSea = craft.y - waterLevel;
-    const height = aboveSea > DOWNWASH_HEIGHT ? aboveSea : craft.y - surfaceHeightAt(craft.x, craft.z);
+    waterQuery.sample(craft.x, craft.z, frameState[ELAPSED], contactSample);
+    if (contactSample.kind === 'none' || contactSample.material === 'ice') {
+      contactState[CONTACT_HEIGHT_SLOT] = Infinity;
+      contact.hasLast = false;
+      return;
+    }
+    const height = craft.y - contactSample.height;
     contactState[CONTACT_HEIGHT_SLOT] = height;
-    if (height > DOWNWASH_HEIGHT) {
+    if (height > DOWNWASH_HEIGHT || contactSample.depth < 0.5) {
       contact.hasLast = false;
       return;
     }
-    // Only open water: one terrain sample per frame, and only while this low.
-    if (world.heightAt(craft.x, craft.z) > waterLevel - 0.5) {
-      contact.hasLast = false;
-      return;
-    }
+    const ocean = contactSample.kind === 'ocean';
     contactMark.x = contact.hasLast ? contactState[CONTACT_LAST_X] : craft.x;
     contactMark.z = contact.hasLast ? contactState[CONTACT_LAST_Z] : craft.z;
     contactMark.x1 = craft.x;
@@ -846,13 +884,13 @@ export function createWaterEffects(ctx) {
       contact.contacts++;
       contactMark.radius = CONTACT_RADIUS;
       contactMark.foam = 0.55;
-      contactMark.glow = 1;
+      contactMark.glow = ocean ? 1 : 0;
     } else {
       contact.stirring = true;
       const share = 1 - (height - CONTACT_HEIGHT) / (DOWNWASH_HEIGHT - CONTACT_HEIGHT);
       contactMark.radius = CONTACT_RADIUS * (1.4 + share);
-      contactMark.foam = 0;
-      contactMark.glow = 0.55 * share;
+      contactMark.foam = ocean ? 0 : 0.18 * share;
+      contactMark.glow = ocean ? 0.55 * share : 0;
     }
     writeCapsule(contactMark, true);
     contactState[CONTACT_LAST_X] = craft.x;
@@ -946,6 +984,8 @@ export function createWaterEffects(ctx) {
       surf.x = region.surf;
     }
     regionCount.value = regions;
+    trailAnchor.value.x = anchorX;
+    trailAnchor.value.y = anchorZ;
     trailOrigin.value.x = ((anchorX % TRAIL_SPAN) + TRAIL_SPAN) % TRAIL_SPAN;
     trailOrigin.value.y = ((anchorZ % TRAIL_SPAN) + TRAIL_SPAN) % TRAIL_SPAN;
     effectClock.value.x = elapsed % 3600;
@@ -979,17 +1019,7 @@ export function createWaterEffects(ctx) {
       if (rippleAge[index] < RIPPLE_LIFE_SECONDS) rippleAge[index] += step;
     }
     if (step > 0) {
-      // High above the sea (funnels only lower the surface) the contact query is a single store here;
-      // only a craft within the downwash reach runs the full query.
-      const craft = state.flight?.position;
-      const aboveSea = craft ? craft.y - waterLevel : Infinity;
-      if (aboveSea <= DOWNWASH_HEIGHT) updateCraftContact();
-      else {
-        contactState[CONTACT_HEIGHT_SLOT] = aboveSea;
-        contact.touching = false;
-        contact.stirring = false;
-        contact.hasLast = false;
-      }
+      updateCraftContact();
       decayTrails();
     }
     updateDroplets(cameraPosition);
@@ -1094,7 +1124,8 @@ export function createWaterEffects(ctx) {
       rippleAge[ripple] = 0;
       rippleStrength[ripple] = 0.35 + 0.65 * power;
       splashSpray.x = x;
-      splashSpray.y = waterLevel + 0.3;
+      waterQuery.staticLevelInto(x, z, levelScratch, 0);
+      splashSpray.y = (levelScratch[0] > -Infinity ? levelScratch[0] : waterLevel) + 0.3;
       splashSpray.z = z;
       splashSpray.count = Math.round(40 + 260 * power);
       splashSpray.speed = 6 + 14 * power;
@@ -1292,13 +1323,21 @@ export function createWaterEffects(ctx) {
       return true;
     },
     surfaceHeightAt,
+    /** Whether (x, z) has water a splash can land on: the sea or a local body (the shared water query). */
+    isWaterAt(x, z) {
+      return waterQuery.isWater(x, z);
+    },
+    /** Whether (x, z) is open ocean (no local body): bioluminescence lives only there. */
+    isOceanAt(x, z) {
+      return waterQuery.isOcean(x, z);
+    },
     /** How many whirlpool vortices are live (while 0 the surface is sea level everywhere). */
     get activeVortices() {
       return vortexSlots.used;
     },
     /**
-     * The craft's height above the water surface (m) at the last frame (above sea level while it is
-     * higher than the downwash reach), and whether it touched or stirred the water.
+     * The craft's height above the water surface below it (m, Infinity over dry land or ice) at the
+     * last frame, and whether it touched or stirred the water.
      */
     get craftContact() {
       return contact;

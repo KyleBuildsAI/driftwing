@@ -26,18 +26,42 @@
 //   gorge       length, width (top), depth, falloff (end taper), pad (anchor pads) paint 'riverbed'
 //   flatten     length, width (the strip), margin (flat apron), shoulder (falloff) paint 'tarmac'
 //   islandBase  radius, height (above the water), falloff                          paint 'basalt'
+//   basin       radius (the lake bowl), depth (rim to floor), rim (berm width), falloff  paint 'sand'
+//   crater      radius (rim crest), depth (rim to floor), rimHeight (above the ground around),
+//               rimWidth (outer flank), floor (flat floor share of the radius, 0..0.8)  paint 'ash'
+//   terraces    length (downhill), width, steps (shelf count), lip (pool rim height), falloff
+//                                                                                 paint 'travertine'
+// The basin, crater and terraces hold water: a preset's `waters` list (waters.js) fills them, and
+// their resolved records carry the reference heights the water levels are measured from (floorY,
+// rimY; the terraces' shelves).
 
-export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase']);
-export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed']);
+export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces']);
+export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed', 'salt', 'sand', 'travertine', 'mud', 'ice']);
 
-const KIND = Object.freeze({ cone: 0, carve: 1, cliffStep: 2, gorge: 3, flatten: 4, islandBase: 5 });
-const PAINT_INDEX = Object.freeze({ ash: 0, basalt: 1, wetRock: 2, tarmac: 3, riverbed: 4 });
+const KIND = Object.freeze({ cone: 0, carve: 1, cliffStep: 2, gorge: 3, flatten: 4, islandBase: 5, basin: 6, crater: 7, terraces: 8 });
+const PAINT_INDEX = Object.freeze({ ash: 0, basalt: 1, wetRock: 2, tarmac: 3, riverbed: 4, salt: 5, sand: 6, travertine: 7, mud: 8, ice: 9 });
 const TAU = Math.PI * 2;
 /** A canyon may cut at most this many depths below the ground on its path, and lift it at most this many. */
 const MAX_CANYON_CUT = 3;
 const MAX_CANYON_LIFT = 1.2;
 /** An islet's outline swings between 1 - ISLAND_LOBE_MAX and 1 + ISLAND_LOBE_MAX of its radius (3 and 7 lobes). */
 const ISLAND_LOBE_MAX = 0.2;
+/** A basin's shoreline swings between 1 - BASIN_LOBE_MAX and 1 + BASIN_LOBE_MAX of its radius (3 and 5 lobes). */
+const BASIN_LOBE_MAX = 0.14;
+/** A basin fits only where its berm lifts the lowest rim ground at most this many depths (and at least 36 m is allowed). */
+const BASIN_MAX_LIFT = 2.2;
+/** ...and where it cuts at most this many depths below the highest ground inside its rim. */
+const BASIN_MAX_CUT = 4;
+/** The rim crest sits this far (m) above the highest ground sampled on the rim. */
+const BASIN_FREEBOARD = 1.5;
+/** Terraces fit only on slopes that drop at least this much (m) per shelf, and at most TERRACE_MAX_DROP. */
+const TERRACE_MIN_DROP = 1.5;
+const TERRACE_MAX_DROP = 26;
+/** Shares of a terrace step (0 uphill .. 1 downhill): the pool floor, the lip crest, then the riser. */
+const TERRACE_POOL_END = 0.68;
+const TERRACE_LIP_END = 0.8;
+/** The flat side walls that close a terrace's pools (m, inside the width). */
+const TERRACE_SIDE_WALL = 6;
 /** A gorge fits only where the ground at both bridge anchors lies within this of its rim (m). */
 const GORGE_ANCHOR_TOLERANCE = 14;
 /** The waterfall lip's largest wander (m) and the gorge wall's (m). */
@@ -57,6 +81,9 @@ const DEFAULTS = Object.freeze({
   gorge: Object.freeze({ length: [700, 1100], width: [80, 130], depth: [80, 120], falloff: [150, 220], pad: [60, 90], paint: 'riverbed' }),
   flatten: Object.freeze({ length: [1100, 1500], width: [40, 60], margin: [30, 55], shoulder: [100, 170], paint: 'tarmac' }),
   islandBase: Object.freeze({ radius: [140, 240], height: [20, 45], falloff: [80, 130], paint: 'basalt' }),
+  basin: Object.freeze({ radius: [180, 320], depth: [14, 24], rim: [30, 50], falloff: [80, 130], paint: 'sand' }),
+  crater: Object.freeze({ radius: [320, 520], depth: [60, 110], rimHeight: [25, 45], rimWidth: [180, 300], floor: [0.25, 0.45], paint: 'ash' }),
+  terraces: Object.freeze({ length: [320, 520], width: [140, 240], steps: [5, 8], lip: [1.2, 2.4], falloff: [60, 110], paint: 'travertine' }),
 });
 
 /** Every size field per type, validated as a positive number or an ascending [min, max] range. */
@@ -67,6 +94,9 @@ const SIZE_FIELDS = Object.freeze({
   gorge: ['length', 'width', 'depth', 'falloff', 'pad'],
   flatten: ['length', 'width', 'margin', 'shoulder'],
   islandBase: ['radius', 'height', 'falloff'],
+  basin: ['radius', 'depth', 'rim', 'falloff'],
+  crater: ['radius', 'depth', 'rimHeight', 'rimWidth', 'floor'],
+  terraces: ['length', 'width', 'steps', 'lip', 'falloff'],
 });
 
 function clamp01(value) { return value < 0 ? 0 : value > 1 ? 1 : value; }
@@ -141,6 +171,7 @@ function isSize(value) {
   return Array.isArray(value) && value.length === 2 && value.every((entry) => Number.isFinite(entry) && entry >= 0) && value[0] <= value[1];
 }
 function maxOf(value) { return Array.isArray(value) ? value[1] : value; }
+function minOf(value) { return Array.isArray(value) ? value[0] : value; }
 function roll(value, random) {
   if (!Array.isArray(value)) return value;
   return value[0] + (value[1] - value[0]) * random();
@@ -176,6 +207,9 @@ export function validateStampSpec(spec, where) {
   }
   const full = withDefaults(spec);
   if (spec.type === 'cone' && maxOf(full.craterRadius) >= maxOf(full.radius) * 0.6) throw new Error(`${where}.craterRadius: must stay under 60 % of the radius`);
+  if (spec.type === 'crater' && maxOf(full.floor) > 0.8) throw new Error(`${where}.floor: must stay at or under 0.8 of the radius`);
+  if (spec.type === 'terraces' && !(minOf(full.steps) >= 2 && maxOf(full.steps) <= 16)) throw new Error(`${where}.steps: must be from 2 to 16 shelves`);
+  if (spec.type === 'basin' && minOf(full.depth) <= 0) throw new Error(`${where}.depth: must be above 0`);
 }
 
 /**
@@ -201,6 +235,15 @@ export function stampReach(spec) {
       break;
     case 'flatten':
       extent = Math.hypot(maxOf(full.length) / 2 + maxOf(full.margin) + maxOf(full.shoulder), maxOf(full.width) / 2 + maxOf(full.margin) + maxOf(full.shoulder));
+      break;
+    case 'basin':
+      extent = (maxOf(full.radius) + maxOf(full.rim) + maxOf(full.falloff)) * (1 + BASIN_LOBE_MAX);
+      break;
+    case 'crater':
+      extent = maxOf(full.radius) + maxOf(full.rimWidth);
+      break;
+    case 'terraces':
+      extent = Math.hypot(maxOf(full.length) / 2 + maxOf(full.falloff), maxOf(full.width) / 2 + maxOf(full.falloff));
       break;
     default:
       extent = (maxOf(full.radius) + maxOf(full.falloff)) * (1 + ISLAND_LOBE_MAX);
@@ -527,6 +570,140 @@ function resolveIslandBase(stamp, spec, random, context) {
   stamp.keyPoints = [{ x: stamp.x, z: stamp.z }, { x: stamp.x + stamp.dirX * radius, z: stamp.z + stamp.dirZ * radius }];
 }
 
+/**
+ * Lake basin: a lobed bowl whose rim crest sits a little above the highest ground on its rim, with a
+ * berm that lifts any lower rim ground up to the crest. Inside the rim the ground follows the bowl
+ * (cut down where higher, lifted where lower), so the bowl holds water up to the crest everywhere.
+ * It does not fit where the berm would lift the low side of the rim, or the bowl would cut into the
+ * ground inside it, by more than a few depths (a lake on a steep slope).
+ */
+function resolveBasin(stamp, spec, random, context) {
+  const radius = roll(spec.radius, random);
+  const depth = roll(spec.depth, random);
+  const rim = roll(spec.rim, random);
+  const falloff = roll(spec.falloff, random);
+  const lobePhaseA = random() * TAU;
+  const lobePhaseB = random() * TAU;
+  stamp.lobeCosA = Math.cos(lobePhaseA);
+  stamp.lobeSinA = Math.sin(lobePhaseA);
+  stamp.lobeCosB = Math.cos(lobePhaseB);
+  stamp.lobeSinB = Math.sin(lobePhaseB);
+  stamp.radius = radius;
+  stamp.depth = depth;
+  stamp.rim = rim;
+  stamp.falloff = falloff;
+  let ringHigh = -Infinity;
+  let ringLow = Infinity;
+  let innerHigh = context.baseHeight(stamp.x, stamp.z);
+  for (let index = 0; index < 12; index++) {
+    const angle = (index / 12) * TAU;
+    const sine = Math.sin(angle);
+    const cosine = Math.cos(angle);
+    const lobe = basinLobe(stamp, sine, -cosine);
+    const ring = context.baseHeight(stamp.x + sine * radius * lobe, stamp.z - cosine * radius * lobe);
+    const inner = context.baseHeight(stamp.x + sine * radius * lobe * 0.55, stamp.z - cosine * radius * lobe * 0.55);
+    if (ring > ringHigh) ringHigh = ring;
+    if (ring < ringLow) ringLow = ring;
+    if (inner > innerHigh) innerHigh = inner;
+  }
+  const rimY = Math.max(ringHigh + BASIN_FREEBOARD, context.waterLevel + 3);
+  const floorY = rimY - depth;
+  stamp.rimY = rimY;
+  stamp.floorY = floorY;
+  stamp.fits = rimY - ringLow <= Math.max(36, depth * BASIN_MAX_LIFT) && innerHigh - floorY <= depth * BASIN_MAX_CUT;
+  stamp.outerRadius = (radius + rim + falloff) * (1 + BASIN_LOBE_MAX);
+  circleBounds(stamp, stamp.outerRadius);
+  stamp.keyPoints = [
+    { x: stamp.x, z: stamp.z },
+    { x: stamp.x + stamp.dirX * radius * 0.6, z: stamp.z + stamp.dirZ * radius * 0.6 },
+    { x: stamp.x - stamp.dirZ * radius, z: stamp.z + stamp.dirX * radius },
+  ];
+}
+
+/**
+ * Impact crater: a raised rim crest at `radius` (rimHeight above the mean ground around it), a bowl
+ * `depth` below the crest with a flat floor, and an ejecta flank falling back to the ground over
+ * rimWidth. The floor stays above the sea, so a crater lake always sits in its own bowl.
+ */
+function resolveCrater(stamp, spec, random, context) {
+  const radius = roll(spec.radius, random);
+  const depth = roll(spec.depth, random);
+  const rimHeight = roll(spec.rimHeight, random);
+  const rimWidth = roll(spec.rimWidth, random);
+  const floor = Math.min(roll(spec.floor, random), 0.8);
+  let sum = 0;
+  for (let index = 0; index < 12; index++) {
+    const angle = (index / 12) * TAU;
+    sum += context.baseHeight(stamp.x + Math.sin(angle) * radius, stamp.z - Math.cos(angle) * radius);
+  }
+  const groundY = sum / 12;
+  const rimY = Math.max(groundY, context.waterLevel + 4) + rimHeight;
+  const floorY = Math.max(rimY - depth, context.waterLevel + 2);
+  stamp.radius = radius;
+  stamp.depth = rimY - floorY;
+  stamp.rimHeight = rimHeight;
+  stamp.rimWidth = rimWidth;
+  stamp.floorShare = floor;
+  stamp.groundY = groundY;
+  stamp.rimY = rimY;
+  stamp.floorY = floorY;
+  circleBounds(stamp, radius + rimWidth);
+  stamp.keyPoints = [
+    { x: stamp.x, z: stamp.z },
+    { x: stamp.x + stamp.dirX * radius, z: stamp.z + stamp.dirZ * radius },
+    { x: stamp.x - stamp.dirZ * (radius + rimWidth * 0.5), z: stamp.z + stamp.dirX * (radius + rimWidth * 0.5) },
+  ];
+}
+
+/**
+ * Terraces: `steps` flat shelves stepping down the slope along the stamp's forward axis (downhill
+ * when the preset aligns its sites downhill). Each shelf holds a pool behind a lip at its downhill
+ * edge and between two side walls; a riser drops to the next shelf. It fits only on a slope that
+ * drops between TERRACE_MIN_DROP and TERRACE_MAX_DROP per shelf.
+ */
+function resolveTerraces(stamp, spec, random, context) {
+  const length = roll(spec.length, random);
+  const width = roll(spec.width, random);
+  const steps = Math.round(roll(spec.steps, random));
+  const lip = roll(spec.lip, random);
+  const falloff = roll(spec.falloff, random);
+  const topY = context.baseHeight(stamp.x - stamp.dirX * length / 2, stamp.z - stamp.dirZ * length / 2);
+  const bottomY = context.baseHeight(stamp.x + stamp.dirX * length / 2, stamp.z + stamp.dirZ * length / 2);
+  const drop = topY - bottomY;
+  stamp.fits = drop >= steps * TERRACE_MIN_DROP && drop <= steps * TERRACE_MAX_DROP && bottomY - lip > context.waterLevel + 2;
+  const stepDrop = Math.max(drop, steps * TERRACE_MIN_DROP) / steps;
+  stamp.length = length;
+  stamp.width = width;
+  stamp.steps = steps;
+  stamp.lip = lip;
+  stamp.falloff = falloff;
+  stamp.stepLength = length / steps;
+  stamp.stepDrop = stepDrop;
+  stamp.topY = topY;
+  stamp.bottomY = topY - stepDrop * steps;
+  // Shelf k: its lip crest (the brim its pool can fill to) and its pool floor, lip below the crest.
+  const shelves = [];
+  for (let shelf = 0; shelf < steps; shelf++) {
+    const crestY = topY - stepDrop * (shelf + 0.5);
+    const startAlong = -length / 2 + shelf * stamp.stepLength;
+    shelves.push(Object.freeze({
+      index: shelf,
+      crestY,
+      floorY: crestY - lip,
+      along: startAlong + stamp.stepLength * TERRACE_POOL_END * 0.5,
+      x: stamp.x + stamp.dirX * (startAlong + stamp.stepLength * TERRACE_POOL_END * 0.5),
+      z: stamp.z + stamp.dirZ * (startAlong + stamp.stepLength * TERRACE_POOL_END * 0.5),
+    }));
+  }
+  stamp.shelves = shelves;
+  rotatedBounds(stamp, length / 2 + falloff, width / 2 + falloff);
+  stamp.keyPoints = [
+    { x: stamp.x, z: stamp.z },
+    { x: shelves[0].x, z: shelves[0].z },
+    { x: shelves[steps - 1].x, z: shelves[steps - 1].z },
+  ];
+}
+
 const RESOLVERS = Object.freeze({
   cone: resolveCone,
   carve: resolveCarve,
@@ -534,6 +711,9 @@ const RESOLVERS = Object.freeze({
   gorge: resolveGorge,
   flatten: resolveFlatten,
   islandBase: resolveIslandBase,
+  basin: resolveBasin,
+  crater: resolveCrater,
+  terraces: resolveTerraces,
 });
 
 /**
@@ -548,7 +728,8 @@ const RESOLVERS = Object.freeze({
  * and placement drops the site) and the type's own sizes and reference heights
  * (cone: baseY, peakY, rimY, craterFloorY; carve: path, entry, exit, length; cliffStep: topY,
  * bottomY, lipX/Z, poolX/Z; gorge: rimY, floorY, span, anchors; flatten: y, thresholds;
- * islandBase: topY).
+ * islandBase: topY; basin: rimY, floorY, radius; crater: rimY, floorY, radius; terraces: topY,
+ * bottomY, shelves [{ index, crestY, floorY, along, x, z }]).
  */
 export function resolveStamp(spec, site, index, random, context) {
   const full = withDefaults(spec);
@@ -584,6 +765,7 @@ export function resolveStamp(spec, site, index, random, context) {
   if (stamp.path) stamp.path = Object.freeze(stamp.path);
   if (stamp.anchors) stamp.anchors = Object.freeze(stamp.anchors);
   if (stamp.thresholds) stamp.thresholds = Object.freeze(stamp.thresholds);
+  if (stamp.shelves) stamp.shelves = Object.freeze(stamp.shelves);
   return Object.freeze(stamp);
 }
 
@@ -599,7 +781,7 @@ function rectangleDistance(stamp, x, z, halfAlong, halfAcross) {
 
 /** Half extents (along, across) of the rectangle stamp types' footprints. */
 function rectangleExtents(stamp) {
-  if (stamp.kind === 2) return [stamp.length / 2 + stamp.falloff, stamp.width / 2 + stamp.falloff];
+  if (stamp.kind === 2 || stamp.kind === 8) return [stamp.length / 2 + stamp.falloff, stamp.width / 2 + stamp.falloff];
   if (stamp.kind === 3) return [stamp.length / 2, stamp.halfWidth * 1.35 + stamp.pad * 1.1 + 10];
   return [stamp.length / 2 + stamp.margin + stamp.shoulder, stamp.width / 2 + stamp.margin + stamp.shoulder];
 }
@@ -610,7 +792,8 @@ function rectangleExtents(stamp) {
  */
 export function stampFootprintDistance(stamp, x, z) {
   if (stamp.kind === 0) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.radius);
-  if (stamp.kind === 5) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.outerRadius);
+  if (stamp.kind === 5 || stamp.kind === 6) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.outerRadius);
+  if (stamp.kind === 7) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.radius - stamp.rimWidth);
   if (stamp.kind === 1) {
     const data = stamp.data;
     let nearest = Infinity;
@@ -637,7 +820,8 @@ export function stampFootprintDistance(stamp, x, z) {
  */
 export function stampFootprintDiscs(stamp) {
   if (stamp.kind === 0) return [{ x: stamp.x, z: stamp.z, radius: stamp.radius }];
-  if (stamp.kind === 5) return [{ x: stamp.x, z: stamp.z, radius: stamp.outerRadius }];
+  if (stamp.kind === 5 || stamp.kind === 6) return [{ x: stamp.x, z: stamp.z, radius: stamp.outerRadius }];
+  if (stamp.kind === 7) return [{ x: stamp.x, z: stamp.z, radius: stamp.radius + stamp.rimWidth }];
   if (stamp.kind === 1) {
     const data = stamp.data;
     const discs = [];
@@ -897,6 +1081,169 @@ function islandBaseHeight(stamp, x, z, height) {
   return height + (target - height) * (1 - smoothstep(stamp.radius, outer, reach));
 }
 
+/** The basin's outline scale in the direction (cosAngle, sinAngle) = (dx, dz) / distance (3 and 5 lobes). */
+function basinLobe(stamp, cosAngle, sinAngle) {
+  return 1 + BASIN_LOBE_MAX * (0.6 * angularWave(cosAngle, sinAngle, 3, stamp.lobeCosA, stamp.lobeSinA) + 0.4 * angularWave(cosAngle, sinAngle, 5, stamp.lobeCosB, stamp.lobeSinB));
+}
+
+/**
+ * The distance (m) from a basin's centre to (x, z) measured against its lobed shoreline: the actual
+ * distance divided by the outline's scale in that direction, so `radius` is the bowl's edge (its
+ * rim crest) in every direction. Water bodies clip to basinReach < radius.
+ */
+export function basinReach(stamp, x, z) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const distance = Math.sqrt(dx * dx + dz * dz);
+  if (distance <= 0) return 0;
+  return distance / basinLobe(stamp, dx / distance, dz / distance);
+}
+
+/**
+ * Whether (x, z) lies inside a basin's lobed shoreline (basinReach < radius), computed without
+ * returning a double from any call (the water query's hot path stays allocation-free).
+ */
+export function basinContains(stamp, x, z) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const distanceSq = dx * dx + dz * dz;
+  const limit = stamp.radius * (1 + BASIN_LOBE_MAX);
+  if (distanceSq >= limit * limit) return false;
+  if (distanceSq === 0) return true;
+  const distance = Math.sqrt(distanceSq);
+  const cosAngle = dx / distance;
+  const sinAngle = dz / distance;
+  // The 3- and 5-lobe waves of basinLobe, written out.
+  let real = 1;
+  let imaginary = 0;
+  let waveA = 0;
+  for (let step = 1; step <= 5; step++) {
+    const nextReal = real * cosAngle - imaginary * sinAngle;
+    imaginary = real * sinAngle + imaginary * cosAngle;
+    real = nextReal;
+    if (step === 3) waveA = imaginary * stamp.lobeCosA + real * stamp.lobeSinA;
+  }
+  const waveB = imaginary * stamp.lobeCosB + real * stamp.lobeSinB;
+  return distance < stamp.radius * (1 + BASIN_LOBE_MAX * (0.6 * waveA + 0.4 * waveB));
+}
+
+/**
+ * Blends the ground toward a bowl profile: where the ground is higher it is cut toward the profile
+ * by cutMask, where lower it is lifted by liftMask (each 0..1). With both masks at 1 the result IS
+ * the profile; with both at 0 it is the ground, so the edits fade out smoothly.
+ */
+function bowlBlend(height, profile, cutMask, liftMask) {
+  return height > profile ? height - (height - profile) * cutMask : height + (profile - height) * liftMask;
+}
+
+function basinHeight(stamp, x, z, height) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const distanceSq = dx * dx + dz * dz;
+  if (distanceSq >= stamp.outerRadius * stamp.outerRadius) return height;
+  const reach = basinReach(stamp, x, z);
+  const radius = stamp.radius;
+  const outer = radius + stamp.rim + stamp.falloff;
+  if (reach >= outer) return height;
+  let profile = stamp.rimY;
+  if (reach < radius) {
+    // Flat in the middle, rounding up to the crest: zero slope at the centre and at the rim.
+    const share = reach / radius;
+    profile = stamp.floorY + stamp.depth * share * share * (3 - 2 * share);
+  }
+  // Inside the rim the bowl replaces the ground; outside it higher ground eases down toward the crest
+  // and the berm lifts lower ground up to it, both fading out over the rim and the falloff.
+  const cutMask = 1 - smoothstep(radius, outer, reach);
+  const liftMask = 1 - smoothstep(radius + stamp.rim * 0.4, outer, reach);
+  return bowlBlend(height, profile, cutMask, liftMask);
+}
+
+function craterHeight(stamp, x, z, height) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const distanceSq = dx * dx + dz * dz;
+  const outer = stamp.radius + stamp.rimWidth;
+  if (distanceSq >= outer * outer) return height;
+  const distance = Math.sqrt(distanceSq);
+  const radius = stamp.radius;
+  if (distance < radius) {
+    // The bowl: a flat floor, then walls steepening up to the crest.
+    const wall = smoothstep(stamp.floorShare * radius, radius, distance);
+    const profile = stamp.floorY + (stamp.rimY - stamp.floorY) * Math.pow(wall, 1.6);
+    return bowlBlend(height, profile, 1, 1);
+  }
+  // The ejecta flank: from the crest back down to the ground around, concave, lift only at its foot.
+  const flank = (distance - radius) / stamp.rimWidth;
+  const inward = 1 - flank;
+  const profile = stamp.groundY + (stamp.rimY - stamp.groundY) * inward * inward;
+  const cutMask = 1 - smoothstep(0, 0.3, flank);
+  const liftMask = 1 - smoothstep(0.7, 1, flank);
+  return bowlBlend(height, profile, cutMask, liftMask);
+}
+
+/**
+ * The terrace profile at a point `along` the stamp (m from its centre, downhill +) and `across` it:
+ * the pool floor of its shelf, rising to the lip crest at the downhill edge and to the side walls,
+ * then the riser down to the next shelf's pool floor.
+ */
+function terraceProfile(stamp, along, across) {
+  const fromTop = along + stamp.length / 2;
+  let shelf = Math.floor(fromTop / stamp.stepLength);
+  if (shelf < 0) shelf = 0;
+  else if (shelf >= stamp.steps) shelf = stamp.steps - 1;
+  const share = fromTop / stamp.stepLength - shelf;
+  const crestY = stamp.topY - stamp.stepDrop * (shelf + 0.5);
+  const floorY = crestY - stamp.lip;
+  let profile;
+  if (share < TERRACE_POOL_END) profile = floorY;
+  else if (share < TERRACE_LIP_END) profile = floorY + stamp.lip * smoothstep(TERRACE_POOL_END, TERRACE_LIP_END, share);
+  else {
+    // The riser: from this lip crest down to the next shelf's pool floor.
+    const nextFloor = crestY - stamp.stepDrop - stamp.lip;
+    profile = crestY + (nextFloor - crestY) * smoothstep(TERRACE_LIP_END, 1, share);
+  }
+  // The side walls close the pools at the lip crest's height, stepping down along the riser to the
+  // next shelf's crest (continuous from shelf to shelf).
+  const wall = smoothstep(stamp.width / 2 - TERRACE_SIDE_WALL, stamp.width / 2 - TERRACE_SIDE_WALL * 0.4, Math.abs(across));
+  const wallY = share < TERRACE_LIP_END ? crestY : crestY - stamp.stepDrop * smoothstep(TERRACE_LIP_END, 1, share);
+  return profile + (Math.max(profile, wallY) - profile) * wall;
+}
+
+function terracesHeight(stamp, x, z, height) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const along = dx * stamp.dirX + dz * stamp.dirZ;
+  const across = dx * -stamp.dirZ + dz * stamp.dirX;
+  const halfLength = stamp.length / 2;
+  const halfWidth = stamp.width / 2;
+  const absAlong = Math.abs(along);
+  const absAcross = Math.abs(across);
+  if (absAlong >= halfLength + stamp.falloff || absAcross >= halfWidth + stamp.falloff) return height;
+  const mask = (1 - smoothstep(halfLength, halfLength + stamp.falloff, absAlong)) * (1 - smoothstep(halfWidth, halfWidth + stamp.falloff, absAcross));
+  if (mask <= 0) return height;
+  const clampedAlong = along < -halfLength ? -halfLength : along > halfLength ? halfLength : along;
+  const clampedAcross = across < -halfWidth ? -halfWidth : across > halfWidth ? halfWidth : across;
+  const profile = terraceProfile(stamp, clampedAlong, clampedAcross);
+  return height + (profile - height) * mask;
+}
+
+/**
+ * The shelf (0 .. steps - 1) whose pool holds (x, z), or -1: inside the shelf's pool floor and lip
+ * span along the stamp and between its side walls. Water bodies on terraces clip to their shelf.
+ */
+export function terraceShelfAt(stamp, x, z) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const along = dx * stamp.dirX + dz * stamp.dirZ;
+  const across = dx * -stamp.dirZ + dz * stamp.dirX;
+  if (Math.abs(across) >= stamp.width / 2 - TERRACE_SIDE_WALL * 0.4) return -1;
+  const fromTop = along + stamp.length / 2;
+  if (fromTop < 0 || fromTop >= stamp.length) return -1;
+  const shelf = Math.floor(fromTop / stamp.stepLength);
+  const share = fromTop / stamp.stepLength - shelf;
+  return share < TERRACE_LIP_END ? shelf : -1;
+}
+
 /**
  * The height after one resolved stamp at (x, z), given the height before it. Exactly `height`
  * outside the stamp's bounds.
@@ -910,7 +1257,7 @@ export function applyStampHeight(stamp, x, z, height) {
  * worldgen's hot path keeps the kinds in a typed array and calls through this table, so each type's
  * function only ever sees stamps of one shape and its property reads stay monomorphic.
  */
-export const STAMP_HEIGHT = Object.freeze([coneHeight, carveHeight, cliffStepHeight, gorgeHeight, flattenHeight, islandBaseHeight]);
+export const STAMP_HEIGHT = Object.freeze([coneHeight, carveHeight, cliffStepHeight, gorgeHeight, flattenHeight, islandBaseHeight, basinHeight, craterHeight, terracesHeight]);
 
 /** applyStampHeight with the stamp's kind passed in. */
 function stampHeightByKind(kind, stamp, x, z, height) {
@@ -920,7 +1267,10 @@ function stampHeightByKind(kind, stamp, x, z, height) {
     case 2: return cliffStepHeight(stamp, x, z, height);
     case 3: return gorgeHeight(stamp, x, z, height);
     case 4: return flattenHeight(stamp, x, z, height);
-    default: return islandBaseHeight(stamp, x, z, height);
+    case 5: return islandBaseHeight(stamp, x, z, height);
+    case 6: return basinHeight(stamp, x, z, height);
+    case 7: return craterHeight(stamp, x, z, height);
+    default: return terracesHeight(stamp, x, z, height);
   }
 }
 
@@ -1040,6 +1390,39 @@ function paintIslandBase(stamp, x, z, out) {
   }
 }
 
+function paintBasin(stamp, x, z, out) {
+  const reach = basinReach(stamp, x, z);
+  // The lake bed and a beach along its shore, fading out just past the rim crest.
+  const weight = 1 - smoothstep(stamp.radius * 0.84, stamp.radius * 1.02, reach);
+  if (weight > out.weight) {
+    out.weight = weight;
+    out.paintIndex = stamp.paintIndex;
+  }
+}
+
+function paintCrater(stamp, x, z, out) {
+  const distance = Math.hypot(x - stamp.x, z - stamp.z);
+  // The bowl and the ejecta blanket thinning out down the flank.
+  const weight = 1 - smoothstep(stamp.radius + stamp.rimWidth * 0.25, stamp.radius + stamp.rimWidth * 0.7, distance);
+  if (weight > out.weight) {
+    out.weight = weight;
+    out.paintIndex = stamp.paintIndex;
+  }
+}
+
+function paintTerraces(stamp, x, z, out) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const along = Math.abs(dx * stamp.dirX + dz * stamp.dirZ);
+  const across = Math.abs(dx * -stamp.dirZ + dz * stamp.dirX);
+  const weight = (1 - smoothstep(stamp.length / 2 - 4, stamp.length / 2 + stamp.falloff * 0.3, along))
+    * (1 - smoothstep(stamp.width / 2 - 4, stamp.width / 2 + stamp.falloff * 0.3, across));
+  if (weight > out.weight) {
+    out.weight = weight;
+    out.paintIndex = stamp.paintIndex;
+  }
+}
+
 /**
  * Raises out.weight / out.paintIndex to this stamp's paint at (x, z) when it is stronger there
  * (weights 0..1). Stamps without a paint leave `out` alone.
@@ -1057,6 +1440,9 @@ export function accumulateStampPaintByKind(kind, stamp, x, z, out) {
     case 2: paintCliffStep(stamp, x, z, out); return;
     case 3: paintGorge(stamp, x, z, out); return;
     case 4: paintFlatten(stamp, x, z, out); return;
-    default: paintIslandBase(stamp, x, z, out);
+    case 5: paintIslandBase(stamp, x, z, out); return;
+    case 6: paintBasin(stamp, x, z, out); return;
+    case 7: paintCrater(stamp, x, z, out); return;
+    default: paintTerraces(stamp, x, z, out);
   }
 }

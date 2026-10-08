@@ -1,0 +1,167 @@
+[
+  {
+    "wait": 2500
+  },
+  {
+    "eval": "(async () => { try { const kit = await import('/src/dev/waterBodiesTest.js'); const api = kit.installWaterChecks(window.DRIFTWING); return 'dev server with ?test=waters&seed=HARNESS-1: imports /src/dev/waterBodiesTest.js | ' + api.setup(); } catch (error) { console.error('[waters check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureLake', {\"distance\":1.1,\"height\":0.4,\"bearing\":210}); } catch (error) { console.error('[waters check] show fixtureLake failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-lake"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveBody('fixtureLake'); } catch (error) { console.error('[waters check] prove fixtureLake failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureLake', {\"distance\":0.45,\"height\":0.25,\"bearing\":30}); } catch (error) { console.error('[waters check] show fixtureLake failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-lake-shore"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveSpecies([6]); } catch (error) { console.error('[waters check] prove fixtureLake failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureCraterLake', {\"distance\":1.2,\"height\":0.55,\"bearing\":200}); } catch (error) { console.error('[waters check] show fixtureCraterLake failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-crater-lake"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveBody('fixtureCraterLake'); } catch (error) { console.error('[waters check] prove fixtureCraterLake failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureTerraces', {\"distance\":1.6,\"height\":0.6,\"bearing\":160}); } catch (error) { console.error('[waters check] show fixtureTerraces failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-terraces"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveBody('fixtureTerraces'); } catch (error) { console.error('[waters check] prove fixtureTerraces failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureFrozenLake', {\"distance\":1.1,\"height\":0.4,\"bearing\":220}); } catch (error) { console.error('[waters check] show fixtureFrozenLake failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-frozen-lake"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveBody('fixtureFrozenLake'); } catch (error) { console.error('[waters check] prove fixtureFrozenLake failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveAttribute('material'); } catch (error) { console.error('[waters check] prove fixtureFrozenLake failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureSaltFlat', {\"distance\":0.8,\"height\":0.18,\"bearing\":120}); } catch (error) { console.error('[waters check] show fixtureSaltFlat failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-salt-flat"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveBody('fixtureSaltFlat'); } catch (error) { console.error('[waters check] prove fixtureSaltFlat failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureAutumn', {\"distance\":0.8,\"height\":0.45,\"bearing\":200}); } catch (error) { console.error('[waters check] show fixtureAutumn failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-autumn-sweep"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveAttribute('tintSweep'); } catch (error) { console.error('[waters check] prove fixtureAutumn failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureFields', {\"distance\":0.35,\"height\":0.3,\"bearing\":200}); } catch (error) { console.error('[waters check] show fixtureFields failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-flower-stripes"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveAttribute('stripes'); } catch (error) { console.error('[waters check] prove fixtureFields failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveSpecies([11, 12]); } catch (error) { console.error('[waters check] prove fixtureFields failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureRedwoods', {\"distance\":0.3,\"height\":0.25,\"bearing\":200}); } catch (error) { console.error('[waters check] show fixtureRedwoods failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-redwoods"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveSpecies([7]); } catch (error) { console.error('[waters check] prove fixtureRedwoods failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureGroves', {\"distance\":0.3,\"height\":0.25,\"bearing\":200}); } catch (error) { console.error('[waters check] show fixtureGroves failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-saguaro-grove"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveSpecies([9]); } catch (error) { console.error('[waters check] prove fixtureGroves failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureGroves', {\"distance\":0.6,\"height\":0.35,\"bearing\":200,\"overlay\":1}); } catch (error) { console.error('[waters check] show fixtureGroves bamboo failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-bamboo-grove"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveSpecies([8]); } catch (error) { console.error('[waters check] prove fixtureGroves bamboo failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.show('fixtureMangrove', {\"distance\":0.3,\"height\":0.25,\"bearing\":200}); } catch (error) { console.error('[waters check] show fixtureMangrove failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "wait": 800
+  },
+  {
+    "shot": "waters-mangrove"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveSpecies([10]); } catch (error) { console.error('[waters check] prove fixtureMangrove failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return window.__dwWaters.proveOverlays(); } catch (error) { console.error('[waters check] overlays failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { return await window.__dwWaters.proveQuery('fixtureLake'); } catch (error) { console.error('[waters check] query failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  },
+  {
+    "eval": "(async () => { try { const failed = window.__dwWaters.results.filter((entry) => !entry.passed).length; return 'checks ' + (window.__dwWaters.results.length - failed) + ' / ' + window.__dwWaters.results.length + ' passed'; } catch (error) { console.error('[waters check] summary failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+  }
+]

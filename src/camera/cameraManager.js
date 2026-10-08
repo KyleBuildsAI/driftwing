@@ -462,7 +462,8 @@ export function createCameraSystem(ctx) {
     orbit.offset.copy(camera.position).sub(orbit.pivot).applyQuaternion(orbit.rotation);
     camera.position.copy(orbit.pivot).add(orbit.offset);
     camera.quaternion.premultiply(orbit.rotation);
-    const floor = Math.max(world.groundHeight(camera.position.x, camera.position.z), CONFIG.WATER_LEVEL) + CHASE_ORBIT_CLEARANCE;
+    const water = ctx.waterQuery ? ctx.waterQuery.heightAt(camera.position.x, camera.position.z) : CONFIG.WATER_LEVEL;
+    const floor = Math.max(world.groundHeight(camera.position.x, camera.position.z), water) + CHASE_ORBIT_CLEARANCE;
     if (camera.position.y < floor) camera.position.y = floor;
   }
 

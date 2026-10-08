@@ -6,6 +6,10 @@ import { CONFIG } from '../core/config.js';
 import { createChunkBuilder } from './chunkBuilder.js';
 import { curvedPositionNode } from '../render/curvature.js';
 import { handoffDitherNode, handoffPresenceNode } from './farField.js';
+import { OVERLAY_SWEEP_SLOTS } from './overlays.js';
+import { VEGETATION_TYPE_COUNT as SPECIES_TYPE_COUNT, speciesById } from './vegetationSpecies.js';
+import { registerVegetationColliders } from './vegetationColliders.js';
+import { createWindSway } from '../render/windSway.js';
 
 /**
  * TERRAIN: the infinite streamed world surface.
@@ -28,6 +32,11 @@ import { handoffDitherNode, handoffPresenceNode } from './farField.js';
  *   band (innerRadius 0) the terrain stops drawing, and its streaming pauses more than 20 km above the
  *   ground (a descent finds the ground ready; collision never depended on it). Below 5 km the chunks
  *   keep the original materials, so the golden-hour opening is untouched.
+ * - Region overlays (Phase 3): the chunk attribute `overlay` drives animated tint sweeps (colour
+ *   slots filled from the overlays near the focus), the glossy ice material and per-stripe shading;
+ *   all zero (Phase 2 rendering) outside overlays. The species 6-12 are instanced like the Phase 1
+ *   types, and every type sways by the WindField's near-ground wind (windSway.js). Redwood trunks
+ *   are colliders through the vegetation provider (vegetationColliders.js) when ctx.colliders exists.
  */
 export function createTerrainSystem(ctx) {
   const { scene, camera, world, state, bus, uniforms } = ctx;
@@ -35,6 +44,7 @@ export function createTerrainSystem(ctx) {
     Fn, vec2, vec3, vec4, color, uniform, texture, attribute, positionWorld, positionGeometry,
     vertexColor, smoothstep, mix, sin, cos, mod, saturate, min, abs, dot, oneMinus, modelWorldMatrix,
     screenCoordinate, fract, floor, exp, normalize, normalView, cameraViewMatrix, fwidth, cameraPosition,
+    uniformArray, int, step, float,
   } = TSL;
 
   // ---- Tuning --------------------------------------------------------------------------
@@ -71,7 +81,7 @@ export function createTerrainSystem(ctx) {
   const FLOWER_RINGS = 2;
   const NEW_VEGETATION_MESHES_PER_FRAME = 6;
   const VEGETATION = world.VEGETATION;
-  const VEGETATION_TYPE_COUNT = 6;
+  const VEGETATION_TYPE_COUNT = SPECIES_TYPE_COUNT;
   const SCATTER_MAX_INSTANCES = 640;
   const SCATTER_HEADER_FLOATS = VEGETATION_TYPE_COUNT * 6;
   const SCATTER_INSTANCE_FLOATS = 10;
@@ -207,8 +217,35 @@ export function createTerrainSystem(ctx) {
   const worldUpView = cameraViewMatrix.transformDirection(vec3(0, 1, 0));
   const terrainNormalNode = normalize(mix(normalView, worldUpView, seabedCalm));
 
+  // ---- Region overlays: the chunk attribute `overlay` (x: sweep slot + weight, y: sweep phase in m,
+  // z: material id, w: stripe id), all zero outside overlays so the Phase 2 look is untouched.
+  const overlayData = attribute('overlay', 'vec4');
+  const sweepColorA = uniformArray(Array.from({ length: OVERLAY_SWEEP_SLOTS }, () => new THREE.Vector3(0, 0, 0)), 'vec3');
+  const sweepColorB = uniformArray(Array.from({ length: OVERLAY_SWEEP_SLOTS }, () => new THREE.Vector3(0, 0, 0)), 'vec3');
+  // Per slot: (period s, wave length m, 0, 0).
+  const sweepParams = uniformArray(Array.from({ length: OVERLAY_SWEEP_SLOTS }, () => new THREE.Vector4(600, 500, 0, 0)), 'vec4');
+  const sweepWeight = fract(overlayData.x);
+  const iceShare = step(0.5, overlayData.z).mul(oneMinus(step(1.5, overlayData.z)));
+  const iceColor = color(0xd4e4ef);
+
+  /**
+   * The overlay look over a vertex colour: the tint sweep (a colour wave travelling along the sweep
+   * direction, base -> colour A -> colour B as it passes), the ice sheen and a per-stripe brightness.
+   */
+  const overlayShade = Fn(([base]) => {
+    const slot = int(floor(overlayData.x));
+    const params = sweepParams.element(slot);
+    const wave = sin(overlayData.y.div(params.y).sub(uniforms.time.div(params.x)).mul(Math.PI * 2)).mul(0.5).add(0.5);
+    const ramp = mix(mix(base, sweepColorA.element(slot), saturate(wave.mul(2))), sweepColorB.element(slot), saturate(wave.mul(2).sub(1)));
+    const swept = mix(base, ramp, sweepWeight.mul(0.85));
+    const iced = mix(swept, iceColor.mul(swept.add(0.6).mul(0.65)), iceShare.mul(0.7));
+    const stripe = overlayData.w;
+    const stripeJitter = fract(sin(stripe.mul(12.9898)).mul(43758.5453)).mul(0.1).add(0.94);
+    return iced.mul(mix(float(1), stripeJitter, step(0.5, stripe)));
+  });
+
   const terrainColorNode = Fn(() => {
-    const base = vertexColor().rgb;
+    const base = overlayShade(vertexColor().rgb);
     const heightAboveWater = positionWorld.y.sub(uniforms.waterLevel.sub(uniforms.renderOrigin.y));
     const depth = seabedDepth;
     const wetSand = oneMinus(smoothstep(0.15, 1.6, heightAboveWater)).mul(smoothstep(-0.3, 0.0, heightAboveWater));
@@ -221,8 +258,11 @@ export function createTerrainSystem(ctx) {
   // Foam catches a little light of its own so it still reads on coasts facing away from the sun.
   const terrainEmissiveNode = foamColor.mul(shoreFoam).mul(oneMinus(uniforms.nightFactor.mul(0.75)).mul(0.2));
 
+  // Ice is glossy: a lower roughness where the overlay material says ice.
+  const terrainRoughnessNode = mix(float(0.95), float(0.36), iceShare);
   const material = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
   material.colorNode = terrainColorNode;
+  material.roughnessNode = terrainRoughnessNode;
   material.normalNode = terrainNormalNode;
   material.emissiveNode = terrainEmissiveNode;
   material.receivedShadowNode = cloudShadowReceiver;
@@ -240,6 +280,7 @@ export function createTerrainSystem(ctx) {
   })();
   const fadeMaterial = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
   fadeMaterial.colorNode = terrainColorNode;
+  fadeMaterial.roughnessNode = terrainRoughnessNode;
   fadeMaterial.normalNode = terrainNormalNode;
   fadeMaterial.emissiveNode = terrainEmissiveNode;
   fadeMaterial.receivedShadowNode = cloudShadowReceiver;
@@ -296,7 +337,9 @@ export function createTerrainSystem(ctx) {
     return clamp((terrainClock - object.userData.bornAt) / VEGETATION_GROW_SECONDS, 0, 1);
   });
 
-  function createVegetationPositionNode(swayStrength, fadeRadius) {
+  const windSway = createWindSway(ctx);
+
+  function createVegetationPositionNode(swayStrength, fadeRadius, gustFactor = 0.6) {
     return Fn(() => {
       const placement = attribute('vegetationPlacement', 'vec4');
       const stretch = attribute('vegetationScale', 'vec3');
@@ -321,8 +364,10 @@ export function createTerrainSystem(ctx) {
       const wrapped = mod(baseWorld.xz, WRAP_PERIOD);
       const phase = uniforms.time.mul(1.25).add(wrapped.x.mul(0.043)).add(wrapped.y.mul(0.037));
       const gust = sin(phase).mul(0.7).add(sin(phase.mul(2.3).add(1.7)).mul(0.3)).add(0.55);
-      const sway = gust.mul(heightInModel.mul(heightInModel)).mul(swayStrength).mul(uniforms.windStrength);
-      return sunk.add(vec3(uniforms.windDirection.x.mul(sway), 0.0, uniforms.windDirection.y.mul(sway)));
+      // The WindField's wind here (calm ambient = windDirection x windStrength) and its gusts.
+      const wind = windSway.swaySample(baseWorld.xz);
+      const sway = gust.add(wind.z.mul(gustFactor)).mul(heightInModel.mul(heightInModel)).mul(swayStrength);
+      return sunk.add(vec3(wind.x.mul(sway), 0.0, wind.y.mul(sway)));
     })();
   }
 
@@ -334,6 +379,17 @@ export function createTerrainSystem(ctx) {
     { roughness: 0.75, sway: 0, doubleSided: false },
     { roughness: 0.8, sway: 0.03, doubleSided: false },
   ];
+  // The species: their sway stiffness and gust response from the species table.
+  for (let type = 6; type < VEGETATION_TYPE_COUNT; type++) {
+    const species = speciesById(type);
+    VEGETATION_LOOK[type] = { roughness: species.name === 'saguaro' ? 0.75 : 0.85, sway: species.sway.stiffness, gust: species.sway.gust, doubleSided: false };
+  }
+  /** Small plants (flowers, rows) draw only in the near rings, fade early and cast no shadow. */
+  function isSmallType(type) {
+    if (type === VEGETATION.FLOWERS) return true;
+    const species = speciesById(type);
+    return species !== null && species.rows;
+  }
   const vegetationMaterials = VEGETATION_LOOK.map((look, type) => {
     const vegetationMaterial = new THREE.MeshStandardNodeMaterial({
       roughness: look.roughness,
@@ -345,7 +401,8 @@ export function createTerrainSystem(ctx) {
     vegetationMaterial.colorNode = vegetationColorNode;
     vegetationMaterial.positionNode = createVegetationPositionNode(
       look.sway,
-      type === VEGETATION.FLOWERS ? flowerFadeRadius : vegetationFadeRadius,
+      isSmallType(type) ? flowerFadeRadius : vegetationFadeRadius,
+      look.gust ?? 0.6,
     );
     vegetationMaterial.receivedShadowNode = cloudShadowReceiver;
     vegetationMaterial.name = `vegetation-${type}`;
@@ -726,6 +783,167 @@ export function createTerrainSystem(ctx) {
     return shape.toGeometry();
   }
 
+
+  // ---- Phase 3 species (grow only inside region overlays; heights at scale 1 = referenceHeight) ----
+  function buildCherryGeometry() {
+    const shape = createShapeBuilder();
+    const bark = linearColor(0x4a3530);
+    addFrustum(shape, {
+      start: [0, -1.4, 0], end: [0.1, 3.0, 0.05], radiusStart: 0.36, radiusEnd: 0.22, sides: 5, rgb: bark,
+      shadeStart: 0.62, shadeEnd: 0.95, mask: 0,
+    });
+    for (const [dx, dz] of [[1.5, 0.6], [-1.3, 0.9], [0.2, -1.5]]) {
+      addFrustum(shape, {
+        start: [0.08, 2.6, 0.04], end: [dx, 4.4, dz], radiusStart: 0.16, radiusEnd: 0.08, sides: 4, rgb: bark,
+        shadeStart: 0.85, shadeEnd: 1, mask: 0,
+      });
+    }
+    // A wide, flat-topped blossom canopy (tinted pink per instance).
+    const blobs = [[0, 5.6, 0, 2.6], [1.8, 5.0, 0.7, 1.9], [-1.6, 5.1, 0.9, 1.9], [0.3, 5.2, -1.8, 1.8], [0.2, 6.6, 0.1, 1.7]];
+    blobs.forEach(([x, y, z, radius], index) => {
+      addBlob(shape, { center: [x, y, z], radius, squash: 0.72, jitter: 0.16, seed: 200 + index * 7, rgb: WHITE, bottomShade: 0.6, topShade: 1, mask: 1 });
+    });
+    return shape.toGeometry();
+  }
+
+  function buildRedwoodGeometry() {
+    const shape = createShapeBuilder();
+    const bark = linearColor(0x7a3f2c);
+    const barkDark = linearColor(0x5e3022);
+    // The giant trunk: tapering from 2.7 m at the base to a spire, in ribbed sections.
+    const sections = [[-2, 0, 2.9, 2.5], [0, 22, 2.5, 2.0], [22, 46, 2.0, 1.45], [46, 70, 1.45, 0.9], [70, 84, 0.9, 0.25]];
+    sections.forEach(([y0, y1, r0, r1], index) => {
+      addFrustum(shape, {
+        start: [0, y0, 0], end: [0, y1, 0], radiusStart: r0, radiusEnd: r1, sides: 9, rgb: index % 2 === 0 ? bark : barkDark,
+        shadeStart: 0.7, shadeEnd: 0.95, mask: 0, ribShade: 0.12, rotation: index * 0.3,
+      });
+    });
+    // Foliage from 34 m up: drooping tiers narrowing to the crown.
+    const tiers = [
+      { baseY: 34, apexY: 48, radius: 9.5, shade: 0.55 },
+      { baseY: 44, apexY: 58, radius: 8.2, shade: 0.62 },
+      { baseY: 54, apexY: 68, radius: 6.8, shade: 0.7 },
+      { baseY: 64, apexY: 77, radius: 5.0, shade: 0.78 },
+      { baseY: 73, apexY: 85, radius: 3.2, shade: 0.86 },
+    ];
+    tiers.forEach((tier, index) => {
+      addCone(shape, {
+        baseY: tier.baseY, apexY: tier.apexY, radius: tier.radius, sides: 9, rotation: index * 0.7, jitter: 0.18,
+        seed: 240 + index * 13, rgb: WHITE, baseShade: tier.shade, apexShade: 1, mask: 1, undersideShade: index === 0 ? 0.4 : 0,
+      });
+    });
+    return shape.toGeometry();
+  }
+
+  function buildBambooGeometry() {
+    const shape = createShapeBuilder();
+    const culm = linearColor(0xa9b85a);
+    const node = linearColor(0x7d8c44);
+    // A clump of seven culms, leaning a little outward, with leaf sprays over their upper half.
+    for (let stem = 0; stem < 7; stem++) {
+      const angle = stem * 2.399 + 0.3;
+      const reach = stem === 0 ? 0 : 0.55 + 0.25 * pseudoRandom(stem + 41);
+      const baseX = Math.cos(angle) * reach;
+      const baseZ = Math.sin(angle) * reach;
+      const lean = 0.06 + 0.05 * pseudoRandom(stem + 7);
+      const height = 11.5 + 2.5 * pseudoRandom(stem + 13);
+      const segments = 5;
+      for (let segment = 0; segment < segments; segment++) {
+        const t0 = segment / segments;
+        const t1 = (segment + 1) / segments;
+        addFrustum(shape, {
+          start: [baseX + Math.cos(angle) * lean * height * t0 * t0, -0.6 + height * t0, baseZ + Math.sin(angle) * lean * height * t0 * t0],
+          end: [baseX + Math.cos(angle) * lean * height * t1 * t1, -0.6 + height * t1, baseZ + Math.sin(angle) * lean * height * t1 * t1],
+          radiusStart: 0.11 - 0.04 * t0, radiusEnd: 0.1 - 0.04 * t1, sides: 4, rgb: segment % 2 === 0 ? culm : node,
+          shadeStart: 0.8, shadeEnd: 1, mask: 0,
+        });
+      }
+      for (let spray = 0; spray < 3; spray++) {
+        const t = 0.55 + spray * 0.17;
+        addBlob(shape, {
+          center: [baseX + Math.cos(angle) * (lean * height * t * t + 0.5), -0.6 + height * t, baseZ + Math.sin(angle) * (lean * height * t * t + 0.5)],
+          radius: 0.9 - spray * 0.12, squash: 0.55, jitter: 0.25, seed: 300 + stem * 11 + spray, rgb: WHITE, bottomShade: 0.55, topShade: 1, mask: 1,
+          base: 'octahedron',
+        });
+      }
+    }
+    return shape.toGeometry();
+  }
+
+  function buildSaguaroGeometry() {
+    const shape = createShapeBuilder();
+    const rib = 0.18;
+    addFrustum(shape, {
+      start: [0, -0.5, 0], end: [0, 9.2, 0], radiusStart: 0.48, radiusEnd: 0.42, sides: 10,
+      rgb: WHITE, shadeStart: 0.72, shadeEnd: 1, mask: 1, ribShade: rib, capHeight: 0.45,
+    });
+    // Two upturned arms at different heights.
+    for (const [angle, height, reach, top] of [[0.4, 3.6, 1.4, 7.4], [3.4, 4.6, 1.2, 7.9]]) {
+      const armX = Math.cos(angle);
+      const armZ = Math.sin(angle);
+      addFrustum(shape, {
+        start: [armX * 0.35, height, armZ * 0.35], end: [armX * reach, height + 0.2, armZ * reach], radiusStart: 0.3,
+        radiusEnd: 0.28, sides: 8, rgb: WHITE, shadeStart: 0.85, shadeEnd: 0.9, mask: 1, ribShade: rib,
+      });
+      addFrustum(shape, {
+        start: [armX * reach, height - 0.1, armZ * reach], end: [armX * reach, top, armZ * reach], radiusStart: 0.28,
+        radiusEnd: 0.25, sides: 8, rgb: WHITE, shadeStart: 0.8, shadeEnd: 1, mask: 1, ribShade: rib, capHeight: 0.3,
+      });
+    }
+    return shape.toGeometry();
+  }
+
+  function buildMangroveGeometry() {
+    const shape = createShapeBuilder();
+    const root = linearColor(0x5a4636);
+    // Arching stilt roots from the trunk down to the mud (or the water), then a short trunk.
+    for (let leg = 0; leg < 7; leg++) {
+      const angle = leg * 0.898 + 0.2;
+      const reach = 1.6 + 0.6 * pseudoRandom(leg + 3);
+      addFrustum(shape, {
+        start: [Math.cos(angle) * reach, -0.8, Math.sin(angle) * reach], end: [Math.cos(angle) * 0.35, 2.6, Math.sin(angle) * 0.35],
+        radiusStart: 0.1, radiusEnd: 0.14, sides: 4, rgb: root, shadeStart: 0.6, shadeEnd: 0.9, mask: 0,
+      });
+    }
+    addFrustum(shape, {
+      start: [0, 2.2, 0], end: [0.1, 4.6, 0], radiusStart: 0.3, radiusEnd: 0.2, sides: 5, rgb: root, shadeStart: 0.75, shadeEnd: 1, mask: 0,
+    });
+    const blobs = [[0, 5.9, 0, 2.6], [1.7, 5.4, 0.6, 1.8], [-1.6, 5.5, -0.7, 1.9], [0.4, 6.8, -0.3, 1.6]];
+    blobs.forEach(([x, y, z, radius], index) => {
+      addBlob(shape, { center: [x, y, z], radius, squash: 0.68, jitter: 0.15, seed: 340 + index * 9, rgb: WHITE, bottomShade: 0.5, topShade: 1, mask: 1 });
+    });
+    return shape.toGeometry();
+  }
+
+  /** A planted row segment along local +x (lengthwise -4.7 .. 4.7 m): a low green base, then heads. */
+  function buildRowGeometry({ headHeight, headRadius, heads, baseHeight, stems, seed }) {
+    const shape = createShapeBuilder();
+    const leaf = linearColor(0x56783a);
+    for (let bush = 0; bush < 6; bush++) {
+      const x = -3.9 + bush * 1.56;
+      addBlob(shape, {
+        center: [x, baseHeight * 0.5, 0], radius: baseHeight * 0.9, squash: 0.6, jitter: 0.2, seed: seed + bush * 3,
+        rgb: leaf, bottomShade: 0.5, topShade: 0.95, mask: 0, base: 'octahedron',
+      });
+    }
+    for (let head = 0; head < heads; head++) {
+      const x = -4.5 + (head + 0.5) * (9 / heads) + (pseudoRandom(seed + head) - 0.5) * 0.25;
+      const z = (pseudoRandom(seed + head * 5 + 1) - 0.5) * 0.45;
+      const y = headHeight * (0.9 + 0.2 * pseudoRandom(seed + head * 3 + 2));
+      if (stems) {
+        addFrustum(shape, {
+          start: [x, 0, z], end: [x, y - headRadius * 0.6, z], radiusStart: 0.025, radiusEnd: 0.02, sides: 3, rgb: leaf,
+          shadeStart: 0.7, shadeEnd: 0.9, mask: 0,
+        });
+      }
+      addBlob(shape, {
+        center: [x, y, z], radius: headRadius, squash: stems ? 1.25 : 1.6, jitter: 0.12, seed: seed + 50 + head,
+        rgb: WHITE, bottomShade: 0.7, topShade: 1, mask: 1, base: 'octahedron',
+      });
+    }
+    return shape.toGeometry();
+  }
+
   const vegetationGeometries = [];
   vegetationGeometries[VEGETATION.PINE] = buildPineGeometry();
   vegetationGeometries[VEGETATION.BROADLEAF] = buildBroadleafGeometry();
@@ -733,6 +951,13 @@ export function createTerrainSystem(ctx) {
   vegetationGeometries[VEGETATION.ROCK] = buildRockGeometry();
   vegetationGeometries[VEGETATION.CACTUS] = buildCactusGeometry();
   vegetationGeometries[VEGETATION.FLOWERS] = buildFlowerGeometry();
+  vegetationGeometries[VEGETATION.CHERRY] = buildCherryGeometry();
+  vegetationGeometries[VEGETATION.REDWOOD] = buildRedwoodGeometry();
+  vegetationGeometries[VEGETATION.BAMBOO] = buildBambooGeometry();
+  vegetationGeometries[VEGETATION.SAGUARO] = buildSaguaroGeometry();
+  vegetationGeometries[VEGETATION.MANGROVE] = buildMangroveGeometry();
+  vegetationGeometries[VEGETATION.LAVENDER] = buildRowGeometry({ headHeight: 0.85, headRadius: 0.16, heads: 22, baseHeight: 0.42, stems: false, seed: 400 });
+  vegetationGeometries[VEGETATION.TULIP] = buildRowGeometry({ headHeight: 0.55, headRadius: 0.07, heads: 30, baseHeight: 0.2, stems: true, seed: 460 });
   const vegetationExtents = vegetationGeometries.map((geometry) => {
     const box = geometry.boundingBox;
     return {
@@ -753,7 +978,7 @@ export function createTerrainSystem(ctx) {
   const meshTotals = new Array(LOD_COUNT).fill(0);
   const vegetationPools = Array.from({ length: VEGETATION_TYPE_COUNT }, () => []);
   const vegetationTotals = new Array(VEGETATION_TYPE_COUNT).fill(0);
-  const bufferPools = Array.from({ length: LOD_COUNT }, () => ({ position: [], normal: [], color: [] }));
+  const bufferPools = Array.from({ length: LOD_COUNT }, () => ({ position: [], normal: [], color: [], overlay: [] }));
   const scatterBufferPool = [];
 
   function createChunkMesh(lod) {
@@ -762,6 +987,7 @@ export function createTerrainSystem(ctx) {
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(floats), 3));
     geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(floats), 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(floats), 3));
+    geometry.setAttribute('overlay', new THREE.BufferAttribute(new Float32Array((floats / 3) * 4), 4));
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(CHUNK_SIZE / 2, 0, CHUNK_SIZE / 2), CHUNK_SIZE);
     const mesh = new THREE.Mesh(geometry, activeMaterial);
     mesh.name = `terrain-lod${lod}`;
@@ -801,7 +1027,7 @@ export function createTerrainSystem(ctx) {
     const mesh = new THREE.Mesh(geometry, vegetationMaterials[type]);
     mesh.name = `vegetation-${type}`;
     mesh.matrixAutoUpdate = false;
-    mesh.castShadow = type !== VEGETATION.FLOWERS;
+    mesh.castShadow = !isSmallType(type);
     mesh.receiveShadow = true;
     mesh.visible = false;
     mesh.userData.vegetationType = type;
@@ -1064,7 +1290,7 @@ export function createTerrainSystem(ctx) {
     const terrainShown = chunk.displayedLod >= 0 && !high.vegetationHidden;
     const castsShadow = chunk.ring <= VEGETATION_SHADOW_RINGS;
     for (const mesh of chunk.vegetationMeshes) {
-      const isFlower = mesh.userData.vegetationType === VEGETATION.FLOWERS;
+      const isFlower = isSmallType(mesh.userData.vegetationType);
       mesh.visible = terrainShown && (!isFlower || chunk.ring <= FLOWER_RINGS);
       mesh.castShadow = castsShadow && !isFlower;
     }
@@ -1120,10 +1346,12 @@ export function createTerrainSystem(ctx) {
       pool.position.push(result.position);
       pool.normal.push(result.normal);
       pool.color.push(result.color);
+      pool.overlay.push(result.overlay);
     }
     result.position = null;
     result.normal = null;
     result.color = null;
+    result.overlay = null;
   }
   function recycleScatterBuffer(result) {
     if (scatterBufferPool.length < BUFFER_POOL_LIMIT && result.data instanceof ArrayBuffer && result.data.byteLength > 0) {
@@ -1162,13 +1390,16 @@ export function createTerrainSystem(ctx) {
     const positionAttribute = geometry.attributes.position;
     const normalAttribute = geometry.attributes.normal;
     const colorAttribute = geometry.attributes.color;
+    const overlayAttribute = geometry.attributes.overlay;
     positionAttribute.array.set(new Float32Array(result.position));
     normalAttribute.array.set(new Float32Array(result.normal));
     colorAttribute.array.set(new Float32Array(result.color));
     positionAttribute.needsUpdate = true;
     normalAttribute.needsUpdate = true;
     colorAttribute.needsUpdate = true;
-    uploadBytesThisFrame += result.position.byteLength * 3;
+    overlayAttribute.array.set(new Float32Array(result.overlay));
+    overlayAttribute.needsUpdate = true;
+    uploadBytesThisFrame += result.position.byteLength * 3 + result.overlay.byteLength;
     const minY = Number.isFinite(result.minY) ? result.minY : -SKIRT_DEPTHS[lod];
     const maxY = Number.isFinite(result.maxY) ? result.maxY : 0;
     const halfHeight = (maxY - minY) / 2;
@@ -1436,6 +1667,7 @@ export function createTerrainSystem(ctx) {
         position: takeFloatBuffer(pool.position, floats),
         normal: takeFloatBuffer(pool.normal, floats),
         color: takeFloatBuffer(pool.color, floats),
+        overlay: takeFloatBuffer(pool.overlay, (floats / 3) * 4),
         minY: 0, maxY: 0, buildMs: 0,
       };
       chunk.inflightMask |= 1 << job.lod;
@@ -1443,6 +1675,7 @@ export function createTerrainSystem(ctx) {
       if (message.position) transfer.push(message.position);
       if (message.normal) transfer.push(message.normal);
       if (message.color) transfer.push(message.color);
+      if (message.overlay) transfer.push(message.overlay);
       record.worker.postMessage(message, transfer);
     } else {
       const message = {
@@ -1484,12 +1717,14 @@ export function createTerrainSystem(ctx) {
         position: allocateFloatBuffer(pool.position, floats),
         normal: allocateFloatBuffer(pool.normal, floats),
         color: allocateFloatBuffer(pool.color, floats),
+        overlay: allocateFloatBuffer(pool.overlay, (floats / 3) * 4),
         minY: 0, maxY: 0, buildMs: 0,
       };
       const output = {
         positions: new Float32Array(result.position),
         normals: new Float32Array(result.normal),
         colors: new Float32Array(result.color),
+        overlays: new Float32Array(result.overlay),
         minY: 0, maxY: 0, vertexCount: 0,
       };
       chunk.inflightMask |= 1 << job.lod;
@@ -1627,6 +1862,31 @@ export function createTerrainSystem(ctx) {
     return !high.paused;
   }
 
+  // ---- Overlay sweep colour slots: filled from the tint-sweep overlays within SWEEP_RADIUS of the
+  // focus, looked up again when the focus has moved SWEEP_REFRESH metres (the lookup allocates its
+  // list; the frame update does not). A slot no nearby overlay uses keeps its last colours.
+  const SWEEP_RADIUS = 14000;
+  const SWEEP_REFRESH = 1500;
+  const sweepFocus = new Float64Array([NaN, NaN]);
+  const slotTaken = new Uint8Array(OVERLAY_SWEEP_SLOTS);
+  function refreshSweepSlots(x, z) {
+    sweepFocus[0] = x;
+    sweepFocus[1] = z;
+    if (!world.hasOverlays) return;
+    slotTaken.fill(0);
+    world.overlaysNear(x, z, SWEEP_RADIUS, (record) => {
+      const sweep = record.tintSweep;
+      if (sweep === null || slotTaken[sweep.slot] === 1) return;
+      slotTaken[sweep.slot] = 1;
+      sweepColorA.array[sweep.slot].set(sweep.colors[0][0], sweep.colors[0][1], sweep.colors[0][2]);
+      sweepColorB.array[sweep.slot].set(sweep.colors[1][0], sweep.colors[1][1], sweep.colors[1][2]);
+      sweepParams.array[sweep.slot].set(sweep.periodSeconds, sweep.width * 4, 0, 0);
+    });
+  }
+
+  // Trunk colliders and tree-top perches (contract d.4), when the collider service exists.
+  const unregisterVegetationColliders = ctx.colliders ? registerVegetationColliders(ctx.colliders, world) : null;
+
   const statsFrustum = new THREE.Frustum();
   const statsMatrix = new THREE.Matrix4();
 
@@ -1684,6 +1944,8 @@ export function createTerrainSystem(ctx) {
         foamFogFar.value = Math.max(scene.fog.far, scene.fog.near + 1);
       }
       const centerChanged = updateFocus(dt, realDt);
+      windSway.update(lastFocus.x, lastFocus.z);
+      if (!(Math.hypot(lastFocus.x - sweepFocus[0], lastFocus.z - sweepFocus[1]) < SWEEP_REFRESH)) refreshSweepSlots(lastFocus.x, lastFocus.z);
       replanTimer -= realDt;
       if (!streaming) {
         // Far above a hidden terrain: nothing new is planned or built until the craft comes down.
@@ -1760,6 +2022,7 @@ export function createTerrainSystem(ctx) {
         vegetationMeshes: vegetationTotals.reduce((sum, value) => sum + value, 0) - vegetationPooled,
         vegetationPooled,
         workers: workerRecords.length,
+        windSway: windSway.getStats(),
         mode,
         workerFallback,
         avgBuildMs: Math.round(buildMsAverage * 100) / 100,
@@ -1772,6 +2035,8 @@ export function createTerrainSystem(ctx) {
 
     dispose() {
       unsubscribeQuality();
+      if (unregisterVegetationColliders !== null) unregisterVegetationColliders();
+      windSway.dispose();
       stopWorkers();
       scene.remove(group);
       for (const pool of meshPools) pool.length = 0;

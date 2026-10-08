@@ -38,6 +38,7 @@ import { createGroundContact } from './groundContact.js';
 import { createLandingMonitor } from './landing.js';
 import { registerAssistCatalog, registerAssistHandler } from './assists.js';
 import { registerAutopilotHandler } from './autopilot.js';
+import { surfaceHeightAt, waterHeightAt } from './waterSurface.js';
 
 const MAX_ANGULAR_SPEED = 35;
 const MAX_SPEED = 120;
@@ -744,7 +745,7 @@ export function createSimQuadModel({ profile, craft, bus, craftState = {}, setti
     systems.inflowFactor = inflowFactorFor(axialInflow, meanSpeed);
     systems.propWash = systems.armed ? propWashFor(axialInflow, inPlaneSpeed) * smoothstep(0.15, 0.35, meanSpeed) : 0;
 
-    const surfaceHeight = Math.max(env.groundHeight(centerPosition.x, centerPosition.z), env.waterLevel);
+    const surfaceHeight = surfaceHeightAt(env, centerPosition.x, centerPosition.z);
     const agl = centerPosition.y - surfaceHeight;
 
     // Flight mode (set by the quad assist handler; rate mode when nothing set it).
@@ -1234,7 +1235,7 @@ function terrainFloor(memory, env, position, velocity, dt) {
     const x = position.x + velocity.x * seconds;
     const z = position.z + velocity.z * seconds;
     const ground = world ? world.groundHeight(x, z) : env.groundHeight(x, z);
-    floor = Math.max(floor, Math.max(ground, env.waterLevel) + QUAD_AUTOPILOT.CLEARANCE);
+    floor = Math.max(floor, Math.max(ground, waterHeightAt(env, x, z)) + QUAD_AUTOPILOT.CLEARANCE);
   }
   memory.floor = floor;
   return floor;
