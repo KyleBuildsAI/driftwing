@@ -36,11 +36,11 @@ export const SMOKE_RIBBON = Object.freeze({
   /** The anchor follows the nozzle once it is this far away (m). */
   REANCHOR: 2000,
   /** Half-widths (m) at birth and at the end of the fade; each sample varies by +-15 %. */
-  BIRTH_HALF_WIDTH: 0.45,
+  BIRTH_HALF_WIDTH: 0.6,
   DEATH_HALF_WIDTH: 5.5,
   /** Buoyant smoke rises slowly on top of the wind (m/s). */
   RISE: 0.3,
-  OPACITY: 0.74,
+  OPACITY: 0.85,
   FADE_IN: 0.2,
   NEAR_FADE_START: 3,
   NEAR_FADE_RANGE: 9,
