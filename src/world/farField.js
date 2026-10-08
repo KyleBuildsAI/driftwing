@@ -7,7 +7,8 @@ import { MAX_VIEW_DISTANCE } from '../env/atmosphere.js';
  * terrain chunks, seen from high altitude.
  *
  * - Tiles: a quadtree of square tiles on a power-of-two world grid, 1 km (level 0) to 256 km (level 8,
- *   the roots), split while the camera is closer than SPLIT_FACTOR tile sizes, out to the horizon. Each
+ *   the roots), split while the camera is closer than SPLIT_FACTOR tile sizes (about 45 tiles a level,
+ *   each quad some 14 px across on screen), out to the horizon. Each
  *   tile is a 32 x 32 quad grid in tile-local coordinates at its world centre, from the Phase 2
  *   map-tile worker (createMapTileService, fields surface and albedo, its own IndexedDB cache), with
  *   skirts, flat shading, vertex curvature (render/curvature.js) and a sun glint on water (lakes come
@@ -16,7 +17,9 @@ import { MAX_VIEW_DISTANCE } from '../env/atmosphere.js';
  *   pass in the worker).
  * - No holes: a node is replaced by its four children only once all four are ready, and every tile
  *   drawn keeps its ancestors cached, so the coverage only ever refines. The roots (a few 256 km tiles)
- *   load first, from 4.5 km camera altitude, before the far field draws at 6 km.
+ *   load first, from 4.5 km camera altitude, before the far field draws at 6 km. The children being
+ *   gathered for a split are kept with the tiles in use (never evicted before their siblings arrive),
+ *   and refinement stops short of the mesh budget, so the cache never thrashes.
  * - Handoff with the terrain: from 6 km the far field fills the annulus beyond the terrain's coverage.
  *   In the overlap band both draw: the far-field ground sits FAR_SINK (0.2 %) of the distance lower and
  *   the two cross-fade with complementary screen-door dithers (handoffPresenceNode: the far field keeps
@@ -41,13 +44,15 @@ const SKIRT_VERTICES = TILE_VERTICES * 4;
 const TILE_VERTEX_COUNT = GRID_VERTICES + SKIRT_VERTICES;
 const BASE_TILE_SIZE = 1024;
 const ROOT_LEVEL = 8;
-const SPLIT_FACTOR = 3.2;
+const SPLIT_FACTOR = 2.2;
 /** Tiles at or below this level (16 km) sample the stamped world; coarser ones the bare world. */
 const STAMPED_MAX_LEVEL = 4;
 /** Requests waiting in the worker queue at most (the rest are asked for as these finish). */
 const MAX_PENDING = 40;
 /** Tile meshes kept at most (drawn, ancestors of drawn, and recently used). */
 const MAX_TILE_MESHES = 720;
+/** Refinement asks for no new children once the tiles in use come this close to MAX_TILE_MESHES. */
+const MESH_HEADROOM = 64;
 /** Selection stack and selection list capacities. */
 const STACK_CAPACITY = 4096;
 const MAX_SELECTED = 900;
@@ -368,19 +373,36 @@ export function createFarFieldSystem(ctx) {
   const selected = new Array(MAX_SELECTED).fill(null);
   let selectedCount = 0;
   let holes = 0;
-  // Bumped by every selection: a tile (or an ancestor of one) used by the latest selection is never
-  // evicted.
+  // Bumped by every selection: a tile (or an ancestor of one, or a child gathered for a split) used by
+  // the latest selection is never evicted; usedCount counts them.
   let selectStamp = 1;
+  let usedCount = 0;
   const view = { x: 0, z: 0, altitude: 0, reach: 0, inner: 0 };
   const lastSelect = { x: NaN, z: NaN, altitude: NaN, timer: 0 };
+
+  /** Marks a record (if any) as used by this selection. */
+  function touch(record) {
+    if (record === undefined || record.lastUsed === selectStamp) return;
+    record.lastUsed = selectStamp;
+    usedCount++;
+  }
+
+  /** Requests a child gathered for a split, or keeps it if it is already built. */
+  function gatherChild(level, tileX, tileZ, priority) {
+    const record = records.get(tileKey(level, tileX, tileZ));
+    if (record !== undefined && record.state === STATE_READY) {
+      touch(record);
+      return;
+    }
+    if (usedCount + pendingCount < MAX_TILE_MESHES - MESH_HEADROOM) requestTile(level, tileX, tileZ, priority);
+  }
 
   /** Marks a tile and every ancestor as used this frame (ancestors are the fallback coverage). */
   function touchLineage(level, tileX, tileZ) {
     let currentX = tileX;
     let currentZ = tileZ;
     for (let current = level; current <= ROOT_LEVEL; current++) {
-      const record = records.get(tileKey(current, currentX, currentZ));
-      if (record !== undefined) record.lastUsed = selectStamp;
+      touch(records.get(tileKey(current, currentX, currentZ)));
       currentX = Math.floor(currentX / 2);
       currentZ = Math.floor(currentZ / 2);
     }
@@ -390,6 +412,7 @@ export function createFarFieldSystem(ctx) {
     selectStamp++;
     selectedCount = 0;
     holes = 0;
+    usedCount = 0;
     const rootSize = levelSize(ROOT_LEVEL);
     const minRootX = Math.floor((view.x - view.reach) / rootSize);
     const maxRootX = Math.floor((view.x + view.reach) / rootSize);
@@ -440,10 +463,10 @@ export function createFarFieldSystem(ctx) {
           continue;
         }
         const childPriority = priority + 1000 + 0.5;
-        requestTile(childLevel, childX, childZ, childPriority);
-        requestTile(childLevel, childX + 1, childZ, childPriority);
-        requestTile(childLevel, childX, childZ + 1, childPriority);
-        requestTile(childLevel, childX + 1, childZ + 1, childPriority);
+        gatherChild(childLevel, childX, childZ, childPriority);
+        gatherChild(childLevel, childX + 1, childZ, childPriority);
+        gatherChild(childLevel, childX, childZ + 1, childPriority);
+        gatherChild(childLevel, childX + 1, childZ + 1, childPriority);
       }
       const record = recordFor(level, tileX, tileZ);
       if (record === undefined || record.state !== STATE_READY) {
@@ -771,8 +794,9 @@ export function createFarFieldSystem(ctx) {
     update,
     /**
      * Dev and tests: { active, selected, drawn, holes (selected tiles not built yet: 0 once loaded),
-     * ready, pending, levels (selected per level), meshes, reach, inner, handoff, shell, counters,
-     * service, planetRadiusKm }.
+     * used (tiles the selection keeps: selected, their ancestors and children being gathered), ready,
+     * pending, levels (selected per level), meshes, reach, inner, handoff, shell, counters, service,
+     * planetRadiusKm }.
      */
     getStats() {
       let ready = 0;
@@ -788,6 +812,7 @@ export function createFarFieldSystem(ctx) {
         selected: selectedCount,
         drawn,
         holes,
+        used: usedCount,
         ready,
         pending,
         levels,
