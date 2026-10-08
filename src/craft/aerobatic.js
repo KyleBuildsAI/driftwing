@@ -39,7 +39,7 @@ const simProfile = Object.freeze({
     rollRate: 400, // deg/s, full aileron at 80 m/s
     vne: 113, // m/s = 407 km/h
   }),
-  mass: Object.freeze({ empty: 640, pilot: 90, fuel: 70 }), // 800 kg, 75 kg/m^2
+  mass: Object.freeze({ empty: 600, pilot: 90, fuel: 60 }), // 750 kg, 70 kg/m^2
   // kg m^2 about body x (pitch), y (yaw) and z (roll): short wings and the mass on the centreline.
   inertia: Object.freeze({ pitch: 1150, yaw: 1750, roll: 720, yawRoll: 20 }),
   centerOfMass: Object.freeze([0, 0, -0.32]),
@@ -59,9 +59,9 @@ const simProfile = Object.freeze({
   aero: Object.freeze({
     cd0: 0.034, // spring-steel gear, wheel pants and the big canopy
     clAlpha: 4.33, // per rad (AR 5.3)
-    clMax: 1.32,
-    clMin: -1.32,
-    alphaCritical: 17.47, // clMax / clAlpha from zero lift at zero angle of attack
+    clMax: 1.45,
+    clMin: -1.45,
+    alphaCritical: 19.19, // clMax / clAlpha from zero lift at zero angle of attack
     postStallClDrop: 0.45,
     stallDropWidth: 3,
     stallBlendWidth: 14,
@@ -78,7 +78,7 @@ const simProfile = Object.freeze({
     aileron: 30,
     elevator: 28,
     rudder: 30,
-    effectiveness: Object.freeze({ aileron: 0.62, elevator: 0.95, rudder: 0.75 }),
+    effectiveness: Object.freeze({ aileron: 0.52, elevator: 0.7, rudder: 0.75 }),
     trimRange: 0.35,
     servoRate: 7,
   }),
@@ -98,7 +98,8 @@ const simProfile = Object.freeze({
     staticThrustN: 9800,
     staticFade: 22,
     spoolSeconds: 0.5,
-    position: Object.freeze([0, 0.03, -2.72]),
+    // On the centre of mass's waterline: a hang on the prop does not pitch the nose over.
+    position: Object.freeze([0, 0, -2.72]),
     // Right-hand prop: torque rolls the craft left in a hang; the big blades' angular momentum gives the
     // gyroscopic yaw and pitch couplings of tumbles.
     rotation: 'clockwise-from-cockpit',

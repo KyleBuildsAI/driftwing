@@ -51,19 +51,28 @@ const TUNING = Object.freeze({
     /** Upside down the hold rests (auto-level rolls the craft upright first, when it is on). */
     INVERTED_BANK: 100 * DEG,
   }),
+  // The limiters set an elevator ceiling (and floor): the elevator that holds the limit in a steady
+  // pull, from the airframe's elevator per rad of angle of attack (ELEVATOR_PER_AOA) and per unit of
+  // pitch rate over airspeed (ELEVATOR_PER_RATE, m: the tail's and the fuselage's pitch damping), at the
+  // pitch rate that load factor turns at, less a damping share of the rate toward the limit. The load
+  // per rad of angle of attack is measured as it flies (filtered). Nothing in a ceiling follows the
+  // elevator itself, so the servo's lag cannot set up a hunt. tools/lab/aerobatic.mjs calibrates them.
   LIMITER: Object.freeze({
-    AOA_MARGIN: 2.5 * DEG,
-    AOA_BAND: 5 * DEG,
-    AOA_LEAD: 0.12,
-    /** Inside the band the elevator may move toward the limit at GAIN x the margin per second; past it, back at OVERSHOOT. */
-    AOA_GAIN: 9,
-    AOA_OVERSHOOT_GAIN: 50,
+    AOA_MARGIN: 3.5 * DEG,
+    ELEVATOR_PER_AOA: 0.7,
+    ELEVATOR_PER_RATE: 52,
+    /** Seconds of the angle-of-attack and load rates taken off the margin (damping of the overshoot). */
+    AOA_DAMPING: 0.25,
+    G_DAMPING: 0.08,
+    /** Past the limit the ceiling comes down by this much elevator per rad over (the model's residual). */
+    AOA_EXCESS_GAIN: 5,
     G_POSITIVE_SHARE: 0.85,
     G_NEGATIVE_SHARE: 0.6,
-    G_BAND: 1.2,
-    G_LEAD: 0.08,
-    G_GAIN: 1.2,
-    G_OVERSHOOT_GAIN: 3,
+    /** The measured load per rad of angle of attack: filtered at this rate (1/s), above MEASURE_AOA. */
+    LOAD_SLOPE_SMOOTHING: 6,
+    MEASURE_AOA: 3 * DEG,
+    /** Before a measurement, this share of the wing's lift slope (the tail's download takes the rest). */
+    LOAD_SLOPE_SHARE: 0.68,
     RATE_SMOOTHING: 18,
   }),
   OVERSPEED: Object.freeze({ START: 0.88, FULL: 1, LEAD: 1.5 }),
@@ -95,8 +104,8 @@ function createMemory() {
     loadRate: 0,
     lastSpeed: NaN,
     acceleration: 0,
-    /** The final elevator of the last tick (the limiters move from it). */
-    lastPitch: 0,
+    /** The measured load factor per rad of angle of attack (NaN until measured). */
+    loadSlope: NaN,
     primed: null,
   };
 }
@@ -109,7 +118,6 @@ function primeMemory(memory, trim) {
 function applyPrime(memory, trim, data) {
   const elevator = clamp(Number.isFinite(trim.elevator) ? trim.elevator : 0, -1, 1);
   memory.trim = clamp(elevator, -TUNING.AUTO_TRIM.LIMIT, TUNING.AUTO_TRIM.LIMIT);
-  memory.lastPitch = elevator;
   memory.holdingPath = Number.isFinite(trim.flightPath);
   memory.pathHold = memory.holdingPath ? trim.flightPath : 0;
   memory.pitchIdleSeconds = TUNING.AUTO_TRIM.IDLE_DELAY;
@@ -204,18 +212,27 @@ function autoTrim(stick, data, weight, memory, dt) {
   return clamp(stick + memory.trim, -1, 1);
 }
 
-/**
- * One limit on the elevator, as a ceiling (upper) or floor: outside `band` of the limit none; inside it
- * the elevator may only move toward the limit at gain x margin per second, and comes back past it at
- * overshoot x the excess.
- */
-function limitStep(lastPitch, margin, band, gain, overshoot, dt, upper) {
-  if (margin >= band) return upper ? Infinity : -Infinity;
-  const allowed = (gain * margin + overshoot * Math.min(margin, 0)) * dt;
-  return upper ? lastPitch + allowed : lastPitch - allowed;
+/** The airframe's load factor per rad of angle of attack now: measured in flight, else from the wing. */
+function loadPerAoa(data, memory, dt) {
+  const tuning = TUNING.LIMITER;
+  const theory = (tuning.LOAD_SLOPE_SHARE * data.dynamicPressure * data.wingArea * data.liftSlope) / (Math.max(data.mass, 1) * 9.81);
+  if (Math.abs(data.aoa) > tuning.MEASURE_AOA && Number.isFinite(data.gLoad) && !data.stalled) {
+    const measured = data.gLoad / data.aoa;
+    if (measured > 0) {
+      const base = Number.isFinite(memory.loadSlope) ? memory.loadSlope : theory;
+      memory.loadSlope = base + (measured - base) * (1 - Math.exp(-tuning.LOAD_SLOPE_SMOOTHING * dt));
+    }
+  } else if (Number.isFinite(memory.loadSlope)) {
+    memory.loadSlope += (theory - memory.loadSlope) * (1 - Math.exp(-tuning.LOAD_SLOPE_SMOOTHING * 0.25 * dt));
+  }
+  const slope = Number.isFinite(memory.loadSlope) ? memory.loadSlope : theory;
+  return Math.max(slope, 1 / (20 * DEG));
 }
 
-/** The AoA and G limiters on the final elevator, each weighted. Returns the change they made. */
+/**
+ * The AoA and G limiters on the final elevator, each weighted: a ceiling and a floor at the steady
+ * elevator for each limit, damped by the rate toward it. Returns the change they made.
+ */
 function applyLimiters(controls, data, weights, memory, dt) {
   const tuning = TUNING.LIMITER;
   const desired = controls.pitch;
@@ -226,18 +243,26 @@ function applyLimiters(controls, data, weights, memory, dt) {
     if (upper && limit < desired) ceiling = Math.min(ceiling, desired + weight * (limit - desired));
     if (!upper && limit > desired) floor = Math.max(floor, desired + weight * (limit - desired));
   };
+  const gPerAoa = loadPerAoa(data, memory, dt);
+  const speedSquared = Math.max(data.airspeed, TUNING.MIN_AIRSPEED) ** 2;
+  // The vertical's share along body up: a load of n turns the path at (n - upY) g / V.
+  const upY = Math.cos(data.pitch) * Math.cos(data.bank);
+  /** The steady elevator at an angle of attack (rad) and its load (g). */
+  const steadyElevator = (aoa, load) => tuning.ELEVATOR_PER_AOA * aoa + (tuning.ELEVATOR_PER_RATE * 9.81 * (load - upY)) / speedSquared;
   if (weights.aoaLimiter > 0) {
     // The wing is symmetric: the negative stall sits at minus the positive one.
-    const predicted = data.aoa + tuning.AOA_LEAD * memory.aoaRate;
     const limit = data.aoaCritical - tuning.AOA_MARGIN;
-    const panelMargin = Number.isFinite(data.panelMargin) ? data.panelMargin - tuning.AOA_MARGIN - tuning.AOA_LEAD * memory.aoaRate : Infinity;
-    weigh(limitStep(memory.lastPitch, Math.min(limit - predicted, panelMargin), tuning.AOA_BAND, tuning.AOA_GAIN, tuning.AOA_OVERSHOOT_GAIN, dt, true), weights.aoaLimiter, true);
-    weigh(limitStep(memory.lastPitch, predicted + limit, tuning.AOA_BAND, tuning.AOA_GAIN, tuning.AOA_OVERSHOOT_GAIN, dt, false), weights.aoaLimiter, false);
+    const over = Math.max(0, data.aoa - limit);
+    const under = Math.min(0, data.aoa + limit);
+    weigh(steadyElevator(limit, gPerAoa * limit) - tuning.ELEVATOR_PER_AOA * tuning.AOA_DAMPING * Math.max(memory.aoaRate, 0) - tuning.AOA_EXCESS_GAIN * over, weights.aoaLimiter, true);
+    weigh(steadyElevator(-limit, -gPerAoa * limit) - tuning.ELEVATOR_PER_AOA * tuning.AOA_DAMPING * Math.min(memory.aoaRate, 0) - tuning.AOA_EXCESS_GAIN * under, weights.aoaLimiter, false);
   }
   if (weights.gLimiter > 0) {
-    const predicted = data.gLoad + tuning.G_LEAD * memory.loadRate;
-    weigh(limitStep(memory.lastPitch, tuning.G_POSITIVE_SHARE * data.gLimit - predicted, tuning.G_BAND, tuning.G_GAIN, tuning.G_OVERSHOOT_GAIN, dt, true), weights.gLimiter, true);
-    weigh(limitStep(memory.lastPitch, predicted + tuning.G_NEGATIVE_SHARE * data.gLimit, tuning.G_BAND, tuning.G_GAIN, tuning.G_OVERSHOOT_GAIN, dt, false), weights.gLimiter, false);
+    const positive = tuning.G_POSITIVE_SHARE * data.gLimit;
+    const negative = -tuning.G_NEGATIVE_SHARE * data.gLimit;
+    const damping = (tuning.ELEVATOR_PER_AOA * tuning.G_DAMPING) / gPerAoa;
+    weigh(steadyElevator(positive / gPerAoa, positive) - damping * Math.max(memory.loadRate, 0), weights.gLimiter, true);
+    weigh(steadyElevator(negative / gPerAoa, negative) - damping * Math.min(memory.loadRate, 0), weights.gLimiter, false);
   }
   controls.pitch = clamp(clamp(desired, Math.min(floor, ceiling), ceiling), -1, 1);
   return controls.pitch - desired;
@@ -259,7 +284,6 @@ registerAssistHandler(AEROBATIC_MODEL_KIND, Object.freeze({
       memory.holdingPath = false;
       memory.lastSideslip = NaN;
       memory.allIdleSeconds = 0;
-      memory.lastPitch = controls.pitch;
       return;
     }
     if (memory.primed) {
@@ -283,7 +307,6 @@ registerAssistHandler(AEROBATIC_MODEL_KIND, Object.freeze({
       // Anti-windup: hands off, the trim follows a limited elevator, so letting go stores no pull.
       if (change !== 0 && handsOff && !autopilotFlying) memory.trim = clamp(memory.trim + change, -TUNING.AUTO_TRIM.LIMIT, TUNING.AUTO_TRIM.LIMIT);
     }
-    memory.lastPitch = controls.pitch;
   },
 }));
 
