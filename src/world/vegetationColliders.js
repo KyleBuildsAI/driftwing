@@ -55,7 +55,6 @@ export function createVegetationColliders(world) {
       const scaleY = instance.scale;
       const base = instance.y - species.sink * scaleY;
       const height = species.trunk.height * scaleY;
-      const top = base + species.referenceHeight * scaleY;
       found.push(Object.freeze({
         id: `vegetation:${species.name}:${Math.round(instance.x * 100)}:${Math.round(instance.z * 100)}`,
         owner: 'vegetation',
@@ -65,7 +64,8 @@ export function createVegetationColliders(world) {
         halfHeight: height / 2,
         tags: Object.freeze({
           landable: false,
-          perch: species.perch ? Object.freeze({ x: instance.x, y: top, z: instance.z }) : false,
+          // The tree top is published by the perch provider (perchesInCell), never twice.
+          perch: false,
           sensor: false,
           miss: null,
           surface: 'wood',
