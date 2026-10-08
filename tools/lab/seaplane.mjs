@@ -37,6 +37,9 @@
 //               landing grades with surface 'water', the nose-over and the wheels-up skid soft-crash with
 //               their reasons, the gear advisory speaks once, the spray emits droplets, the mesh animates
 //               the wheels and water rudders, and dispose leaves no listener behind
+//   scenarios   the ?test=craft scripts (src/dev/craftScenarios/seaplane.js) fly through the controller
+//               over a synthetic ocean and a 205 m lake in flat land and pass their checks: takeoff and
+//               landing on the ocean and on the lake, and the wheels-down nose-over
 //   allocation  20 000 ticks on the step allocate nothing that survives a full collection
 //
 // Usage: node --expose-gc tools/lab/seaplane.mjs [--verbose] [--only=test]
@@ -57,6 +60,7 @@ import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
 import { CRAFT_IDS } from '../../src/core/settings.js';
 import { DEG, clamp, wrapDegrees } from '../../src/core/util.js';
+import seaplaneScenarios from '../../src/dev/craftScenarios/seaplane.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 const ONLY = (process.argv.find((flag) => flag.startsWith('--only=')) ?? '').slice(7);
@@ -773,7 +777,11 @@ function ensureDocumentStandIn() {
   globalThis.document = { body: { appendChild() {} }, getElementById: () => null, createElement: () => element };
 }
 
-function createGame() {
+/**
+ * The controller in a world: the flat sea south of SEA_SOUTH_OF with land at 40 m north of it, or a
+ * synthetic water world { groundHeight, waterQuery } (createWaterWorld).
+ */
+function createGame(waterWorld = null) {
   ensureDocumentStandIn();
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const events = { notify: [], softCrash: [], landed: [], speech: [], stats: [] };
@@ -782,7 +790,7 @@ function createGame() {
   bus.onTyped('landed', (payload) => events.landed.push(payload));
   bus.onTyped('journalStat', (payload) => events.stats.push(payload));
   // Land at 40 m north of z = 3000, a sea 30 m deep south of it.
-  const world = {
+  const world = waterWorld ? { groundHeight: waterWorld.groundHeight, heightAt: waterWorld.groundHeight, WATER_LEVEL: 0 } : {
     groundHeight: (x, z) => (z < SEA_SOUTH_OF ? 40 : -30),
     heightAt: (x, z) => (z < SEA_SOUTH_OF ? 40 : -30),
     WATER_LEVEL: 0,
@@ -814,6 +822,7 @@ function createGame() {
     uniforms: { time: uniform(0), sunDirection: uniform(new THREE.Vector3(0, 1, 0)), sunColor: uniform(new THREE.Color(1, 1, 1)), skyHorizonColor: uniform(new THREE.Color(1, 1, 1)), skyZenithColor: uniform(new THREE.Color(1, 1, 1)), nightFactor: uniform(0) },
     craftRegistry,
     flightModels,
+    waterQuery: waterWorld ? waterWorld.waterQuery : undefined,
     settings: {
       get: (key) => {
         const value = settingsValues[key];
@@ -985,6 +994,122 @@ function testController() {
   check('controller', "switching away disposes the floats extension (its 'landed' listener is gone)", game.flight.getCraft() === 'glider' && after === before - 1, `${before} -> ${after}`);
 }
 
+// ---- The ?test=craft scenarios, dry-run in node ------------------------------------------------
+const LAKE = Object.freeze({ x: 1500, z: -400, radius: 205, level: 42, bed: 28, land: 45 });
+const OCEAN_SOUTH_OF = 6000;
+
+/** Flat land at 45 m with a round 205 m lake (level 42 m) and the open sea south of z = 6000. */
+function createWaterWorld() {
+  const inLake = (x, z) => Math.hypot(x - LAKE.x, z - LAKE.z) < LAKE.radius;
+  const groundHeight = (x, z) => (z > OCEAN_SOUTH_OF ? -30 : inLake(x, z) ? LAKE.bed : LAKE.land);
+  const heightAt = (x, z) => (z > OCEAN_SOUTH_OF ? 0 : inLake(x, z) ? LAKE.level : -Infinity);
+  const waterQuery = {
+    seaLevel: 0,
+    heightAt,
+    sample(x, z, t, out) {
+      const height = heightAt(x, z);
+      out.height = height;
+      out.normalX = 0;
+      out.normalY = 1;
+      out.normalZ = 0;
+      out.velocityX = 0;
+      out.velocityY = 0;
+      out.velocityZ = 0;
+      out.kind = height === -Infinity ? 'none' : z > OCEAN_SOUTH_OF ? 'ocean' : 'lake';
+      out.bodyId = null;
+      out.body = null;
+      out.material = 'water';
+      out.depth = height === -Infinity ? 0 : height - groundHeight(x, z);
+      out.film = false;
+      return out;
+    },
+    isWater: (x, z) => heightAt(x, z) > -Infinity,
+    isOcean: (x, z) => z > OCEAN_SOUTH_OF,
+    staticLevelInto(x, z, out, offset) {
+      out[offset] = heightAt(x, z);
+    },
+  };
+  return { groundHeight, waterQuery };
+}
+
+/** Flies one scenario of the seaplane's ?test=craft file through the controller: { checks, crashes, memo }. */
+function flyScenario(scenario, waterWorld, heading) {
+  const game = createGame(waterWorld);
+  game.settings.set('craft', 'seaplane');
+  game.run(0.5);
+  const start = scenario.start;
+  const place = start.at === 'lake' ? { x: LAKE.x, z: LAKE.z, y: LAKE.level } : { x: 0, z: OCEAN_SOUTH_OF + 2000, y: 0 };
+  const placement = { mode: start.mode, heading, position: { x: place.x, y: start.mode === 'water' ? place.y : place.y + start.agl, z: place.z } };
+  if (Number.isFinite(start.speed)) placement.speed = start.speed;
+  if (start.craftState) placement.craftState = start.craftState;
+  game.flight.startAt(placement);
+  game.run(0.05);
+  const typed = new Map();
+  for (const type of ['landed', 'softCrash']) game.bus.onTyped(type, (payload) => typed.set(type, { count: (typed.get(type)?.count ?? 0) + 1, last: payload }));
+  const once = new Set();
+  const memo = {};
+  const player = game.state.player;
+  const startPose = { x: player.position.x, y: player.position.y, z: player.position.z, heading };
+  const run = { t: 0 };
+  const surfaceAt = (x, z) => Math.max(waterWorld.groundHeight(x, z), waterWorld.waterQuery.heightAt(x, z));
+  const api = {
+    get t() { return run.t; },
+    get flight() { return game.state.flight; },
+    get craftState() { return game.state.flight.craftState; },
+    get player() { return game.state.player; },
+    world: game.ctx.world,
+    waterQuery: waterWorld.waterQuery,
+    memo,
+    start: startPose,
+    once(key) {
+      if (once.has(key)) return false;
+      once.add(key);
+      return true;
+    },
+    events: { count: (type) => typed.get(type)?.count ?? 0, last: (type) => typed.get(type)?.last ?? null },
+    agl: () => player.position.y - surfaceAt(player.position.x, player.position.z),
+  };
+  const states = scenario.checks.map(() => ({ passed: false, failed: false, seen: false }));
+  const axes = ['roll', 'pitch', 'yaw', 'throttle', 'brakeL', 'brakeR'];
+  const startElapsed = game.state.time.elapsed;
+  game.run(scenario.seconds, (lab) => {
+    run.t = lab.state.time.elapsed - startElapsed;
+    const controls = scenario.script(run.t, api);
+    for (const axis of axes) if (Number.isFinite(controls[axis])) lab.controls[axis] = controls[axis];
+    for (const action of controls.actions ?? []) lab.controls.actions.add(action);
+    if (process.env.SEA_DEBUG && Math.round(run.t * 60) % 60 === 0) log('   ', scenario.id, round(run.t, 0), memo.phase, 'd', round(Math.hypot(player.position.x - LAKE.x, player.position.z - LAKE.z), 0), 'agl', round(api.agl(), 1), 'v', round(game.state.flight.airspeed, 1), 'vs', round(game.state.flight.verticalSpeed, 1), 'hdg', round(game.state.flight.heading, 0), 'roll', round(game.state.flight.roll, 0), 'thr', round(game.state.flight.throttle, 2), 'onG', game.state.flight.onGround);
+    scenario.checks.forEach((check, index) => {
+      const state = states[index];
+      const from = Number.isFinite(check.from) ? check.from : 0;
+      const until = Number.isFinite(check.until) ? check.until : scenario.seconds;
+      if (run.t < from || run.t > until || state.failed || (!check.always && state.passed)) return;
+      const holds = Boolean(check.test(api));
+      state.seen = true;
+      if (check.always && !holds) state.failed = true;
+      else if (holds) state.passed = true;
+    });
+    return false;
+  });
+  return {
+    checks: scenario.checks.map((check, index) => ({ id: check.id, passed: check.always ? states[index].seen && !states[index].failed : states[index].passed })),
+    crashes: game.events.softCrash,
+    memo,
+  };
+}
+
+function testScenarios() {
+  const waterWorld = createWaterWorld();
+  for (const scenario of seaplaneScenarios.scenarios) {
+    // Two starting headings: the scripts pick their own runs (the lake's survey, the ocean's straight run).
+    for (const heading of [300, 70, 160]) {
+      const result = flyScenario(scenario, waterWorld, heading);
+      const failed = result.checks.filter((check) => !check.passed).map((check) => check.id);
+      const crashesOk = scenario.allowCrash || result.crashes.length === 0;
+      check('scenarios', `${scenario.id} (starting heading ${heading}): every check passes${scenario.allowCrash ? '' : ' with no soft crash'}`, failed.length === 0 && crashesOk, `failed [${failed.join(', ')}], crashes ${JSON.stringify(result.crashes.map((crash) => crash.reason))}, phase ${result.memo.phase}`);
+    }
+  }
+}
+
 function testAllocation() {
   if (typeof global.gc !== 'function') {
     check('allocation', 'run with --expose-gc to measure', false, 'no global.gc');
@@ -1000,7 +1125,7 @@ function testAllocation() {
   check('allocation', '20 000 ticks on the step retain nothing (heap within 128 KB after a full collection)', growth < 128 * 1024, `${round(growth / 1024, 1)} KB`);
 }
 
-const TESTS = { registry: testRegistry, flight: testFlight, afloat: testAfloat, waves: testWaves, hump: testHump, takeoff: testTakeoff, porpoise: testPorpoise, landing: testLanding, noseOver: testNoseOver, land: testLand, rudders: testRudders, gear: testGear, situate: testSituate, copilot: testCopilot, controller: testController, allocation: testAllocation };
+const TESTS = { registry: testRegistry, flight: testFlight, afloat: testAfloat, waves: testWaves, hump: testHump, takeoff: testTakeoff, porpoise: testPorpoise, landing: testLanding, noseOver: testNoseOver, land: testLand, rudders: testRudders, gear: testGear, situate: testSituate, copilot: testCopilot, controller: testController, scenarios: testScenarios, allocation: testAllocation };
 for (const [name, test] of Object.entries(TESTS)) {
   if (ONLY && ONLY !== name) continue;
   try {
