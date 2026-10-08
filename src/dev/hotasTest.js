@@ -59,7 +59,7 @@ const SPEC_BUTTONS = Object.freeze({
     7: ['craftPrev'], 8: ['craftNext'], 9: ['versionToggle'], 10: ['autopilotToggle'], 11: ['timeForward'], 12: ['timeBack'], 13: ['ringCourse'], 14: ['journal'], 15: ['settings'],
   },
   [THROTTLE_KEY]: {
-    0: ['recenterView'], 1: ['airbrake'], 2: ['viewCycle'], 3: ['relaunch'], 4: ['engineToggle'], 5: ['chuteDeploy'], 6: ['controlsPanel'], 7: ['viewToggle1P3P'], 8: ['mapToggle'],
+    0: ['recenterView'], 1: ['airbrake'], 2: ['viewCycle'], 3: ['relaunch'], 4: ['engineToggle'], 5: ['chuteDeploy'], 6: ['controlsPanel'], 7: ['viewToggle1P3P'], 8: ['mapToggle'], 9: ['craftAbilityAlt'],
   },
 });
 const SPEC_STICK_HAT = Object.freeze({ up: 'viewForward', down: 'viewBack', left: 'viewLeft', right: 'viewRight' });
@@ -516,8 +516,9 @@ function createHotasTestSystem(ctx, { capture }) {
 
     // 9. Persistence: a custom binding and a per-craft tuning, then a reload.
     step('saving bindings and calibration');
-    const bound = input().bindings.bind({ device: THROTTLE_KEY, target: 'recenterView', ref: { type: 'button', index: 9 }, replace: false });
-    check('persistence', 'custom binding: throttle button 9 -> recenterView', bound.ok, bound.ok ? 'bound' : bound.error, 'bound');
+    // Throttle button index 10 (Windows button 11) is free by default; index 9 is craftAbilityAlt.
+    const bound = input().bindings.bind({ device: THROTTLE_KEY, target: 'recenterView', ref: { type: 'button', index: 10 }, replace: false });
+    check('persistence', 'custom binding: throttle button 10 -> recenterView', bound.ok, bound.ok ? 'bound' : bound.error, 'bound');
     const tuned = input().bindings.updateRef({ device: STICK_KEY, target: 'roll', index: 0, patch: { invert: true, deadzone: 0.1 }, craft: 'jet' });
     check('persistence', 'per-craft override: jet stick roll inverted, deadzone 0.1', tuned.ok, tuned.ok ? 'tuned' : tuned.error, 'tuned');
     session.expected = {
@@ -722,7 +723,7 @@ function createHotasTestSystem(ctx, { capture }) {
     check('persistence', 'devices in new slots and another id format keep their keys', Boolean(deviceSummary(STICK_KEY)) && Boolean(deviceSummary(THROTTLE_KEY)), keys.join(', '), `${STICK_KEY}@0, ${THROTTLE_KEY}@3`);
     check('persistence', 'no calibration needed after the reload', deviceSummary(STICK_KEY)?.needsCalibration === false && deviceSummary(THROTTLE_KEY)?.needsCalibration === false, `${deviceSummary(STICK_KEY)?.needsCalibration}, ${deviceSummary(THROTTLE_KEY)?.needsCalibration}`, 'false, false');
     await checkCalibratedPipeline('persistence');
-    await checkButtonAction('persistence', 'throttle', THROTTLE_KEY, 9, 'recenterView', 'custom binding works: throttle button 9 -> recenterView');
+    await checkButtonAction('persistence', 'throttle', THROTTLE_KEY, 10, 'recenterView', 'custom binding works: throttle button 10 -> recenterView');
     settings.set('craft', 'jet');
     await settle();
     const stickCalibration = EXPECTED_CALIBRATION[STICK_KEY][0];
