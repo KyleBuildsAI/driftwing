@@ -40,7 +40,9 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   and `?test=determinism` cover the water stamps and every overlay kind. Review fixes: a water body
   switching LOD keeps its old mesh drawn until the new one is built; the sway texture probes at
   worldgen's `heightAt` (a quarter of `groundHeight`'s cost, 128 probes a frame); redwood trunk
-  colliders no longer tag a perch (the perch provider publishes each tree top once).
+  colliders no longer tag a perch (the perch provider publishes each tree top once). The map tiles
+  colour every local water body in its tint (worldgen `waterBodyAt`), and their cache tag covers
+  waters and overlays (unchanged for presets without them); the water lab checks both (32/32).
 - **Next:** the verification runs on both backends (builds, test:v1, labs, the water-bodies,
   golden-frame, discovery, waterEffect and preset step files, `?test=terrain`, `?test=determinism`,
   a reduced `?test=1`), their numbers here.

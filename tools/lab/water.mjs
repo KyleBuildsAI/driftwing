@@ -19,6 +19,9 @@
 //   determinism  waterBodyAt agrees between two worlds (the second built from structured-cloned
 //                options, as the terrain worker is) at 5000 points asked in a different order; the
 //                prevailing wind angle equals the WindField's
+//   maptiles     the map tiles colour every local water body (lake, pool, film, ice) in its tint at every
+//                sample waterBodyAt covers, and the cache tag of presets without waters or overlays
+//                is the Phase 2 tag (cached tiles of such worlds stay valid)
 //   vegetation   the vegetation provider emits a cylinder per redwood trunk, deterministically, each
 //                under a tree the scatter draws at the lowest quality density; perches come from the
 //                redwood tops and the tallest pines; vegetationNear equals the chunk scatter
@@ -39,6 +42,8 @@ import { waterOutlineContains } from '../../src/world/waters.js';
 import { createVegetationColliders } from '../../src/world/vegetationColliders.js';
 import { VEGETATION_IDS } from '../../src/world/vegetationSpecies.js';
 import { WATER_FIXTURES } from '../../src/dev/waterFixtures.js';
+import { createMapTileGenerator, mapTileCacheTag, MAP_TILE_VERSION } from '../../src/world/mapTileGen.js';
+import { PRESETS } from '../../src/spawns/presets/index.js';
 import { prevailingWindDirection } from '../../src/env/WindField.js';
 import { createGroundContact } from '../../src/flight/groundContact.js';
 import { flightModels } from '../../src/flight/models.js';
@@ -312,6 +317,51 @@ function testDeterminism() {
   check('determinism', 'the prevailing wind angle overlays follow equals the WindField\'s', Math.abs(Math.cos(world.prevailingWindAngle) - direction.x) < 1e-12 && Math.abs(Math.sin(world.prevailingWindAngle) - direction.y) < 1e-12);
 }
 
+// ---- map tiles -----------------------------------------------------------------------------------
+/** The Phase 2 map tile cache tag (placement and stamps only), written out. */
+function phase2TileTag(seed, presets) {
+  const text = JSON.stringify(presets.map((preset) => [preset.id, preset.kind, preset.placement ?? null, preset.stamps ?? null]));
+  let hash = 2166136261 >>> 0;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${String(seed).toUpperCase()}|v${MAP_TILE_VERSION}|${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function testMapTiles() {
+  const generator = createMapTileGenerator(world);
+  let covered = 0;
+  let wrong = 0;
+  const kinds = new Set();
+  for (const body of bodies) {
+    const size = Math.max(body.bounds.maxX - body.bounds.minX, body.bounds.maxZ - body.bounds.minZ) + 200;
+    const resolution = 48;
+    const minX = (body.bounds.minX + body.bounds.maxX) / 2 - size / 2;
+    const minZ = (body.bounds.minZ + body.bounds.maxZ) / 2 - size / 2;
+    const { color } = generator.generate({ x: minX, z: minZ, size, resolution, fields: ['color'] });
+    const step = size / resolution;
+    for (let row = 0; row < resolution; row++) {
+      for (let column = 0; column < resolution; column++) {
+        const covering = world.waterBodyAt(minX + (column + 0.5) * step, minZ + (row + 0.5) * step);
+        if (covering === null || covering.level <= world.WATER_LEVEL) continue;
+        covered++;
+        kinds.add(`${covering.kind}/${covering.material}`);
+        const out = (row * resolution + column) * 4;
+        const tint = covering.tint ?? null;
+        // A body pixel is its tint scaled by one depth factor (0.62..1.12) on all three channels.
+        if (tint !== null) {
+          const scales = [(tint >> 16) & 255, (tint >> 8) & 255, tint & 255].map((channel, index) => (channel > 24 ? color[out + index] / channel : null)).filter((scale) => scale !== null);
+          if (scales.some((scale) => scale < 0.6 || scale > 1.14) || Math.max(...scales) - Math.min(...scales) > 0.08) wrong++;
+        }
+      }
+    }
+  }
+  check('maptiles', 'map tiles colour every water body sample in its own tint (lakes, pools, films and ice)', covered > 200 && wrong === 0, `${covered} body samples over ${bodies.length} bodies (${[...kinds].join(', ')}), ${wrong} off-tint`);
+  check('maptiles', 'the cache tag of presets without waters or overlays is the Phase 2 tag', mapTileCacheTag('HARNESS-1', PRESETS) === phase2TileTag('HARNESS-1', PRESETS));
+  check('maptiles', 'the cache tag changes with the waters and overlays of the fixture presets', mapTileCacheTag('HARNESS-1', WATER_FIXTURES) !== phase2TileTag('HARNESS-1', WATER_FIXTURES));
+}
+
 // ---- vegetation ----------------------------------------------------------------------------------
 function testVegetation() {
   const redwoods = sites.find((site) => site.presetId === 'fixtureRedwoods');
@@ -432,6 +482,8 @@ testDeterminism();
 testVegetation();
 testCost();
 await testAllocation();
+// Last: the tiles' bulk worldgen work would warm and churn the heap the cost and allocation checks measure.
+testMapTiles();
 
 let failed = 0;
 for (const result of results) {
