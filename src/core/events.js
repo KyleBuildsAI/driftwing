@@ -39,6 +39,14 @@ export const EVENT_TYPES = Object.freeze({
   /** Terrain or water impact handled by fade and respawn. */
   softCrash: { craft: 'string', reason: 'string', impactSpeed: 'number', position: 'vector3' },
   /**
+   * The craft touched a solid collider (src/world/colliders.js): speed is the impact speed into the
+   * surface (m/s, relative to a moving collider), crashed whether it was over the craft's
+   * bodyStrikeSpeed (a soft crash 'structure strike' follows), surface the collider's surface tag.
+   */
+  colliderHit: { id: 'string', owner: 'string', craft: 'string', speed: 'number', normal: 'vector3', position: 'vector3', crashed: 'boolean', surface: 'string' },
+  /** The craft entered a sensor collider (a kite string): a miss for a challenge, never a crash. */
+  colliderSensor: { id: 'string', owner: 'string', tag: 'string', craft: 'string', position: 'vector3' },
+  /**
    * First sight of a landmark or a spawn in this world. For spawns, kind is the preset category, id
    * is the site id (sites) or the preset id (events), and presetId names the preset.
    */

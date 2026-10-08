@@ -160,7 +160,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     const gpu = count((row) => row.cycles.length === 2 && row.cycles.every((cycle) => cycle.gpuOk));
     const heap = count((row) => row.cycles.length === 2 && row.cycles[1].heapOk);
     const wind = count((row) => row.cycles.length === 2 && row.cycles.every((cycle) => cycle.windOk));
-    const other = count((row) => row.cycles.length === 2 && row.cycles.every((cycle) => cycle.lightsOk && cycle.skyOk && cycle.leaksOk));
+    const other = count((row) => row.cycles.length === 2 && row.cycles.every((cycle) => cycle.lightsOk && cycle.skyOk && cycle.leaksOk && cycle.collidersOk));
     const shots = count((row) => Boolean(row.shot && row.shot.taken));
     const counts = capture.counts;
     const fpsRows = rows.filter((row) => Number.isFinite(row.frames.avgFps));
@@ -169,7 +169,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       { id: 'gpu', label: 'GPU memory back after every dispose (geometries, textures)', value: ratio(gpu), status: allOf(gpu) },
       { id: 'heap', label: `JS heap within ${HEAP_TOLERANCE_MB} MB after ${leakCycles} more creates and disposes`, value: heapAvailable() ? ratio(heap) : 'unavailable', status: heapAvailable() ? allOf(heap) : 'muted' },
       { id: 'wind', label: 'Wind sources removed after every dispose', value: ratio(wind), status: allOf(wind) },
-      { id: 'other', label: 'Real lights, sky modifiers and leak counters back', value: ratio(other), status: allOf(other) },
+      { id: 'other', label: 'Real lights, sky modifiers, colliders and leak counters back', value: ratio(other), status: allOf(other) },
       { id: 'console', label: 'Console errors / warnings', value: `${counts.errors} / ${counts.warnings}`, status: counts.errors === 0 && counts.warnings === 0 ? 'pass' : 'fail' },
       shotsWanted
         ? { id: 'shots', label: 'Screenshots taken', value: ratio(shots, total), status: allOf(shots) }
@@ -812,7 +812,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
   // ---- Summary ------------------------------------------------------------------------------------------------
   function cycleCell(cycle) {
     if (!cycle) return { text: '-', status: 'fail' };
-    const ok = cycle.gpuOk && cycle.windOk && cycle.skyOk && cycle.lightsOk && cycle.leaksOk;
+    const ok = cycle.gpuOk && cycle.windOk && cycle.skyOk && cycle.lightsOk && cycle.leaksOk && cycle.collidersOk;
     return { text: `g${cycle.geometryDelta >= 0 ? '+' : ''}${cycle.geometryDelta} (world ${cycle.worldFirstDrawn}) t${cycle.textureDelta >= 0 ? '+' : ''}${cycle.textureDelta} w${cycle.windLeft.length}`, status: ok ? 'pass' : 'fail', title: JSON.stringify({ leftBehind: cycle.leftBehind, wind: cycle.windSources, sky: cycle.skyModifiers, lights: cycle.lights }) };
   }
 

@@ -7,10 +7,10 @@
 // browser console and screenshots of the summary panel, and stops the browser and the server.
 //
 // Usage:
-//   node tools/run-harness.mjs --test 1|soak|hotas|terrain|determinism|spawns [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
+//   node tools/run-harness.mjs --test 1|soak|hotas|terrain|determinism|spawns|collision [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
 //     [--crafts glider,jet] [--views first,third] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
-//     [--presets real | --presets tornado,comet] [--leak-cycles N]
+//     [--presets real | --presets tornado,comet] [--leak-cycles N] [--parts fixture,special,landmarks,structures]
 //
 // The terrain test runs on one seed (the first of --seeds; by default P2-TERRAIN, or TERRAIN-REAL-8
 // with --presets real, a world with every real stamp type near its spawn) in the late
@@ -33,6 +33,13 @@
 // in reach), and the runner takes one screenshot per preset when the page asks for it
 // (spawn-<nn>-<preset>.png). --presets a,b,c shows only those presets; --leak-cycles N runs N held
 // creates and disposes per preset in its leak check instead of 3 (a longer heap trend).
+//
+// The collision test (/v2/?test=collision) flies the jet and the bush plane into a fixture of every
+// collider type, the retrofitted landmarks and the Phase 2 structures at 60, 250 and 1500 m/s on one
+// seed (the first of --seeds, by default COLLIDERS-LAB, whose spawn has every landmark type in reach),
+// with the slow bump, the landable deck, the tunnel centreline, the arch opening and the kite strings.
+// --parts a,b runs some of its parts only (fixture, special, landmarks, structures; the criteria of the
+// others are muted).
 //
 // --alloc-profile N (diagnostic): once the first flight-test run is flying, samples every JS
 // allocation for N seconds with the sampling heap profiler (collected objects included, so it is
@@ -94,7 +101,9 @@ const DETERMINISM_SEED = 'DETERMINISM-1';
 const SPAWNS_SEED = REAL_TERRAIN_SEED;
 /** The spawns test asks for screenshots: the runner polls this often while it runs. */
 const SHOT_POLL_MS = 400;
-const TESTS = Object.freeze(['1', 'soak', 'hotas', 'terrain', 'determinism', 'spawns']);
+/** The collision test's default world. */
+const COLLISION_SEED = 'COLLIDERS-LAB';
+const TESTS = Object.freeze(['1', 'soak', 'hotas', 'terrain', 'determinism', 'spawns', 'collision']);
 /** The soak's default worlds (src/dev/testHarness.js SOAK_SEEDS). */
 const SOAK_SEED_COUNT = 5;
 
@@ -115,6 +124,7 @@ function parseArgs(argv) {
     allocProfileSeconds: null,
     presets: null,
     leakCycles: null,
+    parts: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -132,6 +142,7 @@ function parseArgs(argv) {
       case '--views': options.views = next(); break;
       case '--presets': options.presets = next(); break;
       case '--leak-cycles': options.leakCycles = Number(next()); break;
+      case '--parts': options.parts = next(); break;
       case '--out': options.out = next(); break;
       case '--timeout-minutes': options.timeoutMinutes = Number(next()); break;
       case '--width': options.width = Number(next()); break;
@@ -321,6 +332,10 @@ function harnessUrl(port, options) {
     if (options.presets === 'real') url.searchParams.set('presets', 'real');
   }
   if (options.test === 'determinism') url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : DETERMINISM_SEED);
+  if (options.test === 'collision') {
+    url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : COLLISION_SEED);
+    if (options.parts) url.searchParams.set('testParts', options.parts);
+  }
   if (options.test === 'spawns') {
     url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : SPAWNS_SEED);
     url.searchParams.set('testShots', '1');
@@ -340,7 +355,7 @@ function harnessUrl(port, options) {
 function timeLimitMs(options) {
   if (Number.isFinite(options.timeoutMinutes) && options.timeoutMinutes > 0) return options.timeoutMinutes * 60000;
   if (options.test === 'hotas') return 8 * 60000;
-  if (options.test === 'terrain' || options.test === 'determinism') return 40 * 60000;
+  if (options.test === 'terrain' || options.test === 'determinism' || options.test === 'collision') return 40 * 60000;
   if (options.test === 'spawns') return 90 * 60000;
   const soak = options.test === 'soak';
   const seeds = options.seeds ? options.seeds.split(',').filter(Boolean).length : soak ? SOAK_SEED_COUNT : 3;
@@ -635,7 +650,7 @@ async function takeRequestedShot(page, options, runner) {
 
 function spawnsTable(report) {
   const lines = ['  #  preset               sun  weather   anchor   engines                              fps   p99ms  maxms  show: geo/world tex wind  leak: geo/world tex wind  heapMB  err/warn  shot  result'];
-  const cycleText = (cycle) => (cycle ? `${cycle.geometryDelta}/${cycle.worldFirstDrawn} ${cycle.textureDelta} ${cycle.windLeft.length}${cycle.gpuOk && cycle.windOk && cycle.skyOk && cycle.lightsOk && cycle.leaksOk ? '' : '!'}` : '-');
+  const cycleText = (cycle) => (cycle ? `${cycle.geometryDelta}/${cycle.worldFirstDrawn} ${cycle.textureDelta} ${cycle.windLeft.length}${cycle.gpuOk && cycle.windOk && cycle.skyOk && cycle.lightsOk && cycle.leaksOk && cycle.collidersOk ? '' : '!'}` : '-');
   for (const row of report.presets) {
     lines.push([
       String(row.index).padStart(3),
@@ -661,6 +676,26 @@ function spawnsTable(report) {
     const leak = row.cycles[1];
     if (leak && leak.warmupRetainedMB > 0.5) lines.push(`  note: ${row.presetId}: the held warm-up kept ${leak.warmupRetainedMB} MB once; the judged cycles read ${leak.heapTraceMB.join(', ')} MB`);
   }
+  for (const problem of report.harnessErrors) lines.push(`  harness problem: ${problem}`);
+  return lines.join('\n');
+}
+
+function collisionTable(report) {
+  const lines = ['  target                        craft                  m/s            runs  strikes  through  inside  max impact'];
+  for (const row of report.types) {
+    lines.push([
+      `  ${row.kind.padEnd(30)}`,
+      row.crafts.padEnd(22),
+      row.speeds.padEnd(14),
+      String(row.runs).padStart(4),
+      String(row.crashes).padStart(8),
+      String(row.through).padStart(8),
+      String(row.penetrations).padStart(7),
+      String(row.impact).padStart(11),
+    ].join(' '));
+  }
+  for (const criterion of report.criteria) lines.push(`  ${criterion.status === 'pass' ? 'PASS' : criterion.status === 'fail' ? 'FAIL' : '----'}  ${criterion.label}: ${criterion.value}`);
+  for (const note of report.special?.notes ?? []) lines.push(`  note: ${note}`);
   for (const problem of report.harnessErrors) lines.push(`  harness problem: ${problem}`);
   return lines.join('\n');
 }
@@ -890,7 +925,7 @@ async function main() {
   writeFileSync(join(options.out, 'process-load.json'), JSON.stringify(processLoad.samples, null, 2));
 
   const flightTables = () => `${flightTable(report)}\n${craftViewTable(report)}\n${criteriaLines(report)}\n${slowFrameEvidence(report)}`;
-  const tables = { 1: flightTables, soak: flightTables, hotas: () => hotasTable(report), terrain: () => terrainTable(report), determinism: () => determinismTable(report), spawns: () => spawnsTable(report) };
+  const tables = { 1: flightTables, soak: flightTables, hotas: () => hotasTable(report), terrain: () => terrainTable(report), determinism: () => determinismTable(report), spawns: () => spawnsTable(report), collision: () => collisionTable(report) };
   if (report) process.stdout.write(`${tables[options.test]()}\n`);
   process.stdout.write(`run-harness: ${runner.passed ? 'PASS' : 'FAIL'} (harness ${report ? report.result : 'no report'}, backend ${runner.backend ? runner.backend.join(', ') : 'unknown'}, browser console ${runner.errors.length} errors / ${runner.warnings.length} warnings, ${runner.durationSeconds} s)\n`);
   for (const problem of runner.problems) process.stdout.write(`run-harness: problem: ${problem}\n`);

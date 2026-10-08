@@ -9,6 +9,7 @@ import { paint } from '../palette.js';
 import { addBoulder } from '../common.js';
 import { shade } from '../meshBuilder.js';
 import { roll, rollInteger } from '../../engineKit.js';
+import { builderFrame, localHull, localSphere, ringPoints } from '../colliders.js';
 
 export const SPIRES_DEFAULTS = Object.freeze({
   count: [5, 9],
@@ -61,6 +62,7 @@ export function buildSpires(context, read) {
     const tilt = (spire === spires[0] ? 0.3 : 1) * tiltDegrees * (0.4 + 0.6 * rng()) * (Math.PI / 180);
     const phase = rng();
     addCrystal(glow, spire.x, spire.ground, spire.z, outwardYaw, tilt, spire.radius, spire.height, paint(spire.colour), phase);
+    out.colliders.push(crystalCollider(spire.x, spire.ground, spire.z, outwardYaw, tilt, spire.radius, spire.height, true));
     heightSum += spire.height;
     // Shards and boulders around the base (resting on the ground).
     const shards = rollInteger(shardRange, rng) / spires.length;
@@ -70,14 +72,21 @@ export function buildSpires(context, read) {
       const sx = spire.x + Math.sin(angle) * reach;
       const sz = spire.z - Math.cos(angle) * reach;
       const size = spire.radius * (0.2 + rng() * 0.25);
-      addCrystal(glow, sx, context.ground(sx, sz), sz, angle, (15 + rng() * 30) * (Math.PI / 180), size, size * (3 + rng() * 4), paint(colors[Math.floor(rng() * colors.length)]), rng());
+      const shardTilt = (15 + rng() * 30) * (Math.PI / 180);
+      const shardHeight = size * (3 + rng() * 4);
+      const shardGround = context.ground(sx, sz);
+      addCrystal(glow, sx, shardGround, sz, angle, shardTilt, size, shardHeight, paint(colors[Math.floor(rng() * colors.length)]), rng());
+      out.colliders.push(crystalCollider(sx, shardGround, sz, angle, shardTilt, size, shardHeight, false));
     }
     for (let boulder = 0; boulder < 2; boulder++) {
       const angle = rng() * Math.PI * 2;
       const reach = spire.radius * (1.2 + rng());
       const bx = spire.x + Math.sin(angle) * reach;
       const bz = spire.z - Math.cos(angle) * reach;
-      addBoulder(body, bx, context.ground(bx, bz), bz, spire.radius * (0.35 + rng() * 0.3), rng);
+      const boulderGround = context.ground(bx, bz);
+      const boulderRadius = spire.radius * (0.35 + rng() * 0.3);
+      addBoulder(body, bx, boulderGround, bz, boulderRadius, rng);
+      out.colliders.push(localSphere('boulder', bx, boulderGround + boulderRadius * 0.3, bz, boulderRadius * 1.05, { surface: 'stone' }));
     }
   }
   glow.resetTransform();
@@ -114,6 +123,17 @@ export function buildSpires(context, read) {
   const centreGround = spires[0].ground;
   out.audioPoint = [0, centreGround + (heightSum / spires.length) * 0.5, 0];
   out.radius = Math.max(out.radius, spread + heightRange[1] * 0.4);
+}
+
+/**
+ * A crystal's collider: the hull of its widest base ring (below the ground), its upper ring and its tip,
+ * in addCrystal's frame. The rings narrow upward, so the hull holds every band. A spire's tip is a perch.
+ */
+function crystalCollider(x, y, z, yaw, tilt, radius, height, spire) {
+  const place = builderFrame(x, y, z, yaw, -tilt, 0);
+  const points = [...ringPoints(0, -6, 0, radius * 1.05, 6, 0.35), ...ringPoints(0, height * 0.8, 0, radius * 0.85, 6, 0.35), [0, height, 0]].map(place);
+  const tip = points[points.length - 1];
+  return localHull(spire ? 'spire' : 'shard', points, { surface: 'ice', perch: spire ? { x: tip[0], y: tip[1], z: tip[2] } : false });
 }
 
 /**

@@ -412,7 +412,7 @@ export function installPresetChecks(game) {
       return check(`${presetId}: craft ${distance} m from the ${childKey}`, true, api.setPieceState(presetId).records);
     },
 
-    /** Ends presetId's spawn: GPU memory, wind sources and sky modifiers back to their levels, no leaks. */
+    /** Ends presetId's spawn: GPU memory, wind sources, colliders and sky modifiers back to their levels, no leaks. */
     async end(presetId) {
       const record = spawned.get(presetId);
       if (!record) return check(`${presetId}: ended`, false, 'never spawned');
@@ -426,7 +426,7 @@ export function installPresetChecks(game) {
       const result = await dispose.compare(record.baseline, { presetIds: [presetId] });
       return check(`${presetId}: dispose returns GPU memory, removes its wind sources and sky modifiers`, result.ok, {
         endedNaturally: !active, before: result.before, during: record.during, after: result.after, worldFirstDrawn: result.worldFirstDrawn, leftBehind: result.leftBehind,
-        windSources: result.windSources, windLeft: result.windLeft, skyModifiers: result.skyModifiers, lights: result.lights, leaks: result.leaks,
+        windSources: result.windSources, windLeft: result.windLeft, colliders: result.colliders, collidersLeft: result.collidersLeft, skyModifiers: result.skyModifiers, lights: result.lights, leaks: result.leaks,
       });
     },
 

@@ -49,6 +49,7 @@ import { createWindModifierEngine } from './spawns/engines/windModifierEngine.js
 import { createWindOverlaySystem } from './dev/windOverlay.js';
 import { createWorldGen } from './world/worldgen.js';
 import { createGroundSurfaces } from './world/groundSurfaces.js';
+import { createColliderWorld } from './world/colliders.js';
 import { DEG, clamp, damp, wrapDegrees, headingFromVector, vectorFromHeading, bearingTo, compassName } from './core/util.js';
 import { EventBus } from './core/eventBus.js';
 import { attachTypedEvents } from './core/events.js';
@@ -89,8 +90,10 @@ const SPAWN_ENGINE_FACTORIES = Object.freeze([
  * ?test=terrain (terrain stamps: seams, worker parity, collision), ?test=sites (the terrain
  * fixtures' stamped world with no harness, for engine step files that need real stamped sites),
  * ?test=waters (the water-body and overlay fixtures' world with no harness, for
- * tools/steps/water-bodies.json), ?test=determinism (the same seed and scripted path in two page loads: site list and director log)
- * and ?test=spawns (each of the 30 presets force-spawned ahead, shown and disposed back to baseline).
+ * tools/steps/water-bodies.json), ?test=determinism (the same seed and scripted path in two page loads: site list and director log),
+ * ?test=spawns (each of the 30 presets force-spawned ahead, shown and disposed back to baseline) and
+ * ?test=collision (every collider type and retrofitted structure flown into at speed: soft crashes, no
+ * pass-through, sensors counted).
  * Loaded on demand from dev builds only, so none exists in production builds. Returns
  * { databaseName, createSystem(ctx), worldPresets? } or null; worldPresets (fixture presets) replace
  * the preset list in worldgen on both threads.
@@ -104,6 +107,7 @@ async function loadDevTest(params) {
   if (test === 'waters') return (await import('./dev/waterBodiesTest.js')).prepareWaterWorld();
   if (test === 'determinism') return (await import('./dev/determinismTest.js')).prepareDeterminismTest({ params });
   if (test === 'spawns') return (await import('./dev/spawnsTest.js')).prepareSpawnsTest({ params });
+  if (test === 'collision') return (await import('./dev/collisionTest.js')).prepareCollisionTest({ params });
   return null;
 }
 
@@ -301,6 +305,7 @@ async function boot() {
   window.addEventListener('touchstart', onFirstGesture, true);
 
   ctx.wind = createWindField({ world, uniforms, state, bus });
+  ctx.colliders = createColliderWorld({ groundSurfaces: ctx.groundSurfaces, bus });
 
   const perf = createPerfGovernor(ctx, { devHooks });
   ctx.perf = perf;

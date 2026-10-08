@@ -29,6 +29,18 @@ const TOASTS = Object.freeze({
   hard: { title: 'Hard landing.', kind: 'warning' },
 });
 
+/**
+ * Per event bus: the resolver naming what a landing touched ('structure' for a landable collider top;
+ * src/flight/FlightController.js registers it), or none. Without one, or when it answers null, the
+ * landed event carries no surface (read as 'ground').
+ */
+const surfaceResolvers = new WeakMap();
+
+/** Registers resolver(position) -> 'structure' | 'perch' | 'water' | 'ground' | null for landings on bus. */
+export function setLandingSurfaceResolver(bus, resolver) {
+  surfaceResolvers.set(bus, resolver);
+}
+
 /** Grade for a touchdown sink rate (m/s, positive down). */
 export function gradeLanding(sinkRate) {
   const sink = Math.max(0, Number.isFinite(sinkRate) ? sinkRate : Infinity);
@@ -62,14 +74,18 @@ export function createLandingMonitor({ bus, craftId, limits = {} }) {
   function announce(record) {
     landings++;
     const toast = TOASTS[record.grade];
-    bus.emitTyped('landed', {
+    const payload = {
       grade: record.grade,
       craft: craftId,
       sinkRate: record.sinkRate,
       groundSpeed: record.groundSpeed,
       surface: record.surface,
       position: { x: record.position.x, y: record.position.y, z: record.position.z },
-    });
+    };
+    const resolver = surfaceResolvers.get(bus);
+    const surface = resolver ? resolver(record.position) : null;
+    if (typeof surface === 'string') payload.surface = surface;
+    bus.emitTyped('landed', payload);
     const feetPerMinute = Math.round((record.sinkRate * 196.85) / 10) * 10;
     bus.emit('notify', { text: `${toast.title} ${record.sinkRate.toFixed(1)} m/s (${feetPerMinute} fpm) at touchdown.`, kind: toast.kind });
   }

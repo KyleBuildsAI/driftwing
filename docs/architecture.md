@@ -177,7 +177,11 @@ system, and then starts the frame loop.
 | `worldgen.js` | `createWorldGen(seed, options)`: seeded noise, biomes, the SHARED height function (`heightAt`, `groundHeight`) with the site stamps applied, stamp-aware face colours, vegetation scatter and landmark sites. Imported by the main thread and the worker |
 | `placement.js` | deterministic site placement on the 2 km grid ([Placement and terrain stamps](#placement-and-terrain-stamps)); pure, imported by worldgen on both threads |
 | `stamps.js` | the terrain stamps (cone, carve, cliffStep, gorge, flatten, islandBase): resolution, height, paint, footprints; pure |
-| `groundSurfaces.js` | extra ground surfaces: landable ground that is not terrain (floating island tops; later decks and roofs). `add({ id, minX, maxX, minZ, maxZ, top, heightAt })`, `remove(id)`, `surfaceBelow(x, z, ceiling)`; allocation-free queries. The game's instance is `ctx.groundSurfaces` |
+| `groundSurfaces.js` | extra ground surfaces: landable ground that is not terrain (floating island tops, and from Phase 3 every landable collider's up-facing faces). `add({ id, minX, maxX, minZ, maxZ, top, heightAt })`, `remove(id)`, `setBounds(id, ...)` (a moving surface), `surfaceBelow(x, z, ceiling)`, `surfaceIdBelow(x, z, ceiling)`; filed in a 256 m cell grid, allocation-free queries. The game's instance is `ctx.groundSurfaces` |
+| `colliders.js` | the structure collision service (Phase 3, [Structure collision](#structure-collision-ctxcolliders)): `createColliderWorld({ groundSurfaces })` with box, cylinder, capsule, hull, heightfield and mesh colliders, a 256 m spatial hash, providers, perches, sensors and landable tops; pure JS. The game's instance is `ctx.colliders` |
+| `colliderMath.js` | the collider narrow phase: a sphere swept against points, segments, triangles, boxes, cylinders and convex hulls, and the deterministic hull builder; numbers pass through float64 registers, never call arguments (nothing is boxed or allocated) |
+| `colliderMesh.js` | `createMeshCollider(geometry, worldMatrix)`: a three-mesh-bvh BVH as a `mesh` collider, main thread only, where no primitive fits (the cave tunnel, preset 77) |
+| `cellGrid.js` | the sparse integer cell grid both spatial hashes file into (small-integer keys, never-shrinking cell lists) |
 | `terrain.worker.js` | the terrain Web Worker (Vite `?worker&inline`, so it also works in the single-file build) |
 | `mapTileGen.js` | map tiles from the shared height and biome functions: `generate({ x, z, size, resolution, fields, stamps })` returns `height` (Float32Array), `color` (RGBA sRGB, face colours under a shaded relief, water by depth), `biome` (Uint8Array), and for the far field `surface` (the visible surface: terrain or water level, local bodies included) and `albedo` (face colours without relief, alpha 0 on water); `stamps: false` samples the bare world (the worker keeps one beside the stamped world: coarse tiles stay fast); seamless; pure |
 | `mapTiles.worker.js`, `mapTiles.js` | the map-tile worker (imports worldgen like the terrain worker, caches tiles in the IndexedDB database `driftwing-v2-maptiles`) and its main-thread service `createMapTileService({ seed, worldOptions })`: `request(spec, { priority })`, `reprioritize(fn)`, `stats()`, `dispose()` |
@@ -520,6 +524,7 @@ plus optional `prewarm()` / `endPrewarm()` hooks and whatever API it offers. `ct
 | `settings`, `storage` | persisted settings and the raw key-value storage |
 | `world` | the shared deterministic world generator (`heightAt`, `groundHeight`, `biomeAt`, `sitesNear`, `sitesInCell`, `stampInfluence`, ...) |
 | `groundSurfaces` | extra ground surfaces (`src/world/groundSurfaces.js`): landable tops that are not terrain; spawn engines add them (engine ctx `surfaces`), the flight controller stands on them |
+| `colliders` | the structure collision service (`src/world/colliders.js`): spawn engines (engine ctx `game.colliders`) and the landmarks register colliders, the flight controller sweeps its probes against them every tick |
 | `wind` | the WindField |
 | `perf` | the perf governor |
 | `craftRegistry` | craft catalog and registered craft modules |
@@ -638,7 +643,9 @@ Typed events are emitted with `bus.emitTyped(name, payload)` and heard with
 | --- | --- | --- |
 | `craftChanged` | `{ craft, previous }` | flight controller |
 | `landed` | `{ grade: butter\|smooth\|firm\|hard, craft, sinkRate, groundSpeed, position }` | landing monitor |
-| `softCrash` | `{ craft, reason, impactSpeed, position }` | flight controller |
+| `softCrash` | `{ craft, reason, impactSpeed, position }`; reason `structure strike` for a collider struck over the craft's `bodyStrikeSpeed` | flight controller |
+| `colliderHit` | `{ id, owner, craft, speed, normal, position, crashed, surface }`: the craft touched a solid collider (speed into its surface, relative to a moving one); `crashed` when it was a structure strike. A scrape repeats at most every 0.25 s per collider | flight controller |
+| `colliderSensor` | `{ id, owner, tag, craft, position }`: the craft entered a sensor collider (a kite string, tag `kiteString`); once per entry, re-armed when every probe has left it | flight controller |
 | `discovery` | `{ id, name, kind, position, presetId? }`: landmarks (bridged from `landmark:discovered`) and spawns (`kind` is the preset category, `id` the site id or the event preset id, `presetId` the preset) | events.js, SpawnManager |
 | `windSourceAdded` / `windSourceRemoved` | `{ id, kind, position, radius }` / `{ id, kind }` | WindField |
 | `viewChanged` | `{ view: chase\|cockpit\|wing\|flyby\|fpv, craft }` (also at start and on craft change) | camera |
@@ -814,6 +821,7 @@ called with `{ profile, craft, world, bus, state, craftState, settings }`, where
 A soft crash triggers when:
 
 - `bodyStrike.speed` exceeds `limits.bodyStrikeSpeed` (default 5 m/s);
+- a collision probe strikes a collider faster than `limits.bodyStrikeSpeed` (reason `structure strike`, below);
 - `touchdown.sinkRate` exceeds `limits.crashSinkRate`;
 - a craft that cannot float touches water;
 - the penetration exceeds 1 m.
@@ -823,6 +831,53 @@ the surface there (the shared height function, an extra ground surface it struck
 fast strike can end its tick metres inside a steep slope. A strike during the fade-out (a respawn
 facing a cliff) is a new soft crash that fades back to black from the current opacity.
 `node tools/lab/jet.mjs --only=crashhold` checks both.
+
+#### Structure collision (`ctx.colliders`)
+
+Phase 3 (contract section b). Colliders live in the WORLD frame (float64) in `src/world/colliders.js`:
+box, cylinder (axis local +y), capsule, convex hull (at most 64 points, optionally moving about a
+centre), heightfield (a solid prism under triangulated heights, NaN for holes) and mesh (a
+three-mesh-bvh BVH, `src/world/colliderMesh.js`). Each record has tags `{ landable, perch, sensor,
+miss, surface }` and an optional velocity. A landable collider publishes its up-facing faces
+(normal.y > 0.7) to `ctx.groundSurfaces` under its own id, so touchdowns, rolling, parking, grades and
+the sink-rate soft crash on it are the existing ground contact's (a landing there reports `landed`
+with `surface: 'structure'`). Queries: `sweepSphere`, `raycast`, `overlapSphere`, `perchesNear`,
+`insideSolid`, `liftClear`, `boundsOccupied`, and the controller's batch `sweepProbes(probeSet,
+onSensor)`; moving parts use `update(id, fields)` or, per frame, `setPose(id, pose, velocity)`
+(typed arrays). Providers (`addProvider`) emit procedural colliders for a queried box; perch
+providers add perch points. Results never depend on insertion order (earliest hit, ties to the
+lower id), and the queries allocate nothing in steady state (`node --expose-gc tools/lab/colliders.mjs`).
+A mesh collider tells inside from outside (`depth()`, used by `insideSolid`) by the parity of three
+fixed rays, majority wins, so it needs a closed mesh but not a consistent winding.
+
+Every craft carries collision probes: `craft.collision.probes` when a module declares them, else the
+centre of mass (0.6 m), every `simProfile.contacts` point (0.35 m) and fill probes every 0.7 m on the
+line from the centre to each contact (so a wing cannot slice past a mast or a string between its tip
+and the fuselage). Every fixed tick, right after `enforceSimCeiling()`, each probe sweeps from its
+previous to its current world position (nothing tunnels at any speed: at 1500 m/s a tick is 12.5 m
+and the sweep covers it), and the earliest hit decides:
+
+- faster into the surface (relative to a moving collider) than `limits.bodyStrikeSpeed`: the craft goes
+  back to the hit pose plus 0.05 m along the normal and soft-crashes there (`structure strike`). The
+  fade's floor then ignores ground surfaces above the craft, and a respawn inside a collider's bounds
+  rises 50 m above its top;
+- slower: the probe goes onto the surface plus 0.05 m, the velocity into it is reflected with
+  restitution 0.15 and the slide braked with friction 0.35 (a scrape, a bump, a perch approach);
+- a landable top is ground: gear probes ignore its up-facing faces, and a slow touch by any probe is
+  the ground contact's;
+- a sensor emits `colliderSensor` once per entry and never resolves or crashes.
+
+Every solid hit emits `colliderHit`. `getStats()` counts `structureStrikes`, `structureContacts` and
+`sensorEntries`; `getCollisionProbes()` lists the probe set. Spawn engines add colliders through
+`ctx.game.colliders`, list every id in `instance.colliderIds` and remove them on dispose; the
+SpawnManager removes and counts any left behind (`leaks.colliders`, a `console.error`). The
+retrofits: the v1-derived landmarks (arch box legs and capsule ribs that keep the opening clear,
+standing stones and lintels as boxes with landable perch lintels, boulder hulls, the lighthouse as
+stacked cylinders, every balloon as two hulls and a basket box moving with its drift) and the Phase 2
+structures (turbine masts plus nacelles and rotor discs that turn with the yaw, the rope bridge's
+deck boxes and rope capsules, hangar hulls with landable roofs, crystal hulls with perches on the
+tips, island rock hulls, trees and roots, and the island tops as landable heightfields that publish
+the exact top). Props under 2 m tall carry none.
 
 `SimFixedWing` also takes an optional `profile.extension({ profile, craft, bus, craftState, limits,
 flightData })`. Its hooks are `shapeControls`, `engine { update, forces, reset }`,
@@ -1299,8 +1354,9 @@ are implemented here. The preset schema (section 1) and the 30 presets are in [s
   `fauna:scatter`, `fauna:call`, `structure:gate`, `structure:course`, `structure:landing`,
   `setPiece:stage`, `setPiece:narrate`, `setPiece:ended`); the references are in `docs/engines/`.
 - **Clean-up.** After `dispose(instance)` the manager removes any wind source still listed in
-  `instance.windSourceIds` and releases any real light the spawn still holds, and reports each as a
-  leak (`console.error`, `getStats().leaks`).
+  `instance.windSourceIds` and any collider still listed in `instance.colliderIds` (Phase 3), releases
+  any real light the spawn still holds, and reports each as a leak (`console.error`,
+  `getStats().leaks`).
 - **Memory accounting.** `renderer.info.memory` (geometries, textures, attributes, programs, total
   bytes) and the JS heap (`performance.memory`, Chrome) are read before each create, after it, and
   after each dispose: `getStats().memory` has the baseline (after the engines initialised;
@@ -1620,6 +1676,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `?test=terrain` | dev builds: the terrain test (`src/dev/terrainTest.js`). The fixture site presets reach worldgen on both threads; near every stamp type, every LOD pair of neighbouring chunks is checked for cracks, the displayed (worker-built) meshes must equal main-thread builds bit for bit, and `groundHeight` must match the rendered LOD0 mesh within 0.5 m. On-screen summary and `window.DRIFTWING.testReport`; `window.DRIFTWING.terrainTest.showView(i)` frames stamp type i. With `&presets=real` (`node tools/run-harness.mjs --test terrain --presets real`) the same checks run on the game's own stamped site presets, in the world as a player gets it (the runner defaults to seed `TERRAIN-REAL-8`, whose spawn has every real stamp type within the 40 km search radius, the rare volcano's cone included) |
 | `?test=1` | dev builds: the flight-test harness (`src/dev/testHarness.js`). It flies each of the six craft for 60 s in first person and in third person across 3 seeds (36 runs), and logs average fps, p99 frame time, NaN events, terrain penetrations, soft crashes, heap growth and console errors. It shows an on-screen summary and offers a JSON report (`window.DRIFTWING.testReport`). URL options: `testSeeds`, `testSeconds`, `testCraft`, `testViews` (`first`, `third`) |
 | `?test=1&testPlan=soak` | dev builds: the 10-minute soak, the flight-test harness with its soak plan: 5 seeds (`SOAK-1` to `SOAK-5`), one craft per seed (the six in turn), both views, 60 s each, the event director live as in the game. Its criteria add heap growth under 75 MB per world, the worst p99 frame time within the perf governor's frame target, and the director live on every world (its activations, the activations the SpawnManager declined with refusal `declined` and the spawns started are listed per world) to the flight test's |
+| `?test=collision` | dev builds: the collision test (`src/dev/collisionTest.js`): a fixture of every collider type (with a mesh BVH tunnel mountain) and a kite-string slalom high above the terrain, the nearest landmark of every type and every Phase 2 structure preset; the jet and the bush plane (and the spaceplane once registered) fly scripted lines into each at 60, 250 and 1500 m/s and must soft-crash with `structure strike`, never pass through, and never end a tick with a probe inside a solid collider (a probe within 0.5 m under a landable top stands on ground); the real flight model at cruise into the box and the tunnel's flank; a 3 m/s bump resolves; a landable deck is ground (the real bush plane stands on it, and real-model dives onto it crash on it); the tunnel centreline and the arch opening are flown clean (the arch threads); every kite string crossed is one miss; the tunnel's BVH answers with the game's own `THREE.Vector3` (one three.js core). It holds the quality level at high; `&testParts=fixture,special,landmarks,structures` runs some parts (the others' criteria muted) |
 | `?test=spawns` | dev builds: the spawns test (`src/dev/spawnsTest.js`, scenarios in `spawnScenarios.js`). The game's presets are held and the site feed detached; each of the 30 presets goes back in for its own show: force-spawned ahead of the craft (a site preset on its nearest real placed site, with its stamps), frame times recorded over its live window, a staging step where one is named (totality, the wall cloud, meteors in flight, the eagle on the wing), framed by the photo camera, screenshot, disposed; then, with the simulation held, one warm-up create and dispose (a one-time cache it keeps is reported, not judged) and 3 more with the heap read after each. GPU memory (with the geometry tracker), wind sources, real lights, sky modifiers and leak counters must be back after each, and the JS heap within 1 MB across the judged held cycles. The test spawns through the debug path, which is never declined; a director activation of the re-added preset that the manager declines (refusal `declined`) is listed in the notes. URL options: `testPresets=a,b` (a subset), `testShots=1` (wait for the runner's screenshots), `testLeakCycles=N` (a longer heap trend) |
 | `?test=determinism` | dev builds: the determinism test (`src/dev/determinismTest.js`). Two page loads, each with a freshly deleted database: frames stepped by hand at 30 per second, the time of day and the perf governor's frame time held, the flight clock set to 1200 s, then `spawns.debug.restartSpawns()` and a 480 s autopilot path in the bush plane clear of the terrain. The site-list hashes (live and freshly built) and the director activation log must be identical; the spawn events and the flown path are compared as evidence |
 | `tools/run-harness.mjs` | runs a harness headlessly on a spare port (`--test 1\|soak\|hotas\|terrain\|determinism\|spawns`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--presets real` for the terrain test or `--presets a,b` and `--leak-cycles N` for the spawns test, `--out`), prints its tables, takes the spawns test's screenshots when the page asks, and exits 0 on PASS |
@@ -1651,6 +1708,8 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/shell-check.mjs --url <shell>` | the pill (shows, hides, clear of both games' HUDs), persistence and forwarding |
 | `node tools/flight-lab.mjs`, `node tools/lab/<name>.mjs` | the flight models, settings migrations, storage, input, WREN's grammar, the copilot server |
 | `node --expose-gc tools/lab/spawns.mjs` | the spawn framework headless: the preset validator, the engine registry, the pools, LOD hysteresis, budgets (heavy sites included), lures, discovery (view cone, terrain occlusion, once per world), sites from a feed, wind sources and lights removed on dispose, leak clean-up, lifetimes, the real celestial, weatherVolume and fauna engines with no audio service and with a refused voice recipe (nothing left behind), and a manager frame update that allocates nothing (young-generation growth over 100 000 frames with 40 spawns) |
+| `node --expose-gc tools/lab/colliders.mjs` (`npm run lab:colliders`) | the collider service headless: every shape against sweeps, overlaps and rays with analytic answers, tunnelling at 10, 300 and 2000 m/s at normal and grazing incidence, the earliest-hit and tie rules, sensors, landable tops on the ground surfaces, providers and perches, validation, determinism under shuffled insertion, 30 probes against 2000 colliders under 0.1 ms, zero allocation, the retrofitted landmarks on a real world and the Phase 2 structures in a real SpawnManager |
+| `npm run test:collision`, `test:collision:webgl` | `?test=collision` headless (seed `COLLIDERS-LAB`, every landmark type within reach): per target type the strikes, pass-throughs and penetrations; `node tools/run-harness.mjs --test collision --parts landmarks` runs a subset |
 | `node --expose-gc tools/lab/structure.mjs` | the structure engine headless: every recipe on its stamped site and free-standing, params, stamps and `structureStamps`, gates and achievements, timed courses and their journal statistic, graded landings, landable island tops, ground-start spots, the wind farm's wake by tier, LOD, memory, per-recipe cost, and 100 000 allocation-free frames |
 | `node --expose-gc tools/lab/setpiece.mjs` | the set-piece engine headless in a real SpawnManager: timeline validation, the dev timeline end to end (children through the manager, ramps, `set`, tracking, narration, records, journal statistics), every trigger kind, budget retries, control records, determinism, early dispose, the copilot's narration tokens, cost and allocation |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-structure.json` (add `--query renderer=webgl`) | every structure test preset force-spawned ahead of the craft and framed (screenshots), GPU memory and wind sources back after each dispose, the bridge's gate and achievement |

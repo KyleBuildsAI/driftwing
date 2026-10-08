@@ -11,8 +11,9 @@
 //     before a create and starts the geometry tracker; compare(baseline, options) after the dispose
 //     proves GPU memory back (no geometry an engine created still alive, the count moved by no more
 //     than the world's own first draws, textures exactly back), every wind source added since the
-//     baseline removed, the sky modifiers and the real lights back to their counts, the
-//     SpawnManager's leak counters unchanged, and on request the JS heap within a tolerance.
+//     baseline removed, every collider a spawn added since the baseline removed (landmark colliders
+//     stream with the craft and are not a spawn's, and a live spawn's are its own), the sky modifiers and the real lights back to their
+//     counts, the SpawnManager's leak counters unchanged, and on request the JS heap within a tolerance.
 import { createGeometryTracker, splitFresh } from './geometryTracker.js';
 import { heapAvailable, readHeapMB, round } from './testStats.js';
 
@@ -169,6 +170,23 @@ export function createDisposeCheck(ctx, framing) {
     return { geometries: memory.geometries, textures: memory.textures };
   }
 
+  /** Collider ids (ctx.colliders) that are not the streaming landmarks'. */
+  function spawnColliderIds() {
+    if (!ctx.colliders) return [];
+    return ctx.colliders.list().filter((entry) => !entry.owner.startsWith('landmark:')).map((entry) => entry.id);
+  }
+
+  /** The colliders live spawns still list (a site the feed built meanwhile is not the disposed spawn's). */
+  function heldColliderIds() {
+    const held = new Set();
+    for (const spawn of manager.getActive()) {
+      for (const part of manager.getParts(spawn.id)) {
+        if (Array.isArray(part.colliderIds)) for (const id of part.colliderIds) held.add(id);
+      }
+    }
+    return held;
+  }
+
   function lightsInUse() {
     const lights = manager.getStats().lights;
     return lights ? lights.active : 0;
@@ -201,6 +219,7 @@ export function createDisposeCheck(ctx, framing) {
         memory: gpuMemory(),
         windIds: new Set(ctx.wind.listSources().map((source) => source.id)),
         windCount: ctx.wind.sourceCount,
+        colliderIds: new Set(spawnColliderIds()),
         sky: ctx.systems.sky.getModifierState().count,
         lights: lightsInUse(),
         leaks: { ...manager.getStats().leaks },
@@ -213,7 +232,7 @@ export function createDisposeCheck(ctx, framing) {
      * Compares the state after a dispose with its baseline. options: { presetIds (the presets under
      * test: a structure geometry can only be theirs when one has a structure part), heapToleranceMB
      * (judge the heap; the baseline must have read it), waitTerrain = true }. Returns the readings
-     * with gpuOk, windOk, skyOk, lightsOk, leaksOk, heapOk and ok (all of them).
+     * with gpuOk, windOk, collidersOk, skyOk, lightsOk, leaksOk, heapOk and ok (all of them).
      */
     async compare(baseline, { presetIds = [], heapToleranceMB = null, waitTerrain = true } = {}) {
       await frames(SETTLE_FRAMES);
@@ -228,6 +247,8 @@ export function createDisposeCheck(ctx, framing) {
       // spawn's leftovers show as leftBehind or as a count above the world's first draws.
       const worldFresh = split.world + (split.leftBehind.length - leftBehind.length);
       const windLeft = ctx.wind.listSources().filter((source) => !baseline.windIds.has(source.id)).map((source) => source.id);
+      const heldColliders = heldColliderIds();
+      const collidersLeft = spawnColliderIds().filter((id) => !baseline.colliderIds.has(id) && !heldColliders.has(id));
       const sky = ctx.systems.sky.getModifierState().count;
       const lights = lightsInUse();
       const leaks = manager.getStats().leaks;
@@ -247,18 +268,21 @@ export function createDisposeCheck(ctx, framing) {
         windSources: `${baseline.windCount} -> ${ctx.wind.sourceCount}`,
         windLeft,
         windOk: windLeft.length === 0,
+        colliders: `${baseline.colliderIds.size} -> ${baseline.colliderIds.size + collidersLeft.length}`,
+        collidersLeft,
+        collidersOk: collidersLeft.length === 0,
         skyModifiers: `${baseline.sky} -> ${sky}`,
         skyOk: sky === baseline.sky,
         lights: `${baseline.lights} -> ${lights}`,
         lightsOk: lights === baseline.lights,
         leaks,
-        leaksOk: leaks.windSources === baseline.leaks.windSources && leaks.lights === baseline.leaks.lights,
+        leaksOk: leaks.windSources === baseline.leaks.windSources && leaks.lights === baseline.leaks.lights && (leaks.colliders ?? 0) === (baseline.leaks.colliders ?? 0),
         heapBeforeMB: baseline.heapMB,
         heapAfterMB: heapMB,
         heapDeltaMB,
         heapOk: !judgeHeap || (heapDeltaMB === null ? !heapAvailable() : heapDeltaMB <= heapToleranceMB),
       };
-      result.ok = result.gpuOk && result.windOk && result.skyOk && result.lightsOk && result.leaksOk && result.heapOk;
+      result.ok = result.gpuOk && result.windOk && result.collidersOk && result.skyOk && result.lightsOk && result.leaksOk && result.heapOk;
       return result;
     },
 
