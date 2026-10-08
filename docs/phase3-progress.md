@@ -452,7 +452,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | not started |
 | 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | not started |
 | 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | not started |
-| P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | not started |
+| P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | in progress (branch complete, awaiting I2) |
 | I2 | Integration pass: merge 2.0 first (before the craft branches start), then the craft branches in catalog order and the picker / director branch; `?test=craft` on both backends | `v2-phase3` | | not started |
 
 ### Wave 2 - p3/craft-framework
@@ -505,6 +505,57 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   name: "dragon") are Milestone O's (j.2), as are the journal panel's Craft section and the remote
   `flightState` craft fields of h.3; the picker shows the 14 craft in one strip until the picker
   branch regroups them.
+
+### Wave 2 - p3/picker-director
+
+- **Done** (contract h.7 and i; what was built beyond the letter of them is in contract i.5):
+  - the craft picker (`src/ui/craftPicker.js`, `ui.css`): only installed craft, in the six groups
+    with a hairline between them, each with its favorite key and its skin's silhouette; from 11
+    craft the strip packs to 22 px so all 14 clear the compass at 1280 px; the glass roster panel
+    (grid button or right click): ten favorite slots (drag a craft onto a key, a key onto a key, a key
+    menu per craft, an x per slot), the craft by group, skins under the eagle; Escape and outside
+    clicks close it. Number keys, craftNext / craftPrev and the situational spawn through `situate()`
+    are the framework's and work from the picker unchanged;
+  - the director (`src/spawns/director.js`): the ground track (velocity bearing smoothed over 1 s,
+    the heading below 2 m/s) for every ahead test and `forceSpawn` (the spawns system's `pointAhead`
+    too); craft weighting from the module's `directorProfile` or `DEFAULT_DIRECTOR_PROFILES`
+    (seaplane, eagle, spaceplane above 20 km, balloon, airship), clamped 0.25..3; combo scheduling
+    (preconditions, all-member budgets, exclusivity, deterministic placement and delays with reserved
+    budgets, `parent` on the SpawnManager records, `comboStarted`, the log); the global overrides
+    (`src/spawns/overrides.js`: per-night schedule, night window, regional blend, the midnight sun's
+    bend; `createSkyOverrideSink`, `globalOverride`, the once-a-night spawn); `getState()` adds track,
+    craft, weights, combos and overrides, shown in the F9 debugger;
+  - the sky: a modifier `moonTint` (moon disc, halo, moon light), `sky.addSunOverride`, and
+    `state.time.days` (a forward-only day counter);
+  - presets: `tags`, `combo` and `override` validation in schema.js (members and sites cross-checked);
+    the 30 Phase 2 presets carry tags; `spawns.debug.restartSpawns({ extraPresets })` for fixtures;
+  - tests: `tools/lab/director.mjs` +38 checks (track, craft, combos on dev fixtures, overrides,
+    schema), `tools/steps/craft-picker.json` (28 checks), `tools/steps/director-p3.json` (14 checks),
+    `director-game.json` aims along the track and holds the perf governor steady while it probes the
+    shedder; docs: architecture.md (event director, craft picker, events, testing), spawns.md
+    (tags, combos, overrides, templates), controls.md, the contract's i.5.
+- **Determinism re-recorded** (reason: every log entry now records the craft, and the in-game ahead
+  tests follow the ground track, so the director picks other candidates than along the nose): site
+  list d85384433861a1b0, water 61f315c9 and path 55b1a55f unchanged; director log 1093b8c1 -> 703b9a83
+  (4 entries), spawn events 74d3d2fa -> 961c09f2. Both backends identical.
+- **Verified 2026-10-08** (each once, both backends unless noted; reruns named):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 239/239 | built | |
+  | Labs: director 88/88 (`--presets real` 6/6), craft 66, settings 45, copilot 240, copilot-server 17, discovery 43, flight-lab 82, atmosphere 28, challenges 70, colliders 84, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden (6/6 identical), setpiece 47, spawns 98, storage 54, structure 75, terrain 404, wind-engines 56, wingsuit 37, audio 191 (alone), water 33/34 (its `[cost]` check: heightAt over open ocean 1.25 us median against 1 us, machine load; src/world untouched) | all pass but water's timing | |
+  | `run-harness --test determinism` | PASS, hashes above, 0/0 | PASS, identical hashes, 0/0 |
+  | Step files `craft-picker` (28), `director-p3` (14), `director-game` (3) | all pass, 0/0 | all pass, 0/0 |
+  | Built `dist-single/v2` (rebuilt at 03f0994) and the built shell smoke | 0/0, screenshots differ | 0/0, screenshots differ (V2) |
+  | `run-harness --test 1` reduced (HARNESS-1/2, glider and jet, both views, 20 s) | 0 NaN, 0 penetrations, 0/0, heap 11.08 MB, 8/8 runs, 24/24 manoeuvres; frames over 50 ms: 318 (mainThread 227, delayed 57, systems 18 led by camera, flight, terrain and landmarks, gc 16; other processes held 91 % of the machine; a first run overlapped this branch's own build:single, 522) | same criteria pass, heap 8.53 MB; frames over 50 ms: 94 (mainThread 66, delayed 20, gc 7, systems 1; others 89 % of the machine) |
+
+- **Next:** I2 merges this branch after the craft branches (catalog order); then the craft modules'
+  own `directorProfile`s replace the defaults where they bring one, and the picker shows each craft
+  as its module registers.
+- **Open issues:** the world's snow patches are 1.5-8 km across (one every ~10 km), so a midnight-sun
+  preset (wave 3, preset 98) needs `region.blendKm` of a few km; the contract's example 20 km reaches
+  nearly the whole world. A combo's delayed member can lose a reserved heavy slot to a site coming
+  into range (the manager never refuses a site); it then retries and is dropped after 60 s, logged.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
