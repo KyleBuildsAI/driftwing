@@ -226,8 +226,10 @@ export function createSpaceplaneExtension({ profile, craftState, flightData }) {
     flight.rpm = rocket.level;
     const airShare = smoothstep(handling.stallPressure[0], handling.stallPressure[1], air.dynamicPressure);
     flight.stall.buffet = Math.round(Math.max(flight.stall.buffet * airShare, air.buffet * handling.buffetTelemetry) * 1000) / 1000;
-    flight.stall.warning = flight.stall.warning && airShare > 0.5;
-    flight.stall.stalled = flight.stall.stalled && airShare > 0.5;
+    // The entry guidance flies past the critical angle on purpose (belly first): no stall cue then.
+    const entering = craftState.reentryPhase === 'entry';
+    flight.stall.warning = flight.stall.warning && airShare > 0.5 && !entering;
+    flight.stall.stalled = flight.stall.stalled && airShare > 0.5 && !entering;
   }
 
   function reset(pose, systems) {

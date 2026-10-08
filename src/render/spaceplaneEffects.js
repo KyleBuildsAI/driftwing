@@ -16,10 +16,10 @@ import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { clamp, damp } from '../core/util.js';
 
-const { Fn, uniform, float, vec3, uv, sin, cos, pow, abs, mix, saturate, smoothstep, dot, normalize, normalView, positionView, normalLocal, positionLocal, instancedBufferAttribute } = TSL;
+const { Fn, uniform, float, vec3, uv, sin, cos, pow, abs, mix, saturate, smoothstep, dot, normalize, normalView, positionView, normalLocal, positionLocal, instancedDynamicBufferAttribute } = TSL;
 
 const PLUME = Object.freeze({ SEGMENTS: 24, DIAMONDS: 5, DENSE_LENGTH: 7, VACUUM_LENGTH: 26, DENSE_WIDTH: 1, VACUUM_WIDTH: 5.5 });
-const PUFF = Object.freeze({ LENGTH: 1.6, RADIUS: 0.32 });
+const PUFF = Object.freeze({ LENGTH: 2.4, RADIUS: 0.5 });
 /** The wake trails this far behind the centre of the shell (m) at full heating. */
 const WAKE_LENGTH = 70;
 const PRIME_FRAMES = 2;
@@ -36,9 +36,10 @@ function createPlume(ctx, spec) {
   const along = uv().y;
   const facing = abs(dot(normalView, normalize(positionView.negate())));
   const intensity = Fn(() => {
-    const core = pow(facing, mix(float(1.6), float(0.6), expansion));
+    // A gas column glows through its whole depth: seen end-on from behind it reads as a disc, not a ring.
+    const core = pow(facing, mix(float(1.2), float(0.5), expansion)).mul(0.55).add(0.45);
     // Shock diamonds in dense air; gone in the under-expanded vacuum plume.
-    const diamonds = pow(cos(along.mul(PLUME.DIAMONDS * Math.PI * 2).sub(0.5)).mul(0.5).add(0.5), float(4)).mul(float(1).sub(along)).mul(float(1).sub(expansion)).mul(1.4);
+    const diamonds = pow(cos(along.mul(PLUME.DIAMONDS * Math.PI * 2).sub(0.5)).mul(0.5).add(0.5), float(4)).mul(float(1).sub(along)).mul(float(1).sub(expansion)).mul(0.7);
     const flicker = sin(uniforms.time.mul(53).add(along.mul(17))).mul(sin(uniforms.time.mul(29).sub(along.mul(9)))).mul(0.15).add(0.92);
     const fade = pow(float(1).sub(along), mix(float(1.2), float(2.4), expansion)).mul(smoothstep(float(0), float(0.04), along));
     // The vacuum plume is wide and faint: the same energy spread over far more volume.
@@ -81,7 +82,7 @@ function createPuffs(ctx, thrusters) {
   const strengths = new Float32Array(count);
   const strengthAttribute = new THREE.InstancedBufferAttribute(strengths, 1);
   strengthAttribute.setUsage(THREE.DynamicDrawUsage);
-  const strength = instancedBufferAttribute(strengthAttribute, 'float');
+  const strength = instancedDynamicBufferAttribute(strengthAttribute, 'float');
   const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false });
   const along = uv().y.oneMinus();
   const facing = abs(dot(normalView, normalize(positionView.negate())));
@@ -90,7 +91,7 @@ function createPuffs(ctx, thrusters) {
     const plume = pow(float(1).sub(along), float(1.6)).mul(smoothstep(float(0), float(0.08), along));
     const soft = pow(facing, float(0.8));
     const flicker = sin(uniforms.time.mul(61).add(along.mul(21))).mul(0.18).add(0.82);
-    return saturate(plume.mul(soft).mul(flicker).mul(strength).mul(0.8));
+    return saturate(plume.mul(soft).mul(flicker).mul(strength).mul(1.1));
   })();
   const mesh = new THREE.InstancedMesh(geometry, material, count);
   mesh.name = 'rcs-puffs';
@@ -125,11 +126,12 @@ function createPlasma(ctx, spec) {
   const shellIntensity = Fn(() => {
     // Windward: the faces the air flows onto (the normal against the flow).
     const windward = saturate(dot(normalize(normalLocal), flow.negate()));
-    const front = pow(windward, float(2.2));
+    const front = pow(windward, float(1.5));
     const facing = abs(dot(normalView, normalize(positionView.negate())));
-    const rim = pow(float(1).sub(facing), float(2)).mul(0.6);
+    // The shock layer hugs the windward faces: the rim glows only where the air is piling up.
+    const rim = pow(float(1).sub(facing), float(2.5)).mul(windward).mul(0.8);
     const turbulence = sin(positionLocal.x.mul(5.1).add(uniforms.time.mul(23))).mul(sin(positionLocal.z.mul(3.3).sub(uniforms.time.mul(31)))).mul(0.25).add(0.8);
-    return front.mul(1.3).add(rim.mul(windward.add(0.15))).mul(turbulence).mul(strength);
+    return front.mul(1.3).add(rim).mul(turbulence).mul(strength);
   })();
   const pink = vec3(1.0, 0.38, 0.55);
   const orange = vec3(1.0, 0.58, 0.2);

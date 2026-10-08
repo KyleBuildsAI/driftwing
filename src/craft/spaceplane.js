@@ -116,8 +116,8 @@ const simProfile = Object.freeze({
     }),
     heating: Object.freeze({
       reference: 0.9e7, // rho V^3 (W/m^2 class) at heating 1
-      machFrom: 2.6, // the flow starts to glow
-      machFull: 4.2,
+      machFrom: 3.6, // the flow starts to glow
+      machFull: 4.4,
       maxIndex: 1.4,
       lagSeconds: 2.5, // the skin's thermal lag
       buffetFrom: 0.25,
@@ -153,14 +153,14 @@ const simProfile = Object.freeze({
       liftCapacity: 1.2,
       reentry: Object.freeze({
         entryAoa: 40,
-        glideAoa: 6,
+        glideAoa: 14,
         aoaTrim: 10,
         maxBank: 70,
         glideMach: 3,
         glideAltitude: 25000,
         glidePressure: 2500,
-        handBackMach: 1.1,
-        handBackAltitude: 18000,
+        handBackMach: 1.5,
+        handBackAltitude: 20000,
         glideRampSeconds: 10,
         descentRate: 20,
         autoArmAbove: 60000,
@@ -537,7 +537,7 @@ function buildMesh(ctx) {
   const effects = createSpaceplaneEffects(ctx, root, {
     nozzle: { z: NOZZLE.GIMBAL_Z + NOZZLE.LENGTH, y: NOZZLE.Y, radius: NOZZLE.EXIT, depth: NOZZLE.LENGTH },
     thrusters: RCS_THRUSTERS,
-    plasma: { centre: [0, -0.15, -0.2], radii: [5.4, 1.7, 8.8] },
+    plasma: { centre: [0, -0.2, -0.3], radii: [5.0, 1.3, 8.3] },
   });
   // Test and debug readout of the effect levels (plume, expansion, puffs, plasma).
   root.userData.spaceplaneEffects = effects;
@@ -660,7 +660,7 @@ const logs = new WeakMap();
 function logFor(craftState) {
   let log = logs.get(craftState);
   if (!log) {
-    log = { inSpace: false, highArc: false, phase: 'none', clearSeconds: 0, lastVerticalSpeed: 0, maxMach: 0 };
+    log = { inSpace: false, highArc: false, phase: 'none', clearSeconds: 0, lastVerticalSpeed: 0, peakMach: 0, machArmed: true };
     logs.set(craftState, log);
   }
   return log;
@@ -717,10 +717,19 @@ function updateFlightLog(api, dt) {
     log.highArc = false;
     if (log.phase !== 'none' && log.phase !== 'blackout') log.phase = 'none';
   }
+  // The fastest Mach of each acceleration goes to the journal once it is past (no toast per tenth).
   const mach = Number.isFinite(telemetry.mach) ? telemetry.mach : 0;
-  if (mach > log.maxMach + 0.25) {
-    log.maxMach = mach;
-    bus.emitTyped('journalStat', { key: 'spaceplaneMaxMach', value: Math.round(mach * 10) / 10, op: 'max' });
+  if (log.machArmed) {
+    log.peakMach = Math.max(log.peakMach, mach);
+    if (log.peakMach > 1 && mach < log.peakMach - 0.3) {
+      bus.emitTyped('journalStat', { key: 'spaceplaneMaxMach', value: Math.round(log.peakMach * 10) / 10, op: 'max' });
+      log.machArmed = false;
+      log.peakMach = mach;
+    }
+  } else {
+    // Re-armed once the craft accelerates again from its slowest since.
+    log.peakMach = Math.min(log.peakMach, mach);
+    if (mach > log.peakMach + 0.3) log.machArmed = true;
   }
 
   // Re-entry: heating, then the blackout, then the link comes back.
@@ -910,8 +919,9 @@ export default Object.freeze({
   capabilities: Object.freeze({ engine: true, chute: false, space: true }),
   cameraRig: Object.freeze({
     eye: EYE,
-    // The chase camera's pull-back, FOV stretch and speed shake scale to the spaceplane's speeds.
-    chase: Object.freeze({ distance: 21, height: 4.8, lookAhead: 24, speedRange: Object.freeze({ CRUISE: 250, MAX: 1400, TOP: 2400 }) }),
+    // The chase camera's pull-back, FOV stretch and speed shake scale to the spaceplane's speeds (its
+    // kilometres a second happen where there is no air for the wind streaks to show).
+    chase: Object.freeze({ distance: 21, height: 4.8, lookAhead: 24, speedRange: Object.freeze({ CRUISE: 300, MAX: 3000, TOP: 3500 }) }),
     wing: Object.freeze({ position: Object.freeze([3.6, 1.2, 4.6]), target: Object.freeze([0.4, 0.2, -5]) }),
     fpv: null,
     // The pilot's seat under the windscreen: a narrow tub, the space panel wide and shallow (Mach,
