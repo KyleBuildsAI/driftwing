@@ -17,7 +17,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 1 | Floating origin: `src/core/origin.js`, `scene.position = -offset`, the 4096 m lattice, the shader, CPU-matrix and float32-buffer fixes, audio in the render frame | `p3/origin` | a | not started |
 | 2 | Colliders (box, cylinder, capsule, hull, heightfield, mesh BVH), the flight controller's sweep and soft crash, sensors, perches; retrofits on the v1 landmarks and the Phase 2 structures; `?test=collision` | `p3/colliders` | b | not started |
 | 3 | Local water bodies (basin, crater, terraces stamps; lake and ice material), the shared water-height query and the caller migration; region overlays; vegetation species 6-12 with WindField sway and trunk colliders | `p3/water-regions` | c, d | not started |
-| 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | in progress |
+| 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | done on branch (awaiting merge) |
 | 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | not started |
 | I1 | Integration pass: merge in the order origin, high altitude, water/regions, colliders, fauna/challenges; the follow-ups of contract appendix A; every lab and step file once on both backends | `v2-phase3` | appendix A | not started |
 
@@ -65,9 +65,33 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   the start prompt at once; each challenge gate shape has its own marker mesh (swapping the geometry
   between the ring and the rect frame broke the WebGPU post pipeline once). Labs: fauna-modes 44/44,
   challenges 69/69, path 37/37, structure 75/75.
-- **Next:** the step files on WebGL2, the fauna / discovery / preset step files on both backends, the
-  reduced `?test=1` harness on both backends.
-- **Open issues:** none yet.
+- **Verified (2026-10-07, dev server, one run each, reruns noted):**
+  - `tools/smoke-test.mjs`: `engine-fauna-modes.json` WebGPU and WebGL2 11/11, 0/0 console,
+    screenshots differ; `challenge.json` WebGPU 12/12 0/0; on WebGL2 the first run failed only the
+    armed check's `distance > 500` (the craft had already closed to 472 m; the threshold is now
+    100 m) and the rerun passed 12/12 0/0 (scratch streaming driver; smoke-test.mjs's Chrome
+    shutdown took 10-25 minutes per run on this machine).
+  - The same steps through a scratch driver that streams each check (identical evals, console
+    capture): `engine-fauna.json` (`seed=ENGINEFAUNA`) 11 checks, `discovery.json` 7,
+    `presets-batch1.json` (`seed=DRIFTWING`) 25, `presets-batch2.json` (`seed=HARNESS-1`) 31,
+    `presets-21-30.json` 51, all PASS with 0/0 console on both backends. Reruns: batch 2 WebGL2
+    (a WebGL context loss under GPU load on the first run), presets 21-30 on both backends (the
+    first worlds had a live waterfall site whose curtain wind source and geometries came into range
+    during three dispose checks; a navigation timeout once), challenge WebGPU (a navigation timeout).
+  - Reduced flight harness (INTEG-A and INTEG-B, glider and jet, both views, 45 s): 0 NaN, 0
+    penetrations, 0/0 console, heap growth 38.3 MB (WebGPU) and 23.4 MB (WebGL2), 8/8 runs, 24/24
+    manoeuvres. Frames over 50 ms: 18 on WebGPU and 198 on WebGL2 (INTEG-A's WebGL2 runs at a
+    65-80 ms median), nearly all main-thread / GPU time; the systems-attributed ones are flight
+    41 ms and terrain 88 ms frames each with a 10-23 MB GC inside, none in the challenge, HUD or
+    fauna systems.
+  - `npm run build`, `npm run build:single` (V1 SHA-256 matches), `npm run test:v1` 2/2,
+    `tools/docs-check.mjs` 233/233; labs: fauna-modes 44/44, challenges 69/69, path 37/37,
+    structure 75/75, spawns 98/98, discovery 39/39, ringsGolden 6/6.
+- **Next:** none on this branch (ready for the wave 1 integration pass).
+- **Open issues:** the challenge core keeps its own plane test (`crossGate`, the Phase 2 ring
+  course's math operation for operation, with rect gates) instead of `gateDetector.crossGates`,
+  which the golden logs need; the integration pass adds `challenges.count()` to the spawn check
+  kit's dispose baseline and the rigid curvature drop to the fauna group roots (contract appendix A).
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
