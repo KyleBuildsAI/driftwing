@@ -11,9 +11,9 @@
 //              nothing notable going on: it restarts when a site comes into view, on a discovery,
 //              on an activation, and on every tick while a spawn the director started is in view
 //              (the player is watching it or flying toward it). When it reaches the drought
-//              threshold (a seeded 60-70 s per drought, leaving time to find one), the best eligible candidate AHEAD of the
-//              heading, 3-8 km out, is activated: a common one or one of a due tier, from 75 s an
-//              uncommon one too, and from 80 s a rare one or one up to 60 degrees off the heading
+//              threshold (a seeded 60-70 s per drought, leaving time to find one), the best eligible candidate AHEAD on the
+//              ground track, 3-8 km out, is activated: a common one or one of a due tier, from 75 s an
+//              uncommon one too, and from 80 s a rare one or one up to 60 degrees off the track
 //   rarity     each tier has a due time drawn from its period (common 2.5-5 min, uncommon 10-15 min,
 //              rare 30-60 min, legendary 1-2 h of flight); a due tier activates its best eligible
 //              candidate ahead, and any activation of a tier draws its next due time
@@ -28,9 +28,11 @@
 //              candidate, surface (land, water, coast), distance band, and `near`: a candidate moves
 //              onto the nearest Phase 1 landmark of the named types within the radius of its seeded
 //              point (a lantern festival at a lighthouse), or is rejected when there is none
-//   ahead      every director activation lies within 45 degrees of the heading (60 for a drought
-//              past 80 s) and inside the
-//              preset's distance band; nothing is ever started behind the player
+//   ahead      every director activation lies within 45 degrees of the ground track (60 for a
+//              drought past 80 s) and inside the preset's distance band; nothing is ever started
+//              behind the player. The ground track is the bearing of the horizontal velocity,
+//              smoothed over 1 s, or the nose heading below 2 m/s: a balloon, an airship or anything
+//              drifting gets its content along its drift line, not where the nose points
 //   lifetimes  events end naturally (the engine sets instance.ended) or after their seeded duration
 //              plus a grace period; beyond despawn.distance + hysteresis and out of view for
 //              outOfViewSeconds they are despawned, and back inside despawn.distance the out-of-view
@@ -39,14 +41,29 @@
 //              through the SpawnManager's LOD bias. The perf governor consults it before it lowers
 //              the render scale. A frame-time miss reported by perf.getHeadroom() also defers heavy
 //              activations on its own
+//   craft      (contract i.2) the ahead score is multiplied by craftWeight(preset, profile,
+//              altitude): the flying craft's directorProfile (its module's, or
+//              DEFAULT_DIRECTOR_PROFILES) favours preset tags and categories, clamped to 0.25..3, so
+//              it reorders candidates inside a rarity tier but never across tiers (a due tier adds 10)
+//   combos     (contract i.3) a preset with a `combo` block is a legendary candidate whose
+//              preconditions (biomes, time of day, weather at the candidate, an active site nearby,
+//              landmarks or sites within a radius) all hold; it starts only when the budgets admit
+//              every member at once, its members are placed around it deterministically and started
+//              (some after a delay, their budget share reserved meanwhile), and an exclusive combo
+//              keeps every other legendary out while it runs
+//   overrides  (contract i.4, src/spawns/overrides.js) presets with an `override` block (the blood
+//              moon, the midnight sun) are never candidates: their per-night schedule gives a weight
+//              at the player, fires globalOverride and drives the sky through the overrideSink
 //
-// Every activation is logged as { time, presetId, candidateId, reason }; the log (and its running
-// hash) is identical for the same seed and the same scripted path, which the determinism test and
-// tools/lab/director.mjs check. The director allocates only when something happens (an activation,
-// a new candidate position, an API call); a quiet tick reuses pooled records.
+// Every activation is logged as { time, presetId, candidateId, reason, craft } (combos add combo
+// and members, in order); the log (and its running hash) is identical for the same seed, the same
+// scripted path and the same craft, which the determinism test and tools/lab/director.mjs check.
+// The director allocates only when something happens (an activation, a new candidate position, a
+// craft change, an API call); a quiet tick reuses pooled records.
 //
 // Distances are metres, headings and bearings compass degrees (0 north, 90 east), times seconds of
 // flight (state.time.elapsed in the game).
+import { applyMidnightSun, createOverrideSchedule, nightIndex } from './overrides.js';
 import {
   angleBetween,
   aheadScore,
@@ -97,6 +114,7 @@ export const MAX_OFF_AXIS_WIDE = 60;
  */
 const PARTICLE_HEADROOM = 0.85;
 const LIGHTS_PER_SPAWN = 2;
+const LEGENDARY_TIER = RARITY_TIERS.indexOf('legendary');
 const COMMON_BIT = 1 << RARITY_TIERS.indexOf('common');
 const UNCOMMON_BIT = 1 << RARITY_TIERS.indexOf('uncommon');
 const RARE_BIT = 1 << RARITY_TIERS.indexOf('rare');
@@ -111,6 +129,94 @@ const SITE_ACTIVE_DEFAULTS = Object.freeze({ bucketSeconds: 600, chance: 0.5 });
 /** Load shedding: levels 2 and 3 multiply the LOD distances by these (fewer instances at NEAR and MID). */
 const SHED_LOD_BIAS = Object.freeze([1, 1, 0.7, 0.5]);
 const MAX_SHED_LEVEL = SHED_LOD_BIAS.length - 1;
+/** Below this ground speed (m/s) the ahead tests follow the nose heading instead of the ground track. */
+export const TRACK_MIN_SPEED = 2;
+/** The ground track is smoothed over this time constant (s), on the director's ticks. */
+export const TRACK_SMOOTHING_SECONDS = 1;
+const TRACK_BLEND = 1 - Math.exp(-DIRECTOR_TICK_SECONDS / TRACK_SMOOTHING_SECONDS);
+/** Craft weights are clamped to this range (contract i.2): never enough to reorder rarity tiers. */
+export const CRAFT_WEIGHT_RANGE = Object.freeze({ min: 0.25, max: 3 });
+
+function freezeDeep(value) {
+  if (value && typeof value === 'object') {
+    for (const key of Object.keys(value)) freezeDeep(value[key]);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/**
+ * The director profiles the spec requires (contract i.2), for a craft whose module brings no
+ * directorProfile of its own (a module's profile always wins). Tags are PRESET_TAGS (schema.js),
+ * categories PRESET_CATEGORIES; an `above` band multiplies on top of the base favour from its
+ * altitude (m MSL) up.
+ */
+export const DEFAULT_DIRECTOR_PROFILES = freezeDeep({
+  seaplane: { favor: { tags: { water: 1.8, lake: 2, coast: 1.4 } } },
+  eagle: { favor: { tags: { thermal: 2, perch: 1.8, murmuration: 1.8 } } },
+  spaceplane: {
+    above: [{
+      altitude: 20000,
+      favor: { tags: { celestial: 3, farLure: 2.5 }, categories: { wildlife: 0.25, structure: 0.25, flightplay: 0.25, geo: 0.5, ocean: 0.5 } },
+    }],
+  },
+  balloon: { favor: { tags: { calm: 1.8, slow: 1.8, spectacle: 1.5 } } },
+  airship: { favor: { tags: { calm: 1.5, slow: 1.5, spectacle: 1.4 } } },
+});
+
+/** The product of a favour block's weights that apply to a preset (its tags and its category). */
+function favorWeight(preset, favor) {
+  if (!favor) return 1;
+  let weight = 1;
+  const tags = favor.tags;
+  if (tags && Array.isArray(preset.tags)) {
+    for (let index = 0; index < preset.tags.length; index++) {
+      const value = tags[preset.tags[index]];
+      if (Number.isFinite(value) && value > 0) weight *= value;
+    }
+  }
+  const categories = favor.categories;
+  if (categories) {
+    const value = categories[preset.category];
+    if (Number.isFinite(value) && value > 0) weight *= value;
+  }
+  return weight;
+}
+
+/**
+ * How much a craft favours a preset (contract i.2): the base favour of its directorProfile times every
+ * `above` band the altitude (m MSL) has reached, clamped to CRAFT_WEIGHT_RANGE; 1 without a profile.
+ */
+export function craftWeight(preset, profile, altitude) {
+  if (!profile) return 1;
+  let weight = favorWeight(preset, profile.favor);
+  const bands = profile.above;
+  if (Array.isArray(bands)) {
+    for (let index = 0; index < bands.length; index++) {
+      if (altitude >= bands[index].altitude) weight *= favorWeight(preset, bands[index].favor);
+    }
+  }
+  return Math.min(CRAFT_WEIGHT_RANGE.max, Math.max(CRAFT_WEIGHT_RANGE.min, weight));
+}
+
+/** How many of a profile's `above` bands an altitude has reached (weights change only when this does). */
+function bandLevel(profile, altitude) {
+  const bands = profile ? profile.above : null;
+  if (!Array.isArray(bands)) return 0;
+  let level = 0;
+  for (let index = 0; index < bands.length; index++) if (altitude >= bands[index].altitude) level++;
+  return level;
+}
+
+/** A combo whose members cannot all start within this long after their start time drops the rest (s). */
+export const COMBO_MEMBER_PATIENCE = 60;
+/** siteActive preconditions look this far (m) from the candidate when the combo names no near radius. */
+const COMBO_SITE_RADIUS = 20000;
+const COMBO_MEMBER_SALT = 0x51ed;
+/** The blood moon's sky modifier at full weight: a deep red moon (and moon light) in a darker night. */
+const BLOOD_MOON_SKY = Object.freeze({ darkness: 0.32, ambient: 0.8, moonTint: 0xc8442a, moonTintAmount: 0.88 });
+/** An override's own preset starts this far (m) ahead on the ground track (its discovery). */
+const OVERRIDE_SPAWN_DISTANCE = 3000;
 /** Coast: land and water both within this distance (m) of the point. */
 const COAST_PROBE = 1200;
 const SURFACE_CACHE_LIMIT = 4096;
@@ -156,6 +262,9 @@ const REJECT = Object.freeze({
   lightBudget: 'lightBudget',
   notAhead: 'notAhead',
   near: 'near',
+  precondition: 'precondition',
+  exclusive: 'exclusive',
+  comboBudget: 'comboBudget',
 });
 
 /**
@@ -197,6 +306,8 @@ function describePreset(preset, index) {
   const near = filters.near && Array.isArray(filters.near.landmarks) && Number.isFinite(filters.near.radius)
     ? { landmarks: filters.near.landmarks, radius: filters.near.radius }
     : null;
+  // An override preset is scheduled per night (src/spawns/overrides.js), never rolled as a candidate.
+  const override = preset.override || null;
   return {
     preset,
     index,
@@ -204,7 +315,10 @@ function describePreset(preset, index) {
     tier,
     heavy: preset.heavy === true,
     kind: preset.kind,
-    candidateKind: preset.kind === 'event' ? 'event' : siteActive ? 'siteActive' : null,
+    candidateKind: override ? null : preset.kind === 'event' ? 'event' : siteActive ? 'siteActive' : null,
+    /** The combo block, resolved against the other presets by resolveCombos (null for a plain preset). */
+    combo: preset.combo || null,
+    override,
     presetHash: hashString(preset.id),
     settings,
     filters,
@@ -222,6 +336,53 @@ function describePreset(preset, index) {
 }
 
 /**
+ * Resolves every combo block against the director's presets (contract i.3): its members' infos in
+ * order, the heavy slots it needs at once (at least its heavy members and itself), the engine
+ * instances and real lights its members use, and the member ids the log records.
+ */
+function resolveCombos(infos, infoById) {
+  for (const info of infos) {
+    if (!info.combo) continue;
+    const block = info.combo;
+    if (info.kind !== 'event' || info.preset.rarity !== 'legendary') throw new Error(`[DRIFTWING] director: combo "${info.id}" must be a legendary event`);
+    const members = block.members.map((member, index) => {
+      const memberInfo = infoById.get(member.presetId);
+      if (!memberInfo || memberInfo.kind !== 'event' || memberInfo.combo || memberInfo.override) {
+        throw new Error(`[DRIFTWING] director: combo "${info.id}" member ${index} names "${member.presetId}", which is not a plain event preset of the director`);
+      }
+      return {
+        info: memberInfo,
+        role: member.role === 'anchor' ? 'anchor' : 'member',
+        place: member.place || null,
+        delay: Number.isFinite(member.delay) ? member.delay : 0,
+      };
+    });
+    const engineNeeds = {};
+    let heavyMembers = info.heavy ? 1 : 0;
+    let lights = info.usesLights ? 1 : 0;
+    for (const name of info.engines) engineNeeds[name] = (engineNeeds[name] || 0) + 1;
+    for (const member of members) {
+      if (member.info.heavy) heavyMembers++;
+      if (member.info.usesLights) lights++;
+      for (const name of member.info.engines) engineNeeds[name] = (engineNeeds[name] || 0) + 1;
+    }
+    const preconditions = block.preconditions || {};
+    info.combo = {
+      preconditions,
+      near: preconditions.near || null,
+      siteRadius: preconditions.near && Number.isFinite(preconditions.near.radius) ? preconditions.near.radius : COMBO_SITE_RADIUS,
+      members,
+      memberIds: Object.freeze(members.map((member) => member.info.id)),
+      exclusive: block.exclusive === true,
+      heavySlots: Math.max(Number.isInteger(block.heavySlots) ? block.heavySlots : 0, heavyMembers),
+      engineNeeds,
+      engineNames: Object.keys(engineNeeds),
+      lights,
+    };
+  }
+}
+
+/**
  * Creates a director. Options:
  *   seedHash        the world seed hash (worldgen's seedHash; candidates.seedHashFor(seed))
  *   presets         the preset list (src/spawns/presets/index.js PRESETS, or the lab's)
@@ -229,12 +390,15 @@ function describePreset(preset, index) {
  *                   getInstance, getStats, and setLodBias for load shedding (spawnCount, when
  *                   offered, lets the shedder skip levels that would take nothing away)
  *   weather         a weather model (createWeatherModel): stateAt(x, z, time), sampleAt
- *   terrain         { heightAt(x, z), biomeAt(x, z) -> { key }, waterLevel, landmarkSitesNear?(x, z,
- *                   radius) -> [{ type, x, z }] } (without landmarkSitesNear, presets with a `near`
- *                   filter are never activated)
- *   getPlayer()     -> { position: { x, y, z }, heading (deg), speed (m/s) }
+ *   terrain         { heightAt(x, z), biomeAt(x, z) -> { key, weights? }, waterLevel,
+ *                   landmarkSitesNear?(x, z, radius) -> [{ type, x, z }], biomeKeys? (the keys of
+ *                   biomeAt's weights, in order: the overrides' regional blend) } (without
+ *                   landmarkSitesNear, presets with a `near` filter are never activated)
+ *   getPlayer()     -> { position: { x, y, z }, heading (deg), speed (m/s), velocity?: { x, y, z } }
+ *                   (the ahead tests follow the ground track of velocity, contract i.1)
  *   getTime()       -> flight time (s)
- *   getSun()        -> { sunElevation (deg), dayTime (0..1) }
+ *   getSun()        -> { sunElevation (deg), dayTime (0..1), days? (the day counter: whole days
+ *                   since the start plus dayTime; the overrides' night index, dayTime without it) }
  *   isInView(x, y, z, radius) -> boolean (the camera frustum)
  *   placement       optional: { sitesNear(x, z, radius) -> [site] } (site active states, getNearby)
  *   perf            optional: the perf governor (addLoadShedder, getHeadroom)
@@ -242,6 +406,12 @@ function describePreset(preset, index) {
  *                   notables)
  *   isDiscovered(id) optional: whether a site was discovered on an earlier flight (the journal)
  *   budgets         optional: DIRECTOR_BUDGETS by default
+ *   getCraft()      optional: the flying craft's id (contract i.2: the craft weighting and the log)
+ *   profileFor(id)  optional: the craft's directorProfile or null (DEFAULT_DIRECTOR_PROFILES[id] by
+ *                   default; the game passes the module's own profile first)
+ *   overrideSink    optional: { apply(entry), dispose() } receives every override entry each tick
+ *                   ({ id, presetId, kind, night, scheduled, weight, region }; the game's drives
+ *                   the sky) and is disposed with the director
  *   devHooks        enables forceSpawn
  */
 export function createDirector({
@@ -259,6 +429,9 @@ export function createDirector({
   bus = null,
   isDiscovered = null,
   budgets = DIRECTOR_BUDGETS,
+  getCraft = null,
+  profileFor = null,
+  overrideSink = null,
   devHooks = false,
 }) {
   if (!Number.isInteger(seedHash)) throw new TypeError('createDirector: seedHash must be an integer');
@@ -276,11 +449,19 @@ export function createDirector({
   const waterLevel = Number.isFinite(terrain.waterLevel) ? terrain.waterLevel : 0;
   const infos = presets.map(describePreset);
   const infoById = new Map(infos.map((info) => [info.id, info]));
+  resolveCombos(infos, infoById);
   const candidateInfos = infos.filter((info) => info.candidateKind !== null);
   const eventInfos = candidateInfos.filter((info) => info.candidateKind === 'event');
   const siteActiveInfos = new Map(candidateInfos.filter((info) => info.candidateKind === 'siteActive').map((info) => [info.id, info]));
   const searchRadius = Math.min(MAX_SEARCH_RADIUS, candidateInfos.reduce((largest, info) => Math.max(largest, info.band.max), DROUGHT_BAND.max));
   const heavyCandidates = candidateInfos.some((info) => info.heavy);
+  const lookupProfile = typeof profileFor === 'function' ? profileFor : (id) => DEFAULT_DIRECTOR_PROFILES[id] ?? null;
+  /** craftWeight per preset for the current craft and altitude band (recomputed when either changes). */
+  const weights = new Float64Array(infos.length).fill(1);
+  const craftState = { id: '', profile: null, band: 0 };
+  const overrides = createOverrideSchedule({ seedHash, presets, biomeAt: terrain.biomeAt, biomeKeys: terrain.biomeKeys ?? null });
+  /** Per override entry: whether it is on, above half weight, and the spawn it started (discovery). */
+  const overrideStatus = overrides.entries.map(() => ({ active: false, high: false, spawnId: null, spawnedNight: null }));
 
   const pool = createCandidatePool(128);
   /** candidate hash -> { surface bits, biome key } (a candidate's ground never changes). */
@@ -294,8 +475,24 @@ export function createDirector({
   const tierDue = new Float64Array(RARITY_TIERS.length);
   const tierCount = new Uint32Array(RARITY_TIERS.length);
   const tierActivations = new Uint32Array(RARITY_TIERS.length);
-  /** Live spawns the director started: { id, info, source, activatedAt, expiresAt, outOfView, siteId, candidateId }. */
+  /**
+   * Live spawns the director started: { id, info, source, activatedAt, expiresAt, outOfView, siteId,
+   * candidateId, combo (the combo record it belongs to, or null), comboMember }.
+   */
   const activations = [];
+  /** candidate hash -> the { x, z } a combo's near precondition moved it onto, or null (none in reach). */
+  const comboNearCache = new Map();
+  /**
+   * Live combos: { id, info, presetId, hash, x, z, viewX, viewZ, heading, source, forced, exclusive,
+   * live (spawns still running), mainAlive, pending [{ index, at }] }.
+   */
+  const combos = [];
+  /** The budget share of combo members still waiting for their delay (kept free for them). */
+  const reserved = { heavy: 0, lights: 0, engines: {} };
+  for (const name of Object.keys(budgets.engines)) reserved.engines[name] = 0;
+  let legendaryLive = 0;
+  let exclusiveLive = 0;
+  const memberPoint = { x: 0, z: 0 };
   const siteScratch = [];
   const log = [];
   let logHash = 2166136261 >>> 0;
@@ -324,8 +521,12 @@ export function createDirector({
   let debugSerial = 0;
   let disposed = false;
   let engineStats = null;
-  const player = { x: 0, y: 0, z: 0, heading: 0, speed: 0 };
-  const sun = { elevation: 0, dayTime: 0 };
+  // heading: the nose (compass degrees); track: where the craft is actually going over the ground
+  // (contract i.1), the smoothed bearing of the horizontal velocity, which every ahead test uses.
+  const player = { x: 0, y: 0, z: 0, heading: 0, speed: 0, groundSpeed: 0, track: 0 };
+  /** The smoothed ground-track direction (a horizontal unit vector, compass frame: x east, z south). */
+  const trackDirection = { x: 0, z: -1, ready: false };
+  const sun = { elevation: 0, dayTime: 0, days: 0 };
 
   function drawPeriod(tier) {
     const [low, high] = RARITY_PERIODS[RARITY_TIERS[tier]];
@@ -419,17 +620,79 @@ export function createDirector({
   const siteSpawnApi = typeof spawnManager.getSiteSpawn === 'function' && typeof spawnManager.setSiteActive === 'function';
 
   // ---- Reading the world ----------------------------------------------------------------------------
-  function readInputs() {
+  /**
+   * The ground track (contract i.1): the bearing of the horizontal velocity, or the nose heading below
+   * TRACK_MIN_SPEED (a hover, a calm), smoothed over TRACK_SMOOTHING_SECONDS. advance is true on a
+   * director tick only, so API calls between ticks never move the smoothing (the log stays a pure
+   * function of the seed and the path). Without a velocity (the labs' scripted paths) the track is
+   * the heading.
+   */
+  function updateTrack(current, advance) {
+    const velocity = current.velocity;
+    const vx = velocity && Number.isFinite(velocity.x) ? velocity.x : 0;
+    const vz = velocity && Number.isFinite(velocity.z) ? velocity.z : 0;
+    const groundSpeed = Math.hypot(vx, vz);
+    player.groundSpeed = velocity ? groundSpeed : player.speed;
+    let targetX;
+    let targetZ;
+    if (velocity && groundSpeed >= TRACK_MIN_SPEED) {
+      targetX = vx / groundSpeed;
+      targetZ = vz / groundSpeed;
+    } else {
+      const radians = (player.heading * Math.PI) / 180;
+      targetX = Math.sin(radians);
+      targetZ = -Math.cos(radians);
+    }
+    if (!trackDirection.ready) {
+      trackDirection.x = targetX;
+      trackDirection.z = targetZ;
+      trackDirection.ready = true;
+    } else if (advance) {
+      trackDirection.x += (targetX - trackDirection.x) * TRACK_BLEND;
+      trackDirection.z += (targetZ - trackDirection.z) * TRACK_BLEND;
+      const length = Math.hypot(trackDirection.x, trackDirection.z);
+      // A full reversal inside one tick passes through zero: keep the new direction then.
+      if (length < 1e-6) {
+        trackDirection.x = targetX;
+        trackDirection.z = targetZ;
+      } else {
+        trackDirection.x /= length;
+        trackDirection.z /= length;
+      }
+    }
+    const degrees = (Math.atan2(trackDirection.x, -trackDirection.z) * 180) / Math.PI;
+    player.track = degrees < 0 ? degrees + 360 : degrees;
+  }
+
+  function readInputs(advance = false) {
     const current = getPlayer();
     player.x = current.position.x;
     player.y = current.position.y;
     player.z = current.position.z;
     player.heading = current.heading;
     player.speed = current.speed;
+    updateTrack(current, advance);
     const sky = getSun();
     sun.elevation = sky.sunElevation;
     sun.dayTime = sky.dayTime;
+    sun.days = Number.isFinite(sky.days) ? sky.days : sky.dayTime;
     headroomMissing = perf && typeof perf.getHeadroom === 'function' ? perf.getHeadroom().missing === true : false;
+    if (advance) updateCraftWeights();
+  }
+
+  /**
+   * The craft weighting (contract i.2): weights[] holds craftWeight for every preset, recomputed only
+   * when the craft, its profile or the altitude band changes (a quiet tick allocates nothing).
+   */
+  function updateCraftWeights() {
+    const id = typeof getCraft === 'function' ? String(getCraft() ?? '') : '';
+    const profile = id ? lookupProfile(id) ?? null : null;
+    const band = bandLevel(profile, player.y);
+    if (id === craftState.id && profile === craftState.profile && band === craftState.band) return;
+    craftState.id = id;
+    craftState.profile = profile;
+    craftState.band = band;
+    for (let index = 0; index < infos.length; index++) weights[index] = craftWeight(infos[index].preset, profile, player.y);
   }
 
   function surfaceBits(x, z) {
@@ -514,7 +777,8 @@ export function createDirector({
       const cap = caps[name];
       if (!cap || !perEngine || !perEngine[name]) continue;
       const used = perEngine[name];
-      if ((used.instances || 0) + 1 > cap.instances) return true;
+      // Combo members waiting for their delay hold their share (reserved.engines).
+      if ((used.instances || 0) + (reserved.engines[name] || 0) + 1 > cap.instances) return true;
       if (cap.particles > 0 && (used.particles || 0) >= cap.particles * PARTICLE_HEADROOM) return true;
     }
     return false;
@@ -524,14 +788,146 @@ export function createDirector({
   function directorRejection(info, record) {
     if (time < cooldownUntil[info.index]) return REJECT.cooldown;
     if (info.index === lastPresetIndex) return REJECT.repeat;
-    if (info.heavy) {
-      if (heavyActive >= budgets.maxHeavy) return REJECT.heavyBudget;
-      if (shedLevel >= 1 || headroomMissing) return REJECT.deferred;
+    if (info.combo) {
+      const rule = comboBudgetRejection(info);
+      if (rule) return rule;
+    } else {
+      // An exclusive combo keeps every other legendary out while it runs (contract i.3).
+      if (info.tier === LEGENDARY_TIER && exclusiveLive > 0) return REJECT.exclusive;
+      if (info.heavy) {
+        if (heavyActive + reserved.heavy >= budgets.maxHeavy) return REJECT.heavyBudget;
+        if (shedLevel >= 1 || headroomMissing) return REJECT.deferred;
+      }
+      if (engineAtCap(info)) return REJECT.engineBudget;
+      if (info.usesLights && lightsActive + (reserved.lights + 1) * LIGHTS_PER_SPAWN > budgets.maxRealLights) return REJECT.lightBudget;
     }
-    if (engineAtCap(info)) return REJECT.engineBudget;
-    if (info.usesLights && lightsActive + LIGHTS_PER_SPAWN > budgets.maxRealLights) return REJECT.lightBudget;
     if (record.offAxis > MAX_OFF_AXIS_WIDE || record.distance < info.band.min || record.distance > info.band.max) return REJECT.notAhead;
     return info.candidateKind === 'event' ? managerRejection(info) : '';
+  }
+
+  // ---- Combos (contract i.3) -------------------------------------------------------------------------
+  /** Whether a site of one of the presets in siteIds has a live active state within radius of (x, z). */
+  function siteActiveNear(siteIds, x, z, radius) {
+    for (let index = 0; index < activations.length; index++) {
+      const record = activations[index];
+      if (record.siteId === null || !siteIds.includes(record.info.id)) continue;
+      const instance = spawnManager.getInstance(record.id);
+      const anchor = instance ? instance.anchor || instance.position : null;
+      if (anchor && Math.hypot(anchor.x - x, anchor.z - z) <= radius) return true;
+    }
+    return false;
+  }
+
+  /** The combo's preconditions at the candidate (contract i.3): '' when all hold. */
+  function comboRejection(info, record) {
+    const combo = info.combo;
+    const preconditions = combo.preconditions;
+    if (combo.near && comboNearCache.get(record.hash) === null) return REJECT.precondition;
+    if (preconditions.timeOfDay && !matchesTimeOfDay(preconditions.timeOfDay, sun.elevation, sun.dayTime)) return REJECT.precondition;
+    if (preconditions.weather && !preconditions.weather.includes(weather.stateAt(record.x, record.z, time))) return REJECT.precondition;
+    if (preconditions.biomes && !preconditions.biomes.includes(groundOf(record).biome)) return REJECT.precondition;
+    if (preconditions.siteActive && !siteActiveNear(preconditions.siteActive, record.x, record.z, combo.siteRadius)) return REJECT.precondition;
+    return '';
+  }
+
+  /**
+   * Whether the budgets admit every member of a combo at once: its heavy slots, each engine's instances
+   * (and particle headroom), the real lights, the load shedder, and exclusivity both ways.
+   */
+  function comboBudgetRejection(info) {
+    const combo = info.combo;
+    if (exclusiveLive > 0 || (combo.exclusive && legendaryLive > 0)) return REJECT.exclusive;
+    if (combo.heavySlots > 0) {
+      if (heavyActive + reserved.heavy + combo.heavySlots > budgets.maxHeavy) return REJECT.comboBudget;
+      if (shedLevel >= 1 || headroomMissing) return REJECT.deferred;
+    }
+    const perEngine = engineStats && engineStats.engines ? engineStats.engines : null;
+    for (let index = 0; index < combo.engineNames.length; index++) {
+      const name = combo.engineNames[index];
+      const cap = budgets.engines[name];
+      if (!cap) continue;
+      const used = perEngine && perEngine[name] ? perEngine[name] : null;
+      const instances = used ? used.instances || 0 : 0;
+      if (instances + (reserved.engines[name] || 0) + combo.engineNeeds[name] > cap.instances) return REJECT.comboBudget;
+      if (used && cap.particles > 0 && (used.particles || 0) >= cap.particles * PARTICLE_HEADROOM) return REJECT.comboBudget;
+    }
+    if (combo.lights > 0 && lightsActive + (reserved.lights + combo.lights) * LIGHTS_PER_SPAWN > budgets.maxRealLights) return REJECT.comboBudget;
+    return '';
+  }
+
+  /**
+   * A combo's near precondition: the nearest landmark of its types within radius of the candidate (or,
+   * with only sites named, the nearest such site), as { x, z }, or null when one of the named kinds has
+   * nothing in reach. Cached by the candidate's hash (landmarks and sites never move).
+   */
+  function comboNearPoint(info, record) {
+    if (comboNearCache.has(record.hash)) return comboNearCache.get(record.hash);
+    if (comboNearCache.size >= SURFACE_CACHE_LIMIT) comboNearCache.clear();
+    const near = info.combo.near;
+    let landmark = null;
+    let site = null;
+    if (Array.isArray(near.landmarks)) {
+      let bestDistance = Infinity;
+      const found = typeof terrain.landmarkSitesNear === 'function' ? terrain.landmarkSitesNear(record.x, record.z, near.radius) : [];
+      for (let index = 0; index < found.length; index++) {
+        const entry = found[index];
+        if (!near.landmarks.includes(entry.type)) continue;
+        const distance = Math.hypot(entry.x - record.x, entry.z - record.z);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          landmark = entry;
+        }
+      }
+    }
+    if (Array.isArray(near.sites)) {
+      let bestDistance = Infinity;
+      const found = placement ? placement.sitesNear(record.x, record.z, near.radius) : [];
+      for (let index = 0; index < found.length; index++) {
+        const entry = found[index];
+        if (!near.sites.includes(entry.presetId)) continue;
+        const distance = Math.hypot(entry.x - record.x, entry.z - record.z);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          site = entry;
+        }
+      }
+    }
+    const missing = (Array.isArray(near.landmarks) && landmark === null) || (Array.isArray(near.sites) && site === null);
+    const anchor = missing ? null : landmark || site;
+    const point = anchor ? { x: anchor.x, z: anchor.z } : null;
+    comboNearCache.set(record.hash, point);
+    return point;
+  }
+
+  /** A log entry copy (a combo's member list copied too). */
+  function copyEntry(entry) {
+    const copy = { ...entry };
+    if (entry.members) copy.members = entry.members.slice();
+    return copy;
+  }
+
+  /** The presets the current craft favours or disfavours, with their weights (getState). */
+  function favouredPresets() {
+    const favoured = {};
+    for (let index = 0; index < infos.length; index++) if (weights[index] !== 1) favoured[infos[index].id] = Math.round(weights[index] * 100) / 100;
+    return favoured;
+  }
+
+  /** Whether a spawn id is still one of the director's live activations. */
+  function isLive(id) {
+    for (let index = 0; index < activations.length; index++) if (activations[index].id === id) return true;
+    return false;
+  }
+
+  /** Live legendary spawns and exclusive combos, for the exclusivity rule (once per tick). */
+  function countLegendaries() {
+    legendaryLive = 0;
+    for (let index = 0; index < activations.length; index++) {
+      const record = activations[index];
+      if (!record.comboMember && record.info.tier === LEGENDARY_TIER) legendaryLive++;
+    }
+    exclusiveLive = 0;
+    for (let index = 0; index < combos.length; index++) if (combos[index].exclusive) exclusiveLive++;
   }
 
   function refreshBudgets() {
@@ -604,18 +1000,20 @@ export function createDirector({
     for (let index = 0; index < pool.count; index++) {
       const record = pool.records[index];
       const info = infos[record.presetIndex];
-      if (!info.near || record.siteIndex >= 0) continue;
-      const landmark = nearLandmark(info, record);
-      if (landmark) {
-        record.x = landmark.x;
-        record.z = landmark.z;
-        record.distance = Math.hypot(landmark.x - player.x, landmark.z - player.z);
+      if (record.siteIndex >= 0) continue;
+      // filters.near moves a candidate onto its landmark; a combo's near precondition onto its
+      // landmark or site (contract i.3).
+      const point = info.near ? nearLandmark(info, record) : info.combo && info.combo.near ? comboNearPoint(info, record) : null;
+      if (point) {
+        record.x = point.x;
+        record.z = point.z;
+        record.distance = Math.hypot(point.x - player.x, point.z - player.z);
       }
     }
     for (let index = 0; index < pool.count; index++) {
       const record = pool.records[index];
       record.bearing = bearingDegrees(player.x, player.z, record.x, record.z);
-      record.offAxis = angleBetween(record.bearing, player.heading);
+      record.offAxis = angleBetween(record.bearing, player.track);
     }
   }
 
@@ -628,7 +1026,7 @@ export function createDirector({
       record.viable = false;
       if ((usedUntil.get(record.hash) ?? -1) > time) { record.rejection = REJECT.used; continue; }
       if ((refusedUntil.get(record.hash) ?? -1) > time) { record.rejection = REJECT.refused; continue; }
-      const environment = environmentRejection(info, record);
+      const environment = environmentRejection(info, record) || (info.combo ? comboRejection(info, record) : '');
       if (environment) { record.rejection = environment; continue; }
       record.viable = true;
       const rule = directorRejection(info, record);
@@ -647,8 +1045,9 @@ export function createDirector({
 
   /**
    * The best eligible candidate for a choice: tierMask admits rarity tiers (bit per tier), maxOffAxis
-   * bounds the angle off the heading, and drought fills also keep to DROUGHT_BAND. Due tiers outrank
-   * the rest, rarer due tiers first, then the ahead score decides, with the candidate's own roll as a
+   * bounds the angle off the ground track, and drought fills also keep to DROUGHT_BAND. Due tiers
+   * outrank the rest, rarer due tiers first, then the ahead score times the craft weight decides (at
+   * most CRAFT_WEIGHT_RANGE.max, below the 10 a due tier adds), with the candidate's own roll as a
    * small seeded preference.
    */
   function pickBest(tierMask, maxOffAxis, droughtFill) {
@@ -660,18 +1059,26 @@ export function createDirector({
       if ((tierMask & (1 << info.tier)) === 0 || record.offAxis > maxOffAxis) continue;
       if (droughtFill && (record.distance < DROUGHT_BAND.min || record.distance > DROUGHT_BAND.max)) continue;
       const due = time >= tierDue[info.tier];
-      record.rank = (due ? 10 + info.tier : 0) + record.score + (1 - record.roll) * 0.01;
+      record.rank = (due ? 10 + info.tier : 0) + record.score * weights[info.index] + (1 - record.roll) * 0.01;
       if (best === null || compareRanked(record, best) < 0) best = record;
     }
     return best;
   }
 
   // ---- Activation -----------------------------------------------------------------------------------
+  /**
+   * Appends an activation to the log and its running hash. Every entry records the flying craft
+   * (contract i.2); combo entries add the combo id, and a combo's own entry its member ids in order.
+   */
   function appendLog(entry) {
+    entry.craft = craftState.id;
     log.push(entry);
     if (log.length > LOG_LIMIT) log.shift();
     logTotal++;
-    const line = `${entry.time}|${entry.presetId}|${entry.candidateId}|${entry.reason};`;
+    let line = `${entry.time}|${entry.presetId}|${entry.candidateId}|${entry.reason}|${entry.craft}`;
+    if (entry.combo) line += `|${entry.combo}`;
+    if (entry.members) line += `|${entry.members.join(',')}`;
+    line += ';';
     for (let index = 0; index < line.length; index++) {
       logHash ^= line.charCodeAt(index);
       logHash = Math.imul(logHash, 16777619) >>> 0;
@@ -688,7 +1095,11 @@ export function createDirector({
     return Math.max(terrain.heightAt(x, z), waterLevel);
   }
 
-  function track(id, info, source, { candidate, siteId, duration, siteActive = false }) {
+  /**
+   * Records a live spawn the director started. A combo member (comboMember) spends its preset's
+   * cooldown but neither the rarity schedule nor the no-repeat rule: it rides on its combo's turn.
+   */
+  function track(id, info, source, { candidate, siteId, duration, siteActive = false, combo = null, comboMember = false }) {
     const record = {
       id,
       info,
@@ -702,18 +1113,23 @@ export function createDirector({
       siteId,
       siteActive,
       candidateId: candidate,
+      combo,
+      comboMember,
     };
     activations.push(record);
+    if (combo) combo.live++;
     cooldownUntil[info.index] = time + info.cooldown;
+    if (info.heavy) heavyActive++;
+    if (comboMember) return record;
     lastPresetIndex = info.index;
     tierDue[info.tier] = time + drawPeriod(info.tier);
     tierActivations[info.tier]++;
-    if (info.heavy) heavyActive++;
     return record;
   }
 
   function activateCandidate(record, reason) {
     const info = infos[record.presetIndex];
+    if (info.combo) return activateCombo(info, record, reason);
     const site = record.siteIndex >= 0 ? siteScratch[record.siteIndex] : null;
     const duration = durationFor(info, record.hash);
     const position = { x: record.x, y: site && Number.isFinite(site.groundY) ? site.groundY : groundY(record.x, record.z), z: record.z };
@@ -740,6 +1156,210 @@ export function createDirector({
     markNotable('event', time);
     if (reason === 'drought') droughtFills++;
     return true;
+  }
+
+  // ---- Combo activation (contract i.3) ------------------------------------------------------------------
+  /** A combo candidate passed every rule: start the combo and its members. */
+  function activateCombo(info, record, reason) {
+    const bucketEnd = (record.bucket + 1) * info.settings.bucketSeconds;
+    const label = candidateId(record, info.id);
+    const started = startCombo(info, {
+      x: record.x, z: record.z, heading: record.heading, hash: record.hash, label, reason, source: 'director', forced: false,
+    });
+    if (!started) {
+      refusedUntil.set(record.hash, bucketEnd);
+      return false;
+    }
+    usedUntil.set(record.hash, bucketEnd);
+    markNotable('event', time);
+    if (reason === 'drought') droughtFills++;
+    return true;
+  }
+
+  /**
+   * Starts a combo: its own preset at the anchor point (source as given, the combo id as parent), then
+   * every member, each placed by memberPosition and started now or after its delay (the budget share
+   * of a waiting member stays reserved). Logs the combo with its members in order, emits comboStarted
+   * and returns the combo record, or null when the manager refused the combo's own spawn.
+   */
+  function startCombo(info, { x, z, heading, hash, label, reason, source, forced }) {
+    const comboId = `combo:${label}`;
+    const duration = durationFor(info, hash);
+    const id = spawnManager.activate(info.id, {
+      position: { x, y: groundY(x, z), z }, heading, source, seed: hash, duration, parent: comboId, ...(forced ? { force: true } : {}),
+    });
+    if (id === null || id === undefined) return null;
+    const combo = {
+      id: comboId,
+      info,
+      presetId: info.id,
+      mainId: id,
+      hash,
+      x,
+      z,
+      viewX: player.x,
+      viewZ: player.z,
+      heading,
+      source,
+      forced,
+      exclusive: info.combo.exclusive,
+      live: 0,
+      pending: [],
+      startedAt: time,
+    };
+    combos.push(combo);
+    track(id, info, source, { candidate: label, siteId: null, duration, combo });
+    appendLog({ time, presetId: info.id, candidateId: label, reason, combo: comboId, members: info.combo.memberIds });
+    if (bus && typeof bus.emitTyped === 'function') bus.emitTyped('comboStarted', { id: comboId, presetId: info.id, members: info.combo.memberIds.slice() });
+    const members = info.combo.members;
+    for (let index = 0; index < members.length; index++) {
+      const member = members[index];
+      if (member.delay > 0 || !startMember(combo, index)) {
+        combo.pending.push({ index, at: time + member.delay });
+        reserveMember(member.info, 1);
+      }
+    }
+    countLegendaries();
+    return combo;
+  }
+
+  /** Holds (sign 1) or releases (-1) a waiting member's budget share. */
+  function reserveMember(info, sign) {
+    if (info.heavy) reserved.heavy += sign;
+    if (info.usesLights) reserved.lights += sign;
+    for (let index = 0; index < info.engines.length; index++) {
+      const name = info.engines[index];
+      if (name in reserved.engines) reserved.engines[name] += sign;
+    }
+  }
+
+  /**
+   * Where member `index` of a combo stands: the anchor (role 'anchor', or no place) at the combo's
+   * point; any other member place.distance metres from it on place.bearing, measured from the line
+   * of sight (0 is straight beyond the anchor as seen from where the player was when the combo
+   * started, 90 to its right), moved by up to place.jitter metres. The jitter comes from
+   * hash(seedHash, combo candidate, member index): the candidate's hash already holds the seed.
+   */
+  function memberPosition(combo, index, out) {
+    const member = combo.info.combo.members[index];
+    out.x = combo.x;
+    out.z = combo.z;
+    if (member.role === 'anchor' || !member.place) return out;
+    const view = combo.viewX === combo.x && combo.viewZ === combo.z ? combo.heading : bearingDegrees(combo.viewX, combo.viewZ, combo.x, combo.z);
+    const radians = ((view + member.place.bearing) * Math.PI) / 180;
+    out.x += Math.sin(radians) * member.place.distance;
+    out.z -= Math.cos(radians) * member.place.distance;
+    const jitter = Number.isFinite(member.place.jitter) ? member.place.jitter : 0;
+    if (jitter > 0) {
+      const memberHash = rehash(combo.hash, COMBO_MEMBER_SALT + index);
+      const radius = jitter * Math.sqrt(unitFromHash(memberHash));
+      const angle = unitFromHash(rehash(memberHash, 1)) * Math.PI * 2;
+      out.x += Math.sin(angle) * radius;
+      out.z -= Math.cos(angle) * radius;
+    }
+    return out;
+  }
+
+  /** Starts member `index` of a combo now. Returns whether the manager took it. */
+  function startMember(combo, index) {
+    const member = combo.info.combo.members[index];
+    const memberInfo = member.info;
+    memberPosition(combo, index, memberPoint);
+    const seed = rehash(combo.hash, COMBO_MEMBER_SALT + 101 + index);
+    const duration = durationFor(memberInfo, seed);
+    const id = spawnManager.activate(memberInfo.id, {
+      position: { x: memberPoint.x, y: groundY(memberPoint.x, memberPoint.z), z: memberPoint.z },
+      heading: combo.heading,
+      source: combo.source,
+      seed,
+      duration,
+      parent: combo.id,
+      ...(combo.forced ? { force: true } : {}),
+    });
+    if (id === null || id === undefined) return false;
+    const label = `${combo.id}#${index}`;
+    track(id, memberInfo, combo.source, { candidate: label, siteId: null, duration, combo, comboMember: true });
+    appendLog({ time, presetId: memberInfo.id, candidateId: label, reason: 'comboMember', combo: combo.id });
+    return true;
+  }
+
+  /**
+   * Once per tick: waiting members start when their delay is up (a refusal retries next tick, for
+   * up to COMBO_MEMBER_PATIENCE s, then the member is dropped and logged); a combo whose own spawn has
+   * ended drops its waiting members; a combo with nothing live and nothing waiting is over.
+   */
+  function processCombos() {
+    for (let comboIndex = combos.length - 1; comboIndex >= 0; comboIndex--) {
+      const combo = combos[comboIndex];
+      const mainAlive = isLive(combo.mainId);
+      for (let index = combo.pending.length - 1; index >= 0; index--) {
+        const entry = combo.pending[index];
+        if (mainAlive && time < entry.at) continue;
+        const member = combo.info.combo.members[entry.index];
+        let done = false;
+        if (mainAlive && startMember(combo, entry.index)) {
+          done = true;
+        } else if (!mainAlive || time >= entry.at + COMBO_MEMBER_PATIENCE) {
+          done = true;
+          appendLog({ time, presetId: member.info.id, candidateId: `${combo.id}#${entry.index}`, reason: 'comboMemberDropped', combo: combo.id });
+        }
+        if (done) {
+          reserveMember(member.info, -1);
+          combo.pending.splice(index, 1);
+        }
+      }
+      if (combo.live <= 0 && combo.pending.length === 0) combos.splice(comboIndex, 1);
+    }
+  }
+
+  // ---- Global overrides (contract i.4) --------------------------------------------------------------
+  /**
+   * Once per tick: the override schedule at the player (src/spawns/overrides.js). globalOverride fires
+   * when an override starts, ends, and when its weight crosses 0.5; the overrideSink gets every entry;
+   * from half weight the override's own preset is started once per night (its discovery and journal
+   * entry) and it is ended with the override.
+   */
+  function updateOverrides() {
+    if (overrides.entries.length === 0) return;
+    const entries = overrides.update(sun.days, sun.dayTime, player.x, player.z);
+    for (let index = 0; index < entries.length; index++) {
+      const entry = entries[index];
+      const status = overrideStatus[index];
+      const active = entry.weight > 0;
+      const high = entry.weight >= 0.5;
+      if (active !== status.active || (active && high !== status.high)) {
+        if (active && !status.active) appendLog({ time, presetId: entry.presetId, candidateId: `${entry.id}@${entry.night}`, reason: 'override' });
+        if (bus && typeof bus.emitTyped === 'function') bus.emitTyped('globalOverride', { id: entry.id, kind: entry.kind, active, weight: entry.weight });
+      }
+      status.active = active;
+      status.high = high;
+      if (overrideSink && typeof overrideSink.apply === 'function') overrideSink.apply(entry);
+      overrideSpawn(entry, status);
+    }
+  }
+
+  /** Starts an override's preset once per night from half weight; ends it when the override ends. */
+  function overrideSpawn(entry, status) {
+    if (status.spawnId !== null) {
+      const instance = spawnManager.getInstance(status.spawnId);
+      if (!instance || instance.ended === true) {
+        status.spawnId = null;
+      } else if (!status.active) {
+        spawnManager.deactivate(status.spawnId, 'override');
+        status.spawnId = null;
+      }
+      return;
+    }
+    if (!status.high || status.spawnedNight === entry.night) return;
+    const info = infoById.get(entry.presetId);
+    const radians = (player.track * Math.PI) / 180;
+    const x = player.x + Math.sin(radians) * OVERRIDE_SPAWN_DISTANCE;
+    const z = player.z - Math.cos(radians) * OVERRIDE_SPAWN_DISTANCE;
+    const seed = rehash(baseHash, hashString(entry.id) ^ Math.imul(entry.night | 0, 0x27d4eb2d));
+    const id = spawnManager.activate(info.id, { position: { x, y: groundY(x, z), z }, heading: player.track, source: 'director', seed, duration: durationFor(info, seed) });
+    if (id === null || id === undefined) return;
+    status.spawnId = id;
+    status.spawnedNight = entry.night;
   }
 
   /**
@@ -780,6 +1400,8 @@ export function createDirector({
 
   // ---- Lifetimes and despawn -------------------------------------------------------------------------
   function removeActivation(index) {
+    const combo = activations[index].combo;
+    if (combo) combo.live--;
     const last = activations.length - 1;
     if (index !== last) activations[index] = activations[last];
     activations.pop();
@@ -831,9 +1453,12 @@ export function createDirector({
 
   function tick() {
     tickCount++;
-    readInputs();
+    readInputs(true);
     refreshBudgets();
     pollActivations();
+    processCombos();
+    countLegendaries();
+    updateOverrides();
     gatherCandidates();
     evaluateCandidates();
     decide();
@@ -964,15 +1589,45 @@ export function createDirector({
           age: Math.round(time - record.activatedAt),
           remaining: Number.isFinite(record.expiresAt) ? Math.round(record.expiresAt - LIFETIME_GRACE - time) : null,
         })),
-        log: log.slice(-50),
+        log: log.slice(-50).map(copyEntry),
         logLength: logTotal,
         logHash: logHash.toString(16).padStart(8, '0'),
+        track: Math.round(player.track),
+        groundSpeed: Math.round(player.groundSpeed * 10) / 10,
+        craft: craftState.id,
+        craftWeights: favouredPresets(),
+        combos: combos.map((combo) => ({
+          id: combo.id,
+          presetId: combo.presetId,
+          exclusive: combo.exclusive,
+          live: combo.live,
+          pending: combo.pending.map((entry) => combo.info.combo.members[entry.index].info.id),
+          age: Math.round(time - combo.startedAt),
+        })),
+        overrides: overrides.entries.map((entry) => ({
+          id: entry.id,
+          presetId: entry.presetId,
+          kind: entry.kind,
+          night: entry.night,
+          scheduled: entry.scheduled,
+          forced: entry.forcedNight === entry.night,
+          weight: Math.round(entry.weight * 1000) / 1000,
+          region: Math.round(entry.region * 1000) / 1000,
+        })),
       };
     },
 
-    /** The whole activation log (a copy): [{ time, presetId, candidateId, reason }]. */
+    /**
+     * The whole activation log (a copy): [{ time, presetId, candidateId, reason, craft, combo?,
+     * members? }].
+     */
     getLog() {
-      return log.map((entry) => ({ ...entry }));
+      return log.map(copyEntry);
+    },
+
+    /** The override schedule's entries now (a copy): [{ id, presetId, kind, night, scheduled, weight, region }]. */
+    getOverrides() {
+      return overrides.entries.map((entry) => ({ id: entry.id, presetId: entry.presetId, kind: entry.kind, night: entry.night, scheduled: entry.scheduled, weight: entry.weight, region: entry.region }));
     },
 
     /** Whether presetId is one of the director's presets (forceSpawn and scheduling know it). */
@@ -982,19 +1637,32 @@ export function createDirector({
 
     /**
      * Dev only: starts a preset ahead of the player through the SpawnManager (source 'debug').
-     * options: { distance (m), bearingOffset (deg), force (ignore the manager's budgets) }.
+     * options: { distance (m), bearingOffset (deg), force (ignore the manager's budgets) }. A combo
+     * starts with all its members, its preconditions ignored (contract i.3: how the F9 debugger forces
+     * one); the combo id is returned. An override is scheduled on the current night whatever its roll
+     * and region (it shows from the evening on); its id is returned.
      */
     forceSpawn(presetId, { distance = 3000, bearingOffset = 0, force = false } = {}) {
       if (!devHooks) throw new Error('director.forceSpawn is only available in development builds or with ?debug=1');
       const info = infoById.get(presetId);
       if (!info) throw new RangeError(`director.forceSpawn: unknown preset "${presetId}"`);
       readInputs();
-      const radians = ((player.heading + bearingOffset) * Math.PI) / 180;
+      if (info.override) {
+        overrides.force(presetId, nightIndex(sun.days));
+        return `override:${presetId}`;
+      }
+      const radians = ((player.track + bearingOffset) * Math.PI) / 180;
       const x = player.x + Math.sin(radians) * distance;
       const z = player.z - Math.cos(radians) * distance;
       const seed = mix32((baseHash ^ Math.imul(++debugSerial, 0x9e3779b1)) >>> 0);
+      if (info.combo) {
+        const combo = startCombo(info, { x, z, heading: player.track, hash: seed, label: `debug:${debugSerial}`, reason: 'debug', source: 'debug', forced: force === true });
+        if (!combo) return null;
+        markNotable('event', time);
+        return combo.id;
+      }
       const duration = durationFor(info, seed);
-      const id = spawnManager.activate(info.id, { position: { x, y: groundY(x, z), z }, heading: player.heading, source: 'debug', seed, duration, force: force === true });
+      const id = spawnManager.activate(info.id, { position: { x, y: groundY(x, z), z }, heading: player.track, source: 'debug', seed, duration, force: force === true });
       if (id === null || id === undefined) return null;
       const label = `debug:${debugSerial}`;
       track(id, info, 'debug', { candidate: label, siteId: null, duration });
@@ -1021,6 +1689,56 @@ export function createDirector({
       }
       for (const record of activations) endActivation(record, 'dispose');
       activations.length = 0;
+      combos.length = 0;
+      for (const status of overrideStatus) {
+        if (status.spawnId !== null) spawnManager.deactivate(status.spawnId, 'dispose');
+        status.spawnId = null;
+      }
+      if (overrideSink && typeof overrideSink.dispose === 'function') overrideSink.dispose();
+    },
+  };
+}
+
+/**
+ * The game's override sink (contract i.4): the blood moon is a sky modifier (the moon reddens and the
+ * night darkens), the midnight sun a sun override that bends the sun's path through applyMidnightSun,
+ * each eased by the override's weight. sky is the sky system (addModifier, addSunOverride). Handles
+ * are made on an override's first non-zero weight and kept until dispose(); a tick reuses them.
+ */
+export function createSkyOverrideSink(sky) {
+  const handles = new Map();
+  const weightValues = { weight: 0 };
+
+  function create(entry) {
+    if (entry.kind === 'bloodMoon') {
+      const modifier = sky.addModifier(entry.id, { priority: 5 });
+      modifier.set({ ...BLOOD_MOON_SKY, weight: 0 });
+      return { modifier, sun: null };
+    }
+    return { modifier: null, sun: sky.addSunOverride(entry.id, { apply: applyMidnightSun }) };
+  }
+
+  return {
+    apply(entry) {
+      let handle = handles.get(entry.id);
+      if (!handle) {
+        if (!(entry.weight > 0)) return;
+        handle = create(entry);
+        handles.set(entry.id, handle);
+      }
+      if (handle.modifier) {
+        weightValues.weight = entry.weight;
+        handle.modifier.set(weightValues);
+      } else {
+        handle.sun.setWeight(entry.weight);
+      }
+    },
+    dispose() {
+      for (const handle of handles.values()) {
+        if (handle.modifier) handle.modifier.remove();
+        if (handle.sun) handle.sun.remove();
+      }
+      handles.clear();
     },
   };
 }
@@ -1028,7 +1746,8 @@ export function createDirector({
 /**
  * The director wired to the running game, for the spawns system to create once its SpawnManager
  * exists and to update every frame: the flight clock, the player, the sun, the camera frustum, the
- * regional weather system, the world's height and biome functions, the perf governor and the bus.
+ * regional weather system, the world's height and biome functions, the perf governor, the bus, the
+ * flying craft and its module's directorProfile, and the sky (the overrides' sink).
  * options: { spawnManager, presets, placement?, isDiscovered?, budgets?, devHooks? }. budgets defaults to
  * DIRECTOR_BUDGETS (the spawns system passes the SpawnManager's own budget view, so both agree);
  * devHooks (forceSpawn) defaults to dev builds and ?debug=1.
@@ -1044,12 +1763,25 @@ export function createGameDirector(ctx, { spawnManager, presets, placement = nul
   // The camera matrices are in the render frame (src/core/origin.js): world points move into it.
   const origin = ctx.origin ?? null;
   let frustumFrame = -1;
+  const sky = ctx.systems.sky ?? null;
+  const overrideSink = sky && typeof sky.addModifier === 'function' && typeof sky.addSunOverride === 'function' ? createSkyOverrideSink(sky) : null;
+  const flight = ctx.systems.flight ?? null;
   return createDirector({
     seedHash: world.seedHash >>> 0,
     presets,
     spawnManager,
     weather: weather.model,
-    terrain: { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL, landmarkSitesNear: world.landmarkSitesNear },
+    terrain: {
+      heightAt: world.heightAt,
+      biomeAt: world.biomeAt,
+      waterLevel: CONFIG.WATER_LEVEL,
+      landmarkSitesNear: world.landmarkSitesNear,
+      biomeKeys: Array.isArray(world.BIOMES) ? world.BIOMES.map((biome) => biome.key) : null,
+    },
+    // The craft flying now (the controller's, which may still be refusing a settings change).
+    getCraft: () => (flight && typeof flight.getCraft === 'function' ? flight.getCraft() : ctx.settings.get('craft')),
+    profileFor: (craftId) => (ctx.craftRegistry && ctx.craftRegistry.get(craftId)?.directorProfile) ?? DEFAULT_DIRECTOR_PROFILES[craftId] ?? null,
+    overrideSink,
     getPlayer: () => state.player,
     getTime: () => state.time.elapsed,
     getSun: () => state.time,

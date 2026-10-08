@@ -255,11 +255,12 @@ function createFlightPath({ pathSeed, speed, altitude: [lowAltitude, highAltitud
 
 /** The sun on a uniform day clock (CONFIG day length), starting in the golden hour. */
 function createSun(startDayTime = 0.72) {
-  const sun = { sunElevation: 0, dayTime: startDayTime };
+  const sun = { sunElevation: 0, dayTime: startDayTime, days: startDayTime };
   return {
     sun,
     update(time) {
-      sun.dayTime = (startDayTime + time / CONFIG.DAY_LENGTH_DEFAULT) % 1;
+      sun.days = startDayTime + time / CONFIG.DAY_LENGTH_DEFAULT;
+      sun.dayTime = sun.days % 1;
       sun.sunElevation = Math.sin((sun.dayTime - 0.25) * Math.PI * 2) * CONFIG.SUN_MAX_ELEVATION_DEG;
     },
   };
@@ -286,7 +287,7 @@ function createView(player) {
  * getStats { engines, totals, heavy }, canActivate, getSiteSpawn / setSiteActive, 'spawns:inView',
  * and no setLodBias.
  */
-function createStubSpawnManager({ bus, player, getTime, placement, isInView, budgets = DIRECTOR_BUDGETS, naturalEnds = true, shape = 'contract' }) {
+function createStubSpawnManager({ bus, player, getTime, placement, isInView, budgets = DIRECTOR_BUDGETS, naturalEnds = true, shape = 'contract', presetById = PRESET_BY_ID }) {
   const instances = new Map();
   const activeList = [];
   const siteInstances = new Map();
@@ -396,7 +397,7 @@ function createStubSpawnManager({ bus, player, getTime, placement, isInView, bud
     lodBiasHistory,
     counters,
     activate(presetId, options) {
-      const preset = PRESET_BY_ID.get(presetId);
+      const preset = presetById.get(presetId);
       if (!preset) throw new Error(`stub manager: unknown preset ${presetId}`);
       // A site's active state rides on the site: its heavy share is the site instance's.
       const siteInstance = options.site ? siteInstances.get(options.site.id) : null;
@@ -408,6 +409,7 @@ function createStubSpawnManager({ bus, player, getTime, placement, isInView, bud
       records.push({
         time, presetId, source: options.source, distance, offAxis: angleBetween(bearing, player.heading),
         duration: options.duration, refused, site: options.site ? options.site.id : null,
+        parent: options.parent ?? null, x: options.position.x, z: options.position.z, bearing,
       });
       if (refused === 'heavy') counters.refusedHeavy++;
       if (refused === 'engine') counters.refusedEngine++;
@@ -454,7 +456,7 @@ function createStubSpawnManager({ bus, player, getTime, placement, isInView, bud
       }
       for (const site of placement.sitesNear(player.position.x, player.position.z, SITE_INSTANCE_RANGE)) {
         if (!siteInstances.has(site.id) && stats.engines.structure.instances < budgets.engines.structure.instances) {
-          const preset = PRESET_BY_ID.get(site.presetId);
+          const preset = presetById.get(site.presetId);
           // A site renders its heavy parts, lights and particles only while the budgets allow;
           // otherwise it stands as bare structure until they do.
           const heavy = preset.heavy && stats.total.heavy < budgets.maxHeavy;
@@ -498,7 +500,7 @@ function createStubSpawnManager({ bus, player, getTime, placement, isInView, bud
       return frameworkStats;
     },
     canActivate(presetId, source = 'director') {
-      const preset = PRESET_BY_ID.get(presetId);
+      const preset = presetById.get(presetId);
       if (!preset) return 'preset';
       const reason = refusal(preset, preset.heavy && source !== 'site');
       return reason ? REFUSAL_NAMES[reason] : null;

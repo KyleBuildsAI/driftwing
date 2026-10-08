@@ -71,6 +71,13 @@ export const EVENT_TYPES = Object.freeze({
   spawnActivated: { id: 'string', presetId: 'string', category: 'string', kind: SPAWN_KINDS, position: 'vector3' },
   /** A spawn instance was disposed; reason says why (ended, expired, despawn, range, debug, replaced, ...). */
   spawnEnded: { id: 'string', presetId: 'string', reason: 'string' },
+  /** The director started a legendary combo (contract i.3); members: the member preset ids, in order. */
+  comboStarted: { id: 'string', presetId: 'string', members: 'object' },
+  /**
+   * A global override (the blood moon, the midnight sun; contract i.4) started, ended or crossed half
+   * weight at the player.
+   */
+  globalOverride: { id: 'string', kind: ['bloodMoon', 'midnightSun'], active: 'boolean', weight: 'number' },
   /**
    * The regional weather where the player flies changed state (src/spawns/weather.js). It fires only on
    * a real change, so previous is always a state; region is the weather cell id "rx:rz".

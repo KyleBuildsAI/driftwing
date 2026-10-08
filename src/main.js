@@ -220,6 +220,8 @@ async function boot() {
       realElapsed: 0,
       frameDt: 0,
       dayTime: startDayTime,
+      // The day counter (whole days since the start plus dayTime; the sky keeps it, contract i.4).
+      days: startDayTime,
       sunDirection: startSun.clone(),
       moonDirection: moonDirectionForDayTime(startDayTime),
       sunElevation: Math.asin(startSun.y) / DEG,

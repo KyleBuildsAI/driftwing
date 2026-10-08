@@ -14,7 +14,7 @@ import { PRESETS } from './presets/index.js';
 import { validatePreset, validatePresets } from './schema.js';
 import { createEngineRegistry } from './engineRegistry.js';
 import { createSpawnManager } from './spawnManager.js';
-import { DIRECTOR_BUDGETS, createGameDirector } from './director.js';
+import { DIRECTOR_BUDGETS, TRACK_MIN_SPEED, createGameDirector } from './director.js';
 
 const NO_SITES = Object.freeze([]);
 /** Distance (m) ahead of the craft a debug spawn uses when none is given. */
@@ -24,8 +24,18 @@ const GROUND_START_RANGE = 80000;
 /** A site id: '<presetId>:<cellX>:<cellZ>' (src/world/placement.js). */
 const SITE_ID_PATTERN = /^([A-Za-z][A-Za-z0-9]*):(-?\d+):(-?\d+)$/;
 
-/** Horizontal unit vector of the craft's heading into target ({ x, z }). */
+/**
+ * Horizontal unit vector along the craft's ground track into target ({ x, z }): where it is going
+ * over the ground (contract i.1), or its heading below TRACK_MIN_SPEED.
+ */
 function flatForward(player, target) {
+  const velocity = player.velocity;
+  const groundSpeed = velocity ? Math.hypot(velocity.x, velocity.z) : 0;
+  if (groundSpeed >= TRACK_MIN_SPEED) {
+    target.x = velocity.x / groundSpeed;
+    target.z = velocity.z / groundSpeed;
+    return target;
+  }
   const forward = player.forward;
   const length = Math.hypot(forward.x, forward.z);
   if (length > 1e-3) {
@@ -113,7 +123,7 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
     director = createDirector();
   }
 
-  /** The anchor distance metres ahead of the craft on its heading, on the ground (or the water). */
+  /** The anchor distance metres ahead of the craft on its ground track, on the ground (or the water). */
   function pointAhead(distance) {
     const player = state.player.position;
     flatForward(state.player, forward);
