@@ -492,6 +492,25 @@ function autopilotTest() {
     return false;
   });
   record('autopilot perch approach lands on the perch', perchedAt === null ? -1 : perchedAt, 90, { unit: 's', compare: perchedAt !== null && rig.craftState.perchKind === 'structure', decimals: 1, note: `kind ${rig.craftState.perchKind}, NaN ticks ${rig.nonFinite}` });
+  // A tree on a hillside, the bird 40 m over it: it circles down over the low side, never touching the hill.
+  const hill = createHillWorld(0, -200, 120, 120);
+  const tree = { x: 80, y: hill.groundHeight(80, -200) + 12, z: -200, kind: 'tree', id: 'perch:pine:hill' };
+  const sloped = createRig({ assists: 1, world: hill, colliders: createColliders([tree]) });
+  sloped.airborne({ speed: 12.5, altitude: tree.y + 40, x: 80, z: 0 });
+  sloped.pilot.throttle = 0.3;
+  sloped.craftState.perchTarget = { x: tree.x, y: tree.y, z: tree.z, kind: tree.kind, id: tree.id };
+  Object.assign(sloped.autopilot, { enabled: true, heading: 180, altitude: tree.y + 40, speed: 12 });
+  let hillPerchedAt = null;
+  let touched = false;
+  sloped.run(120, (current) => {
+    if (current.model.phase === 'flight' && current.model.contact.onGround) touched = true;
+    if (hillPerchedAt === null && current.model.phase === 'perched') {
+      hillPerchedAt = current.time;
+      return true;
+    }
+    return false;
+  });
+  record('autopilot perch approach on a hillside, clear of the ground', hillPerchedAt === null ? -1 : hillPerchedAt, 120, { unit: 's', compare: hillPerchedAt !== null && !touched && sloped.craftState.perchKind === 'tree', decimals: 1, note: `touched the ground: ${touched}, kind ${sloped.craftState.perchKind}` });
 }
 
 function ignitionTest() {

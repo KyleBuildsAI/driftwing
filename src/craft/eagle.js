@@ -84,7 +84,7 @@ const simProfile = Object.freeze({
     captureRadius: 14,
     captureAbove: 14,
     captureBelow: 3,
-    captureSpeed: 11.5,
+    captureSpeed: 12,
     underRadius: 4,
     aheadCosine: 0.15,
     landSeconds: Object.freeze([0.9, 2.8]),

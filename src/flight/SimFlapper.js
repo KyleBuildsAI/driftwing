@@ -196,7 +196,7 @@ const AUTOPILOT = Object.freeze({
   BANK_GAIN: 1.5,
   ROLL_RATE_GAIN: 0.3,
   ROLL_LIMIT: 0.7,
-  SPEED_P: 0.07,
+  SPEED_P: 0.1,
   SPEED_I: 0.03,
   PATH_DAMPING: 1.2,
   PITCH_MIN: -0.4,
@@ -215,14 +215,40 @@ const AUTOPILOT = Object.freeze({
   CLEARANCE: 40,
   /**
    * The perch approach: speeds far and near, the glide slope (height per metre of distance) and the
-   * band above it, the final height over the perch, and the circle (radius, m) flown to lose height.
+   * band above it, the final height over the perch, and the holding circle flown to lose height (its
+   * speed, radius, offset from the perch and the ground samples that choose its side).
    */
-  APPROACH: Object.freeze({ FAR: 140, NEAR: 35, SPEED_FAR: 12.5, SPEED_NEAR: 10, SLOPE: 0.06, MIN_ABOVE: 2, MAX_ABOVE: 60, FINAL_ABOVE: 1.5, HIGH_MARGIN: 12, CIRCLE: 55, TERRAIN_CLEARANCE: 10 }),
+  /** Holding circle law: degrees of turn toward the circle per metre off it, at most HOLD_CORRECTION. */
+  HOLD_GAIN: 1.5,
+  HOLD_CORRECTION: 60,
+  APPROACH: Object.freeze({ FAR: 140, NEAR: 35, SPEED_FAR: 12.5, SPEED_NEAR: 9.5, SLOPE: 0.06, MIN_ABOVE: 2, MAX_ABOVE: 60, FINAL_ABOVE: 1.5, HIGH_MARGIN: 12, SPEED_HOLD: 13.5, CIRCLE: 45, HOLD_OFFSET: 85, HOLD_ABOVE: 3, INBOUND_ANGLE: 40, GO_AROUND: 15, HOLD_SAMPLES: Object.freeze([40, 80, 120]), TERRAIN_CLEARANCE: 10 }),
 });
+
+/** The holding point of a perch approach: HOLD_OFFSET out on the side whose ground stays lowest. */
+function chooseHoldingPoint(env, target, memory) {
+  const tuning = AUTOPILOT.APPROACH;
+  let best = Infinity;
+  for (let side = 0; side < 8; side++) {
+    const angle = (side / 8) * Math.PI * 2;
+    const dx = Math.sin(angle);
+    const dz = -Math.cos(angle);
+    let highest = -Infinity;
+    for (let index = 0; index < tuning.HOLD_SAMPLES.length; index++) {
+      const out = tuning.HOLD_SAMPLES[index];
+      highest = Math.max(highest, surfaceHeightAt(env, target.x + dx * out, target.z + dz * out));
+    }
+    if (highest < best) {
+      best = highest;
+      memory.holdX = target.x + dx * tuning.HOLD_OFFSET;
+      memory.holdZ = target.z + dz * tuning.HOLD_OFFSET;
+    }
+  }
+  memory.holdFor = target;
+}
 
 const flapperAutopilot = Object.freeze({
   createMemory() {
-    return { resetCount: -1, engaged: false, speedIntegral: 0, flapIntegral: 0, roll: 0, pitch: 0, yaw: 0, flap: 0, circling: false };
+    return { resetCount: -1, engaged: false, speedIntegral: 0, flapIntegral: 0, roll: 0, pitch: 0, yaw: 0, flap: 0, circling: false, holdFor: null, holdX: 0, holdZ: 0, closest: Infinity };
   },
 
   apply(controls, context, memory) {
@@ -260,25 +286,48 @@ const flapperAutopilot = Object.freeze({
       const share = clamp((distance - tuning.NEAR) / (tuning.FAR - tuning.NEAR), 0, 1);
       speed = tuning.SPEED_NEAR + (tuning.SPEED_FAR - tuning.SPEED_NEAR) * share;
       const heightError = feet + above - position.y;
-      // Too high for the slope near the perch: circle down beside it (a turn round a point CIRCLE
-      // metres off), until back on the slope.
-      if (heightError < -tuning.HIGH_MARGIN && distance < tuning.FAR * 1.5) memory.circling = true;
-      else if (heightError > -tuning.HIGH_MARGIN * 0.3) memory.circling = false;
-      if (memory.circling) {
-        const tangent = distance > tuning.CIRCLE ? Math.asin(clamp(tuning.CIRCLE / distance, -1, 1)) / DEG : 90;
-        heading = heading + tangent;
-        speed = tuning.SPEED_FAR;
-      }
-      // Down the slope at the rate that arrives there with the remaining distance.
-      climb = clamp(heightError * Math.max(speed / Math.max(distance, 8), AUTOPILOT.CLIMB_PER_METRE), -AUTOPILOT.MAX_DESCENT, AUTOPILOT.MAX_CLIMB);
-      // Short of the final, never below TERRAIN_CLEARANCE over the ground ahead (a ridge before the perch).
+      // The ground ahead: never below TERRAIN_CLEARANCE over it short of the final.
+      let terrainBelow = -Infinity;
       if (env && distance > tuning.NEAR) {
+        // Only the ground short of the perch: what lies beyond it is the go-around's business.
         const velocity = model.state.velocity;
+        const horizontalSpeed = Math.max(planar(velocity.x, velocity.z), 1);
+        const reach = (distance - tuning.NEAR) / horizontalSpeed;
         let floor = -Infinity;
-        for (const seconds of AUTOPILOT.LOOKAHEAD) floor = Math.max(floor, surfaceHeightAt(env, position.x + velocity.x * seconds, position.z + velocity.z * seconds));
-        const below = floor + tuning.TERRAIN_CLEARANCE - position.y;
-        if (below > 0) climb = Math.max(climb, Math.min(AUTOPILOT.MAX_CLIMB, below * AUTOPILOT.CLIMB_PER_METRE * 3));
+        for (let index = 0; index < AUTOPILOT.LOOKAHEAD.length; index++) {
+          const seconds = Math.min(AUTOPILOT.LOOKAHEAD[index], reach);
+          floor = Math.max(floor, surfaceHeightAt(env, position.x + velocity.x * seconds, position.z + velocity.z * seconds));
+        }
+        terrainBelow = floor + tuning.TERRAIN_CLEARANCE - position.y;
       }
+      if (memory.holdFor !== target && env) {
+        chooseHoldingPoint(env, target, memory);
+        memory.closest = Infinity;
+      }
+      // Hold (a circle of radius CIRCLE round a point HOLD_OFFSET out where the ground is lowest)
+      // when too high for the slope, after passing the perch without catching it (a go-around), or
+      // when the ground ahead rises into the approach; back inbound once on the slope and facing the
+      // perch, so the approach comes in from the low side.
+      memory.closest = Math.min(memory.closest, distance);
+      const passed = memory.closest < tuning.NEAR && distance > memory.closest + tuning.GO_AROUND;
+      if (!memory.circling && ((heightError < -tuning.HIGH_MARGIN && distance < tuning.FAR * 1.5) || passed || terrainBelow > 0)) memory.circling = true;
+      if (memory.circling) {
+        const holdHeight = feet + clamp(tuning.HOLD_OFFSET * tuning.SLOPE, tuning.MIN_ABOVE, tuning.MAX_ABOVE) + tuning.HOLD_ABOVE;
+        const toPerch = wrapSignedDegrees(heading - data.heading);
+        if (position.y - holdHeight < tuning.HIGH_MARGIN * 0.3 && Math.abs(toPerch) < tuning.INBOUND_ANGLE && terrainBelow <= 0 && distance > tuning.NEAR * 1.5) {
+          memory.circling = false;
+          memory.closest = distance;
+        } else {
+          const centre = planar(memory.holdX - position.x, memory.holdZ - position.z);
+          const correction = clamp((centre - tuning.CIRCLE) * AUTOPILOT.HOLD_GAIN, -AUTOPILOT.HOLD_CORRECTION, AUTOPILOT.HOLD_CORRECTION);
+          heading = bearingTo(position.x, position.z, memory.holdX, memory.holdZ) - 90 + correction;
+          speed = tuning.SPEED_HOLD;
+          climb = clamp((holdHeight - position.y) * AUTOPILOT.CLIMB_PER_METRE, -AUTOPILOT.MAX_DESCENT, AUTOPILOT.MAX_CLIMB);
+        }
+      }
+      // Inbound: down the slope at the rate that arrives there with the remaining distance.
+      if (!memory.circling) climb = clamp(heightError * Math.max(speed / Math.max(distance, 8), AUTOPILOT.CLIMB_PER_METRE), -AUTOPILOT.MAX_DESCENT, AUTOPILOT.MAX_CLIMB);
+      if (terrainBelow > 0) climb = Math.max(climb, Math.min(AUTOPILOT.MAX_CLIMB, terrainBelow * AUTOPILOT.CLIMB_PER_METRE * 3));
     } else {
       let altitude = Number.isFinite(autopilot.altitude) ? autopilot.altitude : position.y;
       // Terrain look-ahead: keep CLEARANCE above the ground or water along the next few seconds.

@@ -1281,7 +1281,7 @@ along the body axis drooped 6 degrees, up to 14 m, cut short by a solid collider
 ### The eagle's perch (`SimFlapper.js`)
 
 The flapper model looks for a perch every 0.1 s while the bird flies slower than `perch.captureSpeed`
-(11.5 m/s, below its 12.6 m/s glide): the collider service's perch points (`colliders.perchesNear`:
+(12 m/s, below its 12.6 m/s glide): the collider service's perch points (`colliders.perchesNear`:
 tagged structure tops, the vegetation provider's tree tops) and terrain peaks (a local top higher
 than two rings of samples around it and standing 3 m out of the outer one), within 14 m ahead and
 from 14 m above to 3 m below its feet, with a clear line of flight (`colliders.raycast`). A perch

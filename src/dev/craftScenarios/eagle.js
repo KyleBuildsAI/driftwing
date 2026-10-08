@@ -58,6 +58,15 @@ function steerToward(api, x, z) {
   return Math.max(-1, Math.min(1, 0.05 * (bank - api.flight.roll)));
 }
 
+/**
+ * After a takeoff: the autopilot flies out the way the approach came in, climbing 80 m over the
+ * perch with its terrain look-ahead (the run's last seconds are not spent hands off near the ground).
+ */
+function flyOut(api) {
+  if (!api.once('flyOut')) return;
+  api.controller.setAutopilot({ enabled: true, heading: api.memo.exitHeading, altitude: api.memo.perch.y + 80, speed: 13, reason: 'craft test' });
+}
+
 /** Moves the bird to its approach on the first frame; returns false (fly level) until it is there. */
 function setUpApproach(api, distance, above) {
   if (api.memo.setUpFailed) throw new Error(api.memo.setUpFailed);
@@ -75,6 +84,8 @@ function setUpApproach(api, distance, above) {
   }
   api.controller.startAt(placement);
   api.memo.perch = perch;
+  // The way out: back along the approach, over the low ground it was chosen for.
+  api.memo.exitHeading = (placement.heading + 180) % 360;
   return false;
 }
 
@@ -93,7 +104,10 @@ export default Object.freeze({
         if (!setUpApproach(api, 70, 9)) return { roll: 0, pitch: 0, yaw: 0, throttle: 0.25 };
         const perch = memo.perch;
         if (api.craftState.perched === true && memo.perchedAt === undefined) memo.perchedAt = t;
-        if (memo.perchedAt !== undefined && t >= memo.perchedAt + 4) return { roll: 0, pitch: 0, yaw: 0, throttle: 0.85 };
+        if (memo.perchedAt !== undefined && t >= memo.perchedAt + 4) {
+          if (api.craftState.perched === false && t >= memo.perchedAt + 5) flyOut(api);
+          return { roll: 0, pitch: 0, yaw: 0, throttle: 0.85 };
+        }
         if (memo.perchedAt !== undefined) return { roll: 0, pitch: 0, yaw: 0, throttle: 0.25 };
         // Hand-flown: steer at the perch, slow (pitch up), a little flap power while low on the slope.
         const position = api.player.position;
@@ -114,21 +128,21 @@ export default Object.freeze({
       id: 'eagle-find-perch',
       views: ['third', 'first'],
       start: { at: 'perch', mode: 'air', speed: 15 },
-      seconds: 70,
+      seconds: 100,
       script(t, api) {
         const memo = api.memo;
         if (!setUpApproach(api, 160, 30)) return { roll: 0, pitch: 0, yaw: 0, throttle: 0.3 };
         if (t >= 0.5 && api.once('find')) memo.find = api.controller.runCraftCommand('findPerch');
         if (api.craftState.perched === true && memo.perchedAt === undefined) memo.perchedAt = t;
         if (memo.perchedAt !== undefined && t >= memo.perchedAt + 3 && api.once('takeOff')) memo.takeOff = api.controller.runCraftCommand('takeOff');
-        // After the takeoff, a climb at full flap power (the run ends a few seconds later).
-        return { roll: 0, pitch: memo.takeOff ? 0.1 : 0, yaw: 0, throttle: memo.takeOff ? 1 : 0.3 };
+        if (memo.takeOff && t >= memo.perchedAt + 4 && api.craftState.perched === false) flyOut(api);
+        return { roll: 0, pitch: 0, yaw: 0, throttle: memo.takeOff ? 1 : 0.3 };
       },
       checks: [
         { id: 'command', label: '"find a perch" finds one and engages the autopilot', from: 0.5, until: 4, test: (api) => api.memo.find?.ok === true && api.player.autopilot.enabled === true && api.craftState.perchTarget !== null },
-        { id: 'perched', label: 'the autopilot brings it onto a perch', until: 62, test: (api) => perched(api) },
-        { id: 'released', label: 'the approach lets go once perched', until: 63, test: (api) => perched(api) && api.player.autopilot.enabled === false && api.craftState.perchTarget === null },
-        { id: 'takeoff', label: '"take off" leaves the perch', until: 68, test: (api) => api.memo.takeOff?.ok === true && api.craftState.perched === false },
+        { id: 'perched', label: 'the autopilot brings it onto a perch', until: 90, test: (api) => perched(api) },
+        { id: 'released', label: 'the approach lets go once perched', until: 91, test: (api) => perched(api) && api.player.autopilot.enabled === false && api.craftState.perchTarget === null },
+        { id: 'takeoff', label: '"take off" leaves the perch', until: 97, test: (api) => api.memo.takeOff?.ok === true && api.craftState.perched === false },
       ],
     }),
     Object.freeze({
