@@ -7,8 +7,8 @@
 // browser console and screenshots of the summary panel, and stops the browser and the server.
 //
 // Usage:
-//   node tools/run-harness.mjs --test 1|soak|hotas|terrain|determinism|spawns|collision [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
-//     [--crafts glider,jet] [--views first,third] [--out <dir>] [--timeout-minutes N]
+//   node tools/run-harness.mjs --test 1|soak|hotas|terrain|determinism|spawns|collision|craft [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
+//     [--crafts glider,jet] [--views first,third] [--scenarios id,general-glider] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
 //     [--presets real | --presets tornado,comet] [--leak-cycles N] [--parts fixture,special,landmarks,structures]
 //
@@ -40,6 +40,12 @@
 // with the slow bump, the landable deck, the tunnel centreline, the arch opening and the kite strings.
 // --parts a,b runs some of its parts only (fixture, special, landmarks, structures; the criteria of the
 // others are muted).
+//
+// The craft test (/v2/?test=craft) flies the general flight test of every registered craft (or
+// --crafts) in both views (or --views) on one seed (the first of --seeds, by default CRAFT-1),
+// --seconds long (30 by default), then each craft's scenarios from src/dev/craftScenarios/ (--scenarios
+// picks some by id; 'general' or 'general-<craft>' picks general runs). Scenarios on another seed or
+// on the water fixtures' world reload the page; the runner follows.
 //
 // --alloc-profile N (diagnostic): once the first flight-test run is flying, samples every JS
 // allocation for N seconds with the sampling heap profiler (collected objects included, so it is
@@ -103,7 +109,9 @@ const SPAWNS_SEED = REAL_TERRAIN_SEED;
 const SHOT_POLL_MS = 400;
 /** The collision test's default world. */
 const COLLISION_SEED = 'COLLIDERS-LAB';
-const TESTS = Object.freeze(['1', 'soak', 'hotas', 'terrain', 'determinism', 'spawns', 'collision']);
+/** The craft test's default world (src/dev/craftTest.js DEFAULT_SEED). */
+const CRAFT_SEED = 'CRAFT-1';
+const TESTS = Object.freeze(['1', 'soak', 'hotas', 'terrain', 'determinism', 'spawns', 'collision', 'craft']);
 /** The soak's default worlds (src/dev/testHarness.js SOAK_SEEDS). */
 const SOAK_SEED_COUNT = 5;
 
@@ -125,6 +133,7 @@ function parseArgs(argv) {
     presets: null,
     leakCycles: null,
     parts: null,
+    scenarios: null,
   };
   for (let index = 2; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -143,6 +152,7 @@ function parseArgs(argv) {
       case '--presets': options.presets = next(); break;
       case '--leak-cycles': options.leakCycles = Number(next()); break;
       case '--parts': options.parts = next(); break;
+      case '--scenarios': options.scenarios = next(); break;
       case '--out': options.out = next(); break;
       case '--timeout-minutes': options.timeoutMinutes = Number(next()); break;
       case '--width': options.width = Number(next()); break;
@@ -342,6 +352,13 @@ function harnessUrl(port, options) {
     if (options.presets) url.searchParams.set('testPresets', options.presets);
     if (Number.isInteger(options.leakCycles) && options.leakCycles > 0) url.searchParams.set('testLeakCycles', String(options.leakCycles));
   }
+  if (options.test === 'craft') {
+    url.searchParams.set('seed', options.seeds ? options.seeds.split(',')[0] : CRAFT_SEED);
+    if (options.seconds) url.searchParams.set('testSeconds', String(options.seconds));
+    if (options.crafts) url.searchParams.set('testCraft', options.crafts);
+    if (options.views) url.searchParams.set('testViews', options.views);
+    if (options.scenarios) url.searchParams.set('testScenarios', options.scenarios);
+  }
   if (options.test === '1' || options.test === 'soak') {
     if (options.seeds) url.searchParams.set('testSeeds', options.seeds);
     if (options.seconds) url.searchParams.set('testSeconds', String(options.seconds));
@@ -356,6 +373,7 @@ function timeLimitMs(options) {
   if (Number.isFinite(options.timeoutMinutes) && options.timeoutMinutes > 0) return options.timeoutMinutes * 60000;
   if (options.test === 'hotas') return 8 * 60000;
   if (options.test === 'terrain' || options.test === 'determinism' || options.test === 'collision') return 40 * 60000;
+  if (options.test === 'craft') return 90 * 60000;
   if (options.test === 'spawns') return 90 * 60000;
   const soak = options.test === 'soak';
   const seeds = options.seeds ? options.seeds.split(',').filter(Boolean).length : soak ? SOAK_SEED_COUNT : 3;
@@ -700,6 +718,31 @@ function collisionTable(report) {
   return lines.join('\n');
 }
 
+function craftTable(report) {
+  const lines = ['  #   run                            craft        view   start           checks  NaN  pen  crash  err/warn  p99 ms  result'];
+  for (const run of report.runs) {
+    lines.push([
+      `  ${String(run.index + 1).padEnd(3)}`,
+      run.id.padEnd(30),
+      run.craft.padEnd(12),
+      run.view.padEnd(6),
+      (run.start ? `${run.start.mode}${run.start.applied !== run.start.mode ? `>${run.start.applied}` : ''}` : '-').padEnd(15),
+      `${run.checks.filter((check) => check.passed).length}/${run.checks.length}`.padStart(6),
+      String(run.nanEvents).padStart(4),
+      String(run.penetrations).padStart(4),
+      String(run.softCrashes).padStart(6),
+      `${run.consoleErrors}/${run.consoleWarnings}`.padStart(9),
+      String(run.frames?.p99Ms ?? '-').padStart(7),
+      `  ${run.passed ? 'PASS' : 'FAIL'}`,
+    ].join(' '));
+    for (const check of run.checks.filter((entry) => !entry.passed)) lines.push(`        check failed: ${check.label}`);
+    for (const note of run.notes) lines.push(`        note: ${note}`);
+  }
+  for (const criterion of report.criteria) lines.push(`  ${criterion.status === 'pass' ? 'PASS' : criterion.status === 'fail' ? 'FAIL' : '----'}  ${criterion.label}: ${criterion.value}`);
+  for (const problem of report.harnessErrors) lines.push(`  harness problem: ${problem}`);
+  return lines.join('\n');
+}
+
 function hotasTable(report) {
   const lines = [];
   for (const check of report.checks) lines.push(`  ${check.passed ? 'PASS' : 'FAIL'}  [${check.group}] ${check.name}: ${check.actual}${check.passed ? '' : ` (expected ${check.expected})`}`);
@@ -925,7 +968,7 @@ async function main() {
   writeFileSync(join(options.out, 'process-load.json'), JSON.stringify(processLoad.samples, null, 2));
 
   const flightTables = () => `${flightTable(report)}\n${craftViewTable(report)}\n${criteriaLines(report)}\n${slowFrameEvidence(report)}`;
-  const tables = { 1: flightTables, soak: flightTables, hotas: () => hotasTable(report), terrain: () => terrainTable(report), determinism: () => determinismTable(report), spawns: () => spawnsTable(report), collision: () => collisionTable(report) };
+  const tables = { 1: flightTables, soak: flightTables, hotas: () => hotasTable(report), terrain: () => terrainTable(report), determinism: () => determinismTable(report), spawns: () => spawnsTable(report), collision: () => collisionTable(report), craft: () => craftTable(report) };
   if (report) process.stdout.write(`${tables[options.test]()}\n`);
   process.stdout.write(`run-harness: ${runner.passed ? 'PASS' : 'FAIL'} (harness ${report ? report.result : 'no report'}, backend ${runner.backend ? runner.backend.join(', ') : 'unknown'}, browser console ${runner.errors.length} errors / ${runner.warnings.length} warnings, ${runner.durationSeconds} s)\n`);
   for (const problem of runner.problems) process.stdout.write(`run-harness: problem: ${problem}\n`);

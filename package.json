@@ -33,6 +33,8 @@
     "test:soak:webgl": "node tools/run-harness.mjs --test soak --backend webgl",
     "test:collision": "node tools/run-harness.mjs --test collision",
     "test:collision:webgl": "node tools/run-harness.mjs --test collision --backend webgl",
+    "test:craft": "node tools/run-harness.mjs --test craft",
+    "test:craft:webgl": "node tools/run-harness.mjs --test craft --backend webgl",
     "lab:colliders": "node --expose-gc tools/lab/colliders.mjs",
     "lab:craft": "node tools/lab/craft.mjs",
     "lab:terrain": "node tools/lab/terrain.mjs"

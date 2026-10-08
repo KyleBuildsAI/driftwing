@@ -95,7 +95,8 @@ const SPAWN_ENGINE_FACTORIES = Object.freeze([
  * tools/steps/water-bodies.json), ?test=determinism (the same seed and scripted path in two page loads: site list and director log),
  * ?test=spawns (each of the 30 presets force-spawned ahead, shown and disposed back to baseline) and
  * ?test=collision (every collider type and retrofitted structure flown into at speed: soft crashes, no
- * pass-through, sensors counted).
+ * pass-through, sensors counted) and ?test=craft (every registered craft's general flight test in both
+ * views, then its scenarios from src/dev/craftScenarios/).
  * Loaded on demand from dev builds only, so none exists in production builds. Returns
  * { databaseName, createSystem(ctx), worldPresets? } or null; worldPresets (fixture presets) replace
  * the preset list in worldgen on both threads.
@@ -110,6 +111,7 @@ async function loadDevTest(params) {
   if (test === 'determinism') return (await import('./dev/determinismTest.js')).prepareDeterminismTest({ params });
   if (test === 'spawns') return (await import('./dev/spawnsTest.js')).prepareSpawnsTest({ params });
   if (test === 'collision') return (await import('./dev/collisionTest.js')).prepareCollisionTest({ params });
+  if (test === 'craft') return (await import('./dev/craftTest.js')).prepareCraftTest({ params });
   return null;
 }
 
