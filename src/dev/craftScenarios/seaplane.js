@@ -304,8 +304,9 @@ function noseOverScript(t, api) {
   else if (t > 0.6 && api.once('flaps2')) actions.push('flapsDown');
   else if (t > 0.9 && api.once('flaps3')) actions.push('flapsDown');
   else if (t > 1.2) press(api, 'gearDown', 'gearToggle', actions);
-  // Along the channel, slowing to the approach speed, then down at 1.5 m/s onto the water.
-  const verticalSpeed = t < 6 ? 0 : -1.5;
+  // Along the channel, slowing to the approach speed, then down at 1.5 m/s and a flare onto the water.
+  const agl = api.flight.agl;
+  const verticalSpeed = t < 6 ? 0 : agl < FLARE_HEIGHT ? -Math.max(0.4, 0.3 * (agl - 2.2)) : -1.5;
   return { ...flyAir(api, dt, { heading: api.start.heading, verticalSpeed, airspeed: CIRCUIT.approachSpeed }), actions };
 }
 

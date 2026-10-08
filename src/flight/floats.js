@@ -55,8 +55,11 @@ import { DEG, clamp } from '../core/util.js';
 import { GRAVITY, smoothstep } from './aero.js';
 import { createWaterSampleScratch, waterHeightAt, waterSampleAt } from './waterSurface.js';
 
-/** A touchdown on the water counts after this long with no float or gear contact (shorter gaps are bounces). */
-const TOUCHDOWN_AIRBORNE_SECONDS = 0.25;
+/**
+ * A touchdown on the water counts after this long with no float or gear contact: shorter gaps are
+ * skips off the swell on the run (and bounces), part of the same run on the water.
+ */
+const TOUCHDOWN_AIRBORNE_SECONDS = 1;
 /** Nothing touches while the centre of mass is this far (m) above the surface below it. */
 const CONTACT_REACH = 9;
 /** The wheels must be in the water above the nose-over speed this long (s) before they dig in. */

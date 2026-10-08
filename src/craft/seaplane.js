@@ -1017,7 +1017,7 @@ export default Object.freeze({
   instruments: Object.freeze(['airspeed', 'altitude', 'attitude', 'heading', 'vsi', 'aoa', 'g', 'throttle', 'flapsGear', 'waterRudder']),
   abilities: Object.freeze({ craftAbility }),
   spawn: Object.freeze({ cruise: 52, cruiseThrottle: 0.7, hover: false, relaunch: 'airstart', canStartOnGround: true }),
-  limits: Object.freeze({ vne: 72, gLimit: 3.8, crashSinkRate: 4, bodyStrikeSpeed: 5, floats: false, waterLanding: 'floats', noseOverSpeed: 4.5, skidCrashSpeed: 5.6 }),
+  limits: Object.freeze({ vne: 72, gLimit: 3.8, crashSinkRate: 4.5, bodyStrikeSpeed: 5, floats: false, waterLanding: 'floats', noseOverSpeed: 4.5, skidCrashSpeed: 5.6 }),
   situate,
   copilot,
   journal: Object.freeze({

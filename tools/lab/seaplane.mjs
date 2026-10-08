@@ -393,6 +393,8 @@ function testWaves() {
   });
   check('waves', 'the floats ride a 1 m swell (heave 0.4-1.3 m)', high - low > 0.4 && high - low < 1.3, `${round(high - low, 2)} m`);
   check('waves', 'no strikes and no NaN on the swell', strikes === 0 && finite && rig.model.contact.floating, `${strikes} strikes`);
+  const run = waterTakeoff({ assists: 1, swell: { amplitude: 0.5, wavelength: 40, period: 5 } });
+  check('waves', 'a takeoff run through the swell: skips are part of the run (no hard touchdown), airborne', run.liftoff !== null && run.hardTouchdowns === 0 && run.strikes === 0, run.liftoff ? `${round(run.liftoff.distance, 0)} m, ${run.hardTouchdowns} hard touchdowns, ${run.strikes} strikes` : 'never lifted off');
 }
 
 /** Water resistance (fraction of the weight) at a towed speed and a fixed trim, free to heave. */
@@ -437,8 +439,8 @@ function testHump() {
 }
 
 /** A water takeoff at full power, flaps 2: returns the liftoff and what the run saw. */
-function waterTakeoff({ assists, stick = 0, rotate = 0.15 }) {
-  const rig = createRig({ assists });
+function waterTakeoff({ assists, stick = 0, rotate = 0.15, swell = null }) {
+  const rig = createRig({ assists, swell });
   rig.afloat();
   rig.run(3);
   rig.selectFlaps(2);
@@ -449,6 +451,7 @@ function waterTakeoff({ assists, stick = 0, rotate = 0.15 }) {
   let maxSpray = 0;
   let strikes = 0;
   let maxPorpoise = 0;
+  let hardTouchdowns = 0;
   let slowestAcceleration = Infinity;
   let lastSpeed = 0;
   rig.run(60, (lab) => {
@@ -460,13 +463,14 @@ function waterTakeoff({ assists, stick = 0, rotate = 0.15 }) {
     maxSpray = Math.max(maxSpray, lab.craftState.spray);
     maxPorpoise = Math.max(maxPorpoise, lab.craftState.porpoise);
     if (lab.model.contact.bodyStrike) strikes++;
+    if (lab.model.contact.touchdown && lab.model.contact.touchdown.sinkRate > seaplane.limits.crashSinkRate) hardTouchdowns++;
     const speed = Math.abs(lab.craftState.waterSpeed);
     if (lab.model.contact.floating && speed > 6 && speed < 13) slowestAcceleration = Math.min(slowestAcceleration, (speed - lastSpeed) / DT);
     lastSpeed = speed;
     if (!liftoff && !lab.model.contact.onGround && lab.time > 5) liftoff = { time: lab.time, distance: lab.distance(start), speed: lab.data.airspeed };
     return Boolean(liftoff && lab.model.state.position.y > 15);
   });
-  return { rig, liftoff, stepSeconds, maxSpray, strikes, maxPorpoise };
+  return { rig, liftoff, stepSeconds, maxSpray, strikes, maxPorpoise, hardTouchdowns };
 }
 
 function testTakeoff() {
