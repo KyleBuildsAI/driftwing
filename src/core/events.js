@@ -96,6 +96,11 @@ export const EVENT_TYPES = Object.freeze({
   /** A challenge run ended without a finish (cancelled, abandoned, crash, timeLimit, replaced, removed). */
   challengeCancelled: { id: 'string', reason: 'string' },
   /**
+   * The aerobatic recognizer named a figure just flown (src/flight/maneuverRecognizer.js): figure is
+   * one of its FIGURE_IDS (loop, aileronRoll, ...), score its precision 0-100, position where it ended.
+   */
+  figureFlown: { figure: 'string', score: 'number', craft: 'string', position: 'vector3' },
+  /**
    * A journal statistic from a preset or an engine (src/gameplay/journal.js keeps the global records).
    * op says how value folds into the record: 'add' sums (stormsChased, value 1), 'min' keeps the
    * lowest (closestTornado in metres, bestCanyonRun in seconds for clean runs only), 'max' the highest.
