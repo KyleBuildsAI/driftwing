@@ -245,11 +245,15 @@ function buildPanelHousing(builder, spec, faceHeight) {
   const lipZ = topZ + 0.13;
   const rearY = topY + 0.01;
   const rearZ = topZ - 0.07;
-  builder.quad([-halfWidth, rearY, rearZ], [halfWidth, rearY, rearZ], [halfWidth, lipY, lipZ], [-halfWidth, lipY, lipZ], TINT.glare, [0, -1, topZ]);
-  builder.quad([-halfWidth, lipY - 0.02, lipZ], [halfWidth, lipY - 0.02, lipZ], [halfWidth, lipY, lipZ], [-halfWidth, lipY, lipZ], TINT.glare, [0, lipY - 0.01, lipZ - 1]);
+  // The hood follows the panel's own x (a panel off the centreline, the balloon's instrument pack).
+  const left = x - halfWidth;
+  const right = x + halfWidth;
+  builder.quad([left, rearY, rearZ], [right, rearY, rearZ], [right, lipY, lipZ], [left, lipY, lipZ], TINT.glare, [x, -1, topZ]);
+  builder.quad([left, lipY - 0.02, lipZ], [right, lipY - 0.02, lipZ], [right, lipY, lipZ], [left, lipY, lipZ], TINT.glare, [x, lipY - 0.01, lipZ - 1]);
   // Side cheeks, facing inward (the pilot sees their inner side).
   for (const side of [-1, 1]) {
-    builder.triangle([side * halfWidth, lipY, lipZ], [side * halfWidth, rearY, rearZ], [side * halfWidth, y - faceHeight / 2, z], TINT.glare, [side * halfWidth * 3, y, z]);
+    const cheek = x + side * halfWidth;
+    builder.triangle([cheek, lipY, lipZ], [cheek, rearY, rearZ], [cheek, y - faceHeight / 2, z], TINT.glare, [x + side * halfWidth * 3, y, z]);
   }
   return { lipY, lipZ, halfWidth, topY, topZ };
 }
