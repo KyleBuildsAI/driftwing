@@ -40,6 +40,8 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   glowPoints.js (camera to the metre), ribbons.js (slot mesh at the strike), the structure engine's
   pooled meshes (at the anchor), weather volume puffs and shafts (2048 m grid), celestial (camera or
   2048 m grid), fauna (floating anchor). Reported, not edited: clouds.js (anchored by the field).
+  The dev wind overlay (`windOverlay.js`) now stands at the render origin with its arrows relative
+  to it, shifted back by the delta on a rebase.
 - Audio in the render frame: the spatializer and the spawn voices keep world positions (doppler,
   distances, camera velocity) and feed the Web Audio graph `world - offset`; after a rebase the
   listener and every panner are snapped (`snapParameter`), never glided.
@@ -47,9 +49,13 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   render-frame position, so after a rebase the sky fill lit everything sideways (a 44 % pixel pop
   near the ground). The sky now keeps it 1 m above the render origin (`sky.js`, `updateDome`).
 - Dev hook `DRIFTWING.debug.rebaseOrigin(point?)`; `src/dev/originRebaseCheck.js` and
-  `tools/steps/origin-rebase.json` (image checks at fixed poses, two flight legs of 900 rendered
-  frames with forced rebases, terrain and site identity).
-- Next: the verification runs on both backends.
+  `tools/steps/origin-rebase.json` (image checks at fixed poses, with the wind overlay on and 400 km
+  out, two flight legs of 900 rendered frames with forced rebases, terrain and site identity over
+  21 x 21 site cells). Run 2026-10-07 on both backends: 10/10, 0 errors, 0 warnings; worst
+  camera-relative error 0.0000 mm, far point 5.5e-8 px; `tools/lab/origin.mjs` 32/32 (needs
+  `--expose-gc`).
+- Next: the remaining verification runs on both backends (spawn and terrain step files,
+  `?test=terrain`, a reduced flight harness).
 - Open issues: `src/render/water.js` (`surfaceNoise`, `shadowUV`) is the water engineer's (contract
   0.1); they apply `worldPositionNode` there in the integration pass.
 

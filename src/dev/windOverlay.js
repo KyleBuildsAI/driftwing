@@ -12,6 +12,11 @@
 // settings.windOverlay (settings panel, Developer group) and by the Arrows button the overlay adds to
 // the dev badge. It is an ordinary scene object drawn only while the setting is on, so photo
 // captures contain it only when the overlay is enabled.
+//
+// Precision (Phase 3 floating origin, src/core/origin.js): the mesh stands at the render origin and
+// each instance matrix holds its arrow relative to it, so the float32 instance data stays small at
+// any distance from the world origin; a rebase moves the mesh and shifts the live arrows back by the
+// origin's move, so they stay put in the world.
 
 const GRID_SIDE = 13;
 const SPACING = 64;
@@ -102,6 +107,10 @@ export function createWindOverlaySystem(ctx) {
   const instanceScale = new T.Vector3();
   const instanceColor = new T.Color();
   const stats = { arrows: 0, maxLift: 0, maxSink: 0, maxSpeed: 0, sampleMs: 0, chunkMs: 0 };
+  // The render origin (world anchor of the mesh), or null in a game without one.
+  const origin = ctx.origin ?? null;
+  // A rebase shifted every arrow: the next upload sends the whole buffer.
+  let uploadAll = false;
 
   /** A unit arrow along +z: a thin shaft from 0 to 0.7 and a cone head to 1. */
   function buildArrowGeometry() {
@@ -131,6 +140,7 @@ export function createWindOverlaySystem(ctx) {
     }
     arrows.instanceColor.setUsage(T.DynamicDrawUsage);
     arrows.frustumCulled = false;
+    if (origin) arrows.position.copy(origin.offset);
     arrows.castShadow = false;
     arrows.receiveShadow = false;
     scene.add(arrows);
@@ -160,6 +170,7 @@ export function createWindOverlaySystem(ctx) {
     direction.copy(velocity).divideScalar(speed);
     instanceQuaternion.setFromUnitVectors(forward, direction);
     instancePosition.set(x, y, z).addScaledVector(direction, -length / 2);
+    if (origin) instancePosition.sub(origin.offset);
     instanceScale.set(width, width, length);
     instanceMatrix.compose(instancePosition, instanceQuaternion, instanceScale);
     mesh.setMatrixAt(index, instanceMatrix);
@@ -227,7 +238,12 @@ export function createWindOverlaySystem(ctx) {
     const slotCount = (last - first) * LAYER_COUNT;
     mesh.instanceMatrix.clearUpdateRanges();
     mesh.instanceColor.clearUpdateRanges();
-    mesh.instanceMatrix.addUpdateRange(firstSlot * 16, slotCount * 16);
+    if (uploadAll) {
+      mesh.instanceMatrix.addUpdateRange(0, ARROW_CAPACITY * 16);
+      uploadAll = false;
+    } else {
+      mesh.instanceMatrix.addUpdateRange(firstSlot * 16, slotCount * 16);
+    }
     mesh.instanceColor.addUpdateRange(firstSlot * 3, slotCount * 3);
     mesh.instanceMatrix.needsUpdate = true;
     mesh.instanceColor.needsUpdate = true;
@@ -259,6 +275,28 @@ export function createWindOverlaySystem(ctx) {
     // A fresh pass starts on the next update, from the craft's current position.
     if (enabled) sweep.nextColumn = GRID_COLUMNS;
   }
+
+  /**
+   * After a render origin rebase (delta: the origin's move, world m): the mesh follows the origin and
+   * every arrow's translation moves back by delta, so the arrows keep their world places. Allocation-free.
+   */
+  function followOrigin(delta) {
+    if (!mesh) return;
+    mesh.position.copy(origin.offset);
+    const elements = mesh.instanceMatrix.array;
+    for (let index = 0; index < ARROW_CAPACITY; index++) {
+      const base = index * 16;
+      elements[base + 12] -= delta.x;
+      elements[base + 13] -= delta.y;
+      elements[base + 14] -= delta.z;
+    }
+    // The whole buffer goes up: with the overlay off now, at the next upload; with it on, the
+    // resample later in this frame replaces its own range with the full one (uploadAll).
+    mesh.instanceMatrix.clearUpdateRanges();
+    mesh.instanceMatrix.needsUpdate = true;
+    uploadAll = true;
+  }
+  if (origin) origin.onRebase(followOrigin);
 
   bus.on('settings:changed', (payload) => {
     if (payload && payload.key === 'windOverlay') applySetting();
