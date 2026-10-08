@@ -1303,6 +1303,13 @@ rising into it, it holds on a 45 m circle 85 m out over the lowest side and come
 Without a perch target its terrain look-ahead turns it aside from ground rising faster than it can
 climb, and it never pushes for speed within 40 m of the ground.
 
+The eagle module's copilot commands (`craftCommand`, contract h.6): `findPerch` ("find a perch":
+the nearest perch within 200, 600 or 1500 m, and the autopilot approach above), `takeOff`,
+`screech` (the dragon roars), `fireBreath` (dragon only: a 3 s burst), `tuck` (latches the tuck on or
+off) and `glide` (flap power to zero, wings out); `copilot.status` says what the creature is doing.
+Its journal stats are `eaglePerches` (count), `eagleBestSoar` (metres climbed in one soaring climb
+with the flap power at zero) and `dragonLanternsLit` (count).
+
 ### WindField (`ctx.wind`, `src/env/WindField.js`)
 
 | member | what |

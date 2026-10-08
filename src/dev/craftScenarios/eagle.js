@@ -1,8 +1,8 @@
 // Eagle / dragon scenarios for ?test=craft (contract k.1; Milestone P item 3, "eagle perch and
 // takeoff"):
-//   eagle-perch-takeoff   a slow, hand-flown approach at the nearest perch from 70 m out: the
-//                         auto-landing, standing still on the perch while the chase camera orbits,
-//                         then raised flap power takes off and flies away
+//   eagle-perch-takeoff   a slow, hand-flown approach at a perch from 70 m out: the auto-landing,
+//                         standing still on the perch while the chase camera orbits, turning on the
+//                         spot to face the way out, then raised flap power takes off and flies away
 //   eagle-find-perch      the copilot's "find a perch" from 160 m out: the autopilot flies the
 //                         approach, the bird perches and the approach lets go; "take off" leaves
 //   eagle-perch-placement a 'perch' placement on the nearest perch point stands on it, turns on the spot,
@@ -110,11 +110,17 @@ export default Object.freeze({
         if (!setUpApproach(api, 70, 9)) return { roll: 0, pitch: 0, yaw: 0, throttle: 0.25 };
         const perch = memo.perch;
         if (api.craftState.perched === true && memo.perchedAt === undefined) memo.perchedAt = t;
-        if (memo.perchedAt !== undefined && t >= memo.perchedAt + 4) {
-          if (api.craftState.perched === false && t >= memo.perchedAt + 5) flyOut(api);
-          return { roll: 0, pitch: 0, yaw: 0, throttle: 0.85 };
+        if (memo.perchedAt !== undefined) {
+          // On the perch: turn on the spot to face the way out, then flap off along it.
+          const facing = ((((memo.exitHeading - api.flight.heading) % 360) + 540) % 360) - 180;
+          if (api.craftState.perched === true && Math.abs(facing) > 6) return { roll: 0, pitch: 0, yaw: Math.max(-1, Math.min(1, facing / 30)), throttle: 0.25 };
+          if (t >= memo.perchedAt + 4) {
+            if (memo.takeoffAt === undefined && api.craftState.perched === false) memo.takeoffAt = t;
+            if (memo.takeoffAt !== undefined && t >= memo.takeoffAt + 1) flyOut(api);
+            return { roll: 0, pitch: 0, yaw: 0, throttle: 0.85 };
+          }
+          return { roll: 0, pitch: 0, yaw: 0, throttle: 0.25 };
         }
-        if (memo.perchedAt !== undefined) return { roll: 0, pitch: 0, yaw: 0, throttle: 0.25 };
         // Hand-flown: steer at the perch, slow (pitch up), a little flap power while low on the slope.
         const position = api.player.position;
         const distance = Math.hypot(perch.x - position.x, perch.z - position.z);
