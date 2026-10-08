@@ -45,6 +45,7 @@ import { buildCloudPuffGeometry, createCloudLook } from '../../render/cloudShadi
 import { GROUP_STRIDE, PUFF_STRIDE, SHAFT_STRIDE, layoutWeatherVolume, resolveWeatherParams } from './weatherVolume/forms.js';
 import { createCanopyRain, createLocalRain, createPuffMesh, createShaftMesh, createVeil } from './weatherVolume/materials.js';
 import { createApproachJournal, createWindSample, ownsPresetAudio } from './engineKit.js';
+import { rigidCurvatureDrop } from '../../render/curvature.js';
 
 const PUFF_CAPACITY = 3072;
 const SHAFT_CAPACITY = 32;
@@ -534,6 +535,9 @@ export function createWeatherVolumeEngine() {
       const worldX = anchor.x + x * data.rightX + z * data.forwardX;
       const worldZ = anchor.z + x * data.rightZ + z * data.forwardZ;
       const worldY = ground + y;
+      // The planet curvature (render/curvature.js; 0 below 5 km): each puff is drawn lowered by the drop
+      // of its own position, before the compression, so the cloud stays over the curved ground.
+      const curve = rigidCurvatureDrop(ctx, worldX, worldZ);
       const halfHeight = radius * source[offset + 4] * size;
       const scaledRadius = radius * size;
       if (checkInside) {
@@ -545,16 +549,16 @@ export function createWeatherVolumeEngine() {
       }
       // Distance compression toward the camera beyond the fog (see the header).
       const toX = worldX - cameraX;
-      const toY = worldY - cameraY;
+      const toY = worldY - curve - cameraY;
       const toZ = worldZ - cameraZ;
       const distance = Math.sqrt(toX * toX + toY * toY + toZ * toZ);
       let k = 1;
       if (distance > start) k = (start + span * (1 - Math.exp(-(distance - start) / span))) / distance;
-      const baseY = ground + groups[group] * drop;
-      const topY = ground + groups[group + 1] * drop;
+      const baseY = ground + groups[group] * drop - curve;
+      const topY = ground + groups[group + 1] * drop - curve;
       const centreX = anchor.x + groups[group + 2] * data.rightX + groups[group + 4] * data.forwardX;
       const centreZ = anchor.z + groups[group + 2] * data.rightZ + groups[group + 4] * data.forwardZ;
-      const centreY = ground + groups[group + 3] * drop;
+      const centreY = ground + groups[group + 3] * drop - curve;
       const out = puffCursor * 16;
       const horizontal = scaledRadius * k;
       const cosine = data.puffCos[puff];
@@ -576,7 +580,7 @@ export function createWeatherVolumeEngine() {
       matrices[out + 14] = cameraZ + toZ * k - frame.anchorZ;
       matrices[out + 15] = 1;
       const attribute = puffCursor * 4;
-      shapes[attribute] = groups[group + 6] === 1 ? (baseY - worldY) / halfHeight : -2;
+      shapes[attribute] = groups[group + 6] === 1 ? (baseY + curve - worldY) / halfHeight : -2;
       shapes[attribute + 1] = cameraY + (baseY - cameraY) * k;
       shapes[attribute + 2] = cameraY + (topY - cameraY) * k;
       shapes[attribute + 3] = source[offset + 6];
@@ -648,8 +652,10 @@ export function createWeatherVolumeEngine() {
         }
       }
       if (visibility < 0.02 || shaftCursor >= SHAFT_CAPACITY) continue;
+      // The planet curvature at the shaft's foot (0 below 5 km), as for the puffs.
+      const curve = rigidCurvatureDrop(ctx, footX, footZ);
       const midX = footX - lean * 0.5 * data.forwardX - frame.cameraX;
-      const midY = ground + height * 0.5 - frame.cameraY;
+      const midY = ground - curve + height * 0.5 - frame.cameraY;
       const midZ = footZ - lean * 0.5 * data.forwardZ - frame.cameraZ;
       const distance = Math.sqrt(midX * midX + midY * midY + midZ * midZ);
       let k = 1;
@@ -669,7 +675,7 @@ export function createWeatherVolumeEngine() {
       matrices[out + 10] = scaledRadius;
       matrices[out + 11] = 0;
       matrices[out + 12] = frame.cameraX + (footX - frame.cameraX) * k - frame.anchorX;
-      matrices[out + 13] = frame.cameraY + (ground - frame.cameraY) * k;
+      matrices[out + 13] = frame.cameraY + (ground - curve - frame.cameraY) * k;
       matrices[out + 14] = frame.cameraZ + (footZ - frame.cameraZ) * k - frame.anchorZ;
       matrices[out + 15] = 1;
       const attribute = shaftCursor * 4;

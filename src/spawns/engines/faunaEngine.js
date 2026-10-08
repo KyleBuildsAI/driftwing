@@ -59,6 +59,7 @@
 import { SPECIES } from './faunaSpecies.js';
 import { createWindSample, ownsPresetAudio } from './engineKit.js';
 import { SLOPE_RUN, buildGroundPath, createPath, createPathFollower } from '../../world/pathFollower.js';
+import { rigidCurvatureDrop } from '../../render/curvature.js';
 
 export const FAUNA_BEHAVIORS = Object.freeze(['murmuration', 'flock', 'formation', 'circling', 'pod', 'wingman', 'drift', 'herd', 'column', 'surface']);
 /** Altitude modes: above the ground, above sea level, on the water, near the player, on the ground. */
@@ -1158,7 +1159,7 @@ export function createFaunaEngine() {
     const ground = io[IO.GROUND];
     let target;
     if (altitude.mode === 'msl') target = altitude.value;
-    else if (altitude.mode === 'water') target = waterIsFlat() ? ctx.terrain.waterLevel : waterSurface(g[G.X], g[G.Z]);
+    else if (altitude.mode === 'water') target = waterHeightAt(g[G.X], g[G.Z]);
     else target = ground + altitude.value;
     if (altitude.mode !== 'water') target = Math.max(target, ground + data.params.floor + 10);
     const previous = g[G.Y];
@@ -2379,7 +2380,7 @@ export function createFaunaEngine() {
       dust.py[slot] += dust.vy[slot] * dt;
       dust.pz[slot] += dust.vz[slot] * dt;
       dust.dustA[offset] = dust.px[slot] - origin.x;
-      dust.dustA[offset + 1] = dust.py[slot] - origin.y;
+      dust.dustA[offset + 1] = dust.py[slot] - origin.y - rigidCurvatureDrop(ctx, dust.px[slot], dust.pz[slot]);
       dust.dustA[offset + 2] = dust.pz[slot] - origin.z;
       dust.dustA[offset + 3] = dust.size[slot] * (1 + share * 1.8);
       dust.dustB[offset] = dust.color[slot * 3];
@@ -3704,7 +3705,8 @@ export function createFaunaEngine() {
         continue;
       }
       positionData[offset] = pool.px[index] - origin.x;
-      positionData[offset + 1] = pool.py[index] - origin.y;
+      // Drawn lowered by the planet curvature (render/curvature.js; 0 below 5 km camera altitude).
+      positionData[offset + 1] = pool.py[index] - origin.y - rigidCurvatureDrop(ctx, pool.px[index], pool.pz[index]);
       positionData[offset + 2] = pool.pz[index] - origin.z;
       positionData[offset + 3] = pool.scale[index] * size * fade;
       const vx = pool.vx[index];
@@ -3962,7 +3964,7 @@ export function createFaunaEngine() {
     }
     if (resolved.behavior === 'pod') g[G.Y] = waterSurface(g[G.X], g[G.Z]);
     else if (altitude.mode === 'msl') g[G.Y] = Math.max(altitude.value, ground + resolved.floor + 10);
-    else if (altitude.mode === 'water') g[G.Y] = waterSurface(g[G.X], g[G.Z]);
+    else if (altitude.mode === 'water') g[G.Y] = waterHeightAt(g[G.X], g[G.Z]);
     else g[G.Y] = ground + altitude.value + (rng() * 2 - 1) * altitude.spread;
     if (resolved.behavior === 'wingman') g[G.Y] = Math.max(g[G.Y], ground + resolved.wingman.waitAltitude);
     g[G.BASE_Y] = g[G.Y];
