@@ -677,7 +677,7 @@ export function createSkySystem(ctx) {
   let dayTime = wrapUnit(Number.isFinite(state.time.dayTime) ? state.time.dayTime : dayTimeForSunElevation(config.START_SUN_ELEVATION_DEG, true));
   /** Whole days since the flight began (state.time.days = wholeDays + dayTime). */
   let wholeDays = 0;
-  const transition = { active: false, from: 0, delta: 0, elapsed: 0, duration: 0 };
+  const transition = { active: false, from: 0, fromDays: 0, delta: 0, elapsed: 0, duration: 0 };
   let lastLabel = '';
   let suppressLabelEvent = false;
   let smoothedSnow = state.player.biome?.weights?.[0] ?? 0;
@@ -937,23 +937,17 @@ export function createSkySystem(ctx) {
   }
 
   // ---- Per-frame pieces ----------------------------------------------------------------------------------
-  /**
-   * Keeps state.time.days, the day counter (whole days since the flight began plus dayTime): a wrap
-   * through midnight in either direction (time passing, a time-of-day jump) moves the whole days.
-   */
-  function countDays(previous, next) {
-    if (next < previous - 0.5) wholeDays++;
-    else if (next > previous + 0.5) wholeDays--;
-  }
-
+  // Time only ever moves forward (a time-of-day request goes forward to its target), so the day
+  // counter state.time.days (whole days since the flight began plus dayTime) adds a day each time
+  // dayTime passes midnight.
   function advanceTime(dt, realDt) {
     if (transition.active) {
       transition.elapsed += realDt;
       const progress = Math.min(1, transition.elapsed / transition.duration);
       const eased = progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-      const previous = dayTime;
-      dayTime = wrapUnit(transition.from + transition.delta * eased);
-      countDays(previous, dayTime);
+      const unwrapped = transition.from + transition.delta * eased;
+      dayTime = wrapUnit(unwrapped);
+      wholeDays = transition.fromDays + Math.floor(unwrapped);
       if (progress >= 1) {
         transition.active = false;
         suppressLabelEvent = true;
@@ -963,9 +957,9 @@ export function createSkySystem(ctx) {
     if (!(dt > 0) || settings.get('timeFrozen')) return;
     const dayLength = clamp(Number(settings.get('dayLength')) || config.DAY_LENGTH_DEFAULT, 30, 7200);
     const rate = warpRate(elevationForDayTime(dayTime));
-    const previous = dayTime;
-    dayTime = wrapUnit(dayTime + (dt * rate * WARP_NORMALISATION) / dayLength);
-    countDays(previous, dayTime);
+    const unwrapped = dayTime + (dt * rate * WARP_NORMALISATION) / dayLength;
+    wholeDays += Math.floor(unwrapped);
+    dayTime = wrapUnit(unwrapped);
   }
 
   function updateCelestialState() {
@@ -1351,11 +1345,13 @@ export function createSkySystem(ctx) {
     const delta = wrapUnit(target - dayTime);
     if (duration <= 0 || delta < 1e-5 || delta > 1 - 1e-5) {
       transition.active = false;
+      if (delta <= 1 - 1e-5) wholeDays += Math.floor(dayTime + delta);
       dayTime = target;
       refresh(0);
     } else {
       transition.active = true;
       transition.from = dayTime;
+      transition.fromDays = wholeDays;
       transition.delta = delta;
       transition.elapsed = 0;
       transition.duration = duration;
@@ -1456,6 +1452,9 @@ export function createSkySystem(ctx) {
         skyTintAmount: combined.skyTintAmount,
         flash: combined.flash,
         flashColor: `#${combined.flashColor.getHexString()}`,
+        moonTint: `#${combined.moonTint.getHexString()}`,
+        moonTintAmount: combined.moonTintAmount,
+        sunOverrides: sunOverrides.map((override) => ({ id: override.id, weight: override.weight })),
       };
     },
   };
