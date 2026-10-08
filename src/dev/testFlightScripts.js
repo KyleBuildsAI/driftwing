@@ -81,6 +81,14 @@ const JET = simFixedWing([
   { at: 0.74, label: 'afterburner off, throttle 70 %', run: (pilot) => { pilot.action('craftAbility'); pilot.throttle(0.7); } },
 ], [{ id: 'afterburner', label: 'afterburner lit 3 s', test: (seen, run) => seen.afterburnerSeconds >= seconds(3, run) }], { roll: 0.25, rollEnd: 0.5 });
 
+// The aerobatic rolls at about 400 deg/s (no bank protection at any level): a short, light input. Then
+// the display smoke on, a colour change and off again.
+const AEROBATIC = simFixedWing([
+  { at: 0.58, label: 'smoke on (craft ability)', run: (pilot) => pilot.action('craftAbility') },
+  { at: 0.64, label: 'smoke colour (second ability)', run: (pilot) => pilot.action('craftAbilityAlt') },
+  { at: 0.74, label: 'smoke off', run: (pilot) => pilot.action('craftAbility') },
+], [{ id: 'smoke', label: 'smoke on 3 s', test: (seen, run) => seen.smokeSeconds >= seconds(3, run) }], { roll: 0.15, rollEnd: 0.5 });
+
 /** Hover craft (helicopter, FPV drone at 100 % assists): hover, stick moves, then autopilot. */
 const HOVER = Object.freeze({
   steps: [
@@ -119,6 +127,7 @@ const SCRIPTS = Object.freeze({
   helicopter: HOVER,
   wingsuit: WINGSUIT,
   fpv: HOVER,
+  aerobatic: AEROBATIC,
 });
 
 /** The script for a craft ({ steps, checks }), or null when none exists. */
@@ -127,4 +136,4 @@ export function flightScriptFor(craft) {
 }
 
 /** Every craft id with a script, in the harness's run order. */
-export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv']);
+export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic']);

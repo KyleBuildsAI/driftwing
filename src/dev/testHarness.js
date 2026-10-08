@@ -545,6 +545,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     if (Number.isFinite(telemetry.flapNotch)) seen.maxFlapNotch = Math.max(seen.maxFlapNotch, telemetry.flapNotch);
     if (Number.isFinite(telemetry.airbrake)) seen.maxAirbrake = Math.max(seen.maxAirbrake, telemetry.airbrake);
     if (telemetry.afterburner) seen.afterburnerSeconds += dt;
+    if (telemetry.craftState && telemetry.craftState.smoke === true) seen.smokeSeconds += dt;
     const flightStats = run.flight;
     if (flightStats.lastX !== null) flightStats.distance += Math.hypot(player.position.x - flightStats.lastX, player.position.z - flightStats.lastZ);
     flightStats.lastX = player.position.x;
@@ -683,7 +684,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       heapStartMB,
       seen: {
         autopilotSeconds: 0, maxBank: 0, hoverSeconds: 0, translateSeconds: 0,
-        relaunches: 0, minPitch: Infinity, canopy: false, maxFlapNotch: 0, maxAirbrake: 0, afterburnerSeconds: 0,
+        relaunches: 0, minPitch: Infinity, canopy: false, maxFlapNotch: 0, maxAirbrake: 0, afterburnerSeconds: 0, smokeSeconds: 0,
       },
       flight: { distance: 0, lastX: null, lastZ: null, maxAirspeed: 0, minAgl: Infinity, maxAltitude: -Infinity },
     };
@@ -769,6 +770,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         maxFlapNotch: seen.maxFlapNotch,
         maxAirbrake: round(seen.maxAirbrake, 2),
         afterburnerSeconds: round(seen.afterburnerSeconds, 1),
+        smokeSeconds: round(seen.smokeSeconds, 1),
       },
       flight: {
         distanceKm: round(run.flight.distance / 1000, 2),
