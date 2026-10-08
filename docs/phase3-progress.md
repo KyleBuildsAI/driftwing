@@ -564,7 +564,6 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   `check('paraglider')` line and the count bumped at integration; docs/architecture.md and
   docs/controls.md (the HOTAS profile) get the paraglider rows in Milestone O.
 
-
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
 | # | Presets | Branch | Status |
