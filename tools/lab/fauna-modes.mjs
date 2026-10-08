@@ -435,6 +435,39 @@ function testFlamingos() {
   lab.manager.deactivate(id, 'lab');
 }
 
+// A steep bank (the lake west of the plain): the shallow band is under a metre wide, and the birds stay in it.
+function testFlamingosSteepBank() {
+  const lab = createLab();
+  // An integer spot on the bank 0.15-0.45 m deep (the bank drops about 0.8 m per metre there).
+  let bankX = null;
+  let bankZ = 0;
+  for (let z = 0; z < 400 && bankX === null; z++) {
+    for (let x = -240; x > -260; x--) {
+      const depth = -groundHeight(x, z);
+      if (depth > 0.15 && depth < 0.45) {
+        bankX = x;
+        bankZ = z;
+        break;
+      }
+    }
+  }
+  lab.state.player.position.set(bankX + 1200, 600, bankZ);
+  lab.follow();
+  const id = lab.spawn('labFlamingosBank', { species: 'flamingo', behavior: 'surface', count: 12, surface: { wade: { depthMax: 0.6, flushRadius: 60, searchRadius: 60 } } }, { x: bankX, y: 0, z: bankZ }, 0);
+  let deepest = 0;
+  let dry = 0;
+  lab.step(60 * 30, 1 / 60, () => {
+    for (const agent of agents(lab, id)) {
+      const depth = -groundHeight(agent.x, agent.z);
+      deepest = Math.max(deepest, depth);
+      if (depth <= 0) dry++;
+    }
+  });
+  const group = lab.fauna.describe(id);
+  check('flamingos', 'on a steep bank they stay in its narrow shallows (no deeper than depthMax)', bankX !== null && group && group.airborne === 0 && deepest < 0.6 + 0.05 && dry === 0, `bank at ${bankX}, ${bankZ}, deepest ${deepest.toFixed(2)} m, ${dry} dry samples`);
+  if (group) lab.manager.deactivate(id, 'lab');
+}
+
 // ---- dolphins -------------------------------------------------------------------------------------------------
 function testDolphins() {
   const lab = createLab();
@@ -556,6 +589,7 @@ testHerd();
 testStampede();
 testColumn();
 testFlamingos();
+testFlamingosSteepBank();
 testDolphins();
 testValidation();
 

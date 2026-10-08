@@ -314,7 +314,8 @@ so two runs (or two clients) at the same flight time see the same column.
 
 `wade`: `{ depthMax: 0.6, flushRadius: 150, takeoffWave: { delay: 0.35, spread: 0.6 }, flySeconds: [25, 45], flyAltitude: 45, flyRadius: 260, spacing: 2.2, searchRadius: 1600 }`.
 The flock finds shallow water (depth under `depthMax`) at the anchor or within `searchRadius` and
-stands there, each bird on its own spot. The craft within `flushRadius` (times its `faunaThreat`)
+stands there, each bird on its own spot (shuffling about it, or still where the shallow band is under
+a couple of metres wide). The craft within `flushRadius` (times its `faunaThreat`)
 flushes it: every bird takes off `delay` seconds per 10 m from the craft later than the nearest
 (plus a seeded `spread`), runs along the water with splashes, climbs, flies as a flock on a circle of
 `flyRadius` over the water at `flyAltitude` for `flySeconds`, then glides back and settles; 20 s

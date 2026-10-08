@@ -197,6 +197,9 @@ const WADE_STAND = 0;
 const WADE_TAKEOFF = 1;
 const WADE_FLY = 2;
 const WADE_LAND = 3;
+/** Metres a standing wader shuffles about its home: with shallows all round it, and on a narrow band. */
+const WADE_SHUFFLE = 1;
+const WADE_SHUFFLE_NARROW = 0;
 /** Seconds a flushed flock needs to glide home after its longest flight (the far tier's settle). */
 const WADER_RETURN_SECONDS = 25;
 const SWIM = 0;
@@ -619,6 +622,8 @@ export function createFaunaEngine() {
       aux2: new Float32Array(capacity),
       /** Quadrupeds: the gait blend (0 walk .. 1 run) the shader widens the stride with. */
       gait: new Float32Array(capacity),
+      /** Wading birds: how far (m) a standing bird shuffles about its home, kept inside the shallows. */
+      shuffle: new Float32Array(capacity),
     };
   }
 
@@ -3247,6 +3252,11 @@ export function createFaunaEngine() {
       }
       pool.homeX[index] = homeX;
       pool.homeZ[index] = homeZ;
+      // A narrow shallow band (a steep shore): the bird stands still, so it never wades out of it.
+      const spotX = g[G.HOME_X] + homeX;
+      const spotZ = g[G.HOME_Z] + homeZ;
+      const roomy = shallowAt(spotX + 1, spotZ) && shallowAt(spotX - 1, spotZ) && shallowAt(spotX, spotZ + 1) && shallowAt(spotX, spotZ - 1);
+      pool.shuffle[index] = roomy ? WADE_SHUFFLE : WADE_SHUFFLE_NARROW;
       // The body stands legHeight above the bottom.
       pool.homeY[index] = groundAt(data, g[G.HOME_X] + homeX, g[G.HOME_Z] + homeZ) + legHeight * pool.scale[index] * g[G.SIZE];
     }
@@ -3376,8 +3386,8 @@ export function createFaunaEngine() {
         if (mode === WADE_STAND) {
           // Standing in the shallows: a slow shuffle about the home spot, wings folded.
           const shuffle = time * 0.07 + pool.seed[index] * TWO_PI;
-          const targetX = homeX + Math.sin(shuffle) * 1.2;
-          const targetZ = homeZ + Math.cos(shuffle * 0.8) * 1.2;
+          const targetX = homeX + Math.sin(shuffle) * pool.shuffle[index];
+          const targetZ = homeZ + Math.cos(shuffle * 0.8) * pool.shuffle[index];
           pool.vx[index] = (targetX - pool.px[index]) * 0.4;
           pool.vy[index] = 0;
           pool.vz[index] = (targetZ - pool.pz[index]) * 0.4;
