@@ -3,6 +3,7 @@ import * as TSL from 'three/tsl';
 import { clamp, damp, bearingTo } from '../core/util.js';
 import { CONFIG } from '../core/config.js';
 import { applyRigidDrop } from '../render/curvature.js';
+import { BALLOON_PALETTES as BALLOON_PALETTE_HEX, BALLOON_PATTERNS, BALLOON_PROFILE, balloonPatternIndex } from './balloonFamily.js';
 
 /**
  * LANDMARKS: procedural set pieces on the world generator's landmark sites.
@@ -253,22 +254,9 @@ export function createLandmarkSystem(ctx) {
   const BURNER_METAL = linear(0x3a3a40);
   const SKIRT_FABRIC = linear(0x2c2f38, 0.6);
   const MOUTH_INTERIOR = [0.12, 0.05, 0.02, 14];
-  const BALLOON_PALETTES = [
-    [0xe0703a, 0xf1e4cf, 0x2c2f38],
-    [0xd9483b, 0xf6d44c, 0x2f6db3],
-    [0x2a9d8f, 0xe9c46a, 0xf4a261],
-    [0x6a4c93, 0xf2c94c, 0xf1e4cf],
-    [0x3a7ca5, 0xf1e4cf, 0xe0703a],
-    [0xc0392b, 0xf5e6c8, 0x3f8f5a],
-    [0xe58fa6, 0xf7f1e3, 0x5fb3b6],
-    [0xf28c28, 0x5b3f8c, 0xf6e7c1],
-  ].map((palette) => palette.map((hex) => linear(hex)));
-  const BALLOON_PATTERNS = ['gores', 'spiral', 'harlequin', 'bands', 'crown', 'sunburst'];
-  // Unit envelope profile from the mouth (bottom) to the crown: [radius, height].
-  const BALLOON_PROFILE = [
-    [0.125, -0.05], [0.13, 0], [0.19, 0.07], [0.3, 0.19], [0.41, 0.32], [0.49, 0.46],
-    [0.53, 0.6], [0.52, 0.72], [0.46, 0.83], [0.36, 0.91], [0.22, 0.97], [0, 1],
-  ];
+  // The v1 balloon family (src/world/balloonFamily.js, shared with the flyable balloon): palettes
+  // in linear vertex colours, the gore patterns and the unit envelope profile.
+  const BALLOON_PALETTES = BALLOON_PALETTE_HEX.map((palette) => palette.map((hex) => linear(hex)));
   // Tower band boundaries (metres); odd bands are red.
   const LIGHTHOUSE_BANDS = [
     [1.6, 8.5, 12.5, 19.5, 23.5, 33.8],
@@ -1724,17 +1712,6 @@ export function createLandmarkSystem(ctx) {
   }
 
   // ---- Balloons ---------------------------------------------------------------------------------
-  function balloonPatternIndex(pattern, row, segment) {
-    switch (pattern) {
-      case 'gores': return row >= 8 ? 2 : segment % 2;
-      case 'spiral': return (segment + row) % 4 < 2 ? 0 : 1;
-      case 'harlequin': return row >= 8 ? 2 : (segment + row) % 2;
-      case 'bands': return row >= 8 ? 2 : (row >= 5 && row <= 6) || row <= 1 ? 1 : 0;
-      case 'crown': return row >= 7 ? (segment % 2 === 0 ? 2 : 1) : row === 5 ? 2 : 0;
-      default: return row >= 8 ? 1 : segment % 4 === 0 ? 2 : segment % 4 === 2 ? 1 : 0;
-    }
-  }
-
   /** Patterned envelope; the gores glow most near the mouth when the burner fires. */
   function addBalloonEnvelope(builder, random, palette, pattern, height) {
     const segments = 16;
