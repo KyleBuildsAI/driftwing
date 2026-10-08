@@ -382,6 +382,13 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
     fix either (two probes: a plain degrade plus craft switches, and the collision test's special
     runs with the governor forced down to 1024 mid-run: 0 warnings each), so the proof is that the
     path now runs clean, not a before/after.
+  - step-file hardening against live spawns and the load shedder: the spawns dev hook gains
+    `pinLodBias(bias)` / `releaseLodBias()` (the director's shedder requests are kept and applied on
+    release); `holdGamePresets()` pins the bias at 1 (every engine step file and the collision and
+    spawns tests), and the preset step files (`presets-batch1.json`, `presetChecks.js`,
+    `presetChecksBatch2.js`) pin it in their setup; the spawn check kit leaves live spawns' wind
+    sources out of a dispose check, as it does for their colliders and courses (a game site the feed
+    builds during a check is not the disposed spawn's).
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 

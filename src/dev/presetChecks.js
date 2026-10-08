@@ -139,6 +139,8 @@ export function installPresetChecks(game) {
 
     /** Attributes the engines for the memory checks and adds dev stand-ins for missing set-piece children. */
     setup() {
+      // The load shedder must not demote the checks' spawns (their wind probes and lures) on a busy machine.
+      system.debug.pinLodBias(1);
       const added = [];
       for (const preset of manager.listPresets()) {
         for (const entry of preset.engines) {

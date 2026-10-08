@@ -170,6 +170,8 @@ export function installPresetChecks(game) {
 
     /** Reports the presets under test and the tracker (each smoke run has a fresh browser profile). */
     setup() {
+      // The load shedder must not demote the checks' spawns (their wind probes and lures) on a busy machine.
+      system.debug.pinLodBias(1);
       const presets = manager.listPresets().map((preset) => preset.id);
       for (const preset of manager.listPresets()) {
         if (preset.kind !== 'site') continue;

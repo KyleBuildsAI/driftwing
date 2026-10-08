@@ -11,7 +11,7 @@
 //     before a create and starts the geometry tracker; compare(baseline, options) after the dispose
 //     proves GPU memory back (no geometry an engine created still alive, the count moved by no more
 //     than the world's own first draws, textures exactly back), every wind source added since the
-//     baseline removed, every collider a spawn added since the baseline removed (landmark colliders
+//     baseline removed (a live spawn's, such as a site the feed built meanwhile, are its own), every collider a spawn added since the baseline removed (landmark colliders
 //     stream with the craft and are not a spawn's, and a live spawn's are its own), every challenge
 //     course a spawn registered since the baseline unregistered (the ring course and live spawns'
 //     courses are not the spawn's), the sky modifiers and the real lights back to their counts, the
@@ -189,6 +189,17 @@ export function createDisposeCheck(ctx, framing) {
     return held;
   }
 
+  /** The wind sources live spawns still list (a site the feed built meanwhile is not the disposed spawn's). */
+  function heldWindIds() {
+    const held = new Set();
+    for (const spawn of manager.getActive()) {
+      for (const part of manager.getParts(spawn.id)) {
+        if (Array.isArray(part.windSourceIds)) for (const id of part.windSourceIds) held.add(id);
+      }
+    }
+    return held;
+  }
+
   /** Challenge courses (ctx.systems.challenges) that are not the ring course's. */
   function spawnCourseKeys() {
     const challenges = ctx.systems.challenges;
@@ -267,7 +278,8 @@ export function createDisposeCheck(ctx, framing) {
       // The count may also drop by what the world freed meanwhile (a far site or terrain chunk), so a
       // spawn's leftovers show as leftBehind or as a count above the world's first draws.
       const worldFresh = split.world + (split.leftBehind.length - leftBehind.length);
-      const windLeft = ctx.wind.listSources().filter((source) => !baseline.windIds.has(source.id)).map((source) => source.id);
+      const heldWind = heldWindIds();
+      const windLeft = ctx.wind.listSources().filter((source) => !baseline.windIds.has(source.id) && !heldWind.has(source.id)).map((source) => source.id);
       const heldColliders = heldColliderIds();
       const collidersLeft = spawnColliderIds().filter((id) => !baseline.colliderIds.has(id) && !heldColliders.has(id));
       const heldCourses = heldCourseKeys();

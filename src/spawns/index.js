@@ -229,7 +229,36 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
   if (devHooks) {
     /** The game presets holdGamePresets took out of the manager. */
     const heldGamePresets = [];
+    /**
+     * The LOD bias pin (pinLodBias): the manager's own setLodBias while pinned, and the last bias the
+     * director's load shedder asked for meanwhile (applied on release).
+     */
+    const lodPin = { setLodBias: null, requested: 1 };
     system.debug = {
+      /**
+       * Pins the SpawnManager's LOD bias at bias (default 1) for a check: the director's load shedder
+       * can no longer shrink the LOD distances meanwhile (on a busy machine it demotes far tiers, which
+       * removes their wind sources and lures). Its requests are kept and applied by releaseLodBias.
+       */
+      pinLodBias(bias = 1) {
+        if (lodPin.setLodBias === null) {
+          lodPin.setLodBias = manager.setLodBias;
+          lodPin.requested = manager.getStats().lodBias ?? 1;
+          manager.setLodBias = (value) => {
+            lodPin.requested = value;
+          };
+        }
+        lodPin.setLodBias(bias);
+        return bias;
+      },
+      /** Ends pinLodBias: the shedder's latest bias applies again. Returns it. */
+      releaseLodBias() {
+        if (lodPin.setLodBias === null) return manager.getStats().lodBias ?? 1;
+        manager.setLodBias = lodPin.setLodBias;
+        lodPin.setLodBias = null;
+        manager.setLodBias(lodPin.requested);
+        return lodPin.requested;
+      },
       /** Adds a preset (validated against the registered engines). */
       addPreset(preset) {
         validatePreset(preset, { engineNames: registry.names() });
@@ -240,9 +269,11 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
       /**
        * Takes the game's own presets (PRESETS) out of the manager, ending their live spawns, so a
        * check runs on its test presets alone in an otherwise empty game; the director's activations
-       * of them are then refused quietly (reason 'preset'). Returns the ids held.
+       * of them are then refused quietly (reason 'preset'). It also pins the LOD bias at 1
+       * (pinLodBias), so the load shedder cannot demote the check's own spawns. Returns the ids held.
        */
       holdGamePresets() {
+        system.debug.pinLodBias(1);
         const held = [];
         for (const preset of PRESETS) {
           if (manager.getPreset(preset.id) !== preset) continue;
@@ -252,8 +283,9 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
         }
         return held;
       },
-      /** Puts the presets holdGamePresets took back. Returns their ids. */
+      /** Puts the presets holdGamePresets took back and releases its LOD bias pin. Returns their ids. */
       releaseGamePresets() {
+        system.debug.releaseLodBias();
         const released = [];
         for (const preset of heldGamePresets.splice(0)) {
           if (manager.getPreset(preset.id)) continue;
