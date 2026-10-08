@@ -3,8 +3,9 @@
 // out.colliders entries made with the local* helpers below; the engine registers them with the game's
 // collider service (ctx.game.colliders) at create, lists every id in instance.colliderIds and
 // removes them on dispose. Turbine nacelles and rotor discs follow their yaw every frame (setPose).
-// Floating island tops become landable heightfields that publish the exact top the mesh is built
-// from (islandTopHeight over islandOutline), so the Phase 2 ground surface moves onto the collider.
+// Floating island tops become landable heightfields (their crown a perch) that publish the exact top
+// the mesh is built from (islandTopHeight over islandOutline), so the Phase 2 ground surface moves onto
+// the collider.
 // Pure apart from the service it is handed: the node labs (no collider service) skip all of it.
 import { islandOutline, islandTopHeight } from './recipes/islands.js';
 
@@ -302,6 +303,7 @@ export function islandTopCollider(surface, anchor, id, owner) {
       const share = Math.sqrt(offsetX * offsetX + offsetZ * offsetZ) / outlineAt(offsetX, offsetZ);
       return share > 1 ? NaN : topY + islandTopHeight(share, surface.dome);
     },
-    tags: { landable: true, surface: 'stone' },
+    // The crown is a perch (the eagle, wave 2): perch true is the heightfield's highest point.
+    tags: { landable: true, perch: true, surface: 'stone' },
   };
 }

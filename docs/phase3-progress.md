@@ -366,7 +366,9 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
     "other" criterion and the harness table;
   - the challenge best path stores positions relative to the first gate (`anchor`, float64), so the
     float32 frames keep centimetre precision far from the world origin; `getBestPath` returns
-    `{ hz, anchor, frames }` (contract f.1 updated; a stored path without an anchor reads with 0).
+    `{ hz, anchor, frames }` (contract f.1 updated; a stored path without an anchor reads with 0);
+  - floating island tops (landable heightfields) also tag their crown as a perch, beside the
+    lintels, tall stones, lighthouse gallery and spire tips the colliders branch tagged.
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
