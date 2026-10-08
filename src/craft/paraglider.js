@@ -26,7 +26,7 @@ const simProfile = Object.freeze({
     minSpeed: 6.9, // m/s = 25 km/h, both brakes deep
     trimSink: 1.17, // m/s
     bigEarsSink: 2.8, // m/s with the big ears in, hands off
-    fullBrakeTurn: 40, // deg/s with one brake fully down
+    halfBrakeTurn: 20, // deg/s with one brake half down (fully down spins it at 0 % assists)
     weightShiftTurn: 9, // deg/s with a full weight shift alone
   }),
   // All up 97.5 kg: pilot, harness and gear hang under 5.5 kg of wing.
@@ -79,7 +79,7 @@ const simProfile = Object.freeze({
   }),
   // Canopy yaw: inertia (kg m^2, fabric and the air it carries), weathervane stability, rate damping
   // and the warp of a full weight shift.
-  yaw: Object.freeze({ inertia: 60, weathervane: 0.08, damping: 0.03, weightShift: 0.0016 }),
+  yaw: Object.freeze({ inertia: 60, weathervane: 0.08, damping: 0.03, weightShift: 0.0016, brake: 0.011 }),
   // Big ears: the share of each half that folds under, the folded fabric's drag, the incidence change
   // (the outer A lines pulled down lower the leading edge, which keeps the wing near its trim speed
   // against the drag of the folded tips) and how long the fold takes to pull in and to reopen.

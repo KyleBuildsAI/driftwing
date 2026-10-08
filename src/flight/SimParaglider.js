@@ -90,6 +90,16 @@ const GLIDE_SMOOTHING = 1.5;
 const CLIMB_SMOOTHING = 1 / 6;
 /** Climb tracking: a climb starts above START m/s held for HOLD s and ends below END m/s held for EXIT s. */
 const CLIMB = Object.freeze({ START: 0.35, HOLD: 8, END: -0.25, EXIT: 10, WINDOW: 20, MIN_GAIN: 30 });
+/** The climb tracker's doubles: hold and exit timers, lowest and highest altitude, best average, smoothed climb, sample timer, average. */
+const CLIMB_HOLD = 0;
+const CLIMB_EXIT = 1;
+const CLIMB_LOWEST = 2;
+const CLIMB_HIGHEST = 3;
+const CLIMB_BEST = 4;
+const CLIMB_SMOOTHED = 5;
+const CLIMB_TIMER = 6;
+const CLIMB_AVERAGE = 7;
+const CLIMB_FIELDS = 8;
 const NOTIFY_INTERVAL = 6;
 /** The surface under the pilot is re-read every this many ticks, and every tick below SURFACE_PROBE_AGL. */
 const SURFACE_PROBE_TICKS = 4;
@@ -136,7 +146,7 @@ export const PARAGLIDER_ASSIST_CATALOG = Object.freeze([
   Object.freeze({ key: 'turnCoordination', name: 'turn coordination', from: 0.25, full: 0.75 }),
   Object.freeze({ key: 'activePiloting', name: 'active piloting', from: 0.5, full: 1 }),
   Object.freeze({ key: 'stallProtection', name: 'stall protection', from: 0.5, full: 1 }),
-  Object.freeze({ key: 'spiralExit', name: 'spiral exit', from: 0.6, full: 1 }),
+  Object.freeze({ key: 'spiralExit', name: 'spiral and spin protection', from: 0.6, full: 1 }),
 ]);
 
 const ASSIST = Object.freeze({
@@ -155,8 +165,12 @@ const ASSIST = Object.freeze({
   RECOVER: Object.freeze({ COUNTER: 0.7, SHIFT: 0.8, PUMP_BASE: 0.35, PUMP_DEPTH: 0.4, PUMP_HZ: 1.3 }),
   /** Stall protection keeps the angle of attack this far below the stall (not in the flare: below FLARE_AGL). */
   STALL: Object.freeze({ MARGIN: 2 * DEG, GAIN: 6, FLARE_AGL: 5 }),
-  /** Spiral exit: past BANK with the pilot's hands off, the outer brake opens the spiral. */
-  SPIRAL: Object.freeze({ BANK: 48 * DEG, GAIN: 1.2, LIMIT: 0.6 }),
+  /**
+   * Spiral and spin protection: past BANK with the pilot's hands off, the outer brake opens the spiral;
+   * past RATE or BANK the inner brake (and the pedal on that side) eases off, so a held brake turns
+   * steeply but never spins or locks into a spiral dive.
+   */
+  SPIRAL: Object.freeze({ BANK: 48 * DEG, GAIN: 1.2, LIMIT: 0.6, RATE: 55 * DEG, EASE: 3 }),
 });
 
 function createParagliderAssistMemory() {
@@ -244,6 +258,20 @@ const paragliderAssistHandler = Object.freeze({
         controls.brakeR *= scale;
         if (controls.pitch > 0) controls.pitch *= scale;
         controls.yaw = axisValue(controls.yaw) * scale;
+      }
+    }
+    if (weights.spiralExit > 0) {
+      const tuning = ASSIST.SPIRAL;
+      const excess = Math.max((Math.abs(data.yawRate) - tuning.RATE) / tuning.RATE, (Math.abs(data.bank) - tuning.BANK) / tuning.BANK);
+      if (excess > 0) {
+        const ease = 1 - weights.spiralExit * Math.min(0.9, excess * tuning.EASE);
+        if (data.yawRate > 0) {
+          controls.brakeR *= ease;
+          if (controls.yaw > 0) controls.yaw *= ease;
+        } else {
+          controls.brakeL *= ease;
+          if (controls.yaw < 0) controls.yaw *= ease;
+        }
       }
     }
   },
@@ -403,7 +431,8 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
     bigEarsLatched: false,
     lastNotify: -Infinity,
   };
-  const climb = { active: false, holdSeconds: 0, exitSeconds: 0, lowest: 0, highest: 0, bestAverage: 0, smoothed: 0, sampleTimer: 0, samples: new Float64Array(CLIMB.WINDOW + 1), sampleCount: 0, sampleHead: 0, average: 0 };
+  /** The climb tracker: its doubles in a typed array (indices CLIMB_*), the altitude once a second. */
+  const climb = { active: false, values: new Float64Array(CLIMB_FIELDS), samples: new Float64Array(CLIMB.WINDOW + 1), sampleCount: 0, sampleHead: 0 };
   /**
    * Doubles written every tick live in object fields: a double closure variable would be boxed on
    * every write (an allocation per tick).
@@ -802,7 +831,7 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
     const reference = Math.max(airspeed, 4);
     const qSb = dynamicPressure * wing.area * span * share;
     aero.yawMoment = wing.yawArm * (rightHalf.drag - leftHalf.drag)
-      + qSb * (yawProfile.weathervane * Math.sin(sideslip) - yawProfile.damping * (span / (2 * reference)) * wingState.yawRate + yawProfile.weightShift * wingState.weightShift);
+      + qSb * (yawProfile.weathervane * Math.sin(sideslip) - yawProfile.damping * (span / (2 * reference)) * wingState.yawRate + yawProfile.weightShift * wingState.weightShift + yawProfile.brake * (wingState.brakeRight - wingState.brakeLeft));
   }
 
   /** One half's collapse: onset below the collapse angle (in turbulence), reinflation otherwise. */
@@ -1365,43 +1394,45 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
    */
   function updateClimb() {
     const dt = tick.dt;
-    climb.smoothed += (state.velocity.y - climb.smoothed) * (1 - Math.exp(-CLIMB_SMOOTHING * dt));
-    climb.sampleTimer += dt;
-    if (climb.sampleTimer >= 1) {
-      climb.sampleTimer -= 1;
-      climb.samples[climb.sampleHead] = state.position.y;
+    const values = climb.values;
+    const altitude = state.position.y;
+    values[CLIMB_SMOOTHED] += (state.velocity.y - values[CLIMB_SMOOTHED]) * (1 - Math.exp(-CLIMB_SMOOTHING * dt));
+    values[CLIMB_TIMER] += dt;
+    if (values[CLIMB_TIMER] >= 1) {
+      values[CLIMB_TIMER] -= 1;
+      climb.samples[climb.sampleHead] = altitude;
       climb.sampleHead = (climb.sampleHead + 1) % climb.samples.length;
       climb.sampleCount = Math.min(climb.samples.length, climb.sampleCount + 1);
-      if (climb.sampleCount === climb.samples.length) {
-        const oldest = climb.samples[climb.sampleHead];
-        climb.average = (state.position.y - oldest) / CLIMB.WINDOW;
-      }
+      if (climb.sampleCount === climb.samples.length) values[CLIMB_AVERAGE] = (altitude - climb.samples[climb.sampleHead]) / CLIMB.WINDOW;
     }
     const flying = wingState.phase === 'flight';
     if (!climb.active) {
-      climb.holdSeconds = flying && climb.smoothed > CLIMB.START ? climb.holdSeconds + dt : 0;
-      if (climb.holdSeconds >= CLIMB.HOLD) {
+      values[CLIMB_HOLD] = flying && values[CLIMB_SMOOTHED] > CLIMB.START ? values[CLIMB_HOLD] + dt : 0;
+      if (values[CLIMB_HOLD] >= CLIMB.HOLD) {
         climb.active = true;
-        climb.exitSeconds = 0;
-        climb.lowest = state.position.y - climb.smoothed * CLIMB.HOLD;
-        climb.highest = state.position.y;
-        climb.bestAverage = 0;
+        values[CLIMB_EXIT] = 0;
+        values[CLIMB_LOWEST] = altitude - values[CLIMB_SMOOTHED] * CLIMB.HOLD;
+        values[CLIMB_HIGHEST] = altitude;
+        values[CLIMB_BEST] = 0;
       }
       return;
     }
-    climb.highest = Math.max(climb.highest, state.position.y);
-    if (climb.sampleCount === climb.samples.length) climb.bestAverage = Math.max(climb.bestAverage, climb.average);
-    climb.exitSeconds = flying && climb.smoothed < CLIMB.END ? climb.exitSeconds + dt : flying ? 0 : CLIMB.EXIT;
-    if (climb.exitSeconds >= CLIMB.EXIT) finishClimb();
+    if (altitude > values[CLIMB_HIGHEST]) values[CLIMB_HIGHEST] = altitude;
+    if (climb.sampleCount === climb.samples.length && values[CLIMB_AVERAGE] > values[CLIMB_BEST]) values[CLIMB_BEST] = values[CLIMB_AVERAGE];
+    if (!flying) values[CLIMB_EXIT] = CLIMB.EXIT;
+    else if (values[CLIMB_SMOOTHED] < CLIMB.END) values[CLIMB_EXIT] += dt;
+    else values[CLIMB_EXIT] = 0;
+    if (values[CLIMB_EXIT] >= CLIMB.EXIT) finishClimb();
   }
 
   function finishClimb() {
-    const gain = climb.highest - climb.lowest;
+    const values = climb.values;
+    const gain = values[CLIMB_HIGHEST] - values[CLIMB_LOWEST];
     climb.active = false;
-    climb.holdSeconds = 0;
+    values[CLIMB_HOLD] = 0;
     if (gain < CLIMB.MIN_GAIN) return;
     bus.emitTyped('journalStat', { key: 'paragliderBestGain', value: Math.round(gain), op: 'max' });
-    if (climb.bestAverage > 0) bus.emitTyped('journalStat', { key: 'paragliderBestClimb', value: Math.round(climb.bestAverage * 100) / 100, op: 'max' });
+    if (values[CLIMB_BEST] > 0) bus.emitTyped('journalStat', { key: 'paragliderBestClimb', value: Math.round(values[CLIMB_BEST] * 100) / 100, op: 'max' });
   }
 
   function writeCraftState() {
@@ -1432,8 +1463,8 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
     craftState.canopyPitch = wingState.incidence;
     if (!craftState.climb || typeof craftState.climb !== 'object') craftState.climb = { active: false, gain: 0, average: 0 };
     craftState.climb.active = climb.active;
-    craftState.climb.gain = climb.active ? climb.highest - climb.lowest : 0;
-    craftState.climb.average = climb.sampleCount === climb.samples.length ? climb.average : 0;
+    craftState.climb.gain = climb.active ? climb.values[CLIMB_HIGHEST] - climb.values[CLIMB_LOWEST] : 0;
+    craftState.climb.average = climb.sampleCount === climb.samples.length ? climb.values[CLIMB_AVERAGE] : 0;
   }
 
   // ============================================================================================
@@ -1493,12 +1524,10 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
       placeCanopyFlying();
     }
     climb.active = false;
-    climb.holdSeconds = 0;
+    climb.values.fill(0);
     climb.sampleCount = 0;
     climb.sampleHead = 0;
-    climb.sampleTimer = 0;
-    climb.average = 0;
-    climb.smoothed = state.velocity.y;
+    climb.values[CLIMB_SMOOTHED] = state.velocity.y;
     tick.surfaceAge = SURFACE_PROBE_TICKS;
     tick.agl = 0;
     clock.load = 1;
@@ -1563,7 +1592,7 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
       canopyPosition: [canopy.position.x, canopy.position.y, canopy.position.z],
       canopyVelocity: [canopy.velocity.x, canopy.velocity.y, canopy.velocity.z],
       wing: { ...wingState },
-      climb: { ...climb, samples: Array.from(climb.samples) },
+      climb: { active: climb.active, values: Array.from(climb.values), samples: Array.from(climb.samples), sampleCount: climb.sampleCount, sampleHead: climb.sampleHead },
       load: clock.load,
       glide: [clock.horizontal, clock.sink],
       time: clock.time,
@@ -1582,10 +1611,11 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
     canopy.velocity.fromArray(data.canopyVelocity);
     Object.assign(wingState, data.wing);
     if (data.climb) {
-      const { samples, ...fields } = data.climb;
-      Object.assign(climb, fields);
-      climb.samples = new Float64Array(CLIMB.WINDOW + 1);
-      if (Array.isArray(samples)) climb.samples.set(samples.slice(0, climb.samples.length));
+      climb.active = data.climb.active === true;
+      if (Array.isArray(data.climb.values)) climb.values.set(data.climb.values.slice(0, CLIMB_FIELDS));
+      if (Array.isArray(data.climb.samples)) climb.samples.set(data.climb.samples.slice(0, climb.samples.length));
+      climb.sampleCount = finiteOr(data.climb.sampleCount, 0);
+      climb.sampleHead = finiteOr(data.climb.sampleHead, 0);
     }
     clock.load = finiteOr(data.load, 1);
     [clock.horizontal, clock.sink] = data.glide;
