@@ -26,9 +26,13 @@ import ld from './ld.js';
 import droneMode from './droneMode.js';
 import glide from './glide.js';
 import proximity from './proximity.js';
+import mach from './mach.js';
+import apogee from './apogee.js';
+import heating from './heating.js';
+import rcs from './rcs.js';
 
 export const INSTRUMENTS = Object.freeze(Object.fromEntries(
-  [airspeed, altitude, attitude, heading, vsi, aoa, gMeter, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide, proximity]
+  [airspeed, altitude, attitude, heading, vsi, aoa, gMeter, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide, proximity, mach, apogee, heating, rcs]
     .map((instrument) => [instrument.id, instrument]),
 ));
 export const INSTRUMENT_IDS = Object.freeze(Object.keys(INSTRUMENTS));
