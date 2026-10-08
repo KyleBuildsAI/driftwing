@@ -1,7 +1,7 @@
 // Flight-test harness (?test=1, dev builds only; main.js never loads it in production).
 //
 // A scripted pilot flies every craft for runSeconds (60 s) in first person and in third person on
-// each world seed (3 by default): 6 craft x 2 views x 3 seeds = 36 runs. Each run switches craft
+// each world seed (3 by default): every scripted craft (SCRIPTED_CRAFT: 7 with the seaplane) x 2 views x 3 seeds. Each run switches craft
 // through the settings command channel (exactly as the picker does), picks the view the same way
 // WREN does (settings.views: 'cockpit' for first person, 'chase' for third person; the camera
 // follows the active craft's entry) and flies the craft's script from testFlightScripts.js through
