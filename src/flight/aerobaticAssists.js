@@ -30,7 +30,7 @@ const TUNING = Object.freeze({
   MIN_AIRSPEED: 15,
   COORDINATION: Object.freeze({ GAIN: 3.5, RATE_GAIN: 0.6, LIMIT: 0.6 }),
   YAW_DAMPER: 0.35,
-  AUTO_LEVEL: Object.freeze({ DELAY: 1, BANK_GAIN: 1.1, RATE_GAIN: 0.18, LIMIT: 0.45 }),
+  AUTO_LEVEL: Object.freeze({ DELAY: 0.5, BANK_GAIN: 1.4, RATE_GAIN: 0.2, LIMIT: 0.5 }),
   AUTO_TRIM: Object.freeze({
     IDLE_DELAY: 0.3,
     /** While a gentle stick (under FOLLOW_STICK, within FOLLOW_ATTITUDE of level) is held the trim creeps toward it over this many seconds. */
@@ -38,12 +38,12 @@ const TUNING = Object.freeze({
     FOLLOW_STICK: 0.3,
     FOLLOW_ATTITUDE: 35 * DEG,
     /** Hands off: a path hold (trim per rad s of path error, per rad/s of pitch rate, per g s past the band). */
-    HOLD_INTEGRAL: 0.5,
+    HOLD_INTEGRAL: 0.8,
     HOLD_DAMPING: 0.25,
     HOLD_LOAD: 0.2,
-    MIN_LOAD: 0.8,
-    MAX_LOAD: 1.2,
-    PATH_LIMIT: 5 * DEG,
+    MIN_LOAD: 0.5,
+    MAX_LOAD: 2,
+    PATH_LIMIT: 2 * DEG,
     /** The hold's gains scale with REFERENCE_PRESSURE / q (Pa), at most MAX_SCALE. */
     REFERENCE_PRESSURE: 4000,
     MAX_SCALE: 6,
@@ -53,7 +53,7 @@ const TUNING = Object.freeze({
      * Steeply banked or upside down, and on a steep line (a vertical up or down, the pivot of a
      * hammerhead), the hold rests: it only flies near-level flight (auto-level rolls the craft back first).
      */
-    HOLD_BANK: 60 * DEG,
+    HOLD_BANK: 75 * DEG,
     HOLD_PITCH: 40 * DEG,
   }),
   // The limiters set an elevator ceiling (and floor): the elevator that holds the limit in a steady
@@ -206,8 +206,8 @@ function autoTrim(stick, data, weight, memory, dt) {
       memory.holdingPath = true;
       memory.pathHold = clamp(data.flightPath, -tuning.PATH_LIMIT, tuning.PATH_LIMIT);
     }
+    // Past the load band the hold eases off (it never pulls more than MAX_LOAD to get back to its path).
     const excess = Math.max(0, data.gLoad - tuning.MAX_LOAD) + Math.min(0, data.gLoad - tuning.MIN_LOAD);
-    if (excess !== 0) memory.pathHold = clamp(data.flightPath, -tuning.PATH_LIMIT, tuning.PATH_LIMIT);
     const scale = clamp(tuning.REFERENCE_PRESSURE / Math.max(data.dynamicPressure, 200), 0.05, tuning.MAX_SCALE);
     const error = memory.pathHold - data.flightPath;
     memory.trim += weight * scale * (tuning.HOLD_INTEGRAL * error - tuning.HOLD_DAMPING * data.pitchRate - tuning.HOLD_LOAD * excess) * dt;

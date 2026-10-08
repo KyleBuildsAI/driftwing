@@ -24,6 +24,7 @@
 //   synthetic    the recognizer on generated trajectories of all 12 figures (Cuban eight, tailslide and
 //                lomcevak included), the lomcevak refused above 25 % assists, and turns and half rolls
 //                that are no figure
+//   general      ?test=craft's general flight test at 100 %: two roll pulses hands off lose little height
 //   controller   the FlightController headless: boot at cruise, 30 s hands off; a switch from the bush
 //                plane in flight (situate); Space / Shift+Space smoke and colour; the copilot commands
 //                and status; the ribbon laid, re-anchored past 2 km, fading out, disposed with the craft
@@ -1107,6 +1108,29 @@ function testController() {
   check('controller', 'the game registry has the aerobatic module', craftRegistry.has('aerobatic'));
 }
 
+/**
+ * ?test=craft's general flight test through the controller at 100 %: hands off, a roll pulse right,
+ * one left (each 1.5 s at 15 %: about 90 degrees of bank) and a gentle pull. The assists level the
+ * wings and hold the path, so the craft never loses much height.
+ */
+function testGeneral() {
+  const rig = createControllerRig();
+  rig.run(0.1);
+  const start = rig.state.player.position.y;
+  let lowest = 0;
+  let time = 0;
+  rig.run(30, (lab) => {
+    const pulse = (from) => time >= from * 30 && time < from * 30 + 1.5;
+    lab.controls.roll = pulse(0.2) ? 0.15 : pulse(0.45) ? -0.15 : 0;
+    lab.controls.pitch = pulse(0.7) ? 0.075 : 0;
+    lowest = Math.min(lowest, lab.state.player.position.y - start);
+    time += FRAME;
+  });
+  log(`  general: lowest ${lowest.toFixed(1)} m below the start`);
+  record('general', '100 %: height lost through the roll pulses hands off', -lowest, 80, { unit: 'm', compare: 'max' });
+  check('general', 'no soft crash', rig.events.softCrash.length === 0);
+}
+
 // ============================================================================================
 // INSTRUMENTS
 // ============================================================================================
@@ -1196,7 +1220,7 @@ function testAllocation() {
 const TESTS = [
   ['stall', testStall], ['inverted', testInverted], ['roll', testRoll], ['cruise', testCruise], ['climb', testClimb],
   ['g', testLoads], ['handsOff', testHandsOff], ['hang', testHang], ['snap', testSnap], ['knifeEdge', testKnifeEdge],
-  ['figures', testFigures], ['synthetic', testSynthetic], ['controller', testController], ['instruments', testInstruments],
+  ['figures', testFigures], ['synthetic', testSynthetic], ['controller', testController], ['general', testGeneral], ['instruments', testInstruments],
   ['allocation', testAllocation],
 ];
 for (const [name, test] of TESTS) {
