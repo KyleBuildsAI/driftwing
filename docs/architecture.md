@@ -391,7 +391,7 @@ and `waypoints.js` (waypoint beacon and arrow), from v1.
 | `bat-check.mjs` | runs `start-driftwing.bat`'s Node.js version check under cmd.exe against fake `node` versions |
 | `browser.mjs`, `ports.mjs` | Chrome / Edge discovery and free-port discovery (never 5199) shared by the headless tools |
 | `flight-lab.mjs` | headless flight lab for the glider and bush plane (handling, spawns, craft switches, hot-plug) |
-| `lab/jet.mjs`, `lab/helicopter.mjs`, `lab/wingsuit.mjs`, `lab/fpv.mjs` | headless flight labs per craft |
+| `lab/jet.mjs`, `lab/helicopter.mjs`, `lab/wingsuit.mjs`, `lab/fpv.mjs`, `lab/tiltrotor.mjs` | headless flight labs per craft |
 | `lab/settings.mjs` | settings migrations (views per craft included) and the one-time HOTAS assist default |
 | `lab/terrain.mjs` | site placement and terrain stamps: Phase 1 bit-identity, filters, determinism, stamp shapes, seams, collision (the fixtures and the real presets' stamps), and the height-sampling cost against Phase 1 |
 | `lab/spawns.mjs`, `lab/director.mjs`, `lab/audio.mjs`, `lab/discovery.mjs` | the spawn framework, the event director and the regional weather, the spawn voices and recipes, and the discovery loop, headless ([Testing](#testing)) |
@@ -840,7 +840,8 @@ and only adds its `craftState`; a hook that throws or returns something unusable
 A model is created by a factory registered per kind: `flightModels.register(kind, factory)`. It is
 called with `{ profile, craft, world, bus, state, craftState, settings }`, where `profile` is the
 `simProfile` (whose `model` field names the kind). Registered kinds are `fixedWing`, `jet`
-(SimFixedWing with the jet's own assists), `helicopter`, `wingsuit` and `quad`. `create()` checks this interface:
+(SimFixedWing with the jet's own assists), `helicopter`, `wingsuit`, `quad` and `tiltrotor` (SimTiltrotor: tilting
+nacelles, two proprotors, a wing, the conversion corridor of `tiltrotorCorridor.js`). `create()` checks this interface:
 
 | member | contract |
 | --- | --- |
@@ -951,6 +952,7 @@ weight that ramps with the level.
 | helicopter (`helicopterAssists.js`) | trim and stability augmentation, heading hold | attitude limits, torque auto-compensation, auto-hover (plus engine protection, vortex-ring avoidance and autorotation) |
 | wingsuit (`SimWingsuit.js`) | stability, terrain proximity warning | auto-level, stall protection |
 | quad (`SimQuad.js`) | angle mode (above 35 %) | altitude hold (above 85 %); 0 % is rate (acro) mode |
+| tiltrotor (`tiltrotorAssists.js`) | stability augmentation (rate damping, attitude hold, yaw damper), heading hold in the hover and turn coordination at speed | attitude command with limits (wings level hands off, stall protection in airplane mode), auto-hover in helicopter mode (position hold; the lever is a climb command around its detent) |
 
 - At 100 % hands off, fixed-wing craft hold the air-mass flight path within 0.85-1.25 g.
 
@@ -998,6 +1000,10 @@ height; `stall.warning` is the low-rotor-rpm horn.
   `brakeLeft` / `brakeRight`, `proximityWarning`, `proximity`, `clearance`, `impactSeconds`,
   `windStreaks`, ...;
 - FPV drone: `droneMode` (`rate` \| `angle`), `altitudeHold`, `modeOverride`, `turtle`;
+- tiltrotor: `nacelleAngle` (deg, 0 airplane .. 97), `nacelleTarget` (the selection), `nacelleCommand`
+  (after the auto-nacelle schedule), `autoNacelle`, `mode` (`hover` \| `conversion` \| `airplane`),
+  `corridor { min, max, state: ok \| wingStall \| overspeed }`, `proprotorRpm`; a placement, command or
+  test that writes `nacelleAngle` or `nacelleTarget` is taken over on the next tick;
 - a craft with skins: `skin` (set by the controller);
 - the Phase 3 craft: the fields of contract h.3 (aerobatic `smoke`, `smokeColor`, ...; seaplane
   `onStep`, `waterRudders`, ...; and so on), written by their own models and abilities.
@@ -1035,6 +1041,7 @@ groups)` builds one over another catalog (the labs).
 | `journal` (optional) | `{ stats: [{ key, label, unit, op: 'add' \| 'min' \| 'max' }] }`: the craft's journal stats, known to the journal like its own (`journalStatInfo`) |
 | `directorProfile` (optional) | `{ favor: { tags, categories }, above: [{ altitude, favor }] }`: the director's craft weighting (contract i.2) |
 | `faunaThreat` (optional) | number: fauna scatter radius and burst scale (the eagle's 2.5) |
+| `hud` (optional) | `{ instruments: [ids] }`: instruments the pilot always needs (the tiltrotor's conversion corridor), shown as glass tiles even with the instrument overlay off, except while a cockpit panel is on screen (`src/ui/instrumentHud.js`) |
 
 **`cameraRig`.**
 
@@ -1067,11 +1074,12 @@ groups)` builds one over another catalog (the labs).
   - `jet`: `whineHz`, `rumbleHz`, `idleSpool`, `spoolUp`, `spoolDown`, `afterburnerRoar`;
   - `heli`: `blades`, `rotorRpm`, `tailBlades`, `tailRatio`, `turbineHz`;
   - `drone`: `motors`, `idleHz`, `maxHz`;
+  - `proprotor`: `blades`, `rotorRpm`, `turbineHz`; the thrum follows `craftState.nacelleAngle` (an impulsive slap with the nacelles up, a smooth drone tilted forward) and `craftState.proprotorRpm`;
   - `wingsuit`: `flutterHz`, `proximityRange`.
 
-**Instruments** (`src/ui/instruments/index.js`). There are 17 ids: `airspeed, altitude, attitude,
+**Instruments** (`src/ui/instruments/index.js`). There are 18 ids: `airspeed, altitude, attitude,
 heading, vsi, aoa, g, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide,
-proximity`. A renderer is `{ id, label, draw(pen, source, theme, memory), createMemory?,
+proximity, nacelle` (`nacelle`: the nacelle angle on the conversion corridor chart). A renderer is `{ id, label, draw(pen, source, theme, memory), createMemory?,
 update?(memory, dt, source), reset? }`. It draws in a 200 x 200 design box in a `panel` theme (steam
 gauge on the cockpit CanvasTexture) and a `glass` theme (HUD tile). Units follow `settings.units`.
 Unknown ids are skipped and reported in the camera stats. A new instrument is one file,
@@ -1086,6 +1094,7 @@ the HUD overlay draw it from then on.
 | helicopter | helicopter | airspeed, altitude, attitude, heading, vsi, rotorRpm, torque, radarAlt, throttle |
 | wingsuit | wingsuit | airspeed, altitude, heading, vsi, glide, proximity |
 | fpv | quad | throttle, droneMode, airspeed, altitude, attitude, heading, vsi |
+| tiltrotor | tiltrotor | airspeed, altitude, attitude, heading, vsi, nacelle (pinned on the HUD), rotorRpm, torque, radarAlt, throttle |
 
 ### How to add a craft
 
