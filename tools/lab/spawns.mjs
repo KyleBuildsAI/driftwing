@@ -179,7 +179,7 @@ function testSchema() {
     ['unknown field', mutate(base, { colour: 1 }), /field "\(preset\)\.colour" is not a known field/],
     ['site with duration', mutate(site, { lifetime: { duration: [1, 2], despawn: site.lifetime.despawn } }), /"testSite": field "lifetime\.duration" must be null for a site/],
     ['event with stamps', mutate(base, { stamps: [{ type: 'cone' }] }), /field "stamps" must be empty for an event/],
-    ['bad stamp type', mutate(site, { stamps: [{ type: 'crater' }] }), /field "stamps\[0\]\.type" must be one of cone/],
+    ['bad stamp type', mutate(site, { stamps: [{ type: 'spiral' }] }), /field "stamps\[0\]\.type" must be one of cone/],
     ['unregistered engine', mutate(base, { engines: [{ engine: 'vortex', params: {} }] }), /field "engines\[0\]\.engine" names an engine that is not registered: "vortex"/],
     ['camelCase id', mutate(base, { id: 'Test-marker' }), /field "id" must be camelCase/],
     ['bad time of day', mutate(base, { filters: { ...base.filters, timeOfDay: ['noon'] } }), /field "filters\.timeOfDay\[0\]" must be one of dawn/],
