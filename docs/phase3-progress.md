@@ -54,10 +54,26 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   21 x 21 site cells). Run 2026-10-07 on both backends: 10/10, 0 errors, 0 warnings; worst
   camera-relative error 0.0000 mm, far point 5.5e-8 px; `tools/lab/origin.mjs` 32/32 (needs
   `--expose-gc`).
-- Next: the remaining verification runs on both backends (spawn and terrain step files,
-  `?test=terrain`, a reduced flight harness).
+- Verified 2026-10-07 (each once, both backends unless noted): `npm run build`, `build:single` (V1
+  SHA-256 matches), `test:v1` 2/2; every lab passes (wind-engines 56/56 on a rerun with
+  `--expose-gc`: the first run's sampled allocation check blamed `windModifierEngine.js`, which
+  this branch does not touch); step files terrain-worker-start, engine-vortex, engine-weatherVolume,
+  engine-celestial, director-game, engine-structure-sites (9/9), presets-batch1 (58/58) all 0/0
+  (weatherVolume on WebGL2 passed on a rerun: the first run's director load shedder held the LOD
+  bias at 0.5, so the 12 and 18 km supercells showed their far tier); `?test=terrain` PASS (the
+  WebGPU run passed on a rerun after a 120 s navigation timeout); `?test=1` reduced (HARNESS-1,
+  glider and jet, both views, 20 s): 0 NaN, 0 penetrations, 0/0, heap 17 / 12 MB, maneuvers 12/12,
+  frames over 50 ms 11 / 37 (machine load: `mainThread`, `gc` and `delayed`, none `systems`); the
+  built V2 smoke 0/0 on both backends and the built shell 0/0 (WebGPU).
+- Next: nothing in this branch's scope; the integration pass merges it first.
 - Open issues: `src/render/water.js` (`surfaceNoise`, `shadowUV`) is the water engineer's (contract
-  0.1); they apply `worldPositionNode` there in the integration pass.
+  0.1); they apply `worldPositionNode` there in the integration pass. Two edits outside this
+  branch's ownership: `sky.js` (the fog layer's camera height and the hemisphere light, owned by
+  `p3/high-altitude`; merges cleanly with it today) and `src/dev/windOverlay.js`. The vortex slot
+  data holds world positions in float32 (about 6 cm at 1000 km, far below what a funnel shows); not
+  on the a.7 list, left as is. Trial merges: `p3/water-regions` conflicts in `terrain.js`
+  `terrainColorNode` (keep its `overlayShade(...)` line and this branch's `renderOrigin` water-level
+  line); every branch conflicts in this file's wave 1 subsections (keep all).
 
 ### Wave 2: craft (one engineer per craft, plus the picker / director engineer)
 
