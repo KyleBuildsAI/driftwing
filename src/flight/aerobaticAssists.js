@@ -43,13 +43,18 @@ const TUNING = Object.freeze({
     HOLD_LOAD: 0.2,
     MIN_LOAD: 0.8,
     MAX_LOAD: 1.2,
+    PATH_LIMIT: 5 * DEG,
     /** The hold's gains scale with REFERENCE_PRESSURE / q (Pa), at most MAX_SCALE. */
     REFERENCE_PRESSURE: 4000,
     MAX_SCALE: 6,
     LIMIT: 0.6,
     GROUND_DECAY_SECONDS: 5,
-    /** Upside down the hold rests (auto-level rolls the craft upright first, when it is on). */
-    INVERTED_BANK: 100 * DEG,
+    /**
+     * Steeply banked or upside down, and on a steep line (a vertical up or down, the pivot of a
+     * hammerhead), the hold rests: it only flies near-level flight (auto-level rolls the craft back first).
+     */
+    HOLD_BANK: 60 * DEG,
+    HOLD_PITCH: 40 * DEG,
   }),
   // The limiters set an elevator ceiling (and floor): the elevator that holds the limit in a steady
   // pull, from the airframe's elevator per rad of angle of attack (ELEVATOR_PER_AOA) and per unit of
@@ -119,7 +124,7 @@ function applyPrime(memory, trim, data) {
   const elevator = clamp(Number.isFinite(trim.elevator) ? trim.elevator : 0, -1, 1);
   memory.trim = clamp(elevator, -TUNING.AUTO_TRIM.LIMIT, TUNING.AUTO_TRIM.LIMIT);
   memory.holdingPath = Number.isFinite(trim.flightPath);
-  memory.pathHold = memory.holdingPath ? trim.flightPath : 0;
+  memory.pathHold = memory.holdingPath ? clamp(trim.flightPath, -TUNING.AUTO_TRIM.PATH_LIMIT, TUNING.AUTO_TRIM.PATH_LIMIT) : 0;
   memory.pitchIdleSeconds = TUNING.AUTO_TRIM.IDLE_DELAY;
   memory.allIdleSeconds = TUNING.AUTO_LEVEL.DELAY;
   memory.lastAoa = data.aoa;
@@ -188,7 +193,7 @@ function autoTrim(stick, data, weight, memory, dt) {
   const tuning = TUNING.AUTO_TRIM;
   const idle = Math.abs(stick) < TUNING.IDLE;
   memory.pitchIdleSeconds = idle ? memory.pitchIdleSeconds + dt : 0;
-  const upright = Math.abs(data.bank) < tuning.INVERTED_BANK;
+  const upright = Math.abs(data.bank) < tuning.HOLD_BANK && Math.abs(data.pitch) < tuning.HOLD_PITCH;
   if (!idle) {
     // Only a gentle stick in near-level flight is relieved: the pull of a figure is never trimmed in,
     // so letting go after a loop leaves no stored pull behind.
@@ -196,12 +201,13 @@ function autoTrim(stick, data, weight, memory, dt) {
     const cruising = Math.abs(stick) < tuning.FOLLOW_STICK && Math.abs(data.bank) < tuning.FOLLOW_ATTITUDE && Math.abs(data.pitch) < tuning.FOLLOW_ATTITUDE;
     if (cruising) memory.trim += (weight * stick * dt) / tuning.FOLLOW_SECONDS;
   } else if (memory.pitchIdleSeconds >= tuning.IDLE_DELAY && upright) {
+    // The path captured at release, within PATH_LIMIT: let go out of a figure and the craft levels out.
     if (!memory.holdingPath) {
       memory.holdingPath = true;
-      memory.pathHold = data.flightPath;
+      memory.pathHold = clamp(data.flightPath, -tuning.PATH_LIMIT, tuning.PATH_LIMIT);
     }
     const excess = Math.max(0, data.gLoad - tuning.MAX_LOAD) + Math.min(0, data.gLoad - tuning.MIN_LOAD);
-    if (excess !== 0) memory.pathHold = data.flightPath;
+    if (excess !== 0) memory.pathHold = clamp(data.flightPath, -tuning.PATH_LIMIT, tuning.PATH_LIMIT);
     const scale = clamp(tuning.REFERENCE_PRESSURE / Math.max(data.dynamicPressure, 200), 0.05, tuning.MAX_SCALE);
     const error = memory.pathHold - data.flightPath;
     memory.trim += weight * scale * (tuning.HOLD_INTEGRAL * error - tuning.HOLD_DAMPING * data.pitchRate - tuning.HOLD_LOAD * excess) * dt;

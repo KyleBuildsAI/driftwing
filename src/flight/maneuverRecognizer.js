@@ -63,6 +63,8 @@ const WINDOW_MAX_SECONDS = 45;
 /** Below this airspeed (m/s) on a level stretch the craft is not flying figures (taxi, hover). */
 const MIN_AIRSPEED = 20;
 const MARKER = Object.freeze({ UP: 1, DOWN: 2, TOP: 3, SLIDE: 4, SNAP: 5, TUMBLE: 6 });
+/** One letter per marker kind (index = kind) for the window description. */
+const MARKER_LETTERS = ' UDTSKX';
 const MAX_MARKERS = 32;
 const VERTICAL = Object.freeze({ ENTER: 70, REARM: 50 });
 const TOP = Object.freeze({ UP_Y: -0.5, PITCH: 40, REARM_UP_Y: 0, REARM_PITCH: 55 });
@@ -79,6 +81,8 @@ const PASS = Object.freeze({
   KNIFE_BANK_MAX: 108,
   INVERTED_BANK: 155,
   PITCH: 20,
+  /** A knife-edge flies nose high by its sideslip (15-25 degrees). */
+  KNIFE_PITCH: 32,
   VERTICAL_SPEED: 6,
   MIN_AIRSPEED: 30,
 });
@@ -171,7 +175,7 @@ export function createManeuverRecognizer({ onFigure = null } = {}) {
   const knife = createPass();
   const inverted = createPass();
   const details = { duration: 0, pitch: 0, roll: 0, yaw: 0, headingChange: 0, heightChange: 0, minAirspeed: 0, maxG: 1, minG: 1 };
-  const stats = { windows: 0, recognized: 0, aborted: 0, lastFigure: null, lastScore: 0 };
+  const stats = { windows: 0, recognized: 0, aborted: 0, lastFigure: null, lastScore: 0, lastWindow: null };
 
   function resetPass(pass) {
     pass.time = 0;
@@ -417,11 +421,30 @@ export function createManeuverRecognizer({ onFigure = null } = {}) {
     if (onFigure) onFigure(figure, score, summary);
   }
 
+  /** The closed window's totals and markers for the lab and tests (built once per window, not per sample). */
+  function describeWindow(summary, figure) {
+    let markers = '';
+    for (let index = 0; index < figureWindow.markerCount; index++) markers += MARKER_LETTERS[figureWindow.markers[index]];
+    stats.lastWindow = {
+      figure,
+      duration: summary.duration,
+      pitch: summary.pitch,
+      roll: summary.roll,
+      yaw: summary.yaw,
+      headingChange: summary.headingChange,
+      heightChange: summary.heightChange,
+      minG: summary.minG,
+      markers,
+    };
+  }
+
   function closeWindow(input) {
     const summary = fillDetails(figureWindow.time, wrap180(input.heading - entry.heading), input.altitude - entry.altitude);
     const figure = figureWindow.passRecognized ? null : classify(summary, input.assists);
+    const score = figure ? scoreFigure(figure, summary) : 0;
+    describeWindow(summary, figure);
     closeWindowState();
-    if (figure) recognize(figure, scoreFigure(figure, summary), summary);
+    if (figure) recognize(figure, score, summary);
   }
 
   // ---- Held passes ------------------------------------------------------------------------------------
@@ -453,10 +476,11 @@ export function createManeuverRecognizer({ onFigure = null } = {}) {
   }
 
   function updatePasses(input, pitch, bank, dt) {
-    const steady = Math.abs(pitch) < PASS.PITCH && Math.abs(input.verticalSpeed) < PASS.VERTICAL_SPEED && input.airspeed > PASS.MIN_AIRSPEED;
+    const steady = Math.abs(input.verticalSpeed) < PASS.VERTICAL_SPEED && input.airspeed > PASS.MIN_AIRSPEED;
     const absBank = Math.abs(bank);
-    updatePass(knife, steady && absBank >= PASS.KNIFE_BANK_MIN && absBank <= PASS.KNIFE_BANK_MAX, Math.abs(absBank - 90), input, dt, 'knifeEdge');
-    updatePass(inverted, steady && absBank >= PASS.INVERTED_BANK, 180 - absBank, input, dt, 'invertedPass');
+    const knifeHeld = steady && Math.abs(pitch) < PASS.KNIFE_PITCH && absBank >= PASS.KNIFE_BANK_MIN && absBank <= PASS.KNIFE_BANK_MAX;
+    updatePass(knife, knifeHeld, Math.abs(absBank - 90), input, dt, 'knifeEdge');
+    updatePass(inverted, steady && Math.abs(pitch) < PASS.PITCH && absBank >= PASS.INVERTED_BANK, 180 - absBank, input, dt, 'invertedPass');
   }
 
   /** The figure the open window looks like so far (contract h.3 figureInProgress). */
@@ -545,7 +569,11 @@ export function createManeuverRecognizer({ onFigure = null } = {}) {
       return figureWindow.open;
     },
 
-    /** { windows, recognized, aborted, lastFigure, lastScore } (tests and the lab). */
+    /**
+     * { windows, recognized, aborted, lastFigure, lastScore, lastWindow } (tests and the lab); lastWindow
+     * is the last closed window: { figure, duration, pitch, roll, yaw, headingChange, heightChange, minG,
+     * markers } (markers as letters: U up, D down, T top, S slide, K snap, X tumble).
+     */
     get stats() {
       return stats;
     },

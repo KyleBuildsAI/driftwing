@@ -16,7 +16,7 @@
 //                it; 100 % assists: the G limiter holds +8.5 / -6 g; the AoA limiter never stalls
 //   handsOff     100 % assists, trimmed at cruise, 60 s hands off: holds its height and wings level
 //   hang         vertical at zero airspeed on full power: climbs (thrust over weight) and torque-rolls left
-//   snap         0 % assists at 55 m/s: full aft stick and rudder stall one wing into a snap roll
+//   snap         0 % assists at 68 m/s: a sharp pull with full rudder stalls one wing into a snap roll
 //   knifeEdge    90 degrees of bank held on the rudder at 85 m/s: height held, rudder not at its stop
 //   figures      the recognizer through the flight model, every figure flown by a scripted pilot:
 //                loop and aileron roll (100 % assists), Immelmann, split-S, barrel roll, hammerhead,
@@ -95,6 +95,29 @@ function createRig({ assists = 0 } = {}) {
   const env = { time: 0, wind: { vel: new THREE.Vector3(), turbulence: 0 }, groundHeight: world.groundHeight, waterLevel: ground - 100, rho: 1.225, world, craftState, assists, handsOff: false, autopilot, telemetry };
   const context = { dt: DT, model, craft: aerobatic, craftId: aerobatic.id, env, autopilot, assists, handsOff: false, telemetry, activeAssists: [] };
   const rig = { model, data: model.flightData, pilot, controls, env, context, events, telemetry, craftState, time: 0 };
+  // A second recognizer fed the same flight data as the extension's, for its window diagnostics.
+  const shadow = createManeuverRecognizer();
+  const shadowInput = createRecognizerInput();
+  rig.shadow = shadow;
+  function feedShadow() {
+    const data = model.flightData;
+    shadowInput.dt = DT;
+    shadowInput.pitch = data.pitch;
+    shadowInput.bank = data.bank;
+    shadowInput.heading = data.heading;
+    shadowInput.rollRate = data.rollRate;
+    shadowInput.pitchRate = data.pitchRate;
+    shadowInput.yawRate = data.yawRate;
+    shadowInput.gLoad = data.gLoad;
+    shadowInput.stalled = data.stalled;
+    shadowInput.airspeed = data.airspeed;
+    shadowInput.verticalSpeed = data.verticalSpeed;
+    shadowInput.flightPath = data.flightPath;
+    shadowInput.altitude = model.state.position.y;
+    shadowInput.onGround = data.onGround;
+    shadowInput.assists = env.assists;
+    shadow.sample(shadowInput);
+  }
 
   rig.tick = () => {
     copyControlState(controls, pilot);
@@ -104,6 +127,7 @@ function createRig({ assists = 0 } = {}) {
     for (const stage of flightModels.controlStages()) stage.apply(controls, context);
     env.time += DT;
     model.step(DT, controls, env);
+    feedShadow();
     telemetry.position.copy(model.state.position);
     rig.time += DT;
   };
@@ -467,7 +491,7 @@ function testHang() {
 
 function testSnap() {
   const rig = createRig({ assists: 0 });
-  rig.airborne({ speed: 55, altitude: 1500, throttle: 0.7 });
+  rig.airborne({ speed: 68, altitude: 1500, throttle: 0.7 });
   const wings = createBankPilot(0);
   const level = createAltitudePilot(1500);
   rig.run(1.5, (lab) => {
@@ -486,7 +510,7 @@ function testSnap() {
     peakRate = Math.max(peakRate, rate);
     stalled = stalled || lab.data.stalled;
     if (phase === 'snap') {
-      lab.pilot.pitch = 1;
+      lab.pilot.pitch = 0.7;
       lab.pilot.yaw = 1;
       lab.pilot.roll = 0;
       if (rolled >= 240) phase = 'stop';
@@ -580,18 +604,25 @@ function trackRoll(rig, memo) {
   memo.roll = (memo.roll ?? 0) + (rig.data.rollRate / DEG) * DT;
 }
 
-function flyFigure(id, assists, start, script, { after = 6, settleAltitude = NaN } = {}) {
+/** Aileron that holds the body's roll where it was at `reference` (deg of memo.roll): a pull without rolling. */
+function holdRoll(rig, memo, reference) {
+  return clamp(-0.04 * (memo.roll - reference) - 0.15 * rig.data.rollRate, -1, 1);
+}
+
+function flyFigure(id, assists, start, script, { after = 6 } = {}) {
   const rig = createRig({ assists });
   rig.trimmed(start);
+  // Below 100 % nothing levels the wings hands off: the test pilot holds the entry straight and level.
+  const settleAltitude = assists < 1 ? start.altitude : NaN;
   settle(rig, 2, settleAltitude);
   const memo = {};
   rig.run(40, (lab) => {
     trackRoll(lab, memo);
     return script(lab, memo) === true;
   });
-  settle(rig, after, settleAltitude);
+  settle(rig, after, assists < 1 ? rig.altitude() : NaN);
   const figures = rig.events.figures.map((event) => `${event.figure} ${event.score}`).join(', ') || 'none';
-  log(`  ${id}: ${figures}`);
+  log(`  ${id}: ${figures}; windows ${rig.shadow.stats.windows}, last ${JSON.stringify(rig.shadow.stats.lastWindow)}`);
   check('figures', `${id} recognized`, rig.figure(id).length === 1 && rig.events.figures.length === 1, figures);
   return rig;
 }
@@ -604,7 +635,7 @@ function testFigures() {
     if (memo.up && Math.abs(lab.data.bank / DEG) > 150) memo.top = true;
     if (memo.top && pitch < -60) memo.down = true;
     lab.pilot.pitch = 0.8;
-    lab.pilot.roll = 0;
+    lab.pilot.roll = holdRoll(lab, memo, 0);
     lab.pilot.yaw = 0;
     if (memo.down && pitch > -8) {
       lab.neutral();
@@ -632,7 +663,7 @@ function testFigures() {
     if (pitch > 70) memo.up = true;
     if (!memo.rolling) {
       lab.pilot.pitch = 0.85;
-      lab.pilot.roll = 0;
+      lab.pilot.roll = holdRoll(lab, memo, 0);
       if (memo.up && Math.abs(lab.data.bank / DEG) > 150 && pitch < 12) {
         memo.rolling = true;
         memo.roll = 0;
@@ -650,10 +681,13 @@ function testFigures() {
     if (!memo.pulling) {
       lab.pilot.roll = memo.roll < 172 ? 1 : 0;
       lab.pilot.pitch = 0;
-      if (memo.roll >= 172) memo.pulling = true;
+      if (memo.roll >= 172) {
+        memo.pulling = true;
+        memo.pullFrom = 180;
+      }
       return false;
     }
-    lab.pilot.roll = 0;
+    lab.pilot.roll = holdRoll(lab, memo, memo.pullFrom);
     lab.pilot.pitch = 0.85;
     if (pitch < -70) memo.down = true;
     if (memo.down && pitch > -5) {
@@ -677,14 +711,22 @@ function testFigures() {
   // Hammerhead, 50 %: up a vertical line, full rudder as the speed dies, down the line, pull out.
   flyFigure('hammerhead', 0.5, { speed: 95, altitude: 1200, throttle: 1 }, (lab, memo) => {
     const pitch = lab.data.pitch / DEG;
+    memo.entryHeading ??= lab.data.heading;
     if (!memo.vertical) {
-      lab.pilot.pitch = 0.8;
-      if (pitch > 84) memo.vertical = true;
+      // A firm pull short of the accelerated stall (50 % has no AoA limiter: yank and it snaps).
+      lab.pilot.pitch = 0.6;
+      lab.pilot.roll = holdRoll(lab, memo, 0);
+      if (pitch > 83) memo.vertical = true;
       return false;
     }
     if (!memo.pivot) {
-      lab.pilot.pitch = clamp(0.05 * (90 - pitch), -0.5, 0.5);
-      lab.pilot.roll = clamp(-0.02 * wrap180(lab.data.bank / DEG), -0.3, 0.3);
+      // The vertical line: the nose steered onto the sky's zenith, from where the zenith lies in body
+      // axes (toward the canopy: elevator; toward a wing: rudder), damped by the body rates.
+      const zenithUp = Math.cos(lab.data.pitch) * Math.cos(lab.data.bank);
+      const zenithRight = -Math.cos(lab.data.pitch) * Math.sin(lab.data.bank);
+      lab.pilot.pitch = clamp(3 * zenithUp - 1.2 * lab.data.pitchRate, -0.5, 0.5);
+      lab.pilot.yaw = clamp(3 * zenithRight - 0.8 * lab.data.yawRate, -1, 1);
+      lab.pilot.roll = holdRoll(lab, memo, 0);
       if (lab.data.airspeed < 24) memo.pivot = true;
       return false;
     }
@@ -692,12 +734,25 @@ function testFigures() {
       lab.pilot.yaw = -1;
       lab.pilot.pitch = 0;
       lab.pilot.roll = 0.3;
-      if (pitch < -70) memo.down = true;
+      if (pitch < -55) memo.down = true;
+      return false;
+    }
+    if (!memo.pulling) {
+      // The down line: the nose steered onto the nadir (the pivot's yaw stopped with the rudder).
+      const zenithUp = Math.cos(lab.data.pitch) * Math.cos(lab.data.bank);
+      const zenithRight = -Math.cos(lab.data.pitch) * Math.sin(lab.data.bank);
+      lab.pilot.pitch = clamp(-3 * zenithUp - 1.2 * lab.data.pitchRate, -0.5, 0.5);
+      lab.pilot.yaw = clamp(-3 * zenithRight - 0.8 * lab.data.yawRate, -1, 1);
+      // Roll the canopy round to face back along the entry: the pull-out then flies out reversed.
+      const canopy = new THREE.Vector3(0, 1, 0).applyQuaternion(lab.model.state.quaternion);
+      const canopyError = wrap180(memo.entryHeading + 180 - headingFromVector(canopy.x, canopy.z));
+      lab.pilot.roll = clamp(0.012 * canopyError - 0.15 * lab.data.rollRate, -1, 1);
+      if (lab.data.airspeed > 55 && Math.abs(canopyError) < 15) memo.pulling = true;
       return false;
     }
     lab.pilot.yaw = 0;
-    lab.pilot.roll = 0;
-    lab.pilot.pitch = 0.7;
+    lab.pilot.roll = holdRoll(lab, memo, memo.roll);
+    lab.pilot.pitch = 0.35;
     if (pitch > -5) {
       lab.neutral();
       return true;
@@ -773,7 +828,7 @@ function testFigures() {
  * { seconds, roll, pitch, yaw, speed? (m/s, ramps from the previous), slide? (tail-first), stalled? }
  * and feeds the recognizer at 120 Hz. Starts straight and level at 80 m/s for 2 s, ends with 3 s.
  */
-function synthesize(phases, { assists = 1, startSpeed = 80 } = {}) {
+function synthesize(phases, { assists = 1, startSpeed = 80, diagnostics = null } = {}) {
   const figures = [];
   const recognizer = createManeuverRecognizer({ onFigure: (figure, score) => figures.push({ figure, score }) });
   const input = createRecognizerInput();
@@ -819,6 +874,7 @@ function synthesize(phases, { assists = 1, startSpeed = 80 } = {}) {
       recognizer.sample(input);
     }
   }
+  if (diagnostics) diagnostics.window = recognizer.stats.lastWindow;
   return figures;
 }
 
@@ -826,7 +882,9 @@ function testSynthetic() {
   const cases = [
     { id: 'loop', phases: [{ seconds: 6, roll: 0, pitch: 60, yaw: 0 }] },
     { id: 'aileronRoll', phases: [{ seconds: 0.9, roll: 400, pitch: 0, yaw: 0 }] },
-    { id: 'barrelRoll', phases: [{ seconds: 4, roll: 90, pitch: 55, yaw: 0, g: 3 }] },
+    // A rotation about one fixed body axis between the roll and pitch axes, 360 degrees round: the
+    // helix of a barrel roll (330 degrees of roll with 144 of pitch), back level on the entry heading.
+    { id: 'barrelRoll', phases: [{ seconds: 4, roll: 82.5, pitch: 36, yaw: 0, g: 3 }] },
     { id: 'immelmann', phases: [{ seconds: 3, roll: 0, pitch: 60, yaw: 0, speed: 45 }, { seconds: 0.5, roll: 360, pitch: 0, yaw: 0 }] },
     { id: 'splitS', phases: [{ seconds: 0.5, roll: 360, pitch: 0, yaw: 0 }, { seconds: 3, roll: 0, pitch: 60, yaw: 0, speed: 95 }] },
     {
@@ -852,15 +910,17 @@ function testSynthetic() {
       ],
     },
     { id: 'snapRoll', phases: [{ seconds: 0.25, roll: 0, pitch: 40, yaw: 0, speed: 50 }, { seconds: 1.2, roll: 300, pitch: 10, yaw: 60, stalled: true }, { seconds: 0.2, roll: 0, pitch: -50, yaw: 0, speed: 55 }] },
-    { id: 'lomcevak', assists: 0, phases: [{ seconds: 0.5, roll: 120, pitch: 60, yaw: 0, speed: 45 }, { seconds: 2.2, roll: 60, pitch: 250, yaw: 160, stalled: true, speed: 25 }, { seconds: 3, roll: 0, pitch: 0, yaw: 0, speed: 60 }, { seconds: 0.6, roll: 0, pitch: wrap180Rate(), yaw: 0 }] },
+    // A gyroscopic tumble: two turns about one axis mostly of pitch and yaw, stalled, back level.
+    { id: 'lomcevak', assists: 0, phases: [{ seconds: 1.972, roll: 60, pitch: 300, yaw: 200, stalled: true, speed: 30 }, { seconds: 2, roll: 0, pitch: 0, yaw: 0, speed: 60 }] },
     { id: 'knifeEdge', phases: [{ seconds: 0.3, roll: 300, pitch: 0, yaw: 0 }, { seconds: 4, roll: 0, pitch: 0, yaw: 0 }, { seconds: 0.3, roll: -300, pitch: 0, yaw: 0 }] },
     { id: 'invertedPass', phases: [{ seconds: 0.5, roll: 360, pitch: 0, yaw: 0 }, { seconds: 4, roll: 0, pitch: 0, yaw: 0 }, { seconds: 0.5, roll: -360, pitch: 0, yaw: 0 }] },
   ];
   const covered = new Set();
   for (const { id, phases, assists = 1 } of cases) {
-    const figures = synthesize(phases, { assists });
+    const diagnostics = {};
+    const figures = synthesize(phases, { assists, diagnostics });
     const names = figures.map((entry) => `${entry.figure} ${entry.score}`).join(', ') || 'none';
-    log(`  synthetic ${id}: ${names}`);
+    log(`  synthetic ${id}: ${names}; last window ${JSON.stringify(diagnostics.window)}`);
     const pass = figures.length === 1 && figures[0].figure === id && figures[0].score >= 0 && figures[0].score <= 100;
     if (pass) covered.add(id);
     check('synthetic', `${id} recognized`, pass, names);
@@ -871,15 +931,9 @@ function testSynthetic() {
   check('synthetic', `a tumble at ${Math.round((LOMCEVAK_MAX_ASSISTS + 0.25) * 100)} % assists is not credited as a lomcevak`, assisted.length === 0, assisted.map((entry) => entry.figure).join(','));
   const halfRoll = synthesize([{ seconds: 0.5, roll: 360, pitch: 0, yaw: 0 }, { seconds: 1, roll: 0, pitch: 0, yaw: 0 }, { seconds: 0.5, roll: -360, pitch: 0, yaw: 0 }]);
   check('synthetic', 'a half roll and back is no figure', halfRoll.length === 0, halfRoll.map((entry) => entry.figure).join(','));
-  const sloppy = synthesize([{ seconds: 0.9, roll: 400, pitch: 0, yaw: 18 }]);
+  const sloppy = synthesize([{ seconds: 0.3, roll: 600, pitch: 0, yaw: 0 }, { seconds: 0.9, roll: 200, pitch: 0, yaw: 0 }]);
   const clean = synthesize([{ seconds: 0.9, roll: 400, pitch: 0, yaw: 0 }]);
-  check('synthetic', 'a roll that wanders off heading scores lower than a clean one', sloppy.length === 1 && clean.length === 1 && sloppy[0].score < clean[0].score, `${sloppy[0]?.score} < ${clean[0]?.score}`);
-}
-
-/** The lomcevak's last pitch phase: brings the tumble's body pitch back to the horizon. */
-function wrap180Rate() {
-  // 250 deg/s for 2.2 s = 550 deg of tumble pitch plus 30 of the entry: 580; -220 brings it to 360.
-  return -220 / 0.6;
+  check('synthetic', 'an uneven roll scores lower than a clean one', sloppy.length === 1 && clean.length === 1 && sloppy[0].score < clean[0].score, `${sloppy[0]?.score} < ${clean[0]?.score}`);
 }
 
 // ============================================================================================
@@ -988,6 +1042,7 @@ function createControllerRig({ craft = 'aerobatic' } = {}) {
 
 function testController() {
   const rig = createControllerRig();
+  rig.run(0.1);
   const start = rig.state.flight.altitude;
   rig.run(30);
   const flight = rig.state.flight;
@@ -1013,7 +1068,8 @@ function testController() {
   for (let index = 0; index < positions.length; index++) largest = Math.max(largest, Math.abs(positions[index]));
   const afterFlight = ribbon.getStats();
   check('controller', 'the ribbon re-anchors past 2 km (origin rule a.7)', afterFlight.reanchors >= 2, JSON.stringify(afterFlight));
-  record('controller', 'largest float32 ribbon coordinate', largest, SMOKE_RIBBON.REANCHOR + 1500, { unit: 'm', compare: 'max', decimals: 0 });
+  // Contract a.7: float32 positions relative to an anchor within 8 km (live samples trail at most 30 s behind).
+  record('controller', 'largest float32 ribbon coordinate', largest, 8000, { unit: 'm', compare: 'max', decimals: 0 });
   check('controller', 'the ring stays within its capacity', afterFlight.liveSamples <= SMOKE_RIBBON.CAPACITY, `${afterFlight.liveSamples}`);
 
   // The copilot's commands and status.

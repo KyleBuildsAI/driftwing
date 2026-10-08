@@ -62,10 +62,15 @@ const simProfile = Object.freeze({
     clMax: 1.45,
     clMin: -1.45,
     alphaCritical: 19.19, // clMax / clAlpha from zero lift at zero angle of attack
-    postStallClDrop: 0.45,
-    stallDropWidth: 3,
-    stallBlendWidth: 14,
+    // A sharp-edged symmetric section: past the stall the lift keeps falling for 14 degrees, so the wing
+    // that drops (more angle of attack) loses lift: the autorotation of a snap roll or a spin.
+    postStallClDrop: 0.75,
+    stallDropWidth: 14,
+    stallBlendWidth: 16,
   }),
+  // The stalled wing's roll-damping reversal (aerobaticAero.js): full from 1 to 14 degrees past the
+  // critical angle of attack (rad), gone by 26.
+  autorotation: Object.freeze({ gain: 0.25, from: 0, full: 1 * DEG, fadeFrom: 14 * DEG, fadeTo: 26 * DEG }),
   // The slab-sided fuselage, canopy and gear legs make a big side force: with rudder it holds the
   // craft up in a knife-edge at about 15 degrees of sideslip near 80 m/s.
   fuselage: Object.freeze({ sideArea: 6.4, sideForceSlope: 0.85, sideForceZ: -1.0, crossflowStations: Object.freeze([-1.9, 2.8]) }),
