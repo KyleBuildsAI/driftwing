@@ -116,8 +116,8 @@ const simProfile = Object.freeze({
     }),
     heating: Object.freeze({
       reference: 0.9e7, // rho V^3 (W/m^2 class) at heating 1
-      machFrom: 3.6, // the flow starts to glow
-      machFull: 4.4,
+      machFrom: 2.8, // the flow starts to glow
+      machFull: 4.0,
       maxIndex: 1.4,
       lagSeconds: 2.5, // the skin's thermal lag
       buffetFrom: 0.25,

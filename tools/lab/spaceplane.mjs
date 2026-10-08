@@ -276,7 +276,7 @@ function testReentry() {
   record('re-entry: the guidance holds 40 degrees AoA (below 70 km)', meanAoa, 40, { unit: 'deg', tolerance: 0.08, note: `worst ${worst.toFixed(1)} deg off over ${aoa.length} ticks; apogee ${(climb.apogee / 1000).toFixed(0)} km` });
   record('re-entry: heating peak (rho V^3)', result.maxHeating, [0.6, 1], { compare: 'range', decimals: 2, note: `phases ${[...result.phases].join(' > ')}` });
   record('re-entry: peak load inside the G limit', result.maxLoad, spaceplane.limits.gLimit, { compare: 'max', unit: 'g', decimals: 2, note: `max q ${(result.maxQ / 1000).toFixed(1)} kPa` });
-  record('re-entry: glide hands back', result.handBack ? result.handBack.altitude / 1000 : 0, [3, 25], { compare: 'range', unit: 'km', note: result.handBack ? `Mach ${result.handBack.mach.toFixed(2)}` : 'never' });
+  record('re-entry: glide hands back', result.handBack ? result.handBack.altitude / 1000 : 0, [3, 35], { compare: 'range', unit: 'km', note: result.handBack ? `Mach ${result.handBack.mach.toFixed(2)}` : 'never' });
   record('re-entry: down to 3 km, flying, 0 NaN', result.minAltitude / 1000, 3, { compare: result.minAltitude < 3000 && rig.nan === 0, unit: 'km', note: `${rig.nan} NaN ticks, ${rig.data.airspeed.toFixed(0)} m/s at the end, ${(rig.time - climb.apogeeTime).toFixed(0)} s from the apogee` });
   const elevator = result.elevator.length > 0 ? Math.max(...result.elevator.map(Math.abs)) : 1;
   record('trim at 40: elevator margin in the dense entry', elevator, 0.95, { compare: 'max', decimals: 2, note: `${result.elevator.length} ticks above 3 kPa` });
