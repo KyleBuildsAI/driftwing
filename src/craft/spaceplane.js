@@ -475,6 +475,25 @@ const GEAR_TRANSIT_SECONDS = simProfile.gear.transitSeconds;
 /** Split rudder halves open this far (degrees each) as the speed brake. */
 const SPEED_BRAKE_ANGLE = 42;
 
+/** The plasma sheath stands this far off the skin (m). */
+const SHEATH_OFFSET = 0.22;
+
+/**
+ * The plasma sheath: the airframe's skin pushed out along its (flat) normals, so the glow hugs the nose,
+ * the belly and the leading edges instead of a bubble round the craft.
+ */
+function buildSheath(airframeGeometry) {
+  const sheath = airframeGeometry.clone();
+  sheath.deleteAttribute('color');
+  const position = sheath.getAttribute('position');
+  const normal = sheath.getAttribute('normal');
+  for (let index = 0; index < position.count; index++) {
+    position.setXYZ(index, position.getX(index) + normal.getX(index) * SHEATH_OFFSET, position.getY(index) + normal.getY(index) * SHEATH_OFFSET, position.getZ(index) + normal.getZ(index) * SHEATH_OFFSET);
+  }
+  sheath.computeBoundingSphere();
+  return sheath;
+}
+
 /** The plume's expansion (0 dense .. 1 vacuum) from the density ratio at the craft. */
 function plumeExpansion(altitude) {
   const ratio = airDensity(altitude) / SEA_LEVEL_DENSITY;
@@ -501,7 +520,8 @@ function buildMesh(ctx) {
   buildWingHalf(airframe, -1);
   buildFin(airframe);
   buildRcsPorts(airframe);
-  addSolid(root, airframe.toGeometry(null), bodyMaterial);
+  const airframeGeometry = airframe.toGeometry(null);
+  addSolid(root, airframeGeometry, bodyMaterial);
   const cockpitSkin = addSolid(root, cockpitSkinBuilder.toGeometry(null), bodyMaterial);
   cockpitSkin.userData.hideInCockpit = true;
 
@@ -537,7 +557,7 @@ function buildMesh(ctx) {
   const effects = createSpaceplaneEffects(ctx, root, {
     nozzle: { z: NOZZLE.GIMBAL_Z + NOZZLE.LENGTH, y: NOZZLE.Y, radius: NOZZLE.EXIT, depth: NOZZLE.LENGTH },
     thrusters: RCS_THRUSTERS,
-    plasma: { centre: [0, -0.2, -0.3], radii: [5.0, 1.3, 8.3] },
+    plasma: { geometry: buildSheath(airframeGeometry), centre: [0, -0.2, -0.3], radius: 3.6 },
   });
   // Test and debug readout of the effect levels (plume, expansion, puffs, plasma).
   root.userData.spaceplaneEffects = effects;

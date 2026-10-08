@@ -5,7 +5,7 @@
 //                 (the ambient pressure no longer holds it in), its brightness following the thrust
 //   RCS puffs     one instanced draw of every thruster's puff: a short white cone of cold gas along the
 //                 jet's direction, flickering while the jet fires (instance strength attribute)
-//   plasma        the re-entry glow: a shell around the airframe, brightest on the windward faces (the
+//   plasma        the re-entry glow: a sheath a little off the airframe's skin, brightest on the windward faces (the
 //                 belly and the nose at entry angles of attack) with a hot rim and a turbulent flicker,
 //                 plus a long ionised wake streaming down the air flow; both follow the heating. Seen
 //                 from the cockpit its inside faces wash the windscreen pink and orange
@@ -18,7 +18,7 @@ import { clamp, damp } from '../core/util.js';
 
 const { Fn, uniform, float, vec3, uv, sin, cos, pow, abs, mix, saturate, smoothstep, dot, normalize, normalView, positionView, normalLocal, positionLocal, instancedDynamicBufferAttribute } = TSL;
 
-const PLUME = Object.freeze({ SEGMENTS: 24, DIAMONDS: 5, DENSE_LENGTH: 7, VACUUM_LENGTH: 26, DENSE_WIDTH: 1, VACUUM_WIDTH: 5.5 });
+const PLUME = Object.freeze({ SEGMENTS: 24, DIAMONDS: 5, DENSE_LENGTH: 7, VACUUM_LENGTH: 16, DENSE_WIDTH: 1, VACUUM_WIDTH: 4 });
 const PUFF = Object.freeze({ LENGTH: 2.4, RADIUS: 0.5 });
 /** The wake trails this far behind the centre of the shell (m) at full heating. */
 const WAKE_LENGTH = 70;
@@ -38,12 +38,13 @@ function createPlume(ctx, spec) {
   const intensity = Fn(() => {
     // A gas column glows through its whole depth: seen end-on from behind it reads as a disc, not a ring.
     const core = pow(facing, mix(float(1.2), float(0.5), expansion)).mul(0.55).add(0.45);
-    // Shock diamonds in dense air; gone in the under-expanded vacuum plume.
-    const diamonds = pow(cos(along.mul(PLUME.DIAMONDS * Math.PI * 2).sub(0.5)).mul(0.5).add(0.5), float(4)).mul(float(1).sub(along)).mul(float(1).sub(expansion)).mul(0.7);
+    // Shock diamonds in dense air, seen from the side (end-on they would stack into rings); gone in the
+    // under-expanded vacuum plume.
+    const diamonds = pow(cos(along.mul(PLUME.DIAMONDS * Math.PI * 2).sub(0.5)).mul(0.5).add(0.5), float(4)).mul(float(1).sub(along)).mul(float(1).sub(expansion)).mul(facing.mul(facing)).mul(0.9);
     const flicker = sin(uniforms.time.mul(53).add(along.mul(17))).mul(sin(uniforms.time.mul(29).sub(along.mul(9)))).mul(0.15).add(0.92);
     const fade = pow(float(1).sub(along), mix(float(1.2), float(2.4), expansion)).mul(smoothstep(float(0), float(0.04), along));
     // The vacuum plume is wide and faint: the same energy spread over far more volume.
-    const thin = mix(float(1), float(0.32), expansion);
+    const thin = mix(float(1), float(0.2), expansion);
     return core.add(diamonds.mul(core)).mul(fade).mul(flicker).mul(thin).mul(strength);
   })();
   const hot = vec3(0.62, 0.72, 1.0);
@@ -115,13 +116,12 @@ function createPuffs(ctx, thrusters) {
   return { mesh, strengths, strengthAttribute };
 }
 
-/** The plasma shell around the airframe and its ionised wake. */
+/** The plasma sheath around the airframe and its ionised wake. */
 function createPlasma(ctx, spec) {
   const { uniforms } = ctx;
   const strength = uniform(0);
   /** The air flow's direction in the craft's frame (unit, toward where the air goes). */
   const flow = uniform(new THREE.Vector3(0, 0, 1));
-  const shellGeometry = new THREE.SphereGeometry(1, 40, 24);
   const shellMaterial = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, fog: false });
   const shellIntensity = Fn(() => {
     // Windward: the faces the air flows onto (the normal against the flow).
@@ -138,10 +138,8 @@ function createPlasma(ctx, spec) {
   const white = vec3(1.0, 0.92, 0.85);
   shellMaterial.colorNode = mix(mix(orange, pink, saturate(shellIntensity.mul(0.6))), white, saturate(strength.sub(0.75).mul(2))).mul(shellIntensity).mul(1.5);
   shellMaterial.opacityNode = saturate(shellIntensity.mul(0.85));
-  const shell = new THREE.Mesh(shellGeometry, shellMaterial);
+  const shell = new THREE.Mesh(spec.geometry, shellMaterial);
   shell.name = 'plasma-sheath';
-  shell.position.set(spec.centre[0], spec.centre[1], spec.centre[2]);
-  shell.scale.set(spec.radii[0], spec.radii[1], spec.radii[2]);
   shell.renderOrder = 6;
   shell.castShadow = false;
   shell.receiveShadow = false;
@@ -172,7 +170,8 @@ function createPlasma(ctx, spec) {
 
 /**
  * Adds the spaceplane's effects to `root`. spec: { nozzle: { z (exit), y, radius, depth }, thrusters:
- * [{ position, direction, axis: 'pitch' | 'yaw' | 'roll', sign }], plasma: { centre, radii } }.
+ * [{ position, direction, axis: 'pitch' | 'yaw' | 'roll', sign }], plasma: { geometry (the sheath, owned
+ * by the effects from then on), centre (where the wake starts), radius (the wake's) } }.
  * update(frame) takes { dt, thrust (0..1 of the lever), expansion (0 dense .. 1 vacuum), jets: { pitch,
  * yaw, roll } (-1..1), heating (0..1), flow (unit Vector3: the air flow in the craft's frame), engineOn }.
  * Returns { update, getStats }.
@@ -219,7 +218,7 @@ export function createSpaceplaneEffects(ctx, root, spec) {
         plasma.wake.quaternion.setFromUnitVectors(wakeUp, frame.flow);
       }
       const wakeLength = WAKE_LENGTH * (0.3 + 0.7 * levels.plasma);
-      const wakeRadius = spec.plasma.radii[0] * 0.75;
+      const wakeRadius = spec.plasma.radius;
       plasma.wake.scale.set(wakeRadius, wakeLength, wakeRadius);
 
       const priming = primeFrames > 0;
