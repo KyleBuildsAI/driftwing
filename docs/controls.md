@@ -144,6 +144,7 @@ The same ControlState drives every craft; each craft's input profile decides wha
 | Helicopter | collective | hover hold (locks position, height and heading; the stick moves the hold point) | at 100 % assists the lever is a climb / descend command around its centre; Z cuts the engine for autorotation practice |
 | Wingsuit | none | deploy the parachute (U does too) | under the canopy, stick roll, the rudder pedals and the toe brakes are the steering toggles; pull back to flare |
 | FPV drone | thrust | rate / angle mode (turtle mode when it lies upside down) | Z arms and disarms; at high assists the throttle asks for a climb rate around its centre (altitude hold) |
+| Seaplane | throttle | water rudders up / down (TWCS button 6 too) | G raises and lowers the amphibian wheels, on the water as well (up for water, down for a runway: wheels down in the water nose it over, wheels up on land skid the floats, and WREN warns on the approach); on the water the pedals and the differential toe brakes steer the water rudders; 3 flap notches; above 50 % assists the water assist holds the planing trim |
 
 ## World map
 
