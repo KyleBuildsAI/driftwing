@@ -10,13 +10,17 @@
 //                 width) x the station length, along the water's normal: the floats displace water,
 //                 they are not springs
 //   planing       the water's normal force on the bottom from the flow into it (strip theory: the
-//                 added-mass momentum term, proportional to the forward speed times the speed into
-//                 the bottom, plus cross-flow drag and radiation damping). It grows with the square
-//                 of the speed and lifts the floats until only the forebody near the step is wet:
-//                 the craft rides "on the step"
+//                 added-mass momentum term, proportional to the forward speed times the flow into the
+//                 bottom, which is inclined by the keel's own slope: the rocker meets the water at the
+//                 bow, the afterbody faces away from it until the trim passes the sternpost angle).
+//                 It develops with the beam Froude number (a share of it at displacement speeds: the
+//                 bow wave), is strongest at the leading wetted edge, grows with the square of the
+//                 speed and lifts the floats until only the forebody near the step is wet: the craft
+//                 rides "on the step". Cross-flow drag and radiation damping answer heave only
 //   drag          skin friction on the wetted girth, and the displacement (wave-making) drag of the
-//                 immersed volume, which peaks at the hump speed (profile hump.speed, about 45 km/h)
-//                 and falls away as the planing lift empties the floats: lower drag on the step
+//                 immersed volume (peaking near hump.waveDragSpeed); as the planing lift empties the
+//                 floats, the water resistance peaks near hump.speed (about 45 km/h) and falls well
+//                 below that on the step
 //   side force    the floats' keels resist sideslip (cross-flow drag and keel lift), so they track
 // Porpoising: on the step, a trim attitude outside the stable band (hump.trimLow .. trimHigh; the
 // attitude the pilot holds, the trim averaged over about a porpoise period) feeds a pitch-heave
@@ -49,7 +53,7 @@
 import * as THREE from 'three/webgpu';
 import { DEG, clamp } from '../core/util.js';
 import { GRAVITY, smoothstep } from './aero.js';
-import { createWaterSampleScratch, surfaceHeightAt, waterHeightAt, waterSampleAt } from './waterSurface.js';
+import { createWaterSampleScratch, waterHeightAt, waterSampleAt } from './waterSurface.js';
 
 /** A touchdown on the water counts after this long with no float or gear contact (shorter gaps are bounces). */
 const TOUCHDOWN_AIRBORNE_SECONDS = 0.25;
@@ -73,14 +77,14 @@ const SETTLE_SECONDS = 1;
 const HELD_TRIM_SECONDS = 0.8;
 /** A run on the step this long (s) or longer goes to the journal. */
 const STEP_RECORD_SECONDS = 3;
-/** The gear selector refuses to raise wheels that carry the craft on land. */
+/** The gear selector's notices (it refuses to raise wheels that carry the craft on land). */
 const GEAR_NOTICE = Object.freeze({
   up: 'Gear up: set for a water landing.',
   down: 'Gear down: set for a runway landing.',
   locked: 'The wheels carry us on land: the gear stays down.',
 });
 
-/** Smoothly saturating section lift of a water rudder blade (stalls past about 25 degrees). */
+/** Smoothly saturating section lift of a water rudder blade at angle (rad; stalls past about 25 degrees). */
 function rudderLift(angle, slope) {
   return slope * Math.sin(clamp(angle, -0.55, 0.55)) * (1 - 0.35 * smoothstep(0.35, 0.55, Math.abs(angle)));
 }
@@ -126,7 +130,7 @@ function buildStations(floats) {
     const z = (from + to) / 2;
     const toBow = (keel.stepZ - z) / foreLength;
     // slope: the bottom's angle to the body axis (rad), facing the flow: the rocker lifts the bow.
-    stations.push({ z, length: to - from, rise: keel.bowRise * toBow * toBow, slope: (2 * keel.bowRise * toBow) / foreLength, beamScale: 0.45 + 0.55 * Math.sqrt(Math.max(0, 1 - toBow * toBow)), afterbody: false });
+    stations.push({ z, length: to - from, rise: keel.bowRise * toBow * toBow, slope: (2 * keel.bowRise * toBow) / foreLength, beamScale: 0.45 + 0.55 * Math.sqrt(Math.max(0, 1 - toBow * toBow)) });
   }
   for (let index = 0; index < floats.aftStations; index++) {
     const from = keel.stepZ + (aftLength * index) / floats.aftStations;
@@ -135,7 +139,7 @@ function buildStations(floats) {
     const toStern = (z - keel.stepZ) / aftLength;
     // Aft of the step the bottom rises at the sternpost angle: it faces away from the flow until the
     // trim exceeds that angle (then the afterbody lifts: the upper limit of stable planing).
-    stations.push({ z, length: to - from, rise: keel.stepHeight + (z - keel.stepZ) * sternpost, slope: -Math.atan(sternpost), beamScale: 1 - 0.5 * toStern, afterbody: true });
+    stations.push({ z, length: to - from, rise: keel.stepHeight + (z - keel.stepZ) * sternpost, slope: -Math.atan(sternpost), beamScale: 1 - 0.5 * toStern });
   }
   return stations;
 }
@@ -152,8 +156,8 @@ export function floatKeelHeight(floats, z) {
 
 /**
  * The extension factory (profile.extension): { profile, craft, bus, craftState, limits, flightData }
- * -> SimFixedWing hooks (shapeControls, contactForces, afterStep, reset, writeTelemetry, snapshot,
- * restore, dispose).
+ * -> SimFixedWing hooks (shapeControls, contactForces, afterStep, reset, snapshot, restore, dispose)
+ * and the live hydro readouts (hydro).
  */
 export function createFloatsExtension({ profile, craft, bus, craftState, limits, flightData }) {
   const floats = profile.floats;
@@ -173,7 +177,7 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
 
   // ---- Geometry (relative to the centre of mass, body axes) ---------------------------------------
   const stationTemplate = buildStations(floats);
-  /** Every station of both hulls: { relative (keel point), length, beam, afterbody, hull }. */
+  /** Every station of both hulls: { relative (keel point), length, slope, beam, hull }. */
   const stations = [];
   floats.hulls.forEach((hullX, hull) => {
     for (const template of stationTemplate) {
@@ -182,7 +186,6 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
         length: template.length,
         slope: template.slope,
         beam: floats.beam * template.beamScale,
-        afterbody: template.afterbody,
         hull,
       });
     }
@@ -249,6 +252,9 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
   const lever = new THREE.Vector3();
   const forceSum = new THREE.Vector3();
   const sample = createWaterSampleScratch();
+  /** Per hull, this tick: wet yet, and the leading wetted edge (z relative to the centre of mass). */
+  const wetHull = floats.hulls.map(() => false);
+  const leadingZ = new Float64Array(floats.hulls.length);
 
   function notify(text, kind = 'info') {
     bus.emit('notify', { text, kind });
@@ -351,8 +357,8 @@ export function createFloatsExtension({ profile, craft, bus, craftState, limits,
     if (position.y - surfaceBelow < CONTACT_REACH) {
       inverseQuaternion.copy(tick.quaternion).invert();
       forceSum.set(0, 0, 0);
-      const wetHull = [false, false];
-      const leadingZ = [NaN, NaN];
+      wetHull.fill(false);
+      leadingZ.fill(NaN);
       let forwardSum = 0;
       let forwardWeight = 0;
       for (const station of stations) {
