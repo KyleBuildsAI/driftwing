@@ -68,8 +68,9 @@ export default Object.freeze({
       seconds: 12,
       script(t, api) {
         trackRoll(api);
-        const rolling = t >= 3 && api.memo.roll < 330;
-        return { roll: rolling ? 1 : 0, pitch: 0, yaw: 0, throttle: 0.8 };
+        // Full aileron, easing off over the last 60 degrees so a slow frame cannot overshoot the stop.
+        const roll = t >= 3 ? clamp((355 - api.memo.roll) / 60, 0, 1) : 0;
+        return { roll: roll > 0.05 ? roll : 0, pitch: 0, yaw: 0, throttle: 0.8 };
       },
       checks: [
         { id: 'rate', label: 'rolls faster than 300 deg/s', from: 3, until: 6, test: (api) => api.memo.peakRollRate > 300 },
@@ -107,7 +108,11 @@ export default Object.freeze({
         const memo = api.memo;
         const rollRate = trackRoll(api);
         if (t < 3) return { roll: clamp(-0.02 * api.flight.roll, -0.3, 0.3), pitch: clamp(-0.03 * api.flight.pitch, -0.2, 0.2), yaw: 0, throttle: 0.7 };
-        if (!memo.stopping && memo.roll < 240) return { roll: 0, pitch: 0.7, yaw: 1, throttle: 0.7 };
+        // The snap's inputs until the roll is far enough round to stop it (allowing for a slow frame's turn).
+        const lastFrame = Number.isFinite(memo.frameSeconds) ? memo.frameSeconds : 0;
+        memo.frameSeconds = Number.isFinite(memo.previousT) ? t - memo.previousT : 0;
+        memo.previousT = t;
+        if (!memo.stopping && memo.roll + (rollRate / DEG) * lastFrame < 240) return { roll: 0, pitch: 0.7, yaw: 1, throttle: 0.7 };
         memo.stopping = true;
         // Stop the rotation (forward stick, opposite rudder), then fly wings level onto the horizon.
         if (!memo.stopped) {
