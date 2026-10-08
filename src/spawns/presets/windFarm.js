@@ -14,6 +14,7 @@ export default Object.freeze({
   kind: 'site',
   rarity: 'common',
   heavy: false,
+  tags: ['slow'],
   placement: {
     chance: 0.06,
     minSpacing: 14000,

@@ -13,6 +13,7 @@ export default Object.freeze({
   kind: 'event',
   rarity: 'uncommon',
   heavy: false,
+  tags: ['challenge'],
   candidates: Object.freeze({ cellSize: 7000, bucketSeconds: 900, chance: 0.45 }),
   filters: Object.freeze({
     biomes: null,

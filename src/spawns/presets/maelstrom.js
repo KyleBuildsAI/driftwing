@@ -14,6 +14,7 @@ export default Object.freeze({
   kind: 'site',
   rarity: 'rare',
   heavy: false,
+  tags: ['water', 'spectacle'],
   placement: {
     chance: 0.035,
     minSpacing: 30000,

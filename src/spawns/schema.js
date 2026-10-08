@@ -32,6 +32,19 @@ export const ANCHOR_SEEKS = Object.freeze(['peak']);
 export const ANCHOR_ALIGNS = Object.freeze(['downwind']);
 /** Tokens a callout line may use; they are filled in when the line is spoken. */
 export const CALLOUT_TOKENS = Object.freeze(['distance', 'direction', 'name', 'eta']);
+/**
+ * Tags a preset may carry (contract i.2): what the director's craft-aware weighting favours, through
+ * each craft module's directorProfile (a seaplane favours water and lake, an eagle thermal, perch and
+ * murmuration, a high spaceplane celestial and farLure, a balloon calm, slow and spectacle).
+ */
+export const PRESET_TAGS = Object.freeze([
+  'water', 'lake', 'coast', 'thermal', 'perch', 'murmuration', 'celestial', 'farLure', 'calm', 'slow', 'spectacle',
+  'challenge', 'night', 'snow', 'desert', 'forest',
+]);
+/** Global overrides with regional blending (contract i.4; src/spawns/overrides.js). */
+export const OVERRIDE_KINDS = Object.freeze(['bloodMoon', 'midnightSun']);
+/** Combo member roles (contract i.3): the anchor stands at the candidate, the others around it. */
+export const COMBO_ROLES = Object.freeze(['anchor', 'member']);
 /** Every top-level preset field. Anything else is a typo and is refused. */
 export const PRESET_FIELDS = Object.freeze([
   'id', 'name', 'category', 'kind', 'rarity', 'heavy', 'placement', 'candidates', 'filters', 'stamps', 'engines',
@@ -350,6 +363,110 @@ function validateAnchor(check, anchor, kind) {
   if (anchor.align !== undefined && anchor.align !== null) check.oneOf(anchor.align, ANCHOR_ALIGNS, 'anchor.align');
 }
 
+/** tags (optional, contract i.2): distinct names from PRESET_TAGS. */
+function validateTags(check, tags) {
+  if (tags === undefined) return;
+  check.array(tags, 'tags');
+  const seen = new Set();
+  tags.forEach((tag, index) => {
+    check.oneOf(tag, PRESET_TAGS, `tags[${index}]`);
+    if (seen.has(tag)) check.fail(`tags[${index}]`, `repeats ${describe(tag)}`);
+    seen.add(tag);
+  });
+}
+
+/** combo.preconditions.near: landmarks and / or sites (preset ids) within radius metres. */
+function validateComboNear(check, near) {
+  const path = 'combo.preconditions.near';
+  check.object(near, path);
+  check.onlyKeys(near, ['landmarks', 'sites', 'radius'], path);
+  if (near.landmarks === undefined && near.sites === undefined) check.fail(path, 'must name landmarks, sites or both');
+  if (near.landmarks !== undefined) {
+    check.array(near.landmarks, `${path}.landmarks`);
+    if (near.landmarks.length === 0) check.fail(`${path}.landmarks`, 'must name at least one landmark type');
+    near.landmarks.forEach((type, index) => check.oneOf(type, LANDMARK_TYPES, `${path}.landmarks[${index}]`));
+  }
+  if (near.sites !== undefined) {
+    check.array(near.sites, `${path}.sites`);
+    if (near.sites.length === 0) check.fail(`${path}.sites`, 'must name at least one site preset');
+    near.sites.forEach((id, index) => check.string(id, `${path}.sites[${index}]`));
+  }
+  check.number(near.radius, `${path}.radius`, { above: 0, max: 20000 });
+}
+
+/**
+ * combo (optional, contract i.3): a legendary event whose preconditions all hold at its candidate,
+ * started with its member presets (each an event) placed around it. validatePresets checks that the
+ * members and the sites it names exist.
+ */
+function validateCombo(check, combo, preset) {
+  if (combo === undefined || combo === null) return;
+  check.object(combo, 'combo');
+  check.onlyKeys(combo, ['preconditions', 'members', 'exclusive', 'heavySlots'], 'combo');
+  if (preset.kind !== 'event') check.fail('combo', 'is for events only (the director schedules a combo as a candidate)');
+  if (preset.rarity !== 'legendary') check.fail('combo', `needs rarity "legendary", got ${describe(preset.rarity)}`);
+  if (combo.preconditions !== undefined) {
+    const preconditions = check.object(combo.preconditions, 'combo.preconditions');
+    check.onlyKeys(preconditions, ['biomes', 'timeOfDay', 'weather', 'siteActive', 'near'], 'combo.preconditions');
+    check.listOrNull(preconditions.biomes, null, 'combo.preconditions.biomes');
+    check.listOrNull(preconditions.timeOfDay, TIME_OF_DAY_CLASSES, 'combo.preconditions.timeOfDay');
+    check.listOrNull(preconditions.weather, WEATHER_STATE_NAMES, 'combo.preconditions.weather');
+    check.listOrNull(preconditions.siteActive, null, 'combo.preconditions.siteActive');
+    if (preconditions.near !== undefined && preconditions.near !== null) validateComboNear(check, preconditions.near);
+  }
+  check.array(combo.members, 'combo.members');
+  if (combo.members.length === 0) check.fail('combo.members', 'must name at least one member');
+  let anchors = 0;
+  combo.members.forEach((member, index) => {
+    const path = `combo.members[${index}]`;
+    check.object(member, path);
+    check.onlyKeys(member, ['presetId', 'role', 'place', 'delay'], path);
+    check.string(member.presetId, `${path}.presetId`);
+    if (member.presetId === preset.id) check.fail(`${path}.presetId`, 'cannot be the combo itself');
+    const role = member.role === undefined ? 'member' : check.oneOf(member.role, COMBO_ROLES, `${path}.role`);
+    if (role === 'anchor') {
+      anchors++;
+      if (member.place !== undefined) check.fail(`${path}.place`, 'is for members (the anchor stands at the candidate)');
+    } else {
+      const place = check.object(member.place, `${path}.place`);
+      check.onlyKeys(place, ['bearing', 'distance', 'jitter'], `${path}.place`);
+      check.number(place.bearing, `${path}.place.bearing`, { min: -360, max: 360 });
+      check.number(place.distance, `${path}.place.distance`, { min: 0, max: 20000 });
+      if (place.jitter !== undefined) check.number(place.jitter, `${path}.place.jitter`, { min: 0, max: 5000 });
+    }
+    if (member.delay !== undefined) check.number(member.delay, `${path}.delay`, { min: 0, max: 600 });
+  });
+  if (anchors > 1) check.fail('combo.members', `may hold one anchor, got ${anchors}`);
+  if (combo.exclusive !== undefined) check.boolean(combo.exclusive, 'combo.exclusive');
+  if (combo.heavySlots !== undefined) {
+    check.number(combo.heavySlots, 'combo.heavySlots', { min: 0, max: 2 });
+    if (!Number.isInteger(combo.heavySlots)) check.fail('combo.heavySlots', `must be a whole number, got ${combo.heavySlots}`);
+  }
+}
+
+/**
+ * override (optional, contract i.4): a global override the director schedules per night (never a
+ * candidate): active on night n when hash(seed, n, presetId) < nightChance, weighted at the player
+ * by region (null: everywhere; else the named biomes blended over blendKm).
+ */
+function validateOverride(check, override, preset) {
+  if (override === undefined || override === null) return;
+  check.object(override, 'override');
+  check.onlyKeys(override, ['kind', 'nightChance', 'region'], 'override');
+  if (preset.kind !== 'event') check.fail('override', 'is for events only (an override is a happening, not a placed site)');
+  if (preset.combo !== undefined && preset.combo !== null) check.fail('override', 'cannot be combined with combo');
+  check.oneOf(override.kind, OVERRIDE_KINDS, 'override.kind');
+  check.number(override.nightChance, 'override.nightChance', { above: 0, max: 1 });
+  if (override.region !== null) {
+    const region = check.object(override.region, 'override.region');
+    check.onlyKeys(region, ['biomes', 'blendKm'], 'override.region');
+    check.array(region.biomes, 'override.region.biomes');
+    if (region.biomes.length === 0) check.fail('override.region.biomes', 'must name at least one biome');
+    region.biomes.forEach((biome, index) => check.string(biome, `override.region.biomes[${index}]`));
+    check.number(region.blendKm, 'override.region.blendKm', { above: 0, max: 200 });
+  }
+}
+
 /**
  * Validates one preset against contract section 1. Returns the preset; throws an Error naming the
  * preset and the field at fault.
@@ -399,7 +516,38 @@ export function validatePreset(preset, { engineNames = null } = {}) {
   // challenge: a gate course in the spawn's frame (src/gameplay/challenges.js validateChallengeBlock),
   // built and registered by the structure recipe challengeGates.
   if (preset.challenge !== undefined && preset.challenge !== null) validateChallengeBlock(preset.challenge, preset.id);
+  validateTags(check, preset.tags);
+  validateCombo(check, preset.combo, preset);
+  validateOverride(check, preset.override, preset);
   return preset;
+}
+
+/**
+ * The cross-preset references of combos (contract i.3): every member is another event preset of the
+ * list that is neither a combo nor an override, and every site a precondition names is a site preset
+ * (with an activeState when siteActive names it).
+ */
+function validateComboReferences(presets) {
+  const byId = new Map(presets.map((preset) => [preset.id, preset]));
+  for (const preset of presets) {
+    if (!preset.combo) continue;
+    const check = createChecker(preset.id);
+    preset.combo.members.forEach((member, index) => {
+      const target = byId.get(member.presetId);
+      const path = `combo.members[${index}].presetId`;
+      if (!target) check.fail(path, `names no preset: ${describe(member.presetId)}`);
+      if (target.kind !== 'event') check.fail(path, `must name an event preset (${describe(member.presetId)} is a ${target.kind})`);
+      if (target.combo || target.override) check.fail(path, `cannot name a combo or an override preset (${describe(member.presetId)})`);
+    });
+    const preconditions = preset.combo.preconditions || {};
+    const siteActive = preconditions.siteActive || [];
+    const sites = [...siteActive, ...((preconditions.near && preconditions.near.sites) || [])];
+    for (const siteId of sites) {
+      const target = byId.get(siteId);
+      if (!target || target.kind !== 'site') check.fail('combo.preconditions', `names ${describe(siteId)}, which is not a site preset`);
+      if (siteActive.includes(siteId) && !target.activeState) check.fail('combo.preconditions.siteActive', `names ${describe(siteId)}, which has no activeState`);
+    }
+  }
 }
 
 /** Validates every preset and that their ids are unique. Returns the list. */
@@ -411,5 +559,6 @@ export function validatePresets(presets, options = {}) {
     if (seen.has(preset.id)) throw new Error(`[DRIFTWING] preset "${preset.id}": field "id" is used by another preset`);
     seen.add(preset.id);
   }
+  validateComboReferences(presets);
   return presets;
 }

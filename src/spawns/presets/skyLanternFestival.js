@@ -14,6 +14,7 @@ export default Object.freeze({
   kind: 'event',
   rarity: 'rare',
   heavy: false,
+  tags: ['night', 'calm', 'slow', 'spectacle'],
   candidates: Object.freeze({ cellSize: 6000, bucketSeconds: 900, chance: 0.5 }),
   filters: Object.freeze({
     biomes: null,

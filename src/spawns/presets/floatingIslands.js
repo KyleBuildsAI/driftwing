@@ -12,6 +12,7 @@ export default Object.freeze({
   kind: 'site',
   rarity: 'rare',
   heavy: true,
+  tags: ['perch', 'spectacle', 'farLure'],
   placement: Object.freeze({
     chance: 0.3,
     minSpacing: 22000,
