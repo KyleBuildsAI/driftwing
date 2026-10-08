@@ -712,7 +712,11 @@ function updateFlightLog(api, dt) {
     api.notify(`Apogee ${kilometres(altitude)}.`, 'info');
   }
   log.lastVerticalSpeed = climb;
-  if (altitude > REENTRY.highArc) log.highArc = true;
+  if (altitude > REENTRY.highArc) {
+    log.highArc = true;
+    // Back in space (a new climb, or a relaunch high up): the next way down is a new re-entry.
+    if (log.phase === 'clear') log.phase = 'none';
+  }
   if (climb > 0 && altitude < REENTRY.newArcBelow) {
     log.highArc = false;
     if (log.phase !== 'none' && log.phase !== 'blackout') log.phase = 'none';
