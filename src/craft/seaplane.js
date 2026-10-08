@@ -35,7 +35,7 @@ const FLOATS = Object.freeze({
    * Keel line: the step's keel height (body y), the step's position, the bow and the stern; the keel
    * rises toward the bow (rocker), steps up at the step and rises aft of it at the sternpost angle.
    */
-  keel: Object.freeze({ stepY: -2.18, stepZ: -0.4, bowZ: -4.05, sternZ: 4.05, bowRise: 0.62, stepHeight: 0.07, sternpostAngle: 7.5 }),
+  keel: Object.freeze({ stepY: -2.18, stepZ: -0.4, bowZ: -4.05, sternZ: 4.05, bowRise: 0.62, stepHeight: 0.07, sternpostAngle: 8.5 }),
   beam: 0.92,
   deadrise: 22,
   /** Keel to deck (m): deeper immersion than this is a fully submerged section. */
@@ -103,7 +103,7 @@ const simProfile = Object.freeze({
     area: 23.2, // constant 1.59 m chord, rounded tips
     taper: 1,
     oswald: 0.78,
-    incidence: 2,
+    incidence: 3,
     // 1 degree of geometric dihedral plus the high wing's keel effect.
     dihedral: 3,
     washout: 1,
