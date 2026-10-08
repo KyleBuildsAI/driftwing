@@ -76,9 +76,10 @@ export default Object.freeze({
     Object.freeze({
       id: 'paraglider-thermal-climb',
       views: ['third', 'first'],
-      // Midday: the thermals are at full strength (the WindField's sun factor).
+      // Midday: the thermals are at full strength (the WindField's sun factor). The start is low in the
+      // column, where it is strong (a thermal tops out 600-1300 m above its ground).
       time: 0.5,
-      start: { at: 'thermal', mode: 'air', agl: 300 },
+      start: { at: 'thermal', mode: 'air', agl: 150 },
       seconds: 120,
       script: thermalPilot,
       checks: [
@@ -133,16 +134,20 @@ export default Object.freeze({
     Object.freeze({
       id: 'paraglider-slope-launch',
       views: ['third', 'first'],
-      // Standing on the nearest launch slope facing downhill; the launch run starts at once.
-      start: { at: 'slope', mode: 'ground', craftState: { launchRequested: true } },
-      seconds: 24,
-      script() {
+      // Standing on flat ground, the pilot asks WREN to launch: the copilot command takes the pilot to
+      // the nearest launch slope facing into the wind (the craft's own slope finder, as a switch below
+      // 60 m does), the wing inflates, the pilot runs and is lifted off.
+      start: { at: 'spawn', mode: 'ground', flatSpot: true },
+      seconds: 30,
+      script(t, api) {
+        if (t >= 1 && api.once('launch')) api.memo.reply = api.controller.runCraftCommand('launch');
         return { roll: 0, pitch: 0, yaw: 0, throttle: 0 };
       },
       checks: [
-        { id: 'standing', label: 'starts standing on the slope', until: 0.5, test: (api) => api.flight.onGround },
-        { id: 'inflating', label: 'the wing inflates and the pilot runs', until: 6, test: (api) => api.craftState.phase === 'launch' && api.craftState.inflation > 0.5 && api.flight.groundSpeed > 2 },
-        { id: 'airborne', label: 'airborne: flying the wing clear of the slope', until: 24, test: (api) => api.craftState.phase === 'flight' && !api.flight.onGround && api.agl() > 5 },
+        { id: 'standing', label: 'starts standing on the flat, the wing laid down', until: 0.9, test: (api) => api.flight.onGround && api.craftState.phase === 'landed' },
+        { id: 'command', label: 'the launch command runs (a slope found)', from: 1, until: 3, test: (api) => Boolean(api.memo.reply && api.memo.reply.ok && /Launching|Inflating/.test(api.memo.reply.text)) },
+        { id: 'inflating', label: 'the wing inflates and the pilot runs', from: 1, until: 9, test: (api) => api.craftState.phase === 'launch' && api.craftState.inflation > 0.5 && api.flight.groundSpeed > 2 },
+        { id: 'airborne', label: 'airborne: flying the wing clear of the slope', from: 2, until: 30, test: (api) => api.craftState.phase === 'flight' && !api.flight.onGround && api.agl() > 5 },
       ],
     }),
   ]),

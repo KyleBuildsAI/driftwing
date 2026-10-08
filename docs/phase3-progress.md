@@ -523,7 +523,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
     on deep brakes, big ears 2.5 m/s down.
   - `src/craft/paraglider.js`: the mesh (a 16-cell elliptical wing re-skinned every frame: brake
     flaps, big ears and collapses folded about hinge ribs, flutter, crumpled while deflated and rising
-    on the inflation arc; 46 line segments; the pilot in a harness with IK arms on the brake handles,
+    on the inflation arc; 32 line segments; the pilot in a harness with IK arms on the brake handles,
     IK legs on the speed bar, standing and striding on the ground, leaning into a weight shift), the
     harness cockpit (custom: the flight deck, the pod, the straps), `situate` (flying at trim; below
     60 m AGL or landed: standing on the nearest launch slope, downhill and into the wind, the run
