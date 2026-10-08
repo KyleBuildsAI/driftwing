@@ -711,8 +711,8 @@ function buildMesh(ctx) {
 /** Spray droplets per second at full spray from each chine (and from the prop wash at full power). */
 const SPRAY_RATE = Object.freeze({ chine: 110, bow: 45, propWash: 60 });
 /**
- * A gear advisory speaks once per approach: it re-arms when the craft climbs above REARM_AGL (m), the
- * gear is moved, or its warning has been clear for ADVISORY_REARM_SECONDS (s).
+ * A gear advisory speaks once per approach: it re-arms when the craft climbs above ADVISORY_REARM_AGL
+ * (m), the gear is moved, or its warning has been clear for ADVISORY_REARM_SECONDS (s).
  */
 const ADVISORY_REARM_SECONDS = 20;
 const ADVISORY_REARM_AGL = 200;
