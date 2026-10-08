@@ -195,6 +195,9 @@ export function createFarFieldSystem(ctx) {
 
   const meshPool = [];
   let meshesCreated = 0;
+  // Whether a mesh went to a tile since the last release: the prewarm stand-in alone is no reason to
+  // release (disposing it would free a geometry 20 s after boot, in the middle of whatever is running).
+  let tilesBuilt = false;
   function createTileMesh() {
     const geometry = new THREE.BufferGeometry();
     geometry.setIndex(sharedIndex);
@@ -344,6 +347,7 @@ export function createFarFieldSystem(ctx) {
   }
 
   function acquireMesh() {
+    tilesBuilt = true;
     if (meshPool.length > 0) return meshPool.pop();
     if (meshesCreated >= MAX_TILE_MESHES) evictTiles(1);
     return meshPool.length > 0 ? meshPool.pop() : createTileMesh();
@@ -752,6 +756,7 @@ export function createFarFieldSystem(ctx) {
     group.clear();
     meshPool.length = 0;
     meshesCreated = 0;
+    tilesBuilt = false;
     records.clear();
     pendingCount = 0;
     readySinceSelect = false;
@@ -785,7 +790,7 @@ export function createFarFieldSystem(ctx) {
       }
       shell.visible = false;
       lowSeconds += realDt;
-      if (lowSeconds >= RELEASE_SECONDS && (meshesCreated > 0 || records.size > 0)) releaseTiles();
+      if (lowSeconds >= RELEASE_SECONDS && (tilesBuilt || records.size > 0)) releaseTiles();
       return;
     }
     lowSeconds = 0;

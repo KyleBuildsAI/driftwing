@@ -389,6 +389,14 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
     `presetChecksBatch2.js`) pin it in their setup; the spawn check kit leaves live spawns' wind
     sources out of a dispose check, as it does for their colliders and courses (a game site the feed
     builds during a check is not the disposed spawn's).
+  - the far field no longer releases (disposes) its prewarm stand-in tile 20 s after boot when no
+    tile was ever built: that one-time geometry free landed inside the strict GPU-memory baselines
+    of engine-fauna, engine-fauna-modes, engine-structure, engine-waterEffect and
+    engine-windModifier on WebGL2 (one geometry fewer "during" a check); it now releases only after
+    tiles were built (), as the high-altitude step file's release check expects;
+  - wading birds choose their shallows by the still water level (: a
+    lake's level or sea level), not the instantaneous swell, so a spot 1 m deep no longer reads as
+    shallow under a passing trough (engine-fauna-modes' wade check failed on WebGL2 that way).
 - **Docs:** the architecture test table lists the wave 1 labs (origin, water, challenges and the
   ring goldens, path, fauna modes) and step files (origin-rebase, water-bodies, challenge,
   engine-fauna-modes, shadow-resize).
