@@ -296,12 +296,12 @@ export function createFlightController(ctx) {
 
   /** The craft state both abilities start from (craftAbility's initialState, then craftAbilityAlt's). */
   function initialCraftState(module) {
-    const state = {};
+    const initial = {};
     for (const slot of Object.keys(ABILITY_ACTIONS)) {
       const ability = module.abilities ? module.abilities[slot] : null;
-      if (ability && typeof ability.initialState === 'function') Object.assign(state, ability.initialState());
+      if (ability && typeof ability.initialState === 'function') Object.assign(initial, ability.initialState());
     }
-    return state;
+    return initial;
   }
 
   /** The skin a module flies in: settings.craftSkins when it names one of its skins, else its default; null without skins. */

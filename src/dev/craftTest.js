@@ -21,9 +21,11 @@
 //
 // The general flight test (one per craft and view, generalSpec): the craft starts as its file's
 // general.start says (default: above the world's spawn point, 'air' 500 m above the ground, or 'hover'
-// 80 m up for a hovering craft, so every run starts from the same place),
-// flies hands off, then rolls right, levels, rolls left, levels and pulls up gently (general.stick of
-// full deflection, 0.4 by default); it must respond (roll, pitch or heading moves 5 degrees from where
+// 80 m up for a hovering craft, so every run starts from the same place; and 250 m above the highest
+// ground it could reach at its cruise during the run, since it flies hands off), flies hands off,
+// then gives a roll pulse right, a roll pulse left (so a craft without auto-level ends near wings
+// level) and a gentle pull, each general.pulse seconds long (1.5 s) at general.stick of full
+// deflection (0.4 by default; the pull at half of it); it must respond (roll, pitch or heading moves 5 degrees from where
 // the manual inputs began) and fly (10 m from the start, 5 m up or down, or faster than 2 m/s over
 // the ground: a hovering craft may hold its place).
 //
@@ -59,6 +61,9 @@ const START_PLACES = Object.freeze(['here', 'spawn', 'ocean', 'lake', 'thermal',
 const SCRIPT_AXES = Object.freeze(['roll', 'pitch', 'yaw', 'throttle', 'collective', 'brakeL', 'brakeR', 'flaps', 'trim', 'antenna', 'lookX', 'lookY']);
 const GENERAL_SECONDS = 30;
 const GENERAL_STICK = 0.4;
+/** The general test's stick pulses: when each starts (share of the run) and how long it lasts (s). */
+const GENERAL_PULSE_SECONDS = 1.5;
+const GENERAL_PULSES = Object.freeze({ rollRight: 0.2, rollLeft: 0.45, pull: 0.7 });
 /** After ready and on every page load: frames must flow (WebGPU's cold pipeline compile stalls the page), then a warmup. */
 const FRAMES_FLOWING = 20;
 const FLOW_WINDOW_MS = 1000;
@@ -76,6 +81,13 @@ const LAKE_SEARCH_RADIUS = 60000;
 const THERMAL_RING = Object.freeze({ radius: 6000, samples: 8, minStrength: 1 });
 const SLOPE_SEARCH = Object.freeze({ radius: 20000, step: 400, angles: 16, minGrade: 0.25, maxGrade: 1, minHeight: 60, probe: 20 });
 const PERCH_SEARCH_RADIUS = 30000;
+/** start.clearRadius: the highest ground within it is sampled on this grid (m) and cleared by start.clearance. */
+const CLEAR_STEP = 250;
+const DEFAULT_CLEARANCE = 250;
+/** The general test keeps clear of the ground this far around its start: the craft's cruise for the run, with a margin. */
+const GENERAL_CLEAR_FACTOR = 1.2;
+const GENERAL_HOVER_CLEAR_RADIUS = 300;
+const MAX_CLEAR_RADIUS = 12000;
 
 /** One problem with a scenario set, or '' when it can run. */
 function scenarioProblem(set, scenario, seenIds) {
@@ -324,19 +336,25 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     const hover = Boolean(module && module.spawn && module.spawn.hover);
     const seconds = Number.isFinite(general.seconds) ? general.seconds : config.generalSeconds;
     const stick = Number.isFinite(general.stick) ? general.stick : GENERAL_STICK;
+    const pulse = Number.isFinite(general.pulse) ? general.pulse : GENERAL_PULSE_SECONDS;
+    const within = (t, share) => t >= seconds * share && t < seconds * share + pulse;
     const engine = module && module.inputProfile && module.inputProfile.throttle !== 'none';
     const throttle = Number.isFinite(general.throttle) ? general.throttle : !engine ? null : hover ? 0.5 : module.spawn.cruiseThrottle;
     return {
       id: `general-${craftId}`,
       seconds,
-      start: general.start ?? { at: 'spawn', mode: hover ? 'hover' : 'air', agl: hover ? 80 : 500 },
+      start: general.start ?? {
+        at: 'spawn',
+        mode: hover ? 'hover' : 'air',
+        agl: hover ? 80 : 500,
+        clearRadius: hover ? GENERAL_HOVER_CLEAR_RADIUS : Math.min(MAX_CLEAR_RADIUS, module.spawn.cruise * seconds * GENERAL_CLEAR_FACTOR),
+      },
       script(t) {
-        const share = t / seconds;
         const controls = { roll: 0, pitch: 0, yaw: 0 };
         if (Number.isFinite(throttle)) controls.throttle = throttle;
-        if (share >= 0.2 && share < 0.35) controls.roll = stick;
-        else if (share >= 0.5 && share < 0.65) controls.roll = -stick;
-        else if (share >= 0.72 && share < 0.8) controls.pitch = stick * 0.5;
+        if (within(t, GENERAL_PULSES.rollRight)) controls.roll = stick;
+        else if (within(t, GENERAL_PULSES.rollLeft)) controls.roll = -stick;
+        else if (within(t, GENERAL_PULSES.pull)) controls.pitch = stick * 0.5;
         return controls;
       },
       checks: [
@@ -425,6 +443,17 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     return best;
   }
 
+  /** The highest ground or water surface within radius of (x, z), on a CLEAR_STEP grid. */
+  function highestSurface(x, z, radius) {
+    let highest = surfaceAt(x, z);
+    for (let offsetX = -radius; offsetX <= radius; offsetX += CLEAR_STEP) {
+      for (let offsetZ = -radius; offsetZ <= radius; offsetZ += CLEAR_STEP) {
+        if (offsetX * offsetX + offsetZ * offsetZ <= radius * radius) highest = Math.max(highest, surfaceAt(x + offsetX, z + offsetZ));
+      }
+    }
+    return highest;
+  }
+
   /** The placement for a start (flight.startAt) and the resolved start point. Throws when the place is not found. */
   function resolveStart(start) {
     const origin = state.player.position;
@@ -451,6 +480,10 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     }
     const airborne = mode === 'air' || mode === 'climb' || mode === 'drift' || mode === 'hover';
     if (airborne && y === null) y = surfaceAt(x, z) + (Number.isFinite(start.agl) ? start.agl : mode === 'hover' ? 60 : 400);
+    // clearRadius: high enough to clear every hill the craft could reach (start.clearance above it).
+    if (airborne && Number.isFinite(start.clearRadius) && start.clearRadius > 0) {
+      y = Math.max(y, highestSurface(x, z, start.clearRadius) + (Number.isFinite(start.clearance) ? start.clearance : DEFAULT_CLEARANCE));
+    }
     if (y === null) y = surfaceAt(x, z);
     const placement = { mode, heading };
     // A ground start at 'here' looks for a flat spot near the craft; every other start is exact.

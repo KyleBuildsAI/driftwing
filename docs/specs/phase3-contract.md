@@ -1131,7 +1131,7 @@ changed meaning.
   `controller`, `world`, `waterQuery`, `colliders`, `wind`, `controls`, `memo`, `start`,
   `once(key)`, `events.count(type)` / `events.last(type)` (every typed event), `surfaceHeight`,
   `agl()`, `distanceFromStart()` and `press(actionId)`. `general` tunes the general flight test
-  (`start`, `stick`, `throttle`, `seconds`). `tools/run-harness.mjs --test craft` takes `--crafts`,
+  (`start`, `stick`, `pulse`, `throttle`, `seconds`). `tools/run-harness.mjs --test craft` takes `--crafts`,
   `--views`, `--scenarios` and `--seconds`; npm `test:craft`, `test:craft:webgl`.
 
 ---

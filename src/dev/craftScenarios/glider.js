@@ -13,7 +13,9 @@ export default Object.freeze({
       },
       checks: [
         { id: 'spoilersOut', label: 'spoilers out (half or more)', until: 8, test: (api) => api.flight.airbrake >= 0.5 },
-        { id: 'steepGlide', label: 'sinking faster than 2.5 m/s with the spoilers out', from: 5, until: 15, test: (api) => api.flight.verticalSpeed < -2.5 },
+        // The total-energy vario: at 100 % assists the flight-path hold trades speed for height, so the
+        // spoilers show as energy lost, not only as sink.
+        { id: 'steepGlide', label: 'losing energy faster than 2.5 m/s with the spoilers out (total-energy vario)', from: 5, until: 15, test: (api) => api.flight.vario < -2.5 },
         { id: 'spoilersIn', label: 'spoilers back in', from: 17, until: 24, test: (api) => api.flight.airbrake < 0.1 },
       ],
     }),

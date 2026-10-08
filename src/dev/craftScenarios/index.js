@@ -4,11 +4,12 @@
 //   { craft, general?, scenarios: [scenario] }
 //
 //   general     optional tuning of the general flight test every registered craft flies in both
-//               views: { start?, stick?, throttle?, seconds? } (craftTest.js, generalSpec)
+//               views: { start?, stick?, pulse?, throttle?, seconds? } (craftTest.js, generalSpec)
 //   scenario    { id, views: ['first', 'third'], seed?, world?: 'game' | 'waters', time?, assists?,
 //                 start: { at?: 'here' | 'spawn' | 'ocean' | 'lake' | 'thermal' | 'slope' | 'perch' | { x, y?, z },
 //                          mode?: 'air' | 'ground' | 'water' | 'hover' | 'drift' | 'climb' | 'perch',
-//                          heading?, agl?, speed?, pitch?, throttle?, craftState?, flatSpot? },
+//                          heading?, agl?, clearRadius?, clearance?, speed?, pitch?, throttle?,
+//                          craftState?, flatSpot? },
 //                 seconds, script?(t, api) -> controls, checks: [{ id, label?, from?, until?, always?, test(api) }],
 //                 allowCrash? }
 //

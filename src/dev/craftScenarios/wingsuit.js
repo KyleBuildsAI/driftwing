@@ -2,7 +2,7 @@
 // descent.
 export default Object.freeze({
   craft: 'wingsuit',
-  general: Object.freeze({ start: Object.freeze({ at: 'spawn', mode: 'air', agl: 1200 }) }),
+  general: Object.freeze({ start: Object.freeze({ at: 'spawn', mode: 'air', agl: 1200, clearRadius: 2000 }) }),
   scenarios: Object.freeze([
     Object.freeze({
       id: 'wingsuit-canopy',
