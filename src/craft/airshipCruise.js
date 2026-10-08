@@ -1,12 +1,14 @@
 // The airship's scenic cruise: an autopilot tour through the sites around the craft.
 //
-// Starting it gathers the places worth seeing nearby: the event director's getNearby() (live spawns,
-// dormant candidates and sites; exact site positions from the SpawnManager's site feed) and the
-// v1-derived landmarks. It chains the next few (SCENIC_CRUISE.SITES) by distance and turn, aims each
-// leg at a viewing point beside its site (the site passes the gondola's left windows rather than
-// under the keel), picks one cruise altitude that clears the highest ground along the chain (below
-// the airship's pressure height), and lays a smooth Catmull-Rom path through it (the PathFollower
-// path, src/world/pathFollower.js). The airship autopilot then chases a point a little ahead along
+// Starting it gathers the places worth seeing nearby: the event director's getNearby() (its live
+// spawns, which it prefers, and its sites, with exact positions from the SpawnManager's site feed;
+// not the dormant candidates, which are only places where something might happen, nor the sky-wide
+// celestial and weather events) and the v1-derived landmarks. It chains the next few
+// (SCENIC_CRUISE.SITES) by distance and turn, aims each leg at a viewing point beside its site (the
+// site passes the gondola's left windows rather than under the keel), picks one cruise altitude that
+// clears the highest ground along the chain by each site's clearance (more over a balloon fair, whose
+// balloons fly up to 320 m above the ground) and stays below the airship's pressure height, and lays a
+// smooth Catmull-Rom path through it (the PathFollower path, src/world/pathFollower.js). The airship autopilot then chases a point a little ahead along
 // that path, crabbing into the wind so the ground track stays on it, and slows to a photo pace while
 // photo mode is open: no beacon, no banking, no sudden turns, so it is made for photographs. Passing
 // a site counts it as visited (a toast, the journal stat airshipCruiseSites) and the next leg
@@ -34,8 +36,18 @@ export const SCENIC_CRUISE = Object.freeze({
   LOOKAHEAD: 420,
   /** The progress along the path only moves forward, by at most this much per update (m): no shortcuts across a loop. */
   PROGRESS_WINDOW: 1500,
-  /** Cruise altitude: this much above the highest ground near the chain (m, to the envelope's centre). */
-  CLEARANCE: 170,
+  /**
+   * Cruise altitude: this much above the highest ground near the chain (m, to the envelope's centre;
+   * the gondola wheel hangs 10 m lower): clear of wind turbines, spires and lighthouses, and of a
+   * balloon fair's balloons (CLEARANCE_BALLOONS).
+   */
+  CLEARANCE: 260,
+  CLEARANCE_BALLOONS: 470,
+  /** Director entries the cruise visits (states) and the sky-wide categories it leaves out. */
+  STATES: Object.freeze(['active', 'site', 'discovered']),
+  SKY_CATEGORIES: Object.freeze(['celestial', 'weather']),
+  /** A live spawn's distance counts this much when the next site is chosen (they come and go: see them now). */
+  LIVE_PREFERENCE: 0.6,
   /** Never closer than this to the pressure height (m): above it the airship turns heavy. */
   PRESSURE_MARGIN: 120,
   /** The ground is sampled along each leg every ALTITUDE_STEP metres, ALTITUDE_WIDTH to either side. */
@@ -67,9 +79,9 @@ export function createCruiseState() {
 }
 
 /**
- * The places worth seeing within radiusKm of (x, z): the director's nearby entries (positions from
- * the site feed when it knows them, else from the entry's distance and bearing) and the landmarks,
- * minus the ids in `skip`, one entry per place. Entry: { id, name, x, z }.
+ * The places worth seeing within radiusKm of (x, z): the director's live spawns and sites (positions
+ * from the site feed when it knows them, else from the entry's distance and bearing) and the
+ * landmarks, minus the ids in `skip`, one entry per place. Entry: { id, name, x, z, live, clearance }.
  */
 export function gatherCruiseSites(systems, x, z, radiusKm, skip) {
   const sites = [];
@@ -86,22 +98,26 @@ export function gatherCruiseSites(systems, x, z, radiusKm, skip) {
   }
   for (const entry of nearby) {
     if (!entry || typeof entry.id !== 'string' || skip.has(entry.id)) continue;
+    if (!SCENIC_CRUISE.STATES.includes(entry.state) || SCENIC_CRUISE.SKY_CATEGORIES.includes(entry.category)) continue;
     const site = feed ? feed.get(entry.id) : null;
     const radians = (entry.bearing * Math.PI) / 180;
     const siteX = site ? site.x : Number.isFinite(entry.x) ? entry.x : x + Math.sin(radians) * entry.distance;
     const siteZ = site ? site.z : Number.isFinite(entry.z) ? entry.z : z - Math.cos(radians) * entry.distance;
-    if (Number.isFinite(siteX) && Number.isFinite(siteZ)) sites.push({ id: entry.id, name: entry.name || 'site', x: siteX, z: siteZ });
+    if (Number.isFinite(siteX) && Number.isFinite(siteZ)) sites.push({ id: entry.id, name: entry.name || 'site', x: siteX, z: siteZ, live: entry.state === 'active', clearance: SCENIC_CRUISE.CLEARANCE });
   }
   const landmarks = systems ? systems.landmarks : null;
   if (landmarks && typeof landmarks.getNearby === 'function') {
     for (const entry of landmarks.getNearby(radiusKm * 1000)) {
       if (!entry || typeof entry.id !== 'string' || skip.has(entry.id)) continue;
-      if (Number.isFinite(entry.x) && Number.isFinite(entry.z)) sites.push({ id: entry.id, name: entry.name || 'landmark', x: entry.x, z: entry.z });
+      const clearance = entry.type === 'balloons' ? SCENIC_CRUISE.CLEARANCE_BALLOONS : SCENIC_CRUISE.CLEARANCE;
+      if (Number.isFinite(entry.x) && Number.isFinite(entry.z)) sites.push({ id: entry.id, name: entry.name || 'landmark', x: entry.x, z: entry.z, live: false, clearance });
     }
   }
   const merged = [];
   for (const site of sites) {
-    if (!merged.some((other) => Math.hypot(other.x - site.x, other.z - site.z) < SCENIC_CRUISE.MERGE_DISTANCE)) merged.push(site);
+    const twin = merged.find((other) => Math.hypot(other.x - site.x, other.z - site.z) < SCENIC_CRUISE.MERGE_DISTANCE);
+    if (!twin) merged.push(site);
+    else twin.clearance = Math.max(twin.clearance, site.clearance);
   }
   return merged;
 }
@@ -135,9 +151,9 @@ function highestAlong(surfaceHeight, ax, az, bx, bz) {
 
 /**
  * Plans a chain from (x, z) heading `heading` (deg) through up to SITES of `sites`: greedy on
- * distance plus TURN_COST per degree of turn, every leg at least MIN_LEG, every leg's ground clear
- * below `ceiling` (the pressure height minus its margin). Returns { waypoints, altitude } (waypoints
- * empty when nothing fits).
+ * distance (a live spawn's at LIVE_PREFERENCE) plus TURN_COST per degree of turn, every leg at least
+ * MIN_LEG, every leg's ground plus its site's clearance below `ceiling` (the pressure height minus its
+ * margin). Returns { waypoints, altitude } (waypoints empty when nothing fits).
  */
 export function planCruise(sites, { x, z, heading, surfaceHeight, ceiling, floor = -Infinity }) {
   const waypoints = [];
@@ -145,7 +161,7 @@ export function planCruise(sites, { x, z, heading, surfaceHeight, ceiling, floor
   let fromX = x;
   let fromZ = z;
   let direction = heading;
-  let highest = surfaceHeight(x, z);
+  let required = surfaceHeight(x, z) + SCENIC_CRUISE.CLEARANCE;
   while (waypoints.length < SCENIC_CRUISE.SITES) {
     let best = null;
     let bestCost = Infinity;
@@ -155,23 +171,23 @@ export function planCruise(sites, { x, z, heading, surfaceHeight, ceiling, floor
       if (distance < SCENIC_CRUISE.MIN_LEG) continue;
       const bearing = (Math.atan2(site.x - fromX, -(site.z - fromZ)) * 180) / Math.PI;
       const turn = Math.abs(((((bearing - direction + 180) % 360) + 360) % 360) - 180);
-      const cost = distance + turn * SCENIC_CRUISE.TURN_COST;
+      const cost = distance * (site.live ? SCENIC_CRUISE.LIVE_PREFERENCE : 1) + turn * SCENIC_CRUISE.TURN_COST;
       if (cost >= bestCost) continue;
       const aim = viewingPoint(site, fromX, fromZ);
-      const legHighest = highestAlong(surfaceHeight, fromX, fromZ, aim.x, aim.z);
-      if (Math.max(legHighest, highest) + SCENIC_CRUISE.CLEARANCE > ceiling) continue;
-      best = { site, aim, legHighest, bearing };
+      const legRequired = highestAlong(surfaceHeight, fromX, fromZ, aim.x, aim.z) + (Number.isFinite(site.clearance) ? site.clearance : SCENIC_CRUISE.CLEARANCE);
+      if (Math.max(legRequired, required) > ceiling) continue;
+      best = { site, aim, legRequired, bearing };
       bestCost = cost;
     }
     if (!best) break;
     used.add(best.site.id);
-    highest = Math.max(highest, best.legHighest);
+    required = Math.max(required, best.legRequired);
     waypoints.push({ id: best.site.id, name: best.site.name, x: best.site.x, z: best.site.z, aimX: best.aim.x, aimZ: best.aim.z });
     direction = best.bearing;
     fromX = best.aim.x;
     fromZ = best.aim.z;
   }
-  const altitude = Math.min(ceiling, Math.max(floor, highest + SCENIC_CRUISE.CLEARANCE));
+  const altitude = Math.min(ceiling, Math.max(floor, required));
   return { waypoints, altitude };
 }
 

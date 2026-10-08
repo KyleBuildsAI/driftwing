@@ -73,7 +73,7 @@ const simProfile = Object.freeze({
   ]),
   props: Object.freeze({
     positions: Object.freeze([Object.freeze([-9.8, -2.5, -2]), Object.freeze([9.8, -2.5, -2])]),
-    radius: 1.4,
+    radius: 1.7,
     staticThrust: 10000, // N, both props at full throttle and no inflow
     zeroThrustSpeed: 70, // m/s of inflow where the thrust has gone
     differential: 0.15, // share of the thrust the rudder moves from one prop to the other
@@ -86,10 +86,10 @@ const simProfile = Object.freeze({
     fadeSpeed: Object.freeze([6, 14]), // m/s of forward airspeed where the fins take over from it
   }),
   contacts: Object.freeze([
-    Object.freeze({ id: 'gondolaWheel', kind: 'wheel', gear: true, position: Object.freeze([0, -10.25, -10]), spring: 60000, damping: 22000, rollingFriction: 0.05, sideFriction: 0.6 }),
-    Object.freeze({ id: 'tailWheel', kind: 'wheel', gear: true, position: Object.freeze([0, -10.05, 27.4]), spring: 50000, damping: 18000, rollingFriction: 0.05, sideFriction: 0.5 }),
-    Object.freeze({ id: 'gondolaNose', kind: 'body', gear: false, position: Object.freeze([0, -9.2, -16.4]), spring: 40000, damping: 12000 }),
-    Object.freeze({ id: 'gondolaTail', kind: 'body', gear: false, position: Object.freeze([0, -9.4, -4.8]), spring: 40000, damping: 12000 }),
+    Object.freeze({ id: 'gondolaWheel', kind: 'wheel', gear: true, position: Object.freeze([0, -10.9, -10]), spring: 60000, damping: 22000, rollingFriction: 0.05, sideFriction: 0.6 }),
+    Object.freeze({ id: 'tailWheel', kind: 'wheel', gear: true, position: Object.freeze([0, -10.6, 27.4]), spring: 50000, damping: 18000, rollingFriction: 0.05, sideFriction: 0.5 }),
+    Object.freeze({ id: 'gondolaNose', kind: 'body', gear: false, position: Object.freeze([0, -9.8, -16.6]), spring: 40000, damping: 12000 }),
+    Object.freeze({ id: 'gondolaTail', kind: 'body', gear: false, position: Object.freeze([0, -10.0, -4.5]), spring: 40000, damping: 12000 }),
     Object.freeze({ id: 'nose', kind: 'body', gear: false, position: Object.freeze([0, 0, -31]), spring: 30000, damping: 9000 }),
     Object.freeze({ id: 'tail', kind: 'body', gear: false, position: Object.freeze([0, 0, 32.6]), spring: 30000, damping: 9000 }),
     Object.freeze({ id: 'envelopeBelowFront', kind: 'body', gear: false, position: Object.freeze([0, -6.6, -21]), spring: 30000, damping: 9000 }),
@@ -97,8 +97,8 @@ const simProfile = Object.freeze({
     Object.freeze({ id: 'envelopeTop', kind: 'body', gear: false, position: Object.freeze([0, 7.5, -2]), spring: 30000, damping: 9000 }),
     Object.freeze({ id: 'envelopeLeft', kind: 'body', gear: false, position: Object.freeze([-7.5, 0, -2]), spring: 30000, damping: 9000 }),
     Object.freeze({ id: 'envelopeRight', kind: 'body', gear: false, position: Object.freeze([7.5, 0, -2]), spring: 30000, damping: 9000 }),
-    Object.freeze({ id: 'podLeft', kind: 'body', gear: false, position: Object.freeze([-11.2, -2.5, -2]), spring: 40000, damping: 9000 }),
-    Object.freeze({ id: 'podRight', kind: 'body', gear: false, position: Object.freeze([11.2, -2.5, -2]), spring: 40000, damping: 9000 }),
+    Object.freeze({ id: 'podLeft', kind: 'body', gear: false, position: Object.freeze([-11.5, -2.5, -2]), spring: 40000, damping: 9000 }),
+    Object.freeze({ id: 'podRight', kind: 'body', gear: false, position: Object.freeze([11.5, -2.5, -2]), spring: 40000, damping: 9000 }),
     Object.freeze({ id: 'finLeftTip', kind: 'body', gear: false, position: Object.freeze([-9.6, 0, 27]), spring: 30000, damping: 9000 }),
     Object.freeze({ id: 'finRightTip', kind: 'body', gear: false, position: Object.freeze([9.6, 0, 27]), spring: 30000, damping: 9000 }),
     Object.freeze({ id: 'finTopTip', kind: 'body', gear: false, position: Object.freeze([0, 9.6, 27]), spring: 30000, damping: 9000 }),
@@ -135,7 +135,7 @@ function buildEnvelope() {
   // around 270 degrees) is orange, the nose cap orange, the tail cone charcoal.
   const belly = new Set([12, 13, 14]);
   builder.loft(sections, (segment, face) => {
-    if (segment <= 1) return PALETTE.orange;
+    if (segment === 0) return PALETTE.orange;
     if (segment >= sections.length - 3) return PALETTE.charcoal;
     if (belly.has(face)) return segment === 6 || segment === 7 ? PALETTE.cream : PALETTE.orange;
     if (segment === 5 && (face === 4 || face === 5)) return PALETTE.orange;
@@ -177,18 +177,18 @@ function buildControlSurface() {
 // ---- Gondola: a glazed cabin under the front of the envelope -----------------------------------
 // Stations: [z, bottom y, top y, half width at the floor, half width at the window line].
 const GONDOLA = Object.freeze([
-  [-16.6, -9.0, -7.6, 0.55, 0.65],
-  [-16.0, -9.55, -7.25, 1.05, 1.2],
-  [-14.6, -9.75, -7.1, 1.25, 1.42],
-  [-10.5, -9.8, -7.05, 1.3, 1.45],
-  [-7.0, -9.75, -7.05, 1.28, 1.42],
-  [-5.0, -9.5, -7.1, 1.05, 1.2],
-  [-4.4, -9.15, -7.3, 0.6, 0.75],
+  [-16.6, -9.95, -7.6, 0.55, 0.65],
+  [-16.0, -10.15, -7.25, 1.05, 1.2],
+  [-14.6, -10.35, -7.1, 1.25, 1.42],
+  [-10.5, -10.4, -7.05, 1.3, 1.45],
+  [-7.0, -10.35, -7.05, 1.28, 1.42],
+  [-5.0, -10.15, -7.1, 1.05, 1.2],
+  [-4.4, -9.95, -7.3, 0.6, 0.75],
 ]);
 const GONDOLA_SIDES = 8;
 /** Window band: y between these (m), on the side faces (1, 2 right; 5, 6 left) and the nose. */
-const WINDOW_TOP = -7.6;
-const WINDOW_BOTTOM = -8.95;
+const WINDOW_TOP = -7.65;
+const WINDOW_BOTTOM = -9.6;
 
 /** An eight-sided gondola ring at one station: floor corners, window-line corners, roof. */
 function gondolaRing([z, bottom, top, floorHalf, windowHalf]) {
@@ -252,6 +252,19 @@ function addStrut(builder, from, to, half, tint) {
   builder.loft([ring(from), ring(to)], () => tint, { capStart: tint, capEnd: tint });
 }
 
+/** A small landing wheel (an octagonal disc about x) centred on `centre`. */
+function addWheel(builder, centre, radius, width) {
+  const ring = (x) => {
+    const points = [];
+    for (let index = 0; index < 8; index++) {
+      const angle = (index / 8) * Math.PI * 2;
+      points.push([centre[0] + x, centre[1] + Math.cos(angle) * radius, centre[2] + Math.sin(angle) * radius]);
+    }
+    return points;
+  };
+  builder.loft([ring(-width / 2), ring(width / 2)], () => PALETTE.charcoal, { capStart: PALETTE.charcoal, capEnd: PALETTE.charcoal });
+}
+
 // ---- Propeller pods (swivel about x with the vector angle) ---------------------------------------
 const POD = Object.freeze({ LENGTH: 2.6, RADIUS: 0.5 });
 const POD_X = simProfile.props.positions[1][0];
@@ -312,7 +325,7 @@ function buildSternHub() {
   return builder.toGeometry(null);
 }
 
-const EYE = Object.freeze([0, -8.35, -15.0]);
+const EYE = Object.freeze([0, -8.95, -15.0]);
 const BREATHING = Object.freeze({ PERIOD: 7, AMOUNT: 0.0025, BALLONET: 0.006 });
 const ENGINE_RAMP = 3;
 
@@ -354,6 +367,11 @@ function buildMesh(ctx) {
     const hullX = side * Math.sqrt(Math.max(ENVELOPE_RADIUS ** 2 - POD_Y ** 2, 0)) * 0.97;
     addStrut(airframe, [hullX, POD_Y, POD_Z - 0.6], [side * (POD_X - 0.35), POD_Y, POD_Z], 0.42, PALETTE.creamShade);
     addStrut(airframe, [hullX, POD_Y - 1.6, POD_Z + 0.4], [side * (POD_X - 0.45), POD_Y - 0.15, POD_Z], 0.18, PALETTE.charcoal);
+  }
+  // The landing wheels: one under the gondola, one under the lower fin, each on a short strut.
+  for (const [z, top, axle] of [[-10, GONDOLA[3][1] + 0.05, -10.55], [27.4, -FIN.TIP_X + 0.3, -10.25]]) {
+    addStrut(airframe, [0, top, z], [0, axle, z], 0.16, PALETTE.charcoal);
+    addWheel(airframe, [0, axle, z], 0.35, 0.2);
   }
   const gondolaGeometry = airframe.toGeometry(null);
   addSolid(root, gondolaGeometry, bodyMaterial);
@@ -547,7 +565,6 @@ function buildGondolaCockpit(builder) {
   };
   post(-noseHalf, -HALF);
   post(noseHalf, HALF);
-  post(0, 0);
   cabinQuad(builder, [-noseHalf, FLOOR + 0.3, FRONT], [noseHalf, FLOOR + 0.3, FRONT], [noseHalf, SILL, FRONT], [-noseHalf, SILL, FRONT], CABIN_TINT.wallLow);
   cabinQuad(builder, [-HALF, ROOF, FRONT + 0.25], [HALF, ROOF, FRONT + 0.25], [noseHalf, TOP, FRONT + 0.3], [-noseHalf, TOP, FRONT + 0.3], CABIN_TINT.frame);
   // Rear bulkhead with a door.
@@ -704,7 +721,7 @@ export default Object.freeze({
     eye: EYE,
     chase: Object.freeze({ distance: 92, height: 20, lookAhead: 36, speedRange: Object.freeze({ CRUISE: 22, MAX: 30, TOP: 36 }) }),
     // Behind the right prop pod, looking forward along the envelope.
-    wing: Object.freeze({ position: Object.freeze([11.4, -1.8, 4.5]), target: Object.freeze([1.5, -4.5, -40]) }),
+    wing: Object.freeze({ position: Object.freeze([14, 0.5, 9]), target: Object.freeze([2, -5, -40]) }),
     fpv: null,
     // The gondola: a custom cockpit (the pilot's seat behind a raked windshield and a long window band).
     cockpit: Object.freeze({
@@ -718,8 +735,8 @@ export default Object.freeze({
       roof: CABIN.ROOF,
       near: 0.1,
       panel: Object.freeze({
-        width: 0.98,
-        center: Object.freeze([0, -0.5, -1.0]),
+        width: 0.72,
+        center: Object.freeze([0, -0.6, -0.85]),
         layout: Object.freeze([
           Object.freeze(['airspeed', 'attitude', 'altitude', 'ballonet']),
           Object.freeze(['heading', 'vsi', 'throttle']),
@@ -741,16 +758,16 @@ export default Object.freeze({
       Object.freeze({ id: 'hullRear', position: Object.freeze([0, 0, 15]), radius: 6 }),
       Object.freeze({ id: 'tailCone', position: Object.freeze([0, 0, 23]), radius: 4.2 }),
       Object.freeze({ id: 'tail', position: Object.freeze([0, 0, 30]), radius: 1.4 }),
-      Object.freeze({ id: 'gondolaFront', position: Object.freeze([0, -8.6, -14.5]), radius: 1.4 }),
-      Object.freeze({ id: 'gondolaRear', position: Object.freeze([0, -8.6, -7.5]), radius: 1.4 }),
+      Object.freeze({ id: 'gondolaFront', position: Object.freeze([0, -9.0, -14.5]), radius: 1.5 }),
+      Object.freeze({ id: 'gondolaRear', position: Object.freeze([0, -9.0, -7.5]), radius: 1.5 }),
       Object.freeze({ id: 'podLeft', position: Object.freeze([-POD_X, POD_Y, POD_Z]), radius: 1.5 }),
       Object.freeze({ id: 'podRight', position: Object.freeze([POD_X, POD_Y, POD_Z]), radius: 1.5 }),
       Object.freeze({ id: 'finLeft', position: Object.freeze([-8.4, 0, 26.5]), radius: 1.2 }),
       Object.freeze({ id: 'finRight', position: Object.freeze([8.4, 0, 26.5]), radius: 1.2 }),
       Object.freeze({ id: 'finTop', position: Object.freeze([0, 8.4, 26.5]), radius: 1.2 }),
       Object.freeze({ id: 'finBottom', position: Object.freeze([0, -8.4, 26.5]), radius: 1.2 }),
-      Object.freeze({ id: 'gondolaWheel', position: Object.freeze([0, -9.9, -10]), radius: 0.4, gear: true }),
-      Object.freeze({ id: 'tailWheel', position: Object.freeze([0, -9.7, 27.4]), radius: 0.4, gear: true }),
+      Object.freeze({ id: 'gondolaWheel', position: Object.freeze([0, -10.55, -10]), radius: 0.4, gear: true }),
+      Object.freeze({ id: 'tailWheel', position: Object.freeze([0, -10.25, 27.4]), radius: 0.4, gear: true }),
     ]),
   }),
   situate,

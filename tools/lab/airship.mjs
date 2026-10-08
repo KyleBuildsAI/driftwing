@@ -42,6 +42,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as THREE from 'three/webgpu';
 import airship, { AIRSHIP_STATICS, SCENIC_CRUISE } from '../../src/craft/airship.js';
+import { gatherCruiseSites } from '../../src/craft/airshipCruise.js';
 import { flightModels } from '../../src/flight/models.js';
 import { airshipAssistHandler, airshipAutopilot, levelThrottle, crabHeading } from '../../src/flight/SimAirship.js';
 import { assistWeights, describeAssists } from '../../src/flight/assists.js';
@@ -589,6 +590,30 @@ function testCruise() {
   record('the autopilot off ends the cruise', cruise.active ? 1 : 0, 0, { compare: !cruise.active, note: rig.events.notify[rig.events.notify.length - 1] });
 }
 
+/** Which places the cruise tours: live spawns and sites, landmarks; not dormant candidates or sky-wide events. */
+function testCruiseSites() {
+  const entry = (id, state, category, distance, bearing) => ({ id, name: id, state, category, distance, bearing, etaSeconds: null });
+  const systems = {
+    spawns: {
+      director: {
+        getNearby: () => [
+          entry('liveHerd', 'active', 'wildlife', 1500, 90),
+          entry('waterfall', 'site', 'geo', 3000, 0),
+          entry('maybeGeese', 'dormant', 'wildlife', 1200, 180),
+          entry('aurora', 'active', 'celestial', 800, 45),
+          entry('storm', 'active', 'weather', 2000, 270),
+        ],
+      },
+    },
+    landmarks: { getNearby: () => [{ id: 'fair', type: 'balloons', name: 'Balloon Fair', x: 1600, z: 100 }, { id: 'arch', type: 'arch', name: 'Old Arch', x: -2500, z: 900 }] },
+  };
+  const sites = gatherCruiseSites(systems, 0, 0, 9, new Set(['arch']));
+  const ids = sites.map((site) => site.id).join(',');
+  const herd = sites.find((site) => site.id === 'liveHerd');
+  const ok = ids === 'liveHerd,waterfall' && herd && herd.live && herd.clearance === SCENIC_CRUISE.CLEARANCE_BALLOONS;
+  record('cruise sites: live spawns and sites, landmarks merged; no dormant or sky-wide events', ok ? 1 : 0, 1, { compare: ok, note: `${ids}; the herd beside the balloon fair keeps the fair's clearance (${herd ? herd.clearance : '-'} m); a skipped id stays out` });
+}
+
 function testLanding() {
   const rig = createRig({ assists: 1 });
   rig.airborne({ altitude: 40, ballonet: 0.62 });
@@ -648,16 +673,23 @@ function testSituate() {
   record('a drift placement floats (30 s)', Math.abs(rig.position().y - (fromHeli.position.y - 200)), 3, { unit: 'm', compare: 'max', decimals: 2 });
 }
 
-/** Young-generation bytes `fn` allocates over `count` calls, after a warm-up (TurboFan has optimised it). */
+/**
+ * Young-generation bytes `fn` allocates over `count` calls, after a warm-up (TurboFan has optimised
+ * it): the least of three windows, so a background compile landing in one window does not count.
+ */
 function youngBytes(fn, count) {
   const youngUsed = () => v8.getHeapSpaceStatistics().find((space) => space.space_name === 'new_space').space_used_size;
   for (let index = 0; index < 60000; index++) fn();
-  if (typeof globalThis.gc === 'function') globalThis.gc();
-  const probeA = youngUsed();
-  const probeB = youngUsed();
-  const before = youngUsed();
-  for (let index = 0; index < count; index++) fn();
-  return Math.max(0, youngUsed() - before - (probeB - probeA));
+  let least = Infinity;
+  for (let window = 0; window < 3; window++) {
+    if (typeof globalThis.gc === 'function') globalThis.gc();
+    const probeA = youngUsed();
+    const probeB = youngUsed();
+    const before = youngUsed();
+    for (let index = 0; index < count; index++) fn();
+    least = Math.min(least, Math.max(0, youngUsed() - before - (probeB - probeA)));
+  }
+  return least;
 }
 
 /**
@@ -761,6 +793,7 @@ testStability();
 testAssists();
 testAutopilot();
 testCruise();
+testCruiseSites();
 testLanding();
 testCopilot();
 testSituate();
