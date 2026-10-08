@@ -6,7 +6,7 @@ export default Object.freeze({
     Object.freeze({
       id: 'helicopter-hover-hold',
       views: ['third', 'first'],
-      start: { at: 'here', mode: 'hover', agl: 60 },
+      start: { at: 'spawn', mode: 'hover', agl: 60 },
       seconds: 24,
       script(t, api) {
         return { throttle: 0.5, roll: 0, pitch: 0, yaw: 0, actions: t >= 2 && api.once('hold') ? ['craftAbility'] : [] };

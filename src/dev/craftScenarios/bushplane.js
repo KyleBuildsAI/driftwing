@@ -1,28 +1,30 @@
-// Bush plane scenarios for ?test=craft: a take-off from a ground placement (the parking brake path,
-// full power, rotation at 100 % assists) and the smoke trail through the craft ability.
+// Bush plane scenarios for ?test=craft: a ground placement and the take-off roll from it (idle until
+// the pilot opens the throttle), and the smoke trail through the craft ability.
 export default Object.freeze({
   craft: 'bushplane',
   scenarios: Object.freeze([
     Object.freeze({
-      id: 'bushplane-ground-takeoff',
+      id: 'bushplane-ground-start',
       views: ['third', 'first'],
-      start: { at: 'here', mode: 'ground' },
-      seconds: 45,
+      // The nearest flat, dry spot to the world's spawn, nose into the wind (flight.startAt 'ground').
+      // The flat spot guarantees the first 180 m of the run, so the scenario ends with the take-off
+      // roll under way; the flight lab's groundStart test flies the whole take-off on flat ground.
+      start: { at: 'spawn', mode: 'ground', flatSpot: true },
+      seconds: 9,
       script(t) {
-        if (t < 2) return { throttle: 0, roll: 0, pitch: 0, yaw: 0 };
-        if (t < 14) return { throttle: 1, roll: 0, pitch: 0, yaw: 0 };
-        return { throttle: 1, roll: 0, pitch: t < 24 ? 0.3 : 0.1, yaw: 0 };
+        return { throttle: t < 2 ? 0 : 1, roll: 0, pitch: 0, yaw: 0 };
       },
       checks: [
-        { id: 'standing', label: 'starts standing on its gear', until: 1.5, test: (api) => api.flight.onGround },
-        { id: 'rolling', label: 'rolls past 10 m/s', until: 14, test: (api) => api.flight.onGround && api.flight.groundSpeed > 10 },
-        { id: 'airborne', label: 'airborne, 20 m above the ground', until: 45, test: (api) => !api.flight.onGround && api.flight.agl > 20 },
+        { id: 'standing', label: 'starts standing still on its gear', until: 1.5, test: (api) => api.flight.onGround && api.flight.groundSpeed < 0.5 },
+        { id: 'idle', label: 'the throttle at idle before the pilot opens it', until: 1.5, test: (api) => api.flight.throttle < 0.05 },
+        { id: 'rolling', label: 'the take-off roll passes 8 m/s', until: 9, test: (api) => api.flight.onGround && api.flight.groundSpeed > 8 },
+        { id: 'onGround', label: 'still on its wheels through the roll', from: 0, until: 9, always: true, test: (api) => api.flight.onGround },
       ],
     }),
     Object.freeze({
       id: 'bushplane-smoke',
       views: ['third'],
-      start: { at: 'here', mode: 'air', agl: 500 },
+      start: { at: 'spawn', mode: 'air', agl: 500 },
       seconds: 14,
       script(t, api) {
         const actions = [];

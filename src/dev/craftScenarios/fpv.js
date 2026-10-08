@@ -7,7 +7,7 @@ export default Object.freeze({
     Object.freeze({
       id: 'fpv-hover-start',
       views: ['third', 'first'],
-      start: { at: 'here', mode: 'hover', agl: 30 },
+      start: { at: 'spawn', mode: 'hover', agl: 30 },
       seconds: 15,
       script() {
         return { throttle: 0.5, roll: 0, pitch: 0, yaw: 0 };

@@ -20,10 +20,12 @@
 // window with `always: true`. Frame times are reported, not judged (the owner's rule on machine load).
 //
 // The general flight test (one per craft and view, generalSpec): the craft starts as its file's
-// general.start says (default: 'air' 500 m above the ground, or 'hover' 80 m up for a hovering craft),
+// general.start says (default: above the world's spawn point, 'air' 500 m above the ground, or 'hover'
+// 80 m up for a hovering craft, so every run starts from the same place),
 // flies hands off, then rolls right, levels, rolls left, levels and pulls up gently (general.stick of
 // full deflection, 0.4 by default); it must respond (roll, pitch or heading moves 5 degrees from where
-// the manual inputs began) and fly (20 m from the start, or 10 m up or down).
+// the manual inputs began) and fly (10 m from the start, 5 m up or down, or faster than 2 m/s over
+// the ground: a hovering craft may hold its place).
 //
 // Scenarios on another seed or world (seed, world: 'waters' for the water fixtures' lakes) run on
 // their own page load: the test reloads with the seed in the URL and carries its progress, results
@@ -52,7 +54,7 @@ const VIEWS = Object.freeze(['third', 'first']);
 const VIEW_SLOTS = Object.freeze({ third: 'chase', first: 'cockpit' });
 const WORLDS = Object.freeze(['game', 'waters']);
 const START_MODES = Object.freeze(['air', 'ground', 'water', 'hover', 'drift', 'climb', 'perch']);
-const START_PLACES = Object.freeze(['here', 'ocean', 'lake', 'thermal', 'slope', 'perch']);
+const START_PLACES = Object.freeze(['here', 'spawn', 'ocean', 'lake', 'thermal', 'slope', 'perch']);
 /** ControlState fields a script may set. */
 const SCRIPT_AXES = Object.freeze(['roll', 'pitch', 'yaw', 'throttle', 'collective', 'brakeL', 'brakeR', 'flaps', 'trim', 'antenna', 'lookX', 'lookY']);
 const GENERAL_SECONDS = 30;
@@ -327,7 +329,7 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     return {
       id: `general-${craftId}`,
       seconds,
-      start: general.start ?? { at: 'here', mode: hover ? 'hover' : 'air', agl: hover ? 80 : 500 },
+      start: general.start ?? { at: 'spawn', mode: hover ? 'hover' : 'air', agl: hover ? 80 : 500 },
       script(t) {
         const share = t / seconds;
         const controls = { roll: 0, pitch: 0, yaw: 0 };
@@ -350,7 +352,7 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
             return Math.abs(api.flight.roll - base.roll) > 5 || Math.abs(api.flight.pitch - base.pitch) > 5 || Math.abs(wrapDegrees(api.flight.heading - base.heading + 180) - 180) > 5;
           },
         },
-        { id: 'flies', label: 'flies (20 m from the start, or 10 m up or down)', test: (api) => api.distanceFromStart() > 20 || Math.abs(api.flight.altitude - api.start.y) > 10 },
+        { id: 'flies', label: 'flies (10 m from the start, 5 m up or down, or faster than 2 m/s over the ground)', test: (api) => api.distanceFromStart() > 10 || Math.abs(api.flight.altitude - api.start.y) > 5 || api.flight.groundSpeed > 2 },
       ],
     };
   }
@@ -434,6 +436,7 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     let heading = Number.isFinite(start.heading) ? start.heading : state.player.heading;
     let place = null;
     if (typeof at === 'object') place = { x: at.x, z: at.z, y: Number.isFinite(at.y) ? at.y : null };
+    else if (at === 'spawn') place = { x: state.spawn.x, z: state.spawn.z };
     else if (at === 'ocean') place = findOcean(origin);
     else if (at === 'lake') place = findLake(origin);
     else if (at === 'thermal') place = findThermal(origin);
@@ -454,6 +457,7 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     if (!(mode === 'ground' && at === 'here')) placement.position = { x, y, z };
     for (const field of ['speed', 'pitch', 'throttle']) if (Number.isFinite(start[field])) placement[field] = start[field];
     if (start.craftState && typeof start.craftState === 'object') placement.craftState = start.craftState;
+    if (start.flatSpot === true) placement.flatSpot = true;
     return { placement, point: { x, y, z, heading } };
   }
 

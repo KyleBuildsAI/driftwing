@@ -775,6 +775,7 @@ export function createFlightController(ctx) {
       if (placement[field] !== undefined && !Number.isFinite(placement[field])) return `a ${field} that is not a number`;
     }
     if (placement.craftState !== undefined && (placement.craftState === null || typeof placement.craftState !== 'object')) return 'a craftState that is not an object';
+    if (placement.flatSpot !== undefined && typeof placement.flatSpot !== 'boolean') return 'a flatSpot that is not a boolean';
     return '';
   }
 
@@ -782,7 +783,8 @@ export function createFlightController(ctx) {
    * Places the craft as a placement says (contract h.4; also startAt for tests and tools). Any field
    * left out keeps the Phase 1 default: the old craft's place and heading, the craft's cruise and
    * cruise throttle (a climb: 45 degrees at full power; hover, drift and perch: no airspeed). A
-   * 'water' placement over dry ground flies instead.
+   * 'water' placement over dry ground flies instead. A 'ground' placement stands exactly at its
+   * position, or on the nearest flat, dry spot to it with flatSpot: true (or without a position).
    */
   function applyPlacement(placement, pose) {
     const heading = Number.isFinite(placement.heading) ? wrapDegrees(placement.heading) : headingOfQuaternion(pose.quaternion, currentHeading());
@@ -790,7 +792,7 @@ export function createFlightController(ctx) {
     const surface = surfaceHeight(position.x, position.z);
     const mode = placement.mode === 'water' && !(waterHeightNow(position.x, position.z) > world.groundHeight(position.x, position.z)) ? 'air' : placement.mode;
     if (mode === 'ground') {
-      if (placement.position) placeOnGround(position.x, position.z, { heading });
+      if (placement.position && placement.flatSpot !== true) placeOnGround(position.x, position.z, { heading });
       else placeOnGround(position.x, position.z);
     } else if (mode === 'water' || mode === 'perch') {
       resetActiveModel(restingPose(position, heading, mode, placement));

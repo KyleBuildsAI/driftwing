@@ -6,7 +6,7 @@ export default Object.freeze({
     Object.freeze({
       id: 'glider-spoilers',
       views: ['third', 'first'],
-      start: { at: 'here', mode: 'air', agl: 800 },
+      start: { at: 'spawn', mode: 'air', agl: 800 },
       seconds: 24,
       script(t) {
         return { roll: 0, pitch: 0, yaw: 0, brakeL: t >= 3 && t < 15 ? 1 : 0, brakeR: t >= 3 && t < 15 ? 1 : 0 };

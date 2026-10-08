@@ -7,7 +7,7 @@ export default Object.freeze({
     Object.freeze({
       id: 'jet-climb-start',
       views: ['third', 'first'],
-      start: { at: 'here', mode: 'climb', agl: 1500, speed: 220 },
+      start: { at: 'spawn', mode: 'climb', agl: 1500, speed: 220 },
       seconds: 18,
       checks: [
         { id: 'climbing', label: 'climbing faster than 30 m/s', until: 4, test: (api) => api.flight.verticalSpeed > 30 },

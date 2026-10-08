@@ -2,12 +2,12 @@
 // descent.
 export default Object.freeze({
   craft: 'wingsuit',
-  general: Object.freeze({ start: Object.freeze({ at: 'here', mode: 'air', agl: 1200 }) }),
+  general: Object.freeze({ start: Object.freeze({ at: 'spawn', mode: 'air', agl: 1200 }) }),
   scenarios: Object.freeze([
     Object.freeze({
       id: 'wingsuit-canopy',
       views: ['third', 'first'],
-      start: { at: 'here', mode: 'air', agl: 1200 },
+      start: { at: 'spawn', mode: 'air', agl: 1200 },
       seconds: 26,
       script(t, api) {
         return { roll: 0, pitch: 0, yaw: 0, actions: t >= 4 && api.once('chute') ? ['chuteDeploy'] : [] };
