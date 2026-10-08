@@ -18,7 +18,9 @@
 // active run. Flying through a course's start gate starts it too.
 //
 // update() allocates nothing: courses live in an array, the live state objects are reused, and the
-// path recorder writes into one preallocated Float32Array.
+// path recorder writes into one preallocated Float32Array. Its positions are relative to the course's
+// first gate (the path anchor, float64), so they keep centimetre precision at any distance from the
+// world origin (the float32 rule of the floating origin, contract a.7).
 
 /** Medals, best first. */
 export const MEDALS = Object.freeze(['gold', 'silver', 'bronze']);
@@ -28,7 +30,7 @@ export const CHALLENGE_STORAGE_VERSION = 1;
 export const BEST_PATH_HZ = 10;
 /** Frames of a recorded best path at most (20 minutes at 10 Hz). */
 export const MAX_PATH_FRAMES = 12000;
-/** Floats per path frame: t, x, y, z, qx, qy, qz, qw. */
+/** Floats per path frame: t, x, y, z (relative to the path's anchor), qx, qy, qz, qw. */
 export const PATH_FRAME_STRIDE = 8;
 export const GATE_ROLES = Object.freeze(['start', 'checkpoint', 'finish']);
 export const GATE_SHAPES = Object.freeze(['circle', 'rect']);
@@ -407,6 +409,9 @@ export function createChallengeSystem(ctx) {
   const lerped = { x: 0, y: 0, z: 0 };
   const rivalOut = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, heading: 0, distance: 0, speed: 0, done: false };
   const pathFrames = new Float32Array(MAX_PATH_FRAMES * PATH_FRAME_STRIDE);
+  /** The active run's path anchor: the WORLD centre of the course's first gate (float64). */
+  const pathAnchor = new Float64Array(3);
+  /** Best paths read or saved: key -> { anchor: { x, y, z }, frames: Float32Array }. */
   const pathCache = new Map();
   let records = loadRecords();
   let storageWarned = false;
@@ -531,6 +536,10 @@ export function createChallengeSystem(ctx) {
     run.splits = new Array(entry.course.gates.length).fill(null);
     run.pathCount = 0;
     run.finishedHold = 0;
+    const anchorGate = entry.course.gates[0];
+    pathAnchor[0] = anchorGate.cx;
+    pathAnchor[1] = anchorGate.cy;
+    pathAnchor[2] = anchorGate.cz;
   }
 
   /**
@@ -710,9 +719,9 @@ export function createChallengeSystem(ctx) {
     const share = dt > 1e-9 ? Math.min(1, Math.max(0, (sampleTime - frameStart) / dt)) : 1;
     const base = run.pathCount * PATH_FRAME_STRIDE;
     pathFrames[base] = sampleTime;
-    pathFrames[base + 1] = previous.x + (player.x - previous.x) * share;
-    pathFrames[base + 2] = previous.y + (player.y - previous.y) * share;
-    pathFrames[base + 3] = previous.z + (player.z - previous.z) * share;
+    pathFrames[base + 1] = previous.x + (player.x - previous.x) * share - pathAnchor[0];
+    pathFrames[base + 2] = previous.y + (player.y - previous.y) * share - pathAnchor[1];
+    pathFrames[base + 3] = previous.z + (player.z - previous.z) * share - pathAnchor[2];
     pathFrames[base + 4] = quaternion.x;
     pathFrames[base + 5] = quaternion.y;
     pathFrames[base + 6] = quaternion.z;
@@ -722,21 +731,28 @@ export function createChallengeSystem(ctx) {
 
   function saveBestPath(courseKey, craft) {
     const frames = pathFrames.slice(0, run.pathCount * PATH_FRAME_STRIDE);
-    pathCache.set(pathKey(courseKey, craft), frames);
-    if (!storage.write(pathKey(courseKey, craft), { version: CHALLENGE_STORAGE_VERSION, hz: BEST_PATH_HZ, frames: Array.from(frames) })) warnStorage();
+    const anchor = { x: pathAnchor[0], y: pathAnchor[1], z: pathAnchor[2] };
+    pathCache.set(pathKey(courseKey, craft), { anchor, frames });
+    if (!storage.write(pathKey(courseKey, craft), { version: CHALLENGE_STORAGE_VERSION, hz: BEST_PATH_HZ, anchor, frames: Array.from(frames) })) warnStorage();
+  }
+
+  /** A stored anchor, or the world origin for a path saved without one (its frames are world positions). */
+  function readAnchor(value) {
+    const valid = value && Number.isFinite(value.x) && Number.isFinite(value.y) && Number.isFinite(value.z);
+    return valid ? { x: value.x, y: value.y, z: value.z } : { x: 0, y: 0, z: 0 };
   }
 
   function getBestPath(courseKey, craft) {
     const key = pathKey(courseKey, craft);
-    let frames = pathCache.get(key) ?? null;
-    if (!frames) {
+    let entry = pathCache.get(key) ?? null;
+    if (!entry) {
       const stored = storage.read(key, null);
       if (stored && stored.version === CHALLENGE_STORAGE_VERSION && stored.hz === BEST_PATH_HZ && Array.isArray(stored.frames) && stored.frames.length % PATH_FRAME_STRIDE === 0 && stored.frames.every(Number.isFinite)) {
-        frames = Float32Array.from(stored.frames);
-        pathCache.set(key, frames);
+        entry = { anchor: readAnchor(stored.anchor), frames: Float32Array.from(stored.frames) };
+        pathCache.set(key, entry);
       }
     }
-    return frames ? { hz: BEST_PATH_HZ, frames: frames.slice() } : null;
+    return entry ? { hz: BEST_PATH_HZ, anchor: { ...entry.anchor }, frames: entry.frames.slice() } : null;
   }
 
   // ---- Detection ---------------------------------------------------------------------------------------------

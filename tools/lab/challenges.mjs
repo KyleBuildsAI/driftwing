@@ -363,16 +363,17 @@ function testPath() {
     if (index > 0 && !(t > frames[(index - 1) * PATH_FRAME_STRIDE])) ordered = false;
     if (index < expectedLattice && Math.abs(t - Math.fround(index / BEST_PATH_HZ)) > 1e-6) ordered = false;
     const expectedZ = -100 - 37 * t;
-    worstPosition = Math.max(worstPosition, Math.abs(frames[index * PATH_FRAME_STRIDE + 3] - expectedZ), Math.abs(frames[index * PATH_FRAME_STRIDE + 2] - 100));
+    worstPosition = Math.max(worstPosition, Math.abs(path.anchor.z + frames[index * PATH_FRAME_STRIDE + 3] - expectedZ), Math.abs(path.anchor.y + frames[index * PATH_FRAME_STRIDE + 2] - 100));
   }
   check('path', `10 Hz frames from the start crossing plus the finish frame (${expectedLattice} + 1)`, path && path.hz === 10 && count === expectedLattice + 1 && ordered && Math.abs(frames[(count - 1) * PATH_FRAME_STRIDE] - duration) < 1e-4 && Math.abs(finish.time - duration) < 1e-9, `${count} frames, last t ${frames ? frames[(count - 1) * PATH_FRAME_STRIDE] : 'none'}`);
-  check('path', 'each frame lies on the flown line at its time (float32)', worstPosition < 0.01, `worst ${worstPosition.toFixed(5)} m`);
+  check('path', 'each frame lies on the flown line at its time (float32 relative to the anchor)', worstPosition < 0.01, `worst ${worstPosition.toFixed(5)} m`);
+  check('path', 'the path anchor is the first gate (world, float64)', path && path.anchor.x === 0 && path.anchor.y === 100 && path.anchor.z === -100, JSON.stringify(path && path.anchor));
   const storedKey = `${CHALLENGE_PATH_KEY_PREFIX}${key}.glider`;
   const stored = storage.map.get(storedKey);
-  check('path', `stored under ${CHALLENGE_PATH_KEY_PREFIX}<courseKey>.<craft> as { version: 1, hz: 10, frames: [...] }`, stored && stored.version === 1 && stored.hz === 10 && Array.isArray(stored.frames) && stored.frames.length === count * PATH_FRAME_STRIDE, storedKey);
+  check('path', `stored under ${CHALLENGE_PATH_KEY_PREFIX}<courseKey>.<craft> as { version: 1, hz: 10, anchor, frames: [...] }`, stored && stored.version === 1 && stored.hz === 10 && stored.anchor && stored.anchor.y === 100 && Array.isArray(stored.frames) && stored.frames.length === count * PATH_FRAME_STRIDE, storedKey);
   const reopened = createLab({ storage: createStorage(storage.map) });
   const back = reopened.challenges.getBestPath(key, 'glider');
-  check('path', 'the storage round trip gives the same frames', back && back.frames.length === frames.length && back.frames.every((value, index) => value === frames[index]));
+  check('path', 'the storage round trip gives the same frames and anchor', back && back.frames.length === frames.length && back.frames.every((value, index) => value === frames[index]) && back.anchor.x === path.anchor.x && back.anchor.y === path.anchor.y && back.anchor.z === path.anchor.z);
   const writesBefore = storage.writes.length;
   flyNorth(lab, { endZ: -700, speed: 20, frames: [1 / 60] });
   check('path', 'a slower run stores no path (only an improved best does)', storage.writes.length === writesBefore && lab.challenges.getBestPath(key, 'glider').frames.length === frames.length, `${storage.writes.length - writesBefore} writes`);

@@ -748,7 +748,7 @@ recipe `challengeGates`, or the ring adapter):
 | `nearest(radius)` | `{ courseKey, name, distance, bearing }` of the nearest registered start gate, or null |
 | `getState()` | the live `state.challenge` object (f.2) |
 | `getBest(courseKey, craft)`, `getRecords()` | best `{ time, medal, splits, date, missed }` per craft; a plain copy of everything |
-| `getBestPath(courseKey, craft)` | `{ hz: 10, frames: Float32Array }` (8 floats per frame: t, x, y, z, qx, qy, qz, qw; t from the start crossing) or null. Phase 4 ghosts read this |
+| `getBestPath(courseKey, craft)` | `{ hz: 10, anchor: { x, y, z }, frames: Float32Array }` (8 floats per frame: t, x, y, z, qx, qy, qz, qw; t from the start crossing; x, y, z relative to `anchor`, the WORLD centre of the first gate, per the float32 rule of a.7; a path stored without an anchor reads with anchor 0) or null. Phase 4 ghosts read this |
 | `count()` | registered courses (dispose checks) |
 
 **Rules**
@@ -764,7 +764,7 @@ recipe `challengeGates`, or the ring adapter):
   `{ version: 1, courses: { [courseKey]: { name, presetId, best: { [craft]: { time, medal, splits, missed, date } } } } }`.
 - The best run's path is recorded at 10 Hz from the start crossing to the finish (at most 12 000
   frames) and saved, only when the best improves, under
-  `${CHALLENGE_PATH_KEY_PREFIX}${courseKey}.${craft}` as `{ version: 1, hz: 10, frames: [...] }`.
+  `${CHALLENGE_PATH_KEY_PREFIX}${courseKey}.${craft}` as `{ version: 1, hz: 10, anchor: { x, y, z }, frames: [...] }`.
 - Owners unregister their courses in `dispose()`; the integration pass adds `count()` to the spawn
   check kit's dispose baseline.
 
