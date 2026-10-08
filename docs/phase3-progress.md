@@ -447,7 +447,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | not started |
 | 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | not started |
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | not started |
-| 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
+| 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | in progress |
 | 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
 | 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | not started |
 | 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | not started |
@@ -505,6 +505,42 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   name: "dragon") are Milestone O's (j.2), as are the journal panel's Craft section and the remote
   `flightState` craft fields of h.3; the picker shows the 14 craft in one strip until the picker
   branch regroups them.
+
+### Wave 2 - p3/craft-paraglider
+
+- **Done:**
+  - `src/flight/SimParaglider.js` (model kind `paraglider`): canopy and pilot as two masses on
+    inextensible, slackable lines (an impulse and a projection, two substeps per tick), the canopy's
+    own yaw, its incidence to the lines (rigging, brakes, bar, big ears, pitch inertia against the
+    swing, the surge out of a stall), the WindField probed at the canopy, per-half aerodynamics
+    (span-scale gusts from the turbulence, brake camber, open share), collapses (pressure angle under
+    the collapse angle for 0.1 s; reinflation with airspeed, a pumped or held brake), the stall, the
+    ground (feet as a braked wheel, the seat as a skid), landing (the wing killed and laid down), the
+    launch run (inflation arc, run force, lift-off) and water landings (floating, graded). The kind's
+    assists (collapse recovery and surge damping from 0 %, turn coordination from 25 %, active
+    piloting, stall protection and spiral exit toward 100 %) and autopilot (heading by weight shift
+    and brake, speed by the bar). Targets: trim 38.1 km/h at 8.9 : 1, full bar 50.2 km/h, 23.8 km/h
+    on deep brakes, big ears 2.5 m/s down.
+  - `src/craft/paraglider.js`: the mesh (a 16-cell elliptical wing re-skinned every frame: brake
+    flaps, big ears and collapses folded about hinge ribs, flutter, crumpled while deflated and rising
+    on the inflation arc; 46 line segments; the pilot in a harness with IK arms on the brake handles,
+    IK legs on the speed bar, standing and striding on the ground, leaning into a weight shift), the
+    harness cockpit (custom: the flight deck, the pod, the straps), `situate` (flying at trim; below
+    60 m AGL or landed: standing on the nearest launch slope, downhill and into the wind, the run
+    requested), the big-ears ability (held; B toggles a latched pair; a splashdown relaunches from a
+    slope), copilot commands `bigEars`, `speedBar`, `launch`, `findThermal` and a status line,
+    journal stats `paragliderBestClimb`, `paragliderBestGain`, `paragliderSlopeLaunches`,
+    `paragliderCollapses`, per-craft bindings (standard gamepad: the analog triggers are the brakes,
+    the bumpers the speed bar; TWCS button 5: big ears), collision probes along the wing and the line
+    curtain, the director profile and fauna threat 0.7.
+  - `src/audio/engines/paraglider.js` (canopy flutter, rush, line whistle on the bar, collapse snap
+    and reinflation pop; the shared vario on by default) and `src/ui/instruments/speedBar.js` (the
+    wing display: brakes, bar, folded tips and collapsed sides, the state in words).
+  - `tools/lab/paraglider.mjs` (41 checks) and `src/dev/craftScenarios/paraglider.js` (thermal climb
+    in both views, big ears, slope launch in both views).
+- **Next:** the browser verification (craft test on both backends, the reduced flight harness with
+  the paraglider, view physics, builds, labs, smoke).
+- **Open issues:** none yet.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
