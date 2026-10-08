@@ -446,7 +446,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | in progress (branch complete, awaiting I2) |
 | 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | not started |
 | 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | not started |
-| 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | not started |
+| 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | in progress (built; verification running) |
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
 | 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
 | 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | not started |
@@ -505,6 +505,25 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   name: "dragon") are Milestone O's (j.2), as are the journal panel's Craft section and the remote
   `flightState` craft fields of h.3; the picker shows the 14 craft in one strip until the picker
   branch regroups them.
+
+### Wave 2 - p3/craft-tiltrotor
+
+- **Built** (contract h; spec Milestone D item 9):
+  - model kind `tiltrotor` (`src/flight/SimTiltrotor.js`): tilting nacelles (0-97 degrees, 8 deg/s,
+    detents 0 / 60 / 90, 60 degrees minimum on the wheels), two blade-element proprotors with flapping
+    and SimHelicopter's inflow, the FCS collective schedule (helicopter to airplane lever range with
+    the wing's capacity, an axial-inflow bias, a governor trim), the rpm schedule (100 % to 84 %), a
+    wing in the rotor wash (download in the hover), flaperons, H tail, nacelle drag, retractable gear,
+    rotor strikes; the corridor maths in `src/flight/tiltrotorCorridor.js`; assists, autopilot and
+    trim in `src/flight/tiltrotorAssists.js`;
+  - the craft module `src/craft/tiltrotor.js` (mesh with tilting nacelles, proprotors and blur discs,
+    flaperons, elevator, rudders, folding gear; cabin cockpit; auto-nacelle ability; situate; copilot
+    `nacelle`, `airplaneMode`, `hoverMode`, `autoNacelle`; journal `tiltrotorConversions`,
+    `tiltrotorFastestConversion`; per-craft keyboard bindings), the `proprotor` sound family, the
+    `nacelle` corridor instrument, pinned on the HUD through the new optional module field `hud`;
+  - tests: `tools/lab/tiltrotor.mjs`, `src/dev/craftScenarios/tiltrotor.js` (full conversion both
+    ways, overspeed, wing stall), the view-physics step file flies it.
+- **Next:** the verification runs (both backends), then I2.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
