@@ -1656,6 +1656,8 @@ export function createFlightController(ctx) {
     /** The WindField (ctx.wind): probe(pos), sample(pos), nearestThermal(pos), ambientAt(pos). */
     wind: ctx.wind ?? null,
     notify,
+    /** The typed event bus (journalStat and the craft's own typed events). */
+    bus,
     /** True while an action is held (hold-type abilities: the balloon's burner, the dragon's fire). */
     isHeld(actionId) {
       return liveControls.held.has(actionId);
