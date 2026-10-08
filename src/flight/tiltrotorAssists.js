@@ -83,7 +83,8 @@ export const TILTROTOR_TUNING = Object.freeze({
     GROUND_RATE: 0.5,
     RING_SAFE_SHARE: 0.2,
   }),
-  HEADING: Object.freeze({ P: 1.2, I: 0.4, D: 0.9, RATE_P: 1.2, MAX_RATE: 25 * DEG, INTEGRAL_LIMIT: 0.6, COORDINATION_SPEEDS: Object.freeze([20, 35]), SIDESLIP_GAIN: 2 }),
+  /** Heading: rad/s of yaw rate per rad of error, the rate loop (pedal per rad/s) and its integral. */
+  HEADING: Object.freeze({ P: 0.8, RATE_P: 4, I: 1.5, MAX_RATE: 15 * DEG, INTEGRAL_LIMIT: 0.5, COORDINATION_SPEEDS: Object.freeze([20, 35]), SIDESLIP_GAIN: 2 }),
   PICKUP: Object.freeze({ MOVE: 0.03, SLEW: 0.5 }),
 });
 
@@ -280,8 +281,9 @@ function leverToVerticalSpeed(lever) {
 }
 
 /**
- * Heading hold in the hover (pedals command a yaw rate; hands off the heading is held), turn
- * coordination at speed (the pedals keep the sideslip at zero).
+ * Heading hold in the hover through a yaw-rate loop (the craft's big yaw inertia needs the damping):
+ * hands off the heading error becomes a limited yaw-rate command, pushed pedals command a yaw rate;
+ * turn coordination at speed (the pedals keep the sideslip at zero).
  */
 function headingToPedal(memory, data, pedal, dt) {
   const tuning = TILTROTOR_TUNING.HEADING;
@@ -289,16 +291,17 @@ function headingToPedal(memory, data, pedal, dt) {
   const [low, high] = tuning.COORDINATION_SPEEDS;
   const coordination = smooth01((data.airspeed - low) / (high - low));
   const idle = Math.abs(pedal) < TILTROTOR_TUNING.IDLE;
-  let hold;
+  let rateCommand;
   if (idle && !data.onGround) {
-    const error = wrapSignedRadians(memory.headingTarget - heading);
-    hold = tuning.P * error - tuning.D * data.yawRate;
-    if (Math.abs(hold + memory.headingIntegral) < 1 || hold * error < 0) {
-      memory.headingIntegral = clamp(memory.headingIntegral + tuning.I * error * dt, -tuning.INTEGRAL_LIMIT, tuning.INTEGRAL_LIMIT);
-    }
+    rateCommand = clamp(tuning.P * wrapSignedRadians(memory.headingTarget - heading), -tuning.MAX_RATE, tuning.MAX_RATE);
   } else {
     memory.headingTarget = heading;
-    hold = tuning.RATE_P * (pedal * tuning.MAX_RATE - data.yawRate);
+    rateCommand = pedal * tuning.MAX_RATE;
+  }
+  const rateError = rateCommand - data.yawRate;
+  const hold = tuning.RATE_P * rateError;
+  if (!data.onGround && (Math.abs(hold + memory.headingIntegral) < 1 || hold * rateError < 0)) {
+    memory.headingIntegral = clamp(memory.headingIntegral + tuning.I * rateError * dt, -tuning.INTEGRAL_LIMIT, tuning.INTEGRAL_LIMIT);
   }
   const hover = memory.headingIntegral + hold;
   const coordinated = pedal + tuning.SIDESLIP_GAIN * data.sideslip;
@@ -482,17 +485,20 @@ const AUTOPILOT = Object.freeze({
   SPEED_I: 0.005,
   MAX_PITCH: 10 * DEG,
   /** Airplane mode: the thrust lever per m/s of speed error, and the flight path per m of height error. */
-  LEVER_P: 0.04,
-  LEVER_I: 0.02,
-  PATH_PER_METRE: 0.004,
+  LEVER_P: 0.02,
+  LEVER_I: 0.005,
+  PATH_PER_METRE: 0.0025,
   MAX_PATH: 8 * DEG,
-  PATH_P: 1.2,
+  PATH_P: 1,
+  PATH_I: 0.35,
   BANK_PER_HEADING: 1.1,
   MAX_BANK: 30 * DEG,
   TURN_SPEED: 20,
   ALIGN_ANGLE: 35 * DEG,
   CLIMB_PER_METRE: 0.25,
   MAX_CLIMB: 5,
+  /** Climb limit (m/s) while the nacelles come down: the thrust goes into the acceleration. */
+  CONVERSION_CLIMB: 1.5,
   MAX_DESCENT: 4,
   LOOKAHEAD: Object.freeze([0, 200, 400, 800, 1400, 2200]),
   LOOKAHEAD_REFRESH: 0.5,
@@ -500,7 +506,7 @@ const AUTOPILOT = Object.freeze({
 });
 
 function createAutopilotMemory() {
-  return { ...createLoopMemory(), engaged: false, speedIntegral: 0, leverIntegral: 0.4, lookaheadAge: Infinity, terrainFloor: -Infinity, corridor: { min: 0, max: NACELLE.MAX } };
+  return { ...createLoopMemory(), engaged: false, speedIntegral: 0, leverIntegral: 0.4, pathPitch: 0, lookaheadAge: Infinity, terrainFloor: -Infinity, corridor: { min: 0, max: NACELLE.MAX } };
 }
 
 function refreshTerrainFloor(memory, env, position, headingDegrees, dt) {
@@ -546,6 +552,7 @@ const tiltrotorAutopilot = Object.freeze({
       initializeLoops(memory, data, controls);
       memory.speedIntegral = 0;
       memory.leverIntegral = data.collective;
+      memory.pathPitch = data.pitch;
       memory.lookaheadAge = Infinity;
     }
     const vne = Number.isFinite(data.vne) ? data.vne : 150;
@@ -556,30 +563,40 @@ const tiltrotorAutopilot = Object.freeze({
     refreshTerrainFloor(memory, env, position, headingTarget, dt);
     const altitudeTarget = Math.max(Number.isFinite(autopilot.altitude) ? autopilot.altitude : position.y, memory.terrainFloor);
 
-    // ---- Nacelles: hover below the airplane speed, airplane mode above it, always on the schedule --------
+    const headingError = wrapSignedRadians((headingTarget - data.heading) * DEG);
+    const frame = headingFrameVelocity(data, velocityScratch);
+    // Airplane mode only once the nose points the way to go (a hover turns on the spot first).
+    const wantAirplane = speedTarget >= AUTOPILOT.AIRPLANE_SPEED;
+    const aligned = Math.abs(headingError) < AUTOPILOT.ALIGN_ANGLE || data.airspeed > AUTOPILOT.TURN_SPEED * 2;
+    const converting = wantAirplane && aligned;
+
+    // ---- Nacelles: hover, or airplane mode on the auto-nacelle schedule ----------------------------------
     const craftState = env && env.craftState ? env.craftState : null;
     if (craftState) {
       conversionCorridor(data.airspeed, env.rho, model.corridorParameters, memory.corridor);
-      const wanted = speedTarget >= AUTOPILOT.AIRPLANE_SPEED ? NACELLE.MIN : NACELLE.HOVER;
-      const selection = scheduledNacelle(wanted, memory.corridor, model.corridorParameters.margin);
+      const selection = scheduledNacelle(converting ? NACELLE.MIN : NACELLE.HOVER, memory.corridor, model.corridorParameters.margin);
       if (Math.abs((craftState.nacelleTarget ?? selection) - selection) > 0.5) craftState.nacelleTarget = Math.round(selection);
     }
 
     const hover = data.hoverShare * (1 - smooth01((data.airspeed - 30) / 20));
-    const headingError = wrapSignedRadians((headingTarget - data.heading) * DEG);
-    const frame = headingFrameVelocity(data, velocityScratch);
 
-    // ---- Helicopter form: altitude -> collective, speed -> pitch, pedals turn when slow --------------------
-    const verticalTarget = Math.max(clamp((altitudeTarget - position.y) * AUTOPILOT.CLIMB_PER_METRE, -AUTOPILOT.MAX_DESCENT, AUTOPILOT.MAX_CLIMB), descentLimit(data));
+    // ---- Helicopter form: altitude -> collective; hold position, fly slow speeds with the pitch, or
+    // keep the attitude level while the nacelles accelerate the craft through a conversion ---------------
+    const climbLimit = converting ? AUTOPILOT.CONVERSION_CLIMB : AUTOPILOT.MAX_CLIMB;
+    const verticalTarget = Math.max(clamp((altitudeTarget - position.y) * AUTOPILOT.CLIMB_PER_METRE, -AUTOPILOT.MAX_DESCENT, climbLimit), descentLimit(data));
     const heliCollective = verticalSpeedToCollective(memory, data, verticalTarget, dt);
     let heliPitch;
     let heliBank;
-    if (hovering) {
+    if (hovering || (wantAirplane && !aligned)) {
       velocityToAttitude(memory, data, position, 0, 0, dt, tiltOut);
       heliPitch = tiltOut.pitch;
       heliBank = tiltOut.bank;
+    } else if (converting) {
+      memory.positionCaptured = false;
+      heliPitch = 0;
+      heliBank = clamp(-0.05 * frame.right, -6 * DEG, 6 * DEG);
     } else {
-      const aligned = Math.abs(headingError) < AUTOPILOT.ALIGN_ANGLE || data.airspeed > AUTOPILOT.TURN_SPEED;
+      memory.positionCaptured = false;
       const speedError = (aligned ? speedTarget : 0) - frame.forward;
       memory.speedIntegral = clamp(memory.speedIntegral + AUTOPILOT.SPEED_I * speedError * dt, -5 * DEG, 5 * DEG);
       heliPitch = clamp(-(AUTOPILOT.SPEED_P * speedError + memory.speedIntegral), -AUTOPILOT.MAX_PITCH, AUTOPILOT.MAX_PITCH);
@@ -589,11 +606,15 @@ const tiltrotorAutopilot = Object.freeze({
     // ---- Airplane form: altitude -> flight path -> pitch, speed -> thrust lever, heading -> bank ------------
     const path = clamp((altitudeTarget - position.y) * AUTOPILOT.PATH_PER_METRE, -AUTOPILOT.MAX_PATH, AUTOPILOT.MAX_PATH);
     const currentPath = Math.asin(clamp(data.verticalSpeed / Math.max(data.airspeed, 1), -1, 1));
-    const planePitch = clamp(data.pitch + AUTOPILOT.PATH_P * (path - currentPath), -AUTOPILOT.MAX_PITCH * 1.5, AUTOPILOT.MAX_PITCH * 1.5);
+    const pathError = path - currentPath;
+    if (hover > 0.6) memory.pathPitch = data.pitch;
+    else memory.pathPitch = clamp(memory.pathPitch + AUTOPILOT.PATH_I * pathError * dt, -AUTOPILOT.MAX_PITCH, AUTOPILOT.MAX_PITCH * 1.5);
+    const planePitch = clamp(memory.pathPitch + AUTOPILOT.PATH_P * pathError, -AUTOPILOT.MAX_PITCH, AUTOPILOT.MAX_PITCH * 1.5);
     const leverError = speedTarget - data.airspeed;
-    memory.leverIntegral = clamp(memory.leverIntegral + AUTOPILOT.LEVER_I * leverError * dt, 0, 1);
-    const planeLever = clamp(memory.leverIntegral + AUTOPILOT.LEVER_P * leverError, 0, 1);
-    const turning = smooth01((data.airspeed - AUTOPILOT.TURN_SPEED * 0.6) / (AUTOPILOT.TURN_SPEED * 0.6));
+    const leverOut = memory.leverIntegral + AUTOPILOT.LEVER_P * leverError;
+    if ((leverOut < 1 || leverError < 0) && (leverOut > 0 || leverError > 0)) memory.leverIntegral = clamp(memory.leverIntegral + AUTOPILOT.LEVER_I * leverError * dt, 0, 1);
+    const planeLever = clamp(leverOut, 0, 1);
+    const turning = smooth01((data.airspeed - AUTOPILOT.TURN_SPEED) / AUTOPILOT.TURN_SPEED);
     const turnBank = clamp(headingError * AUTOPILOT.BANK_PER_HEADING, -AUTOPILOT.MAX_BANK, AUTOPILOT.MAX_BANK);
 
     const pitchTarget = heliPitch * hover + planePitch * (1 - hover);

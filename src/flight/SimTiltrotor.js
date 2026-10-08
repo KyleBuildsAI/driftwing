@@ -1104,7 +1104,7 @@ export function createSimTiltrotorModel({ profile, craft, bus, craftState = {} }
     const overspeed = airborne && (corridorNow === 'overspeed' || flightData.rotorRpm > OVERSPEED_SHARE);
     if (overspeed && !warnings.overspeed) {
       warnings.overspeed = true;
-      notify('Rotor overspeed: the nacelles are too high for this airspeed. Tilt them forward or slow down.', 'warning');
+      notify('Rotor overspeed: too fast for this nacelle angle. The discs blow back and the blades stall. Tilt the nacelles forward or slow down.', 'warning');
     } else if (!overspeed && corridorNow === 'ok' && flightData.rotorRpm < OVERSPEED_SHARE - 0.02) {
       warnings.overspeed = false;
     }

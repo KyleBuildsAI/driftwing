@@ -41,7 +41,7 @@ const simProfile = Object.freeze({
   mass: Object.freeze({ empty: 15000, pilot: 200, fuel: 2000, payload: 800 }), // 18 t: a light mission weight
   // kg m^2 about body x (pitch), y (yaw) and z (roll): the nacelles and rotors far out on the wingtips.
   inertia: Object.freeze({ pitch: 320000, yaw: 520000, roll: 260000 }),
-  centerOfMass: Object.freeze([0, 0.7, NACELLE_PIVOT.Z]),
+  centerOfMass: Object.freeze([0, 0.95, NACELLE_PIVOT.Z]),
   rotor: Object.freeze({
     radius: ROTOR_RADIUS,
     blades: 3,
@@ -53,7 +53,7 @@ const simProfile = Object.freeze({
     inertia: 23000, // kg m^2: both proprotors and the cross-shaft
     // Blade pitch at 3/4 radius over the thrust lever's travel in helicopter and in airplane mode
     // (the flight control computer adds the inflow bias and the governor trim on top).
-    helicopterPitch: Object.freeze([1.1, 28.1]),
+    helicopterPitch: Object.freeze([0.3, 27.3]),
     airplanePitch: Object.freeze([-1.5, 4.5]),
     maxBias: 62,
     cyclic: 12, // longitudinal cyclic at full stick (helicopter mode)
