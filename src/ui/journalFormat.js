@@ -1,6 +1,6 @@
 // Formatting shared by the journal panel, the discovery toast and the world map: record statistics,
 // world coordinates, discovery times and dates.
-import { JOURNAL_STATS } from '../gameplay/journal.js';
+import { journalStatInfo } from '../gameplay/journal.js';
 
 function padNumber(value, length) {
   return String(value).padStart(length, '0');
@@ -29,22 +29,23 @@ export function formatRunTime(seconds) {
   return `${minutes}:${padNumber(wholeSeconds, 2)}.${tenths}`;
 }
 
-/** The label of a record statistic: the known label, else the key in words. */
+/** The label of a record statistic: the known label (the game's or a craft module's), else the key in words. */
 export function statLabel(key) {
-  return JOURNAL_STATS[key]?.label ?? humanizeKey(key);
+  return journalStatInfo(key)?.label ?? humanizeKey(key);
 }
 
 /**
  * A record statistic as [value, unit] for a stat card: counts as whole numbers, distances in m / km,
- * run times as M:SS.t; other keys print their number.
+ * run times as M:SS.t; another declared unit ('m/s', 'points', ...) follows the number; undeclared
+ * keys print their number.
  */
 export function statParts(key, value) {
-  const unit = JOURNAL_STATS[key]?.unit ?? null;
+  const unit = journalStatInfo(key)?.unit ?? null;
   if (!Number.isFinite(value)) return ['None', ''];
   if (unit === 'count') return [String(Math.round(value)), ''];
   if (unit === 'metres') return distanceParts(value);
   if (unit === 'seconds') return [formatRunTime(value), ''];
-  return [String(Math.round(value * 100) / 100), ''];
+  return [String(Math.round(value * 100) / 100), typeof unit === 'string' ? unit : ''];
 }
 
 /** A record statistic as one string ('212 m', '1:42.3', '3'). */

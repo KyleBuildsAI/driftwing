@@ -13,7 +13,9 @@
 //   records     journalStat folds 'add', 'min' and 'max'; known keys keep their own op (a mismatch is
 //               reported once); bad payloads are refused; achievements are recorded once; records and
 //               achievements are global (another world sees them) while discoveries stay per seed;
-//               the best landing in any world is kept
+//               the best landing in any world is kept; flight time per craft accrues frame by frame
+//               (records version 2, a version 1 record reads with none) and is saved with the
+//               throttled saves
 //   tiles       every field has the right size and type; the same request gives the same bytes; tiles
 //               share their edges (no seams in height or colour); water is tinted by depth; bad
 //               requests throw; the cache tag follows the seed and the preset placement data; the
@@ -109,7 +111,7 @@ function session(seed) {
   bus.on('journal:discovery', (payload) => announced.discoveries.push(payload));
   bus.on('journal:record', (payload) => announced.records.push(payload));
   bus.on('journal:achievement', (payload) => announced.achievements.push(payload));
-  return { bus, journal, marked, announced };
+  return { bus, journal, marked, announced, state };
 }
 
 function testJournal() {
@@ -182,6 +184,25 @@ function testRecords() {
   check('records', 'records and achievements are global', global.stats.stormsChased?.value === 2 && global.achievements.length === 2);
   check('records', 'the best landing in any world is kept', global.bestLanding?.grade === 'smooth' && global.bestLanding.craft === 'bushplane', JSON.stringify(global.bestLanding));
   check('records', 'while the landings of each world stay its own', other.journal.getData().landings.count === 2 && world.journal.getData().landings.count === 1);
+
+  // Flight time per craft (records version 2): counted every frame of flight for the craft flying it.
+  const stored = storage.read(RECORDS_STORAGE_KEY, null);
+  storage.write(RECORDS_STORAGE_KEY, { version: 1, stats: stored.stats, achievements: stored.achievements, bestLanding: stored.bestLanding });
+  const flying = session('CRAFTTIME');
+  check('records', 'a version 1 record reads with no flight time per craft and keeps the rest', Object.keys(flying.journal.getRecords().craftTime).length === 0 && flying.journal.getRecords().stats.stormsChased?.value === 2, JSON.stringify(flying.journal.getRecords().craftTime));
+  flying.state.flight = { craft: 'jet' };
+  for (let frame = 0; frame < 120; frame++) flying.journal.update(1 / 60, 1 / 60);
+  flying.state.flight.craft = 'balloon';
+  for (let frame = 0; frame < 60; frame++) flying.journal.update(1 / 60, 1 / 60);
+  flying.journal.update(0, 6);
+  const times = flying.journal.getRecords().craftTime;
+  check('records', 'flight time accrues per craft, frame by frame', Math.abs(times.jet - 2) < 0.05 && Math.abs(times.balloon - 1) < 0.05, JSON.stringify(times));
+  const savedTimes = storage.read(RECORDS_STORAGE_KEY, null);
+  check('records', 'the records are saved as version 2 with craftTime (throttled save)', savedTimes.version === 2 && Math.abs(savedTimes.craftTime.jet - 2) < 0.05, JSON.stringify(savedTimes.craftTime));
+  const paused = session('CRAFTTIME');
+  paused.state.flight = { craft: 'jet' };
+  paused.journal.update(0, 1);
+  check('records', 'a paused frame adds no flight time', Math.abs(paused.journal.getRecords().craftTime.jet - 2) < 0.05, JSON.stringify(paused.journal.getRecords().craftTime));
 }
 
 // ---- Tiles ---------------------------------------------------------------------------------------

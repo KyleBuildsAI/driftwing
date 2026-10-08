@@ -7,7 +7,7 @@
 // Cards queue and show one at a time. In photo mode (and on touch screens while a panel is open) the
 // card is hidden and its clock stops, so it comes back afterwards. Clicking a card opens the journal.
 import './discoveryToast.css';
-import { JOURNAL_STATS } from '../gameplay/journal.js';
+import { journalStatInfo } from '../gameplay/journal.js';
 import { discoveryIcon, discoveryIconSvg } from './categoryIcons.js';
 import { formatStat, statLabel } from './journalFormat.js';
 
@@ -117,7 +117,7 @@ export function createDiscoveryToast({ root, bus, toast, onActivate }) {
   });
   bus.on('journal:record', (payload) => {
     if (!payload || !payload.improved) return;
-    const known = JOURNAL_STATS[payload.key];
+    const known = journalStatInfo(payload.key);
     if (known && known.op === 'add') {
       toast(`${statLabel(payload.key)}: ${formatStat(payload.key, payload.value)}`, { kind: 'success', key: `record-${payload.key}` });
     } else if (payload.op !== 'add') {

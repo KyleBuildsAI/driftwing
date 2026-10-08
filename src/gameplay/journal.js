@@ -3,10 +3,12 @@ import { JOURNAL_STAT_OPS } from '../core/events.js';
 import { LANDING_GRADES, isBetterLanding } from '../flight/landing.js';
 import { PRESETS, PRESET_BY_ID } from '../spawns/presets/index.js';
 import { PRESET_CATEGORIES } from '../spawns/schema.js';
+import { craftRegistry } from '../craft/registry.js';
 
 /** Where the global records (achievements and bests across every world) are kept. */
 export const RECORDS_STORAGE_KEY = 'driftwing-v2.records';
-const RECORDS_VERSION = 1;
+/** Version 2 (Phase 3) adds craftTime; a version 1 record reads with none. */
+const RECORDS_VERSION = 2;
 
 /**
  * The journal statistics the game knows (typed event journalStat): how each folds and what it
@@ -18,6 +20,33 @@ export const JOURNAL_STATS = Object.freeze({
   bestCanyonRun: Object.freeze({ op: 'min', unit: 'seconds', label: 'Best canyon run' }),
 });
 const STAT_KEY_PATTERN = /^[a-z][A-Za-z0-9]{0,39}$/;
+const CRAFT_ID_PATTERN = /^[a-z][A-Za-z0-9]{0,31}$/;
+const MAX_CRAFT_TIMES = 64;
+
+/** The journal stats the registered craft modules declare (module journal.stats), rebuilt when a module registers. */
+const craftStats = { key: '', stats: new Map() };
+function craftJournalStats() {
+  const registered = craftRegistry.list().filter((entry) => entry.available).map((entry) => entry.id);
+  const key = registered.join(',');
+  if (key === craftStats.key) return craftStats.stats;
+  craftStats.key = key;
+  craftStats.stats = new Map();
+  for (const id of registered) {
+    const stats = craftRegistry.get(id).journal?.stats ?? [];
+    for (const stat of stats) {
+      if (!JOURNAL_STATS[stat.key]) craftStats.stats.set(stat.key, Object.freeze({ op: stat.op, unit: stat.unit, label: stat.label, craft: id }));
+    }
+  }
+  return craftStats.stats;
+}
+
+/**
+ * What a journal statistic is: { op, unit, label } for the game's own (JOURNAL_STATS) and every
+ * registered craft module's journal.stats (contract h.2), or null for a key nobody declared.
+ */
+export function journalStatInfo(key) {
+  return JOURNAL_STATS[key] ?? craftJournalStats().get(key) ?? null;
+}
 
 /**
  * JOURNAL: the per-seed discovery log. Records biomes visited, landmarks found, spawns discovered
@@ -28,9 +57,10 @@ const STAT_KEY_PATTERN = /^[a-z][A-Za-z0-9]{0,39}$/;
  * under `driftwing-v2.journal.<seed>`.
  *
  * The global records live under `driftwing-v2.records`, shared by every world: the journal
- * statistics from the typed 'journalStat' events (storms chased, closest tornado, best canyon run
- * and any other key a preset sends), the achievements from the typed 'achievement' events, and the
- * best landing in any world.
+ * statistics from the typed 'journalStat' events (storms chased, closest tornado, best canyon run,
+ * each craft module's own journal.stats and any other key a preset sends), the achievements from the
+ * typed 'achievement' events, the best landing in any world, and the flight time per craft
+ * (craftTime: seconds, counted every frame of flight for the craft flying it).
  *
  * The spawn collection counts implemented presets only: found / total over the spawn registry (the
  * SpawnManager's presets, which is PRESETS in a player's build).
@@ -88,7 +118,7 @@ export function createJournal(ctx) {
   }
 
   function createEmptyRecords() {
-    return { stats: {}, achievements: [], bestLanding: null };
+    return { stats: {}, achievements: [], bestLanding: null, craftTime: {} };
   }
 
   /**
@@ -274,6 +304,13 @@ export function createJournal(ctx) {
       }
     }
     loaded.bestLanding = sanitizeLanding(stored.bestLanding);
+    if (stored.craftTime && typeof stored.craftTime === 'object') {
+      for (const [craft, seconds] of Object.entries(stored.craftTime)) {
+        if (!CRAFT_ID_PATTERN.test(craft) || Object.keys(loaded.craftTime).length >= MAX_CRAFT_TIMES) continue;
+        const value = finiteNumber(seconds, NaN);
+        if (value > 0) loaded.craftTime[craft] = value;
+      }
+    }
     return loaded;
   }
 
@@ -289,6 +326,8 @@ export function createJournal(ctx) {
   let statsTimer = STATS_EVENT_INTERVAL_SECONDS;
   let saveFailureReported = false;
   let recordsSaveFailureReported = false;
+  /** craftTime grew since the records were last saved (saved with the journal's throttled saves). */
+  let craftTimeDirty = false;
 
   /** JSON-safe copy of the journal (also the persisted shape). */
   function snapshot() {
@@ -317,10 +356,13 @@ export function createJournal(ctx) {
   function recordsSnapshot() {
     const stats = {};
     for (const [key, stat] of Object.entries(records.stats)) stats[key] = { ...stat };
+    const craftTime = {};
+    for (const [craft, seconds] of Object.entries(records.craftTime)) craftTime[craft] = roundTo(seconds, 1);
     return {
       stats,
       achievements: records.achievements.map((entry) => ({ ...entry })),
       bestLanding: records.bestLanding ? { ...records.bestLanding } : null,
+      craftTime,
     };
   }
 
@@ -340,6 +382,7 @@ export function createJournal(ctx) {
   }
 
   function saveRecords() {
+    craftTimeDirty = false;
     if (storage.write(RECORDS_STORAGE_KEY, { version: RECORDS_VERSION, ...recordsSnapshot() })) return true;
     if (!recordsSaveFailureReported) {
       recordsSaveFailureReported = true;
@@ -408,6 +451,12 @@ export function createJournal(ctx) {
     if (Number.isFinite(player.speed) && player.speed > 0) data.distanceFlown += player.speed * dt;
     if (Number.isFinite(player.altitude) && player.altitude > data.maxAltitude) data.maxAltitude = player.altitude;
     data.flightTime += dt;
+    // Flight time per craft (global records), for the craft flying this frame.
+    const craft = state.flight ? state.flight.craft : null;
+    if (typeof craft === 'string' && CRAFT_ID_PATTERN.test(craft) && (craft in records.craftTime || Object.keys(records.craftTime).length < MAX_CRAFT_TIMES)) {
+      records.craftTime[craft] = (records.craftTime[craft] ?? 0) + dt;
+      craftTimeDirty = true;
+    }
     dirty = true;
     statsTimer -= dt;
     if (statsTimer <= 0) {
@@ -491,7 +540,7 @@ export function createJournal(ctx) {
     if (!payload || typeof payload.key !== 'string' || !STAT_KEY_PATTERN.test(payload.key)) return null;
     const value = finiteNumber(payload.value, NaN);
     if (!Number.isFinite(value) || !JOURNAL_STAT_OPS.includes(payload.op)) return null;
-    const known = JOURNAL_STATS[payload.key];
+    const known = journalStatInfo(payload.key);
     let op = payload.op;
     if (known && known.op !== op) {
       reportStatOpMismatch(payload.key, op, known.op);
@@ -541,10 +590,15 @@ export function createJournal(ctx) {
   }
 
   function flushOnHide() {
-    if (document.visibilityState === 'hidden') save();
+    if (document.visibilityState !== 'hidden') return;
+    save();
+    if (craftTimeDirty) saveRecords();
   }
   document.addEventListener('visibilitychange', flushOnHide);
-  window.addEventListener('pagehide', () => save());
+  window.addEventListener('pagehide', () => {
+    save();
+    if (craftTimeDirty) saveRecords();
+  });
   bus.on('biome:changed', (payload) => visitBiome(payload?.biome?.key));
   bus.on('landed', (landing) => recordLanding(landing));
   bus.onTyped('discovery', (payload) => recordSpawnDiscovery(payload));
@@ -565,6 +619,7 @@ export function createJournal(ctx) {
       if (saveTimer <= 0) {
         saveTimer = SAVE_INTERVAL_SECONDS;
         if (dirty) save();
+        if (craftTimeDirty) saveRecords();
       }
       if (changePending) {
         changePending = false;
@@ -586,7 +641,7 @@ export function createJournal(ctx) {
     /** The challenge bests: { version, courses: { courseKey: { name, presetId, best: { craft: { time, medal, splits, missed, date } } } } } or null. */
     getChallengeRecords: challengeRecords,
 
-    /** The global records: { stats: { key: { value, op, at, seed, presetId } }, achievements, bestLanding }. */
+    /** The global records: { stats: { key: { value, op, at, seed, presetId } }, achievements, bestLanding, craftTime: { craft: seconds } }. */
     getRecords() {
       return recordsSnapshot();
     },
