@@ -450,7 +450,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
 | 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
 | 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | not started |
-| 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | not started |
+| 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | in progress |
 | 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | not started |
 | P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | not started |
 | I2 | Integration pass: merge 2.0 first (before the craft branches start), then the craft branches in catalog order and the picker / director branch; `?test=craft` on both backends | `v2-phase3` | | not started |
@@ -505,6 +505,25 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   name: "dragon") are Milestone O's (j.2), as are the journal panel's Craft section and the remote
   `flightState` craft fields of h.3; the picker shows the 14 craft in one strip until the picker
   branch regroups them.
+
+### Wave 2 - p3/craft-eagle
+
+- **Built** (contract h; additions in the final report and docs/architecture.md):
+  - `src/flight/SimFlapper.js` (kind `flapper`): flap power on the throttle axis (0 = glide), the
+    tuck (stick pushed hard, or `craftAbilityAlt` held) into a 65 m/s stoop, soaring on the
+    WindField's thermals and ridge lift, the perch (scan, auto-landing, standing, takeoff, ground
+    stand, resting placements), its assists (stability with a phugoid damper, auto-level, stall
+    protection) and its autopilot (energy control; the perch approach for the copilot);
+  - `src/craft/eagle.js` + `eagleMeshes.js`: the module with two skins (bald eagle; dragon with
+    membranes, jaw, tail chain and flame jet), collision probes, `situate`, abilities (screech /
+    fire breath, tuck), copilot commands (findPerch, takeOff, screech, fireBreath, tuck, glide) and
+    status, journal stats (eaglePerches, eagleBestSoar, dragonLanternsLit), per-craft bindings,
+    directorProfile, faunaThreat 2.5, the creature first-person view, the perch camera orbit;
+  - `src/audio/engines/creature.js`, `src/ui/instruments/perch.js`, `src/gameplay/ignition.js`
+    (`ctx.ignition`), the typed `perched` event, `cameraRig.chase.orbitYaw` in the camera;
+  - `tools/lab/eagle.mjs`, `src/dev/craftScenarios/eagle.js` (perch and takeoff by hand and by the
+    copilot, ground takeoff, stoop, dragon fire).
+- **Next:** verification on both backends, then I2 merges it in catalog order.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
