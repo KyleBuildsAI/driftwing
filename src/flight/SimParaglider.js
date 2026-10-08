@@ -76,6 +76,9 @@ const RELIFT_SECONDS = 1;
 const LAUNCH_INPUT = Object.freeze({ PUSH: 0.5, BAR: 0.6, SECONDS: 0.3 });
 /** Airborne this long during a launch run counts as flying. */
 const LAUNCH_AIRBORNE_SECONDS = 0.4;
+/** A launch run turns up to this far (deg) from downhill toward the wind, in these steps. */
+const LAUNCH_TURN = 50;
+const LAUNCH_TURN_STEP = 10;
 /** The canopy rests this high (m) above the surface below it. */
 const CANOPY_REST_HEIGHT = 0.25;
 /** The speed bar engages once the lever has moved this far from where it was at a reset (or sits at idle). */
@@ -889,7 +892,7 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
     const gradientX = (env.groundHeight(x + probe, z) - env.groundHeight(x - probe, z)) / (2 * probe);
     const gradientZ = (env.groundHeight(x, z + probe) - env.groundHeight(x, z - probe)) / (2 * probe);
     const grade = Math.sqrt(gradientX * gradientX + gradientZ * gradientZ);
-    if (grade > launchProfile.minGrade) wingState.heading = wrapSignedRadians(headingFromVector(-gradientX, -gradientZ) * DEG);
+    if (grade > launchProfile.minGrade) wingState.heading = launchHeading(env, gradientX, gradientZ, grade);
     setPhase('launch');
     wingState.inflation = 0;
     wingState.launchSeconds = 0;
@@ -899,6 +902,31 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
     placeCanopyForInflation();
     canopy.velocity.copy(state.velocity);
     notify(grade > launchProfile.minGrade ? 'Inflating: run down the slope!' : 'Inflating on the flat: it needs a breeze to lift you.', 'info');
+  }
+
+  /**
+   * The run's direction (rad): downhill, turned up to LAUNCH_TURN toward the wind where the ground
+   * still falls away steeply enough (a launch into the wind needs less run; downwind it may not fly).
+   */
+  function launchHeading(env, gradientX, gradientZ, grade) {
+    const downhill = headingFromVector(-gradientX, -gradientZ);
+    const windX = env.wind && env.wind.vel ? env.wind.vel.x : 0;
+    const windZ = env.wind && env.wind.vel ? env.wind.vel.z : 0;
+    let best = downhill;
+    let bestScore = -Infinity;
+    for (let turn = -LAUNCH_TURN; turn <= LAUNCH_TURN; turn += LAUNCH_TURN_STEP) {
+      const heading = (downhill + turn) * DEG;
+      const directionX = Math.sin(heading);
+      const directionZ = -Math.cos(heading);
+      const drop = -(gradientX * directionX + gradientZ * directionZ);
+      if (drop < Math.max(launchProfile.minGrade, 0.6 * grade)) continue;
+      const score = drop * 10 - (windX * directionX + windZ * directionZ);
+      if (score > bestScore) {
+        bestScore = score;
+        best = downhill + turn;
+      }
+    }
+    return wrapSignedRadians(best * DEG);
   }
 
   /** The canopy on its inflation arc (wingState.inflation): lying behind the pilot (0) to over the pilot at the trim (1). */
@@ -964,10 +992,12 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
       return;
     }
     const requested = Boolean(craftState && craftState.launchRequested);
-    if (craftState) craftState.launchRequested = false;
     const pushing = axisValue(controls.pitch) < -LAUNCH_INPUT.PUSH || (wingState.barArmed && unitValue(controls.throttle) > LAUNCH_INPUT.BAR);
     wingState.launchInputSeconds = pushing ? wingState.launchInputSeconds + tick.dt : 0;
-    if ((requested || wingState.launchInputSeconds >= LAUNCH_INPUT.SECONDS) && contact.report.onGround) beginLaunch(env);
+    // A request waits for the feet to settle on the ground (a placement starts exactly at the surface).
+    if (!(requested || wingState.launchInputSeconds >= LAUNCH_INPUT.SECONDS) || !contact.report.onGround) return;
+    if (craftState) craftState.launchRequested = false;
+    beginLaunch(env);
   }
 
   /** The pilot's forces this substep: weight, drag, the ground, the run (into pilotForce). */
@@ -1072,7 +1102,6 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
     handleActions(controls);
     updatePilotInputs(controls);
     previousQuaternion.copy(state.quaternion);
-    checkLaunchRequest(controls, env);
 
     // Ground contact (once per tick): the feet are a braked wheel while standing, free while running.
     const running = wingState.phase === 'launch' || (wingState.phase === 'flight' && state.velocity.lengthSq() > LANDED_SPEED * LANDED_SPEED);
@@ -1082,6 +1111,7 @@ export function createSimParagliderModel({ profile, craft, bus, craftState: init
     groundMoment.set(0, 0, 0);
     contact.evaluate(contactBody, contactInputs, env, dt, groundForce, groundMoment);
     const report = contact.report;
+    checkLaunchRequest(controls, env);
 
     // The air at both bodies, the gusts across the span, the launch run.
     sampleCanopyWind(env);
