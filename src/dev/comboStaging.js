@@ -113,11 +113,11 @@ function downSun(state) {
 }
 
 /**
- * Stages presetId (one of COMBO_STAGING) and forces it: conditions, place, viewpoint, what the place
- * needs awake, then the combo on the spot. Resolves to { presetId, id, place, view, woke } (id: the
- * combo id or the override's) or throws with the reason.
+ * The first half of stageCombo: holds the conditions, finds the place, puts the craft at the viewpoint
+ * and wakes what the place needs. Resolves to { presetId, staging, place, view, woke } (a check takes
+ * its baselines here, before forceCombo) or throws with the reason.
  */
-export async function stageCombo(ctx, presetId) {
+export async function prepareCombo(ctx, presetId) {
   const staging = COMBO_STAGING[presetId];
   if (!staging) throw new Error(`no combo staging for "${presetId}"`);
   const { state, world } = ctx;
@@ -154,18 +154,41 @@ export async function stageCombo(ctx, presetId) {
       if (!woke) throw new Error(`the ${place.site.presetId} site ${place.site.id} could not be woken`);
     }
   }
-  let id;
-  if (staging.override) {
-    id = spawns.forceSpawn(presetId, { force: true });
-  } else {
-    id = spawns.forceSpawn(presetId, { force: true, at: { x: place.x, z: place.z } });
-  }
-  if (!id) throw new Error(`the director refused ${presetId} (${spawns.manager.getStats().lastRefusal ?? 'see the console'})`);
+  return {
+    presetId,
+    staging,
+    place: { x: place.x, z: place.z, label: place.label },
+    view: { x: Math.round(viewX), y: Math.round(viewY), z: Math.round(viewZ), heading: Math.round(heading) },
+    woke,
+  };
+}
+
+/**
+ * The second half: forces the prepared combo on its place through the director's debug path (the
+ * override on the current night). Returns the combo id (or the override's) or throws.
+ */
+export function forceCombo(ctx, prepared) {
+  const spawns = ctx.systems.spawns;
+  const id = prepared.staging.override
+    ? spawns.forceSpawn(prepared.presetId, { force: true })
+    : spawns.forceSpawn(prepared.presetId, { force: true, at: { x: prepared.place.x, z: prepared.place.z } });
+  if (!id) throw new Error(`the director refused ${prepared.presetId} (${spawns.manager.getStats().lastRefusal ?? 'see the console'})`);
+  return id;
+}
+
+/**
+ * Stages presetId (one of COMBO_STAGING) and forces it: conditions, place, viewpoint, what the place
+ * needs awake, then the combo on the spot. Resolves to { presetId, id, place, view, woke } (id: the
+ * combo id or the override's) or throws with the reason.
+ */
+export async function stageCombo(ctx, presetId) {
+  const prepared = await prepareCombo(ctx, presetId);
+  const id = forceCombo(ctx, prepared);
   return {
     presetId,
     id,
-    place: { x: Math.round(place.x), z: Math.round(place.z), label: place.label },
-    view: { x: Math.round(viewX), y: Math.round(viewY), z: Math.round(viewZ), heading: Math.round(heading) },
-    woke,
+    place: { x: Math.round(prepared.place.x), z: Math.round(prepared.place.z), label: prepared.place.label },
+    view: prepared.view,
+    woke: prepared.woke,
   };
 }
