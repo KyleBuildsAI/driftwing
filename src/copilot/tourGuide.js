@@ -87,6 +87,14 @@ const NAME_SYNONYMS = Object.freeze([
   [/\b(lens clouds?|ufo clouds?|lenticulars?)\b/g, 'lenticular'],
   [/\b(rainbows?)\b/g, 'glory rainbow'],
   [/\b(spouts?)\b/g, 'waterspout'],
+  // Phase 3, presets 91-100.
+  [/\b(frozen ponds?|ice lakes?|lake ice)\b/g, 'frozen lake'],
+  [/\b(northern lights|aurora borealis|auroras)\b/g, 'aurora'],
+  [/\b(broken comet|split comet|comet breaking up|disintegrating comet)\b/g, 'comet breakup'],
+  [/\b(endless day|sun that never sets|polar day)\b/g, 'midnight sun'],
+  [/\b(singing (crystals?|spires?)|crystal lightning)\b/g, 'resonating crystal spires'],
+  // "double rainbow" became "double glory rainbow" above: the double one is the whales' combo.
+  [/\b(double glory rainbows?)\b/g, 'double rainbow whales'],
 ]);
 
 /**
