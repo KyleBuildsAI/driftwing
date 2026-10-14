@@ -447,7 +447,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | in progress (branch complete, awaiting I2) |
 | 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | in progress (branch complete, awaiting I2) |
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | in progress (branch complete, awaiting I2) |
-| 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
+| 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | branch complete, awaiting I2 |
 | 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
 | 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | not started |
 | 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | not started |
@@ -650,6 +650,64 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   1.4 KB per tick against the helicopter's 1 KB in node; no per-tick objects), as every flight model
   does; Milestone O's copilot "switch to the tiltrotor" synonyms and the remote `flightState`
   nacelle field (h.3, j.2).
+
+### Wave 2 - p3/craft-paraglider
+
+- **Done:**
+  - `src/flight/SimParaglider.js` (model kind `paraglider`): canopy and pilot as two masses on
+    inextensible, slackable lines (an impulse and a projection, two substeps per tick), the canopy's
+    own yaw, its incidence to the lines (rigging, brakes, bar, big ears, pitch inertia against the
+    swing, the surge out of a stall), the WindField probed at the canopy, per-half aerodynamics
+    (span-scale gusts from the turbulence, brake camber, open share), collapses (pressure angle under
+    the collapse angle for 0.1 s; reinflation with airspeed, a pumped or held brake), the stall, the
+    ground (feet as a braked wheel, the seat as a skid), landing (the wing killed and laid down), the
+    launch run (inflation arc, run force, lift-off) and water landings (floating, graded). The kind's
+    assists (collapse recovery and surge damping from 0 %, turn coordination from 25 %, active
+    piloting, stall protection and spiral exit toward 100 %) and autopilot (heading by weight shift
+    and brake, speed by the bar). Targets: trim 38.1 km/h at 8.9 : 1, full bar 50.2 km/h, 23.8 km/h
+    on deep brakes, big ears 2.5 m/s down.
+  - `src/craft/paraglider.js`: the mesh (a 16-cell elliptical wing re-skinned every frame: brake
+    flaps, big ears and collapses folded about hinge ribs, flutter, crumpled while deflated and rising
+    on the inflation arc; 32 line segments; the pilot in a harness with IK arms on the brake handles,
+    IK legs on the speed bar, standing and striding on the ground, leaning into a weight shift), the
+    harness cockpit (custom: the flight deck, the pod, the straps), `situate` (flying at trim; below
+    60 m AGL or landed: standing on the nearest launch slope, downhill and into the wind, the run
+    requested), the big-ears ability (held; B toggles a latched pair; a splashdown relaunches from a
+    slope), copilot commands `bigEars`, `speedBar`, `launch`, `findThermal` and a status line,
+    journal stats `paragliderBestClimb`, `paragliderBestGain`, `paragliderSlopeLaunches`,
+    `paragliderCollapses`, per-craft bindings (standard gamepad: the analog triggers are the brakes,
+    the bumpers the speed bar; TWCS button 5: big ears), collision probes along the wing and the line
+    curtain, the director profile and fauna threat 0.7.
+  - `src/audio/engines/paraglider.js` (canopy flutter, rush, line whistle on the bar, collapse snap
+    and reinflation pop; the shared vario on by default) and `src/ui/instruments/speedBar.js` (the
+    wing display: brakes, bar, folded tips and collapsed sides, the state in words).
+  - `tools/lab/paraglider.mjs` (45 checks) and `src/dev/craftScenarios/paraglider.js` (thermal climb
+    in both views, the sun held at noon; big ears; a launch through WREN's `launch` command in both
+    views); a paraglider script in `src/dev/testFlightScripts.js` for `?test=1`.
+- **Fixes found on the way:** the harness shell loft had no half widths (NaN positions: a
+  `computeBoundingSphere` error at the craft switch); a launch request placed exactly at the surface
+  was dropped before the feet touched; half a brake hardly turned (a trailing-edge yaw term now; full
+  brake spins at 0 %, the spin and spiral protection holds it below 55 deg/s toward 100 %); the
+  sky's midday warp carried the sun (and the thermals) away within a minute of a `time: 0.5` start,
+  so the thermal scenario holds noon.
+- **Verified 2026-10-08** (each once, both backends unless noted; reruns named):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `tools/lab/paraglider.mjs` | 45/45: trim 38.1 km/h at 8.9 : 1 (sink 1.18 m/s), full bar 50.2 km/h at 6.2 : 1, half brakes 28 km/h at 0.98 m/s, deep brakes 23.8 km/h, stall at 0 % and the surge out, half-brake turn 24.9 deg/s, full brake spins at 0 % (128 deg/s) and holds 44 deg/s at 100 %, weight shift 11 deg/s, big ears 2.5 m/s, pendulum swings 22 / 8 / 3 deg, 4 m/s thermal climb 2.2 m/s with the journal's gain and best climb, collapses at 0 % (reopen in calm air), none at 100 %, landing, slope launch, water landing, 28 800 random ticks finite, the model module allocates no objects (58 B/tick of boxed numbers, bound 64) | |
+  | `run-harness --test craft --crafts paraglider` (general in both views, thermal climb x2, big ears, launch x2) | PASS 7/7 runs, 24/24 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0 (the thermal climb failed on earlier runs until the sun was held at noon) | PASS 7/7, 24/24, same |
+  | View physics (view-physics.json with the paraglider only, scratch copy) | PASS, max difference 0 | PASS, 4.2e-12 |
+  | `run-harness --test 1 --crafts paraglider --seconds 30` (HARNESS-1, both views) | 0 NaN, 0 penetrations, 0/0, heap growth 2.9 MB, script 8/8; frames over 50 ms: 6 (systems 0; main thread 5, gc 1, machine CPU 93-97 %) | 0 NaN, 0 penetrations, 0/0, heap growth 6.9 MB, script 8/8; frames over 50 ms: 6 (systems 0; main thread 4, gc 1, delayed 1) |
+  | Labs: craft 66, settings 45, copilot 240, copilot-server 17, discovery 43, flight-lab 82, wingsuit 37, input 34, atmosphere 28, challenges 70, colliders 84, director 50, fauna-modes 44, fpv 87, helicopter 46, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden, setpiece 47, spawns 98, storage 54, structure 75, terrain 404, water 34, wind-engines 56, audio 191 | all pass | |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, docs-check 236/236 | pass; no dev test code in the V2 bundle | |
+  | Built `dist-single/v2` (switch to the paraglider, both views) and the built shell | 0/0, screenshots differ | 0/0 (V2), screenshots differ |
+
+- **Next:** I2 merges this branch in catalog order.
+- **Open issues:** see the integration notes in the final report: the shared-file lines (craft,
+  model, audio, instrument and scenario lists, the craft lab's catalog check, the flight harness
+  script table) conflict with the other craft branches by design; view-physics.json needs its
+  `check('paraglider')` line and the count bumped at integration; docs/architecture.md and
+  docs/controls.md (the HOTAS profile) get the paraglider rows in Milestone O.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 

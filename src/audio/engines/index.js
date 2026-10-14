@@ -27,6 +27,7 @@ import { createRadialSynth } from './radial.js';
 import { createProprotorSynth } from './proprotor.js';
 import { createWingsuitSynth } from './wingsuit.js';
 import { createAerobaticPropSynth } from './aerobaticProp.js';
+import { createParagliderSynth } from './paraglider.js';
 
 const COMMON_DEFAULTS = Object.freeze({
   airflowSpeed: 60,
@@ -93,6 +94,11 @@ export const ENGINE_FAMILIES = Object.freeze({
     create: createRadialSynth,
     // A prop variant: cylinders (odd, a radial), blades, maxRpm, idleRpm; plus the floats' water slap and spray.
     defaults: { cylinders: 9, blades: 3, maxRpm: 2300, idleRpm: 600, airflowSpeed: 60, interiorCutoff: 850, stallHorn: true, stallAoa: 15 },
+  },
+  paraglider: {
+    create: createParagliderSynth,
+    // flutterHz (canopy flutter rate at trim; folded fabric flaps faster). The variometer is on by default.
+    defaults: { flutterHz: 3.2, airflowSpeed: 16, interiorCutoff: 0, touchdown: 'body', callouts: false, vario: true, varioLift: 0.1, varioSink: -2.5 },
   },
 });
 

@@ -130,6 +130,20 @@ const WINGSUIT = Object.freeze({
   checks: [CHECK.autopilot, CHECK.dive, CHECK.relaunch, { id: 'canopy', label: 'canopy open', test: (seen) => seen.canopy }],
 });
 
+/** Paraglider: heading autopilot, a weight-shift turn, big ears in and out (B), a peak relaunch. */
+const PARAGLIDER = Object.freeze({
+  steps: [
+    { at: 0, label: 'autopilot glide', run: (pilot) => cruise(pilot) },
+    { at: 0.3, label: 'autopilot off, weight shift right (turn coordination adds the brake)', run: (pilot) => { handsOff(pilot); pilot.stick({ roll: 0.8, pitch: 0, yaw: 0 }); } },
+    { at: 0.42, label: 'hands off', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
+    { at: 0.5, label: 'big ears in (B)', run: (pilot) => pilot.action('airbrake') },
+    { at: 0.62, label: 'big ears out (B)', run: (pilot) => pilot.action('airbrake') },
+    { at: 0.72, label: 'relaunch from the nearest peak', run: (pilot) => pilot.action('relaunch') },
+    { at: 0.78, label: 'autopilot glide', run: (pilot) => cruise(pilot) },
+  ],
+  checks: [CHECK.autopilot, CHECK.bank, CHECK.relaunch, { id: 'bigEars', label: 'big ears folded', test: (seen) => seen.maxAirbrake >= 0.5 }],
+});
+
 const SCRIPTS = Object.freeze({
   glider: GLIDER,
   bushplane: BUSHPLANE,
@@ -141,6 +155,7 @@ const SCRIPTS = Object.freeze({
   seaplane: SEAPLANE,
   // The tiltrotor flies the hover script in helicopter mode; its autopilot cruise converts to airplane mode.
   tiltrotor: HOVER,
+  paraglider: PARAGLIDER,
 });
 
 /** The script for a craft ({ steps, checks }), or null when none exists. */
@@ -149,4 +164,4 @@ export function flightScriptFor(craft) {
 }
 
 /** Every craft id with a script, in the harness's run order. */
-export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic', 'seaplane', 'tiltrotor']);
+export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic', 'seaplane', 'tiltrotor', 'paraglider']);

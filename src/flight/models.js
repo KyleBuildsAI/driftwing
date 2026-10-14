@@ -20,10 +20,11 @@ import { createSimHelicopterModel } from './SimHelicopter.js';
 import { createSimWingsuitModel } from './SimWingsuit.js';
 import { createSimQuadModel } from './SimQuad.js';
 import { createSimTiltrotorModel } from './SimTiltrotor.js';
+import { createSimParagliderModel } from './SimParaglider.js';
 import { createAutopilotStage } from './autopilot.js';
 import { createAssistStage } from './assists.js';
 
-export const MODEL_KINDS = Object.freeze(['fixedWing', 'jet', 'helicopter', 'wingsuit', 'quad', 'aerobatic', 'tiltrotor']);
+export const MODEL_KINDS = Object.freeze(['fixedWing', 'jet', 'helicopter', 'wingsuit', 'quad', 'aerobatic', 'tiltrotor', 'paraglider']);
 
 /** Methods and fields every model must expose (checked when the controller creates one). */
 const MODEL_INTERFACE = Object.freeze({
@@ -129,5 +130,6 @@ flightModels.register('quad', createSimQuadModel);
 flightModels.register('jet', createSimFixedWingModel);
 flightModels.register('aerobatic', createSimFixedWingModel);
 flightModels.register('tiltrotor', createSimTiltrotorModel);
+flightModels.register('paraglider', createSimParagliderModel);
 flightModels.registerControlStage(createAutopilotStage());
 flightModels.registerControlStage(createAssistStage());
