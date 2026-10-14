@@ -21,6 +21,7 @@ export const ICE_RIDGES_DEFAULTS = Object.freeze({
   wander: 18,
   colors: Object.freeze([0xe6f2f8, 0xc4dceb, 0x9fc4da]),
   spread: 220,
+  approach: 1500,
 });
 
 /** Slabs stand this far apart along a ridge, as a share of their size (they overlap into a wall). */
@@ -44,6 +45,8 @@ export function buildIceRidges(context, read) {
   const colors = read.array('colors', ICE_RIDGES_DEFAULTS.colors);
   if (colors.length === 0 || !colors.every((value) => Number.isInteger(value) && value >= 0 && value <= 0xffffff)) read.fail('colors', 'must be a non-empty array of 0xRRGGBB colours');
   const paints = colors.map((color) => paint(color));
+  // The voice's approach reach (the ice sings louder as you close in).
+  out.approach = read.number('approach', ICE_RIDGES_DEFAULTS.approach, 50, 20000);
 
   // The ice body (world space) and its level in the local frame; a debug spawn has none.
   const site = context.site;
