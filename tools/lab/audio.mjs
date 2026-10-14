@@ -406,6 +406,8 @@ const RENDER_PLAN = Object.freeze({
   goose: { intensity: 1, seconds: 6, skip: 0.2, triggers: [{ at: 0.2, name: 'call' }] },
   // Phase 3 presets 61-70.
   skyShimmer: { intensity: 1, seconds: 5, triggers: [{ at: 2, name: 'flash' }] },
+  canopy: { intensity: 1, seconds: 6, triggers: [{ at: 2, name: 'creak' }] },
+  portal: { intensity: 1, seconds: 5, triggers: [{ at: 2, name: 'surge' }] },
 });
 
 async function testRecipes(page, label) {

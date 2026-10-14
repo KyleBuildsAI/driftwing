@@ -1084,7 +1084,12 @@ presets (92-100) use the wave 2 combo scheduling.
   engine's night-sky components `lunarEclipse`, `greenFlash`, `noctilucent` and `galaxy`
   (`src/spawns/engines/celestial/nightSky.js`), the moonbow on the existing `rainbow` (`light: 'moon'`)
   at a mega-waterfall through the new `filters.near.sites`, and the `skyShimmer` audio recipe.
-- **Next:** 66-70 (world tree, portal ring, sleeping giant, ghost galleon, dragon racer), the batch kit
+  66-67 (world tree, portal ring): structure recipes `worldTree` and `portalRing`, the `tree` lure, the
+  structure engine's `portal` / `ghost` geometry kinds, `out.voiceTrigger`, the `portal` gate action,
+  `out.motion` (PathFollower movers with moving capsule colliders) and `out.lanterns` (ignitables);
+  the portal system `src/gameplay/portals.js` (`portalSeed`, `worldVisited`, the journal's
+  `worldsVisited`), and the `canopy` and `portal` audio recipes.
+- **Next:** 68-70 (sleeping giant, ghost galleon, dragon racer), the batch kit
   `src/dev/presetChecks61.js` with `tools/steps/presets-61-70.json`, `src/dev/spawnScenarios/batch61.js`,
   docs/spawns.md rows and sections, then the verification on both backends.
 

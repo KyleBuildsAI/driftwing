@@ -98,6 +98,11 @@ export const EVENT_TYPES = Object.freeze({
   /** An achievement was earned (V-formation, Thread the Needle, ...). */
   achievement: { id: 'string', title: 'string' },
   /**
+   * The player went through a portal ring (preset 67, src/gameplay/portals.js): seed is the world it
+   * leads to (hash(previous, portalId)), previous the world left behind. The page reloads into seed.
+   */
+  worldVisited: { seed: 'string', previous: 'string', portalId: 'string' },
+  /**
    * A challenge run started (src/gameplay/challenges.js): its clock runs from the start-gate crossing
    * (or from now for an immediate start). id is the course key `${seed}:${courseId}`; gates counts them.
    */

@@ -9,6 +9,9 @@ import { SPIRES_DEFAULTS, buildSpires } from './spires.js';
 import { WATERFALL_DEFAULTS, buildWaterfall } from './waterfall.js';
 import { WIND_FARM_DEFAULTS, buildWindFarm } from './windFarm.js';
 import { CHALLENGE_GATES_DEFAULTS, buildChallengeGates } from './challengeGates.js';
+// Phase 3 presets 61-70.
+import { WORLD_TREE_DEFAULTS, buildWorldTree } from './worldTree.js';
+import { PORTAL_RING_DEFAULTS, buildPortalRing } from './portalRing.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -23,6 +26,9 @@ export const RECIPES = Object.freeze({
   gates: Object.freeze({ build: buildGates, defaults: GATES_DEFAULTS, audioIntensity: 'constant' }),
   waterfall: Object.freeze({ build: buildWaterfall, defaults: WATERFALL_DEFAULTS, audioIntensity: 'constant' }),
   challengeGates: Object.freeze({ build: buildChallengeGates, defaults: CHALLENGE_GATES_DEFAULTS, audioIntensity: 'approach' }),
+  // Phase 3 presets 61-70.
+  worldTree: Object.freeze({ build: buildWorldTree, defaults: WORLD_TREE_DEFAULTS, audioIntensity: 'approach' }),
+  portalRing: Object.freeze({ build: buildPortalRing, defaults: PORTAL_RING_DEFAULTS, audioIntensity: 'approach' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

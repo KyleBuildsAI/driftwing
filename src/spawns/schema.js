@@ -26,7 +26,7 @@ export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac',
 /** Phase 1 landmark types (src/world/worldgen.js) a filters.near block may name. */
 export const LANDMARK_TYPES = Object.freeze(['arch', 'monoliths', 'lighthouse', 'balloons']);
 /** FAR lure silhouettes drawn by src/spawns/lure.js. */
-export const LURE_TYPES = Object.freeze(['plume', 'anvil', 'funnel', 'whale', 'islands', 'comet']);
+export const LURE_TYPES = Object.freeze(['plume', 'anvil', 'funnel', 'whale', 'islands', 'comet', 'tree']);
 /** How the SpawnManager may move an activation before the engines see it (preset.anchor). */
 export const ANCHOR_SEEKS = Object.freeze(['peak']);
 export const ANCHOR_ALIGNS = Object.freeze(['downwind']);

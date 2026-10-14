@@ -40,6 +40,8 @@ import greenFlash from './greenFlash.js';
 import noctilucentClouds from './noctilucentClouds.js';
 import milkyWayCore from './milkyWayCore.js';
 import moonbow from './moonbow.js';
+import worldTree from './worldTree.js';
+import portalRing from './portalRing.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -81,6 +83,8 @@ export const PRESETS = Object.freeze([
   noctilucentClouds,
   milkyWayCore,
   moonbow,
+  worldTree,
+  portalRing,
 ]);
 
 /** Presets by id. */

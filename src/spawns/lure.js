@@ -4,8 +4,8 @@
 // flies toward it.
 //
 // One InstancedMesh of camera-facing quads draws every lure in one call. Each quad's fragment shader
-// draws its silhouette procedurally from preset.lure: plume, anvil, funnel, whale, islands or comet,
-// with soft, slowly billowing edges.
+// draws its silhouette procedurally from preset.lure: plume, anvil, funnel, whale, islands, comet or
+// tree (Phase 3: the world tree), with soft, slowly billowing edges.
 //
 // Placement: a lure at true distance d beyond the projection limit (PROJECT_SHARE of the fog's far
 // distance) is drawn at the limit instead, scaled by limit / d, so it keeps its exact direction and
@@ -181,6 +181,21 @@ function createLureMaterial({ THREE, TSL, uniforms, skyColorNode, shapeAttribute
     return vec3(mask, float(0), head.mul(3).add(tail.mul(0.9)));
   });
 
+  // The world tree: a buttressed trunk up through the lower half under a broad, lumpy crown of
+  // clumps, with daylight showing through a few gaps between the limbs.
+  const tree = Fn(([x, y, seed]) => {
+    const lumps = mx_noise_float(vec3(x.mul(5), y.mul(5), seed)).mul(0.07).add(mx_noise_float(vec3(x.mul(13), y.mul(13), seed.add(4))).mul(0.03));
+    const flare = exp(y.mul(-16)).mul(0.16);
+    const trunk = inside(float(0.07).add(flare).sub(y.mul(0.03)), abs(x.sub(sin(y.mul(4).add(seed)).mul(0.03))), 0.012).mul(float(1).sub(smoothstep(0.62, 0.7, y)));
+    const crownX = x.div(0.96);
+    const crownY = y.sub(0.68).div(0.3);
+    const crown = smoothstep(0, 0.12, float(1).sub(crownX.mul(crownX)).sub(crownY.mul(crownY)).add(lumps.mul(2.2)));
+    const gaps = smoothstep(0.62, 0.74, mx_noise_float(vec3(x.mul(4.2), y.mul(6), seed.add(9))));
+    const mask = max(trunk, crown.mul(float(1).sub(gaps.mul(0.85))));
+    const shade = mix(float(0.5), mix(0.62, 1.05, smoothstep(0.42, 0.98, y)).add(lumps), crown);
+    return vec3(mask, shade, float(0));
+  });
+
   const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false });
   material.colorNode = Fn(() => {
     const shapeIndex = lureShape.x;
@@ -201,8 +216,10 @@ function createLureMaterial({ THREE, TSL, uniforms, skyColorNode, shapeAttribute
       result.assign(whale(x, y, seed, facing));
     }).ElseIf(shapeIndex.lessThan(4.5), () => {
       result.assign(islands(x, y, seed));
-    }).Else(() => {
+    }).ElseIf(shapeIndex.lessThan(5.5), () => {
       result.assign(comet(x, y));
+    }).Else(() => {
+      result.assign(tree(x, y, seed));
     });
     // Every silhouette fades out before the quad's sides and top, so no shape is ever cut straight.
     const edgeFade = float(1).sub(smoothstep(0.9, 1, abs(x))).mul(float(1).sub(smoothstep(0.96, 1, y)));

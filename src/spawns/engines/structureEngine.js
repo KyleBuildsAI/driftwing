@@ -9,6 +9,10 @@
 //   decal    ground paint (runway tarmac and markings), polygon-offset over the terrain
 //   glow     crystal (emissive, pulsing in the shader, brighter at night)
 //   water    waterfall ribbons and streams (transparent streaks scrolling in the shader)
+//   portal   (Phase 3) a portal's membrane: an additive swirl spiralling into its centre (uv.x the
+//            angle share, uv.y the radius share), as bright by night as by day
+//   ghost    (Phase 3) translucent, glowing spectral surfaces (the ghost galleon): a fresnel rim and a
+//            slow drifting shimmer, additive, strongest at night
 // Moving parts are shared instanced meshes built once in init(): turbine nacelles and rotors (yawed
 // into the real WindField wind, spun with its speed), windsock segments (a chain hanging in the wind)
 // and mist puffs (soft luminous blobs). The sway weight in the geometry lets the bridge deck, ropes,
@@ -30,6 +34,21 @@
 //                kilometres from it and cannot fly through the wake)
 //   audio        preset.audio as a spawn voice, driven by approach, wind or a constant level
 //   setParam     glow, sway, rotorSpeed and audio multipliers the set-piece engine can ramp
+//   voiceTrigger (Phase 3) out.voiceTrigger = { name, interval: [min, max] s, strength }: the voice's
+//                ambient one-shot every seeded interval while the player is near (the world tree's
+//                groaning limbs)
+//   portal       (Phase 3) a gate with action 'portal' sends the bus event 'structure:portal'
+//                { spawnId, presetId, siteId, gate, portalId, direction } (the portal system,
+//                src/gameplay/portals.js, takes the player through to the next world)
+//   motion       (Phase 3) out.motion = { points (local xyz), closed, speed, startDistance, bob,
+//                bobPeriod, roll, rollPeriod, pitch }: the whole structure sails a PathFollower
+//                (src/world/pathFollower.js) from the instance's start time, a pure function of the
+//                flight clock; its meshes, lanterns, voice and anchor follow, and its colliders (capsules
+//                only) move with it every frame through colliders.update, carrying the ship's velocity
+//   lanterns     (Phase 3) out.lanterns = [{ x, y, z, size, color, litColor, ignitable }]: glowing
+//                lanterns on a shared instanced pool; an ignitable one registers with the game's
+//                ignition service (instance.ignitableIds, removed on dispose) and turns to litColor
+//                when a flame lights it (the dragon's fire breath)
 //
 // update() allocates nothing: per-instance numbers live in typed arrays, matrices are composed into
 // scratch objects made in init(), and the wind is probed a few times a second into a reused record.
@@ -41,6 +60,7 @@ import { GATE_TELEPORT_DISTANCE, createGateSet, crossGates } from './gateDetecto
 import { createParamView, createWindSample, ownsPresetAudio } from './engineKit.js';
 import { applyRigidDrop } from '../../render/curvature.js';
 import { addStructureColliders, islandTopCollider, removeStructureColliders, updateTurbineColliders } from './structure/colliders.js';
+import { createPath, createPathFollower } from '../../world/pathFollower.js';
 
 const ENGINE_NAME = 'structure';
 /** Structure spawns alive at once (the director's cap is the same). */
@@ -49,6 +69,8 @@ const TURBINE_CAPACITY = 256;
 const SOCK_SEGMENTS = 5;
 const SOCK_CAPACITY = 64 * SOCK_SEGMENTS;
 const PUFF_CAPACITY = 512;
+/** Lanterns (Phase 3: the ghost galleon's) alive at once, over every structure. */
+const LANTERN_CAPACITY = 128;
 /** Reference rotor radius (m) of the shared nacelle and rotor geometry; instances scale it. */
 const ROTOR_REFERENCE = 40;
 /** The rotor hub sits this far ahead of the tower axis, in reference metres. */
@@ -90,7 +112,9 @@ function addWakeGust(result, point) {
   result.vel.y += 0.6 * sigma * (0.5 * Math.sin(time * 1.9 + z * 0.061 + offsetY) + 0.3 * Math.sin(time * 3.7 - x * 0.093 + offsetY * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z) * 0.147 + offsetY * 2.3));
   result.vel.z += sigma * (0.5 * Math.sin(time * 1.9 + (x + 311) * 0.061 + offsetZ) + 0.3 * Math.sin(time * 3.7 - (z - 173) * 0.093 + offsetZ * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z + 138) * 0.147 + offsetZ * 2.3));
 }
-const GEOMETRY_KINDS = Object.freeze(['body', 'detail', 'decal', 'glow', 'water']);
+const GEOMETRY_KINDS = Object.freeze(['body', 'detail', 'decal', 'glow', 'water', 'portal', 'ghost']);
+/** The kinds built with a uv attribute (their materials read it). */
+const UV_KINDS = Object.freeze(['water', 'portal', 'ghost']);
 
 /** Visibility of each geometry kind per tier: [near, mid, far] (far: non-heavy presets only). */
 const KIND_TIERS = Object.freeze({
@@ -99,7 +123,11 @@ const KIND_TIERS = Object.freeze({
   decal: [true, true, true],
   glow: [true, true, true],
   water: [true, true, false],
+  portal: [true, true, true],
+  ghost: [true, true, true],
 });
+/** Moving structures: the flight time read by their PathFollower (a typed array, no boxed doubles). */
+const motionTime = new Float64Array(1);
 
 export function createStructureEngine() {
   let ctx = null;
@@ -110,13 +138,15 @@ export function createStructureEngine() {
   let rotors = null;
   let socks = null;
   let puffs = null;
+  let lanterns = null;
   let serial = 0;
   let proxies = [];
   const live = [];
-  const counts = { instances: 0, buffers: 0, drawCalls: 0, surfaces: 0, gates: 0, landings: 0, courses: 0, turbines: 0, puffs: 0 };
+  const counts = { instances: 0, buffers: 0, drawCalls: 0, surfaces: 0, gates: 0, landings: 0, courses: 0, turbines: 0, puffs: 0, lanterns: 0, lanternsLit: 0, portals: 0 };
 
   // Scratch (made in init; never allocated per frame).
   let hiddenMatrix = null;
+  let identityQuaternion = null;
   const crossing = new Float64Array(1);
   /** A transform being written: position, then the scaled x, y and z axis columns. */
   const transform = new Float64Array(12);
@@ -124,7 +154,7 @@ export function createStructureEngine() {
   // ---- Materials --------------------------------------------------------------------------------
   function buildMaterials() {
     const {
-      attribute, vertexColor, uniform, positionLocal, float, vec3, sin, mix, pow, saturate, dot, smoothstep,
+      attribute, vertexColor, uniform, positionLocal, float, vec3, sin, cos, abs, mix, pow, saturate, dot, smoothstep,
       normalView, positionViewDirection, uv, mx_noise_float, instanceIndex,
     } = ctx.TSL;
     const time = ctx.uniforms.time;
@@ -178,7 +208,34 @@ export function createStructureEngine() {
     const moving = new THREE.MeshStandardNodeMaterial({ flatShading: true, roughness: 0.7, metalness: 0.05, side: THREE.DoubleSide });
     moving.colorNode = rgba.rgb;
 
-    return { solid, decal, glow, water, mist, moving };
+    // Portal membrane: arms of light spiralling into the centre, a bright rim, a glowing core; it
+    // ignores fog and is as bright by night as by day (a little brighter in the dark).
+    const portal = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false });
+    const membrane = uv();
+    const radial = membrane.y;
+    const twist = membrane.x.mul(TWO_PI).add(radial.mul(5)).sub(time.mul(0.7));
+    const swirl = mx_noise_float(vec3(cos(twist).mul(radial).mul(3), sin(twist).mul(radial).mul(3), time.mul(0.15))).mul(0.5).add(0.5);
+    const arms = sin(twist.mul(3).add(swirl.mul(4))).mul(0.5).add(0.5);
+    const core = float(1).sub(smoothstep(float(0), float(0.35), radial));
+    const rimGlow = smoothstep(float(0.75), float(1), radial);
+    portal.colorNode = rgba.rgb.mul(swirl.mul(0.9).add(arms.mul(0.6)).add(rimGlow.mul(1.4)).add(core.mul(0.8))).mul(mix(float(0.9), float(1.6), nightFactor));
+    portal.opacityNode = rgba.a.mul(float(0.45).add(arms.mul(0.3)).add(rimGlow.mul(0.4))).mul(float(1).sub(smoothstep(float(0.97), float(1), radial)));
+
+    // Ghost surfaces: a fresnel rim over a faint body, a slow shimmer drifting up through them,
+    // additive and strongest at night (a ghost ship is a night sight).
+    const ghost = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+    const ghostFacing = abs(dot(normalView, positionViewDirection));
+    const ghostRim = pow(float(1).sub(ghostFacing), 2);
+    const shimmer = mx_noise_float(positionLocal.mul(0.12).add(vec3(0, time.mul(0.35), time.mul(0.05)))).mul(0.5).add(0.5);
+    ghost.colorNode = rgba.rgb.mul(ghostRim.mul(1.3).add(0.3).add(shimmer.mul(0.35))).mul(mix(float(0.45), float(1.5), nightFactor));
+    ghost.opacityNode = rgba.a.mul(ghostRim.mul(0.55).add(0.16).add(shimmer.mul(0.14)));
+
+    // Lanterns: self-lit boxes in their instance colour (unlit ghost light, or the warm light a flame
+    // gave them), brighter at night where the bloom picks them up.
+    const lantern = new THREE.MeshBasicNodeMaterial();
+    lantern.colorNode = vec3(1, 1, 1).mul(mix(float(1.2), float(3.2), nightFactor));
+
+    return { solid, decal, glow, water, mist, moving, portal, ghost, lantern };
   }
 
   // ---- Shared moving-part geometry ------------------------------------------------------------------
@@ -270,6 +327,7 @@ export function createStructureEngine() {
       turbines: [], socks: [], puffs: [], gates: [], surfaces: [], zones: [], courses: [], colliders: [],
       challenge: null,
       wake: null, turbineSettings: null, sway: null, audioPoint: null, windProbe: null, approach: 0, radius: 20,
+      voiceTrigger: null, motion: null, lanterns: [],
     };
     const context = {
       presetId: preset.id,
@@ -291,6 +349,8 @@ export function createStructureEngine() {
       decal: createMeshBuilder(),
       glow: createMeshBuilder(),
       water: createMeshBuilder({ uv: true }),
+      portal: createMeshBuilder({ uv: true }),
+      ghost: createMeshBuilder({ uv: true }),
       out,
       /** Adds a gate (local metres); source names the param for error messages. */
       addGate(gate) {
@@ -366,12 +426,14 @@ export function createStructureEngine() {
       throw new Error(`[DRIFTWING] structure: every ${kind} mesh is in use (${MAX_INSTANCES + 8} at once)`);
     }
     mesh.position.copy(anchor);
+    // A pooled mesh may come back turned by a moving structure that used it before.
+    mesh.quaternion.identity();
     mesh.userData.swayOffset = instanceData.swayOffset;
     mesh.userData.look = instanceData.look;
     mesh.frustumCulled = true;
     mesh.castShadow = false;
-    mesh.receiveShadow = kind !== 'water';
-    mesh.renderOrder = kind === 'water' ? 2 : 0;
+    mesh.receiveShadow = !UV_KINDS.includes(kind);
+    mesh.renderOrder = UV_KINDS.includes(kind) ? 2 : 0;
     mesh.updateMatrix();
     counts.buffers++;
     return mesh;
@@ -731,6 +793,11 @@ export function createStructureEngine() {
     const gate = data.gateMeta[gateIndex];
     counts.gates++;
     if (gate.action === 'chime' && data.voice) data.voice.trigger('chime', { strength: Math.min(1, 0.4 + ctx.state.player.speed / 120), notes: 3 });
+    if (gate.action === 'portal') {
+      counts.portals++;
+      if (data.voice) data.voice.trigger('surge', { strength: 1 });
+      ctx.bus.emit('structure:portal', { spawnId: instance.id, presetId: instance.presetId, siteId: data.siteId, gate: gate.id, portalId: data.portalId, direction });
+    }
     ctx.bus.emit('structure:gate', {
       spawnId: instance.id, presetId: instance.presetId, siteId: data.siteId, gate: gate.id, kind: gate.kind, direction,
     });
@@ -870,6 +937,193 @@ export function createStructureEngine() {
     voice.setIntensity(audio[0]);
   }
 
+  /** The recipe's ambient one-shot (out.voiceTrigger), every seeded interval while the voice is up. */
+  function updateVoiceTrigger(data, dt) {
+    const trigger = data.voiceTrigger;
+    if (trigger === null || data.voice === null || dt <= 0) return;
+    const timer = data.voiceTriggerTimer;
+    timer[0] -= dt;
+    if (timer[0] > 0) return;
+    timer[0] = trigger.interval[0] + (trigger.interval[1] - trigger.interval[0]) * data.rng();
+    if (data.audioState[0] > 0.05) data.voice.trigger(trigger.name, data.voiceTriggerOptions);
+  }
+
+  // ---- Moving structures (Phase 3) ----------------------------------------------------------------
+  /**
+   * A structure that sails a path (out.motion): the PathFollower over the motion's points (local, so
+   * moved to the anchor), its rocking, and its colliders' local capsules (re-placed every frame).
+   */
+  function setupMotion(instance, data, out, prefix) {
+    const motion = out.motion;
+    const anchor = instance.anchor;
+    const local = motion.points;
+    if (!local || local.length < 6 || local.length % 3 !== 0) throw new Error(`[DRIFTWING] structure "${instance.presetId ?? data.name}": out.motion.points must hold at least two xyz points`);
+    const points = new Float64Array(local.length);
+    for (let index = 0; index < local.length; index += 3) {
+      points[index] = anchor.x + local[index];
+      points[index + 1] = anchor.y + local[index + 1];
+      points[index + 2] = anchor.z + local[index + 2];
+    }
+    const closed = motion.closed !== false;
+    const path = createPath({ points, closed, smoothing: 'catmullRom', samplesPerSegment: 12 });
+    const follower = createPathFollower({ path, speed: motion.speed, mode: closed ? 'loop' : 'pingpong', startTime: data.startTime, startDistance: motion.startDistance ?? 0 });
+    const colliders = [];
+    if (colliderWorld()) {
+      out.colliders.forEach((spec, index) => {
+        if (spec.type !== 'capsule') throw new Error(`[DRIFTWING] structure "${data.name}": a moving structure's colliders must be capsules (part "${spec.part}" is a ${spec.type})`);
+        colliders.push({
+          id: `${prefix}:${spec.part}${index}`,
+          a: new Float64Array([spec.a.x, spec.a.y, spec.a.z]),
+          b: new Float64Array([spec.b.x, spec.b.y, spec.b.z]),
+          fields: { a: { x: 0, y: 0, z: 0 }, b: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 } },
+        });
+      });
+    }
+    return {
+      path,
+      follower,
+      speed: motion.speed,
+      bob: motion.bob ?? 0,
+      bobRate: TWO_PI / (motion.bobPeriod ?? 9),
+      roll: (motion.roll ?? 0) * DEG,
+      rollRate: TWO_PI / (motion.rollPeriod ?? 11),
+      pitch: (motion.pitch ?? 0) * DEG,
+      phase: data.rng() * TWO_PI,
+      audioLocal: out.audioPoint ? out.audioPoint.slice() : [0, 5, 0],
+      at: { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, heading: 0, distance: 0, speed: 0, done: false },
+      euler: new THREE.Euler(0, 0, 0, 'YXZ'),
+      quaternion: new THREE.Quaternion(),
+      position: new THREE.Vector3(),
+      point: new THREE.Vector3(),
+      matrix: new THREE.Matrix4(),
+      scale: new THREE.Vector3(),
+      colliders,
+    };
+  }
+
+  /** Sails a moving structure to its place at this flight time: meshes, colliders, lanterns, voice, anchor. */
+  function updateMotion(instance, data) {
+    const motion = data.motion;
+    const elapsed = ctx.time.elapsed;
+    motionTime[0] = elapsed;
+    motion.follower.atFrom(motionTime, 0, motion.at);
+    const at = motion.at;
+    const bob = Math.sin(elapsed * motion.bobRate + motion.phase) * motion.bob;
+    const roll = Math.sin(elapsed * motion.rollRate + motion.phase * 1.7) * motion.roll;
+    const pitch = Math.sin(elapsed * motion.rollRate * 0.63 + motion.phase) * motion.pitch;
+    motion.euler.set(pitch, -at.heading * DEG, roll, 'YXZ');
+    motion.quaternion.setFromEuler(motion.euler);
+    const position = motion.position.set(at.x, at.y + bob, at.z);
+    instance.anchor.x = at.x;
+    instance.anchor.y = at.y;
+    instance.anchor.z = at.z;
+    for (let kind = 0; kind < GEOMETRY_KINDS.length; kind++) {
+      const mesh = data.meshes[GEOMETRY_KINDS[kind]];
+      if (!mesh) continue;
+      mesh.position.copy(position);
+      mesh.quaternion.copy(motion.quaternion);
+      applyRigidDrop(ctx, mesh, position.y);
+    }
+    const colliders = colliderWorld();
+    if (colliders) {
+      const speed = at.speed;
+      for (let index = 0; index < motion.colliders.length; index++) {
+        const entry = motion.colliders[index];
+        const point = motion.point.set(entry.a[0], entry.a[1], entry.a[2]).applyQuaternion(motion.quaternion);
+        entry.fields.a.x = position.x + point.x;
+        entry.fields.a.y = position.y + point.y;
+        entry.fields.a.z = position.z + point.z;
+        point.set(entry.b[0], entry.b[1], entry.b[2]).applyQuaternion(motion.quaternion);
+        entry.fields.b.x = position.x + point.x;
+        entry.fields.b.y = position.y + point.y;
+        entry.fields.b.z = position.z + point.z;
+        entry.fields.velocity.x = at.tx * speed;
+        entry.fields.velocity.y = at.ty * speed;
+        entry.fields.velocity.z = at.tz * speed;
+        colliders.update(entry.id, entry.fields);
+      }
+    }
+    if (data.lanternSlots.length > 0 && !data.lanternsHidden) placeLanterns(data, position, motion.quaternion);
+    const audio = motion.point.set(motion.audioLocal[0], motion.audioLocal[1], motion.audioLocal[2]).applyQuaternion(motion.quaternion);
+    data.audioPosition.set(position.x + audio.x, position.y + audio.y, position.z + audio.z);
+    if (data.voice) data.voice.setPosition(data.audioPosition);
+  }
+
+  // ---- Lanterns (Phase 3) ---------------------------------------------------------------------------
+  /** Allocates the recipe's lanterns (out.lanterns) and registers the ignitable ones. */
+  function addLanterns(instance, data, out, prefix) {
+    const list = out.lanterns;
+    if (list.length === 0) return;
+    data.lanternSlots = allocSlots(lanterns, list.length, 'lantern');
+    counts.lanterns += list.length;
+    data.lanternLocal = new Float64Array(list.length * 4);
+    data.lanternColors = list.map((entry) => ({ unlit: new THREE.Color(entry.color ?? 0x9fffd8), lit: new THREE.Color(entry.litColor ?? entry.color ?? 0xffc46a) }));
+    data.lanternIgnitables = list.map(() => null);
+    data.lanternLit = new Uint8Array(list.length);
+    list.forEach((entry, index) => {
+      data.lanternLocal.set([entry.x, entry.y, entry.z, entry.size ?? 0.8], index * 4);
+      lanterns.setColor(data.lanternSlots[index], data.lanternColors[index].unlit);
+    });
+    data.lanternWorld = list.map(() => new THREE.Matrix4());
+    placeLanterns(data, instance.anchor, null);
+    const ignition = ctx.game && ctx.game.ignition ? ctx.game.ignition : null;
+    if (!ignition) return;
+    list.forEach((entry, index) => {
+      if (entry.ignitable !== true) return;
+      const id = `${prefix}:lantern${index}`;
+      ignition.add({
+        id,
+        position: { x: instance.anchor.x + entry.x, y: instance.anchor.y + entry.y, z: instance.anchor.z + entry.z },
+        radius: Math.max(1.5, (entry.size ?? 0.8) * 2),
+        onIgnite: () => lightLantern(data, index),
+      });
+      data.lanternIgnitables[index] = id;
+      instance.ignitableIds.push(id);
+    });
+  }
+
+  /** Writes every lantern's matrix (local points turned by quaternion, or none) from origin; moves its ignitable. */
+  function placeLanterns(data, origin, quaternion) {
+    const motion = data.motion;
+    const scratch = motion ?? data.lanternScratch;
+    const ignition = ctx.game && ctx.game.ignition ? ctx.game.ignition : null;
+    for (let index = 0; index < data.lanternSlots.length; index++) {
+      const base = index * 4;
+      const point = scratch.point.set(data.lanternLocal[base], data.lanternLocal[base + 1], data.lanternLocal[base + 2]);
+      if (quaternion) point.applyQuaternion(quaternion);
+      point.x += origin.x;
+      point.y += origin.y;
+      point.z += origin.z;
+      const size = data.lanternLocal[base + 3];
+      const matrix = data.lanternWorld[index];
+      matrix.compose(point, quaternion ?? identityQuaternion, scratch.scale.set(size, size * 1.35, size));
+      lanterns.setMatrix(data.lanternSlots[index], matrix);
+      const id = data.lanternIgnitables[index];
+      if (id !== null && ignition) ignition.move(id, point.x, point.y, point.z);
+    }
+    lanterns.flush();
+  }
+
+  /** A flame lit lantern index: it takes its lit colour. */
+  function lightLantern(data, index) {
+    if (data.lanternLit[index] === 1 || data.lanternSlots.length === 0) return;
+    data.lanternLit[index] = 1;
+    counts.lanternsLit++;
+    lanterns.setColor(data.lanternSlots[index], data.lanternColors[index].lit);
+    lanterns.flush();
+  }
+
+  function removeLanterns(instance, data) {
+    const ignition = ctx.game && ctx.game.ignition ? ctx.game.ignition : null;
+    if (ignition) for (const id of instance.ignitableIds) ignition.remove(id);
+    instance.ignitableIds.length = 0;
+    if (data.lanternSlots.length === 0) return;
+    for (let index = 0; index < data.lanternSlots.length; index++) if (data.lanternLit[index] === 1) counts.lanternsLit--;
+    freeSlots(lanterns, data.lanternSlots);
+    counts.lanterns -= data.lanternSlots.length;
+    data.lanternSlots = new Int32Array(0);
+  }
+
   // ---- Landings -----------------------------------------------------------------------------------
   function onLanded(landing) {
     for (let index = 0; index < live.length; index++) {
@@ -941,6 +1195,12 @@ export function createStructureEngine() {
     const showPuffs = rank < 2;
     for (let index = 0; index < data.puffSlots.length; index++) puffs.setMatrix(data.puffSlots[index], showPuffs ? data.puffMatrices[index] : hiddenMatrix);
     puffs.flush();
+    // Lanterns show at the near and mid tiers (a moving structure rewrites them every frame).
+    if (data.lanternSlots.length > 0) {
+      data.lanternsHidden = rank === 2;
+      for (let index = 0; index < data.lanternSlots.length; index++) lanterns.setMatrix(data.lanternSlots[index], data.lanternsHidden ? hiddenMatrix : data.lanternWorld[index]);
+      lanterns.flush();
+    }
     data.movingHidden = !showMoving;
     // Turbines keep turning at the mid tier and freeze (still drawn) at the far tier.
     data.animateTurbines = showMoving && rank < 2;
@@ -954,8 +1214,9 @@ export function createStructureEngine() {
       ctx = engineCtx;
       THREE = ctx.THREE;
       hiddenMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+      identityQuaternion = new THREE.Quaternion();
       materials = buildMaterials();
-      const poolMaterial = { body: materials.solid, detail: materials.solid, decal: materials.decal, glow: materials.glow, water: materials.water };
+      const poolMaterial = { body: materials.solid, detail: materials.solid, decal: materials.decal, glow: materials.glow, water: materials.water, portal: materials.portal, ghost: materials.ghost };
       meshPools = {};
       for (const kind of GEOMETRY_KINDS) {
         meshPools[kind] = ctx.pools.createMeshPool({ material: poolMaterial[kind], capacity: MAX_INSTANCES + 8, parent: ctx.scene, name: `structure-${kind}` });
@@ -965,6 +1226,7 @@ export function createStructureEngine() {
       socks = ctx.pools.createInstancedPool({ geometry: buildSockGeometry(), material: materials.moving, capacity: SOCK_CAPACITY, name: 'structure-windsocks', parent: ctx.scene, colors: true });
       const puffGeometry = new THREE.IcosahedronGeometry(1, 2);
       puffs = ctx.pools.createInstancedPool({ geometry: puffGeometry, material: materials.mist, capacity: PUFF_CAPACITY, name: 'structure-mist', parent: ctx.scene });
+      lanterns = ctx.pools.createInstancedPool({ geometry: new THREE.OctahedronGeometry(1, 1), material: materials.lantern, capacity: LANTERN_CAPACITY, name: 'structure-lanterns', parent: ctx.scene, colors: true });
       nacelles.mesh.castShadow = true;
       rotors.mesh.castShadow = true;
       puffs.mesh.renderOrder = 3;
@@ -974,13 +1236,16 @@ export function createStructureEngine() {
         const solidProxy = new THREE.Mesh(proxyGeometry(false), materials.solid);
         solidProxy.castShadow = true;
         solidProxy.receiveShadow = true;
-        proxies = [solidProxy, new THREE.Mesh(proxyGeometry(false), materials.decal), new THREE.Mesh(proxyGeometry(false), materials.glow), new THREE.Mesh(proxyGeometry(true), materials.water)];
+        proxies = [
+          solidProxy, new THREE.Mesh(proxyGeometry(false), materials.decal), new THREE.Mesh(proxyGeometry(false), materials.glow), new THREE.Mesh(proxyGeometry(true), materials.water),
+          new THREE.Mesh(proxyGeometry(true), materials.portal), new THREE.Mesh(proxyGeometry(true), materials.ghost),
+        ];
         for (const proxy of proxies) {
           proxy.userData.swayOffset = new THREE.Vector3();
           proxy.userData.look = new THREE.Vector4(1, 0, 0, 0);
           ctx.registerPrewarm(proxy);
         }
-        for (const pool of [nacelles, rotors, socks, puffs]) ctx.registerPrewarm(pool.mesh);
+        for (const pool of [nacelles, rotors, socks, puffs, lanterns]) ctx.registerPrewarm(pool.mesh);
       }
       if (ctx.bus && typeof ctx.bus.onTyped === 'function') {
         ctx.bus.onTyped('landed', onLanded);
@@ -1045,6 +1310,23 @@ export function createStructureEngine() {
         audioPosition: new THREE.Vector3(),
         /** [last level sent, seconds to the next level update]. */
         audioState: new Float64Array([-1, 0]),
+        /** The recipe's ambient voice one-shot (out.voiceTrigger) and [seconds to the next one]. */
+        voiceTrigger: out.voiceTrigger,
+        voiceTriggerTimer: new Float64Array(1),
+        voiceTriggerOptions: out.voiceTrigger ? { strength: out.voiceTrigger.strength ?? 1 } : null,
+        rng,
+        /** The portal id a 'portal' gate reports: the site id, or `${presetId}:${seed}` for an event. */
+        portalId: params.site ? params.site.id : `${preset.id}:${params.seed}`,
+        startTime: Number.isFinite(params.startTime) ? params.startTime : ctx.time.elapsed,
+        motion: null,
+        lanternSlots: new Int32Array(0),
+        lanternLocal: null,
+        lanternColors: null,
+        lanternIgnitables: null,
+        lanternLit: null,
+        lanternWorld: null,
+        lanternsHidden: false,
+        lanternScratch: { point: new THREE.Vector3(), scale: new THREE.Vector3() },
         movingHidden: false,
         animateTurbines: true,
         animateSocks: true,
@@ -1060,12 +1342,13 @@ export function createStructureEngine() {
       const audioPoint = out.audioPoint ?? [0, 5, 0];
       data.audioPosition.set(anchor.x + audioPoint[0], anchor.y + audioPoint[1], anchor.z + audioPoint[2]);
       // Live params (read every frame): the set-piece engine's ramps write them directly.
-      const instance = { anchor, radius: out.radius, windSourceIds: [], colliderIds: [], lights: 0, particles: 0, data, params: { glow: 1, sway: 1, rotorSpeed: 1, audio: 1 } };
+      const instance = { anchor, radius: out.radius, windSourceIds: [], colliderIds: [], ignitableIds: [], lights: 0, particles: 0, data, params: { glow: 1, sway: 1, rotorSpeed: 1, audio: 1 } };
       const colliderPrefix = `${preset.id}:${params.seed}:${serialNumber}`;
       data.params = instance.params;
       try {
         // Geometry on pooled meshes.
         for (const kind of GEOMETRY_KINDS) data.meshes[kind] = showGeometry(kind, context[kind].toGeometry(THREE), data, anchor);
+        instance.presetId = preset.id;
         // Turbines.
         out.turbines.forEach((turbine, index) => {
           data.turbinePositions[index * 3] = anchor.x + turbine.x;
@@ -1143,6 +1426,11 @@ export function createStructureEngine() {
         if (data.turbineCount > 0) updateTurbines(data, 0);
         if (data.sockCount > 0) updateSocks(data);
         addStructureColliders(colliderWorld(), instance, data, out, anchor, colliderPrefix);
+        addLanterns(instance, data, out, colliderPrefix);
+        if (out.motion) {
+          data.motion = setupMotion(instance, data, out, colliderPrefix);
+          updateMotion(instance, data);
+        }
         // The preset's voice (engineKit's ownsPresetAudio: params.voice, else the first engine entry).
         if (ownsPresetAudio(preset, ENGINE_NAME, read.boolean('voice', null)) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
           data.audioMode = read.choice('audioIntensity', recipe.audioIntensity, ['approach', 'wind', 'constant']);
@@ -1162,7 +1450,8 @@ export function createStructureEngine() {
 
     update(instance, dt) {
       const data = instance.data;
-      for (let kind = 0; kind < GEOMETRY_KINDS.length; kind++) applyRigidDrop(ctx, data.meshes[GEOMETRY_KINDS[kind]], instance.anchor.y);
+      if (data.motion) updateMotion(instance, data);
+      else for (let kind = 0; kind < GEOMETRY_KINDS.length; kind++) applyRigidDrop(ctx, data.meshes[GEOMETRY_KINDS[kind]], instance.anchor.y);
       data.look.x = instance.params.glow;
       updateWind(data, dt);
       if (data.turbineCount > 0 && data.animateTurbines) updateTurbines(data, dt);
@@ -1172,6 +1461,7 @@ export function createStructureEngine() {
       checkGates(instance);
       if (data.courses.length > 0) checkCorridors(instance);
       updateAudio(data, dt);
+      updateVoiceTrigger(data, dt);
     },
 
     setLOD(instance, tier) {
@@ -1192,6 +1482,7 @@ export function createStructureEngine() {
       removeWake(instance);
       removeSurfaces(data);
       removeStructureColliders(colliderWorld(), instance, data);
+      removeLanterns(instance, data);
       unregisterChallenge(data);
       releaseMeshes(data);
       if (data.nacelleSlots.length > 0) {
@@ -1222,12 +1513,12 @@ export function createStructureEngine() {
         const meshes = live[index].data.meshes;
         for (const kind of GEOMETRY_KINDS) if (meshes[kind] && meshes[kind].visible) drawCalls++;
       }
-      for (const pool of [nacelles, rotors, socks, puffs]) if (pool && pool.used > 0) drawCalls++;
+      for (const pool of [nacelles, rotors, socks, puffs, lanterns]) if (pool && pool.used > 0) drawCalls++;
       return {
         instances: counts.instances,
         particles: 0,
         lights: 0,
-        buffers: counts.buffers + (nacelles ? 4 : 0),
+        buffers: counts.buffers + (nacelles ? 5 : 0),
         drawCalls,
         turbines: counts.turbines,
         mistPuffs: counts.puffs,
@@ -1235,6 +1526,9 @@ export function createStructureEngine() {
         gatesPassed: counts.gates,
         landingsGraded: counts.landings,
         coursesRun: counts.courses,
+        lanterns: counts.lanterns,
+        lanternsLit: counts.lanternsLit,
+        portalsCrossed: counts.portals,
       };
     },
 
@@ -1268,7 +1562,7 @@ export function createStructureEngine() {
     teardown() {
       for (const instance of [...live]) engine.dispose(instance);
       for (const kind of GEOMETRY_KINDS) meshPools[kind].dispose();
-      for (const pool of [nacelles, rotors, socks, puffs]) pool.dispose({ keepMaterial: true });
+      for (const pool of [nacelles, rotors, socks, puffs, lanterns]) pool.dispose({ keepMaterial: true });
       for (const proxy of proxies) proxy.geometry.dispose();
       proxies = [];
       for (const material of Object.values(materials)) material.dispose();

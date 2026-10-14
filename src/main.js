@@ -29,6 +29,7 @@ import { createRenderer } from './render/renderer.js';
 import { ORIGIN_QUANTUM, createRenderOrigin } from './core/origin.js';
 import { createRingCourseSystem } from './gameplay/rings.js';
 import { createChallengeSystem } from './gameplay/challenges.js';
+import { createPortalSystem } from './gameplay/portals.js';
 import { createSettings } from './core/settings.js';
 import { createShellBridge } from './shell/bridge.js';
 import { createSkySystem } from './render/sky.js';
@@ -411,6 +412,8 @@ async function boot() {
     ['waypoints', createWaypointSystem],
     ['rings', createRingCourseSystem],
     ['challenges', createChallengeSystem],
+    // Phase 3, preset 67: the portal rings' way into the next world (no per-frame update).
+    ['portals', createPortalSystem],
     ['flight', createFlightController],
     ['camera', createCameraSystem],
     ['fx', createFxSystem],

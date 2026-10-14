@@ -23,6 +23,8 @@ import waterfall from './waterfall.js';
 import { skyWhale, whale } from './whale.js';
 // Phase 3 presets 61-70.
 import skyShimmer from './skyShimmer.js';
+import canopy from './canopy.js';
+import portal from './portal.js';
 
 export const RECIPES = Object.freeze({
   tornado,
@@ -42,6 +44,8 @@ export const RECIPES = Object.freeze({
   goose,
   // Phase 3 presets 61-70.
   skyShimmer,
+  canopy,
+  portal,
 });
 
 /**
