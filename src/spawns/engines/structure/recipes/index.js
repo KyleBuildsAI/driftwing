@@ -9,6 +9,10 @@ import { SPIRES_DEFAULTS, buildSpires } from './spires.js';
 import { WATERFALL_DEFAULTS, buildWaterfall } from './waterfall.js';
 import { WIND_FARM_DEFAULTS, buildWindFarm } from './windFarm.js';
 import { CHALLENGE_GATES_DEFAULTS, buildChallengeGates } from './challengeGates.js';
+import { GLACIER_DEFAULTS, buildGlacier } from './glacier.js';
+import { SHIPWRECK_DEFAULTS, buildShipwreck } from './shipwreck.js';
+import { SEA_ARCHES_DEFAULTS, buildSeaArches } from './seaArches.js';
+import { CAVE_MOUTH_DEFAULTS, buildCaveMouth } from './caveMouth.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -23,6 +27,11 @@ export const RECIPES = Object.freeze({
   gates: Object.freeze({ build: buildGates, defaults: GATES_DEFAULTS, audioIntensity: 'constant' }),
   waterfall: Object.freeze({ build: buildWaterfall, defaults: WATERFALL_DEFAULTS, audioIntensity: 'constant' }),
   challengeGates: Object.freeze({ build: buildChallengeGates, defaults: CHALLENGE_GATES_DEFAULTS, audioIntensity: 'approach' }),
+  // Phase 3 wave 3, presets 41-50.
+  glacier: Object.freeze({ build: buildGlacier, defaults: GLACIER_DEFAULTS, audioIntensity: 'constant' }),
+  shipwreck: Object.freeze({ build: buildShipwreck, defaults: SHIPWRECK_DEFAULTS, audioIntensity: 'constant' }),
+  seaArches: Object.freeze({ build: buildSeaArches, defaults: SEA_ARCHES_DEFAULTS, audioIntensity: 'constant' }),
+  caveMouth: Object.freeze({ build: buildCaveMouth, defaults: CAVE_MOUTH_DEFAULTS, audioIntensity: 'constant' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

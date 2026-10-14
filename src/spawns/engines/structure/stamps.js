@@ -23,6 +23,10 @@ export const RECIPE_STAMP_TYPES = Object.freeze({
   spires: null,
   gates: 'carve',
   waterfall: 'cliffStep',
+  glacier: null,
+  shipwreck: 'reef',
+  seaArches: 'seaStacks',
+  caveMouth: null,
 });
 
 /** Stamp sizes each recipe prefers over the stamp type's own defaults (m, or [min, max] ranges). */
@@ -32,6 +36,8 @@ const RECIPE_STAMP_DEFAULTS = Object.freeze({
   islands: Object.freeze({ radius: [170, 230], height: [24, 40], falloff: [90, 120], paint: 'basalt' }),
   gates: Object.freeze({ length: [2200, 2600], width: [36, 50], depth: [75, 95], wallWidth: [18, 26], twist: [180, 260], plateau: [40, 60], shoulder: [110, 140], paint: 'riverbed' }),
   waterfall: Object.freeze({ width: [380, 520], drop: [110, 160], length: [520, 680], face: [8, 12], falloff: [140, 180], pool: [55, 75], paint: 'wetRock' }),
+  shipwreck: Object.freeze({ radius: [200, 270], depth: [1.8, 2.6], pocket: [8, 10], pocketRadius: [60, 80], heads: [12, 18], falloff: [140, 190], paint: 'coral' }),
+  seaArches: Object.freeze({ count: [4, 6], radius: [12, 19], height: [40, 68], spread: [280, 400], arches: [1, 2], span: [44, 60], archHeight: [30, 40], paint: 'wetRock' }),
 });
 
 /** Islet layout for the islands recipe: how many islets, and how far out the others ring the first. */
