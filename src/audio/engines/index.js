@@ -30,6 +30,7 @@ import { createAerobaticPropSynth } from './aerobaticProp.js';
 import { createParagliderSynth } from './paraglider.js';
 import { createBurnerSynth } from './burner.js';
 import { createAirshipPropSynth } from './airshipProp.js';
+import { createCreatureSynth } from './creature.js';
 
 const COMMON_DEFAULTS = Object.freeze({
   airflowSpeed: 60,
@@ -104,6 +105,7 @@ export const ENGINE_FAMILIES = Object.freeze({
   },
   burner: { create: createBurnerSynth, defaults: { roarHz: 320, creakRate: 1.2, airflowSpeed: 25, interiorCutoff: 0, touchdown: 'body', callouts: false } },
   airshipProp: { create: createAirshipPropSynth, defaults: { cylinders: 4, blades: 4, maxRpm: 2300, idleRpm: 700, airflowSpeed: 30, interiorCutoff: 900, touchdown: 'wheels', callouts: false } },
+  creature: { create: createCreatureSynth, defaults: { airflowSpeed: 30, interiorCutoff: 0, touchdown: 'body', callouts: false } },
 });
 
 const PROFILE_CACHE = new WeakMap();

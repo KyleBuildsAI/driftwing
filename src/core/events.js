@@ -36,6 +36,12 @@ export const EVENT_TYPES = Object.freeze({
    * absent): what it touched down on; a floating craft's touchdown on water is graded the same way.
    */
   landed: { grade: LANDING_GRADES, craft: 'string', sinkRate: 'number', groundSpeed: 'number', position: 'vector3', surface: { type: ['ground', 'water', 'structure', 'perch'], optional: true } },
+  /**
+   * The eagle settled on a perch (perched true, after its auto-landing) or took off from one (false).
+   * kind: a terrain peak, a tagged collider (structure) or a tree top; perchId names it (the collider
+   * id, the vegetation perch id, or "peak:<x>:<z>").
+   */
+  perched: { craft: 'string', perchId: 'string', kind: ['peak', 'structure', 'tree'], position: 'vector3', perched: 'boolean' },
   /** Terrain or water impact handled by fade and respawn. */
   softCrash: { craft: 'string', reason: 'string', impactSpeed: 'number', position: 'vector3' },
   /**

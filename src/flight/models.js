@@ -23,10 +23,11 @@ import { createSimTiltrotorModel } from './SimTiltrotor.js';
 import { createSimParagliderModel } from './SimParaglider.js';
 import { createSimBalloonModel } from './SimBalloon.js';
 import { createSimAirshipModel } from './SimAirship.js';
+import { createSimFlapperModel } from './SimFlapper.js';
 import { createAutopilotStage } from './autopilot.js';
 import { createAssistStage } from './assists.js';
 
-export const MODEL_KINDS = Object.freeze(['fixedWing', 'jet', 'helicopter', 'wingsuit', 'quad', 'aerobatic', 'tiltrotor', 'paraglider', 'balloon', 'airship']);
+export const MODEL_KINDS = Object.freeze(['fixedWing', 'jet', 'helicopter', 'wingsuit', 'quad', 'aerobatic', 'tiltrotor', 'paraglider', 'balloon', 'airship', 'flapper']);
 
 /** Methods and fields every model must expose (checked when the controller creates one). */
 const MODEL_INTERFACE = Object.freeze({
@@ -135,5 +136,6 @@ flightModels.register('tiltrotor', createSimTiltrotorModel);
 flightModels.register('paraglider', createSimParagliderModel);
 flightModels.register('balloon', createSimBalloonModel);
 flightModels.register('airship', createSimAirshipModel);
+flightModels.register('flapper', createSimFlapperModel);
 flightModels.registerControlStage(createAutopilotStage());
 flightModels.registerControlStage(createAssistStage());

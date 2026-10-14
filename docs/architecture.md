@@ -201,6 +201,7 @@ system, and then starts the frame loop.
 | `SimHelicopter.js` | single-main-rotor helicopter |
 | `SimWingsuit.js` | wingsuit and its canopy mode |
 | `SimQuad.js` | multirotor with its flight-controller firmware (rates, angle mode, altitude hold) |
+| `SimFlapper.js` | the flapping creature (kind `flapper`: the eagle and its dragon skin): flap power, tuck, soaring, the perch and its auto-landing, with its assists and autopilot |
 | `aero.js` | atmosphere, lift and drag curves past the stall, surface forces, ground effect, propeller |
 | `jetAero.js` | the jet's SimFixedWing extension: turbofan with afterburner and detent, transonic drag, wing rock, buffet |
 | `jetFcs.js` | the jet's flight control system: its assist catalog and handler, autopilot and trim handler |
@@ -227,6 +228,7 @@ system, and then starts the frame loop.
 | `kit.js` | the procedural mesh kit and shared materials (v1 palette, nav lights, prop disc) |
 | `glider.js`, `bushplane.js`, `jet.js`, `helicopter.js`, `wingsuit.js`, `fpv.js` | one craft module each (schema below) |
 | `seaplane.js` | the Phase 3 amphibious floatplane (Beaver style, on the floats extension) |
+| `eagle.js`, `eagleMeshes.js` | the eagle / dragon module (one craft, two skins) and its two meshes (the bald eagle; the dragon with its membranes, jaw and flame jet) |
 
 ### `src/input`: every input device
 
@@ -349,7 +351,8 @@ system, and then starts the frame loop.
 
 `journal.js` (landmarks, biomes, distance, best landings from v1; spawn discoveries, the global
 records and the achievements from Phase 2, see [UI](#ui-ctxsystemsui)), `rings.js` (ring courses)
-and `waypoints.js` (waypoint beacon and arrow), from v1.
+and `waypoints.js` (waypoint beacon and arrow), from v1. `ignition.js` (Phase 3, contract h.5) is
+`ctx.ignition`, the registry of things a flame can light ([below](#ignition-ctxignition)).
 
 ### `src/dev`: developer tools (never player features)
 
@@ -530,6 +533,7 @@ plus optional `prewarm()` / `endPrewarm()` hooks and whatever API it offers. `ct
 | `groundSurfaces` | extra ground surfaces (`src/world/groundSurfaces.js`): landable tops that are not terrain; spawn engines add them (engine ctx `surfaces`), the flight controller stands on them |
 | `colliders` | the structure collision service (`src/world/colliders.js`): spawn engines (engine ctx `game.colliders`) and the landmarks register colliders, the flight controller sweeps its probes against them every tick |
 | `wind` | the WindField |
+| `ignition` | what a flame can light (`src/gameplay/ignition.js`): lantern and torch owners register ignitables (engine ctx `game.ignition`), the dragon's fire breath lights them |
 | `perf` | the perf governor |
 | `craftRegistry` | craft catalog and registered craft modules |
 | `flightModels` | the flight model and control-stage registry |
@@ -660,6 +664,7 @@ Typed events are emitted with `bus.emitTyped(name, payload)` and heard with
 | `viewChanged` | `{ view: chase\|cockpit\|wing\|flyby\|fpv, craft }` (also at start and on craft change) | camera |
 | `deviceConnected` / `deviceDisconnected` | `{ deviceKey, kind, name }`; kind `gamepad` \| `hotas-stick` \| `hotas-throttle` \| `hotas-pedals` | gamepad registry |
 | `relaunched` | `{ craft, method, position }` | flight controller |
+| `perched` | `{ craft, perchId, kind: peak\|structure\|tree, position, perched }`: the eagle settled on a perch after its auto-landing (`perched: true`) or took off from it (`false`); standing on plain ground is a landing, not a perch | SimFlapper |
 | `spawnActivated` | `{ id, presetId, category, kind: site\|event, position }` | SpawnManager |
 | `spawnEnded` | `{ id, presetId, reason }`; reason `ended`, `expired`, `despawn`, `range`, `hours` (a site outside its hours), `error`, `removed`, `disposed`, or the `deactivate` caller's (default `deactivated`; the director's `lifetime`, `despawn`, `dispose`; the F9 debugger's `debug`) | SpawnManager |
 | `weatherChanged` | `{ state: clear\|building\|storm\|clearing, previous, region }`; fires only on a real change, so `previous` is always a state; `region` is the weather cell `"rx:rz"` | weather system |
@@ -844,8 +849,8 @@ and only adds its `craftState`; a hook that throws or returns something unusable
 A model is created by a factory registered per kind: `flightModels.register(kind, factory)`. It is
 called with `{ profile, craft, world, bus, state, craftState, settings }`, where `profile` is the
 `simProfile` (whose `model` field names the kind). Registered kinds are `fixedWing`, `jet`
-(SimFixedWing with the jet's own assists), `helicopter`, `wingsuit`, `quad` and `tiltrotor` (SimTiltrotor: tilting
-nacelles, two proprotors, a wing, the conversion corridor of `tiltrotorCorridor.js`). `create()` checks this interface:
+(SimFixedWing with the jet's own assists), `helicopter`, `wingsuit`, `quad`, `tiltrotor` (SimTiltrotor: tilting
+nacelles, two proprotors, a wing, the conversion corridor of `tiltrotorCorridor.js`) and `flapper` (SimFlapper: the eagle / dragon). `create()` checks this interface:
 
 | member | contract |
 | --- | --- |
@@ -961,6 +966,7 @@ weight that ramps with the level.
 | wingsuit (`SimWingsuit.js`) | stability, terrain proximity warning | auto-level, stall protection |
 | quad (`SimQuad.js`) | angle mode (above 35 %) | altitude hold (above 85 %); 0 % is rate (acro) mode |
 | tiltrotor (`tiltrotorAssists.js`) | stability augmentation (rate damping, attitude hold, yaw damper), heading hold in the hover and turn coordination at speed | attitude command with limits (wings level hands off, stall protection in airplane mode), auto-hover in helicopter mode (position hold; the lever is a climb command around its detent) |
+| flapper (`SimFlapper.js`) | stability (rate damping, turn coordination, phugoid damping), stall warning | auto-level, stall protection |
 
 - At 100 % hands off, fixed-wing craft hold the air-mass flight path within 0.85-1.25 g.
 
@@ -968,7 +974,8 @@ weight that ramps with the level.
 heading, altitude and speed with PID loops, follows waypoints and rings, and uses a terrain
 look-ahead. Other kinds register theirs with `registerAutopilotHandler(kind, { createMemory(),
 apply(controls, context, memory) })`. `autopilotHandlerFor(kind)` lets a kind reuse another's (the
-jet flies the fixed-wing autopilot). The helicopter, wingsuit and quad have their own.
+jet flies the fixed-wing autopilot). The helicopter, wingsuit, quad and flapper have their own (the
+flapper's flies a perch approach when the craft state holds a `perchTarget`).
 
 **Trim** (`trim.js`). After every airborne reset (boot, respawn, airstart, craft switch, tow
 release, NaN fallback), the controller calls `trimModel(model, request)`, where
@@ -1012,6 +1019,10 @@ height; `stall.warning` is the low-rotor-rpm horn.
   (after the auto-nacelle schedule), `autoNacelle`, `mode` (`hover` \| `conversion` \| `airplane`),
   `corridor { min, max, state: ok \| wingStall \| overspeed }`, `proprotorRpm`; a placement, command or
   test that writes `nacelleAngle` or `nacelleTarget` is taken over on the next tick;
+- eagle / dragon: `skin`, `perched`, `perchId`, `perchKind`, `flapPower`, `wingTuck` (contract h.3), plus
+  `landing` (0..1 through the auto-landing), `perchedSeconds`, `flapPhase`, `flapAmplitude`, `flapCount`,
+  `soarGain`, `screechCount`, `roarCount`, `fire`, `fireIntensity`, `lanternsLit`, `nearestPerch`, and the
+  requests `tuckRequest`, `takeoffRequest`, `perchTarget`;
 - a craft with skins: `skin` (set by the controller);
 - seaplane: `onWater`, `onStep`, `waterRudders` (down), `porpoise` (0..1), `noseOverWarning`,
   `skidWarning`, `spray` (0..1), `trim` (deg on the water), `waterSpeed` (m/s through the water),
@@ -1059,7 +1070,8 @@ groups)` builds one over another catalog (the labs).
 
 - `eye`: `[x, y, z]` body axes.
 - `chase`: `{ distance, height, lookAhead, speedRange?: { CRUISE, MAX, TOP } }` (the speeds the pull-back, FOV stretch and shake scale to; v1's `CONFIG.SPEED` by default). It may be an
-  object with getters; the wingsuit's widens under the canopy.
+  object with getters; the wingsuit's widens under the canopy. An optional `orbitYaw` (degrees) turns
+  the chase view round the craft on top of the free look: the eagle's idle orbit on a perch.
 - `wing`: `{ position, target }` in body axes. Without it the mount is derived from the right
   wingtip.
 - `fpv`: `{ position, uptilt (0-40, default 25), near }`. Its presence makes the first-person slot
@@ -1071,7 +1083,8 @@ groups)` builds one over another catalog (the labs).
   calls `build(builder, spec, THREE)`: it draws the interior into the shared flat-shaded mesh
   builder (`createMeshBuilder` from kit.js, frame relative to the eye) and may return `{ objects?:
   Object3D[], dispose?() }`, extra objects added to the cockpit and disposed with it. The panel
-  (with its housing) is still built from `panel.layout`; the stick is off by default.
+  (with its housing) is still built from `panel.layout` (an empty layout, `[]`, builds none: the glass
+  HUD shows, as in the eagle's view); the stick is off by default.
 
 **`audioProfile`** (`src/audio/engines/index.js`). Missing parameters take the family defaults, so
 `{ engine: 'jet' }` is enough.
@@ -1089,11 +1102,14 @@ groups)` builds one over another catalog (the labs).
   - `wingsuit`: `flutterHz`, `proximityRange`;
   - `radial`: `cylinders`, `blades`, `maxRpm`, `idleRpm` (a prop variant), plus the floats' water slap and
     spray from `craftState` (the seaplane);
-  - `proprotor`: `blades`, `rotorRpm`, `turbineHz`; the thrum follows `craftState.nacelleAngle` (an impulsive slap with the nacelles up, a smooth drone tilted forward) and `craftState.proprotorRpm`.
+  - `proprotor`: `blades`, `rotorRpm`, `turbineHz`; the thrum follows `craftState.nacelleAngle` (an impulsive slap with the nacelles up, a smooth drone tilted forward) and `craftState.proprotorRpm`;
+  - `creature`: no parameters of its own; the eagle's per-beat whoosh and screech, the dragon's
+    wingbeat thump, roar and fire whoosh, from the craft state's counters (`flapCount`,
+    `screechCount`, `roarCount`) and `fireIntensity`.
 
-**Instruments** (`src/ui/instruments/index.js`). There are 19 ids: `airspeed, altitude, attitude,
+**Instruments** (`src/ui/instruments/index.js`). There are 20 ids: `airspeed, altitude, attitude,
 heading, vsi, aoa, g, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide,
-proximity, waterRudder, nacelle` (`nacelle`: the nacelle angle on the conversion corridor chart). A renderer is `{ id, label, draw(pen, source, theme, memory), createMemory?,
+proximity, waterRudder, nacelle, perch` (`nacelle`: the nacelle angle on the conversion corridor chart). A renderer is `{ id, label, draw(pen, source, theme, memory), createMemory?,
 update?(memory, dt, source), reset? }`. It draws in a 200 x 200 design box in a `panel` theme (steam
 gauge on the cockpit CanvasTexture) and a `glass` theme (HUD tile). Units follow `settings.units`.
 Unknown ids are skipped and reported in the camera stats. A new instrument is one file,
@@ -1110,6 +1126,7 @@ the HUD overlay draw it from then on.
 | fpv | quad | throttle, droneMode, airspeed, altitude, attitude, heading, vsi |
 | seaplane | fixedWing (floats extension) | airspeed, altitude, attitude, heading, vsi, aoa, g, throttle, flapsGear, waterRudder (the gear advisory, the water rudders, STEP, porpoise, trim and water speed) |
 | tiltrotor | tiltrotor | airspeed, altitude, attitude, heading, vsi, nacelle (pinned on the HUD), rotorRpm, torque, radarAlt, throttle |
+| eagle | flapper | airspeed, altitude, heading, vsi, vario, perch (flap power, tuck, soaring and the perch line) |
 
 ### How to add a craft
 
@@ -1262,6 +1279,60 @@ Behaviour:
   thump. Silent at zero turbulence and through the calm-air floor, in photo mode and while paused.
   `getStats().turbulenceRattle` is `{ amount, interior, rattle, thump, levels }`.
 - **Typed events consumed**: `viewChanged`, `craftChanged`, `landed` and `softCrash`.
+
+### Ignition (`ctx.ignition`)
+
+`src/gameplay/ignition.js` (contract h.5): the registry of things a flame can light. Lantern and
+torch owners (the sky lantern festival, the monastery, the castle, the ghost galleon) register theirs
+through the engine ctx (`ctx.game.ignition`) and remove them in their dispose (contract appendix B);
+the dragon skin's fire breath is the flame. Pure JS, WORLD frame (float64), allocation-free in `cone()`
+and `move()`.
+
+| member | what |
+| --- | --- |
+| `add({ id, position, radius = 1, onIgnite(source) })` | an unlit ignitable (a sphere); throws on a bad or duplicate definition. `onIgnite` runs once when it lights, with the flame's `source` (`{ kind: 'dragonFire', craft, position }`) |
+| `remove(id)`, `move(id, x, y, z)` | owners remove theirs; a moving ignitable (a drifting lantern) moves |
+| `ignite(id, source)`, `extinguish(id)`, `isLit(id)` | lights it once (`onIgnite`, a failing one logs one error and it stays lit); `extinguish` re-arms it |
+| `cone(origin, direction, length, angle, visit)` | `visit(id, lit, distance)` for every ignitable whose sphere touches the cone (half-angle `angle`, rad), in registration order; the flame decides what to light |
+| `count`, `litCount`, `ids()`, `getStats()`, `clear()` | for leak checks and tests |
+
+The dragon's flame (the eagle module's `craftAbility` while the dragon skin flies) runs from the mouth
+along the body axis drooped 6 degrees, up to 14 m, cut short by a solid collider (`colliders.raycast`),
+13 degrees wide; whatever it lights counts toward `craftState.lanternsLit` and the journal stat
+`dragonLanternsLit`. The mesh draws the flame and borrows a real light from the spawn light pool
+(`ctx.systems.spawns.manager.lights`, priority 5) while it burns.
+
+### The eagle's perch (`SimFlapper.js`)
+
+The flapper model looks for a perch every 0.1 s while the bird flies slower than `perch.captureSpeed`
+(12 m/s, below its 12.6 m/s glide) and not flapping hard (under half power): the collider
+service's perch points (`colliders.perchesNear`: tagged structure tops, the vegetation provider's tree tops) and terrain peaks (a local top higher
+than two rings of samples around it and standing 3 m out of the outer one), within 14 m ahead and
+from 14 m above to 3 m below its feet, with a clear line of flight (`colliders.raycast`). A perch
+point inside a solid (a railing's volume) moves up onto its top (`liftClear`). The auto-landing is a
+kinematic cubic from the bird's position and velocity to the perch (0.9-2.8 s), flaring the body; then
+the bird stands with its feet on the point, held still (the structure sweep may ease it out of a
+collider: it stays where it was put), turns on the spot with the stick or pedals, and takes off with a
+hop when the flap power rises past where it was when it settled (or on the copilot's "take off"). A
+perch that vanishes (a despawned structure) lets it go. A slow touchdown on its feet anywhere stands
+the same way (kind `ground`: a graded landing, no `perched` event); a fast one is the soft crash. A
+resting placement (`mode: 'perch'` or `'ground'`) stands on the surface when it is at most a leg above
+it, else with its feet on the given point. The chase rig's `orbitYaw` orbits the camera round the
+perched bird after 1.5 s and eases back behind it on takeoff.
+
+The flapper autopilot's perch approach (the copilot's "find a perch", `craftState.perchTarget`)
+flies toward the perch down a shallow slope, slowing to 9.5 m/s with a light wingbeat on the final.
+Too high to glide into the capture box, after a pass without a catch, or with the ground ahead
+rising into it, it holds on a 45 m circle 85 m out over the lowest side and comes in from there.
+Without a perch target its terrain look-ahead turns it aside from ground rising faster than it can
+climb, and it never pushes for speed within 40 m of the ground.
+
+The eagle module's copilot commands (`craftCommand`, contract h.6): `findPerch` ("find a perch":
+the nearest perch within 150 or 300 m, and the autopilot approach above), `takeOff`,
+`screech` (the dragon roars), `fireBreath` (dragon only: a 3 s burst), `tuck` (latches the tuck on or
+off) and `glide` (flap power to zero, wings out); `copilot.status` says what the creature is doing.
+Its journal stats are `eaglePerches` (count), `eagleBestSoar` (metres climbed in one soaring climb
+with the flap power at zero) and `dragonLanternsLit` (count).
 
 ### WindField (`ctx.wind`, `src/env/WindField.js`)
 

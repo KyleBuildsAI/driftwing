@@ -19,6 +19,11 @@ const PINE_TOP = 12.1;
 const PINE_SINK = 0.25;
 /** One perch per PERCH_CELL square from the Phase 1 pines: the tallest one in it. */
 const PERCH_CELL = 64;
+/**
+ * No tree top stands higher than this over the ground (m; the tallest perch species, the redwood, is
+ * about 110 m at most): a perch query wholly above it scatters nothing (each new cell costs a scatter).
+ */
+const MAX_PERCH_ABOVE_GROUND = 150;
 
 /** The pine's vertical scale from its scatter scale and variant (chunkBuilder computeScale). */
 function pineScaleY(scale, variant) {
@@ -134,6 +139,8 @@ export function createVegetationColliders(world) {
     id: 'vegetation',
     /** Contract b.2 (colliders.perchesNear): visit(x, y, z, kind, sourceId) for every tree-top perch within radius. */
     near(x, y, z, radius, visit) {
+      // Wholly above every tree top (a margin of one radius for the slope under the query): nothing.
+      if (y - radius > world.groundHeight(x, z) + radius + MAX_PERCH_ABOVE_GROUND) return;
       const firstX = Math.floor((x - radius) / CELL);
       const lastX = Math.floor((x + radius) / CELL);
       const firstZ = Math.floor((z - radius) / CELL);
