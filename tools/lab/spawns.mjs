@@ -22,7 +22,9 @@
 //   wind         a wind engine's source is live while its spawn runs and gone after dispose (with
 //                windSourceRemoved); its real light returns to the pool, which holds exactly the
 //                lights the engines declare
-//   leaks        an engine that forgets its wind source and light is cleaned up and reported
+//   leaks        an engine that forgets its wind source and light is cleaned up and reported; one that
+//                forgets an ignitable (the game's ignition service, contract h.5) too, while one that
+//                removes its own leaves no leak
 //   lifetime     ended events end, expired events end, director events despawn out of range and view
 //   memory       every create and dispose is logged with its readings; a long-lived spawn whose log
 //                entry was reused by 64 newer spawns does not overwrite the newer entry
@@ -51,6 +53,7 @@ import { createCelestialEngine } from '../../src/spawns/engines/celestialEngine.
 import { createWeatherVolumeEngine } from '../../src/spawns/engines/weatherVolumeEngine.js';
 import { createFaunaEngine } from '../../src/spawns/engines/faunaEngine.js';
 import { PRESET_BY_ID } from '../../src/spawns/presets/index.js';
+import { createIgnitionService } from '../../src/gameplay/ignition.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -90,7 +93,7 @@ const world = {
   },
 };
 
-function createLab() {
+function createLab({ game = null } = {}) {
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0xe0b48c, 400, 2400);
@@ -119,7 +122,7 @@ function createLab() {
   const registry = createEngineRegistry();
   const manager = createSpawnManager({
     THREE, TSL, scene, camera, renderer: { info: { memory } }, backend: 'WebGPU', wind, audio: null, world, state, sky: null,
-    bus, perf: null, settings: null, uniforms, registry, presets: [], seed: 'LAB',
+    bus, perf: null, settings: null, uniforms, registry, presets: [], seed: 'LAB', game,
   });
   manager.register(createTestMarkerEngine());
   manager.register(createTestWindEngine());
@@ -471,6 +474,45 @@ function testLeaks() {
   check('leaks', 'both leaks reach the console as errors', consoleErrors.length - errorsBefore === 2, consoleErrors.slice(errorsBefore).join(' | '));
 }
 
+/** An engine with a lantern (an ignitable); `tidy` engines remove theirs in dispose. */
+function createLanternEngine(name, tidy) {
+  return {
+    name,
+    init(ctx) { this.ctx = ctx; },
+    create(preset, params) {
+      const id = `${name}:lantern:${params.seed}`;
+      this.ctx.game.ignition.add({ id, position: params.position, radius: 2, onIgnite() {} });
+      return { anchor: params.position, radius: 50, windSourceIds: [], ignitableIds: [id], lights: 0, particles: 0, data: null };
+    },
+    update() {},
+    setLOD() {},
+    dispose(instance) {
+      if (tidy) for (const id of instance.ignitableIds) this.ctx.game.ignition.remove(id);
+    },
+    stats() { return { instances: 0, particles: 0, lights: 0, buffers: 0, drawCalls: 0 }; },
+  };
+}
+
+function testIgnitableLeaks() {
+  const ignition = createIgnitionService();
+  const lab = createLab({ game: { ignition } });
+  lab.manager.register(createLanternEngine('testLantern', true));
+  lab.manager.register(createLanternEngine('testLanternLeaky', false));
+  const base = createTestPresets()[0];
+  lab.manager.addPreset(Object.freeze({ ...base, id: 'testLantern', engines: [{ engine: 'testLantern' }] }));
+  lab.manager.addPreset(Object.freeze({ ...base, id: 'testLanternLeak', engines: [{ engine: 'testLanternLeaky' }] }));
+  const errorsBefore = consoleErrors.length;
+  const tidyId = lab.spawnAhead('testLantern', 500);
+  const registered = ignition.count === 1;
+  lab.manager.deactivate(tidyId);
+  check('leaks', 'an engine reaches the ignition service through ctx.game and its lantern registers', registered);
+  check('leaks', 'a lantern removed in dispose leaves no leak', ignition.count === 0 && lab.manager.getStats().leaks.ignitables === 0 && consoleErrors.length === errorsBefore);
+  const leakyId = lab.spawnAhead('testLanternLeak', 500, { x: 900 });
+  lab.manager.deactivate(leakyId);
+  const stats = lab.manager.getStats();
+  check('leaks', 'a forgotten ignitable is removed and reported', ignition.count === 0 && stats.leaks.ignitables === 1 && consoleErrors.length - errorsBefore === 1, consoleErrors.slice(errorsBefore).join(' | '));
+}
+
 // ---- lifetime -----------------------------------------------------------------------------------------------------------------------
 function testLifetime() {
   const lab = createLab();
@@ -651,11 +693,12 @@ testDiscovery();
 testSites();
 testWind();
 testLeaks();
+testIgnitableLeaks();
 testLifetime();
 testMemoryLog();
 testCouplings();
 
-const unexpectedErrors = consoleErrors.filter((line) => !/left wind source|holding \d+ real light|unknown spawn audio recipe/.test(line));
+const unexpectedErrors = consoleErrors.filter((line) => !/left wind source|left ignitable|holding \d+ real light|unknown spawn audio recipe/.test(line));
 check('console', 'no unexpected console errors (event payloads valid)', unexpectedErrors.length === 0, unexpectedErrors.join(' | '));
 console.error = originalError;
 

@@ -200,6 +200,22 @@ export function createDisposeCheck(ctx, framing) {
     return held;
   }
 
+  /** Ignitables registered with the game's ignition service (ctx.ignition: lanterns, torches). */
+  function spawnIgnitableIds() {
+    return ctx.ignition && typeof ctx.ignition.ids === 'function' ? ctx.ignition.ids() : [];
+  }
+
+  /** The ignitables live spawns still list (a site the feed built meanwhile is not the disposed spawn's). */
+  function heldIgnitableIds() {
+    const held = new Set();
+    for (const spawn of manager.getActive()) {
+      for (const part of manager.getParts(spawn.id)) {
+        if (Array.isArray(part.ignitableIds)) for (const id of part.ignitableIds) held.add(id);
+      }
+    }
+    return held;
+  }
+
   /** Challenge courses (ctx.systems.challenges) that are not the ring course's. */
   function spawnCourseKeys() {
     const challenges = ctx.systems.challenges;
@@ -252,6 +268,7 @@ export function createDisposeCheck(ctx, framing) {
         windCount: ctx.wind.sourceCount,
         colliderIds: new Set(spawnColliderIds()),
         courseKeys: new Set(spawnCourseKeys()),
+        ignitableIds: new Set(spawnIgnitableIds()),
         sky: ctx.systems.sky.getModifierState().count,
         lights: lightsInUse(),
         leaks: { ...manager.getStats().leaks },
@@ -264,7 +281,8 @@ export function createDisposeCheck(ctx, framing) {
      * Compares the state after a dispose with its baseline. options: { presetIds (the presets under
      * test: a structure geometry can only be theirs when one has a structure part), heapToleranceMB
      * (judge the heap; the baseline must have read it), waitTerrain = true }. Returns the readings
-     * with gpuOk, windOk, collidersOk, challengesOk, skyOk, lightsOk, leaksOk, heapOk and ok (all of them).
+     * with gpuOk, windOk, collidersOk, challengesOk, ignitablesOk, skyOk, lightsOk, leaksOk, heapOk and
+     * ok (all of them).
      */
     async compare(baseline, { presetIds = [], heapToleranceMB = null, waitTerrain = true } = {}) {
       await frames(SETTLE_FRAMES);
@@ -284,6 +302,8 @@ export function createDisposeCheck(ctx, framing) {
       const collidersLeft = spawnColliderIds().filter((id) => !baseline.colliderIds.has(id) && !heldColliders.has(id));
       const heldCourses = heldCourseKeys();
       const challengesLeft = spawnCourseKeys().filter((key) => !baseline.courseKeys.has(key) && !heldCourses.has(key));
+      const heldIgnitables = heldIgnitableIds();
+      const ignitablesLeft = spawnIgnitableIds().filter((id) => !baseline.ignitableIds.has(id) && !heldIgnitables.has(id));
       const sky = ctx.systems.sky.getModifierState().count;
       const lights = lightsInUse();
       const leaks = manager.getStats().leaks;
@@ -309,18 +329,21 @@ export function createDisposeCheck(ctx, framing) {
         challenges: `${baseline.courseKeys.size} -> ${baseline.courseKeys.size + challengesLeft.length}`,
         challengesLeft,
         challengesOk: challengesLeft.length === 0,
+        ignitables: `${baseline.ignitableIds.size} -> ${baseline.ignitableIds.size + ignitablesLeft.length}`,
+        ignitablesLeft,
+        ignitablesOk: ignitablesLeft.length === 0,
         skyModifiers: `${baseline.sky} -> ${sky}`,
         skyOk: sky === baseline.sky,
         lights: `${baseline.lights} -> ${lights}`,
         lightsOk: lights === baseline.lights,
         leaks,
-        leaksOk: leaks.windSources === baseline.leaks.windSources && leaks.lights === baseline.leaks.lights && (leaks.colliders ?? 0) === (baseline.leaks.colliders ?? 0),
+        leaksOk: leaks.windSources === baseline.leaks.windSources && leaks.lights === baseline.leaks.lights && (leaks.colliders ?? 0) === (baseline.leaks.colliders ?? 0) && (leaks.ignitables ?? 0) === (baseline.leaks.ignitables ?? 0),
         heapBeforeMB: baseline.heapMB,
         heapAfterMB: heapMB,
         heapDeltaMB,
         heapOk: !judgeHeap || (heapDeltaMB === null ? !heapAvailable() : heapDeltaMB <= heapToleranceMB),
       };
-      result.ok = result.gpuOk && result.windOk && result.collidersOk && result.challengesOk && result.skyOk && result.lightsOk && result.leaksOk && result.heapOk;
+      result.ok = result.gpuOk && result.windOk && result.collidersOk && result.challengesOk && result.ignitablesOk && result.skyOk && result.lightsOk && result.leaksOk && result.heapOk;
       return result;
     },
 

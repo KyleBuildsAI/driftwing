@@ -160,7 +160,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     const gpu = count((row) => row.cycles.length === 2 && row.cycles.every((cycle) => cycle.gpuOk));
     const heap = count((row) => row.cycles.length === 2 && row.cycles[1].heapOk);
     const wind = count((row) => row.cycles.length === 2 && row.cycles.every((cycle) => cycle.windOk));
-    const other = count((row) => row.cycles.length === 2 && row.cycles.every((cycle) => cycle.lightsOk && cycle.skyOk && cycle.leaksOk && cycle.collidersOk && cycle.challengesOk));
+    const other = count((row) => row.cycles.length === 2 && row.cycles.every((cycle) => cycle.lightsOk && cycle.skyOk && cycle.leaksOk && cycle.collidersOk && cycle.challengesOk && cycle.ignitablesOk));
     const shots = count((row) => Boolean(row.shot && row.shot.taken));
     const counts = capture.counts;
     const fpsRows = rows.filter((row) => Number.isFinite(row.frames.avgFps));
@@ -812,7 +812,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
   // ---- Summary ------------------------------------------------------------------------------------------------
   function cycleCell(cycle) {
     if (!cycle) return { text: '-', status: 'fail' };
-    const ok = cycle.gpuOk && cycle.windOk && cycle.skyOk && cycle.lightsOk && cycle.leaksOk && cycle.collidersOk && cycle.challengesOk;
+    const ok = cycle.gpuOk && cycle.windOk && cycle.skyOk && cycle.lightsOk && cycle.leaksOk && cycle.collidersOk && cycle.challengesOk && cycle.ignitablesOk;
     return { text: `g${cycle.geometryDelta >= 0 ? '+' : ''}${cycle.geometryDelta} (world ${cycle.worldFirstDrawn}) t${cycle.textureDelta >= 0 ? '+' : ''}${cycle.textureDelta} w${cycle.windLeft.length}`, status: ok ? 'pass' : 'fail', title: JSON.stringify({ leftBehind: cycle.leftBehind, wind: cycle.windSources, sky: cycle.skyModifiers, lights: cycle.lights }) };
   }
 

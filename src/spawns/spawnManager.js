@@ -17,8 +17,8 @@
 //     hidden by terrain along the sight line), once per site id or event preset per world;
 //   - accounts memory: renderer.info.memory and the JS heap before each create and after each
 //     dispose, for the ?test=spawns harness;
-//   - cleans up after engines: wind sources and real lights a disposed instance still held are
-//     removed and reported as leaks.
+//   - cleans up after engines: wind sources, real lights, colliders and ignitables a disposed instance
+//     still held are removed and reported as leaks.
 //
 // The frame update allocates nothing: records live in an array, per-engine counters are built once,
 // the site scan reads the feed's per-cell cache in time slices, and the hot path never passes a
@@ -156,8 +156,10 @@ function copyReading(target, source) {
  *                            the typed weatherChanged event reports changes only, so an engine reads
  *                            the state it starts in here
  *   game                     optional: the game ctx (engine ctx `game`): the Phase 3 services. An
- *                            engine lists the colliders it adds in instance.colliderIds; any still
+ *                            engine lists the colliders it adds in instance.colliderIds and the
+ *                            ignitables it adds (game.ignition) in instance.ignitableIds; any still
  *                            registered after its dispose are removed and counted in leaks.colliders
+ *                            and leaks.ignitables
  */
 export function createSpawnManager(options) {
   const {
@@ -193,7 +195,7 @@ export function createSpawnManager(options) {
   const distances = new Float64Array(MAX_SPAWNS);
   const outOfView = new Float64Array(MAX_SPAWNS);
   const nextVisibilityFrame = new Int32Array(MAX_SPAWNS);
-  const leaks = { windSources: 0, lights: 0, colliders: 0 };
+  const leaks = { windSources: 0, lights: 0, colliders: 0, ignitables: 0 };
   const counters = { activated: 0, ended: 0, tierChanges: 0, discoveries: 0, lureRefused: 0, visibilityChecks: 0 };
   let heavyActive = 0;
   let visibilityCursor = 0;
@@ -542,6 +544,16 @@ export function createSpawnManager(options) {
         if (colliderWorld && colliderWorld.remove(colliderIds[colliderIndex])) {
           leaks.colliders++;
           console.error(`[DRIFTWING] spawn engine "${part.engine.name}" left collider "${colliderIds[colliderIndex]}" of ${record.id} behind; the manager removed it`);
+        }
+      }
+      // Ignitables (contract h.5, appendix B): lanterns and torches an instance registered with the
+      // game's ignition service; any id still registered after dispose is a leak.
+      const ignitableIds = Array.isArray(part.instance.ignitableIds) ? part.instance.ignitableIds : [];
+      const ignition = game && game.ignition ? game.ignition : null;
+      for (let ignitableIndex = 0; ignitableIndex < ignitableIds.length; ignitableIndex++) {
+        if (ignition && ignition.remove(ignitableIds[ignitableIndex])) {
+          leaks.ignitables++;
+          console.error(`[DRIFTWING] spawn engine "${part.engine.name}" left ignitable "${ignitableIds[ignitableIndex]}" of ${record.id} behind; the manager removed it`);
         }
       }
     }
