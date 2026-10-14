@@ -21,6 +21,16 @@
 //   rainbow  a rainbow (or a moonbow) inside a sphere of mist, lit by the sun or the moon behind the
 //            viewer (the waterfall's mist)
 //   sky      a static sky modifier eased in and out with the instance
+// Phase 3 night-sky components (celestial/nightSky.js draws them):
+//   lunarEclipse  the blood moon (61): a copper halo around the dome's moon disc (which the director's
+//                 global override reddens) and the bright limb on the side leaving the umbra
+//   greenFlash    the green flash (62): the green upper limb and the detached sliver as the setting sun's
+//                 top limb reaches the horizon, then a brief bright flash as it vanishes; only toward an
+//                 ocean horizon (the terrain sampled toward the sun once a second)
+//   noctilucent   noctilucent clouds (63): rippled electric-blue sheets low over the sun's azimuth, lit
+//                 while the sun is 6-16 degrees down
+//   galaxy        the Milky Way core (64): bulge, star clouds and dust lanes on the star field's band,
+//                 strongest over the desert (the dune share around the camera, sampled every 2 s)
 //
 // Positions come from the sky's own sun and moon directions (state.time, src/core/sun.js) and the
 // star field's rotation about the celestial pole (src/render/sky.js), so the eclipse sits exactly on
@@ -35,16 +45,27 @@
 // Shared GPU resources are built once in init(); an instance owns only slots in them, so dispose()
 // returns GPU memory exactly. No allocation per frame: typed arrays, reused scratch vectors and
 // persistent update ranges.
-import { CELESTIAL_POLE_ELEVATION_DEG, SUN_ANGULAR_RADIUS } from '../../render/sky.js';
+import { CELESTIAL_POLE_ELEVATION_DEG, MOON_ANGULAR_RADIUS, SUN_ANGULAR_RADIUS } from '../../render/sky.js';
 import { resolveCelestialParams } from './celestial/params.js';
-import { ownsPresetAudio } from './engineKit.js';
+import { ownsPresetAudio, sendVoiceLevel } from './engineKit.js';
 import { CORONA_EXTENT, createCometMesh, createEclipseMeshes, createMeteorMesh, createRainbowMesh } from './celestial/materials.js';
+import { GREEN_FLASH_EXTENT, createNightSkyMeshes, galacticFrame } from './celestial/nightSky.js';
 
 const METEOR_CAPACITY = 48;
 const METEOR_STRIDE = 16;
 const COMET_CAPACITY = 3;
 const ECLIPSE_CAPACITY = 2;
 const RAINBOW_CAPACITY = 3;
+/** Instances of each night-sky component drawn at once (blood moon, green flash, noctilucent, galaxy). */
+const NIGHT_CAPACITY = 2;
+/** The sun's angular radius in degrees (its top limb is this far above its centre). */
+const SUN_RADIUS_DEG = SUN_ANGULAR_RADIUS / (Math.PI / 180);
+/** Green flash: the ocean horizon is sampled this often (s), at these shares of horizonReach toward the sun. */
+const OCEAN_CHECK_SECONDS = 1;
+const OCEAN_SAMPLES = Object.freeze([0.05, 0.1, 0.18, 0.3, 0.45, 0.65, 0.85, 1]);
+/** Galaxy: the dune share around the camera is sampled this often (s), at the centre and four points this far out (m). */
+const DESERT_CHECK_SECONDS = 2;
+const DESERT_PROBE_RADIUS = 3000;
 /** Sky objects sit on this share of the camera's far plane (outside the dome, inside the far plane). */
 const SKY_SHELL_SHARE = 0.96;
 const MODIFIER_PRIORITY = 30;
@@ -83,12 +104,14 @@ export function createCelestialEngine() {
   let comets = null;
   let eclipses = null;
   let rainbows = null;
+  let nightSky = null;
   const live = [];
   let serial = 0;
   let frameStamp = -1;
   let cometCursor = 0;
   let eclipseCursor = 0;
   let rainbowCursor = 0;
+  const nightCursor = { lunar: 0, flash: 0, noctilucent: 0, galaxy: 0 };
   let activeMeteors = 0;
   let gloryFrame = 0;
   let bowFrame = 0;
@@ -97,9 +120,11 @@ export function createCelestialEngine() {
   // Persistent update range per attribute (three clears the list after each upload; the objects are reused).
   const ranges = new Map();
   // The attribute lists each mesh flushes, built in init().
-  const lists = { meteors: null, comets: null, disc: null, corona: null, rainbows: null, none: [] };
+  const lists = { meteors: null, comets: null, disc: null, corona: null, rainbows: null, lunar: null, flash: null, noctilucent: null, galaxy: null, none: [] };
   const frame = { cameraX: 0, cameraY: 0, cameraZ: 0, shell: 4000, rotation: 0, overcast: 0, sunElevation: 0, dt: 0 };
   let scratch = null;
+  /** The galactic band's star-frame axes (celestial/nightSky.js galacticFrame), made in init(). */
+  let galaxyFrame = null;
 
   // ---- Directions -------------------------------------------------------------------------------
   /** Compass azimuth and elevation (degrees) to a unit vector (+x east, -z north). */
@@ -152,6 +177,14 @@ export function createCelestialEngine() {
     eclipses.corona.position.copy(camera.position);
     rainbows.mesh.position.set(Math.round(frame.cameraX / 2048) * 2048, 0, Math.round(frame.cameraZ / 2048) * 2048);
     rainbows.anchor.value.copy(rainbows.mesh.position);
+    nightCursor.lunar = 0;
+    nightCursor.flash = 0;
+    nightCursor.noctilucent = 0;
+    nightCursor.galaxy = 0;
+    for (let index = 0; index < nightSky.meshes.length; index++) nightSky.meshes[index].position.copy(camera.position);
+    // The star frame exactly as the sky computes its own (sky.js: a rotation about the pole by -dayTime turns).
+    scratch.matrix.makeRotationAxis(scratch.pole, -ctx.state.time.dayTime * TWO_PI);
+    nightSky.starMatrix.value.setFromMatrix4(scratch.matrix);
     advanceMeteors(dt);
   }
 
@@ -480,6 +513,7 @@ export function createCelestialEngine() {
     // The light must be up and behind the viewer; the bow stands 42 degrees from the antisolar point.
     const lightUp = smooth(light.y, 0.01, 0.08);
     const presence = data.presence * data.tierVisibility * lightUp * (params.light === 'moon' ? ctx.state.time.nightFactor : 1) * (1 - 0.9 * frame.overcast);
+    data.rainbowLevel = presence;
     const slot = rainbowCursor;
     const anchor = instance.anchor;
     const centreX = anchor.x + params.offsetX * data.rightX + params.offsetZ * data.forwardX;
@@ -509,6 +543,222 @@ export function createCelestialEngine() {
     bow[attribute + 3] = 0;
     rainbowCursor++;
     flushMesh(rainbows.mesh, rainbowCursor, lists.rainbows);
+  }
+
+  // ---- Night sky (Phase 3) ------------------------------------------------------------------------
+  /** Writes an instanced sphere slot: centred on the camera (the mesh position), scaled to the shell, turned by yaw about +y. */
+  function writeSkySphere(array, slot, yaw) {
+    const out = slot * 16;
+    const shell = frame.shell;
+    const cosine = Math.cos(yaw);
+    const sine = Math.sin(yaw);
+    array.fill(0, out, out + 16);
+    array[out] = cosine * shell;
+    array[out + 2] = -sine * shell;
+    array[out + 5] = shell;
+    array[out + 8] = sine * shell;
+    array[out + 10] = cosine * shell;
+    array[out + 15] = 1;
+  }
+
+  /** The blood moon: the copper halo and the bright umbral limb around the moon disc. Returns its visibility. */
+  function updateLunarEclipse(instance) {
+    const data = instance.data;
+    const params = data.params.lunarEclipse;
+    const moon = ctx.state.time.moonDirection;
+    const moonUp = smooth(moon.y, -0.02, 0.06) * ctx.state.time.nightFactor;
+    const visibility = moonUp * data.presence * (1 - 0.85 * frame.overcast);
+    if (nightCursor.lunar < NIGHT_CAPACITY) {
+      const slot = nightCursor.lunar;
+      const size = MOON_ANGULAR_RADIUS * params.haloRadius * 2;
+      basisAround(moon, scratch.u, scratch.v);
+      writeSkyQuad(nightSky.lunar.mesh.instanceMatrix.array, slot, moon, scratch.u, size, size, 0);
+      const look = nightSky.lunar.look.array;
+      const tint = nightSky.lunar.tint.array;
+      const out = slot * 4;
+      look[out] = params.glow * visibility;
+      look[out + 1] = params.rim * visibility;
+      look[out + 2] = data.rimAngle;
+      look[out + 3] = data.seedValue;
+      tint[out] = data.lunarColor.r;
+      tint[out + 1] = data.lunarColor.g;
+      tint[out + 2] = data.lunarColor.b;
+      tint[out + 3] = params.haloRadius;
+      nightCursor.lunar++;
+      flushMesh(nightSky.lunar.mesh, nightCursor.lunar, lists.lunar);
+    }
+    return visibility;
+  }
+
+  /** True when every terrain sample toward the sun out to reach metres is open water (an ocean horizon). */
+  function oceanHorizon(reach) {
+    const sun = ctx.state.time.sunDirection;
+    const horizontal = Math.sqrt(sun.x * sun.x + sun.z * sun.z);
+    if (horizontal < 1e-6) return false;
+    const towardX = sun.x / horizontal;
+    const towardZ = sun.z / horizontal;
+    const limit = ctx.terrain.waterLevel - 1;
+    for (let index = 0; index < OCEAN_SAMPLES.length; index++) {
+      const distance = OCEAN_SAMPLES[index] * reach;
+      if (ctx.terrain.heightAt(frame.cameraX + towardX * distance, frame.cameraZ + towardZ * distance) >= limit) return false;
+    }
+    return true;
+  }
+
+  /**
+   * The green flash as the evening sun sets (its top limb SUN_RADIUS_DEG above its centre): the green
+   * rim grows over the last 0.7 degrees of the limb's descent, the flash fires as it crosses the
+   * horizon and lasts flashSeconds; once the sun is well down the event ends afterSeconds later.
+   * Returns its visibility.
+   */
+  function updateGreenFlash(instance, dt) {
+    const data = instance.data;
+    const params = data.params.greenFlash;
+    data.oceanTimer -= dt;
+    if (data.oceanTimer <= 0 || data.oceanSeen < 0) {
+      data.oceanTimer = OCEAN_CHECK_SECONDS;
+      const first = data.oceanSeen < 0;
+      data.oceanSeen = !params.ocean || oceanHorizon(params.horizonReach) ? 1 : 0;
+      if (first) data.ocean = data.oceanSeen;
+    }
+    data.ocean += (data.oceanSeen - data.ocean) * Math.min(1, dt / 0.8);
+    const evening = ctx.state.time.dayTime > 0.5;
+    const top = frame.sunElevation + SUN_RADIUS_DEG;
+    if (evening && data.previousTop > 0.02 && top <= 0.02) data.flashAge = 0;
+    data.previousTop = top;
+    if (data.flashAge >= 0) data.flashAge += dt;
+    const rim = evening ? (1 - smooth(top, 0.15, 0.7)) * smooth(top, -0.12, 0.02) : 0;
+    const pulse = data.flashAge >= 0 ? smooth(data.flashAge, 0, 0.15) * (1 - smooth(data.flashAge, 0.3 * params.flashSeconds, params.flashSeconds)) : 0;
+    data.flashRim = rim;
+    data.flashPulse = pulse;
+    const weight = data.presence * data.ocean * (1 - 0.95 * frame.overcast) * params.strength;
+    if (data.voice && pulse > 0 && !data.flashCalled) {
+      data.flashCalled = true;
+      data.triggerOptions.strength = Math.min(1.5, weight);
+      data.triggerOptions.duration = params.flashSeconds;
+      data.voice.trigger('flash', data.triggerOptions);
+    }
+    // The sun is gone: the event ends afterSeconds (plus its fade) from now.
+    if (!data.sunsetDone && evening && top < -1.5) {
+      data.sunsetDone = true;
+      const remaining = data.age + params.afterSeconds + data.params.fadeOut;
+      data.duration = data.duration === null ? remaining : Math.min(data.duration, remaining);
+    }
+    if (nightCursor.flash < NIGHT_CAPACITY && rim + pulse > 0.001) {
+      const slot = nightCursor.flash;
+      const sun = ctx.state.time.sunDirection;
+      // along = up x sun (to the left of the sun), so the quad's across axis is the world's up.
+      const along = scratch.along.set(sun.z, 0, -sun.x);
+      if (along.lengthSq() < 1e-8) along.set(1, 0, 0);
+      along.normalize();
+      const size = SUN_ANGULAR_RADIUS * GREEN_FLASH_EXTENT * 2;
+      writeSkyQuad(nightSky.flash.mesh.instanceMatrix.array, slot, sun, along, size, size, 0);
+      const look = nightSky.flash.look.array;
+      const tint = nightSky.flash.tint.array;
+      const out = slot * 4;
+      look[out] = rim * weight;
+      look[out + 1] = pulse * weight;
+      look[out + 2] = 0;
+      look[out + 3] = data.seedValue;
+      tint[out] = data.flashColor.r;
+      tint[out + 1] = data.flashColor.g;
+      tint[out + 2] = data.flashColor.b;
+      tint[out + 3] = 0;
+      nightCursor.flash++;
+    }
+    flushMesh(nightSky.flash.mesh, nightCursor.flash, lists.flash);
+    return (rim * 0.4 + pulse) * weight;
+  }
+
+  /** Noctilucent clouds over the sun's azimuth while the sun is inside sunWindow. Returns their visibility. */
+  function updateNoctilucent(instance, dt) {
+    const data = instance.data;
+    const params = data.params.noctilucent;
+    const low = params.sunWindow[0];
+    const high = params.sunWindow[1];
+    const sun = frame.sunElevation;
+    const window = smooth(sun, low - 1.5, low + 1.5) * (1 - smooth(sun, high - 1.5, high + 1.5));
+    data.driftPhase += dt * 0.05 * params.drift;
+    // Deep night on the evening side: the clouds are in the earth's shadow for good, so the event ends.
+    if (!data.sunsetDone && ctx.state.time.dayTime > 0.5 && sun < low - 2) {
+      data.sunsetDone = true;
+      const remaining = data.age + data.params.fadeOut;
+      data.duration = data.duration === null ? remaining : Math.min(data.duration, remaining);
+    }
+    const visibility = window * data.presence * (1 - 0.95 * frame.overcast);
+    if (nightCursor.noctilucent < NIGHT_CAPACITY) {
+      const slot = nightCursor.noctilucent;
+      const direction = ctx.state.time.sunDirection;
+      writeSkySphere(nightSky.noctilucent.mesh.instanceMatrix.array, slot, Math.atan2(direction.x, direction.z));
+      const look = nightSky.noctilucent.look.array;
+      const tint = nightSky.noctilucent.tint.array;
+      const out = slot * 4;
+      look[out] = params.strength * visibility;
+      look[out + 1] = data.driftPhase;
+      look[out + 2] = data.seedValue;
+      look[out + 3] = Math.sin(params.top * DEG);
+      tint[out] = data.noctilucentColor.r;
+      tint[out + 1] = data.noctilucentColor.g;
+      tint[out + 2] = data.noctilucentColor.b;
+      tint[out + 3] = params.spread * DEG;
+      nightCursor.noctilucent++;
+      flushMesh(nightSky.noctilucent.mesh, nightCursor.noctilucent, lists.noctilucent);
+    }
+    return visibility;
+  }
+
+  /** The dune share (0..1) around the camera: the centre and four points DESERT_PROBE_RADIUS out. */
+  function desertShare() {
+    let dunes = 0;
+    for (let index = 0; index < 5; index++) {
+      const angle = index === 0 ? 0 : (index - 1) * (Math.PI / 2);
+      const reach = index === 0 ? 0 : DESERT_PROBE_RADIUS;
+      const info = ctx.terrain.biomeAt(frame.cameraX + Math.sin(angle) * reach, frame.cameraZ - Math.cos(angle) * reach);
+      if (info && info.key === 'dunes') dunes++;
+    }
+    return dunes / 5;
+  }
+
+  /** The Milky Way core, on the star field's band. Returns its visibility. */
+  function updateGalaxy(instance, dt) {
+    const data = instance.data;
+    const params = data.params.galaxy;
+    data.desertTimer -= dt;
+    if (data.desertTimer <= 0 || data.desertTarget < 0) {
+      data.desertTimer = DESERT_CHECK_SECONDS;
+      data.desertTarget = desertShare();
+      if (data.desert < 0) data.desert = data.desertTarget;
+    }
+    data.desert += (data.desertTarget - data.desert) * Math.min(1, dt / 3);
+    const moon = ctx.state.time.moonDirection;
+    const moonlight = smooth(moon.y, -0.05, 0.3) * params.moonFade;
+    const desert = 1 - params.desert + params.desert * data.desert;
+    const visibility = darkSky(false) * (1 - moonlight) * data.presence;
+    if (nightCursor.galaxy < NIGHT_CAPACITY) {
+      const slot = nightCursor.galaxy;
+      writeSkySphere(nightSky.galaxy.mesh.instanceMatrix.array, slot, 0);
+      const look = nightSky.galaxy.look.array;
+      const extra = nightSky.galaxy.extra.array;
+      const out = slot * 4;
+      look[out] = params.strength * desert * visibility;
+      look[out + 1] = params.dust;
+      look[out + 2] = params.core;
+      look[out + 3] = params.width;
+      extra[out] = params.coreLongitude * DEG;
+      extra[out + 1] = data.seedValue;
+      extra[out + 2] = 0;
+      extra[out + 3] = 0;
+      nightCursor.galaxy++;
+      flushMesh(nightSky.galaxy.mesh, nightCursor.galaxy, lists.galaxy);
+    }
+    return visibility * desert;
+  }
+
+  /** The Milky Way core's sky direction now (the star frame turned back by +dayTime turns about the pole). */
+  function galaxyCoreDirection(data, target) {
+    target.copy(data.galaxyCore);
+    scratch.quaternion.setFromAxisAngle(scratch.pole, ctx.state.time.dayTime * TWO_PI);
+    return target.applyQuaternion(scratch.quaternion);
   }
 
   // ---- Modifier -----------------------------------------------------------------------------------
@@ -570,17 +820,23 @@ export function createCelestialEngine() {
       comets = createCometMesh(THREE, TSL, { uniforms: ctx.uniforms, capacity: COMET_CAPACITY });
       eclipses = createEclipseMeshes(THREE, TSL, { skyColorNode, uniforms: ctx.uniforms, capacity: ECLIPSE_CAPACITY });
       rainbows = createRainbowMesh(THREE, TSL, { uniforms: ctx.uniforms, capacity: RAINBOW_CAPACITY });
-      ctx.scene.add(meteors.mesh, comets.mesh, eclipses.disc, eclipses.corona, rainbows.mesh);
+      nightSky = createNightSkyMeshes(THREE, TSL, { uniforms: ctx.uniforms, capacity: NIGHT_CAPACITY });
+      ctx.scene.add(meteors.mesh, comets.mesh, eclipses.disc, eclipses.corona, rainbows.mesh, ...nightSky.meshes);
       // Drawn once behind the loading fade, so the first meteor, comet, eclipse or rainbow costs no
       // pipeline build and its geometry is counted in the memory baseline from the start.
-      for (const mesh of [meteors.mesh, comets.mesh, eclipses.disc, eclipses.corona, rainbows.mesh]) ctx.registerPrewarm?.(mesh);
+      for (const mesh of [meteors.mesh, comets.mesh, eclipses.disc, eclipses.corona, rainbows.mesh, ...nightSky.meshes]) ctx.registerPrewarm?.(mesh);
       lists.meteors = [meteors.look, meteors.head, meteors.trail];
       lists.comets = [comets.look, comets.dust, comets.ion];
       lists.disc = [eclipses.shade];
       lists.corona = [eclipses.state, eclipses.moon];
       lists.rainbows = [rainbows.volume, rainbows.bow];
-      // Instance matrices and attributes: meteors 4, comets 4, disc 2, corona 3, rainbows 3.
-      buffersOwned = 16;
+      lists.lunar = [nightSky.lunar.look, nightSky.lunar.tint];
+      lists.flash = [nightSky.flash.look, nightSky.flash.tint];
+      lists.noctilucent = [nightSky.noctilucent.look, nightSky.noctilucent.tint];
+      lists.galaxy = [nightSky.galaxy.look, nightSky.galaxy.extra];
+      // Instance matrices and attributes: meteors 4, comets 4, disc 2, corona 3, rainbows 3, and 3
+      // each for the lunar eclipse, the green flash, the noctilucent band and the galaxy.
+      buffersOwned = 28;
       scratch = {
         pole: new THREE.Vector3(0, Math.sin(CELESTIAL_POLE_ELEVATION_DEG * DEG), -Math.cos(CELESTIAL_POLE_ELEVATION_DEG * DEG)).normalize(),
         quaternion: new THREE.Quaternion(),
@@ -594,7 +850,9 @@ export function createCelestialEngine() {
         middle: new THREE.Vector3(),
         along: new THREE.Vector3(),
         across: new THREE.Vector3(),
+        matrix: new THREE.Matrix4(),
       };
+      galaxyFrame = galacticFrame(THREE);
     },
 
     create(preset, params, rng) {
@@ -643,7 +901,48 @@ export function createCelestialEngine() {
         voice: null,
         triggerOptions: { strength: 1, duration: 1 },
         writtenFrame: -1,
+        // Night sky (Phase 3).
+        rimAngle: 0,
+        lunarColor: null,
+        flashColor: null,
+        ocean: 0,
+        oceanSeen: -1,
+        oceanTimer: 0,
+        previousTop: Infinity,
+        flashAge: -1,
+        flashRim: 0,
+        flashPulse: 0,
+        flashCalled: false,
+        sunsetDone: false,
+        noctilucentColor: null,
+        driftPhase: 0,
+        galaxyCore: null,
+        desert: -1,
+        desertTarget: -1,
+        desertTimer: 0,
+        /** A night-sky or moonbow voice's level: [last sent, wanted] (engineKit sendVoiceLevel). */
+        voiceLevels: new Float64Array([-1, 0]),
+        nightLevel: 0,
+        rainbowLevel: 0,
       };
+      if (resolved.lunarEclipse) {
+        data.rimAngle = resolved.lunarEclipse.rimAngle !== null ? resolved.lunarEclipse.rimAngle * DEG : rng() * TWO_PI;
+        data.lunarColor = new THREE.Color(resolved.lunarEclipse.color);
+      }
+      if (resolved.greenFlash) {
+        data.flashColor = new THREE.Color(resolved.greenFlash.color);
+        // The flash belongs to an evening sun still above the horizon: in the morning, or with the
+        // sun already set, there is nothing to see, so the activation ends at create (the manager
+        // declines it and the director tries again later).
+        const top = ctx.state.time.sunElevation + SUN_RADIUS_DEG;
+        data.previousTop = top;
+        if (ctx.state.time.dayTime <= 0.5 || top < -0.5) data.sunsetDone = true;
+      }
+      if (resolved.noctilucent) data.noctilucentColor = new THREE.Color(resolved.noctilucent.color);
+      if (resolved.galaxy) {
+        const longitude = resolved.galaxy.coreLongitude * DEG;
+        data.galaxyCore = galaxyFrame.core.clone().multiplyScalar(Math.cos(longitude)).addScaledVector(galaxyFrame.side, Math.sin(longitude));
+      }
       if (resolved.meteors) {
         const meteorParams = resolved.meteors;
         const radiantNow = meteorParams.radiant
@@ -712,6 +1011,7 @@ export function createCelestialEngine() {
         throw error;
       }
       live.push(instance);
+      if (resolved.greenFlash && data.sunsetDone) instance.ended = true;
       return instance;
     },
 
@@ -756,6 +1056,32 @@ export function createCelestialEngine() {
         direction.copy(ctx.state.time.sunDirection);
       }
       if (params.rainbow) updateRainbow(instance);
+      let night = 0;
+      if (params.galaxy) {
+        night = Math.max(night, updateGalaxy(instance, step));
+        galaxyCoreDirection(data, direction);
+      }
+      if (params.noctilucent) {
+        night = Math.max(night, updateNoctilucent(instance, step));
+        // Toward the clouds: the sun's azimuth, a little above the horizon.
+        const sun = ctx.state.time.sunDirection;
+        const horizontal = Math.sqrt(sun.x * sun.x + sun.z * sun.z) || 1;
+        direction.set(sun.x / horizontal, 0.14, sun.z / horizontal).normalize();
+      }
+      if (params.greenFlash) {
+        night = Math.max(night, updateGreenFlash(instance, step));
+        direction.copy(ctx.state.time.sunDirection);
+      }
+      if (params.lunarEclipse) {
+        night = Math.max(night, updateLunarEclipse(instance));
+        direction.copy(ctx.state.time.moonDirection);
+      }
+      data.nightLevel = night;
+      // A night-sky or rainbow voice follows what the player can see (meteors drive their own).
+      if (data.voice && !params.meteors && (night > 0 || params.galaxy || params.noctilucent || params.greenFlash || params.lunarEclipse || params.rainbow)) {
+        data.voiceLevels[1] = Math.max(night, data.rainbowLevel);
+        sendVoiceLevel(data.voice, data.voiceLevels);
+      }
       applyModifier(instance);
       if (params.anchor === 'sky') {
         instance.anchor.set(frame.cameraX + direction.x * params.anchorDistance, frame.cameraY + direction.y * params.anchorDistance, frame.cameraZ + direction.z * params.anchorDistance);
@@ -794,6 +1120,7 @@ export function createCelestialEngine() {
         flushMesh(eclipses.disc, 0, lists.none);
         flushMesh(eclipses.corona, 0, lists.none);
         flushMesh(rainbows.mesh, 0, lists.none);
+        for (let index = 0; index < nightSky.meshes.length; index++) flushMesh(nightSky.meshes[index], 0, lists.none);
         activeMeteors = 0;
         gloryFrame = 0;
         bowFrame = 0;
@@ -804,7 +1131,8 @@ export function createCelestialEngine() {
 
     stats() {
       const visible = (mesh) => (mesh && mesh.visible ? 1 : 0);
-      const drawCalls = meteors ? visible(meteors.mesh) + visible(comets.mesh) + visible(eclipses.disc) + visible(eclipses.corona) + visible(rainbows.mesh) : 0;
+      let drawCalls = meteors ? visible(meteors.mesh) + visible(comets.mesh) + visible(eclipses.disc) + visible(eclipses.corona) + visible(rainbows.mesh) : 0;
+      if (nightSky) for (let index = 0; index < nightSky.meshes.length; index++) drawCalls += visible(nightSky.meshes[index]);
       return { instances: live.length, particles: activeMeteors, lights: 0, buffers: buffersOwned, drawCalls };
     },
 
@@ -821,6 +1149,12 @@ export function createCelestialEngine() {
         flash: data.flash,
         eclipse: data.params.eclipse ? { uncovered: data.eclipseUncovered, totality: data.eclipseTotality, weight: data.eclipseWeight, quiet: data.quiet } : null,
         glory: { cloudGlory: ctx.uniforms.cloudGlory.value, cloudBow: ctx.uniforms.cloudBow.value },
+        lunarEclipse: data.params.lunarEclipse ? { visibility: data.nightLevel, rimAngle: data.rimAngle } : null,
+        greenFlash: data.params.greenFlash ? { ocean: data.ocean, oceanSeen: data.oceanSeen, rim: data.flashRim, flash: data.flashPulse, flashAge: data.flashAge, sunsetDone: data.sunsetDone } : null,
+        noctilucent: data.params.noctilucent ? { visibility: data.nightLevel, sunsetDone: data.sunsetDone } : null,
+        galaxy: data.params.galaxy ? { visibility: data.nightLevel, desert: data.desert } : null,
+        rainbow: data.params.rainbow ? { level: data.rainbowLevel } : null,
+        voiceLevel: data.voiceLevels[0],
         anchor: { x: instance.anchor.x, y: instance.anchor.y, z: instance.anchor.z },
       };
     },

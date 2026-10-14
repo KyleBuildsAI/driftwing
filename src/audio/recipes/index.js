@@ -21,6 +21,8 @@ import turbine from './turbine.js';
 import volcano from './volcano.js';
 import waterfall from './waterfall.js';
 import { skyWhale, whale } from './whale.js';
+// Phase 3 presets 61-70.
+import skyShimmer from './skyShimmer.js';
 
 export const RECIPES = Object.freeze({
   tornado,
@@ -38,6 +40,8 @@ export const RECIPES = Object.freeze({
   discovery,
   raptor,
   goose,
+  // Phase 3 presets 61-70.
+  skyShimmer,
 });
 
 /**

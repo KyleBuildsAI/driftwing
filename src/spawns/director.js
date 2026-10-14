@@ -27,7 +27,9 @@
 //   filters    per preset: biome, time of day, altitude band (player MSL), weather state at the
 //              candidate, surface (land, water, coast), distance band, and `near`: a candidate moves
 //              onto the nearest Phase 1 landmark of the named types within the radius of its seeded
-//              point (a lantern festival at a lighthouse), or is rejected when there is none
+//              point (a lantern festival at a lighthouse), or onto the nearest placed site of the
+//              named site presets, taking the site's heading (Phase 3: a moonbow at a waterfall),
+//              or is rejected when there is none
 //   ahead      every director activation lies within 45 degrees of the ground track (60 for a
 //              drought past 80 s) and inside the preset's distance band; nothing is ever started
 //              behind the player. The ground track is the bearing of the horizontal velocity,
@@ -307,8 +309,8 @@ function describePreset(preset, index) {
     settings.chance = SITE_ACTIVE_DEFAULTS.chance;
   }
   const engines = (preset.engines || []).map((entry) => entry.engine);
-  const near = filters.near && Array.isArray(filters.near.landmarks) && Number.isFinite(filters.near.radius)
-    ? { landmarks: filters.near.landmarks, radius: filters.near.radius }
+  const near = filters.near && (Array.isArray(filters.near.landmarks) || Array.isArray(filters.near.sites)) && Number.isFinite(filters.near.radius)
+    ? { landmarks: filters.near.landmarks ?? null, sites: filters.near.sites ?? null, radius: filters.near.radius }
     : null;
   // An override preset is scheduled per night (src/spawns/overrides.js), never rolled as a candidate.
   const override = preset.override || null;
@@ -733,15 +735,17 @@ export function createDirector({
   }
 
   /**
-   * filters.near: the nearest Phase 1 landmark of the preset's types within its radius of the seeded
-   * point, as { x, z }, or null. Cached by the candidate's hash (landmarks never move).
+   * filters.near: the nearest Phase 1 landmark of the preset's types, or placed site of its site
+   * presets (Phase 3), within its radius of the seeded point, as { x, z, heading } (heading: a site's
+   * own compass heading, so the event faces the way the site does; null for a landmark), or null.
+   * Cached by the candidate's hash (landmarks and sites never move).
    */
   function nearLandmark(info, record) {
     if (nearCache.has(record.hash)) return nearCache.get(record.hash);
     if (nearCache.size >= SURFACE_CACHE_LIMIT) nearCache.clear();
     let best = null;
-    if (typeof terrain.landmarkSitesNear === 'function') {
-      let bestDistance = Infinity;
+    let bestDistance = Infinity;
+    if (info.near.landmarks && typeof terrain.landmarkSitesNear === 'function') {
       const sites = terrain.landmarkSitesNear(record.x, record.z, info.near.radius);
       for (let index = 0; index < sites.length; index++) {
         const site = sites[index];
@@ -749,7 +753,19 @@ export function createDirector({
         const distance = Math.hypot(site.x - record.x, site.z - record.z);
         if (distance < bestDistance) {
           bestDistance = distance;
-          best = { x: site.x, z: site.z };
+          best = { x: site.x, z: site.z, heading: null };
+        }
+      }
+    }
+    if (info.near.sites && placement) {
+      const sites = placement.sitesNear(record.x, record.z, info.near.radius);
+      for (let index = 0; index < sites.length; index++) {
+        const site = sites[index];
+        if (!info.near.sites.includes(site.presetId)) continue;
+        const distance = Math.hypot(site.x - record.x, site.z - record.z);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = { x: site.x, z: site.z, heading: Number.isFinite(site.rotation) ? (site.rotation * 180) / Math.PI : null };
         }
       }
     }
@@ -1011,6 +1027,7 @@ export function createDirector({
       if (point) {
         record.x = point.x;
         record.z = point.z;
+        if (Number.isFinite(point.heading)) record.heading = point.heading;
         record.distance = Math.hypot(point.x - player.x, point.z - player.z);
       }
     }

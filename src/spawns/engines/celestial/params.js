@@ -9,8 +9,13 @@
 //   glory    the glory and the full-circle rainbow on every cloud around the craft's own shadow
 //   rainbow  a rainbow (or moonbow) inside a volume of mist (a sphere), seen with the light behind you
 //   sky      a static sky modifier (stars, darkness, tints) eased in and out with the instance
+// Phase 3 night-sky components (presets 61-64; their meshes are in celestial/nightSky.js):
+//   lunarEclipse  the blood moon's copper halo and bright umbral limb around the dome's moon disc
+//   greenFlash    the green rim and the brief flash on the sun's upper limb as it sets into an ocean horizon
+//   noctilucent   electric-blue rippled clouds low over the sun's azimuth, lit while the sun is 6-16 degrees down
+//   galaxy        the Milky Way core: a bright bulge, star clouds and dark dust lanes along the star field's band
 
-export const CELESTIAL_COMPONENTS = Object.freeze(['meteors', 'comet', 'eclipse', 'glory', 'rainbow', 'sky']);
+export const CELESTIAL_COMPONENTS = Object.freeze(['meteors', 'comet', 'eclipse', 'glory', 'rainbow', 'sky', 'lunarEclipse', 'greenFlash', 'noctilucent', 'galaxy']);
 export const CELESTIAL_ANCHORS = Object.freeze(['sky', 'world']);
 export const LIGHT_SOURCES = Object.freeze(['sun', 'moon']);
 export const SKY_WHEN = Object.freeze(['always', 'day', 'night']);
@@ -158,6 +163,54 @@ function resolveSky(source) {
   return Object.freeze({ values: Object.freeze(values), when: oneOf(source.when, SKY_WHEN, `${field}.when`, 'always') });
 }
 
+function resolveLunarEclipse(source) {
+  const field = 'lunarEclipse';
+  return Object.freeze({
+    glow: number(source.glow, `${field}.glow`, 1, 0, 3),
+    rim: number(source.rim, `${field}.rim`, 0.8, 0, 3),
+    haloRadius: number(source.haloRadius, `${field}.haloRadius`, 5, 1.5, 20),
+    color: color(source.color, `${field}.color`, 0xc8442a),
+    rimAngle: source.rimAngle === undefined || source.rimAngle === null ? null : number(source.rimAngle, `${field}.rimAngle`, 0, -360, 360),
+  });
+}
+
+function resolveGreenFlash(source) {
+  const field = 'greenFlash';
+  return Object.freeze({
+    strength: number(source.strength, `${field}.strength`, 1, 0, 4),
+    flashSeconds: number(source.flashSeconds, `${field}.flashSeconds`, 1.6, 0.2, 10),
+    color: color(source.color, `${field}.color`, 0x3dff7a),
+    ocean: source.ocean !== false,
+    horizonReach: number(source.horizonReach, `${field}.horizonReach`, 24000, 2000, 60000),
+    afterSeconds: number(source.afterSeconds, `${field}.afterSeconds`, 8, 0, 120),
+  });
+}
+
+function resolveNoctilucent(source) {
+  const field = 'noctilucent';
+  return Object.freeze({
+    strength: number(source.strength, `${field}.strength`, 1, 0, 4),
+    color: color(source.color, `${field}.color`, 0x6fb8ff),
+    spread: number(source.spread, `${field}.spread`, 75, 20, 85),
+    top: number(source.top, `${field}.top`, 22, 6, 40),
+    sunWindow: range(source.sunWindow, `${field}.sunWindow`, Object.freeze([-16, -6]), -24, 0),
+    drift: number(source.drift, `${field}.drift`, 1, 0, 10),
+  });
+}
+
+function resolveGalaxy(source) {
+  const field = 'galaxy';
+  return Object.freeze({
+    strength: number(source.strength, `${field}.strength`, 1, 0, 4),
+    dust: number(source.dust, `${field}.dust`, 0.75, 0, 1),
+    core: number(source.core, `${field}.core`, 1, 0, 3),
+    coreLongitude: number(source.coreLongitude, `${field}.coreLongitude`, 0, -180, 180),
+    width: number(source.width, `${field}.width`, 1, 0.3, 3),
+    desert: number(source.desert, `${field}.desert`, 0.45, 0, 1),
+    moonFade: number(source.moonFade, `${field}.moonFade`, 0.55, 0, 1),
+  });
+}
+
 /**
  * Resolves a preset's celestial params (see the header). duration is the instance's (s, or null for
  * a site). Throws naming the bad field; at least one component is required.
@@ -170,7 +223,11 @@ export function resolveCelestialParams(params, duration = null) {
   const glory = block(source.glory, 'glory');
   const rainbow = block(source.rainbow, 'rainbow');
   const sky = block(source.sky, 'sky');
-  if (!meteors && !comet && !eclipse && !glory && !rainbow && !sky) fail('meteors', `needs at least one component (${CELESTIAL_COMPONENTS.join(', ')})`);
+  const lunarEclipse = block(source.lunarEclipse, 'lunarEclipse');
+  const greenFlash = block(source.greenFlash, 'greenFlash');
+  const noctilucent = block(source.noctilucent, 'noctilucent');
+  const galaxy = block(source.galaxy, 'galaxy');
+  if (!meteors && !comet && !eclipse && !glory && !rainbow && !sky && !lunarEclipse && !greenFlash && !noctilucent && !galaxy) fail('meteors', `needs at least one component (${CELESTIAL_COMPONENTS.join(', ')})`);
   return Object.freeze({
     anchor: oneOf(source.anchor, CELESTIAL_ANCHORS, 'anchor', rainbow ? 'world' : 'sky'),
     anchorDistance: number(source.anchorDistance, 'anchorDistance', 1500, 50, 20000),
@@ -184,5 +241,9 @@ export function resolveCelestialParams(params, duration = null) {
     glory: glory ? resolveGlory(glory) : null,
     rainbow: rainbow ? resolveRainbow(rainbow) : null,
     sky: sky ? resolveSky(sky) : null,
+    lunarEclipse: lunarEclipse ? resolveLunarEclipse(lunarEclipse) : null,
+    greenFlash: greenFlash ? resolveGreenFlash(greenFlash) : null,
+    noctilucent: noctilucent ? resolveNoctilucent(noctilucent) : null,
+    galaxy: galaxy ? resolveGalaxy(galaxy) : null,
   });
 }

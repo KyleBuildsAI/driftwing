@@ -175,12 +175,21 @@ function validateFilters(check, filters) {
     if (altitude.max < altitude.min) check.fail('filters.altitude.max', `must not be below filters.altitude.min (${altitude.min}), got ${altitude.max}`);
   }
   if (filters.near !== undefined && filters.near !== null) {
-    // The director moves the candidate onto the nearest landmark of these types within radius (m).
+    // The director moves the candidate onto the nearest landmark of these types, or placed site of
+    // these site presets (Phase 3: the moonbow at a waterfall), within radius (m).
     const near = check.object(filters.near, 'filters.near');
-    check.onlyKeys(near, ['landmarks', 'radius'], 'filters.near');
-    check.array(near.landmarks, 'filters.near.landmarks');
-    if (near.landmarks.length === 0) check.fail('filters.near.landmarks', 'must name at least one landmark type');
-    near.landmarks.forEach((type, index) => check.oneOf(type, LANDMARK_TYPES, `filters.near.landmarks[${index}]`));
+    check.onlyKeys(near, ['landmarks', 'sites', 'radius'], 'filters.near');
+    if (near.landmarks === undefined && near.sites === undefined) check.fail('filters.near', 'must name landmarks, sites or both');
+    if (near.landmarks !== undefined) {
+      check.array(near.landmarks, 'filters.near.landmarks');
+      if (near.landmarks.length === 0) check.fail('filters.near.landmarks', 'must name at least one landmark type');
+      near.landmarks.forEach((type, index) => check.oneOf(type, LANDMARK_TYPES, `filters.near.landmarks[${index}]`));
+    }
+    if (near.sites !== undefined) {
+      check.array(near.sites, 'filters.near.sites');
+      if (near.sites.length === 0) check.fail('filters.near.sites', 'must name at least one site preset');
+      near.sites.forEach((id, index) => check.string(id, `filters.near.sites[${index}]`));
+    }
     check.number(near.radius, 'filters.near.radius', { above: 0, max: 20000 });
   }
   if (filters.minDistance !== undefined) check.number(filters.minDistance, 'filters.minDistance', { min: 0 });
@@ -550,6 +559,20 @@ function validateComboReferences(presets) {
   }
 }
 
+/** filters.near.sites (Phase 3): every preset it names is a site preset of the list. */
+function validateNearReferences(presets) {
+  const byId = new Map(presets.map((preset) => [preset.id, preset]));
+  for (const preset of presets) {
+    const sites = preset.filters && preset.filters.near && preset.filters.near.sites;
+    if (!sites) continue;
+    const check = createChecker(preset.id);
+    sites.forEach((siteId, index) => {
+      const target = byId.get(siteId);
+      if (!target || target.kind !== 'site') check.fail(`filters.near.sites[${index}]`, `names ${describe(siteId)}, which is not a site preset`);
+    });
+  }
+}
+
 /** Validates every preset and that their ids are unique. Returns the list. */
 export function validatePresets(presets, options = {}) {
   if (!Array.isArray(presets)) throw new TypeError('[DRIFTWING] validatePresets needs an array of presets');
@@ -560,5 +583,6 @@ export function validatePresets(presets, options = {}) {
     seen.add(preset.id);
   }
   validateComboReferences(presets);
+  validateNearReferences(presets);
   return presets;
 }

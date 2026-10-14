@@ -1067,7 +1067,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | not started |
 | B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | not started |
 | B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | not started |
-| B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
+| B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | in progress |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
 | B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | not started |
 | B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | not started |
@@ -1077,6 +1077,16 @@ Each preset ships with its journal title and one-liner, 3+ callouts, its audio r
 FAR lure where heavy, colliders where solid, rarity, filters and lifetime (docs/spawns.md
 template). The challenge-based presets (70, 76-81) use the wave 1 challenge system; the combo
 presets (92-100) use the wave 2 combo scheduling.
+
+### Wave 3 - p3/presets-61-70
+
+- **Done:** 61-65 (blood moon, green flash, noctilucent clouds, Milky Way core, moonbow): the celestial
+  engine's night-sky components `lunarEclipse`, `greenFlash`, `noctilucent` and `galaxy`
+  (`src/spawns/engines/celestial/nightSky.js`), the moonbow on the existing `rainbow` (`light: 'moon'`)
+  at a mega-waterfall through the new `filters.near.sites`, and the `skyShimmer` audio recipe.
+- **Next:** 66-70 (world tree, portal ring, sleeping giant, ghost galleon, dragon racer), the batch kit
+  `src/dev/presetChecks61.js` with `tools/steps/presets-61-70.json`, `src/dev/spawnScenarios/batch61.js`,
+  docs/spawns.md rows and sections, then the verification on both backends.
 
 ### Wave 4: discovery and verification, then the tag
 

@@ -34,6 +34,12 @@ import skyWhale from './skyWhale.js';
 import crystalSpires from './crystalSpires.js';
 import jetStream from './jetStream.js';
 import stormChase from './stormChase.js';
+// Batch 7: presets 61-70.
+import bloodMoon from './bloodMoon.js';
+import greenFlash from './greenFlash.js';
+import noctilucentClouds from './noctilucentClouds.js';
+import milkyWayCore from './milkyWayCore.js';
+import moonbow from './moonbow.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -69,6 +75,12 @@ export const PRESETS = Object.freeze([
   crystalSpires,
   jetStream,
   stormChase,
+  // Batch 7: presets 61-70.
+  bloodMoon,
+  greenFlash,
+  noctilucentClouds,
+  milkyWayCore,
+  moonbow,
 ]);
 
 /** Presets by id. */

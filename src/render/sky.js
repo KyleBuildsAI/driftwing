@@ -10,6 +10,10 @@ import { planetRadiusFromSetting } from './curvature.js';
 export const SUN_ANGULAR_RADIUS = 0.0175;
 /** The celestial pole the star field turns about (latitude 52 degrees north). */
 export const CELESTIAL_POLE_ELEVATION_DEG = 52;
+/** Angular radius (rad) of the moon disc the dome draws; the blood moon's halo is sized from it. */
+export const MOON_ANGULAR_RADIUS = 0.024;
+/** The pole of the star field's milky way band (unnormalised, star frame); the Milky Way core lies on that band. */
+export const GALAXY_POLE = Object.freeze([0.62, 0.31, -0.72]);
 /** The moon disc's linear colour, its halo and its light (a modifier's moonTint tints all three). */
 const MOON_DISC_COLOR = Object.freeze({ r: 1.35, g: 1.3095, b: 1.215 });
 const MOON_GLOW_HEX = 0x8fa6d8;
@@ -50,7 +54,6 @@ export function createSkySystem(ctx) {
   } = TSL;
 
   // ---- Tunables -----------------------------------------------------------------------------------
-  const MOON_ANGULAR_RADIUS = 0.024;
   const STAR_CELL_SCALE = 96;
   const AURORA_LAYERS = 20;
   const SHADOW_EXTENT = 320;
@@ -109,7 +112,7 @@ export function createSkySystem(ctx) {
   const SPACE_SUN_LIGHT = new THREE.Color(0xfff6ec);
   const SPACE_SUN_INTENSITY = 3.1;
   const CELESTIAL_POLE = new THREE.Vector3(0, Math.sin(CELESTIAL_POLE_ELEVATION_DEG * DEG), -Math.cos(CELESTIAL_POLE_ELEVATION_DEG * DEG)).normalize();
-  const GALAXY_NORMAL = new THREE.Vector3(0.62, 0.31, -0.72).normalize();
+  const GALAXY_NORMAL = new THREE.Vector3(GALAXY_POLE[0], GALAXY_POLE[1], GALAXY_POLE[2]).normalize();
   const AURORA_FILL = new THREE.Color(0x4fd6a8);
 
   // ---- Keyframes by sun elevation (degrees). Hex values are sRGB; converted to linear once. ----------
