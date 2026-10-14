@@ -19,9 +19,9 @@
 //
 // Auto re-entry (craftState.reentryPhase): 'armed' waits for the descent; 'entry' holds 40 degrees
 // angle of attack (the pitch stick trims it by up to +-10 degrees), the wings at the bank the pilot
-// sets (level by default) and zero sideslip, belly first into the air, until the craft is below Mach 3
-// or 25 km; 'glide' eases the angle of attack down to the hypersonic glide's and hands the craft back
-// once it is subsonic or below 12 km (the hold then keeps its flight path). The phase machine runs here,
+// sets (level by default) and zero sideslip, belly first into the air, until the craft is below 25 km
+// (or below Mach 3 in dense air); 'glide' eases the angle of attack down to the hypersonic glide's and
+// hands the craft back below Mach 1.5 or 20 km (the hold then keeps its flight path). The phase machine runs here,
 // every physics tick; the craft's ability update announces the phases.
 import * as THREE from 'three/webgpu';
 import { DEG, clamp } from '../core/util.js';
@@ -150,7 +150,7 @@ function captureHold(model, data, memory, tuning) {
 
 /**
  * The arc and the re-entry phases: auto re-entry arms itself past an apogee above space (with the
- * assist), the guidance starts on the descent, eases into the glide and hands back once subsonic or low.
+ * assist), the guidance starts on the descent, eases into the glide and hands back below the hand-back Mach or altitude.
  */
 function updateReentry(data, model, craftState, weights, memory, dt, tuning) {
   const altitude = model.state.position.y;
