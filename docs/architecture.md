@@ -165,10 +165,12 @@ system, and then starts the frame loop.
 | `cloudShading.js` | the cloud puff geometry, palette (`createCloudLook`) and light response (`createCloudRadiance`) shared by the v1 clouds and the weather volumes, and the cloud optics (glory and rainbow bands) |
 | `water.js` | animated water, sun glint and shoreline foam (v1), plus the local effects layer's terms |
 | `waterEffects.js` | the water effects layer: trail buffer, vortices, ripples, glow regions, spray droplets and pool discs for spawns |
-| `birds.js` | boid flocks that scatter (v1) |
+| `birds.js` | boid flocks that scatter (v1), wider from a craft with a higher `faunaThreat` (the eagle) |
 | `fx.js` | contrails, wind streaks, bursts (v1) |
 | `jetEffects.js` | afterburner flame, vapor cones (Mach 0.9-1.05, low altitude) and wingtip vapour, attached to the jet mesh |
 | `wingsuitEffects.js` | the wingsuit's ram-air canopy, lines and pilot chute, with the deployment animation |
+| `smokeRibbon.js` | the aerobatic's display smoke: one pooled 1024-sample ribbon, sunlit, camera-facing, drifting with the wind and fading over 30 s, re-anchored every 2 km |
+| `spaceplaneEffects.js` | the spaceplane's rocket plume (ballooning in vacuum), instanced RCS thruster puffs and the plasma sheath with its wake |
 
 ### `src/world`: the deterministic world
 
@@ -189,6 +191,7 @@ system, and then starts the frame loop.
 | `terrain.js` | the chunk manager: ring LOD with skirts, pooled meshes, the worker queue (v1). A time-sliced main-thread builder takes over when workers are missing or fail (one `console.error`) or have not said ready 30 s (wall clock) and 120 frames after the terrain's first frame; a slow start is not an error, so it only logs a `console.info` note. `getStats()` reports `mode` (`workers` or `main-thread`) and `workerFallback` (`null`, `slow start` or `failure`) |
 | `farField.js` | the far-field planet (Phase 3): quadtree tiles from the map-tile worker out to the horizon from 6 km, with skirts, curvature and a water glint, the dithered handoff with the terrain, and a cloud-layer shell from the cumulus coverage and the regional weather |
 | `landmarks.js` | arches, monolith circles, lighthouses and balloons (v1) |
+| `balloonFamily.js` | the v1 hot air balloon family (profile, mouth ring, palettes, patterns, envelope geometry) shared by the fair landmarks and the balloon craft |
 | `spawn.js` | the golden-hour opening spawn (v1) |
 
 ### `src/flight`: flight models and the controller
@@ -201,10 +204,16 @@ system, and then starts the frame loop.
 | `SimHelicopter.js` | single-main-rotor helicopter |
 | `SimWingsuit.js` | wingsuit and its canopy mode |
 | `SimQuad.js` | multirotor with its flight-controller firmware (rates, angle mode, altitude hold) |
+| `SimTiltrotor.js`, `tiltrotorCorridor.js`, `tiltrotorAssists.js` | the tiltrotor (kind `tiltrotor`): nacelles 0-97 degrees with detents, two proprotors, the wing in the wash; the conversion corridor and the auto-nacelle schedule; its assists, autopilot and trim |
+| `SimParaglider.js` | the paraglider (kind `paraglider`): the two-body pendulum, brakes, speed bar, weight shift, big ears, collapses, the launch run; its assists and autopilot |
+| `SimBalloon.js` | the hot air balloon (kind `balloon`): buoyancy from the envelope temperature with its thermal lag, burner and vents, drift with the WindField, basket landings; altitude hold |
+| `SimAirship.js` | the airship (kind `airship`): helium and ballonet trim, added mass, vectored props and the stern thruster, fins with little authority when slow; its assists and autopilot (the scenic cruise's crabbed track) |
 | `SimFlapper.js` | the flapping creature (kind `flapper`: the eagle and its dragon skin): flap power, tuck, soaring, the perch and its auto-landing, with its assists and autopilot |
 | `aero.js` | atmosphere, lift and drag curves past the stall, surface forces, ground effect, propeller |
 | `jetAero.js` | the jet's SimFixedWing extension: turbofan with afterburner and detent, transonic drag, wing rock, buffet |
 | `jetFcs.js` | the jet's flight control system: its assist catalog and handler, autopilot and trim handler |
+| `aerobaticAero.js`, `aerobaticAssists.js`, `maneuverRecognizer.js` | the aerobatic (kind `aerobatic`, SimFixedWing): the stalled wing's autorotation (snap rolls) and the figure judging; its assists (no attitude protection at any level); the pure recognizer of the 12 figures (`figureFlown`) |
+| `spaceplaneAero.js`, `spaceplaneFcs.js` | the spaceplane (kind `spaceplane`, SimFixedWing): the air-augmented rocket, RCS blended by dynamic pressure, wave drag, heating (rho V^3), the apogee; its flight control system with attitude hold and auto re-entry |
 | `floats.js` | the seaplane's SimFixedWing extension: per-float buoyancy against the water query, planing and the hump, porpoising, water rudders, the amphibian wheels (nose-over, skid on land), water strikes, the gear advisory and the water handling assist |
 | `assists.js` | the assists control stage, assist catalogs and handlers per model kind, the fixed-wing handler |
 | `assistDefaults.js` | the one-time HOTAS assist default (50 % on craft the player never set) and which craft the player set |
@@ -224,11 +233,17 @@ system, and then starts the frame loop.
 | file | what |
 | --- | --- |
 | `registry.js` | `CRAFT_CATALOG` (the 14 craft of Phase 3: id, name, role, group, informational hotkey, picker silhouette), `CRAFT_GROUPS`, `craftRegistry` and the module validation |
-| `index.js` | registers every craft module (six so far; each Phase 3 craft adds its line as it lands) |
+| `index.js` | registers every craft module (all 14, in catalog order) |
 | `kit.js` | the procedural mesh kit and shared materials (v1 palette, nav lights, prop disc) |
 | `glider.js`, `bushplane.js`, `jet.js`, `helicopter.js`, `wingsuit.js`, `fpv.js` | one craft module each (schema below) |
+| `aerobatic.js` | the Phase 3 aerobatic monoplane (Extra 330 style): display smoke and its colours, the figure instruments |
 | `seaplane.js` | the Phase 3 amphibious floatplane (Beaver style, on the floats extension) |
+| `tiltrotor.js` | the Phase 3 tiltrotor (Osprey style): tilting nacelles, proprotors, the corridor pinned on the HUD |
+| `paraglider.js` | the Phase 3 paraglider: the 16-cell wing re-skinned every frame, the IK pilot, the harness view, slope launches |
+| `balloon.js` | the Phase 3 hot air balloon (the v1 balloon family): burner, vents, the basket view, the wind-layer column |
+| `airship.js`, `airshipCruise.js` | the Phase 3 airship (Zeppelin NT style) with its gondola view, and the scenic cruise (a chain of three sites from `director.getNearby()` and the landmarks, a `createPath` route) |
 | `eagle.js`, `eagleMeshes.js` | the eagle / dragon module (one craft, two skins) and its two meshes (the bald eagle; the dragon with its membranes, jaw and flame jet) |
+| `spaceplane.js` | the Phase 3 suborbital spaceplane: the climb to space, re-entry heating, the comms blackout and the flight log |
 
 ### `src/input`: every input device
 
@@ -370,7 +385,7 @@ and `waypoints.js` (waypoint beacon and arrow), from v1. `ignition.js` (Phase 3,
 | `mockGamepads.js` | scriptable mock T.16000M, TWCS and standard gamepad devices |
 | `testHarness.js` | the flight-test harness at `?test=1` (dev builds only), and with `&testPlan=soak` the 10-minute soak (5 seeds, one craft each, both views, the event director live), with its scripted flights per craft (`testFlightScripts.js`), slow-frame attribution (`testFrameProfiler.js`), console capture (`testConsole.js`), statistics (`testStats.js`) and on-screen panel (`testPanel.js`, `testPanel.css`) |
 | `geometryTracker.js` | dev builds only: records the GPU geometries created between `start()` and `stop()` with their owners, so the engine memory checks tell a spawn's leftovers from the world's own new geometries |
-| `spawnCheckKit.js` | dev builds only: the one kit of the spawn checks (`?test=spawns`, `presetChecks.js`, `presetChecksBatch2.js` and `structureTestKit.js`'s browser helpers): frame and wall-clock waits, the held time of day and weather, the photo-camera framing over the terrain, and the dispose check (GPU memory with the geometry tracker, wind sources added since the baseline, sky modifiers, real lights, leak counters and, on request, the JS heap) |
+| `spawnCheckKit.js` | dev builds only: the one kit of the spawn checks (`?test=spawns`, `presetChecks.js`, `presetChecksBatch2.js` and `structureTestKit.js`'s browser helpers): frame and wall-clock waits, the held time of day and weather, the photo-camera framing over the terrain, and the dispose check (GPU memory with the geometry tracker, wind sources, colliders, challenge courses and ignitables added since the baseline, sky modifiers, real lights, leak counters and, on request, the JS heap) |
 | `spawnsTest.js`, `spawnScenarios.js` | the spawns test at `?test=spawns` (dev builds only): each of the 30 presets force-spawned ahead of the craft at the time of day and in the weather of its scenario (sites on their nearest real placed site), its frame times recorded, framed for a screenshot, and disposed back to its GPU memory, wind source, light and sky modifier baselines, with a held leak check on the JS heap |
 | `determinismTest.js` | the determinism test at `?test=determinism` (dev builds only): the same seed and scripted path in two page loads, stepped frame by frame from `spawns.debug.restartSpawns()`, with identical site-list hashes and director activation logs |
 | `hotasTest.js` | the HOTAS pipeline test at `?test=hotas` (dev builds only) |
@@ -399,6 +414,7 @@ and `waypoints.js` (waypoint beacon and arrow), from v1. `ignition.js` (Phase 3,
 | `browser.mjs`, `ports.mjs` | Chrome / Edge discovery and free-port discovery (never 5199) shared by the headless tools |
 | `flight-lab.mjs` | headless flight lab for the glider and bush plane (handling, spawns, craft switches, hot-plug) |
 | `lab/jet.mjs`, `lab/helicopter.mjs`, `lab/wingsuit.mjs`, `lab/fpv.mjs`, `lab/tiltrotor.mjs` | headless flight labs per craft |
+| `lab/aerobatic.mjs`, `lab/paraglider.mjs`, `lab/balloon.mjs`, `lab/airship.mjs`, `lab/eagle.mjs`, `lab/spaceplane.mjs` | the other Phase 3 craft labs (`node --expose-gc`): each craft's handling targets of the spec, its situate, abilities, copilot commands and allocation |
 | `lab/seaplane.mjs` | the seaplane headless (`node --expose-gc`): flight targets, afloat and on a swell, the towing-tank hump, water takeoffs at 0 and 100 % assists, porpoising, water landings, the nose-over, wheels and keels on land, water rudders, the gear, situate, the copilot, the controller path and its `?test=craft` scenarios dry-run in their own world (CRAFT-1 with the water fixtures, a fresh world per flight) in calm air, three steady winds and the game's WindField at 1 and 1.2 x (`SEA_ONLY=id:label` flies one, `SEA_DEBUG=1` traces it) |
 | `lab/settings.mjs` | settings migrations (views per craft included) and the one-time HOTAS assist default |
 | `lab/terrain.mjs` | site placement and terrain stamps: Phase 1 bit-identity, filters, determinism, stamp shapes, seams, collision (the fixtures and the real presets' stamps), and the height-sampling cost against Phase 1 |
@@ -866,8 +882,11 @@ and only adds its `craftState`; a hook that throws or returns something unusable
 A model is created by a factory registered per kind: `flightModels.register(kind, factory)`. It is
 called with `{ profile, craft, world, bus, state, craftState, settings }`, where `profile` is the
 `simProfile` (whose `model` field names the kind). Registered kinds are `fixedWing`, `jet`
-(SimFixedWing with the jet's own assists), `helicopter`, `wingsuit`, `quad`, `tiltrotor` (SimTiltrotor: tilting
-nacelles, two proprotors, a wing, the conversion corridor of `tiltrotorCorridor.js`) and `flapper` (SimFlapper: the eagle / dragon). `create()` checks this interface:
+(SimFixedWing with the jet's own assists), `helicopter`, `wingsuit`, `quad`, `aerobatic` (SimFixedWing with its
+own assists and the `aerobaticAero` extension), `tiltrotor` (SimTiltrotor: tilting nacelles, two proprotors, a
+wing, the conversion corridor of `tiltrotorCorridor.js`), `paraglider` (SimParaglider), `balloon` (SimBalloon),
+`airship` (SimAirship), `flapper` (SimFlapper: the eagle / dragon) and `spaceplane` (SimFixedWing with the rocket
+and RCS extension). The seaplane flies `fixedWing` with the `floats` extension. `create()` checks this interface:
 
 | member | contract |
 | --- | --- |
@@ -1069,7 +1088,7 @@ groups)` builds one over another catalog (the labs).
 | `audioProfile` | `{ engine: family, ...parameters }` (below) |
 | `cameraRig` | `{ eye, chase, wing, fpv, cockpit }` (below) |
 | `instruments` | ordered instrument ids for the panel and HUD (below) |
-| `abilities` | `{ craftAbility, craftAbilityAlt? }`, each `{ label, initialState?(), run(api), update?(api, dt) }`: Space and Shift+Space. Both initial states merge into the craft state; both updates run every frame. `api = { craftState, craft, module, skin, telemetry, player, state, controls (this tick's shaped ControlState, read only), systems, world, colliders, waterQuery, wind (the WindField), notify(text), isHeld(actionId), setCraftState(field, value), relaunch(), runAbility(slot), setAutopilot(options), emitTrail(kind, anchor, dt, color?) }`; `emitTrail` kinds are `smoke`, `spray` and `smokeColor` (tinted by `color` [r, g, b] or by `craftState.smokeColor`, an index into `SMOKE_COLORS` in trails.js) |
+| `abilities` | `{ craftAbility, craftAbilityAlt? }`, each `{ label, initialState?(), run(api), update?(api, dt) }`: Space and Shift+Space. Both initial states merge into the craft state; both updates run every frame. `api = { craftState, craft, module, skin, telemetry, player, state, controls (this tick's shaped ControlState, read only), systems, world, colliders, waterQuery, wind (the WindField), ignition (ctx.ignition: what a flame can light), bus (the typed event bus: journalStat and the craft's own events), notify(text), isHeld(actionId), setCraftState(field, value), relaunch(), runAbility(slot), setAutopilot(options), emitTrail(kind, anchor, dt, color?) }`; `emitTrail` kinds are `smoke`, `spray` and `smokeColor` (tinted by `color` [r, g, b] or by `craftState.smokeColor`, an index into `SMOKE_COLORS` in trails.js) |
 | `spawn` | `{ cruise (airspeed, m/s), cruiseThrottle? (craft with an engine), hover, relaunch: 'aerotow' \| 'peak' \| 'airstart', respawn?: 'peak', canStartOnGround, runwayLength?, peakDive?: { angle, speed } }` |
 | `limits` | `{ vne, vneMach?, gLimit, crashSinkRate, bodyStrikeSpeed?, floats, ceiling? (m), waterLanding?: 'floats' \| 'basket' \| null, noseOverSpeed?, skidCrashSpeed? }` |
 | `capabilities` (optional) | `{ engine?, chute?, smoke?, water?, perch?, space? }` booleans; otherwise inferred from the profiles (copilot, UI) |
@@ -1079,9 +1098,9 @@ groups)` builds one over another catalog (the labs).
 | `situate` (optional) | `situate(situation, api) -> placement`: where and how the craft starts after a switch (FlightController, "Placements") |
 | `copilot` (optional) | `{ commands: [{ id, phrases: [regex sources], run(api, value) -> reply }], status?(craftState, telemetry) -> string }`: WREN's `craftCommand` action (docs/copilot-api.md) |
 | `journal` (optional) | `{ stats: [{ key, label, unit, op: 'add' \| 'min' \| 'max' }] }`: the craft's journal stats, known to the journal like its own (`journalStatInfo`) |
-| `directorProfile` (optional) | `{ favor: { tags, categories }, above: [{ altitude, favor }] }`: the director's craft weighting (contract i.2) |
-| `faunaThreat` (optional) | number: fauna scatter radius and burst scale (the eagle's 2.5) |
-| `hud` (optional) | `{ instruments: [ids] }`: instruments the pilot always needs (the tiltrotor's conversion corridor), shown as glass tiles even with the instrument overlay off, except while a cockpit panel is on screen (`src/ui/instrumentHud.js`) |
+| `directorProfile` (optional) | `{ favor: { tags, categories }, above: [{ altitude, favor }] }`: the director's craft weighting (contract i.2); tags from `PRESET_TAGS`, categories from `PRESET_CATEGORIES` (src/spawns/schema.js) |
+| `faunaThreat` (optional) | number: fauna scatter radius and burst scale (the eagle's 2.5, the balloon's 0.6); read through `faunaThreatOf(module)` (registry.js, 1 without one) by the fauna engine and the ambient bird flocks |
+| `hud` (optional) | `{ instruments: [ids] }` (each one of the craft's `instruments`): instruments the pilot always needs (the tiltrotor's conversion corridor, the balloon's wind-layer column and envelope), shown as glass tiles even with the instrument overlay off, except while a cockpit panel is on screen (`src/ui/instrumentHud.js`) |
 
 **`cameraRig`.**
 
@@ -1119,14 +1138,22 @@ groups)` builds one over another catalog (the labs).
   - `wingsuit`: `flutterHz`, `proximityRange`;
   - `radial`: `cylinders`, `blades`, `maxRpm`, `idleRpm` (a prop variant), plus the floats' water slap and
     spray from `craftState` (the seaplane);
+  - `aerobaticProp`: the `prop` parameters plus `exhaustRoughness` (0..1, the high-rpm snarl's grit), and the smoke hiss from `craftState.smoke`;
   - `proprotor`: `blades`, `rotorRpm`, `turbineHz`; the thrum follows `craftState.nacelleAngle` (an impulsive slap with the nacelles up, a smooth drone tilted forward) and `craftState.proprotorRpm`;
+  - `paraglider`: `flutterHz` (canopy flutter at trim); line whistle on the bar, the collapse snap and the reinflation pop; the variometer is on by default;
+  - `burner`: the burner roar with its whump on lighting, the pilot-light hiss, the vent rush and the basket creaks, otherwise near silence;
+  - `airshipProp`: `cylinders`, `blades`, `maxRpm`, `idleRpm`; the twin prop drone with its slow beat, the stern fan, the ballonet blowers and the envelope creak under load;
   - `creature`: no parameters of its own; the eagle's per-beat whoosh and screech, the dragon's
     wingbeat thump, roar and fire whoosh, from the craft state's counters (`flapCount`,
-    `screechCount`, `roarCount`) and `fireIntensity`.
+    `screechCount`, `roarCount`) and `fireIntensity`;
+  - `rocket`: `roarHz`, `rumbleHz`; the roar thins with the air to the structure-borne rumble and the re-entry roar returns with density (`airflowBasis: 'equivalent'`: the airflow beds follow the equivalent airspeed and fall silent in vacuum).
 
-**Instruments** (`src/ui/instruments/index.js`). There are 20 ids: `airspeed, altitude, attitude,
+**Instruments** (`src/ui/instruments/index.js`). There are 30 ids: `airspeed, altitude, attitude,
 heading, vsi, aoa, g, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide,
-proximity, waterRudder, nacelle, perch` (`nacelle`: the nacelle angle on the conversion corridor chart). A renderer is `{ id, label, draw(pen, source, theme, memory), createMemory?,
+proximity`, and for the Phase 3 craft `smoke, figure` (aerobatic), `waterRudder` (seaplane), `nacelle`
+(tiltrotor: the nacelle angle on the conversion corridor chart), `speedBar` (paraglider: the wing, brakes,
+bar, ears and collapses), `envelope, windColumn` (balloon), `ballonet` (airship), `perch` (eagle) and
+`mach, apogee, heating, rcs` (spaceplane). A renderer is `{ id, label, draw(pen, source, theme, memory), createMemory?,
 update?(memory, dt, source), reset? }`. It draws in a 200 x 200 design box in a `panel` theme (steam
 gauge on the cockpit CanvasTexture) and a `glass` theme (HUD tile). Units follow `settings.units`.
 Unknown ids are skipped and reported in the camera stats. A new instrument is one file,
@@ -1143,7 +1170,12 @@ the HUD overlay draw it from then on.
 | fpv | quad | throttle, droneMode, airspeed, altitude, attitude, heading, vsi |
 | seaplane | fixedWing (floats extension) | airspeed, altitude, attitude, heading, vsi, aoa, g, throttle, flapsGear, waterRudder (the gear advisory, the water rudders, STEP, porpoise, trim and water speed) |
 | tiltrotor | tiltrotor | airspeed, altitude, attitude, heading, vsi, nacelle (pinned on the HUD), rotorRpm, torque, radarAlt, throttle |
+| aerobatic | aerobatic | airspeed, altitude, attitude, heading, vsi, aoa, g, throttle, smoke, figure |
+| paraglider | paraglider | airspeed, altitude, heading, vario, speedBar, ld |
+| balloon | balloon | envelope, windColumn (both pinned on the HUD), altitude, vsi, radarAlt, heading |
+| airship | airship | airspeed, altitude, attitude, heading, vsi, throttle, ballonet |
 | eagle | flapper | airspeed, altitude, heading, vsi, vario, perch (flap power, tuck, soaring and the perch line) |
+| spaceplane | spaceplane | airspeed, altitude, attitude, heading, vsi, aoa, g, throttle, mach, apogee, heating, rcs |
 
 ### How to add a craft
 
@@ -1564,8 +1596,9 @@ are implemented here. The preset schema (section 1) and the 30 presets are in [s
   `fauna:scatter`, `fauna:call`, `structure:gate`, `structure:course`, `structure:landing`,
   `setPiece:stage`, `setPiece:narrate`, `setPiece:ended`); the references are in `docs/engines/`.
 - **Clean-up.** After `dispose(instance)` the manager removes any wind source still listed in
-  `instance.windSourceIds` and any collider still listed in `instance.colliderIds` (Phase 3), releases
-  any real light the spawn still holds, and reports each as a leak (`console.error`,
+  `instance.windSourceIds`, any collider still listed in `instance.colliderIds` and any ignitable still
+  listed in `instance.ignitableIds` (Phase 3: lanterns and torches registered with `ctx.game.ignition`),
+  releases any real light the spawn still holds, and reports each as a leak (`console.error`,
   `getStats().leaks`).
 - **Memory accounting.** `renderer.info.memory` (geometries, textures, attributes, programs, total
   bytes) and the JS heap (`performance.memory`, Chrome) are read before each create, after it, and
@@ -1936,7 +1969,7 @@ The copilot system offers `update`, `ask`, `toggleMic`, `isListening`, `pushToTa
 | `?test=1` | dev builds: the flight-test harness (`src/dev/testHarness.js`). It flies each of the six craft for 60 s in first person and in third person across 3 seeds (36 runs), and logs average fps, p99 frame time, NaN events, terrain penetrations, soft crashes, heap growth and console errors. It shows an on-screen summary and offers a JSON report (`window.DRIFTWING.testReport`). URL options: `testSeeds`, `testSeconds`, `testCraft`, `testViews` (`first`, `third`) |
 | `?test=1&testPlan=soak` | dev builds: the 10-minute soak, the flight-test harness with its soak plan: 5 seeds (`SOAK-1` to `SOAK-5`), one craft per seed (the six in turn), both views, 60 s each, the event director live as in the game. Its criteria add heap growth under 75 MB per world, the worst p99 frame time within the perf governor's frame target, and the director live on every world (its activations, the activations the SpawnManager declined with refusal `declined` and the spawns started are listed per world) to the flight test's |
 | `?test=collision` | dev builds: the collision test (`src/dev/collisionTest.js`): a fixture of every collider type (with a mesh BVH tunnel mountain) and a kite-string slalom high above the terrain, the nearest landmark of every type and every Phase 2 structure preset; the jet and the bush plane (and the spaceplane once registered) fly scripted lines into each at 60, 250 and 1500 m/s and must soft-crash with `structure strike`, never pass through, and never end a tick with a probe inside a solid collider (a probe within 0.5 m under a landable top stands on ground); the real flight model at cruise into the box and the tunnel's flank; a 3 m/s bump resolves; a landable deck is ground (the real bush plane stands on it, and real-model dives onto it crash on it); the tunnel centreline and the arch opening are flown clean (the arch threads); every kite string crossed is one miss; the tunnel's BVH answers with the game's own `THREE.Vector3` (one three.js core). It holds the quality level at high; `&testParts=fixture,special,landmarks,structures` runs some parts (the others' criteria muted) |
-| `?test=craft` | dev builds: the craft test (`src/dev/craftTest.js`, contract k.1): every registered craft flies the general flight test (hands off, a roll each way, a gentle pull; it must respond and fly) in the first and third person views from the world's spawn, then every scenario in `src/dev/craftScenarios/<craft>.js` (a placement through `flight.startAt`, a script writing the ControlState through the test input path, timed checks). Each run must be flown in its planned craft and view on every frame with 0 NaN, 0 penetrations, 0 soft crashes (unless the scenario allows them), 0 console errors or warnings and every check passed; frame times are reported, not judged. Scenarios on another seed or on the water fixtures' world (`world: 'waters'`) reload the page. `&testCraft=`, `&testViews=`, `&testScenarios=` (ids, `general`, `general-<craft>`), `&testSeconds=` (the general test's length, 30 s) |
+| `?test=craft` | dev builds: the craft test (`src/dev/craftTest.js`, contract k.1): every registered craft flies the general flight test (hands off, a roll each way, a gentle pull; it must respond and fly) in the first and third person views from the world's spawn, then every scenario in `src/dev/craftScenarios/<craft>.js` (a placement through `flight.startAt`, a script writing the ControlState through the test input path, timed checks; a scenario's `time` is held for the whole run with the day clock frozen, and an optional `endWhen(api)` ends a long run once it is done). Each run must be flown in its planned craft and view on every frame with 0 NaN, 0 penetrations, 0 soft crashes (unless the scenario allows them), 0 console errors or warnings and every check passed; frame times are reported, not judged. Scenarios on another seed or on the water fixtures' world (`world: 'waters'`) reload the page. `&testCraft=`, `&testViews=`, `&testScenarios=` (ids, `general`, `general-<craft>`), `&testSeconds=` (the general test's length, 30 s) |
 | `?test=spawns` | dev builds: the spawns test (`src/dev/spawnsTest.js`, scenarios in `spawnScenarios.js`). The game's presets are held and the site feed detached; each of the 30 presets goes back in for its own show: force-spawned ahead of the craft (a site preset on its nearest real placed site, with its stamps), frame times recorded over its live window, a staging step where one is named (totality, the wall cloud, meteors in flight, the eagle on the wing), framed by the photo camera, screenshot, disposed; then, with the simulation held, one warm-up create and dispose (a one-time cache it keeps is reported, not judged) and 3 more with the heap read after each. GPU memory (with the geometry tracker), wind sources, real lights, sky modifiers and leak counters must be back after each, and the JS heap within 1 MB across the judged held cycles. The test spawns through the debug path, which is never declined; a director activation of the re-added preset that the manager declines (refusal `declined`) is listed in the notes. URL options: `testPresets=a,b` (a subset), `testShots=1` (wait for the runner's screenshots), `testLeakCycles=N` (a longer heap trend) |
 | `?test=determinism` | dev builds: the determinism test (`src/dev/determinismTest.js`). Two page loads, each with a freshly deleted database: frames stepped by hand at 30 per second, the time of day and the perf governor's frame time held, the flight clock set to 1200 s, then `spawns.debug.restartSpawns()` and a 480 s autopilot path in the bush plane clear of the terrain. The site-list hashes (live and freshly built) and the director activation log must be identical; the spawn events and the flown path are compared as evidence |
 | `tools/run-harness.mjs` | runs a harness headlessly on a spare port (`--test 1\|soak\|hotas\|terrain\|determinism\|spawns`, `--backend webgpu\|webgl`, `--seeds`, `--seconds`, `--crafts`, `--views`, `--presets real` for the terrain test or `--presets a,b` and `--leak-cycles N` for the spawns test, `--out`), prints its tables, takes the spawns test's screenshots when the page asks, and exits 0 on PASS |
