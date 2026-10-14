@@ -89,6 +89,16 @@ const AEROBATIC = simFixedWing([
   { at: 0.74, label: 'smoke off', run: (pilot) => pilot.action('craftAbility') },
 ], [{ id: 'smoke', label: 'smoke on 3 s', test: (seen, run) => seen.smokeSeconds >= seconds(3, run) }], { roll: 0.15, rollEnd: 0.5 });
 
+// The seaplane: the bush plane's flap work, and the amphibian wheels down and up again in flight.
+const SEAPLANE = simFixedWing([
+  { at: 0.58, label: 'throttle 90 %, flaps down one notch', run: (pilot) => { pilot.throttle(0.9); pilot.action('flapsDown'); } },
+  { at: 0.61, label: 'flaps down a second notch', run: (pilot) => pilot.action('flapsDown') },
+  { at: 0.64, label: 'amphibian wheels down', run: (pilot) => pilot.action('gearToggle') },
+  { at: 0.7, label: 'flaps up one notch, throttle 70 %', run: (pilot) => { pilot.action('flapsUp'); pilot.throttle(0.7); } },
+  { at: 0.73, label: 'flaps up', run: (pilot) => pilot.action('flapsUp') },
+  { at: 0.76, label: 'amphibian wheels up', run: (pilot) => pilot.action('gearToggle') },
+], [{ id: 'flaps', label: 'flaps to notch 2', test: (seen) => seen.maxFlapNotch >= 2 }]);
+
 /** Hover craft (helicopter, FPV drone at 100 % assists): hover, stick moves, then autopilot. */
 const HOVER = Object.freeze({
   steps: [
@@ -128,6 +138,7 @@ const SCRIPTS = Object.freeze({
   wingsuit: WINGSUIT,
   fpv: HOVER,
   aerobatic: AEROBATIC,
+  seaplane: SEAPLANE,
 });
 
 /** The script for a craft ({ steps, checks }), or null when none exists. */
@@ -136,4 +147,4 @@ export function flightScriptFor(craft) {
 }
 
 /** Every craft id with a script, in the harness's run order. */
-export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic']);
+export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic', 'seaplane']);

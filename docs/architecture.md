@@ -204,6 +204,7 @@ system, and then starts the frame loop.
 | `aero.js` | atmosphere, lift and drag curves past the stall, surface forces, ground effect, propeller |
 | `jetAero.js` | the jet's SimFixedWing extension: turbofan with afterburner and detent, transonic drag, wing rock, buffet |
 | `jetFcs.js` | the jet's flight control system: its assist catalog and handler, autopilot and trim handler |
+| `floats.js` | the seaplane's SimFixedWing extension: per-float buoyancy against the water query, planing and the hump, porpoising, water rudders, the amphibian wheels (nose-over, skid on land), water strikes, the gear advisory and the water handling assist |
 | `assists.js` | the assists control stage, assist catalogs and handlers per model kind, the fixed-wing handler |
 | `assistDefaults.js` | the one-time HOTAS assist default (50 % on craft the player never set) and which craft the player set |
 | `helicopterAssists.js` | helicopter assists (auto-hover, heading hold, attitude limits, torque and engine protection, autorotation) and autopilot |
@@ -225,6 +226,7 @@ system, and then starts the frame loop.
 | `index.js` | registers every craft module (six so far; each Phase 3 craft adds its line as it lands) |
 | `kit.js` | the procedural mesh kit and shared materials (v1 palette, nav lights, prop disc) |
 | `glider.js`, `bushplane.js`, `jet.js`, `helicopter.js`, `wingsuit.js`, `fpv.js` | one craft module each (schema below) |
+| `seaplane.js` | the Phase 3 amphibious floatplane (Beaver style, on the floats extension) |
 
 ### `src/input`: every input device
 
@@ -263,6 +265,7 @@ system, and then starts the frame loop.
 | `mixer.js` | buses `master, engine, environment, ui, copilot, music`, ducking, reverb, muffle, compressor |
 | `engines/index.js` | engine families and `resolveAudioProfile` |
 | `engines/glider.js`, `prop.js`, `jet.js`, `heli.js`, `drone.js`, `wingsuit.js` | one synth per family |
+| `engines/radial.js` | the seaplane's nine-cylinder radial (rumble, lope, stack crackle, prop) with the floats' water slap and spray |
 | `airflow.js` | wind beds, buffet, ground roll, cockpit interior low-pass |
 | `turbulenceRattle.js` | the cockpit rattle and airframe thump that follow the turbulence at the craft |
 | `flightCues.js` | stall horn, variometer, gear and flap motors, touchdown, afterburner detent click, crash |
@@ -319,7 +322,7 @@ system, and then starts the frame loop.
 | `settingsPanel.js` | the tabbed settings panel (Flight, Graphics, Sound, Controls, General) |
 | `controlsPanel.js`, `controlsPanel.css` | the controls panel: device tabs, live readings, bindings, tuning, export / import |
 | `calibrationWizard.js` | the calibration wizard screens |
-| `instruments/` | 17 instrument renderers (`index.js` registry, `gaugeKit.js`, `units.js`) |
+| `instruments/` | 18 instrument renderers (`index.js` registry, `gaugeKit.js`, `units.js`) |
 | `glassHud.js`, `glassHud.css` | the glass HUD's attitude indicator, stall / AoA warning and flight path marker, and when the glass HUD shows (the camera system drives it) |
 | `instrumentHud.js`, `instrumentHud.css` | the optional glass instrument HUD overlay |
 | `stickReticle.js`, `stickReticle.css` | the virtual-stick reticle |
@@ -392,6 +395,7 @@ and `waypoints.js` (waypoint beacon and arrow), from v1.
 | `browser.mjs`, `ports.mjs` | Chrome / Edge discovery and free-port discovery (never 5199) shared by the headless tools |
 | `flight-lab.mjs` | headless flight lab for the glider and bush plane (handling, spawns, craft switches, hot-plug) |
 | `lab/jet.mjs`, `lab/helicopter.mjs`, `lab/wingsuit.mjs`, `lab/fpv.mjs` | headless flight labs per craft |
+| `lab/seaplane.mjs` | the seaplane headless (`node --expose-gc`): flight targets, afloat and on a swell, the towing-tank hump, water takeoffs at 0 and 100 % assists, porpoising, water landings, the nose-over, wheels and keels on land, water rudders, the gear, situate, the copilot, the controller path and its `?test=craft` scenarios dry-run in their own world (CRAFT-1 with the water fixtures, a fresh world per flight) in calm air, three steady winds and the game's WindField at 1 and 1.2 x (`SEA_ONLY=id:label` flies one, `SEA_DEBUG=1` traces it) |
 | `lab/settings.mjs` | settings migrations (views per craft included) and the one-time HOTAS assist default |
 | `lab/terrain.mjs` | site placement and terrain stamps: Phase 1 bit-identity, filters, determinism, stamp shapes, seams, collision (the fixtures and the real presets' stamps), and the height-sampling cost against Phase 1 |
 | `lab/spawns.mjs`, `lab/director.mjs`, `lab/audio.mjs`, `lab/discovery.mjs` | the spawn framework, the event director and the regional weather, the spawn voices and recipes, and the discovery loop, headless ([Testing](#testing)) |
@@ -919,8 +923,12 @@ the exact top). Props under 2 m tall carry none.
 
 `SimFixedWing` also takes an optional `profile.extension({ profile, craft, bus, craftState, limits,
 flightData })`. Its hooks are `shapeControls`, `engine { update, forces, reset }`,
-`dragCoefficient`, `moments`, `afterStep`, `reset`, `writeTelemetry`, `snapshot` and `restore`. The
-jet flies on it (`jetAero.js`). `profile.vneBasis: 'equivalent'` and `profile.maxSpeed` suit fast
+`dragCoefficient`, `moments`, `contactForces`, `afterStep`, `reset`, `writeTelemetry`, `snapshot`,
+`restore` and `dispose`. The jet flies on it (`jetAero.js`), and the seaplane (`floats.js`):
+`contactForces(tick, forceWorld, momentBody)` runs right after the ground contact and adds world forces
+and body moments of surface contact the point contact does not cover, and may complete `tick.contact`
+(the live contact report: afloat, touchdowns, strikes); the tick also carries the live `position` (the
+centre of mass), `velocity` and `quaternion`, and the model's `dispose()` calls the extension's. `profile.vneBasis: 'equivalent'` and `profile.maxSpeed` suit fast
 craft.
 
 ### Control stages, assists, autopilot and trim
@@ -999,6 +1007,10 @@ height; `stall.warning` is the low-rotor-rpm horn.
   `windStreaks`, ...;
 - FPV drone: `droneMode` (`rate` \| `angle`), `altitudeHold`, `modeOverride`, `turtle`;
 - a craft with skins: `skin` (set by the controller);
+- seaplane: `onWater`, `onStep`, `waterRudders` (down), `porpoise` (0..1), `noseOverWarning`,
+  `skidWarning`, `spray` (0..1), `trim` (deg on the water), `waterSpeed` (m/s through the water),
+  `gearPosition` (0 up .. 1 down), `gearAdvisories` (spoken), and `gearRequest` (the copilot's
+  `'up' | 'down'`, applied and cleared by the model);
 - the Phase 3 craft: the fields of contract h.3 (aerobatic `smoke`, `smokeColor`, ...; seaplane
   `onStep`, `waterRudders`, ...; and so on), written by their own models and abilities.
 
@@ -1067,11 +1079,13 @@ groups)` builds one over another catalog (the labs).
   - `jet`: `whineHz`, `rumbleHz`, `idleSpool`, `spoolUp`, `spoolDown`, `afterburnerRoar`;
   - `heli`: `blades`, `rotorRpm`, `tailBlades`, `tailRatio`, `turbineHz`;
   - `drone`: `motors`, `idleHz`, `maxHz`;
-  - `wingsuit`: `flutterHz`, `proximityRange`.
+  - `wingsuit`: `flutterHz`, `proximityRange`;
+  - `radial`: `cylinders`, `blades`, `maxRpm`, `idleRpm` (a prop variant), plus the floats' water slap and
+    spray from `craftState` (the seaplane).
 
-**Instruments** (`src/ui/instruments/index.js`). There are 17 ids: `airspeed, altitude, attitude,
+**Instruments** (`src/ui/instruments/index.js`). There are 18 ids: `airspeed, altitude, attitude,
 heading, vsi, aoa, g, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide,
-proximity`. A renderer is `{ id, label, draw(pen, source, theme, memory), createMemory?,
+proximity, waterRudder`. A renderer is `{ id, label, draw(pen, source, theme, memory), createMemory?,
 update?(memory, dt, source), reset? }`. It draws in a 200 x 200 design box in a `panel` theme (steam
 gauge on the cockpit CanvasTexture) and a `glass` theme (HUD tile). Units follow `settings.units`.
 Unknown ids are skipped and reported in the camera stats. A new instrument is one file,
@@ -1086,6 +1100,7 @@ the HUD overlay draw it from then on.
 | helicopter | helicopter | airspeed, altitude, attitude, heading, vsi, rotorRpm, torque, radarAlt, throttle |
 | wingsuit | wingsuit | airspeed, altitude, heading, vsi, glide, proximity |
 | fpv | quad | throttle, droneMode, airspeed, altitude, attitude, heading, vsi |
+| seaplane | fixedWing (floats extension) | airspeed, altitude, attitude, heading, vsi, aoa, g, throttle, flapsGear, waterRudder (the gear advisory, the water rudders, STEP, porpoise, trim and water speed) |
 
 ### How to add a craft
 

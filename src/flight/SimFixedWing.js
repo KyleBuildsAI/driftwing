@@ -37,8 +37,13 @@
 //                                             replaces the propeller engine (spool, thrust, telemetry)
 //   dragCoefficient(tick) -> number           added to cd0 (wave drag)
 //   moments(tick, momentBody)                 extra body moments (dampers, buffet, wing rock)
+//   contactForces(tick, forceWorld, momentBody)
+//                                             after the ground contact: extra world forces and body
+//                                             moments of surface contact it does not cover (the
+//                                             seaplane's floats); tick.contact is the live contact
+//                                             report, which the hook may complete
 //   afterStep(tick)                           after flightData is written
-//   reset(pose, systems), writeTelemetry(flight), snapshot(), restore(data)
+//   reset(pose, systems), writeTelemetry(flight), snapshot(), restore(data), dispose()
 // profile.vneBasis 'equivalent' compares equivalent airspeed with Vne; profile.maxSpeed raises the
 // speed guard for fast craft. The model's kind is profile.model, so an airframe registered under its
 // own kind (flightModels.register('jet', createSimFixedWingModel)) gets its own assists and autopilot.
@@ -389,6 +394,12 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     meanChord,
     bodyAir,
     angularVelocity: state.angularVelocity,
+    /** Centre of mass (world), velocity (world) and attitude (body to world): live. */
+    position: centerPosition,
+    velocity: state.velocity,
+    quaternion: state.quaternion,
+    /** The live ground contact report (contactForces may complete it). */
+    contact: contactReport,
     systems,
     surfaces: surfacesActual,
     flightData,
@@ -777,6 +788,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     groundMoment.set(0, 0, 0);
     contact.evaluate(contactBody, contactInputs, env, dt, groundForce, groundMoment);
     momentBody.add(groundMoment);
+    if (extension && extension.contactForces) extension.contactForces(tick, groundForce, momentBody);
 
     // Total force (world) and the specific force the pilot feels (load factor along body up).
     forceWorld.copy(forceBody).applyQuaternion(state.quaternion).add(groundForce);
@@ -1001,6 +1013,7 @@ export function createSimFixedWingModel({ profile, craft, bus, craftState = {} }
     dispose() {
       contactReport.touchdown = null;
       contactReport.bodyStrike = null;
+      if (extension && extension.dispose) extension.dispose();
     },
   };
 }

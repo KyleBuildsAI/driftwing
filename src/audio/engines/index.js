@@ -23,6 +23,7 @@ import { createGliderSynth } from './glider.js';
 import { createHeliSynth } from './heli.js';
 import { createJetSynth } from './jet.js';
 import { createPropSynth } from './prop.js';
+import { createRadialSynth } from './radial.js';
 import { createWingsuitSynth } from './wingsuit.js';
 import { createAerobaticPropSynth } from './aerobaticProp.js';
 
@@ -84,6 +85,11 @@ export const ENGINE_FAMILIES = Object.freeze({
     create: createAerobaticPropSynth,
     // The prop family's parameters plus exhaustRoughness (0..1: the snarl's grit); smoke hiss from craftState.smoke.
     defaults: { cylinders: 6, blades: 3, maxRpm: 2700, idleRpm: 800, exhaustRoughness: 0.4, airflowSpeed: 80, interiorCutoff: 1100, stallHorn: true, stallAoa: 17 },
+  },
+  radial: {
+    create: createRadialSynth,
+    // A prop variant: cylinders (odd, a radial), blades, maxRpm, idleRpm; plus the floats' water slap and spray.
+    defaults: { cylinders: 9, blades: 3, maxRpm: 2300, idleRpm: 600, airflowSpeed: 60, interiorCutoff: 850, stallHorn: true, stallAoa: 15 },
   },
 });
 

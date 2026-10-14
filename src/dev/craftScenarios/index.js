@@ -22,6 +22,7 @@ import helicopter from './helicopter.js';
 import wingsuit from './wingsuit.js';
 import fpv from './fpv.js';
 import aerobatic from './aerobatic.js';
+import seaplane from './seaplane.js';
 
 export const CRAFT_SCENARIO_SETS = Object.freeze([
   glider,
@@ -31,4 +32,5 @@ export const CRAFT_SCENARIO_SETS = Object.freeze([
   wingsuit,
   fpv,
   aerobatic,
+  seaplane,
 ]);

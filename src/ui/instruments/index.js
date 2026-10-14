@@ -28,9 +28,10 @@ import glide from './glide.js';
 import proximity from './proximity.js';
 import smoke from './smoke.js';
 import figure from './figure.js';
+import waterRudder from './waterRudder.js';
 
 export const INSTRUMENTS = Object.freeze(Object.fromEntries(
-  [airspeed, altitude, attitude, heading, vsi, aoa, gMeter, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide, proximity, smoke, figure]
+  [airspeed, altitude, attitude, heading, vsi, aoa, gMeter, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide, proximity, smoke, figure, waterRudder]
     .map((instrument) => [instrument.id, instrument]),
 ));
 export const INSTRUMENT_IDS = Object.freeze(Object.keys(INSTRUMENTS));
