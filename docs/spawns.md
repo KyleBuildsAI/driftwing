@@ -83,6 +83,16 @@ preset's section below.
 | 28 | [Crystal spires](#28-crystal-spires) | `crystalSpires` | fantasy | site | uncommon | no | `structure`, `lightEffect` | no |
 | 29 | [Jet stream ribbon](#29-jet-stream-ribbon) | `jetStream` | flightplay | event | uncommon | no | `emitter`, `windModifier` | yes |
 | 30 | [Storm chase](#30-storm-chase) | `stormChase` | setpiece | event | legendary | no | `setPiece` | children |
+| 31 | [Frozen lake](#91-frozen-lake) | `frozenLake` | geo | site | uncommon | no | `structure` | no |
+| 32 | [Aurora and meteor shower](#92-aurora-and-meteor-shower) | `auroraMeteorShower` | celestial | event | legendary | no | `celestial` | no |
+| 33 | [Volcano, lightning and aurora](#93-volcano-lightning-and-aurora) | `volcanoAurora` | geo | event | legendary | no | `lightEffect`, `celestial` | no |
+| 34 | [Double rainbow over whales](#94-double-rainbow-over-whales) | `doubleRainbowWhales` | ocean | event | legendary | no | `celestial`, `weatherVolume` | no |
+| 35 | [Eclipse over the monoliths](#95-eclipse-over-the-monoliths) | `eclipseMonoliths` | celestial | event | legendary | no | `lightEffect` | no |
+| 36 | [Comet breakup](#96-comet-breakup) | `cometBreakup` | celestial | event | legendary | no | `celestial` | no |
+| 37 | [Migration convergence](#97-migration-convergence) | `migrationConvergence` | wildlife | event | legendary | no | `emitter` | no |
+| 38 | [Midnight sun](#98-midnight-sun) | `midnightSun` | celestial | event | legendary | no | `celestial` | no |
+| 39 | [Resonating crystal spires](#99-resonating-crystal-spires) | `resonatingSpires` | fantasy | event | legendary | no | `lightEffect` | no |
+| 40 | [Lighthouse beacons](#100-lighthouse-beacons) | `lighthouseBeacons` | structure | event | legendary | no | `lightEffect` | no |
 
 In all: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy. The
 journal's collection count is found / 30 over these presets (`PRESETS` in
@@ -732,6 +742,208 @@ and the storm decays.
 - **Journal:** the "Storm Chaser" entry; `closestTornado` (min, the closest pass to the funnel) and
   `stormsChased` (+1 when you came within 5 km of the funnel).
 
+### Frozen lake and the legendary combos (91-100)
+
+Preset 91 closes the biome set pieces; 92-97, 99 and 100 are the legendary combos the director
+arranges through combo scheduling ([Combos](#combos-legendary-presets-92-97-99-and-100)); 98 is a
+global override ([Global overrides](#global-overrides-the-blood-moon-and-the-midnight-sun)). The
+table above numbers rows by their place in `PRESETS`; the headings keep the spec's numbers. None of
+them changes the air the craft flies through.
+
+#### 91. Frozen lake
+
+A lake in the snow country frozen hard: pale clear ice under white rime, webbed with cracks, with long
+pressure ridges of tilted slabs buckled up across it. The ice holds a landing, and up close it sings:
+falling chirps and booms as it strains.
+[src/spawns/presets/frozenLake.js](../src/spawns/presets/frozenLake.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** snow or pine; land; ground 30-1600 m; chance 0.16; at least 14 km apart; 500 m
+  clearance.
+- **Stamps, water and overlay:** a `basin` (radius 240-340 m, depth 10-16 m, painted `ice`) holding an
+  ice body filled to 0.8 of its depth (`waters`, material `ice`: the water query's solid ice, so craft
+  land and skid on it), and the `frozen` overlay with the ice material around it, grown 220 m past the
+  basin.
+- **Engines:** `structure` (recipe `iceRidges`: 3-5 ridges 180-360 m long across the ice, slabs
+  1.4-3.4 m tall and 2.6-5.8 m long leaning this way and that, only where the body holds ice; every
+  26 m stretch a capsule collider; owns the voice, its intensity the approach within 1.6 km).
+- **Wind:** none.
+- **Sound:** `iceSing` (a thin wind over the ice; falling chirps and an occasional boom, more often as
+  you close in; `crack`).
+- **LOD:** near 1500 m, mid 5000 m, far 12 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 12 + 2 km.
+
+#### 92. Aurora and meteor shower
+
+On a clear night over the snow the aurora flares to full strength across the whole sky while a meteor
+shower rains through the curtains.
+[src/spawns/presets/auroraMeteorShower.js](../src/spawns/presets/auroraMeteorShower.js)
+
+- **Kind:** event, legendary combo.
+- **Combo:** preconditions snow, night, clear or clearing weather; member `meteorShower` (the
+  anchor); exclusive.
+- **Engines:** `celestial` (sky-anchored; the `sky` component's `aurora: 1` raises the curtains
+  wherever the sky is dark, stars at full; until dawn; owns the voice).
+- **Filters:** snow; night; clear or clearing; any surface and altitude; 3-8 km ahead.
+- **Candidates:** 7 km cells, 900 s buckets, chance 0.4.
+- **Wind:** none.
+- **Sound:** `aurora` (an airy shimmer and a silky rustle); the shower's own `meteor` voice.
+- **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, not needing a view.
+- **Lifetime:** 300-420 s, or until dawn; despawned beyond 20 + 3 km after 30 s out of view.
+
+#### 93. Volcano, lightning and aurora
+
+A volcano erupting at night at the edge of the snow: lightning crawls and forks through its ash plume
+while the aurora burns overhead.
+[src/spawns/presets/volcanoAurora.js](../src/spawns/presets/volcanoAurora.js)
+
+- **Kind:** event, legendary combo with no member preset: the erupting volcano and its own two parts
+  are the event.
+- **Combo:** preconditions an erupting `volcano` site (`siteActive`) within 12 km (`near` moves the
+  candidate onto it), snow there, night; exclusive.
+- **Engines:** `lightEffect` (a dirty thunderstorm in the ash: 24 strikes a minute within 650 m,
+  2300 m up the column, 30 % to the ground, a warm cloud glow, thunder); `celestial` (sky-anchored,
+  `aurora: 1`; owns the voice).
+- **Filters:** snow; night; clear, clearing or building; over land; player below 9 km; 3-30 km.
+- **Candidates:** 9 km cells, 600 s buckets, chance 0.6.
+- **Wind:** none of its own (the volcano's column).
+- **Sound:** `aurora`; thunder through the audio engine; the volcano's own rumble.
+- **LOD:** near 3 km, mid 12 km, far 45 km. **Discovery:** 12 km, in view.
+- **Lifetime:** 300-400 s; despawned beyond 40 + 5 km after 30 s out of view.
+
+#### 94. Double rainbow over whales
+
+A passing shower at sea in the low sun, a double rainbow across it, and a whale pod spouting and
+breaching underneath.
+[src/spawns/presets/doubleRainbowWhales.js](../src/spawns/presets/doubleRainbowWhales.js)
+
+- **Kind:** event, legendary combo.
+- **Combo:** preconditions golden light, clearing or building weather; member `whalePod` (the
+  anchor); exclusive.
+- **Engines:** `celestial` (a `rainbow` in a 2400 m sphere of mist around the pod, 250 m up, the
+  secondary bow at full); `weatherVolume` (a shower cumulus 1100 m up with a rain curtain 1.5 km
+  beyond; no wind of its own; owns the voice).
+- **Filters:** any biome; golden; clearing or building; coast; player below 2500 m; 3-8 km ahead.
+- **Candidates:** 7 km cells, 900 s buckets, chance 0.4.
+- **Wind:** none.
+- **Sound:** `waterfall` as the shower's hiss; the pod's `whale` song.
+- **LOD:** near 4 km, mid 12 km, far 30 km. **Discovery:** 5 km, in view.
+- **Lifetime:** 300-420 s; despawned beyond 14 + 3 km after 30 s out of view.
+
+#### 95. Eclipse over the monoliths
+
+The total solar eclipse comes over a monolith circle; as the light fails a ring of pale gold lights
+wakes among the standing stones and the stones hum.
+[src/spawns/presets/eclipseMonoliths.js](../src/spawns/presets/eclipseMonoliths.js)
+
+- **Kind:** event, legendary combo.
+- **Combo:** preconditions day, clear or clearing, a `monoliths` landmark within 6 km (the candidate
+  moves onto it); member `totalSolarEclipse` (the anchor); exclusive.
+- **Engines:** `lightEffect` (13 breathing glows on a 34 m ring around the circle and a flare on the
+  altar, read brightest through totality; owns the voice, its intensity the approach).
+- **Filters:** any biome; day; clear or clearing; over land; 1.5-8 km ahead.
+- **Candidates:** 7 km cells, 900 s buckets, chance 0.45.
+- **Wind:** none.
+- **Sound:** `crystal` tuned down to E2 (82.4 Hz), a low drone swelling on approach.
+- **LOD:** near 1500 m, mid 4 km, far 12 km. **Discovery:** 4 km, not needing a view.
+- **Lifetime:** 160-180 s; despawned beyond 20 + 3 km after 30 s out of view.
+
+#### 96. Comet breakup
+
+A bright comet low over the sea flares and breaks apart; its fragments drift away along its orbit on
+their own tails while debris streaks across the sky.
+[src/spawns/presets/cometBreakup.js](../src/spawns/presets/cometBreakup.js)
+
+- **Kind:** event, legendary combo with no member preset.
+- **Combo:** preconditions night, clear or clearing; exclusive.
+- **Engines:** `celestial` (a `comet` aimed along the activation heading, 16 degrees up; its
+  `breakup` at 25 s: a flare to 2.8 times, then 5-7 fragments split off 7 s apart and drift apart at
+  0.06 degrees a second; `meteors` `fromComet`, 30 a minute from the split, 14 % fireballs; owns the
+  voice).
+- **Filters:** any biome; night; clear or clearing; over water; 3-8 km ahead.
+- **Candidates:** 7 km cells, 900 s buckets, chance 0.4.
+- **Wind:** none.
+- **Sound:** `meteor` (a sizzle per bright streak, a boom per fireball).
+- **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, in view.
+- **Lifetime:** 360-480 s; despawned beyond 20 + 3 km after 30 s out of view.
+
+#### 97. Migration convergence
+
+Butterflies, a V of geese and a caribou column all meet in one valley, the air hazy with the dust and
+fluff they stir up.
+[src/spawns/presets/migrationConvergence.js](../src/spawns/presets/migrationConvergence.js)
+
+- **Kind:** event, legendary combo.
+- **Anchor:** `seek: 'valley'` within 2.5 km: the lowest dry ground; the members stand around it.
+- **Combo:** preconditions meadows or pine, day or golden, clear or clearing; members
+  `butterflyMigration` (the anchor, optional), `geeseFormation` (500 m on), `caribouMigration`
+  (700 m at 70 degrees, 10 s later, optional); exclusive. The optional members belong to presets 51
+  and 52: until they are in the build the combo starts without them.
+- **Engines:** `emitter` (3000 motes of warm dust and seed fluff over a 650 m disc of the valley floor,
+  drifting on the real wind; owns the voice).
+- **Filters:** meadows or pine; day or golden; clear or clearing; over land; player below 3 km;
+  3-8 km ahead.
+- **Candidates:** 7 km cells, 900 s buckets, chance 0.4.
+- **Wind:** none.
+- **Sound:** `murmuration` (the rush of many wings); the geese's honking.
+- **LOD:** near 2 km, mid 5 km, far 10 km. **Discovery:** 3 km, in view.
+- **Lifetime:** 360-480 s; despawned beyond 12 + 3 km after 25 s out of view.
+
+#### 98. Midnight sun
+
+A night over the snow when the sun never sets, skimming the northern horizon in endless gold.
+[src/spawns/presets/midnightSun.js](../src/spawns/presets/midnightSun.js)
+
+- **Kind:** event, legendary global override (never a director candidate).
+- **Override:** `midnightSun`, night chance 0.05, region snow blended over 4 km: the sun's path bends
+  so it stays 1.5 degrees up at midnight; `state.time` follows it.
+- **Engines:** `celestial` (sky-anchored; a warm amber over the sky and the haze, eased in and out;
+  owns the voice), started once a night from half weight and ended with the override.
+- **Wind:** none.
+- **Sound:** `lantern` (a soft ambient pad).
+- **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, not needing a view.
+- **Lifetime:** with the override (1800-2400 s caps it).
+
+#### 99. Resonating crystal spires
+
+A thunderstorm over a grove of crystal spires sets it ringing: arcs of light leap from tip to tip, the
+spires glow brighter and lightning strikes into the grove.
+[src/spawns/presets/resonatingSpires.js](../src/spawns/presets/resonatingSpires.js)
+
+- **Kind:** event, legendary combo.
+- **Combo:** preconditions storm weather and a `crystalSpires` site within 8 km (the candidate moves
+  onto it); member `supercell`, 3.5 km beyond (one heavy slot); exclusive.
+- **Engines:** `lightEffect` (lightning: 9 a minute within 220 m, 85 % to the ground; `arcs` across
+  the spires' tips, 42 a minute between tips up to 170 m apart, the spires' glow raised to 2.8 times;
+  owns the voice, each arc a chime).
+- **Filters:** any biome and hour; storm; over land; 2-9 km ahead.
+- **Candidates:** 8 km cells, 600 s buckets, chance 0.6.
+- **Wind:** none of its own (the supercell's).
+- **Sound:** `crystal` at D3 (146.8 Hz), at full intensity, a chime per arc; thunder.
+- **LOD:** near 2500 m, mid 8 km, far 20 km. **Discovery:** 4 km, in view.
+- **Lifetime:** 240-360 s; despawned beyond 16 + 3 km after 30 s out of view.
+
+#### 100. Lighthouse beacons
+
+A lighthouse fires its beacon into the night, and every lighthouse in sight answers in turn down the
+coast, a flare in each lantern and a foghorn each.
+[src/spawns/presets/lighthouseBeacons.js](../src/spawns/presets/lighthouseBeacons.js)
+
+- **Kind:** event, legendary combo with no member preset: the world's lighthouses are the event.
+- **Combo:** preconditions dusk or night and a `lighthouse` landmark within 8 km (the candidate moves
+  onto it); exclusive.
+- **Engines:** `lightEffect` (a beam swinging 58 degrees up from the first lantern, a lamp light, and a
+  glow group on every lighthouse within 18 km, nearest first, flaring one after another 2.8 s apart,
+  the chain running round every 36 s; owns the voice, a horn as each flare lights).
+- **Filters:** any biome; dusk or night; clear, clearing or building; any surface; 2-12 km ahead.
+- **Candidates:** 7 km cells, 900 s buckets, chance 0.5.
+- **Wind:** none.
+- **Sound:** `foghorn` (the wash of the sea; a diaphone `horn` per answer, louder near, a different
+  note each).
+- **LOD:** near 3 km, mid 10 km, far 30 km. **Discovery:** 6 km, in view.
+- **Lifetime:** 240-360 s; despawned beyond 30 + 4 km after 30 s out of view.
+
+
 ## Adding a preset
 
 Phase 3 adds 70 presets on these same engines. A new preset needs no engine or system code unless
@@ -760,7 +972,7 @@ it needs an engine feature that does not exist yet.
 5. **Sound.** `audio.recipe` must be one of the recipes in
    [src/audio/recipes/index.js](../src/audio/recipes/index.js): `tornado`, `thunder`, `volcano`,
    `geyser`, `waterfall`, `whale`, `skyWhale`, `crystal`, `turbine`, `murmuration`, `meteor`,
-   `lantern`, `discovery`, `raptor` or `goose`. A preset has one voice. Without a flag the first
+   `lantern`, `discovery`, `raptor`, `goose`, or Phase 3's `iceSing`, `aurora` and `foghorn`. A preset has one voice. Without a flag the first
    engine entry opens it; each engine has its own flag: `voice` (vortex, structure, fauna,
    waterEffect), `sound` (emitter, lightEffect) or `ownsAudio` (weatherVolume, celestial). On a
    multi-engine preset set the flags explicitly: `true` on the part that should own the voice and
@@ -1008,9 +1220,9 @@ export default Object.freeze({
 | `achievements` | both | optional | `[{ id, title, description }]` | engines, journal |
 | `activeState` | site | optional | `{ duration: [min, max] }`: a dormant site the director wakes | director, SpawnManager |
 | `cooldown` | both | optional | seconds before it may run again | director |
-| `anchor` | event | optional | `{ seek: 'peak', radius, align: 'downwind' }` | SpawnManager |
+| `anchor` | event | optional | `{ seek: 'peak' \| 'valley', radius, align: 'downwind' }` | SpawnManager |
 | `tags` | both | optional | distinct names from `PRESET_TAGS` (schema.js): the craft weighting's vocabulary | director (contract i.2) |
-| `combo` | event | optional, legendary only | `{ preconditions?, members, exclusive?, heavySlots? }` ([Combos](#combos-legendary-presets-92-97-99-and-100)) | director (contract i.3) |
+| `combo` | event | optional, legendary only | `{ preconditions?, members, exclusive?, heavySlots? }`, a member `{ presetId, role?, place?, delay?, optional? }` ([Combos](#combos-legendary-presets-92-97-99-and-100)) | director (contract i.3) |
 | `override` | event | optional, not with `combo` | `{ kind: bloodMoon \| midnightSun, nightChance, region: null \| { biomes, blendKm } }` ([Global overrides](#global-overrides-the-blood-moon-and-the-midnight-sun)) | director, sky (contract i.4) |
 
 Any other top-level field is refused as a typo. A preset must be frozen
@@ -1041,6 +1253,13 @@ combo: {
   heavySlots: 2,     // heavy slots it needs at once (0-2; at least its heavy members)
 },
 ```
+
+Two Phase 3 additions: a member with `optional: true` may name a preset this build does not have
+(another batch's; the director then starts the combo without it, and its log and `comboStarted`
+list only the members it has), and a combo with preconditions may name no member at all, its own
+engines carrying it at the site, landmark or sky its preconditions bring (93, 96, 100). A combo
+whose own preset seeks its ground (`anchor.seek`, the migration's valley) places its members around
+the point the SpawnManager moved it to.
 
 The combo's own preset (its engines) starts at the candidate too; the combo and its members carry
 the combo id as `parent` on their SpawnManager records, the log lists the combo with its member ids
