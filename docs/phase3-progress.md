@@ -544,7 +544,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
   | Check | WebGPU | WebGL2 |
   | --- | --- | --- |
-  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1`, `docs-check` 236/236 | built | |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 236/236 | built, V1 untouched | |
   | Labs: balloon 66/66 (new), craft 66, flight-lab 82, audio 191, atmosphere 28, challenges 70, colliders 84, copilot 240, copilot-server 17, director 50, discovery 43, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden (identical), setpiece 47, settings 45, spawns 98, storage 54, structure 75, terrain 404, water 34, wind-engines 56, wingsuit 37 | all pass (the allocation labs with `--expose-gc`) | |
   | `run-harness --test craft --crafts balloon` (general test both views, 12 scenario runs) | PASS 14/14 runs, 50/50 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0 (rerun; the first run had the same 50/50 and one `WebGPU Device Lost: A valid external Instance reference no longer exists` console error from the shared GPU) | PASS 14/14, 50/50, 0/0 |
   | `run-harness --test 1` reduced (HARNESS-1/2, balloon, both views, 20 s) | 0 NaN, 0 penetrations, 0/0, heap 7.08 MB, 4/4 runs, 8/8 manoeuvres; frames over 50 ms: 145 (mostly mainThread at 100 % machine CPU) | same criteria pass, heap 6.89 MB; frames over 50 ms: 66 |
