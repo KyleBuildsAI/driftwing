@@ -34,6 +34,7 @@ import skyWhale from './skyWhale.js';
 import crystalSpires from './crystalSpires.js';
 import jetStream from './jetStream.js';
 import stormChase from './stormChase.js';
+import sandstormWall from './sandstormWall.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -69,6 +70,8 @@ export const PRESETS = Object.freeze([
   crystalSpires,
   jetStream,
   stormChase,
+  // Batch 4: presets 31-40.
+  sandstormWall,
 ]);
 
 /** Presets by id. */
