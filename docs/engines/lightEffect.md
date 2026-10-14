@@ -43,6 +43,15 @@ Unknown keys are refused too.
   - Points take the scene's own haze (the sky's `fogAmountNode`).
 - **Beams.** A lighthouse's spokes are ribbons in one of 4 shared beam slots, sweeping around the
   vertical axis in the shader on the scene clock.
+- **Arcs (Phase 3).** Bolts leaping between the arc points of a neighbouring structure spawn (the crystal
+  spires' tips, `instance.data.arcPoints`), found through the SpawnManager's allocation-free
+  `nearestPart` and looked up again every second; they use the bolt slots, the flash billboard and the
+  strike light like strikes do, and the target structure's glow swells with the arcs' activity (its
+  live `glow` param), given back when they end.
+- **Chains (Phase 3).** A glow group on the world's landmarks (`layout: 'landmarks'`: every lighthouse
+  within `radius`, nearest first) or any group with a `chain` blinks point after point: each point's
+  blink phase is set from the chain's start, so the shader lights them one by one with no CPU work,
+  and the voice's chain trigger (a foghorn) fires as each one lights.
 - **Night first.** Glows, swarms and beams fade with the time of day (`visibility`, `beam.night`,
   `light.night`), so a preset looks right at night and golden hour and is quiet at noon.
 
@@ -83,7 +92,9 @@ Each entry is a group of points: one lamp, a ring of crystal tips, a field of la
 | param | unit | range | default | notes |
 | --- | --- | --- | --- | --- |
 | `count` | points | 1..12000 | 1 | |
-| `layout` | | `point`, `ring`, `scatter`, `line` | `point` | `ring` spaces the points on a circle of `radius`, `scatter` fills a disc of `radius`, `line` spreads them over `length` along forward |
+| `layout` | | `point`, `ring`, `scatter`, `line`, `landmarks` | `point` | `ring` spaces the points on a circle of `radius`, `scatter` fills a disc of `radius`, `line` spreads them over `length` along forward, `landmarks` stands one on each landmark of type `landmark` within `radius` of the anchor (at most `count`, nearest first; on its ground plus `offset[1]`; none without the game's world, as in the labs) |
+| `landmark` | | `arch`, `monoliths`, `lighthouse`, `balloons` | | layout `landmarks` only (and required there) |
+| `chain` | object or null | | null | `{ interval s = 2.5 (0..600), period s = 30 (0.5..3600), duty 0..1 = 0.15, delay s = 0, trigger }`: the points light one after another, `interval` apart from `delay` after the create, each for `duty` of every `period`; `trigger` names the voice's trigger fired as each lights (louder for a point near the camera, the pitch option a little different per point). A chained group cannot share its instance with a swarm |
 | `offset` | m, scaled | [r, u, f] | [0, 0, 0] | the group's centre |
 | `radius` | m, scaled | 0..100000 | 50 | ring and scatter radius |
 | `length` | m, scaled | 0..100000 | 500 | line length |
@@ -115,6 +126,26 @@ Fireflies and other living lights: points hovering over the ground under the anc
 | `wander` | object | | `{ radius 1.5, speed 0.35, vertical 0.5 }` | |
 
 One instance holds at most 12 000 points (glows and swarm together).
+
+### Arcs (`arcs`, object or omitted)
+
+Arcs of light between the arc points a structure recipe offers (`out.arcPoints`: the spires' tips).
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `target` | preset id | | required | the preset whose live structure spawn offers the points (`crystalSpires`) |
+| `radius` | m | 1..20000 | 3000 | the nearest such spawn within this of the anchor |
+| `rate` | arcs/min | 0..600 | 24 | at activity 1, at the near and mid tiers |
+| `maxGap` | m | 5..2000 | 180 | an arc joins a point to a seeded partner within this (the nearest when none is) |
+| `color` | 0xRRGGBB | | 0xbfe8ff | the bolt and its flash |
+| `width` | m | 0.1..50 | 1.6 | channel half-width |
+| `brightness` | HDR gain | 0..100 | 8 | |
+| `branches` | count | 0..24 | 3 | |
+| `duration` | s | 0.1..5 | 0.45 | how long an arc stays lit |
+| `glow` | 0..50 | | 0.8 | the flash billboard at its middle (0 for none) |
+| `thunder` | 0..1.5 | | 0.35 | a crack through the audio engine's thunder |
+| `resonance` | 0..4 | | 1.5 | the target's glow multiplier rises to 1 + this at full activity |
+| `chime` | bool | | true | every arc rings the voice's `chime` (the crystal recipe) |
 
 ### Steady light (`light`, object or omitted)
 
@@ -221,6 +252,14 @@ One instance holds at most 12 000 points (glows and swarm together).
 // Sky lantern launch: the light at the launch field (the lanterns themselves are the emitter's `lantern` style)
 { engine: 'lightEffect', params: { glows: [{ layout: 'scatter', count: 40, radius: 120, onGround: true, height: [1, 2], size: [4, 7], colors: [0xffb45a], intensity: 2, flicker: 0.2 }],
   light: { color: 0xffa050, intensity: 6e4, range: 500, offset: [0, 15, 0], flicker: 0.15 } } }
+
+// Phase 3: resonating spires: arcs between the crystal spires' tips while lightning strikes the grove (audio: crystal)
+{ engine: 'lightEffect', params: { lightning: { rate: 9, radius: 220, groundShare: 0.85 },
+  arcs: { target: 'crystalSpires', radius: 2500, rate: 42, maxGap: 170, resonance: 1.8 }, visibility: { day: 1, night: 1 } } }
+
+// Phase 3: the lighthouse chain: a flare on every lighthouse within 18 km, lit one after another (audio: foghorn)
+{ engine: 'lightEffect', params: { glows: [{ layout: 'landmarks', landmark: 'lighthouse', radius: 18000, count: 10, offset: [0, 37, 0],
+  size: [70, 90], intensity: 14, shape: 'flare', chain: { interval: 2.8, period: 36, duty: 0.14, trigger: 'horn' } }], lod: { far: 1 } } }
 
 // Phase 3: aurora-lit ice, will-o'-the-wisps, bioluminescent caves
 { engine: 'lightEffect', params: { glows: [{ layout: 'scatter', count: 12, radius: 300, height: [2, 8], size: [2, 3], colors: [0x9fffe0], intensity: 4,

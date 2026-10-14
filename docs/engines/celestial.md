@@ -21,11 +21,11 @@ comet, or an eclipse that also raises the stars.
 | component | what it draws and drives | presets |
 | --- | --- | --- |
 | `meteors` | streaks from a radiant fixed among the stars (it turns with them), a seeded Poisson stream, fireballs that flash the sky and the land | meteor shower |
-| `comet` | nucleus, coma, a curved dust tail pointing away from the sun, a straight ion tail; fixed among the stars | comet |
+| `comet` | nucleus, coma, a curved dust tail pointing away from the sun, a straight ion tail; fixed among the stars; optionally breaking up into fragments that drift apart on their own tails | comet, comet breakup (96) |
 | `eclipse` | the moon's disc crossing the sun, corona, chromosphere, Baily's beads; a sky modifier that dims the sun and ambient light, darkens and tints the sky and fog, and raises the stars; the typed `wildlifeQuiet` event through totality | total solar eclipse |
 | `glory` | drives the shared cloud optics (`uniforms.cloudGlory`, `uniforms.cloudBow`): the glory's coloured rings and the full-circle rainbow shine on every cloud (v1 field and weather volumes) around the antisolar point, where the craft's own shadow falls on the cloud tops below | glory + full-circle rainbow |
 | `rainbow` | a rainbow (or a moonbow) inside a sphere of mist, lit by the sun or moon behind the viewer | the waterfall's daytime rainbow, Phase 3 moonbow |
-| `sky` | a static sky modifier eased in and out with the instance | Phase 3: Milky Way core, blood moon, aurora nights |
+| `sky` | a static sky modifier eased in and out with the instance, the aurora's strength among its values | Phase 3: Milky Way core, blood moon, the aurora nights (92, 93), the midnight sun's amber (98) |
 
 ## Parameters
 
@@ -55,6 +55,7 @@ comet, or an eclipse that also raises the stars.
 | `brightness` | factor | 0..4 | 1 | |
 | `maxActive` | count | 1..48 | 24 | |
 | `daylight` | bool | | false | when false, meteors fade out in a bright sky (the sun above -3 degrees; fully visible below -12) and under overcast |
+| `fromComet` | bool | | false | the radiant sits on the instance's own comet, so the streaks fly away from it (its debris); with a comet `breakup` the stream starts at the split |
 
 The `meteor` audio recipe gets `setIntensity` (the shower's activity) and triggers: `streak` for
 bright meteors and `fireball` for fireballs.
@@ -65,6 +66,8 @@ bright meteors and `fireball` for fireballs.
 | --- | --- | --- | --- | --- |
 | `position` | `{ azimuth, elevation }` deg | | seeded circumpolar (18-32 degrees from the pole) | where it is at activation |
 | `sidereal` | bool | | true | turns with the stars |
+| `aim` | `seeded` or `heading` | | `seeded` | where it stands at activation without an absolute `position`: seeded near the pole, or toward the activation heading (`position.azimuth` then turns it from the heading and `position.elevation`, default 18, lifts it; a comet over the sea ahead) |
+| `breakup` | object or null | | null | the nucleus splits, see below |
 | `tailLength` | deg | 2..90 | 22 | the tail points away from the sun along the sky |
 | `tailWidth` | deg | 0.2..30 | 4 | |
 | `curvature` | -1..1 | | 0.3 | how far the dust tail bends |
@@ -72,6 +75,22 @@ bright meteors and `fireball` for fireballs.
 | `ionTail` | 0..1 | | 0.6 | the straight blue ion tail |
 | `color`, `ionColor` | 0xRRGGBB | | 0xfff0d2, 0x7fb4ff | |
 | `brightness` | factor | 0..4 | 1 | the comet fades out as the sun rises above -8 degrees, and under overcast |
+
+`comet.breakup` (Phase 3, the comet breakup preset): at `start` the nucleus flares to `flare` times its
+brightness, falling back over about 10 s to `remain`, and its fragments split off one after another,
+each a small comet of its own (its own short tail away from the sun, its own coma) drifting along the
+orbit behind the nucleus (the anti-sun line on the sky) at its own share of `drift` and scattering
+sideways up to `spread` over a minute.
+
+| field | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `start` | s | 0..3600 | 20 | after the activation |
+| `fragments` | count or [min, max] | 1..8 | [4, 6] | seeded per instance |
+| `stagger` | s | 0..600 | 6 | between two fragments splitting off (seeded 0.6-1.4 times) |
+| `drift` | deg/s | 0.001..2 | 0.05 | how fast they separate along the orbit (each 0.3-1 times) |
+| `spread` | deg | 0..10 | 0.6 | sideways scatter at a minute |
+| `flare` | factor | 1..6 | 2.5 | the nucleus at the split |
+| `remain` | factor | 0..1 | 0.55 | the nucleus after the flare |
 
 ### eclipse
 
@@ -127,7 +146,9 @@ volume `sheet` in the same preset put the cloud there.
 ### sky
 
 `sky` takes any of the sky modifier values: `sunIntensity`, `ambient`, `fogDensity`, `darkness`,
-`overcast`, `stars`, `skyTint`, `skyTintAmount`, `fogColor`, `fogColorAmount`. It also takes
+`overcast`, `stars`, `skyTint`, `skyTintAmount`, `fogColor`, `fogColorAmount`, and `aurora` (0..1,
+Phase 3: the aurora curtains' presence is raised to at least this much wherever the sky is dark, not
+only over the snow; still hidden by overcast and daylight). It also takes
 `when` (`always`, `day` or `night`). The values ease in with the instance's presence, and the engine
 folds them with an eclipse or a fireball flash into the instance's one modifier.
 
@@ -149,7 +170,8 @@ folds them with an eclipse or a fireball flash into the instance's one modifier.
   meteors and (after the last instance) the cloud optics. The celestial engine registers no wind
   sources.
 - **Budget.** `budget: { instances: 3, particles: 6000 }`, where particles are the active meteors.
-  The engine holds 48 meteors, 3 comets, 2 eclipses and 3 rainbows at once.
+  The engine holds 48 meteors, 12 comet quads (three comets and a breakup's fragments), 2 eclipses and
+  3 rainbows at once.
 
 ## Measured cost
 
@@ -177,6 +199,13 @@ covers both engines).
 
 // The waterfall's daytime rainbow in its mist (with the weatherVolume mist in the same preset)
 { engine: 'celestial', params: { rainbow: { radius: 260, height: 160 } } }
+
+// Phase 3: an aurora night (the curtains at full wherever it is dark)
+{ engine: 'celestial', params: { sky: { aurora: 1, stars: 1, when: 'night' } } }
+
+// Phase 3: a comet breaking up low over the sea ahead, its debris streaking away from it
+{ engine: 'celestial', params: { comet: { aim: 'heading', position: { azimuth: 0, elevation: 16 }, breakup: { start: 25, fragments: [5, 7] } },
+  meteors: { fromComet: true, rate: 30, fireballChance: 0.14 } } }   // audio: { recipe: 'meteor' }
 
 // Phase 3: a moonbow, a Milky Way core night, a blood moon's darkened reddish night
 { engine: 'celestial', params: { rainbow: { radius: 260, height: 160, light: 'moon' } } }
