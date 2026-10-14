@@ -4,7 +4,8 @@
 // A celestial instance is a set of optional components, so one preset can combine them (a meteor
 // shower under a comet, a moonbow in a waterfall's mist, an eclipse that also raises the stars):
 //   meteors  streaks from a radiant, occasional fireballs with a brief flash of light
-//   comet    a nucleus and coma with a curved dust tail pointing away from the sun and a straight ion tail
+//   comet    a nucleus and coma with a curved dust tail pointing away from the sun and a straight ion tail;
+//            optionally breaking up into fragments that drift apart along the orbit
 //   eclipse  the moon's disc crossing the sun, the corona, Baily's beads, the sky, fog and light darkening
 //   glory    the glory and the full-circle rainbow on every cloud around the craft's own shadow
 //   rainbow  a rainbow (or moonbow) inside a volume of mist (a sphere), seen with the light behind you
@@ -14,6 +15,10 @@ export const CELESTIAL_COMPONENTS = Object.freeze(['meteors', 'comet', 'eclipse'
 export const CELESTIAL_ANCHORS = Object.freeze(['sky', 'world']);
 export const LIGHT_SOURCES = Object.freeze(['sun', 'moon']);
 export const SKY_WHEN = Object.freeze(['always', 'day', 'night']);
+/** comet.aim: where an unplaced comet stands: seeded near the pole, or toward the activation heading. */
+export const COMET_AIMS = Object.freeze(['seeded', 'heading']);
+/** The most fragments a comet's breakup draws (each takes a comet slot). */
+export const MAX_COMET_FRAGMENTS = 8;
 const SKY_SCALARS = Object.freeze({
   sunIntensity: [0, 4], ambient: [0, 4], fogDensity: [0.25, 8], darkness: [0, 1], overcast: [0, 1], stars: [0, 1], skyTintAmount: [0, 1], fogColorAmount: [0, 1],
   aurora: [0, 1],
@@ -86,6 +91,20 @@ function resolveMeteors(source) {
     brightness: number(source.brightness, `${field}.brightness`, 1, 0, 4),
     maxActive: Math.round(number(source.maxActive, `${field}.maxActive`, 24, 1, 48)),
     daylight: source.daylight === true,
+    fromComet: source.fromComet === true,
+  });
+}
+
+/** comet.breakup: the nucleus splitting into fragments that drift apart along the orbit. */
+function resolveBreakup(source, field) {
+  return Object.freeze({
+    start: number(source.start, `${field}.start`, 20, 0, 3600),
+    fragments: range(source.fragments, `${field}.fragments`, Object.freeze([4, 6]), 1, MAX_COMET_FRAGMENTS),
+    stagger: number(source.stagger, `${field}.stagger`, 6, 0, 600),
+    drift: number(source.drift, `${field}.drift`, 0.05, 0.001, 2),
+    spread: number(source.spread, `${field}.spread`, 0.6, 0, 10),
+    flare: number(source.flare, `${field}.flare`, 2.5, 1, 6),
+    remain: number(source.remain, `${field}.remain`, 0.55, 0, 1),
   });
 }
 
@@ -102,6 +121,8 @@ function resolveComet(source) {
     ionColor: color(source.ionColor, `${field}.ionColor`, 0x7fb4ff),
     ionTail: number(source.ionTail, `${field}.ionTail`, 0.6, 0, 1),
     sidereal: source.sidereal !== false,
+    aim: oneOf(source.aim, COMET_AIMS, `${field}.aim`, 'seeded'),
+    breakup: block(source.breakup, `${field}.breakup`) ? resolveBreakup(block(source.breakup, `${field}.breakup`), `${field}.breakup`) : null,
   });
 }
 
