@@ -31,6 +31,11 @@
 //   within HEAP_TOLERANCE_MB of its baseline: a spawn that kept even a third of a megabyte per create
 //   fails it. The show itself is not judged on the heap: a first create builds the shared pipelines and
 //   caches it leaves behind on purpose, and the craft flies through streaming terrain.
+// Phase 3 scenarios may also show a legendary combo with its members (`combo`: started through the
+// director's debug path on the anchor, every spawn with the combo as parent ended together), a global
+// override (`override`: scheduled on the night, its preset shown, the forced night released after), and
+// stand up the real sites a combo needs before the baseline (`sites`, `wake` for an active state), so
+// they count as the world's and stay out of the judged deltas (src/dev/spawnScenarios.js).
 // Criteria: 30 / 30 presets spawned, GPU memory, wind sources, lights and sky modifiers back after
 // every dispose, the heap within tolerance across every leak check, 0 console errors and 0 warnings, every
 // screenshot taken (with ?testShots=1), no harness problems. Frame times are reported, not judged.
@@ -141,6 +146,8 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
   /** The frame recorder of the live window, or null outside it. */
   let recording = null;
   let lastFrameMs = null;
+  /** A combo's main spawn id -> its combo id (scenario.combo): its members end with it. */
+  const comboOfSpawn = new Map();
   /** The screenshot the runner should take now: { token, name, presetId } or null. */
   let pendingShot = null;
   let shotSerial = 0;
@@ -321,6 +328,39 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     return best;
   }
 
+  /** The nearest landmark of a type (src/world/worldgen.js landmark sites) to the start, or throws. */
+  function nearestLandmark(type) {
+    const origin = state.spawn;
+    for (let radius = 6000; radius <= SITE_SEARCH_RADIUS; radius *= 2) {
+      let best = null;
+      for (const site of world.landmarkSitesNear(origin.x, origin.z, radius)) {
+        if (site.type !== type) continue;
+        if (!best || Math.hypot(site.x - origin.x, site.z - origin.z) < Math.hypot(best.x - origin.x, best.z - origin.z)) best = site;
+      }
+      if (best) return best;
+    }
+    throw new Error(`no ${type} landmark within ${SITE_SEARCH_RADIUS / 1000} km of the start`);
+  }
+
+  /**
+   * The real sites a scenario needs standing (scenario.sites: a combo's place), activated through the
+   * manager before the baseline, so they count as the world's; with scenario.wake the first one's active
+   * state is on (the erupting volcano). Returns their spawn ids.
+   */
+  function standSites(scenario) {
+    const ids = [];
+    for (const [index, presetId] of (scenario.sites ?? []).entries()) {
+      const site = realSite(presetId);
+      if (!site) throw new Error(`no ${presetId} site within ${SITE_SEARCH_RADIUS / 1000} km of the start`);
+      const awake = scenario.wake === true && index === 0;
+      const id = manager.activate(presetId, { position: { x: site.x, y: site.groundY, z: site.z }, site, source: awake ? 'site' : 'debug', force: true });
+      if (!id) throw new Error(`the ${presetId} site ${site.id} was refused (${manager.getStats().lastRefusal})`);
+      if (awake && !manager.setSiteActive(id, true)) throw new Error(`the ${presetId} site ${site.id} could not be woken`);
+      ids.push(id);
+    }
+    return ids;
+  }
+
   /** Where a site's stamp puts its point of interest: a volcano's peak, a waterfall's lip. */
   function siteFocus(site) {
     const stamp = site.stamps && site.stamps.length > 0 ? site.stamps[0] : null;
@@ -332,8 +372,12 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
   /** The scenario's anchor: { kind, x, z, y, site? , note }. */
   function resolveAnchor(scenario, preset) {
     if (scenario.anchor === 'sky') return { kind: 'sky' };
+    if (scenario.anchor === 'landmark') {
+      const landmark = nearestLandmark(scenario.landmark);
+      return { kind: 'landmark', x: landmark.x, z: landmark.z, y: ground(landmark.x, landmark.z), note: `${scenario.landmark} ${landmark.id}` };
+    }
     if (scenario.anchor === 'site') {
-      const site = realSite(preset.id);
+      const site = realSite(scenario.siteOf ?? preset.id);
       if (site) {
         const focus = siteFocus(site);
         return { kind: 'site', x: site.x, z: site.z, y: site.groundY, site, focus, note: `real site ${site.id} (${site.stamps.map((stamp) => stamp.type).join(', ') || 'no stamps'})` };
@@ -372,8 +416,41 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     return { x, y, z, heading };
   }
 
+  /**
+   * A combo (scenario.combo) through the director's debug path on the anchor's spot, with its members;
+   * returns the combo's own spawn id (its members end with it, endSpawn) or null.
+   */
+  function createCombo(scenario, anchor) {
+    const spot = anchor.kind === 'sky' ? system.pointAhead(scenario.distance) : anchor;
+    const comboId = system.director.forceSpawn(scenario.id, { force: true, at: { x: spot.x, z: spot.z } });
+    if (!comboId) return null;
+    const main = manager.getActive().find((spawn) => spawn.parent === comboId && spawn.presetId === scenario.id);
+    if (!main) return null;
+    comboOfSpawn.set(main.id, comboId);
+    return main.id;
+  }
+
+  /** Ends a spawn and, for a combo, every spawn it brought (the same parent). */
+  function endSpawn(spawnId) {
+    const comboId = comboOfSpawn.get(spawnId) ?? null;
+    if (manager.getInstance(spawnId)) manager.deactivate(spawnId, 'spawns test');
+    if (comboId === null) return;
+    for (const spawn of manager.getActive()) if (spawn.parent === comboId) manager.deactivate(spawn.id, 'spawns test');
+    comboOfSpawn.delete(spawnId);
+  }
+
+  /** The live spawns a combo brought besides its own (members), by preset id. */
+  function comboMembers(spawnId) {
+    const comboId = comboOfSpawn.get(spawnId) ?? null;
+    if (comboId === null) return [];
+    return manager.getActive().filter((spawn) => spawn.parent === comboId && spawn.id !== spawnId);
+  }
+
   /** Creates the spawn at the anchor (the debug path the F9 debugger uses). Returns its id or null. */
   function createSpawn(scenario, anchor) {
+    if (scenario.combo) return createCombo(scenario, anchor);
+    // A global override is scheduled on the night (the sky bends), and its own preset shown as usual.
+    if (scenario.override) system.forceSpawn(scenario.id, { force: true });
     const options = { source: 'debug', force: true, heading: state.player.heading };
     if (scenario.params) options.params = scenario.params;
     if (anchor.kind === 'sky') {
@@ -391,9 +468,20 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     return manager.activate(scenario.id, options);
   }
 
-  /** The preset and every set-piece child it names, in the order they go into the manager. */
-  function presetFamily(preset) {
+  /**
+   * The preset, every set-piece child it names, a combo's members this build has and the sites the
+   * scenario stands up, in the order they go into the manager.
+   */
+  function presetFamily(preset, scenario = null) {
     const family = [preset];
+    for (const member of preset.combo ? preset.combo.members : []) {
+      const memberPreset = presetById.get(member.presetId);
+      if (memberPreset && !family.includes(memberPreset)) family.push(memberPreset);
+    }
+    for (const siteId of scenario && scenario.sites ? scenario.sites : []) {
+      const sitePreset = presetById.get(siteId);
+      if (sitePreset && !family.includes(sitePreset)) family.push(sitePreset);
+    }
     for (const entry of preset.engines) {
       if (entry.engine !== 'setPiece') continue;
       for (const child of Object.values(entry.params.children ?? {})) {
@@ -505,6 +593,66 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       const where = flock ? `, ${round(flock.playerDistance, 1)} m from the craft` : '';
       return joined ? `joined the wing (${round((performance.now() - started) / 1000, 1)} s with the settle)${where}` : `did not join within 40 s${where}`;
     },
+    /** Waits (up to 30 s) for every member of a combo this build has, and names them. */
+    async comboMembers(spawnId) {
+      const preset = presetById.get(manager.getInstance(spawnId)?.presetId ?? '');
+      const wanted = preset && preset.combo ? preset.combo.members.filter((member) => presetById.has(member.presetId)).length : 0;
+      const started = performance.now();
+      while (comboMembers(spawnId).length < wanted && performance.now() - started < 30000) await frames(5);
+      const members = comboMembers(spawnId).map((spawn) => spawn.presetId);
+      return `${members.length}/${wanted} members: ${members.join(', ') || 'none'}`;
+    },
+    /** A combo's eclipse member put at totality (the moon centred on the sun). */
+    async memberTotality(spawnId) {
+      const member = comboMembers(spawnId).find((spawn) => spawn.presetId === 'totalSolarEclipse');
+      return member ? STAGES.totality(member.id) : 'no eclipse member';
+    },
+    /** Moves a comet breakup on past its split, so the fragments and the debris show. */
+    async breakup(spawnId) {
+      const part = partsOf(spawnId).find((entry) => entry.engine === 'celestial');
+      if (!part || !part.data.params.comet || !part.data.params.comet.breakup) return 'no comet breakup';
+      part.data.startTime -= part.data.params.comet.breakup.start + 45;
+      const started = performance.now();
+      while (engineOf('celestial').describe(part).meteorsActive < 3 && performance.now() - started < 20000) await frames(1);
+      const described = engineOf('celestial').describe(part);
+      return `split ${round(described.comet.split, 2)}, ${described.comet.fragmentsShown} fragments shown, ${described.meteorsActive} debris streaks`;
+    },
+    /** Waits (up to 20 s) for the arcs to find their structure and leap at least twice. */
+    async arcs(spawnId) {
+      const part = partsOf(spawnId).find((entry) => entry.engine === 'lightEffect');
+      if (!part) return 'no light effect';
+      const engine = engineOf('lightEffect');
+      const before = engine.describe(part).strikes.arcs;
+      const started = performance.now();
+      while (engine.describe(part).strikes.arcs - before < 2 && performance.now() - started < 20000) await frames(2);
+      const described = engine.describe(part);
+      return `${described.arcTarget} arc points, ${described.strikes.arcs - before} arcs, resonance ${round(described.resonance, 2)}, ${described.bolts} bolts lit`;
+    },
+    /** Waits until three flares of the beacon chain have lit, and counts its lighthouses. */
+    async chain(spawnId) {
+      const part = partsOf(spawnId).find((entry) => entry.engine === 'lightEffect');
+      if (!part) return 'no light effect';
+      const glow = part.data.config.glows.find((entry) => entry.chain);
+      if (!glow) return 'no chained glow group';
+      const lit = part.data.chainStart + glow.chain.delay + glow.chain.interval * 2.2;
+      const started = performance.now();
+      while (state.time.elapsed < lit && performance.now() - started < 20000) await frames(2);
+      const described = engineOf('lightEffect').describe(part);
+      return `${described.landmarks.filter((count) => count !== null).join(', ')} lighthouses in the chain`;
+    },
+    /** Waits (up to 20 s) for a forced override to reach full weight; reports the bent sun. */
+    async override(spawnId) {
+      const presetId = manager.getInstance(spawnId)?.presetId;
+      const started = performance.now();
+      let entry = null;
+      while (performance.now() - started < 20000) {
+        entry = system.director.getOverrides().find((candidate) => candidate.presetId === presetId) ?? null;
+        if (entry && entry.weight >= 0.95) break;
+        await frames(5);
+      }
+      await frames(10);
+      return `${presetId} weight ${entry ? round(entry.weight, 2) : 'none'}, sun ${round(state.time.sunElevation, 1)} deg at dayTime ${round(state.time.dayTime, 3)}`;
+    },
     /** Moves the comet's slow fade-in on by 30 s. */
     async cometFadeIn(spawnId) {
       for (const part of partsOf(spawnId)) if (part.engine === 'celestial' && Number.isFinite(part.data.startTime)) part.data.startTime -= 30;
@@ -558,7 +706,12 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       await frames(2);
       const position = new THREE.Vector3(player.x, player.y + 30, player.z);
       let target;
-      if (mode === 'sun') {
+      if (view.direction) {
+        // A fixed part of the sky (an aurora night: low over the northern horizon).
+        const azimuth = (view.direction.azimuth * Math.PI) / 180;
+        const elevation = (view.direction.elevation * Math.PI) / 180;
+        target = new THREE.Vector3(position.x + Math.sin(azimuth) * Math.cos(elevation) * 1000, position.y + Math.sin(elevation) * 1000, position.z - Math.cos(azimuth) * Math.cos(elevation) * 1000);
+      } else if (mode === 'sun') {
         const sun = state.time.sunDirection;
         target = new THREE.Vector3(position.x + sun.x * 1000, position.y + sun.y * 1000, position.z + sun.z * 1000);
       } else {
@@ -674,9 +827,12 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       row.notes.push('no such preset');
       return;
     }
-    const family = presetFamily(preset);
+    const family = presetFamily(preset, scenario);
     const declinedBefore = declinedCount();
+    let siteIds = [];
     holdConditions(ctx, { sun: scenario.sun, morning: scenario.morning === true, weather: scenario.weather ?? 'clear' });
+    // A scenario may name the clock itself (midnight for the midnight sun) over its sun elevation.
+    if (Number.isFinite(scenario.dayTime)) ctx.systems.sky.setDayTime(scenario.dayTime, { transition: 0 });
     phase = 'placing';
     progress(label, `${row.conditions.why}: finding its spot`);
     const anchor = resolveAnchor(scenario, preset);
@@ -684,6 +840,8 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     const pose = placeCraft(scenario, anchor);
     addFamily(family);
     try {
+      siteIds = standSites(scenario);
+      if (siteIds.length > 0) row.notes.push(`sites standing for it: ${siteIds.join(', ')}`);
       // ---- Cycle 1: the show ----
       phase = 'show';
       progress(label, 'baseline');
@@ -710,8 +868,11 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       row.shot = await takeShot(`spawn-${String(index + 1).padStart(2, '0')}-${scenario.id}`, scenario.id);
       const live = manager.getInstance(spawnId);
       row.discovered = live ? live.discovered === true : null;
-      if (live) manager.deactivate(spawnId, 'spawns test');
-      else row.notes.push('the spawn had ended on its own before the dispose');
+      if (live) endSpawn(spawnId);
+      else {
+        endSpawn(spawnId);
+        row.notes.push('the spawn had ended on its own before the dispose');
+      }
       ctx.setPhotoMode(false);
       row.otherSpawnsEnded += endOtherSpawns();
       row.cycles.push(await dispose.compare(baseline, { presetIds: family.map((entry) => entry.id) }));
@@ -731,7 +892,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       const warmupId = createSpawn(scenario, anchor);
       if (warmupId) {
         await frames(LEAK_CYCLE_FRAMES);
-        if (manager.getInstance(warmupId)) manager.deactivate(warmupId, 'spawns test');
+        endSpawn(warmupId);
         await frames(2);
       }
       const baseline2 = await dispose.baseline({ heap: true });
@@ -745,7 +906,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
           break;
         }
         await frames(LEAK_CYCLE_FRAMES);
-        if (manager.getInstance(cycleId)) manager.deactivate(cycleId, 'spawns test');
+        endSpawn(cycleId);
         await frames(2);
         if (heapAvailable()) heapTrace.push(await settledHeapMB());
       }
@@ -757,6 +918,8 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       ctx.setPhotoMode(false);
       if (refused) row.notes.push(`leak check refused: ${refused}`);
     } finally {
+      for (const id of siteIds) if (manager.getInstance(id)) manager.deactivate(id, 'spawns test');
+      if (scenario.override && system.director) system.director.releaseOverride(scenario.id);
       removeFamily(family);
       row.directorDeclined = declinedCount() - declinedBefore;
       row.console = { errors: capture.counts.errors - errorsBefore, warnings: capture.counts.warnings - warningsBefore };
