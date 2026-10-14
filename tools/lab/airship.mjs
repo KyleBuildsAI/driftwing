@@ -492,6 +492,7 @@ function createAbilityApi(rig, systems) {
     player,
     state,
     systems,
+    bus: rig.bus,
     world: rig.world,
     waterQuery: null,
     notify(text) {
@@ -521,13 +522,9 @@ function createAbilityApi(rig, systems) {
 /** The lab director: sites around the origin, answered as getNearby does (distance and bearing). */
 function createLabSystems(rig, sites) {
   const journal = { stats: [] };
+  rig.bus.onTyped('journalStat', (payload) => journal.stats.push(payload));
   return {
-    journal: {
-      recordStat(payload) {
-        journal.stats.push(payload);
-      },
-      list: journal.stats,
-    },
+    journal: { list: journal.stats },
     spawns: {
       director: {
         getNearby(radiusKm) {

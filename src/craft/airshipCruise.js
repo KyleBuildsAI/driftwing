@@ -62,12 +62,11 @@ export const SCENIC_CRUISE = Object.freeze({
 });
 
 /**
- * Folds a journal statistic (journal.stats of the airship module) through the journal system; the
- * ability api has no event bus, and the journal is absent in the node labs.
+ * Reports a journal statistic (journal.stats of the airship module) as the typed journalStat event,
+ * the one path every craft's stats take to the journal.
  */
 function recordStat(api, key, value, op) {
-  const journal = api.systems ? api.systems.journal : null;
-  if (journal && typeof journal.recordStat === 'function') journal.recordStat({ key, value, op });
+  if (api.bus) api.bus.emitTyped('journalStat', { key, value, op });
 }
 
 /** Private runtime per craft state: { path, progress, distances, visitedIds, carrot }. */
