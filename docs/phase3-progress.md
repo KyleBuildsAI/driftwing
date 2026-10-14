@@ -448,7 +448,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | not started |
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | not started |
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
-| 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
+| 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | in progress (module, model, tests built; verifying) |
 | 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | not started |
 | 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | not started |
 | 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | not started |
@@ -505,6 +505,35 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   name: "dragon") are Milestone O's (j.2), as are the journal panel's Craft section and the remote
   `flightState` craft fields of h.3; the picker shows the 14 craft in one strip until the picker
   branch regroups them.
+
+### Wave 2 - p3/craft-balloon
+
+- **Done** (contract h; spec Milestone E item 11):
+  - `src/flight/SimBalloon.js` (kind `balloon`): lift = (rho_ambient - rho_hot) x V x g with the shared
+    density model and ISA temperatures, one envelope temperature state (burner through a 4 s plume,
+    fabric convection and radiation, parachute and rotation vent outflow, adiabatic cooling) giving a
+    20-30 s thermal lag; drag pulls it to the WindField at its height; the rig swings as a pendulum
+    about the centre of buoyancy; basket skids bounce and drag, float on water
+    (`limits.waterLanding 'basket'`), a vented envelope collapses on the ground and the burner
+    reinflates it; a ground start is tied down until it lifts. Assists: over-temperature protection,
+    rotation damping, altitude hold (auto-burner in blasts, lag-aware, raised over the terrain under
+    the drift); the autopilot flies altitude and basket heading; the copilot's assisted landing.
+  - `src/craft/balloon.js`: the v1 balloon family envelope (shared with the fair landmarks through
+    `src/world/balloonFamily.js`), basket, burner frame, tanks and pilot; animated flame, pilot lights,
+    glow through the fabric, parachute vent, rotation vent flaps, breathing and collapse, the pilot's
+    arm; first person in the basket (custom cockpit, instrument pack on the front upright); bindings
+    for keyboard, gamepad, T.16000M and TWCS; abilities burner (held) and parachute vent (held); the
+    wind-layer column sampled once a second in `craftState.windColumn`; copilot burn, vent, steer by
+    layer ("take us east"), wind report, land, status; journal stats; `situate()` = drift at the
+    current height (ground or water when the previous craft was).
+  - `src/audio/engines/burner.js`: burner roar, rumble and jet hiss with a whump, pilot-light hiss,
+    vent rush, basket creaks on blasts, swings, touchdowns and drags; otherwise near silence.
+  - Instruments `envelope` and `windColumn`; the instrument HUD shows a craft's `hudInstruments` in
+    the third-person views with the overlay off.
+  - Tests: `tools/lab/balloon.mjs`, `src/dev/craftScenarios/balloon.js` (wind layer, drift start,
+    burner lag, landing, bounce and drag, rotation, steer, water), the flight-test script, the
+    view-physics step.
+- **Next:** verification runs, then hand to I2.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
