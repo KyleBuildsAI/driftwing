@@ -9,6 +9,8 @@ import { SPIRES_DEFAULTS, buildSpires } from './spires.js';
 import { WATERFALL_DEFAULTS, buildWaterfall } from './waterfall.js';
 import { WIND_FARM_DEFAULTS, buildWindFarm } from './windFarm.js';
 import { CHALLENGE_GATES_DEFAULTS, buildChallengeGates } from './challengeGates.js';
+// Presets 51-60.
+import { MONASTERY_DEFAULTS, buildMonastery } from './monastery.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -23,6 +25,8 @@ export const RECIPES = Object.freeze({
   gates: Object.freeze({ build: buildGates, defaults: GATES_DEFAULTS, audioIntensity: 'constant' }),
   waterfall: Object.freeze({ build: buildWaterfall, defaults: WATERFALL_DEFAULTS, audioIntensity: 'constant' }),
   challengeGates: Object.freeze({ build: buildChallengeGates, defaults: CHALLENGE_GATES_DEFAULTS, audioIntensity: 'approach' }),
+  // Presets 51-60.
+  monastery: Object.freeze({ build: buildMonastery, defaults: MONASTERY_DEFAULTS, audioIntensity: 'wind' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

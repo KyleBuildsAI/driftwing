@@ -1066,7 +1066,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | --- | --- | --- | --- |
 | B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | not started |
 | B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | not started |
-| B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | not started |
+| B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | in progress |
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
 | B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | not started |
@@ -1077,6 +1077,21 @@ Each preset ships with its journal title and one-liner, 3+ callouts, its audio r
 FAR lure where heavy, colliders where solid, rarity, filters and lifetime (docs/spawns.md
 template). The challenge-based presets (70, 76-81) use the wave 1 challenge system; the combo
 presets (92-100) use the wave 2 combo scheduling.
+
+### Wave 3 - p3/presets-51-60
+
+- **Engine extensions (additive; the Phase 2 recipes build exactly as before):** the structure engine's
+  `cloth` geometry kind (flags and banners swinging and rippling in the WindField wind the structure
+  shows), movers (`context.addMover`, posed by a recipe's `out.animate(state, env)` hook, with box
+  colliders that follow them), dynamic steam puffs on the mist pool, torches (`out.torches`: flames on a
+  shared instanced pool, each an ignitable in `ctx.game.ignition`, optionally lit at dusk;
+  `instance.ignitableIds`), instanced blocks (`out.blocks`), the `recipe` audio intensity mode and an
+  emissive decal channel (vertex alpha; the Phase 2 decals paint 0). The celestial engine's
+  `skyTarget(out)` (a live comet, else a meteor radiant). Shared props in
+  `src/spawns/engines/structure/heritage.js`.
+- **Presets:** 53 cliffside monastery (recipe `monastery` on a `cliffStep` stamp, audio `bells`).
+- **Lab:** `node --expose-gc tools/lab/presets-51-60.mjs`.
+- **Next:** the remaining nine presets, the scenario file, the step file, the docs and the test runs.
 
 ### Wave 4: discovery and verification, then the tag
 

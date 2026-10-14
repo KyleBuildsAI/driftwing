@@ -594,6 +594,7 @@ export function createCelestialEngine() {
         middle: new THREE.Vector3(),
         along: new THREE.Vector3(),
         across: new THREE.Vector3(),
+        target: new THREE.Vector3(),
       };
     },
 
@@ -806,6 +807,36 @@ export function createCelestialEngine() {
       const visible = (mesh) => (mesh && mesh.visible ? 1 : 0);
       const drawCalls = meteors ? visible(meteors.mesh) + visible(comets.mesh) + visible(eclipses.disc) + visible(eclipses.corona) + visible(rainbows.mesh) : 0;
       return { instances: live.length, particles: activeMeteors, lights: 0, buffers: buffersOwned, drawCalls };
+    },
+
+    /**
+     * The direction (unit, world) of the most striking live sky target into out (a Float64Array(3)):
+     * a comet first (returns 1), else a meteor shower's radiant (returns 2), else nothing (0). Only
+     * instances that have faded in count. For other engines' animations (the observatory's telescope).
+     * Allocation-free.
+     */
+    skyTarget(out) {
+      let found = 0;
+      for (let index = 0; index < live.length; index++) {
+        const data = live[index].data;
+        if (!(data.presence > 0.05)) continue;
+        const target = scratch.target;
+        if (data.params.comet) {
+          target.copy(data.cometDirection);
+          if (data.params.comet.sidereal) target.applyQuaternion(starRotation(scratch.quaternion));
+          found = 1;
+        } else if (data.params.meteors && found === 0) {
+          target.copy(data.radiant).applyQuaternion(starRotation(scratch.quaternion));
+          found = 2;
+        } else {
+          continue;
+        }
+        out[0] = target.x;
+        out[1] = target.y;
+        out[2] = target.z;
+        if (found === 1) return 1;
+      }
+      return found;
     },
 
     /** Dev and tests: the state of one instance's components. */

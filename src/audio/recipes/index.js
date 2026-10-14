@@ -21,6 +21,8 @@ import turbine from './turbine.js';
 import volcano from './volcano.js';
 import waterfall from './waterfall.js';
 import { skyWhale, whale } from './whale.js';
+// Presets 51-60.
+import bells from './bells.js';
 
 export const RECIPES = Object.freeze({
   tornado,
@@ -38,6 +40,8 @@ export const RECIPES = Object.freeze({
   discovery,
   raptor,
   goose,
+  // Presets 51-60.
+  bells,
 });
 
 /**
