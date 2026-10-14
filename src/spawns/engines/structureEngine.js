@@ -30,6 +30,10 @@
 //                kilometres from it and cannot fly through the wake)
 //   audio        preset.audio as a spawn voice, driven by approach, wind or a constant level
 //   setParam     glow, sway, rotorSpeed and audio multipliers the set-piece engine can ramp
+//   movers       (Phase 3) rigid parts on their own pooled meshes with collider hulls turned with
+//                them: drifting icebergs and an ice front's calving slabs (structure/movers.js)
+//   underwater   (Phase 3) out.underwater: the parts below the sea shade toward the seabed's depth
+//                colour, as the terrain does (a wreck read through clear shallow water)
 //
 // update() allocates nothing: per-instance numbers live in typed arrays, matrices are composed into
 // scratch objects made in init(), and the wind is probed a few times a second into a reused record.
@@ -39,8 +43,9 @@ import { RECIPES, RECIPE_NAMES } from './structure/recipes/index.js';
 import { islandOutline, islandTopHeight } from './structure/recipes/islands.js';
 import { GATE_TELEPORT_DISTANCE, createGateSet, crossGates } from './gateDetector.js';
 import { createParamView, createWindSample, ownsPresetAudio } from './engineKit.js';
-import { applyRigidDrop } from '../../render/curvature.js';
+import { applyRigidDrop, rigidCurvatureDrop } from '../../render/curvature.js';
 import { addStructureColliders, islandTopCollider, removeStructureColliders, updateTurbineColliders } from './structure/colliders.js';
+import { createMovers, describeMovers, forceCalving, releaseMovers, setMoversVisible, showMovers, updateMovers } from './structure/movers.js';
 
 const ENGINE_NAME = 'structure';
 /** Structure spawns alive at once (the director's cap is the same). */
@@ -49,6 +54,8 @@ const TURBINE_CAPACITY = 256;
 const SOCK_SEGMENTS = 5;
 const SOCK_CAPACITY = 64 * SOCK_SEGMENTS;
 const PUFF_CAPACITY = 512;
+/** Mover meshes (icebergs, calving slabs) across every live structure. */
+const MOVER_CAPACITY = 64;
 /** Reference rotor radius (m) of the shared nacelle and rotor geometry; instances scale it. */
 const ROTOR_REFERENCE = 40;
 /** The rotor hub sits this far ahead of the tower axis, in reference metres. */
@@ -110,6 +117,7 @@ export function createStructureEngine() {
   let rotors = null;
   let socks = null;
   let puffs = null;
+  let moverPool = null;
   let serial = 0;
   let proxies = [];
   const live = [];
@@ -139,7 +147,15 @@ export function createStructureEngine() {
     const objectGlow = objectLook.x;
 
     const solid = new THREE.MeshStandardNodeMaterial({ flatShading: true, roughness: 0.88, metalness: 0 });
-    solid.colorNode = rgba.rgb;
+    // Underwater (objectLook.y = 1, a recipe's out.underwater): below the sea the colour eases toward
+    // the seabed's depth colour, as the terrain's does (turquoise shallows to deep blue by 12 m), so a
+    // wreck reads through clear water. Exactly the vertex colour where objectLook.y is 0.
+    const { positionWorld, exp, max } = ctx.TSL;
+    const seaLevel = ctx.uniforms.waterLevel ? ctx.uniforms.waterLevel : float(ctx.terrain.waterLevel);
+    const depthBelowSea = max(seaLevel.sub(ctx.uniforms.renderOrigin.y).sub(positionWorld.y), 0);
+    const depthColor = mix(vec3(0.092, 0.495, 0.43), vec3(0.0103, 0.0685, 0.117), smoothstep(1.5, 12, depthBelowSea));
+    const depthFade = float(1).sub(exp(max(depthBelowSea.sub(0.3), 0).div(-6))).mul(0.9).mul(objectLook.y);
+    solid.colorNode = mix(rgba.rgb, depthColor, depthFade);
     solid.emissiveNode = rgba.rgb.mul(rgba.a).mul(objectGlow).mul(mix(float(0.15), float(1), nightFactor));
     solid.positionNode = positionLocal.add(swayOffset.mul(swayWeight));
     solid.side = THREE.FrontSide;
@@ -271,6 +287,11 @@ export function createStructureEngine() {
       challenge: null,
       wake: null, turbineSettings: null, sway: null, audioPoint: null, windProbe: null, approach: 0, radius: 20,
     };
+    out.movers = [];
+    out.navigation = null;
+    out.calving = null;
+    out.underwater = false;
+    out.ended = false;
     const context = {
       presetId: preset.id,
       presetName: preset.name,
@@ -295,6 +316,22 @@ export function createStructureEngine() {
       /** Adds a gate (local metres); source names the param for error messages. */
       addGate(gate) {
         out.gates.push(gate);
+      },
+      /** The world's raw ground height at WORLD (x, z) (no sea floor clamp): shared searches use it. */
+      worldGround: (x, z) => ctx.terrain.groundHeight(x, z),
+      /** A fresh mesh builder (a mover's part, built in its own frame). */
+      newBuilder: () => createMeshBuilder(),
+      /** Adds a mover (structure/movers.js lists the spec). */
+      addMover(spec) {
+        out.movers.push(spec);
+      },
+      /** The calving schedule of the structure's slabs: { interval: [min, max], first, wave }. */
+      setCalving(calving) {
+        out.calving = calving;
+      },
+      /** The grid of water deep enough for the drifting movers (movers.js createNavigationGrid). */
+      setNavigation(grid) {
+        out.navigation = grid;
       },
     };
     return context;
@@ -942,6 +979,7 @@ export function createStructureEngine() {
     for (let index = 0; index < data.puffSlots.length; index++) puffs.setMatrix(data.puffSlots[index], showPuffs ? data.puffMatrices[index] : hiddenMatrix);
     puffs.flush();
     data.movingHidden = !showMoving;
+    setMoversVisible(data.movers, showMoving);
     // Turbines keep turning at the mid tier and freeze (still drawn) at the far tier.
     data.animateTurbines = showMoving && rank < 2;
     data.animateSocks = showSocks;
@@ -965,6 +1003,7 @@ export function createStructureEngine() {
       socks = ctx.pools.createInstancedPool({ geometry: buildSockGeometry(), material: materials.moving, capacity: SOCK_CAPACITY, name: 'structure-windsocks', parent: ctx.scene, colors: true });
       const puffGeometry = new THREE.IcosahedronGeometry(1, 2);
       puffs = ctx.pools.createInstancedPool({ geometry: puffGeometry, material: materials.mist, capacity: PUFF_CAPACITY, name: 'structure-mist', parent: ctx.scene });
+      moverPool = ctx.pools.createMeshPool({ material: materials.solid, capacity: MOVER_CAPACITY, parent: ctx.scene, name: 'structure-movers' });
       nacelles.mesh.castShadow = true;
       rotors.mesh.castShadow = true;
       puffs.mesh.renderOrder = 3;
@@ -1049,6 +1088,8 @@ export function createStructureEngine() {
         animateTurbines: true,
         animateSocks: true,
         turbineColliders: null,
+        movers: null,
+        moverContext: null,
       };
       // Probe point and audio position in world space; the ambient wind there, once.
       data.probe = [anchor.x + data.probe[0], anchor.y + data.probe[1], anchor.z + data.probe[2]];
@@ -1066,6 +1107,18 @@ export function createStructureEngine() {
       try {
         // Geometry on pooled meshes.
         for (const kind of GEOMETRY_KINDS) data.meshes[kind] = showGeometry(kind, context[kind].toGeometry(THREE), data, anchor);
+        data.look.y = out.underwater ? 1 : 0;
+        // Movers (icebergs, calving slabs) on their own pooled meshes, each with its collider hull.
+        data.movers = createMovers(THREE, out, anchor, rng);
+        if (data.movers) {
+          showMovers(data.movers, moverPool, colliderWorld(), instance, colliderPrefix, data.look, data.swayOffset);
+          data.moverContext = {
+            instance, water: ctx.water ?? null, waterLevel: ctx.terrain.waterLevel, voice: null, bus: ctx.bus, colliders: colliderWorld(),
+            dropAt: (x, z) => rigidCurvatureDrop(ctx, x, z),
+          };
+        }
+        // A recipe that found no place to build (a cave with no cliff face) ends at once.
+        if (out.ended) instance.ended = true;
         // Turbines.
         out.turbines.forEach((turbine, index) => {
           data.turbinePositions[index * 3] = anchor.x + turbine.x;
@@ -1150,6 +1203,7 @@ export function createStructureEngine() {
           data.audioReference = data.audioMode === 'wind' ? (out.turbineSettings ? out.turbineSettings.ratedWind : 10) : data.audioMode === 'approach' ? (out.approach || 1500) : 1;
           data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: data.audioMode === 'constant' ? data.audioLevel : 0 });
           data.voice.setPosition(data.audioPosition);
+          if (data.moverContext) data.moverContext.voice = data.voice;
         }
       } catch (error) {
         engine.dispose(instance);
@@ -1171,6 +1225,7 @@ export function createStructureEngine() {
       if (data.meshes.body !== null || data.meshes.detail !== null) updateSway(data);
       checkGates(instance);
       if (data.courses.length > 0) checkCorridors(instance);
+      if (data.movers) updateMovers(data.movers, data.moverContext, dt, ctx.time.elapsed);
       updateAudio(data, dt);
     },
 
@@ -1193,6 +1248,9 @@ export function createStructureEngine() {
       removeSurfaces(data);
       removeStructureColliders(colliderWorld(), instance, data);
       unregisterChallenge(data);
+      releaseMovers(data.movers, moverPool, ctx.water ?? null);
+      data.movers = null;
+      if (data.moverContext) data.moverContext.voice = null;
       releaseMeshes(data);
       if (data.nacelleSlots.length > 0) {
         freeSlots(nacelles, data.nacelleSlots);
@@ -1218,16 +1276,24 @@ export function createStructureEngine() {
 
     stats() {
       let drawCalls = 0;
+      let moverBuffers = 0;
       for (let index = 0; index < live.length; index++) {
         const meshes = live[index].data.meshes;
         for (const kind of GEOMETRY_KINDS) if (meshes[kind] && meshes[kind].visible) drawCalls++;
+        const movers = live[index].data.movers;
+        if (!movers) continue;
+        for (const mesh of movers.meshes) {
+          if (!mesh) continue;
+          moverBuffers++;
+          if (mesh.visible) drawCalls++;
+        }
       }
       for (const pool of [nacelles, rotors, socks, puffs]) if (pool && pool.used > 0) drawCalls++;
       return {
         instances: counts.instances,
         particles: 0,
         lights: 0,
-        buffers: counts.buffers + (nacelles ? 4 : 0),
+        buffers: counts.buffers + moverBuffers + (nacelles ? 4 : 0),
         drawCalls,
         turbines: counts.turbines,
         mistPuffs: counts.puffs,
@@ -1245,9 +1311,18 @@ export function createStructureEngine() {
      * Returns whether the param is known.
      */
     setParam(instance, name, value) {
-      if (!Number.isFinite(value) || !Object.hasOwn(instance.params, name)) return false;
+      if (!Number.isFinite(value)) return false;
+      // 'calve' (>= 0.5): the next attached slab of an ice front calves now (a set piece, the checks).
+      if (name === 'calve') return value >= 0.5 ? forceCalving(instance.data.movers) : Boolean(instance.data.movers && instance.data.movers.calving);
+      if (!Object.hasOwn(instance.params, name)) return false;
       instance.params[name] = value;
       return true;
+    },
+
+    /** What one instance is: its recipe, its colliders and its movers (dev tools and tests). */
+    describe(instance) {
+      const data = instance.data;
+      return { recipe: data.recipe, colliders: instance.colliderIds.length, underwater: data.look.y > 0.5, movers: describeMovers(data.movers) };
     },
 
     /**
@@ -1268,6 +1343,7 @@ export function createStructureEngine() {
     teardown() {
       for (const instance of [...live]) engine.dispose(instance);
       for (const kind of GEOMETRY_KINDS) meshPools[kind].dispose();
+      moverPool.dispose();
       for (const pool of [nacelles, rotors, socks, puffs]) pool.dispose({ keepMaterial: true });
       for (const proxy of proxies) proxy.geometry.dispose();
       proxies = [];
