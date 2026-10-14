@@ -22,7 +22,7 @@ import { createSimQuadModel } from './SimQuad.js';
 import { createAutopilotStage } from './autopilot.js';
 import { createAssistStage } from './assists.js';
 
-export const MODEL_KINDS = Object.freeze(['fixedWing', 'jet', 'helicopter', 'wingsuit', 'quad']);
+export const MODEL_KINDS = Object.freeze(['fixedWing', 'jet', 'helicopter', 'wingsuit', 'quad', 'aerobatic']);
 
 /** Methods and fields every model must expose (checked when the controller creates one). */
 const MODEL_INTERFACE = Object.freeze({
@@ -126,5 +126,6 @@ flightModels.register('helicopter', createSimHelicopterModel);
 flightModels.register('wingsuit', createSimWingsuitModel);
 flightModels.register('quad', createSimQuadModel);
 flightModels.register('jet', createSimFixedWingModel);
+flightModels.register('aerobatic', createSimFixedWingModel);
 flightModels.registerControlStage(createAutopilotStage());
 flightModels.registerControlStage(createAssistStage());

@@ -444,7 +444,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | # | Work | Branch | Contract | Status |
 | --- | --- | --- | --- | --- |
 | 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | in progress (branch complete, awaiting I2) |
-| 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | not started |
+| 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | in progress (branch complete, awaiting I2) |
 | 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | not started |
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | not started |
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
@@ -505,6 +505,60 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   name: "dragon") are Milestone O's (j.2), as are the journal panel's Craft section and the remote
   `flightState` craft fields of h.3; the picker shows the 14 craft in one strip until the picker
   branch regroups them.
+
+### Wave 2 - p3/craft-aerobatic
+
+- **Done** (contract h; the craft's reference is [docs/aerobatic.md](aerobatic.md)):
+  - the module `src/craft/aerobatic.js`: an Extra 330 class mesh (low tapered symmetric wing with
+    near-full-span ailerons and their spades, bubble canopy, big rudder and elevator, wheel pants,
+    three-blade prop; ailerons, spades, elevator, rudder, tail wheel and prop animate; the cockpit deck
+    hides in first person), its profile, Space smoke / Shift+Space colour, `situate`, per-craft
+    bindings (the gamepad's and T.16000M's gear button cycles the colour: fixed gear), copilot
+    commands (`smoke`, `smokeColor`, `lastFigure`, `figures`) and status, a `canopy` cockpit with the
+    new `smoke` and `figure` instruments, journal stats (each figure's best score, op `max`);
+  - the model kind `aerobatic` (SimFixedWing; `src/flight/aerobaticAssists.js`): no attitude
+    protections at any level; coordination, yaw damper, auto-trim and stall warning to 50 %; AoA
+    limiter (both signs), G limiter (+8.5 / -6 g), auto-level and overspeed protection to 100 %; the
+    fixed-wing autopilot and trim reused;
+  - the extension `aerobaticAero` (`src/flight/aerobaticAero.js`): the stalled wing's roll-damping
+    reversal (snap rolls), and the figure judging on the 120 Hz flight clock;
+  - the recognizer `src/flight/maneuverRecognizer.js` (pure, allocation-free): the 12 figures, each
+    scored 0-100, the lomcevak credited only at 25 % assists or less; the typed event `figureFlown`,
+    a toast and a `journalStat` per figure; `craftState.figureInProgress` / `lastFigure`;
+  - the smoke ribbon `src/render/smokeRibbon.js` (one pooled 1024-sample mesh, sunlit, camera-facing,
+    drifting with the wind, fading over 30 s, re-anchored every 2 km) plus puffs at the nozzle;
+  - the audio family `aerobaticProp` (the prop family plus the high-rpm snarl and the smoke hiss);
+  - tests: `tools/lab/aerobatic.mjs` (79 checks), `src/dev/craftScenarios/aerobatic.js` (loop, aileron
+    roll, smoke, snap roll), the `?test=1` flight script, the view-physics step.
+- **Edits outside the craft's own files** (single lines unless noted): `src/craft/index.js`,
+  `src/flight/models.js` (kind and `MODEL_KINDS`), `src/audio/engines/index.js`,
+  `src/ui/instruments/index.js`, `src/dev/craftScenarios/index.js`, `src/core/events.js` (`figureFlown`
+  after `challengeCancelled`), `tools/steps/view-physics.json` (one step, and the closing count), `src/dev/testFlightScripts.js`
+  (the script, its map entry and `SCRIPTED_CRAFT`), `src/dev/testHarness.js` (the `smokeSeconds`
+  observation, three lines), `tools/lab/craft.mjs` (the catalog checks follow the registered craft) and
+  `src/gameplay/journal.js` (the module-stat cache rebuilds when a module is replaced).
+- **Fixes found on the way:** the journal's module-stat cache keyed on craft ids only, so a module
+  replaced under the same id (the craft lab's test craft) kept stale stats; it now keys on the module
+  objects. The view-physics step's closing check expected exactly six craft; it now expects every
+  flyable craft. A figure's score was computed after its window was cleared (the Cuban eight's lobe
+  symmetry read no markers); it is scored first now.
+- **Verified 2026-10-08** (each once unless noted; reruns named):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1`, `docs-check` 240/240 | built; the V2 bundle holds no craft scenarios, one three.js core | |
+  | Labs: aerobatic 81/81 (`--expose-gc`), craft 66, discovery 43, copilot 240, copilot-server 17, settings 45, flight-lab 82, jet 60, helicopter 46, wingsuit 37, fpv 87, input 34, atmosphere 28, colliders 84, director 50, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden 6, setpiece 47, spawns 98, storage 54, structure 75, terrain 404, wind-engines 56; challenges 70, origin 32, fauna-modes 44 (their allocation checks need `--expose-gc`: 68/70, 31/32, 42/44 without it, all pass with it); water 33/34 (its open-ocean `heightAt` cost check, 1.29 us against 1 us, under the machine's load; water code untouched) | as listed | |
+  | `run-harness --test craft --crafts aerobatic` at the branch head (general test in both views, loop and roll in both views, smoke, snap) | PASS 8/8 runs, 25/25 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0 | PASS, same |
+  | `run-harness --test craft` (all seven craft, 33 runs) | an earlier head: 81/86 checks, the aerobatic's roll and snap scripts and one general-test dive at p99 147-266 ms (machine at 100 %); the scripts were made frame-proof and the hands-off levelling faster, then the aerobatic set passed on both backends (row above) | PASS 33/33 runs, 86/86 checks, 0/0 (before those fixes) |
+  | `run-harness --test 1` reduced (HARNESS-1/2, aerobatic, both views, 20 s) | 0 NaN, 0 penetrations, 0/0, heap growth 2.49 MB, 12/12 manoeuvres (smoke included); frames over 50 ms: 75 (main thread 52, delayed 15, gc 5, systems 3; machine CPU 100 %) | same criteria pass, heap 6.18 MB; frames over 50 ms: 410 at 25 fps (another Chrome at 63 % CPU; slow frames led by camera, terrain, flight, birds) |
+  | `tools/steps/view-physics.json` on built V2 (`?debug=1`) | 7/7 craft identical in every view, 0/0 | 7/7, 0/0 |
+  | Built `dist-single/v2` and the built shell smoke | 0/0, screenshots differ (shell too) | 0/0, screenshots differ |
+
+- **Next:** I2 merges this branch after 2.0, in catalog order (aerobatic is the first new craft).
+- **Open issues:** the reduced flight harness's frames over 50 ms (machine load; a node benchmark puts
+  the aerobatic's physics tick at about 50 us warm against the bush plane's 30 us, the recognizer and
+  the autorotation included); the journal panel's Figures section (counts per figure from
+  `figureFlown`) and the copilot's cross-craft "smoke on / off" are Milestone O's (j.1, j.2).
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 

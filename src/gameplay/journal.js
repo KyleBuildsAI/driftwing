@@ -23,16 +23,20 @@ const STAT_KEY_PATTERN = /^[a-z][A-Za-z0-9]{0,39}$/;
 const CRAFT_ID_PATTERN = /^[a-z][A-Za-z0-9]{0,31}$/;
 const MAX_CRAFT_TIMES = 64;
 
-/** The journal stats the registered craft modules declare (module journal.stats), rebuilt when a module registers. */
-const craftStats = { key: '', stats: new Map() };
+/**
+ * The journal stats the registered craft modules declare (module journal.stats), rebuilt when a module
+ * registers or is replaced (the cache keeps the module objects it was built from).
+ */
+const craftStats = { modules: [], stats: new Map() };
 function craftJournalStats() {
-  const registered = craftRegistry.list().filter((entry) => entry.available).map((entry) => entry.id);
-  const key = registered.join(',');
-  if (key === craftStats.key) return craftStats.stats;
-  craftStats.key = key;
+  const registered = craftRegistry.list().filter((entry) => entry.available).map((entry) => craftRegistry.get(entry.id));
+  const unchanged = registered.length === craftStats.modules.length && registered.every((module, index) => module === craftStats.modules[index]);
+  if (unchanged) return craftStats.stats;
+  craftStats.modules = registered;
   craftStats.stats = new Map();
-  for (const id of registered) {
-    const stats = craftRegistry.get(id).journal?.stats ?? [];
+  for (const module of registered) {
+    const id = module.id;
+    const stats = module.journal?.stats ?? [];
     for (const stat of stats) {
       if (!JOURNAL_STATS[stat.key]) craftStats.stats.set(stat.key, Object.freeze({ op: stat.op, unit: stat.unit, label: stat.label, craft: id }));
     }
