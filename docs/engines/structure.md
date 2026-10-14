@@ -50,6 +50,8 @@ The frame: a compass `heading` (degrees) from the activation; `along` is forward
 | `gates` | a timed course: start and finish gates marked by cairns with pennants, an optional river down the canyon floor | `carve` | a timed course, a journal best run, an optional corridor |
 | `waterfall` | a river spilling over the cliff step as a wide curtain of falling strands into the plunge pool, the river on downstream, boulders and mist puffs | `cliffStep` | a voice at the pool (the `waterfall` recipe) |
 | `challengeGates` | the gate frames of the preset's `challenge` course: posts and a lintel for rectangle gates, a hoop on a post for circle gates, pennants (white start, red checkpoints, chequered finish) | none | a challenge course registered with the challenge system (start prompt, splits, medals, bests per craft) |
+| `archChain` | a line of v1-style natural stone arches with strata, caps and rubble, one around each of the preset's challenge gates (Phase 3, the five-arch chain) | `flatten` (optional: a level floor) | colliders (box legs, capsule ribs), crown perches, a wind-driven voice |
+| `hoodoos` | a field of banded badland hoodoos with capstones and fallen blocks, in seeded clusters (Phase 3) | none | colliders (capsule shafts, capstone cylinders), perches on every top, a wind-driven voice |
 
 Without its stamp (a debug spawn, or a site whose preset lists none) every recipe still builds:
 the bridge spans `span` metres across the heading on trestles, the strip is draped along the
@@ -236,6 +238,47 @@ The recipe resolves it to a world course with the id `${presetId}:${siteId}` (`$
 an event) and hands it to the engine as `out.challenge`; the engine registers it with
 `ctx.game.systems.challenges` at create (`data.challengeKeys`) and unregisters it at dispose. The
 frames are visual only: a preset that wants solid frames adds its own collider boxes.
+
+## archChain
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `count` | arches | 1..12 | 5 | without a `challenge` block only (with one, there is an arch per gate) |
+| `spacing` | m | 60..2000 | 260 | without a `challenge` block only: along the heading, centred on the anchor |
+| `span` | m | 20..400 | [76, 88] | centre-line span; widened when a gate needs it |
+| `height` | m | 10..300 | [54, 64] | crown height above the ground at the arch's centre; raised when a gate needs it |
+| `legThickness`, `topThickness` | m | 2..60, 1.5..40 | [11, 15], [8, 10] | the cross-section thins from the legs to the crown |
+| `depth` | m | 3..80 | [15, 21] | front to back at the legs (the crown is 60-75 % of it) |
+| `style` | | `auto`, `dunes`, `snow`, `pine`, `archipelago`, `meadows` | `auto` | the v1 strata and cap colours; `auto` takes the site's biome |
+| `margin` | m | 0..50 | 6 | clearance kept around each gate inside its arch's opening |
+
+Each arch is lofted like the v1 landmark arch (src/world/landmarks.js): a lumpy twelve-point
+cross-section around a half-ellipse, buried legs, strata bands dipping across the stone with a cap
+on the upward faces, boulders merged into the feet. With the preset's `challenge` block an arch
+stands at each gate (`along`, `across`, `heading`), sized so its inner half-ellipse holds the gate's
+rectangle or circle with `margin` to spare (the lumps, bulge and skew allowed for), so the course and
+the stone agree on every site. The colliders follow the v1 arch's: oriented boxes for the steep leg
+segments, rows of capsule ribs elsewhere, every piece inside the stone's inner face (the opening stays
+clear); boulders are spheres; each crown carries a perch. The voice (`audioIntensity` `wind` by
+default) plays at the middle arch.
+
+## hoodoos
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `count` | pillars | 1..160 | [44, 64] | fewer when the field is too crowded to place them apart |
+| `spread` | m | 20..3000 | 380 | the field's radius |
+| `height` | m | 3..120 | [12, 36] | foot to neck |
+| `radius` | m | 0.5..20 | [2.2, 4.2] | the shaft's base radius (the foot flares, the waist bulges, the neck narrows) |
+| `clusters` | | 1..12 | [3, 5] | seeded cluster centres the pillars gather around, with lanes between |
+| `capChance` | share | 0..1 | 0.85 | pillars wearing a dark capstone; the rest wear to a rounded point |
+| `boulders` | count | 0..120 | [10, 18] | fallen blocks among the pillars |
+| `colors` | 0xRRGGBB array | | six badland clays | the strata, level across the whole field (2.6 m bands) |
+| `capColor` | 0xRRGGBB | | 0x5b4636 | the capstones |
+
+The field is one merged body geometry. Colliders: a capsule per shaft as wide as its widest drum, a
+cylinder per capstone with a perch on its top (or a sphere at a rounded tip), spheres for the
+boulders. Pair it with a `badlands` region overlay for the ground between the pillars (preset 87).
 
 ## Generic features
 

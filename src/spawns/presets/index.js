@@ -34,6 +34,16 @@ import skyWhale from './skyWhale.js';
 import crystalSpires from './crystalSpires.js';
 import jetStream from './jetStream.js';
 import stormChase from './stormChase.js';
+import fiveArchChain from './fiveArchChain.js';
+import cherryBlossomValley from './cherryBlossomValley.js';
+import autumnColourWave from './autumnColourWave.js';
+import lavenderTulipStripes from './lavenderTulipStripes.js';
+import riceTerraces from './riceTerraces.js';
+import redwoodGiants from './redwoodGiants.js';
+import badlandsHoodoos from './badlandsHoodoos.js';
+import mangroveDelta from './mangroveDelta.js';
+import cactusDustDevils from './cactusDustDevils.js';
+import bambooForest from './bambooForest.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -69,6 +79,17 @@ export const PRESETS = Object.freeze([
   crystalSpires,
   jetStream,
   stormChase,
+  // Batch 9: presets 81-90.
+  fiveArchChain,
+  cherryBlossomValley,
+  autumnColourWave,
+  lavenderTulipStripes,
+  riceTerraces,
+  redwoodGiants,
+  badlandsHoodoos,
+  mangroveDelta,
+  cactusDustDevils,
+  bambooForest,
 ]);
 
 /** Presets by id. */

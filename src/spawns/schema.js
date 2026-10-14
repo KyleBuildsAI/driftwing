@@ -21,7 +21,7 @@ export const PLACEMENT_ALIGNMENTS = Object.freeze(['random', 'downhill', 'ridge'
 /** Time-of-day classes a preset may be limited to (filters.timeOfDay; director.js matchesTimeOfDay). */
 export const TIME_OF_DAY_CLASSES = Object.freeze(['dawn', 'day', 'golden', 'dusk', 'night', 'midday']);
 export const WEATHER_STATE_NAMES = Object.freeze(['clear', 'building', 'storm', 'clearing']);
-export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces']);
+export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces', 'delta']);
 export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed', 'salt', 'sand', 'travertine', 'mud', 'ice']);
 /** Phase 1 landmark types (src/world/worldgen.js) a filters.near block may name. */
 export const LANDMARK_TYPES = Object.freeze(['arch', 'monoliths', 'lighthouse', 'balloons']);

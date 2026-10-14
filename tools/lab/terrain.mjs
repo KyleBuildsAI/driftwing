@@ -503,6 +503,33 @@ function testShapes(world, sites) {
         }
         check('shapes', `${label}: every shelf's pool floor is flat (within 1 cm)`, worstFlat <= 0.01, `${round(worstFlat, 4)} m`);
         check('shapes', `${label}: the shelves step down the slope`, stepsDown, `${stamp.shelves.length} shelves, ${round(stamp.topY, 1)} -> ${round(stamp.bottomY, 1)} m`);
+      } else if (stamp.type === 'delta') {
+        // Every channel lies below sea level halfway down the fan, and the flats between the shallows
+        // and the plain along the fan's middle (away from the channels).
+        const middle = Math.floor(stamp.samples / 2);
+        let deepest = -Infinity;
+        for (let channel = 0; channel < stamp.channels; channel++) {
+          const point = localPoint(stamp, 0, stamp.centres[channel * stamp.samples + middle]);
+          deepest = Math.max(deepest, world.heightAt(point.x, point.z));
+        }
+        check('shapes', `${label}: every channel is cut below sea level halfway down the fan`, deepest < WATER - 1, `shallowest channel ${round(deepest, 2)} m`);
+        let flatsOutside = 0;
+        let flats = 0;
+        for (let row = 1; row < 6; row++) {
+          const along = -stamp.length / 2 + (row / 6) * stamp.length;
+          const index = Math.min(stamp.samples - 2, Math.floor((along + stamp.length / 2) / 4));
+          for (const share of [-0.4, -0.2, 0, 0.2, 0.4]) {
+            const across = share * stamp.width * (0.25 + 0.25 * (row / 6));
+            let nearChannel = false;
+            for (let channel = 0; channel < stamp.channels; channel++) if (Math.abs(across - stamp.centres[channel * stamp.samples + index]) < stamp.channelWidth * 1.2) nearChannel = true;
+            if (nearChannel) continue;
+            const point = localPoint(stamp, along, across);
+            const height = world.heightAt(point.x, point.z);
+            flats++;
+            if (height < stamp.shallowY - 0.01 || height > stamp.plainY + 0.01) flatsOutside++;
+          }
+        }
+        check('shapes', `${label}: the flats lie between the shallows and the plain`, flats > 0 && flatsOutside === 0, `${flatsOutside} of ${flats} samples outside ${round(stamp.shallowY, 2)}..${round(stamp.plainY, 2)} m`);
       } else {
         const top = world.heightAt(stamp.x, stamp.z);
         check('shapes', `${label}: the islet stands at least 70 % of its height above the sea`, top - WATER >= stamp.height * 0.7, `${round(top, 1)} m, height ${round(stamp.height, 1)} m`);
@@ -993,7 +1020,7 @@ function testWaterStamps() {
   check('phase3', `every water fixture (${stamped.length}) has ${SITES_PER_TYPE} sites on ${WATER_SEED}`, stamped.every((preset) => sites.filter((site) => site.presetId === preset.id).length === SITES_PER_TYPE),
     sites.map((site) => `${site.stamps[0].type} ${round(Math.hypot(site.x, site.z) / 1000, 1)} km`).join(', '));
   const typesPlaced = new Set(sites.map((site) => site.stamps[0].type));
-  check('phase3', 'every Phase 3 stamp type (basin, crater, terraces) is placed', ['basin', 'crater', 'terraces'].every((type) => typesPlaced.has(type)), [...typesPlaced].join(', '));
+  check('phase3', 'every Phase 3 stamp type (basin, crater, terraces, delta) is placed', ['basin', 'crater', 'terraces', 'delta'].every((type) => typesPlaced.has(type)), [...typesPlaced].join(', '));
   testShapes(world, sites);
   testFalloff(world, sites);
   testPaint(world, sites, WATER_SEED);

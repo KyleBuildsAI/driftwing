@@ -51,6 +51,7 @@ const COMMON_DEFAULTS = Object.freeze({
   tint: 0xffffff,
   brightness: 1,
   glow: null,
+  hours: null,
   drift: null,
   billow: 0.15,
   formSeconds: null,
@@ -191,6 +192,7 @@ export function resolveWeatherParams(params, { event = true } = {}) {
   const anvil = anvilSource ? { ...(FORM_DEFAULTS.tower.anvil), ...objectParam(anvilSource, 'anvil') } : null;
   const wallSource = objectParam(value('wallCloud'), 'wallCloud');
   const glowSource = objectParam(value('glow'), 'glow');
+  const hoursSource = objectParam(value('hours'), 'hours');
   const driftSource = objectParam(value('drift'), 'drift');
   const waveSource = objectParam(wind.wave, 'wind.wave');
   const formSeconds = value('formSeconds');
@@ -249,6 +251,12 @@ export function resolveWeatherParams(params, { event = true } = {}) {
       color: colorParam(glowSource.color, 'glow.color', 0x9fd4ff),
       strength: numberParam(glowSource.strength, 'glow.strength', 1, 0, 8),
       when: oneOf(glowSource.when, GLOW_TIMES, 'glow.when', 'twilight'),
+    }) : null,
+    hours: hoursSource ? Object.freeze({
+      dawn: numberParam(hoursSource.dawn, 'hours.dawn', 1, 0, 1),
+      day: numberParam(hoursSource.day, 'hours.day', 1, 0, 1),
+      dusk: numberParam(hoursSource.dusk, 'hours.dusk', 1, 0, 1),
+      night: numberParam(hoursSource.night, 'hours.night', 1, 0, 1),
     }) : null,
     drift: driftSource ? Object.freeze({
       speed: numberParam(driftSource.speed, 'drift.speed', 0, 0, 200),

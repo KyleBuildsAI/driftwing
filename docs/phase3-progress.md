@@ -1090,8 +1090,18 @@ Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file
     material reads it as `vegetationSweep` (`terrain.js`; outside overlays the colour is exactly the
     Phase 2 one);
   - `WindField.gustAt(x, z, t)`: the ambient gusts' shape without a terrain lookup;
-  - emitter `gusts` (level follows the gusts, a burst on each gust, the voice's `gust` trigger).
-- **Next:** the remaining extensions and the ten presets, then the step file and the checks.
+  - emitter `gusts` (level follows the gusts, a burst on each gust, the voice's `gust` trigger);
+  - structure recipes `archChain` (v1-style arches built around a challenge block's gates) and
+    `hoodoos` (a banded pillar field), with colliders and perches; `structureStamps('archChain')`;
+  - audio recipes `stoneWind`, `rustle`, `meadowHum`, `marsh` (and their audio-lab render plans);
+  - weatherVolume `hours` (dawn / day / dusk / night share of a volume, for morning mists);
+  - stamp type `delta` (tidal flats and channels the ocean fills; `stamps.js`, schema's list, the
+    mangrove fixture now stamped, the terrain lab's delta shape check).
+- **Presets:** all ten files registered under "Batch 9" in `presets/index.js`; `validatePresets` passes
+  (40 presets on this branch). Placement on DRIFTWING / HARNESS-1 / P2-TERRAIN / SPAWNS-1: every preset
+  has sites within 60 km (the mangrove delta 2-6, the arch chain 2-5, the rest 5-16).
+- **Next:** docs/spawns.md rows and sections, the spawn scenarios (`batch81.js`), the step file and
+  the checks on both backends.
 
 ### Wave 4: discovery and verification, then the tag
 

@@ -2,7 +2,8 @@
 // bodies step file (tools/steps/water-bodies.json, through ?test=sites) and tools/lab/water.mjs only.
 //
 // One site per new stamp type (basin, crater, terraces) holding local water (a lake, a crater lake,
-// terraced pools, a frozen lake, a salt-flat film on a flatten strip), and overlay sites covering
+// terraced pools, a frozen lake, a salt-flat film on a flatten strip), a delta (wave 3: tidal flats
+// and channels the ocean fills, under the mangrove overlay), and overlay sites covering
 // every overlay kind (palette, vegetation species, the ice material, a tint sweep, stripes) and
 // every Phase 3 species (cherry, redwood, bamboo, saguaro, mangrove, lavender, tulip). Shaped like
 // the wave 3 presets they stand in for (crater lake 38, hot spring terraces 39, salt flat 40,
@@ -123,7 +124,8 @@ export const FIXTURE_GROVES = fixture('fixtureGroves', 'Fixture groves', 'geo', 
 });
 
 export const FIXTURE_MANGROVE = fixture('fixtureMangrove', 'Fixture mangrove delta', 'geo', {
-  placement: Object.freeze({ chance: 0.5, minSpacing: 8000, biomes: Object.freeze(['archipelago', 'meadows', 'pine']), surface: 'coast', clearance: 200 }),
+  placement: Object.freeze({ chance: 0.5, minSpacing: 8000, biomes: Object.freeze(['archipelago', 'meadows', 'pine']), surface: 'coast', clearance: 200, align: 'downhill' }),
+  stamps: Object.freeze([Object.freeze({ type: 'delta', length: [1100, 1300], width: [900, 1100], channels: [4, 5], channelWidth: [24, 34], depth: [2.5, 3.5], plain: [0.5, 0.8], falloff: [150, 200], paint: null })]),
   overlays: Object.freeze([Object.freeze({
     shape: Object.freeze({ kind: 'disc', radius: [600, 800], falloff: 160 }),
     palette: 'mangrove',
@@ -152,6 +154,7 @@ export const WATER_FIXTURE_STAMP_TYPE = Object.freeze({
   fixtureTerraces: 'terraces',
   fixtureFrozenLake: 'basin',
   fixtureSaltFlat: 'flatten',
+  fixtureMangrove: 'delta',
 });
 
 /** The overlay kinds each overlay fixture exercises (palette, vegetation, material, tintSweep, stripes). */
