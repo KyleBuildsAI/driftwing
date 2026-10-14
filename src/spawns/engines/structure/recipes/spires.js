@@ -4,12 +4,16 @@
 // attribute). Shards sprout around the bases among boulders. Every pair of neighbouring spires is a
 // fly-through gate: passing between them rings the crystal voice's chimes. The hum's pitch rises as
 // the player approaches (the engine drives the voice's intensity with the approach). The crystals go
-// to the glow geometry (the crystal material); the boulders to the solid body.
+// to the glow geometry (the crystal material); the boulders to the solid body. Each spire's tip goes
+// into out.arcPoints, so a light effect can arc between the tips (the resonating spires, preset 99).
 import { paint } from '../palette.js';
 import { addBoulder } from '../common.js';
 import { shade } from '../meshBuilder.js';
 import { roll, rollInteger } from '../../engineKit.js';
 import { builderFrame, localHull, localSphere, ringPoints } from '../colliders.js';
+
+/** An arc point sits this share of a spire's height up its axis (just under the pointed tip). */
+const ARC_POINT_SHARE = 0.96;
 
 export const SPIRES_DEFAULTS = Object.freeze({
   count: [5, 9],
@@ -63,6 +67,7 @@ export function buildSpires(context, read) {
     const phase = rng();
     addCrystal(glow, spire.x, spire.ground, spire.z, outwardYaw, tilt, spire.radius, spire.height, paint(spire.colour), phase);
     out.colliders.push(crystalCollider(spire.x, spire.ground, spire.z, outwardYaw, tilt, spire.radius, spire.height, true));
+    out.arcPoints.push(builderFrame(spire.x, spire.ground, spire.z, outwardYaw, -tilt, 0)([0, spire.height * ARC_POINT_SHARE, 0]));
     heightSum += spire.height;
     // Shards and boulders around the base (resting on the ground).
     const shards = rollInteger(shardRange, rng) / spires.length;
