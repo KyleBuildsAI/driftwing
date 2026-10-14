@@ -140,11 +140,15 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
    * Starts presetId ahead of the craft (dev): through the director's forceSpawn for the director's own
    * presets (it tracks the spawn's lifetime and logs it), else straight through the SpawnManager with
    * source 'debug' (presets added through the dev API). options: { distance (m), force (ignore
-   * budgets) }. Returns the spawn id or null.
+   * budgets), at ({ x, z }: that spot instead of a point ahead; the F9 combo staging) }. Returns the
+   * spawn id or null.
    */
-  function forceSpawn(presetId, { distance = DEBUG_SPAWN_DEFAULT_DISTANCE, force = true } = {}) {
-    if (director && director.hasPreset(presetId)) return director.forceSpawn(presetId, { distance, force });
-    return manager.activate(presetId, { position: pointAhead(distance), heading: state.player.heading, source: 'debug', force });
+  function forceSpawn(presetId, { distance = DEBUG_SPAWN_DEFAULT_DISTANCE, force = true, at = null } = {}) {
+    if (director && director.hasPreset(presetId)) return director.forceSpawn(presetId, { distance, force, at });
+    const position = at && Number.isFinite(at.x) && Number.isFinite(at.z)
+      ? { x: at.x, y: Math.max(world.groundHeight(at.x, at.z), world.WATER_LEVEL), z: at.z }
+      : pointAhead(distance);
+    return manager.activate(presetId, { position, heading: state.player.heading, source: 'debug', force });
   }
 
   /** Degrees between two compass headings (0..180). */

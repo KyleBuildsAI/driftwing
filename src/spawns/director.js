@@ -349,17 +349,21 @@ function resolveCombos(infos, infoById) {
     if (!info.combo) continue;
     const block = info.combo;
     if (info.kind !== 'event' || info.preset.rarity !== 'legendary') throw new Error(`[DRIFTWING] director: combo "${info.id}" must be a legendary event`);
-    const members = block.members.map((member, index) => {
+    const members = [];
+    block.members.forEach((member, index) => {
       const memberInfo = infoById.get(member.presetId);
+      // An optional member names a preset this build may not have (another batch's): the combo then
+      // starts without it, and its log and comboStarted list the members it really has.
+      if (!memberInfo && member.optional === true) return;
       if (!memberInfo || memberInfo.kind !== 'event' || memberInfo.combo || memberInfo.override) {
         throw new Error(`[DRIFTWING] director: combo "${info.id}" member ${index} names "${member.presetId}", which is not a plain event preset of the director`);
       }
-      return {
+      members.push({
         info: memberInfo,
         role: member.role === 'anchor' ? 'anchor' : 'member',
         place: member.place || null,
         delay: Number.isFinite(member.delay) ? member.delay : 0,
-      };
+      });
     });
     const engineNeeds = {};
     let heavyMembers = info.heavy ? 1 : 0;
@@ -1193,6 +1197,16 @@ export function createDirector({
       position: { x, y: groundY(x, z), z }, heading, source, seed: hash, duration, parent: comboId, ...(forced ? { force: true } : {}),
     });
     if (id === null || id === undefined) return null;
+    // A combo whose own preset seeks its ground (anchor.seek: a migration's valley) places its members
+    // around the point the SpawnManager moved it to, so they all meet there.
+    if (info.preset.anchor && info.preset.anchor.seek) {
+      const placed = spawnManager.getInstance(id);
+      const anchor = placed ? placed.anchor || placed.position : null;
+      if (anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.z)) {
+        x = anchor.x;
+        z = anchor.z;
+      }
+    }
     const combo = {
       id: comboId,
       info,
@@ -1648,12 +1662,13 @@ export function createDirector({
 
     /**
      * Dev only: starts a preset ahead of the player through the SpawnManager (source 'debug').
-     * options: { distance (m), bearingOffset (deg), force (ignore the manager's budgets) }. A combo
+     * options: { distance (m), bearingOffset (deg), force (ignore the manager's budgets), at ({ x, z }:
+     * the spot itself instead of a point ahead, as the F9 combo staging uses) }. A combo
      * starts with all its members, its preconditions ignored (contract i.3: how the F9 debugger forces
      * one); the combo id is returned. An override is scheduled on the current night whatever its roll
      * and region (it shows from the evening on); its id is returned.
      */
-    forceSpawn(presetId, { distance = 3000, bearingOffset = 0, force = false } = {}) {
+    forceSpawn(presetId, { distance = 3000, bearingOffset = 0, force = false, at = null } = {}) {
       if (!devHooks) throw new Error('director.forceSpawn is only available in development builds or with ?debug=1');
       const info = infoById.get(presetId);
       if (!info) throw new RangeError(`director.forceSpawn: unknown preset "${presetId}"`);
@@ -1663,8 +1678,9 @@ export function createDirector({
         return `override:${presetId}`;
       }
       const radians = ((player.track + bearingOffset) * Math.PI) / 180;
-      const x = player.x + Math.sin(radians) * distance;
-      const z = player.z - Math.cos(radians) * distance;
+      const spot = at && Number.isFinite(at.x) && Number.isFinite(at.z);
+      const x = spot ? at.x : player.x + Math.sin(radians) * distance;
+      const z = spot ? at.z : player.z - Math.cos(radians) * distance;
       const seed = mix32((baseHash ^ Math.imul(++debugSerial, 0x9e3779b1)) >>> 0);
       if (info.combo) {
         const combo = startCombo(info, { x, z, heading: player.track, hash: seed, label: `debug:${debugSerial}`, reason: 'debug', source: 'debug', forced: force === true });

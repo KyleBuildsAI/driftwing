@@ -1070,13 +1070,26 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
 | B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | not started |
-| B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | not started |
+| B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | in progress |
 | I3 | Integration pass: presets/index.js and spawnScenarios in spec order; `?test=spawns` for all 100 on both backends | `v2-phase3` | not started |
 
 Each preset ships with its journal title and one-liner, 3+ callouts, its audio recipe, LOD and a
 FAR lure where heavy, colliders where solid, rarity, filters and lifetime (docs/spawns.md
 template). The challenge-based presets (70, 76-81) use the wave 1 challenge system; the combo
 presets (92-100) use the wave 2 combo scheduling.
+
+### Wave 3 - p3/presets-91-100
+
+- **Done:**
+  - director and schema (contract i.3, additive): a combo member may be `optional: true` (it may name
+    a preset another batch adds; the director starts the combo without it until it exists), a combo
+    with preconditions may name no member (its own engines carry it at its site, landmark or sky),
+    `forceSpawn(id, { at: { x, z } })` starts a preset on a given spot (the F9 combo staging), and a
+    combo whose own preset seeks its ground (`anchor.seek`) places its members around that point;
+    `anchor.seek: 'valley'` (the lowest dry ground in reach); `SpawnManager.nearestPart(presetId,
+    engine, x, z, radius)`, an allocation-free neighbour lookup for engines.
+- **Next:** the engine extensions (sky aurora, comet breakup, arcs, the beacon chain, ice ridges), the
+  audio recipes, presets 91-100, the F9 force-combo staging, the scenarios, step file and checks.
 
 ### Wave 4: discovery and verification, then the tag
 

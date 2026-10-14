@@ -65,6 +65,11 @@ const MEMORY_LOG_SIZE = 64;
 const PEAK_SEEK_GRID = 25;
 const PEAK_CLIMBS = 4;
 const PEAK_MIN_STRIDE = 8;
+/**
+ * preset.anchor seek 'valley' (Phase 3): the same grid and strides, descending, over dry ground only:
+ * at least this many metres above the water level (a valley floor, not its lake or the sea).
+ */
+const VALLEY_DRY_MARGIN = 4;
 /** Spawns alive at once (far above the budgets; activations past it are refused as 'capacity'). */
 export const MAX_SPAWNS = 512;
 const DEG = Math.PI / 180;
@@ -567,7 +572,9 @@ export function createSpawnManager(options) {
 
   /**
    * preset.anchor (events): seek 'peak' moves the activation point to the highest ground within
-   * anchor.radius (a coarse grid over the disc, then a finer one around its best sample); align
+   * anchor.radius (a coarse grid over the disc, then a finer one around its best sample); seek
+   * 'valley' to the lowest DRY ground there (VALLEY_DRY_MARGIN above the water level; the activation
+   * itself when the disc holds none); align
    * 'downwind' turns the heading downwind of the prevailing wind. Writes the result into out
    * ({ x, y, z, heading }); without an anchor rule it is the activation itself. Runs once per
    * activation, so it may allocate.
@@ -621,6 +628,13 @@ export function createSpawnManager(options) {
       out.x = best.x;
       out.z = best.z;
       out.y = Math.max(best.y, world.WATER_LEVEL);
+    } else if (rule.seek === 'valley') {
+      const best = seekValley(position, rule.radius);
+      if (best) {
+        out.x = best.x;
+        out.z = best.z;
+        out.y = best.y;
+      }
     }
     if (rule.align === 'downwind') {
       const direction = uniforms.windDirection.value;
@@ -628,6 +642,55 @@ export function createSpawnManager(options) {
       out.heading = compass < 0 ? compass + 360 : compass;
     }
     return out;
+  }
+
+  /**
+   * anchor seek 'valley': the lowest dry ground within radius of position, as { x, y, z }, or null when
+   * the disc holds no dry ground. A coarse grid, then its lowest few samples descend in halving strides
+   * (never onto water), and the lowest floor wins. Runs once per activation, so it may allocate.
+   */
+  function seekValley(position, radius) {
+    const radiusSquared = radius * radius;
+    const dryFloor = world.WATER_LEVEL + VALLEY_DRY_MARGIN;
+    const inside = (x, z) => (x - position.x) * (x - position.x) + (z - position.z) * (z - position.z) <= radiusSquared;
+    const step = (2 * radius) / (PEAK_SEEK_GRID - 1);
+    const samples = [];
+    for (let row = 0; row < PEAK_SEEK_GRID; row++) {
+      for (let column = 0; column < PEAK_SEEK_GRID; column++) {
+        const x = position.x - radius + column * step;
+        const z = position.z - radius + row * step;
+        if (!inside(x, z)) continue;
+        const y = world.groundHeight(x, z);
+        if (y > dryFloor) samples.push({ x, z, y });
+      }
+    }
+    if (samples.length === 0) return null;
+    samples.sort((first, second) => first.y - second.y);
+    let best = samples[0];
+    for (let index = 0; index < Math.min(PEAK_CLIMBS, samples.length); index++) {
+      const floor = { ...samples[index] };
+      for (let stride = step; stride >= PEAK_MIN_STRIDE; stride /= 2) {
+        let moved = true;
+        while (moved) {
+          moved = false;
+          for (let direction = 0; direction < 8; direction++) {
+            const angle = (direction / 8) * Math.PI * 2;
+            const x = floor.x + Math.cos(angle) * stride;
+            const z = floor.z + Math.sin(angle) * stride;
+            if (!inside(x, z)) continue;
+            const y = world.groundHeight(x, z);
+            if (y < floor.y && y > dryFloor) {
+              floor.x = x;
+              floor.z = z;
+              floor.y = y;
+              moved = true;
+            }
+          }
+        }
+      }
+      if (floor.y < best.y) best = floor;
+    }
+    return best;
   }
 
   /** Whether the spawn's FAR lure shows: at the far tier, and for a dormant site (activeState) not at all. */
@@ -1204,6 +1267,31 @@ export function createSpawnManager(options) {
     getParts(id) {
       const record = recordById.get(id);
       return record ? record.parts.map((part) => part.instance) : [];
+    },
+    /**
+     * The engine instance of engineName in the nearest live spawn of presetId within radius metres
+     * (horizontal) of (x, z), or null. Allocation-free: an engine may look up a neighbour spawn's part
+     * from its update (the resonating spires' arcs find the crystal spires this way).
+     */
+    nearestPart(presetId, engineName, x, z, radius) {
+      let best = null;
+      let bestSquared = radius * radius;
+      for (let index = 0; index < records.length; index++) {
+        const record = records[index];
+        if (record.presetId !== presetId || record.ended) continue;
+        for (let partIndex = 0; partIndex < record.parts.length; partIndex++) {
+          const part = record.parts[partIndex];
+          if (part.engine.name !== engineName || !part.instance || !part.instance.anchor) continue;
+          const dx = part.instance.anchor.x - x;
+          const dz = part.instance.anchor.z - z;
+          const squared = dx * dx + dz * dz;
+          if (squared <= bestSquared) {
+            bestSquared = squared;
+            best = part.instance;
+          }
+        }
+      }
+      return best;
     },
     /** The spawn created for a site id, or null. */
     getSiteSpawn(siteId) {

@@ -27,8 +27,11 @@ export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac',
 export const LANDMARK_TYPES = Object.freeze(['arch', 'monoliths', 'lighthouse', 'balloons']);
 /** FAR lure silhouettes drawn by src/spawns/lure.js. */
 export const LURE_TYPES = Object.freeze(['plume', 'anvil', 'funnel', 'whale', 'islands', 'comet']);
-/** How the SpawnManager may move an activation before the engines see it (preset.anchor). */
-export const ANCHOR_SEEKS = Object.freeze(['peak']);
+/**
+ * How the SpawnManager may move an activation before the engines see it (preset.anchor): 'peak' the
+ * highest ground in reach, 'valley' the lowest dry ground in reach (Phase 3: a migration's valley).
+ */
+export const ANCHOR_SEEKS = Object.freeze(['peak', 'valley']);
 export const ANCHOR_ALIGNS = Object.freeze(['downwind']);
 /** Tokens a callout line may use; they are filled in when the line is spoken. */
 export const CALLOUT_TOKENS = Object.freeze(['distance', 'direction', 'name', 'eta']);
@@ -397,7 +400,10 @@ function validateComboNear(check, near) {
 /**
  * combo (optional, contract i.3): a legendary event whose preconditions all hold at its candidate,
  * started with its member presets (each an event) placed around it. validatePresets checks that the
- * members and the sites it names exist.
+ * members and the sites it names exist. Phase 3 additions: a member with `optional: true` may name a
+ * preset this build lacks (the director then starts the combo without it), and a combo with
+ * preconditions may name no member at all: its own engines carry it at the site, landmark or sky its
+ * preconditions bring (the volcano's aurora, a comet's breakup, the lighthouse chain).
  */
 function validateCombo(check, combo, preset) {
   if (combo === undefined || combo === null) return;
@@ -415,12 +421,15 @@ function validateCombo(check, combo, preset) {
     if (preconditions.near !== undefined && preconditions.near !== null) validateComboNear(check, preconditions.near);
   }
   check.array(combo.members, 'combo.members');
-  if (combo.members.length === 0) check.fail('combo.members', 'must name at least one member');
+  if (combo.members.length === 0 && (combo.preconditions === undefined || combo.preconditions === null)) {
+    check.fail('combo.members', 'must name at least one member (or give preconditions: a combo of its own engines at a site, landmark or sky)');
+  }
   let anchors = 0;
   combo.members.forEach((member, index) => {
     const path = `combo.members[${index}]`;
     check.object(member, path);
-    check.onlyKeys(member, ['presetId', 'role', 'place', 'delay'], path);
+    check.onlyKeys(member, ['presetId', 'role', 'place', 'delay', 'optional'], path);
+    if (member.optional !== undefined) check.boolean(member.optional, `${path}.optional`);
     check.string(member.presetId, `${path}.presetId`);
     if (member.presetId === preset.id) check.fail(`${path}.presetId`, 'cannot be the combo itself');
     const role = member.role === undefined ? 'member' : check.oneOf(member.role, COMBO_ROLES, `${path}.role`);
@@ -524,8 +533,8 @@ export function validatePreset(preset, { engineNames = null } = {}) {
 
 /**
  * The cross-preset references of combos (contract i.3): every member is another event preset of the
- * list that is neither a combo nor an override, and every site a precondition names is a site preset
- * (with an activeState when siteActive names it).
+ * list that is neither a combo nor an override (an optional member may name no preset at all), and
+ * every site a precondition names is a site preset (with an activeState when siteActive names it).
  */
 function validateComboReferences(presets) {
   const byId = new Map(presets.map((preset) => [preset.id, preset]));
@@ -535,6 +544,8 @@ function validateComboReferences(presets) {
     preset.combo.members.forEach((member, index) => {
       const target = byId.get(member.presetId);
       const path = `combo.members[${index}].presetId`;
+      // An optional member may name a preset this build does not have yet (another batch's).
+      if (!target && member.optional === true) return;
       if (!target) check.fail(path, `names no preset: ${describe(member.presetId)}`);
       if (target.kind !== 'event') check.fail(path, `must name an event preset (${describe(member.presetId)} is a ${target.kind})`);
       if (target.combo || target.override) check.fail(path, `cannot name a combo or an override preset (${describe(member.presetId)})`);
