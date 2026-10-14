@@ -23,15 +23,15 @@ import { createGliderSynth } from './glider.js';
 import { createHeliSynth } from './heli.js';
 import { createJetSynth } from './jet.js';
 import { createPropSynth } from './prop.js';
-import { createRadialSynth } from './radial.js';
-import { createProprotorSynth } from './proprotor.js';
-import { createRocketSynth } from './rocket.js';
 import { createWingsuitSynth } from './wingsuit.js';
 import { createAerobaticPropSynth } from './aerobaticProp.js';
+import { createRadialSynth } from './radial.js';
+import { createProprotorSynth } from './proprotor.js';
 import { createParagliderSynth } from './paraglider.js';
 import { createBurnerSynth } from './burner.js';
 import { createAirshipPropSynth } from './airshipProp.js';
 import { createCreatureSynth } from './creature.js';
+import { createRocketSynth } from './rocket.js';
 
 const COMMON_DEFAULTS = Object.freeze({
   airflowSpeed: 60,
@@ -82,8 +82,6 @@ export const ENGINE_FAMILIES = Object.freeze({
     // motors, idleHz (motor tone at zero thrust), maxHz (at full thrust).
     defaults: { motors: 4, idleHz: 190, maxHz: 880, airflowSpeed: 42, interiorCutoff: 0, touchdown: 'body', callouts: false },
   },
-  // blades, rotorRpm (helicopter-mode rpm), turbineHz; the thrum follows craftState.nacelleAngle.
-  proprotor: { create: createProprotorSynth, defaults: { blades: 3, rotorRpm: 397, turbineHz: 4300, airflowSpeed: 120, interiorCutoff: 850 } },
   wingsuit: {
     create: createWingsuitSynth,
     // flutterHz (fabric flap rate at 40 m/s), proximityRange (m AGL where terrain rush starts).
@@ -99,20 +97,22 @@ export const ENGINE_FAMILIES = Object.freeze({
     // A prop variant: cylinders (odd, a radial), blades, maxRpm, idleRpm; plus the floats' water slap and spray.
     defaults: { cylinders: 9, blades: 3, maxRpm: 2300, idleRpm: 600, airflowSpeed: 60, interiorCutoff: 850, stallHorn: true, stallAoa: 15 },
   },
+  // blades, rotorRpm (helicopter-mode rpm), turbineHz; the thrum follows craftState.nacelleAngle.
+  proprotor: { create: createProprotorSynth, defaults: { blades: 3, rotorRpm: 397, turbineHz: 4300, airflowSpeed: 120, interiorCutoff: 850 } },
   paraglider: {
     create: createParagliderSynth,
     // flutterHz (canopy flutter rate at trim; folded fabric flaps faster). The variometer is on by default.
     defaults: { flutterHz: 3.2, airflowSpeed: 16, interiorCutoff: 0, touchdown: 'body', callouts: false, vario: true, varioLift: 0.1, varioSink: -2.5 },
   },
+  burner: { create: createBurnerSynth, defaults: { roarHz: 320, creakRate: 1.2, airflowSpeed: 25, interiorCutoff: 0, touchdown: 'body', callouts: false } },
+  airshipProp: { create: createAirshipPropSynth, defaults: { cylinders: 4, blades: 4, maxRpm: 2300, idleRpm: 700, airflowSpeed: 30, interiorCutoff: 900, touchdown: 'wheels', callouts: false } },
+  creature: { create: createCreatureSynth, defaults: { airflowSpeed: 30, interiorCutoff: 0, touchdown: 'body', callouts: false } },
   rocket: {
     create: createRocketSynth,
     // roarHz (the roar's resonant body), rumbleHz (the structure-borne sub tone); airflowBasis
     // 'equivalent' makes the airflow beds follow the dynamic pressure (silent in vacuum).
     defaults: { roarHz: 95, rumbleHz: 34, airflowBasis: 'equivalent', airflowSpeed: 280, interiorCutoff: 600, stallHorn: true, stallHornStyle: 'beep', motorPitch: 0.8 },
   },
-  burner: { create: createBurnerSynth, defaults: { roarHz: 320, creakRate: 1.2, airflowSpeed: 25, interiorCutoff: 0, touchdown: 'body', callouts: false } },
-  airshipProp: { create: createAirshipPropSynth, defaults: { cylinders: 4, blades: 4, maxRpm: 2300, idleRpm: 700, airflowSpeed: 30, interiorCutoff: 900, touchdown: 'wheels', callouts: false } },
-  creature: { create: createCreatureSynth, defaults: { airflowSpeed: 30, interiorCutoff: 0, touchdown: 'body', callouts: false } },
 });
 
 const PROFILE_CACHE = new WeakMap();
