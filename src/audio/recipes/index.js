@@ -21,6 +21,10 @@ import turbine from './turbine.js';
 import volcano from './volcano.js';
 import waterfall from './waterfall.js';
 import { skyWhale, whale } from './whale.js';
+import stoneWind from './stoneWind.js';
+import rustle from './rustle.js';
+import meadowHum from './meadowHum.js';
+import marsh from './marsh.js';
 
 export const RECIPES = Object.freeze({
   tornado,
@@ -38,6 +42,10 @@ export const RECIPES = Object.freeze({
   discovery,
   raptor,
   goose,
+  stoneWind,
+  rustle,
+  meadowHum,
+  marsh,
 });
 
 /**

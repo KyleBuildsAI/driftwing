@@ -404,6 +404,10 @@ const RENDER_PLAN = Object.freeze({
   discovery: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.2, name: 'chime' }] },
   raptor: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.3, name: 'call' }, { at: 2.6, name: 'call', options: { strength: 0.8 } }] },
   goose: { intensity: 1, seconds: 6, skip: 0.2, triggers: [{ at: 0.2, name: 'call' }] },
+  stoneWind: { intensity: 0.8, seconds: 5 },
+  rustle: { intensity: 0.7, seconds: 6, params: { knocks: 0.6, chirps: 0.5 }, triggers: [{ at: 2, name: 'burst' }] },
+  meadowHum: { intensity: 0.8, seconds: 6 },
+  marsh: { intensity: 0.8, seconds: 6, params: { frogs: 0.8, trickle: 0.4 } },
 });
 
 async function testRecipes(page, label) {
