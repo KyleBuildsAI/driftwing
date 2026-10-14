@@ -404,6 +404,9 @@ const RENDER_PLAN = Object.freeze({
   discovery: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.2, name: 'chime' }] },
   raptor: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.3, name: 'call' }, { at: 2.6, name: 'call', options: { strength: 0.8 } }] },
   goose: { intensity: 1, seconds: 6, skip: 0.2, triggers: [{ at: 0.2, name: 'call' }] },
+  iceSing: { intensity: 1, seconds: 6, skip: 0.2, triggers: [{ at: 1, name: 'crack', options: { strength: 1 } }] },
+  aurora: { intensity: 1, seconds: 8, skip: 1 },
+  foghorn: { intensity: 0.7, seconds: 7, skip: 0.2, triggers: [{ at: 0.8, name: 'horn', options: { strength: 1 } }] },
 });
 
 async function testRecipes(page, label) {

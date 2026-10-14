@@ -21,6 +21,9 @@ import turbine from './turbine.js';
 import volcano from './volcano.js';
 import waterfall from './waterfall.js';
 import { skyWhale, whale } from './whale.js';
+import iceSing from './iceSing.js';
+import aurora from './aurora.js';
+import foghorn from './foghorn.js';
 
 export const RECIPES = Object.freeze({
   tornado,
@@ -38,10 +41,13 @@ export const RECIPES = Object.freeze({
   discovery,
   raptor,
   goose,
+  iceSing,
+  aurora,
+  foghorn,
 });
 
 /**
  * Every recipe name, in the contract's order and then the later additions (raptor and goose, for the
- * wildlife presets); a preset's audio.recipe must be one of these.
+ * wildlife presets; Phase 3's per preset, in spec order); a preset's audio.recipe must be one of these.
  */
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));
