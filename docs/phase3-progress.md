@@ -1064,7 +1064,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 | # | Presets | Branch | Status |
 | --- | --- | --- | --- |
-| B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | not started |
+| B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | in progress |
 | B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | not started |
 | B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | not started |
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
@@ -1077,6 +1077,16 @@ Each preset ships with its journal title and one-liner, 3+ callouts, its audio r
 FAR lure where heavy, colliders where solid, rarity, filters and lifetime (docs/spawns.md
 template). The challenge-based presets (70, 76-81) use the wave 1 challenge system; the combo
 presets (92-100) use the wave 2 combo scheduling.
+
+### Wave 3 - p3/presets-31-40
+
+Presets 31-40 (weather and sky, volcanic and geo), each its own file in `src/spawns/presets/`.
+
+Done:
+- `gale` audio recipe (`src/audio/recipes/gale.js`): a howling storm wind with gust swells, a grit
+  hiss and a low rumble (params `grit`, `howl`, `depth`), for the storm walls of presets 31-33.
+
+Next: preset 31 (sandstorm wall) with the weather volume's canopy grit.
 
 ### Wave 4: discovery and verification, then the tag
 

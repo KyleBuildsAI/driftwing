@@ -11,6 +11,7 @@
 import { goose, raptor } from './birdCall.js';
 import crystal from './crystal.js';
 import discovery from './discovery.js';
+import gale from './gale.js';
 import geyser from './geyser.js';
 import lantern from './lantern.js';
 import meteor from './meteor.js';
@@ -38,6 +39,7 @@ export const RECIPES = Object.freeze({
   discovery,
   raptor,
   goose,
+  gale,
 });
 
 /**
