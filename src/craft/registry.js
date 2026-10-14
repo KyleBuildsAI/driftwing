@@ -9,6 +9,7 @@
 // The catalog is append-only: settings, bindings and journal records key on the ids, so an id
 // never changes meaning. hotkey is informational (the Phase 1 number keys); the number keys are the
 // player's ten favorites (settings.craftFavorites, actions craftSelect1-10).
+import { PRESET_CATEGORIES, PRESET_TAGS } from '../spawns/schema.js';
 
 /**
  * Picker silhouettes are top views, nose up, in a 64 x 64 box (the balloon is drawn from the side:
@@ -343,12 +344,28 @@ function validateJournal(module) {
   }
 }
 
+/** The faunaThreat of a craft that declares none: wildlife scatters at its usual distance. */
+export const DEFAULT_FAUNA_THREAT = 1;
+
+/**
+ * How strongly wildlife treats a craft module as a predator (h.2 faunaThreat; the eagle 2.5, the
+ * balloon 0.6): the scale of scatter and flush distances, DEFAULT_FAUNA_THREAT without one. The fauna
+ * engine's flocks, herds and waders and the ambient bird flocks all read it here.
+ */
+export function faunaThreatOf(module) {
+  return module && Number.isFinite(module.faunaThreat) && module.faunaThreat > 0 ? module.faunaThreat : DEFAULT_FAUNA_THREAT;
+}
+
+/** The names a director favour may weight: the preset tags and categories (src/spawns/schema.js). */
+const FAVOR_NAMES = Object.freeze({ tags: PRESET_TAGS, categories: PRESET_CATEGORIES });
+
 function validateFavor(module, field, favor) {
   if (!isPlainObject(favor)) fail(module, field, 'must be { tags?, categories? }');
   for (const kind of ['tags', 'categories']) {
     if (favor[kind] === undefined) continue;
     if (!isPlainObject(favor[kind])) fail(module, `${field}.${kind}`, 'must map names to weights');
     for (const [name, weight] of Object.entries(favor[kind])) {
+      if (!FAVOR_NAMES[kind].includes(name)) fail(module, `${field}.${kind}.${name}`, `is not one of the preset ${kind} (${FAVOR_NAMES[kind].join(', ')})`);
       if (!(Number.isFinite(weight) && weight > 0)) fail(module, `${field}.${kind}.${name}`, 'must be a positive weight');
     }
   }
@@ -364,6 +381,14 @@ function validateDirectorProfile(module) {
     if (!isPlainObject(band) || !Number.isFinite(band.altitude)) fail(module, `directorProfile.above[${index}]`, 'needs an altitude (m)');
     validateFavor(module, `directorProfile.above[${index}].favor`, band.favor);
   });
+}
+
+/** hud: { instruments: [ids] }, tiles the HUD pins with the overlay off; each one of the craft's instruments. */
+function validateHud(module) {
+  if (!isPlainObject(module.hud) || !Array.isArray(module.hud.instruments)) fail(module, 'hud', 'must be { instruments: [ids] }');
+  for (const id of module.hud.instruments) {
+    if (!module.instruments.includes(id)) fail(module, `hud.instruments.${id}`, 'must be one of the craft instruments');
+  }
 }
 
 function validateCapabilities(module) {
@@ -388,6 +413,7 @@ function validateOptionalFields(module) {
   if (module.directorProfile !== undefined) validateDirectorProfile(module);
   if (module.faunaThreat !== undefined && !(Number.isFinite(module.faunaThreat) && module.faunaThreat > 0)) fail(module, 'faunaThreat', 'must be a positive number');
   if (module.capabilities !== undefined) validateCapabilities(module);
+  if (module.hud !== undefined) validateHud(module);
   if (typeof module.audioProfile.engine !== 'string') fail(module, 'audioProfile.engine', 'must name an audio engine family');
 }
 

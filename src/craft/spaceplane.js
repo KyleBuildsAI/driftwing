@@ -985,7 +985,15 @@ export default Object.freeze({
       Object.freeze({ key: 'spaceplaneReentries', label: 'Re-entries', unit: 'count', op: 'add' }),
     ]),
   }),
+  // Above 20 km (contract i.2): celestial events and the heavy far-lure spawns, while ground-only small
+  // spawns (wildlife, structures, flight play, then geology and the sea) drop away.
   directorProfile: Object.freeze({
-    above: Object.freeze([Object.freeze({ altitude: 20000, favor: Object.freeze({ categories: Object.freeze({ celestial: 2.5 }), tags: Object.freeze({ heavy: 2 }) }) })]),
+    above: Object.freeze([Object.freeze({
+      altitude: 20000,
+      favor: Object.freeze({
+        tags: Object.freeze({ celestial: 3, farLure: 2.5 }),
+        categories: Object.freeze({ celestial: 2, wildlife: 0.25, structure: 0.25, flightplay: 0.25, geo: 0.5, ocean: 0.5 }),
+      }),
+    })]),
   }),
 });
