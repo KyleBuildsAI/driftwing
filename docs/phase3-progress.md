@@ -1105,8 +1105,10 @@ Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file
   Phase 2 world digests are rebuilt from the 30 Phase 2 presets (`PHASE2_PRESET_IDS`; wave 3 site
   presets change the real world's site list, as they must), the paint check accepts unpainted stamps
   (the arch chain's floor, the delta) and knows the delta, plus the delta shape check.
-- **Next:** docs/spawns.md rows and sections, the spawn scenarios (`batch81.js`), the step file and
-  the checks on both backends.
+- **Docs:** docs/spawns.md has the ten table rows (numbered 81-90) and a section each; docs-check
+  numbers a row by the "Preset NN" in its preset file's first line (its place in PRESETS when the line
+  names none), so a batch's rows keep their spec numbers before the other batches merge: 284/284.
+- **Next:** the spawn scenarios (`batch81.js`), the step file and the checks on both backends.
 
 ### Wave 4: discovery and verification, then the tag
 

@@ -83,6 +83,16 @@ preset's section below.
 | 28 | [Crystal spires](#28-crystal-spires) | `crystalSpires` | fantasy | site | uncommon | no | `structure`, `lightEffect` | no |
 | 29 | [Jet stream ribbon](#29-jet-stream-ribbon) | `jetStream` | flightplay | event | uncommon | no | `emitter`, `windModifier` | yes |
 | 30 | [Storm chase](#30-storm-chase) | `stormChase` | setpiece | event | legendary | no | `setPiece` | children |
+| 81 | [Five-arch chain](#81-five-arch-chain) | `fiveArchChain` | flightplay | site | uncommon | no | `structure` | no |
+| 82 | [Cherry blossom valley](#82-cherry-blossom-valley) | `cherryBlossomValley` | geo | site | uncommon | no | `emitter` | no |
+| 83 | [Autumn colour wave](#83-autumn-colour-wave) | `autumnColourWave` | geo | site | uncommon | no | `emitter` | no |
+| 84 | [Lavender and tulip stripes](#84-lavender-and-tulip-stripes) | `lavenderTulipStripes` | geo | site | uncommon | no | `emitter` | no |
+| 85 | [Rice terraces](#85-rice-terraces) | `riceTerraces` | geo | site | uncommon | no | `weatherVolume` | no |
+| 86 | [Redwood giants](#86-redwood-giants) | `redwoodGiants` | geo | site | uncommon | no | `emitter` | no |
+| 87 | [Badlands hoodoos](#87-badlands-hoodoos) | `badlandsHoodoos` | geo | site | uncommon | no | `structure` | no |
+| 88 | [Mangrove delta](#88-mangrove-delta) | `mangroveDelta` | ocean | site | uncommon | no | `weatherVolume`, `lightEffect` | no |
+| 89 | [Cactus forest with dust devils](#89-cactus-forest-with-dust-devils) | `cactusDustDevils` | geo | site | uncommon | no | `vortex` | yes |
+| 90 | [Bamboo forest](#90-bamboo-forest) | `bambooForest` | geo | site | uncommon | no | `emitter` | no |
 
 In all: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy. The
 journal's collection count is found / 30 over these presets (`PRESETS` in
@@ -732,6 +742,215 @@ and the storm decays.
 - **Journal:** the "Storm Chaser" entry; `closestTornado` (min, the closest pass to the funnel) and
   `stormsChased` (+1 when you came within 5 km of the funnel).
 
+### Flight-play and biome set pieces (presets 81-90)
+
+The biome set pieces are region overlays (src/world/overlays.js): a site's overlay recolours the
+ground inside its shape, plants its own vegetation species (which grow only there) or rows of them,
+and may sweep a colour wave across it. The overlay is part of the terrain, so it shows from any
+distance the terrain draws and needs no spawn; the plants draw within the vegetation range (a few
+hundred metres, the setting), and the preset's engines add the life: petals, leaves, mist, sounds.
+
+#### 81. Five-arch chain
+
+Five natural stone arches in the v1 style stand in a line along a level valley floor, 260 m apart:
+thread all five against the clock, with splits, medals and a best time per craft.
+[src/spawns/presets/fiveArchChain.js](../src/spawns/presets/fiveArchChain.js)
+
+- **Kind:** site, uncommon (challenge).
+- **Placement:** meadows, dunes or pine; land; ground 15-600 m, flat relief; chance 0.12; at least
+  16 km apart; 600 m clearance.
+- **Stamp:** `flatten`, 1240-1300 m by 150-180 m, unpainted (`structureStamps('archChain')`): a level
+  floor under the chain.
+- **Engines:** `structure` (recipe `archChain`: one v1-style arch around each of the challenge's
+  gates, its opening sized to hold the gate with 6 m to spare; box legs and capsule ribs as
+  colliders, the crown a perch; owns the voice, driven by the wind); `structure` (recipe
+  `challengeGates`, no frames: the stone is the gate).
+- **Challenge:** "Five-Arch Chain": five rectangular gates 36 m wide and 30 m tall, centred 21 m up,
+  at -520, -260, 0, 260 and 520 m along the site heading (start, three checkpoints, finish); gold
+  18 s, silver 25 s, bronze 36 s; a missed arch costs 5 s; the start prompt within 1.5 km (Y).
+- **Wind:** none.
+- **Sound:** `stoneWind` at pitch 0.8 (hollow moans through the stone, rising with the wind).
+- **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 2 km.
+
+#### 82. Cherry blossom valley
+
+A valley floor turned pink with cherry trees in bloom; every gust that comes down the valley tears
+petals off the canopy in a swirling pink storm.
+[src/spawns/presets/cherryBlossomValley.js](../src/spawns/presets/cherryBlossomValley.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** meadows or pine; land; ground 20-700 m, valley relief; chance 0.12; at least 18 km
+  apart; 400 m clearance.
+- **Overlay:** a disc of 1500-1900 m (350 m falloff), palette `cherryBlossom`, the `cherry` species
+  replacing the biome's plants (density 0.72).
+- **Engines:** `emitter` (petals: a light fall from the crowns all the time and 1600-2600 more on
+  every gust; the emission follows the WindField's gusts, `gusts`; owns the voice, which swells with
+  them and answers each gust); `emitter` (a soft pink haze torn off the trees, only on the gusts).
+- **Wind:** none of its own: the petals ride the WindField's wind and gusts.
+- **Sound:** `rustle` with chirps (the leaves in the wind, small birds).
+- **LOD:** near 2500 m, mid 7000 m, far 16 km. **Discovery:** 3 km, in view.
+- **Lifetime:** a site; removed beyond 16 + 2 km.
+
+#### 83. Autumn colour wave
+
+Over a forest the season turns as you watch: a wave of gold and crimson rolls slowly downwind across
+the ground and the broadleaf crowns while leaves twist down from the canopy.
+[src/spawns/presets/autumnColourWave.js](../src/spawns/presets/autumnColourWave.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** pine or meadows; land; ground 20-900 m; chance 0.12; at least 18 km apart; 400 m
+  clearance.
+- **Overlay:** a disc of 2200-2800 m (450 m falloff), palette `autumnForest`, a tint sweep from gold
+  (0xe0a030) to crimson (0xb8402a) moving downwind, 600 s period, 900 m width (a 3.6 km wave whose
+  front moves at about 6 m/s). The broadleaf trees turn with the ground under them; the pines stay
+  green.
+- **Engines:** `emitter` (leaves twisting down from the crowns and settling, a flurry on every gust;
+  owns the voice).
+- **Wind:** none.
+- **Sound:** `rustle` with a few creaks and chirps.
+- **LOD:** near 2500 m, mid 7000 m, far 18 km. **Discovery:** 3.5 km, in view.
+- **Lifetime:** a site; removed beyond 18 + 2 km.
+
+#### 84. Lavender and tulip stripes
+
+Two striped fields side by side on flat open country, ruled in rows: lavender in purple rows and
+tulips in red, yellow, pink and white bands, with pollen drifting over them and bees humming.
+[src/spawns/presets/lavenderTulipStripes.js](../src/spawns/presets/lavenderTulipStripes.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** meadows or dunes; land; ground 6-450 m, flat relief; chance 0.12; at least 16 km
+  apart; 400 m clearance.
+- **Overlays:** two ellipses across the site heading, 400 m behind and ahead of its centre: the
+  lavender field (palette `lavenderFields`, 6 m stripes of `lavender`, purple rows alternating with
+  darker soil-toned ones) and the tulip field (palette `tulipFields`, 14 m stripes of `tulip` in four
+  colours), rows along the site heading.
+- **Engines:** `emitter` (pollen drifting over the rows, thicker in the breeze; owns the voice).
+- **Wind:** none.
+- **Sound:** `meadowHum` (a drone of bees, now and then one flying past).
+- **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 2 km.
+
+#### 85. Rice terraces
+
+Two flights of flooded paddies step down a green hillside, every flat a still mirror of the sky; at
+dawn a mist lies in the steps.
+[src/spawns/presets/riceTerraces.js](../src/spawns/presets/riceTerraces.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** archipelago, meadows or pine; land; ground 40-900 m; chance 0.14; at least 16 km
+  apart; 400 m clearance; aligned downhill.
+- **Stamps:** two `terraces` side by side (165 m either side of the centre), each 380-460 m down the
+  slope, 150-170 m wide, 7-9 shelves behind 0.7-1 m bunds, painted `mud`.
+- **Waters:** a `pool` on every shelf of both, filled to 72 % of the bund, tinted green-grey, nearly
+  still (waves 0.03), with glint 1.4 and the sky mirror at 0.7.
+- **Overlay:** a disc of 620-760 m, palette `riceTerraces` (paddy greens and mud banks).
+- **Engines:** `weatherVolume` (a low mist bank 28 m deep over the steps, `hours`: all of it at dawn,
+  a tenth by day, a third at dusk, half at night; owns the voice).
+- **Wind:** only the mist's faint turbulence (0.04).
+- **Sound:** `marsh` with trickle (water running from paddy to paddy, frogs, insects).
+- **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 2 km.
+
+#### 86. Redwood giants
+
+A grove of giant redwoods 60-110 m tall, spaced wide enough to slalom between the trunks, with needles
+drifting down through the light.
+[src/spawns/presets/redwoodGiants.js](../src/spawns/presets/redwoodGiants.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** pine; land; ground 30-900 m; chance 0.12; at least 18 km apart; 400 m clearance.
+- **Overlay:** a disc of 1300-1700 m (300 m falloff), palette `redwoodForest`, the `redwood` species
+  replacing the biome's trees at density 0.075 (about one giant per 40 m square).
+- **Colliders:** every trunk is a cylinder (the vegetation collider provider, from the overlay's own
+  scatter), every crown a perch: the grove is solid without a spawn.
+- **Engines:** `emitter` (needles and motes drifting down under the crowns, flurries on the gusts; owns
+  the voice).
+- **Wind:** none.
+- **Sound:** `rustle` with creaks (the great trunks groaning).
+- **LOD:** near 2500 m, mid 7000 m, far 16 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 16 + 2 km.
+
+#### 87. Badlands hoodoos
+
+A field of banded rock pillars up to 36 m tall in clay badlands, each balancing a dark capstone,
+gathered in clusters with lanes between them.
+[src/spawns/presets/badlandsHoodoos.js](../src/spawns/presets/badlandsHoodoos.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** dunes or meadows; land; ground 30-900 m; chance 0.12; at least 16 km apart; 500 m
+  clearance.
+- **Overlay:** a disc of 900-1100 m, palette `badlands`, the biome's plants replaced by a rare saguaro
+  (density 0.015).
+- **Engines:** `structure` (recipe `hoodoos`: 44-64 pillars 12-36 m tall within 400 m, in 3-5
+  clusters, 85 % capped, 12-20 fallen blocks; capsule shafts, capstone cylinders and boulder spheres
+  as colliders, a perch on every top; owns the voice, driven by the wind).
+- **Wind:** none.
+- **Sound:** `stoneWind` at pitch 1.25.
+- **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 2 km.
+
+#### 88. Mangrove delta
+
+Where a low coast meets the sea, tidal flats fan out cut by meandering channels, and mangroves stand
+on their roots across them; a mist lies low at dawn and fireflies blink at night.
+[src/spawns/presets/mangroveDelta.js](../src/spawns/presets/mangroveDelta.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** archipelago, meadows or pine; on a coast; chance 0.6 (few coastal cells take a
+  delta); at least 18 km apart; 150 m clearance; aligned downhill (the fan opens out to sea).
+- **Stamp:** `delta`, 550 m seaward of the site, 1300-1600 m long and 1200-1600 m wide at the sea,
+  4-7 channels 26-42 m wide cut 2.5-4 m below sea level (the sea fills them), flats between 1.2 m below
+  and 0.5-0.85 m above sea level, unpainted (plants grow on it). It fits only where the fan's core
+  rises at most 60 m above the sea and part of it lies below.
+- **Overlay:** the stamp's footprint grown by 120 m, palette `mangrove`, the `mangrove` species
+  (density 0.62) on the flats and in the shallows.
+- **Engines:** `weatherVolume` (a mist bank 38 m deep over the ground below 4 m, `hours`: thick at
+  dawn, 15 % by day; owns the voice); `lightEffect` (2600 fireflies among the trees at night,
+  blinking partly in step).
+- **Wind:** only the mist's faint turbulence.
+- **Sound:** `marsh` (water lapping at the roots, frogs, insects).
+- **LOD:** near 2500 m, mid 7000 m, far 16 km. **Discovery:** 3 km, in view.
+- **Lifetime:** a site; removed beyond 16 + 2 km.
+
+#### 89. Cactus forest with dust devils
+
+A forest of tall saguaros on warm desert ground, with two dust devils wandering between the cacti.
+[src/spawns/presets/cactusDustDevils.js](../src/spawns/presets/cactusDustDevils.js)
+
+- **Kind:** site, uncommon; affects flight.
+- **Placement:** dunes; land; ground 10-900 m; chance 0.14; at least 16 km apart; 400 m clearance.
+- **Overlay:** a disc of 1200-1500 m, palette `saguaroDesert`, the `saguaro` species added to the
+  desert's own plants (density 0.22; their tops are perches).
+- **Engines:** two `vortex` dust devils, slim collarless sand columns (6 m core and 230 m tall; 4 m and
+  160 m), each walking its own seeded meandering track at 3 and 2.4 m/s (a site walks it back and
+  forth), the larger owning the voice.
+- **Wind:** a Rankine vortex each: 16 m/s of spin at the core (the slighter 12), inflow within 140 m
+  (4 m/s), a 7 m/s updraft (5), turbulence 0.6 with 3 m/s gusts. A glider through the core is kicked
+  up and bumped; a jet's airspeed jolts (`tools/lab/preset-flight.mjs`).
+- **Sound:** `tornado` at a low intensity (the hiss and whirl of sand), reference distance 60 m.
+- **LOD:** near 2000 m, mid 5000 m, far 12 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 12 + 2 km.
+
+#### 90. Bamboo forest
+
+A dense grove of tall bamboo whose culms bend with the WindField's near-ground wind, each gust running
+across it as a ripple, knocking hollow wood against wood.
+[src/spawns/presets/bambooForest.js](../src/spawns/presets/bambooForest.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** meadows, archipelago or pine; land; ground 10-800 m; chance 0.12; at least 16 km
+  apart; 400 m clearance.
+- **Overlay:** a disc of 800-1100 m (220 m falloff), palette `bambooGrove`, the `bamboo` species
+  replacing the biome's plants (density 0.85). The sway reads the wind-sway texture (spawn wind
+  sources included), and bamboo answers its gusts more than any other plant.
+- **Engines:** `emitter` (leaves shaken loose by the gusts; owns the voice, whose knocks cascade on
+  every gust).
+- **Wind:** none of its own.
+- **Sound:** `rustle` with knocks.
+- **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 2 km.
+
 ## Adding a preset
 
 Phase 3 adds 70 presets on these same engines. A new preset needs no engine or system code unless
@@ -760,7 +979,8 @@ it needs an engine feature that does not exist yet.
 5. **Sound.** `audio.recipe` must be one of the recipes in
    [src/audio/recipes/index.js](../src/audio/recipes/index.js): `tornado`, `thunder`, `volcano`,
    `geyser`, `waterfall`, `whale`, `skyWhale`, `crystal`, `turbine`, `murmuration`, `meteor`,
-   `lantern`, `discovery`, `raptor` or `goose`. A preset has one voice. Without a flag the first
+   `lantern`, `discovery`, `raptor` or `goose`, and the Phase 3 additions (`stoneWind`, `rustle`,
+   `meadowHum` and `marsh` with presets 81-90). A preset has one voice. Without a flag the first
    engine entry opens it; each engine has its own flag: `voice` (vortex, structure, fauna,
    waterEffect), `sound` (emitter, lightEffect) or `ownsAudio` (weatherVolume, celestial). On a
    multi-engine preset set the flags explicitly: `true` on the part that should own the voice and
