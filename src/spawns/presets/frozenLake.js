@@ -1,6 +1,7 @@
-// Preset 91: Frozen lake (uncommon site). A lake in the snow country frozen hard: a basin stamp holds an
-// ice body (the water query's solid ice, so craft land and skid on it), shaded by the ice material
-// with its white rime and its web of cracks, the shore around it rimed in the 'frozen' overlay. Long
+// Preset 91: Frozen lake (uncommon site). A mountain tarn in the snow country frozen hard: a basin stamp
+// (small and deep, so it fits the steep snow and pine country) holds an ice body (the water query's
+// solid ice, so craft land and skid on it), shaded by the ice material with its white rime and its web
+// of cracks, the shore around it rimed in the 'frozen' overlay. Long
 // pressure ridges of tilted ice slabs buckle up across the ice (structure recipe iceRidges), each a
 // solid collider. Up close the ice sings: falling chirps, twangs and booms as it strains (iceSing,
 // louder as you approach). Docs: docs/engines/structure.md.
@@ -13,22 +14,22 @@ export default Object.freeze({
   heavy: false,
   tags: Object.freeze(['lake', 'snow', 'calm', 'spectacle']),
   placement: Object.freeze({
-    chance: 0.16,
+    chance: 0.6,
     minSpacing: 14000,
     biomes: Object.freeze(['snow', 'pine']),
     surface: 'land',
-    terrain: Object.freeze({ minHeight: 30, maxHeight: 1600, relief: 'any' }),
+    terrain: Object.freeze({ minHeight: 30, maxHeight: 2400, relief: 'any' }),
     clearance: 500,
   }),
   filters: Object.freeze({ biomes: null, timeOfDay: null, altitude: null, weather: null, surface: 'land' }),
   stamps: Object.freeze([
-    Object.freeze({ type: 'basin', radius: Object.freeze([240, 340]), depth: Object.freeze([10, 16]), rim: Object.freeze([30, 45]), falloff: Object.freeze([80, 120]), paint: 'ice' }),
+    Object.freeze({ type: 'basin', radius: Object.freeze([110, 170]), depth: Object.freeze([16, 22]), rim: Object.freeze([30, 45]), falloff: Object.freeze([80, 120]), paint: 'ice' }),
   ]),
   waters: Object.freeze([
     Object.freeze({ kind: 'lake', stamp: 0, level: Object.freeze({ mode: 'basin', fill: 0.8 }), material: 'ice', tint: 0x9cc9dc }),
   ]),
   overlays: Object.freeze([
-    Object.freeze({ shape: Object.freeze({ kind: 'stamp', stamp: 0, grow: 220, falloff: 140 }), palette: 'frozen', material: 'ice' }),
+    Object.freeze({ shape: Object.freeze({ kind: 'stamp', stamp: 0, grow: 180, falloff: 120 }), palette: 'frozen', material: 'ice' }),
   ]),
   engines: Object.freeze([
     Object.freeze({
@@ -37,7 +38,7 @@ export default Object.freeze({
         recipe: 'iceRidges',
         water: 0,
         ridges: Object.freeze([3, 5]),
-        length: Object.freeze([180, 360]),
+        length: Object.freeze([120, 280]),
         height: Object.freeze([1.4, 3.4]),
         slab: Object.freeze([2.6, 5.8]),
         wander: 16,

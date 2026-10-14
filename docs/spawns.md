@@ -752,19 +752,19 @@ them changes the air the craft flies through.
 
 #### 91. Frozen lake
 
-A lake in the snow country frozen hard: pale clear ice under white rime, webbed with cracks, with long
+A mountain tarn in the snow country frozen hard: pale clear ice under white rime, webbed with cracks, with long
 pressure ridges of tilted slabs buckled up across it. The ice holds a landing, and up close it sings:
 falling chirps and booms as it strains.
 [src/spawns/presets/frozenLake.js](../src/spawns/presets/frozenLake.js)
 
 - **Kind:** site, uncommon.
-- **Placement:** snow or pine; land; ground 30-1600 m; chance 0.16; at least 14 km apart; 500 m
-  clearance.
-- **Stamps, water and overlay:** a `basin` (radius 240-340 m, depth 10-16 m, painted `ice`) holding an
+- **Placement:** snow or pine; land; ground 30-2400 m; chance 0.6 (a small, deep basin is what the
+  steep snow and pine country takes); at least 14 km apart; 500 m clearance.
+- **Stamps, water and overlay:** a `basin` (radius 110-170 m, depth 16-22 m, painted `ice`) holding an
   ice body filled to 0.8 of its depth (`waters`, material `ice`: the water query's solid ice, so craft
-  land and skid on it), and the `frozen` overlay with the ice material around it, grown 220 m past the
+  land and skid on it), and the `frozen` overlay with the ice material around it, grown 180 m past the
   basin.
-- **Engines:** `structure` (recipe `iceRidges`: 3-5 ridges 180-360 m long across the ice, slabs
+- **Engines:** `structure` (recipe `iceRidges`: 3-5 ridges up to 120-280 m long across the ice, slabs
   1.4-3.4 m tall and 2.6-5.8 m long leaning this way and that, only where the body holds ice; every
   26 m stretch a capsule collider; owns the voice, its intensity the approach within 1.6 km).
 - **Wind:** none.
