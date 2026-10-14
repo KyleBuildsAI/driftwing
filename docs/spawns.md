@@ -83,6 +83,9 @@ preset's section below.
 | 28 | [Crystal spires](#28-crystal-spires) | `crystalSpires` | fantasy | site | uncommon | no | `structure`, `lightEffect` | no |
 | 29 | [Jet stream ribbon](#29-jet-stream-ribbon) | `jetStream` | flightplay | event | uncommon | no | `emitter`, `windModifier` | yes |
 | 30 | [Storm chase](#30-storm-chase) | `stormChase` | setpiece | event | legendary | no | `setPiece` | children |
+| 31 | [Sandstorm wall](#31-sandstorm-wall) | `sandstormWall` | weather | event | uncommon | no | `weatherVolume`, `windModifier`, `emitter` | yes |
+| 32 | [Snow squall](#32-snow-squall) | `snowSquall` | weather | event | common | no | `weatherVolume`, `windModifier`, `emitter` | yes |
+| 33 | [Hurricane eye](#33-hurricane-eye) | `hurricaneEye` | weather | event | rare | yes | `weatherVolume`, `windModifier`, `emitter` | yes |
 
 In all: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy. The
 journal's collection count is found / 30 over these presets (`PRESETS` in
@@ -731,6 +734,78 @@ and the storm decays.
 - **Lifetime:** 570-600 s; despawned beyond 30 + 5 km after 60 s out of view.
 - **Journal:** the "Storm Chaser" entry; `closestTornado` (min, the closest pass to the funnel) and
   `stormsChased` (+1 when you came within 5 km of the funnel).
+
+### Weather and sky (Phase 3)
+
+#### 31. Sandstorm wall
+
+A haboob: a rolling orange wall of dust a kilometre and a half tall and fourteen wide marches downwind
+across the dunes with dust boiling along its foot. Its gust front hits first as a headwind and rough
+air; inside, the world shrinks to a few hundred metres of ochre gloom and grit streaks race across the
+canopy.
+[src/spawns/presets/sandstormWall.js](../src/spawns/presets/sandstormWall.js)
+
+- **Kind:** event, uncommon.
+- **Anchor:** turned downwind (`anchor: { align: 'downwind' }`), so the wall rolls with the wind.
+- **Engines:** `weatherVolume` (a `bank` 14 km long and 2.2 km deep with a tall leading wall (`wall`
+  0.85), 420 ochre puffs, three dust shafts, a dark ochre inside fog, `canopyGrit` 0.9, drifting at
+  11 m/s; owns the voice); `windModifier` (the gust front, following the volume); `emitter` (dust
+  boiling up along the wall's foot, travelling with it).
+- **Filters:** dunes; day, dawn or dusk; clear or building weather; over land; player 0-4500 m;
+  5-12 km ahead.
+- **Candidates:** 9 km cells, 600 s buckets, chance 0.45.
+- **Wind:** a gust front 1150 m ahead of the wall's centre line, 14 km long: 15 m/s of outflow below
+  900 m, 3 m/s of lift at its edge, turbulence 0.8 with 7 m/s gusts; inside the dust, turbulence 0.6.
+- **Sound:** `gale` (howling wind with a thick grit hiss).
+- **LOD:** near 4 km, mid 12 km, far 30 km. **Discovery:** 9 km, in view.
+- **Lifetime:** 360-480 s; despawned beyond 25 + 5 km after 30 s out of view.
+
+#### 32. Snow squall
+
+A squall line sweeps downwind over the snow country: a low, dark-bellied cloud deck dragging curtains
+of heavy snow, a white wall of blowing snow at its foot and spindrift smoking off the ground ahead of
+its gust front. Inside it is a whiteout, with snow streaming past the canopy.
+[src/spawns/presets/snowSquall.js](../src/spawns/presets/snowSquall.js)
+
+- **Kind:** event, common (the snow biome's pacing).
+- **Anchor:** turned downwind.
+- **Engines:** `weatherVolume` (the squall deck: a `bank` 5 km long held 1000 m above the ground,
+  storm 0.7, with three snow shafts and canopy rain, drifting at 9 m/s; owns the voice);
+  `weatherVolume` (the whiteout: a ground-hugging `bank` with a low wall, a white inside fog and
+  `canopyGrit` 0.35 of snow); `windModifier` (the gust front and the downdraft under the core,
+  following the deck); `emitter` (spindrift along the gust front, travelling with it).
+- **Filters:** snow; any hour; building, storm or clearing weather; over land; player 0-5000 m;
+  3-8 km ahead.
+- **Candidates:** 5 km cells, 360 s buckets, chance 0.5.
+- **Wind:** a gust front 900 m ahead: 13 m/s of outflow, 2 m/s of lift, turbulence 0.75 with 8 m/s
+  gusts; under the core a 4 m/s downdraft spreading as an 8 m/s outflow; inside, turbulence 0.45-0.5.
+- **Sound:** `gale` (a howling wind with a snow hiss).
+- **LOD:** near 2500 m, mid 9 km, far 20 km. **Discovery:** 4.5 km, in view.
+- **Lifetime:** 240-360 s; despawned beyond 12 + 3 km after 20 s out of view.
+
+#### 33. Hurricane eye
+
+A hurricane over the open ocean, fifty kilometres across: spiral rain bands sweep in toward a towering
+eyewall, and its cloud canopy stands on the horizon 60 km away. Fly in through the bands and the dark,
+violent eyewall, with 40 m/s winds, heavy rain on the canopy and the sea whipped white below, and punch
+through into the calm eye: still air, a stadium of cloud curving up all around, blue sky above.
+[src/spawns/presets/hurricaneEye.js](../src/spawns/presets/hurricaneEye.js)
+
+- **Kind:** event, rare, heavy. Anvil lure, 12 km tall and 42 km wide.
+- **Engines:** `weatherVolume` (the `ring` form: an eyewall of radius 4.2 km, 11 km tall, flaring
+  1.7 km outward at the top around the clear eye; four spiral rain bands out to 26 km; a canopy out to
+  2.6 radii; rain at the foot of the wall; canopy rain inside; drifting at 5 m/s; its voice stands on
+  the eyewall nearest the camera and ducks in the eye); `windModifier` (the `cyclone` source, following
+  the volume); `emitter` (sea spray swept around under the eyewall).
+- **Filters:** any biome; day, dawn or dusk; clear, building or clearing weather (the eye shows the
+  sky above); over water; player 0-14 000 m; 18-34 km ahead.
+- **Candidates:** 30 km cells, 1800 s buckets, chance 0.4.
+- **Wind:** a cyclone: the eye calm (under 5 m/s, turbulence 0.04), the eyewall 42 m/s with lift and
+  turbulence 0.95 with 9 m/s gusts, falling off as (wall / r)^0.6 to 28 km, inflow at low level, and
+  four spiral bands of gusty air (turbulence 0.5) turning with the visible bands.
+- **Sound:** `gale` (a deep roar with a high howl, reference distance 900 m).
+- **LOD:** near 9 km, mid 30 km, far 70 km. **Discovery:** 25 km, in view.
+- **Lifetime:** 600-780 s; despawned beyond 60 + 8 km after 45 s out of view.
 
 ## Adding a preset
 

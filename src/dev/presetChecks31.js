@@ -11,7 +11,7 @@
 // tools/steps/presets-31-40.json drives it (a dev server: it imports this module by URL). Never part of
 // a production build: only step files import it. Every failed check calls console.error.
 import { installPresetChecks } from './presetChecks.js';
-import { frames, wait } from './spawnCheckKit.js';
+import { createFraming, frames, wait } from './spawnCheckKit.js';
 import { PRESET_BY_ID } from '../spawns/presets/index.js';
 
 const DEG = Math.PI / 180;
@@ -22,6 +22,9 @@ export function installPresetChecks31(game) {
   const THREE = ctx.THREE;
   const manager = ctx.systems.spawns.manager;
   const probePoint = new THREE.Vector3();
+  const framing = createFraming(ctx);
+  const surfaceAt = (x, z) => Math.max(ctx.world.groundHeight(x, z), ctx.world.WATER_LEVEL);
+  const isWater = (x, z) => ctx.world.groundHeight(x, z) < ctx.world.WATER_LEVEL - 4;
 
   function check(name, ok, detail) {
     const line = `${ok ? 'PASS' : 'FAIL'} ${name}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`;
@@ -54,7 +57,74 @@ export function installPresetChecks31(game) {
     return out;
   }
 
+  /**
+   * A start point and heading from which `distance` ahead lies on `surface` ('water': open water, the
+   * point and a ring of points `clear` m around it; 'land': dry land), searched outward from the
+   * world's spawn. Returns { x, z, heading } or null.
+   */
+  function startFacing(surface, distance, clear) {
+    const origin = state.spawn;
+    for (let ring = 0; ring <= 20; ring++) {
+      const reach = ring * 4000;
+      const steps = ring === 0 ? 1 : 24;
+      for (let step = 0; step < steps; step++) {
+        const angle = (step / steps) * Math.PI * 2;
+        const x = origin.x + Math.sin(angle) * reach;
+        const z = origin.z - Math.cos(angle) * reach;
+        let ok = surface === 'water' ? isWater(x, z) : !isWater(x, z);
+        for (let around = 0; ok && around < 8; around++) {
+          const turn = (around / 8) * Math.PI * 2;
+          const aroundX = x + Math.sin(turn) * clear;
+          const aroundZ = z - Math.cos(turn) * clear;
+          ok = surface === 'water' ? isWater(aroundX, aroundZ) : !isWater(aroundX, aroundZ);
+        }
+        if (!ok) continue;
+        const heading = ring === 0 ? origin.heading : (angle * 180) / Math.PI;
+        const radians = (heading * Math.PI) / 180;
+        return { x: x - Math.sin(radians) * distance, z: z + Math.cos(radians) * distance, heading };
+      }
+    }
+    return null;
+  }
+
   Object.assign(api, {
+    /**
+     * start() (the generic kit's force-spawn, baseline and run) from a start point that puts the spawn
+     * over `surface` (see startFacing): the world's spawn point is moved there for the call only.
+     */
+    async startOn(presetId, surface, options = {}) {
+      const distance = options.distance ?? 1500;
+      const point = startFacing(surface, distance, options.clear ?? 2000);
+      if (!point) return check(`${presetId}: a start with ${surface} ${distance} m ahead`, false, 'none within 80 km of the spawn');
+      const saved = { x: state.spawn.x, y: state.spawn.y, z: state.spawn.z, heading: state.spawn.heading };
+      Object.assign(state.spawn, { x: point.x, y: surfaceAt(point.x, point.z), z: point.z, heading: point.heading });
+      try {
+        return await api.start(presetId, options);
+      } finally {
+        Object.assign(state.spawn, saved);
+      }
+    },
+
+    /**
+     * Frames presetId's spawn in photo mode from camera [right, up, forward] (up above the anchor) at
+     * target [right, up, forward], both in the spawn's frame, with an optional fov.
+     */
+    async frameAt(presetId, { camera, target, fov }) {
+      const record = spawnOf(presetId);
+      if (!record) return check(`${presetId}: framed`, false, 'no live spawn');
+      const anchor = manager.getParts(record.id)[0].anchor;
+      const heading = headingOf(record) * DEG;
+      const toWorld = ([right, up, forward]) => ({
+        x: anchor.x + Math.cos(heading) * right + Math.sin(heading) * forward,
+        y: anchor.y + up,
+        z: anchor.z + Math.sin(heading) * right - Math.cos(heading) * forward,
+      });
+      const position = toWorld(camera);
+      position.y = Math.max(position.y, surfaceAt(position.x, position.z) + 20);
+      const settled = await framing.frameView(position, toWorld(target), { fov });
+      return check(`${presetId}: framed`, true, { terrainSettled: settled, camera: { x: Math.round(position.x), y: Math.round(position.y), z: Math.round(position.z) } });
+    },
+
     /**
      * Holds every game preset but presetId (the site feed then builds only its sites, and no other
      * spawn's wind, modifiers or geometry moves the dispose baselines while the craft travels).
@@ -96,12 +166,30 @@ export function installPresetChecks31(game) {
     },
 
     /**
-     * Probes the wind at each probe { label, offset: [right, up, forward], speedMin, speedMax,
-     * turbulenceMin, turbulenceMax, upMin, upMax } (every bound optional) and judges it.
+     * Moves the windModifier parts of presetId's live spawn `seconds` on in their own clock (their
+     * sources' fade-ins are past at once; photo mode holds the simulation clock).
      */
-    wind(presetId, probes) {
+    windAge(presetId, seconds) {
+      const record = spawnOf(presetId);
+      let moved = 0;
+      for (const part of record ? manager.getParts(record.id) : []) {
+        if (part.engine !== 'windModifier') continue;
+        part.data.numbers[0] += seconds;
+        moved++;
+      }
+      return check(`${presetId}: wind sources ${seconds} s on`, moved > 0, { moved });
+    },
+
+    /**
+     * Probes the wind at each probe { label, offset: [right, up, forward], speedMin, speedMax,
+     * turbulenceMin, turbulenceMax, upMin, upMax } (every bound optional) and judges it, out of photo
+     * mode (the engines update their sources only while the simulation runs).
+     */
+    async wind(presetId, probes) {
       const record = spawnOf(presetId);
       if (!record) return check(`${presetId}: wind`, false, 'no live spawn');
+      ctx.setPhotoMode(false);
+      await frames(6);
       const rows = [];
       let ok = true;
       for (const probe of probes) {

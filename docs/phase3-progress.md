@@ -1085,8 +1085,21 @@ Presets 31-40 (weather and sky, volcanic and geo), each its own file in `src/spa
 Done:
 - `gale` audio recipe (`src/audio/recipes/gale.js`): a howling storm wind with gust swells, a grit
   hiss and a low rumble (params `grit`, `howl`, `depth`), for the storm walls of presets 31-33.
+- weatherVolume `canopyGrit` (grit streaks and a sandblasted rim on the canopy in the first-person
+  views, inside the volume or its dust shafts; 0 by default, the canopy unchanged).
+- weatherVolume form `ring` (hurricane: stadium eyewall flaring with height, spiral bands, canopy;
+  params `flare`, `spin`, `bands`, `canopy`; its voice stands on the eyewall nearest the camera and
+  ducks in the eye) and the windModifier source type `cyclone` (calm eye, eyewall, decay, inflow,
+  lift, eye subsidence, spiral band gusts turning with the visible bands).
+- Presets 31 sandstorm wall, 32 snow squall, 33 hurricane eye, with their docs/spawns.md rows and
+  sections; `src/dev/presetChecks31.js` (the batch's dev check kit on top of presetChecks.js).
+- Browser checks so far (WebGPU, dev server, seed DRIFTWING): 31-33 force-spawned, framed and
+  disposed back to their baselines; the sandstorm's gust front and inside turbulence, grit 0.9 in the
+  cockpit; the squall's gust front (24.7 m/s, turbulence 0.72), whiteout and snow in the cockpit; the
+  hurricane's calm eye (6.6 m/s with the ambient wind, turbulence 0.08), eyewall 47 m/s with
+  turbulence 0.95, outer bands 21 m/s.
 
-Next: preset 31 (sandstorm wall) with the weather volume's canopy grit.
+Next: preset 34 (valley fog river), 35 (dirty thunderstorm), then the volcanic and geo sites.
 
 ### Wave 4: discovery and verification, then the tag
 
