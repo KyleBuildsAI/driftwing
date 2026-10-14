@@ -17,6 +17,7 @@ export default Object.freeze({
   kind: 'event',
   rarity: 'common',
   heavy: false,
+  tags: ['murmuration', 'calm', 'slow'],
   candidates: { cellSize: 3500, bucketSeconds: 300, chance: 0.6 },
   filters: {
     biomes: null,

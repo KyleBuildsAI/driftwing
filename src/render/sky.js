@@ -10,6 +10,10 @@ import { planetRadiusFromSetting } from './curvature.js';
 export const SUN_ANGULAR_RADIUS = 0.0175;
 /** The celestial pole the star field turns about (latitude 52 degrees north). */
 export const CELESTIAL_POLE_ELEVATION_DEG = 52;
+/** The moon disc's linear colour, its halo and its light (a modifier's moonTint tints all three). */
+const MOON_DISC_COLOR = Object.freeze({ r: 1.35, g: 1.3095, b: 1.215 });
+const MOON_GLOW_HEX = 0x8fa6d8;
+const MOON_LIGHT_HEX = 0xb6c5ec;
 
 /**
  * SKY / ATMOSPHERE: owns the time of day and everything the sky does with it.
@@ -23,6 +27,10 @@ export const CELESTIAL_POLE_ELEVATION_DEG = 52;
  * - Sky modifiers (Phase 2): addModifier(id, { priority }) lets the regional weather and the celestial
  *   events darken, tint and fog the sky. They act on the CPU-side palette and lights only (no shader
  *   change), and with no modifier weighing in the sky runs exactly the Phase 1 path.
+ * - Global overrides (Phase 3, contract i.4): a modifier's moonTint reddens the moon disc, its halo
+ *   and the moon light (the blood moon); addSunOverride(id, { apply }) bends the sun's path (the
+ *   midnight sun skims the horizon) and state.time follows the bent sun. state.time.days counts the
+ *   days (whole days since the start plus dayTime) for the override schedule's night index.
  * - High altitude (Phase 3, contract g.2): state.atmosphere (src/env/atmosphere.js, from the camera
  *   altitude every frame) drives the dome toward black above the limb band, the sharper sun disc and
  *   narrower glow, daylight stars, the thin blue limb on the rendered horizon (its dip below the
@@ -273,6 +281,8 @@ export function createSkySystem(ctx) {
     moonUp: uniform(new THREE.Vector3(0, 1, 0)),
     moonStrength: uniform(0),
     moonGlowColor: uniform(new THREE.Color(0x8fa6d8)),
+    // The moon disc's colour (a modifier's moonTint reddens it: the blood moon, contract i.4).
+    moonColor: uniform(new THREE.Color(MOON_DISC_COLOR.r, MOON_DISC_COLOR.g, MOON_DISC_COLOR.b)),
     starStrength: uniform(0),
     starRotation: uniform(new THREE.Matrix3()),
     auroraStrength: uniform(0),
@@ -463,7 +473,7 @@ export function createSkySystem(ctx) {
       const albedo = mix(0.58, 1.0, maria);
       const inside = fadeOut(MOON_ANGULAR_RADIUS * 0.9, MOON_ANGULAR_RADIUS, moonOffset).mul(smoothstep(-0.003, 0.004, skyUp));
       moonCover.assign(inside);
-      const moonColor = vec3(1.0, 0.97, 0.9).mul(1.35);
+      const moonColor = sky.moonColor;
       radiance.addAssign(moonColor.mul(albedo.mul(lit).mul(inside).mul(sky.moonStrength)));
     });
 
@@ -614,7 +624,7 @@ export function createSkySystem(ctx) {
   sunLight.shadow.camera.updateProjectionMatrix();
   scene.add(sunLight);
 
-  const moonLight = new THREE.DirectionalLight(0xb6c5ec, 0);
+  const moonLight = new THREE.DirectionalLight(MOON_LIGHT_HEX, 0);
   moonLight.name = 'moon';
   moonLight.target = lightTarget;
   moonLight.castShadow = false;
@@ -665,7 +675,9 @@ export function createSkySystem(ctx) {
 
   // ---- Mutable state -------------------------------------------------------------------------------------
   let dayTime = wrapUnit(Number.isFinite(state.time.dayTime) ? state.time.dayTime : dayTimeForSunElevation(config.START_SUN_ELEVATION_DEG, true));
-  const transition = { active: false, from: 0, delta: 0, elapsed: 0, duration: 0 };
+  /** Whole days since the flight began (state.time.days = wholeDays + dayTime). */
+  let wholeDays = 0;
+  const transition = { active: false, from: 0, fromDays: 0, delta: 0, elapsed: 0, duration: 0 };
   let lastLabel = '';
   let suppressLabelEvent = false;
   let smoothedSnow = state.player.biome?.weights?.[0] ?? 0;
@@ -712,11 +724,11 @@ export function createSkySystem(ctx) {
   // (and so to the fog colour) and lifts the hemisphere light for an instant. A modifier at weight 0
   // or at neutral values changes nothing, and when nothing weighs in, no modifier code touches a
   // colour at all.
-  const MODIFIER_NEUTRAL = Object.freeze({ sunIntensity: 1, ambient: 1, fogColorAmount: 0, fogDensity: 1, skyTintAmount: 0, darkness: 0, stars: 0, overcast: 0, flash: 0 });
+  const MODIFIER_NEUTRAL = Object.freeze({ sunIntensity: 1, ambient: 1, fogColorAmount: 0, fogDensity: 1, skyTintAmount: 0, darkness: 0, stars: 0, overcast: 0, flash: 0, moonTintAmount: 0 });
   const MODIFIER_SCALAR_FIELDS = Object.keys(MODIFIER_NEUTRAL);
   const MODIFIER_LIMITS = Object.freeze({
     sunIntensity: [0, 4], ambient: [0, 4], fogColorAmount: [0, 1], fogDensity: [0.25, 8], skyTintAmount: [0, 1], darkness: [0, 1], stars: [0, 1], overcast: [0, 1],
-    flash: [0, 1],
+    flash: [0, 1], moonTintAmount: [0, 1],
   });
   /** A full flash (1) adds this much of its colour to the sky palette (display-referred), per key. */
   const FLASH_SKY_GAIN = Object.freeze({ zenith: 0.35, horizon: 0.55, anti: 0.45, ground: 0.4 });
@@ -731,6 +743,7 @@ export function createSkySystem(ctx) {
     fogColor: new THREE.Color(), fogColorAmount: 0,
     skyTint: new THREE.Color(), skyTintAmount: 0,
     flash: 0, flashColor: new THREE.Color(),
+    moonTint: new THREE.Color(), moonTintAmount: 0,
   };
   const tintScratch = new THREE.Color();
 
@@ -778,6 +791,8 @@ export function createSkySystem(ctx) {
     combined.skyTintAmount = 0;
     combined.fogColor.setRGB(0, 0, 0);
     combined.skyTint.setRGB(0, 0, 0);
+    combined.moonTintAmount = 0;
+    combined.moonTint.setRGB(0, 0, 0);
     combined.flash = 0;
     let active = false;
     for (let index = 0; index < modifierList.length; index++) {
@@ -797,6 +812,7 @@ export function createSkySystem(ctx) {
       }
       compositeTint('fogColor', 'fogColorAmount', modifier.fogColor, values.fogColorAmount * weight);
       compositeTint('skyTint', 'skyTintAmount', modifier.skyTint, values.skyTintAmount * weight);
+      compositeTint('moonTint', 'moonTintAmount', modifier.moonTint, values.moonTintAmount * weight);
       active = true;
     }
     // Above the cloud decks there is no overcast and no low haze: a storm below a high craft no longer
@@ -810,7 +826,7 @@ export function createSkySystem(ctx) {
     combined.active = active && (
       combined.sunIntensity !== 1 || combined.ambient !== 1 || combined.fogDensity !== 1 || combined.darkness !== 0
       || combined.stars !== 0 || combined.overcast !== 0 || combined.fogColorAmount !== 0 || combined.skyTintAmount !== 0
-      || combined.flash !== 0
+      || combined.flash !== 0 || combined.moonTintAmount !== 0
     );
   }
 
@@ -828,7 +844,8 @@ export function createSkySystem(ctx) {
    * away. sunIntensity, ambient and fogDensity are multipliers (1 = unchanged); darkness dims the sky
    * and every light; overcast hides the sun disc, god rays, moon and stars behind cloud; stars raises
    * the star field (an eclipse); flash (0..1) adds flashColor (default a cold white) to the sky and
-   * the ambient light for a lightning strike; weight (default 1) eases the whole modifier in and out.
+   * the ambient light for a lightning strike; moonTint / moonTintAmount (0..1) tint the moon disc, its
+   * halo and the moon light (the blood moon); weight (default 1) eases the whole modifier in and out.
    */
   function addModifier(id, { priority = 0 } = {}) {
     if (typeof id !== 'string' || !id) throw new TypeError('sky.addModifier expects a string id');
@@ -843,6 +860,7 @@ export function createSkySystem(ctx) {
       fogColor: new THREE.Color(1, 1, 1),
       skyTint: new THREE.Color(1, 1, 1),
       flashColor: new THREE.Color(0.82, 0.88, 1),
+      moonTint: new THREE.Color(1, 1, 1),
     };
     modifierIds.add(id);
     modifierList.push(modifier);
@@ -870,6 +888,7 @@ export function createSkySystem(ctx) {
         if (values.fogColor !== undefined) readColor(values.fogColor, modifier.fogColor, 'fogColor', id);
         if (values.skyTint !== undefined) readColor(values.skyTint, modifier.skyTint, 'skyTint', id);
         if (values.flashColor !== undefined) readColor(values.flashColor, modifier.flashColor, 'flashColor', id);
+        if (values.moonTint !== undefined) readColor(values.moonTint, modifier.moonTint, 'moonTint', id);
         return this;
       },
       remove() {
@@ -882,13 +901,53 @@ export function createSkySystem(ctx) {
     };
   }
 
+  // ---- Sun overrides (contract i.4) ---------------------------------------------------------------------
+  // A sun override bends the sun's path: apply(dayTime, direction, weight) edits the unit sun direction
+  // in place (the midnight sun, src/spawns/overrides.js applyMidnightSun). Overrides run in the order
+  // they were added, only while their weight is above 0, and state.time (elevation, night factor, the
+  // label) follows the bent sun, so every system that reads the sun agrees.
+  const sunOverrides = [];
+
+  /**
+   * Adds a sun override. Returns a handle: setWeight(weight) eases it (0..1, starting at 0) and
+   * remove() takes it away.
+   */
+  function addSunOverride(id, { apply } = {}) {
+    if (typeof id !== 'string' || !id) throw new TypeError('sky.addSunOverride expects a string id');
+    if (typeof apply !== 'function') throw new TypeError(`sun override "${id}": apply(dayTime, direction, weight) is required`);
+    if (sunOverrides.some((entry) => entry.id === id)) throw new Error(`sun override "${id}" already exists`);
+    const entry = { id, apply, weight: 0 };
+    sunOverrides.push(entry);
+    let removed = false;
+    return {
+      id,
+      setWeight(weight) {
+        if (removed) throw new Error(`sun override "${id}" was removed`);
+        if (!Number.isFinite(weight)) throw new TypeError(`sun override "${id}": weight must be a finite number`);
+        entry.weight = clamp(weight, 0, 1);
+        return this;
+      },
+      remove() {
+        if (removed) return false;
+        removed = true;
+        sunOverrides.splice(sunOverrides.indexOf(entry), 1);
+        return true;
+      },
+    };
+  }
+
   // ---- Per-frame pieces ----------------------------------------------------------------------------------
+  // Time only ever moves forward (a time-of-day request goes forward to its target), so the day
+  // counter state.time.days (whole days since the flight began plus dayTime) adds a day each time
+  // dayTime passes midnight.
   function advanceTime(dt, realDt) {
     if (transition.active) {
       transition.elapsed += realDt;
       const progress = Math.min(1, transition.elapsed / transition.duration);
       const eased = progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-      dayTime = wrapUnit(transition.from + transition.delta * eased);
+      const unwrapped = transition.from + transition.delta * eased;
+      dayTime = wrapUnit(unwrapped);
+      wholeDays = transition.fromDays + Math.floor(unwrapped);
       if (progress >= 1) {
         transition.active = false;
         suppressLabelEvent = true;
@@ -898,13 +957,20 @@ export function createSkySystem(ctx) {
     if (!(dt > 0) || settings.get('timeFrozen')) return;
     const dayLength = clamp(Number(settings.get('dayLength')) || config.DAY_LENGTH_DEFAULT, 30, 7200);
     const rate = warpRate(elevationForDayTime(dayTime));
-    dayTime = wrapUnit(dayTime + (dt * rate * WARP_NORMALISATION) / dayLength);
+    const unwrapped = dayTime + (dt * rate * WARP_NORMALISATION) / dayLength;
+    wholeDays += Math.floor(unwrapped);
+    dayTime = wrapUnit(unwrapped);
   }
 
   function updateCelestialState() {
     const time = state.time;
     time.dayTime = dayTime;
+    time.days = wholeDays + dayTime;
     sunDirectionForDayTime(dayTime, time.sunDirection);
+    for (let index = 0; index < sunOverrides.length; index++) {
+      const override = sunOverrides[index];
+      if (override.weight > 0) override.apply(dayTime, time.sunDirection, override.weight);
+    }
     moonDirectionForDayTime(dayTime, time.moonDirection);
     const elevation = Math.asin(clamp(time.sunDirection.y, -1, 1)) / DEG;
     time.sunElevation = elevation;
@@ -975,6 +1041,13 @@ export function createSkySystem(ctx) {
 
     const moonAbove = smoothRange(-0.04, 0.06, time.moonDirection.y);
     sky.moonStrength.value = (0.12 + 0.88 * time.nightFactor) * moonAbove;
+    sky.moonColor.value.setRGB(MOON_DISC_COLOR.r, MOON_DISC_COLOR.g, MOON_DISC_COLOR.b);
+    sky.moonGlowColor.value.setHex(MOON_GLOW_HEX);
+    if (combined.active && combined.moonTintAmount > 0) {
+      // The tint keeps the disc's brightness and takes its colour: an eclipsed, copper-red moon.
+      applyTint(sky.moonColor.value, combined.moonTint, combined.moonTintAmount);
+      applyTint(sky.moonGlowColor.value, combined.moonTint, combined.moonTintAmount);
+    }
     setBasis(time.moonDirection, sky.moonRight, sky.moonUp);
     sky.starStrength.value = 1 - smoothRange(-13, -4, elevation);
     if (combined.active) {
@@ -1140,6 +1213,8 @@ export function createSkySystem(ctx) {
 
     const moonAbove = smoothRange(0.0, 0.25, time.moonDirection.y);
     moonLight.intensity = sampleScalar(KEYS.moonIntensity, elevation) * moonAbove;
+    moonLight.color.setHex(MOON_LIGHT_HEX);
+    if (combined.active && combined.moonTintAmount > 0) applyTint(moonLight.color, combined.moonTint, combined.moonTintAmount);
 
     sampleColor(KEYS.hemisphereSky, elevation, hemisphereLight.color).lerp(AURORA_FILL, 0.16 * sky.auroraStrength.value);
     sampleColor(KEYS.hemisphereGround, elevation, hemisphereLight.groundColor);
@@ -1270,11 +1345,13 @@ export function createSkySystem(ctx) {
     const delta = wrapUnit(target - dayTime);
     if (duration <= 0 || delta < 1e-5 || delta > 1 - 1e-5) {
       transition.active = false;
+      if (delta <= 1 - 1e-5) wholeDays += Math.floor(dayTime + delta);
       dayTime = target;
       refresh(0);
     } else {
       transition.active = true;
       transition.from = dayTime;
+      transition.fromDays = wholeDays;
       transition.delta = delta;
       transition.elapsed = 0;
       transition.duration = duration;
@@ -1339,6 +1416,7 @@ export function createSkySystem(ctx) {
       return fogAmount(offsetNode);
     },
     addModifier,
+    addSunOverride,
     /**
      * The live folded modifier record, for systems that follow the sky every frame (the cloud
      * palette): { active, sunIntensity, ambient, fogDensity, darkness, stars, overcast, fogColor,
@@ -1374,6 +1452,9 @@ export function createSkySystem(ctx) {
         skyTintAmount: combined.skyTintAmount,
         flash: combined.flash,
         flashColor: `#${combined.flashColor.getHexString()}`,
+        moonTint: `#${combined.moonTint.getHexString()}`,
+        moonTintAmount: combined.moonTintAmount,
+        sunOverrides: sunOverrides.map((override) => ({ id: override.id, weight: override.weight })),
       };
     },
   };

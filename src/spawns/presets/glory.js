@@ -10,6 +10,7 @@ export default Object.freeze({
   kind: 'event',
   rarity: 'common',
   heavy: false,
+  tags: ['calm', 'slow', 'spectacle'],
   candidates: { cellSize: 5000, bucketSeconds: 600, chance: 0.45 },
   filters: {
     biomes: ['meadows', 'pine', 'dunes', 'archipelago'],

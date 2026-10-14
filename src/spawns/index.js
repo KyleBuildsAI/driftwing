@@ -14,9 +14,10 @@ import { PRESETS } from './presets/index.js';
 import { validatePreset, validatePresets } from './schema.js';
 import { createEngineRegistry } from './engineRegistry.js';
 import { createSpawnManager } from './spawnManager.js';
-import { DIRECTOR_BUDGETS, createGameDirector } from './director.js';
+import { DIRECTOR_BUDGETS, TRACK_MIN_SPEED, createGameDirector } from './director.js';
 
 const NO_SITES = Object.freeze([]);
+const NO_PRESETS = Object.freeze([]);
 /** Distance (m) ahead of the craft a debug spawn uses when none is given. */
 const DEBUG_SPAWN_DEFAULT_DISTANCE = 1500;
 /** "Start on ground" goes to a discovered site's ground-start spot within this distance (m). */
@@ -24,8 +25,18 @@ const GROUND_START_RANGE = 80000;
 /** A site id: '<presetId>:<cellX>:<cellZ>' (src/world/placement.js). */
 const SITE_ID_PATTERN = /^([A-Za-z][A-Za-z0-9]*):(-?\d+):(-?\d+)$/;
 
-/** Horizontal unit vector of the craft's heading into target ({ x, z }). */
+/**
+ * Horizontal unit vector along the craft's ground track into target ({ x, z }): where it is going
+ * over the ground (contract i.1), or its heading below TRACK_MIN_SPEED.
+ */
 function flatForward(player, target) {
+  const velocity = player.velocity;
+  const groundSpeed = velocity ? Math.hypot(velocity.x, velocity.z) : 0;
+  if (groundSpeed >= TRACK_MIN_SPEED) {
+    target.x = velocity.x / groundSpeed;
+    target.z = velocity.z / groundSpeed;
+    return target;
+  }
   const forward = player.forward;
   const length = Math.hypot(forward.x, forward.z);
   if (length > 1e-3) {
@@ -84,12 +95,15 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
     },
   };
 
-  /** The event director on the running manager, or null (logged) when it cannot be created. */
-  function createDirector() {
+  /**
+   * The event director on the running manager, or null (logged) when it cannot be created.
+   * extraPresets (dev: the checks' fixtures, already added to the manager) join the game's presets.
+   */
+  function createDirector(extraPresets = NO_PRESETS) {
     try {
       return createGameDirector(ctx, {
         spawnManager: manager,
-        presets: PRESETS,
+        presets: extraPresets.length > 0 ? [...PRESETS, ...extraPresets] : PRESETS,
         placement: placementView,
         isDiscovered: (id) => manager.isDiscovered(id),
         budgets: manager.budgets,
@@ -113,7 +127,7 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
     director = createDirector();
   }
 
-  /** The anchor distance metres ahead of the craft on its heading, on the ground (or the water). */
+  /** The anchor distance metres ahead of the craft on its ground track, on the ground (or the water). */
   function pointAhead(distance) {
     const player = state.player.position;
     flatForward(state.player, forward);
@@ -298,15 +312,17 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
        * Starts the spawns afresh on the current flight clock (the determinism test): the director is
        * disposed (ending what it started), the SpawnManager ends every other spawn and forgets its
        * discoveries and frame state (resetForReplay), and a new director starts. Its activation log
-       * then depends only on the seed and the path flown from here. Returns the new director or null.
+       * then depends only on the seed and the path flown from here. options.extraPresets: presets
+       * (added with addPreset first) the new director schedules too, such as the combo fixtures of
+       * tools/steps/director-p3.json. Returns the new director or null.
        */
-      restartSpawns() {
+      restartSpawns({ extraPresets = NO_PRESETS } = {}) {
         if (director) {
           director.dispose();
           director = null;
         }
         manager.resetForReplay();
-        director = createDirector();
+        director = createDirector(extraPresets);
         return director;
       },
       registerEngine: (engine) => manager.register(engine),

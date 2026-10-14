@@ -627,7 +627,8 @@ export function createSpawnManager(options) {
    * Activates presetId. opts: { position: {x, y, z} (required), heading (compass degrees),
    * source: 'site' | 'director' | 'debug', site?, seed?, scale?, force? (debug only: ignore the
    * budgets), duration?, params? ({ [engine name]: { ...overrides } } merged over that engine
-   * entry's preset params: the set-piece engine places and tunes its children this way) }.
+   * entry's preset params: the set-piece engine places and tunes its children this way), parent?
+   * (the director's combo id for a legendary combo and its members, contract i.3) }.
    * Returns the spawn id, or null when a budget (or a missing preset or engine) refuses, or when a
    * director activation is declined because every engine ended its instance at create ('declined').
    */
@@ -662,6 +663,7 @@ export function createSpawnManager(options) {
       source,
       site,
       siteId,
+      parent: typeof opts.parent === 'string' ? opts.parent : null,
       discoveryKey: siteId ?? presetId,
       seed: spawnSeed,
       heading,
@@ -1069,6 +1071,7 @@ export function createSpawnManager(options) {
       kind: record.preset.kind,
       source: record.source,
       siteId: record.siteId,
+      parent: record.parent,
       heavy: record.preset.heavy,
       active: record.active,
       tier: LOD_TIERS[record.tierRank],

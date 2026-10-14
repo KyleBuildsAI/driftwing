@@ -13,6 +13,7 @@ export default Object.freeze({
   kind: 'event',
   rarity: 'uncommon',
   heavy: false,
+  tags: ['thermal', 'calm'],
   candidates: { cellSize: 6000, bucketSeconds: 450, chance: 0.45 },
   filters: {
     biomes: ['snow', 'pine', 'meadows', 'dunes'],

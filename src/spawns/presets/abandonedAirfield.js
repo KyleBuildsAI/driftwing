@@ -13,6 +13,7 @@ export default Object.freeze({
   kind: 'site',
   rarity: 'uncommon',
   heavy: false,
+  tags: ['calm', 'perch'],
   placement: Object.freeze({
     chance: 0.35,
     minSpacing: 12000,

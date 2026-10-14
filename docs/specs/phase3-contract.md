@@ -1198,6 +1198,62 @@ override: { kind: 'bloodMoon' | 'midnightSun', nightChance: 0.04, region: { biom
   WindField thermals (midday-strong) stay consistent and deterministic.
 - `globalOverride` fires on start, end and on crossing weight 0.5.
 
+### i.5 The picker and the director as built (branch P, additive to h.7 and i.1-i.4)
+
+Merged from `p3/picker-director`; docs/architecture.md ("Event director", "The craft picker") and
+docs/spawns.md ("Combos", "Global overrides") are the reference. Nothing above changed meaning.
+
+- **Picker** (`src/ui/craftPicker.js`): the strip shows only craft whose module is registered (a
+  module registered later appears within a second), in their groups with a hairline between, each
+  with its favorite key and the chosen skin's silhouette (a skin's optional `silhouette`); from 11
+  craft the buttons pack to 22 px. The roster panel (a grid button at the end of the strip, or a
+  right click on a craft) holds the ten slots (drag a craft onto one, a slot onto another to swap, a
+  key menu per craft, an x per slot) and the skins under their craft. Assigning a craft that already
+  has a slot swaps it with the target's occupant. Exported pure helpers: `favoriteKey`,
+  `assignFavorite`, `clearFavorite`, `swapFavorites`; the picker API adds `openPanel`, `closePanel`,
+  `isOpen`, `select`, `setSkin`, `assignFavorite`, `clearFavorite` and `getState`. Escape closes the
+  panel first (ui.js).
+- **Ground track** (i.1): below 2 m/s the nose heading; the 1 s smoothing advances only on director
+  ticks; a player object without `velocity` (the labs) keeps its heading unsmoothed, so every
+  Phase 2 lab check and log is unchanged. `forceSpawn` and the spawns system's `pointAhead` follow the
+  track; `getState()` adds `track` and `groundSpeed`.
+- **Craft weighting** (i.2): `createDirector` takes `getCraft()` and `profileFor(craftId)`;
+  `DEFAULT_DIRECTOR_PROFILES` (seaplane, eagle, spaceplane, balloon, airship) applies when a module
+  brings no `directorProfile` (a module's own always wins). An `above` band multiplies on top of the
+  base favour; the product is clamped to `CRAFT_WEIGHT_RANGE` (0.25..3) and multiplies the ahead
+  score. Log entries gain `craft` and the hash line includes it. `PRESET_TAGS` adds no names beyond
+  the list above; the 30 Phase 2 presets carry tags. `getState()` adds `craft` and `craftWeights`.
+- **Combos** (i.3): `combo` is validated (`validateCombo`; members and sites cross-checked by
+  `validatePresets`): legendary events only; `role` is `anchor` (at most one, no place) or `member`
+  (needs `place`); `place.bearing` is measured from the line of sight (0 = straight beyond the anchor
+  as seen from the player at the start); `heavySlots` 0-2, raised to the heavy members; `siteActive`
+  looks within `near.radius`, else 20 km; `near` moves the candidate onto the nearest landmark, else
+  the site. The combo's own preset starts at the candidate (its own engines) with the members. A
+  delayed member's budget share is reserved against the director's own activations; refused at its
+  time, it retries every 2 s and is dropped after `COMBO_MEMBER_PATIENCE` (60 s; a site may take a
+  reserved heavy slot, since the manager never refuses a site). The log adds the reasons `comboMember`
+  and `comboMemberDropped`, entries carry `combo` and the combo's own entry `members`. The combo id is
+  `combo:<candidate id>` (`combo:debug:<n>` when forced); `SpawnManager.activate` takes `parent` and
+  `getActive()` / `getInstance()` report it. `getState()` adds `combos`.
+  `spawns.debug.restartSpawns({ extraPresets })` lets a dev check give the new director fixtures.
+- **Overrides** (i.4, `src/spawns/overrides.js`): the night index is `floor(days + 0.5)` (noon to
+  noon) on `state.time.days`, the day counter the sky now keeps (whole days since the start plus
+  `dayTime`, moving forward only). The weight is `nightWindow(dayTime)` (in over 0.64-0.70, out over
+  0.30-0.36) times the region weight; the region is the 2 km lattice cells where the named biomes hold
+  at least half the climate weight, and the weight is `1 - smoothstep(0, blendKm, distance to the
+  nearest such cell)`. A preset with `override` is never a candidate; from half weight its own
+  preset starts once per night ahead on the track and ends (reason `override`) with it.
+  `createDirector` takes `overrideSink` (`apply(entry)` every tick, `dispose()`);
+  `createSkyOverrideSink(sky)` is the game's. Sky additions: modifier fields `moonTint` /
+  `moonTintAmount` (disc, halo and moon light), `sky.addSunOverride(id, { apply })` returning
+  `{ setWeight, remove }`, and `getModifierState()` reports both. `getState()` adds `overrides`;
+  `getOverrides()` lists the schedule. `forceSpawn` of an override preset schedules it on the current
+  night (region ignored) and returns `override:<presetId>`.
+- **Events**: `comboStarted` and `globalOverride` are in `EVENT_TYPES` (after `spawnEnded`).
+- **Determinism**: the director log hash changed for every run because entries now record the craft
+  (and the in-game track differs from the heading under wind); `?test=determinism` compares two
+  page loads, so it needs no recorded hash.
+
 ---
 
 ## j. Journal and copilot additions (wave 4, Milestone O)

@@ -452,7 +452,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | in progress (branch complete, awaiting I2) |
 | 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | in progress (branch complete, awaiting I2) |
 | 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | in progress (branch complete, awaiting I2) |
-| P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | not started |
+| P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | in progress (branch complete, awaiting I2) |
 | I2 | Integration pass: merge 2.0 first (before the craft branches start), then the craft branches in catalog order and the picker / director branch; `?test=craft` on both backends | `v2-phase3` | | not started |
 
 ### Wave 2 - p3/craft-framework
@@ -542,36 +542,6 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   objects. The view-physics step's closing check expected exactly six craft; it now expects every
   flyable craft. A figure's score was computed after its window was cleared (the Cuban eight's lobe
   symmetry read no markers); it is scored first now.
-
-### Wave 2 - p3/craft-eagle
-
-- **Built** (contract h; additions in the final report and docs/architecture.md):
-  - `src/flight/SimFlapper.js` (kind `flapper`): flap power on the throttle axis (0 = glide), the
-    tuck (stick pushed hard, or `craftAbilityAlt` held) into a 65 m/s stoop, soaring on the
-    WindField's thermals and ridge lift, the perch (scan, auto-landing, standing, takeoff, ground
-    stand, resting placements), its assists (stability with a phugoid damper, auto-level, stall
-    protection) and its autopilot (energy control; the perch approach for the copilot);
-  - `src/craft/eagle.js` + `eagleMeshes.js`: the module with two skins (bald eagle; dragon with
-    membranes, jaw, tail chain and flame jet), collision probes, `situate`, abilities (screech /
-    fire breath, tuck), copilot commands (findPerch, takeOff, screech, fireBreath, tuck, glide) and
-    status, journal stats (eaglePerches, eagleBestSoar, dragonLanternsLit), per-craft bindings,
-    directorProfile, faunaThreat 2.5, the creature first-person view, the perch camera orbit;
-  - `src/audio/engines/creature.js`, `src/ui/instruments/perch.js`, `src/gameplay/ignition.js`
-    (`ctx.ignition`), the typed `perched` event, `cameraRig.chase.orbitYaw` in the camera;
-  - `tools/lab/eagle.mjs` (50 checks: glide polar, flapping climb, stoop, handling, thermal and
-    ridge soaring, perch capture / hold / takeoff / tailwind hop, peak and ground stands, placements,
-    the autopilot approach on flat ground, a hillside and the real CRAFT-1 tree tops, takeoffs and
-    fly-outs there, ignition, the step's allocation in a clean child process);
-  - `src/dev/craftScenarios/eagle.js` (hand-flown perch and takeoff, the copilot's "find a perch",
-    a perch placement, ground takeoff, stoop, dragon fire); the eagle script in the `?test=1`
-    harness (`testFlightScripts.js`); the eagle in `tools/steps/view-physics.json`.
-- **Edits outside the craft files** (each needed): `main.js` (`ctx.ignition`), `events.js` (`perched`
-  after `landed`), `FlightController.js` (the ability api's `ignition`), `cameraManager.js`
-  (`chase.orbitYaw`), `cockpit.js` (a custom view with `layout: []` has no panel), `craftTest.js`
-  (the perch start searched ring by ring: the 30 km search stalled the page),
-  `vegetationColliders.js` (perch queries wholly above the trees scatter nothing),
-  `testHarness.js` (comment), `tools/lab/craft.mjs` (the catalog check accepts new modules),
-  `view-physics.json` (expects every registered craft).
 - **Verified 2026-10-08** (each once unless noted; reruns named):
 
   | Check | WebGPU | WebGL2 |
@@ -773,47 +743,6 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   third-person views with the overlay off); `src/dev/testFlightScripts.js` (a balloon script);
   `tools/lab/craft.mjs` (its catalog check accepts registered Phase 3 craft);
   `tools/steps/view-physics.json` (flies the balloon and fails on any registered craft not flown).
-
-### Wave 2 - p3/craft-spaceplane
-
-- **Done** (spec Milestone E item 14, contract h; every file below is new unless marked):
-  - flight model: kind `spaceplane` (SimFixedWing + `src/flight/spaceplaneAero.js`, registered in
-    models.js): an air-augmented rocket (core 0.6 g in vacuum, ram-air augmentation with the mass
-    flow, fading past Mach 4-6, no fuel limit) tuned so a full-power 65 degree climb tops out at
-    115 km (50 degrees: 105 km, 80 degrees: 120 km); RCS on all three axes blended in as the dynamic
-    pressure falls (150 Pa .. 6 kPa), the yaw jets kept on at entry angles of attack, the pedals on
-    the yaw jets; wave drag to Mach 8; heating index rho V^3 / 9e6 gated by Mach 2.8-4.0 with a
-    2.5 s skin lag; re-entry buffet; the apogee prediction (powered while the thrust cannot hold
-    the climb, else ballistic); stall cues need air and stay quiet in the entry;
-  - flight control system `src/flight/spaceplaneFcs.js`: rate loops through the control power
-    (jets plus q x surfaces) with integrators; rate damping and coordination (0-50 %), rate
-    command with attitude hold, the AoA and G limiters and auto re-entry arming (50-100 %); the
-    pilot's attitude hold and auto re-entry switches at any level; the entry guidance (40 degrees
-    AoA, pilot bank, zero sideslip) and the hypersonic glide (14 degrees) handing back below Mach
-    1.5 or 20 km; the fixed-wing autopilot; a trim that leaves ballistic states alone;
-  - craft `src/craft/spaceplane.js`: procedural mesh (lifting body with the black heat-shield belly,
-    double delta, dorsal fin, bell nozzle, RCS ports) with animated elevons, body flap, split
-    rudder / speed brake, nozzle gimbal, gear; effects `src/render/spaceplaneEffects.js` (plume
-    tight in dense air and ballooning in vacuum, instanced RCS puffs, the plasma sheath on the skin
-    plus its wake); canopy cockpit with the space panel; abilities (auto re-entry, attitude hold),
-    the flight log (space crossings, apogees, the comms blackout and the `reentry` events, journal
-    stats, WREN's lines), copilot commands (`autoReentry`, `attitudeHold`, `apogee`, `mach`) and
-    status, journal stats (`spaceplaneApogee`, `spaceplaneMaxMach`, `spaceplaneSpaceFlights`,
-    `spaceplaneReentries`), situate (climb: 45 degrees, 250 m/s, full thrust), per-craft gamepad and
-    T.16000M bindings for attitude hold, the director profile above 20 km;
-  - audio family `rocket` (`src/audio/engines/rocket.js`): roar and crackle thinning with the air,
-    the structure-borne rumble that stays in the cockpit, RCS hiss / thump, the re-entry roar;
-  - instruments `mach`, `apogee`, `heating`, `rcs`;
-  - tests: `tools/lab/spaceplane.mjs` (24 checks), `?test=craft` scenarios `spaceplane-climb` and
-    `spaceplane-reentry` (continuity of camera-relative positions at every rebase, far-field holes
-    every frame above 11 km, readback probes in the handoff band and from space), the flight-test
-    script (`?test=1`) and the view-physics step file.
-- **Edits outside the craft's files:** single lines in craft/index.js, models.js, audio
-  engines/index.js, instruments/index.js, craftScenarios/index.js, events.js (`reentry` after
-  `viewChanged`); `abilityApi.bus` in FlightController.js; the comms-blackout hold in copilot.js;
-  `airflowBasis: 'equivalent'` in airflow.js; far-field root prefetch past the reach (farField.js);
-  the WebGL2 cockpit near plane above 12 km (cameraManager.js); contrails fade out in thin air
-  (fx.js); the craft lab's catalog check; testFlightScripts.js and view-physics.json.
 - **Verified 2026-10-13** (each once, both backends unless noted; reruns named):
 
   | Check | WebGPU | WebGL2 |
@@ -896,6 +825,39 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   instrument, craftState fields) are Milestone O's; a stand-alone T.16000M has no default vector
   binding (the TWCS rocker is the vector lever).
 
+### Wave 2 - p3/craft-eagle
+
+- **Built** (contract h; additions in the final report and docs/architecture.md):
+  - `src/flight/SimFlapper.js` (kind `flapper`): flap power on the throttle axis (0 = glide), the
+    tuck (stick pushed hard, or `craftAbilityAlt` held) into a 65 m/s stoop, soaring on the
+    WindField's thermals and ridge lift, the perch (scan, auto-landing, standing, takeoff, ground
+    stand, resting placements), its assists (stability with a phugoid damper, auto-level, stall
+    protection) and its autopilot (energy control; the perch approach for the copilot);
+  - `src/craft/eagle.js` + `eagleMeshes.js`: the module with two skins (bald eagle; dragon with
+    membranes, jaw, tail chain and flame jet), collision probes, `situate`, abilities (screech /
+    fire breath, tuck), copilot commands (findPerch, takeOff, screech, fireBreath, tuck, glide) and
+    status, journal stats (eaglePerches, eagleBestSoar, dragonLanternsLit), per-craft bindings,
+    directorProfile, faunaThreat 2.5, the creature first-person view, the perch camera orbit;
+  - `src/audio/engines/creature.js`, `src/ui/instruments/perch.js`, `src/gameplay/ignition.js`
+    (`ctx.ignition`), the typed `perched` event, `cameraRig.chase.orbitYaw` in the camera;
+  - `tools/lab/eagle.mjs` (50 checks: glide polar, flapping climb, stoop, handling, thermal and
+    ridge soaring, perch capture / hold / takeoff / tailwind hop, peak and ground stands, placements,
+    the autopilot approach on flat ground, a hillside and the real CRAFT-1 tree tops, takeoffs and
+    fly-outs there, ignition, the step's allocation in a clean child process);
+  - `src/dev/craftScenarios/eagle.js` (hand-flown perch and takeoff, the copilot's "find a perch",
+    a perch placement, ground takeoff, stoop, dragon fire); the eagle script in the `?test=1`
+    harness (`testFlightScripts.js`); the eagle in `tools/steps/view-physics.json`.
+- **Edits outside the craft files** (each needed): `main.js` (`ctx.ignition`), `events.js` (`perched`
+  after `landed`), `FlightController.js` (the ability api's `ignition`), `cameraManager.js`
+  (`chase.orbitYaw`), `cockpit.js` (a custom view with `layout: []` has no panel), `craftTest.js`
+  (the perch start searched ring by ring: the 30 km search stalled the page),
+  `vegetationColliders.js` (perch queries wholly above the trees scatter nothing),
+  `testHarness.js` (comment), `tools/lab/craft.mjs` (the catalog check accepts new modules),
+  `view-physics.json` (expects every registered craft).
+- **Verified 2026-10-08** (each once unless noted; reruns named):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
   | `run-harness --test craft` (all 14 catalog craft registered so far: 7; general test both views, every scenario) | PASS 39/39 runs, 121/121 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0 | PASS 39/39, 121/121, same |
   | `run-harness --test craft --crafts eagle` (general + 6 scenarios, both views) | PASS 14/14, 60/60, 0/0 | PASS 14/14, 60/60, 0/0 |
   | `run-harness --test 1` reduced (HARNESS-1/2, glider and eagle, both views, 20 s) | 0 NaN, 0 penetrations, 0 crashes, 0/0, heap growth 3.34 MB, 8/8 runs, 24/24 manoeuvres; frames over 50 ms: 89 (main thread 61, delayed 22, gc 6, systems 0; machine at 100 % CPU) | same criteria pass (heap 7.9 MB); frames over 50 ms: 146 (systems 7, run before the perch-search fix) |
@@ -913,6 +875,50 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   torch registers with `ctx.ignition` until the wave 3 owners land; the per-craft copilot commands
   and the HOTAS profile docs are Milestone O's.
 
+### Wave 2 - p3/craft-spaceplane
+
+- **Done** (spec Milestone E item 14, contract h; every file below is new unless marked):
+  - flight model: kind `spaceplane` (SimFixedWing + `src/flight/spaceplaneAero.js`, registered in
+    models.js): an air-augmented rocket (core 0.6 g in vacuum, ram-air augmentation with the mass
+    flow, fading past Mach 4-6, no fuel limit) tuned so a full-power 65 degree climb tops out at
+    115 km (50 degrees: 105 km, 80 degrees: 120 km); RCS on all three axes blended in as the dynamic
+    pressure falls (150 Pa .. 6 kPa), the yaw jets kept on at entry angles of attack, the pedals on
+    the yaw jets; wave drag to Mach 8; heating index rho V^3 / 9e6 gated by Mach 2.8-4.0 with a
+    2.5 s skin lag; re-entry buffet; the apogee prediction (powered while the thrust cannot hold
+    the climb, else ballistic); stall cues need air and stay quiet in the entry;
+  - flight control system `src/flight/spaceplaneFcs.js`: rate loops through the control power
+    (jets plus q x surfaces) with integrators; rate damping and coordination (0-50 %), rate
+    command with attitude hold, the AoA and G limiters and auto re-entry arming (50-100 %); the
+    pilot's attitude hold and auto re-entry switches at any level; the entry guidance (40 degrees
+    AoA, pilot bank, zero sideslip) and the hypersonic glide (14 degrees) handing back below Mach
+    1.5 or 20 km; the fixed-wing autopilot; a trim that leaves ballistic states alone;
+  - craft `src/craft/spaceplane.js`: procedural mesh (lifting body with the black heat-shield belly,
+    double delta, dorsal fin, bell nozzle, RCS ports) with animated elevons, body flap, split
+    rudder / speed brake, nozzle gimbal, gear; effects `src/render/spaceplaneEffects.js` (plume
+    tight in dense air and ballooning in vacuum, instanced RCS puffs, the plasma sheath on the skin
+    plus its wake); canopy cockpit with the space panel; abilities (auto re-entry, attitude hold),
+    the flight log (space crossings, apogees, the comms blackout and the `reentry` events, journal
+    stats, WREN's lines), copilot commands (`autoReentry`, `attitudeHold`, `apogee`, `mach`) and
+    status, journal stats (`spaceplaneApogee`, `spaceplaneMaxMach`, `spaceplaneSpaceFlights`,
+    `spaceplaneReentries`), situate (climb: 45 degrees, 250 m/s, full thrust), per-craft gamepad and
+    T.16000M bindings for attitude hold, the director profile above 20 km;
+  - audio family `rocket` (`src/audio/engines/rocket.js`): roar and crackle thinning with the air,
+    the structure-borne rumble that stays in the cockpit, RCS hiss / thump, the re-entry roar;
+  - instruments `mach`, `apogee`, `heating`, `rcs`;
+  - tests: `tools/lab/spaceplane.mjs` (24 checks), `?test=craft` scenarios `spaceplane-climb` and
+    `spaceplane-reentry` (continuity of camera-relative positions at every rebase, far-field holes
+    every frame above 11 km, readback probes in the handoff band and from space), the flight-test
+    script (`?test=1`) and the view-physics step file.
+- **Edits outside the craft's files:** single lines in craft/index.js, models.js, audio
+  engines/index.js, instruments/index.js, craftScenarios/index.js, events.js (`reentry` after
+  `viewChanged`); `abilityApi.bus` in FlightController.js; the comms-blackout hold in copilot.js;
+  `airflowBasis: 'equivalent'` in airflow.js; far-field root prefetch past the reach (farField.js);
+  the WebGL2 cockpit near plane above 12 km (cameraManager.js); contrails fade out in thin air
+  (fx.js); the craft lab's catalog check; testFlightScripts.js and view-physics.json.
+- **Verified 2026-10-13** (each once, both backends unless noted; reruns named):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
   | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 236/236 | built; no craft scenario or view-physics kit in the V2 bundle | |
   | Labs: spaceplane 24 (new), craft 66, settings 45, copilot 240, copilot-server 17, discovery 43, flight-lab, atmosphere 28, challenges 70, colliders 84, director 50, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden (goldens identical), setpiece 47, spawns 98, storage 54, structure 75, terrain 404, water 34, wind-engines 56, wingsuit 37, audio 191 (alone) | all pass. The allocation labs need `--expose-gc` (challenges, fauna-modes, origin, water failed only their GC checks without it). The audio lab failed its doppler camera-cut check on its first run (both backends, under load), then hung loading the page on the second; the third run, alone, passed 191/191 | |
   | `run-harness --test craft --crafts spaceplane` (the general test in both views, `spaceplane-climb` and `spaceplane-reentry` in both views) | PASS 6/6 runs, 58/58 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0 | PASS 6/6, same |
@@ -927,6 +933,57 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 - **Next:** I2 merges this branch in catalog order.
 - **Open issues:** none blocking; Milestone O documents the spaceplane's HOTAS profile and its
   remote `flightState` fields (h.3: `apogee` is in `craftState`).
+
+### Wave 2 - p3/picker-director
+
+- **Done** (contract h.7 and i; what was built beyond the letter of them is in contract i.5):
+  - the craft picker (`src/ui/craftPicker.js`, `ui.css`): only installed craft, in the six groups
+    with a hairline between them, each with its favorite key and its skin's silhouette; from 11
+    craft the strip packs to 22 px so all 14 clear the compass at 1280 px; the glass roster panel
+    (grid button or right click): ten favorite slots (drag a craft onto a key, a key onto a key, a key
+    menu per craft, an x per slot), the craft by group, skins under the eagle; Escape and outside
+    clicks close it. Number keys, craftNext / craftPrev and the situational spawn through `situate()`
+    are the framework's and work from the picker unchanged;
+  - the director (`src/spawns/director.js`): the ground track (velocity bearing smoothed over 1 s,
+    the heading below 2 m/s) for every ahead test and `forceSpawn` (the spawns system's `pointAhead`
+    too); craft weighting from the module's `directorProfile` or `DEFAULT_DIRECTOR_PROFILES`
+    (seaplane, eagle, spaceplane above 20 km, balloon, airship), clamped 0.25..3; combo scheduling
+    (preconditions, all-member budgets, exclusivity, deterministic placement and delays with reserved
+    budgets, `parent` on the SpawnManager records, `comboStarted`, the log); the global overrides
+    (`src/spawns/overrides.js`: per-night schedule, night window, regional blend, the midnight sun's
+    bend; `createSkyOverrideSink`, `globalOverride`, the once-a-night spawn); `getState()` adds track,
+    craft, weights, combos and overrides, shown in the F9 debugger;
+  - the sky: a modifier `moonTint` (moon disc, halo, moon light), `sky.addSunOverride`, and
+    `state.time.days` (a forward-only day counter);
+  - presets: `tags`, `combo` and `override` validation in schema.js (members and sites cross-checked);
+    the 30 Phase 2 presets carry tags; `spawns.debug.restartSpawns({ extraPresets })` for fixtures;
+  - tests: `tools/lab/director.mjs` +38 checks (track, craft, combos on dev fixtures, overrides,
+    schema), `tools/steps/craft-picker.json` (28 checks), `tools/steps/director-p3.json` (14 checks),
+    `director-game.json` aims along the track and holds the perf governor steady while it probes the
+    shedder; docs: architecture.md (event director, craft picker, events, testing), spawns.md
+    (tags, combos, overrides, templates), controls.md, the contract's i.5.
+- **Determinism re-recorded** (reason: every log entry now records the craft, and the in-game ahead
+  tests follow the ground track, so the director picks other candidates than along the nose): site
+  list d85384433861a1b0, water 61f315c9 and path 55b1a55f unchanged; director log 1093b8c1 -> 703b9a83
+  (4 entries), spawn events 74d3d2fa -> 961c09f2. Both backends identical.
+- **Verified 2026-10-08** (each once, both backends unless noted; reruns named):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 239/239 | built | |
+  | Labs: director 88/88 (`--presets real` 6/6), craft 66, settings 45, copilot 240, copilot-server 17, discovery 43, flight-lab 82, atmosphere 28, challenges 70, colliders 84, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden (6/6 identical), setpiece 47, spawns 98, storage 54, structure 75, terrain 404, wind-engines 56, wingsuit 37, audio 191 (alone), water 33/34 (its `[cost]` check: heightAt over open ocean 1.25 us median against 1 us, machine load; src/world untouched) | all pass but water's timing | |
+  | `run-harness --test determinism` | PASS, hashes above, 0/0 | PASS, identical hashes, 0/0 |
+  | Step files `craft-picker` (28), `director-p3` (14), `director-game` (3) | all pass, 0/0 | all pass, 0/0 |
+  | Built `dist-single/v2` (rebuilt at 03f0994) and the built shell smoke | 0/0, screenshots differ | 0/0, screenshots differ (V2) |
+  | `run-harness --test 1` reduced (HARNESS-1/2, glider and jet, both views, 20 s) | 0 NaN, 0 penetrations, 0/0, heap 11.08 MB, 8/8 runs, 24/24 manoeuvres; frames over 50 ms: 318 (mainThread 227, delayed 57, systems 18 led by camera, flight, terrain and landmarks, gc 16; other processes held 91 % of the machine; a first run overlapped this branch's own build:single, 522) | same criteria pass, heap 8.53 MB; frames over 50 ms: 94 (mainThread 66, delayed 20, gc 7, systems 1; others 89 % of the machine) |
+
+- **Next:** I2 merges this branch after the craft branches (catalog order); then the craft modules'
+  own `directorProfile`s replace the defaults where they bring one, and the picker shows each craft
+  as its module registers.
+- **Open issues:** the world's snow patches are 1.5-8 km across (one every ~10 km), so a midnight-sun
+  preset (wave 3, preset 98) needs `region.blendKm` of a few km; the contract's example 20 km reaches
+  nearly the whole world. A combo's delayed member can lose a reserved heavy slot to a site coming
+  into range (the manager never refuses a site); it then retries and is dropped after 60 s, logged.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
