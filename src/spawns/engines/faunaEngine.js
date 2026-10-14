@@ -60,6 +60,7 @@ import { SPECIES } from './faunaSpecies.js';
 import { createWindSample, ownsPresetAudio } from './engineKit.js';
 import { SLOPE_RUN, buildGroundPath, createPath, createPathFollower } from '../../world/pathFollower.js';
 import { rigidCurvatureDrop } from '../../render/curvature.js';
+import { faunaThreatOf } from '../../craft/registry.js';
 
 export const FAUNA_BEHAVIORS = Object.freeze(['murmuration', 'flock', 'formation', 'circling', 'pod', 'wingman', 'drift', 'herd', 'column', 'surface']);
 /** Altitude modes: above the ground, above sea level, on the water, near the player, on the ground. */
@@ -664,7 +665,7 @@ export function createFaunaEngine() {
       threatCraft = craft;
       const registry = ctx.game && ctx.game.craftRegistry;
       const module = craft && registry && typeof registry.get === 'function' ? registry.get(craft) : null;
-      threat[0] = module && Number.isFinite(module.faunaThreat) && module.faunaThreat > 0 ? module.faunaThreat : 1;
+      threat[0] = faunaThreatOf(module);
     }
   }
 

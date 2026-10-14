@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { clamp } from '../core/util.js';
 import { CONFIG } from '../core/config.js';
+import { faunaThreatOf } from '../craft/registry.js';
 
 /**
  * BIRDS: boid flocks drifting over the landscape.
@@ -9,7 +10,9 @@ import { CONFIG } from '../core/config.js';
  * vertex shader: a per-instance phase from instanceIndex plus ctx.uniforms.time, with glide pauses,
  * and a CPU-driven excitement channel that makes scattered birds flap hard. Flocks spawn ahead of the
  * glider, follow a slowly wandering target, keep clear of the terrain, scatter outward/upward when the
- * glider passes through them (emitting 'birds:scattered'), regroup, and recycle once far behind.
+ * glider passes through them (emitting 'birds:scattered'), regroup, and recycle once far behind. The
+ * trigger and scatter distances scale with the flying craft's faunaThreat (faunaThreatOf: the eagle
+ * 2.5, so flocks break wider and earlier from a predator; the balloon 0.6).
  * While any source holds the typed wildlifeQuiet (a total solar eclipse), the flocks settle out of the
  * sky: none spawn, the flying ones fade away over a few seconds and stop scattering, and they return
  * (fading in ahead of the glider) once the last hold ends.
@@ -46,6 +49,17 @@ export function createBirdSystem(ctx) {
   /** Seconds the flocks take to settle out of the sky when the wildlife falls quiet. */
   const QUIET_FADE_SECONDS = 4;
   const player = state.player;
+  /** The flying craft's faunaThreat, looked up again only when the craft changes. */
+  let threatCraft = null;
+  let threat = 1;
+
+  function refreshThreat() {
+    const craft = state.flight ? state.flight.craft : null;
+    if (craft === threatCraft) return;
+    threatCraft = craft;
+    const registry = ctx.craftRegistry;
+    threat = faunaThreatOf(craft && registry && typeof registry.get === 'function' ? registry.get(craft) : null);
+  }
 
   // ---- Geometry: a low-poly gull-like silhouette, nose toward -z, wings along x --------------
   function buildBirdGeometry() {
@@ -536,14 +550,15 @@ export function createBirdSystem(ctx) {
     const px = player.position.x;
     const py = player.position.y;
     const pz = player.position.z;
-    const reach = flock.radius + SCATTER_TRIGGER_DISTANCE;
+    const triggerDistance = SCATTER_TRIGGER_DISTANCE * threat;
+    const reach = flock.radius + triggerDistance;
     const centerDx = flock.centerX - px;
     const centerDy = flock.centerY - py;
     const centerDz = flock.centerZ - pz;
     if (centerDx * centerDx + centerDy * centerDy + centerDz * centerDz > reach * reach) return;
     const start = flock.start;
     const end = start + flock.count;
-    const triggerSq = SCATTER_TRIGGER_DISTANCE * SCATTER_TRIGGER_DISTANCE;
+    const triggerSq = triggerDistance * triggerDistance;
     let triggered = false;
     for (let index = start; index < end && !triggered; index++) {
       const dx = positionX[index] - px;
@@ -555,7 +570,8 @@ export function createBirdSystem(ctx) {
     pathDirection.copy(player.velocity);
     if (pathDirection.lengthSq() < 1) pathDirection.copy(player.forward);
     pathDirection.normalize();
-    const scatterSq = SCATTER_RADIUS * SCATTER_RADIUS;
+    const scatterRadius = SCATTER_RADIUS * threat;
+    const scatterSq = scatterRadius * scatterRadius;
     let fled = 0;
     let fleeSumX = 0;
     let fleeSumZ = 0;
@@ -773,6 +789,7 @@ export function createBirdSystem(ctx) {
       if (dt > 0) {
         simulationTime += dt;
         updateQuiet(dt);
+        refreshThreat();
         refreshGroundSamples(dt);
         for (const flock of flocks) {
           if (!flock.active) continue;
@@ -816,7 +833,7 @@ export function createBirdSystem(ctx) {
           };
         }
       }
-      return { flocks: activeFlocks, birds, excited, nearest, quiet: quietSources.size > 0, quietFade: Math.round(quietFade * 100) / 100 };
+      return { flocks: activeFlocks, birds, excited, nearest, threat, quiet: quietSources.size > 0, quietFade: Math.round(quietFade * 100) / 100 };
     },
   };
 }

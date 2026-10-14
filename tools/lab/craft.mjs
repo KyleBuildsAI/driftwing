@@ -34,12 +34,16 @@
 //   bindings    a craft module's default bindings apply to that craft only, the player's overrides
 //               win, an invalid module reference is dropped with one error
 //   journal     a craft module's journal.stats keys are known stats (their op wins)
+//   roster      (wave 2 integration) all 14 catalog craft fly; every Phase 3 module places itself
+//               (situate); the director's profile lookup knows every craft id and the required
+//               profiles of contract i.2 hold on the real modules; faunaThreatOf; pinned HUD tiles
 //
 // Usage: node tools/lab/craft.mjs [--verbose]
 // Prints one line per check and exits non-zero if any check fails.
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
-import { CRAFT_CATALOG, CRAFT_GROUPS, createCraftRegistry, craftRegistry as gameRegistry } from '../../src/craft/registry.js';
+import { CRAFT_CATALOG, CRAFT_GROUPS, DEFAULT_FAUNA_THREAT, createCraftRegistry, faunaThreatOf, craftRegistry as gameRegistry } from '../../src/craft/registry.js';
+import { CRAFT_WEIGHT_RANGE, DEFAULT_DIRECTOR_PROFILES, craftWeight } from '../../src/spawns/director.js';
 import '../../src/craft/index.js';
 import glider from '../../src/craft/glider.js';
 import bushplane from '../../src/craft/bushplane.js';
@@ -319,6 +323,9 @@ function testValidation() {
     ['a copilot phrase that is not a regex', { copilot: { commands: [{ id: 'smoke', phrases: ['(unclosed'], run() {} }] } }, /not a valid regex/],
     ['a journal op', { journal: { stats: [{ key: 'labStat', label: 'Lab', unit: 'count', op: 'average' }] } }, /journal\.stats\.labStat\.op/],
     ['a director weight', { directorProfile: { favor: { tags: { water: -1 } } } }, /directorProfile\.favor\.tags\.water/],
+    ['a director tag outside PRESET_TAGS', { directorProfile: { above: [{ altitude: 20000, favor: { tags: { heavy: 2 } } }] } }, /directorProfile\.above\[0\]\.favor\.tags\.heavy/],
+    ['a director category outside PRESET_CATEGORIES', { directorProfile: { favor: { categories: { scenic: 2 } } } }, /directorProfile\.favor\.categories\.scenic/],
+    ['a pinned HUD tile the craft does not carry', { hud: { instruments: ['nacelle'] } }, /hud\.instruments\.nacelle/],
     ['a collision probe', { collision: { probes: [{ id: 'nose', position: [0, 0], radius: 0.4 }] } }, /collision\.probes/],
     ['a capability that is not a boolean', { capabilities: { smoke: 'yes' } }, /capabilities\.smoke/],
     ['a situate that is not a function', { situate: { mode: 'air' } }, /situate/],
@@ -494,7 +501,39 @@ async function testJournal() {
   check('journal', "a craft module's journal.stats keys are known stats", info && info.op === 'max' && info.unit === 'points' && info.label === 'Best lab score' && info.craft === 'aerobatic', JSON.stringify(info));
 }
 
+// ---- roster (wave 2 integration) ------------------------------------------------------------------------
+function testRoster() {
+  const missing = CRAFT_CATALOG.filter((entry) => !gameRegistry.has(entry.id)).map((entry) => entry.id);
+  check('roster', 'all 14 catalog craft have their module', missing.length === 0, missing.join(', ') || 'none missing');
+  const phaseThree = CRAFT_CATALOG.slice(6).map((entry) => gameRegistry.get(entry.id)).filter(Boolean);
+  check('roster', 'every Phase 3 module places itself after a switch (situate)', phaseThree.length === 8 && phaseThree.every((module) => typeof module.situate === 'function'), phaseThree.filter((module) => typeof module.situate !== 'function').map((module) => module.id).join(', '));
+  // The game's lookup (createGameDirector): the module's own profile, else the director's default.
+  const profileFor = (id) => gameRegistry.get(id)?.directorProfile ?? DEFAULT_DIRECTOR_PROFILES[id] ?? null;
+  const weight = (id, preset, altitude = 500) => craftWeight(preset, profileFor(id), altitude);
+  const tagged = (...tags) => ({ tags, category: 'geo' });
+  const probes = [tagged('water'), tagged('celestial', 'farLure'), { tags: [], category: 'wildlife' }];
+  const inRange = CRAFT_CATALOG.every((entry) => probes.every((preset) => {
+    const value = weight(entry.id, preset, 30000);
+    return value >= CRAFT_WEIGHT_RANGE.min && value <= CRAFT_WEIGHT_RANGE.max;
+  }));
+  check('roster', 'the director weighs every craft id inside CRAFT_WEIGHT_RANGE', inRange);
+  const required = [
+    ['seaplane favours water and lakes', ['water', 'lake'].every((tag) => weight('seaplane', tagged(tag)) > 1)],
+    ['the eagle favours thermals, perches and murmurations', ['thermal', 'perch', 'murmuration'].every((tag) => weight('eagle', tagged(tag)) > 1)],
+    ['the balloon favours calm, slow spectacles', ['calm', 'slow', 'spectacle'].every((tag) => weight('balloon', tagged(tag)) > 1)],
+    ['the airship favours calm, slow spectacles', ['calm', 'slow', 'spectacle'].every((tag) => weight('airship', tagged(tag)) > 1)],
+    ['the spaceplane is neutral below 20 km', weight('spaceplane', tagged('celestial'), 5000) === 1 && weight('spaceplane', { tags: [], category: 'wildlife' }, 5000) === 1],
+    ['the spaceplane favours celestial and far-lure spawns above 20 km', weight('spaceplane', tagged('celestial'), 25000) > 1 && weight('spaceplane', tagged('farLure'), 25000) > 1],
+    ['the spaceplane drops ground-only small spawns above 20 km', ['wildlife', 'structure', 'flightplay'].every((category) => weight('spaceplane', { tags: [], category }, 25000) < 1)],
+  ];
+  for (const [label, pass] of required) check('roster', `contract i.2: ${label}`, pass);
+  check('roster', 'faunaThreatOf: the eagle 2.5, a craft without one the default', faunaThreatOf(gameRegistry.get('eagle')) === 2.5 && faunaThreatOf(gameRegistry.get('glider')) === DEFAULT_FAUNA_THREAT && faunaThreatOf(null) === DEFAULT_FAUNA_THREAT);
+  const pinned = CRAFT_CATALOG.map((entry) => gameRegistry.get(entry.id)).filter((module) => module && module.hud);
+  check('roster', 'pinned HUD tiles (hud.instruments): the tiltrotor and the balloon, each a carried instrument', pinned.map((module) => module.id).sort().join() === 'balloon,tiltrotor' && pinned.every((module) => module.hud.instruments.every((id) => module.instruments.includes(id))), pinned.map((module) => `${module.id}: ${module.hud.instruments.join('+')}`).join(', '));
+}
+
 testCatalog();
+testRoster();
 testValidation();
 testFavorites();
 testSituate();
