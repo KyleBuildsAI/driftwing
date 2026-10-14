@@ -451,7 +451,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
 | 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | not started |
 | 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | not started |
-| 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | not started |
+| 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | in progress (branch complete, awaiting I2) |
 | P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | not started |
 | I2 | Integration pass: merge 2.0 first (before the craft branches start), then the craft branches in catalog order and the picker / director branch; `?test=craft` on both backends | `v2-phase3` | | not started |
 
@@ -546,7 +546,21 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   `airflowBasis: 'equivalent'` in airflow.js; far-field root prefetch past the reach (farField.js);
   the WebGL2 cockpit near plane above 12 km (cameraManager.js); contrails fade out in thin air
   (fx.js); the craft lab's catalog check; testFlightScripts.js and view-physics.json.
-- **Verified:** see the table below (each once, both backends unless noted).
+- **Verified 2026-10-13** (each once, both backends unless noted; reruns named):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 236/236 | built; no craft scenario or view-physics kit in the V2 bundle | |
+  | Labs: spaceplane 24 (new), craft 66, settings 45, copilot 240, copilot-server 17, discovery 43, flight-lab, atmosphere 28, challenges 70, colliders 84, director 50, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden (goldens identical), setpiece 47, spawns 98, storage 54, structure 75, terrain 404, water 34, wind-engines 56, wingsuit 37, audio 191 (alone) | all pass. The allocation labs need `--expose-gc` (challenges, fauna-modes, origin, water failed only their GC checks without it). The audio lab failed its doppler camera-cut check on its first run (both backends, under load), then hung loading the page on the second; the third run, alone, passed 191/191 | |
+  | `run-harness --test craft --crafts spaceplane` (the general test in both views, `spaceplane-climb` and `spaceplane-reentry` in both views) | PASS 6/6 runs, 58/58 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0 | PASS 6/6, same |
+  | `run-harness --test 1 --crafts spaceplane --seconds 20` (HARNESS-1..3, both views) | 0 NaN, 0 penetrations, 0/0, heap growth 7.92 MB max, 6/6 runs, 18/18 manoeuvres; frames over 50 ms: 3 (mainThread) | same criteria pass, heap growth 5.33 MB max; frames over 50 ms: 11 (9 mainThread or delayed, 2 systems: the landmarks' build at 27.9 ms and the camera at 29.7 ms 1.25 s into a cockpit run); the spaceplane's cockpit panel redraw measures 1.11 ms, the jet's 1.06 ms |
+  | `run-harness --test hotas` | 140/140 | 140/140 |
+  | Step files view-physics (7/7 craft), copilot-guide, high-altitude, origin-rebase | all pass, 0/0 | all pass, 0/0 |
+  | Built `dist-single/v2` and the built shell smoke | 0/0, screenshots differ | 0/0, screenshots differ (V2) |
+
+- **Frame time (owner's rule, one line):** the reduced flight harness failed only its frames-over-50-ms
+  criterion (3 on WebGPU, 11 on WebGL2) with the machine at 88-100 % CPU; neither "systems" frame
+  is the spaceplane's code.
 - **Next:** I2 merges this branch in catalog order.
 - **Open issues:** none blocking; Milestone O documents the spaceplane's HOTAS profile and its
   remote `flightState` fields (h.3: `apogee` is in `craftState`).
