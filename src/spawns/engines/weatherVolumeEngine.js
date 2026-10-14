@@ -37,7 +37,9 @@
 // removed on dispose. A drifting volume re-indexes its bounds only after moving WIND_REINDEX_METRES.
 //
 // Audio: the volume plays preset.audio when it owns the preset's voice (its entry is the first in
-// preset.engines, or its params set ownsAudio: true), at the anchor, with the growth as intensity.
+// preset.engines, or its params set ownsAudio: true), at the anchor, with the growth as intensity. A
+// 'ring' (hurricane) voice stands on the eyewall nearest the camera instead, and ducks in the calm
+// eye, so the roar is loudest in the wall and quiet at the eye's centre.
 //
 // No allocation per frame: puffs, groups and shafts live in typed arrays laid out at create, the
 // instance buffers are written in place with persistent update ranges, and the wind sample and the
@@ -79,6 +81,8 @@ const CANOPY_STREAK_SPEED = 55;
 const GRIT_DRIFT = 0.6;
 const GRIT_DRIFT_SPEED = 40;
 const GLOW_SCALE = 0.6;
+/** A ring's voice keeps this share of its level at the centre of the eye. */
+const RING_EYE_VOICE = 0.3;
 
 function smooth(value, edge0, edge1) {
   const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
@@ -716,6 +720,26 @@ export function createWeatherVolumeEngine() {
     }
   }
 
+  /**
+   * A ring's voice: on the eyewall where the camera's bearing from the eye crosses it, at the camera's
+   * height within the wall, ducked toward the centre of the eye. (dx, dz): the camera from the anchor.
+   */
+  function placeRingVoice(instance, dx, dz) {
+    const data = instance.data;
+    const params = data.params;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    const wall = params.radius + params.flare * 0.3;
+    const unitX = distance > 1 ? dx / distance : data.forwardX;
+    const unitZ = distance > 1 ? dz / distance : data.forwardZ;
+    const point = data.voicePoint;
+    point.x = instance.anchor.x + unitX * wall;
+    point.z = instance.anchor.z + unitZ * wall;
+    point.y = Math.min(data.baseAltitude + params.height * 0.6, Math.max(data.baseAltitude, frame.cameraY));
+    data.voice.setPosition(point);
+    const duck = RING_EYE_VOICE + (1 - RING_EYE_VOICE) * smooth(distance, params.radius * 0.6, params.radius);
+    data.voice.setIntensity(data.growth * duck);
+  }
+
   /** Records what this volume does to the camera, when it beats the strongest so far this frame. */
   /**
    * Approach journal (params.journal): the player's closest horizontal distance to the volume's
@@ -879,6 +903,8 @@ export function createWeatherVolumeEngine() {
         windIndexedX: anchor.x,
         windIndexedZ: anchor.z,
         voice: null,
+        /** Where a ring's voice stands (the eyewall nearest the camera), written in place. */
+        voicePoint: new THREE.Vector3(),
         cameraNear: false,
         inside: 0,
         rain: 0,
@@ -950,7 +976,8 @@ export function createWeatherVolumeEngine() {
           ctx.wind.setSourceBounds(data.windSource.id, data.windBounds);
         }
       }
-      if (data.voice) {
+      if (data.voice && data.params.form === 'ring') placeRingVoice(instance, dx, dz);
+      else if (data.voice) {
         data.voice.setPosition(instance.anchor);
         data.voice.setIntensity(data.growth);
       }

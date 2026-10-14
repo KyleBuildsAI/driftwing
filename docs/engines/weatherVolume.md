@@ -24,6 +24,7 @@ The `form` sets the shape, and each form covers a family of phenomena:
 | `bank` | a low strip on the ground; optionally curved (`curve`) with a tall leading wall (`wall`) | fog banks, valley fog rivers (`fillBelow`), sandstorm walls, hurricane rain bands |
 | `sheet` | a thin wide layer | a cloud sea (the glory preset), stratus decks, noctilucent clouds (`glow`, `ripple`) |
 | `mist` | a column of puffs rising and swelling from its foot | waterfall mist, geyser steam |
+| `ring` | a hurricane: a stadium eyewall of towering cloud whose inner face flares outward with height around a clear eye, spiral rain bands leaving it, and a cloud canopy spreading from its top; the anchor is the eye's centre | hurricane eye |
 
 The volume frame follows the activation heading. `x` points right, `z` points forward along the
 heading, and `y` points up from the volume base. Towers lean their anvil forward (downwind), and lens
@@ -57,6 +58,10 @@ waves lift upwind of the cloud (`-z`).
 | `anvil` | object or null | | tower: `{}` | `{ radius 8500 m, thickness 1500 m, altitude (m above the base, default 0.84 x height), lean 2600 m (downwind offset), puffs 110, storm 0.3 }` |
 | `overshoot` | 0..1 | | tower 0.5 | the dome above the anvil |
 | `wallCloud` | object or null | | null | `{ radius (0.35 x radius), drop 350 m below the base, offset (-0.3 x radius along z, negative = rear), rotation 6 deg/s, puffs 22 }` |
+| `flare` | m | 0..20000 | 0.4 x radius | a ring's eye face widens this much at the top (`flare x h^1.6`, h the height share): the stadium |
+| `spin` | rad/s | -0.2..0.2 | ring 0.004, else 0 | a ring turns its wall at this rate, its bands at 0.4 x and its canopy at 0.6 x (positive is counterclockwise from above); its bands spiral the other way going out |
+| `bands` | object or null | | ring: `{}` | a ring's spiral rain bands: `{ count 4 (0..8), turns 1.1 (0..4), reach 26000 m (the outer end), width 2400 m, height 4000 m (their tops, lower outward), puffs 340 }`; arm k leaves the wall at angle 2 pi k / count, log-spiral in radius (the `cyclone` wind source's bands) |
+| `canopy` | object or null | | ring: `{}` | a ring's cloud canopy at its top: `{ reach 2.6 (x radius), thickness 1600 m, puffs 150 }` |
 
 ### Look
 
@@ -100,6 +105,7 @@ null.
 | --- | --- | --- | --- |
 | `insideFog` | object | tower `{ density 4.5, color 0x7a838f, darkness 0.25 }`, bank `{ 7, 0xd9dee4, 0.05 }`, ... | inside the volume, the sky modifier sets these fog density (x1..8), fog colour and darkness values, weighted by how deep the camera is |
 | `canopyRain` | 0..1 | 0 | inside the volume itself (not only its shafts) rain wets the canopy (hurricane bands, squalls) |
+| `canopyGrit` | 0..1 | 0 | inside the volume or its dust shafts, grit streaks race across the canopy in the first-person views, with a sandblasted haze at its rim, in the volume's tint (a sandstorm's dust, a squall's snow); 0 leaves the canopy as before |
 | `wind.turbulence` | 0..1 | tower 0.45, cumulus 0.2, mist 0.15, sheet 0.1, lens and bank 0.05 | inside the mass |
 | `wind.updraft` | m/s | 0 | under a tower's base, radius 0.6 x radius |
 | `wind.downdraft` | m/s | 0 | inside the rain shafts (a microburst: 15-25) |
@@ -110,7 +116,7 @@ null.
 
 | param | default | notes |
 | --- | --- | --- |
-| `ownsAudio` | the first engine entry of the preset owns `preset.audio` | the voice plays at the anchor, with the growth as its intensity |
+| `ownsAudio` | the first engine entry of the preset owns `preset.audio` | the voice plays at the anchor, with the growth as its intensity; a `ring`'s voice stands on the eyewall where the camera's bearing from the eye crosses it and ducks to 30 % at the eye's centre, so the roar is loudest in the wall |
 | `journal` | none | approach stats, as the vortex engine's `journal` param: the player's closest horizontal distance to the anchor (a storm's core) while the volume stands grown, sent as typed `journalStat` events when the spawn ends. The supercell preset counts `stormsChased` (op `add`) within 6 km |
 
 ### Live control (set pieces)
@@ -182,6 +188,12 @@ null.
   rain: [{ radius: 1400, kind: 'snow', density: 0.85, top: 700 }] } }
 { engine: 'weatherVolume', params: { form: 'bank', base: 600, followTerrain: false, length: 30000, width: 2500, height: 1500, curve: 60, storm: 0.6, canopyRain: 1,
   rain: [{ offset: [0, 0], radius: 5000, density: 0.8 }] } }
+
+// Phase 3: a hurricane (the eye at the anchor), with rain at the foot of its wall; its wind is a
+// windModifier 'cyclone' source following the volume, so the volume's own turbulence stays off
+{ engine: 'weatherVolume', params: { form: 'ring', base: 250, radius: 4200, height: 11000, flare: 1700, spin: 0.004, storm: 0.6,
+  bands: { count: 4, turns: 1.1, reach: 26000 }, canopy: { reach: 2.6 }, canopyRain: 1, wind: { turbulence: 0 },
+  rain: [{ offset: [4900, 0], radius: 1500, density: 0.8, top: 5000 }], drift: { speed: 5 } } }
 
 // Phase 3: noctilucent clouds
 { engine: 'weatherVolume', params: { form: 'sheet', base: 7000, radius: 9000, thickness: 90, ripple: 0.8, tint: 0xcfe4ff, glow: { color: 0x9fd4ff, strength: 1.2, when: 'twilight' } } }

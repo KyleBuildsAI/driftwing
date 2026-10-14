@@ -17,6 +17,9 @@
 //            banks, valley fog rivers with fillBelow, sandstorm walls, hurricane rain bands)
 //   sheet    a thin wide layer (a cloud sea for the glory, stratus decks, noctilucent clouds)
 //   mist     a column of puffs rising and swelling from its foot (waterfall mist, geyser steam)
+//   ring     a hurricane: a stadium eyewall (a ring of towering cloud whose inner face flares outward
+//            with height around a clear eye), spiral rain bands leaving it and a cloud canopy spreading
+//            from its top; the anchor is the centre of the eye
 //
 // Puff record (PUFF_STRIDE floats): x, y, z (m, the puff centre in the volume frame; y above the
 // volume base, or above the puff's own ground for ground-following groups), radius (m), squash
@@ -37,7 +40,7 @@ export const SHAFT_STRIDE = 10;
 export const MAX_PUFFS_PER_VOLUME = 1000;
 export const MAX_GROUPS = 8;
 export const MAX_SHAFTS = 6;
-export const WEATHER_FORMS = Object.freeze(['tower', 'cumulus', 'lens', 'bank', 'sheet', 'mist']);
+export const WEATHER_FORMS = Object.freeze(['tower', 'cumulus', 'lens', 'bank', 'sheet', 'mist', 'ring']);
 export const RAIN_KINDS = Object.freeze(['rain', 'snow', 'dust']);
 export const FAR_MODES = Object.freeze(['auto', 'coarse', 'hide']);
 export const GLOW_TIMES = Object.freeze(['twilight', 'night', 'always']);
@@ -106,6 +109,14 @@ const FORM_DEFAULTS = Object.freeze({
     haze: Object.freeze({ near: 600, far: 8000, max: 0.9 }),
     insideFog: Object.freeze({ density: 3.5, color: 0xeef2f5, darkness: 0 }),
     turbulence: 0.15,
+  }),
+  ring: Object.freeze({
+    base: 200, radius: 4200, height: 11000, puffs: 380, detail: 0.15, storm: 0.55, tint: 0xeef1f4, spin: 0.004,
+    bands: Object.freeze({ count: 4, turns: 1.1, reach: 26000, width: 2400, height: 4000, puffs: 340 }),
+    canopy: Object.freeze({ reach: 2.6, thickness: 1600, puffs: 150 }),
+    haze: Object.freeze({ near: 6000, far: 90000, max: 0.6 }),
+    insideFog: Object.freeze({ density: 7, color: 0x6f7782, darkness: 0.4 }),
+    turbulence: 0,
   }),
 });
 
@@ -193,6 +204,10 @@ export function resolveWeatherParams(params, { event = true } = {}) {
   const wallSource = objectParam(value('wallCloud'), 'wallCloud');
   const glowSource = objectParam(value('glow'), 'glow');
   const driftSource = objectParam(value('drift'), 'drift');
+  const bandsSource = source.bands === undefined ? defaults.bands : source.bands;
+  const bands = bandsSource ? { ...(FORM_DEFAULTS.ring.bands), ...objectParam(bandsSource, 'bands') } : null;
+  const canopySource = source.canopy === undefined ? defaults.canopy : source.canopy;
+  const canopy = canopySource ? { ...(FORM_DEFAULTS.ring.canopy), ...objectParam(canopySource, 'canopy') } : null;
   const waveSource = objectParam(wind.wave, 'wind.wave');
   const formSeconds = value('formSeconds');
   return Object.freeze({
@@ -246,6 +261,22 @@ export function resolveWeatherParams(params, { event = true } = {}) {
     ripple: numberParam(value('ripple'), 'ripple', 0, 0, 1),
     // mist
     rise: numberParam(value('rise'), 'rise', 0, 0, 200),
+    // ring
+    flare: numberParam(value('flare'), 'flare', sizes.radius * 0.4, 0, 20000),
+    spin: numberParam(value('spin'), 'spin', 0, -0.2, 0.2),
+    bands: form === 'ring' && bands ? Object.freeze({
+      count: Math.round(numberParam(bands.count, 'bands.count', 4, 0, 8)),
+      turns: numberParam(bands.turns, 'bands.turns', 1.1, 0, 4),
+      reach: numberParam(bands.reach, 'bands.reach', 26000, 500, 150000),
+      width: numberParam(bands.width, 'bands.width', 2400, 50, 20000),
+      height: numberParam(bands.height, 'bands.height', 4000, 50, 20000),
+      puffs: Math.round(numberParam(bands.puffs, 'bands.puffs', 340, 0, MAX_PUFFS_PER_VOLUME)),
+    }) : null,
+    canopy: form === 'ring' && canopy ? Object.freeze({
+      reach: numberParam(canopy.reach, 'canopy.reach', 2.6, 1.05, 8),
+      thickness: numberParam(canopy.thickness, 'canopy.thickness', 1600, 50, 8000),
+      puffs: Math.round(numberParam(canopy.puffs, 'canopy.puffs', 150, 0, MAX_PUFFS_PER_VOLUME)),
+    }) : null,
     // shared
     glow: glowSource ? Object.freeze({
       color: colorParam(glowSource.color, 'glow.color', 0x9fd4ff),
@@ -560,6 +591,84 @@ function layoutSheet(layout, params, rng) {
   }
 }
 
+/** The ring's inner (eye) face radius at height share h (0 base .. 1 top): the stadium flare. */
+export function ringInnerRadius(params, h) {
+  return params.radius + params.flare * Math.pow(Math.min(1, Math.max(0, h)), 1.6);
+}
+
+/**
+ * A hurricane (see the header): the eyewall in rows of towering puffs whose inner faces sit on the
+ * flaring stadium face, then the spiral rain bands (arm k leaves the wall at angle 2 pi k / count and
+ * turns by -sign(spin) x turns x 2 pi out to bands.reach, log-spiral in radius, matching the cyclone
+ * wind source's bands), then the canopy spreading from the wall's top. The eye stays clear.
+ */
+function layoutRing(layout, params, rng) {
+  const { radius, height, puffs, storm, spin } = params;
+  const sign = spin < 0 ? -1 : 1;
+  const wall = addGroup(layout, 0, height, 0, height * 0.45, 0, storm, true, spin);
+  const rows = Math.max(3, Math.round(height / (radius * 0.28)));
+  const wallPuffs = Math.max(rows * 8, Math.round(puffs * (1 - params.detail)));
+  const perRow = Math.max(8, Math.round(wallPuffs / rows));
+  for (let row = 0; row < rows; row++) {
+    const h = (row + 0.5) / rows;
+    const inner = ringInnerRadius(params, h);
+    const puffRadius = radius * (0.2 + 0.08 * Math.sin(Math.PI * h)) * (row === rows - 1 ? 1.15 : 1);
+    for (let index = 0; index < perRow; index++) {
+      // Jittered in angle, height and size, so the rows never read as courses of bricks.
+      const angle = ((index + (row % 2) * 0.5 + (rng() - 0.5) * 0.9) / perRow) * Math.PI * 2;
+      const y = (h + ((rng() - 0.5) * 0.7) / rows) * height;
+      const size = puffRadius * (0.75 + 0.55 * rng());
+      const reach = inner + size * (0.65 + 0.45 * rng());
+      const level = index % 3 === 0 ? 0 : 1;
+      if (!addPuff(layout, Math.cos(angle) * reach, y, Math.sin(angle) * reach, size, 0.74 + 0.16 * rng(), rng() * Math.PI, 0.92 + 0.12 * rng(), 0.04 + 0.6 * h, wall, level, rng() * Math.PI * 2)) return;
+    }
+  }
+  // Detail: smaller heaps on the wall's outer flank and its crest.
+  const details = Math.max(0, puffs - rows * perRow);
+  for (let index = 0; index < details; index++) {
+    const h = 0.25 + 0.75 * rng();
+    const angle = rng() * Math.PI * 2;
+    const reach = ringInnerRadius(params, h) + radius * (0.45 + 0.25 * rng());
+    if (!addPuff(layout, Math.cos(angle) * reach, h * height, Math.sin(angle) * reach, radius * (0.1 + 0.06 * rng()), 0.8, rng() * Math.PI, 0.95 + 0.08 * rng(), 0.3 + 0.5 * h, wall, 2, rng() * Math.PI * 2)) return;
+  }
+  const bands = params.bands;
+  if (bands && bands.count > 0 && bands.puffs > 0) {
+    const bandGroup = addGroup(layout, 0, bands.height, 0, bands.height * 0.4, 0, storm * 0.55, true, spin * 0.4);
+    const start = radius * 1.3;
+    const spiral = Math.log(Math.max(1.05, bands.reach / start));
+    const perArm = Math.max(1, Math.round(bands.puffs / bands.count));
+    for (let arm = 0; arm < bands.count; arm++) {
+      const armAngle = (arm / bands.count) * Math.PI * 2;
+      for (let index = 0; index < perArm; index++) {
+        const t = (index + rng() * 0.6) / perArm;
+        const reach = start * Math.exp(t * spiral) + (rng() - 0.5) * bands.width * (0.4 + 0.6 * t);
+        const angle = armAngle - sign * bands.turns * Math.PI * 2 * t + (rng() - 0.5) * 0.06;
+        const puffRadius = bands.width * 0.32 * (1 - 0.35 * t) * (0.7 + 0.6 * rng());
+        const top = bands.height * (1 - 0.45 * t);
+        const squash = 0.7 + 0.2 * rng();
+        const y = puffRadius * squash * 0.4 + rng() * Math.max(0, top - puffRadius * squash);
+        const level = index % 4 === 0 ? 0 : index % 4 === 3 ? 2 : 1;
+        if (!addPuff(layout, Math.cos(angle) * reach, y, Math.sin(angle) * reach, puffRadius, squash, rng() * Math.PI, 0.96 + 0.12 * rng(), 0.15 + 0.5 * t, bandGroup, level, rng() * Math.PI * 2)) return;
+      }
+    }
+  }
+  const canopy = params.canopy;
+  if (canopy && canopy.puffs > 0) {
+    const inner = ringInnerRadius(params, 0.95);
+    const outer = radius * canopy.reach;
+    const canopyGroup = addGroup(layout, height - canopy.thickness, height + canopy.thickness * 0.5, 0, height, 0, storm * 0.5, false, spin * 0.6);
+    const puffRadius = Math.max(radius * 0.3, Math.sqrt((outer * outer - inner * inner) / Math.max(1, canopy.puffs)) * 0.95);
+    const squash = Math.min(0.5, Math.max(0.15, canopy.thickness / (2 * puffRadius)));
+    for (let index = 0; index < canopy.puffs; index++) {
+      const reach = Math.sqrt(inner * inner + rng() * (outer * outer - inner * inner)) + puffRadius * 0.4;
+      const angle = rng() * Math.PI * 2;
+      const edge = (reach - inner) / Math.max(1, outer - inner);
+      const y = height - canopy.thickness * 0.25 * edge + (rng() - 0.5) * canopy.thickness * 0.3;
+      if (!addPuff(layout, Math.cos(angle) * reach, y, Math.sin(angle) * reach, puffRadius * (0.85 + 0.3 * rng()), squash, rng() * Math.PI, 1.02 + 0.04 * rng(), 0.55 + 0.35 * edge, canopyGroup, index % 3 === 0 ? 0 : 1, rng() * Math.PI * 2)) return;
+    }
+  }
+}
+
 function layoutMist(layout, params, rng) {
   const { radius, height, puffs, rise } = params;
   const group = addGroup(layout, 0, height, 0, height * 0.35, 0, params.storm, false, 0, false, rise);
@@ -589,6 +698,7 @@ export function layoutWeatherVolume(params, rng, groundAt, frame) {
     case 'bank': layoutBank(layout, params, rng, groundAt, frame); break;
     case 'sheet': layoutSheet(layout, params, rng); break;
     case 'mist': layoutMist(layout, params, rng); break;
+    case 'ring': layoutRing(layout, params, rng); break;
     default: throw new Error(`[DRIFTWING] weatherVolume: unknown form "${params.form}"`);
   }
   for (const shaft of params.rain) addShaft(layout, shaft);
