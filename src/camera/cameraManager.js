@@ -589,7 +589,7 @@ export function createCameraSystem(ctx) {
       counters.panelRedraws++;
     }
     const hudStarted = performance.now();
-    hud.update(realDt, tick && !photo);
+    hud.update(realDt, tick && !photo, panelViewActive());
     if (tick && hud.visible && !photo) counters.hudDrawMs += (performance.now() - hudStarted - counters.hudDrawMs) * 0.1;
     if (tick && hud.visible && !photo) counters.hudTicks++;
     return tick;

@@ -145,6 +145,7 @@ The same ControlState drives every craft; each craft's input profile decides wha
 | Wingsuit | none | deploy the parachute (U does too) | under the canopy, stick roll, the rudder pedals and the toe brakes are the steering toggles; pull back to flare |
 | FPV drone | thrust | rate / angle mode (turtle mode when it lies upside down) | Z arms and disarms; at high assists the throttle asks for a climb rate around its centre (altitude hold) |
 | Seaplane | throttle | water rudders up / down (TWCS button 6 too) | G raises and lowers the amphibian wheels, on the water as well (up for water, down for a runway: wheels down in the water nose it over, wheels up on land skid the floats, and WREN warns on the approach); on the water the pedals and the differential toe brakes steer the water rudders; 3 flap notches; above 50 % assists the water assist holds the planing trim |
+| Tiltrotor | thrust control lever (the proprotors' collective) | auto-nacelle schedule on / off (keeps the nacelles inside the conversion corridor) | F / Page Up tilt the nacelles up one detent (0, 60, 90, then the 97 degree stop), Shift+F / Page Down tilt them forward one (gamepad D-pad down / up, T.16000M flap buttons); the TWCS antenna sets the angle directly (0 airplane mode to full at 97, detents at 0, 60 and 90). In the hover the stick is cyclic and differential collective and the pedals differential cyclic; in airplane mode the flaperons, elevator and rudders. On the wheels the nacelles stop at 60 degrees. At 100 % assists the lever is a climb / descend command around its centre in the hover; G raises the gear |
 
 ## World map
 
@@ -270,7 +271,7 @@ the best published layout. If your hardware reports them differently, rebind in 
 | Pedal rudder | yaw (helicopter: anti-torque); disables twist yaw once moved |
 | Left / right toe brake | wheel brakes (both), differential ground steering, airbrake in the air |
 | Rocker | pitch trim (spring-centred: hold it to move the trim) |
-| Antenna slider | flaps with notch hysteresis on fixed-wing craft; FOV zoom (up to 3x) on the helicopter, drone and wingsuit |
+| Antenna slider | flaps with notch hysteresis on fixed-wing craft; FOV zoom (up to 3x) on the helicopter, drone and wingsuit; the nacelle angle on the tiltrotor (takes over when it moves) |
 | Mini-stick | free look (absolute angle; releasing returns to centre) |
 | Mini-stick click (1) | recenter view |
 | Button 2 | airbrake (hold) |

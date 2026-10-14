@@ -139,6 +139,8 @@ const SCRIPTS = Object.freeze({
   fpv: HOVER,
   aerobatic: AEROBATIC,
   seaplane: SEAPLANE,
+  // The tiltrotor flies the hover script in helicopter mode; its autopilot cruise converts to airplane mode.
+  tiltrotor: HOVER,
 });
 
 /** The script for a craft ({ steps, checks }), or null when none exists. */
@@ -147,4 +149,4 @@ export function flightScriptFor(craft) {
 }
 
 /** Every craft id with a script, in the harness's run order. */
-export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic', 'seaplane']);
+export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic', 'seaplane', 'tiltrotor']);

@@ -1,5 +1,8 @@
 // Instrument HUD overlay: the active craft's instruments (craft.instruments) as glass tiles in the
-// v1 HUD style, for readability in any view. Off by default (settings.hud.overlay).
+// v1 HUD style, for readability in any view. Off by default (settings.hud.overlay). A craft module may
+// pin instruments its pilot always needs (module.hud.instruments, e.g. the tiltrotor's conversion
+// corridor): with the overlay off those tiles still show, except while a cockpit panel (which carries
+// them) is on screen.
 //
 // The tiles form a grid on the right edge. Its band runs between whatever v1 HUD element sits above
 // it (top bar, stats or dev badge, touch chips) and below it (seed card, mic, touch controls),
@@ -32,6 +35,9 @@ export function createInstrumentHud(ctx, instrumentSet) {
 
   const tiles = [];
   let tileIds = '';
+  /** The pinned instruments of the active craft (module.hud.instruments with a renderer), cached per craft. */
+  let pinnedCraft = null;
+  let pinnedIds = [];
   let enabled = readEnabled();
   let layoutTimer = 0;
   let layout = { size: 0, columns: 0, rows: 0, top: 0, right: 0 };
@@ -139,19 +145,29 @@ export function createInstrumentHud(ctx, instrumentSet) {
     layoutTimer = 0;
   });
 
+  /** The craft's pinned instrument ids that it lists and that have a renderer (in its instruments order). */
+  function pinnedFor(craft) {
+    if (craft === pinnedCraft) return pinnedIds;
+    pinnedCraft = craft;
+    const pinned = craft && craft.hud && Array.isArray(craft.hud.instruments) ? craft.hud.instruments : [];
+    pinnedIds = instrumentSet.ids.filter((id) => pinned.includes(id));
+    return pinnedIds;
+  }
+
   return {
-    /** True while the overlay is switched on and the craft has instruments. */
+    /** True while tiles show: the overlay is switched on, or the craft pins instruments. */
     get visible() {
-      return enabled && tiles.length > 0;
+      return !container.hidden && tiles.length > 0;
     },
 
     /**
-     * Per frame: keeps the tiles in step with the craft's instruments and the layout current;
-     * redraws the gauges when `redrawNow` (the 30 Hz instrument tick).
+     * Per frame: keeps the tiles in step with the craft's instruments (or its pinned ones while the
+     * overlay is off and no cockpit panel is on screen) and the layout current; redraws the gauges
+     * when `redrawNow` (the 30 Hz instrument tick).
      */
-    update(realDt, redrawNow) {
-      const ids = instrumentSet.ids;
-      if (!enabled || ids.length === 0) {
+    update(realDt, redrawNow, panelOnScreen = false) {
+      const ids = enabled ? instrumentSet.ids : panelOnScreen ? [] : pinnedFor(instrumentSet.craft);
+      if (ids.length === 0) {
         container.hidden = true;
         return;
       }
@@ -167,7 +183,7 @@ export function createInstrumentHud(ctx, instrumentSet) {
     },
 
     getStats() {
-      return { enabled, visible: enabled && tiles.length > 0, tiles: tiles.length, redraws, layout: { ...layout } };
+      return { enabled, visible: !container.hidden && tiles.length > 0, pinned: !enabled && !container.hidden, tiles: tiles.length, redraws, layout: { ...layout } };
     },
   };
 }
