@@ -180,7 +180,8 @@ export function resolveLightEffectConfig(preset, params) {
     const pulse = read.object(glow.pulse, `${path}.pulse`);
     read.onlyKeys(pulse, `${path}.pulse`, ['period', 'depth']);
     const chain = read.object(glow.chain, `${path}.chain`);
-    read.onlyKeys(chain, `${path}.chain`, ['interval', 'period', 'duty', 'delay']);
+    read.onlyKeys(chain, `${path}.chain`, ['interval', 'period', 'duty', 'delay', 'trigger']);
+    if (chain && chain.trigger !== undefined && (typeof chain.trigger !== 'string' || chain.trigger.length === 0)) read.fail(`${path}.chain.trigger`, 'must name a trigger of the preset audio recipe (for example "horn")');
     const layout = LAYOUTS.indexOf(read.oneOf(glow.layout, `${path}.layout`, 'point', LAYOUTS));
     if (layout === LANDMARK_LAYOUT && glow.landmark === undefined) read.fail(`${path}.landmark`, `is needed with layout 'landmarks' (one of ${GLOW_LANDMARKS.join(', ')})`);
     if (layout !== LANDMARK_LAYOUT && glow.landmark !== undefined) read.fail(`${path}.landmark`, "is only for layout 'landmarks'");
@@ -194,6 +195,7 @@ export function resolveLightEffectConfig(preset, params) {
         period: read.number(chain.period, `${path}.chain.period`, 30, 0.5, 3600),
         duty: read.number(chain.duty, `${path}.chain.duty`, 0.15, 0.01, 1),
         delay: read.number(chain.delay, `${path}.chain.delay`, 0, 0, 600),
+        trigger: chain.trigger ?? null,
       } : null,
       radius: read.number(glow.radius, `${path}.radius`, 50, 0, 100000) * scale,
       length: read.number(glow.length, `${path}.length`, 500, 0, 100000) * scale,
@@ -802,6 +804,39 @@ export function createLightEffectEngine() {
   }
 
   /**
+   * A chained glow group's voice: as each point of the chain lights, the voice's chain trigger fires
+   * once (the lighthouse's horn answering), louder for a point near the camera, its pitch a little
+   * different per point. A frame that skips several steps fires only the newest. Allocation-free.
+   */
+  function fireChain(instance, glowIndex, now, camera) {
+    const data = instance.data;
+    const glow = data.config.glows[glowIndex];
+    const chain = glow.chain;
+    const since = now - data.chainStart - chain.delay;
+    if (since < 0) return;
+    const sites = data.landmarkPoints[glowIndex];
+    const count = sites ? Math.min(glow.count, sites.length / 3) : glow.count;
+    if (count <= 0) return;
+    const cycle = Math.floor(since / chain.period);
+    const within = since - cycle * chain.period;
+    const order = Math.min(count - 1, chain.interval > 0 ? Math.floor(within / chain.interval) : count - 1);
+    const step = cycle * count + order;
+    if (step <= data.chainFired[glowIndex]) return;
+    data.chainFired[glowIndex] = step;
+    let distance = 0;
+    if (sites) {
+      const dx = sites[order * 3] - camera.x;
+      const dz = sites[order * 3 + 2] - camera.z;
+      distance = Math.sqrt(dx * dx + dz * dz);
+    }
+    const options = data.chainOptions;
+    options.strength = Math.max(0.3, Math.min(1.2, 1.2 - distance / 12000));
+    const golden = order * 0.618034;
+    options.pitch = 0.85 + 0.3 * (golden - Math.floor(golden));
+    data.voice.trigger(chain.trigger, options);
+  }
+
+  /**
    * For every glow group on landmarks: the world points (x, ground y, z per site) of the landmarks of
    * its type within its radius of the anchor, nearest first (the anchor's own landmark leads a chain).
    * The game's world answers (ctx.game.world.landmarkSitesNear); without it (the labs) the group is
@@ -912,6 +947,9 @@ export function createLightEffectEngine() {
         chainStart: ctx.time.elapsed,
         /** Per glow group: its landmarks' world points (layout 'landmarks'), else null. */
         landmarkPoints: landmarkPoints(config, anchor),
+        /** Per glow group: the last chain step whose voice trigger fired (-1 before the first). */
+        chainFired: new Float64Array(config.glows.length).fill(-1),
+        chainOptions: { strength: 1, pitch: 1 },
         colorScratch: new Float64Array(3),
         lightPhase: rng() * 100,
         /** The strike generator's state (fillRandoms), seeded from the spawn's rng. */
@@ -1128,6 +1166,9 @@ export function createLightEffectEngine() {
 
       if (data.voice) {
         data.voice.setPosition(anchor);
+        for (let glowIndex = 0; glowIndex < config.glows.length; glowIndex++) {
+          if (config.glows[glowIndex].chain && config.glows[glowIndex].chain.trigger) fireChain(instance, glowIndex, time.elapsed, camera);
+        }
         if (config.soundIntensity === 'approach') {
           const dx = anchor.x - camera.x;
           const dy = anchor.y - camera.y;
