@@ -1254,6 +1254,33 @@ docs/spawns.md ("Combos", "Global overrides") are the reference. Nothing above c
   (and the in-game track differs from the heading under wind); `?test=determinism` compares two
   page loads, so it needs no recorded hash.
 
+### i.6 Wave 3 additions for presets 91-100 (branch `p3/presets-91-100`, additive to i.3 and i.4)
+
+Nothing above changed meaning; every existing preset behaves as before.
+
+- **Combo members** may carry `optional: true`: a member naming a preset the build lacks is accepted
+  by `validatePresets` and dropped by the director when it resolves its combos (the log, `members`
+  and `comboStarted` then list only the members it has). The migration convergence (97) co-spawns
+  the butterflies (51) and the caribou (52) this way until their batch is merged.
+- **A combo with preconditions may name no member** (`members: []`): its own engines carry it at the
+  site, landmark or sky its preconditions bring (93, 96, 100). A combo with neither members nor
+  preconditions is still refused.
+- **A combo whose own preset seeks its ground** (`anchor.seek`) places its members around the point
+  the SpawnManager moved it to.
+- **`anchor.seek: 'valley'`** (`ANCHOR_SEEKS`): the lowest dry ground (4 m above the water level)
+  within `anchor.radius`, by the same grid and strides as `peak`, descending.
+- **Director dev API:** `forceSpawn(id, { at: { x, z } })` starts a preset (a combo with its members)
+  on a spot; `forceSiteActive(siteId)` wakes a live site's active state, tracked like the director's
+  own. The F9 debugger's Force combo (`src/dev/comboStaging.js`) stages each legendary combo with them.
+- **SpawnManager:** `nearestPart(presetId, engineName, x, z, radius)` returns the engine instance of
+  the nearest live spawn of a preset (allocation-free), so an engine can follow a neighbour spawn.
+- **Sky:** the modifier field `aurora` (0..1, the maximum wins) raises the aurora curtains' presence
+  wherever the sky is dark; `getModifierState()` reports `aurora` and `auroraStrength`.
+- **Engines** (docs/engines/): celestial `sky.aurora`, `comet.aim`, `comet.breakup`,
+  `meteors.fromComet`; lightEffect `arcs`, glow `layout: 'landmarks'` with `landmark`, glow `chain`
+  (with its voice `trigger`); structure recipe `iceRidges` and `out.arcPoints` (the spires' tips,
+  `instance.data.arcPoints`). Audio recipes `iceSing`, `aurora`, `foghorn`.
+
 ---
 
 ## j. Journal and copilot additions (wave 4, Milestone O)
