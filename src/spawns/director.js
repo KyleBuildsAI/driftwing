@@ -1698,6 +1698,32 @@ export function createDirector({
       return id;
     },
 
+    /**
+     * Dev only: starts the active state of a live site spawn now (an erupting volcano), tracked like
+     * the director's own: it ends after its seeded activeState duration, and a combo's siteActive
+     * precondition sees it. Used by the F9 combo staging (the volcano under the aurora). Returns the
+     * site's spawn id, or null when the site has no live spawn or its preset no active state.
+     */
+    forceSiteActive(siteId) {
+      if (!devHooks) throw new Error('director.forceSiteActive is only available in development builds or with ?debug=1');
+      if (!siteSpawnApi) return null;
+      const spawnId = spawnManager.getSiteSpawn(siteId);
+      if (!spawnId) return null;
+      if (isLive(spawnId)) return spawnId;
+      const instance = spawnManager.getInstance(spawnId);
+      const info = instance ? siteActiveInfos.get(instance.presetId) : null;
+      if (!info) return null;
+      if (spawnManager.setSiteActive(spawnId, true) === false) return null;
+      readInputs();
+      const seed = mix32((baseHash ^ Math.imul(++debugSerial, 0x9e3779b1)) >>> 0);
+      const duration = durationFor(info, seed);
+      const label = `debug:${debugSerial}`;
+      track(spawnId, info, 'debug', { candidate: label, siteId, duration, siteActive: true });
+      appendLog({ time, presetId: info.id, candidateId: label, reason: 'debug' });
+      markNotable('event', time);
+      return spawnId;
+    },
+
     /** The director's load shedder (registered with perf when one was given). */
     shedder,
 
