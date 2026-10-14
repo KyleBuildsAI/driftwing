@@ -1100,6 +1100,11 @@ Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file
 - **Presets:** all ten files registered under "Batch 9" in `presets/index.js`; `validatePresets` passes
   (40 presets on this branch). Placement on DRIFTWING / HARNESS-1 / P2-TERRAIN / SPAWNS-1: every preset
   has sites within 60 km (the mangrove delta 2-6, the arch chain 2-5, the rest 5-16).
+- **Labs so far:** `tools/lab/preset-flight.mjs` gains the dust devil scenario (the glider and the jet
+  through the larger devil's core: 17/17); `tools/lab/terrain.mjs` 463/463 after two lab changes: the
+  Phase 2 world digests are rebuilt from the 30 Phase 2 presets (`PHASE2_PRESET_IDS`; wave 3 site
+  presets change the real world's site list, as they must), the paint check accepts unpainted stamps
+  (the arch chain's floor, the delta) and knows the delta, plus the delta shape check.
 - **Next:** docs/spawns.md rows and sections, the spawn scenarios (`batch81.js`), the step file and
   the checks on both backends.
 

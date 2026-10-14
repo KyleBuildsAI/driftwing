@@ -7,7 +7,7 @@
 // src/world/stamps.js, waters.js, overlays.js.
 
 /** One flight of paddies: long and narrow down the slope, many low shelves. */
-const FLIGHT = Object.freeze({ type: 'terraces', length: [380, 460], width: [150, 180], steps: [7, 9], lip: [0.7, 1], falloff: [50, 80], paint: 'mud' });
+const FLIGHT = Object.freeze({ type: 'terraces', length: [380, 460], width: [150, 170], steps: [7, 9], lip: [0.7, 1], falloff: [40, 60], paint: 'mud' });
 /** Its flooded flats: shallow, almost still, a sky mirror with a little glint. */
 const PADDIES = Object.freeze({ kind: 'pool', level: Object.freeze({ mode: 'basin', fill: 0.72 }), material: 'water', tint: 0x6f8f74, waves: 0.03, glint: 1.4, foam: 0.15, mirror: 0.7 });
 
@@ -29,9 +29,11 @@ export default Object.freeze({
     align: 'downhill',
   },
   filters: { biomes: null, timeOfDay: null, altitude: null, weather: null, surface: 'land' },
+  // Side by side with a strip of the natural slope between them (their falloffs never meet, so every
+  // shelf stays level).
   stamps: [
-    { ...FLIGHT, offset: { along: 0, across: -98 } },
-    { ...FLIGHT, offset: { along: 30, across: 98 } },
+    { ...FLIGHT, offset: { along: 0, across: -165 } },
+    { ...FLIGHT, offset: { along: 30, across: 165 } },
   ],
   waters: [
     { ...PADDIES, stamp: 0 },
@@ -46,7 +48,7 @@ export default Object.freeze({
     {
       engine: 'weatherVolume',
       params: {
-        form: 'bank', base: 2, length: 520, width: 620, height: 28, puffs: 90, detail: 0.2, tint: 0xf2f5f3, brightness: 1.05,
+        form: 'bank', base: 2, length: 660, width: 620, height: 28, puffs: 90, detail: 0.2, tint: 0xf2f5f3, brightness: 1.05,
         billow: 0.25, hours: { dawn: 1, day: 0.1, dusk: 0.35, night: 0.5 },
         insideFog: { density: 3.5, color: 0xe6ebe8, darkness: 0 }, wind: { turbulence: 0.04 }, ownsAudio: true,
       },
