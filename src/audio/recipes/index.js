@@ -23,6 +23,7 @@ import waterfall from './waterfall.js';
 import { skyWhale, whale } from './whale.js';
 // Presets 51-60.
 import bells from './bells.js';
+import observatory from './observatory.js';
 
 export const RECIPES = Object.freeze({
   tornado,
@@ -42,6 +43,7 @@ export const RECIPES = Object.freeze({
   goose,
   // Presets 51-60.
   bells,
+  observatory,
 });
 
 /**

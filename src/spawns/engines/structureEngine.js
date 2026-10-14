@@ -348,9 +348,10 @@ export function createStructureEngine() {
       turbines: [], socks: [], puffs: [], gates: [], surfaces: [], zones: [], courses: [], colliders: [],
       challenge: null,
       wake: null, turbineSettings: null, sway: null, audioPoint: null, windProbe: null, approach: 0, radius: 20,
-      // Phase 3 (optional): movers (context.addMover), the animate hook that poses them, dynamic steam
-      // puffs, torches (ignitables) and instanced blocks.
-      movers: [], animate: null, steam: 0, torches: [], blocks: [],
+      // Phase 3 (optional): movers (context.addMover), the animate hook that poses them (a module-level
+      // function, one for every instance of the recipe, reading its instance's own data from
+      // state.custom = animateState), dynamic steam puffs, torches (ignitables) and instanced blocks.
+      movers: [], animate: null, animateState: null, steam: 0, torches: [], blocks: [],
     };
     const context = {
       presetId: preset.id,
@@ -881,6 +882,16 @@ export function createStructureEngine() {
     if (data.animate !== null) data.animate(data.moverState, data.moverEnv);
     if (data.moverMeshes.length > 0) poseMovers(data);
     if (data.steamSlots.length > 0) writeSteam(data);
+  }
+
+  /**
+   * env.trigger(name, options) of the animate hooks: plays a trigger on the instance's voice. One
+   * function for every instance (called as a method of its env), so the hooks' call sites stay
+   * monomorphic.
+   */
+  function triggerVoice(name, options) {
+    const voice = this.data.voice;
+    if (voice) voice.trigger(name, options);
   }
 
   /**
@@ -1631,7 +1642,7 @@ export function createStructureEngine() {
         blockShownWritten: -1,
       };
       // The animate hook's state (what it writes) and env (what it reads), made once per instance.
-      data.moverState = { poses: data.moverPoses, steam: new Float64Array(0), level: new Float64Array([0.8]), glow: new Float64Array([1]) };
+      data.moverState = { poses: data.moverPoses, steam: new Float64Array(0), level: new Float64Array([0.8]), glow: new Float64Array([1]), custom: out.animateState ?? null };
       data.moverEnv = {
         /** [time (s), step (s), night factor, sun elevation (deg), shown (1 near and mid, else 0)]. */
         clock: new Float64Array(5),
@@ -1642,10 +1653,10 @@ export function createStructureEngine() {
         moonDirection: ctx.state.time.moonDirection ?? null,
         sunDirection: ctx.state.time.sunDirection ?? null,
         skyTarget,
-        /** Plays a voice trigger (event work: a whistle, a bell). */
-        trigger(name, options) {
-          if (data.voice) data.voice.trigger(name, options);
-        },
+        /** Plays a voice trigger (event work: a whistle, a bell): env.trigger(name, options). */
+        trigger: triggerVoice,
+        /** The instance data (the voice), for trigger. */
+        data,
       };
       // Probe point and audio position in world space; the ambient wind there, once.
       data.probe = [anchor.x + data.probe[0], anchor.y + data.probe[1], anchor.z + data.probe[2]];

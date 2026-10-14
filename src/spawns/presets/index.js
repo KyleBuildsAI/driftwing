@@ -37,6 +37,7 @@ import stormChase from './stormChase.js';
 // Batch 6: presets 51-60.
 import cliffsideMonastery from './cliffsideMonastery.js';
 import seaCliffCastle from './seaCliffCastle.js';
+import mountaintopObservatory from './mountaintopObservatory.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -75,6 +76,7 @@ export const PRESETS = Object.freeze([
   // Batch 6: presets 51-60.
   cliffsideMonastery,
   seaCliffCastle,
+  mountaintopObservatory,
 ]);
 
 /** Presets by id. */

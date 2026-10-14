@@ -17,8 +17,9 @@
 //   memory       dispose returns every per-instance geometry and pooled slot
 //   allocation   after a JIT warm-up, 60 000 frames of every structure part allocate nothing
 //
-// Usage: node --expose-gc tools/lab/presets-51-60.mjs [--verbose]
-// Prints one line per check and exits non-zero if any check fails.
+// Usage: node --expose-gc tools/lab/presets-51-60.mjs [--verbose] [--only <presetId,presetId,...>]
+// --only runs the checks for the named presets alone. Prints one line per check and exits non-zero if
+// any check fails.
 import { PerformanceObserver } from 'node:perf_hooks';
 import v8 from 'node:v8';
 import * as THREE from 'three/webgpu';
@@ -39,8 +40,15 @@ import { buildTestSite } from '../../src/dev/structureTestKit.js';
 import { PRESETS, PRESET_BY_ID } from '../../src/spawns/presets/index.js';
 
 const VERBOSE = process.argv.includes('--verbose');
-for (const flag of process.argv.slice(2)) {
-  if (flag !== '--verbose') throw new Error(`Unknown flag ${flag}`);
+let ONLY = null;
+for (let index = 2; index < process.argv.length; index++) {
+  const flag = process.argv[index];
+  if (flag === '--verbose') continue;
+  if (flag === '--only') {
+    ONLY = (process.argv[++index] ?? '').split(',').filter(Boolean);
+    continue;
+  }
+  throw new Error(`Unknown flag ${flag}`);
 }
 
 const results = [];
@@ -56,10 +64,12 @@ console.error = (...args) => {
 };
 
 /** The batch's presets that have a structure part, in spec order, with what each must show. */
-const BATCH = Object.freeze([
+const ALL_ENTRIES = Object.freeze([
   Object.freeze({ id: 'cliffsideMonastery', colliders: 8, perches: true, torches: true, cloth: true }),
   Object.freeze({ id: 'seaCliffCastle', colliders: 16, perches: true, torches: true, cloth: true }),
+  Object.freeze({ id: 'mountaintopObservatory', colliders: 6, perches: true, movers: 3 }),
 ]);
+const BATCH = ONLY ? ALL_ENTRIES.filter((entry) => ONLY.includes(entry.id)) : ALL_ENTRIES;
 
 // ---- Stub world: gentle hills at about 120 m, with every test site's stamps applied --------------------
 const WATER_LEVEL = 0;
@@ -149,6 +159,26 @@ function createLab() {
     bus, perf: null, settings: null, uniforms, registry, presets: [], seed: 'LAB51', surfaces, game,
   });
   const engine = manager.register(createStructureEngine());
+  // A stand-in for the celestial engine's skyTarget (the observatory aims at it): sky.direction while
+  // sky.kind is 1 (a comet) or 2 (a radiant), nothing while it is 0.
+  const sky = { kind: 0, direction: [0, 1, 0] };
+  manager.register({
+    name: 'celestial',
+    budget: { instances: 0, particles: 0 },
+    init() {},
+    create() { throw new Error('the lab celestial stand-in creates nothing'); },
+    update() {},
+    setLOD() {},
+    dispose() {},
+    stats() { return { instances: 0, particles: 0, lights: 0, buffers: 0, drawCalls: 0 }; },
+    skyTarget(out) {
+      if (sky.kind === 0) return 0;
+      out[0] = sky.direction[0];
+      out[1] = sky.direction[1];
+      out[2] = sky.direction[2];
+      return sky.kind;
+    },
+  });
   for (const preset of LAB_PRESETS) manager.addPreset(preset);
   manager.init();
   function step(frames = 1, dt = 1 / 60) {
@@ -166,11 +196,23 @@ function createLab() {
   function spawnFree(presetId, x = 0, z = -2000, heading = 30) {
     return manager.activate(presetId, { position: { x, y: groundHeight(x, z), z }, heading, source: 'debug', force: true });
   }
-  /** Spawns a preset where it belongs: on its site, or (an event) free-standing ahead. */
-  function spawn(presetId) {
-    return siteOf(presetId) ? spawnSite(presetId) : spawnFree(presetId, 30000, -4000);
+  /** Puts the player and the camera 600 m from a point, 300 m up (so the manager keeps a site there). */
+  function visit(x, z) {
+    state.player.position.set(x + 400, groundHeight(x, z) + 300, z + 450);
+    camera.position.copy(state.player.position);
+    camera.updateMatrixWorld();
   }
-  return { bus, scene, camera, uniforms, state, wind, memory, voices, surfaces, registry, manager, engine, game, step, spawnSite, spawnFree, spawn };
+  /** Spawns a preset where it belongs (on its site, or an event free-standing ahead), the player near it. */
+  function spawn(presetId) {
+    const site = siteOf(presetId);
+    if (site) {
+      visit(site.x, site.z);
+      return spawnSite(presetId);
+    }
+    visit(30000, -4000);
+    return spawnFree(presetId, 30000, -4000);
+  }
+  return { bus, scene, camera, uniforms, state, wind, memory, voices, surfaces, registry, manager, engine, game, sky, step, spawnSite, spawnFree, spawn, visit };
 }
 
 /** The spawn's structure instance (the lab presets carry only their structure parts). */
@@ -257,7 +299,7 @@ function testColliders() {
       const centreX = (box.bounds[0] + box.bounds[3]) / 2;
       const centreZ = (box.bounds[2] + box.bounds[5]) / 2;
       const out = { t: 0, point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 }, id: null, owner: null, tags: null, velocity: null };
-      const hit = colliders.sweepSphere({ x: centreX, y: top + 40, z: centreZ }, { x: centreX, y: top - 4, z: centreZ }, 1, { landableTops: false }, out);
+      const hit = colliders.sweepSphere({ x: centreX, y: top + 40, z: centreZ }, { x: centreX, y: top - 4, z: centreZ }, 1, {}, out);
       check('colliders', `${entry.id}: a sphere dropped onto ${box.id.split(':').pop()} hits the structure`, hit, hit ? `hit ${out.id ? out.id.split(':').pop() : '?'} at t ${out.t.toFixed(2)}` : 'no hit');
     }
     lab.manager.deactivate(id, 'test');
@@ -301,6 +343,66 @@ function testTorches() {
     lab.manager.deactivate(id, 'test');
     check('torches', `${entry.id}: dispose removes every ignitable and frees the flames`, ids.every((ignitableId) => !ignition.isLit(ignitableId) && ignition.ids().indexOf(ignitableId) < 0) && lab.engine.stats().flames === 0 && lab.engine.stats().litFlames === 0, `${ignition.count} left`);
   }
+}
+
+// ---- movers -----------------------------------------------------------------------------------------------
+/** The pose of a spawn's mover by name: { x, y, z, yaw, pitch, roll, scale, visible } (local). */
+function moverPose(part, name, movers) {
+  const index = movers.indexOf(name);
+  const poses = part.data.moverState.poses;
+  const base = index * 8;
+  return { x: poses[base], y: poses[base + 1], z: poses[base + 2], yaw: poses[base + 3], pitch: poses[base + 4], roll: poses[base + 5], scale: poses[base + 6], visible: poses[base + 7] };
+}
+
+/** Wrapped angle difference (rad) in [-pi, pi]. */
+function angleGap(a, b) {
+  let gap = a - b;
+  gap -= Math.PI * 2 * Math.floor((gap + Math.PI) / (Math.PI * 2));
+  return gap;
+}
+
+function testObservatory() {
+  const lab = createLab();
+  const id = lab.spawn('mountaintopObservatory');
+  const part = partOf(lab, id);
+  lab.engine.setLOD(part, 'near');
+  const movers = ['dome', 'shutter', 'telescope'];
+  check('movers', 'observatory: the dome, its shutter and the telescope are movers on pooled meshes', part.data.moverMeshes.length === 3 && part.data.moverMeshes.every(Boolean), `${part.data.moverMeshes.length} movers`);
+  lab.uniforms.nightFactor.value = 0;
+  lab.step(120);
+  check('movers', 'observatory: by day the shutter stays closed', moverPose(part, 'shutter', movers).pitch === 0, `shutter ${moverPose(part, 'shutter', movers).pitch.toFixed(3)} rad`);
+  // A comet 40 degrees up in the north-east: the dome opens, turns and the telescope rises to it.
+  const azimuth = 50 * Math.PI / 180;
+  const elevation = 40 * Math.PI / 180;
+  lab.sky.kind = 1;
+  lab.sky.direction = [Math.sin(azimuth) * Math.cos(elevation), Math.sin(elevation), -Math.cos(azimuth) * Math.cos(elevation)];
+  lab.uniforms.nightFactor.value = 1;
+  const triggers = lab.voices.at(-1).triggers.length;
+  lab.step(60 * 90);
+  const telescope = moverPose(part, 'telescope', movers);
+  const dome = moverPose(part, 'dome', movers);
+  const shutter = moverPose(part, 'shutter', movers);
+  check('movers', 'observatory: at night the shutter slides open and the latch clunks', shutter.pitch > 1.2 && lab.voices.at(-1).triggers.length > triggers && lab.voices.at(-1).triggers.includes('clunk'), `shutter ${shutter.pitch.toFixed(2)} rad, triggers ${lab.voices.at(-1).triggers.join(', ')}`);
+  check('movers', 'observatory: the dome turns its slit and the telescope rises to the comet', Math.abs(angleGap(dome.yaw, azimuth)) < 0.02 && Math.abs(angleGap(telescope.yaw, azimuth)) < 0.02 && Math.abs(telescope.pitch - elevation) < 0.02,
+    `dome ${(dome.yaw * 180 / Math.PI).toFixed(1)} deg, telescope ${(telescope.yaw * 180 / Math.PI).toFixed(1)} / ${(telescope.pitch * 180 / Math.PI).toFixed(1)} deg`);
+  // The meteor radiant when there is no comet.
+  const radiantAzimuth = -100 * Math.PI / 180;
+  lab.sky.kind = 2;
+  lab.sky.direction = [Math.sin(radiantAzimuth) * Math.cos(0.9), Math.sin(0.9), -Math.cos(radiantAzimuth) * Math.cos(0.9)];
+  lab.step(60 * 90);
+  const toRadiant = moverPose(part, 'telescope', movers);
+  check('movers', 'observatory: with no comet it follows the meteor radiant', Math.abs(angleGap(toRadiant.yaw, radiantAzimuth)) < 0.02 && Math.abs(toRadiant.pitch - 0.9) < 0.02, `${(toRadiant.yaw * 180 / Math.PI).toFixed(1)} / ${(toRadiant.pitch * 180 / Math.PI).toFixed(1)} deg`);
+  check('movers', 'observatory: the mover meshes carry the pose (anchor + local, turned)', part.data.moverMeshes[2].matrix.elements[12] !== 0 && part.data.moverMeshes.every((mesh) => mesh.visible), `x ${part.data.moverMeshes[2].matrix.elements[12].toFixed(1)}`);
+  lab.engine.setLOD(part, 'far');
+  check('movers', 'observatory: the movers hide at the far tier', part.data.moverMeshes.every((mesh) => !mesh.visible), '');
+  lab.engine.setLOD(part, 'mid');
+  lab.step(2);
+  check('movers', 'observatory: and show again at mid', part.data.moverMeshes.every((mesh) => mesh.visible), '');
+  lab.uniforms.nightFactor.value = 0;
+  lab.step(60 * 30);
+  check('movers', 'observatory: at dawn it parks and closes', moverPose(part, 'shutter', movers).pitch === 0, `shutter ${moverPose(part, 'shutter', movers).pitch.toFixed(3)} rad`);
+  lab.sky.kind = 0;
+  lab.manager.deactivate(id, 'test');
 }
 
 // ---- wind -------------------------------------------------------------------------------------------------
@@ -379,6 +481,7 @@ async function testAllocation() {
 testRecipes();
 testColliders();
 testTorches();
+if (BATCH.some((entry) => entry.id === 'mountaintopObservatory')) testObservatory();
 testWind();
 testMemory();
 await testAllocation();

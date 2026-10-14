@@ -1090,7 +1090,13 @@ presets (92-100) use the wave 2 combo scheduling.
   `skyTarget(out)` (a live comet, else a meteor radiant). Shared props in
   `src/spawns/engines/structure/heritage.js`.
 - **Presets:** 53 cliffside monastery (recipe `monastery` on a `cliffStep` stamp, audio `bells`); 54
-  sea-cliff castle ruin (recipe `castleRuin` on a coastal `cliffStep`, the surf as a low `waterfall`).
+  sea-cliff castle ruin (recipe `castleRuin` on a coastal `cliffStep`, the surf as a low `waterfall`); 55
+  mountaintop observatory (recipe `observatory` on a summit `flatten`, its dome, shutter and telescope
+  movers aimed by the celestial engine's `skyTarget`, audio `observatory`).
+- **Allocation rule found on the way:** an animate hook must be a module-level function (one per
+  recipe, per-instance numbers in `out.animateState`, read as `state.custom`): per-instance closures
+  share their optimised code and deoptimise each other, and the baseline code then boxes every double
+  (about 190 B a frame in the lab).
 - **Lab:** `node --expose-gc tools/lab/presets-51-60.mjs`.
 - **Next:** the remaining nine presets, the scenario file, the step file, the docs and the test runs.
 
