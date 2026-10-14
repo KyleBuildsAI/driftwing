@@ -25,6 +25,7 @@ export const RECIPE_STAMP_TYPES = Object.freeze({
   waterfall: 'cliffStep',
   // Presets 51-60.
   monastery: 'cliffStep',
+  castleRuin: 'cliffStep',
 });
 
 /** Stamp sizes each recipe prefers over the stamp type's own defaults (m, or [min, max] ranges). */
@@ -36,6 +37,7 @@ const RECIPE_STAMP_DEFAULTS = Object.freeze({
   waterfall: Object.freeze({ width: [380, 520], drop: [110, 160], length: [520, 680], face: [8, 12], falloff: [140, 180], pool: [55, 75], paint: 'wetRock' }),
   // Presets 51-60.
   monastery: Object.freeze({ width: [300, 380], drop: [95, 140], length: [440, 560], face: [6, 9], falloff: [130, 170], pool: [18, 26], paint: 'basalt' }),
+  castleRuin: Object.freeze({ width: [280, 360], drop: [45, 75], length: [380, 480], face: [5, 8], falloff: [110, 150], pool: [16, 22], paint: 'basalt' }),
 });
 
 /** Islet layout for the islands recipe: how many islets, and how far out the others ring the first. */

@@ -58,6 +58,7 @@ console.error = (...args) => {
 /** The batch's presets that have a structure part, in spec order, with what each must show. */
 const BATCH = Object.freeze([
   Object.freeze({ id: 'cliffsideMonastery', colliders: 8, perches: true, torches: true, cloth: true }),
+  Object.freeze({ id: 'seaCliffCastle', colliders: 16, perches: true, torches: true, cloth: true }),
 ]);
 
 // ---- Stub world: gentle hills at about 120 m, with every test site's stamps applied --------------------
@@ -289,10 +290,14 @@ function testTorches() {
     lab.uniforms.nightFactor.value = 1;
     lab.step(2);
     const litNight = lab.engine.stats().litFlames;
-    check('torches', `${entry.id}: the lamps light themselves at dusk`, litNight >= auto && auto > 0, `${litNight} lit at night`);
+    if (auto > 0) {
+      check('torches', `${entry.id}: the lamps light themselves at dusk`, litNight >= auto, `${litNight} lit at night`);
+    } else {
+      check('torches', `${entry.id}: its torches wait for a flame (none light themselves at night)`, litNight === 1, `${litNight} lit at night`);
+    }
     lab.uniforms.nightFactor.value = 0;
     lab.step(2);
-    check('torches', `${entry.id}: and go out at dawn (a torch a flame lit by hand stays lit)`, lab.engine.stats().litFlames === (manual >= 0 ? 1 : 0), `${lab.engine.stats().litFlames} lit by day`);
+    check('torches', `${entry.id}: by day only the torch a flame lit burns`, lab.engine.stats().litFlames === 1, `${lab.engine.stats().litFlames} lit by day`);
     lab.manager.deactivate(id, 'test');
     check('torches', `${entry.id}: dispose removes every ignitable and frees the flames`, ids.every((ignitableId) => !ignition.isLit(ignitableId) && ignition.ids().indexOf(ignitableId) < 0) && lab.engine.stats().flames === 0 && lab.engine.stats().litFlames === 0, `${ignition.count} left`);
   }

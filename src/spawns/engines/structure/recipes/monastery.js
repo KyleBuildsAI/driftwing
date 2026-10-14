@@ -8,11 +8,11 @@
 // the pavilion, the pole and the stairs are solid, the roofs landable perches.
 // Without a cliffStep stamp (a debug spawn) the recipe raises its own basalt cliff `drop` metres high.
 import { PALETTE } from '../palette.js';
-import { addPine, findStamp, frameFromHeading, pick } from '../common.js';
+import { addPine, pick } from '../common.js';
 import { paint, shade } from '../meshBuilder.js';
 import { roll, rollInteger } from '../../engineKit.js';
 import { localBox, localCapsule, localCylinder, localHull } from '../colliders.js';
-import { HERITAGE, addFlagString, addHipRoof, addTorchPost, addWhiteHall, createSiteFrame, outwardQuad } from '../heritage.js';
+import { HERITAGE, addFlagString, addHipRoof, addTorchPost, addWhiteHall, cliffSiteFrame, outwardQuad } from '../heritage.js';
 
 export const MONASTERY_DEFAULTS = Object.freeze({
   stamp: 0,
@@ -26,7 +26,6 @@ export const MONASTERY_DEFAULTS = Object.freeze({
   width: 260,
 });
 
-const BASALT = paint(0x3e3a37);
 const BRONZE = paint(0x8a6a3a);
 /** Metres between the lower halls' floors down the face, and the clearance kept above the cliff foot. */
 const TIER_STEP = 13;
@@ -42,7 +41,7 @@ export function buildMonastery(context, read) {
   const withChorten = read.boolean('chorten', MONASTERY_DEFAULTS.chorten);
   const withBell = read.boolean('bell', MONASTERY_DEFAULTS.bell);
   const pineCount = rollInteger(read.range('pines', MONASTERY_DEFAULTS.pines, 0, 30), rng);
-  const site = buildFrame(context, read);
+  const site = cliffSiteFrame(context, read.number('stamp', 0, 0, 16), read.number('drop', MONASTERY_DEFAULTS.drop, 40, 300), read.number('width', MONASTERY_DEFAULTS.width, 80, 800));
   const { frame, heightAt } = site;
   const yaw = frame.yaw;
   const topY = heightAt(-26, 0);
@@ -256,36 +255,6 @@ export function buildMonastery(context, read) {
 /** -1 or 1: the side of the site's centre line a stretch across lies on. */
 function side(across) {
   return across >= 0 ? 1 : -1;
-}
-
-/**
- * The cliff frame: the site frame on the cliffStep stamp's lip (heights from the terrain), or a basalt
- * cliff of its own across the heading for a debug spawn (heights from that wall).
- */
-function buildFrame(context, read) {
-  const stamp = findStamp(context.site, 'cliffStep', read.number('stamp', 0, 0, 16));
-  if (stamp) {
-    const frame = createSiteFrame(stamp.lipX - context.anchor.x, stamp.lipZ - context.anchor.z, stamp.dirX, stamp.dirZ);
-    return {
-      frame,
-      bottomY: stamp.bottomY - context.anchor.y,
-      heightAt: (along, across) => context.ground(frame.x(along, across), frame.z(along, across)),
-    };
-  }
-  const heading = frameFromHeading(context.heading);
-  const frame = createSiteFrame(0, 0, heading.forwardX, heading.forwardZ);
-  const drop = read.number('drop', MONASTERY_DEFAULTS.drop, 40, 300);
-  const width = read.number('width', MONASTERY_DEFAULTS.width, 80, 800);
-  const groundY = context.ground(0, 0);
-  const depth = 160;
-  context.body.setPaint(BASALT).box(frame.x(-depth / 2, 0), groundY + drop / 2 - 3, frame.z(-depth / 2, 0), width, drop + 6, depth, frame.yaw);
-  context.out.colliders.push(localBox('cliff', frame.x(-depth / 2, 0), groundY + drop / 2 - 3, frame.z(-depth / 2, 0), width, drop + 6, depth, frame.yaw, { surface: 'stone', landable: true }));
-  const top = groundY + drop + 3;
-  return {
-    frame,
-    bottomY: groundY,
-    heightAt: (along, across) => (along <= 0 && along >= -depth && Math.abs(across) <= width / 2 ? top : context.ground(frame.x(along, across), frame.z(along, across))),
-  };
 }
 
 /**

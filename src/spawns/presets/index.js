@@ -36,6 +36,7 @@ import jetStream from './jetStream.js';
 import stormChase from './stormChase.js';
 // Batch 6: presets 51-60.
 import cliffsideMonastery from './cliffsideMonastery.js';
+import seaCliffCastle from './seaCliffCastle.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -73,6 +74,7 @@ export const PRESETS = Object.freeze([
   stormChase,
   // Batch 6: presets 51-60.
   cliffsideMonastery,
+  seaCliffCastle,
 ]);
 
 /** Presets by id. */

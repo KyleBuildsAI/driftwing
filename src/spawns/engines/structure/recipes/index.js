@@ -11,6 +11,7 @@ import { WIND_FARM_DEFAULTS, buildWindFarm } from './windFarm.js';
 import { CHALLENGE_GATES_DEFAULTS, buildChallengeGates } from './challengeGates.js';
 // Presets 51-60.
 import { MONASTERY_DEFAULTS, buildMonastery } from './monastery.js';
+import { CASTLE_RUIN_DEFAULTS, buildCastleRuin } from './castleRuin.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -27,6 +28,7 @@ export const RECIPES = Object.freeze({
   challengeGates: Object.freeze({ build: buildChallengeGates, defaults: CHALLENGE_GATES_DEFAULTS, audioIntensity: 'approach' }),
   // Presets 51-60.
   monastery: Object.freeze({ build: buildMonastery, defaults: MONASTERY_DEFAULTS, audioIntensity: 'wind' }),
+  castleRuin: Object.freeze({ build: buildCastleRuin, defaults: CASTLE_RUIN_DEFAULTS, audioIntensity: 'constant' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

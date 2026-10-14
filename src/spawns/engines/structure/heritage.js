@@ -5,7 +5,8 @@
 // the builder's transform when it is done.
 import { paint, shade } from './meshBuilder.js';
 import { PALETTE } from './palette.js';
-import { pick } from './common.js';
+import { findStamp, frameFromHeading, pick } from './common.js';
+import { localBox } from './colliders.js';
 
 /** Colours the heritage recipes share (linear RGBA; alpha is the emissive gain). */
 export const HERITAGE = Object.freeze({
@@ -44,6 +45,43 @@ export function createSiteFrame(originX, originZ, dirX, dirZ) {
     x: (along, across) => originX + dirX * along - dirZ * across,
     z: (along, across) => originZ + dirZ * along + dirX * across,
   });
+}
+
+const BASALT = paint(0x3e3a37);
+
+/**
+ * The cliff frame of a recipe that stands on a cliffStep stamp (the monastery, the castle ruin, the
+ * dam): the site frame on the stamp's lip (along downstream, toward the drop), the cliff foot and the
+ * ground under any site-frame point. Without the stamp (a debug spawn) the recipe raises its own basalt
+ * cliff `drop` metres high and `width` wide across the heading (solid and landable), and heights come
+ * from that wall.
+ */
+export function cliffSiteFrame(context, stampIndex, drop, width) {
+  const stamp = findStamp(context.site, 'cliffStep', stampIndex);
+  if (stamp) {
+    const frame = createSiteFrame(stamp.lipX - context.anchor.x, stamp.lipZ - context.anchor.z, stamp.dirX, stamp.dirZ);
+    return {
+      frame,
+      stamp,
+      bottomY: stamp.bottomY - context.anchor.y,
+      heightAt: (along, across) => context.ground(frame.x(along, across), frame.z(along, across)),
+    };
+  }
+  const heading = frameFromHeading(context.heading);
+  const frame = createSiteFrame(0, 0, heading.forwardX, heading.forwardZ);
+  const groundY = context.ground(0, 0);
+  const depth = 160;
+  const centreX = frame.x(-depth / 2, 0);
+  const centreZ = frame.z(-depth / 2, 0);
+  context.body.setPaint(BASALT).box(centreX, groundY + drop / 2 - 3, centreZ, width, drop + 6, depth, frame.yaw);
+  context.out.colliders.push(localBox('cliff', centreX, groundY + drop / 2 - 3, centreZ, width, drop + 6, depth, frame.yaw, { surface: 'stone', landable: true }));
+  const top = groundY + drop + 3;
+  return {
+    frame,
+    stamp: null,
+    bottomY: groundY,
+    heightAt: (along, across) => (along <= 0 && along >= -depth && Math.abs(across) <= width / 2 ? top : context.ground(frame.x(along, across), frame.z(along, across))),
+  };
 }
 
 /**

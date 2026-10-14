@@ -1089,7 +1089,8 @@ presets (92-100) use the wave 2 combo scheduling.
   emissive decal channel (vertex alpha; the Phase 2 decals paint 0). The celestial engine's
   `skyTarget(out)` (a live comet, else a meteor radiant). Shared props in
   `src/spawns/engines/structure/heritage.js`.
-- **Presets:** 53 cliffside monastery (recipe `monastery` on a `cliffStep` stamp, audio `bells`).
+- **Presets:** 53 cliffside monastery (recipe `monastery` on a `cliffStep` stamp, audio `bells`); 54
+  sea-cliff castle ruin (recipe `castleRuin` on a coastal `cliffStep`, the surf as a low `waterfall`).
 - **Lab:** `node --expose-gc tools/lab/presets-51-60.mjs`.
 - **Next:** the remaining nine presets, the scenario file, the step file, the docs and the test runs.
 
