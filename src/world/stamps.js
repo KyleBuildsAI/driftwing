@@ -31,15 +31,26 @@
 //               rimWidth (outer flank), floor (flat floor share of the radius, 0..0.8)  paint 'ash'
 //   terraces    length (downhill), width, steps (shelf count), lip (pool rim height), falloff
 //                                                                                 paint 'travertine'
+//   atoll       radius (to the reef rim's crest line), width (the rim), islets (motu count),
+//               isletHeight (above the sea), lagoonDepth, reefDepth (the crest between the islets,
+//               below the sea), falloff (the seaward slope)                       paint 'sand'
+//   reef        radius (the reef flat), depth (its crest below the sea), pocket (the sand hollow's
+//               depth below the sea), pocketRadius, heads (coral head count), falloff  paint 'coral'
+//   seaStacks   count (stacks), radius, height (above the sea), spread (the field, seaward of the
+//               site), arches (rock arch count), span (between an arch's legs), archHeight
+//                                                                                 paint 'wetRock'
+//   estuary     length (from the mouth inland), mouthWidth, headWidth, depth (below the sea at the
+//               mouth), bank (levee height above the sea), bankWidth, falloff      paint 'mud'
 // The basin, crater and terraces hold water: a preset's `waters` list (waters.js) fills them, and
 // their resolved records carry the reference heights the water levels are measured from (floorY,
-// rimY; the terraces' shelves).
+// rimY; the terraces' shelves). The atoll and the reef sit in the sea and publish their clear water
+// (`shallows`: x, z, radius, fade, surfRadius, surfWidth) for the waterEffect engine's shallows.
 
-export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces']);
-export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed', 'salt', 'sand', 'travertine', 'mud', 'ice']);
+export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces', 'atoll', 'reef', 'seaStacks', 'estuary']);
+export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed', 'salt', 'sand', 'travertine', 'mud', 'ice', 'coral']);
 
-const KIND = Object.freeze({ cone: 0, carve: 1, cliffStep: 2, gorge: 3, flatten: 4, islandBase: 5, basin: 6, crater: 7, terraces: 8 });
-const PAINT_INDEX = Object.freeze({ ash: 0, basalt: 1, wetRock: 2, tarmac: 3, riverbed: 4, salt: 5, sand: 6, travertine: 7, mud: 8, ice: 9 });
+const KIND = Object.freeze({ cone: 0, carve: 1, cliffStep: 2, gorge: 3, flatten: 4, islandBase: 5, basin: 6, crater: 7, terraces: 8, atoll: 9, reef: 10, seaStacks: 11, estuary: 12 });
+const PAINT_INDEX = Object.freeze({ ash: 0, basalt: 1, wetRock: 2, tarmac: 3, riverbed: 4, salt: 5, sand: 6, travertine: 7, mud: 8, ice: 9, coral: 10 });
 const TAU = Math.PI * 2;
 /** A canyon may cut at most this many depths below the ground on its path, and lift it at most this many. */
 const MAX_CANYON_CUT = 3;
@@ -69,6 +80,21 @@ const LIP_AMPLITUDE = 7.5;
 const GORGE_WOBBLE = 6;
 /** The canyon's segment grid: cells of this size (m) list, as a bit mask, the segments near them. */
 const CARVE_GRID = 64;
+/** An atoll's rim swings between 1 - ATOLL_LOBE_MAX and 1 + ATOLL_LOBE_MAX of its radius (3 and 5 lobes). */
+const ATOLL_LOBE_MAX = 0.05;
+/** An atoll fits only where the sea under it is at least this deep (m below sea level) everywhere sampled. */
+const ATOLL_MIN_DEPTH = 3;
+/** A sea stack's wave-cut shelf reaches this many stack radii out, just under the sea. */
+const STACK_SHELF = 1.9;
+/** The shelf's top (m below sea level) and the cliff band (m) between a stack's top and its shelf. */
+const STACK_SHELF_DEPTH = 0.6;
+const STACK_CLIFF = 5;
+/** Sea stacks stand apart by at least this much (m) beyond their radii. */
+const STACK_GAP = 24;
+/** The estuary's mouth lies this share of its length seaward of the site, its head the rest inland. */
+const ESTUARY_MOUTH_SHARE = 0.12;
+/** An estuary fits only where the land along its channel stays under this height (m above the sea). */
+const ESTUARY_MAX_LAND = 45;
 /** Per-segment scratch of the canyon's two passes (segments are validated to at most 32). */
 const carveCutFloor = new Float64Array(32);
 const carveCutShare = new Float64Array(32);
@@ -84,6 +110,10 @@ const DEFAULTS = Object.freeze({
   basin: Object.freeze({ radius: [180, 320], depth: [14, 24], rim: [30, 50], falloff: [80, 130], paint: 'sand' }),
   crater: Object.freeze({ radius: [320, 520], depth: [60, 110], rimHeight: [25, 45], rimWidth: [180, 300], floor: [0.25, 0.45], paint: 'ash' }),
   terraces: Object.freeze({ length: [320, 520], width: [140, 240], steps: [5, 8], lip: [1.2, 2.4], falloff: [60, 110], paint: 'travertine' }),
+  atoll: Object.freeze({ radius: [700, 1050], width: [110, 170], islets: [5, 8], isletHeight: [2.2, 4.2], lagoonDepth: [5, 8], reefDepth: [0.5, 1.1], falloff: [260, 380], paint: 'sand' }),
+  reef: Object.freeze({ radius: [190, 280], depth: [1.6, 2.8], pocket: [7, 10], pocketRadius: [55, 80], heads: [10, 18], falloff: [130, 200], paint: 'coral' }),
+  seaStacks: Object.freeze({ count: [4, 6], radius: [11, 20], height: [38, 70], spread: [260, 400], arches: [1, 2], span: [42, 64], archHeight: [28, 42], paint: 'wetRock' }),
+  estuary: Object.freeze({ length: [2200, 3000], mouthWidth: [320, 460], headWidth: [50, 80], depth: [3.5, 5.5], bank: [5, 8], bankWidth: [40, 70], falloff: [120, 180], paint: 'mud' }),
 });
 
 /** Every size field per type, validated as a positive number or an ascending [min, max] range. */
@@ -97,6 +127,10 @@ const SIZE_FIELDS = Object.freeze({
   basin: ['radius', 'depth', 'rim', 'falloff'],
   crater: ['radius', 'depth', 'rimHeight', 'rimWidth', 'floor'],
   terraces: ['length', 'width', 'steps', 'lip', 'falloff'],
+  atoll: ['radius', 'width', 'islets', 'isletHeight', 'lagoonDepth', 'reefDepth', 'falloff'],
+  reef: ['radius', 'depth', 'pocket', 'pocketRadius', 'heads', 'falloff'],
+  seaStacks: ['count', 'radius', 'height', 'spread', 'arches', 'span', 'archHeight'],
+  estuary: ['length', 'mouthWidth', 'headWidth', 'depth', 'bank', 'bankWidth', 'falloff'],
 });
 
 function clamp01(value) { return value < 0 ? 0 : value > 1 ? 1 : value; }
@@ -210,6 +244,22 @@ export function validateStampSpec(spec, where) {
   if (spec.type === 'crater' && maxOf(full.floor) > 0.8) throw new Error(`${where}.floor: must stay at or under 0.8 of the radius`);
   if (spec.type === 'terraces' && !(minOf(full.steps) >= 2 && maxOf(full.steps) <= 16)) throw new Error(`${where}.steps: must be from 2 to 16 shelves`);
   if (spec.type === 'basin' && minOf(full.depth) <= 0) throw new Error(`${where}.depth: must be above 0`);
+  if (spec.type === 'atoll') {
+    if (maxOf(full.width) > minOf(full.radius) * 0.5) throw new Error(`${where}.width: must stay at or under half the radius`);
+    if (!(minOf(full.islets) >= 1 && maxOf(full.islets) <= 12)) throw new Error(`${where}.islets: must be from 1 to 12 islets`);
+    if (minOf(full.lagoonDepth) <= maxOf(full.reefDepth)) throw new Error(`${where}.lagoonDepth: must be deeper than the reefDepth`);
+  }
+  if (spec.type === 'reef') {
+    if (maxOf(full.pocketRadius) > minOf(full.radius) * 0.6) throw new Error(`${where}.pocketRadius: must stay at or under 60 % of the radius`);
+    if (minOf(full.pocket) <= maxOf(full.depth)) throw new Error(`${where}.pocket: must be deeper than the reef's depth`);
+    if (maxOf(full.heads) > 30) throw new Error(`${where}.heads: must be at most 30 coral heads`);
+  }
+  if (spec.type === 'seaStacks') {
+    if (!(minOf(full.count) >= 1 && maxOf(full.count) <= 10)) throw new Error(`${where}.count: must be from 1 to 10 stacks`);
+    if (maxOf(full.arches) > 3) throw new Error(`${where}.arches: must be at most 3 arches`);
+    if (maxOf(full.archHeight) >= minOf(full.height) * 1.5) throw new Error(`${where}.archHeight: must stay under 1.5 x the stack height`);
+  }
+  if (spec.type === 'estuary' && maxOf(full.headWidth) >= minOf(full.mouthWidth)) throw new Error(`${where}.headWidth: must be narrower than the mouthWidth`);
 }
 
 /**
@@ -244,6 +294,18 @@ export function stampReach(spec) {
       break;
     case 'terraces':
       extent = Math.hypot(maxOf(full.length) / 2 + maxOf(full.falloff), maxOf(full.width) / 2 + maxOf(full.falloff));
+      break;
+    case 'atoll':
+      extent = (maxOf(full.radius) + maxOf(full.width) / 2 + maxOf(full.falloff)) * (1 + ATOLL_LOBE_MAX);
+      break;
+    case 'reef':
+      extent = maxOf(full.radius) * 1.1 + maxOf(full.falloff);
+      break;
+    case 'seaStacks':
+      extent = Math.hypot(maxOf(full.spread), maxOf(full.spread) * 0.7) + maxOf(full.span) / 2 + maxOf(full.radius) * STACK_SHELF * 1.2;
+      break;
+    case 'estuary':
+      extent = Math.hypot(maxOf(full.length) * (1 - ESTUARY_MOUTH_SHARE) + maxOf(full.headWidth) / 2 + maxOf(full.bankWidth) + maxOf(full.falloff), maxOf(full.mouthWidth) / 2 + maxOf(full.bankWidth) + maxOf(full.falloff));
       break;
     default:
       extent = (maxOf(full.radius) + maxOf(full.falloff)) * (1 + ISLAND_LOBE_MAX);
@@ -704,6 +766,269 @@ function resolveTerraces(stamp, spec, random, context) {
   ];
 }
 
+/** The atoll rim's outline scale in the direction (cosAngle, sinAngle) = (dx, dz) / distance (3 and 5 lobes). */
+function atollLobe(stamp, cosAngle, sinAngle) {
+  return 1 + ATOLL_LOBE_MAX * (0.6 * angularWave(cosAngle, sinAngle, 3, stamp.lobeCosA, stamp.lobeSinA) + 0.4 * angularWave(cosAngle, sinAngle, 5, stamp.lobeCosB, stamp.lobeSinB));
+}
+
+/**
+ * Coral atoll: a ring reef rising from the deep sea around a shallow lagoon. The rim's crest lies just
+ * under the sea between `islets` motu (sand islets standing isletHeight above it), the lagoon floor
+ * lagoonDepth under the sea inside, and the seaward slope falls back to the ocean floor over the
+ * falloff. It fits only in open sea at least ATOLL_MIN_DEPTH deep (it never cuts an island away).
+ */
+function resolveAtoll(stamp, spec, random, context) {
+  const radius = roll(spec.radius, random);
+  const halfWidth = roll(spec.width, random) / 2;
+  const isletCount = Math.max(1, Math.round(roll(spec.islets, random)));
+  const lagoonDepth = roll(spec.lagoonDepth, random);
+  const reefDepth = roll(spec.reefDepth, random);
+  const falloff = roll(spec.falloff, random);
+  const lobePhaseA = random() * TAU;
+  const lobePhaseB = random() * TAU;
+  stamp.lobeCosA = Math.cos(lobePhaseA);
+  stamp.lobeSinA = Math.sin(lobePhaseA);
+  stamp.lobeCosB = Math.cos(lobePhaseB);
+  stamp.lobeSinB = Math.sin(lobePhaseB);
+  stamp.radius = radius;
+  stamp.halfWidth = halfWidth;
+  stamp.falloff = falloff;
+  stamp.crestY = context.waterLevel - reefDepth;
+  stamp.lagoonY = context.waterLevel - lagoonDepth;
+  stamp.lagoonSlope = Math.min(140, radius * 0.16);
+  // The motu: unit directions, the cosine of each islet's angular half width, its lift above the crest.
+  const isletX = new Float64Array(isletCount);
+  const isletZ = new Float64Array(isletCount);
+  const isletCosHalf = new Float64Array(isletCount);
+  const isletLift = new Float64Array(isletCount);
+  const base = random() * TAU;
+  const islets = [];
+  for (let index = 0; index < isletCount; index++) {
+    const angle = base + (TAU * index) / isletCount + (random() - 0.5) * (TAU / isletCount) * 0.45;
+    isletX[index] = Math.sin(angle);
+    isletZ[index] = -Math.cos(angle);
+    isletCosHalf[index] = Math.cos((Math.PI / isletCount) * (0.3 + 0.35 * random()));
+    const topY = context.waterLevel + roll(spec.isletHeight, random);
+    isletLift[index] = topY - stamp.crestY;
+    const lobe = atollLobe(stamp, isletX[index], isletZ[index]);
+    islets.push(Object.freeze({ x: stamp.x + isletX[index] * radius * lobe, z: stamp.z + isletZ[index] * radius * lobe, topY }));
+  }
+  stamp.data = { isletCount, isletX, isletZ, isletCosHalf, isletLift };
+  stamp.islets = islets;
+  let deepest = context.baseHeight(stamp.x, stamp.z);
+  for (let index = 0; index < 16; index++) {
+    const angle = (index / 16) * TAU;
+    for (const reach of [radius * 0.5, radius, radius + halfWidth]) {
+      const height = context.baseHeight(stamp.x + Math.sin(angle) * reach, stamp.z - Math.cos(angle) * reach);
+      if (height > deepest) deepest = height;
+    }
+  }
+  stamp.fits = deepest <= context.waterLevel - ATOLL_MIN_DEPTH;
+  stamp.outerRadius = (radius + halfWidth + falloff) * (1 + ATOLL_LOBE_MAX);
+  circleBounds(stamp, stamp.outerRadius);
+  stamp.shallows = Object.freeze({
+    x: stamp.x, z: stamp.z, radius: radius + halfWidth * 0.6, fade: stamp.lagoonSlope + 60, surfRadius: radius + halfWidth * 0.95, surfWidth: 16,
+  });
+  stamp.keyPoints = [
+    { x: stamp.x, z: stamp.z },
+    { x: islets[0].x, z: islets[0].z },
+    { x: stamp.x + stamp.dirX * radius * 0.5, z: stamp.z + stamp.dirZ * radius * 0.5 },
+  ];
+}
+
+/**
+ * Coral reef: a reef flat whose crest lies `depth` under the sea, studded with coral heads that stay
+ * at least half a metre under the surface, around a sand hollow `pocket` deep (where a wreck lies),
+ * its edge sloping back to the sea floor over the falloff.
+ */
+function resolveReef(stamp, spec, random, context) {
+  const radius = roll(spec.radius, random);
+  const depth = roll(spec.depth, random);
+  const pocket = roll(spec.pocket, random);
+  const pocketRadius = roll(spec.pocketRadius, random);
+  const headCount = Math.round(roll(spec.heads, random));
+  const falloff = roll(spec.falloff, random);
+  stamp.radius = radius;
+  stamp.falloff = falloff;
+  stamp.crestY = context.waterLevel - depth;
+  stamp.pocketY = context.waterLevel - pocket;
+  stamp.pocketRadius = pocketRadius;
+  const edgePhase = random() * TAU;
+  stamp.edgeCos = Math.cos(edgePhase);
+  stamp.edgeSin = Math.sin(edgePhase);
+  const headX = new Float64Array(headCount);
+  const headZ = new Float64Array(headCount);
+  const headRadius = new Float64Array(headCount);
+  const headLift = new Float64Array(headCount);
+  for (let index = 0; index < headCount; index++) {
+    const angle = random() * TAU;
+    const reach = pocketRadius * 1.3 + (radius * 0.75 - pocketRadius * 1.3) * Math.sqrt(random());
+    headX[index] = stamp.x + Math.sin(angle) * reach;
+    headZ[index] = stamp.z - Math.cos(angle) * reach;
+    headRadius[index] = 7 + 11 * random();
+    headLift[index] = (depth - 0.5) * (0.45 + 0.55 * random());
+  }
+  stamp.data = { headCount, headX, headZ, headRadius, headLift };
+  stamp.fits = context.baseHeight(stamp.x, stamp.z) <= stamp.pocketY + 2;
+  stamp.outerRadius = radius * 1.1 + falloff;
+  circleBounds(stamp, stamp.outerRadius);
+  stamp.shallows = Object.freeze({ x: stamp.x, z: stamp.z, radius: radius + falloff * 0.35, fade: falloff * 0.6, surfRadius: radius * 0.95, surfWidth: 12 });
+  stamp.keyPoints = [
+    { x: stamp.x, z: stamp.z },
+    { x: stamp.x + stamp.dirX * radius * 0.6, z: stamp.z + stamp.dirZ * radius * 0.6 },
+    { x: stamp.x - stamp.dirZ * (radius + falloff * 0.5), z: stamp.z + stamp.dirX * (radius + falloff * 0.5) },
+  ];
+}
+
+/**
+ * Sea stacks: `count` rock columns standing out of the sea seaward of the site (its forward axis, which
+ * an align 'downhill' preset points out to sea), each on a wave-cut shelf just under the surface, plus
+ * the legs of `arches` rock arches (pairs of columns `span` apart whose lintel a structure recipe
+ * builds). Every column stands in water at least 1.5 m deep; the stamp fits when at least two stacks
+ * and every requested arch found room.
+ */
+function resolveSeaStacks(stamp, spec, random, context) {
+  const count = Math.round(roll(spec.count, random));
+  const spread = roll(spec.spread, random);
+  const archCount = Math.round(roll(spec.arches, random));
+  const rightX = -stamp.dirZ;
+  const rightZ = stamp.dirX;
+  const columns = [];
+  const stacks = [];
+  const arches = [];
+  const roomFor = (x, z, radius) => columns.every((column) => Math.hypot(column.x - x, column.z - z) > column.radius + radius + STACK_GAP);
+  const inWater = (x, z) => context.baseHeight(x, z) < context.waterLevel - 1.5;
+  for (let attempt = 0; attempt < 80 && arches.length < archCount; attempt++) {
+    const along = spread * (0.3 + 0.6 * random());
+    const across = (random() * 2 - 1) * spread * 0.6;
+    const x = stamp.x + stamp.dirX * along + rightX * across;
+    const z = stamp.z + stamp.dirZ * along + rightZ * across;
+    const heading = stamp.rotation + Math.PI / 2 + (random() - 0.5) * 1.1;
+    const spanX = Math.sin(heading);
+    const spanZ = -Math.cos(heading);
+    const span = roll(spec.span, random);
+    const legRadius = roll(spec.radius, random) * 0.85;
+    const topY = context.waterLevel + roll(spec.archHeight, random);
+    const legA = { x: x - spanX * span / 2, z: z - spanZ * span / 2 };
+    const legB = { x: x + spanX * span / 2, z: z + spanZ * span / 2 };
+    if (!inWater(legA.x, legA.z) || !inWater(legB.x, legB.z) || !inWater(x, z)) continue;
+    if (!roomFor(legA.x, legA.z, legRadius) || !roomFor(legB.x, legB.z, legRadius)) continue;
+    // The legs stand to just under the lintel; the recipe's rock lintel sits on them.
+    for (const leg of [legA, legB]) columns.push({ x: leg.x, z: leg.z, radius: legRadius, topY: topY - 5, arch: true });
+    arches.push(Object.freeze({ x, z, heading, spanX, spanZ, span, legRadius, topY, legs: Object.freeze([Object.freeze(legA), Object.freeze(legB)]) }));
+  }
+  for (let attempt = 0; attempt < 120 && stacks.length < count; attempt++) {
+    const along = spread * (0.15 + 0.85 * random());
+    const across = (random() * 2 - 1) * spread * 0.7;
+    const x = stamp.x + stamp.dirX * along + rightX * across;
+    const z = stamp.z + stamp.dirZ * along + rightZ * across;
+    const radius = roll(spec.radius, random);
+    if (!inWater(x, z) || !roomFor(x, z, radius)) continue;
+    const topY = context.waterLevel + roll(spec.height, random);
+    columns.push({ x, z, radius, topY, arch: false });
+    stacks.push(Object.freeze({ x, z, radius, topY }));
+  }
+  stamp.fits = stacks.length >= 2 && arches.length >= Math.min(archCount, 1);
+  const columnCount = columns.length;
+  const columnX = new Float64Array(columnCount);
+  const columnZ = new Float64Array(columnCount);
+  const columnRadius = new Float64Array(columnCount);
+  const columnTop = new Float64Array(columnCount);
+  const columnCos = new Float64Array(columnCount);
+  const columnSin = new Float64Array(columnCount);
+  let minX = stamp.x;
+  let maxX = stamp.x;
+  let minZ = stamp.z;
+  let maxZ = stamp.z;
+  columns.forEach((column, index) => {
+    columnX[index] = column.x;
+    columnZ[index] = column.z;
+    columnRadius[index] = column.radius;
+    columnTop[index] = column.topY;
+    const phase = random() * TAU;
+    columnCos[index] = Math.cos(phase);
+    columnSin[index] = Math.sin(phase);
+    const reach = column.radius * STACK_SHELF * 1.2;
+    minX = Math.min(minX, column.x - reach);
+    maxX = Math.max(maxX, column.x + reach);
+    minZ = Math.min(minZ, column.z - reach);
+    maxZ = Math.max(maxZ, column.z + reach);
+  });
+  stamp.data = { columnCount, columnX, columnZ, columnRadius, columnTop, columnCos, columnSin };
+  stamp.minX = minX - 1;
+  stamp.maxX = maxX + 1;
+  stamp.minZ = minZ - 1;
+  stamp.maxZ = maxZ + 1;
+  stamp.shelfY = context.waterLevel - STACK_SHELF_DEPTH;
+  stamp.stacks = stacks;
+  stamp.arches = arches;
+  stamp.columns = columns.map((column) => Object.freeze({ x: column.x, z: column.z, reach: column.radius * STACK_SHELF * 1.2 }));
+  const first = stacks[0] ?? { x: stamp.x, z: stamp.z };
+  stamp.keyPoints = [{ x: stamp.x, z: stamp.z }, { x: first.x, z: first.z }, arches.length > 0 ? { x: arches[0].x, z: arches[0].z } : { x: first.x, z: first.z }];
+}
+
+/**
+ * Estuary: a straight channel carved below sea level from the coast inland, wide at its mouth (just
+ * seaward of the site) and narrowing to its head `length` metres inland, between mud levees `bank`
+ * metres above the sea that fall away to the land over the falloff. The forward axis points to sea
+ * (align 'downhill'); a tidal bore surges up it from the mouth (inlandX, inlandZ). It fits where the
+ * head lies on land, the mouth at the sea, and no land along the channel stands more than
+ * ESTUARY_MAX_LAND above the sea.
+ */
+function resolveEstuary(stamp, spec, random, context) {
+  const length = roll(spec.length, random);
+  const mouthHalfWidth = roll(spec.mouthWidth, random) / 2;
+  const headHalfWidth = roll(spec.headWidth, random) / 2;
+  const depth = roll(spec.depth, random);
+  const bank = roll(spec.bank, random);
+  const bankWidth = roll(spec.bankWidth, random);
+  const falloff = roll(spec.falloff, random);
+  const mouthAlong = length * ESTUARY_MOUTH_SHARE;
+  const headAlong = mouthAlong - length;
+  stamp.length = length;
+  stamp.channelLength = length;
+  stamp.mouthAlong = mouthAlong;
+  stamp.headAlong = headAlong;
+  stamp.mouthHalfWidth = mouthHalfWidth;
+  stamp.headHalfWidth = headHalfWidth;
+  stamp.bank = bank;
+  stamp.bankWidth = bankWidth;
+  stamp.falloff = falloff;
+  stamp.floorMouthY = context.waterLevel - depth;
+  stamp.floorHeadY = context.waterLevel - depth * 0.45;
+  stamp.flatY = context.waterLevel + 1.5;
+  stamp.mouthX = stamp.x + stamp.dirX * mouthAlong;
+  stamp.mouthZ = stamp.z + stamp.dirZ * mouthAlong;
+  stamp.headX = stamp.x + stamp.dirX * headAlong;
+  stamp.headZ = stamp.z + stamp.dirZ * headAlong;
+  stamp.inlandX = -stamp.dirX;
+  stamp.inlandZ = -stamp.dirZ;
+  let highest = -Infinity;
+  for (let index = 0; index <= 8; index++) {
+    const along = headAlong + (index / 8) * (length - mouthAlong);
+    const height = context.baseHeight(stamp.x + stamp.dirX * along, stamp.z + stamp.dirZ * along);
+    if (height > highest) highest = height;
+  }
+  stamp.fits = context.baseHeight(stamp.headX, stamp.headZ) > context.waterLevel + 1 && context.baseHeight(stamp.mouthX, stamp.mouthZ) < context.waterLevel + 1
+    && highest <= context.waterLevel + ESTUARY_MAX_LAND;
+  const halfAlong = length / 2 + headHalfWidth + bankWidth + falloff;
+  const halfAcross = mouthHalfWidth + bankWidth + falloff;
+  const centreAlong = (mouthAlong + headAlong) / 2;
+  const centreX = stamp.x + stamp.dirX * centreAlong;
+  const centreZ = stamp.z + stamp.dirZ * centreAlong;
+  const extentX = Math.abs(stamp.dirX) * halfAlong + Math.abs(stamp.dirZ) * halfAcross;
+  const extentZ = Math.abs(stamp.dirZ) * halfAlong + Math.abs(stamp.dirX) * halfAcross;
+  stamp.minX = centreX - extentX - 1;
+  stamp.maxX = centreX + extentX + 1;
+  stamp.minZ = centreZ - extentZ - 1;
+  stamp.maxZ = centreZ + extentZ + 1;
+  stamp.keyPoints = [
+    { x: stamp.mouthX, z: stamp.mouthZ },
+    { x: stamp.x + stamp.dirX * (headAlong + length * 0.5), z: stamp.z + stamp.dirZ * (headAlong + length * 0.5) },
+    { x: stamp.headX, z: stamp.headZ },
+  ];
+}
+
 const RESOLVERS = Object.freeze({
   cone: resolveCone,
   carve: resolveCarve,
@@ -714,6 +1039,10 @@ const RESOLVERS = Object.freeze({
   basin: resolveBasin,
   crater: resolveCrater,
   terraces: resolveTerraces,
+  atoll: resolveAtoll,
+  reef: resolveReef,
+  seaStacks: resolveSeaStacks,
+  estuary: resolveEstuary,
 });
 
 /**
@@ -729,7 +1058,11 @@ const RESOLVERS = Object.freeze({
  * (cone: baseY, peakY, rimY, craterFloorY; carve: path, entry, exit, length; cliffStep: topY,
  * bottomY, lipX/Z, poolX/Z; gorge: rimY, floorY, span, anchors; flatten: y, thresholds;
  * islandBase: topY; basin: rimY, floorY, radius; crater: rimY, floorY, radius; terraces: topY,
- * bottomY, shelves [{ index, crestY, floorY, along, x, z }]).
+ * bottomY, shelves [{ index, crestY, floorY, along, x, z }]; atoll: radius, halfWidth, crestY,
+ * lagoonY, islets [{ x, z, topY }], shallows; reef: radius, crestY, pocketY, pocketRadius, shallows;
+ * seaStacks: stacks [{ x, z, radius, topY }], arches [{ x, z, heading, spanX, spanZ, span, legRadius,
+ * topY, legs: [{ x, z }, { x, z }] }], columns [{ x, z, reach }]; estuary: mouthX/Z, headX/Z,
+ * inlandX/Z, channelLength, mouthHalfWidth, headHalfWidth, floorMouthY, floorHeadY).
  */
 export function resolveStamp(spec, site, index, random, context) {
   const full = withDefaults(spec);
@@ -766,6 +1099,10 @@ export function resolveStamp(spec, site, index, random, context) {
   if (stamp.anchors) stamp.anchors = Object.freeze(stamp.anchors);
   if (stamp.thresholds) stamp.thresholds = Object.freeze(stamp.thresholds);
   if (stamp.shelves) stamp.shelves = Object.freeze(stamp.shelves);
+  if (stamp.islets) stamp.islets = Object.freeze(stamp.islets);
+  if (stamp.stacks) stamp.stacks = Object.freeze(stamp.stacks);
+  if (stamp.arches) stamp.arches = Object.freeze(stamp.arches);
+  if (stamp.columns) stamp.columns = Object.freeze(stamp.columns);
   return Object.freeze(stamp);
 }
 
@@ -792,7 +1129,19 @@ function rectangleExtents(stamp) {
  */
 export function stampFootprintDistance(stamp, x, z) {
   if (stamp.kind === 0) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.radius);
-  if (stamp.kind === 5 || stamp.kind === 6) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.outerRadius);
+  if (stamp.kind === 5 || stamp.kind === 6 || stamp.kind === 9 || stamp.kind === 10) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.outerRadius);
+  if (stamp.kind === 11) {
+    let nearest = Infinity;
+    for (const column of stamp.columns) nearest = Math.min(nearest, Math.hypot(x - column.x, z - column.z) - column.reach);
+    return Math.max(0, nearest);
+  }
+  if (stamp.kind === 12) {
+    // The channel corridor from its head to past its mouth, as wide as the mouth with its levees.
+    const along = (x - stamp.x) * stamp.dirX + (z - stamp.z) * stamp.dirZ;
+    const clamped = along < stamp.headAlong ? stamp.headAlong : along > stamp.mouthAlong + stamp.falloff ? stamp.mouthAlong + stamp.falloff : along;
+    const distance = Math.hypot(x - (stamp.x + stamp.dirX * clamped), z - (stamp.z + stamp.dirZ * clamped));
+    return Math.max(0, distance - (stamp.mouthHalfWidth + stamp.bankWidth + stamp.falloff));
+  }
   if (stamp.kind === 7) return Math.max(0, Math.hypot(x - stamp.x, z - stamp.z) - stamp.radius - stamp.rimWidth);
   if (stamp.kind === 1) {
     const data = stamp.data;
@@ -820,7 +1169,22 @@ export function stampFootprintDistance(stamp, x, z) {
  */
 export function stampFootprintDiscs(stamp) {
   if (stamp.kind === 0) return [{ x: stamp.x, z: stamp.z, radius: stamp.radius }];
-  if (stamp.kind === 5 || stamp.kind === 6) return [{ x: stamp.x, z: stamp.z, radius: stamp.outerRadius }];
+  if (stamp.kind === 5 || stamp.kind === 6 || stamp.kind === 9 || stamp.kind === 10) return [{ x: stamp.x, z: stamp.z, radius: stamp.outerRadius }];
+  if (stamp.kind === 11) return stamp.columns.map((column) => ({ x: column.x, z: column.z, radius: column.reach }));
+  if (stamp.kind === 12) {
+    const halfAcross = stamp.mouthHalfWidth + stamp.bankWidth + stamp.falloff;
+    const start = stamp.headAlong;
+    const end = stamp.mouthAlong + stamp.falloff;
+    const count = Math.max(1, Math.ceil((end - start) / (2 * halfAcross)));
+    const spacing = (end - start) / count;
+    const radius = Math.hypot(spacing / 2, halfAcross);
+    const discs = [];
+    for (let index = 0; index < count; index++) {
+      const along = start + spacing * (index + 0.5);
+      discs.push({ x: stamp.x + stamp.dirX * along, z: stamp.z + stamp.dirZ * along, radius });
+    }
+    return discs;
+  }
   if (stamp.kind === 7) return [{ x: stamp.x, z: stamp.z, radius: stamp.radius + stamp.rimWidth }];
   if (stamp.kind === 1) {
     const data = stamp.data;
@@ -1245,6 +1609,143 @@ export function terraceShelfAt(stamp, x, z) {
 }
 
 /**
+ * The atoll's distance from its centre measured against its lobed rim (the actual distance divided by
+ * the outline's scale in that direction): `radius` is the rim's crest line in every direction.
+ */
+function atollReach(stamp, dx, dz, distance) {
+  if (distance <= 0) return 0;
+  return distance / atollLobe(stamp, dx / distance, dz / distance);
+}
+
+/** The lift (m) of the highest motu above the rim's crest in the direction (cosAngle, sinAngle). */
+function atollIsletLift(stamp, cosAngle, sinAngle) {
+  const data = stamp.data;
+  let lift = 0;
+  for (let index = 0; index < data.isletCount; index++) {
+    const cosine = cosAngle * data.isletX[index] + sinAngle * data.isletZ[index];
+    const half = data.isletCosHalf[index];
+    if (cosine <= half) continue;
+    const share = smoothstep(half, half + (1 - half) * 0.55, cosine) * data.isletLift[index];
+    if (share > lift) lift = share;
+  }
+  return lift;
+}
+
+function atollHeight(stamp, x, z, height) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const distanceSq = dx * dx + dz * dz;
+  if (distanceSq >= stamp.outerRadius * stamp.outerRadius) return height;
+  const distance = Math.sqrt(distanceSq);
+  const reach = atollReach(stamp, dx, dz, distance);
+  const inner = stamp.radius - stamp.halfWidth;
+  const outer = stamp.radius + stamp.halfWidth;
+  if (reach >= outer + stamp.falloff) return height;
+  if (reach < inner) {
+    // The lagoon: from the rim's inner edge down to its flat floor.
+    return stamp.lagoonY + (stamp.crestY - stamp.lagoonY) * smoothstep(inner - stamp.lagoonSlope, inner, reach);
+  }
+  if (reach <= outer) {
+    // The rim: its crest under the sea, a motu's flat-topped sand bank rising out of it.
+    const across = (reach - stamp.radius) / stamp.halfWidth;
+    const across2 = across * across;
+    const lift = distance > 0 ? atollIsletLift(stamp, dx / distance, dz / distance) : 0;
+    return stamp.crestY + lift * (1 - across2 * across2);
+  }
+  // The seaward slope, from the crest back down to the ocean floor.
+  return stamp.crestY + (height - stamp.crestY) * smoothstep(0, stamp.falloff, reach - outer);
+}
+
+function reefHeight(stamp, x, z, height) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const distanceSq = dx * dx + dz * dz;
+  if (distanceSq >= stamp.outerRadius * stamp.outerRadius) return height;
+  const distance = Math.sqrt(distanceSq);
+  // The reef's edge wanders (5 lobes, up to a tenth of its radius).
+  const edge = distance > 0 ? stamp.radius * (1 + 0.1 * angularWave(dx / distance, dz / distance, 5, stamp.edgeCos, stamp.edgeSin)) : stamp.radius;
+  if (distance >= edge + stamp.falloff) return height;
+  if (distance >= edge) return stamp.crestY + (height - stamp.crestY) * smoothstep(edge, edge + stamp.falloff, distance);
+  // The flat, the sand hollow in its middle and the coral heads on it (never nearer the surface than 0.5 m).
+  const flat = smoothstep(stamp.pocketRadius * 0.55, stamp.pocketRadius, distance);
+  let target = stamp.pocketY + (stamp.crestY - stamp.pocketY) * flat;
+  const data = stamp.data;
+  let heads = 0;
+  for (let index = 0; index < data.headCount; index++) {
+    const offsetX = x - data.headX[index];
+    const offsetZ = z - data.headZ[index];
+    const radius = data.headRadius[index];
+    const reachSq = offsetX * offsetX + offsetZ * offsetZ;
+    if (reachSq >= radius * radius) continue;
+    const share = 1 - reachSq / (radius * radius);
+    const lift = data.headLift[index] * share * share * (3 - 2 * share);
+    if (lift > heads) heads = lift;
+  }
+  target += heads * flat;
+  return target;
+}
+
+function seaStacksHeight(stamp, x, z, height) {
+  const data = stamp.data;
+  let result = height;
+  for (let index = 0; index < data.columnCount; index++) {
+    const dx = x - data.columnX[index];
+    const dz = z - data.columnZ[index];
+    const radius = data.columnRadius[index];
+    const shelf = radius * STACK_SHELF * 1.2;
+    const distanceSq = dx * dx + dz * dz;
+    if (distanceSq >= shelf * shelf) continue;
+    const distance = Math.sqrt(distanceSq);
+    // A wave-bitten outline (5 and 8 lobes), a cliff band, then the shelf just under the sea.
+    const edge = distance > 0
+      ? radius * (1 + 0.12 * angularWave(dx / distance, dz / distance, 5, data.columnCos[index], data.columnSin[index]) + 0.06 * angularWave(dx / distance, dz / distance, 8, data.columnSin[index], data.columnCos[index]))
+      : radius;
+    const shelfMask = 1 - smoothstep(radius * STACK_SHELF, shelf, distance);
+    const shelfY = height < stamp.shelfY ? height + (stamp.shelfY - height) * shelfMask : height;
+    const top = data.columnTop[index] - (distance / edge) * (distance / edge) * 2.5;
+    const cliff = 1 - smoothstep(edge, edge + STACK_CLIFF, distance);
+    const columnY = shelfY + (top - shelfY) * cliff;
+    const surface = columnY > shelfY ? columnY : shelfY;
+    if (surface > result) result = surface;
+  }
+  return result;
+}
+
+function estuaryHeight(stamp, x, z, height) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const along = dx * stamp.dirX + dz * stamp.dirZ;
+  if (along > stamp.mouthAlong + stamp.falloff || along < stamp.headAlong - stamp.headHalfWidth - stamp.bankWidth - stamp.falloff) return height;
+  const lateral = Math.abs(dx * -stamp.dirZ + dz * stamp.dirX);
+  const share = along <= stamp.headAlong ? 0 : along >= stamp.mouthAlong ? 1 : (along - stamp.headAlong) / stamp.length;
+  const halfWidth = stamp.headHalfWidth + (stamp.mouthHalfWidth - stamp.headHalfWidth) * share * share;
+  if (lateral >= halfWidth + stamp.bankWidth + stamp.falloff) return height;
+  // The head is rounded: beyond it the distance runs from the head's centre point.
+  const behind = stamp.headAlong - along;
+  const across = behind > 0 ? Math.sqrt(lateral * lateral + behind * behind) : lateral;
+  if (across >= halfWidth + stamp.bankWidth + stamp.falloff) return height;
+  const seaFade = 1 - smoothstep(stamp.mouthAlong, stamp.mouthAlong + stamp.falloff, along);
+  const bankY = stamp.flatY + (stamp.bank - 1.5) * (1 - 0.75 * share);
+  let target;
+  if (across < halfWidth) {
+    // The channel: a flat floor rising up its sides to the levee (or the higher ground beside it).
+    const floor = stamp.floorHeadY + (stamp.floorMouthY - stamp.floorHeadY) * share;
+    const edgeY = height > bankY ? height : bankY;
+    const side = smoothstep(0.55, 1, across / halfWidth);
+    target = floor + (edgeY - floor) * side * Math.sqrt(side);
+  } else if (across < halfWidth + stamp.bankWidth) {
+    // The levee: its crest at the channel's edge, falling to the mud flats (never lowering the land).
+    const leveeY = bankY - (bankY - stamp.flatY) * smoothstep(0.35, 1, (across - halfWidth) / stamp.bankWidth);
+    target = height > leveeY ? height : leveeY;
+  } else {
+    // The mud flats: low land lifted toward the flats' level, fading out over the falloff.
+    const mask = 1 - smoothstep(0, stamp.falloff, across - halfWidth - stamp.bankWidth);
+    target = height < stamp.flatY ? height + (stamp.flatY - height) * mask : height;
+  }
+  return height + (target - height) * seaFade;
+}
+
+/**
  * The height after one resolved stamp at (x, z), given the height before it. Exactly `height`
  * outside the stamp's bounds.
  */
@@ -1257,7 +1758,10 @@ export function applyStampHeight(stamp, x, z, height) {
  * worldgen's hot path keeps the kinds in a typed array and calls through this table, so each type's
  * function only ever sees stamps of one shape and its property reads stay monomorphic.
  */
-export const STAMP_HEIGHT = Object.freeze([coneHeight, carveHeight, cliffStepHeight, gorgeHeight, flattenHeight, islandBaseHeight, basinHeight, craterHeight, terracesHeight]);
+export const STAMP_HEIGHT = Object.freeze([
+  coneHeight, carveHeight, cliffStepHeight, gorgeHeight, flattenHeight, islandBaseHeight, basinHeight, craterHeight, terracesHeight,
+  atollHeight, reefHeight, seaStacksHeight, estuaryHeight,
+]);
 
 /** applyStampHeight with the stamp's kind passed in. */
 function stampHeightByKind(kind, stamp, x, z, height) {
@@ -1270,7 +1774,11 @@ function stampHeightByKind(kind, stamp, x, z, height) {
     case 5: return islandBaseHeight(stamp, x, z, height);
     case 6: return basinHeight(stamp, x, z, height);
     case 7: return craterHeight(stamp, x, z, height);
-    default: return terracesHeight(stamp, x, z, height);
+    case 8: return terracesHeight(stamp, x, z, height);
+    case 9: return atollHeight(stamp, x, z, height);
+    case 10: return reefHeight(stamp, x, z, height);
+    case 11: return seaStacksHeight(stamp, x, z, height);
+    default: return estuaryHeight(stamp, x, z, height);
   }
 }
 
@@ -1423,6 +1931,62 @@ function paintTerraces(stamp, x, z, out) {
   }
 }
 
+function paintAtoll(stamp, x, z, out) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const reach = atollReach(stamp, dx, dz, Math.hypot(dx, dz));
+  // White sand over the lagoon floor, the rim and the motu, thinning out down the seaward slope.
+  const outer = stamp.radius + stamp.halfWidth;
+  const weight = 1 - smoothstep(outer, outer + stamp.falloff * 0.35, reach);
+  if (weight > out.weight) {
+    out.weight = weight;
+    out.paintIndex = stamp.paintIndex;
+  }
+}
+
+function paintReef(stamp, x, z, out) {
+  const distance = Math.hypot(x - stamp.x, z - stamp.z);
+  // Coral on the flat; the sand hollow in its middle keeps the paint the stamp does not set.
+  const coral = smoothstep(stamp.pocketRadius * 0.7, stamp.pocketRadius * 1.05, distance) * (1 - smoothstep(stamp.radius * 0.95, stamp.radius + stamp.falloff * 0.4, distance));
+  const sand = 1 - smoothstep(stamp.pocketRadius * 0.6, stamp.pocketRadius * 0.95, distance);
+  if (coral >= sand) {
+    if (coral > out.weight) { out.weight = coral; out.paintIndex = stamp.paintIndex; }
+  } else if (sand > out.weight) {
+    out.weight = sand;
+    out.paintIndex = PAINT_INDEX.sand;
+  }
+}
+
+function paintSeaStacks(stamp, x, z, out) {
+  const data = stamp.data;
+  for (let index = 0; index < data.columnCount; index++) {
+    const distance = Math.hypot(x - data.columnX[index], z - data.columnZ[index]);
+    const radius = data.columnRadius[index];
+    const weight = 1 - smoothstep(radius * 1.25, radius * STACK_SHELF, distance);
+    if (weight > out.weight) {
+      out.weight = weight;
+      out.paintIndex = stamp.paintIndex;
+    }
+  }
+}
+
+function paintEstuary(stamp, x, z, out) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const along = dx * stamp.dirX + dz * stamp.dirZ;
+  const lateral = Math.abs(dx * -stamp.dirZ + dz * stamp.dirX);
+  const share = along <= stamp.headAlong ? 0 : along >= stamp.mouthAlong ? 1 : (along - stamp.headAlong) / stamp.length;
+  const halfWidth = stamp.headHalfWidth + (stamp.mouthHalfWidth - stamp.headHalfWidth) * share * share;
+  const behind = stamp.headAlong - along;
+  const across = behind > 0 ? Math.sqrt(lateral * lateral + behind * behind) : lateral;
+  // Mud in the channel and up the levees, fading at the sea.
+  const weight = (1 - smoothstep(halfWidth + stamp.bankWidth * 0.5, halfWidth + stamp.bankWidth * 1.1, across)) * (1 - smoothstep(stamp.mouthAlong, stamp.mouthAlong + stamp.falloff * 0.6, along));
+  if (weight > out.weight) {
+    out.weight = weight;
+    out.paintIndex = stamp.paintIndex;
+  }
+}
+
 /**
  * Raises out.weight / out.paintIndex to this stamp's paint at (x, z) when it is stronger there
  * (weights 0..1). Stamps without a paint leave `out` alone.
@@ -1443,6 +2007,10 @@ export function accumulateStampPaintByKind(kind, stamp, x, z, out) {
     case 5: paintIslandBase(stamp, x, z, out); return;
     case 6: paintBasin(stamp, x, z, out); return;
     case 7: paintCrater(stamp, x, z, out); return;
-    default: paintTerraces(stamp, x, z, out);
+    case 8: paintTerraces(stamp, x, z, out); return;
+    case 9: paintAtoll(stamp, x, z, out); return;
+    case 10: paintReef(stamp, x, z, out); return;
+    case 11: paintSeaStacks(stamp, x, z, out); return;
+    default: paintEstuary(stamp, x, z, out);
   }
 }
