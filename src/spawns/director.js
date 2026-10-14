@@ -1699,6 +1699,15 @@ export function createDirector({
     },
 
     /**
+     * Dev only: drops an override forced with forceSpawn, so its night follows its own roll again (a
+     * dev check gives the sky back after showing the midnight sun). Returns whether one was forced.
+     */
+    releaseOverride(presetId) {
+      if (!devHooks) throw new Error('director.releaseOverride is only available in development builds or with ?debug=1');
+      return overrides.release(presetId);
+    },
+
+    /**
      * Dev only: starts the active state of a live site spawn now (an erupting volcano), tracked like
      * the director's own: it ends after its seeded activeState duration, and a combo's siteActive
      * precondition sees it. Used by the F9 combo staging (the volcano under the aurora). Returns the
