@@ -4,7 +4,8 @@ The windModifier engine authors WindField sources and draws nothing: the air of 
 visual partners come from the other engines in the same preset. It covers the microburst, the
 lenticular wave lift and its rotor, the geyser updraft columns, the jet-stream ribbon, the sky-whale
 slipstream, the mega-waterfall downdraft curtains, supercell gust fronts and downdrafts and wind-farm
-wake turbulence, and in Phase 3 ridge bands, wind shear lines and thermal streets.
+wake turbulence, and in Phase 3 the sandstorm wall's and the snow squall's gust fronts, the hurricane's
+cyclone, ridge bands, wind shear lines and thermal streets.
 
 - Code: `src/spawns/engines/windModifierEngine.js`.
 - Sources: `src/spawns/engines/windSources.js` (shared with the vortex engine).
@@ -31,7 +32,7 @@ Each source is its type's params plus these source fields:
 
 | field | unit | range | default | notes |
 | --- | --- | --- | --- | --- |
-| `type` | | | | `updraft`, `downburst`, `wake`, `jetStream`, `slipstream`, `waveLift`, `gustFront`, `curtain` |
+| `type` | | | | `updraft`, `downburst`, `wake`, `jetStream`, `slipstream`, `waveLift`, `gustFront`, `curtain`, `cyclone` |
 | `direction` | `heading`, `ambient` or compass degrees | | `heading` | the source's facing. `heading`: the activation heading; with `drift` or `follow`, the direction of travel (once the anchor moves faster than 1 m/s). `ambient`: downwind of the prevailing wind, followed live. A number: a fixed compass direction |
 | `turn` | degrees | -360..360 | 0 | added to the direction |
 | `offset` | [along, side, up] m | | [0, 0, 0] | from the anchor: along the direction, to its right, and up (scaled) |
@@ -213,6 +214,40 @@ A waterfall's downdraft, or a rain curtain: sinking air in a sheet that spills o
 | `reach` | m | 10..20000 | 320 | how far the spill reaches from the sheet |
 | `turbulence`, `gust` | | | 0.5, 3 | |
 
+### cyclone: a hurricane
+
+A hurricane's air (preset 33): a calm eye, the eyewall's ring of the strongest wind, winds falling off
+outward to the outer radius, low-level inflow toward the wall, lift in the wall, gently sinking air in
+the eye, and spiral rain bands of gusty air. The eye and the wall flare outward with height, as the
+`ring` weather volume's stadium face does. Use it with `follow: 'weatherVolume'` on the preset's
+`ring` volume, so the eye rides the visible eye.
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `eyeRadius` | m | 100..30000 | 3600 | the calm eye at the base: about 0.1 x `maxTangential` and the eye's turbulence inside 85 % of it |
+| `wallRadius` | m | 200..40000 | 4800 | the radius of the strongest wind at the base; inside it the wind rises steeply from the eye's edge |
+| `wallWidth` | m | 50..10000 | 1400 | the eyewall band's width (its lift and turbulence fall as a Gaussian of it) |
+| `outerRadius` | m | 1000..150000 | 28000 | the wind and the bands fade out toward it |
+| `flare` | m | 0..20000 | 1600 | how far the eye and the wall widen at the top: `flare x (height / top)^1.6` |
+| `maxTangential` | m/s | 0..90 | 42 | the wall's wind, counterclockwise from above for `rotation: 1` |
+| `decay` | exponent | 0.2..1.5 | 0.6 | outside the wall the wind falls as `(wall / r)^decay` |
+| `inflow` | m/s | 0..40 | 8 | the inward low-level flow outside the wall |
+| `inflowTop` | m | 50..6000 | 1500 | the inflow layer's top |
+| `updraft` | m/s | 0..40 | 8 | the lift in the eyewall |
+| `subsidence` | m/s | 0..10 | 1 | the sinking air in the eye |
+| `top` | m | 200..20000 | 12000 | the storm's top (the wind fades over its upper fifth) |
+| `bands` | count | 0..8 | 4 | spiral rain bands of gusty air outside the wall |
+| `bandTurns` | turns | 0..4 | 1.1 | how far each band winds out to the outer radius (log-spiral in radius) |
+| `bandSpin` | rad/s | -0.2..0.2 | 0 | the band pattern's turn rate; match the `ring` volume's bands (0.4 x its `spin`) |
+| `turbulence` | 0..1 | | 0.95 | in the eyewall |
+| `bandTurbulence` | 0..1 | | 0.5 | in the bands |
+| `eyeTurbulence` | 0..1 | | 0.04 | in the eye |
+| `gust` | m/s | 0..30 | 9 | |
+| `rotation` | 1 or -1 | | 1 | 1 is counterclockwise from above (the northern hemisphere) |
+
+The bands are measured in the frame of the source's direction (`x` to its right, `z` along it), the
+`ring` volume's own frame: band k leaves the wall at angle 2 pi k / `bands`.
+
 ## LOD and the far tier
 
 The engine draws nothing, so the tiers only decide the wind. At FAR a source is removed when its
@@ -300,6 +335,13 @@ Wind-farm wake turbulence downwind of the turbines:
 
 ```js
 { engine: 'windModifier', params: { type: 'wake', direction: 'ambient', width: 1200, length: 6000, top: 250, deficit: 3, turbulence: 0.6 } }
+```
+
+The hurricane's cyclone, riding its `ring` weather volume (preset 33):
+
+```js
+{ engine: 'windModifier', params: { follow: 'weatherVolume', sources: [{ type: 'cyclone', eyeRadius: 3600, wallRadius: 4900, wallWidth: 1400,
+  outerRadius: 28000, flare: 1700, maxTangential: 42, bands: 4, bandTurns: 1.1, bandSpin: 0.0016, fadeIn: 40 }] } }
 ```
 
 Phase 3 ideas on the same types: a ridge band is an `updraft` with a wide `radius`, a low `top` and
