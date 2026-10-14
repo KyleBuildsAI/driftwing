@@ -12,6 +12,12 @@
 //                    camera, and every trail in the water glows (the craft, whales, spray)
 //   plungePool       a waterfall's plunge pool: a local water disc when the pool lies above the sea
 //                    (from the site's cliffStep stamp), churning foam, rising mist and ripples
+//   wave             a travelling wave (Phase 3): a straight crest with tapered ends crossing the
+//                    ocean (a rogue wave) or an expanding ring, with foam and spray along its crest;
+//                    on a site with an estuary stamp it surges up the channel from the mouth (a tidal
+//                    bore) and repeats; the water query lifts the surface with it, so craft ride it
+//   shallows         clear turquoise water over a lagoon or a reef (Phase 3), fitted to a site's atoll
+//                    or reef stamp, with an optional surf ring breaking along the reef crest
 //
 // Every param is documented with units and ranges in docs/engines/waterEffect.md. The engine creates
 // no GPU resources per instance: it borrows slots (vortex, glow region, pool) and droplets from the
@@ -27,7 +33,12 @@
 
 import { ownsPresetAudio } from './engineKit.js';
 
-const EFFECTS = Object.freeze(['whirlpool', 'splash', 'spray', 'bioluminescence', 'plungePool']);
+const EFFECTS = Object.freeze(['whirlpool', 'splash', 'spray', 'bioluminescence', 'plungePool', 'wave', 'shallows']);
+/** A wave's crest spray is emitted from at most this many points along the crest per frame. */
+const WAVE_SPRAY_POINTS = 6;
+/** A wave fades in over its first WAVE_FADE_IN metres of travel and out over its last WAVE_FADE_OUT. */
+const WAVE_FADE_IN = 220;
+const WAVE_FADE_OUT = 320;
 const TIER_SPRAY_SCALE = Object.freeze({ near: 1, mid: 0.35, far: 0 });
 /** Seconds between attempts to take a layer slot that was full. */
 const SLOT_RETRY_SECONDS = 1;
@@ -51,6 +62,11 @@ export const WATER_EFFECT_DEFAULTS = Object.freeze({
   }),
   bioluminescence: Object.freeze({ radius: 900, strength: 1, surf: 0.6, color: 0x1f9dff, flashRate: 12, flashRadius: 4.5 }),
   plungePool: Object.freeze({ radius: null, surfaceY: null, churn: 0.85, mistRate: 120, mistSize: 5.5, rippleInterval: 1.4, glow: 0 }),
+  wave: Object.freeze({
+    mode: 'front', height: 12, width: 45, lean: 0.45, crestLength: 700, taper: 250, speed: 16, travelHeading: 90, start: 1500,
+    travel: 3000, growth: 1, spreadLoss: 150, interval: null, spray: 300, sprayHeight: 9, foam: 0.85, estuary: false, glow: 0,
+  }),
+  shallows: Object.freeze({ radius: 500, fade: 150, color: 0x3fd8c9, clarity: 0.75, surf: 0, surfRadius: null, surfWidth: 16, stamp: null }),
 });
 
 function finiteOr(value, fallback) {
@@ -73,6 +89,13 @@ function resolveParams(params) {
   return merged;
 }
 
+/** The first resolved stamp of a type on a site, or null. */
+function siteStampOf(site, type) {
+  if (!site || !Array.isArray(site.stamps)) return null;
+  for (const stamp of site.stamps) if (stamp && stamp.type === type) return stamp;
+  return null;
+}
+
 /** The plunge pool of a site's cliffStep stamp, or null. */
 function cliffStepOf(site) {
   if (!site || !Array.isArray(site.stamps)) return null;
@@ -92,21 +115,29 @@ export function createWaterEffectEngine() {
     if (data.kind === 'whirlpool' && data.vortexSlot < 0) data.vortexSlot = water.acquireVortex();
     if (data.kind === 'bioluminescence' && data.regionSlot < 0) data.regionSlot = water.acquireGlowRegion();
     if (data.kind === 'plungePool' && data.poolOnDisc && data.poolSlot < 0) data.poolSlot = water.acquirePool();
+    if (data.kind === 'wave' && data.waveSlot < 0) data.waveSlot = water.acquireWave();
+    if (data.kind === 'shallows' && data.shallowsSlot < 0) data.shallowsSlot = water.acquireShallows();
   }
 
   function releaseSlots(data) {
     if (data.vortexSlot >= 0) water.releaseVortex(data.vortexSlot);
     if (data.regionSlot >= 0) water.releaseGlowRegion(data.regionSlot);
     if (data.poolSlot >= 0) water.releasePool(data.poolSlot);
+    if (data.waveSlot >= 0) water.releaseWave(data.waveSlot);
+    if (data.shallowsSlot >= 0) water.releaseShallows(data.shallowsSlot);
     data.vortexSlot = -1;
     data.regionSlot = -1;
     data.poolSlot = -1;
+    data.waveSlot = -1;
+    data.shallowsSlot = -1;
   }
 
   function wantsSlot(data) {
     return (data.kind === 'whirlpool' && data.vortexSlot < 0)
       || (data.kind === 'bioluminescence' && data.regionSlot < 0)
-      || (data.kind === 'plungePool' && data.poolOnDisc && data.poolSlot < 0);
+      || (data.kind === 'plungePool' && data.poolOnDisc && data.poolSlot < 0)
+      || (data.kind === 'wave' && data.waveSlot < 0)
+      || (data.kind === 'shallows' && data.shallowsSlot < 0);
   }
 
   /** Emits data.rate * dt droplets of spray (carrying the fraction to the next frame). */
@@ -303,13 +334,235 @@ export function createWaterEffectEngine() {
     }
   }
 
+  /** The interval before a repeating wave's next run (s), drawn from the instance's random table. */
+  function nextWaveInterval(data) {
+    const interval = data.params.interval;
+    if (Array.isArray(interval)) {
+      drawNoise(data);
+      return interval[0] + data.noiseValue * (interval[1] - interval[0]);
+    }
+    return interval;
+  }
+
+  /**
+   * A travelling wave: its crest runs data.waveTravel metres from the origin at params.speed, fading in
+   * and out over its first and last metres, growing by params.growth (a bore in a narrowing channel),
+   * a ring losing height as it spreads. Spray rises from points along the crest; the voice follows the
+   * crest point nearest the camera. A repeating wave (params.interval) rests between runs; a single
+   * run ends the instance.
+   */
+  function updateWave(instance, data, dt) {
+    const params = data.params;
+    const wave = data.wave;
+    if (!data.waveRunning) {
+      data.timer -= dt;
+      wave.weight = 0;
+      if (data.waveSlot >= 0) water.setWave(data.waveSlot, wave);
+      if (data.timer > 0) return;
+      data.waveRunning = true;
+      data.travelled = 0;
+      data.runs++;
+    }
+    data.travelled += params.speed * dt;
+    const total = data.waveTravel;
+    if (data.travelled >= total) {
+      data.waveRunning = false;
+      wave.weight = 0;
+      if (data.waveSlot >= 0) water.setWave(data.waveSlot, wave);
+      const interval = nextWaveInterval(data);
+      if (Number.isFinite(interval) && interval >= 0) data.timer = interval;
+      else instance.ended = true;
+      return;
+    }
+    const share = data.travelled / total;
+    const rise = Math.min(data.travelled / WAVE_FADE_IN, 1);
+    const fall = Math.min((total - data.travelled) / WAVE_FADE_OUT, 1);
+    wave.weight = data.fade * rise * rise * (3 - 2 * rise) * fall * fall * (3 - 2 * fall);
+    wave.front = data.travelled;
+    let height = data.waveHeight * (1 + (params.growth - 1) * share);
+    if (wave.ring) height /= Math.sqrt(1 + data.travelled / params.spreadLoss);
+    wave.height = height;
+    if (data.estuary !== null) {
+      // The crest spans the channel where it is now (the estuary narrows from the mouth to its head).
+      const halfWidth = data.estuary.mouthHalfWidth + (data.estuary.headHalfWidth - data.estuary.mouthHalfWidth) * share;
+      wave.crestLength = halfWidth * 1.3 + 30;
+      wave.taper = halfWidth * 0.45 + 20;
+    }
+    if (data.waveSlot >= 0) water.setWave(data.waveSlot, wave);
+    // The crest's centre, and the crest point nearest the camera for the voice.
+    const centreX = wave.x + wave.dirX * wave.front;
+    const centreZ = wave.z + wave.dirZ * wave.front;
+    const camera = ctx.camera.position;
+    if (wave.ring) {
+      const offsetX = camera.x - wave.x;
+      const offsetZ = camera.z - wave.z;
+      const distance = Math.sqrt(offsetX * offsetX + offsetZ * offsetZ) || 1;
+      data.voicePoint.x = Math.round(wave.x + (offsetX / distance) * wave.front);
+      data.voicePoint.z = Math.round(wave.z + (offsetZ / distance) * wave.front);
+    } else {
+      let across = (camera.x - centreX) * -wave.dirZ + (camera.z - centreZ) * wave.dirX;
+      if (across > wave.crestLength) across = wave.crestLength;
+      else if (across < -wave.crestLength) across = -wave.crestLength;
+      data.voicePoint.x = Math.round(centreX - wave.dirZ * across);
+      data.voicePoint.z = Math.round(centreZ + wave.dirX * across);
+      // An event's anchor rides the crest's centre (discovery, the despawn rule and the map follow it).
+      if (data.duration !== null && data.estuary === null) {
+        instance.anchor.x = Math.round(centreX);
+        instance.anchor.z = Math.round(centreZ);
+      }
+    }
+    data.voicePoint.y = Math.round(ctx.terrain.waterLevel + height * wave.weight * 0.6);
+    if (dt <= 0) return;
+    // Spray off the crest, from a few points along it each frame.
+    data.emitCarry += params.spray * TIER_SPRAY_SCALE[instance.tier] * wave.weight * dt;
+    const count = Math.floor(data.emitCarry);
+    if (count <= 0) return;
+    data.emitCarry -= count;
+    const spray = data.spray;
+    const points = count < WAVE_SPRAY_POINTS ? count : WAVE_SPRAY_POINTS;
+    const reach = wave.ring ? 0 : Math.max(wave.crestLength - wave.taper, 1);
+    for (let point = 0; point < points; point++) {
+      drawNoise(data);
+      let dirX = wave.dirX;
+      let dirZ = wave.dirZ;
+      if (wave.ring) {
+        const angle = data.noiseValue * TWO_PI;
+        dirX = Math.cos(angle);
+        dirZ = Math.sin(angle);
+        spray.x = wave.x + dirX * wave.front;
+        spray.z = wave.z + dirZ * wave.front;
+      } else {
+        const across = (data.noiseValue * 2 - 1) * reach;
+        spray.x = centreX - wave.dirZ * across;
+        spray.z = centreZ + wave.dirX * across;
+      }
+      spray.y = ctx.terrain.waterLevel + height * wave.weight * 0.92;
+      spray.inheritX = dirX * params.speed * 0.7;
+      spray.inheritZ = dirZ * params.speed * 0.7;
+      spray.count = Math.floor(count / points) + (point < count % points ? 1 : 0);
+      water.emitSpray(spray);
+    }
+  }
+
+  /** Clear shallows: the region fades with the instance; the voice sits on the surf ring nearest the camera. */
+  function updateShallows(instance, data) {
+    const region = data.shallows;
+    region.weight = data.fade;
+    if (data.shallowsSlot >= 0) water.setShallows(data.shallowsSlot, region);
+    const ring = region.surfRadius > 0 ? region.surfRadius : 0;
+    const camera = ctx.camera.position;
+    const offsetX = camera.x - region.x;
+    const offsetZ = camera.z - region.z;
+    const distance = Math.sqrt(offsetX * offsetX + offsetZ * offsetZ) || 1;
+    const reach = distance < ring ? distance : ring;
+    data.voicePoint.x = Math.round(region.x + (offsetX / distance) * reach);
+    data.voicePoint.y = Math.round(ctx.terrain.waterLevel + 1);
+    data.voicePoint.z = Math.round(region.z + (offsetZ / distance) * reach);
+  }
+
   const UPDATERS = Object.freeze({
     whirlpool: updateWhirlpool,
     splash: updateSplash,
     spray: updateSpray,
     bioluminescence: updateBioluminescence,
     plungePool: updatePlungePool,
+    wave: updateWave,
+    shallows: updateShallows,
   });
+
+  /**
+   * A travelling wave's descriptors. A straight front starts params.start metres behind the anchor
+   * on its travel heading (params.travelHeading, relative to the activation's) and runs params.travel metres,
+   * crossing the anchor on the way; a ring spreads from the anchor. With params.estuary on a site with
+   * an estuary stamp, the crest starts at the mouth and surges up the channel to its head.
+   */
+  function prepareWave(instance, data, rng) {
+    const params = data.params;
+    const anchor = instance.anchor;
+    if (params.mode !== 'front' && params.mode !== 'ring') throw new Error(`waterEffect: params.mode must be front or ring, got ${JSON.stringify(params.mode)}`);
+    for (const field of ['height', 'width', 'crestLength', 'speed', 'travel', 'growth', 'spreadLoss']) {
+      if (!(Number.isFinite(params[field]) && params[field] > 0)) throw new Error(`waterEffect: params.${field} must be a positive number, got ${JSON.stringify(params[field])}`);
+    }
+    const estuary = params.estuary ? siteStampOf(data.site, 'estuary') : null;
+    const ring = params.mode === 'ring';
+    let originX = anchor.x;
+    let originZ = anchor.z;
+    let dirX = 1;
+    let dirZ = 0;
+    let crestLength = params.crestLength * data.scale;
+    let taper = params.taper * data.scale;
+    data.waveTravel = params.travel;
+    if (estuary) {
+      originX = estuary.mouthX;
+      originZ = estuary.mouthZ;
+      dirX = estuary.inlandX;
+      dirZ = estuary.inlandZ;
+      data.waveTravel = estuary.channelLength;
+      crestLength = estuary.mouthHalfWidth * 1.3 + 30;
+      taper = estuary.mouthHalfWidth * 0.45 + 20;
+    } else if (!ring) {
+      const heading = (data.activationHeading + params.travelHeading) * (Math.PI / 180);
+      dirX = Math.sin(heading);
+      dirZ = -Math.cos(heading);
+      originX = anchor.x - dirX * params.start;
+      originZ = anchor.z - dirZ * params.start;
+    }
+    data.estuary = estuary;
+    data.waveHeight = params.height * data.scale;
+    data.wave = water.createWave({
+      x: originX, z: originZ, dirX, dirZ, front: 0, height: data.waveHeight, width: params.width * data.scale, lean: params.lean,
+      crestLength, taper: Math.min(taper, crestLength), ring, foam: params.foam, weight: 0,
+    });
+    data.spray = water.createSpray({
+      x: originX, y: anchor.y, z: originZ, speed: params.sprayHeight, up: 1, spread: 0.7, size: 2.4, sizeGrowth: 1.6, life: 2.2,
+      drag: 0.9, gravity: 0.7, alpha: 0.6, glow: params.glow,
+    });
+    data.voicePoint = new ctx.THREE.Vector3(Math.round(originX), Math.round(anchor.y), Math.round(originZ));
+    // A repeating wave (a bore on its site) starts its first run a little after the site appears.
+    data.timer = Array.isArray(params.interval) ? rng() * params.interval[0] * 0.25 : 0;
+    instance.radius = Math.max(crestLength, params.width * 4);
+    data.particlesAtFull = Math.round(params.spray * 2.2);
+  }
+
+  /**
+   * A shallows region: at the anchor with params.radius, or fitted to a site stamp that publishes its
+   * clear water (`shallows`: x, z, radius, fade, surfRadius, surfWidth; the atoll and reef stamps):
+   * params.stamp names its index, else the site's first such stamp is used.
+   */
+  function prepareShallows(instance, data) {
+    const params = data.params;
+    const anchor = instance.anchor;
+    const stamps = data.site && Array.isArray(data.site.stamps) ? data.site.stamps : [];
+    let fitted = null;
+    if (Number.isInteger(params.stamp)) {
+      fitted = stamps[params.stamp] && stamps[params.stamp].shallows ? stamps[params.stamp].shallows : null;
+      if (!fitted && stamps.length > 0) throw new Error(`waterEffect: params.stamp ${params.stamp} names no stamp with clear water on the site`);
+    } else {
+      for (const stamp of stamps) {
+        if (stamp && stamp.shallows) {
+          fitted = stamp.shallows;
+          break;
+        }
+      }
+    }
+    const radius = fitted ? fitted.radius : params.radius * data.scale;
+    const surfRadius = fitted && params.surf > 0 ? fitted.surfRadius : Number.isFinite(params.surfRadius) ? params.surfRadius * data.scale : radius;
+    data.shallows = water.createShallows({
+      x: fitted ? fitted.x : anchor.x,
+      z: fitted ? fitted.z : anchor.z,
+      radius,
+      fade: fitted ? fitted.fade : params.fade * data.scale,
+      color: params.color,
+      clarity: params.clarity,
+      surfRadius: params.surf > 0 ? surfRadius : 0,
+      surfWidth: fitted && params.surf > 0 ? fitted.surfWidth : params.surfWidth,
+      surf: params.surf,
+      weight: 0,
+    });
+    data.voicePoint = new ctx.THREE.Vector3(Math.round(data.shallows.x), Math.round(anchor.y), Math.round(data.shallows.z));
+    instance.radius = Math.max(radius, surfRadius);
+    data.particlesAtFull = 0;
+  }
 
   /** Builds the effect's descriptors (once, in create). */
   function prepare(instance, data, rng) {
@@ -346,6 +599,10 @@ export function createWaterEffectEngine() {
       params.radius = instance.radius;
       data.region = water.createGlowRegion({ x: anchor.x, z: anchor.z, radius: params.radius, strength: 0, surf: 0, color: params.color });
       data.particlesAtFull = 0;
+    } else if (data.kind === 'wave') {
+      prepareWave(instance, data, rng);
+    } else if (data.kind === 'shallows') {
+      prepareShallows(instance, data);
     } else {
       const stamp = cliffStepOf(data.site);
       let radius = Number.isFinite(params.radius) ? params.radius : 50;
@@ -424,6 +681,20 @@ export function createWaterEffectEngine() {
           rate: 0,
           surfaceTimer: 0,
           region: null,
+          /** The activation's compass heading (deg): a wave's travel heading is relative to it. */
+          activationHeading: finiteOr(params.heading, 0),
+          waveSlot: -1,
+          shallowsSlot: -1,
+          wave: null,
+          waveRunning: false,
+          waveTravel: 0,
+          waveHeight: 0,
+          travelled: 0,
+          runs: 0,
+          estuary: null,
+          shallows: null,
+          /** Where the voice sits (a wave's crest or a reef's surf near the camera), or null: the anchor. */
+          voicePoint: null,
           mark: water.createMark(),
           noise: new Float32Array(NOISE_SIZE),
           noiseCursor: 0,
@@ -459,7 +730,7 @@ export function createWaterEffectEngine() {
       }
       if (instance.tier !== 'far') UPDATERS[data.kind](instance, data, dt);
       if (data.voice) {
-        data.voice.setPosition(instance.anchor);
+        data.voice.setPosition(data.voicePoint !== null ? data.voicePoint : instance.anchor);
         data.voice.setIntensity(params.voiceIntensity * fade);
       }
       if (data.duration !== null && data.age >= data.duration) instance.ended = true;
@@ -485,6 +756,26 @@ export function createWaterEffectEngine() {
       data.followAnchor = null;
       liveInstances.delete(instance);
       live--;
+    },
+    /**
+     * What one instance is doing, for dev tools and tests: the effect, its tier and fade, the slots it
+     * holds, and a wave's run (front, height, weight, runs) or a shallows region's disc.
+     */
+    describe(instance) {
+      const data = instance.data;
+      const wave = data.wave;
+      const region = data.shallows;
+      return {
+        effect: data.kind,
+        tier: instance.tier,
+        fade: data.fade,
+        slots: { vortex: data.vortexSlot, glowRegion: data.regionSlot, pool: data.poolSlot, wave: data.waveSlot, shallows: data.shallowsSlot },
+        wave: wave ? {
+          running: data.waveRunning, runs: data.runs, front: wave.front, travel: data.waveTravel, height: wave.height, weight: wave.weight,
+          originX: wave.x, originZ: wave.z, dirX: wave.dirX, dirZ: wave.dirZ, crestLength: wave.crestLength, ring: wave.ring, estuary: data.estuary !== null,
+        } : null,
+        shallows: region ? { x: region.x, z: region.z, radius: region.radius, surfRadius: region.surfRadius, clarity: region.clarity, weight: region.weight } : null,
+      };
     },
     stats() {
       let particles = 0;
