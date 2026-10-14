@@ -143,6 +143,35 @@ One instance holds at most 12 000 points (glows and swarm together).
 | `tilt` | deg | -89..89 | 2 | upward tilt of the spokes |
 | `night` | 0..1 | | 1 | 1 shines only at night |
 
+### Guide (`guide`, object or omitted)
+
+Living lights that move: the instance's anchor travels, and every glow, the steady light and the voice
+follow it (the forest wisps). The wisps wait at the anchor until the craft comes within `joinRadius`,
+trail `trailDistance` behind it along its ground track for `trailSeconds`, then drift toward the
+nearest undiscovered site within `search` (the game's site placement and the SpawnManager's
+discoveries), with a `notify` toast naming the direction. While leading they hold still whenever the
+craft is more than `lead` behind and hurry when it is ahead of them; within `arrive` of the site they
+gather over it. A target the craft discovers gives way to the next one (or to trailing again when
+none is left). The search is event work every `retarget` seconds; the frame update stays
+allocation-free and samples the ground under the anchor four times a second.
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `joinRadius` | m | 10..20000 | 450 | the craft this close starts the trailing |
+| `trailDistance` | m | 0..2000 | 40 | how far behind the craft they trail |
+| `trailSeconds` | s | 0..3600 | 40 | how long they trail before they set off |
+| `speed` | m/s | 0.5..200 | 14 | the leading speed (trailing keeps up with the craft at up to 1.25 x its speed) |
+| `height` | m | 0..2000 | 10 | the anchor's height above the ground while leading (the glows' own heights add to it) |
+| `ceiling` | m | 0..5000 | 350 | the highest they follow the craft above the ground |
+| `lead` | m | 20..20000 | 260 | they wait while the craft is farther than this behind |
+| `search` | m | 500..60000 | 15000 | the undiscovered-site search radius around the craft |
+| `arrive` | m | 10..5000 | 120 | within this of the site they gather over it |
+| `retarget` | s | 1..120 | 5 | seconds between two searches |
+
+Each phase change emits the untyped bus event `lightEffect:guide` `{ presetId, phase: 'trailing' |
+'leading', x, z, siteId }`; `describe(instance)` reports the phase, its clock, the target and the
+anchor.
+
 ### Common
 
 | param | unit | range | default | notes |
@@ -222,7 +251,7 @@ One instance holds at most 12 000 points (glows and swarm together).
 { engine: 'lightEffect', params: { glows: [{ layout: 'scatter', count: 40, radius: 120, onGround: true, height: [1, 2], size: [4, 7], colors: [0xffb45a], intensity: 2, flicker: 0.2 }],
   light: { color: 0xffa050, intensity: 6e4, range: 500, offset: [0, 15, 0], flicker: 0.15 } } }
 
-// Phase 3: aurora-lit ice, will-o'-the-wisps, bioluminescent caves
+// Phase 3: aurora-lit ice, bioluminescent caves; the forest wisps add a `guide` (see Guide)
 { engine: 'lightEffect', params: { glows: [{ layout: 'scatter', count: 12, radius: 300, height: [2, 8], size: [2, 3], colors: [0x9fffe0], intensity: 4,
   wander: { radius: 30, speed: 0.1, vertical: 0.3 }, blink: { period: [6, 12], duty: 0.6 } }], visibility: { day: 0, night: 1 } } }
 ```
