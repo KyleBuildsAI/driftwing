@@ -25,7 +25,8 @@
 // Inside a volume the engine closes the world in through one sky modifier ('weatherVolume', priority
 // 15: above the regional weather, below an eclipse) weighted by how deep the camera is, shows the
 // veil, and inside a rain or snow shaft drives the local streaks and, in first-person views, the
-// canopy rain. With no volume alive the modifier is removed and every mesh hidden, so the sky runs
+// canopy rain; a volume with canopyGrit (a sandstorm's dust, a squall's snow) blasts grit streaks
+// across the canopy instead, inside it or in its dust shafts. With no volume alive the modifier is removed and every mesh hidden, so the sky runs
 // its untouched path.
 //
 // Wind: a volume registers one WindField source (id `weather-<n>:weather`) sampling its parts:
@@ -74,6 +75,9 @@ const FIRST_PERSON_VIEWS = Object.freeze(['cockpit', 'fpv']);
 /** Canopy drops: airspeed (m/s) at which they stop running down and start streaking back. */
 const CANOPY_HOLD_SPEED = 22;
 const CANOPY_STREAK_SPEED = 55;
+/** Canopy grit: drift (screen heights per second) at rest, and the airspeed (m/s) that doubles it. */
+const GRIT_DRIFT = 0.6;
+const GRIT_DRIFT_SPEED = 40;
 const GLOW_SCALE = 0.6;
 
 function smooth(value, edge0, edge1) {
@@ -114,8 +118,8 @@ export function createWeatherVolumeEngine() {
     sunElevation: 0, nightFactor: 0,
   };
   // What the camera met last frame (the strongest volume), applied at the start of the next.
-  const met = { inside: 0, rain: 0, canopy: 0, rainKind: 0, rainFall: 9, fogDensity: 1, fogDarkness: 0, fogColor: null, tint: null };
-  const shown = { inside: 0, rain: 0, canopy: 0, rainKind: 0, rainFall: 9, fogDensity: 1, fogDarkness: 0, fogColor: null };
+  const met = { inside: 0, rain: 0, canopy: 0, grit: 0, rainKind: 0, rainFall: 9, fogDensity: 1, fogDarkness: 0, fogColor: null, tint: null, gritTint: null };
+  const shown = { inside: 0, rain: 0, canopy: 0, grit: 0, rainKind: 0, rainFall: 9, fogDensity: 1, fogDarkness: 0, fogColor: null };
   const modifierValues = { weight: 0, fogDensity: 1, fogColor: null, fogColorAmount: 0, darkness: 0, sunIntensity: 1, ambient: 1 };
   const canopyFlow = { x: 0, y: 1 };
   const scratchColor = { value: null };
@@ -160,6 +164,7 @@ export function createWeatherVolumeEngine() {
     met.inside = 0;
     met.rain = 0;
     met.canopy = 0;
+    met.grit = 0;
     puffCursor = 0;
     shaftCursor = 0;
   }
@@ -169,6 +174,7 @@ export function createWeatherVolumeEngine() {
     shown.inside = approach(shown.inside, met.inside, INSIDE_RATE, dt);
     shown.rain = approach(shown.rain, met.rain, RAIN_RATE, dt);
     shown.canopy = approach(shown.canopy, met.canopy * (isFirstPerson() ? 1 : 0), RAIN_RATE, dt);
+    shown.grit = approach(shown.grit, met.grit * (isFirstPerson() ? 1 : 0), RAIN_RATE, dt);
     if (met.inside > 0.001 || met.rain > 0.001) {
       shown.fogDensity = met.fogDensity;
       shown.fogDarkness = met.fogDarkness;
@@ -179,6 +185,7 @@ export function createWeatherVolumeEngine() {
     if (shown.inside < 1e-4 && met.inside === 0) shown.inside = 0;
     if (shown.rain < 1e-4 && met.rain === 0) shown.rain = 0;
     if (shown.canopy < 1e-4 && met.canopy === 0) shown.canopy = 0;
+    if (shown.grit < 1e-4 && met.grit === 0) shown.grit = 0;
     const weight = Math.max(shown.inside, shown.rain * 0.7);
     if (modifier) {
       modifierValues.weight = weight;
@@ -238,11 +245,14 @@ export function createWeatherVolumeEngine() {
 
   function updateCanopy(dt) {
     const uniforms = canopy.uniforms;
-    canopy.mesh.visible = shown.canopy > 0.01;
+    canopy.mesh.visible = shown.canopy > 0.01 || shown.grit > 0.01;
     uniforms.amount.value = shown.canopy;
+    uniforms.grit.value = shown.grit;
     if (!canopy.mesh.visible) return;
     const speed = ctx.state.player.speed;
     const airspeed = Number.isFinite(speed) ? speed : 0;
+    // Grit streaks race across the canopy with the wind, faster with airspeed.
+    uniforms.gritShift.value = (uniforms.gritShift.value + GRIT_DRIFT * (1 + airspeed / GRIT_DRIFT_SPEED) * dt) % 64;
     // Slow: drops run down the canopy (screen y is down); fast: they are blown back up and stretch.
     const blown = smooth(airspeed, CANOPY_HOLD_SPEED, CANOPY_STREAK_SPEED);
     const rundown = 1 - smooth(airspeed, 0, CANOPY_HOLD_SPEED);
@@ -255,6 +265,8 @@ export function createWeatherVolumeEngine() {
     uniforms.light.value.copy(ctx.uniforms.fogColor.value).multiplyScalar(0.9);
     scratchColor.value.copy(look.litColor.value).multiplyScalar(0.25);
     uniforms.light.value.add(scratchColor.value);
+    // The grit takes the volume's own tint (ochre dust, white snow), lit like the drops.
+    uniforms.gritColor.value.copy(met.gritTint).multiply(uniforms.light.value).multiplyScalar(1.15);
   }
 
   /** Marks the written instance ranges of an attribute for upload (persistent range, no allocation). */
@@ -723,6 +735,7 @@ export function createWeatherVolumeEngine() {
     const params = data.params;
     const inside = data.inside * data.growth;
     const canopyRain = Math.max(data.rainKind === 2 ? 0 : data.rain, inside * params.canopyRain);
+    const grit = params.canopyGrit > 0 ? Math.max(inside, data.rainKind === 2 ? data.rain : 0) * params.canopyGrit : 0;
     if (inside > met.inside || data.rain > met.rain) {
       met.fogDensity = params.insideFog.density;
       met.fogDarkness = params.insideFog.darkness;
@@ -736,6 +749,10 @@ export function createWeatherVolumeEngine() {
       met.rainFall = data.rainFall;
     }
     if (canopyRain > met.canopy) met.canopy = canopyRain;
+    if (grit > met.grit) {
+      met.grit = grit;
+      met.gritTint.copy(data.tint);
+    }
   }
 
   function levelTargetsFor(instance, tier) {
@@ -792,6 +809,7 @@ export function createWeatherVolumeEngine() {
       buffersOwned = 5 + 3 + 4 + 8;
       met.fogColor = new THREE.Color();
       met.tint = new THREE.Color(1, 1, 1);
+      met.gritTint = new THREE.Color(0.78, 0.62, 0.42);
       shown.fogColor = new THREE.Color();
       modifierValues.fogColor = shown.fogColor;
       scratchColor.value = new THREE.Color();
@@ -968,9 +986,11 @@ export function createWeatherVolumeEngine() {
         met.inside = 0;
         met.rain = 0;
         met.canopy = 0;
+        met.grit = 0;
         shown.inside = 0;
         shown.rain = 0;
         shown.canopy = 0;
+        shown.grit = 0;
         veil.mesh.visible = false;
         localRain.mesh.visible = false;
         canopy.mesh.visible = false;
@@ -991,7 +1011,7 @@ export function createWeatherVolumeEngine() {
 
     /** Dev and tests: the camera's weather as the engine last applied it. */
     getCameraWeather() {
-      return { inside: shown.inside, rain: shown.rain, canopy: shown.canopy, rainKind: shown.rainKind, firstPerson: ctx ? isFirstPerson() : false, modifier: modifier !== null };
+      return { inside: shown.inside, rain: shown.rain, canopy: shown.canopy, grit: shown.grit, rainKind: shown.rainKind, firstPerson: ctx ? isFirstPerson() : false, modifier: modifier !== null };
     },
   };
 }

@@ -9,7 +9,8 @@
 //   createLocalRain    a field of streaks wrapped around the camera, animated entirely in the vertex
 //                      stage (falling, slanted by the craft's own motion), shown inside a shaft
 //   createCanopyRain   drops and streaks on the canopy (a camera-attached quad, screen space), for
-//                      the cockpit and FPV views
+//                      the cockpit and FPV views; with grit, wind-driven grit streaks and a
+//                      sandblasted rim (a sandstorm's dust or a squall's snow)
 //   createVeil         the soft whiteout while the camera is inside a volume (as the v1 clouds' veil)
 //
 // Nothing here is WebGPU-only: both backends run the same node materials. No per-frame allocation:
@@ -217,7 +218,9 @@ export function createLocalRain(THREE, TSL, { count, box }) {
  * Rain on the canopy (cockpit and FPV views): a camera-attached quad drawing two layers of drops in
  * screen space. Slow flight lets them bead and run down; with airspeed they streak back along the
  * flow. Uniforms: amount (0..1), flow (unit screen direction the drops run, y down), shift (the flow
- * integrated over time, in screen heights), stretch, light (colour). Returns { mesh, uniforms }.
+ * integrated over time, in screen heights), stretch, light (colour), and the grit layer's grit
+ * (0..1), gritShift (its drift, in screen heights) and gritColor (lit colour). With grit at 0 the
+ * colour and opacity are exactly the drops' alone. Returns { mesh, uniforms }.
  */
 export function createCanopyRain(THREE, TSL) {
   const {
@@ -229,6 +232,9 @@ export function createCanopyRain(THREE, TSL) {
     shift: uniform(new THREE.Vector2(0, 0)),
     stretch: uniform(1),
     light: uniform(new THREE.Color(0.7, 0.74, 0.8)),
+    grit: uniform(0),
+    gritShift: uniform(0),
+    gritColor: uniform(new THREE.Color(0.7, 0.56, 0.38)),
   };
   const aspect = screenSize.x.div(max(screenSize.y, 1));
   const point = vec2(screenUV.x.mul(aspect), screenUV.y);
@@ -258,9 +264,35 @@ export function createCanopyRain(THREE, TSL) {
   const body = clamp(moving.x.add(beads.x.mul(0.8)), 0, 1);
   const shine = clamp(moving.y.add(beads.y.mul(0.5)), 0, 1);
 
+  /**
+   * One layer of grit streaks: short scratches lying along the wind across the screen (a slight
+   * per-streak tilt), each cell lit for a moment as grains hit, drifting with gritShift. Coverage 0..1.
+   */
+  const gritLayer = Fn(([position, scale, speed, seedOffset]) => {
+    const drift = controls.gritShift.mul(speed);
+    const grid = position.mul(scale).add(vec2(drift, drift.mul(0.3)));
+    const cell = floor(grid);
+    const local = fract(grid);
+    const key = cell.x.add(cell.y.mul(91.7)).add(seedOffset);
+    const present = step(float(1).sub(controls.grit.mul(0.75)), hash(key.add(5.3)));
+    const centre = vec2(hash(key).mul(0.6).add(0.2), hash(key.add(7.1)).mul(0.6).add(0.2));
+    const offset = local.sub(centre);
+    const tilt = hash(key.add(13.7)).sub(0.5).mul(0.5);
+    const along = offset.x.add(offset.y.mul(tilt));
+    const across = offset.y.sub(offset.x.mul(tilt));
+    const reach = hash(key.add(29.3)).mul(0.22).add(0.1);
+    const thin = float(1).sub(smoothstep(0.006, 0.02, abs(across)));
+    return thin.mul(float(1).sub(smoothstep(reach.mul(0.4), reach, abs(along)))).mul(present);
+  });
+  const scratches = clamp(gritLayer(point, float(8), float(1), float(3.7)).add(gritLayer(point, float(19), float(2.1), float(19.1)).mul(0.6)), 0, 1);
+  // The canopy's rim takes a sandblasted haze first.
+  const rim = smoothstep(0.3, 0.78, length(screenUV.sub(0.5)));
+  const gritAmount = clamp(scratches.mul(1.4).add(rim.mul(0.5)).mul(controls.grit), 0, 1);
+
   const material = new THREE.MeshBasicNodeMaterial({ transparent: true, depthTest: false, depthWrite: false, fog: false });
-  material.colorNode = mix(controls.light.mul(0.42), controls.light.mul(1.5).add(vec3(0.04)), shine);
-  material.opacityNode = controls.amount.mul(body.mul(0.3).add(shine.mul(0.34)).add(0.03));
+  const dropColor = mix(controls.light.mul(0.42), controls.light.mul(1.5).add(vec3(0.04)), shine);
+  material.colorNode = mix(dropColor, controls.gritColor, gritAmount);
+  material.opacityNode = controls.amount.mul(body.mul(0.3).add(shine.mul(0.34)).add(0.03)).add(controls.grit.mul(scratches.mul(0.42).add(rim.mul(0.16))));
   const geometry = new THREE.PlaneGeometry(16, 16);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'weather-volume-canopy-rain';

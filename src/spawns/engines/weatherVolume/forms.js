@@ -57,6 +57,7 @@ const COMMON_DEFAULTS = Object.freeze({
   dissipateSeconds: 30,
   rain: null,
   canopyRain: 0,
+  canopyGrit: 0,
   wind: null,
   farMode: 'auto',
   anvil: null,
@@ -211,6 +212,7 @@ export function resolveWeatherParams(params, { event = true } = {}) {
     dissipateSeconds: numberParam(value('dissipateSeconds'), 'dissipateSeconds', 30, 0, 1800),
     farMode: oneOf(value('farMode'), FAR_MODES, 'farMode', 'auto'),
     canopyRain: numberParam(value('canopyRain'), 'canopyRain', 0, 0, 1),
+    canopyGrit: numberParam(value('canopyGrit'), 'canopyGrit', 0, 0, 1),
     // tower / cumulus
     anvil: anvil ? Object.freeze({
       radius: numberParam(anvil.radius, 'anvil.radius', 8500, 100, 60000),
