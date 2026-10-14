@@ -804,11 +804,21 @@ export function createWeatherVolumeEngine() {
       const resolved = resolveWeatherParams(params, { event: params.duration !== null && params.duration !== undefined });
       const heading = Number.isFinite(params.heading) ? params.heading : 0;
       const headingRadians = (heading * Math.PI) / 180;
-      const forwardX = Math.sin(headingRadians);
-      const forwardZ = -Math.cos(headingRadians);
+      // The volume frame: the activation heading turned by `turn` degrees (a bank laid along the
+      // wind, a cap cloud along a ridge); drifts still default to the activation heading.
+      const frameRadians = headingRadians + (resolved.turn * Math.PI) / 180;
+      const forwardX = Math.sin(frameRadians);
+      const forwardZ = -Math.cos(frameRadians);
       const rightX = -forwardZ;
       const rightZ = forwardX;
-      const anchor = params.position;
+      // `offset` [right, forward] (m, in the turned frame) moves the volume off the activation point.
+      const anchor = resolved.offset[0] === 0 && resolved.offset[1] === 0
+        ? params.position
+        : {
+          x: params.position.x + resolved.offset[0] * rightX + resolved.offset[1] * forwardX,
+          y: params.position.y,
+          z: params.position.z + resolved.offset[0] * rightZ + resolved.offset[1] * forwardZ,
+        };
       const terrain = ctx.terrain;
       const groundAt = (x, z) => Math.max(terrain.heightAt(x, z), terrain.waterLevel);
       const groundY = groundAt(anchor.x, anchor.z);

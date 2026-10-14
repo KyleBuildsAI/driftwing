@@ -14,7 +14,8 @@
 //   cumulus  a single heaped cloud without an anvil (towering cumulus, a volcano's pyrocumulus cap)
 //   lens     a stack of smooth lens clouds (lenticulars, a pileus cap)
 //   bank     a low strip hugging the terrain, optionally curved and with a tall leading wall (fog
-//            banks, valley fog rivers with fillBelow, sandstorm walls, hurricane rain bands)
+//            banks, valley fog rivers with fillBelow, sandstorm walls, hurricane rain bands), or
+//            broken into heaped cumulus clumps along its length (cloud streets, with clumps)
 //   sheet    a thin wide layer (a cloud sea for the glory, stratus decks, noctilucent clouds)
 //   mist     a column of puffs rising and swelling from its foot (waterfall mist, geyser steam)
 //
@@ -62,6 +63,8 @@ const COMMON_DEFAULTS = Object.freeze({
   anvil: null,
   overshoot: 0,
   wallCloud: null,
+  turn: 0,
+  offset: null,
 });
 
 /** Each form's own defaults (see docs/engines/weatherVolume.md for units and ranges). */
@@ -89,7 +92,7 @@ const FORM_DEFAULTS = Object.freeze({
   }),
   bank: Object.freeze({
     base: 0, length: 5000, width: 1400, height: 320, puffs: 90, detail: 0.25, storm: 0.1, tint: 0xe6eaee,
-    followTerrain: true, wall: 0, curve: 0, fillBelow: null,
+    followTerrain: true, wall: 0, curve: 0, fillBelow: null, clumps: 0,
     haze: Object.freeze({ near: 800, far: 12000, max: 0.92 }),
     insideFog: Object.freeze({ density: 7, color: 0xd9dee4, darkness: 0.05 }),
     turbulence: 0.05,
@@ -194,6 +197,8 @@ export function resolveWeatherParams(params, { event = true } = {}) {
   const driftSource = objectParam(value('drift'), 'drift');
   const waveSource = objectParam(wind.wave, 'wind.wave');
   const formSeconds = value('formSeconds');
+  const offsetSource = value('offset');
+  if (offsetSource !== null && offsetSource !== undefined && (!Array.isArray(offsetSource) || offsetSource.length !== 2)) fail('offset', 'must be null or [right, forward] in metres');
   return Object.freeze({
     form,
     base: numberParam(value('base'), 'base', 0, -1000, 20000),
@@ -211,6 +216,8 @@ export function resolveWeatherParams(params, { event = true } = {}) {
     dissipateSeconds: numberParam(value('dissipateSeconds'), 'dissipateSeconds', 30, 0, 1800),
     farMode: oneOf(value('farMode'), FAR_MODES, 'farMode', 'auto'),
     canopyRain: numberParam(value('canopyRain'), 'canopyRain', 0, 0, 1),
+    turn: numberParam(value('turn'), 'turn', 0, -360, 360),
+    offset: Object.freeze(offsetSource ? [numberParam(offsetSource[0], 'offset[0]', 0, -60000, 60000), numberParam(offsetSource[1], 'offset[1]', 0, -60000, 60000)] : [0, 0]),
     // tower / cumulus
     anvil: anvil ? Object.freeze({
       radius: numberParam(anvil.radius, 'anvil.radius', 8500, 100, 60000),
@@ -240,6 +247,7 @@ export function resolveWeatherParams(params, { event = true } = {}) {
     wall: numberParam(value('wall'), 'wall', 0, 0, 1),
     curve: numberParam(value('curve'), 'curve', 0, -300, 300),
     fillBelow: value('fillBelow') === null || value('fillBelow') === undefined ? null : numberParam(value('fillBelow'), 'fillBelow', 0, -1000, 9000),
+    clumps: Math.round(numberParam(value('clumps'), 'clumps', 0, 0, MAX_GROUPS)),
     // sheet
     ripple: numberParam(value('ripple'), 'ripple', 0, 0, 1),
     // mist
@@ -500,7 +508,43 @@ function layoutLens(layout, params, rng) {
   }
 }
 
+/**
+ * A bank broken into `clumps` heaped cumulus along its length (a cloud street): each clump is its
+ * own shading group with a flat base, a dome of puffs `height` metres tall (seeded 0.65..1.2 x)
+ * and up to `width` across, spaced evenly along x with a seeded jitter and gaps between them.
+ */
+function layoutBankClumps(layout, params, rng, groundAt, frame) {
+  const { length, width, height, puffs, clumps, followTerrain } = params;
+  const spacing = length / clumps;
+  const perClump = Math.max(4, Math.floor(puffs / clumps));
+  const detailPerClump = detailCount(perClump, params.detail);
+  for (let clump = 0; clump < clumps; clump++) {
+    const centreX = (clump + 0.5) * spacing - length * 0.5 + (rng() - 0.5) * spacing * 0.3;
+    const centreZ = (rng() - 0.5) * width * 0.25;
+    const radius = Math.min(spacing * 0.42, width * 0.5) * (0.75 + 0.35 * rng());
+    const tall = height * (0.65 + 0.55 * rng());
+    const groundY = followTerrain ? groundAt(frame.x + centreX * frame.rightX + centreZ * frame.forwardX, frame.z + centreX * frame.rightZ + centreZ * frame.forwardZ) : 0;
+    const group = addGroup(layout, 0, tall, centreX, tall * 0.35, centreZ, params.storm, true, 0, followTerrain);
+    for (let index = 0; index < perClump; index++) {
+      const detail = index >= perClump - detailPerClump;
+      // Heaped toward the middle: the higher a puff, the nearer the clump's axis.
+      const h = Math.pow(rng(), 1.4);
+      const angle = rng() * Math.PI * 2;
+      const reach = radius * (1 - 0.55 * h) * Math.sqrt(rng()) * (detail ? 1.05 : 0.8);
+      const puffRadius = radius * (detail ? 0.22 + 0.12 * rng() : 0.42 + 0.2 * rng()) * (1 - 0.35 * h);
+      const squash = index === 0 ? 0.55 : 0.72 + 0.18 * rng();
+      const y = Math.max(puffRadius * squash * 0.4, h * tall);
+      const level = index === 0 ? 0 : detail ? 2 : 1;
+      if (!addPuff(layout, centreX + Math.cos(angle) * reach, y, centreZ + Math.sin(angle) * reach, puffRadius, squash, rng() * Math.PI, params.brightness * (0.95 + 0.07 * rng()), 0.05 + 0.5 * h + 0.15 * rng(), group, level, rng() * Math.PI * 2, groundY)) return;
+    }
+  }
+}
+
 function layoutBank(layout, params, rng, groundAt, frame) {
+  if (params.clumps > 0) {
+    layoutBankClumps(layout, params, rng, groundAt, frame);
+    return;
+  }
   const { length, width, height, puffs, wall, curve, fillBelow, followTerrain } = params;
   const group = addGroup(layout, 0, height * (1 + 3 * wall), 0, height * 0.4, 0, params.storm, false, 0, followTerrain);
   const curveRadians = (curve * Math.PI) / 180;

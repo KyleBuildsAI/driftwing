@@ -25,8 +25,8 @@ The `form` sets the shape, and each form covers a family of phenomena:
 | `sheet` | a thin wide layer | a cloud sea (the glory preset), stratus decks, noctilucent clouds (`glow`, `ripple`) |
 | `mist` | a column of puffs rising and swelling from its foot | waterfall mist, geyser steam |
 
-The volume frame follows the activation heading. `x` points right, `z` points forward along the
-heading, and `y` points up from the volume base. Towers lean their anvil forward (downwind), and lens
+The volume frame follows the activation heading (turned by `turn` and moved by `offset`). `x` points
+right, `z` points forward along the heading, and `y` points up from the volume base. Towers lean their anvil forward (downwind), and lens
 waves lift upwind of the cloud (`-z`).
 
 ## Parameters
@@ -52,11 +52,14 @@ waves lift upwind of the cloud (`-z`).
 | `wall` | 0..1 | | 0 | a bank's leading (`+z`) edge rises up to 4 times higher (a haboob wall) |
 | `curve` | deg | -300..300 | 0 | bends a bank along an arc (rain bands) |
 | `fillBelow` | m MSL | | null | a bank keeps only the puffs whose ground is below this height (valley fog rivers) |
+| `clumps` | count | 0..8 | 0 | a bank broken into this many heaped cumulus along its length, each with a flat base, its own shading and gaps between them (a cloud street, the thermal street); 0 keeps the continuous strip |
 | `ripple` | 0..1 | | 0 | a sheet's bands in height and brightness (noctilucent billows) |
 | `rise` | m/s | 0..200 | mist 6 | mist puffs climb the column, swelling and fading at the top |
 | `anvil` | object or null | | tower: `{}` | `{ radius 8500 m, thickness 1500 m, altitude (m above the base, default 0.84 x height), lean 2600 m (downwind offset), puffs 110, storm 0.3 }` |
 | `overshoot` | 0..1 | | tower 0.5 | the dome above the anvil |
 | `wallCloud` | object or null | | null | `{ radius (0.35 x radius), drop 350 m below the base, offset (-0.3 x radius along z, negative = rear), rotation 6 deg/s, puffs 22 }` |
+| `turn` | deg | -360..360 | 0 | turns the volume frame from the activation heading (a bank laid along the wind or along a ridge); a `drift` without a heading still follows the activation heading |
+| `offset` | [right, forward] m | -60000..60000 | [0, 0] | moves the volume off the activation point, in the turned frame (the second row of a cloud street) |
 
 ### Look
 
