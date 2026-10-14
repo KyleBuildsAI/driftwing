@@ -169,7 +169,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       { id: 'gpu', label: 'GPU memory back after every dispose (geometries, textures)', value: ratio(gpu), status: allOf(gpu) },
       { id: 'heap', label: `JS heap within ${HEAP_TOLERANCE_MB} MB after ${leakCycles} more creates and disposes`, value: heapAvailable() ? ratio(heap) : 'unavailable', status: heapAvailable() ? allOf(heap) : 'muted' },
       { id: 'wind', label: 'Wind sources removed after every dispose', value: ratio(wind), status: allOf(wind) },
-      { id: 'other', label: 'Real lights, sky modifiers, colliders, challenge courses and leak counters back', value: ratio(other), status: allOf(other) },
+      { id: 'other', label: 'Real lights, sky modifiers, colliders, challenge courses, ignitables and leak counters back', value: ratio(other), status: allOf(other) },
       { id: 'console', label: 'Console errors / warnings', value: `${counts.errors} / ${counts.warnings}`, status: counts.errors === 0 && counts.warnings === 0 ? 'pass' : 'fail' },
       shotsWanted
         ? { id: 'shots', label: 'Screenshots taken', value: ratio(shots, total), status: allOf(shots) }
