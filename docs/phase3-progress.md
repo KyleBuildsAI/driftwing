@@ -445,7 +445,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | --- | --- | --- | --- | --- |
 | 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | in progress (branch complete, awaiting I2) |
 | 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | not started |
-| 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | in progress |
+| 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | in progress (branch complete, awaiting I2) |
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | not started |
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | not started |
 | 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
@@ -508,7 +508,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 ### Wave 2 - p3/craft-seaplane
 
-- **Done so far:** the floats extension (`src/flight/floats.js`: per-station buoyancy of two
+- **Done:** the floats extension (`src/flight/floats.js`: per-station buoyancy of two
   V-bottomed floats against the shared water query, planing with the keel slopes and a Froude onset,
   displacement drag with the hump near 40-45 km/h, porpoising from the held trim, water rudders,
   wheel drag and the nose-over, the wheels-up skid on land, water strikes, the gear advisory, the
@@ -516,7 +516,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   extension's `dispose`); the seaplane module (`src/craft/seaplane.js`: Beaver-style mesh with
   animated gear legs and water rudders, sim profile, situate, copilot commands, journal stats,
   bindings); the `radial` audio family; the `waterRudder` instrument; `tools/lab/seaplane.mjs`
-  (92/92); the craft lab's catalog checks now follow the registered modules.
+  (113/113); the craft lab's catalog checks now follow the registered modules.
 - **Also done:** the `?test=craft` scenarios (`src/dev/craftScenarios/seaplane.js`: `seaplane-ocean` and
   `seaplane-lake`, a full circuit each from a fixed start in the CRAFT-1 'waters' world, takeoff and
   landing on the water, in both views; `seaplane-nose-over`, the gear advisory then the soft crash);
@@ -528,9 +528,24 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   | Check | WebGPU | WebGL2 |
   | --- | --- | --- |
   | `run-harness --test craft --crafts seaplane` (general both views, ocean and lake both views, nose-over) | PASS 7/7 runs, 29/29 checks, 0 NaN, 0 penetrations, 0 soft crashes (the nose-over's allowed one aside), 0/0 (the first attempt timed out navigating the cold dev server; the rerun passed) | PASS 7/7, 29/29, same |
-  | `node --expose-gc tools/lab/seaplane.mjs` | 113/113 | |
+  | `node --expose-gc tools/lab/seaplane.mjs` | 113/113 (without `--expose-gc` its allocation check fails by design, 112/113) | |
   | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 236/236 | built; no scenario code in the V2 bundle | |
   | Labs: atmosphere 28, challenges 70, colliders 84, copilot-server 17, copilot 240, craft 66, director 50, discovery 43, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden 6/6, setpiece 47, settings 45, spawns 98, storage 54, structure 75, terrain 404, water 34, wind-engines 56, wingsuit 37, flight-lab 82 | all pass | |
+  | Audio lab (`tools/lab/audio.mjs`, beside other engineers' Chrome runs) | 189/191 twice, a different pair each time: the WebGPU thunder trigger (5.8 and 5.9 dB against 6; the recipe is random per render, 7.3-7.4 dB on other renders), the WebGPU doppler (1.99 %) and the WebGL2 waterfall distance law (1.22 dB); `--only recipes --backend webgpu` 75/75 on this branch and on the v2-phase3 sources; the branch only adds the `radial` family, which the lab does not exercise | |
+  | `run-harness --test 1` reduced (HARNESS-1/2, seaplane and glider, both views, 20 s) | 0 NaN, 0 penetrations, 0/0, 8/8 runs, 24/24 manoeuvres, heap 7.22 MB; frames over 50 ms: 7 (main thread, systems 0) | same criteria pass, heap 8.99 MB; frames over 50 ms: 9 (main thread 8, delayed 1, systems 0) |
+  | `run-harness --test hotas` | 140/140, 0/0 | |
+  | Step file view-physics on built V2 (`?debug=1`) | 7/7 craft identical in every view (seaplane max difference 1.9e-12), 0/0 | 7/7 (seaplane 0.0), 0/0 |
+  | Built `dist-single/v2` and the built shell smoke | 0/0 each, screenshots differ | 0/0 (V2), screenshots differ |
+
+- **Next:** I2 merges this branch in catalog order (after the aerobatic branch).
+- **Merge notes:** list-append lines in `src/craft/index.js`, `src/audio/engines/index.js`,
+  `src/ui/instruments/index.js`, `src/dev/craftScenarios/index.js` and `testFlightScripts.js`
+  (`SCRIPTED_CRAFT`); `tools/steps/view-physics.json` gains one `check('seaplane')` step, and its last
+  step now expects every registered craft; SimFixedWing gains the `contactForces` hook (one call after
+  the ground contact), the tick's `position` / `velocity` / `quaternion` / `contact` and the
+  extension's `dispose`; the craft lab's availability checks follow the registered modules.
+- **Open issues:** the frames-over-50-ms criterion of the reduced `?test=1` (main thread, no game
+  systems; owner's rule); the audio lab's random thunder render and live-timing checks (see the table).
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
