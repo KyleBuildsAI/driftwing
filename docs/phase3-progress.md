@@ -448,7 +448,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | in progress (branch complete, awaiting I2) |
 | 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | in progress (branch complete, awaiting I2) |
 | 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | branch complete, awaiting I2 |
-| 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | not started |
+| 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | done (branch complete, awaiting I2) |
 | 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | not started |
 | 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | not started |
 | 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | not started |
@@ -708,6 +708,59 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   script table) conflict with the other craft branches by design; view-physics.json needs its
   `check('paraglider')` line and the count bumped at integration; docs/architecture.md and
   docs/controls.md (the HOTAS profile) get the paraglider rows in Milestone O.
+
+### Wave 2 - p3/craft-balloon
+
+- **Done** (contract h; spec Milestone E item 11):
+  - `src/flight/SimBalloon.js` (kind `balloon`): lift = (rho_ambient - rho_hot) x V x g with the shared
+    density model and ISA temperatures, one envelope temperature state (burner through a 4 s plume,
+    fabric convection and radiation, parachute and rotation vent outflow, adiabatic cooling) giving a
+    20-30 s thermal lag; drag pulls it to the WindField at its height; the rig swings as a pendulum
+    about the centre of buoyancy; basket skids bounce and drag, float on water
+    (`limits.waterLanding 'basket'`), a vented envelope collapses on the ground and the burner
+    reinflates it; a ground start is tied down until it lifts. Assists: over-temperature protection,
+    rotation damping, altitude hold (auto-burner in blasts, lag-aware, raised over the terrain under
+    the drift); the autopilot flies altitude and basket heading; the copilot's assisted landing.
+  - `src/craft/balloon.js`: the v1 balloon family envelope (shared with the fair landmarks through
+    `src/world/balloonFamily.js`), basket, burner frame, tanks and pilot; animated flame, pilot lights,
+    glow through the fabric, parachute vent, rotation vent flaps, breathing and collapse, the pilot's
+    arm; first person in the basket (custom cockpit, instrument pack on the front upright); bindings
+    for keyboard, gamepad, T.16000M and TWCS; abilities burner (held) and parachute vent (held); the
+    wind-layer column sampled once a second in `craftState.windColumn`; copilot burn, vent, steer by
+    layer ("take us east"), wind report, land, status; journal stats; `situate()` = drift at the
+    current height (ground or water when the previous craft was).
+  - `src/audio/engines/burner.js`: burner roar, rumble and jet hiss with a whump, pilot-light hiss,
+    vent rush, basket creaks on blasts, swings, touchdowns and drags; otherwise near silence.
+  - Instruments `envelope` and `windColumn`; the instrument HUD shows a craft's `hudInstruments` in
+    the third-person views with the overlay off.
+  - Tests: `tools/lab/balloon.mjs`, `src/dev/craftScenarios/balloon.js` (wind layer, drift start,
+    burner lag, landing, bounce and drag, rotation, steer, water), the flight-test script, the
+    view-physics step.
+- **Outside the craft files (all needed by the balloon):** `src/world/balloonFamily.js` (new) and
+  `src/world/landmarks.js` (the fair balloons import the shared profile, palettes and patterns;
+  unchanged output); `src/camera/cockpit.js` (the glareshield follows a panel's x, so an
+  off-centre panel keeps its hood); `src/ui/instrumentHud.js` (module `hudInstruments` shown in the
+  third-person views with the overlay off); `src/dev/testFlightScripts.js` (a balloon script);
+  `tools/lab/craft.mjs` (its catalog check accepts registered Phase 3 craft);
+  `tools/steps/view-physics.json` (flies the balloon and fails on any registered craft not flown).
+- **Verified 2026-10-13** (each once, both backends unless noted; reruns named):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 236/236 | built, V1 untouched | |
+  | Labs: balloon 66/66 (new), craft 66, flight-lab 82, audio 191, atmosphere 28, challenges 70, colliders 84, copilot 240, copilot-server 17, director 50, discovery 43, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden (identical), setpiece 47, settings 45, spawns 98, storage 54, structure 75, terrain 404, water 34, wind-engines 56, wingsuit 37 | all pass (the allocation labs with `--expose-gc`) | |
+  | `run-harness --test craft --crafts balloon` (general test both views, 12 scenario runs) | PASS 14/14 runs, 50/50 checks, 0 NaN, 0 penetrations, 0 soft crashes, 0/0 (rerun; the first run had the same 50/50 and one `WebGPU Device Lost: A valid external Instance reference no longer exists` console error from the shared GPU) | PASS 14/14, 50/50, 0/0 |
+  | `run-harness --test 1` reduced (HARNESS-1/2, balloon, both views, 20 s) | 0 NaN, 0 penetrations, 0/0, heap 7.08 MB, 4/4 runs, 8/8 manoeuvres; frames over 50 ms: 145 (mostly mainThread at 100 % machine CPU) | same criteria pass, heap 6.89 MB; frames over 50 ms: 66 |
+  | Step file view-physics (now 7 craft) | 7/7 identical, 0/0 | 7/7, 0/0 |
+  | Built `dist-single/v2` and the built shell smoke | 0/0, screenshots differ | 0/0 (V2) |
+
+- **Next:** I2 merges this branch in catalog order.
+- **Open issues:** frame time (owner's rule, one line): the reduced flight test's slow frames were
+  spread over camera, terrain, spawns, clouds and flight at 99-100 % machine CPU, no system
+  consistently. The burner's flame light is the emissive flame, glow sprite and the fabric lit
+  from inside (no pooled PointLight, so the light pool's spawn budget is untouched).
+  docs/architecture.md rows for SimBalloon, balloon.js and balloonFamily.js are left to I2 /
+  Milestone O to avoid nine-way table conflicts.
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 

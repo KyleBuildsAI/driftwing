@@ -1,8 +1,8 @@
 // Instrument HUD overlay: the active craft's instruments (craft.instruments) as glass tiles in the
 // v1 HUD style, for readability in any view. Off by default (settings.hud.overlay). A craft module may
-// pin instruments its pilot always needs (module.hud.instruments, e.g. the tiltrotor's conversion
-// corridor): with the overlay off those tiles still show, except while a cockpit panel (which carries
-// them) is on screen.
+// pin instruments its pilot always needs (module.hud.instruments: the tiltrotor's conversion corridor,
+// the balloon's wind-layer column and envelope): with the overlay off those tiles still show, except
+// while a cockpit panel (which carries them) is on screen.
 //
 // The tiles form a grid on the right edge. Its band runs between whatever v1 HUD element sits above
 // it (top bar, stats or dev badge, touch chips) and below it (seed card, mic, touch controls),

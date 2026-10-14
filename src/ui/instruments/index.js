@@ -31,9 +31,11 @@ import figure from './figure.js';
 import waterRudder from './waterRudder.js';
 import nacelle from './nacelle.js';
 import speedBar from './speedBar.js';
+import envelope from './envelope.js';
+import windColumn from './windColumn.js';
 
 export const INSTRUMENTS = Object.freeze(Object.fromEntries(
-  [airspeed, altitude, attitude, heading, vsi, aoa, gMeter, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide, proximity, smoke, figure, waterRudder, nacelle, speedBar]
+  [airspeed, altitude, attitude, heading, vsi, aoa, gMeter, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide, proximity, smoke, figure, waterRudder, nacelle, speedBar, envelope, windColumn]
     .map((instrument) => [instrument.id, instrument]),
 ));
 export const INSTRUMENT_IDS = Object.freeze(Object.keys(INSTRUMENTS));

@@ -28,6 +28,7 @@ import { createProprotorSynth } from './proprotor.js';
 import { createWingsuitSynth } from './wingsuit.js';
 import { createAerobaticPropSynth } from './aerobaticProp.js';
 import { createParagliderSynth } from './paraglider.js';
+import { createBurnerSynth } from './burner.js';
 
 const COMMON_DEFAULTS = Object.freeze({
   airflowSpeed: 60,
@@ -100,6 +101,7 @@ export const ENGINE_FAMILIES = Object.freeze({
     // flutterHz (canopy flutter rate at trim; folded fabric flaps faster). The variometer is on by default.
     defaults: { flutterHz: 3.2, airflowSpeed: 16, interiorCutoff: 0, touchdown: 'body', callouts: false, vario: true, varioLift: 0.1, varioSink: -2.5 },
   },
+  burner: { create: createBurnerSynth, defaults: { roarHz: 320, creakRate: 1.2, airflowSpeed: 25, interiorCutoff: 0, touchdown: 'body', callouts: false } },
 });
 
 const PROFILE_CACHE = new WeakMap();

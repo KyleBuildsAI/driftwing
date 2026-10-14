@@ -25,6 +25,7 @@ import aerobatic from './aerobatic.js';
 import seaplane from './seaplane.js';
 import tiltrotor from './tiltrotor.js';
 import paraglider from './paraglider.js';
+import balloon from './balloon.js';
 
 export const CRAFT_SCENARIO_SETS = Object.freeze([
   glider,
@@ -37,4 +38,5 @@ export const CRAFT_SCENARIO_SETS = Object.freeze([
   seaplane,
   tiltrotor,
   paraglider,
+  balloon,
 ]);
