@@ -25,6 +25,7 @@ import { createJetSynth } from './jet.js';
 import { createPropSynth } from './prop.js';
 import { createRadialSynth } from './radial.js';
 import { createProprotorSynth } from './proprotor.js';
+import { createRocketSynth } from './rocket.js';
 import { createWingsuitSynth } from './wingsuit.js';
 import { createAerobaticPropSynth } from './aerobaticProp.js';
 import { createParagliderSynth } from './paraglider.js';
@@ -102,6 +103,12 @@ export const ENGINE_FAMILIES = Object.freeze({
     create: createParagliderSynth,
     // flutterHz (canopy flutter rate at trim; folded fabric flaps faster). The variometer is on by default.
     defaults: { flutterHz: 3.2, airflowSpeed: 16, interiorCutoff: 0, touchdown: 'body', callouts: false, vario: true, varioLift: 0.1, varioSink: -2.5 },
+  },
+  rocket: {
+    create: createRocketSynth,
+    // roarHz (the roar's resonant body), rumbleHz (the structure-borne sub tone); airflowBasis
+    // 'equivalent' makes the airflow beds follow the dynamic pressure (silent in vacuum).
+    defaults: { roarHz: 95, rumbleHz: 34, airflowBasis: 'equivalent', airflowSpeed: 280, interiorCutoff: 600, stallHorn: true, stallHornStyle: 'beep', motorPitch: 0.8 },
   },
   burner: { create: createBurnerSynth, defaults: { roarHz: 320, creakRate: 1.2, airflowSpeed: 25, interiorCutoff: 0, touchdown: 'body', callouts: false } },
   airshipProp: { create: createAirshipPropSynth, defaults: { cylinders: 4, blades: 4, maxRpm: 2300, idleRpm: 700, airflowSpeed: 30, interiorCutoff: 900, touchdown: 'wheels', callouts: false } },

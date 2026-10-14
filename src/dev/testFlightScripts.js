@@ -190,6 +190,14 @@ const EAGLE = Object.freeze({
   checks: [CHECK.autopilot, CHECK.bank, CHECK.dive],
 });
 
+// The spaceplane: a rocket on the throttle and attitude hold on the second ability, the speed brake on
+// both toe brakes; its roll is quick on the elevons and the jets, so a short, light input.
+const SPACEPLANE = simFixedWing([
+  { at: 0.56, label: 'full rocket thrust, attitude hold on (second ability)', run: (pilot) => { pilot.throttle(1); pilot.action('craftAbilityAlt'); } },
+  { at: 0.64, label: 'attitude hold off, thrust back, speed brake out', run: (pilot) => { pilot.action('craftAbilityAlt'); pilot.throttle(0.07); pilot.brakes(1); } },
+  { at: 0.72, label: 'speed brake in', run: (pilot) => pilot.brakes(null) },
+], [{ id: 'speedBrake', label: 'speed brake out', test: (seen) => seen.maxAirbrake >= 0.5 }], { roll: 0.25, rollEnd: 0.5 });
+
 const SCRIPTS = Object.freeze({
   glider: GLIDER,
   bushplane: BUSHPLANE,
@@ -205,6 +213,7 @@ const SCRIPTS = Object.freeze({
   balloon: BALLOON,
   airship: AIRSHIP,
   eagle: EAGLE,
+  spaceplane: SPACEPLANE,
 });
 
 /** The script for a craft ({ steps, checks }), or null when none exists. */
@@ -213,4 +222,4 @@ export function flightScriptFor(craft) {
 }
 
 /** Every craft id with a script, in the harness's run order. */
-export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic', 'seaplane', 'tiltrotor', 'paraglider', 'balloon', 'airship', 'eagle']);
+export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic', 'seaplane', 'tiltrotor', 'paraglider', 'balloon', 'airship', 'eagle', 'spaceplane']);

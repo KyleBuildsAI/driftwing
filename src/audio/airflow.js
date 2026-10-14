@@ -130,7 +130,8 @@ export function createAirflow(kit) {
     /** frame: see AudioEngine buildFrame(). Called at the parameter interval. */
     update(frame) {
       const { time, interval, player, flight, profile } = frame;
-      const speed = flight.airspeed;
+      // airflowBasis 'equivalent' (the spaceplane): the beds follow the dynamic pressure, so they thin out with the air.
+      const speed = profile.airflowBasis === 'equivalent' ? flight.indicatedAirspeed : flight.airspeed;
       const speedRatio = clamp((Number.isFinite(speed) ? speed : 0) / profile.airflowSpeed, 0, 1.4);
       const gLoad = clamp(Math.abs((Number.isFinite(flight.gLoad) ? flight.gLoad : 1) - 1), 0, 3);
       const inCloud = clamp(Number.isFinite(player.inCloud) ? player.inCloud : 0, 0, 1);

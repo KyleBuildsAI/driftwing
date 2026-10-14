@@ -951,6 +951,8 @@ export function createCopilotSystem(ctx) {
   const { state, bus, settings, world } = ctx;
   const MIN_CHATTER_GAP = 30;
   const QUIET_AFTER_ANY_LINE = 10;
+  /** What WREN's subtitle shows of a line lost in a comms blackout. */
+  const BLACKOUT_STATIC = '(static)';
   const PENDING_CHATTER_TTL = 40;
   const ERROR_DISPLAY_SECONDS = 3;
   const LANDMARK_SEARCH_RADIUS = 12000;
@@ -1051,9 +1053,18 @@ export function createCopilotSystem(ctx) {
   })();
 
   let lastLineAt = -Infinity;
+  /** A comms blackout (the spaceplane's re-entry plasma, craftState.commsBlackout) cuts WREN off. */
+  function commsBlackout() {
+    return state.flight.craftState?.commsBlackout === true;
+  }
   function say(text, source) {
     const line = Copilot.cleanText(String(text ?? ''), Copilot.MAX_SPEECH_LENGTH);
     if (!line) return '';
+    if (commsBlackout()) {
+      // The line is lost in the static: a subtitle, no voice. The craft checks in once the link is back.
+      bus.emit('copilot:speech', { text: BLACKOUT_STATIC, source: 'static' });
+      return '';
+    }
     lastLineAt = state.time.realElapsed;
     bus.emit('copilot:speech', { text: line, source });
     voiceOutput.speak(line);
@@ -1669,7 +1680,7 @@ export function createCopilotSystem(ctx) {
   // Replies in flight: unsolicited lines wait so they never talk over the pilot or the answer.
   let asksInFlight = 0;
   function chatterAllowed() {
-    if (!settings.get('copilotChatter') || state.photoMode || !state.ready) return false;
+    if (!settings.get('copilotChatter') || state.photoMode || !state.ready || commsBlackout()) return false;
     if (asksInFlight > 0 || voiceInput.isListening()) return false;
     const now = state.time.realElapsed;
     return now - chatter.lastUnsolicitedAt >= MIN_CHATTER_GAP && now - lastLineAt >= QUIET_AFTER_ANY_LINE;

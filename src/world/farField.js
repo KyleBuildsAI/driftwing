@@ -58,6 +58,8 @@ const MESH_HEADROOM = 64;
 /** Selection stack and selection list capacities. */
 const STACK_CAPACITY = 4096;
 const MAX_SELECTED = 900;
+/** Roots this many root sizes past the reach load ahead (prefetchRoots). */
+const PREFETCH_ROOTS = 1;
 /** The far-field ground sits this share of the horizontal distance below the true ground. */
 const FAR_SINK = 0.002;
 /** Skirt depth: this share of the tile size plus a floor (m). */
@@ -484,6 +486,31 @@ export function createFarFieldSystem(ctx) {
       }
       if (selectedCount < MAX_SELECTED) selected[selectedCount++] = record;
       touchLineage(level, tileX, tileZ);
+    }
+    prefetchRoots(rootSize, height);
+  }
+
+  /**
+   * Roots within PREFETCH_ROOTS root sizes past the reach load ahead and stay kept: a fast climb pushes
+   * the horizon out and fast flight carries it along, so a root that enters the reach is already built
+   * and the coverage never opens a hole at its edge.
+   */
+  function prefetchRoots(rootSize, height) {
+    const prefetch = view.reach + rootSize * PREFETCH_ROOTS;
+    const minX = Math.floor((view.x - prefetch) / rootSize);
+    const maxX = Math.floor((view.x + prefetch) / rootSize);
+    const minZ = Math.floor((view.z - prefetch) / rootSize);
+    const maxZ = Math.floor((view.z + prefetch) / rootSize);
+    for (let rootZ = minZ; rootZ <= maxZ; rootZ++) {
+      for (let rootX = minX; rootX <= maxX; rootX++) {
+        const gapX = Math.max(rootX * rootSize - view.x, 0, view.x - (rootX + 1) * rootSize);
+        const gapZ = Math.max(rootZ * rootSize - view.z, 0, view.z - (rootZ + 1) * rootSize);
+        const nearest = Math.sqrt(gapX * gapX + gapZ * gapZ);
+        if (nearest <= view.reach || nearest > prefetch) continue;
+        const record = recordFor(ROOT_LEVEL, rootX, rootZ);
+        if (record !== undefined && record.state === STATE_READY) touch(record);
+        else requestTile(ROOT_LEVEL, rootX, rootZ, -ROOT_LEVEL * 1000 + Math.sqrt(nearest * nearest + height * height) / rootSize);
+      }
     }
   }
 

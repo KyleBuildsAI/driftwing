@@ -16,6 +16,7 @@ import paraglider from './paraglider.js';
 import balloon from './balloon.js';
 import airship from './airship.js';
 import eagle from './eagle.js';
+import spaceplane from './spaceplane.js';
 
 craftRegistry.register(glider);
 craftRegistry.register(bushplane);
@@ -30,5 +31,6 @@ craftRegistry.register(paraglider);
 craftRegistry.register(balloon);
 craftRegistry.register(airship);
 craftRegistry.register(eagle);
+craftRegistry.register(spaceplane);
 
 export { craftRegistry };

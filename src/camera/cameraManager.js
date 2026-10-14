@@ -24,7 +24,8 @@
 // ControlState.antenna narrows the lens (up to 3x). Near planes are per view (cockpit 8 cm) and the
 // v1 near plane comes back for chase and photo mode. Above 12 km the third-person cameras (chase,
 // flyby, photo) widen it with altitude, up to 3 m by 40 km (contract g.2), so the depth range spans the
-// planet out to its horizon (600 km) on the WebGL2 fallback too; below 12 km nothing changes.
+// planet out to its horizon (600 km) on the WebGL2 fallback too, where the cockpit's widens to 40 cm (the
+// spaceplane); below 12 km nothing changes.
 //
 // Turbulence shake (turbulenceShake.js): after the view writes its pose, the WindField's turbulence at
 // the craft (state.flight.turbulence) rotates the camera a little, per view (none on the flyby
@@ -74,6 +75,8 @@ const REDRAW_HISTORY = 31;
 const ALTITUDE_NEAR_START = 12000;
 const ALTITUDE_NEAR_FULL = 40000;
 const ALTITUDE_NEAR_MAX = 3;
+/** The cockpit near plane at ALTITUDE_NEAR_FULL on the WebGL2 fallback (m; cockpitNear). */
+const COCKPIT_ALTITUDE_NEAR = 0.4;
 
 export function createCameraSystem(ctx) {
   const { camera, state, settings, bus, world } = ctx;
@@ -255,10 +258,23 @@ export function createCameraSystem(ctx) {
   }
 
   function viewNear(viewId) {
-    if (viewId === 'cockpit') return views.cockpit.near;
+    if (viewId === 'cockpit') return cockpitNear();
     if (viewId === 'fpv') return views.fpv.nearFor(currentRig());
     if (viewId === 'wing') return views.wing.near;
     return thirdPersonNear();
+  }
+
+  /**
+   * The cockpit's near plane; on the WebGL2 fallback (forward depth) it widens above ALTITUDE_NEAR_START to
+   * COCKPIT_ALTITUDE_NEAR by ALTITUDE_NEAR_FULL, so the planet stays inside the depth range from space
+   * (the spaceplane). WebGPU's reversed depth needs none; no other craft climbs high enough to see it.
+   */
+  function cockpitNear() {
+    const near = views.cockpit.near;
+    const altitude = camera.position.y;
+    if (camera.reversedDepth || !(altitude > ALTITUDE_NEAR_START)) return near;
+    const share = clamp((altitude - ALTITUDE_NEAR_START) / (ALTITUDE_NEAR_FULL - ALTITUDE_NEAR_START), 0, 1);
+    return Math.max(near, Math.round(COCKPIT_ALTITUDE_NEAR * share * 100) / 100);
   }
 
   /** The v1 near plane, widened with the camera's altitude above ALTITUDE_NEAR_START (third person). */

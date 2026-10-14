@@ -35,9 +35,13 @@ import envelope from './envelope.js';
 import windColumn from './windColumn.js';
 import ballonet from './ballonet.js';
 import perch from './perch.js';
+import mach from './mach.js';
+import apogee from './apogee.js';
+import heating from './heating.js';
+import rcs from './rcs.js';
 
 export const INSTRUMENTS = Object.freeze(Object.fromEntries(
-  [airspeed, altitude, attitude, heading, vsi, aoa, gMeter, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide, proximity, smoke, figure, waterRudder, nacelle, speedBar, envelope, windColumn, ballonet, perch]
+  [airspeed, altitude, attitude, heading, vsi, aoa, gMeter, throttle, flapsGear, rotorRpm, torque, radarAlt, vario, ld, droneMode, glide, proximity, smoke, figure, waterRudder, nacelle, speedBar, envelope, windColumn, ballonet, perch, mach, apogee, heating, rcs]
     .map((instrument) => [instrument.id, instrument]),
 ));
 export const INSTRUMENT_IDS = Object.freeze(Object.keys(INSTRUMENTS));

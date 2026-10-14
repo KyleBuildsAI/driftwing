@@ -62,6 +62,12 @@ export const EVENT_TYPES = Object.freeze({
   windSourceRemoved: { id: 'string', kind: 'string' },
   /** Camera view changed. */
   viewChanged: { view: 'string', craft: 'string' },
+  /**
+   * The spaceplane's re-entry (src/craft/spaceplane.js): 'heating' as the plasma builds on the way down
+   * from space, 'blackout' while it cuts the radio link, 'clear' once the link is back. heating is the
+   * craft's heating index (0..1, from rho V^3).
+   */
+  reentry: { phase: ['heating', 'blackout', 'clear'], heating: 'number' },
   /** An input device connected or disconnected (identified by vendor/product, never slot). */
   deviceConnected: { deviceKey: 'string', kind: 'string', name: 'string' },
   deviceDisconnected: { deviceKey: 'string', kind: 'string', name: 'string' },

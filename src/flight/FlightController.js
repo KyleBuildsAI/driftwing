@@ -1658,6 +1658,8 @@ export function createFlightController(ctx) {
     /** What a flame can light (ctx.ignition, src/gameplay/ignition.js): the dragon's fire breath. */
     ignition: ctx.ignition ?? null,
     notify,
+    /** The typed event bus (journalStat and the craft's own typed events). */
+    bus,
     /** True while an action is held (hold-type abilities: the balloon's burner, the dragon's fire). */
     isHeld(actionId) {
       return liveControls.held.has(actionId);
