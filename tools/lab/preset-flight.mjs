@@ -23,6 +23,10 @@
 //   thermal hawks  the glider circling at 45 degrees of bank where the hawks circle (their group
 //                  centre and height), at midday: it climbs with the hawks, against the same circle at
 //                  night when the thermals are off; the jet straight through the column: a load bump
+//   dust devils    (preset 89, the cactus forest) the glider and the jet straight through the larger
+//                  wandering devil's core at least 25 m above the ground, aimed at where its track will
+//                  have taken it: the glider meets rough air and a kick of lift, the jet an airspeed
+//                  jolt from the spin; neither loses control
 //
 // Usage: node tools/lab/preset-flight.mjs [--verbose]
 // Prints one line per check and the flight log, and exits non-zero if any check fails.
@@ -115,7 +119,7 @@ function createLab(seed, { sunElevation = 50 } = {}) {
     sky: null, bus, perf: null, settings: null, uniforms, registry, presets: [], seed, water, surfaces: createGroundSurfaces(),
   });
   for (const createEngine of [createVortexEngine, createFaunaEngine, createStructureEngine, createWaterEffectEngine]) manager.register(createEngine());
-  for (const id of ['maelstrom', 'windFarm', 'thermalHawks']) manager.addPreset(PRESET_BY_ID[id]);
+  for (const id of ['maelstrom', 'windFarm', 'thermalHawks', 'cactusDustDevils']) manager.addPreset(PRESET_BY_ID[id]);
   manager.init();
   const ground = (x, z) => Math.max(world.groundHeight(x, z), CONFIG.WATER_LEVEL);
   /** Advances the world one frame with the camera (LOD, view) at the craft. */
@@ -481,6 +485,64 @@ function testThermalHawks() {
   check('hawks', 'jet straight through the hawks\' column: a load bump against the night', jetMidday.air.maxLoad - jetMidday.air.minLoad > jetNight.maxLoad - jetNight.minLoad + 0.05 && !jetMidday.air.crashed, jetDetail);
 }
 
+function testDustDevils() {
+  const found = findSite('cactusDustDevils');
+  check('dust devils', 'a cactus forest is placed within 60 km on one of the lab seeds', found !== null, found ? `${found.seed}: ${found.site.id}` : 'none');
+  if (!found) return;
+  const { seed, site } = found;
+  const activate = (lab) => {
+    const id = lab.manager.activate('cactusDustDevils', { position: { x: site.x, y: site.groundY, z: site.z }, source: 'site', site });
+    if (!id) throw new Error('the cactus forest was refused');
+    return id;
+  };
+  // The larger devil's track over the first minute (the same in every lab: the track is seeded and
+  // walked on the flight clock from the activation).
+  const probe = createLab(seed);
+  const spawnId = activate(probe);
+  const track = [];
+  const parked = new THREE.Vector3(site.x, site.groundY + 400, site.z + 1500);
+  for (let frame = 0; frame < 60 * 60; frame++) {
+    probe.frame(parked, new THREE.Vector3());
+    const anchor = probe.manager.getParts(spawnId)[0].anchor;
+    track.push({ x: anchor.x, z: anchor.z });
+  }
+  const walked = Math.hypot(track[track.length - 1].x - track[0].x, track[track.length - 1].z - track[0].z);
+  const out = { vel: new THREE.Vector3(), turbulence: 0 };
+  const core = track[track.length - 1];
+  const coreGround = probe.ground(core.x, core.z);
+  const calmProbe = createLab(seed);
+  calmProbe.state.time.elapsed = probe.state.time.elapsed;
+  const at = (dx, height) => new THREE.Vector3(core.x + dx, coreGround + height, core.z);
+  const lift = probe.wind.probe(at(0, 25), probe.state.time.elapsed, out).vel.y - calmProbe.wind.probe(at(0, 25), calmProbe.state.time.elapsed, out).vel.y;
+  const spin = probe.wind.probe(at(6, 15), probe.state.time.elapsed, out).vel.z - calmProbe.wind.probe(at(6, 15), calmProbe.state.time.elapsed, out).vel.z;
+  check('dust devils', 'each devil wanders on its track and blows a real vortex: lift in the core, a spin at its edge', walked > 30 && lift > 3 && Math.abs(spin) > 6,
+    `walked ${Math.round(walked)} m in 60 s; ${round(lift, 1)} m/s more lift in the core at 25 m, ${round(spin, 1)} m/s of spin 6 m out`);
+  for (const entry of [GLIDER, JET]) {
+    // Aim to cross the core where the track puts it `cross` seconds into the flight.
+    const cross = entry === JET ? 4 : 12;
+    const target = track[Math.round(cross / FRAME) - 1];
+    const heading = 90;
+    const start = offset(target.x, target.z, heading + 180, entry.speed * cross);
+    // 25 m over the core, or higher where the ground on the way rises (the craft must clear it).
+    let altitude = probe.ground(target.x, target.z) + 25;
+    for (let step = 0; step <= 40; step++) {
+      const sample = offset(start.x, start.z, heading, (entry.speed * cross * 2 * step) / 40);
+      altitude = Math.max(altitude, probe.ground(sample.x, sample.z) + 25);
+    }
+    const plan = { altitude, heading, start, seconds: cross * 2, target: { x: target.x, z: target.z }, skip: 0.5 };
+    const { calm, air } = compare(seed, entry, plan, activate);
+    const detail = record('dust devil: through the core', entry.label, calm, air);
+    const aimed = `closest approach to the core ${round(air.closest, 1)} m; ${detail}`;
+    if (entry === GLIDER) {
+      check('dust devils', 'glider through the core: rough air and a kick of lift, no loss of control', air.closest < 20 && air.maxTurbulence > calm.maxTurbulence + 0.2 && air.maxVertical > calm.maxVertical + 0.5 && !air.crashed, aimed);
+    } else {
+      // Low over this ground the jet's air is already rough (lee chop); the devil's spin is a jolt in
+      // its airspeed as it crosses the core in a tenth of a second.
+      check('dust devils', 'jet through the core: an airspeed jolt from the spin, no tumble', air.closest < 20 && swing(air) > swing(calm) + 5 && air.minLoad > -0.5 && air.maxLoad < 3.5 && !air.crashed, aimed);
+    }
+  }
+}
+
 // ============================================================================================
 // RUN
 // ============================================================================================
@@ -488,6 +550,7 @@ const started = Date.now();
 testMaelstrom();
 testWindFarm();
 testThermalHawks();
+testDustDevils();
 check('console', 'no console errors from the engines and the manager', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 
 process.stdout.write('\nflight log (calm -> with the preset)\n');
