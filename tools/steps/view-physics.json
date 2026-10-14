@@ -33,7 +33,13 @@
     "eval": "window.__viewPhysics.check('tiltrotor')"
   },
   {
+    "eval": "window.__viewPhysics.check('paraglider')"
+  },
+  {
     "eval": "window.__viewPhysics.check('balloon')"
+  },
+  {
+    "eval": "window.__viewPhysics.check('airship')"
   },
   {
     "eval": "window.__viewPhysics.check('eagle')"
