@@ -253,10 +253,6 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   degrades and craft switches in a probe never reproduced it. The collision test now holds the
   quality at high; the shadow resize path (sky.js `applyShadowQuality`) needs a look by its owner.
 
-| 4 | Fauna ground and water-surface modes (bison, caribou, dolphin, flamingo), PathFollower, the challenge system with the ring migration and the challenge UI | `p3/fauna-challenges` | e, f | in progress |
-| 5 | High-altitude and space rendering: atmosphere, sky / fog / stars / limb, curvature and the planet radius, the far-field impostor, lures from altitude, the per-craft ceiling | `p3/high-altitude` | g | not started |
-| I1 | Integration pass: merge in the order origin, high altitude, water/regions, colliders, fauna/challenges; the follow-ups of contract appendix A; every lab and step file once on both backends | `v2-phase3` | appendix A | not started |
-
 ### Wave 1 - p3/fauna-challenges
 
 - **Done:** the ring golden logs (contract f.4), recorded from the unmodified Phase 2 `rings.js`
@@ -443,17 +439,17 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 | # | Work | Branch | Contract | Status |
 | --- | --- | --- | --- | --- |
-| 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | in progress (branch complete, awaiting I2) |
-| 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | in progress (branch complete, awaiting I2) |
-| 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | in progress (branch complete, awaiting I2) |
-| 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | in progress (branch complete, awaiting I2) |
-| 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | branch complete, awaiting I2 |
-| 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | done (branch complete, awaiting I2) |
-| 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | in progress (branch complete, awaiting I2) |
-| 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | in progress (branch complete, awaiting I2) |
-| 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | in progress (branch complete, awaiting I2) |
-| P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | in progress (branch complete, awaiting I2) |
-| I2 | Integration pass: merge 2.0 first (before the craft branches start), then the craft branches in catalog order and the picker / director branch; `?test=craft` on both backends | `v2-phase3` | | not started |
+| 2.0 | Craft framework (lands first, alone): catalog and groups, settings, favorites actions, `situate`, ability api, `craftCommand`, custom cockpits, `?test=craft` scaffold | `p3/craft-framework` | h.9 | done |
+| 7 | Aerobatic: symmetric airfoil, snap rolls, knife-edge, torque roll, smoke ribbons, the maneuver recognizer (12 figures, lomcevak at low assists) | `p3/craft-aerobatic` | h | done |
+| 8 | Seaplane: per-float buoyancy, hump and step, porpoising, water rudders, spray, amphibian gear | `p3/craft-seaplane` | h | done |
+| 9 | Tiltrotor: nacelle 0-97 degrees with detents, hover and airplane modes, the conversion corridor, auto-nacelle | `p3/craft-tiltrotor` | h | done |
+| 10 | Paraglider: two-body pendulum, speed bar, brakes, weight shift, big ears, collapses, thermals, relaunch | `p3/craft-paraglider` | h | done |
+| 11 | Hot air balloon: buoyancy with thermal lag, burner and vents, wind-layer column, altitude hold, basket landings | `p3/craft-balloon` | h | done |
+| 12 | Airship: ballonet trim, vectored props, gondola view, scenic cruise | `p3/craft-airship` | h | done |
+| 13 | Eagle / Dragon: flapping flight, soaring, perch, screech / fire breath, ignition service, fauna threat | `p3/craft-eagle` | h | done |
+| 14 | Spaceplane: rocket, RCS blend, Mach / altitude / apogee, re-entry heating, plasma, blackout, hypersonic glide | `p3/craft-spaceplane` | h | done |
+| P | Picker rework (groups, skins, favorites 1-0, HOTAS cycling), situational spawn rules, director updates (ground track, craft weighting, combos, global overrides) | `p3/picker-director` | h.7, i | done |
+| I2 | Integration pass: merge 2.0 first (before the craft branches start), then the craft branches in catalog order and the picker / director branch; `?test=craft` on both backends | `v2-phase3` | | done |
 
 ### Wave 2 - p3/craft-framework
 
@@ -985,6 +981,85 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   nearly the whole world. A combo's delayed member can lose a reserved heavy slot to a site coming
   into range (the manager never refuses a site); it then retries and is dropped after 60 s, logged.
 
+### Wave 2 - integration (I2, on `v2-phase3`)
+
+- **Merged** in catalog order with `--no-ff`, one commit each: aerobatic `3db9a61`, seaplane
+  `5f41963`, tiltrotor `fd73aa9`, paraglider `6acf5a0`, balloon `17b9c44`, airship `3387ab4`,
+  eagle `d955fba`, spaceplane `3bbc50f`, picker / director `caf7fbd` (the framework, 2.0, was merged
+  before the craft branches started). Conflicts were the list files (`src/craft/index.js`,
+  `src/flight/models.js` kinds and registrations, `src/audio/engines/index.js`,
+  `src/ui/instruments/index.js`, `src/dev/craftScenarios/index.js`, `src/dev/testFlightScripts.js`:
+  every line kept, in catalog order), `tools/lab/craft.mjs` (one generic catalog check kept),
+  `tools/steps/view-physics.json` (every check step, in catalog order, and one closing step that
+  expects every registered craft), `docs/architecture.md` / `docs/controls.md` rows (all kept),
+  `src/dev/testHarness.js` (the header without a craft count), `src/ui/instrumentHud.js` (below) and
+  this file (every subsection, rebuilt in catalog order from each branch's own copy).
+- **Wiring and fixes** (first parent after `caf7fbd`):
+  - one pinned-HUD hook: the tiltrotor (`hud: { instruments }` with the cockpit-panel rule) and the
+    balloon (`hudInstruments`) had each built one in `instrumentHud.js`; the merge keeps the
+    tiltrotor's and the balloon declares `hud: { instruments: ['windColumn', 'envelope'] }`; the
+    registry validates `hud` (each tile one of the craft's instruments) (`17b9c44`, `8f3c139`);
+  - the airship's scenic cruise reports its journal stats as typed `journalStat` events through the
+    ability api's `bus` (the spaceplane branch added it) instead of calling the journal system
+    (`c5ba936`); the cruise already builds its chain from `director.getNearby()`;
+  - director: the spaceplane's own `directorProfile` favoured an unknown `heavy` tag above 20 km, so
+    far-lure spawns were never weighted and ground-only small spawns never dropped (contract i.2); it
+    now favours `celestial` / `farLure` and weights wildlife, structures and flight play at 0.25. The
+    registry refuses favour names outside `PRESET_TAGS` / `PRESET_CATEGORIES`. The craft lab checks
+    every catalog id through the game's profile lookup (the module's profile, else
+    `DEFAULT_DIRECTOR_PROFILES`) and the i.2 profiles on the real modules (`8f3c139`, `30b0c89`).
+    "Ahead" follows `state.player.velocity`, the inertial velocity the balloon and airship models
+    write, so their drift is the ground track;
+  - fauna threat: `faunaThreatOf(module)` in `src/craft/registry.js` is the one lookup; the fauna
+    engine uses it and the ambient bird flocks (`src/render/birds.js`) now scale their trigger and
+    scatter distances by it (the eagle 2.5, the balloon 0.6) (`30b0c89`);
+  - ignition: engines reach the dragon's service as `ctx.game.ignition`; an engine lists what it
+    registers in `instance.ignitableIds`, the SpawnManager removes and reports leftovers
+    (`leaks.ignitables`), and the spawn check kit, the spawns test and the harness table judge
+    ignitables against their baseline (contract appendix B); the spawns lab covers both paths
+    (`465a6e4`, `2cf39b1`);
+  - tests: the paraglider's and the airship's view-physics steps (`5b7cc24`); the craft test holds a
+    scenario's time of day with the day clock frozen (the paraglider's own per-frame noon hold is gone)
+    and takes an optional `endWhen(api)` (`77eeca7`); the continuous
+    `spaceplane-space-and-back` scenario (the climb placement, full power past 100 km to the apogee,
+    auto re-entry, blackout and glide, home under 3 km in one flight; an engine cut at 100 km tops out
+    near 107 km and never heats past the blackout, as a node simulation showed) and run-harness's
+    six-hour limit for a full craft test (`8033dee`); the discovery step's wider search for a visible
+    test event spot (`c3c669a`: from a high opening spawn no spot 300-900 m ahead was within 24
+    degrees of the camera, on both backends);
+  - the audio families in catalog order (`be92b99`); docs/architecture.md: the 14 craft's files, the
+    12 model kinds, the 14 audio families, the 30 instruments, the labs, `hud`, `faunaThreatOf`,
+    the ability api's `ignition` and `bus`, ignitable clean-up, the craft test's time hold and
+    `endWhen` (`70d1e49`).
+- **Verified on the merged tree (2026-10-13/14, each once on both backends unless noted):**
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `npm run build:single` (V1 SHA-256 matches), `npm run test:v1`, `node tools/docs-check.mjs` | built; 2/2; 244/244; one three.js core; no dev kit in the V2 bundle | (same build) |
+  | Labs (`--expose-gc`): flight-lab 82, aerobatic 81, airship 47, atmosphere 28, balloon 66, challenges 70, colliders 84, copilot 240, copilot-server 17, craft 81, director 88, discovery 43, eagle 50, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, paraglider 45, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden 6/6, seaplane 113, setpiece 47, settings 45, spaceplane 24, spawns 101, storage 54, structure 75, terrain 404, tiltrotor 41, water 34, wind-engines 56, wingsuit 37 | all pass; eagle 49/50 on its first run (the model-step allocation sample 144 B/tick, wingsuit 110 B in the same run, beside a browser run), 50/50 alone (39 B); audio 190/191 alone (WebGPU thunder trigger 5.6 dB against 6 dB, the known random render) | |
+  | `run-harness --test craft` (14 craft: 28 general runs, 68 scenario runs) | 94/96 runs: 0 NaN, 0 penetrations, 0/0 console; checks 385/386; one soft crash (eagle-perch-placement, third person: a beak strike at 17.5 m/s 5 s into the fly-out from a perch its own start search picked, all its checks passed); balloon-wind-layer first person missed "the target band is the nearest for 30 s" (passes alone: 6/6) | 95/96 runs: 0 NaN, 0 penetrations, 0 soft crashes, 0/0; checks 385/386 (the same balloon-wind-layer first-person check) |
+  | Required scenarios | recognizer loop and aileron roll, seaplane ocean and lake, tiltrotor conversion both ways, paraglider thermal climb, balloon wind layer (third person), airship scenic cruise (3 sites), eagle perch and takeoff, spaceplane climb, re-entry and space-and-back (603-674 s, continuity within 1 mm, 0 far-field holes, both readback probes clean): all pass in both views except as noted | same |
+  | `run-harness --test collision` | PASS: 146/146 strikes (the spaceplane included), 15/15 targets, 0 pass-throughs, 0 penetrations, bump, deck, dives, tunnel, arch, 15/15 kite misses | PASS, same |
+  | `run-harness --test determinism` | PASS: site list d85384433861a1b0, water 61f315c9, director log 703b9a83 (it records the craft now), spawn events 961c09f2, path 55b1a55f | PASS, identical |
+  | `run-harness --test spawns` (30 presets) | PASS 30/30 every criterion; lowest avg 91.6 fps, worst p99 22.6 ms | 29/30 on "lights, sky modifiers, ...": the meteor shower's first cycle read 2 -> 1 sky modifiers (one that was live at its baseline ended during the check; its second cycle clean); 44.7 fps lowest, p99 45.3 ms |
+  | `run-harness --test terrain`, `--test hotas` | PASS (9/9 stamp types, 5/5 overlays, 0 cracks, 1002 chunks parity); 140/140 | PASS, same; 140/140 |
+  | `run-harness --test 1` reduced (HARNESS-1/2, glider and jet, both views, 20 s) | 0 NaN, 0 penetrations, 0/0, heap 13.76 MB, 8/8 runs, 24/24 manoeuvres; frames over 50 ms 1 (main thread); one soft crash reported (HARNESS-2 glider first person, a hard landing at 8.8 s) | same criteria pass, heap 14.88 MB; frames over 50 ms 1 (main thread) |
+  | Step files: craft-picker 28, director-p3 14, director-game 3, view-physics (14 craft), copilot-guide 13, input-review 9, hotplug 6, origin-rebase 10, high-altitude 20, water-bodies 41, challenge 23, engine-fauna-modes 20, shadow-resize 5, discovery 17 | all pass, 0/0 (discovery failed 3 checks on both backends before `c3c669a` and passed 17/17 after it) | all pass, 0/0 (same for discovery) |
+  | `tools/spawn-check.mjs` | 55/55 | 55/55 |
+  | Built `dist-single/v2` and `dist-single/index.html` smoke | 0/0 each, screenshots differ | 0/0 each |
+
+- **Open issues (reported, not chased):** the eagle's fly-out from a perch struck once (above); the
+  balloon wind-layer check depends on the run order (the second view inherits the first run's state
+  and a later time of day; alone it passes); the reduced flight harness's glider hard landing; the WebGL2
+  spawns test's sky-modifier count moved by a modifier the check does not own; frames over 50 ms one
+  per backend (main thread). Left by the reports to Milestone O (j.1, j.2, h.3): the "switch to
+  [craft]" synonyms for the eight new craft and skins by name, the journal panel's Craft, Figures
+  and Challenges sections, the remote `flightState` craft fields, the HOTAS profiles of the new
+  craft in docs/controls.md (rows exist for the seaplane, tiltrotor and eagle), and the eight craft
+  in docs/copilot-api.md. Tiny per-craft math helpers (`moveToward`, `wrapSignedDegrees`, mesh
+  builders) stay in their files; no two craft built the same service twice beyond the HUD hook and the
+  stat path above.
+
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
 | # | Presets | Branch | Status |
@@ -1072,18 +1147,20 @@ presets (92-100) use the wave 2 combo scheduling.
 
 ## What's next
 
-Wave 1 is done: the five branches are merged into `v2-phase3`, wired and verified (the
-integration subsection above). Not pushed or tagged (the owner pushes).
+Waves 1 and 2 are done: the craft framework, the eight craft and the picker / director branch are
+merged into `v2-phase3`, wired and verified (the I2 subsection above). Not pushed or tagged (the owner
+pushes).
 
-Next: **wave 2 step 2.0, the craft framework** (`p3/craft-framework`, contract h.9), cut from
-`v2-phase3` and merged alone before the eight craft branches and the picker / director branch
-start. The wave 1 worktrees under `.claude/worktrees/p3-*` can be removed (unlink each
-`node_modules` junction first). The craft engineers build against the merged APIs listed in the
-integration subsection and the contract (origin a, colliders and probes b, water query and
-`onWater` c, atmosphere and ceilings g, challenges f, PathFollower e.2, `faunaThreat` e.1).
+Next: **wave 3, presets 31-100 in seven batches of ten** (`p3/presets-31-40` .. `p3/presets-91-100`,
+the spec's numbering), cut from `v2-phase3`; then I3 merges them in spec order (presets/index.js
+and spawnScenarios in order) and runs `?test=spawns` for all 100 on both backends. The wave 2
+worktrees under `.claude/worktrees/p3-*` can be removed (unlink each `node_modules` junction
+first).
 
 ## Open issues
 
+- **Wave 2 integration leftovers:** see the I2 subsection (the eagle's perch fly-out strike, the
+  balloon wind-layer run-order dependence, the Milestone O items the craft reports left).
 - **Wave 1 integration leftovers:** the WebGPU flight harness's frames over 50 ms on the busy
   machine (above); the shadow-map warning burst never reproduced on demand, so the fix is proven by
   the degrade path running clean, not by a before/after; golden-frame shot 1 (the first render of
