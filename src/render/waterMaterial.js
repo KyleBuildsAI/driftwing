@@ -5,7 +5,8 @@
 // - Ocean: Gerstner swell displaced in wrapped world space on the camera-following grid, per-pixel
 //   detail normals, Fresnel sky reflection (the sky dome's own radiance), an HDR sun glint whose lobe
 //   widens with distance, a moon glint, back-lit crest glow, cloud shadows and the local effects
-//   layer (waterEffects.js). See water.js for the grid.
+//   layer (waterEffects.js), whose shallows regions clear and tint the water over a lagoon or a reef.
+//   See water.js for the grid.
 // - Lake: the same wave table and the same sky, glint and cloud-shadow shading on a flat surface,
 //   with the waves scaled down (per body), shoreline foam from the basin depth baked into the mesh,
 //   the craft's foam trail from the effects layer's trail buffer, an optional body tint and the
@@ -38,6 +39,9 @@ const OCEAN_LOOK = Object.freeze({
   SUN_HALO_STRENGTH: 0.45,
   DETAIL_PHASE_WARP: 2.6,
   SKY_REFLECTION_GAIN: 0.8,
+  /** Phase 3 shallows regions: how far the body turns to their tint, and the share of opacity it loses. */
+  SHALLOWS_TINT: 0.85,
+  SHALLOWS_CLEAR: 0.62,
 });
 const TWO_PI = Math.PI * 2;
 const COMPONENT_NAMES = ['x', 'y', 'z', 'w'];
@@ -327,7 +331,10 @@ function createOceanMaterial(ctx, { waves, axis, gridHalfExtent, effects, clock,
   const subsurface = shallowColor.mul(uniforms.sunColor)
     .mul(pow(towardSun, 5).mul(crest.mul(crest)).mul(subsurfaceStrength).mul(oneMinus(cloudShadow.mul(0.8))));
 
-  const bodyColor = mix(deepColor, shallowColor, saturate(crest.mul(0.45).add(cosView.mul(0.35))));
+  // Shallows regions (a lagoon, a reef): the body turns toward their clear tint and grows more
+  // transparent, so the seabed and a wreck read through it. Exactly zero outside every region.
+  const shallows = effects.nodes.shallows();
+  const bodyColor = mix(mix(deepColor, shallowColor, saturate(crest.mul(0.45).add(cosView.mul(0.35)))), shallows.xyz, shallows.w.mul(OCEAN_LOOK.SHALLOWS_TINT));
   const waterAlbedo = bodyColor.mul(oneMinus(fresnel)).mul(oneMinus(cloudShadow.mul(0.55))).mul(oneMinus(effects.nodes.darken()));
   // Foam is lit like the land (diffuse), and hides the mirror, the glints and the subsurface glow.
   material.colorNode = mix(waterAlbedo, effects.nodes.foamColor.mul(0.82), foam);
@@ -337,7 +344,8 @@ function createOceanMaterial(ctx, { waves, axis, gridHalfExtent, effects, clock,
     .add(subsurface)
     .mul(oneMinus(foam.mul(0.85)))
     .add(effects.nodes.glowColor.mul(effectSurface.w.mul(1.35)));
-  material.opacityNode = mix(mix(float(OCEAN_LOOK.BASE_OPACITY), float(OCEAN_LOOK.GRAZING_OPACITY), fresnel), float(1), foam);
+  const opacity = mix(float(OCEAN_LOOK.BASE_OPACITY), float(OCEAN_LOOK.GRAZING_OPACITY), fresnel).mul(oneMinus(shallows.w.mul(oneMinus(fresnel)).mul(OCEAN_LOOK.SHALLOWS_CLEAR)));
+  material.opacityNode = mix(opacity, float(1), foam);
 
   return { kind: 'ocean', material, swellScale, waveOrigin, cameraOffset };
 }
