@@ -60,6 +60,7 @@ Offsets and directions are `[right, up, forward]` in metres, in the frame of the
 | `schedule` | object or null | | null | a seeded eruption cycle: `{ period [s,s] = [60,120], active [s,s] = [8,15], rampUp s = 1.5, rampDown s = 3, idle 0..1 = 0 (level between eruptions), startActive bool = false }` |
 | `pulse` | object or null | | null | a slow breathing of the level: `{ period s = 8, depth 0..1 = 0.4 }` |
 | `bursts` | object or null | | null | seeded bursts on top of the rate: `{ interval [s,s] = [4,10], count [n,n] = [20,60], speedScale = 1 (0..100), minLevel 0..1 = 0.2 }`. A burst fires only while the level is at least `minLevel` |
+| `gusts` | object or null | | null | the emission follows the WindField's gusts at the emission point (Phase 3: petal storms, falling leaves): `{ threshold 0.05..2 = 0.7, count [n,n] = [200,400], speedScale = 1 (0..100), cooldown s = 5 (0..600), follow 0..1 = 0.6 }`. Four times a second the engine reads the gust index (`WindField.gustAt`, the shape of the ambient gusts, about 0..1.2, times the wind strength; no terrain lookup, no allocation). The level eases toward `1 - follow + follow x min(1.6, index / threshold)`, so the rate and the voice swell with each gust, and a burst of `count` fires when the index rises through `threshold` after `cooldown`. A wind without `gustAt` (the node labs' stand-in) reads as calm |
 | `warmStart` | bool | | true (false for an emitter with bursts and no `rate`) | see above |
 | `endRamp` | s | 0..600 | 3 | an event fades its emission over this after its duration, and ends once the last particle has died |
 | `particles` per frame | | | | at most 4096 emitted per frame, so a long stall never floods the pool |
@@ -146,7 +147,7 @@ ground clamps it.
 | `windSource` | object or null | | null | a WindField source that follows the emission level: `{ type 'updraft' \| 'downburst' \| 'turbulence' = 'updraft', strength m/s = 8, radius m (scaled) = 150, height m (scaled) = 600, base m (scaled) = 0, turbulence 0..1 = 0.4, outflow m/s = 0 (downburst: outward gust near the ground), depth m (scaled) = 150 (downburst: depth of the outflow layer) }`. The core is Gaussian with radius `radius`, tapering over the top 20 %. The column stands under the emission shape's centre (the anchor plus `offset`), so several offset emitters of one preset (a geyser field) each lift where their own jet rises |
 | `immersion` | object or null | | null | the sky fog thickens while the camera is inside the column: `{ radius m = 800, height m = 3000, base m = 0 (all scaled), fogDensity 1..8 = 4, fogColor = the middle colour, fogColorAmount 0..1 = 0.7, darkness 0..1 = 0.3 }` (sky modifier, priority 20) |
 | `sound` | bool | | unset | `true` or `false` decides whether this entry opens the preset's `audio` voice; unset, the preset's first engine entry owns it, so a preset opens one voice (two emitter entries first in a preset both claim it, so set `false` on one) |
-| `soundTriggers` | object | | none | voice triggers: `{ schedule: name, burst: name }` fired when an eruption starts (with its duration) or a burst fires (with its strength). Names: `burst`, `boom`, `streak`, `fireball`, `call`, `chime`, `scatter` (the recipe decides which it answers) |
+| `soundTriggers` | object | | none | voice triggers: `{ schedule: name, burst: name, gust: name }` fired when an eruption starts (with its duration), a burst fires (with its strength) or a gust burst fires (strength from the gust index). Names: `burst`, `boom`, `streak`, `fireball`, `call`, `chime`, `scatter` (the recipe decides which it answers) |
 | `field` | object | | computed | the wind grid: `{ extent m = 2 x (shape + reach), height m = reach, base m = -min(200, 0.1 x height) }`. Set it when particles travel farther than the estimate |
 
 ### LOD
@@ -198,7 +199,8 @@ ground clamps it.
   changed (the intensity as a whole candela), a travelling anchor moves in whole metres, the wind
   grid's probe points are whole metres, and the wind source answers in a result of its own classes
   (`createWindSample`).
-- Event work runs in its own functions: a burst (`fireBurst`), an eruption's voice trigger
+- Event work runs in its own functions: a burst (`fireBurst`), a gust reading (`sampleGust`, 4 a
+  second), an eruption's voice trigger
   (`fireScheduleTrigger`), a wind-grid probe (`sampleFieldNode`, 12 a second), the plume's wind
   source answering a WindField query (`sampleEmitterWind`) and a voice level change
   (`sendVoiceLevel`, sent only when it moved by 1 %). They run a few times a second, too rarely for
@@ -273,6 +275,11 @@ Starting points for the Phase 2 and Phase 3 presets. Tune `scale` for the site s
   bursts: { interval: [20, 40], count: [1500, 2500], minLevel: 0 }, gravity: 0.1, buoyancy: 2, buoyancyDecay: 8, drag: 0.4, life: [8, 14], size: [8, 60] } }
 { engine: 'emitter', params: { particles: 3000, style: 'droplet', shape: { type: 'disc', radius: 200, height: 40 }, swirl: 6, speed: [1, 2],
   gravity: 0.03, drag: 0.8, turbulence: { wobble: 2, frequency: 0.3 }, life: [10, 16], size: 0.3, colors: [0xffc0d8, 0xffe0ec], opacity: 0.85 } }
+// Phase 3 (cherry blossom valley): petals that swirl off the canopy whenever a gust comes through
+{ engine: 'emitter', params: { particles: 6000, style: 'droplet', shape: { type: 'disc', radius: 900, height: 9 }, hugGround: true, offset: [0, 4, 0],
+  direction: 'wind', speed: [1, 3], gravity: 0.04, drag: 0.9, turbulence: { spread: 1.5, wobble: 2.5, frequency: 0.35 }, life: [9, 15],
+  size: 0.35, colors: [0xffc6da, 0xffe2ec, 0xf7a8c4], opacity: 0.9, rate: 120, gusts: { threshold: 0.65, count: [900, 1500], cooldown: 6, follow: 0.7 },
+  soundTriggers: { gust: 'burst' } } }
 ```
 
 Fireflies are not an emitter: they are the lightEffect engine's `swarm` (points that hover and blink

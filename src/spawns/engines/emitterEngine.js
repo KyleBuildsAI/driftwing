@@ -8,7 +8,8 @@
 //     seeded eruption schedule, a pulse, the end ramp of an event, and its LOD tier's share;
 //   - emits that many particles (seeded shapes, directions, speeds, sizes), writing only their birth
 //     records; the GPU does the motion (compute on WebGPU, closed form on WebGL2) and the look;
-//   - fires seeded bursts (lava bombs, meteor sparks);
+//   - fires seeded bursts (lava bombs, meteor sparks), and bursts on the WindField's gusts (petal
+//     storms, falling leaves), its level following the gusts;
 //   - drives its couplings: a real light from the pool (lava glow at night), the underglow that
 //     lights its own plume, a spawn voice with its triggers, a WindField source that follows the
 //     emission (a geyser's updraft), and an immersion sky modifier (inside an ash plume).
@@ -63,6 +64,10 @@ const GRAVITY = 9.81;
 const DEG = Math.PI / 180;
 /** Engine drag floor (1/s): the closed form divides by it. */
 const MIN_DRAG = 0.02;
+/** Seconds between two readings of the gusts at a `gusts` emitter (an event path, 4 a second). */
+const GUST_SAMPLE_SECONDS = 0.25;
+/** The most a gust may raise a `gusts` emitter's level (times its base). */
+const GUST_LEVEL_MAX = 1.6;
 /** Emitter speed above which a frame's anchor jump is a relocation, not motion (m/s). */
 const TELEPORT_SPEED = 3000;
 const SHAPES = Object.freeze(['point', 'sphere', 'disc', 'ring', 'box', 'line']);
@@ -74,7 +79,7 @@ const TOP_LEVEL_PARAMS = Object.freeze([
   'buoyancyDecay', 'drag', 'windFollow', 'turbulence', 'ground', 'groundOffset', 'restitution', 'life', 'size', 'sizeCurve',
   'sizeJitter', 'stretch', 'colors', 'colorMid', 'brightnessJitter', 'opacity', 'fadeIn', 'fadeOut', 'emissive',
   'emissiveDecay', 'nightBoost', 'lit', 'softness', 'fog', 'depthFade', 'underglow', 'lod', 'lodSizeBoost', 'field',
-  'light', 'windSource', 'immersion', 'sound', 'soundTriggers', 'endRamp', 'warmStart',
+  'light', 'windSource', 'immersion', 'sound', 'soundTriggers', 'endRamp', 'warmStart', 'gusts',
 ]);
 /** What the SpawnManager merges into every engine's params (not preset params). */
 const ACTIVATION_PARAMS = Object.freeze(['position', 'heading', 'site', 'startTime', 'scale', 'duration', 'seed']);
@@ -170,6 +175,16 @@ export function resolveEmitterConfig(preset, params) {
     minLevel: read.number(burstParams.minLevel, 'bursts.minLevel', 0.2, 0, 1),
   } : null;
 
+  const gustParams = read.object(params.gusts, 'gusts');
+  read.onlyKeys(gustParams, 'gusts', ['threshold', 'count', 'speedScale', 'cooldown', 'follow']);
+  const gusts = gustParams ? {
+    threshold: read.number(gustParams.threshold, 'gusts.threshold', 0.7, 0.05, 2),
+    count: read.range(gustParams.count, 'gusts.count', [200, 400], 1, MAX_EMIT_PER_FRAME),
+    speedScale: read.number(gustParams.speedScale, 'gusts.speedScale', 1, 0, 100),
+    cooldown: read.number(gustParams.cooldown, 'gusts.cooldown', 5, 0, 600),
+    follow: read.number(gustParams.follow, 'gusts.follow', 0.6, 0, 1),
+  } : null;
+
   const turbulenceParams = read.object(params.turbulence, 'turbulence');
   read.onlyKeys(turbulenceParams, 'turbulence', ['spread', 'wobble', 'frequency', 'vertical']);
   const lodParams = read.object(params.lod, 'lod');
@@ -197,7 +212,7 @@ export function resolveEmitterConfig(preset, params) {
   const immersionParams = read.object(params.immersion, 'immersion');
   read.onlyKeys(immersionParams, 'immersion', ['radius', 'height', 'base', 'fogDensity', 'fogColor', 'fogColorAmount', 'darkness']);
   const triggerParams = read.object(params.soundTriggers, 'soundTriggers');
-  read.onlyKeys(triggerParams, 'soundTriggers', ['schedule', 'burst']);
+  read.onlyKeys(triggerParams, 'soundTriggers', ['schedule', 'burst', 'gust']);
   const colors = Array.isArray(params.colors) ? params.colors : null;
   if (params.colors !== undefined && (!colors || colors.length < 1 || colors.length > 3)) read.fail('colors', 'must be an array of 1 to 3 0xRRGGBB colours');
   const colorList = (colors ?? [0xffffff]).map((color, index) => read.color(color, `colors[${index}]`, 0xffffff));
@@ -219,6 +234,7 @@ export function resolveEmitterConfig(preset, params) {
     schedule,
     pulse,
     bursts,
+    gusts,
     shape,
     offset: read.vector(params.offset, 'offset', [0, 0, 0]).map((value) => value * scale),
     attachCamera: read.oneOf(params.attach, 'attach', 'anchor', ['anchor', 'camera']) === 'camera',
@@ -313,6 +329,7 @@ export function resolveEmitterConfig(preset, params) {
     soundTriggers: {
       schedule: triggerParams ? read.oneOf(triggerParams.schedule, 'soundTriggers.schedule', null, ['burst', 'boom', 'streak', 'fireball', 'call', 'chime', 'scatter']) : null,
       burst: triggerParams ? read.oneOf(triggerParams.burst, 'soundTriggers.burst', null, ['burst', 'boom', 'streak', 'fireball', 'call', 'chime', 'scatter']) : null,
+      gust: triggerParams ? read.oneOf(triggerParams.gust, 'soundTriggers.gust', null, ['burst', 'boom', 'streak', 'fireball', 'call', 'chime', 'scatter']) : null,
     },
     endRamp: read.number(params.endRamp, 'endRamp', 3, 0, 600),
     warmStart: read.boolean(params.warmStart, 'warmStart', !bursts || Boolean(params.rate)),
@@ -811,6 +828,40 @@ export function createEmitterEngine() {
     }
   }
 
+  /**
+   * Reads the WindField's gusts at the emission point (a `gusts` emitter, GUST_SAMPLE_SECONDS apart):
+   * the gust index (the ambient gust shape, WindField.gustAt, times the wind strength), the level the
+   * emission eases toward, and a burst with the voice's gust trigger when the index rises through the
+   * threshold after the cooldown. data.gust: [index, seconds to the next reading, cooldown left,
+   * above the threshold (0 or 1), level factor, its target, gusts fired].
+   */
+  function sampleGust(data) {
+    const config = data.config;
+    const gusts = config.gusts;
+    const state = data.gust;
+    state[1] += GUST_SAMPLE_SECONDS;
+    state[2] -= GUST_SAMPLE_SECONDS;
+    state[0] = typeof ctx.wind.gustAt === 'function' ? ctx.wind.gustAt(data.point[0], data.point[2]) * ctx.uniforms.windStrength.value : 0;
+    const ratio = state[0] / gusts.threshold;
+    state[5] = 1 - gusts.follow + gusts.follow * (ratio > GUST_LEVEL_MAX ? GUST_LEVEL_MAX : ratio);
+    const above = state[0] >= gusts.threshold ? 1 : 0;
+    const rising = above === 1 && state[3] === 0;
+    state[3] = above;
+    if (!rising || state[2] > 0) return;
+    state[2] = gusts.cooldown;
+    state[6]++;
+    const burstCount = Math.min(MAX_EMIT_PER_FRAME, Math.max(1, Math.round(randomIn(data.rng, gusts.count[0], gusts.count[1]) * data.share[0])));
+    refreshAxis(data);
+    emitArgs[0] = 0;
+    emitArgs[1] = gusts.speedScale;
+    emit(data, burstCount, true);
+    if (data.voice && config.soundTriggers.gust) {
+      data.triggerOptions.strength = Math.min(1, ratio * 0.6);
+      data.triggerOptions.intensity = data.triggerOptions.strength;
+      data.voice.trigger(config.soundTriggers.gust, data.triggerOptions);
+    }
+  }
+
   /** Sends the voice its schedule trigger once an eruption starts (with the eruption's duration). */
   function fireScheduleTrigger(instance) {
     const data = instance.data;
@@ -941,6 +992,12 @@ export function createEmitterEngine() {
       const wave = 0.5 + 0.5 * Math.sin(data.age[0] * Math.PI * 2 / config.pulse.period);
       level *= 1 - config.pulse.depth * wave;
     }
+    if (config.gusts) {
+      // The level follows the gusts (sampleGust's target), eased over about half a second.
+      const gust = data.gust;
+      gust[4] += (gust[5] - gust[4]) * (dt * 2 > 1 ? 1 : dt * 2);
+      level *= gust[4];
+    }
     if (config.duration !== null) {
       const over = data.age[0] - config.duration;
       if (over > 0) {
@@ -990,6 +1047,10 @@ export function createEmitterEngine() {
         data.burstTimer[0] -= dt;
         if (data.burstTimer[0] <= 0) fireBurst(data);
       }
+      if (config.gusts) {
+        data.gust[1] -= dt;
+        if (data.gust[1] <= 0) sampleGust(data);
+      }
     } else if (dt > 0) {
       data.debt[0] = 0;
     }
@@ -1035,7 +1096,8 @@ export function createEmitterEngine() {
       if (voiceVelocity.y !== data.velocity[1]) voiceVelocity.y = data.velocity[1];
       if (voiceVelocity.z !== data.velocity[2]) voiceVelocity.z = data.velocity[2];
       data.voice.setPosition(instance.anchor, data.voiceVelocity);
-      data.voiceLevel[1] = data.levels[0];
+      // A gust may lift the emission above 1; the voice takes at most 1.
+      data.voiceLevel[1] = data.levels[0] < 1 ? data.levels[0] : 1;
       sendVoiceLevel(data.voice, data.voiceLevel);
     }
     if (data.windActive || (config.windSource && data.tier !== 'far')) followWindSource(data);
@@ -1252,6 +1314,8 @@ export function createEmitterEngine() {
         triggerDuration: new Float64Array(1),
         pendingScheduleTrigger: false,
         burstTimer: new Float64Array([0]),
+        /** gusts: [index, seconds to the next reading, cooldown left, above, level factor, its target, gusts fired] (sampleGust). */
+        gust: new Float64Array([0, 0, 0, 0, 1, 1, 0]),
         debt: new Float64Array([0]),
         age: new Float64Array([0]),
         emitted: 0,
@@ -1432,6 +1496,7 @@ export function createEmitterEngine() {
         emitted: data.emitted,
         level: data.levels[0],
         schedule: data.config.schedule ? { phase: data.scheduleState[0], envelope: data.levels[1] } : null,
+        gusts: data.config.gusts ? { index: data.gust[0], level: data.gust[4], above: data.gust[3] === 1, fired: data.gust[6] } : null,
         windActive: data.windActive,
         light: data.light ? data.light.held : false,
         voice: data.voice !== null,

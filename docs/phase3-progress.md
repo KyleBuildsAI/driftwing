@@ -1069,7 +1069,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | not started |
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
-| B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | not started |
+| B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | in progress |
 | B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | not started |
 | I3 | Integration pass: presets/index.js and spawnScenarios in spec order; `?test=spawns` for all 100 on both backends | `v2-phase3` | not started |
 
@@ -1077,6 +1077,21 @@ Each preset ships with its journal title and one-liner, 3+ callouts, its audio r
 FAR lure where heavy, colliders where solid, rarity, filters and lifetime (docs/spawns.md
 template). The challenge-based presets (70, 76-81) use the wave 1 challenge system; the combo
 presets (92-100) use the wave 2 combo scheduling.
+
+### Wave 3 - p3/presets-81-90
+
+Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file each under
+`src/spawns/presets/`, on the existing engines plus additive extensions listed here as they land.
+
+- **Engine and world extensions (additive; every existing preset unchanged):**
+  - overlay palettes `riceTerraces` and `badlands` (`src/world/overlays.js`);
+  - broadleaf trees turn with a tint sweep: the scatter output carries each instance's sweep slot,
+    weight and phase (`chunkBuilder.js`, zeros outside a sweeping overlay) and the terrain's broadleaf
+    material reads it as `vegetationSweep` (`terrain.js`; outside overlays the colour is exactly the
+    Phase 2 one);
+  - `WindField.gustAt(x, z, t)`: the ambient gusts' shape without a terrain lookup;
+  - emitter `gusts` (level follows the gusts, a burst on each gust, the voice's `gust` trigger).
+- **Next:** the remaining extensions and the ten presets, then the step file and the checks.
 
 ### Wave 4: discovery and verification, then the tag
 

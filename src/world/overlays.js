@@ -58,6 +58,9 @@ export const OVERLAY_PALETTES = Object.freeze({
     dunes: Object.freeze([0xd8dde2, 0xe6eaee, 0xf2f4f6, 0xc8d2dc, 0xb9c9d8, 0xf8f9fa]),
   }),
   saltFlat: Object.freeze({ base: Object.freeze([0xe8e2d4, 0xf1ece0, 0xf7f4ec, 0xdcd5c4, 0xe2dccb, 0xcfc6b2]) }),
+  // Wave 3 (presets 85 and 87): green paddies with mud banks, and banded badland clays.
+  riceTerraces: Object.freeze({ base: Object.freeze([0x5a8a36, 0x6fa241, 0x88b84f, 0x6b5a3a, 0xa6c85c, 0x4c7432]) }),
+  badlands: Object.freeze({ base: Object.freeze([0x9a5a3c, 0xb46e48, 0xc98b5e, 0xe2c69c, 0x87452f, 0xd6a674]) }),
 });
 
 function isNumber(value) { return typeof value === 'number' && Number.isFinite(value); }

@@ -20,6 +20,8 @@
 //
 // Craft compute airspeed as velocity - sample(pos, t).vel.
 // probe(pos, t, out?) is the same query without touching lastLayers (overlays, many-point probes).
+// gustAt(x, z, t) is the shape of the ambient gusts alone (no terrain lookup), for engines that follow
+// them at a fixed place.
 import * as THREE from 'three/webgpu';
 import { headingFromVector, wrapDegrees } from '../core/util.js';
 
@@ -450,6 +452,18 @@ export function createWindField({ world, uniforms, state, bus }) {
      */
     probe(pos, t = state.time.elapsed, out = { vel: new THREE.Vector3(), turbulence: 0 }) {
       return sampleField(pos, t, out, false);
+    },
+
+    /**
+     * The ambient gusts' shape at (x, z) and time t: the horizontal magnitude of the smooth gust noise
+     * that sample() scales by the local turbulence intensity (the same noise and offsets; about
+     * 0..1.2), so an engine can follow the gusts at a fixed place without a full sample, whose
+     * terrain lookups allocate (an emitter's petal storms on gusts). Pure and allocation-free.
+     */
+    gustAt(x, z, t = state.time.elapsed) {
+      const along = gust(0, t, x, z);
+      const across = gust(2, t, x + 311, z - 173);
+      return Math.sqrt(along * along + across * across);
     },
 
     /**

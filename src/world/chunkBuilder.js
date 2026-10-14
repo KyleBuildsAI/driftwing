@@ -4,8 +4,11 @@
 // Region overlays (Phase 3): when the build output carries an `overlays` buffer, every vertex gets
 // the chunk attribute `overlay` (vec4 per face: tint-sweep slot + weight, sweep phase, material id,
 // stripe id; worldgen.faceOverlay), zeros outside every overlay. The species 6-12 are sized and tinted
-// from src/world/vegetationSpecies.js (rows take their stripe's colour).
+// from src/world/vegetationSpecies.js (rows take their stripe's colour). Every scatter instance also
+// carries its tint sweep (slot + weight, phase; zeros outside a sweeping overlay), so the trees of an
+// autumn colour wave turn with the ground under them.
 import { VEGETATION_SPECIES, speciesById } from './vegetationSpecies.js';
+import { OVERLAY_SWEEP_WEIGHT_MAX } from './overlays.js';
 
 export function createChunkBuilder(worldGen, config) {
   const chunkSize = config.chunkSize;
@@ -382,9 +385,25 @@ export function createChunkBuilder(worldGen, config) {
   }
 
   /**
+   * The tint sweep of a scatter instance at (worldX, worldZ) into output at offset: the slot plus the
+   * weight (worldgen.faceOverlay's x) and the sweep phase (its y); zeros outside a tint-sweep overlay.
+   */
+  function computeSweep(worldX, worldZ, output, offset) {
+    output[offset] = 0;
+    output[offset + 1] = 0;
+    if (overlaySample === null) return;
+    worldGen.overlayAt(worldX, worldZ, overlaySample);
+    const overlay = overlaySample.overlay;
+    if (overlay === null || overlay.tintSweep === null) return;
+    output[offset] = overlay.tintSweep.slot + Math.min(overlaySample.weight, OVERLAY_SWEEP_WEIGHT_MAX);
+    output[offset + 1] = overlaySample.sweepPhase;
+  }
+
+  /**
    * Vegetation for a chunk, grouped by type. Regions: header (per type: count, start, minY,
    * maxY, maxScaleY, maxScaleXZ), placements (x, y, z LOCAL to the chunk origin, rotation Y),
-   * scales (x, y, z) and linear colour tints (r, g, b).
+   * scales (x, y, z), linear colour tints (r, g, b) and tint sweeps (the overlay's sweep slot plus
+   * its weight, and the sweep phase in metres; both 0 outside a tint-sweep overlay).
    */
   function* buildScatter(job, output) {
     const raw = worldGen.scatterChunk(job.cx, job.cz, job.density);
@@ -410,6 +429,7 @@ export function createChunkBuilder(worldGen, config) {
     }
     const scaleOffset = headerFloats + maxInstances * 4;
     const tintOffset = scaleOffset + maxInstances * 3;
+    const sweepOffset = tintOffset + maxInstances * 3;
     const originX = job.cx * chunkSize;
     const originZ = job.cz * chunkSize;
     for (let index = 0; index < total; index++) {
@@ -438,6 +458,7 @@ export function createChunkBuilder(worldGen, config) {
       output[tintSlot] = tint[0] * brightness;
       output[tintSlot + 1] = tint[1] * brightness;
       output[tintSlot + 2] = tint[2] * brightness;
+      computeSweep(originX + localX, originZ + localZ, output, sweepOffset + slot * 2);
       const header = type * 6;
       if (baseY < output[header + 2]) output[header + 2] = baseY;
       if (baseY > output[header + 3]) output[header + 3] = baseY;
