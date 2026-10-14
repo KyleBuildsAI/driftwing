@@ -5,9 +5,11 @@
 // A run switches the craft through the settings channel (as the picker does) at 100 % assists (a
 // scenario may set its own), picks the view through settings.views (first person: the 'cockpit'
 // slot, the FPV camera on the drone; third person: 'chase'), sets the time of day when the scenario
-// asks, places the craft with flight.startAt (the same placements a module's situate returns:
-// start.at finds the place, start.mode the state), then calls the script every frame for `seconds`
-// of flight time. A script returns ControlState fields (roll, pitch, yaw, throttle, collective,
+// asks (and holds it for the run: the day clock is frozen, so the sky's time warp cannot carry a
+// noon start into the afternoon), places the craft with flight.startAt (the same placements a
+// module's situate returns: start.at finds the place, start.mode the state), then calls the script
+// every frame for `seconds` of flight time, or until the scenario's optional endWhen(api) holds (a
+// long flight that is done early, such as the spaceplane's climb to space and back). A script returns ControlState fields (roll, pitch, yaw, throttle, collective,
 // brakeL, brakeR, flaps, trim, antenna, lookX, lookY) that override the live controls after the input
 // system and before flight (the test input path), plus `actions` (one press each) and `held` (held
 // while listed). Real gamepads are hidden behind an empty mock for the whole test.
@@ -105,6 +107,7 @@ function scenarioProblem(set, scenario, seenIds) {
   if (scenario.start.mode !== undefined && !START_MODES.includes(scenario.start.mode)) return `scenario "${scenario.id}" start.mode must be one of ${START_MODES.join(', ')}`;
   if (scenario.world !== undefined && !WORLDS.includes(scenario.world)) return `scenario "${scenario.id}" world must be one of ${WORLDS.join(', ')}`;
   if (scenario.script !== undefined && typeof scenario.script !== 'function') return `scenario "${scenario.id}" script must be a function`;
+  if (scenario.endWhen !== undefined && typeof scenario.endWhen !== 'function') return `scenario "${scenario.id}" endWhen must be a function`;
   if (!Array.isArray(scenario.checks) || scenario.checks.some((check) => !check || typeof check.id !== 'string' || typeof check.test !== 'function')) return `scenario "${scenario.id}" needs checks [{ id, test(api) }]`;
   if (scenario.views !== undefined && (!Array.isArray(scenario.views) || scenario.views.some((view) => !VIEWS.includes(view)))) return `scenario "${scenario.id}" views must list first and / or third`;
   return '';
@@ -246,6 +249,8 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
   let phase = 'loading';
   let step = '';
   let activeRun = null;
+  /** The day clock setting (timeFrozen) to restore after a run that held its time of day, or null. */
+  let heldDayClock = null;
   const frameWaiters = [];
   const report = {};
 
@@ -566,7 +571,11 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     if (!craftOk) notes.push(`asked for ${entry.craft}, flying ${flight().getCraft()}`);
     const viewOk = inPlannedView(entry);
     if (!viewOk) notes.push(`asked for the ${entry.view}-person view, the camera shows ${camera().getView()}`);
-    if (Number.isFinite(spec.time)) ctx.systems.sky.setDayTime(spec.time, { transition: 0 });
+    if (Number.isFinite(spec.time)) {
+      if (heldDayClock === null) heldDayClock = settings.get('timeFrozen') === true;
+      settings.set('timeFrozen', true);
+      ctx.systems.sky.setDayTime(spec.time, { transition: 0 });
+    }
     return { ok: craftOk && viewOk, notes };
   }
 
@@ -628,12 +637,17 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     const frames = run.recorder.summary();
     result.frames = { count: frames.frames, avgFps: frames.avgFps, p99Ms: frames.p99Ms, maxMs: frames.maxMs, over50: frames.slowFrames };
     if (run.cutShort) result.notes.push(`cut short after ${round(run.t, 1)} s of flight (the page stalled)`);
+    if (run.endedEarly) result.notes.push(`done after ${round(run.t, 1)} of ${run.seconds} s (endWhen)`);
     if (run.failure) result.notes.push(run.failure);
     result.failed = Boolean(run.failure || run.cutShort);
     return finishResult(result, run.bucket, spec);
   }
 
   function finishResult(result, bucket, spec = null) {
+    if (heldDayClock !== null) {
+      settings.set('timeFrozen', heldDayClock);
+      heldDayClock = null;
+    }
     result.endedAt = new Date().toISOString();
     result.nanEvents = bucket.nanFrames + bucket.nanGuardEvents;
     result.penetrations = bucket.penetrations;
@@ -678,6 +692,21 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     if (!inPlannedView(run.entry)) run.viewMismatchFrames = (run.viewMismatchFrames ?? 0) + 1;
     if (flight().getCraft() !== run.entry.craft) run.craftMismatchFrames = (run.craftMismatchFrames ?? 0) + 1;
     evaluateChecks(run);
+    if (typeof run.spec.endWhen === 'function') {
+      let done = false;
+      try {
+        done = Boolean(run.spec.endWhen(run.api));
+      } catch (error) {
+        run.failure = `endWhen failed at ${round(run.t, 2)} s: ${error && error.message ? error.message : error}`;
+        session.harnessErrors.push(`${run.entry.id} (${run.entry.view}): ${run.failure}`);
+        done = true;
+      }
+      if (done) {
+        run.endedEarly = !run.failure;
+        endRun(run);
+        return;
+      }
+    }
     if (realDt > 0) updateProgress(run);
   }
 
