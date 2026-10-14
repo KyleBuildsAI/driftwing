@@ -517,8 +517,20 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
   animated gear legs and water rudders, sim profile, situate, copilot commands, journal stats,
   bindings); the `radial` audio family; the `waterRudder` instrument; `tools/lab/seaplane.mjs`
   (92/92); the craft lab's catalog checks now follow the registered modules.
-- **Next:** `?test=craft` scenarios (ocean and lake takeoff and landing, nose-over), docs, the full
-  verification list.
+- **Also done:** the `?test=craft` scenarios (`src/dev/craftScenarios/seaplane.js`: `seaplane-ocean` and
+  `seaplane-lake`, a full circuit each from a fixed start in the CRAFT-1 'waters' world, takeoff and
+  landing on the water, in both views; `seaplane-nose-over`, the gear advisory then the soft crash);
+  the seaplane in the `?test=1` flight scripts and the view-physics step file; the docs
+  (architecture.md: floats.js, the module, the `contactForces` hook, the craftState fields, the radial
+  family and the lab; controls.md: the seaplane row).
+- **Verified 2026-10-13** (each once):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `run-harness --test craft --crafts seaplane` (general both views, ocean and lake both views, nose-over) | PASS 7/7 runs, 29/29 checks, 0 NaN, 0 penetrations, 0 soft crashes (the nose-over's allowed one aside), 0/0 (the first attempt timed out navigating the cold dev server; the rerun passed) | PASS 7/7, 29/29, same |
+  | `node --expose-gc tools/lab/seaplane.mjs` | 113/113 | |
+  | `npm run build`, `build:single` (V1 SHA-256 matches), `test:v1` 2/2, `docs-check` 236/236 | built; no scenario code in the V2 bundle | |
+  | Labs: atmosphere 28, challenges 70, colliders 84, copilot-server 17, copilot 240, craft 66, director 50, discovery 43, fauna-modes 44, fpv 87, helicopter 46, input 34, jet 60, origin 32, path 37, preset-flight 13, preset-pacing 4, preset-wind 12, ringsGolden 6/6, setpiece 47, settings 45, spawns 98, storage 54, structure 75, terrain 404, water 34, wind-engines 56, wingsuit 37, flight-lab 82 | all pass | |
 
 ### Wave 3: presets 31-100 (seven batches of ten, the spec's numbering)
 
