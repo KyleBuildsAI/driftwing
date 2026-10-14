@@ -9,10 +9,25 @@
 //   decal    ground paint (runway tarmac and markings), polygon-offset over the terrain
 //   glow     crystal (emissive, pulsing in the shader, brighter at night)
 //   water    waterfall ribbons and streams (transparent streaks scrolling in the shader)
+//   cloth    flags and banners (Phase 3): each vertex's sway value is its hang (m from the edge it is
+//            tied to); the cloth swings out downwind and ripples with the WindField wind the
+//            structure shows (the monastery's prayer flags, the castle's banners)
 // Moving parts are shared instanced meshes built once in init(): turbine nacelles and rotors (yawed
 // into the real WindField wind, spun with its speed), windsock segments (a chain hanging in the wind)
 // and mist puffs (soft luminous blobs). The sway weight in the geometry lets the bridge deck, ropes,
 // pennants and tree tops swing with the wind in the vertex shader.
+//
+// Phase 3 recipe features (all optional; a recipe that fills none of them builds exactly as before):
+//   movers       context.addMover(): parts with their own geometry on pooled meshes, posed every frame
+//                by the recipe's out.animate(state, env) hook (a train on its viaduct, an observatory's
+//                dome and telescope, a fireball's glowing scar), with optional box colliders that
+//                follow them (setPose)
+//   steam        out.steam dynamic puffs on the shared mist pool, placed by the animate hook (a
+//                locomotive's chimney)
+//   torches      out.torches: flames on a shared instanced pool, each an ignitable (ctx.game.ignition)
+//                the dragon's breath can light, optionally lit at dusk (instance.ignitableIds)
+//   blocks       out.blocks: boxes on a shared instanced pool with instance colours (the labyrinth's
+//                hedge walls)
 //
 // Generic features any recipe or preset uses:
 //   stamps       structure/stamps.js structureStamps(recipe, options): the terrain stamps a recipe
@@ -34,12 +49,12 @@
 // update() allocates nothing: per-instance numbers live in typed arrays, matrices are composed into
 // scratch objects made in init(), and the wind is probed a few times a second into a reused record.
 import { createMeshBuilder } from './structure/meshBuilder.js';
-import { PALETTE } from './structure/palette.js';
+import { PALETTE, paint } from './structure/palette.js';
 import { RECIPES, RECIPE_NAMES } from './structure/recipes/index.js';
 import { islandOutline, islandTopHeight } from './structure/recipes/islands.js';
 import { GATE_TELEPORT_DISTANCE, createGateSet, crossGates } from './gateDetector.js';
 import { createParamView, createWindSample, ownsPresetAudio } from './engineKit.js';
-import { applyRigidDrop } from '../../render/curvature.js';
+import { applyRigidDrop, rigidCurvatureDrop } from '../../render/curvature.js';
 import { addStructureColliders, islandTopCollider, removeStructureColliders, updateTurbineColliders } from './structure/colliders.js';
 
 const ENGINE_NAME = 'structure';
@@ -90,7 +105,7 @@ function addWakeGust(result, point) {
   result.vel.y += 0.6 * sigma * (0.5 * Math.sin(time * 1.9 + z * 0.061 + offsetY) + 0.3 * Math.sin(time * 3.7 - x * 0.093 + offsetY * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z) * 0.147 + offsetY * 2.3));
   result.vel.z += sigma * (0.5 * Math.sin(time * 1.9 + (x + 311) * 0.061 + offsetZ) + 0.3 * Math.sin(time * 3.7 - (z - 173) * 0.093 + offsetZ * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z + 138) * 0.147 + offsetZ * 2.3));
 }
-const GEOMETRY_KINDS = Object.freeze(['body', 'detail', 'decal', 'glow', 'water']);
+const GEOMETRY_KINDS = Object.freeze(['body', 'detail', 'decal', 'glow', 'water', 'cloth']);
 
 /** Visibility of each geometry kind per tier: [near, mid, far] (far: non-heavy presets only). */
 const KIND_TIERS = Object.freeze({
@@ -99,7 +114,25 @@ const KIND_TIERS = Object.freeze({
   decal: [true, true, true],
   glow: [true, true, true],
   water: [true, true, false],
+  cloth: [true, true, false],
 });
+/** Mover materials (a mover's kind) and the pooled meshes each keeps for the session. */
+const MOVER_KINDS = Object.freeze(['body', 'glow', 'decal']);
+const MOVER_CAPACITY = 64;
+/** A mover's pose in the animate state: local x, y, z, yaw, pitch, roll (radians), scale, visible. */
+const POSE_STRIDE = 8;
+/** Steam puffs: local x, y, z and radius (0 hides one) per puff in the animate state. */
+const STEAM_STRIDE = 4;
+const FLAME_CAPACITY = 512;
+const BLOCK_CAPACITY = 4096;
+/** Instanced flames and blocks are rewritten for the planet curvature only when it moved this far (m). */
+const DROP_STEP = 0.25;
+/** Torches lit at dusk light above this night factor and go out below DAY_FACTOR. */
+const DUSK_FACTOR = 0.55;
+const DAY_FACTOR = 0.2;
+/** The cloth's swing (rad per m/s of wind, capped) and its ripple. */
+const CLOTH_SWING = 0.11;
+const CLOTH_SWING_MAX = 1.25;
 
 export function createStructureEngine() {
   let ctx = null;
@@ -110,10 +143,16 @@ export function createStructureEngine() {
   let rotors = null;
   let socks = null;
   let puffs = null;
+  let moverPools = null;
+  let flames = null;
+  let blocks = null;
   let serial = 0;
   let proxies = [];
   const live = [];
-  const counts = { instances: 0, buffers: 0, drawCalls: 0, surfaces: 0, gates: 0, landings: 0, courses: 0, turbines: 0, puffs: 0 };
+  const counts = {
+    instances: 0, buffers: 0, drawCalls: 0, surfaces: 0, gates: 0, landings: 0, courses: 0, turbines: 0, puffs: 0,
+    movers: 0, flames: 0, litFlames: 0, blocks: 0,
+  };
 
   // Scratch (made in init; never allocated per frame).
   let hiddenMatrix = null;
@@ -124,7 +163,7 @@ export function createStructureEngine() {
   // ---- Materials --------------------------------------------------------------------------------
   function buildMaterials() {
     const {
-      attribute, vertexColor, uniform, positionLocal, float, vec3, sin, mix, pow, saturate, dot, smoothstep,
+      attribute, vertexColor, uniform, positionLocal, float, vec3, sin, cos, min, mix, pow, saturate, dot, smoothstep,
       normalView, positionViewDirection, uv, mx_noise_float, instanceIndex,
     } = ctx.TSL;
     const time = ctx.uniforms.time;
@@ -146,6 +185,30 @@ export function createStructureEngine() {
 
     const decal = new THREE.MeshStandardNodeMaterial({ flatShading: true, roughness: 0.96, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
     decal.colorNode = rgba.rgb;
+    // Ground paint glows only where its vertex alpha says (a fireball's embers); the Phase 2 decals
+    // paint alpha 0 and stay unlit.
+    decal.emissiveNode = rgba.rgb.mul(rgba.a).mul(objectGlow);
+
+    // Cloth: the sway attribute is each vertex's hang (m from the edge it is tied to). It swings out
+    // downwind about that edge, by an angle growing with the wind speed, and ripples across the wind
+    // faster in a stronger wind and harder in turbulence: x, y = the wind's unit direction, z = its
+    // speed (m/s), w = its turbulence (per object, from the WindField wind the structure shows).
+    const clothWind = uniform(new THREE.Vector4(1, 0, 0, 0)).onObjectUpdate(({ object }) => object.userData.clothWind);
+    const hang = swayWeight;
+    const swing = min(clothWind.z.mul(CLOTH_SWING), float(CLOTH_SWING_MAX));
+    const lean = vec3(clothWind.x.mul(sin(swing)), float(1).sub(cos(swing)), clothWind.y.mul(sin(swing))).mul(hang);
+    const ripplePhase = positionLocal.x.add(positionLocal.z).mul(0.7);
+    const rippleAmount = min(clothWind.z.div(6), float(1)).mul(0.16).add(clothWind.w.mul(0.2)).add(0.03);
+    const ripple = sin(time.mul(clothWind.z.mul(0.35).add(5)).add(hang.mul(3.1)).add(ripplePhase)).mul(hang).mul(rippleAmount);
+    const cloth = new THREE.MeshStandardNodeMaterial({ flatShading: true, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
+    cloth.colorNode = rgba.rgb;
+    cloth.positionNode = positionLocal.add(lean).add(vec3(clothWind.y.negate().mul(ripple), ripple.mul(0.4), clothWind.x.mul(ripple)));
+
+    // Torch flames: additive, flickering in size and brightness in their own phase, brighter at night.
+    const flicker = sin(time.mul(13.1).add(float(instanceIndex).mul(2.3))).mul(0.22).add(sin(time.mul(7.3).add(float(instanceIndex).mul(1.1))).mul(0.16)).add(1);
+    const flame = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    flame.colorNode = rgba.rgb.mul(flicker).mul(mix(float(1.1), float(2.8), nightFactor));
+    flame.positionNode = positionLocal.mul(vec3(float(2).sub(flicker), flicker, float(2).sub(flicker)));
 
     // Crystal: the sway attribute carries each crystal's pulse phase (0..1), not a sway weight.
     const glow = new THREE.MeshStandardNodeMaterial({ flatShading: true, roughness: 0.22, metalness: 0.12 });
@@ -178,7 +241,22 @@ export function createStructureEngine() {
     const moving = new THREE.MeshStandardNodeMaterial({ flatShading: true, roughness: 0.7, metalness: 0.05, side: THREE.DoubleSide });
     moving.colorNode = rgba.rgb;
 
-    return { solid, decal, glow, water, mist, moving };
+    return { solid, decal, glow, water, mist, moving, cloth, flame };
+  }
+
+  /** A torch flame at reference size (1 m tall): an orange teardrop around a yellow core. */
+  function buildFlameGeometry() {
+    const builder = createMeshBuilder();
+    builder.setPaint(paint(0xff7a24)).lathe(0, 0, 0, [[0.16, 0], [0.3, 0.28], [0.2, 0.62], [0, 1]], 6, { closeBottom: true });
+    builder.setPaint(paint(0xffd76a)).lathe(0, 0.06, 0, [[0.09, 0], [0.16, 0.2], [0, 0.6]], 5, { closeBottom: true, phase: 0.5 });
+    return builder.toGeometry(THREE);
+  }
+
+  /** A unit box (1 m on each side, its base at y = 0) for the instanced blocks; instance colours paint it. */
+  function buildBlockGeometry() {
+    const builder = createMeshBuilder();
+    builder.setPaint(paint(0xffffff)).box(0, 0.5, 0, 1, 1, 1);
+    return builder.toGeometry(THREE);
   }
 
   // ---- Shared moving-part geometry ------------------------------------------------------------------
@@ -270,6 +348,9 @@ export function createStructureEngine() {
       turbines: [], socks: [], puffs: [], gates: [], surfaces: [], zones: [], courses: [], colliders: [],
       challenge: null,
       wake: null, turbineSettings: null, sway: null, audioPoint: null, windProbe: null, approach: 0, radius: 20,
+      // Phase 3 (optional): movers (context.addMover), the animate hook that poses them, dynamic steam
+      // puffs, torches (ignitables) and instanced blocks.
+      movers: [], animate: null, steam: 0, torches: [], blocks: [],
     };
     const context = {
       presetId: preset.id,
@@ -291,10 +372,24 @@ export function createStructureEngine() {
       decal: createMeshBuilder(),
       glow: createMeshBuilder(),
       water: createMeshBuilder({ uv: true }),
+      cloth: createMeshBuilder(),
       out,
       /** Adds a gate (local metres); source names the param for error messages. */
       addGate(gate) {
         out.gates.push(gate);
+      },
+      /**
+       * Adds a mover: a part with its own geometry (build it with the returned builder, in the mover's
+       * own frame: its pose origin at 0, 0, 0, forward -z), drawn with the `kind` material ('body',
+       * 'glow' or 'decal') and posed by out.animate through state.poses[index * POSE_STRIDE ...].
+       * collider: null or { center: [x, y, z], halfExtents: [x, y, z], tags } (a box in the mover's
+       * frame that follows its pose). Returns { builder, index }.
+       */
+      addMover({ name, kind = 'body', collider = null }) {
+        if (!MOVER_KINDS.includes(kind)) throw new Error(`[DRIFTWING] structure preset "${preset.id}": mover "${name}" kind must be one of ${MOVER_KINDS.join(', ')}`);
+        const builder = createMeshBuilder();
+        out.movers.push({ name, kind, builder, collider });
+        return { builder, index: out.movers.length - 1 };
       },
     };
     return context;
@@ -368,6 +463,7 @@ export function createStructureEngine() {
     mesh.position.copy(anchor);
     mesh.userData.swayOffset = instanceData.swayOffset;
     mesh.userData.look = instanceData.look;
+    mesh.userData.clothWind = instanceData.clothWind;
     mesh.frustumCulled = true;
     mesh.castShadow = false;
     mesh.receiveShadow = kind !== 'water';
@@ -387,6 +483,416 @@ export function createStructureEngine() {
       counts.buffers--;
       data.meshes[kind] = null;
     }
+  }
+
+  // ---- Movers, steam, torches and blocks (Phase 3) ---------------------------------------------------
+  /** Shows each mover's geometry on a pooled mesh of its kind; the animate hook poses them. */
+  function showMovers(data, movers, anchor) {
+    data.moverMeshes = new Array(movers.length).fill(null);
+    for (let index = 0; index < movers.length; index++) {
+      const mover = movers[index];
+      const geometry = mover.builder.toGeometry(THREE);
+      if (!geometry) throw new Error(`[DRIFTWING] structure: mover "${mover.name}" has no geometry`);
+      const mesh = moverPools[mover.kind].acquire(geometry);
+      if (!mesh) {
+        geometry.dispose();
+        throw new Error(`[DRIFTWING] structure: every ${mover.kind} mover mesh is in use (${MOVER_CAPACITY} at once)`);
+      }
+      mesh.matrixAutoUpdate = false;
+      mesh.frustumCulled = true;
+      mesh.castShadow = false;
+      mesh.receiveShadow = mover.kind !== 'glow';
+      mesh.userData.swayOffset = data.swayOffset;
+      mesh.userData.look = data.look;
+      mesh.userData.clothWind = data.clothWind;
+      data.moverMeshes[index] = mesh;
+      data.moverKinds[index] = MOVER_KINDS.indexOf(mover.kind);
+      counts.movers++;
+      // A pose starts at the anchor, unrotated, full size and shown.
+      data.moverPoses[index * POSE_STRIDE + 6] = 1;
+      data.moverPoses[index * POSE_STRIDE + 7] = 1;
+    }
+  }
+
+  function releaseMovers(data) {
+    for (let index = 0; index < data.moverMeshes.length; index++) {
+      const mesh = data.moverMeshes[index];
+      if (!mesh) continue;
+      const geometry = mesh.geometry;
+      moverPools[MOVER_KINDS[data.moverKinds[index]]].release(mesh);
+      mesh.matrixAutoUpdate = true;
+      geometry.dispose();
+      counts.movers--;
+      data.moverMeshes[index] = null;
+    }
+  }
+
+  /**
+   * The rotation of a pose (yaw about +y as a compass heading, then pitch about local x, nose up, then
+   * roll about local z, as meshBuilder.setTransform) into rotation[0..8], row-major.
+   */
+  function poseRotation(poses, base, rotation) {
+    const cy = Math.cos(-poses[base + 3]);
+    const sy = Math.sin(-poses[base + 3]);
+    const cx = Math.cos(poses[base + 4]);
+    const sx = Math.sin(poses[base + 4]);
+    const cz = Math.cos(poses[base + 5]);
+    const sz = Math.sin(poses[base + 5]);
+    // Rx * Rz, then Ry in front.
+    const r00 = cz;
+    const r01 = -sz;
+    const r10 = cx * sz;
+    const r11 = cx * cz;
+    const r12 = -sx;
+    const r20 = sx * sz;
+    const r21 = sx * cz;
+    const r22 = cx;
+    rotation[0] = cy * r00 + sy * r20;
+    rotation[1] = cy * r01 + sy * r21;
+    rotation[2] = sy * r22;
+    rotation[3] = r10;
+    rotation[4] = r11;
+    rotation[5] = r12;
+    rotation[6] = -sy * r00 + cy * r20;
+    rotation[7] = -sy * r01 + cy * r21;
+    rotation[8] = cy * r22;
+  }
+
+  /**
+   * Writes every mover's matrix from its pose (anchor + local position, lowered by the planet curvature
+   * at the anchor), and moves the colliders that follow a mover. Allocation-free.
+   */
+  function poseMovers(data) {
+    const poses = data.moverState.poses;
+    const rotation = data.moverRotation;
+    const drop = rigidCurvatureDrop(ctx, data.moverAnchor[0], data.moverAnchor[2]);
+    for (let index = 0; index < data.moverMeshes.length; index++) {
+      const mesh = data.moverMeshes[index];
+      const base = index * POSE_STRIDE;
+      const shown = poses[base + 7] > 0.5 && poses[base + 6] > 0 && data.moversShown === 1;
+      if (mesh.visible !== shown) mesh.visible = shown;
+      poseRotation(poses, base, rotation);
+      const scale = poses[base + 6];
+      const elements = mesh.matrix.elements;
+      elements[0] = rotation[0] * scale;
+      elements[1] = rotation[3] * scale;
+      elements[2] = rotation[6] * scale;
+      elements[3] = 0;
+      elements[4] = rotation[1] * scale;
+      elements[5] = rotation[4] * scale;
+      elements[6] = rotation[7] * scale;
+      elements[7] = 0;
+      elements[8] = rotation[2] * scale;
+      elements[9] = rotation[5] * scale;
+      elements[10] = rotation[8] * scale;
+      elements[11] = 0;
+      elements[12] = data.moverAnchor[0] + poses[base];
+      elements[13] = data.moverAnchor[1] + poses[base + 1] - drop;
+      elements[14] = data.moverAnchor[2] + poses[base + 2];
+      elements[15] = 1;
+      mesh.matrixWorldNeedsUpdate = true;
+      const colliderSlot = data.moverColliderSlots[index];
+      if (colliderSlot >= 0) poseMoverCollider(data, index, colliderSlot);
+    }
+  }
+
+  /**
+   * A mover's box collider follows its pose: the box centre (in the mover's frame) turned and moved
+   * with it, the pose's quaternion. Only when the pose moved since the last write.
+   */
+  function poseMoverCollider(data, index, slot) {
+    const colliders = colliderWorld();
+    if (!colliders) return;
+    const poses = data.moverState.poses;
+    const base = index * POSE_STRIDE;
+    const last = data.moverColliderLast;
+    const lastBase = slot * 6;
+    if (last[lastBase] === poses[base] && last[lastBase + 1] === poses[base + 1] && last[lastBase + 2] === poses[base + 2]
+      && last[lastBase + 3] === poses[base + 3] && last[lastBase + 4] === poses[base + 4] && last[lastBase + 5] === poses[base + 5]) return;
+    for (let field = 0; field < 6; field++) last[lastBase + field] = poses[base + field];
+    const rotation = data.moverRotation;
+    const centre = data.moverColliderCentres;
+    const cx = centre[slot * 3];
+    const cy = centre[slot * 3 + 1];
+    const cz = centre[slot * 3 + 2];
+    const pose = data.moverColliderPose;
+    pose[0] = data.moverAnchor[0] + poses[base] + rotation[0] * cx + rotation[1] * cy + rotation[2] * cz;
+    pose[1] = data.moverAnchor[1] + poses[base + 1] + rotation[3] * cx + rotation[4] * cy + rotation[5] * cz;
+    pose[2] = data.moverAnchor[2] + poses[base + 2] + rotation[6] * cx + rotation[7] * cy + rotation[8] * cz;
+    // q = qy(-yaw) * qx(pitch) * qz(roll).
+    const hy = -poses[base + 3] * 0.5;
+    const hx = poses[base + 4] * 0.5;
+    const hz = poses[base + 5] * 0.5;
+    const sy = Math.sin(hy);
+    const cyq = Math.cos(hy);
+    const sx = Math.sin(hx);
+    const cxq = Math.cos(hx);
+    const sz = Math.sin(hz);
+    const czq = Math.cos(hz);
+    // qx * qz first.
+    const ax = sx * czq;
+    const ay = -sx * sz;
+    const az = cxq * sz;
+    const aw = cxq * czq;
+    // Then qy in front: (0, sy, 0, cy) * (ax, ay, az, aw).
+    pose[3] = cyq * ax + sy * az;
+    pose[4] = cyq * ay + sy * aw;
+    pose[5] = cyq * az - sy * ax;
+    pose[6] = cyq * aw - sy * ay;
+    colliders.setPose(data.moverColliderIds[slot], pose);
+  }
+
+  /** Registers the colliders that follow movers (box specs in each mover's frame). */
+  function addMoverColliders(instance, data, movers, prefix) {
+    const colliders = colliderWorld();
+    const withCollider = movers.filter((mover) => mover.collider);
+    data.moverColliderSlots = new Int32Array(movers.length).fill(-1);
+    data.moverColliderCentres = new Float64Array(withCollider.length * 3);
+    data.moverColliderLast = new Float64Array(withCollider.length * 6).fill(NaN);
+    data.moverColliderIds = [];
+    if (!colliders || withCollider.length === 0) return;
+    let slot = 0;
+    movers.forEach((mover, index) => {
+      if (!mover.collider) return;
+      const { center, halfExtents, tags } = mover.collider;
+      const id = `${prefix}:mover${index}`;
+      colliders.add({
+        id, owner: prefix, type: 'box',
+        center: { x: data.moverAnchor[0] + center[0], y: data.moverAnchor[1] + center[1], z: data.moverAnchor[2] + center[2] },
+        halfExtents: { x: halfExtents[0], y: halfExtents[1], z: halfExtents[2] },
+        tags: tags ?? { surface: 'metal' },
+      });
+      instance.colliderIds.push(id);
+      data.moverColliderIds.push(id);
+      data.moverColliderCentres.set(center, slot * 3);
+      data.moverColliderSlots[index] = slot;
+      slot++;
+    });
+  }
+
+  /** Allocates the steam puffs (on the shared mist pool), hidden until the animate hook sizes them. */
+  function allocSteam(data, count) {
+    if (count <= 0) return;
+    data.steamSlots = allocSlots(puffs, count, 'mist');
+    data.moverState.steam = new Float64Array(count * STEAM_STRIDE);
+    for (let index = 0; index < count; index++) puffs.setMatrix(data.steamSlots[index], hiddenMatrix);
+    puffs.flush();
+    counts.puffs += count;
+  }
+
+  /** Writes the steam puffs from the animate state (radius 0 or the far tier hides one). */
+  function writeSteam(data) {
+    const steam = data.moverState.steam;
+    const array = puffs.mesh.instanceMatrix.array;
+    const drop = rigidCurvatureDrop(ctx, data.moverAnchor[0], data.moverAnchor[2]);
+    for (let index = 0; index < data.steamSlots.length; index++) {
+      const base = index * STEAM_STRIDE;
+      const radius = data.moversShown === 1 ? steam[base + 3] : 0;
+      transform[0] = data.moverAnchor[0] + steam[base];
+      transform[1] = data.moverAnchor[1] + steam[base + 1] - drop;
+      transform[2] = data.moverAnchor[2] + steam[base + 2];
+      transform[3] = radius;
+      transform[4] = 0;
+      transform[5] = 0;
+      transform[6] = 0;
+      transform[7] = radius * 0.8;
+      transform[8] = 0;
+      transform[9] = 0;
+      transform[10] = 0;
+      transform[11] = radius;
+      writeTransform(array, data.steamSlots[index] * 16, transform);
+    }
+    markMatrices(puffs);
+  }
+
+  /**
+   * The torches: a flame slot each (hidden while unlit) and an ignitable each in the game's ignition
+   * service (ids in instance.ignitableIds; onIgnite lights the flame). Without the service (the node
+   * labs) the torches still light at dusk.
+   */
+  function addTorches(instance, data, torches, anchor, prefix) {
+    const count = torches.length;
+    if (count === 0) return;
+    data.torchSlots = allocSlots(flames, count, 'flame');
+    data.torchLocal = new Float64Array(count * 4);
+    data.torchLit = new Uint8Array(count);
+    data.torchAuto = new Uint8Array(count);
+    data.torchIds = new Array(count).fill(null);
+    counts.flames += count;
+    const ignition = ctx.game && ctx.game.ignition ? ctx.game.ignition : null;
+    torches.forEach((torch, index) => {
+      data.torchLocal[index * 4] = torch.x;
+      data.torchLocal[index * 4 + 1] = torch.y;
+      data.torchLocal[index * 4 + 2] = torch.z;
+      data.torchLocal[index * 4 + 3] = torch.size ?? 1;
+      data.torchAuto[index] = torch.autoLight ? 1 : 0;
+      flames.setMatrix(data.torchSlots[index], hiddenMatrix);
+      if (!ignition) return;
+      const id = `${prefix}:torch${index}`;
+      ignition.add({
+        id,
+        position: { x: anchor.x + torch.x, y: anchor.y + torch.y + (torch.size ?? 1) * 0.4, z: anchor.z + torch.z },
+        radius: Math.max(0.6, (torch.size ?? 1) * 1.2),
+        onIgnite: () => setTorchLit(data, index, true),
+      });
+      instance.ignitableIds.push(id);
+      data.torchIds[index] = id;
+    });
+    flames.flush();
+  }
+
+  /** Event work: a torch lights (an ignition, or dusk) or goes out (dawn). */
+  function setTorchLit(data, index, lit) {
+    const value = lit ? 1 : 0;
+    if (data.torchLit[index] === value) return;
+    data.torchLit[index] = value;
+    counts.litFlames += lit ? 1 : -1;
+    data.torchDrop = NaN;
+  }
+
+  /**
+   * Dusk and dawn for the torches marked autoLight: lit through the ignition service (so the registry
+   * agrees: a lit torch is not lit again by a flame) at dusk, put out at dawn. Event work.
+   */
+  function duskAndDawn(data) {
+    const night = ctx.uniforms.nightFactor.value;
+    const dark = night > DUSK_FACTOR ? 1 : night < DAY_FACTOR ? 0 : data.torchDark;
+    if (dark === data.torchDark) return;
+    data.torchDark = dark;
+    const ignition = ctx.game && ctx.game.ignition ? ctx.game.ignition : null;
+    for (let index = 0; index < data.torchLit.length; index++) {
+      if (data.torchAuto[index] !== 1) continue;
+      const id = data.torchIds[index];
+      if (dark === 1) {
+        if (ignition && id) ignition.ignite(id, { kind: 'dusk', craft: null, position: null });
+        else setTorchLit(data, index, true);
+      } else {
+        if (ignition && id) ignition.extinguish(id);
+        setTorchLit(data, index, false);
+      }
+    }
+  }
+
+  /**
+   * Rewrites the torch flames (lit and shown: their place and size; otherwise hidden) when the
+   * curvature drop moved by DROP_STEP or a torch changed. Allocation-free.
+   */
+  function writeTorches(data) {
+    const drop = rigidCurvatureDrop(ctx, data.moverAnchor[0], data.moverAnchor[2]);
+    const shown = data.flamesShown;
+    if (Math.abs(drop - data.torchDrop) < DROP_STEP && shown === data.torchShownWritten) return;
+    data.torchDrop = drop;
+    data.torchShownWritten = shown;
+    const array = flames.mesh.instanceMatrix.array;
+    for (let index = 0; index < data.torchSlots.length; index++) {
+      const base = index * 4;
+      const size = shown === 1 && data.torchLit[index] === 1 ? data.torchLocal[base + 3] : 0;
+      transform[0] = data.moverAnchor[0] + data.torchLocal[base];
+      transform[1] = data.moverAnchor[1] + data.torchLocal[base + 1] - drop;
+      transform[2] = data.moverAnchor[2] + data.torchLocal[base + 2];
+      transform[3] = size;
+      transform[4] = 0;
+      transform[5] = 0;
+      transform[6] = 0;
+      transform[7] = size;
+      transform[8] = 0;
+      transform[9] = 0;
+      transform[10] = 0;
+      transform[11] = size;
+      writeTransform(array, data.torchSlots[index] * 16, transform);
+    }
+    markMatrices(flames);
+  }
+
+  function removeTorches(instance, data) {
+    const ignition = ctx.game && ctx.game.ignition ? ctx.game.ignition : null;
+    if (ignition) for (const id of instance.ignitableIds) ignition.remove(id);
+    instance.ignitableIds.length = 0;
+    if (data.torchSlots.length > 0) {
+      for (let index = 0; index < data.torchLit.length; index++) if (data.torchLit[index] === 1) counts.litFlames--;
+      freeSlots(flames, data.torchSlots);
+      counts.flames -= data.torchSlots.length;
+      data.torchSlots = new Int32Array(0);
+      data.torchLit = new Uint8Array(0);
+    }
+  }
+
+  /** The instanced blocks: a slot each, coloured by its paint; written by writeBlocks. */
+  function addBlocks(data, list) {
+    const count = list.length;
+    if (count === 0) return;
+    data.blockSlots = allocSlots(blocks, count, 'block');
+    data.blockLocal = new Float64Array(count * 8);
+    counts.blocks += count;
+    const color = new THREE.Color();
+    list.forEach((block, index) => {
+      data.blockLocal.set([block.x, block.y, block.z, block.sizeX, block.sizeY, block.sizeZ, Math.cos(block.yaw ?? 0), Math.sin(block.yaw ?? 0)], index * 8);
+      const value = block.paint ?? PALETTE.concrete;
+      blocks.setColor(data.blockSlots[index], color.setRGB(value[0], value[1], value[2]));
+    });
+  }
+
+  /**
+   * Rewrites the blocks (their boxes, or hidden at a tier that hides the body) when the curvature drop
+   * moved by DROP_STEP or the visibility changed. Allocation-free.
+   */
+  function writeBlocks(data) {
+    const drop = rigidCurvatureDrop(ctx, data.moverAnchor[0], data.moverAnchor[2]);
+    const shown = data.blocksShown;
+    if (Math.abs(drop - data.blockDrop) < DROP_STEP && shown === data.blockShownWritten) return;
+    data.blockDrop = drop;
+    data.blockShownWritten = shown;
+    const array = blocks.mesh.instanceMatrix.array;
+    const local = data.blockLocal;
+    for (let index = 0; index < data.blockSlots.length; index++) {
+      const base = index * 8;
+      const visible = shown === 1 ? 1 : 0;
+      const cosine = local[base + 6];
+      const sine = local[base + 7];
+      // A compass yaw as meshBuilder.box: local x turned to (cos, 0, sin), local z to (-sin, 0, cos).
+      transform[0] = data.moverAnchor[0] + local[base];
+      transform[1] = data.moverAnchor[1] + local[base + 1] - drop;
+      transform[2] = data.moverAnchor[2] + local[base + 2];
+      transform[3] = cosine * local[base + 3] * visible;
+      transform[4] = 0;
+      transform[5] = sine * local[base + 3] * visible;
+      transform[6] = 0;
+      transform[7] = local[base + 4] * visible;
+      transform[8] = 0;
+      transform[9] = -sine * local[base + 5] * visible;
+      transform[10] = 0;
+      transform[11] = cosine * local[base + 5] * visible;
+      writeTransform(array, data.blockSlots[index] * 16, transform);
+    }
+    markMatrices(blocks);
+  }
+
+  /**
+   * The recipe's animate hook for this frame: the env clock (time, step, night factor, sun elevation)
+   * and the shown flag, then the hook, then the movers' matrices, colliders and steam from its state.
+   */
+  function runAnimate(instance, data, dt) {
+    const clock = data.moverEnv.clock;
+    clock[0] = ctx.time.elapsed;
+    clock[1] = dt;
+    clock[2] = ctx.uniforms.nightFactor.value;
+    clock[3] = ctx.state.time.sunElevation;
+    clock[4] = data.moversShown;
+    if (data.animate !== null) data.animate(data.moverState, data.moverEnv);
+    if (data.moverMeshes.length > 0) poseMovers(data);
+    if (data.steamSlots.length > 0) writeSteam(data);
+  }
+
+  /**
+   * The direction (unit, world) of the brightest live sky target the celestial engine reports (a
+   * comet, else a meteor radiant) into out (Float64Array(3)): 1 for a comet, 2 for a radiant, 0 for
+   * none. For the animate hooks (the observatory's telescope).
+   */
+  function skyTarget(out) {
+    const spawns = ctx.spawns;
+    const celestial = spawns && spawns.registry ? spawns.registry.get('celestial') : null;
+    if (!celestial || typeof celestial.skyTarget !== 'function') return 0;
+    return celestial.skyTarget(out);
   }
 
   function freeSlots(pool, slots) {
@@ -822,6 +1328,19 @@ export function createStructureEngine() {
     if (course.clean) ctx.bus.emit('notify', { text: `${data.name}: left the canyon, the run is not clean`, kind: 'info' });
   }
 
+  /** The cloth's wind (data.clothWind) from the eased wind the structure shows; the direction holds in a calm. */
+  function updateClothWind(data) {
+    const state = data.wind;
+    const look = data.clothWind;
+    const speed = state[2];
+    if (speed > 0.1) {
+      look.x = state[0] / speed;
+      look.y = state[1] / speed;
+    }
+    look.z = speed * data.params.sway;
+    look.w = state[5];
+  }
+
   function updateSway(data) {
     const sway = data.sway;
     const state = data.wind;
@@ -855,6 +1374,7 @@ export function createStructureEngine() {
     audio[1] = 1 / AUDIO_RATE;
     let level = data.audioLevel;
     if (data.audioMode === 'wind') level = data.wind[2] / data.audioReference;
+    else if (data.audioMode === 'recipe') level = data.moverState.level[0];
     else if (data.audioMode === 'approach') {
       const player = ctx.state.player.position;
       const point = data.audioPosition;
@@ -945,6 +1465,18 @@ export function createStructureEngine() {
     // Turbines keep turning at the mid tier and freeze (still drawn) at the far tier.
     data.animateTurbines = showMoving && rank < 2;
     data.animateSocks = showSocks;
+    // Movers, steam and flames show (and animate) at the near and mid tiers; blocks follow the body.
+    data.moversShown = rank < 2 ? 1 : 0;
+    data.flamesShown = rank < 2 ? 1 : 0;
+    data.blocksShown = !hideAll && KIND_TIERS.body[rank] ? 1 : 0;
+    if (data.moversShown === 0) {
+      for (let index = 0; index < data.moverMeshes.length; index++) if (data.moverMeshes[index]) data.moverMeshes[index].visible = false;
+      if (data.steamSlots.length > 0) writeSteam(data);
+    }
+    for (let index = 0; index < data.moverMeshes.length; index++) {
+      const mesh = data.moverMeshes[index];
+      if (mesh) mesh.castShadow = rank === 0 && data.moverKinds[index] === 0;
+    }
   }
 
   const engine = {
@@ -955,7 +1487,7 @@ export function createStructureEngine() {
       THREE = ctx.THREE;
       hiddenMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
       materials = buildMaterials();
-      const poolMaterial = { body: materials.solid, detail: materials.solid, decal: materials.decal, glow: materials.glow, water: materials.water };
+      const poolMaterial = { body: materials.solid, detail: materials.solid, decal: materials.decal, glow: materials.glow, water: materials.water, cloth: materials.cloth };
       meshPools = {};
       for (const kind of GEOMETRY_KINDS) {
         meshPools[kind] = ctx.pools.createMeshPool({ material: poolMaterial[kind], capacity: MAX_INSTANCES + 8, parent: ctx.scene, name: `structure-${kind}` });
@@ -965,22 +1497,35 @@ export function createStructureEngine() {
       socks = ctx.pools.createInstancedPool({ geometry: buildSockGeometry(), material: materials.moving, capacity: SOCK_CAPACITY, name: 'structure-windsocks', parent: ctx.scene, colors: true });
       const puffGeometry = new THREE.IcosahedronGeometry(1, 2);
       puffs = ctx.pools.createInstancedPool({ geometry: puffGeometry, material: materials.mist, capacity: PUFF_CAPACITY, name: 'structure-mist', parent: ctx.scene });
+      moverPools = {};
+      for (const kind of MOVER_KINDS) {
+        moverPools[kind] = ctx.pools.createMeshPool({ material: poolMaterial[kind], capacity: MOVER_CAPACITY, parent: ctx.scene, name: `structure-mover-${kind}` });
+      }
+      flames = ctx.pools.createInstancedPool({ geometry: buildFlameGeometry(), material: materials.flame, capacity: FLAME_CAPACITY, name: 'structure-flames', parent: ctx.scene });
+      blocks = ctx.pools.createInstancedPool({ geometry: buildBlockGeometry(), material: materials.moving, capacity: BLOCK_CAPACITY, name: 'structure-blocks', parent: ctx.scene, colors: true });
       nacelles.mesh.castShadow = true;
       rotors.mesh.castShadow = true;
+      blocks.mesh.castShadow = true;
+      blocks.mesh.receiveShadow = true;
       puffs.mesh.renderOrder = 3;
+      flames.mesh.renderOrder = 3;
       // The pipeline prewarm (behind the loading fade): one proxy per pooled material, with every
       // attribute the material reads, plus the instanced meshes themselves.
       if (typeof ctx.registerPrewarm === 'function') {
         const solidProxy = new THREE.Mesh(proxyGeometry(false), materials.solid);
         solidProxy.castShadow = true;
         solidProxy.receiveShadow = true;
-        proxies = [solidProxy, new THREE.Mesh(proxyGeometry(false), materials.decal), new THREE.Mesh(proxyGeometry(false), materials.glow), new THREE.Mesh(proxyGeometry(true), materials.water)];
+        proxies = [
+          solidProxy, new THREE.Mesh(proxyGeometry(false), materials.decal), new THREE.Mesh(proxyGeometry(false), materials.glow), new THREE.Mesh(proxyGeometry(true), materials.water),
+          new THREE.Mesh(proxyGeometry(false), materials.cloth),
+        ];
         for (const proxy of proxies) {
           proxy.userData.swayOffset = new THREE.Vector3();
           proxy.userData.look = new THREE.Vector4(1, 0, 0, 0);
+          proxy.userData.clothWind = new THREE.Vector4(1, 0, 0, 0);
           ctx.registerPrewarm(proxy);
         }
-        for (const pool of [nacelles, rotors, socks, puffs]) ctx.registerPrewarm(pool.mesh);
+        for (const pool of [nacelles, rotors, socks, puffs, flames, blocks]) ctx.registerPrewarm(pool.mesh);
       }
       if (ctx.bus && typeof ctx.bus.onTyped === 'function') {
         ctx.bus.onTyped('landed', onLanded);
@@ -1049,6 +1594,58 @@ export function createStructureEngine() {
         animateTurbines: true,
         animateSocks: true,
         turbineColliders: null,
+        /** The cloth's per-object wind: unit direction x, z, speed (m/s), turbulence. */
+        clothWind: new THREE.Vector4(context.windX, context.windZ, 0, 0),
+        // Phase 3 recipe features (empty for the Phase 2 recipes).
+        animate: typeof out.animate === 'function' ? out.animate : null,
+        /** 1 when the recipe has an animate hook, movers or steam (runAnimate runs each frame). */
+        animated: 0,
+        moverMeshes: [],
+        moverKinds: new Uint8Array(out.movers.length),
+        moverPoses: new Float64Array(out.movers.length * POSE_STRIDE),
+        moverAnchor: new Float64Array(3),
+        moverRotation: new Float64Array(9),
+        moverColliderSlots: new Int32Array(0),
+        moverColliderIds: [],
+        moverColliderCentres: new Float64Array(0),
+        moverColliderLast: new Float64Array(0),
+        moverColliderPose: new Float64Array(7),
+        moverState: null,
+        moverEnv: null,
+        /** 1 while movers, steam, flames and blocks show (by tier); the animate hook reads it as clock[4]. */
+        moversShown: 1,
+        flamesShown: 1,
+        blocksShown: 1,
+        steamSlots: new Int32Array(0),
+        torchSlots: new Int32Array(0),
+        torchLocal: new Float64Array(0),
+        torchLit: new Uint8Array(0),
+        torchAuto: new Uint8Array(0),
+        torchIds: [],
+        torchDark: -1,
+        torchDrop: NaN,
+        torchShownWritten: -1,
+        blockSlots: new Int32Array(0),
+        blockLocal: new Float64Array(0),
+        blockDrop: NaN,
+        blockShownWritten: -1,
+      };
+      // The animate hook's state (what it writes) and env (what it reads), made once per instance.
+      data.moverState = { poses: data.moverPoses, steam: new Float64Array(0), level: new Float64Array([0.8]), glow: new Float64Array([1]) };
+      data.moverEnv = {
+        /** [time (s), step (s), night factor, sun elevation (deg), shown (1 near and mid, else 0)]. */
+        clock: new Float64Array(5),
+        /** The wind the structure shows: [x, z, speed (m/s), -, -, turbulence]. */
+        wind: data.wind,
+        anchor,
+        player: ctx.state.player.position,
+        moonDirection: ctx.state.time.moonDirection ?? null,
+        sunDirection: ctx.state.time.sunDirection ?? null,
+        skyTarget,
+        /** Plays a voice trigger (event work: a whistle, a bell). */
+        trigger(name, options) {
+          if (data.voice) data.voice.trigger(name, options);
+        },
       };
       // Probe point and audio position in world space; the ambient wind there, once.
       data.probe = [anchor.x + data.probe[0], anchor.y + data.probe[1], anchor.z + data.probe[2]];
@@ -1060,12 +1657,20 @@ export function createStructureEngine() {
       const audioPoint = out.audioPoint ?? [0, 5, 0];
       data.audioPosition.set(anchor.x + audioPoint[0], anchor.y + audioPoint[1], anchor.z + audioPoint[2]);
       // Live params (read every frame): the set-piece engine's ramps write them directly.
-      const instance = { anchor, radius: out.radius, windSourceIds: [], colliderIds: [], lights: 0, particles: 0, data, params: { glow: 1, sway: 1, rotorSpeed: 1, audio: 1 } };
+      const instance = { anchor, radius: out.radius, windSourceIds: [], colliderIds: [], ignitableIds: [], lights: 0, particles: 0, data, params: { glow: 1, sway: 1, rotorSpeed: 1, audio: 1 } };
       const colliderPrefix = `${preset.id}:${params.seed}:${serialNumber}`;
       data.params = instance.params;
       try {
         // Geometry on pooled meshes.
         for (const kind of GEOMETRY_KINDS) data.meshes[kind] = showGeometry(kind, context[kind].toGeometry(THREE), data, anchor);
+        // Phase 3: movers, steam, torches and blocks, all placed from the anchor.
+        data.moverAnchor[0] = anchor.x;
+        data.moverAnchor[1] = anchor.y;
+        data.moverAnchor[2] = anchor.z;
+        if (out.movers.length > 0) showMovers(data, out.movers, anchor);
+        allocSteam(data, out.steam);
+        addTorches(instance, data, out.torches, anchor, colliderPrefix);
+        addBlocks(data, out.blocks);
         // Turbines.
         out.turbines.forEach((turbine, index) => {
           data.turbinePositions[index * 3] = anchor.x + turbine.x;
@@ -1143,14 +1748,23 @@ export function createStructureEngine() {
         if (data.turbineCount > 0) updateTurbines(data, 0);
         if (data.sockCount > 0) updateSocks(data);
         addStructureColliders(colliderWorld(), instance, data, out, anchor, colliderPrefix);
+        addMoverColliders(instance, data, out.movers, colliderPrefix);
         // The preset's voice (engineKit's ownsPresetAudio: params.voice, else the first engine entry).
         if (ownsPresetAudio(preset, ENGINE_NAME, read.boolean('voice', null)) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
-          data.audioMode = read.choice('audioIntensity', recipe.audioIntensity, ['approach', 'wind', 'constant']);
+          data.audioMode = read.choice('audioIntensity', recipe.audioIntensity, ['approach', 'wind', 'constant', 'recipe']);
           data.audioLevel = read.number('audioLevel', 0.8, 0, 1);
           data.audioReference = data.audioMode === 'wind' ? (out.turbineSettings ? out.turbineSettings.ratedWind : 10) : data.audioMode === 'approach' ? (out.approach || 1500) : 1;
           data.voice = ctx.audio.spawnVoice(preset.audio.recipe, { ...(preset.audio.params ?? {}), intensity: data.audioMode === 'constant' ? data.audioLevel : 0 });
           data.voice.setPosition(data.audioPosition);
         }
+        // The first pose of the recipe's movers, steam, flames and blocks.
+        data.animated = data.animate !== null || out.movers.length > 0 || out.steam > 0 ? 1 : 0;
+        if (data.animated === 1) runAnimate(instance, data, 0);
+        if (data.torchSlots.length > 0) {
+          duskAndDawn(data);
+          writeTorches(data);
+        }
+        if (data.blockSlots.length > 0) writeBlocks(data);
       } catch (error) {
         engine.dispose(instance);
         throw error;
@@ -1163,8 +1777,15 @@ export function createStructureEngine() {
     update(instance, dt) {
       const data = instance.data;
       for (let kind = 0; kind < GEOMETRY_KINDS.length; kind++) applyRigidDrop(ctx, data.meshes[GEOMETRY_KINDS[kind]], instance.anchor.y);
-      data.look.x = instance.params.glow;
+      data.look.x = instance.params.glow * data.moverState.glow[0];
       updateWind(data, dt);
+      if (data.meshes.cloth !== null) updateClothWind(data);
+      if (data.animated === 1 && data.moversShown === 1) runAnimate(instance, data, dt);
+      if (data.torchSlots.length > 0) {
+        duskAndDawn(data);
+        writeTorches(data);
+      }
+      if (data.blockSlots.length > 0) writeBlocks(data);
       if (data.turbineCount > 0 && data.animateTurbines) updateTurbines(data, dt);
       if (data.turbineColliders) updateTurbineColliders(colliderWorld(), data);
       if (data.sockCount > 0 && data.animateSocks) updateSocks(data);
@@ -1214,6 +1835,18 @@ export function createStructureEngine() {
         data.voice.dispose();
         data.voice = null;
       }
+      releaseMovers(data);
+      if (data.steamSlots.length > 0) {
+        freeSlots(puffs, data.steamSlots);
+        counts.puffs -= data.steamSlots.length;
+        data.steamSlots = new Int32Array(0);
+      }
+      removeTorches(instance, data);
+      if (data.blockSlots.length > 0) {
+        freeSlots(blocks, data.blockSlots);
+        counts.blocks -= data.blockSlots.length;
+        data.blockSlots = new Int32Array(0);
+      }
     },
 
     stats() {
@@ -1222,12 +1855,13 @@ export function createStructureEngine() {
         const meshes = live[index].data.meshes;
         for (const kind of GEOMETRY_KINDS) if (meshes[kind] && meshes[kind].visible) drawCalls++;
       }
-      for (const pool of [nacelles, rotors, socks, puffs]) if (pool && pool.used > 0) drawCalls++;
+      for (const pool of [nacelles, rotors, socks, puffs, flames, blocks]) if (pool && pool.used > 0) drawCalls++;
+      if (moverPools) for (const kind of MOVER_KINDS) drawCalls += moverPools[kind].used;
       return {
         instances: counts.instances,
         particles: 0,
         lights: 0,
-        buffers: counts.buffers + (nacelles ? 4 : 0),
+        buffers: counts.buffers + counts.movers + (nacelles ? 6 : 0),
         drawCalls,
         turbines: counts.turbines,
         mistPuffs: counts.puffs,
@@ -1235,6 +1869,10 @@ export function createStructureEngine() {
         gatesPassed: counts.gates,
         landingsGraded: counts.landings,
         coursesRun: counts.courses,
+        movers: counts.movers,
+        flames: counts.flames,
+        litFlames: counts.litFlames,
+        blocks: counts.blocks,
       };
     },
 
@@ -1268,7 +1906,8 @@ export function createStructureEngine() {
     teardown() {
       for (const instance of [...live]) engine.dispose(instance);
       for (const kind of GEOMETRY_KINDS) meshPools[kind].dispose();
-      for (const pool of [nacelles, rotors, socks, puffs]) pool.dispose({ keepMaterial: true });
+      for (const kind of MOVER_KINDS) moverPools[kind].dispose();
+      for (const pool of [nacelles, rotors, socks, puffs, flames, blocks]) pool.dispose({ keepMaterial: true });
       for (const proxy of proxies) proxy.geometry.dispose();
       proxies = [];
       for (const material of Object.values(materials)) material.dispose();
