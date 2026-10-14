@@ -163,6 +163,18 @@ const BALLOON = Object.freeze({
   checks: [CHECK.autopilot, { id: 'vent', label: 'parachute vent opened', test: (seen) => seen.maxAirbrake >= 0.5 }],
 });
 
+/** Airship: autopilot cruise and turn, then the elevators nose it down and the rudders turn it by hand. */
+const AIRSHIP = Object.freeze({
+  steps: [
+    { at: 0, label: 'autopilot cruise', run: (pilot) => cruise(pilot) },
+    { at: 0.3, label: 'autopilot turn 90 deg right', run: (pilot) => cruise(pilot, 90) },
+    { at: 0.44, label: 'autopilot off, nose down and rudder left', run: (pilot) => { handsOff(pilot); pilot.stick({ roll: 0, pitch: -1, yaw: -0.6 }); } },
+    { at: 0.66, label: 'hands off (assists level it and hold the heading)', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
+    { at: 0.8, label: 'autopilot cruise, turn back', run: (pilot) => cruise(pilot, -90) },
+  ],
+  checks: [CHECK.autopilot, { id: 'noseDown', label: 'pitched 2 deg nose down by hand (an airship pitches slowly)', test: (seen) => seen.minPitch <= -2 }],
+});
+
 const SCRIPTS = Object.freeze({
   glider: GLIDER,
   bushplane: BUSHPLANE,
@@ -176,6 +188,7 @@ const SCRIPTS = Object.freeze({
   tiltrotor: HOVER,
   paraglider: PARAGLIDER,
   balloon: BALLOON,
+  airship: AIRSHIP,
 });
 
 /** The script for a craft ({ steps, checks }), or null when none exists. */
@@ -184,4 +197,4 @@ export function flightScriptFor(craft) {
 }
 
 /** Every craft id with a script, in the harness's run order. */
-export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic', 'seaplane', 'tiltrotor', 'paraglider', 'balloon']);
+export const SCRIPTED_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv', 'aerobatic', 'seaplane', 'tiltrotor', 'paraglider', 'balloon', 'airship']);

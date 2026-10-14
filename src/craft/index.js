@@ -14,6 +14,7 @@ import seaplane from './seaplane.js';
 import tiltrotor from './tiltrotor.js';
 import paraglider from './paraglider.js';
 import balloon from './balloon.js';
+import airship from './airship.js';
 
 craftRegistry.register(glider);
 craftRegistry.register(bushplane);
@@ -26,5 +27,6 @@ craftRegistry.register(seaplane);
 craftRegistry.register(tiltrotor);
 craftRegistry.register(paraglider);
 craftRegistry.register(balloon);
+craftRegistry.register(airship);
 
 export { craftRegistry };
