@@ -11,6 +11,10 @@
 //                        blackout (WREN silent, the reentry events heating, blackout, clear), the
 //                        hypersonic glide and the hand-back, then the pilot dives for home under 3 km;
 //                        the attitude hold switch toggles on the way
+//   spaceplane-space-and-back  both in one flight (spec Milestone P item 3 as written): the climb
+//                        placement, full power past 100 km to the apogee, the engine off, auto
+//                        re-entry armed by the assists past the apogee, the blackout and the glide,
+//                        then home under 3 km; it ends a few seconds after (endWhen)
 //
 // Continuity (every frame, rebase frames counted): the craft's position relative to the camera from the
 // render-frame matrices (scene.position = -origin.offset) agrees with the same vector in world
@@ -153,6 +157,49 @@ function probeClean(api, key) {
 
 const continuityCheck = Object.freeze({ id: 'continuity', label: 'rebases without visible jumps: render-frame and world camera-relative positions agree within 1 mm', always: true, test: continuityHolds });
 
+/**
+ * The pilot home after the hand-back: a 30 degree dive with the speed brake, rounding out near 3 km
+ * (or 1.5 km above high ground), then a shallow descent clear of the terrain. Returns the pitch input.
+ */
+function diveHome(api, held) {
+  const altitude = api.flight.altitude;
+  const agl = api.agl();
+  const diving = altitude > 3800 && agl > 1500;
+  const target = diving ? -30 : agl < 900 ? 6 : -4;
+  if (diving) held.push('airbrake');
+  return Math.min(0.6, Math.max(-0.6, (target - flightPath(api.flight)) * 0.045));
+}
+
+/**
+ * The single flight of spec Milestone P item 3: the climb placement, full power at 65 degrees past
+ * 100 km to the top of the arc (as the spaceplane lab's re-entry test flies it: an engine cut at 100 km
+ * tops out lower and never heats past the blackout), the engine off from there, auto re-entry (armed by the assists past the apogee) through the
+ * heating, the blackout and the glide, then home under 3 km. Tracks the phases in the memo.
+ */
+function spaceAndBackPilot(t, api) {
+  watchFarField(api);
+  const memo = api.memo;
+  const craftState = api.craftState;
+  const altitude = api.flight.altitude;
+  memo.peak = Math.max(memo.peak ?? 0, altitude);
+  if (memo.spaceAt === undefined && altitude >= 100000) memo.spaceAt = t;
+  if (memo.spaceAt !== undefined && memo.apogeeAt === undefined && api.flight.velocity.y < 0) memo.apogeeAt = t;
+  if (memo.apogeeAt !== undefined && craftState.autoReentry === true) memo.armed = true;
+  if (craftState.blackout === true) memo.sawBlackout = true;
+  if (craftState.reentryPhase === 'entry') memo.sawEntry = true;
+  if (craftState.reentryPhase === 'glide') memo.sawGlide = true;
+  if (memo.sawGlide && craftState.reentryPhase === 'off' && memo.handBackAt === undefined) memo.handBackAt = t;
+  if (memo.handBackAt !== undefined && memo.downAt === undefined && (altitude < 3000 || api.agl() < 1200)) memo.downAt = t;
+  if (altitude > 99000) startProbe(api, 'probeSpace', 62);
+  if (memo.apogeeAt !== undefined && altitude < 12600 && altitude > 12000) startProbe(api, 'probeBand', 55);
+  const held = [];
+  if (memo.handBackAt !== undefined) return { throttle: 0, roll: 0, yaw: 0, pitch: diveHome(api, held), held };
+  if (memo.apogeeAt !== undefined) return { throttle: 0, roll: 0, yaw: 0, pitch: 0 };
+  const pitch = api.flight.pitch;
+  const pull = altitude < 20000 && pitch < 64.5 ? Math.min(0.6, Math.max(0, (65 - pitch) * 0.05)) : 0;
+  return { throttle: 1, roll: 0, yaw: 0, pitch: pull };
+}
+
 export default Object.freeze({
   craft: 'spaceplane',
   // The general test: a gentle stick for a craft with this much control power.
@@ -216,17 +263,9 @@ export default Object.freeze({
           if (Math.abs(api.flight.aoa - 40) > 4) memo.entryOff = (memo.entryOff ?? 0) + 1;
         }
         memo.maxLoad = Math.max(memo.maxLoad ?? 0, api.flight.gLoad);
-        let pitch = 0;
         const held = [];
-        if (memo.handBackAt !== undefined) {
-          // The pilot takes her home: a 30 degree dive with the speed brake, rounding out near 3 km
-          // (or 1.5 km above high ground), then holding a shallow descent clear of the terrain.
-          const agl = api.agl();
-          const diving = altitude > 3800 && agl > 1500;
-          const target = diving ? -30 : agl < 900 ? 6 : -4;
-          pitch = Math.min(0.6, Math.max(-0.6, (target - flightPath(api.flight)) * 0.045));
-          if (diving) held.push('airbrake');
-        }
+        // The pilot takes her home after the hand-back.
+        const pitch = memo.handBackAt !== undefined ? diveHome(api, held) : 0;
         return { throttle: 0, roll: 0, yaw: 0, pitch, actions, held };
       },
       checks: [
@@ -245,6 +284,29 @@ export default Object.freeze({
         { id: 'farFieldHoles', label: 'no far-field tile missing on any frame above 11 km', from: 400, test: (api) => api.memo.farFrames > 200 && api.memo.holeFrames === 0 },
         { id: 'probeHigh', label: 'ground on every pixel below the horizon at 60 km (readback)', test: (api) => probeClean(api, 'probeHigh') },
         { id: 'probeBand', label: 'ground on every pixel below the horizon in the handoff band (readback)', test: (api) => probeClean(api, 'probeBand') },
+      ],
+    }),
+    Object.freeze({
+      id: 'spaceplane-space-and-back',
+      views: ['third', 'first'],
+      start: { at: 'spawn', mode: 'climb', agl: 2000, clearRadius: 3000, speed: 250, pitch: 45, throttle: 1 },
+      seconds: 900,
+      script: spaceAndBackPilot,
+      // Done a few seconds after it is home under 3 km (the hypersonic glide sets the length).
+      endWhen: (api) => api.memo.downAt !== undefined && api.t > api.memo.downAt + 5,
+      checks: [
+        { id: 'space', label: 'climbs past 100 km', test: (api) => api.memo.spaceAt !== undefined },
+        { id: 'apogee', label: 'the arc tops out at 100-130 km', test: (api) => api.memo.apogeeAt !== undefined && api.memo.peak >= 100000 && api.memo.peak <= 130000 },
+        { id: 'armed', label: 'the assists arm auto re-entry past the apogee', test: (api) => api.memo.armed === true },
+        { id: 'entry', label: 'the entry attitude, the comms blackout and the hypersonic glide', test: (api) => api.memo.sawEntry === true && api.memo.sawBlackout === true && api.memo.sawGlide === true },
+        { id: 'blackoutClear', label: 'the reentry events heating, blackout and clear', test: (api) => api.events.count('reentry') >= 3 && api.events.last('reentry')?.phase === 'clear' },
+        { id: 'down', label: 're-enters to 3 km (or under 1.2 km above high ground) in the same flight', test: (api) => api.memo.downAt !== undefined },
+        { id: 'rebases', label: 'the render origin rebased up and down (20 or more)', test: (api) => api.events.count('originRebased') >= 20 },
+        continuityCheck,
+        { id: 'continuityRebases', label: 'the continuity check saw 20 or more rebase frames', test: (api) => (api.memo.continuity?.rebaseFrames ?? 0) >= 20 },
+        { id: 'farFieldHoles', label: 'no far-field tile missing on any frame above 11 km, up and down', test: (api) => api.memo.downAt !== undefined && api.memo.farFrames > 400 && api.memo.holeFrames === 0 },
+        { id: 'probeSpace', label: 'ground on every pixel below the horizon from 100 km (readback)', test: (api) => probeClean(api, 'probeSpace') },
+        { id: 'probeBand', label: 'ground on every pixel below the horizon in the handoff band on the way down (readback)', test: (api) => probeClean(api, 'probeBand') },
       ],
     }),
   ]),

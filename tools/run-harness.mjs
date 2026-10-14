@@ -373,7 +373,8 @@ function timeLimitMs(options) {
   if (Number.isFinite(options.timeoutMinutes) && options.timeoutMinutes > 0) return options.timeoutMinutes * 60000;
   if (options.test === 'hotas') return 8 * 60000;
   if (options.test === 'terrain' || options.test === 'determinism' || options.test === 'collision') return 40 * 60000;
-  if (options.test === 'craft') return 90 * 60000;
+  // All 14 craft fly about 2.5 hours of scenarios in both views (the spaceplane alone about 50 minutes).
+  if (options.test === 'craft') return (options.crafts || options.scenarios ? 120 : 360) * 60000;
   if (options.test === 'spawns') return 90 * 60000;
   const soak = options.test === 'soak';
   const seeds = options.seeds ? options.seeds.split(',').filter(Boolean).length : soak ? SOAK_SEED_COUNT : 3;
