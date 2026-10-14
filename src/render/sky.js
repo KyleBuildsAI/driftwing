@@ -30,7 +30,8 @@ const MOON_LIGHT_HEX = 0xb6c5ec;
  * - Global overrides (Phase 3, contract i.4): a modifier's moonTint reddens the moon disc, its halo
  *   and the moon light (the blood moon); addSunOverride(id, { apply }) bends the sun's path (the
  *   midnight sun skims the horizon) and state.time follows the bent sun. state.time.days counts the
- *   days (whole days since the start plus dayTime) for the override schedule's night index.
+ *   days (whole days since the start plus dayTime) for the override schedule's night index. A
+ *   modifier's aurora raises the aurora curtains beyond the snow (the legendary aurora nights).
  * - High altitude (Phase 3, contract g.2): state.atmosphere (src/env/atmosphere.js, from the camera
  *   altitude every frame) drives the dome toward black above the limb band, the sharper sun disc and
  *   narrower glow, daylight stars, the thin blue limb on the rendered horizon (its dip below the
@@ -724,11 +725,11 @@ export function createSkySystem(ctx) {
   // (and so to the fog colour) and lifts the hemisphere light for an instant. A modifier at weight 0
   // or at neutral values changes nothing, and when nothing weighs in, no modifier code touches a
   // colour at all.
-  const MODIFIER_NEUTRAL = Object.freeze({ sunIntensity: 1, ambient: 1, fogColorAmount: 0, fogDensity: 1, skyTintAmount: 0, darkness: 0, stars: 0, overcast: 0, flash: 0, moonTintAmount: 0 });
+  const MODIFIER_NEUTRAL = Object.freeze({ sunIntensity: 1, ambient: 1, fogColorAmount: 0, fogDensity: 1, skyTintAmount: 0, darkness: 0, stars: 0, overcast: 0, flash: 0, moonTintAmount: 0, aurora: 0 });
   const MODIFIER_SCALAR_FIELDS = Object.keys(MODIFIER_NEUTRAL);
   const MODIFIER_LIMITS = Object.freeze({
     sunIntensity: [0, 4], ambient: [0, 4], fogColorAmount: [0, 1], fogDensity: [0.25, 8], skyTintAmount: [0, 1], darkness: [0, 1], stars: [0, 1], overcast: [0, 1],
-    flash: [0, 1], moonTintAmount: [0, 1],
+    flash: [0, 1], moonTintAmount: [0, 1], aurora: [0, 1],
   });
   /** A full flash (1) adds this much of its colour to the sky palette (display-referred), per key. */
   const FLASH_SKY_GAIN = Object.freeze({ zenith: 0.35, horizon: 0.55, anti: 0.45, ground: 0.4 });
@@ -744,6 +745,7 @@ export function createSkySystem(ctx) {
     skyTint: new THREE.Color(), skyTintAmount: 0,
     flash: 0, flashColor: new THREE.Color(),
     moonTint: new THREE.Color(), moonTintAmount: 0,
+    aurora: 0,
   };
   const tintScratch = new THREE.Color();
 
@@ -794,6 +796,7 @@ export function createSkySystem(ctx) {
     combined.moonTintAmount = 0;
     combined.moonTint.setRGB(0, 0, 0);
     combined.flash = 0;
+    combined.aurora = 0;
     let active = false;
     for (let index = 0; index < modifierList.length; index++) {
       const modifier = modifierList[index];
@@ -806,6 +809,7 @@ export function createSkySystem(ctx) {
       combined.darkness = 1 - (1 - combined.darkness) * (1 - values.darkness * weight);
       combined.overcast = 1 - (1 - combined.overcast) * (1 - values.overcast * weight);
       combined.stars = Math.max(combined.stars, values.stars * weight);
+      combined.aurora = Math.max(combined.aurora, values.aurora * weight);
       if (values.flash * weight > combined.flash) {
         combined.flash = values.flash * weight;
         combined.flashColor.copy(modifier.flashColor);
@@ -826,7 +830,7 @@ export function createSkySystem(ctx) {
     combined.active = active && (
       combined.sunIntensity !== 1 || combined.ambient !== 1 || combined.fogDensity !== 1 || combined.darkness !== 0
       || combined.stars !== 0 || combined.overcast !== 0 || combined.fogColorAmount !== 0 || combined.skyTintAmount !== 0
-      || combined.flash !== 0 || combined.moonTintAmount !== 0
+      || combined.flash !== 0 || combined.moonTintAmount !== 0 || combined.aurora !== 0
     );
   }
 
@@ -845,7 +849,9 @@ export function createSkySystem(ctx) {
    * and every light; overcast hides the sun disc, god rays, moon and stars behind cloud; stars raises
    * the star field (an eclipse); flash (0..1) adds flashColor (default a cold white) to the sky and
    * the ambient light for a lightning strike; moonTint / moonTintAmount (0..1) tint the moon disc, its
-   * halo and the moon light (the blood moon); weight (default 1) eases the whole modifier in and out.
+   * halo and the moon light (the blood moon); aurora (0..1, the maximum wins) raises the aurora
+   * curtains' presence to at least that much wherever the sky is dark, not only over the snow (the
+   * legendary aurora nights); weight (default 1) eases the whole modifier in and out.
    */
   function addModifier(id, { priority = 0 } = {}) {
     if (typeof id !== 'string' || !id) throw new TypeError('sky.addModifier expects a string id');
@@ -1080,7 +1086,9 @@ export function createSkySystem(ctx) {
     // Teleports and world resets snap straight to the new place instead of fading for seconds.
     smoothedSnow = jumped ? snowWeight : damp(smoothedSnow, snowWeight, 0.5, realDt);
     smoothedHighPine = jumped ? highPine : damp(smoothedHighPine, highPine, 0.5, realDt);
-    const presence = clamp(smoothRange(0.15, 0.75, smoothedSnow) + smoothedHighPine, 0, 1);
+    const natural = clamp(smoothRange(0.15, 0.75, smoothedSnow) + smoothedHighPine, 0, 1);
+    // A modifier's aurora (an aurora night) lifts the curtains anywhere; the snow's own stays the floor.
+    const presence = combined.active ? Math.max(natural, combined.aurora) : natural;
     const darkSky = 1 - smoothRange(-14, -7, state.time.sunElevation);
     sky.auroraStrength.value = darkSky * presence;
     if (combined.active) sky.auroraStrength.value *= 1 - combined.overcast;
@@ -1454,6 +1462,8 @@ export function createSkySystem(ctx) {
         flashColor: `#${combined.flashColor.getHexString()}`,
         moonTint: `#${combined.moonTint.getHexString()}`,
         moonTintAmount: combined.moonTintAmount,
+        aurora: combined.aurora,
+        auroraStrength: sky.auroraStrength.value,
         sunOverrides: sunOverrides.map((override) => ({ id: override.id, weight: override.weight })),
       };
     },

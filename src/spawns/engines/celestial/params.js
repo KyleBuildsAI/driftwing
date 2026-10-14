@@ -8,7 +8,7 @@
 //   eclipse  the moon's disc crossing the sun, the corona, Baily's beads, the sky, fog and light darkening
 //   glory    the glory and the full-circle rainbow on every cloud around the craft's own shadow
 //   rainbow  a rainbow (or moonbow) inside a volume of mist (a sphere), seen with the light behind you
-//   sky      a static sky modifier (stars, darkness, tints) eased in and out with the instance
+//   sky      a static sky modifier (stars, darkness, tints, the aurora) eased in and out with the instance
 
 export const CELESTIAL_COMPONENTS = Object.freeze(['meteors', 'comet', 'eclipse', 'glory', 'rainbow', 'sky']);
 export const CELESTIAL_ANCHORS = Object.freeze(['sky', 'world']);
@@ -16,6 +16,7 @@ export const LIGHT_SOURCES = Object.freeze(['sun', 'moon']);
 export const SKY_WHEN = Object.freeze(['always', 'day', 'night']);
 const SKY_SCALARS = Object.freeze({
   sunIntensity: [0, 4], ambient: [0, 4], fogDensity: [0.25, 8], darkness: [0, 1], overcast: [0, 1], stars: [0, 1], skyTintAmount: [0, 1], fogColorAmount: [0, 1],
+  aurora: [0, 1],
 });
 
 function fail(field, message) {

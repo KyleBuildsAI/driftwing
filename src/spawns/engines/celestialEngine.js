@@ -519,6 +519,7 @@ export function createCelestialEngine() {
     const params = data.params;
     const values = data.modifierValues;
     let weight = 0;
+    values.aurora = 0;
     if (params.eclipse) {
       weight = data.eclipseWeight;
     } else {
@@ -543,6 +544,7 @@ export function createCelestialEngine() {
       if (skyValues.fogDensity !== undefined) values.fogDensity = 1 + (skyValues.fogDensity - 1) * staticWeight;
       if (skyValues.skyTintAmount !== undefined) values.skyTintAmount = Math.max(values.skyTintAmount, skyValues.skyTintAmount * staticWeight);
       if (skyValues.fogColorAmount !== undefined) values.fogColorAmount = Math.max(values.fogColorAmount, skyValues.fogColorAmount * staticWeight);
+      if (skyValues.aurora !== undefined) values.aurora = skyValues.aurora * staticWeight;
       weight = Math.max(weight, staticWeight > 0 ? 1 : 0);
     }
     if (data.flash > 0.002) {
@@ -688,7 +690,7 @@ export function createCelestialEngine() {
         if (resolved.eclipse || resolved.sky || resolved.meteors) {
           data.modifier = ctx.sky && typeof ctx.sky.addModifier === 'function' ? ctx.sky.addModifier(`${id}:celestial`, { priority: MODIFIER_PRIORITY }) : null;
           data.modifierValues = {
-            weight: 0, sunIntensity: 1, ambient: 1, fogDensity: 1, darkness: 0, stars: 0, overcast: 0,
+            weight: 0, sunIntensity: 1, ambient: 1, fogDensity: 1, darkness: 0, stars: 0, overcast: 0, aurora: 0,
             skyTint: new THREE.Color(resolved.sky && resolved.sky.values.skyTint !== undefined ? resolved.sky.values.skyTint : resolved.meteors && !resolved.eclipse ? 0xcff7e2 : 0x1b2350),
             skyTintAmount: 0,
             fogColor: new THREE.Color(resolved.sky && resolved.sky.values.fogColor !== undefined ? resolved.sky.values.fogColor : 0x4a3a4c),
