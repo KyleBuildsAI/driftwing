@@ -326,7 +326,7 @@ export function installPresetChecks91(game) {
       const expected = preset.combo.members.filter((member) => manager.getPreset(member.presetId)).map((member) => member.presetId);
       return check(`${presetId}: staged at ${prepared.place.label} and forced; comboStarted lists its members in order`,
         Boolean(main) && Boolean(started) && JSON.stringify(started.members) === JSON.stringify(expected),
-        { id: comboId, members: started ? started.members : null, expected, live: spawns.map((spawn) => spawn.presetId), view: prepared.view, woke: prepared.woke });
+        { id: comboId, members: started ? started.members : null, expected, live: spawns.map((spawn) => spawn.presetId), view: prepared.view, woke: prepared.woke, nightsSkipped: prepared.nightsSkipped });
     },
 
     /** Waits (up to `seconds`) for every member a combo names (that this build has) to be live with the combo as parent. */

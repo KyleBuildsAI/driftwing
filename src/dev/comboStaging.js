@@ -10,8 +10,9 @@
 // director so it ends on its own), and then the combo itself, started through the director's debug
 // path on that spot (forceSpawn with `at`), its members with it. The midnight sun is scheduled on the
 // current night and the clock is set to midnight. Deterministic: the same seed and the same craft
-// position give the same place, viewpoint and seed. Never part of a production bundle: only the dev
-// debugger and the dev check modules import it.
+// position give the same place, viewpoint and seed. A night staging skips a night the midnight sun
+// keeps light over the craft (on its own schedule), a whole day forward at a time. Never part of a
+// production bundle: only the dev debugger and the dev check modules import it.
 import { frames, holdConditions } from './spawnCheckKit.js';
 
 /** Stagings by preset id: sun elevation (deg, evening unless morning) or a dayTime, weather, the place, the viewpoint. */
@@ -33,6 +34,11 @@ const RING_STEP = 500;
 /** A site the craft was moved to is built within this many seconds (the site feed sweeps). */
 const SITE_WAIT_S = 45;
 
+/** At most this many nights are skipped looking for one the midnight sun leaves dark. */
+const MAX_SKIPPED_NIGHTS = 8;
+/** The director reads its override schedule once per tick (0.5 s of flight): wait a little longer. */
+const OVERRIDE_SETTLE_S = 0.7;
+
 /** Whether presetId has a staging (the debugger shows Force combo for these). */
 export function hasComboStaging(presetId) {
   return Object.hasOwn(COMBO_STAGING, presetId);
@@ -53,6 +59,31 @@ function ringSearch(x, z, test) {
     }
   }
   return null;
+}
+
+/** Resolves once `duration` seconds of flight time have passed (the director has ticked). */
+async function flightSeconds(ctx, duration) {
+  const until = ctx.state.time.elapsed + duration;
+  const started = performance.now();
+  while (ctx.state.time.elapsed < until && performance.now() - started < 10000) await frames(1);
+}
+
+/**
+ * A staging at night skips a night the midnight sun has on its own schedule over the craft (the sun
+ * stays up then, and no aurora or comet would show): the clock goes forward a whole day, to the same
+ * hour, until the override's weight at the craft is 0. Returns the nights skipped.
+ */
+async function skipMidnightSunNights(ctx, director) {
+  let skipped = 0;
+  await flightSeconds(ctx, OVERRIDE_SETTLE_S);
+  while (skipped < MAX_SKIPPED_NIGHTS && director.getOverrides().some((entry) => entry.kind === 'midnightSun' && entry.weight > 0)) {
+    const dayTime = ctx.state.time.dayTime;
+    ctx.systems.sky.setDayTime(dayTime + 0.5, { transition: 0 });
+    ctx.systems.sky.setDayTime(dayTime, { transition: 0 });
+    skipped++;
+    await flightSeconds(ctx, OVERRIDE_SETTLE_S);
+  }
+  return skipped;
 }
 
 /** The place of a staging near (x, z): { x, z, site?, label } or throws naming what is missing. */
@@ -142,6 +173,7 @@ export async function prepareCombo(ctx, presetId) {
   ctx.setPhotoMode(false);
   if (!ctx.systems.flight.resetTo({ x: viewX, y: viewY, z: viewZ, heading })) throw new Error('the flight system refused the viewpoint');
   await frames(3);
+  const nightsSkipped = !staging.override && Number.isFinite(staging.sun) && staging.sun < 0 ? await skipMidnightSunNights(ctx, director) : 0;
   let woke = null;
   if (place.site) {
     // The site is built as the craft nears it (the site feed); its eruption goes through the director.
@@ -160,6 +192,7 @@ export async function prepareCombo(ctx, presetId) {
     place: { x: place.x, z: place.z, label: place.label },
     view: { x: Math.round(viewX), y: Math.round(viewY), z: Math.round(viewZ), heading: Math.round(heading) },
     woke,
+    nightsSkipped,
   };
 }
 
@@ -178,7 +211,7 @@ export function forceCombo(ctx, prepared) {
 
 /**
  * Stages presetId (one of COMBO_STAGING) and forces it: conditions, place, viewpoint, what the place
- * needs awake, then the combo on the spot. Resolves to { presetId, id, place, view, woke } (id: the
+ * needs awake, then the combo on the spot. Resolves to { presetId, id, place, view, woke, nightsSkipped } (id: the
  * combo id or the override's) or throws with the reason.
  */
 export async function stageCombo(ctx, presetId) {
@@ -190,5 +223,6 @@ export async function stageCombo(ctx, presetId) {
     place: { x: Math.round(prepared.place.x), z: Math.round(prepared.place.z), label: prepared.place.label },
     view: prepared.view,
     woke: prepared.woke,
+    nightsSkipped: prepared.nightsSkipped,
   };
 }
