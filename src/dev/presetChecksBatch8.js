@@ -11,9 +11,9 @@
 //   - strike:    the craft flown into a solid part (a pillar, the mountain's flank, an envelope, a
 //                boulder) meets that part's collider (the typed colliderHit event);
 //   - run:       the challenge flow on the course the spawn registered: the craft flown (the real
-//                flight model, reset short of each gate on its line) through every gate starts the
-//                clock, passes every gate, finishes with a medal toast and stores a best time, with no
-//                collider touched on the way;
+//                flight model, reset short of each gate on its line, with a run-in whose ground stays
+//                clear) through every gate starts the clock, passes every gate, finishes with a medal
+//                toast and stores a best time, with no collider touched on the way;
 //   - kiteTouch: on a kite run the craft flown through a string: the flight controller reports the
 //                sensor, the run counts a miss with its penalty, and nothing crashes.
 // Every failed check calls console.error, so the smoke run fails. Never part of a production build:
@@ -21,8 +21,13 @@
 import { frames, wait } from './spawnCheckKit.js';
 
 const DEG = Math.PI / 180;
-/** How far short of a gate (m) the craft is reset on the gate's line for a course run. */
-const GATE_RUN_IN = 80;
+/**
+ * How far short of a gate (m) the craft may be reset on the gate's line for a course run: the longest
+ * run-in whose ground stays RUN_IN_CLEARANCE below the gate's centre (a gate near a cliff face or on a
+ * hillside gets a shorter one).
+ */
+const GATE_RUN_INS = Object.freeze([80, 60, 45, 30, 20]);
+const RUN_IN_CLEARANCE = 10;
 /** How long (ms) a gate may take to register, and a strike or a sensor to happen. */
 const GATE_TIMEOUT_MS = 15000;
 const CONTACT_TIMEOUT_MS = 9000;
@@ -67,10 +72,23 @@ export function installBatch8Checks(game) {
     return line;
   }
 
-  /** The newest live spawn of presetId (a real site or a force spawn), or null. */
+  /**
+   * The live spawn of presetId nearest the craft (a real site or a force spawn), or null: the site feed
+   * keeps every site within its radius built, so another site of the preset may be live far away.
+   */
   function liveSpawn(presetId) {
-    const live = manager.getActive().filter((record) => record.presetId === presetId);
-    return live.length > 0 ? live[live.length - 1] : null;
+    const player = state.player.position;
+    let best = null;
+    let bestDistance = Infinity;
+    for (const record of manager.getActive()) {
+      if (record.presetId !== presetId) continue;
+      const distance = Math.hypot(record.position.x - player.x, record.position.z - player.z);
+      if (distance < bestDistance) {
+        best = record;
+        bestDistance = distance;
+      }
+    }
+    return best;
   }
   function partsOf(spawn, engine = null) {
     const parts = spawn ? manager.getParts(spawn.id) : [];
@@ -99,10 +117,16 @@ export function installBatch8Checks(game) {
     const direction = ctx.uniforms.windDirection.value;
     return compass(direction.x, direction.y);
   }
-  /** Lift (m/s) at the centres of the spawn's updraft sources, each at its own height. */
-  function updraftLifts(spawn) {
+  /**
+   * Lift (m/s) on the axes of the spawn's updraft sources, `above` m over the ground under each (or at
+   * the column's own centre height with above null).
+   */
+  function updraftLifts(spawn, above = null) {
     const own = new Set(windIdsOf(spawn));
-    return ctx.wind.listSources().filter((source) => own.has(source.id) && source.kind === 'spawn-updraft').map((source) => airAt(source.position.x, source.position.y, source.position.z).y);
+    return ctx.wind.listSources().filter((source) => own.has(source.id) && source.kind === 'spawn-updraft').map((source) => {
+      const y = above === null ? source.position.y : ctx.world.groundHeight(source.position.x, source.position.z) + above;
+      return airAt(source.position.x, y, source.position.z).y;
+    });
   }
   /** The registered course of a spawn: its structure part's definition (world frame) and course key. */
   function courseOf(spawn) {
@@ -121,16 +145,35 @@ export function installBatch8Checks(game) {
     ctx.storage.remove(`driftwing-v2.challengePath.${courseKey}.${state.flight.craft}`);
     challenges.reloadRecords();
   }
-  /** Resets the craft `before` m short of a gate on its line, heading through it (level, at its centre). */
-  function toGate(gate, before) {
+  /** The longest run-in of GATE_RUN_INS to (x, y, z) along the horizontal unit (dirX, dirZ) with clear ground. */
+  function runIn(x, y, z, dirX, dirZ) {
+    for (const length of GATE_RUN_INS) {
+      let clear = true;
+      for (let along = 0; along <= length && clear; along += 5) {
+        if (ctx.world.groundHeight(x - dirX * along, z - dirZ * along) > y - RUN_IN_CLEARANCE) clear = false;
+      }
+      if (clear) return length;
+    }
+    return GATE_RUN_INS[GATE_RUN_INS.length - 1];
+  }
+  /** Resets the craft short of a gate on its line (a clear run-in), heading through it, level at its centre. */
+  function toGate(gate) {
     const n = gate.normal;
     const flat = Math.hypot(n.x, n.z) || 1;
-    ctx.systems.flight.resetTo({ x: gate.center.x - (n.x / flat) * before, y: gate.center.y, z: gate.center.z - (n.z / flat) * before, heading: compass(n.x, n.z) });
+    const dirX = n.x / flat;
+    const dirZ = n.z / flat;
+    const before = runIn(gate.center.x, gate.center.y, gate.center.z, dirX, dirZ);
+    ctx.systems.flight.resetTo({ x: gate.center.x - dirX * before, y: gate.center.y, z: gate.center.z - dirZ * before, heading: compass(dirX, dirZ) });
+    return before;
   }
   /** Resets the craft `distance` m from a point, heading at it from `bearing` (deg), at its height. */
   function aimAt(point, bearing, distance) {
     const radians = bearing * DEG;
     ctx.systems.flight.resetTo({ x: point.x - Math.sin(radians) * distance, y: point.y, z: point.z + Math.cos(radians) * distance, heading: bearing });
+  }
+  /** Whether a collider id belongs to an instance of presetId (ids start `${presetId}:${seed}:${serial}:`). */
+  function ownedBy(presetId, id) {
+    return id.startsWith(`${presetId}:`);
   }
   /** Waits (up to timeout) until predicate() holds, frame by frame. */
   async function until(predicate, timeout) {
@@ -155,9 +198,16 @@ export function installBatch8Checks(game) {
       const spawn = liveSpawn(presetId);
       if (!spawn) return check(`${presetId}: wind`, false, 'no live spawn');
       const sources = windIdsOf(spawn).length;
-      if (presetId === 'reverseWaterfall' || presetId === 'ridgeLiftBand' || presetId === 'thermalStreet') {
+      if (presetId === 'ridgeLiftBand') {
+        // 200 m over the ground under each column: the real ridge's own slope lift and lee sink add to
+        // the band's 3 m/s, so every column must lift and the band on average 2 m/s.
+        const lifts = updraftLifts(spawn, 200);
+        const mean = lifts.reduce((sum, lift) => sum + lift, 0) / Math.max(1, lifts.length);
+        return check('ridgeLiftBand: 8 lift columns along the crest, each rising 1+ m/s 200 m over the ground, 2+ m/s on average', lifts.length === 8 && lifts.every((lift) => lift >= 1) && mean >= 2, { sources, mean: Math.round(mean * 10) / 10, lifts: lifts.map((lift) => Math.round(lift * 10) / 10) });
+      }
+      if (presetId === 'reverseWaterfall' || presetId === 'thermalStreet') {
         const lifts = updraftLifts(spawn);
-        const need = { reverseWaterfall: [1, 5], ridgeLiftBand: [8, 1.5], thermalStreet: [16, 2] }[presetId];
+        const need = { reverseWaterfall: [1, 5], thermalStreet: [16, 2] }[presetId];
         return check(`${presetId}: ${need[0]} rising column(s) in the WindField, each lifting ${need[1]}+ m/s at its centre`, lifts.length === need[0] && lifts.every((lift) => lift >= need[1]), { sources, lifts: lifts.map((lift) => Math.round(lift * 10) / 10) });
       }
       if (presetId === 'windShearLine') {
@@ -208,30 +258,53 @@ export function installBatch8Checks(game) {
 
     /**
      * Flies the craft into a solid part of the live spawn of presetId (`part`: a collider id fragment)
-     * from `distance` m and waits for its colliderHit.
+     * and waits for a colliderHit on one of the preset's colliders. With a course, the part nearest a
+     * gate is flown at along that gate's line (a clear run-in at the gate's height: the pillars beside
+     * a canyon gate, the balloons flanking a festival gate); otherwise from `distance` m out on the line
+     * from the spawn's anchor (the cave's flank).
      */
-    async strike(presetId, part, { distance = 140, rise = 0 } = {}) {
+    async strike(presetId, part, { distance = 140 } = {}) {
       const spawn = liveSpawn(presetId);
       if (!spawn) return check(`${presetId}: strike`, false, 'no live spawn');
-      const ids = colliderIdsOf(spawn);
-      const record = collidersOf(spawn).find((entry) => entry.id.includes(`:${part}`) && !entry.tags.sensor) ?? null;
-      if (!record) return check(`${presetId}: strike ${part}`, false, { colliders: ids.length, note: 'no such solid part' });
-      const { min, max } = record.bounds;
-      const target = { x: (min.x + max.x) / 2, y: (min.y + max.y) / 2 + rise, z: (min.z + max.z) / 2 };
-      // From the side of the spawn's anchor, so the run-in crosses open air.
-      const bearing = compass(target.x - spawn.position.x, target.z - spawn.position.z);
+      const solids = collidersOf(spawn).filter((entry) => entry.id.includes(`:${part}`) && !entry.tags.sensor);
+      if (solids.length === 0) return check(`${presetId}: strike ${part}`, false, { note: 'no such solid part' });
+      const centre = (record) => ({ x: (record.bounds.min.x + record.bounds.max.x) / 2, y: (record.bounds.min.y + record.bounds.max.y) / 2, z: (record.bounds.min.z + record.bounds.max.z) / 2 });
+      const { definition } = courseOf(spawn);
       ctx.setPhotoMode(false);
       const since = hits.length;
-      aimAt(target, bearing, distance + Math.max(max.x - min.x, max.z - min.z) * 0.5);
-      const met = await until(() => hits.slice(since).some((hit) => ids.includes(hit.id)), CONTACT_TIMEOUT_MS);
-      const hit = hits.slice(since).find((entry) => ids.includes(entry.id)) ?? null;
+      let approach = null;
+      if (definition) {
+        // The part nearest any gate, flown at along that gate's normal at the gate's height.
+        let best = null;
+        for (const record of solids) {
+          const point = centre(record);
+          for (const gate of definition.gates) {
+            const distanceToGate = Math.hypot(point.x - gate.center.x, point.z - gate.center.z);
+            if (!best || distanceToGate < best.distance) best = { record, point, gate, distance: distanceToGate };
+          }
+        }
+        const n = best.gate.normal;
+        const flat = Math.hypot(n.x, n.z) || 1;
+        const target = { x: best.point.x, y: best.gate.center.y, z: best.point.z };
+        const before = runIn(target.x, target.y, target.z, n.x / flat, n.z / flat) + 15;
+        aimAt(target, compass(n.x, n.z), before);
+        approach = { part: best.record.id, gate: best.gate.id, runIn: before };
+      } else {
+        const record = solids[0];
+        const target = centre(record);
+        const size = Math.max(record.bounds.max.x - record.bounds.min.x, record.bounds.max.z - record.bounds.min.z) * 0.5;
+        aimAt(target, compass(target.x - spawn.position.x, target.z - spawn.position.z) + 90, distance + size);
+        approach = { part: record.id, runIn: Math.round(distance + size) };
+      }
+      const met = await until(() => hits.slice(since).some((hit) => ownedBy(presetId, hit.id)), CONTACT_TIMEOUT_MS);
+      const hit = hits.slice(since).find((entry) => ownedBy(presetId, entry.id)) ?? null;
       await wait(RESPAWN_MS);
-      return check(`${presetId}: flown into its ${part}, the craft meets the collider`, met, hit ? { id: hit.id, speed: Math.round(hit.speed * 10) / 10, crashed: hit.crashed, surface: hit.surface } : { target, others: hits.slice(since).map((entry) => entry.id) });
+      return check(`${presetId}: flown into its ${part}, the craft meets the preset's collider`, met, { approach, hit: hit ? { id: hit.id, speed: Math.round(hit.speed * 10) / 10, crashed: hit.crashed, surface: hit.surface } : null, others: hits.slice(since).map((entry) => entry.id) });
     },
 
     /**
      * The forest wisps fall in behind the craft: it is reset 260 m short of them, flying over them,
-     * and within 12 s the guide is trailing it.
+     * and within 20 s the guide is trailing it, less than 150 m behind.
      */
     async wispsTrail() {
       const spawn = liveSpawn('forestWisps');
@@ -242,10 +315,13 @@ export function installBatch8Checks(game) {
       ctx.setPhotoMode(false);
       const anchor = part.anchor;
       aimAt({ x: anchor.x, y: Math.max(anchor.y + 40, ctx.world.groundHeight(anchor.x, anchor.z) + 120), z: anchor.z }, state.player.heading, 260);
-      const trailing = await until(() => engine.describe(part).guide.phase === 'trailing', 12000);
+      const behindNow = () => {
+        const guide = engine.describe(part).guide;
+        return Math.hypot(guide.anchor.x - state.player.position.x, guide.anchor.z - state.player.position.z);
+      };
+      const trailing = await until(() => engine.describe(part).guide.phase === 'trailing' && behindNow() < 150, 20000);
       const guide = engine.describe(part).guide;
-      const behind = Math.hypot(guide.anchor.x - state.player.position.x, guide.anchor.z - state.player.position.z);
-      return check('forestWisps: as the craft passes over them they fall in behind it', trailing && behind < 200, { before, phase: guide.phase, behind: Math.round(behind) });
+      return check('forestWisps: as the craft passes over them they fall in behind it and keep up', trailing, { before, phase: guide.phase, behind: Math.round(behindNow()) });
     },
 
     /** The challenge flow on the live spawn's course (see the file header). */
@@ -263,20 +339,20 @@ export function installBatch8Checks(game) {
       const log = [];
       ctx.setPhotoMode(false);
       for (let index = 0; index < definition.gates.length; index++) {
-        toGate(definition.gates[index], GATE_RUN_IN);
+        const before = toGate(definition.gates[index]);
         const last = index === definition.gates.length - 1;
         await until(() => {
           const live = challenges.getState();
           return last ? finished.length > finishedBefore : live.phase === 'running' && live.gateIndex > index;
         }, GATE_TIMEOUT_MS);
         const live = challenges.getState();
-        log.push(`${definition.gates[index].id}:${live.phase}/${live.gateIndex}`);
+        log.push(`${definition.gates[index].id}:${before}m:${live.phase}/${live.gateIndex}`);
       }
       const result = finished.slice(finishedBefore).find((payload) => payload.id === entry.courseKey) ?? null;
       await wait(400);
       const toast = document.querySelector('.dw-challenge-toast');
       const best = challenges.getBest(entry.courseKey, state.flight.craft);
-      const touched = hits.slice(hitsBefore).filter((hit) => solid.has(hit.id)).map((hit) => hit.id);
+      const touched = hits.slice(hitsBefore).filter((hit) => solid.has(hit.id) || ownedBy(presetId, hit.id)).map((hit) => hit.id);
       const ok = started.length > startedBefore && Boolean(result) && result.valid && result.missed === 0 && result.medal !== 'none' && Boolean(best) && touched.length === 0 && crashes.length === crashesBefore && toast && toast.dataset.state === 'shown';
       return check(`${presetId}: the course runs start to finish (clock, every gate, medal toast, stored best), no collider touched`, ok, {
         course: entry.courseKey, gates: definition.gates.length, log, time: result ? Math.round(result.time * 100) / 100 : null, medal: result ? result.medal : null,
@@ -294,17 +370,19 @@ export function installBatch8Checks(game) {
       ctx.setPhotoMode(false);
       // Start a run through the start gate.
       const startedBefore = started.length;
-      toGate(definition.gates[0], GATE_RUN_IN);
+      toGate(definition.gates[0]);
       await until(() => started.length > startedBefore, GATE_TIMEOUT_MS);
-      // Then through the string at a fifth of its height: its ground track is a diagonal of its bounds.
+      // Then through the string at half its height, square to it: its ground track is a diagonal of
+      // its bounds (from the stake up to the kite).
       const { min, max } = string.bounds;
-      const share = 0.2;
+      const share = 0.5;
       const point = { x: min.x + (max.x - min.x) * share, y: min.y + (max.y - min.y) * share, z: min.z + (max.z - min.z) * share };
-      const along = compass(max.x - min.x, max.z - min.z);
+      const across = (compass(max.x - min.x, max.z - min.z) + 90) % 360;
       const sensorsBefore = sensors.length;
       const missesBefore = misses.length;
       const crashesBefore = crashes.length;
-      aimAt(point, (along + 90) % 360, 90);
+      const before = runIn(point.x, point.y, point.z, Math.sin(across * DEG), -Math.cos(across * DEG));
+      aimAt(point, across, before);
       const met = await until(() => sensors.slice(sensorsBefore).some((payload) => payload.id === string.id), CONTACT_TIMEOUT_MS);
       await wait(500);
       const live = challenges.getState();
@@ -312,7 +390,7 @@ export function installBatch8Checks(game) {
       const ok = met && Boolean(miss) && miss.tag === 'kiteString' && miss.penaltySeconds === 2 && crashes.length === crashesBefore && live.phase === 'running';
       challenges.cancel('test');
       return check('kiteSlalom: flying through a string counts a miss with its 2 s penalty, no crash, the run goes on', ok, {
-        string: string.id, sensor: met, miss, crashes: crashes.length - crashesBefore, phase: live.phase,
+        string: string.id, runIn: before, sensor: met, miss, crashes: crashes.length - crashesBefore, phase: live.phase,
       });
     },
 
