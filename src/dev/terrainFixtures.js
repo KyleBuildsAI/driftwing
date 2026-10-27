@@ -183,7 +183,37 @@ export const FIXTURE_FLOATING_ISLANDS = Object.freeze({
   lifetime: LIFETIME_SITE,
 });
 
-/** The six fixtures, one per stamp type, in STAMP_TYPES order. */
+// Phase 3: the sleeping giant's figure (preset 68), on any open land.
+export const FIXTURE_GIANT = Object.freeze({
+  id: 'fixtureGiant',
+  name: 'Fixture giant',
+  category: 'fantasy',
+  kind: 'site',
+  rarity: 'rare',
+  heavy: false,
+  placement: {
+    chance: 0.35,
+    minSpacing: 12000,
+    biomes: ['meadows', 'pine', 'dunes', 'snow'],
+    surface: 'land',
+    terrain: { minHeight: 30, maxHeight: 520, relief: 'any' },
+    clearance: 300,
+    scale: [1, 1],
+  },
+  filters: { biomes: null, timeOfDay: null, altitude: { min: 0, max: 5000 }, weather: null, surface: 'land', minDistance: 0, maxDistance: 40000 },
+  stamps: [{ type: 'giant', length: 3200, height: 420, falloff: 0.26, paint: 'basalt' }],
+  engines: [{ engine: 'structure', params: { recipe: 'sleepingGiant' } }],
+  lod: { near: 3000, mid: 9000, far: 30000 },
+  lure: null,
+  wind: [],
+  audio: null,
+  journal: { title: 'Giant', description: 'A fixture giant figure for the terrain test.' },
+  discovery: { radius: 4000, requireInView: true },
+  callouts: ['Giant {distance} {direction}.', 'Stone giant ahead, {eta}.', 'Giant {distance} out.'],
+  lifetime: LIFETIME_SITE,
+});
+
+/** The fixtures, one per stamp type, in STAMP_TYPES order (the water fixtures hold basin, crater and terraces). */
 export const TERRAIN_FIXTURES = Object.freeze([
   FIXTURE_VOLCANO,
   FIXTURE_SLOT_CANYON,
@@ -191,6 +221,7 @@ export const TERRAIN_FIXTURES = Object.freeze([
   FIXTURE_ROPE_BRIDGE,
   FIXTURE_AIRFIELD,
   FIXTURE_FLOATING_ISLANDS,
+  FIXTURE_GIANT,
 ]);
 
 /** The stamp type each fixture exercises. */
@@ -201,4 +232,5 @@ export const FIXTURE_STAMP_TYPE = Object.freeze({
   fixtureRopeBridge: 'gorge',
   fixtureAirfield: 'flatten',
   fixtureFloatingIslands: 'islandBase',
+  fixtureGiant: 'giant',
 });

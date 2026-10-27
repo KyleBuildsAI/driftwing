@@ -12,6 +12,7 @@ import { CHALLENGE_GATES_DEFAULTS, buildChallengeGates } from './challengeGates.
 // Phase 3 presets 61-70.
 import { WORLD_TREE_DEFAULTS, buildWorldTree } from './worldTree.js';
 import { PORTAL_RING_DEFAULTS, buildPortalRing } from './portalRing.js';
+import { SLEEPING_GIANT_DEFAULTS, buildSleepingGiant } from './sleepingGiant.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -29,6 +30,7 @@ export const RECIPES = Object.freeze({
   // Phase 3 presets 61-70.
   worldTree: Object.freeze({ build: buildWorldTree, defaults: WORLD_TREE_DEFAULTS, audioIntensity: 'approach' }),
   portalRing: Object.freeze({ build: buildPortalRing, defaults: PORTAL_RING_DEFAULTS, audioIntensity: 'approach' }),
+  sleepingGiant: Object.freeze({ build: buildSleepingGiant, defaults: SLEEPING_GIANT_DEFAULTS, audioIntensity: 'constant' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

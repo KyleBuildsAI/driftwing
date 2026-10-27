@@ -503,6 +503,20 @@ function testShapes(world, sites) {
         }
         check('shapes', `${label}: every shelf's pool floor is flat (within 1 cm)`, worstFlat <= 0.01, `${round(worstFlat, 4)} m`);
         check('shapes', `${label}: the shelves step down the slope`, stepsDown, `${stamp.shelves.length} shelves, ${round(stamp.topY, 1)} -> ${round(stamp.bottomY, 1)} m`);
+      } else if (stamp.type === 'giant') {
+        // The breath of preset 68 stands at a fixed offset from the site: the base is the site's ground.
+        check('shapes', `${label}: the base is the site's own ground`, Math.abs(stamp.baseY - site.groundY) < 1e-6, `base ${round(stamp.baseY, 2)} m, site ${round(site.groundY, 2)} m`);
+        const nose = world.heightAt(stamp.faceX, stamp.faceZ);
+        check('shapes', `${label}: the nose's tip stands at faceY (within 1 m)`, Math.abs(nose - stamp.faceY) < 1, `${round(nose, 2)} m, faceY ${round(stamp.faceY, 2)} m`);
+        const chest = localPoint(stamp, stamp.length * 0.19, 0);
+        const chestHeight = world.heightAt(chest.x, chest.z) - stamp.baseY;
+        check('shapes', `${label}: the chest stands at least 90 % of the height above the base`, chestHeight >= stamp.height * 0.9, `${round(chestHeight, 1)} m, height ${round(stamp.height, 1)} m`);
+        // The face reads: the nose stands above the brow, the brow above the eye hollows.
+        const brow = localPoint(stamp, stamp.length * 0.43, 0);
+        const eye = localPoint(stamp, stamp.length * 0.415, stamp.length * 0.024);
+        const browHeight = world.heightAt(brow.x, brow.z);
+        const eyeHeight = world.heightAt(eye.x, eye.z);
+        check('shapes', `${label}: the face reads (nose over brow over eye hollow)`, nose > browHeight && browHeight > eyeHeight + 5, `nose ${round(nose, 1)} m, brow ${round(browHeight, 1)} m, eye ${round(eyeHeight, 1)} m`);
       } else {
         const top = world.heightAt(stamp.x, stamp.z);
         check('shapes', `${label}: the islet stands at least 70 % of its height above the sea`, top - WATER >= stamp.height * 0.7, `${round(top, 1)} m, height ${round(stamp.height, 1)} m`);
@@ -599,6 +613,7 @@ function testPaint(world, sites, seed = STAMP_SEED) {
     basin: (stamp) => [{ x: stamp.x, z: stamp.z }, stamp.paint],
     crater: (stamp) => [{ x: stamp.x, z: stamp.z }, stamp.paint],
     terraces: (stamp) => [{ x: stamp.shelves[0].x, z: stamp.shelves[0].z }, stamp.paint],
+    giant: (stamp) => [localPoint(stamp, stamp.length * 0.19, 0), stamp.paint],
   };
   for (const site of sites) {
     const stamp = site.stamps[0];
@@ -818,6 +833,8 @@ function testBenchmark() {
 
 // ---- phase 3: water-holding stamps, water bodies and region overlays ------------------------------------
 /** The Phase 2 real-preset world, recorded from the Phase 2 code (commit f4c2a50, before any Phase 3 change). */
+/** The 30 Phase 2 presets: a Phase 3 site never moves or drops one of their sites. */
+const PHASE2_PRESET_IDS = new Set(PRESETS.slice(0, 30).map((preset) => preset.id));
 const PHASE2_REAL_DIGESTS = Object.freeze({
   DRIFTWING: { meshes: '4ca2d12e93a5440a40928acd8f02754be8a76d96f1518bdd006e6e4cc3fb63e2', sites: '753c7ad07728b9a1' },
   'HARNESS-1': { meshes: '01d73057fae7adf80e6b498c653d4933380eab87df71c702f242fa5f25c40e53', sites: '40179d8108de3ff2' },
@@ -840,7 +857,12 @@ function phase2RealDigest(world) {
     }
     hash.update(Buffer.from(world.scatterChunk(cx, cz, 1).buffer));
   }
-  return { meshes: hash.digest('hex'), sites: hashSiteList(world.sitesNear(0, 0, 30000)) };
+  const sites = world.sitesNear(0, 0, 30000);
+  return {
+    meshes: hash.digest('hex'),
+    sites: hashSiteList(sites.filter((site) => PHASE2_PRESET_IDS.has(site.presetId))),
+    phase3Sites: sites.filter((site) => !PHASE2_PRESET_IDS.has(site.presetId)).map((site) => site.id),
+  };
 }
 
 /** The presets with their overlays removed (placement, stamps and waters unchanged). */
@@ -857,7 +879,7 @@ function testPhase3Worlds() {
     const digest = phase2RealDigest(createWorldGen(seed, WORLD_OPTIONS));
     const golden = PHASE2_REAL_DIGESTS[seed];
     check('phase3', `${seed}: the real presets (no waters, no overlays): meshes, colours and scatter bit-identical to Phase 2`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
-    check('phase3', `${seed}: the real presets: the site-list hash unchanged from Phase 2`, digest.sites === golden.sites, digest.sites);
+    check('phase3', `${seed}: the real presets: the Phase 2 presets' site-list hash unchanged from Phase 2 (the Phase 3 sites join it)`, digest.sites === golden.sites, `${digest.sites}; Phase 3 sites: ${digest.phase3Sites.join(', ') || 'none'}`);
   }
 }
 

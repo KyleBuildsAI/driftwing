@@ -31,14 +31,19 @@
 //               rimWidth (outer flank), floor (flat floor share of the radius, 0..0.8)  paint 'ash'
 //   terraces    length (downhill), width, steps (shelf count), lip (pool rim height), falloff
 //                                                                                 paint 'travertine'
+//   giant       length (head to toe, along the site heading toward the head), height (the chest
+//               above the ground), falloff (the skirt: how far below the figure's base its flanks
+//               reach, as a share of the height)                                 paint 'basalt'
+//               A mountain shaped like a stone giant asleep on its back (preset 68): head, face (brow,
+//               nose, lips, chin, eye hollows), chest, folded hands, hips, one knee raised, feet.
 // The basin, crater and terraces hold water: a preset's `waters` list (waters.js) fills them, and
 // their resolved records carry the reference heights the water levels are measured from (floorY,
 // rimY; the terraces' shelves).
 
-export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces']);
+export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces', 'giant']);
 export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed', 'salt', 'sand', 'travertine', 'mud', 'ice']);
 
-const KIND = Object.freeze({ cone: 0, carve: 1, cliffStep: 2, gorge: 3, flatten: 4, islandBase: 5, basin: 6, crater: 7, terraces: 8 });
+const KIND = Object.freeze({ cone: 0, carve: 1, cliffStep: 2, gorge: 3, flatten: 4, islandBase: 5, basin: 6, crater: 7, terraces: 8, giant: 9 });
 const PAINT_INDEX = Object.freeze({ ash: 0, basalt: 1, wetRock: 2, tarmac: 3, riverbed: 4, salt: 5, sand: 6, travertine: 7, mud: 8, ice: 9 });
 const TAU = Math.PI * 2;
 /** A canyon may cut at most this many depths below the ground on its path, and lift it at most this many. */
@@ -84,6 +89,7 @@ const DEFAULTS = Object.freeze({
   basin: Object.freeze({ radius: [180, 320], depth: [14, 24], rim: [30, 50], falloff: [80, 130], paint: 'sand' }),
   crater: Object.freeze({ radius: [320, 520], depth: [60, 110], rimHeight: [25, 45], rimWidth: [180, 300], floor: [0.25, 0.45], paint: 'ash' }),
   terraces: Object.freeze({ length: [320, 520], width: [140, 240], steps: [5, 8], lip: [1.2, 2.4], falloff: [60, 110], paint: 'travertine' }),
+  giant: Object.freeze({ length: [2800, 3400], height: [360, 460], falloff: [0.22, 0.3], paint: 'basalt' }),
 });
 
 /** Every size field per type, validated as a positive number or an ascending [min, max] range. */
@@ -97,7 +103,143 @@ const SIZE_FIELDS = Object.freeze({
   basin: ['radius', 'depth', 'rim', 'falloff'],
   crater: ['radius', 'depth', 'rimHeight', 'rimWidth', 'floor'],
   terraces: ['length', 'width', 'steps', 'lip', 'falloff'],
+  giant: ['length', 'height', 'falloff'],
 });
+
+// ---- The sleeping giant (stamp 'giant') -------------------------------------------------------------
+// Its body parts in figure units: u along the length from the feet (-0.5) to the head (+0.5), v across
+// it (both in lengths), h the part's top as a share of the height. Domes are [u, v, radius u, radius
+// v, h]; limbs [u0, v0, h0, u1, v1, h1, radius] (a dome swept along a segment, its top interpolated);
+// hollows are domes subtracted (the eye sockets). The parts join through a smooth maximum.
+const GIANT_DOMES = Object.freeze([
+  Object.freeze([0.405, 0, 0.068, 0.062, 0.6]),
+  Object.freeze([0.325, 0, 0.04, 0.045, 0.42]),
+  Object.freeze([0.19, 0, 0.115, 0.125, 1]),
+  Object.freeze([0.02, 0, 0.1, 0.1, 0.82]),
+  Object.freeze([0.04, -0.045, 0.035, 0.03, 0.92]),
+  Object.freeze([0.04, 0.045, 0.035, 0.03, 0.92]),
+  Object.freeze([-0.1, 0, 0.085, 0.115, 0.72]),
+  Object.freeze([-0.49, -0.06, 0.025, 0.03, 0.55]),
+  Object.freeze([-0.49, 0.06, 0.025, 0.03, 0.5]),
+  // The face: nose, chin and lips.
+  Object.freeze([0.392, 0, 0.016, 0.011, 0.8]),
+  Object.freeze([0.345, 0, 0.018, 0.022, 0.6]),
+  Object.freeze([0.365, 0, 0.008, 0.02, 0.63]),
+]);
+const GIANT_LIMBS = Object.freeze([
+  Object.freeze([0.25, -0.14, 0.6, 0.11, -0.16, 0.55, 0.035]),
+  Object.freeze([0.25, 0.14, 0.6, 0.11, 0.16, 0.55, 0.035]),
+  Object.freeze([0.11, -0.16, 0.55, 0.045, -0.05, 0.8, 0.03]),
+  Object.freeze([0.11, 0.16, 0.55, 0.045, 0.05, 0.8, 0.03]),
+  Object.freeze([-0.12, -0.055, 0.62, -0.29, -0.065, 0.95, 0.045]),
+  Object.freeze([-0.29, -0.065, 0.95, -0.46, -0.06, 0.45, 0.035]),
+  Object.freeze([-0.12, 0.055, 0.6, -0.3, 0.065, 0.55, 0.045]),
+  Object.freeze([-0.3, 0.065, 0.55, -0.47, 0.06, 0.42, 0.035]),
+  // The brow ridge.
+  Object.freeze([0.43, -0.032, 0.66, 0.43, 0.032, 0.66, 0.012]),
+]);
+const GIANT_HOLLOWS = Object.freeze([
+  Object.freeze([0.415, -0.024, 0.012, 0.011, 0.06]),
+  Object.freeze([0.415, 0.024, 0.012, 0.011, 0.06]),
+]);
+/** The smooth maximum's blend (in shares of the height). */
+const GIANT_BLEND = 0.08;
+/** The figure's half width (in lengths): v runs from -GIANT_HALF_WIDTH to +GIANT_HALF_WIDTH. */
+export const GIANT_HALF_WIDTH = 0.21;
+/**
+ * The tip of the nose in figure units: `along` (u) and its top `figure` (h). The breath of preset 68
+ * rises from here: the nose stands at along x length ahead of the site, (figure x (height + skirt) -
+ * skirt) above the site's ground.
+ */
+export const GIANT_NOSE = Object.freeze({ along: 0.392, figure: 0.8 });
+/** The figure fits only where the ground under it varies by less than this share of the height. */
+const GIANT_MAX_RELIEF = 0.55;
+
+/** The dome profile at normalised distance d: 1 at the centre, easing to 0 with zero slope at d = 1. */
+function giantProfile(d) {
+  if (d >= 1) return 0;
+  return 1 - d * d * (3 - 2 * d);
+}
+
+/**
+ * Polynomial smooth maximum of a and b (both >= 0) over blend k. The blend narrows to the smaller of
+ * the two as either nears 0, so a part fading out at its edge joins the figure without a step.
+ */
+function smoothMax(a, b, k) {
+  const blend = Math.min(k, a, b);
+  if (blend <= 0) return Math.max(a, b);
+  const h = Math.max(blend - Math.abs(a - b), 0) / blend;
+  return Math.max(a, b) + h * h * blend * 0.25;
+}
+
+/** Below this figure share the giant's raise eases into the ground under it (no cliff at its edge). */
+const GIANT_EDGE = 0.1;
+
+/**
+ * The ground with the giant over it: the figure's top (`figure` x (height + skirt) above the base
+ * less the skirt) where that stands above `ground`, easing into the ground over the lowest
+ * GIANT_EDGE of the figure, so the outline meets low ground without a step. Pure.
+ */
+export function giantRaise(figure, baseY, skirt, height, ground) {
+  if (figure <= 0) return ground;
+  const raised = baseY - skirt + figure * (height + skirt);
+  if (raised <= ground) return ground;
+  if (figure >= GIANT_EDGE) return raised;
+  const t = figure / GIANT_EDGE;
+  return ground + (raised - ground) * t * t * (3 - 2 * t);
+}
+
+// The parts flattened once into typed arrays, with inverse radii and each limb's bounding box, so the
+// terrain's hot path (every height sample over a giant) skips most parts with a few comparisons.
+const DOME_STRIDE = 5;
+const DOME_DATA = new Float64Array(GIANT_DOMES.flatMap(([u, v, radiusU, radiusV, top]) => [u, v, 1 / radiusU, 1 / radiusV, top]));
+const HOLLOW_DATA = new Float64Array(GIANT_HOLLOWS.flatMap(([u, v, radiusU, radiusV, depth]) => [u, v, 1 / radiusU, 1 / radiusV, depth]));
+const LIMB_STRIDE = 12;
+const LIMB_DATA = new Float64Array(GIANT_LIMBS.flatMap(([u0, v0, h0, u1, v1, h1, radius]) => {
+  const segmentU = u1 - u0;
+  const segmentV = v1 - v0;
+  const lengthSq = segmentU * segmentU + segmentV * segmentV;
+  return [
+    u0, v0, h0, segmentU, segmentV, h1 - h0, lengthSq > 0 ? 1 / lengthSq : 0, 1 / radius,
+    Math.min(u0, u1) - radius, Math.max(u0, u1) + radius, Math.min(v0, v1) - radius, Math.max(v0, v1) + radius,
+  ];
+}));
+
+/**
+ * The giant's body at figure coordinates (u, v): the height above its base as a share of the height
+ * (0 off the figure). Pure, allocation-free.
+ */
+export function giantFigure(u, v) {
+  let figure = 0;
+  for (let base = 0; base < DOME_DATA.length; base += DOME_STRIDE) {
+    const du = (u - DOME_DATA[base]) * DOME_DATA[base + 2];
+    if (du >= 1 || du <= -1) continue;
+    const dv = (v - DOME_DATA[base + 1]) * DOME_DATA[base + 3];
+    const squared = du * du + dv * dv;
+    if (squared >= 1) continue;
+    figure = smoothMax(figure, DOME_DATA[base + 4] * giantProfile(Math.sqrt(squared)), GIANT_BLEND);
+  }
+  for (let base = 0; base < LIMB_DATA.length; base += LIMB_STRIDE) {
+    if (u < LIMB_DATA[base + 8] || u > LIMB_DATA[base + 9] || v < LIMB_DATA[base + 10] || v > LIMB_DATA[base + 11]) continue;
+    const segmentU = LIMB_DATA[base + 3];
+    const segmentV = LIMB_DATA[base + 4];
+    let t = ((u - LIMB_DATA[base]) * segmentU + (v - LIMB_DATA[base + 1]) * segmentV) * LIMB_DATA[base + 6];
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const offsetU = u - (LIMB_DATA[base] + segmentU * t);
+    const offsetV = v - (LIMB_DATA[base + 1] + segmentV * t);
+    const squared = (offsetU * offsetU + offsetV * offsetV) * LIMB_DATA[base + 7] * LIMB_DATA[base + 7];
+    if (squared >= 1) continue;
+    figure = smoothMax(figure, (LIMB_DATA[base + 2] + LIMB_DATA[base + 5] * t) * giantProfile(Math.sqrt(squared)), GIANT_BLEND);
+  }
+  for (let base = 0; base < HOLLOW_DATA.length; base += DOME_STRIDE) {
+    const du = (u - HOLLOW_DATA[base]) * HOLLOW_DATA[base + 2];
+    if (du >= 1 || du <= -1) continue;
+    const dv = (v - HOLLOW_DATA[base + 1]) * HOLLOW_DATA[base + 3];
+    const squared = du * du + dv * dv;
+    if (squared < 1) figure -= HOLLOW_DATA[base + 4] * giantProfile(Math.sqrt(squared));
+  }
+  return figure;
+}
 
 function clamp01(value) { return value < 0 ? 0 : value > 1 ? 1 : value; }
 function smoothstep(edge0, edge1, value) {
@@ -244,6 +386,9 @@ export function stampReach(spec) {
       break;
     case 'terraces':
       extent = Math.hypot(maxOf(full.length) / 2 + maxOf(full.falloff), maxOf(full.width) / 2 + maxOf(full.falloff));
+      break;
+    case 'giant':
+      extent = Math.hypot(maxOf(full.length) / 2, maxOf(full.length) * GIANT_HALF_WIDTH) + 8;
       break;
     default:
       extent = (maxOf(full.radius) + maxOf(full.falloff)) * (1 + ISLAND_LOBE_MAX);
@@ -704,6 +849,49 @@ function resolveTerraces(stamp, spec, random, context) {
   ];
 }
 
+/**
+ * The sleeping giant: the figure laid along the site heading (head forward) on a base level at the
+ * site centre's own (unstamped) ground, the height a site spawn is activated at, so its features (the
+ * nose: GIANT_NOSE) stand at fixed offsets from the spawn anchor. Its flanks reach `falloff` x height
+ * below the base, so the figure rises out of the land without a step. It does not fit (placement drops
+ * the site) where the ground under it (nine samples) varies by more than GIANT_MAX_RELIEF of the
+ * height, or dips below the sea.
+ */
+function resolveGiant(stamp, spec, random, context) {
+  const length = roll(spec.length, random);
+  const height = roll(spec.height, random);
+  const skirt = roll(spec.falloff, random) * height;
+  let lowest = Infinity;
+  let highest = -Infinity;
+  for (let along = -1; along <= 1; along++) {
+    for (let across = -1; across <= 1; across++) {
+      const share = along * 0.38 * length;
+      const side = across * 0.14 * length;
+      const sample = context.baseHeight(stamp.x + stamp.dirX * share - stamp.dirZ * side, stamp.z + stamp.dirZ * share + stamp.dirX * side);
+      lowest = Math.min(lowest, sample);
+      highest = Math.max(highest, sample);
+    }
+  }
+  const baseY = context.baseHeight(stamp.x, stamp.z);
+  stamp.length = length;
+  stamp.height = height;
+  stamp.skirt = skirt;
+  stamp.falloff = 0;
+  stamp.halfWidth = length * GIANT_HALF_WIDTH;
+  stamp.baseY = baseY;
+  stamp.peakY = baseY + height;
+  stamp.faceX = stamp.x + stamp.dirX * length * GIANT_NOSE.along;
+  stamp.faceZ = stamp.z + stamp.dirZ * length * GIANT_NOSE.along;
+  stamp.faceY = baseY - skirt + (height + skirt) * GIANT_NOSE.figure;
+  stamp.fits = highest - lowest < height * GIANT_MAX_RELIEF && lowest > context.waterLevel + 2;
+  rotatedBounds(stamp, length / 2 + 4, stamp.halfWidth + 4);
+  stamp.keyPoints = [
+    { x: stamp.x, z: stamp.z },
+    { x: stamp.faceX, z: stamp.faceZ },
+    { x: stamp.x - stamp.dirX * length * 0.48, z: stamp.z - stamp.dirZ * length * 0.48 },
+  ];
+}
+
 const RESOLVERS = Object.freeze({
   cone: resolveCone,
   carve: resolveCarve,
@@ -714,6 +902,7 @@ const RESOLVERS = Object.freeze({
   basin: resolveBasin,
   crater: resolveCrater,
   terraces: resolveTerraces,
+  giant: resolveGiant,
 });
 
 /**
@@ -729,7 +918,8 @@ const RESOLVERS = Object.freeze({
  * (cone: baseY, peakY, rimY, craterFloorY; carve: path, entry, exit, length; cliffStep: topY,
  * bottomY, lipX/Z, poolX/Z; gorge: rimY, floorY, span, anchors; flatten: y, thresholds;
  * islandBase: topY; basin: rimY, floorY, radius; crater: rimY, floorY, radius; terraces: topY,
- * bottomY, shelves [{ index, crestY, floorY, along, x, z }]).
+ * bottomY, shelves [{ index, crestY, floorY, along, x, z }]; giant: length, height, skirt, halfWidth,
+ * baseY, peakY, faceX/Y/Z (the nose's tip)).
  */
 export function resolveStamp(spec, site, index, random, context) {
   const full = withDefaults(spec);
@@ -782,6 +972,7 @@ function rectangleDistance(stamp, x, z, halfAlong, halfAcross) {
 /** Half extents (along, across) of the rectangle stamp types' footprints. */
 function rectangleExtents(stamp) {
   if (stamp.kind === 2 || stamp.kind === 8) return [stamp.length / 2 + stamp.falloff, stamp.width / 2 + stamp.falloff];
+  if (stamp.kind === 9) return [stamp.length / 2, stamp.halfWidth];
   if (stamp.kind === 3) return [stamp.length / 2, stamp.halfWidth * 1.35 + stamp.pad * 1.1 + 10];
   return [stamp.length / 2 + stamp.margin + stamp.shoulder, stamp.width / 2 + stamp.margin + stamp.shoulder];
 }
@@ -1244,6 +1435,17 @@ export function terraceShelfAt(stamp, x, z) {
   return share < TERRACE_LIP_END ? shelf : -1;
 }
 
+/** The giant: the figure's surface over its base (raised from `skirt` below it), where above the ground. */
+function giantHeight(stamp, x, z, height) {
+  if (x < stamp.minX || x > stamp.maxX || z < stamp.minZ || z > stamp.maxZ) return height;
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const u = (dx * stamp.dirX + dz * stamp.dirZ) / stamp.length;
+  const v = (dx * -stamp.dirZ + dz * stamp.dirX) / stamp.length;
+  if (u < -0.5 || u > 0.5 || v < -GIANT_HALF_WIDTH || v > GIANT_HALF_WIDTH) return height;
+  return giantRaise(giantFigure(u, v), stamp.baseY, stamp.skirt, stamp.height, height);
+}
+
 /**
  * The height after one resolved stamp at (x, z), given the height before it. Exactly `height`
  * outside the stamp's bounds.
@@ -1257,7 +1459,7 @@ export function applyStampHeight(stamp, x, z, height) {
  * worldgen's hot path keeps the kinds in a typed array and calls through this table, so each type's
  * function only ever sees stamps of one shape and its property reads stay monomorphic.
  */
-export const STAMP_HEIGHT = Object.freeze([coneHeight, carveHeight, cliffStepHeight, gorgeHeight, flattenHeight, islandBaseHeight, basinHeight, craterHeight, terracesHeight]);
+export const STAMP_HEIGHT = Object.freeze([coneHeight, carveHeight, cliffStepHeight, gorgeHeight, flattenHeight, islandBaseHeight, basinHeight, craterHeight, terracesHeight, giantHeight]);
 
 /** applyStampHeight with the stamp's kind passed in. */
 function stampHeightByKind(kind, stamp, x, z, height) {
@@ -1270,6 +1472,7 @@ function stampHeightByKind(kind, stamp, x, z, height) {
     case 5: return islandBaseHeight(stamp, x, z, height);
     case 6: return basinHeight(stamp, x, z, height);
     case 7: return craterHeight(stamp, x, z, height);
+    case 9: return giantHeight(stamp, x, z, height);
     default: return terracesHeight(stamp, x, z, height);
   }
 }
@@ -1423,6 +1626,20 @@ function paintTerraces(stamp, x, z, out) {
   }
 }
 
+/** The giant's stone shows where the figure stands high; moss and the land's own colours on its lowest flanks. */
+function paintGiant(stamp, x, z, out) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const u = (dx * stamp.dirX + dz * stamp.dirZ) / stamp.length;
+  const v = (dx * -stamp.dirZ + dz * stamp.dirX) / stamp.length;
+  if (u < -0.5 || u > 0.5 || v < -GIANT_HALF_WIDTH || v > GIANT_HALF_WIDTH) return;
+  const weight = smoothstep(0.12, 0.38, giantFigure(u, v));
+  if (weight > out.weight) {
+    out.weight = weight;
+    out.paintIndex = stamp.paintIndex;
+  }
+}
+
 /**
  * Raises out.weight / out.paintIndex to this stamp's paint at (x, z) when it is stronger there
  * (weights 0..1). Stamps without a paint leave `out` alone.
@@ -1443,6 +1660,7 @@ export function accumulateStampPaintByKind(kind, stamp, x, z, out) {
     case 5: paintIslandBase(stamp, x, z, out); return;
     case 6: paintBasin(stamp, x, z, out); return;
     case 7: paintCrater(stamp, x, z, out); return;
+    case 9: paintGiant(stamp, x, z, out); return;
     default: paintTerraces(stamp, x, z, out);
   }
 }

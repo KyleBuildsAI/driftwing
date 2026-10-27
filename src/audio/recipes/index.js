@@ -25,6 +25,7 @@ import { skyWhale, whale } from './whale.js';
 import skyShimmer from './skyShimmer.js';
 import canopy from './canopy.js';
 import portal from './portal.js';
+import giant from './giant.js';
 
 export const RECIPES = Object.freeze({
   tornado,
@@ -46,6 +47,7 @@ export const RECIPES = Object.freeze({
   skyShimmer,
   canopy,
   portal,
+  giant,
 });
 
 /**

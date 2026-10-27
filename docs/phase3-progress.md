@@ -1089,7 +1089,14 @@ presets (92-100) use the wave 2 combo scheduling.
   `out.motion` (PathFollower movers with moving capsule colliders) and `out.lanterns` (ignitables);
   the portal system `src/gameplay/portals.js` (`portalSeed`, `worldVisited`, the journal's
   `worldsVisited`), and the `canopy` and `portal` audio recipes.
-- **Next:** 68-70 (sleeping giant, ghost galleon, dragon racer), the batch kit
+  68 (sleeping giant): the `giant` terrain stamp (src/world/stamps.js: `giantFigure`, `giantRaise`,
+  `GIANT_NOSE`; base at the site's own ground, so the breath emitter stands at a fixed offset), the
+  structure recipe `sleepingGiant` (standing stones and scree on the stamp; free-standing, the figure
+  as a body mesh and a landable heightfield collider, `localHeightfield`), the `giant` audio recipe,
+  the terrain fixture `fixtureGiant` and the terrain lab's giant shape and paint checks. The lab's
+  "site-list hash unchanged" check now hashes the Phase 2 presets' sites (the Phase 3 sites join the
+  world without moving any of them; the portal rings had already changed the full list).
+- **Next:** 69-70 (ghost galleon, dragon racer), the batch kit
   `src/dev/presetChecks61.js` with `tools/steps/presets-61-70.json`, `src/dev/spawnScenarios/batch61.js`,
   docs/spawns.md rows and sections, then the verification on both backends.
 
