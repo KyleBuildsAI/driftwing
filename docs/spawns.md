@@ -86,6 +86,8 @@ preset's section below.
 | 31 | [Sandstorm wall](#31-sandstorm-wall) | `sandstormWall` | weather | event | uncommon | no | `weatherVolume`, `windModifier`, `emitter` | yes |
 | 32 | [Snow squall](#32-snow-squall) | `snowSquall` | weather | event | common | no | `weatherVolume`, `windModifier`, `emitter` | yes |
 | 33 | [Hurricane eye](#33-hurricane-eye) | `hurricaneEye` | weather | event | rare | yes | `weatherVolume`, `windModifier`, `emitter` | yes |
+| 34 | [Valley fog river](#34-valley-fog-river) | `valleyFogRiver` | weather | event | common | no | `weatherVolume` | no |
+| 35 | [Dirty thunderstorm](#35-dirty-thunderstorm) | `dirtyThunderstorm` | geo | event | rare | no | `weatherVolume`, `lightEffect`, `emitter` | yes |
 
 In all: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy. The
 journal's collection count is found / 30 over these presets (`PRESETS` in
@@ -807,6 +809,53 @@ through into the calm eye: still air, a stadium of cloud curving up all around, 
 - **LOD:** near 9 km, mid 30 km, far 70 km. **Discovery:** 25 km, in view.
 - **Lifetime:** 600-780 s; despawned beyond 60 + 8 km after 45 s out of view.
 
+#### 34. Valley fog river
+
+At dawn, cold fog fills the valley floors around the activation to a fixed depth above the lowest
+ground: a white river winding between the ridges, streaming slowly down the valleys and pouring over
+the low saddles into the next valley like a slow waterfall, the peaks standing clear above it in the
+low sun.
+[src/spawns/presets/valleyFogRiver.js](../src/spawns/presets/valleyFogRiver.js)
+
+- **Kind:** event, common.
+- **Engines:** `weatherVolume` (the `river` form: a 33 x 33 terrain grid 3.2 km to each side of the
+  anchor finds the lowest ground; the fog fills the valleys connected to it up to 80 m above it, about
+  two fifths of its 260 puffs lie still in that fog lake and the rest stream at 2.2 m/s along paths
+  traced down the valley floors and over up to three saddles; it forms over 60 s and owns the voice).
+- **Filters:** pine, meadows or snow; dawn only; clear or clearing weather; over land; player
+  0-3500 m; 3-8 km ahead.
+- **Candidates:** 5 km cells, 600 s buckets, chance 0.5.
+- **Wind:** none (the fog lies in still air).
+- **Sound:** `lantern` (a soft, slowly breathing ambient pad, reference distance 600 m).
+- **LOD:** near 3 km, mid 8 km, far 18 km. **Discovery:** 5 km, in view.
+- **Lifetime:** 420-600 s; despawned beyond 12 + 3 km after 30 s out of view.
+
+### Volcanic and geo (Phase 3)
+
+#### 35. Dirty thunderstorm
+
+Over an erupting volcano in storm weather the ash plume builds into a towering, ash-dark thunderhead
+with a spreading anvil, and lightning crackles inside the plume itself: violet-white bolts and
+flickering in-cloud flashes, thunder rolling down the mountain, ash falling from the cloud and grit
+hissing on the canopy inside it.
+[src/spawns/presets/dirtyThunderstorm.js](../src/spawns/presets/dirtyThunderstorm.js)
+
+- **Kind:** event, rare.
+- **Near an erupting volcano:** `filters.near: { sites: ['volcano'], active: true, radius: 8000 }`:
+  the director moves each candidate onto the nearest placed volcano within 8 km whose eruption runs
+  (its live anchor), or rejects it; with no volcano erupting it never starts.
+- **Engines:** `weatherVolume` (a `tower` 7.5 km tall from 2 km up, ash-dark (tint 0x5f5852,
+  storm 0.95) with an anvil leaning 2.4 km downwind, an ash fall shaft, a dark inside fog and
+  `canopyGrit` 0.5); `lightEffect` (26 strikes a minute within 900 m, 70 % in-cloud, violet-white,
+  with the lit cloud glow and thunder; owns the voice); `emitter` (the ash column feeding the cloud,
+  lit from below by the lava).
+- **Filters:** any biome and hour; storm weather; over land; player 0-12 000 m; 3-30 km ahead.
+- **Candidates:** 8 km cells, 600 s buckets, chance 0.6.
+- **Wind:** the volume's own: turbulence 0.6 and a 6 m/s updraft inside the cloud.
+- **Sound:** `thunder` (the strikes' thunder, delayed by distance).
+- **LOD:** near 6 km, mid 20 km, far 45 km. **Discovery:** 9 km, in view.
+- **Lifetime:** 300-420 s; despawned beyond 30 + 5 km after 30 s out of view.
+
 ## Adding a preset
 
 Phase 3 adds 70 presets on these same engines. A new preset needs no engine or system code unless
@@ -1069,7 +1118,7 @@ export default Object.freeze({
 | `heavy` | both | yes | counts toward the heavy limit (2) and needs a `lure` | SpawnManager, director |
 | `placement` | site | yes for sites, absent for events | `chance` (0 < c <= 1), `minSpacing`, `biomes`, `surface`, `clearance`; optional `terrain`, `align`, `scale` | placement.js (both threads) |
 | `candidates` | event | yes for events, absent for sites | `cellSize`, `bucketSeconds`, `chance` | candidates.js, director |
-| `filters` | both | yes | `biomes`, `timeOfDay`, `altitude`, `weather`, `surface`, `minDistance`, `maxDistance`, `near` | director; site hours (`timeOfDay`) |
+| `filters` | both | yes | `biomes`, `timeOfDay`, `altitude`, `weather`, `surface`, `minDistance`, `maxDistance`, `near` (`{ landmarks?, sites?, active?, radius }`: the candidate moves onto the nearest Phase 1 landmark of those types or placed site of those site presets within radius, else it is rejected; `active: true` takes only a site whose active state runs, such as an erupting volcano) | director; site hours (`timeOfDay`) |
 | `stamps` | site | optional (must be empty for events) | terrain stamp specs | placement.js, stamps.js, worldgen |
 | `engines` | both | yes, at least one | `[{ engine, params }]`, one part each | SpawnManager, engines |
 | `lod` | both | yes | `{ near, mid, far }` m, ascending | SpawnManager |

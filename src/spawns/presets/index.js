@@ -37,6 +37,8 @@ import stormChase from './stormChase.js';
 import sandstormWall from './sandstormWall.js';
 import snowSquall from './snowSquall.js';
 import hurricaneEye from './hurricaneEye.js';
+import valleyFogRiver from './valleyFogRiver.js';
+import dirtyThunderstorm from './dirtyThunderstorm.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -76,6 +78,8 @@ export const PRESETS = Object.freeze([
   sandstormWall,
   snowSquall,
   hurricaneEye,
+  valleyFogRiver,
+  dirtyThunderstorm,
 ]);
 
 /** Presets by id. */

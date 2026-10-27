@@ -1093,13 +1093,24 @@ Done:
   lift, eye subsidence, spiral band gusts turning with the visible bands).
 - Presets 31 sandstorm wall, 32 snow squall, 33 hurricane eye, with their docs/spawns.md rows and
   sections; `src/dev/presetChecks31.js` (the batch's dev check kit on top of presetChecks.js).
+- weatherVolume form `river` (valley fog river: a fog lake in the valleys connected to the lowest
+  ground, puffs streaming down the valley floors and pouring over saddles on paths traced over the
+  terrain at create; params `flow`, `pours`).
+- `filters.near.sites` with `active` (schema and director): an event gathers at the nearest placed
+  site of the named site presets, or with `active: true` at one whose active state runs (an erupting
+  volcano's live anchor); the director lab's `near` group checks it (90/90).
+- Presets 34 valley fog river (dawn, the `river` form) and 35 dirty thunderstorm (rare; storm weather
+  over an erupting volcano; lightning inside an ash-dark thunderhead), with their docs/spawns.md rows
+  and sections.
 - Browser checks so far (WebGPU, dev server, seed DRIFTWING): 31-33 force-spawned, framed and
   disposed back to their baselines; the sandstorm's gust front and inside turbulence, grit 0.9 in the
   cockpit; the squall's gust front (24.7 m/s, turbulence 0.72), whiteout and snow in the cockpit; the
   hurricane's calm eye (6.6 m/s with the ambient wind, turbulence 0.08), eyewall 47 m/s with
   turbulence 0.95, outer bands 21 m/s.
 
-Next: preset 34 (valley fog river), 35 (dirty thunderstorm), then the volcanic and geo sites.
+Next: the volcanic and geo sites 36-40 (lava rivers to the sea, fissure eruption, meteor crater lake,
+hot spring terraces, salt flat mirror lake), then the batch's step file, spawn scenarios and the
+verification on both backends.
 
 ### Wave 4: discovery and verification, then the tag
 
