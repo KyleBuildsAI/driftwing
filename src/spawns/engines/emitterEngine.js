@@ -30,6 +30,7 @@
 // create(). What the engine calls may allocate a little: the terrain height under a grid node and
 // the WindField probes (worldgen's noise), which is why they are rationed.
 import { FIELD_NODES, FIELD_X, FIELD_Y, FRAME_ROWS, GROUND_MODES, PAGE_SIZE, PARAM_ROWS, PARTICLE_STYLES, createParticleSystem } from './particleSystem.js';
+import { lavaSourceStamps, traceLavaPath } from './lavaPath.js';
 import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, createWindSample, fillRandoms, ownsPresetAudio, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
 
 /** Emitter instances at once (rows of the particle tables); the director's budget is 16. */
@@ -63,6 +64,8 @@ const GRAVITY = 9.81;
 const DEG = Math.PI / 180;
 /** Engine drag floor (1/s): the closed form divides by it. */
 const MIN_DRAG = 0.02;
+/** seaEntry: the emission level where the lava flow finds no sea (below a burst's default minLevel). */
+const SEA_ENTRY_DRY_LEVEL = 0.12;
 /** Emitter speed above which a frame's anchor jump is a relocation, not motion (m/s). */
 const TELEPORT_SPEED = 3000;
 const SHAPES = Object.freeze(['point', 'sphere', 'disc', 'ring', 'box', 'line']);
@@ -74,7 +77,7 @@ const TOP_LEVEL_PARAMS = Object.freeze([
   'buoyancyDecay', 'drag', 'windFollow', 'turbulence', 'ground', 'groundOffset', 'restitution', 'life', 'size', 'sizeCurve',
   'sizeJitter', 'stretch', 'colors', 'colorMid', 'brightnessJitter', 'opacity', 'fadeIn', 'fadeOut', 'emissive',
   'emissiveDecay', 'nightBoost', 'lit', 'softness', 'fog', 'depthFade', 'underglow', 'lod', 'lodSizeBoost', 'field',
-  'light', 'windSource', 'immersion', 'sound', 'soundTriggers', 'endRamp', 'warmStart',
+  'light', 'windSource', 'immersion', 'sound', 'soundTriggers', 'endRamp', 'warmStart', 'seaEntry',
 ]);
 /** What the SpawnManager merges into every engine's params (not preset params). */
 const ACTIVATION_PARAMS = Object.freeze(['position', 'heading', 'site', 'startTime', 'scale', 'duration', 'seed']);
@@ -196,6 +199,8 @@ export function resolveEmitterConfig(preset, params) {
   read.onlyKeys(windParams, 'windSource', ['type', 'strength', 'radius', 'height', 'base', 'turbulence', 'outflow', 'depth']);
   const immersionParams = read.object(params.immersion, 'immersion');
   read.onlyKeys(immersionParams, 'immersion', ['radius', 'height', 'base', 'fogDensity', 'fogColor', 'fogColorAmount', 'darkness']);
+  const seaEntryParams = read.object(params.seaEntry, 'seaEntry');
+  read.onlyKeys(seaEntryParams, 'seaEntry', ['stamp', 'reach']);
   const triggerParams = read.object(params.soundTriggers, 'soundTriggers');
   read.onlyKeys(triggerParams, 'soundTriggers', ['schedule', 'burst']);
   const colors = Array.isArray(params.colors) ? params.colors : null;
@@ -224,6 +229,10 @@ export function resolveEmitterConfig(preset, params) {
     attachCamera: read.oneOf(params.attach, 'attach', 'anchor', ['anchor', 'camera']) === 'camera',
     hugGround: read.boolean(params.hugGround, 'hugGround', false),
     snapToGround: read.boolean(params.snapToGround, 'snapToGround', false),
+    seaEntry: seaEntryParams ? {
+      stamp: read.integer(seaEntryParams.stamp, 'seaEntry.stamp', 0, 0, 16),
+      reach: read.number(seaEntryParams.reach, 'seaEntry.reach', 2500, 0, 8000),
+    } : null,
     directionMode,
     direction,
     speed,
@@ -457,6 +466,28 @@ export function createEmitterEngine() {
    */
   function snapAnchorToGround(anchor) {
     anchor.y = Math.max(ctx.terrain.groundHeight(anchor.x, anchor.z), ctx.terrain.waterLevel);
+  }
+
+  /**
+   * seaEntry: the anchor moves to where the lava flow down the site's carve stamp `stamp` (counted
+   * among its carve stamps) meets the sea, traced exactly as the structure recipe 'lavaChannels'
+   * traces it (lavaPath.js), or to the flow's end when it finds no sea; then it takes the ground or
+   * water height there. Returns whether the flow reached the sea. A spawn without carve stamps traces
+   * the stand-in channel from its anchor along its heading.
+   */
+  function moveAnchorToSeaEntry(anchor, seaEntry, site, heading, presetId) {
+    const stamps = lavaSourceStamps(site, anchor.x, anchor.z, heading);
+    const fromSite = site && Array.isArray(site.stamps) && site.stamps.some((stamp) => stamp.type === 'carve');
+    if (fromSite && seaEntry.stamp >= stamps.length) {
+      throw new Error(`[DRIFTWING] emitter preset "${presetId}": param "seaEntry.stamp" names carve stamp ${seaEntry.stamp}, but the site has ${stamps.length}`);
+    }
+    const stamp = stamps[Math.min(seaEntry.stamp, stamps.length - 1)];
+    const traced = traceLavaPath(stamp, ctx.terrain.groundHeight, ctx.terrain.waterLevel, { toSea: true, reach: seaEntry.reach });
+    const point = traced.entry ?? traced.end;
+    anchor.x = point.x;
+    anchor.z = point.z;
+    snapAnchorToGround(anchor);
+    return traced.entry !== null;
   }
 
   /** Centres an emitter's field grid on the emission point (relative to its frame origin). */
@@ -1224,13 +1255,19 @@ export function createEmitterEngine() {
       }
       const capacity = Math.min(config.particles, pageCount * PAGE_SIZE);
       const anchor = params.position;
+      const headingDegrees = Number.isFinite(params.heading) ? params.heading : 0;
+      const reachedSea = config.seaEntry ? moveAnchorToSeaEntry(anchor, config.seaEntry, params.site ?? null, headingDegrees, preset.id) : null;
+      // A flow that ends on land (no sea in reach) only fumes: no steam column, no explosions.
+      if (reachedSea === false) config.intensity = Math.min(config.intensity, SEA_ENTRY_DRY_LEVEL);
       if (config.snapToGround) snapAnchorToGround(anchor);
-      const heading = createHeadingFrame().set(Number.isFinite(params.heading) ? params.heading : 0);
+      const heading = createHeadingFrame().set(headingDegrees);
       const id = `emitter:${serial++}`;
       const origin = config.attachCamera ? ctx.camera.position : anchor;
       const data = {
         id,
         config,
+        /** seaEntry: whether the lava flow it follows reached the sea (null without seaEntry). */
+        reachedSea,
         preset,
         pool,
         row,
