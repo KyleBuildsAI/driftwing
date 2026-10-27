@@ -1,8 +1,8 @@
 // Preset 74: Wind shear line (uncommon event; affects flight). A long, ruler-straight cloud edge
 // stands across the sky, its leading side a sharp wall. Underneath it two air masses meet: cross the
-// line and within a hundred metres the wind swings round by fifty degrees or more and nearly doubles,
-// with a band of chop right at the edge. The activation turns downwind; the line lies 70 degrees off
-// the prevailing wind. Docs: docs/engines/weatherVolume.md (turn, wall), windModifier.md (gustFront).
+// line and within a hundred metres the wind swings round by forty-five degrees or more and nearly doubles,
+// with a band of chop right at the edge. The activation turns downwind; the new air mass blows across
+// the prevailing wind, square to the line. Docs: docs/engines/weatherVolume.md (turn, wall), windModifier.md (gustFront).
 export default Object.freeze({
   id: 'windShearLine',
   name: 'Wind shear line',
@@ -27,7 +27,7 @@ export default Object.freeze({
     Object.freeze({
       engine: 'weatherVolume',
       params: Object.freeze({
-        form: 'bank', turn: 70, base: 650, baseMode: 'agl', followTerrain: false, length: 14000, width: 1100, height: 420, wall: 0.7,
+        form: 'bank', turn: 90, base: 650, baseMode: 'agl', followTerrain: false, length: 14000, width: 1100, height: 420, wall: 0.7,
         puffs: 240, detail: 0.25, storm: 0.22, tint: 0xe9edf1, brightness: 1, billow: 0.12, formSeconds: 40, dissipateSeconds: 45,
         haze: Object.freeze({ near: 3000, far: 40000, max: 0.88 }),
         insideFog: Object.freeze({ density: 4, color: 0xd9dee4, darkness: 0.08 }),
@@ -39,7 +39,7 @@ export default Object.freeze({
     Object.freeze({
       engine: 'windModifier',
       params: Object.freeze({
-        type: 'gustFront', turn: 70, offset: Object.freeze([550, 0, 0]), length: 14000, frontWidth: 140, depth: 9000, outflow: 13, outflowTop: 2600,
+        type: 'gustFront', turn: 90, offset: Object.freeze([550, 0, 0]), length: 14000, frontWidth: 140, depth: 9000, outflow: 16, outflowTop: 2600,
         lift: 1.5, liftTop: 1800, turbulence: 0.55, gust: 4, fadeIn: 20,
       }),
     }),
