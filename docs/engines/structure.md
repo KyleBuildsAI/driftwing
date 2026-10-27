@@ -270,7 +270,7 @@ bend and the crown's top clump. The voice groans now and then (`out.voiceTrigger
 
 | param | unit | range | default | notes |
 | --- | --- | --- | --- | --- |
-| `radius` | m | 8..200 | [38, 46] | the ring's inner radius |
+| `radius` | m | 8..200 | [38, 46] | the radius the ring's stone blocks sit on |
 | `thickness` | m | 1..30 | 5.5 | the stone blocks' depth |
 | `lift` | m | 0..200 | 9 | the ring's bottom above the slab |
 | `stones` | count | 8..64 | 28 | blocks round the ring |

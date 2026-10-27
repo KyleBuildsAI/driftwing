@@ -22,7 +22,7 @@ const BELL = Object.freeze([
   Object.freeze([1.5, 0.35, 3.2]),
   Object.freeze([2, 0.4, 2.6]),
 ]);
-const BELL_LEVEL = 0.32;
+const BELL_LEVEL = 0.2;
 
 export default Object.freeze({
   name: 'galleon',
