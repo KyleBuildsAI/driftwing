@@ -1069,7 +1069,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | not started |
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
-| B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | in progress |
+| B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | done (not merged) |
 | B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | not started |
 | I3 | Integration pass: presets/index.js and spawnScenarios in spec order; `?test=spawns` for all 100 on both backends | `v2-phase3` | not started |
 
@@ -1121,6 +1121,27 @@ Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file
   cherry, autumn, lavender, redwood and bamboo emitters; the rice terraces' and mangroves' mists by hour;
   the dust devils' rising, spinning, wandering cores; the paddies' water bodies and the delta's sea.
   Run with `--query seed=DRIFTWING` (a random seed gives other sites).
+- **Lab fixes (wave 3 consequences, not batch logic):** `tools/lab/water.mjs` compares the map-tile
+  cache tag on the presets without waters or overlays (the batch presets add both to PRESETS);
+  `tools/lab/audio.mjs` sizes its all-recipes voice budget to the catalog (19 recipes > 16).
+- **Verification (2026-10-27, once each, owner's rule):**
+  - `tools/steps/presets-81-90.json` (dev server, `seed=DRIFTWING`): 59/59 on WebGPU and 59/59 on
+    WebGL2, 0 console errors and 0 warnings on both; 20 stills each (site and forced spawn per preset);
+  - `run-harness --test spawns --presets <the ten>`: 10/10 on both backends (memory, heap, wind
+    sources, lights, sky modifiers, colliders, challenges, ignitables back; 0/0 console); frame rates
+    reported only (WebGPU lowest avg 33.4 fps, worst p99 77.4 ms; WebGL2 42.3 fps, 74.7 ms);
+  - `run-harness --test terrain --presets real`: PASS on both backends, 8/8 stamp types (the delta and
+    the terraces included), 0 cracks, worker parity, 0/0 console;
+  - `npm run build` and `npm run build:single` (V1 SHA-256 matches); the built shell, V2 on WebGPU and
+    V2 on WebGL2 smoke with 0 errors and 0 warnings; `npm run test:v1` 2/2; docs-check 284/284;
+    `validatePresets` (40 presets);
+  - every lab: all pass alone (the gc labs with `--expose-gc`; terrain 470/470, preset-flight 17/17,
+    spawns 101/101, director 88/88, audio 215/215, water 34/34), except the eagle lab's allocation
+    check (below).
+- **Known:** the eagle lab's model-step allocation is bimodal (39 or 144 B/tick against 64): on the
+  base `f63fa29` 3 of 6 measuring children passed, on this branch 0 of 7; removing the batch presets
+  from PRESETS brings it back to the base's mix, though the measuring child never runs them (module
+  load order shifts V8's inlining). For the eagle owner or Milestone P; not chased here.
 
 ### Wave 4: discovery and verification, then the tag
 
