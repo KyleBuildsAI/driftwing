@@ -1,7 +1,9 @@
-// Recipe 'kiteSlalom': kites flying from a hilltop, their strings the poles of a slalom. Every
-// checkpoint of the preset's `challenge` block that sits off the course line (a nonzero `across`) gets
-// a kite whose string rises from a stake `offset` metres beyond the gate's inner edge, toward the
-// course line, so the gates weave from one side of the strings to the other; `extra` more kites fly
+// Recipe 'kiteSlalom': kites flying from a hilltop, their strings the poles of a slalom. The block's
+// gates are placed over the hill: each `height` above the highest ground under its legs of the course
+// (placeOverHill), so the line from gate to gate clears the summit. Every checkpoint of the preset's
+// `challenge` block that sits off the course line (a nonzero `across`) gets a kite whose string rises
+// from a stake `offset` metres beyond the gate's inner edge, toward the course line, so the gates
+// weave from one side of the strings to the other; `extra` more kites fly
 // off to the sides. Strings lean `lean` degrees downwind (the prevailing wind at create) up to the
 // kite, a diamond with spars and a bow-tie tail, with streamers along the line, all swaying with the
 // wind. Each string is a thin SENSOR collider tagged `kiteString`: touching one counts a miss on the
@@ -22,6 +24,9 @@ export const KITE_SLALOM_DEFAULTS = Object.freeze({
 });
 
 const DEG = Math.PI / 180;
+/** Ground samples (m apart) along a gate's legs of the course, and how far (m) its own line is sampled. */
+const LEG_SAMPLE_STEP = 10;
+const GATE_LINE_REACH = 40;
 const KITE_COLOURS = Object.freeze([0xe2452f, 0xf2b632, 0x2f7fd8, 0x35a05a, 0xd64d9a, 0xf07a2a].map((hex) => paint(hex)));
 const STRING = paint(0xf4efe2);
 const SPAR = paint(0x4e3b2a);
@@ -105,6 +110,42 @@ function addKite(context, x, groundY, z, height, lean, size, streamers) {
   return { from: [x, groundY - 1, z], to: [kiteX, kiteY, kiteZ] };
 }
 
+/**
+ * Places the course over the hill: every gate stands its block `height` above the HIGHEST ground under
+ * its legs of the course (the straight lines to the gates before and after it) and under its own line
+ * GATE_LINE_REACH metres either side, so on a hilltop the course line between two gates clears the
+ * ground between them by that height too (a straight line between two points above a convex summit
+ * would cut into it). Positions in the local frame; headings as the block gives them.
+ */
+function placeOverHill(context) {
+  const block = context.challenge;
+  const radians = context.heading * DEG;
+  const forwardX = Math.sin(radians);
+  const forwardZ = -Math.cos(radians);
+  const at = (gate) => ({ x: forwardX * gate.along - forwardZ * (gate.across ?? 0), z: forwardZ * gate.along + forwardX * (gate.across ?? 0) });
+  const points = block.gates.map(at);
+  const highest = (from, to) => {
+    const length = Math.hypot(to.x - from.x, to.z - from.z);
+    const steps = Math.max(1, Math.ceil(length / LEG_SAMPLE_STEP));
+    let top = -Infinity;
+    for (let step = 0; step <= steps; step++) {
+      const share = step / steps;
+      top = Math.max(top, context.ground(from.x + (to.x - from.x) * share, from.z + (to.z - from.z) * share));
+    }
+    return top;
+  };
+  return (gate, index) => {
+    const point = points[index];
+    const heading = context.heading + (gate.heading ?? 0);
+    const lineX = Math.sin(heading * DEG) * GATE_LINE_REACH;
+    const lineZ = -Math.cos(heading * DEG) * GATE_LINE_REACH;
+    let top = highest({ x: point.x - lineX, z: point.z - lineZ }, { x: point.x + lineX, z: point.z + lineZ });
+    if (index > 0) top = Math.max(top, highest(points[index - 1], point));
+    if (index < points.length - 1) top = Math.max(top, highest(point, points[index + 1]));
+    return { x: point.x, y: top + gate.height, z: point.z, heading, pitch: gate.pitch ?? 0 };
+  };
+}
+
 export function buildKiteSlalom(context, read) {
   const { rng, out, anchor } = context;
   const lineHeight = read.range('lineHeight', KITE_SLALOM_DEFAULTS.lineHeight, 30, 600);
@@ -114,7 +155,8 @@ export function buildKiteSlalom(context, read) {
   const streamers = read.boolean('streamers', KITE_SLALOM_DEFAULTS.streamers);
   const kiteSize = read.range('kiteSize', KITE_SLALOM_DEFAULTS.kiteSize, 0.5, 12);
   const sensorRadius = read.number('sensorRadius', KITE_SLALOM_DEFAULTS.sensorRadius, 0.05, 3);
-  const definition = courseFromBlock(context, read);
+  if (!context.challenge) read.fail('recipe', 'kiteSlalom needs the preset\'s challenge block (see src/gameplay/challenges.js validateChallengeBlock)');
+  const definition = courseFromBlock(context, read, placeOverHill(context));
   const block = context.challenge;
   const strings = [];
   const roll = (range) => range[0] + (range[1] - range[0]) * rng();

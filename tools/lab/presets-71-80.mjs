@@ -27,7 +27,8 @@
 //                falls (<= -4 m/s) and the gates are clear (|w| < 1.5 m/s)
 //   balloons     thirty balloons with envelope hulls, baskets and tethers; every gate opening is clear
 //   kites        the kite strings are sensors tagged kiteString; every gate opening is clear of them;
-//                a sweep across a string meets its sensor and nothing solid
+//                a sweep across a string meets its sensor and nothing solid; every leg of the course
+//                clears the hill by the gates' height
 //   challenge    a scripted run through every course's gates (the challenge system's crossings):
 //                started, every gate passed, finished with a medal and a stored best; a kite run
 //                that brushes a string counts a miss and its penalty and still finishes
@@ -675,6 +676,21 @@ function openingsClear(definition, radius, sensors = false) {
   const across = diagonals.map(([a, b]) => sweep(a, b, 0.6, true)).find((hit) => hit !== null) ?? null;
   const solid = diagonals.map(([a, b]) => sweep(a, b, 0.6, false)).find((hit) => hit !== null) ?? null;
   check('kites', 'a sweep across a string meets its sensor and nothing solid', Boolean(across) && across.sensor && solid === null, across ? across.id : 'none');
+  // Over the hill: every leg from gate to gate clears the ground under it by its gates' height.
+  let lowest = Infinity;
+  definition.gates.forEach((gate, index) => {
+    if (index === 0) return;
+    const from = definition.gates[index - 1].center;
+    const to = gate.center;
+    for (let step = 0; step <= 40; step++) {
+      const share = step / 40;
+      const x = from.x + (to.x - from.x) * share;
+      const z = from.z + (to.z - from.z) * share;
+      lowest = Math.min(lowest, from.y + (to.y - from.y) * share - groundHeight(x, z));
+    }
+  });
+  const leastHeight = Math.min(...PRESET_BY_ID.kiteSlalom.challenge.gates.map((gate) => gate.height));
+  check('kites', 'every leg of the course clears the hill by its gates\' height',lowest >= leastHeight - 0.5, `lowest ${round(lowest, 1)} m over the ground, gates ${leastHeight}+ m`);
 }
 
 // ---- challenge runs ----------------------------------------------------------------------------------------------------
