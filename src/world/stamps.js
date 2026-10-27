@@ -91,8 +91,18 @@ const STACK_SHELF_DEPTH = 0.6;
 const STACK_CLIFF = 5;
 /** Sea stacks stand apart by at least this much (m) beyond their radii. */
 const STACK_GAP = 24;
-/** The estuary's mouth lies this share of its length seaward of the site, its head the rest inland. */
-const ESTUARY_MOUTH_SHARE = 0.12;
+/**
+ * The estuary finds the shore along its forward axis between these shares of its length from the
+ * site (seaward positive), sets its mouth ESTUARY_MOUTH_BEYOND of its length past the shore and its
+ * head `length` metres inland of the mouth, so the head lies at most ESTUARY_HEAD_REACH lengths
+ * inland of the site.
+ */
+const ESTUARY_SHORE_FROM = -0.2;
+const ESTUARY_SHORE_TO = 0.35;
+const ESTUARY_MOUTH_BEYOND = 0.1;
+const ESTUARY_HEAD_REACH = 1 - ESTUARY_SHORE_FROM - ESTUARY_MOUTH_BEYOND;
+/** The shore search steps along the axis by this much (m). */
+const ESTUARY_SHORE_STEP = 25;
 /** An estuary fits only where the land along its channel stays under this height (m above the sea). */
 const ESTUARY_MAX_LAND = 45;
 /** Per-segment scratch of the canyon's two passes (segments are validated to at most 32). */
@@ -110,10 +120,10 @@ const DEFAULTS = Object.freeze({
   basin: Object.freeze({ radius: [180, 320], depth: [14, 24], rim: [30, 50], falloff: [80, 130], paint: 'sand' }),
   crater: Object.freeze({ radius: [320, 520], depth: [60, 110], rimHeight: [25, 45], rimWidth: [180, 300], floor: [0.25, 0.45], paint: 'ash' }),
   terraces: Object.freeze({ length: [320, 520], width: [140, 240], steps: [5, 8], lip: [1.2, 2.4], falloff: [60, 110], paint: 'travertine' }),
-  atoll: Object.freeze({ radius: [700, 1050], width: [110, 170], islets: [5, 8], isletHeight: [2.2, 4.2], lagoonDepth: [5, 8], reefDepth: [0.5, 1.1], falloff: [260, 380], paint: 'sand' }),
+  atoll: Object.freeze({ radius: [380, 560], width: [80, 120], islets: [4, 7], isletHeight: [2.2, 4.2], lagoonDepth: [5, 8], reefDepth: [0.5, 1.1], falloff: [160, 240], paint: 'sand' }),
   reef: Object.freeze({ radius: [190, 280], depth: [1.6, 2.8], pocket: [7, 10], pocketRadius: [55, 80], heads: [10, 18], falloff: [130, 200], paint: 'coral' }),
   seaStacks: Object.freeze({ count: [4, 6], radius: [11, 20], height: [38, 70], spread: [260, 400], arches: [1, 2], span: [42, 64], archHeight: [28, 42], paint: 'wetRock' }),
-  estuary: Object.freeze({ length: [2200, 3000], mouthWidth: [320, 460], headWidth: [50, 80], depth: [3.5, 5.5], bank: [5, 8], bankWidth: [40, 70], falloff: [120, 180], paint: 'mud' }),
+  estuary: Object.freeze({ length: [1600, 2200], mouthWidth: [260, 380], headWidth: [45, 70], depth: [3.5, 5.5], bank: [5, 8], bankWidth: [40, 70], falloff: [120, 180], paint: 'mud' }),
 });
 
 /** Every size field per type, validated as a positive number or an ascending [min, max] range. */
@@ -305,7 +315,7 @@ export function stampReach(spec) {
       extent = Math.hypot(maxOf(full.spread), maxOf(full.spread) * 0.7) + maxOf(full.span) / 2 + maxOf(full.radius) * STACK_SHELF * 1.2;
       break;
     case 'estuary':
-      extent = Math.hypot(maxOf(full.length) * (1 - ESTUARY_MOUTH_SHARE) + maxOf(full.headWidth) / 2 + maxOf(full.bankWidth) + maxOf(full.falloff), maxOf(full.mouthWidth) / 2 + maxOf(full.bankWidth) + maxOf(full.falloff));
+      extent = Math.hypot(maxOf(full.length) * ESTUARY_HEAD_REACH + maxOf(full.headWidth) / 2 + maxOf(full.bankWidth) + maxOf(full.falloff), maxOf(full.mouthWidth) / 2 + maxOf(full.bankWidth) + maxOf(full.falloff));
       break;
     default:
       extent = (maxOf(full.radius) + maxOf(full.falloff)) * (1 + ISLAND_LOBE_MAX);
@@ -969,11 +979,11 @@ function resolveSeaStacks(stamp, spec, random, context) {
 
 /**
  * Estuary: a straight channel carved below sea level from the coast inland, wide at its mouth (just
- * seaward of the site) and narrowing to its head `length` metres inland, between mud levees `bank`
- * metres above the sea that fall away to the land over the falloff. The forward axis points to sea
- * (align 'downhill'); a tidal bore surges up it from the mouth (inlandX, inlandZ). It fits where the
- * head lies on land, the mouth at the sea, and no land along the channel stands more than
- * ESTUARY_MAX_LAND above the sea.
+ * past the shore it finds along the forward axis) and narrowing to its head `length` metres inland,
+ * between mud levees `bank` metres above the sea that fall away to the land over the falloff. The
+ * forward axis points to sea (align 'downhill'); a tidal bore surges up it from the mouth (inlandX,
+ * inlandZ). It fits where a shore lies on the axis, the head lies on land, the mouth at the sea, and
+ * no land along the channel stands more than ESTUARY_MAX_LAND above the sea.
  */
 function resolveEstuary(stamp, spec, random, context) {
   const length = roll(spec.length, random);
@@ -983,7 +993,15 @@ function resolveEstuary(stamp, spec, random, context) {
   const bank = roll(spec.bank, random);
   const bankWidth = roll(spec.bankWidth, random);
   const falloff = roll(spec.falloff, random);
-  const mouthAlong = length * ESTUARY_MOUTH_SHARE;
+  // The shore: the first point along the forward axis (to sea) whose ground lies below the sea.
+  let shoreAlong = NaN;
+  for (let along = length * ESTUARY_SHORE_FROM; along <= length * ESTUARY_SHORE_TO; along += ESTUARY_SHORE_STEP) {
+    if (context.baseHeight(stamp.x + stamp.dirX * along, stamp.z + stamp.dirZ * along) < context.waterLevel - 0.5) {
+      shoreAlong = along;
+      break;
+    }
+  }
+  const mouthAlong = (Number.isFinite(shoreAlong) ? shoreAlong : 0) + length * ESTUARY_MOUTH_BEYOND;
   const headAlong = mouthAlong - length;
   stamp.length = length;
   stamp.channelLength = length;
@@ -1009,7 +1027,7 @@ function resolveEstuary(stamp, spec, random, context) {
     const height = context.baseHeight(stamp.x + stamp.dirX * along, stamp.z + stamp.dirZ * along);
     if (height > highest) highest = height;
   }
-  stamp.fits = context.baseHeight(stamp.headX, stamp.headZ) > context.waterLevel + 1 && context.baseHeight(stamp.mouthX, stamp.mouthZ) < context.waterLevel + 1
+  stamp.fits = Number.isFinite(shoreAlong) && context.baseHeight(stamp.headX, stamp.headZ) > context.waterLevel + 1 && context.baseHeight(stamp.mouthX, stamp.mouthZ) < context.waterLevel + 1
     && highest <= context.waterLevel + ESTUARY_MAX_LAND;
   const halfAlong = length / 2 + headHalfWidth + bankWidth + falloff;
   const halfAcross = mouthHalfWidth + bankWidth + falloff;
