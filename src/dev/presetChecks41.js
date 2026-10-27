@@ -163,9 +163,10 @@ export function installPresetChecks41(game) {
       const dirZ = -Math.cos(angle);
       const from = new THREE.Vector3(target.x - dirX * 70, target.y, target.z - dirZ * 70);
       if (ctx.colliders.insideSolid(from.x, from.y, from.z, 2)) continue;
-      // The terrain stays well under the approach all the way to the target.
-      let clear = true;
-      for (let along = 0; along <= 70 && clear; along += 5) if (surfaceAt(from.x + dirX * along, from.z + dirZ * along) > from.y - 8) clear = false;
+      // The terrain stays well under the approach all the way to the target, and the approach clear of
+      // the water (a berg is struck a few metres over the sea).
+      let clear = from.y > sea + 3;
+      for (let along = 0; along <= 70 && clear; along += 5) if (groundAt(from.x + dirX * along, from.z + dirZ * along) > from.y - 6) clear = false;
       if (!clear) continue;
       const to = new THREE.Vector3(target.x + dirX * 20, target.y, target.z + dirZ * 20);
       if (ctx.colliders.sweepSphere(from, to, 0.5, { sensors: false, landableTops: true }, hit) && ownIds.includes(hit.id) && withinBounds(colliderId, hit.point, 2)) chosen = { dirX, dirZ, from };
