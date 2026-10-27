@@ -900,7 +900,7 @@ and climbs away over the valley; fly through it and they burst aside.
 - **Engines:** `structure` (recipe `caveMouth` on the steepest high face within 1.5 km, solid);
   `fauna` (species `bat`, behaviour `stream`: 1800-2600 bats out of the same face along a 1.7 km
   path climbing 260 m, 6 m wide at the mouth to 34 m at its end, meandering 90 m and turning 35
-  degrees; owns the voice). With no face in reach every part ends at create and the activation is
+  degrees, already 90 s into its flow when it appears; owns the voice). With no face in reach every part ends at create and the activation is
   declined.
 - **Filters:** pine, snow, dunes or meadows; dusk; clear or clearing weather; over land; player
   0-3500 m; 2.5-7 km ahead. The activation moves onto the highest ground within 6 km

@@ -1,6 +1,7 @@
 // Preset 48: Bats at dusk (uncommon event). As the light goes, a stream of two thousand bats pours out
 // of a cave mouth high on a mountain face: a dark ribbon that dips as they drop out of the opening,
-// then climbs away over the valley in a slow, meandering curve and spreads into the night at its end.
+// then climbs away over the valley in a slow, meandering curve and spreads into the night at its end
+// (already in full flow when it appears: the stream starts 90 s into its clock).
 // Fly through it and the bats burst aside, then fold back into the ribbon. The cave mouth is a hood
 // of broken rock around a black opening on the steepest high face near a peak (structure caveMouth,
 // solid), the same face the stream pours from (fauna stream, cliffFace.js); with no such face in
@@ -38,7 +39,7 @@ export default Object.freeze({
         count: Object.freeze([1800, 2600]),
         fadeIn: 2,
         fadeOut: 15,
-        stream: Object.freeze({ source: 'cliff', faceSearch: 1500, length: 1700, climb: 260, width: Object.freeze([6, 34]), meander: 90, turn: 35 }),
+        stream: Object.freeze({ source: 'cliff', faceSearch: 1500, length: 1700, climb: 260, width: Object.freeze([6, 34]), meander: 90, turn: 35, prewarm: 90 }),
         voice: true,
       }),
     }),
