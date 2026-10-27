@@ -63,6 +63,8 @@ const DEFAULT_RUN_SECONDS = 4;
 /** The leak check: this many held creates and disposes after its warm-up, each drawn LEAK_CYCLE_FRAMES frames. */
 const LEAK_CYCLES = 3;
 const LEAK_CYCLE_FRAMES = 45;
+/** How often the show's baseline is read again after ending a director spawn that started under it. */
+const BASELINE_RETRIES = 3;
 /** The most leak cycles ?testLeakCycles= may ask for (a longer trend when a preset is in doubt). */
 const MAX_LEAK_CYCLES = 30;
 /** A warm-up that keeps more than this (MB) is listed in the notes (it is not judged). */
@@ -848,7 +850,17 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       // ---- Cycle 1: the show ----
       phase = 'show';
       progress(label, 'baseline');
-      const baseline = await dispose.baseline();
+      let baseline = await dispose.baseline();
+      // A director spawn that started while the baseline settled (an override's own preset, on a night
+      // its schedule already holds over the craft) is not the world's: it is ended and the baseline read
+      // again (the director starts an override's preset once per night, so it does not come back).
+      for (let retry = 0; retry < BASELINE_RETRIES; retry++) {
+        const ended = endOtherSpawns(siteIds);
+        if (ended === 0) break;
+        row.otherSpawnsEnded += ended;
+        dispose.cancel();
+        baseline = await dispose.baseline();
+      }
       const spawnId = createSpawn(scenario, anchor);
       row.spawnId = spawnId;
       row.spawned = Boolean(spawnId) && manager.getInstance(spawnId) !== null;
