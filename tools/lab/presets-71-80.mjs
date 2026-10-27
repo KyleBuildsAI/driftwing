@@ -14,7 +14,8 @@
 //   wisps        the forest wisps wait, trail the craft once it comes near, then lead toward the
 //                nearest undiscovered site, hold while the craft lags, gather there, and their frame
 //                update allocates nothing
-//   ridge        lift along the ridge band over the crest, none well off the axis
+//   ridge        the band's own lift along the crest (the field less the same field before it), none
+//                well off the axis
 //   shear        the shear line: across the cloud edge the wind veers 40+ degrees and speeds up 1.5x
 //   street       the thermal street: lift under every cloud of both rows, sink or calm between rows
 //   canyon       the canyon gauntlet's gates stand on the carve's floor path, inside its walls, framed
@@ -33,8 +34,8 @@
 //
 // Usage: node --expose-gc tools/lab/presets-71-80.mjs [--verbose]
 // Prints one line per check and exits non-zero if any check fails.
+import inspector from 'node:inspector/promises';
 import { PerformanceObserver } from 'node:perf_hooks';
-import v8 from 'node:v8';
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { EventBus } from '../../src/core/eventBus.js';
@@ -232,8 +233,8 @@ function createLab() {
     return manager.activate(presetId, { position, heading, source: 'debug', force: true });
   }
   const sample = { vel: new THREE.Vector3(), turbulence: 0 };
-  function windAt(x, y, z) {
-    wind.sample(new THREE.Vector3(x, y, z), state.time.elapsed, sample);
+  function windAt(x, y, z, time = state.time.elapsed) {
+    wind.sample(new THREE.Vector3(x, y, z), time, sample);
     return { x: sample.vel.x, y: sample.vel.y, z: sample.vel.z, turbulence: sample.turbulence };
   }
   return { bus, scene, camera, uniforms, state, wind, colliders, surfaces, voices, manager, events, step, moveTo, spawnSite, spawnEvent, windAt, challenges: game.systems.challenges, storageMap, modifiers };
@@ -390,30 +391,62 @@ for (const presetId of ['canyonGauntlet', 'caveTunnel', 'waterfallWall', 'balloo
   const behind = player.position.x - part.anchor.x;
   check('wisps', 'they trail the craft once it comes near', phase() === 'trailing' && behind > 10 && behind < 120 && Math.abs(part.anchor.z) < 20, `${phase()}, ${round(behind, 1)} m behind`);
   // Allocation of the guide's frame update (trailing, the craft moving): a warm-up first, so the
-  // optimising compiler has run, then the measurement with collections watched.
+  // optimising compiler has run, then the measurement with collections watched. The guide's clock
+  // (state slot 1) is held at the trail's start, so the wisps keep trailing through the measurement
+  // (they would otherwise set off for the site, a search that allocates as event work), its ground
+  // sample (slot 7, four times a second: event work through the terrain's call) is held off, so the
+  // measurement is the per-frame path, and the spawn's age is held too (the direct updates would run
+  // it past its lifetime); the anchor, the clocks and the craft go back where they were afterwards.
   const frameCtx = { time: lab.state.time, camera: lab.camera };
   const trailFrom = x;
+  const anchorFrom = { x: part.anchor.x, y: part.anchor.y, z: part.anchor.z };
+  const clockFrom = part.data.guide[1];
+  const ageFrom = part.data.age[0];
+  // The craft's x lives in a typed array: a double captured and reassigned in a closure is boxed.
+  const track = new Float64Array([x]);
   const runTrail = (frames) => {
     for (let frame = 0; frame < frames; frame++) {
-      x += 40 / 60;
-      player.position.x = x;
+      track[0] += 40 / 60;
+      player.position.x = track[0];
+      part.data.guide[1] = 0;
+      part.data.guide[7] = 1;
+      part.data.age[0] = ageFrom;
       engine.update(part, 1 / 60, frameCtx);
     }
   };
-  runTrail(20000);
-  if (typeof globalThis.gc === 'function') globalThis.gc();
-  const before = v8.getHeapStatistics().used_heap_size;
+  runTrail(90000);
+  // V8's sampling heap profiler (every object the minor and major collections take included) counts
+  // what engine.update allocates itself, apart from the loop's own stores; collections are watched
+  // too. The observer is set up before the measurement, so its own allocation is not counted.
   let collections = 0;
   const observer = new PerformanceObserver((list) => { collections += list.getEntries().length; });
   observer.observe({ entryTypes: ['gc'] });
-  const frames = 6000;
+  const session = new inspector.Session();
+  session.connect();
+  if (typeof globalThis.gc === 'function') globalThis.gc();
+  collections = 0;
+  const frames = 30000;
+  await session.post('HeapProfiler.startSampling', { samplingInterval: 64, includeObjectsCollectedByMinorGC: true, includeObjectsCollectedByMajorGC: true });
   runTrail(frames);
-  const grown = v8.getHeapStatistics().used_heap_size - before;
+  const { profile } = await session.post('HeapProfiler.stopSampling');
+  const trailCollections = collections;
   observer.disconnect();
-  // Back to where the trail was, beside the wisps (the measurement moved only the craft).
+  session.disconnect();
+  const engineFile = /lightEffectEngine\.js$/;
+  const underEngine = (node, inside) => {
+    const here = inside || engineFile.test(node.callFrame.url);
+    return (here ? node.selfSize : 0) + node.children.reduce((sum, child) => sum + underEngine(child, here), 0);
+  };
+  const grown = underEngine(profile.head, false);
+  // Back to where the trail was, the wisps behind the craft again.
   x = trailFrom;
+  part.anchor.x = anchorFrom.x;
+  part.anchor.y = anchorFrom.y;
+  part.anchor.z = anchorFrom.z;
+  part.data.guide[1] = clockFrom;
+  part.data.age[0] = ageFrom;
   lab.moveTo(x, groundHeight(x, 0) + 150, 0);
-  check('wisps', 'the guide frame update allocates nothing', collections === 0 && grown / frames < 1, `${round(grown / frames, 3)} B/frame, ${collections} collections`);
+  check('wisps', 'the guide frame update allocates nothing (between its 4 Hz ground samples)', trailCollections === 0 && grown / frames < 1, `${round(grown / frames, 3)} B/frame, ${trailCollections} collections`);
   // After the trail, they set off toward the undiscovered site; the craft keeps pace a while.
   for (let frame = 0; frame < 60 * 30 && phase() === 'trailing'; frame++) {
     x += 40 / 60;
@@ -456,25 +489,32 @@ for (const presetId of ['canyonGauntlet', 'caveTunnel', 'waterfallWall', 'balloo
 
 // ---- ridge band ----------------------------------------------------------------------------------------------------
 {
-  site('ridgeLiftBand');
   const where = SITES.get('ridgeLiftBand');
   const dirX = Math.sin(where.rotation);
   const dirZ = -Math.cos(where.rotation);
-  lab.step(60);
   const crest = where.groundY;
-  const along = [-1800, -900, -600, 0, 600, 1200, 1800].map((offset) => lab.windAt(where.x + dirX * offset, crest + 200, where.z + dirZ * offset).y);
-  const off = lab.windAt(where.x - dirZ * 1500, crest + 200, where.z + dirX * 1500).y;
-  check('ridge', 'lift along the band over the crest (>= 2 m/s), none 1.5 km off the axis', along.every((value) => value >= 2) && Math.abs(off) < 0.6, `along ${along.map((value) => round(value, 1)).join(', ')} m/s, off-axis ${round(off, 2)}`);
+  // The band's own lift: the field with the band, less the same field (same points, same time)
+  // before it: the stub hills' slope lift and lee sink and the gusts are taken off.
+  const time = lab.state.time.elapsed + 1;
+  const points = [-1800, -900, -600, 0, 600, 1200, 1800].map((offset) => [where.x + dirX * offset, crest + 200, where.z + dirZ * offset]);
+  const offAxis = [where.x - dirZ * 1500, crest + 200, where.z + dirX * 1500];
+  const before = points.map((point) => lab.windAt(...point, time).y);
+  const offBefore = lab.windAt(...offAxis, time).y;
+  site('ridgeLiftBand');
+  lab.step(60);
+  const along = points.map((point, index) => lab.windAt(...point, time).y - before[index]);
+  const off = lab.windAt(...offAxis, time).y - offBefore;
+  check('ridge', 'the band lifts along the crest (>= 2 m/s more), not 1.5 km off the axis', along.every((value) => value >= 2) && Math.abs(off) < 0.6, `along +${along.map((value) => round(value, 1)).join(', +')} m/s, off-axis ${round(off, 2)}`);
 }
 
 // ---- shear line -----------------------------------------------------------------------------------------------------
 {
   lab.moveTo(120000, 900, 3000);
   const position = { x: 120000, y: groundHeight(120000, 0), z: 0 };
-  // The activation turns downwind (anchor.align); the front faces 70 degrees right of it.
+  // The activation turns downwind (anchor.align); the front faces 90 degrees right of it.
   const id = lab.spawnEvent('windShearLine', position, 0);
   lab.step(60 * 30);
-  const turn = ((downwindHeading() + 70) * Math.PI) / 180;
+  const turn = ((downwindHeading() + 90) * Math.PI) / 180;
   const frontX = Math.sin(turn);
   const frontZ = -Math.cos(turn);
   const at = (distance) => lab.windAt(position.x + frontX * (550 + distance), position.y + 300, position.z + frontZ * (550 + distance));
