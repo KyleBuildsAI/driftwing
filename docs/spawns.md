@@ -83,6 +83,16 @@ preset's section below.
 | 28 | [Crystal spires](#28-crystal-spires) | `crystalSpires` | fantasy | site | uncommon | no | `structure`, `lightEffect` | no |
 | 29 | [Jet stream ribbon](#29-jet-stream-ribbon) | `jetStream` | flightplay | event | uncommon | no | `emitter`, `windModifier` | yes |
 | 30 | [Storm chase](#30-storm-chase) | `stormChase` | setpiece | event | legendary | no | `setPiece` | children |
+| 41 | [Calving glacier](#41-calving-glacier) | `calvingGlacier` | geo | site | uncommon | no | `structure` | no |
+| 42 | [Coral atoll](#42-coral-atoll) | `coralAtoll` | ocean | site | uncommon | no | `waterEffect` | no |
+| 43 | [Reef shipwreck](#43-reef-shipwreck) | `reefShipwreck` | ocean | site | uncommon | no | `structure`, `waterEffect` | no |
+| 44 | [Dolphin pod](#44-dolphin-pod) | `dolphinPod` | ocean | event | common | no | `fauna` | no |
+| 45 | [Sea stacks and arches](#45-sea-stacks-and-arches) | `seaStacks` | geo | site | uncommon | no | `structure` | no |
+| 46 | [Rogue wave](#46-rogue-wave) | `rogueWave` | ocean | event | uncommon | no | `waterEffect` | no |
+| 47 | [Tidal bore](#47-tidal-bore) | `tidalBore` | ocean | site | uncommon | no | `waterEffect` | no |
+| 48 | [Bats at dusk](#48-bats-at-dusk) | `batsAtDusk` | wildlife | event | uncommon | no | `structure`, `fauna` | no |
+| 49 | [Herd stampede](#49-herd-stampede) | `herdStampede` | wildlife | event | common | no | `fauna` | no |
+| 50 | [Flamingo lake](#50-flamingo-lake) | `flamingoLake` | wildlife | site | uncommon | no | `fauna` | no |
 
 In all: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy. The
 journal's collection count is found / 30 over these presets (`PRESETS` in
@@ -731,6 +741,215 @@ and the storm decays.
 - **Lifetime:** 570-600 s; despawned beyond 30 + 5 km after 60 s out of view.
 - **Journal:** the "Storm Chaser" entry; `closestTornado` (min, the closest pass to the funnel) and
   `stormsChased` (+1 when you came within 5 km of the funnel).
+
+### Ocean and wildlife (presets 41-50)
+
+Presets 41-47 are the spec's ocean set and 48-50 open its wildlife set. They add the Phase 3 water
+features their list asks for: travelling waves and clear shallows in the water effects layer, the
+atoll, reef, sea stacks and estuary stamps, structure movers (calving slabs and drifting icebergs)
+and a bat stream in the fauna engine. None of them changes the air the craft flies through.
+
+#### 41. Calving glacier
+
+Where the snow country meets the sea, a tidewater glacier flows down to an ice cliff standing in the
+water. Every minute or so a slab of the front cracks, topples outward and plunges into the sea with a
+splash and a ring wave spreading across the water, then drifts off as a berg and melts. Icebergs
+drift in the water before the front.
+[src/spawns/presets/calvingGlacier.js](../src/spawns/presets/calvingGlacier.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** snow or pine; coast; chance 0.4; at least 18 km apart; 600 m clearance; aligned
+  downhill (the tongue flows to the sea).
+- **Engines:** `structure` (recipe `glacier`: a tongue 1.4-1.9 km long and 380-540 m wide ending in a
+  front 34-48 m high where its heading meets water, its top a landable heightfield with a perch, the
+  front a row of solid boxes; 3-5 calving slabs, one cracking every 45-85 s (the first after
+  8-18 s), each plunge sending a 2.6 m ring wave 900 m across the water; 6-9 drifting icebergs of
+  10-30 m, each with its own collider hull, kept to water deep enough for them; owns the voice at a
+  constant 0.55).
+- **Wind:** none.
+- **Sound:** `calving` (groaning ice; `crack` as a slab breaks, `splash` as it hits the water).
+- **LOD:** near 2200 m, mid 6000 m, far 14 km. **Discovery:** 3 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 2.5 km.
+
+#### 42. Coral atoll
+
+A ring reef about a kilometre across in the sea: low white-sand islets on a crest just awash around
+a clear turquoise lagoon, the surf breaking in a white ring along the reef.
+[src/spawns/presets/coralAtoll.js](../src/spawns/presets/coralAtoll.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** archipelago, dunes or meadows; any surface, with the centre at least 10 m under the
+  sea (the stamp itself fits only where the sea is at least 3 m deep everywhere it stands); chance
+  0.5; at least 20 km apart; 400 m clearance.
+- **Stamps:** `atoll` (rim radius 380-560 m, rim 80-120 m wide, 4-7 islets 2.2-4.2 m high, lagoon
+  5-8 m deep, crest 0.5-1.1 m under the sea, seaward slope 160-240 m; painted `sand`).
+- **Engines:** `waterEffect` (`shallows` fitted to the atoll: turquoise at clarity 0.85, surf 0.85 on
+  the reef crest; owns the voice at 0.75); `waterEffect` (fish splashes in the lagoon, kept to the
+  water).
+- **Wind:** none.
+- **Sound:** `surf` (breakers on the reef).
+- **LOD:** near 2500 m, mid 6000 m, far 14 km. **Discovery:** 3 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 2.5 km.
+
+#### 43. Reef shipwreck
+
+An old sailing ship broken in two on a coral reef, its halves listing in a sand hollow, a mast top
+breaking the surface, all of it plain through the clear shallows.
+[src/spawns/presets/reefShipwreck.js](../src/spawns/presets/reefShipwreck.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** archipelago, dunes or meadows; water, the centre 9-70 m deep; chance 0.1; at least
+  16 km apart; 900 m clearance.
+- **Stamps:** `reef` through `structureStamps('shipwreck')` (a reef flat 200-270 m across, its crest
+  1.8-2.6 m under the sea, 12-18 coral heads, a sand hollow 8-10 m deep; painted `coral`).
+- **Engines:** `structure` (recipe `shipwreck`: 34-46 m long, broken in two and listing 18-32
+  degrees, shaded underwater; a collider hull per half, capsules for the masts); `waterEffect`
+  (`shallows` fitted to the reef at clarity 0.9, surf 0.55 along its edge; owns the voice at 0.55).
+- **Wind:** none.
+- **Sound:** `surf`.
+- **LOD:** near 1800 m, mid 4500 m, far 10 km. **Discovery:** 1.8 km, in view.
+- **Lifetime:** a site; removed beyond 10 + 2 km.
+
+#### 44. Dolphin pod
+
+Six to twelve dolphins porpoise through the swell off a coast; fly low over the water and they race
+your shadow.
+[src/spawns/presets/dolphinPod.js](../src/spawns/presets/dolphinPod.js)
+
+- **Kind:** event, common.
+- **Engines:** `fauna` (species `dolphin`, behaviour `surface`: 6-12 swimmers 14 m apart, leaping
+  2.2 m every 2.5-6 s; with the craft under 260 m over open water within 900 m they race its shadow at
+  up to 1.9 x cruise; whistles every 3-8 s).
+- **Filters:** any biome; day, golden hour, dawn or dusk; clear, building or clearing weather; on a
+  coast; player 0-2000 m; 2.5-7 km ahead.
+- **Candidates:** 5 km cells, 300 s buckets, chance 0.45.
+- **Wind:** none.
+- **Sound:** `dolphin` (whistles and click trains, `call`).
+- **LOD:** near 1800 m, mid 4000 m, far 8000 m. **Discovery:** 1.5 km, in view.
+- **Lifetime:** 240-400 s, fading out over the last 8 s; despawned beyond 8 + 2 km after 20 s out of
+  view.
+
+#### 45. Sea stacks and arches
+
+Rock columns standing in the surf off a wild coast, with one or two great arches between them high
+enough to fly through.
+[src/spawns/presets/seaStacks.js](../src/spawns/presets/seaStacks.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** pine, meadows, archipelago or snow; coast; chance 0.1; at least 14 km apart; 900 m
+  clearance; aligned downhill (the stacks stand seaward).
+- **Stamps:** `seaStacks` through `structureStamps('seaArches')` (4-6 stacks 40-68 m tall, 1-2 arches
+  with legs 44-60 m apart and 30-40 m high, each column on a wave-cut shelf; painted `wetRock`).
+- **Engines:** `structure` (recipe `seaArches`: the lintel over each pair of legs, a box collider per
+  segment and a perch on top, each opening a fly-through gate with the achievement; owns the voice
+  at a constant 0.7).
+- **Wind:** none.
+- **Sound:** `surf`.
+- **LOD:** near 1800 m, mid 5000 m, far 11 km. **Discovery:** 2.2 km, in view.
+- **Lifetime:** a site; removed beyond 11 + 2 km.
+- **Achievement:** `seaArch`, "Through the Sea Arch" (the first pass through an arch).
+
+#### 46. Rogue wave
+
+A lone wall of water 14 m high and nearly two kilometres long rolls broadside across the open ocean,
+breaking white along its crest.
+[src/spawns/presets/rogueWave.js](../src/spawns/presets/rogueWave.js)
+
+- **Kind:** event, uncommon.
+- **Engines:** `waterEffect` (`wave`, a straight front: 14 m high, half width 48 m with a steeper
+  front face, a crest 900 m each side of its centre tapering over its last 320 m; it starts 1800 m
+  behind the anchor, travels 3600 m at 16 m/s across the activation heading and crosses the anchor
+  midway; spray 340 a second off the crest; the water query lifts the surface with it; owns the
+  voice, one big breaker at full height).
+- **Filters:** any biome; day, golden hour, dawn or dusk; any weather; over water; player 0-3000 m;
+  3-7 km ahead.
+- **Candidates:** 8 km cells, 600 s buckets, chance 0.35.
+- **Wind:** none.
+- **Sound:** `surf` (reference distance 220 m; `crash` at full height).
+- **LOD:** near 2500 m, mid 6000 m, far 12 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** the wave's own run (225 s) ends it inside its 250-270 s; despawned beyond 12 + 2.5 km
+  after 30 s out of view.
+
+#### 47. Tidal bore
+
+A muddy estuary carved into a low coast, where the incoming tide rears up into a breaking wave that
+surges inland up the channel every minute or two.
+[src/spawns/presets/tidalBore.js](../src/spawns/presets/tidalBore.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** any biome; coast, the centre at most 10 m up; chance 0.6; at least 18 km apart;
+  300 m clearance; aligned downhill (the estuary opens to the sea).
+- **Stamps:** `estuary` (a channel 1.6-2.2 km long from just past the shore inland, 260-380 m wide
+  at its mouth narrowing to 45-70 m, 3.5-5.5 m deep at the mouth, mud levees 5-8 m high; painted
+  `mud`).
+- **Engines:** `waterEffect` (`wave` in estuary mode: from the mouth up the channel at 8 m/s, 2.4 m
+  high growing 1.5 x as the channel narrows, its crest spanning the channel; again every 45-90 s;
+  owns the voice).
+- **Wind:** none.
+- **Sound:** `surf` (reference distance 150 m; `crash` as each bore rises).
+- **LOD:** near 2000 m, mid 5000 m, far 11 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 11 + 2 km.
+
+#### 48. Bats at dusk
+
+As the light goes, a stream of two thousand bats pours out of a cave mouth high on a mountain face
+and climbs away over the valley; fly through it and they burst aside.
+[src/spawns/presets/batsAtDusk.js](../src/spawns/presets/batsAtDusk.js)
+
+- **Kind:** event, uncommon.
+- **Engines:** `structure` (recipe `caveMouth` on the steepest high face within 1.5 km, solid);
+  `fauna` (species `bat`, behaviour `stream`: 1800-2600 bats out of the same face along a 1.7 km
+  path climbing 260 m, 6 m wide at the mouth to 34 m at its end, meandering 90 m and turning 35
+  degrees; owns the voice). With no face in reach every part ends at create and the activation is
+  declined.
+- **Filters:** pine, snow, dunes or meadows; dusk; clear or clearing weather; over land; player
+  0-3500 m; 2.5-7 km ahead. The activation moves onto the highest ground within 6 km
+  (`anchor.seek: 'peak'`).
+- **Candidates:** 6 km cells, 600 s buckets, chance 0.45.
+- **Wind:** none.
+- **Sound:** `murmuration` (the wing rush, swelling as you near the stream; `scatter`).
+- **LOD:** near 2200 m, mid 5000 m, far 10 km. **Discovery:** 2.2 km, in view.
+- **Lifetime:** 300-480 s, fading out over the last 15 s; despawned beyond 10 + 2 km after 20 s out
+  of view.
+
+#### 49. Herd stampede
+
+A bison herd grazing across the plains; buzz it low and it bolts at a gallop under a rolling plume
+of dust.
+[src/spawns/presets/herdStampede.js](../src/spawns/presets/herdStampede.js)
+
+- **Kind:** event, common.
+- **Engines:** `fauna` (species `bison`, behaviour `herd`: 40-80 animals 6.5 m apart, grazing half the
+  time; a stampede when the craft comes within 320 m and under 350 m above them, 28 s long, bent
+  downhill, then 40 s before the next; dust 9 puffs a second per running animal, 7 m across; a bull's
+  bellow every 10-24 s).
+- **Filters:** meadows or dunes; day, golden hour, dawn or dusk; clear, building or clearing
+  weather; over land; player 0-2500 m; 2.5-7 km ahead.
+- **Candidates:** 5 km cells, 360 s buckets, chance 0.4.
+- **Wind:** none.
+- **Sound:** `herd` (drumming hooves, loudest in a stampede; `bellow`).
+- **LOD:** near 2000 m, mid 4500 m, far 9000 m. **Discovery:** 1.8 km, in view.
+- **Lifetime:** 300-480 s, fading out over the last 10 s; despawned beyond 9 + 2 km after 20 s out of
+  view.
+
+#### 50. Flamingo lake
+
+A shallow pink soda lake crowded with wading flamingos that lift off in a wave when you fly over
+them, circle the lake and settle again.
+[src/spawns/presets/flamingoLake.js](../src/spawns/presets/flamingoLake.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** meadows, dunes or archipelago; flat land 5-600 m up; chance 0.08; at least 16 km
+  apart; 600 m clearance.
+- **Stamps and water:** a `basin` (radius 260-360 m, 3-5 m deep, painted `salt`) holding a lake
+  filled to 0.75 of its depth, tinted pink (`waters`, tint 0xf2a6b8, waves 0.12).
+- **Engines:** `fauna` (species `flamingo`, behaviour `surface` wading: 60-120 birds in water under
+  0.6 m; flushed within 160 m, they take off in a wave, fly 25-45 s on a 240 m circle 45 m up and
+  settle back; calls every 4-10 s; owns the voice).
+- **Wind:** none.
+- **Sound:** `goose` (honking calls).
+- **LOD:** near 1800 m, mid 4500 m, far 9000 m. **Discovery:** 2 km, in view.
+- **Lifetime:** a site; removed beyond 9 + 2 km.
 
 ## Adding a preset
 
