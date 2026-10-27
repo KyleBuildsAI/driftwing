@@ -3,9 +3,10 @@
 // apart, centred on the site, each fed by a short stream over the cliff top and arcing out on a
 // ballistic path into mist at the foot, with boulders scattered below (sphere colliders). Each fall
 // drags a column of sinking air down its own arc (out.falls: the engine's WindField source follows
-// the arcs exactly, `sink` m/s on the arc fading over `curtain` metres), so the gaps stay clear. The course is the preset's `challenge` block as it
-// stands (the gates in the site frame, heights above the ground under them): authored in the gaps,
-// alternately crossing in behind the falls and out again. Without a cliffStep stamp (a debug spawn)
+// the arcs exactly, `sink` m/s on the arc fading over `curtain` metres), so the gaps stay clear. The
+// course is the preset's `challenge` block as it stands (the gates in the site frame, heights above
+// the ground under them): authored in the gaps, alternately crossing in behind the falls and out
+// again. Without a cliffStep stamp (a debug spawn)
 // the recipe raises its own basalt cliff across the heading, as the waterfall recipe does.
 import { PALETTE } from '../palette.js';
 import { addBoulder, findStamp } from '../common.js';

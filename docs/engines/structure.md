@@ -1,7 +1,9 @@
 # structure engine
 
 Procedural low-poly builds from parametric recipes: wind farms, rope bridges, abandoned airfields,
-floating islands, crystal spires and timed gate courses. The code is in
+floating islands, crystal spires, waterfalls and timed gate courses, and the scenery of the Phase 3
+challenge courses (rock gates down a canyon, a cave tunnel, a wall of waterfalls, a balloon festival
+and a kite-string slalom). The code is in
 `src/spawns/engines/structureEngine.js`. The recipes are in `src/spawns/engines/structure/recipes/`,
 the v1 palette in `structure/palette.js`, the mesh builder in `structure/meshBuilder.js`, the
 terrain stamps a recipe needs in `structure/stamps.js`, and the generic gate detector in
@@ -50,10 +52,17 @@ The frame: a compass `heading` (degrees) from the activation; `along` is forward
 | `gates` | a timed course: start and finish gates marked by cairns with pennants, an optional river down the canyon floor | `carve` | a timed course, a journal best run, an optional corridor |
 | `waterfall` | a river spilling over the cliff step as a wide curtain of falling strands into the plunge pool, the river on downstream, boulders and mist puffs | `cliffStep` | a voice at the pool (the `waterfall` recipe) |
 | `challengeGates` | the gate frames of the preset's `challenge` course: posts and a lintel for rectangle gates, a hoop on a post for circle gates, pennants (white start, red checkpoints, chequered finish) | none | a challenge course registered with the challenge system (start prompt, splits, medals, bests per craft) |
+| `canyonGates` | natural rock gates down a wide canyon: two weathered rock pillars beside every gate of the preset's `challenge` course (placed on the canyon floor and facing down it), a share bridged by rock arches, rubble along the walls | `carve` | a challenge course; pillar hulls, span boxes (perches) and rubble spheres |
+| `caveTunnel` | a lone rock mountain with a winding tunnel bored through it, lanterns along the bore, the challenge gates in the bore | `flatten` | a challenge course; one three-mesh-bvh mesh collider for the whole mountain, bore included (contract b.6), a summit perch |
+| `fallsWall` | a long cliff hung with many thin waterfalls, each fed by a stream over the top, mist and boulders at the foot | `cliffStep` | a challenge course; sinking air down every fall's arc (WindField source `structure-falls`); boulder spheres |
+| `balloonCourse` | dozens of tethered v1-family hot-air balloons over a field, a pair flanking every gate of the `challenge` course | none | a challenge course; envelope hulls, basket boxes and tether capsules |
+| `kiteSlalom` | kites flying from a hilltop on long strings, one beside every off-line checkpoint of the `challenge` course, with tails and streamers | none | a challenge course; every string a SENSOR capsule tagged `kiteString` (a miss, never a crash) |
 
 Without its stamp (a debug spawn, or a site whose preset lists none) every recipe still builds:
 the bridge spans `span` metres across the heading on trestles, the strip is draped along the
-heading, the islands float over the ground, and the course runs `length` metres along the heading.
+heading, the islands float over the ground, the course runs `length` metres along the heading, the
+waterfall and the falls wall raise their own basalt cliff across the heading, the canyon gates stand
+on a straight `length` m line and the cave mountain stands on the open ground.
 
 Phase 3 adds hangars, a monastery, a castle, an observatory, a viaduct, a dam, a labyrinth and more
 as new recipes: a recipe is `build(context, read)` in `structure/recipes/`, registered by name in
@@ -213,11 +222,17 @@ spread around the site, kept apart.
 | `mist` | bool | | true | mist puffs where the curtain meets the pool |
 | `boulders` | count | 0..60 | [10, 16] | about a third at the lip between strands, the rest around the pool |
 | `drop`, `width` | m | 20..400, 40..1200 | 120, 240 | free-standing only: without a `cliffStep` stamp the recipe raises its own basalt cliff across the heading |
+| `reverse` | bool | | false | the reverse waterfall: the strands rise out of the pool, climb the face, leave the lip and twist into a column of water that climbs into the sky; the river runs toward the pool and the streaks scroll upward |
+| `rise` | m | 50..2000 | 420 | `reverse` only: how far the column climbs above the lip before it frays into a mist cloud |
+| `column` | m | 10..400 | 46 | `reverse` only: how far out from the lip the column stands |
+| `columnRadius` | m | 2..200 | 16 | `reverse` only: the column's radius at its foot (it narrows by half as it climbs) |
 
 The curtain reads the stamp's lip, top and pool levels (`topY`, `bottomY`, `poolDepth`, `poolAlong`,
 `channelWidth`), so it pours from the stamped river channel into the stamped plunge pool. Pair it with
 the waterEffect `plungePool`, an emitter mist at the pool, the celestial `rainbow` and a windModifier
-`curtain` (the mega-waterfall preset).
+`curtain` (the mega-waterfall preset). With `reverse`, pair it with an emitter of spray rising up the
+column and a windModifier `updraft` round it (the reverse waterfall preset); the mist puffs gather at
+the pool and in a cloud where the column fades.
 
 ## challengeGates
 
@@ -236,6 +251,94 @@ The recipe resolves it to a world course with the id `${presetId}:${siteId}` (`$
 an event) and hands it to the engine as `out.challenge`; the engine registers it with
 `ctx.game.systems.challenges` at create (`data.challengeKeys`) and unregisters it at dispose. The
 frames are visual only: a preset that wants solid frames adds its own collider boxes.
+
+## canyonGates
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `arches` | share | 0..1 | 0.5 | the share of checkpoints whose pillars are bridged by a rock arch over the opening (start and finish never are) |
+| `pillarRadius` | m | 1..30 | [5, 8] | each pillar's radius at its foot (a jagged seven-sided lathe tapering to 62 %) |
+| `span` | m | 2..40 | [7, 11] | an arch's thickness |
+| `rubble` | count | 0..80 | [16, 26] | boulders along the canyon walls, kept 30 m or more off the floor's centre line |
+| `length` | m | 200..20000 | 2400 | free-standing only: the straight course's length along the heading |
+
+Every gate of the preset's `challenge` block is placed on the `carve` stamp's floor path: `along` is
+metres along the canyon from its middle, `across` offsets it from the path, `height` lifts it above
+the floor there, and it turns to face along the path (a gate on a bend faces along the bend). Two
+pillars stand outside the opening with 1.5 m to spare; their hulls hold the jagged lathe, and their
+tops and the arch spans are perches. The course is registered as `challengeGates` registers its own.
+
+## caveTunnel
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `length` | m | 120..3000 | 640 | the mountain's length along the bore, portal to portal |
+| `bore` | m | 6..80 | 22 | the tunnel's radius |
+| `width` | m | bore + 22..1500 | 170 | the mountain's half width at its foot |
+| `height` | m | (bore + 12) x 2 + 20..1500 | 230 | the summit's height above the ground |
+| `meander` | m | 0..width | 55 | how far the bore winds from side to side |
+| `climb` | m | 0..30 % of height | 16 | how far the bore climbs and dips along its length |
+| `lanterns` | bool | | true | glowing lanterns on the bore's walls every 34 m, alternating sides |
+| `segments` | count | 8..160 | 56 | cross-sections along the bore |
+
+The mountain is one closed rock mesh: every cross-section reaches out from the bore's centre line to a
+jagged envelope (flat on the ground, a ridged summit, cliff faces at the portals) and in to the
+bore's round wall, at least 12 m of rock between them. The same triangles are its collider: the
+recipe lists them as a `localMesh` spec and the engine builds a three-mesh-bvh `MeshCollider`
+(`src/world/colliderMesh.js`) at the anchor, so the bore's walls are as solid as the flanks; the
+summit is a perch. The preset's `challenge` gates are placed on the bore's centre line (`along` from
+the mountain's middle, `across` and `height` offsets from the line), each facing along the bore and
+pitched with its climb. The engine releases the BVH and its CPU geometry on dispose.
+
+## fallsWall
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `falls` | count | 2..24 | 10 | thin waterfalls along the lip, centred on the site |
+| `spacing` | m | 20..400 | 75 | the distance between neighbouring falls |
+| `fallWidth` | m | 2..80 | [11, 15] | each fall's width |
+| `launch` | m/s | 0..40 | 15 | how fast the water leaves the lip (the falls arc out from the face) |
+| `sink` | m/s | 0..40 | 9 | the sinking air on a fall's arc |
+| `curtain` | m | 2..200 | 18 | how far the sinking air reaches from a fall's arc |
+| `streams` | bool | | true | a short stream over the cliff top feeding each fall |
+| `mist` | bool | | true | mist puffs at the foot of each fall |
+| `boulders` | count | 0..80 | [14, 22] | boulders below the wall (sphere colliders) |
+
+The wall reads the `cliffStep` stamp's frame as `waterfall` does (or raises its own cliff without
+one). Each fall's air is listed in `out.falls`; the engine turns it into one WindField source (see
+[Wind](#wind)). The preset's `challenge` block is used as it stands (gates in the site frame, heights
+above the ground), authored in the gaps between the falls.
+
+## balloonCourse
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `count` | count | 2..64 | 30 | balloons in all: two flank every gate, the rest float around the course |
+| `height` | m | 8..40 | [19, 24] | each envelope's height (the v1 balloon family's profile, palettes and gore patterns, `src/world/balloonFamily.js`) |
+| `tethers` | bool | | true | a tether from each basket to a stake in the ground |
+| `spread` | m | 20..3000 | 260 | how far the free balloons scatter around the course |
+| `gap` | m | 0..50 | 3 | the clearance between a flanking envelope's widest ring and the gate opening |
+
+The preset's `challenge` block is used as it stands. Every envelope is solid (two hulls, as the
+landmark balloons), the basket a box and the tether a thin capsule; the free balloons keep clear of
+the gates and of the line between them. Each balloon bobs with the wind by its own amount.
+
+## kiteSlalom
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `lineHeight` | m | 30..600 | [110, 165] | each string's length up to its kite |
+| `lean` | deg | 0..70 | 22 | how far the strings lean downwind (the prevailing wind at create) |
+| `offset` | m | 1..100 | 7 | how far beyond a checkpoint's inner edge, toward the course line, its string is staked |
+| `extra` | count | 0..24 | 4 | more kites flying off to the sides of the course |
+| `streamers` | bool | | true | streamers along each string |
+| `kiteSize` | m | 0.5..12 | [2.6, 3.6] | each diamond kite's span |
+| `sensorRadius` | m | 0.05..3 | 0.35 | the radius of each string's sensor capsule |
+
+Every checkpoint with a nonzero `across` gets a kite whose string rises beside it, so the course
+weaves from one side of the strings to the other. Every string is a SENSOR collider tagged
+`kiteString`: the flight controller emits `colliderSensor` once per entry and the challenge system
+counts a miss with the course's `sensors.kiteString.penaltySeconds`; a string never crashes the craft.
 
 ## Generic features
 
@@ -356,13 +459,29 @@ spheres, the islands' rock body (four wedge hulls of the actual ring vertices), 
 roots. Props under 2 m tall carry none. The node labs run the engine without a collider service and
 skip all of it.
 
+Where no primitive set can stand in for a solid part (the cave tunnel's mountain with its bore,
+contract b.6), a recipe lists a `localMesh(part, positions, indices, tags)` spec: a closed,
+outward-facing triangle mesh in the local frame. The engine hands `addStructureColliders` a factory
+that builds a three-mesh-bvh `MeshCollider` from it at the anchor (a pure translation; the geometry
+lives on the CPU only and is never drawn), keeps it in `data.meshColliders`, and
+`removeStructureColliders` releases the BVH and its geometry with the collider.
+
 ### Wind
 
 The wind farm's wake is a WindField source (`kind: 'structure-wake'`, id `<spawnId>:wake`): slower,
 turbulent air with its own gusts (`wake.gust`) in a widening cone downwind of every rotor, following the eased wind the turbines
 show. It is added at the near and mid tiers and removed at the far tier, where the player is
 kilometres away and cannot reach a wake a few rotor diameters long; it comes back at mid, and
-dispose removes it. No other recipe authors wind.
+dispose removes it.
+
+The falls wall's sinking air is the other (`kind: 'structure-falls'`, id `<spawnId>:falls`): the
+recipe lists every fall in `out.falls` (`{ radius, sink, spill, spillReach, turbulence, gust,
+gravity, drop, lipY, dirX, dirZ, list: [{ x, z, speed }] }`, local), and the engine resolves it to one
+source whose sampler follows each fall's ballistic arc exactly: at a height `below` the lip the water
+is `speed * sqrt(2 * below / gravity)` metres out, and the air sinks at `sink` m/s on the arc, fading
+over `radius`, with turbulence round it and an outward spill where the column meets the ground. It
+allocates nothing and is added and removed by tier like the wake. No other recipe authors wind (the
+reverse waterfall's updraft is the preset's own windModifier entry).
 
 ### Audio
 
@@ -430,6 +549,11 @@ loading fade), so GPU memory returns to its level before the create
 
 ## Testing
 
+- `node --expose-gc tools/lab/presets-71-80.mjs`: the five challenge recipes and the reverse waterfall
+  on stamped test sites (colliders, the cave's mesh collider, the falls' sinking air, the kite
+  sensors, clear gate openings, a scripted run through every course, dispose);
+  `node tools/lab/preset-flight-71-80.mjs` flies the craft through the reverse waterfall's column
+  and along the falls wall.
 - `node --expose-gc tools/lab/structure.mjs`: every recipe on its real stamped site and free-standing,
   params, stamps and `structureStamps`, gates, courses and the journal, landings, surfaces, ground
   starts, the wake, LOD, memory, cost and allocation.
