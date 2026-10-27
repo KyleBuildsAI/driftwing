@@ -42,7 +42,7 @@ export const BATCH61_SCENARIOS = Object.freeze([
   {
     id: 'sleepingGiant', why: 'a clear midday, the figure seen from high above', sun: 35, weather: 'clear',
     anchor: 'site', distance: 4000, altitude: 900, runSeconds: 4,
-    view: { distance: 1800, height: 1500, bearing: 120, lift: 150 },
+    view: { distance: 2000, height: 2500, bearing: 120, lift: -200 },
   },
   {
     id: 'ghostGalleon', why: 'a night with clouds about, at their tops', sun: -24, weather: 'clearing',
