@@ -1070,7 +1070,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
 | B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | not started |
-| B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | in progress |
+| B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | done |
 | I3 | Integration pass: presets/index.js and spawnScenarios in spec order; `?test=spawns` for all 100 on both backends | `v2-phase3` | not started |
 
 Each preset ships with its journal title and one-liner, 3+ callouts, its audio recipe, LOD and a
@@ -1081,15 +1081,54 @@ presets (92-100) use the wave 2 combo scheduling.
 ### Wave 3 - p3/presets-91-100
 
 - **Done:**
-  - director and schema (contract i.3, additive): a combo member may be `optional: true` (it may name
-    a preset another batch adds; the director starts the combo without it until it exists), a combo
-    with preconditions may name no member (its own engines carry it at its site, landmark or sky),
-    `forceSpawn(id, { at: { x, z } })` starts a preset on a given spot (the F9 combo staging), and a
-    combo whose own preset seeks its ground (`anchor.seek`) places its members around that point;
-    `anchor.seek: 'valley'` (the lowest dry ground in reach); `SpawnManager.nearestPart(presetId,
-    engine, x, z, radius)`, an allocation-free neighbour lookup for engines.
-- **Next:** the engine extensions (sky aurora, comet breakup, arcs, the beacon chain, ice ridges), the
-  audio recipes, presets 91-100, the F9 force-combo staging, the scenarios, step file and checks.
+  - director and schema (contract i.3, additive; the full list is contract i.6): a combo member may be
+    `optional: true` (it may name a preset another batch adds; the director starts the combo without
+    it until it exists), a combo with preconditions may name no member (its own engines carry it at
+    its site, landmark or sky), `forceSpawn(id, { at: { x, z } })` starts a preset on a given spot,
+    `forceSiteActive(siteId)` and `releaseOverride(id)` (dev), and a combo whose own preset seeks its
+    ground (`anchor.seek`) places its members around that point; `anchor.seek: 'valley'` (the deepest
+    valley floor on dry ground in reach: the relief ring's mean ground 450 m out less the point's, so
+    never a beach); `SpawnManager.nearestPart(presetId, engine, x, z, radius)`, an allocation-free
+    neighbour lookup for engines.
+  - engines (docs/engines/): the sky modifier field `aurora` (the curtains anywhere the sky is dark);
+    celestial `sky.aurora`, `comet.aim`, `comet.breakup` (fragments drifting, the nucleus flaring) and
+    `meteors.fromComet`; lightEffect `arcs` (bolts between a neighbour structure's arc points, its glow
+    resonating), glow `layout: 'landmarks'` and glow `chain` (with its voice trigger); structure recipe
+    `iceRidges` and `out.arcPoints`. Audio recipes `iceSing`, `aurora`, `foghorn` (one line each in
+    src/audio/recipes/index.js, after the Phase 2 list).
+  - presets 91-100 in src/spawns/presets/ (appended under "Batch 10" in presets/index.js), each with its
+    journal entry, 3+ callouts, audio, LOD, rarity, filters, lifetime and tags; colliders for the
+    frozen lake's ridges (capsules, registered with the instance, removed on dispose); docs/spawns.md
+    table rows and sections; the tour guide's other names.
+  - the F9 debugger's **Force combo** (src/dev/comboStaging.js) for every legendary combo and the
+    midnight sun: time and weather held, the place found deterministically (snow, sea, coast, a
+    landmark or a real site, the volcano woken through the director), a viewpoint, then the combo with
+    its members on that spot. A night staging skips a night the midnight sun keeps light over the craft.
+  - tests: src/dev/spawnScenarios/batch91.js (`?test=spawns`), tools/steps/presets-91-100.json with
+    src/dev/presetChecks91.js (every combo forced through the F9 staging; the butterflies (51) and the
+    caribou (52) stand in as dev fixtures until batch 51-60 is merged).
+  - lab fixes for a growing catalog (shared files, additive): the terrain lab rebuilds its Phase 2
+    digests from the 30 Phase 2 presets and the water lab's tag check takes the presets without waters
+    or overlays (a Phase 3 site with both moved them by design); the pacing lab's sun keeps the day
+    counter the override schedule reads, and a legendary combo or override its shared runs miss is
+    run on the same flights with every other legendary set aside and its `siteActive` sites kept awake;
+    the audio lab's every-recipe checks get a voice budget that holds every recipe (18 now). The spawns
+    test keeps a scenario's stood-up sites (the awake volcano) when it ends the director's spawns.
+- **Verification (2026-10-27, dev server on port 5341 and run-harness's own):** the table below.
+- **Integration notes:** list-file lines appended in place for batch 10 (presets/index.js, recipes
+  index, spawnScenarios.js, the docs tables). The member ids `butterflyMigration` and
+  `caribouMigration` must match batch 51-60's preset ids; with them merged the migration starts all
+  three (the dev fixtures then stay unused).
+
+| Check | Result |
+| --- | --- |
+| `tools/steps/presets-91-100.json` on the dev server, WebGPU (random seed) | 45/45 checks, 0 errors / 0 warnings: the frozen lake on its real site (ice body solid, ridge colliders, a swept sphere and the bush plane both stopped by a ridge with 'structure strike'), every combo forced through the F9 staging with its members, the aurora at full, lightning in the woken volcano's ash, totality over the stones, the comet split with debris, the valley, the arcs and the spires' resonance, the lighthouse chain, the midnight sun up at midnight and setting once released; every dispose back to GPU memory, wind sources, colliders, sky modifiers, lights and leaks |
+| the same, WebGL2, `seed=T5FD46` (a seed with a midnight sun night on the staging's path) | 45/45, 0 / 0; the staging skipped one midnight-sun night for the aurora and volcano combos |
+| `run-harness --test spawns --presets <91-100>`, WebGPU and WebGL2 | PASS both: 10/10 spawned, GPU memory, heap (1 MB), wind sources, lights / sky modifiers / colliders / leaks 10/10, 0 / 0 console, 10 screenshots; lowest average 38.6 fps (WebGPU) and 53.8 fps (WebGL2), worst p99 66.6 ms (the frozen lake's site build), reported only |
+| validatePresets (40 presets), docs-check | pass; 286/286 |
+| `npm run build`, `npm run build:single`, `npm run test:v1` | built; V1 SHA-256 matches; 2/2 |
+| smoke of dist-single: V2 WebGPU, V2 WebGL2, the shell | 0 / 0 each, screenshots differ |
+| Labs | preset-pacing 5/5 (every legendary reached: five in the shared runs, the volcano, rainbow and comet combos on their own runs), terrain 421/421, water 34/34, director 88/88, spawns 101/101, structure 75/75, setpiece 47/47, wind-engines 56/56, preset-flight 13/13, preset-wind 12/12, colliders 84/84, challenges 70/70, origin 32/32, seaplane 113/113, fauna-modes 44/44, path 37/37, discovery 43/43, copilot 240/240, copilot-server 17/17, craft 81/81, aerobatic 81/81, atmosphere 28/28, settings 45/45, storage 54/54, input 34/34, fpv 87/87, ringsGolden 6/6, flight-lab and the craft labs pass (allocation checks with `--expose-gc`); audio 208/209 alone (its known WebGPU waterfall distance-law flake, 1.24 dB against 1 dB); eagle 49/50 (its allocation check, 144 B/tick, the known issue from wave 2; eagle code untouched) |
 
 ### Wave 4: discovery and verification, then the tag
 
