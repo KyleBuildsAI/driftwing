@@ -267,6 +267,9 @@ export function installPresetChecks41(game) {
         presetId, site, spawnId: null, baseline: await dispose.baseline({ waitTerrain: false }), discoveriesBefore: events.discovery.length, cardsBefore: events.cards.length,
       };
       open.set(presetId, record);
+      // A site near the start may have been found in the moments before setup held the presets: the
+      // journal keeps it, and a site is announced only once.
+      const knownBefore = ctx.systems.journal.hasDiscovered(site.id);
       system.debug.addPreset(preset);
       await until(() => {
         record.spawnId = manager.getSiteSpawn(site.id);
@@ -276,11 +279,12 @@ export function installPresetChecks41(game) {
       const target = { x: site.x + x, y: (view.focusY === 'sea' ? sea : site.groundY) + y, z: site.z + z };
       const { distance = 900, height = 180, bearing = 200, fov } = view;
       const settled = await frameView(viewpoint(target, distance, height, bearing + (site.rotation * 180) / Math.PI), target, { fov });
-      const found = await discoveredSince(record);
+      const found = knownBefore ? { event: null, card: null, inJournal: ctx.systems.journal.hasDiscovered(site.id) } : await discoveredSince(record);
+      const discovered = knownBefore ? found.inJournal : Boolean(found.event && found.card && found.inJournal);
       const stamps = site.stamps.map((stamp) => stamp.type);
       const stampsOk = stamps.length === (preset.stamps ?? []).length && stamps.every((type, index) => type === preset.stamps[index].type);
-      return check(`${presetId}: built on its real site with its stamps, discovered (toast and journal entry)`, Boolean(record.spawnId) && stampsOk && Boolean(found.event && found.card && found.inJournal), {
-        site: { id: site.id, x: Math.round(site.x), z: Math.round(site.z), groundY: Math.round(site.groundY), stamps }, spawnId: record.spawnId, terrainSettled: settled,
+      return check(`${presetId}: built on its real site with its stamps, discovered (toast and journal entry)`, Boolean(record.spawnId) && stampsOk && discovered, {
+        site: { id: site.id, x: Math.round(site.x), z: Math.round(site.z), groundY: Math.round(site.groundY), stamps }, spawnId: record.spawnId, terrainSettled: settled, knownBefore,
         discovered: found.event ? found.event.name : null, journal: found.card ? { name: found.card.entry.name, found: found.card.found, total: found.card.total } : null,
       });
     },
@@ -443,11 +447,11 @@ export function installPresetChecks41(game) {
       }
       const described = describe(part);
       const berg = described.movers.list.filter((mover) => mover.motion === 'drift').map((mover) => ctx.colliders.get(mover.collider)).filter(Boolean)
-        .sort((a, b) => (b.bounds[4] - b.bounds[1]) - (a.bounds[4] - a.bounds[1]))[0];
-      if (berg) {
-        lines.push(await strike('calvingGlacier: a drifting berg', berg.id, { x: berg.center[0], y: Math.max(sea + 4, Math.min(berg.bounds[4] - 2, sea + 8)), z: berg.center[2] }));
+        .sort((a, b) => b.bounds[4] - a.bounds[4])[0];
+      if (berg && berg.bounds[4] - sea > 6) {
+        lines.push(await strike('calvingGlacier: a drifting berg', berg.id, { x: berg.center[0], y: sea + Math.min((berg.bounds[4] - sea) * 0.55, 10), z: berg.center[2] }));
       } else {
-        lines.push(check('calvingGlacier: a drifting berg', false, 'no berg collider'));
+        lines.push(check('calvingGlacier: a drifting berg', false, berg ? `the tallest berg stands only ${round(berg.bounds[4] - sea)} m out of the water` : 'no berg collider'));
       }
       return lines.join('\n');
     },
@@ -524,7 +528,7 @@ export function installPresetChecks41(game) {
     async archStrike() {
       const part = partOf(spawnOf('seaStacks'), 'structure');
       const lintel = part ? part.colliderIds.filter((id) => /lintel/.test(id)).map((id) => ctx.colliders.get(id)).filter(Boolean) : [];
-      const middle = lintel[Math.floor(lintel.length / 2)];
+      const middle = lintel.find((record) => record.tags && record.tags.perch) ?? null;
       if (!middle) return check('seaStacks: a lintel', false, 'no lintel collider');
       return strike('seaStacks: an arch lintel', middle.id, { x: middle.center[0], y: middle.center[1], z: middle.center[2] }, part.colliderIds);
     },
@@ -639,14 +643,23 @@ export function installPresetChecks41(game) {
     async batScatter() {
       const fauna = partOf(spawnOf('batsAtDusk'), 'fauna');
       if (!fauna) return check('batsAtDusk: scatter', false, 'no fauna part');
-      const centre = describe(fauna).center;
+      // A point a third of the way along the stream's tabled path, and the path's direction there.
+      const path = fauna.data.streamPath;
+      const point = Math.floor(path.length / 9);
+      const px = path[point * 3];
+      const py = path[point * 3 + 1];
+      const pz = path[point * 3 + 2];
+      const alongX = path[point * 3 + 3] - path[point * 3 - 3];
+      const alongZ = path[point * 3 + 5] - path[point * 3 - 1];
+      const length = Math.hypot(alongX, alongZ) || 1;
+      const acrossX = -alongZ / length;
+      const acrossZ = alongX / length;
       ctx.setPhotoMode(false);
       const before = events.scatter.length;
-      const heading = state.player.heading;
-      const radians = (heading * Math.PI) / 180;
-      const y = Math.max(centre.y, surfaceAt(centre.x, centre.z) + 60);
-      ctx.systems.flight.resetTo({ x: centre.x - Math.sin(radians) * 200, y, z: centre.z + Math.cos(radians) * 200, heading });
-      const scattered = await until(() => events.scatter.length > before, 10);
+      const heading = (Math.atan2(acrossX, -acrossZ) * 180) / Math.PI;
+      ctx.systems.flight.resetTo({ x: px - acrossX * 220, y: py, z: pz - acrossZ * 220, heading });
+      ctx.systems.flight.setAutopilot({ enabled: true, heading, altitude: py, speed: 35, followWaypoint: false, reason: 'presets 41-50 check' });
+      const scattered = await until(() => events.scatter.length > before, 15);
       return check('batsAtDusk: a craft flown through the stream scatters the bats', scattered, { scatters: events.scatter.length - before });
     },
 
@@ -697,7 +710,8 @@ export function installPresetChecks41(game) {
         closest = Math.min(closest, Math.hypot(player.x - centre.x, player.y - centre.y, player.z - centre.z));
         return events.flush.length > before;
       }, 25);
-      await seconds(4);
+      await until(() => describe(part).airborne > 0, 15);
+      await seconds(2);
       const described = describe(part);
       api.flockView = described.center;
       return check('flamingoLake: a pink lake in the basin; buzzed, the flamingos take off in a wave', Boolean(lake) && lake.tint === 0xf2a6b8 && Math.abs(surface - lake.level) < 0.5 && flushed && described.airborne > 0, {
