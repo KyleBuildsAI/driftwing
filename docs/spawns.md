@@ -915,7 +915,8 @@ spires glow brighter and lightning strikes into the grove.
   onto it); member `supercell`, 3.5 km beyond (one heavy slot); exclusive.
 - **Engines:** `lightEffect` (lightning: 9 a minute within 220 m, 85 % to the ground; `arcs` across
   the spires' tips, 42 a minute between tips up to 170 m apart, the spires' glow raised to 2.8 times;
-  owns the voice, each arc a chime).
+  the strike light, which the arcs share, at grove scale: 3e5 cd within 3 km; owns the voice, each arc
+  a chime).
 - **Filters:** any biome and hour; storm; over land; 2-9 km ahead.
 - **Candidates:** 8 km cells, 600 s buckets, chance 0.6.
 - **Wind:** none of its own (the supercell's).

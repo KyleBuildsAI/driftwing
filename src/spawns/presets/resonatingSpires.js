@@ -39,7 +39,9 @@ export default Object.freeze({
           width: 3.5,
           branches: 7,
           flash: 0.6,
-          light: Object.freeze({ intensity: 2e7, range: 6000, priority: 3 }),
+          // The strike light at grove scale (the arcs use it too, 42 a minute): the default 2e7 cd is
+          // sized for strikes kilometres away and would white out the grove from a few hundred metres.
+          light: Object.freeze({ intensity: 3e5, range: 3000, priority: 3 }),
           thunder: 1,
           minCameraDistance: 250,
         }),
