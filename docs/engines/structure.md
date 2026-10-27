@@ -28,10 +28,12 @@ r184" in docs/architecture.md). Up to five geometries per instance:
 | decal | flat, polygon-offset over the terrain | near, mid, far | runway tarmac and markings |
 | glow | crystal: emissive rising toward the tip, pulsing in its own phase, brighter at night (bloom picks it up), a fresnel rim | near, mid, far | crystal spires and shards |
 | water | transparent streaks scrolling down a ribbon, lit by the sun colour, dimmed at night | near, mid | waterfalls and streams |
+| portal | (Phase 3) additive arms of light spiralling into the centre (uv.x the angle share, uv.y the radius share), a bright rim, as bright by night as by day | near, mid, far | the portal ring's membrane |
+| ghost | (Phase 3) translucent and additive: a fresnel rim over a faint body, a shimmer drifting up through it, strongest at night; the paint's alpha is the opacity | near, mid, far | the ghost galleon |
 
 Moving parts are shared instanced meshes built once in `init()` (capacity in brackets): turbine
 nacelles and rotors (256), windsock segments (64 socks of 5 segments) and mist puffs (512 soft
-luminous blobs). A heavy preset hides everything at the far tier (its lure takes over); a light one
+luminous blobs), and (Phase 3) lanterns (128 self-lit boxes, see [Lanterns](#lanterns-phase-3)). A heavy preset hides everything at the far tier (its lure takes over); a light one
 keeps its body, decal and glow there. Turbines keep turning at mid and freeze (still drawn) at far;
 windsocks animate at near only; mist shows at near and mid.
 
@@ -50,6 +52,11 @@ The frame: a compass `heading` (degrees) from the activation; `along` is forward
 | `gates` | a timed course: start and finish gates marked by cairns with pennants, an optional river down the canyon floor | `carve` | a timed course, a journal best run, an optional corridor |
 | `waterfall` | a river spilling over the cliff step as a wide curtain of falling strands into the plunge pool, the river on downstream, boulders and mist puffs | `cliffStep` | a voice at the pool (the `waterfall` recipe) |
 | `challengeGates` | the gate frames of the preset's `challenge` course: posts and a lintel for rectangle gates, a hoop on a post for circle gates, pennants (white start, red checkpoints, chequered finish) | none | a challenge course registered with the challenge system (start prompt, splits, medals, bests per craft) |
+| `worldTree` | (Phase 3) a colossal tree taller than the mountains: a buttressed S-curved trunk, tiers of great limbs with side boughs, a crown of foliage clumps with open lanes between the limbs, roots over the ground | none | capsule and sphere colliders, perches on the limbs and the crown, a gate per crown lane (an achievement), a groaning voice trigger |
+| `portalRing` | (Phase 3) a ring of rune-carved stone blocks on two leaning pillars over a slab, a swirling membrane, hovering crystal shards | none | capsule and box colliders, the keystone a perch, a `portal` gate through the membrane |
+| `sleepingGiant` | (Phase 3) a ring of standing stones and a cairn on the giant's chest, scree boulders on its flanks; free-standing, the figure itself as a basalt body | `giant` | box, cylinder and sphere colliders (the tallest stone a perch); free-standing, a landable heightfield collider of the figure |
+| `ghostGalleon` | (Phase 3) a three-masted galleon of spectral light (the `ghost` part): lofted hull, castles, masts and yards, tattered bellied sails, bowsprit, shrouds and stays | none | sails a PathFollower loop over the cloud band (motion), moving capsule colliders, eleven ignitable lanterns, a tolling bell voice trigger |
+| `dragonRace` | (Phase 3) a basalt crag on a peak with the preset's `challenge` course below it (the `challengeGates` frames and registration) | none | a course rival: a wild dragon that launches from the crag and races the route (see [Course rival](#course-rival-phase-3)); hull colliders, the crag top a perch |
 
 Without its stamp (a debug spawn, or a site whose preset lists none) every recipe still builds:
 the bridge spans `span` metres across the heading on trestles, the strip is draped along the
@@ -60,6 +67,10 @@ as new recipes: a recipe is `build(context, read)` in `structure/recipes/`, regi
 `recipes/index.js`. It fills the context's builders and its `out` record (turbines, socks, puffs,
 zones, surfaces, colliders, courses, wake, sway, audio point, radius) and adds gates with `context.addGate`;
 every generic feature below then works for it with no engine change.
+
+Phase 3's recipes register in `recipes/index.js` the same way; the stamp a recipe reads is listed in
+`structure/stamps.js` (`RECIPE_STAMP_TYPES`, so `structureStamps('sleepingGiant')` returns the giant
+stamp the recipe expects).
 
 ## Common params (every recipe)
 
@@ -237,6 +248,91 @@ an event) and hands it to the engine as `out.challenge`; the engine registers it
 `ctx.game.systems.challenges` at create (`data.challengeKeys`) and unregisters it at dispose. The
 frames are visual only: a preset that wants solid frames adds its own collider boxes.
 
+## worldTree
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `height` | m | 200..3000 | [1100, 1350] | to the top of the crown |
+| `trunkRadius` | m | 5..300 | [70, 90] | at the foot (the buttresses flare out below it) |
+| `limbs` | count | 3..24 | [9, 12] | great limbs in tiers |
+| `branchStart` | share of the height | 0.15..0.85 | 0.42 | where the lowest limbs leave the trunk |
+| `crown` | m | 50..3000 | [520, 680] | the crown's radius |
+| `roots` | count | 0..24 | [7, 9] | buttress roots over the ground |
+| `clumps` | count | 1..16 | [5, 7] | foliage clumps per limb tip |
+| `lanes` | bool | | true | a fly-through gate in every open lane between neighbouring limbs |
+| `laneAchievement` | `{ id, title }` or null | | null | earned by the first pass through a lane |
+
+Colliders: the trunk as capsules between its rings, every limb segment, bough and root a capsule,
+the foliage clumps slightly smaller spheres (surface `foliage`). Perches: the top of each limb's first
+bend and the crown's top clump. The voice groans now and then (`out.voiceTrigger` `creak`).
+
+## portalRing
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `radius` | m | 8..200 | [38, 46] | the ring's inner radius |
+| `thickness` | m | 1..30 | 5.5 | the stone blocks' depth |
+| `lift` | m | 0..200 | 9 | the ring's bottom above the slab |
+| `stones` | count | 8..64 | 28 | blocks round the ring |
+| `shards` | count | 0..24 | [5, 8] | hovering crystal shards |
+| `runeColor`, `membraneColor` | hex | | 0x7fe8ff, 0x9d84ff | |
+
+The ring faces along the heading. Its membrane is a gate with `action: 'portal'`: crossing it, either
+way, sends `structure:portal` (see [Portals](#portals-phase-3)). Every block, both pillars and the
+keystone are capsules, the slab a box; the keystone's top is a perch.
+
+## sleepingGiant
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `stones` | count | 3..16 | [7, 9] | standing stones ringing the chest summit (46 m out, 7-11 m tall) |
+| `boulders` | count | 0..200 | [36, 52] | scree on the lower flanks (where the figure stands 3-24 % of its height); over 6 m they are body (seen far off), smaller ones detail |
+| `length`, `height`, `skirt` | m, m, share | 400..8000, 50..1500, 0..1 | 3200, 420, 0.26 | free-standing only: the figure's size (the giant stamp's own sizes otherwise) |
+
+On a site the figure is the `giant` terrain stamp (src/world/stamps.js `giantFigure`): real ground,
+basalt where it stands high. The recipe reads the stamp's frame and sizes and stands its stones and
+scree on the stamped ground. Without the stamp (a debug spawn) it raises the figure itself along the
+heading, its base at the anchor: a body sampled from the same `giantFigure` on a 24 m grid (mossy on
+its lowest flanks) and a landable heightfield collider of the same top (`localHeightfield`; its highest
+point is a perch), easing into the ground at its outline as the stamp does (`giantRaise`). Either way
+the nose stands at `GIANT_NOSE` ahead of and above the anchor, where the preset's breath emitter
+rises, and the voice's audio point sits there.
+
+## ghostGalleon
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `length` | m | 20..160 | 62 | bow to stern |
+| `loopRadius` | m | 200..8000 | [1500, 2100] | the loop it sails round the anchor (wobbling 16 %) |
+| `altitude` | m above the sea | 50..6000 | 700 | the top of the cloud band |
+| `clearance` | m | 20..2000 | 160 | the least height over the ground under the loop (sampled at each loop point and halfway to its neighbours) |
+| `speed` | m/s | 2..60 | [11, 15] | |
+| `lanterns` | bool | | true | eleven lanterns: the stern (three), the bow, the mast tops and the rails |
+| `color` | hex | | 0x7fe8c8 | the hull and rigging; the sails are paler and fainter |
+
+Everything is drawn in the `ghost` part. The ship sails `out.motion` (a closed loop, rocking with bob
+2.4 m, roll 4 degrees and pitch 2 degrees); the hull (a capsule along the keel line), the stern castle,
+the bowsprit and the three masts are capsules carried with it, with its velocity; the sails are ghost
+cloth a craft passes through. Its lanterns burn a cold green (0x9fffd8) until a flame lights them warm
+(0xffc46a). The voice tolls the bell every 14-28 s (`out.voiceTrigger` `bell`).
+
+## dragonRace
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `frames`, `style`, `post` | | | as `challengeGates` | the course's gate frames |
+| `cragHeight` | m | 20..400 | [80, 105] | the crag's four stacked rock drums |
+| `cragRadius` | m | 5..120 | 26 | at its foot |
+| `paceTime` | s | 5..1200 | 70 | the dragon's time to the finish leading any craft but a dragon |
+| `rivalTime` | s | 5..1200 | 84 | its time racing a dragon (the course's rival) |
+| `scale` | | 1..40 | 9 | the dragon craft's mesh scaled up |
+| `rivalName` | | | `the wild dragon` | the challenge HUD's rival name |
+| `achievement` | `{ id, title }` or null | | null | earned by finishing ahead of the rival as a dragon |
+
+The racing line runs from the crag's top through every gate centre (with midpoints lifted 30 m clear
+of the ground) and 160 m past the finish. Colliders: each rock drum a hull; the top drum's top is the
+perch the dragon sits on.
+
 ## Generic features
 
 ### Terrain stamps
@@ -344,7 +440,8 @@ exactly the rendered top, and a fast strike on it is a structure strike.
 
 A recipe lists its solid parts in `out.colliders`, in the instance's local frame, with the helpers of
 `structure/colliders.js` (`localBox`, `localBoxAxes`, `localCylinder`, `localCapsule`,
-`localSphere`, `localHull`, plus `builderFrame` and `ringPoints` to follow the mesh builder's frames
+`localSphere`, `localHull`, `localHeightfield` (Phase 3: a landable grid, the sleeping giant's
+free-standing figure), plus `builderFrame` and `ringPoints` to follow the mesh builder's frames
 and lathes). The engine registers them with `ctx.game.colliders` at create (ids
 `${preset.id}:${params.seed}:${serial}:<part><n>`, all in `instance.colliderIds`) and removes them
 on dispose. Turbine nacelles and rotor discs are added by the engine from `out.turbines` and turned
@@ -355,6 +452,52 @@ control tower and windsock pole, the crystal and shard hulls (perches on the spi
 spheres, the islands' rock body (four wedge hulls of the actual ring vertices), trees, boulders and
 roots. Props under 2 m tall carry none. The node labs run the engine without a collider service and
 skip all of it.
+
+### Portals (Phase 3)
+
+A gate with `action: 'portal'` sends the bus event `structure:portal` `{ spawnId, presetId, siteId,
+gate, portalId, direction }` when the player crosses it, either way. `portalId` is the site id (an
+event: `${presetId}:${seed}`). The portal system (src/gameplay/portals.js) answers: the next world's
+seed is `portalSeed(seed, portalId)`, the flight is carried, `worldVisited` is sent, the screen fades
+and the page reloads into the new world.
+
+### Voice triggers (Phase 3)
+
+`out.voiceTrigger = { name, interval: [min, max] s, strength }`: the voice's ambient one-shot every
+seeded interval while it is audible (the world tree's `creak`, the galleon's `bell`).
+
+### Motion (Phase 3)
+
+`out.motion = { points (local xyz triples), closed (default true), speed, startDistance, bob, bobPeriod,
+roll, rollPeriod, pitch }`: the whole structure sails a PathFollower (src/world/pathFollower.js; a
+loop when closed, else ping-pong) from the instance's start time, a pure function of the flight clock.
+The meshes (bow along local -z), the lanterns, the voice and the instance anchor follow it every frame
+(so the LOD, discovery and lure follow too), and its colliders, which must be capsules, are moved with
+it through `colliders.update`, carrying its velocity.
+
+### Lanterns (Phase 3)
+
+`out.lanterns = [{ x, y, z, size, color, litColor, ignitable }]`: self-lit boxes on a shared instanced
+pool (128), brighter at night, shown at the near and mid tiers. An `ignitable` one registers with the
+game's ignition service (`ctx.game.ignition`, ids in `instance.ignitableIds`, removed on dispose) and
+turns to `litColor` when a flame lights it (the dragon's fire breath); `stats().lanternsLit` counts them.
+
+### Course rival (Phase 3)
+
+`out.rival = { points (local xyz: the racing line), name, scale, paceTime, rivalTime, achievement }`
+with the recipe's `out.challenge` (structure/rival.js, `createCourseRival`): the engine hands the
+course to the rival, which registers it itself. Two PathFollowers in `once` mode run the line from the
+run's start (the challenge's live elapsed time): `pace` reaches the finish gate in `paceTime`, `rival`
+in `rivalTime`. While the player flies the dragon skin the course is registered with the rival
+follower as its `rival` (the challenge HUD shows the gap); otherwise without one. The course is
+registered again (same key, records kept) whenever that changes, never while a run on it is armed or
+running. The creature is the dragon craft's mesh (`buildDragonMesh`, its shared materials) scaled up,
+posed through the same visual state the craft writes: perched on its crag, launching when the run
+starts (as a rival it roars, the voice's `roar` trigger, and breathes fire), flapping as it climbs,
+tucking as it dives, banking into turns, and flying home on a return path made when the run ends or
+is cancelled. A valid finish ahead of `rivalTime` in a rival run sends the typed `achievement`. The
+voice follows the creature. Without the game context (the node labs) only the model is skipped. Hidden
+at the far tier; dispose removes the model and its listener, and unregisters the course.
 
 ### Wind
 

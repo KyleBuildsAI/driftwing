@@ -83,6 +83,16 @@ preset's section below.
 | 28 | [Crystal spires](#28-crystal-spires) | `crystalSpires` | fantasy | site | uncommon | no | `structure`, `lightEffect` | no |
 | 29 | [Jet stream ribbon](#29-jet-stream-ribbon) | `jetStream` | flightplay | event | uncommon | no | `emitter`, `windModifier` | yes |
 | 30 | [Storm chase](#30-storm-chase) | `stormChase` | setpiece | event | legendary | no | `setPiece` | children |
+| 61 | [Blood moon](#61-blood-moon) | `bloodMoon` | celestial | event | rare | no | `celestial` | no |
+| 62 | [Green flash](#62-green-flash) | `greenFlash` | celestial | event | uncommon | no | `celestial` | no |
+| 63 | [Noctilucent clouds](#63-noctilucent-clouds) | `noctilucentClouds` | celestial | event | uncommon | no | `celestial` | no |
+| 64 | [Milky Way core](#64-milky-way-core) | `milkyWayCore` | celestial | event | uncommon | no | `celestial` | no |
+| 65 | [Moonbow](#65-moonbow) | `moonbow` | celestial | event | uncommon | no | `celestial`, `emitter` | no |
+| 66 | [World tree](#66-world-tree) | `worldTree` | fantasy | site | rare | yes | `structure`, `lightEffect` | no |
+| 67 | [Portal ring](#67-portal-ring) | `portalRing` | fantasy | site | rare | no | `structure`, `lightEffect` | no |
+| 68 | [Sleeping stone giant](#68-sleeping-stone-giant) | `sleepingGiant` | fantasy | site | rare | no | `structure`, `emitter` | no |
+| 69 | [Ghost galleon](#69-ghost-galleon) | `ghostGalleon` | fantasy | event | rare | no | `structure` | no |
+| 70 | [Dragon racer](#70-dragon-racer) | `dragonRacer` | fantasy | site | rare | no | `structure` | no |
 
 In all: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy. The
 journal's collection count is found / 30 over these presets (`PRESETS` in
@@ -731,6 +741,197 @@ and the storm decays.
 - **Lifetime:** 570-600 s; despawned beyond 30 + 5 km after 60 s out of view.
 - **Journal:** the "Storm Chaser" entry; `closestTornado` (min, the closest pass to the funnel) and
   `stormsChased` (+1 when you came within 5 km of the funnel).
+
+### Night and celestial (Phase 3, 61-65)
+
+#### 61. Blood moon
+
+A total eclipse of the moon that lasts the night: the earth's shadow turns the moon copper-red, a
+copper halo glows round it with a bright limb on the side leaving the shadow, and the whole night
+darkens while the stars brighten.
+[src/spawns/presets/bloodMoon.js](../src/spawns/presets/bloodMoon.js)
+
+- **Kind:** event, rare; a global override (`override: { kind: 'bloodMoon', nightChance: 0.04,
+  region: null }`), never a director candidate: the director schedules it on about one night in
+  twenty-five, everywhere at once (see [Global overrides](#global-overrides-the-blood-moon-and-the-midnight-sun)).
+  The override reddens the moon disc, its halo and the moon light and darkens the night; this preset's
+  own part starts at the override's half weight and ends with it.
+- **Engines:** `celestial` (`lunarEclipse`: the copper halo and the bright umbral limb; a `sky`
+  modifier raising the stars at night; sky-anchored, 30 s fades).
+- **Filters:** any biome; dusk or night; any weather, surface and altitude; 2-6 km ahead.
+- **Wind:** none.
+- **Sound:** `skyShimmer` (a low, dark shimmer: base 98 Hz, brightness 0.15).
+- **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, in view.
+- **Lifetime:** the night (the override ends it); 1500-2100 s caps a frozen night clock.
+
+#### 62. Green flash
+
+At sunset over the sea, as the sun's top limb sinks into an open-ocean horizon, a thin green rim and
+a detached green sliver show on it, and as it vanishes a brief green flash fires, with a glassy bell.
+[src/spawns/presets/greenFlash.js](../src/spawns/presets/greenFlash.js)
+
+- **Kind:** event, uncommon.
+- **Engines:** `celestial` (`greenFlash`: only toward an open-ocean horizon, sampled toward the sun
+  once a second; an activation in the morning or after sunset ends at create; sky-anchored at the sun).
+- **Filters:** any biome; dusk; clear or clearing weather; over water; below 3 km; 2-8 km ahead.
+- **Wind:** none.
+- **Sound:** `skyShimmer` (its `flash` trigger rings as the flash fires).
+- **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, in view.
+- **Lifetime:** 600-900 s; it ends 8 s after the sun has gone.
+
+#### 63. Noctilucent clouds
+
+After dusk, when the ground is already dark, thin rippled sheets of electric-blue cloud glow low over
+the sun's azimuth: ice at the edge of space, still in sunlight while the sun is 6-16 degrees down.
+[src/spawns/presets/noctilucentClouds.js](../src/spawns/presets/noctilucentClouds.js)
+
+- **Kind:** event, uncommon.
+- **Engines:** `celestial` (`noctilucent`: the sheets foreshorten toward the horizon and drift; the
+  event waits for the sun's window and ends once the sun has sunk past it; sky-anchored).
+- **Filters:** snow, pine, meadows or archipelago; dusk; clear or clearing weather; any surface and
+  altitude; 2-8 km ahead.
+- **Wind:** none.
+- **Sound:** `skyShimmer` (a glassy, high shimmer).
+- **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, in view.
+- **Lifetime:** 600-900 s.
+
+#### 64. Milky Way core
+
+On a clear, dark night the galaxy's bright core rises on the star field's milky way band: a warm
+bulge, star clouds and grain, split by the dark dust lanes of the Great Rift; strongest over the
+desert, fainter under a bright moon or cloud.
+[src/spawns/presets/milkyWayCore.js](../src/spawns/presets/milkyWayCore.js)
+
+- **Kind:** event, uncommon.
+- **Engines:** `celestial` (`galaxy`, with a `sky` modifier bringing the stars out fully; it lasts
+  until dawn; sky-anchored at the core).
+- **Filters:** dunes, meadows, snow or pine; night; clear weather; any surface and altitude; 2-8 km
+  ahead.
+- **Wind:** none.
+- **Sound:** `skyShimmer` (a deep, slow shimmer).
+- **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, in view.
+- **Lifetime:** until dawn; 600-900 s caps a frozen night clock.
+
+#### 65. Moonbow
+
+A pale, nearly white rainbow in the spray of a mega-waterfall under a bright moon, silver at its
+edges, with a faint secondary bow and a veil of moonlit mist rising from the plunge pool.
+[src/spawns/presets/moonbow.js](../src/spawns/presets/moonbow.js)
+
+- **Kind:** event, uncommon.
+- **Engines:** `celestial` (`rainbow` with `light: 'moon'`, seen with the moon behind the viewer) and
+  `emitter` (the moonlit mist).
+- **Filters:** any biome; night; clear or clearing weather; below 5 km; 1.5-12 km ahead;
+  `near: { sites: ['megaWaterfall'], radius: 15000 }` moves the candidate onto the nearest placed
+  mega-waterfall, facing the way the falls do (none in reach, no moonbow).
+- **Wind:** none (the falls keep their own).
+- **Sound:** `skyShimmer` (a soft night shimmer; the falls keep their roar).
+- **LOD:** near 1.8 km, mid 6 km, far 16 km. **Discovery:** 3 km, in view.
+- **Lifetime:** 480-720 s.
+
+### Fantasy (Phase 3, 66-70)
+
+#### 66. World tree
+
+A tree taller than the mountains, 1.1-1.35 km to its crown, its trunk 90 m thick at the buttressed
+foot; great limbs in tiers hold a crown 1-1.4 km across with open lanes between them, golden motes
+drift in the canopy at night, the leaves rustle and the limbs groan.
+[src/spawns/presets/worldTree.js](../src/spawns/presets/worldTree.js)
+
+- **Kind:** site, rare, heavy. Tree lure (1.4 km tall) on the horizon out to 50 km.
+- **Engines:** `structure` (`worldTree`: capsule trunk, limbs, boughs and roots and sphere foliage
+  colliders; perches on every limb's first bend and the crown; a gate in each crown lane earns
+  "Through the World Tree") and `lightEffect` (220 golden motes in the canopy, at night).
+- **Placement:** pine, meadows or snow; land 30-600 m up; chance 0.06 per 2 km cell, 60 km apart,
+  1.5 km clear of landmarks.
+- **Wind:** none.
+- **Sound:** `canopy` (rustle and groans growing with the approach; a `creak` now and then).
+- **LOD:** near 3 km, mid 12 km, far 50 km. **Discovery:** 6 km, in view.
+- **Lifetime:** a site; despawned beyond 50 + 4 km after 30 s out of view.
+
+#### 67. Portal ring
+
+A ring of rune-carved stone 80-90 m across on two leaning pillars, holding a membrane of violet light
+that spirals into its centre. Fly through it, either way, and the screen fades into its light: the
+next world's seed is `portalSeed(seed, the site id)`, the URL hash updates, the craft arrives as it
+left (position, height above the ground, heading, speed, every setting) and the journal logs the world.
+[src/spawns/presets/portalRing.js](../src/spawns/presets/portalRing.js)
+
+- **Kind:** site, rare.
+- **Engines:** `structure` (`portalRing`: capsule and box colliders, the keystone a perch, the
+  membrane a `portal` gate; src/gameplay/portals.js does the travel) and `lightEffect` (motes drifting
+  in).
+- **Placement:** any biome; flat land 10-700 m up; chance 0.07, 30 km apart, 600 m clear of landmarks.
+- **Wind:** none.
+- **Sound:** `portal` (a beating hum with the approach; a `surge` as you cross).
+- **LOD:** near 1.5 km, mid 5 km, far 12 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; despawned beyond 12 + 2 km after 20 s out of view.
+- **Journal:** `worldsVisited` (the typed `worldVisited`).
+
+#### 68. Sleeping stone giant
+
+A mountain shaped like a giant asleep on its back, 3.2 km from head to toe and 420 m to the chest: a
+face to the sky (brow, eye hollows, nose, lips, chin), hands folded on the belly, one knee raised. It
+is the terrain itself, so it reads from altitude and from the far field. A ring of standing stones
+crowns the chest, scree litters the flanks, and every nine seconds mist rises from its nose as it
+breathes, with a deep rush and a grinding snore.
+[src/spawns/presets/sleepingGiant.js](../src/spawns/presets/sleepingGiant.js)
+
+- **Kind:** site, rare.
+- **Stamps:** `giant` (length 3200 m, height 420 m, skirt 0.26, basalt): the base is the site's own
+  ground and `placement.scale` is 1, so the nose stands 1254 m ahead and 314 m up from the anchor.
+- **Engines:** `structure` (`sleepingGiant`: the standing stones, a cairn and scree with colliders,
+  the tallest stone a perch; a debug spawn raises the figure itself with a landable heightfield
+  collider) and `emitter` (the breath: mist puffs at the nose, `pulse` 9 s deep, owning the voice).
+- **Placement:** meadows, pine, dunes or snow; land 30-520 m up where the ground under the figure
+  varies by under 230 m; chance 0.1, 30 km apart, 300 m clear of landmarks.
+- **Wind:** none.
+- **Sound:** `giant` (the breath and the snore follow the emitter's breathing level).
+- **LOD:** near 3 km, mid 9 km, far 30 km (the figure is terrain at every distance). **Discovery:**
+  5 km, in view.
+- **Lifetime:** a site; despawned beyond 30 + 3 km after 30 s out of view.
+
+#### 69. Ghost galleon
+
+On a night with clouds about, a three-masted galleon of pale green light sails the cloud tops on a slow
+loop 3-4 km across, rocking in a swell that is not there, its tattered sails bellied and its lanterns
+cold; you can see through it. Its bell tolls, the wind whistles in its rigging and a faint choir sings.
+A flame (the dragon's breath) lights its lanterns warm, one by one.
+[src/spawns/presets/ghostGalleon.js](../src/spawns/presets/ghostGalleon.js)
+
+- **Kind:** event, rare.
+- **Engines:** `structure` (`ghostGalleon`: the `ghost` part; a PathFollower loop 700 m above the sea
+  or 160 m over the ground; moving capsule colliders for the hull, castle, bowsprit and masts (the
+  sails are not solid); eleven ignitable lanterns; the `bell` voice trigger).
+- **Filters:** any biome; night; clear, building or clearing weather; any surface; 100 m-4 km up;
+  2.5-7 km ahead.
+- **Candidates:** 8 km cells, 1200 s buckets, chance 0.4.
+- **Wind:** none.
+- **Sound:** `galleon` (rigging, timbers and choir with the approach; the bell every 14-28 s).
+- **LOD:** near 2.5 km, mid 8 km, far 20 km. **Discovery:** 3.5 km, in view.
+- **Lifetime:** 480-720 s; despawned beyond 14 + 3 km after 30 s out of view.
+
+#### 70. Dragon racer
+
+A basalt crag on a peak with a wild dragon on top, and a course of stone gates winding 2.4 km down the
+mountain. Fly through the start gate and the dragon launches from its crag and races you through every
+gate: flying anything else, it leads on the gold line; flying the dragon yourself, it becomes your
+rival, roaring and breathing fire as it launches, the timer showing the gap to it, and beating it to
+the finish earns "Out-flew the wild dragon".
+[src/spawns/presets/dragonRacer.js](../src/spawns/presets/dragonRacer.js)
+
+- **Kind:** site, rare; a challenge (start gate, four checkpoints, finish; medals gold 70 s, silver
+  95 s, bronze 130 s; 5 s per missed gate; the start prompt within 1.2 km; abandoned beyond 3.5 km).
+- **Engines:** `structure` (`dragonRace`: the crag with hull colliders and the perch, the stone gate
+  frames and the course registration, and the course rival: pace 70 s, rival 84 s, the dragon craft's
+  mesh at 9 times its size).
+- **Placement:** pine, meadows, snow or dunes; a peak 120-1400 m up; chance 0.1, 30 km apart, 400 m
+  clear of landmarks.
+- **Wind:** none.
+- **Sound:** `dragon` (wingbeats and breath following the dragon; a `roar` as the rival launches).
+- **LOD:** near 3 km, mid 8 km, far 16 km. **Discovery:** 3.5 km, in view.
+- **Lifetime:** a site; despawned beyond 16 + 2.5 km after 30 s out of view.
+- **Journal:** best times and medals per craft (the challenge system); the `dragonRival` achievement.
 
 ## Adding a preset
 
