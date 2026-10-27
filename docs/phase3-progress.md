@@ -1102,15 +1102,26 @@ Done:
 - Presets 34 valley fog river (dawn, the `river` form) and 35 dirty thunderstorm (rare; storm weather
   over an erupting volcano; lightning inside an ash-dark thunderhead), with their docs/spawns.md rows
   and sections.
+- structure geometry kind `lava` (the lava material: crust plates drifting downstream over glowing
+  cracks, hottest mid-flow, HDR glow brighter at night) and the recipes `lavaChannels` (lava down
+  every carve stamp and on over the real ground to the sea, src/spawns/engines/lavaPath.js; levee
+  blocks; crust slabs at the sea entry), `ejecta` (crater rim blocks, perches on the largest) and
+  `saltPiles` (salt cones at a salt pan's water edge); `structureStamps('lavaChannels')`; the recipe
+  context's `groundAt` and `out.facts`.
+- emitter `seaEntry` (the anchor where the lava flow down a carve stamp meets the sea, traced as the
+  recipe traces it; a flow that finds no sea only fumes); weatherVolume `glow.radius` and
+  `glow.dormant`.
+- Presets 36 lava rivers to the sea, 37 fissure eruption, 38 meteor crater lake, 39 hot spring
+  terraces, 40 salt flat mirror lake (sites; placement tuned so each lies within 40 km of the spawn on
+  DRIFTWING, HARNESS-1 and HARNESS-2), with their docs/spawns.md rows and sections.
 - Browser checks so far (WebGPU, dev server, seed DRIFTWING): 31-33 force-spawned, framed and
   disposed back to their baselines; the sandstorm's gust front and inside turbulence, grit 0.9 in the
   cockpit; the squall's gust front (24.7 m/s, turbulence 0.72), whiteout and snow in the cockpit; the
   hurricane's calm eye (6.6 m/s with the ambient wind, turbulence 0.08), eyewall 47 m/s with
   turbulence 0.95, outer bands 21 m/s.
 
-Next: the volcanic and geo sites 36-40 (lava rivers to the sea, fissure eruption, meteor crater lake,
-hot spring terraces, salt flat mirror lake), then the batch's step file, spawn scenarios and the
-verification on both backends.
+Next: the batch's step file (tools/steps/presets-31-40.json), spawn scenarios
+(src/dev/spawnScenarios/batch31.js), the labs and the verification on both backends.
 
 ### Wave 4: discovery and verification, then the tag
 

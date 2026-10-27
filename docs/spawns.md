@@ -88,6 +88,11 @@ preset's section below.
 | 33 | [Hurricane eye](#33-hurricane-eye) | `hurricaneEye` | weather | event | rare | yes | `weatherVolume`, `windModifier`, `emitter` | yes |
 | 34 | [Valley fog river](#34-valley-fog-river) | `valleyFogRiver` | weather | event | common | no | `weatherVolume` | no |
 | 35 | [Dirty thunderstorm](#35-dirty-thunderstorm) | `dirtyThunderstorm` | geo | event | rare | no | `weatherVolume`, `lightEffect`, `emitter` | yes |
+| 36 | [Lava rivers to the sea](#36-lava-rivers-to-the-sea) | `lavaRiversToSea` | geo | site | uncommon | no | `structure`, `emitter` | no |
+| 37 | [Fissure eruption](#37-fissure-eruption) | `fissureEruption` | geo | site | rare | yes | `structure`, `emitter`, `weatherVolume` | no |
+| 38 | [Meteor crater lake](#38-meteor-crater-lake) | `meteorCraterLake` | geo | site | uncommon | no | `structure` | no |
+| 39 | [Hot spring terraces](#39-hot-spring-terraces) | `hotSpringTerraces` | geo | site | uncommon | no | `emitter` | slight |
+| 40 | [Salt flat mirror lake](#40-salt-flat-mirror-lake) | `saltFlatMirror` | geo | site | uncommon | no | `structure` | no |
 
 In all: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy. The
 journal's collection count is found / 30 over these presets (`PRESETS` in
@@ -855,6 +860,122 @@ hissing on the canopy inside it.
 - **Sound:** `thunder` (the strikes' thunder, delayed by distance).
 - **LOD:** near 6 km, mid 20 km, far 45 km. **Discovery:** 9 km, in view.
 - **Lifetime:** 300-420 s; despawned beyond 30 + 5 km after 30 s out of view.
+
+#### 36. Lava rivers to the sea
+
+On a volcanic coast two rivers of molten lava run down channels between basalt levees, their dark
+crust drifting over glowing cracks, and pour on down the slope into the sea, where the water flashes
+to steam: white plumes boil up from each sea entry, littoral explosions throw glowing spatter, and at
+night the lava and the steam's underside glow orange.
+[src/spawns/presets/lavaRiversToSea.js](../src/spawns/presets/lavaRiversToSea.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** any biome; on a coast; ground 4-300 m; downhill-aligned (the channels run down the
+  fall line toward the water); chance 0.35 per cell; at least 18 km apart; 500 m clearance.
+- **Stamps:** two `carve` lava channels (`structureStamps('lavaChannels')`: 600-800 m long, a floor
+  16-24 m wide, 8-12 m deep between levees, painted basalt), side by side 300 m apart, upslope of the
+  shore.
+- **Engines:** `structure` (the `lavaChannels` recipe: the lava ribbons down both channels and on over
+  the natural ground to the sea, traced by src/spawns/engines/lavaPath.js; cooled basalt blocks on the
+  levees, the larger ones solid; crust slabs at the sea entries); two `emitter` steam plumes, each at
+  its flow's sea entry (`seaEntry`), boiling up with littoral explosions (bursts) and lit from below
+  at night, the first with a real orange light and the voice (each burst a `burst`); an `emitter` of
+  glowing spatter at the first entry. A flow that finds no sea within 2.6 km ends in a lobe, and its
+  steam only fumes.
+- **Wind:** none.
+- **Sound:** `geyser` (a bubbling seethe with roaring hiss bursts, reference distance 160 m).
+- **LOD:** near 2 km, mid 6 km, far 20 km (the plumes keep 15 % of their emission at far).
+  **Discovery:** 4 km, in view.
+- **Lifetime:** a site; removed beyond 20 + 4 km.
+
+#### 37. Fissure eruption
+
+A crack a kilometre long splits a lava plain between ramparts of black spatter, lava glowing in its
+floor. Usually it only steams. When it erupts, a curtain of fire stands along the whole crack: lava
+fountains surging a hundred metres high and falling back, a grey gas plume lit orange from below,
+and at night the low cloud deck above glows orange over the fissure.
+[src/spawns/presets/fissureEruption.js](../src/spawns/presets/fissureEruption.js)
+
+- **Kind:** site, rare, heavy. Plume lure, 3.5 km tall with a lava glow, shown only while it erupts.
+- **Active state:** the eruption lasts 300-540 s (`activeState`), started by the director as a rare
+  candidate at a placed fissure; dormant, the crack steams and its lava glows dimly.
+- **Placement:** snow, pine, meadows or dunes; land; ground 20-900 m; chance 0.06 per cell; at least
+  32 km apart; 600 m clearance.
+- **Stamp:** a narrow `carve` crack 900-1200 m long, 8-12 m wide and 10-16 m deep, turned to run
+  along the site's right axis (the emitters' line), painted basalt.
+- **Filters (the eruption):** any biome, hour and weather; over land; player 0-9000 m; 3-25 km ahead.
+- **Engines:** `structure` (the `lavaChannels` recipe with `toSea: false`: lava in the crack floor and
+  spatter blocks along both lips); `emitter` (the curtain of fire: lava fountains on an 860 m `line`
+  shape along the crack, surging in bursts that boom, with a real orange light; owns the voice);
+  `emitter` (the gas plume off the crack, lit from below; a thin steam while dormant); `weatherVolume`
+  (a low cloud `sheet` 900 m up, glowing orange at night over the fissure: `glow.radius` 3.2 km,
+  `glow.dormant` 0.2).
+- **Wind:** none.
+- **Sound:** `volcano` (a deep rumble, each fountain surge a `boom`).
+- **LOD:** near 2 km, mid 6 km, far 40 km. **Discovery:** 8 km, in view.
+- **Lifetime:** a site; removed beyond 40 + 5 km.
+
+#### 38. Meteor crater lake
+
+A near-perfect bowl punched into the plain by an ancient impact, with a raised rim, steep inner walls
+and a still teal lake on its flat floor; blocks of shattered rock lie strewn over the rim and down its
+outer flank, the biggest of them perches.
+[src/spawns/presets/meteorCraterLake.js](../src/spawns/presets/meteorCraterLake.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** dunes, meadows, pine or snow; land; ground 15-700 m; chance 0.1 per cell; at least
+  22 km apart; 400 m clearance.
+- **Stamp:** `crater`, rim radius 380-480 m, 70-100 m deep, the rim 30-45 m above the plain, a flank
+  200-280 m wide, a flat floor 32-45 % of the radius, painted ash.
+- **Water:** a `lake` on the crater floor filled to 38 % of its depth, deep teal (0x2a7f8f), calm.
+- **Engines:** `structure` (the `ejecta` recipe: 100-140 breccia blocks on the rim and the outer flank,
+  densest and largest on the crest, a few on the inner wall; those of 2.5 m radius and more are
+  solid, the four largest on the crest are perches; owns the voice at a constant level).
+- **Wind:** none.
+- **Sound:** `gale` (a soft wind sighing over the rim, reference distance 500 m).
+- **LOD:** near 1.8 km, mid 5 km, far 14 km. **Discovery:** 3 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 3 km.
+
+#### 39. Hot spring terraces
+
+A hillside of white travertine stepping down in shelves, each holding a pool of hot turquoise water
+behind its lip, steam curling off the pools and drifting downhill with the breeze, and a gentle
+thermal over them.
+[src/spawns/presets/hotSpringTerraces.js](../src/spawns/presets/hotSpringTerraces.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** meadows, pine, snow or dunes; land; ground 30-1400 m; downhill-aligned (the shelves
+  step down the real slope); chance 0.06 per cell; at least 22 km apart; 350 m clearance.
+- **Stamp:** `terraces`, 340-460 m downhill, 160-220 m wide, 5-7 shelves, lips 1.4-2.2 m, painted
+  travertine.
+- **Water:** a `pool` on every shelf filled to 85 %, turquoise (0x40c8c4), nearly still.
+- **Engines:** `emitter` (steam over the terraces: a 180 x 400 m box on the ground, drifting with the
+  wind, with an `updraft` wind source of 1.6 m/s, 200 m wide and 450 m tall; owns the voice).
+- **Wind:** the steam's gentle updraft (enough for an eagle or a paraglider to circle in).
+- **Sound:** `geyser` (bubbling pools and a faint steam hiss, reference distance 90 m).
+- **LOD:** near 1.5 km, mid 4.5 km, far 10 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 10 + 2.5 km.
+
+#### 40. Salt flat mirror lake
+
+A dead-flat white salt pan under a thin film of still water that mirrors the whole sky: clouds, the
+sunset and the stars lie at your feet, and a craft flying low flies with its own reflection. Rows of
+harvested salt cones stand at the water's edge.
+[src/spawns/presets/saltFlatMirror.js](../src/spawns/presets/saltFlatMirror.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** dunes or meadows; land; ground 8-600 m; flat relief; chance 0.6 per cell; at least
+  20 km apart; 150 m clearance.
+- **Stamp:** a wide, shallow `basin` (radius 500-600 m, 2.5-3.5 m deep, a 40-60 m berm), painted salt.
+- **Water:** a `thin` film filled to 70 % of the pan's depth (about 700 m across), `mirror` 1 (the
+  water material's sky reflection, no extra render pass), nearly no waves, no foam.
+- **Overlay:** the `saltFlat` palette over the stamp and 160 m beyond it (fading over 220 m).
+- **Engines:** `structure` (the `saltPiles` recipe: 3-5 rows of 24-40 salt cones at the water's edge,
+  each a small solid cylinder; owns the voice at a constant level).
+- **Wind:** none.
+- **Sound:** `gale` (a faint breeze, reference distance 500 m).
+- **LOD:** near 1.5 km, mid 5 km, far 14 km. **Discovery:** 3.5 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 3 km.
 
 ## Adding a preset
 
