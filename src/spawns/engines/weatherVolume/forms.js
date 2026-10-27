@@ -20,6 +20,9 @@
 //   ring     a hurricane: a stadium eyewall (a ring of towering cloud whose inner face flares outward
 //            with height around a clear eye), spiral rain bands leaving it and a cloud canopy spreading
 //            from its top; the anchor is the centre of the eye
+//   river    a valley fog river: fog filling the valley floors around the anchor to a fixed depth
+//            above the lowest ground, streaming slowly down the valleys and pouring over the saddles
+//            into the next valley (the puffs ride paths traced over the terrain at create)
 //
 // Puff record (PUFF_STRIDE floats): x, y, z (m, the puff centre in the volume frame; y above the
 // volume base, or above the puff's own ground for ground-following groups), radius (m), squash
@@ -28,19 +31,28 @@
 // the billow and the mist cycle), groundY (world m, ground-following puffs only).
 // Group record (GROUP_STRIDE floats): baseY, topY (m, like the puffs' y), shading centre x, y, z,
 // storm (0..1), flatBottom (1 clamps the puffs flat at baseY), spin (rad/s about the group centre),
-// follow (1: y is above each puff's own ground), rise (m/s: the mist cycle).
+// follow (1: y is above each puff's own ground), rise (m/s: the mist cycle), flow (m/s: the river's
+// path puffs move along their paths).
+// Flow (river form only, layout.flow): paths of points (x, z in the volume frame; the world height of
+// the puff's ground-equivalent, so the puff centre sits its own y above it; a size scale), and per
+// puff the path it rides (-1: none) and its starting phase (0..1 along the path); a group with flow
+// (m/s) moves its path puffs along their paths, fading in and out at the ends.
 // Shaft record (SHAFT_STRIDE floats): x, z (m, foot in the volume frame), radius (m), top (m above
 // the volume base), density (0..1), fallSpeed (m/s), kind (index into RAIN_KINDS), lean (m, how far
 // the foot trails along the heading), downdraft (m/s), outflow (m/s).
 
 export const PUFF_STRIDE = 12;
-export const GROUP_STRIDE = 10;
+export const GROUP_STRIDE = 11;
 export const SHAFT_STRIDE = 10;
 /** Most puffs one volume may lay out (the engine's shared mesh holds PUFF_CAPACITY in total). */
 export const MAX_PUFFS_PER_VOLUME = 1000;
 export const MAX_GROUPS = 8;
 export const MAX_SHAFTS = 6;
-export const WEATHER_FORMS = Object.freeze(['tower', 'cumulus', 'lens', 'bank', 'sheet', 'mist', 'ring']);
+export const WEATHER_FORMS = Object.freeze(['tower', 'cumulus', 'lens', 'bank', 'sheet', 'mist', 'ring', 'river']);
+/** The river form's terrain grid (cells a side) and its most flow paths and path points. */
+export const RIVER_GRID = 33;
+export const MAX_FLOW_PATHS = 16;
+export const MAX_FLOW_POINTS = 640;
 export const RAIN_KINDS = Object.freeze(['rain', 'snow', 'dust']);
 export const FAR_MODES = Object.freeze(['auto', 'coarse', 'hide']);
 export const GLOW_TIMES = Object.freeze(['twilight', 'night', 'always']);
@@ -116,6 +128,13 @@ const FORM_DEFAULTS = Object.freeze({
     canopy: Object.freeze({ reach: 2.6, thickness: 1600, puffs: 150 }),
     haze: Object.freeze({ near: 6000, far: 90000, max: 0.6 }),
     insideFog: Object.freeze({ density: 7, color: 0x6f7782, darkness: 0.4 }),
+    turbulence: 0,
+  }),
+  river: Object.freeze({
+    base: 0, radius: 3200, height: 80, puffs: 240, detail: 0.15, storm: 0.05, tint: 0xeef2f6, brightness: 1.04, billow: 0.3,
+    flow: 2, pours: 3,
+    haze: Object.freeze({ near: 1500, far: 16000, max: 0.85 }),
+    insideFog: Object.freeze({ density: 7, color: 0xdfe5ea, darkness: 0.04 }),
     turbulence: 0,
   }),
 });
@@ -261,6 +280,9 @@ export function resolveWeatherParams(params, { event = true } = {}) {
     ripple: numberParam(value('ripple'), 'ripple', 0, 0, 1),
     // mist
     rise: numberParam(value('rise'), 'rise', 0, 0, 200),
+    // river
+    flow: numberParam(value('flow'), 'flow', 0, 0, 20),
+    pours: Math.round(numberParam(value('pours'), 'pours', 0, 0, 6)),
     // ring
     flare: numberParam(value('flare'), 'flare', sizes.radius * 0.4, 0, 20000),
     spin: numberParam(value('spin'), 'spin', 0, -0.2, 0.2),
@@ -326,12 +348,14 @@ function createLayout() {
     wallGroup: -1,
     // Horizontal reach (m) from the anchor and the vertical span above the base.
     reach: 0,
+    // The river form's flow paths (see the header), else null.
+    flow: null,
     bottom: 0,
     top: 0,
   };
 }
 
-function addGroup(layout, baseY, topY, centreX, centreY, centreZ, storm, flatBottom, spin = 0, follow = 0, rise = 0) {
+function addGroup(layout, baseY, topY, centreX, centreY, centreZ, storm, flatBottom, spin = 0, follow = 0, rise = 0, flow = 0) {
   if (layout.groupCount >= MAX_GROUPS) throw new Error(`[DRIFTWING] weatherVolume: more than ${MAX_GROUPS} shading groups`);
   const offset = layout.groupCount * GROUP_STRIDE;
   const groups = layout.groups;
@@ -345,6 +369,7 @@ function addGroup(layout, baseY, topY, centreX, centreY, centreZ, storm, flatBot
   groups[offset + 7] = spin;
   groups[offset + 8] = follow ? 1 : 0;
   groups[offset + 9] = rise;
+  groups[offset + 10] = flow;
   return layout.groupCount++;
 }
 
@@ -669,6 +694,211 @@ function layoutRing(layout, params, rng) {
   }
 }
 
+/**
+ * A valley fog river (see the header). groundAt(x, z) and frame place the volume frame in the world.
+ * A RIVER_GRID square of terrain samples, `radius` m to each side of the anchor, finds the lowest
+ * ground; the fog fills every cell connected to it below that floor plus `height` (a fog lake in the
+ * valleys). About two fifths of the puffs lie still in that lake, the rest ride flow paths: streams
+ * running down the valley floors by steepest descent inside the fog, and pours that climb out over a
+ * saddle (a cell just above the fog's top next to it) and cascade down the far side.
+ */
+function layoutRiver(layout, params, rng, groundAt, frame) {
+  const { radius, height, puffs, storm } = params;
+  const size = RIVER_GRID;
+  const spacing = (2 * radius) / (size - 1);
+  const heights = new Float64Array(size * size);
+  const cellX = (column) => -radius + column * spacing;
+  const cellZ = (row) => -radius + row * spacing;
+  const worldGround = (x, z) => groundAt(frame.x + x * frame.rightX + z * frame.forwardX, frame.z + x * frame.rightZ + z * frame.forwardZ);
+  let lowest = 0;
+  for (let row = 0; row < size; row++) {
+    for (let column = 0; column < size; column++) {
+      const index = row * size + column;
+      heights[index] = worldGround(cellX(column), cellZ(row));
+      if (heights[index] < heights[lowest]) lowest = index;
+    }
+  }
+  // The fog lake: the cells connected to the lowest one below the fog's top (raised until it holds a few).
+  const basin = new Uint8Array(size * size);
+  const queue = new Int32Array(size * size);
+  let level = heights[lowest] + height;
+  let basinCells = 0;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    basin.fill(0);
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = lowest;
+    basin[lowest] = 1;
+    basinCells = 1;
+    while (head < tail) {
+      const index = queue[head++];
+      const row = Math.floor(index / size);
+      const column = index - row * size;
+      for (let side = 0; side < 4; side++) {
+        const nextRow = row + (side === 0 ? -1 : side === 1 ? 1 : 0);
+        const nextColumn = column + (side === 2 ? -1 : side === 3 ? 1 : 0);
+        if (nextRow < 0 || nextRow >= size || nextColumn < 0 || nextColumn >= size) continue;
+        const next = nextRow * size + nextColumn;
+        if (basin[next] === 1 || heights[next] >= level) continue;
+        basin[next] = 1;
+        basinCells++;
+        queue[tail++] = next;
+      }
+    }
+    if (basinCells >= 12) break;
+    level += height * 0.6;
+  }
+  const nominal = spacing * 0.85;
+  const squash = Math.min(0.5, Math.max(0.2, height / nominal));
+  const half = nominal * squash;
+  /** The world height of a puff's ground-equivalent: its centre sits 0.5 x half above it, tucked under the fog's top. */
+  const lakeGround = (ground) => Math.max(ground + half * 0.4, level - half * 0.7) - half * 0.5;
+  const flow = {
+    points: new Float32Array(MAX_FLOW_POINTS * 4),
+    pathStart: new Int32Array(MAX_FLOW_PATHS),
+    pathCount: new Int32Array(MAX_FLOW_PATHS),
+    pathLength: new Float32Array(MAX_FLOW_PATHS),
+    paths: 0,
+    pointCount: 0,
+    puffPath: new Int16Array(MAX_PUFFS_PER_VOLUME).fill(-1),
+    puffPhase: new Float32Array(MAX_PUFFS_PER_VOLUME),
+  };
+  layout.flow = flow;
+  const lowestNeighbour = (index, allowed) => {
+    const row = Math.floor(index / size);
+    const column = index - row * size;
+    let best = -1;
+    let bestHeight = heights[index];
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dz === 0) continue;
+        const nextRow = row + dz;
+        const nextColumn = column + dx;
+        if (nextRow < 0 || nextRow >= size || nextColumn < 0 || nextColumn >= size) continue;
+        const next = nextRow * size + nextColumn;
+        if (!allowed(next) || heights[next] >= bestHeight) continue;
+        best = next;
+        bestHeight = heights[next];
+      }
+    }
+    return best;
+  };
+  /** Appends a path of grid cells (pour: the cells after `firstDescent` hug the slope); false when full. */
+  const addPath = (cells, firstDescent) => {
+    if (flow.paths >= MAX_FLOW_PATHS || flow.pointCount + cells.length > MAX_FLOW_POINTS || cells.length < 3) return false;
+    const start = flow.pointCount;
+    let length = 0;
+    for (let point = 0; point < cells.length; point++) {
+      const index = cells[point];
+      const row = Math.floor(index / size);
+      const column = index - row * size;
+      const x = cellX(column) + (rng() - 0.5) * spacing * 0.3;
+      const z = cellZ(row) + (rng() - 0.5) * spacing * 0.3;
+      const descent = firstDescent >= 0 && point >= firstDescent;
+      const share = descent ? (point - firstDescent) / Math.max(1, cells.length - 1 - firstDescent) : 0;
+      const offset = (start + point) * 4;
+      flow.points[offset] = x;
+      flow.points[offset + 1] = z;
+      flow.points[offset + 2] = descent ? heights[index] + half * 0.45 - half * 0.5 : lakeGround(heights[index]);
+      flow.points[offset + 3] = descent ? 0.95 - 0.4 * share : 1;
+      if (point > 0) length += Math.hypot(x - flow.points[offset - 4], z - flow.points[offset - 3]);
+    }
+    flow.pathStart[flow.paths] = start;
+    flow.pathCount[flow.paths] = cells.length;
+    flow.pathLength[flow.paths] = Math.max(1, length);
+    flow.pointCount += cells.length;
+    flow.paths++;
+    return true;
+  };
+  const inBasin = (index) => basin[index] === 1;
+  // Streams: from the upper basin cells down the valley floors.
+  const order = [];
+  for (let index = 0; index < size * size; index++) if (basin[index] === 1) order.push(index);
+  order.sort((first, second) => heights[second] - heights[first]);
+  const streamStarts = Math.min(8, Math.max(1, Math.floor(order.length / 6)));
+  const used = new Uint8Array(size * size);
+  for (let stream = 0, pick = 0; stream < streamStarts && pick < order.length; pick += Math.max(1, Math.floor(order.length / (streamStarts * 2)))) {
+    const cells = [order[pick]];
+    if (used[order[pick]] === 1) continue;
+    let current = order[pick];
+    for (let step = 0; step < 40; step++) {
+      const next = lowestNeighbour(current, inBasin);
+      if (next < 0) break;
+      cells.push(next);
+      used[next] = 1;
+      current = next;
+    }
+    if (addPath(cells, -1)) stream++;
+  }
+  // Pours: saddle cells just above the fog's top beside it, whose far side falls away.
+  if (params.pours > 0) {
+    const candidates = [];
+    for (let index = 0; index < size * size; index++) {
+      if (basin[index] === 1 || heights[index] < level || heights[index] > level + height * 0.6) continue;
+      const row = Math.floor(index / size);
+      const column = index - row * size;
+      for (let side = 0; side < 4; side++) {
+        const nextRow = row + (side === 0 ? -1 : side === 1 ? 1 : 0);
+        const nextColumn = column + (side === 2 ? -1 : side === 3 ? 1 : 0);
+        if (nextRow < 0 || nextRow >= size || nextColumn < 0 || nextColumn >= size) continue;
+        if (basin[nextRow * size + nextColumn] === 1) {
+          candidates.push({ index, source: nextRow * size + nextColumn });
+          break;
+        }
+      }
+    }
+    candidates.sort((first, second) => heights[first.index] - heights[second.index]);
+    const chosen = [];
+    for (const candidate of candidates) {
+      if (chosen.length >= params.pours) break;
+      const row = Math.floor(candidate.index / size);
+      const column = candidate.index - row * size;
+      if (chosen.some((other) => Math.abs(other.row - row) + Math.abs(other.column - column) < 5)) continue;
+      const cells = [candidate.source, candidate.index];
+      let current = candidate.index;
+      for (let step = 0; step < 24; step++) {
+        const next = lowestNeighbour(current, (index) => basin[index] === 0);
+        if (next < 0) break;
+        cells.push(next);
+        current = next;
+      }
+      if (cells.length < 5 || heights[candidate.index] - heights[current] < height * 0.6) continue;
+      if (addPath(cells, 2)) chosen.push({ row, column });
+    }
+  }
+  const group = addGroup(layout, 0, height * 1.6, 0, height * 0.5, 0, storm, false, 0, true, 0, flow.paths > 0 ? params.flow : 0);
+  const still = flow.paths > 0 ? Math.round(puffs * 0.4) : puffs;
+  for (let index = 0; index < still && order.length > 0; index++) {
+    const cell = order[Math.floor(rng() * order.length)];
+    const row = Math.floor(cell / size);
+    const column = cell - row * size;
+    const x = cellX(column) + (rng() - 0.5) * spacing;
+    const z = cellZ(row) + (rng() - 0.5) * spacing;
+    const ground = worldGround(x, z);
+    if (ground >= level - 2) continue;
+    const puffRadius = nominal * (0.8 + 0.4 * rng());
+    const centre = Math.max(ground + puffRadius * squash * 0.4, level - puffRadius * squash * 0.7);
+    if (!addPuff(layout, x, centre - ground, z, puffRadius, squash, rng() * Math.PI, params.brightness * (0.96 + 0.06 * rng()), 0.05 + 0.4 * rng(), group, index % 3 === 0 ? 0 : 1, rng() * Math.PI * 2, ground)) return;
+  }
+  // The flowing puffs: spread over the paths by length, evenly in phase along each.
+  let totalLength = 0;
+  for (let path = 0; path < flow.paths; path++) totalLength += flow.pathLength[path];
+  const moving = puffs - still;
+  for (let path = 0; path < flow.paths; path++) {
+    const count = Math.max(2, Math.round((moving * flow.pathLength[path]) / Math.max(1, totalLength)));
+    for (let index = 0; index < count; index++) {
+      const puff = layout.puffCount;
+      const puffRadius = nominal * (0.75 + 0.4 * rng());
+      if (!addPuff(layout, 0, half * 0.5, 0, puffRadius, squash, rng() * Math.PI, params.brightness * (0.96 + 0.06 * rng()), 0.05 + 0.4 * rng(), group, index % 3 === 0 ? 0 : 1, rng() * Math.PI * 2)) return;
+      flow.puffPath[puff] = path;
+      flow.puffPhase[puff] = (index + rng() * 0.5) / count;
+    }
+  }
+  // The flowing puffs reach anywhere on the grid.
+  layout.reach = Math.max(layout.reach, radius * Math.SQRT2 + nominal);
+  layout.top = Math.max(layout.top, height * 1.6);
+}
+
 function layoutMist(layout, params, rng) {
   const { radius, height, puffs, rise } = params;
   const group = addGroup(layout, 0, height, 0, height * 0.35, 0, params.storm, false, 0, false, rise);
@@ -699,6 +929,7 @@ export function layoutWeatherVolume(params, rng, groundAt, frame) {
     case 'sheet': layoutSheet(layout, params, rng); break;
     case 'mist': layoutMist(layout, params, rng); break;
     case 'ring': layoutRing(layout, params, rng); break;
+    case 'river': layoutRiver(layout, params, rng, groundAt, frame); break;
     default: throw new Error(`[DRIFTWING] weatherVolume: unknown form "${params.form}"`);
   }
   for (const shaft of params.rain) addShaft(layout, shaft);

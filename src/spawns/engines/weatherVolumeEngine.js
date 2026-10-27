@@ -500,6 +500,8 @@ export function createWeatherVolumeEngine() {
     // Coarse far mass: the core puffs swell a little while the body is hidden.
     const coreSwell = 1 + 0.25 * (1 - weights[1]);
     const checkInside = data.cameraNear;
+    // A river's flow paths (layout.flow), or null.
+    const flowPaths = layout.flow;
     let nearest = Infinity;
     let written = 0;
     for (let puff = 0; puff < layout.puffCount; puff++) {
@@ -543,11 +545,32 @@ export function createWeatherVolumeEngine() {
         size *= (0.55 + 0.75 * fraction) * smooth(fraction, 0, 0.12) * (1 - smooth(fraction, 0.72, 1));
         if (size < 0.04) continue;
       }
+      // A river's path puff rides its path, fading in at the start and out at the end.
+      let pathGround = 0;
+      let onPath = false;
+      const flowSpeed = groups[group + 10];
+      if (flowSpeed > 0 && flowPaths !== null && flowPaths.puffPath[puff] >= 0) {
+        const path = flowPaths.puffPath[puff];
+        const count = flowPaths.pathCount[path];
+        const cycle = flowPaths.puffPhase[puff] + (age * flowSpeed) / flowPaths.pathLength[path];
+        const fraction = cycle - Math.floor(cycle);
+        const along = fraction * (count - 1);
+        const index = Math.min(count - 2, Math.floor(along));
+        const blend = along - index;
+        const points = flowPaths.points;
+        const base = (flowPaths.pathStart[path] + index) * 4;
+        x = points[base] + (points[base + 4] - points[base]) * blend;
+        z = points[base + 1] + (points[base + 5] - points[base + 1]) * blend;
+        pathGround = points[base + 2] + (points[base + 6] - points[base + 2]) * blend;
+        size *= (points[base + 3] + (points[base + 7] - points[base + 3]) * blend) * smooth(fraction, 0, 0.1) * (1 - smooth(fraction, 0.85, 1));
+        if (size < 0.04) continue;
+        onPath = true;
+      }
       if (billow > 0) {
         radius *= 1 + billow * 0.06 * Math.sin(age * 0.4 + phase);
         y += billow * radius * 0.03 * Math.sin(age * 0.3 + phase * 1.3);
       }
-      const ground = follow ? source[offset + 11] + data.followLift : data.baseAltitude;
+      const ground = onPath ? pathGround : follow ? source[offset + 11] + data.followLift : data.baseAltitude;
       const worldX = anchor.x + x * data.rightX + z * data.forwardX;
       const worldZ = anchor.z + x * data.rightZ + z * data.forwardZ;
       const worldY = ground + y;
