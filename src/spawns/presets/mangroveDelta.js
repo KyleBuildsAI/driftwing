@@ -21,6 +21,8 @@ export default Object.freeze({
     surface: 'coast',
     clearance: 150,
     align: 'downhill',
+    // Its region keeps clear of the other biome regions (a grove inside a blossom valley would vanish).
+    separateRegions: true,
   },
   filters: { biomes: null, timeOfDay: null, altitude: null, weather: null, surface: 'coast' },
   // The flats and channels; no paint, so the mangroves grow on them (nothing grows on painted stamp ground).

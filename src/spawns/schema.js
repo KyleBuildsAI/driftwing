@@ -126,7 +126,7 @@ function createChecker(presetId) {
 
 function validatePlacement(check, placement) {
   check.object(placement, 'placement');
-  check.onlyKeys(placement, ['chance', 'minSpacing', 'biomes', 'surface', 'terrain', 'clearance', 'align', 'scale'], 'placement');
+  check.onlyKeys(placement, ['chance', 'minSpacing', 'biomes', 'surface', 'terrain', 'clearance', 'align', 'scale', 'separateRegions'], 'placement');
   check.number(placement.chance, 'placement.chance', { above: 0, max: 1 });
   check.number(placement.minSpacing, 'placement.minSpacing', { min: 0 });
   check.listOrNull(placement.biomes, null, 'placement.biomes');

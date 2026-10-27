@@ -27,6 +27,8 @@ export default Object.freeze({
     terrain: { minHeight: 40, maxHeight: 900, relief: 'any' },
     clearance: 400,
     align: 'downhill',
+    // Its region keeps clear of the other biome regions (a grove inside a blossom valley would vanish).
+    separateRegions: true,
   },
   filters: { biomes: null, timeOfDay: null, altitude: null, weather: null, surface: 'land' },
   // Side by side with a strip of the natural slope between them (their falloffs never meet, so every

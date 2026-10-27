@@ -1212,7 +1212,7 @@ export default Object.freeze({
 | `kind` | both | yes | `site` or `event` | placement, director, SpawnManager |
 | `rarity` | both | yes | `common`, `uncommon`, `rare`, `legendary` | director, callout priority |
 | `heavy` | both | yes | counts toward the heavy limit (2) and needs a `lure` | SpawnManager, director |
-| `placement` | site | yes for sites, absent for events | `chance` (0 < c <= 1), `minSpacing`, `biomes`, `surface`, `clearance`; optional `terrain`, `align`, `scale` | placement.js (both threads) |
+| `placement` | site | yes for sites, absent for events | `chance` (0 < c <= 1), `minSpacing`, `biomes`, `surface`, `clearance`; optional `terrain`, `align`, `scale`, `separateRegions` (Phase 3: true keeps this site's region overlays from meeting another separating site's) | placement.js (both threads) |
 | `candidates` | event | yes for events, absent for sites | `cellSize`, `bucketSeconds`, `chance` | candidates.js, director |
 | `filters` | both | yes | `biomes`, `timeOfDay`, `altitude`, `weather`, `surface`, `minDistance`, `maxDistance`, `near` | director; site hours (`timeOfDay`) |
 | `stamps` | site | optional (must be empty for events) | terrain stamp specs | placement.js, stamps.js, worldgen |

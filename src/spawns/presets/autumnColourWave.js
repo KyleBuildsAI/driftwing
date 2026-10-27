@@ -20,6 +20,8 @@ export default Object.freeze({
     terrain: { minHeight: 20, maxHeight: 900, relief: 'any' },
     clearance: 400,
     align: 'random',
+    // Its region keeps clear of the other biome regions (a grove inside a blossom valley would vanish).
+    separateRegions: true,
   },
   filters: { biomes: null, timeOfDay: null, altitude: null, weather: null, surface: 'land' },
   stamps: [],
