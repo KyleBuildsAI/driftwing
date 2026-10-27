@@ -823,6 +823,12 @@ const PHASE2_REAL_DIGESTS = Object.freeze({
   'HARNESS-1': { meshes: '01d73057fae7adf80e6b498c653d4933380eab87df71c702f242fa5f25c40e53', sites: '40179d8108de3ff2' },
   'P2-TERRAIN': { meshes: '94f279ad6b775a08843693be7f693119cee66e2bb175589b7c4e4a003f8ea152', sites: '06628e3c54a53137' },
 });
+/**
+ * The Phase 2 presets: the first 30 of the registry (src/spawns/presets/index.js keeps spec order).
+ * The digests above were recorded with them; Phase 3's own site presets (a frozen lake) add sites,
+ * waters and overlays to the real world by design, so the Phase 2 world is rebuilt from these.
+ */
+const PHASE2_PRESETS = Object.freeze(PRESETS.slice(0, 30));
 /** The seed the water and overlay fixtures are checked on (every one lies within 14 km of its origin). */
 const WATER_SEED = 'HARNESS-1';
 const WATER_OPTIONS = Object.freeze({ ...WORLD_OPTIONS, presets: WATER_FIXTURES });
@@ -854,7 +860,7 @@ function withoutOverlays(presets) {
 
 function testPhase3Worlds() {
   for (const seed of SEEDS) {
-    const digest = phase2RealDigest(createWorldGen(seed, WORLD_OPTIONS));
+    const digest = phase2RealDigest(createWorldGen(seed, { ...WORLD_OPTIONS, presets: PHASE2_PRESETS }));
     const golden = PHASE2_REAL_DIGESTS[seed];
     check('phase3', `${seed}: the real presets (no waters, no overlays): meshes, colours and scatter bit-identical to Phase 2`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
     check('phase3', `${seed}: the real presets: the site-list hash unchanged from Phase 2`, digest.sites === golden.sites, digest.sites);

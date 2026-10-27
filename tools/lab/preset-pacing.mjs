@@ -12,7 +12,10 @@
 // Checks:
 //   presets   every preset validates and the director takes every one of them
 //   reach     every event preset is activated at least once across the runs, and the volcano's
-//             eruption (a site active state) too
+//             eruption (a site active state) too. Legendary combos and global overrides (Phase 3,
+//             contract i.3 and i.4) are rare by design (a legendary is due every 1-2 h of flight and
+//             shares that slot with every other legendary): each one the shared runs miss is run again
+//             on the same flights with the other combos and overrides set aside, until it starts
 //   ahead     no director activation lies behind the player
 // Printed (not checked, see the batch notes): per scenario, the share of droughts that end within the
 // 90 s pacing window, the longest drought, and the activations per preset. The pacing floor is a
@@ -93,13 +96,17 @@ function createFlightPath({ pathSeed, speed, altitude: [lowAltitude, highAltitud
   };
 }
 
-/** The sun on the game's day clock, starting at startDayTime. */
+/**
+ * The sun on the game's day clock, starting at startDayTime on day 0; days is the sky's day counter
+ * (state.time.days: whole days plus dayTime), which the override schedule's night index reads.
+ */
 function createSun(startDayTime) {
-  const sun = { sunElevation: 0, dayTime: startDayTime };
+  const sun = { sunElevation: 0, dayTime: startDayTime, days: startDayTime };
   return {
     sun,
     update(time) {
-      sun.dayTime = (startDayTime + time / CONFIG.DAY_LENGTH_DEFAULT) % 1;
+      sun.days = startDayTime + time / CONFIG.DAY_LENGTH_DEFAULT;
+      sun.dayTime = sun.days % 1;
       sun.sunElevation = Math.sin((sun.dayTime - 0.25) * Math.PI * 2) * CONFIG.SUN_MAX_ELEVATION_DEG;
     },
   };
@@ -189,7 +196,7 @@ function createLenientManager({ bus, player, getTime, placement, isInView }) {
   };
 }
 
-function runScenario({ seed, craft, hours, startDayTime }) {
+function runScenario({ seed, craft, hours, startDayTime, presets = PRESETS }) {
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const world = createWorldGen(seed, WORLD_OPTIONS);
   const path = createFlightPath({ pathSeed: `${seed}-${craft}-${startDayTime}`, ...SPEEDS[craft] });
@@ -200,7 +207,7 @@ function runScenario({ seed, craft, hours, startDayTime }) {
   const manager = createLenientManager({ bus, player: path.player, getTime, placement: world.placement, isInView });
   const director = createDirector({
     seedHash: world.seedHash >>> 0,
-    presets: PRESETS,
+    presets,
     spawnManager: manager,
     weather: createWeatherModel(world.seedHash >>> 0),
     terrain: { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL, landmarkSitesNear: world.landmarkSitesNear },
@@ -244,25 +251,51 @@ const counts = new Map(PRESETS.map((preset) => [preset.id, 0]));
 let behind = 0;
 let activations = 0;
 const rows = [];
+/** Every flight of the runs: three seeds, three craft, a day and a night start. */
+const FLIGHTS = [];
 for (const seed of ['DRIFTWING', 'HARNESS-1', 'P2-TERRAIN']) {
   for (const craft of Object.keys(SPEEDS)) {
     // Day (golden hour start, through the afternoon and dusk into night) and a night start.
-    for (const startDayTime of [0.62, 0.95]) {
-      const run = runScenario({ seed, craft, hours: OPTIONS.hours, startDayTime });
-      for (const record of run.records) {
-        if (record.offAxis >= 90 && !record.siteActive) behind++;
-        activations++;
-      }
-      for (const entry of run.log) counts.set(entry.presetId, (counts.get(entry.presetId) ?? 0) + 1);
-      const pacing = run.state.pacing;
-      const share = pacing.droughts > 0 ? pacing.withinWindow / pacing.droughts : 1;
-      rows.push(`${seed.padEnd(11)} ${craft.padEnd(9)} ${startDayTime === 0.62 ? 'day  ' : 'night'}  ${String(pacing.withinWindow).padStart(4)}/${String(pacing.droughts).padEnd(4)} droughts within ${PACING_WINDOW_MAX} s (${(share * 100).toFixed(1).padStart(5)} %), longest ${String(run.state.longestDrought).padStart(5)} s, ${run.log.length} activations`);
-    }
+    for (const startDayTime of [0.62, 0.95]) FLIGHTS.push({ seed, craft, startDayTime });
   }
 }
-const events = PRESETS.filter((preset) => preset.kind === 'event');
+for (const { seed, craft, startDayTime } of FLIGHTS) {
+  const run = runScenario({ seed, craft, hours: OPTIONS.hours, startDayTime });
+  for (const record of run.records) {
+    if (record.offAxis >= 90 && !record.siteActive) behind++;
+    activations++;
+  }
+  for (const entry of run.log) counts.set(entry.presetId, (counts.get(entry.presetId) ?? 0) + 1);
+  const pacing = run.state.pacing;
+  const share = pacing.droughts > 0 ? pacing.withinWindow / pacing.droughts : 1;
+  rows.push(`${seed.padEnd(11)} ${craft.padEnd(9)} ${startDayTime === 0.62 ? 'day  ' : 'night'}  ${String(pacing.withinWindow).padStart(4)}/${String(pacing.droughts).padEnd(4)} droughts within ${PACING_WINDOW_MAX} s (${(share * 100).toFixed(1).padStart(5)} %), longest ${String(run.state.longestDrought).padStart(5)} s, ${run.log.length} activations`);
+}
+/** Legendary combos and global overrides: rare by design, so reached on their own runs when missed. */
+const isLegendaryNight = (preset) => Boolean(preset.combo || preset.override);
+const events = PRESETS.filter((preset) => preset.kind === 'event' && !isLegendaryNight(preset));
 const missing = events.filter((preset) => counts.get(preset.id) === 0).map((preset) => preset.id);
-check('reach', 'every event preset is activated at least once across the runs', missing.length === 0, missing.length ? `never: ${missing.join(', ')}` : [...counts].map(([id, count]) => `${id} ${count}`).join(', '));
+check('reach', 'every event preset is activated at least once across the runs', missing.length === 0, missing.length ? `never: ${missing.join(', ')}` : [...counts].filter(([id]) => events.some((preset) => preset.id === id)).map(([id, count]) => `${id} ${count}`).join(', '));
+const legendaryNights = PRESETS.filter(isLegendaryNight);
+const focused = [];
+for (const preset of legendaryNights) {
+  if (counts.get(preset.id) > 0) {
+    focused.push(`${preset.id} ${counts.get(preset.id)} (shared runs)`);
+    continue;
+  }
+  // The same flights with the other combos and overrides set aside (their members and sites stay).
+  const presets = PRESETS.filter((candidate) => candidate === preset || !isLegendaryNight(candidate));
+  let reachedOn = null;
+  for (const flight of FLIGHTS) {
+    const run = runScenario({ ...flight, hours: OPTIONS.hours, presets });
+    if (run.log.some((entry) => entry.presetId === preset.id)) {
+      reachedOn = `${flight.seed} ${flight.craft} ${flight.startDayTime === 0.62 ? 'day' : 'night'}`;
+      break;
+    }
+  }
+  focused.push(`${preset.id} ${reachedOn ? `on its own run (${reachedOn})` : 'never'}`);
+}
+const unreached = focused.filter((line) => line.endsWith(' never'));
+check('reach', 'every legendary combo and global override starts at least once (on its own runs when the shared runs miss it)', unreached.length === 0, focused.join(', ') || 'none in the catalog');
 const activeStates = PRESETS.filter((preset) => preset.activeState);
 const unstarted = activeStates.filter((preset) => counts.get(preset.id) === 0).map((preset) => preset.id);
 check('reach', 'every site active state (the eruption) is started at least once', unstarted.length === 0, unstarted.length ? `never: ${unstarted.join(', ')}` : activeStates.map((preset) => `${preset.id} ${counts.get(preset.id)}`).join(', '));
