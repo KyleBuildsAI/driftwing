@@ -81,6 +81,8 @@ for (const flag of process.argv.slice(2)) {
 const SEEDS = ['DRIFTWING', 'HARNESS-1', 'P2-TERRAIN'];
 /** The seed the stamp checks run on (every stamp type lies within 13 km of its origin). */
 const STAMP_SEED = 'P2-TERRAIN';
+/** More seeds searched for a stamped preset none of the seeds above places: the rare Phase 3 sites (the cave tunnel). */
+const RARE_STAMP_SEEDS = Object.freeze(['SOAK-2']);
 const SEARCH_RADIUS = 30000;
 /** Stamp checks run on this many sites of each fixture (nearest first). */
 const SITES_PER_TYPE = 2;
@@ -708,7 +710,7 @@ function testRealPresets() {
   testDeterminism(realWorld, PRESETS, 'real presets, ');
   for (const preset of stamped) {
     let found = null;
-    for (const seed of [STAMP_SEED, ...SEEDS]) {
+    for (const seed of [STAMP_SEED, ...SEEDS, ...RARE_STAMP_SEEDS]) {
       const world = realWorld(seed);
       const sites = world.sitesNear(0, 0, SEARCH_RADIUS).filter((site) => site.presetId === preset.id).slice(0, SITES_PER_TYPE);
       if (sites.length > 0) {
@@ -817,12 +819,18 @@ function testBenchmark() {
 }
 
 // ---- phase 3: water-holding stamps, water bodies and region overlays ------------------------------------
-/** The Phase 2 real-preset world, recorded from the Phase 2 code (commit f4c2a50, before any Phase 3 change). */
+/**
+ * The Phase 2 real-preset world, recorded from the Phase 2 code (commit f4c2a50, before any Phase 3
+ * change). The site-list hash covers the Phase 2 presets' sites (the first 30 of PRESETS): the Phase 3
+ * site presets add sites of their own and must leave those where they were.
+ */
 const PHASE2_REAL_DIGESTS = Object.freeze({
   DRIFTWING: { meshes: '4ca2d12e93a5440a40928acd8f02754be8a76d96f1518bdd006e6e4cc3fb63e2', sites: '753c7ad07728b9a1' },
   'HARNESS-1': { meshes: '01d73057fae7adf80e6b498c653d4933380eab87df71c702f242fa5f25c40e53', sites: '40179d8108de3ff2' },
   'P2-TERRAIN': { meshes: '94f279ad6b775a08843693be7f693119cee66e2bb175589b7c4e4a003f8ea152', sites: '06628e3c54a53137' },
 });
+/** The Phase 2 presets, the first 30 of PRESETS (the Phase 3 batches follow them). */
+const PHASE2_PRESET_IDS = new Set(PRESETS.slice(0, 30).map((preset) => preset.id));
 /** The seed the water and overlay fixtures are checked on (every one lies within 14 km of its origin). */
 const WATER_SEED = 'HARNESS-1';
 const WATER_OPTIONS = Object.freeze({ ...WORLD_OPTIONS, presets: WATER_FIXTURES });
@@ -840,7 +848,7 @@ function phase2RealDigest(world) {
     }
     hash.update(Buffer.from(world.scatterChunk(cx, cz, 1).buffer));
   }
-  return { meshes: hash.digest('hex'), sites: hashSiteList(world.sitesNear(0, 0, 30000)) };
+  return { meshes: hash.digest('hex'), sites: hashSiteList(world.sitesNear(0, 0, 30000).filter((site) => PHASE2_PRESET_IDS.has(site.presetId))) };
 }
 
 /** The presets with their overlays removed (placement, stamps and waters unchanged). */
@@ -857,7 +865,7 @@ function testPhase3Worlds() {
     const digest = phase2RealDigest(createWorldGen(seed, WORLD_OPTIONS));
     const golden = PHASE2_REAL_DIGESTS[seed];
     check('phase3', `${seed}: the real presets (no waters, no overlays): meshes, colours and scatter bit-identical to Phase 2`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
-    check('phase3', `${seed}: the real presets: the site-list hash unchanged from Phase 2`, digest.sites === golden.sites, digest.sites);
+    check('phase3', `${seed}: the real presets: the Phase 2 presets' site-list hash unchanged from Phase 2`, digest.sites === golden.sites, digest.sites);
   }
 }
 
