@@ -368,10 +368,12 @@ async function testUpdateAllocations() {
   };
   check('updateAllocations', 'every recipe realized on the stand-in', after.realized === RECIPE_NAMES.length && issues.length === 0,
     `${after.realized}/${after.voices}${issues.length ? `; ${issues.join(' | ')}` : ''}`);
-  // An object created per update (or even per hundred updates) would leave thousands of samples.
+  // An object created per update (or even per hundred updates) would leave thousands of samples. The
+  // sporadic runtime samples grow with the voices moving (the Phase 2 catalog's 15 had 50).
+  const sporadicLimit = Math.round((updates / 1000) * Math.max(1, after.voices / 15));
   check('updateAllocations', `${updates} updates of ${after.voices} moving voices create no objects`,
-    sampled.otherSamples < updates / 1000 && after.realizations === warm.realizations,
-    `${sampled.otherSamples} sporadic non-box samples ${JSON.stringify(sampled.otherSites)} (limit ${updates / 1000});`
+    sampled.otherSamples < sporadicLimit && after.realizations === warm.realizations,
+    `${sampled.otherSamples} sporadic non-box samples ${JSON.stringify(sampled.otherSites)} (limit ${sporadicLimit});`
     + ` V8 boxed doubles ${numbers.updateAllocations.boxedDoubleSampleBytesPerUpdate} sampled B per update; realizations during the run ${after.realizations - warm.realizations}`);
   for (const handle of handles) handle.dispose();
 }
@@ -405,6 +407,10 @@ const RENDER_PLAN = Object.freeze({
   discovery: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.2, name: 'chime' }] },
   raptor: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.3, name: 'call' }, { at: 2.6, name: 'call', options: { strength: 0.8 } }] },
   goose: { intensity: 1, seconds: 6, skip: 0.2, triggers: [{ at: 0.2, name: 'call' }] },
+  surf: { intensity: 0.8, seconds: 6, triggers: [{ at: 2, name: 'crash', options: { strength: 1 } }] },
+  herd: { intensity: 1, seconds: 5, triggers: [{ at: 1.5, name: 'bellow', options: { strength: 1 } }] },
+  calving: { intensity: 0.7, seconds: 7, triggers: [{ at: 1, name: 'crack', options: { strength: 1 } }, { at: 4, name: 'splash', options: { strength: 1 } }] },
+  dolphin: { intensity: 1, seconds: 6, skip: 0.2, triggers: [{ at: 0.3, name: 'call' }] },
 });
 
 async function testRecipes(page, label) {
