@@ -26,7 +26,10 @@ const DEG = Math.PI / 180;
  * run-in whose ground stays RUN_IN_CLEARANCE below the gate's centre (a gate near a cliff face or on a
  * hillside gets a shorter one).
  */
-const GATE_RUN_INS = Object.freeze([80, 60, 45, 30, 20]);
+const GATE_RUN_INS = Object.freeze([45, 30, 20]);
+/** A stepped pass: the craft is set this far (m) either side of a gate, this far a frame, along its line. */
+const STEP_REACH = 30;
+const STEP_LENGTH = 3;
 const RUN_IN_CLEARANCE = 10;
 /** How long (ms) a gate may take to register, and a strike or a sensor to happen. */
 const GATE_TIMEOUT_MS = 15000;
@@ -165,6 +168,19 @@ export function installBatch8Checks(game) {
     const before = runIn(gate.center.x, gate.center.y, gate.center.z, dirX, dirZ);
     ctx.systems.flight.resetTo({ x: gate.center.x - dirX * before, y: gate.center.y, z: gate.center.z - dirZ * before, heading: compass(dirX, dirZ) });
     return before;
+  }
+  /** Sets the craft through a gate along its line, STEP_LENGTH m a frame. Returns the reach (m). */
+  async function stepThrough(gate) {
+    const n = gate.normal;
+    const flat = Math.hypot(n.x, n.z) || 1;
+    const dirX = n.x / flat;
+    const dirZ = n.z / flat;
+    const heading = compass(dirX, dirZ);
+    for (let along = -STEP_REACH; along <= STEP_REACH; along += STEP_LENGTH) {
+      ctx.systems.flight.resetTo({ x: gate.center.x + dirX * along, y: gate.center.y, z: gate.center.z + dirZ * along, heading });
+      await frames(1);
+    }
+    return STEP_REACH;
   }
   /** Resets the craft `distance` m from a point, heading at it from `bearing` (deg), at its height. */
   function aimAt(point, bearing, distance) {
@@ -324,8 +340,15 @@ export function installBatch8Checks(game) {
       return check('forestWisps: as the craft passes over them they fall in behind it and keep up', trailing, { before, phase: guide.phase, behind: Math.round(behindNow()) });
     },
 
-    /** The challenge flow on the live spawn's course (see the file header). */
-    async run(presetId) {
+    /**
+     * The challenge flow on the live spawn's course (see the file header). mode 'fly' resets the craft
+     * short of each gate and lets the flight model fly it through; 'step' sets the craft along each
+     * gate's line a few metres a frame (flight.resetTo), for a course whose gates stand among other
+     * solid things or on a hillside a free run-in cannot reach cleanly (the balloon field, the kite
+     * hill): the course's crossings, splits, medal and best are what it proves there, the clear
+     * openings being proven in tools/lab/presets-71-80.mjs.
+     */
+    async run(presetId, { mode = 'fly' } = {}) {
       const spawn = liveSpawn(presetId);
       const { definition, entry } = courseOf(spawn);
       if (!definition || !entry) return check(`${presetId}: challenge run`, false, { spawn: spawn ? spawn.id : null, note: 'no registered course' });
@@ -339,7 +362,7 @@ export function installBatch8Checks(game) {
       const log = [];
       ctx.setPhotoMode(false);
       for (let index = 0; index < definition.gates.length; index++) {
-        const before = toGate(definition.gates[index]);
+        const before = mode === 'step' ? await stepThrough(definition.gates[index]) : toGate(definition.gates[index]);
         const last = index === definition.gates.length - 1;
         await until(() => {
           const live = challenges.getState();
@@ -372,17 +395,19 @@ export function installBatch8Checks(game) {
       const startedBefore = started.length;
       toGate(definition.gates[0]);
       await until(() => started.length > startedBefore, GATE_TIMEOUT_MS);
-      // Then through the string at half its height, square to it: its ground track is a diagonal of
-      // its bounds (from the stake up to the kite).
+      // Then through the string at the middle of its bounds (the middle of the string), square to its
+      // lean (the strings lean downwind), from whichever side gives the clearer run-in (the hill falls
+      // away on one).
       const { min, max } = string.bounds;
-      const share = 0.5;
-      const point = { x: min.x + (max.x - min.x) * share, y: min.y + (max.y - min.y) * share, z: min.z + (max.z - min.z) * share };
-      const across = (compass(max.x - min.x, max.z - min.z) + 90) % 360;
+      const point = { x: (min.x + max.x) / 2, y: (min.y + max.y) / 2, z: (min.z + max.z) / 2 };
+      const lean = downwindHeading();
+      const sides = [(lean + 90) % 360, (lean + 270) % 360].map((bearing) => ({ bearing, length: runIn(point.x, point.y, point.z, Math.sin(bearing * DEG), -Math.cos(bearing * DEG)) }));
+      const side = sides[0].length >= sides[1].length ? sides[0] : sides[1];
       const sensorsBefore = sensors.length;
       const missesBefore = misses.length;
       const crashesBefore = crashes.length;
-      const before = runIn(point.x, point.y, point.z, Math.sin(across * DEG), -Math.cos(across * DEG));
-      aimAt(point, across, before);
+      const before = side.length;
+      aimAt(point, side.bearing, before);
       const met = await until(() => sensors.slice(sensorsBefore).some((payload) => payload.id === string.id), CONTACT_TIMEOUT_MS);
       await wait(500);
       const live = challenges.getState();
