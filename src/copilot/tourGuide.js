@@ -87,6 +87,17 @@ const NAME_SYNONYMS = Object.freeze([
   [/\b(lens clouds?|ufo clouds?|lenticulars?)\b/g, 'lenticular'],
   [/\b(rainbows?)\b/g, 'glory rainbow'],
   [/\b(spouts?)\b/g, 'waterspout'],
+  // Phase 3, presets 41-50.
+  [/\b(icebergs?|ice ?(cliffs?|fronts?)|tidewater glaciers?)\b/g, 'calving glacier'],
+  [/\b(lagoons?|coral reefs?|ring islands?)\b/g, 'coral atoll'],
+  [/\b(ship ?wrecks?|wrecks?|sunken ships?)\b/g, 'reef shipwreck'],
+  [/\b(porpoises?)\b/g, 'dolphin'],
+  [/\b((rock|sea|stone) arch(es)?)\b/g, 'sea stacks arches'],
+  [/\b(freak waves?|monster waves?|giant waves?)\b/g, 'rogue wave'],
+  [/\b(bores?|river waves?)\b/g, 'tidal bore'],
+  [/\b(bat (caves?|swarms?|colon(y|ies)))\b/g, 'bats at dusk'],
+  [/\b(bison|buffalo(e?s)?|stampedes?)\b/g, 'herd stampede'],
+  [/\b(pink lakes?|flamingoes)\b/g, 'flamingo lake'],
 ]);
 
 /**
