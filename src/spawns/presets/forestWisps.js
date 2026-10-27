@@ -40,7 +40,7 @@ export default Object.freeze({
           }),
         ]),
         guide: Object.freeze({ joinRadius: 500, trailDistance: 35, trailSeconds: 35, speed: 14, height: 12, ceiling: 300, lead: 280, search: 16000, arrive: 140, retarget: 5 }),
-        light: Object.freeze({ color: 0x9fffe8, intensity: 30000, range: 220, offset: Object.freeze([0, 8, 0]), pulse: Object.freeze({ period: 3.5, depth: 0.4 }), priority: 1, night: 1 }),
+        light: Object.freeze({ color: 0x9fffe8, intensity: 6000, range: 220, offset: Object.freeze([0, 8, 0]), pulse: Object.freeze({ period: 3.5, depth: 0.4 }), priority: 1, night: 1 }),
         visibility: Object.freeze({ day: 0, night: 1 }),
         lod: Object.freeze({ near: 1, mid: 1, far: 0.9 }),
         sound: true,
