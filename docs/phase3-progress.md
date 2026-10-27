@@ -1083,24 +1083,57 @@ presets (92-100) use the wave 2 combo scheduling.
 - **Done:** the ten presets in `src/spawns/presets/` (registered under the batch 8 comment), the
   engine extensions they need (see contract additions), the audio recipes `wisps`, `windRush` and
   `burner`, the structure recipes `canyonGates`, `caveTunnel`, `fallsWall`, `balloonCourse` and
-  `kiteSlalom` with `structure/courseKit.js`, the docs (docs/spawns.md rows and sections 71-80,
-  docs/engines/structure.md, lightEffect.md, weatherVolume.md, docs/architecture.md audio), the
-  labs `tools/lab/presets-71-80.mjs` (60 checks) and `tools/lab/preset-flight-71-80.mjs` (16
-  checks: glider, bush plane and jet through the five wind presets), the `?test=spawns` scenarios
-  (`src/dev/spawnScenarios/batch8.js`) and the browser step file `tools/steps/presets-71-80.json`
-  with `src/dev/presetChecksBatch8.js` (run on seed SOAK-1, where all seven site presets have a
-  real site within 38 km).
+  `kiteSlalom` with `structure/courseKit.js`, the tour guide's synonyms (upside-down waterfall,
+  will-o'-the-wisps, cloud street, kite strings), the docs (docs/spawns.md rows and sections 71-80,
+  docs/engines/structure.md, lightEffect.md, weatherVolume.md, docs/architecture.md audio), the labs
+  `tools/lab/presets-71-80.mjs` (61 checks) and `tools/lab/preset-flight-71-80.mjs` (16 checks:
+  glider, bush plane and jet through the five wind presets), the `?test=spawns` scenarios
+  (`src/dev/spawnScenarios/batch8.js`, one import line in spawnScenarios.js) and the browser step
+  file `tools/steps/presets-71-80.json` with `src/dev/presetChecksBatch8.js` (seed SOAK-1, where all
+  seven site presets have a real site within 38 km: real-site build, discovery and journal, wind
+  probes, colliders, strikes into a pillar, the cave's flank and an envelope, a challenge run on
+  every course with its medal toast and best, a kite-string touch counted as a 2 s miss without a
+  crash, and the dispose check of a force spawn of each preset).
 - Resumed from a cut-off session: its uncommitted work was reviewed and committed in pieces; the
   lab's failures were fixed (the wisps allocation check measured the loop's own boxing and ran the
   spawn past its lifetime; the ridge check counted the stub hills' lee sink; the shear line veered
   only 33-37 degrees, now turned square to the wind with a 16 m/s outflow).
-- Tuned by the flight lab: the reverse waterfall's updraft column is 170 m in radius and 10 m/s
-  (75 m was too narrow to ride), and the thermal street has eight thermals of 330 m and 4.2 m/s
-  per row under eight cloud clumps (seven of 260 m gave a glider no net gain).
-- **Next:** the browser runs on both backends, `?test=spawns` for the batch, builds, `test:v1`,
-  every lab.
-- **Open issues:** docs-check fails only the ten row numbers 71-80 (it wants each row's number to be
-  its index in PRESETS, 31-40 on this branch); they match once batches 31-70 are merged.
+- Tuned by the tests: the reverse waterfall's updraft column is 170 m in radius and 10 m/s (75 m was
+  too narrow to ride), and it is no longer heavy (always there, it held a heavy slot and kept the
+  tornado and the volcano's eruption out of the pacing lab's runs); the thermal street has eight
+  thermals of 330 m and 4.2 m/s per row under eight cloud clumps; the kite slalom sits on rolling
+  meadow or dune hilltops (a crag beside a taller mountain put strings into the slope) and lays its
+  course along the gentlest of six lines with every gate above the highest ground of its legs; the
+  cave tunnel's flattened plain is painted basalt scree (the terrain lab wants a paint on every
+  flatten); the wisps' light is 6000 cd (30 000 washed the hillside out) and their shimmer carries a
+  little further (the audio lab's stand-in kept dropping it).
+- **Verified (2026-10-27, once each unless noted):**
+  - `tools/steps/presets-71-80.json` on the dev server (seed SOAK-1): WebGPU 21/21 batch checks and
+    32/32 preset checks, 0 errors / 0 warnings (three earlier runs found the issues above);
+    WebGL2 21/21 and 32/32, 0 / 0.
+  - `run-harness --test spawns --presets <the ten>`: WebGPU and WebGL2 PASS, 10/10 spawned, GPU
+    memory, heap, wind sources, colliders, challenge courses and leak counters back, 0 / 0 console;
+    frame rate reported only (lowest average 43.5 fps WebGPU, 42.8 WebGL2). The reverse waterfall
+    again on both after it stopped being heavy: PASS.
+  - `run-harness --test terrain --presets real` (WebGPU): PASS, 6/6 types, 0 cracks, worker = main
+    723 chunks, 0 / 0.
+  - Labs: presets-71-80 61/61, preset-flight-71-80 16/16, terrain 453/453, structure 75/75, spawns
+    101/101, colliders 84/84, challenges 70/70, director 88/88, discovery 43/43, copilot 240/240,
+    preset-pacing 4/4, preset-wind 12/12, preset-flight 13/13, wind-engines 56/56 (55/56 on the
+    first run: the known windModifierEngine allocation sample), the craft labs, flight-lab 82/82 and
+    every other lab passing; eagle 49/50 beside a browser run (its known allocation check); audio
+    207/209 (the WebGL2 doppler camera-cut check and the waterfall's offline distance render at
+    1.21 dB, the known flaky kinds).
+  - `npm run build`, `npm run build:single` (V1 SHA-256 matches; one `Multiple instances` guard,
+    so one three.js core with three-mesh-bvh; no batch 8 dev kit in the bundle), `npm run test:v1`
+    2/2; the built V2 (dist-single) 0 / 0 on WebGPU and WebGL2, the built shell 0 / 0.
+  - docs-check 275/285: only the ten row numbers 71-80 fail (it wants each row's number to be its
+    index in PRESETS, 31-40 on this branch); they match once batches 31-70 are merged.
+- **Next:** nothing on this branch; ready for the I3 integration pass.
+- **Open issues:** shared files touched beyond this batch's own lines (see the integration notes in
+  the batch report): tools/lab/terrain.mjs (Phase 2 site hash over the Phase 2 presets, SOAK-2 for
+  rare stamped sites), tools/lab/audio.mjs (a voice budget for every recipe), src/copilot/
+  tourGuide.js (synonyms), src/dev/spawnScenarios.js (one import and one spread line).
 
 ### Wave 4: discovery and verification, then the tag
 
