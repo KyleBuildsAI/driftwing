@@ -1353,6 +1353,48 @@ plus the last two).
 
 ---
 
+## l. Wave 3 additions for presets 41-50 (branch `p3/presets-41-50`, additive)
+
+Nothing above changed meaning; every existing preset behaves as before (each new layer term, stamp,
+behaviour and recipe is exactly inert until a preset uses it).
+
+- **Water effects layer** (`src/render/waterEffects.js`, `WATER_EFFECT_LIMITS` gains `waves: 4`,
+  `shallows: 4`): travelling waves (`createWave`, `acquireWave`, `setWave`, `releaseWave`,
+  `activeWaves`; a sech-squared crest, a straight front with tapered ends or a ring) and shallows
+  regions (`createShallows`, `acquireShallows`, `setShallows`, `releaseShallows`; clear tinted water
+  with an optional surf ring). Both share one packed `vec4` uniform array. `surfaceHeightAt` adds the
+  waves' lift, and the water query (c.2) reads it whenever a vortex or a wave is live, so every
+  `ctx.waterQuery` caller rides a passing wave. The ocean material (c.4) takes `nodes.shallows()`
+  (exactly zero outside every region). `stats()` adds `waves`, `shallows`.
+- **waterEffect engine:** effects `wave` (with `estuary` mode on an `estuary` stamp, a repeating
+  `interval`, the voice's `crash` once per run) and `shallows` (fitted to an `atoll` or `reef`
+  stamp's published `shallows`), and `describe(instance)`.
+- **Stamps** (`STAMP_TYPES` and `STAMP_PAINTS`, appended): `atoll`, `reef`, `seaStacks`, `estuary`;
+  paint `coral`. The atoll and the reef publish `shallows`; the estuary finds the shore along its
+  forward axis and fits only where its channel runs through land; its lifts fade out under open water.
+- **Structure engine:** recipes `glacier`, `shipwreck`, `seaArches` (on `seaStacks`), `caveMouth`
+  (`RECIPE_STAMP_TYPES` appended); movers (`structure/movers.js`: drifting and calving parts on the
+  pooled `structure-movers` meshes, each with a hull collider posed every frame, removed with the
+  instance); `out.underwater` (the solid material's depth shading, inert at 0); the context's
+  `worldGround`, `newBuilder`, `addMover`, `setCalving`, `setNavigation`; the collider helper
+  `localHeightfield`; `setParam(instance, 'calve', 1)`; `describe(instance)`; the bus event
+  `structure:calve` `{ spawnId, presetId, slab, stage: 'crack' | 'splash', position }`.
+- **Fauna engine:** the behaviour `stream` (a flyer ribbon out of a cliff face, `stream` params, a
+  pure function of the group clock) and the species `bat`; `describe()` adds `emerged` and `mouth`.
+  `src/spawns/engines/cliffFace.js` (pure) is the one cliff-face search the cave mouth and the
+  stream share.
+- **Audio recipes** (appended in Milestone G order): `surf` (`crash`), `herd` (`bellow`), `calving`
+  (`crack`, `splash`), `dolphin` (`call`).
+- **Docs check:** spawn table rows carry the preset's spec number (the "Preset NN" of its file's first
+  line), the same change as batch 81-90, so a batch branch passes before the others merge.
+- **Terrain lab:** shape and paint checks for the four stamps, the Phase 2 world rebuilt from the
+  Phase 2 presets alone (the same change as batch 81-90), and `REAL_SITE_SEEDS` (`P3-B5-22`), where a
+  tidal bore lies within the lab's 30 km search.
+- **Tests:** `src/dev/presetChecks41.js` with `tools/steps/presets-41-50.json` (seed `P3-B5-37`, which
+  holds all six of the batch's sites within 35 km), `src/dev/spawnScenarios/batch41.js`.
+
+---
+
 ## Appendix A. Wave 1 file ownership
 
 | engineer | branch | owns (creates or edits freely) | edits only at the anchors of 0.1 |
