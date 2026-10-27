@@ -14,7 +14,8 @@ salt flat on the same layer.
 Preset authors use this page as the reference. A preset names the engine as
 `{ engine: 'waterEffect', params: { effect: '...', ... } }`. One engine entry is one effect. A preset
 lists several entries to combine effects, for example a bay with splashes. A bad `effect` throws
-`waterEffect: params.effect must be one of whirlpool, splash, spray, bioluminescence, plungePool`.
+`waterEffect: params.effect must be one of whirlpool, splash, spray, bioluminescence, plungePool, wave,
+shallows`.
 
 ## The water effects layer
 
@@ -45,6 +46,18 @@ vortex, emitter, setPiece and so on) call it directly. It is the generic disturb
   ambient wind, as mist that grows. They are lit by the sun and sky and glow inside a glow region.
 - **Pools (4 slots).** Local water discs above sea level, such as a waterfall's plunge pool, with
   churning foam.
+- **Travelling waves (4 slots, Phase 3).** A solitary crest moving across the ocean: a sech-squared
+  hump whose front face is steeper than its back (`lean`), displaced into the swell, with white water
+  on the crest and the front face breaking up into drifting lace. A straight front fades out over
+  `taper` metres at its crest's ends (a rogue wave, a tidal bore); a ring spreads in every direction
+  from its origin (a calving glacier's wave). The CPU twin `surfaceHeightAt` adds the same lift, so
+  the shared water query (`ctx.waterQuery`) reports it and a craft or a floating berg rides it.
+- **Shallows regions (4 slots, Phase 3).** Clear water over a lagoon or a reef: inside the disc the
+  ocean's body colour turns toward the region's tint and loses up to 62 % of its opacity (by
+  `clarity`, less at grazing angles), so the seabed, its stamp paint and a wreck read through it. An
+  optional surf ring breaks along a reef crest in sets of breakers.
+- **One packed uniform array.** The waves and the shallows share one `vec4` uniform array (three
+  vectors each), because a shader stage may bind only 12 uniform buffers on WebGPU.
 - **No cost at rest.** With nothing registered and an empty trail buffer, every added term is exactly
   zero and the shader skips the work (uniform branches). The ocean then renders exactly as in
   Phase 1. The layer's `stats()` then reads 0 vortices, glow regions, pools and trail rows, which
@@ -77,10 +90,12 @@ Positions are world metres, and strengths are 0..1.
 | `createVortex(overrides)`, `acquireVortex()`, `setVortex(slot, vortex)`, `releaseVortex(slot)` | a whirlpool slot (-1 when all 4 are in use) |
 | `createGlowRegion(overrides)`, `acquireGlowRegion()`, `setGlowRegion(slot, region)`, `releaseGlowRegion(slot)` | a glow region slot. The descriptor is `{ x, z, radius, strength, surf, color }` (defaults 0, 0, 900, 1, 0.6, 0x1f9dff). The layer has one glow colour: the last one set |
 | `createPool(overrides)`, `acquirePool()`, `setPool(slot, pool)`, `releasePool(slot)` | a pool disc slot |
-| `surfaceHeightAt(x, z)` | sea level plus every vortex funnel (the swell is excluded). Engines use it to keep things on the water. Away from every funnel it returns sea level itself, so nothing is allocated |
-| `activeVortices` | how many whirlpool vortices are live. While it is 0 the surface is sea level everywhere, so a hot loop can skip `surfaceHeightAt` |
+| `createWave(overrides)`, `acquireWave()`, `setWave(slot, wave)`, `releaseWave(slot)` | a travelling wave slot (-1 when all 4 are in use). The descriptor is `{ x, z, dirX, dirZ, front, height, width, lean, crestLength, taper, ring, foam, weight }` (defaults 0, 0, 1, 0, 0, 4, 40, 0.3, 400, 120, false, 0.8, 1): the origin, the travel direction (normalised by `setWave`), the crest's distance along it (a ring's radius, m), its height (m), the hump's half width (m; the front face is `1 - 0.6 lean` of it, the back `1 + 0.6 lean`), the crest's half length across the travel and its end taper (m, a straight front), foam 0..1 and weight 0..1 |
+| `createShallows(overrides)`, `acquireShallows()`, `setShallows(slot, region)`, `releaseShallows(slot)` | a shallows region slot. The descriptor is `{ x, z, radius, fade, color, clarity, surfRadius, surfWidth, surf, weight }` (defaults 0, 0, 400, 120, 0x46d6c8, 0.7, 0, 14, 0, 1): a disc fading out over its outer `fade` metres, its sRGB tint and clarity 0..1, and a surf ring at `surfRadius` (0: none), `surfWidth` wide, of strength `surf` |
+| `surfaceHeightAt(x, z)` | sea level plus every vortex funnel and travelling wave (the swell is excluded). Engines use it to keep things on the water. Away from every funnel and wave it returns sea level itself, so nothing is allocated |
+| `activeVortices`, `activeWaves` | how many whirlpool vortices and travelling waves are live. While both are 0 the surface is sea level everywhere, so a hot loop can skip `surfaceHeightAt` |
 | `craftContact` | `{ touching, stirring, height, contacts }`: the craft's height above the water at the last frame (above sea level while the craft is higher than the 14 m downwash reach) |
-| `stats()` | `{ vortices, ripples, glowRegions, pools, droplets, dropletsDropped, splashesDropped, trailRows, trailUploads, craftContacts, craftHeight }` |
+| `stats()` | `{ vortices, ripples, glowRegions, waves, shallows, pools, droplets, dropletsDropped, splashesDropped, trailRows, trailUploads, craftContacts, craftHeight }` |
 
 | spray field | unit | default | notes |
 | --- | --- | --- | --- |
@@ -122,6 +137,8 @@ Positions are world metres, and strengths are 0..1.
 | `spray` | a continuous spray ring on the water with a foam ring and swirl. `follow` makes it track another part of the same spawn | the waterspout's base |
 | `bioluminescence` | a glow region: glowing surf on the swell crests, plankton flashes near the camera, and every trail in the water glows (the craft, whales, spray) | bioluminescent bay |
 | `plungePool` | a waterfall's plunge pool: a local water disc where the pool lies above the sea (from the site's `cliffStep` stamp), churning foam, rising mist and ripples | mega-waterfall |
+| `wave` | a travelling wave (Phase 3): a straight crest with tapered ends crossing the ocean or an expanding ring, with foam and spray along its crest; on a site with an `estuary` stamp it surges up the channel from the mouth and repeats. The water query lifts the surface with it, so craft ride it | rogue wave, tidal bore |
+| `shallows` | clear turquoise water over a lagoon or a reef (Phase 3), fitted to a site's `atoll` or `reef` stamp, with an optional surf ring breaking along the reef crest | coral atoll, reef shipwreck |
 
 The whale pod's own wakes, spouts and breach splashes come from the fauna engine through the layer
 API, so a whale pod needs no waterEffect entry. A pod inside a bioluminescent bay glows by itself.
@@ -219,12 +236,60 @@ The glow brightens with the night factor, so a bay preset should use the filter
 - **Pools at sea level.** A pool that would not stand at least 0.5 m above the sea becomes churn on
   the ocean itself, with ripples and foam.
 
+### wave
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `mode` | id | `'front'`, `'ring'` | `'front'` | a straight crest, or a ring spreading from the anchor |
+| `height` | m | > 0 | 12 | the crest's height (x scale) |
+| `width` | m | > 0 | 45 | the hump's half width (x scale) |
+| `lean` | 0..1 | | 0.45 | how much steeper the front face is than the back |
+| `crestLength` | m | > 0 | 700 | a front's crest half length across its travel (x scale) |
+| `taper` | m | | 250 | a front's crest fades out over this many metres at each end (x scale) |
+| `speed` | m/s | > 0 | 16 | |
+| `travelHeading` | deg | | 90 | a front's travel heading, relative to the activation's heading (90: across the player's view) |
+| `start` | m | | 1500 | a front starts this far behind the anchor on its travel heading, so it crosses the anchor `start` metres into its run |
+| `travel` | m | > 0 | 3000 | how far a run goes; it fades in over its first 220 m and out over its last 320 m |
+| `growth` | factor | > 0 | 1 | the height grows (or shrinks) to `growth` x over the run (a bore in a narrowing channel) |
+| `spreadLoss` | m | > 0 | 150 | a ring's height falls as 1 / sqrt(1 + front / spreadLoss) |
+| `interval` | s, `[min, max]` or null | | null | null: one run, then the instance ends. Otherwise the wave rests this long between runs (a site's bore); the first run starts within a quarter of the shortest rest |
+| `spray` | droplets/s | >= 0 | 300 | spray off the crest, from up to 6 points along it per frame (x 0.35 at mid) |
+| `sprayHeight` | m/s | | 9 | the spray's launch speed |
+| `foam` | 0..1 | | 0.85 | |
+| `estuary` | bool | | false | on a site with an `estuary` stamp the crest starts at the stamp's mouth, travels up the channel (its whole length) and spans the channel's width where it is now |
+| `glow` | 0..1 | | 0 | |
+
+- **The anchor rides the crest.** A front with a duration (an event) moves its instance's anchor
+  with the crest's centre, so discovery, the despawn rule and the map follow the wave.
+- **The voice** sits on the crest point nearest the camera, and plays `crash` once per run as the
+  crest reaches full height (the surf recipe's big breaker).
+
+### shallows
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `radius` | m | | 500 | the disc (x scale) when no stamp fits it |
+| `fade` | m | | 150 | its soft outer edge (x scale) |
+| `color` | 0xRRGGBB | | 0x3fd8c9 | the clear water's tint (sRGB) |
+| `clarity` | 0..1 | | 0.75 | how far the body colour turns to the tint, and how much opacity it loses |
+| `surf` | 0..1 | | 0 | the surf ring's strength (0: none) |
+| `surfRadius` | m or null | | null | the surf ring's radius without a stamp (null: the disc's radius) |
+| `surfWidth` | m | | 16 | the surf band's width without a stamp |
+| `stamp` | index or null | | null | the site stamp to fit: an `atoll` or `reef` stamp publishes its clear water (`shallows`: x, z, radius, fade, surfRadius, surfWidth). Null takes the site's first such stamp |
+
+The voice sits on the surf ring at the point nearest the camera (inside the ring, under the camera).
+
+`describe(instance)` (dev tools and tests) returns `{ effect, tier, fade, slots, wave, shallows }`:
+a wave's run (`running`, `runs`, `front`, `travel`, `height`, `weight`, its origin and direction,
+`crestLength`, `ring`, `estuary`) and a shallows region's disc (`x`, `z`, `radius`, `surfRadius`,
+`clarity`, `weight`).
+
 ## LOD
 
 | tier | what runs |
 | --- | --- |
 | near | everything |
-| mid | the vortex, glow region and pool stay. Spray and mist run at 0.35 x their rate, with no plankton flashes |
+| mid | the vortex, glow region, pool, wave and shallows stay. Spray and mist run at 0.35 x their rate, with no plankton flashes |
 | far | the slots are released and the spray stops (the ocean grid ends 4 km from the camera, so the pool and the glow are invisible there). They are taken again on the way back in |
 
 - **Slots are pooled.** When the layer's slots are full, an instance retries once a second and
@@ -278,6 +343,12 @@ waterEffect` samples the heap profiler over 3000 frames of the busiest scene and
 { engine: 'waterEffect', params: { effect: 'spray', follow: 0, ringRadius: 18, rate: 220 } }
 // Mega-waterfall plunge pool (site; the cliffStep stamp places it)
 { engine: 'waterEffect', params: { effect: 'plungePool', churn: 0.9, mistRate: 160 } }
+// Rogue wave crossing the player's view (event)
+{ engine: 'waterEffect', params: { effect: 'wave', height: 14, width: 48, crestLength: 900, speed: 16, start: 1800, travel: 3600 } }
+// Tidal bore up an estuary stamp, every 45-90 s (site)
+{ engine: 'waterEffect', params: { effect: 'wave', estuary: true, height: 2.4, width: 18, growth: 1.5, speed: 8, interval: [45, 90] } }
+// Clear lagoon water with surf on the reef crest, fitted to an atoll stamp (site)
+{ engine: 'waterEffect', params: { effect: 'shallows', color: 0x3fdccb, clarity: 0.85, surf: 0.85 } }
 ```
 
 ## Cost

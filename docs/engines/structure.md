@@ -50,6 +50,10 @@ The frame: a compass `heading` (degrees) from the activation; `along` is forward
 | `gates` | a timed course: start and finish gates marked by cairns with pennants, an optional river down the canyon floor | `carve` | a timed course, a journal best run, an optional corridor |
 | `waterfall` | a river spilling over the cliff step as a wide curtain of falling strands into the plunge pool, the river on downstream, boulders and mist puffs | `cliffStep` | a voice at the pool (the `waterfall` recipe) |
 | `challengeGates` | the gate frames of the preset's `challenge` course: posts and a lintel for rectangle gates, a hoop on a post for circle gates, pennants (white start, red checkpoints, chequered finish) | none | a challenge course registered with the challenge system (start prompt, splits, medals, bests per craft) |
+| `glacier` | a tidewater glacier: a crevassed ice tongue down the heading to an ice cliff in the sea, calving slabs along its front and a field of drifting icebergs | none | movers (calving slabs, drifting bergs), a landable heightfield top with a perch, the front as solid boxes |
+| `shipwreck` | an old wooden sailing ship broken in two in a reef's sand hollow, listing, its mainmast breaking the surface, cannon, barrels and planks on the sand | `reef` | underwater shading, collider hulls for the halves, capsules for the masts |
+| `seaArches` | the rock lintel over each pair of arch legs a `seaStacks` stamp raises, rubble on the shelf below | `seaStacks` | a fly-through gate per arch (optional achievement), box colliders along each lintel with a perch on top |
+| `caveMouth` | the mouth of a cave on the steepest high face near the anchor: a hood of broken rock around a dark opening, a black throat and a rubble apron | none | a collider hull for the hood; ends at once with no face in reach |
 
 Without its stamp (a debug spawn, or a site whose preset lists none) every recipe still builds:
 the bridge spans `span` metres across the heading on trestles, the strip is draped along the
@@ -219,6 +223,70 @@ The curtain reads the stamp's lip, top and pool levels (`topY`, `bottomY`, `pool
 the waterEffect `plungePool`, an emitter mist at the pool, the celestial `rainbow` and a windModifier
 `curtain` (the mega-waterfall preset).
 
+## glacier
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `length`, `width` | m | 300..6000, 80..2000 | [1400, 1900], [380, 540] | the tongue, down the heading (it narrows to 60 % inland) |
+| `frontHeight` | m | 5..150 | [34, 48] | the ice cliff above the sea |
+| `thickness` | m | 5..200 | [28, 44] | the ice over the ground inland |
+| `slope` | rise over run | 0..0.3 | 0.04 | the surface's rise inland from the front |
+| `reach` | m | 200..10000 | 2600 | how far down the heading the front is looked for: where it first meets water 1.5 m deep (else halfway down the tongue) |
+| `slabs` | count | 0..8 | [3, 5] | calving slabs along the front |
+| `slabDepth` | m | 4..60 | [12, 18] | a slab's thickness along the face normal |
+| `bergs` | count | 0..16 | [6, 9] | drifting icebergs before the front |
+| `bergSize` | m | 3..120 | [10, 30] | a berg's radius at the waterline (tabular or pinnacle) |
+| `bergSpread` | m | 100..5000 | 900 | the berg field's reach; a berg's leash is 0.65 of it |
+| `bergSpeed` | m/s | 0..5 | [0.35, 1] | |
+| `interval` | s | 5..3600 | [40, 80] | between calvings |
+| `first` | s | 0..3600 | [8, 18] | until the first calving |
+| `wave` | `{ height, width, speed, travel }` | | `{ 2.6, 16, 9, 900 }` | the ring wave each plunge sends across the water (the water layer's travelling waves) |
+
+The tongue's top is a heightfield collider (`landable`, `perch`, surface `ice`) built from the same
+triangulated grid as the mesh, so landings use the exact top; the front cliff is a row of solid
+boxes reaching 18 m under the sea. Bergs drift only where a navigable grid (40 m cells over the
+field, sampled once at create) has water at least 5 m deep, and turn about at a shoal.
+
+## shipwreck
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `length`, `beam` | m | 10..120, 3..30 | [34, 46], [9, 12] | the ship |
+| `list` | deg | 0..60 | [18, 32] | the halves lie over to a seeded side |
+| `buried` | m | 0..6 | [1.2, 2.2] | how deep the keel sits in the sand |
+| `gap` | m | 0..40 | [6, 10] | between the bow and the stern half |
+| `mastRise` | m | 0.5..20 | [2.5, 4.5] | how far the mainmast's top stands out of the sea |
+
+On a `reef` stamp the wreck lies in its sand hollow (`pocketY`); free-standing it lies on the ground
+under the anchor. The recipe sets `out.underwater`: the structure's parts below the sea shade toward
+the seabed's depth colour (turquoise shallows to deep blue by 12 m, as the terrain does), so the
+wreck reads through the clear water of a waterEffect `shallows` entry.
+
+## seaArches
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `thickness` | m | 3..40 | [9, 13] | the lintel's thickness at its crown |
+| `rise` | m | 0..40 | [6, 10] | how far its underside arches up between the legs |
+| `segments` | count | 4..32 | 12 | lintel segments (a box collider each) |
+| `span`, `height` | m | 10..200 | [44, 60], [30, 40] | free-standing only: without a `seaStacks` stamp the recipe raises one arch across the heading, legs and all |
+| `gate` | `{ id, achievement }` | | `{ id: 'arch', achievement: null }` | the fly-through gate under every arch (`arch0`, `arch1`, ... with two or more); `achievement` `{ id, title }` is sent on the first pass |
+
+The stacks and the arch legs are terrain (the `seaStacks` stamp), solid as ground; the lintels are
+box colliders with a perch at the middle of each.
+
+## caveMouth
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `search` | m | 100..6000 | 1500 | the cliff-face search radius around the anchor (`src/spawns/engines/cliffFace.js`) |
+| `width`, `height`, `depth` | m | 3..60, 2..40, 2..80 | [11, 16], [7, 10], [10, 15] | the opening and its throat |
+| `requireFace` | bool | | true | with no face in reach the part ends at once (an activation whose every part ends is declined); false builds the mouth at the anchor |
+
+A face is the steepest ground (rise over run at least 0.55, at least 25 m above the sea) on a 13 x 13
+grid over the search square, high ground winning among the steep. The fauna engine's `stream`
+behaviour runs the same search from the same anchor, so a preset's bats pour out of this mouth.
+
 ## challengeGates
 
 | param | unit | range | default | notes |
@@ -356,6 +424,29 @@ spheres, the islands' rock body (four wedge hulls of the actual ring vertices), 
 roots. Props under 2 m tall carry none. The node labs run the engine without a collider service and
 skip all of it.
 
+Phase 3 adds `localHeightfield(part, x0, z0, cell, cols, rows, heights, bottom, surfaceHeightAt, tags)`
+(a landable top such as the glacier's; `surfaceHeightAt` publishes the exact top for landings) and
+mover hulls (below).
+
+### Movers (Phase 3)
+
+Rigid parts that move after the build, each on its own pooled mesh (`structure-movers`, 64 across
+every live structure) with its collider hull turned with it every frame (`setPose`):
+`context.addMover({ builder, x, y, z, yaw, motion, hull, drift, calve })`, with `context.newBuilder()`
+for the part's own geometry, `context.setCalving({ interval, first, wave })` and
+`context.setNavigation(grid)` (`structure/movers.js`).
+
+- `drift`: a floating body rides the sea (the water layer's surface, so a passing wave lifts it) with
+  a slow bob and rock, drifts on a heading that turns lazily, back toward home past its leash, and
+  turns about where the navigable grid has no water deep enough.
+- `calve`: a slab rests flush with an ice face until its turn (the calving schedule, or
+  `setParam('calve', 1)`), shudders for 1.6 s as the crack rings out (`crack` on the voice), topples
+  outward about its outer base edge for 3.4 s and plunges (a splash, a ring wave and `splash` on the
+  voice), floats away for 70 s, melts under the surface over 24 s and slides back out of the face
+  over 30 s. The crack and the plunge each emit `structure:calve`.
+- The far tier hides the mover meshes; dispose releases them, disposes their geometries and gives
+  back the ring wave's slot.
+
 ### Wind
 
 The wind farm's wake is a WindField source (`kind: 'structure-wake'`, id `<spawnId>:wake`): slower,
@@ -377,7 +468,13 @@ The level is sent at most 10 times a second and only when it moves by 0.01.
 `instance.params` holds live multipliers a set piece's ramps write directly: `glow` (the emissive
 and crystal glow), `sway` (the sway amplitude), `rotorSpeed` (the turbine speed) and `audio` (the
 voice level), all 1 by default. `engine.setParam(instance, name, value)` sets the same numbers and
-returns whether the name is known.
+returns whether the name is known. `setParam(instance, 'calve', 1)` starts the next calving of a
+structure with calving slabs at once (a set piece, the checks).
+
+`engine.describe(instance)` (dev tools and tests) returns `{ recipe, colliders, underwater, movers }`:
+the movers' count, calvings so far, whether a ring wave is running and each mover's motion, status
+(`attached`, `cracking`, `toppling`, `floating`, `melting`, `regrowing` or `drifting`), position and
+collider id.
 
 ## Events
 
@@ -386,6 +483,7 @@ returns whether the name is known.
 | `structure:gate` | bus | `{ spawnId, presetId, siteId, gate, kind, direction }` |
 | `structure:course` | bus | `{ spawnId, presetId, siteId, course, time, clean }` |
 | `structure:landing` | bus | `{ spawnId, presetId, siteId, zone, runway, grade, sinkRate, centreline, fromThreshold, score, rating }` |
+| `structure:calve` | bus | `{ spawnId, presetId, slab, stage: 'crack' \| 'splash', position }` (a calving slab breaks away, then hits the sea) |
 | `achievement` | typed | `{ id, title }` (a gate's achievement) |
 | `journalStat` | typed | `{ key, value, op: 'min', presetId }` (a clean course run with `journal`) |
 | `notify` | bus | course times and landing scores |
