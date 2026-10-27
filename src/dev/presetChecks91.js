@@ -65,6 +65,56 @@ function memberFixture(id) {
   });
 }
 
+/** A sky framing aimed at a comet looks this much (direction y) above its head, at its tail. */
+const SKY_FRAME_LIFT = 0.12;
+/** The ridge strike: the run-up (m) short of the ridge, and the craft's lowest probe over the ice (m). */
+const RIDGE_RUN_UP_M = 30;
+const RIDGE_PROBE_CLEARANCE_M = 0.7;
+const RIDGE_PROBE_HIGHEST_M = 1.2;
+/** The lowest probe flies at least this far (m) under the ridge's crest. */
+const RIDGE_CREST_MARGIN_M = 0.5;
+/** The ground under a run-up is sampled this often (m); it must stay this far (m) under the ice. */
+const RIDGE_LANE_STEP_M = 3;
+const RIDGE_LANE_ICE_MARGIN_M = 0.2;
+/** The flight controller's contact probe radius (m), for craft that declare no probes. */
+const CONTACT_PROBE_RADIUS_M = 0.35;
+
+/**
+ * The run-up across a ridge capsule from one side (side 1 or -1): { middle, acrossX, acrossZ } with
+ * the across direction pointing at the ridge, or null when the ground under the run-up rises to the
+ * ice (a shore) before the ridge.
+ */
+function ridgeLane(world, capsule, side, level) {
+  const ends = capsule.ends;
+  const middle = { x: (ends[0] + ends[3]) / 2, y: (ends[1] + ends[4]) / 2, z: (ends[2] + ends[5]) / 2 };
+  const alongX = ends[3] - ends[0];
+  const alongZ = ends[5] - ends[2];
+  const length = Math.hypot(alongX, alongZ) || 1;
+  const acrossX = (-alongZ / length) * side;
+  const acrossZ = (alongX / length) * side;
+  for (let distance = RIDGE_RUN_UP_M + 10; distance >= 0; distance -= RIDGE_LANE_STEP_M) {
+    if (world.groundHeight(middle.x - acrossX * distance, middle.z - acrossZ * distance) > level - RIDGE_LANE_ICE_MARGIN_M) return null;
+  }
+  return { middle, acrossX, acrossZ };
+}
+
+/**
+ * How far (m, negative: below) the craft's lowest collision probe sits under its centre of mass in
+ * level flight: its declared probes, or its contact points (src/flight/FlightController.js
+ * buildCollisionProbes), less the probe radius.
+ */
+function lowestProbeOffset(craft) {
+  const centre = craft.simProfile && craft.simProfile.centerOfMass ? craft.simProfile.centerOfMass : [0, 0, 0];
+  const declared = craft.collision && Array.isArray(craft.collision.probes) && craft.collision.probes.length > 0 ? craft.collision.probes : null;
+  const points = declared ?? (craft.simProfile && Array.isArray(craft.simProfile.contacts) ? craft.simProfile.contacts : []);
+  let lowest = 0;
+  for (const point of points) {
+    const radius = Number.isFinite(point.radius) ? point.radius : CONTACT_PROBE_RADIUS_M;
+    lowest = Math.min(lowest, point.position[1] - centre[1] - radius);
+  }
+  return lowest;
+}
+
 /** Resolves after `seconds` of wall time, frame by frame. */
 async function seconds(duration) {
   const until = performance.now() + duration * 1000;
@@ -198,46 +248,48 @@ export function installPresetChecks91(game) {
       const record = open.get('frozenLake');
       const part = record && record.mainId ? partOf(record.mainId, 'structure') : null;
       if (!part || part.colliderIds.length === 0) return check('frozenLake: ridge strike', false, 'no ridge colliders');
-      // The longest ridge stretch (a capsule's ends, world space).
+      const level = record.site.waters[0].level;
+      // The ridge stretch (a capsule's ends, world space) whose crest stands highest over the ice, with a
+      // run-up across it that stays over the ice (no shore under the craft before it meets the ridge).
       let ridge = null;
-      let longest = 0;
+      let crestBest = -Infinity;
       for (const id of part.colliderIds) {
-        const record = ctx.colliders.get(id);
-        if (!record || record.type !== 'capsule') continue;
-        const ends = record.ends;
-        const span = Math.hypot(ends[3] - ends[0], ends[5] - ends[2]);
-        if (span > longest) {
-          longest = span;
-          ridge = record;
+        const candidate = ctx.colliders.get(id);
+        if (!candidate || candidate.type !== 'capsule') continue;
+        const ends = candidate.ends;
+        if (Math.hypot(ends[3] - ends[0], ends[5] - ends[2]) < 4) continue;
+        const crest = (ends[1] + ends[4]) / 2 + candidate.shape[0] - level;
+        if (crest <= crestBest) continue;
+        for (const side of [1, -1]) {
+          const lane = ridgeLane(ctx.world, candidate, side, level);
+          if (!lane) continue;
+          crestBest = crest;
+          ridge = { record: candidate, ...lane };
+          break;
         }
       }
-      if (!ridge || longest < 4) return check('frozenLake: ridge strike', false, 'no ridge stretch longer than 4 m');
-      const a = { x: ridge.ends[0], y: ridge.ends[1], z: ridge.ends[2] };
-      const b = { x: ridge.ends[3], y: ridge.ends[4], z: ridge.ends[5] };
-      const middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 };
-      const alongX = b.x - a.x;
-      const alongZ = b.z - a.z;
-      const length = Math.hypot(alongX, alongZ) || 1;
-      const acrossX = -alongZ / length;
-      const acrossZ = alongX / length;
+      if (!ridge) return check('frozenLake: ridge strike', false, 'no ridge stretch longer than 4 m with a run-up over the ice');
+      const { middle, acrossX, acrossZ } = ridge;
       const hit = { t: 0, point: new THREE.Vector3(), normal: new THREE.Vector3(), id: null, owner: null, tags: null, velocity: new THREE.Vector3() };
       const from = new THREE.Vector3(middle.x - acrossX * 40, middle.y, middle.z - acrossZ * 40);
       const to = new THREE.Vector3(middle.x + acrossX * 40, middle.y, middle.z + acrossZ * 40);
       const swept = ctx.colliders.sweepSphere(from, to, 0.5, { sensors: false, landableTops: true }, hit);
-      // The craft, out of photo mode, 90 m short of the ridge, heading across it, its body just over the
-      // ridge's crest so its landing gear (contact probes) meets the ridge clear of the ice.
+      // The craft, out of photo mode, RIDGE_RUN_UP_M short of the ridge, heading across it, level, its
+      // lowest probe clear of the ice but under the crest, so it meets the ridge and nothing before it.
       ctx.setPhotoMode(false);
       const crashesBefore = events.crashes.length;
       const heading = (Math.atan2(acrossX, -acrossZ) * 180) / Math.PI;
-      ctx.systems.flight.resetTo({ x: from.x - acrossX * 50, y: middle.y + ridge.shape[0] + 0.3, z: from.z - acrossZ * 50, heading });
+      const lowestProbe = lowestProbeOffset(ctx.systems.flight.getCraftModule());
+      const probeHeight = Math.max(RIDGE_PROBE_CLEARANCE_M, Math.min(crestBest - RIDGE_CREST_MARGIN_M, RIDGE_PROBE_HIGHEST_M));
+      ctx.systems.flight.resetTo({ x: middle.x - acrossX * RIDGE_RUN_UP_M, y: level + probeHeight - lowestProbe, z: middle.z - acrossZ * RIDGE_RUN_UP_M, heading });
       const started = performance.now();
       while (events.crashes.length === crashesBefore && performance.now() - started < 8000) await frames(1);
       const crash = events.crashes.slice(crashesBefore)[0] ?? null;
       const player = state.player.position;
       const passed = (player.x - middle.x) * acrossX + (player.z - middle.z) * acrossZ;
       return check("frozenLake: a ridge is solid (a swept sphere hits it; a craft flown into it soft-crashes 'structure strike', never through)",
-        swept && hit.id === ridge.id && crash !== null && crash.reason === 'structure strike' && passed < 5,
-        { swept, hitId: hit.id, ridge: ridge.id, crash: crash ? { reason: crash.reason, speed: Math.round(crash.impactSpeed) } : null, beyondRidge: Math.round(passed * 10) / 10 });
+        swept && hit.id === ridge.record.id && crash !== null && crash.reason === 'structure strike' && passed < 5,
+        { swept, hitId: hit.id, ridge: ridge.record.id, crestOverIce: Math.round(crestBest * 100) / 100, lowestProbeOverIce: Math.round(probeHeight * 100) / 100, crash: crash ? { reason: crash.reason, speed: Math.round(crash.impactSpeed) } : null, beyondRidge: Math.round(passed * 10) / 10 });
     },
 
     /**
@@ -353,7 +405,7 @@ export function installPresetChecks91(game) {
       const record = open.get(presetId);
       const main = record.mainId ? manager.getInstance(record.mainId) : null;
       if (!main) return check(`${presetId}: valley`, false, 'no live spawn');
-      const anchor = main.anchor;
+      const anchor = main.position;
       const anchorY = ctx.world.groundHeight(anchor.x, anchor.z);
       let lower = 0;
       for (let index = 0; index < 16; index++) {
@@ -362,7 +414,7 @@ export function installPresetChecks91(game) {
         if (y < anchorY - 1 && y > ctx.world.WATER_LEVEL + 4) lower++;
       }
       const members = comboSpawns(record.comboId).filter((spawn) => spawn.id !== record.mainId).map((spawn) => {
-        const memberAnchor = manager.getInstance(spawn.id).anchor;
+        const memberAnchor = spawn.position;
         return { presetId: spawn.presetId, distance: Math.round(Math.hypot(memberAnchor.x - anchor.x, memberAnchor.z - anchor.z)) };
       });
       return check(`${presetId}: the combo stands in a valley (no dry ground 400 m round it lower), its members around it`, lower <= 3 && members.every((member) => member.distance < 1600),
@@ -402,6 +454,9 @@ export function installPresetChecks91(game) {
 
     /** The midnight sun at full weight: the sun up at midnight; released, it sets again. */
     async midnightSun(presetId) {
+      // Out of the photo mode a framing left on: the game (and the director's override schedule) runs.
+      ctx.setPhotoMode(false);
+      await frames(2);
       const started = performance.now();
       let entry = null;
       while (performance.now() - started < 20000) {
@@ -423,7 +478,8 @@ export function installPresetChecks91(game) {
     /**
      * Frames an open check: view.mode 'sky' (from the craft toward view.direction { azimuth, elevation },
      * or the main spawn's sky anchor), 'sun' (toward the sun), 'antisolar' (down-sun from beside the
-     * craft), or the world (target = the place plus lift, from distance and height at bearing).
+     * craft), or the world (target = the place, or with view.at 'spawn' the main spawn's own spot, plus
+     * lift, from distance and height at bearing).
      */
     async frame(presetId, view = {}) {
       const record = open.get(presetId);
@@ -446,15 +502,28 @@ export function installPresetChecks91(game) {
           direction.y = Math.max(direction.y + 0.12, 0.05);
           direction.normalize();
         } else {
-          const anchor = record.mainId ? manager.getInstance(record.mainId).anchor : null;
-          direction = anchor ? new THREE.Vector3(anchor.x - position.x, anchor.y - position.y, anchor.z - position.z).normalize() : new THREE.Vector3(0, 1, 0);
+          // The main spawn's comet (its head, lifted a little so the tail and the fragments show), or
+          // the direction of its position from the camera.
+          const celestial = record.mainId ? partOf(record.mainId, 'celestial') : null;
+          const comet = celestial && celestial.data.cometDirection && !celestial.data.params.comet.sidereal ? celestial.data.cometDirection : null;
+          const main = record.mainId ? manager.getInstance(record.mainId) : null;
+          if (comet) {
+            direction = comet.clone();
+            direction.y += SKY_FRAME_LIFT;
+            direction.normalize();
+          } else if (main) {
+            direction = new THREE.Vector3(main.position.x - position.x, main.position.y - position.y, main.position.z - position.z).normalize();
+          } else {
+            direction = new THREE.Vector3(0, 1, 0);
+          }
         }
         const target = position.clone().addScaledVector(direction, 1000);
         ctx.systems.camera.setFreeCameraPose({ position, target, fov: view.fov });
         await frames(30);
         return check(`${presetId}: framed (${mode})`, true, { direction: { x: Math.round(direction.x * 100) / 100, y: Math.round(direction.y * 100) / 100, z: Math.round(direction.z * 100) / 100 } });
       }
-      const place = record.prepared ? record.prepared.place : record.site;
+      const spawned = view.at === 'spawn' && record.mainId ? manager.getInstance(record.mainId) : null;
+      const place = spawned ? spawned.position : record.prepared ? record.prepared.place : record.site;
       const target = { x: place.x, y: ground(place.x, place.z) + (view.lift ?? 40), z: place.z };
       const settled = await frameView(viewpoint(target, view.distance ?? 900, view.height ?? 160, state.player.heading + (view.bearing ?? 200)), target, { fov: view.fov });
       return check(`${presetId}: framed`, true, { terrainSettled: settled, target: { x: Math.round(target.x), y: Math.round(target.y), z: Math.round(target.z) } });
@@ -477,10 +546,18 @@ export function installPresetChecks91(game) {
         system.director.releaseOverride(presetId);
         for (const spawn of manager.getActive()) if (spawn.presetId === presetId) manager.deactivate(spawn.id, 'test');
       }
-      if (record.prepared && record.prepared.woke && manager.getInstance(record.prepared.woke)) manager.setSiteActive(record.prepared.woke, false);
-      removeFamily(record.family);
+      const putAway = () => {
+        if (record.prepared && record.prepared.woke && manager.getInstance(record.prepared.woke)) manager.setSiteActive(record.prepared.woke, false);
+        removeFamily(record.family);
+      };
+      // A combo's place (a woken volcano, the spires' site) stood before its baseline, so it is the
+      // world's: the combo's own spawns are judged against that baseline first, then the place goes
+      // (its eruption's sky modifiers with it). The frozen lake's site came after its baseline: it goes
+      // first, and its dispose is judged.
+      if (!record.prepared) putAway();
       await wait(500);
       const result = await dispose.compare(record.baseline, { presetIds: record.family.map((preset) => preset.id) });
+      if (record.prepared) putAway();
       return check(`${presetId}: dispose returns GPU memory, removes its wind sources, colliders and sky modifiers`, result.ok, {
         before: result.before, after: result.after, worldFirstDrawn: result.worldFirstDrawn, leftBehind: result.leftBehind,
         windSources: result.windSources, windLeft: result.windLeft, colliders: result.colliders, collidersLeft: result.collidersLeft,
