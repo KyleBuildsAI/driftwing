@@ -30,9 +30,9 @@ export const BATCH61_SCENARIOS = Object.freeze([
   },
   // ---- Fantasy (66-70) ----
   {
-    id: 'worldTree', why: 'a clear afternoon, the whole tree against the sky', sun: 22, weather: 'clear',
+    id: 'worldTree', why: 'a clear afternoon, the whole tree seen from above the cloud band', sun: 22, weather: 'clear',
     anchor: 'land', distance: 3000, runSeconds: 3,
-    view: { distance: 2400, height: 120, bearing: 200, lift: 600 },
+    view: { distance: 5000, height: 900, bearing: 200, lift: 600 },
   },
   {
     id: 'portalRing', why: 'a clear afternoon, the membrane head on', sun: 18, weather: 'clear',
@@ -40,9 +40,9 @@ export const BATCH61_SCENARIOS = Object.freeze([
     view: { distance: 230, height: 25, bearing: 200, lift: 50 },
   },
   {
-    id: 'sleepingGiant', why: 'low morning light across the face, seen side on', sun: 14, morning: true, weather: 'clear',
+    id: 'sleepingGiant', why: 'a clear midday, the figure seen from above the cloud band', sun: 35, weather: 'clear',
     anchor: 'site', distance: 4000, altitude: 900, runSeconds: 4,
-    view: { distance: 3000, height: 250, bearing: 100, lift: 150 },
+    view: { distance: 2800, height: 800, bearing: 120, lift: 150 },
   },
   {
     id: 'ghostGalleon', why: 'a clear night at the cloud tops', sun: -24, weather: 'clear',
