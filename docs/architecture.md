@@ -1304,7 +1304,11 @@ Behaviour:
     (`chime`; the hum rises with the intensity), `turbine` (intensity = wind speed), `murmuration`
     (`scatter`), `meteor` (`streak`, `fireball`), `lantern`, `discovery` (`chime`), and the bird
     calls of the wildlife presets: `raptor` (`call`, a hawk's descending scream; `params.pitch`
-    lowers it for an eagle) and `goose` (`call`; intensity = the honking chorus). A preset's
+    lowers it for an eagle) and `goose` (`call`; intensity = the honking chorus). Presets 71-80 add
+    `wisps` (`chime`: the forest wisps' glassy shimmer, louder as they near), `windRush` (open-air
+    wind with `params.gust`, a resonant `howlHz` / `howl` moan for canyons and bores, and `flutter`
+    for kites; intensity = the wind's strength there) and `burner` (`burst`: propane burners firing
+    by turns across a balloon festival; intensity = the approach). A preset's
     `audio.params` may set `intensity` and override `refDistance`, `rolloffFactor`,
     `distanceModel`, `size` and `reverb`;
   - `thunder({ position, intensity })` plays a crack and a rolling rumble when the sound front

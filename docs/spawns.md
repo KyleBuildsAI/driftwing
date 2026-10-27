@@ -83,6 +83,16 @@ preset's section below.
 | 28 | [Crystal spires](#28-crystal-spires) | `crystalSpires` | fantasy | site | uncommon | no | `structure`, `lightEffect` | no |
 | 29 | [Jet stream ribbon](#29-jet-stream-ribbon) | `jetStream` | flightplay | event | uncommon | no | `emitter`, `windModifier` | yes |
 | 30 | [Storm chase](#30-storm-chase) | `stormChase` | setpiece | event | legendary | no | `setPiece` | children |
+| 71 | [Reverse waterfall](#71-reverse-waterfall) | `reverseWaterfall` | fantasy | site | rare | yes | `structure`, `emitter`, `waterEffect`, `windModifier` | yes |
+| 72 | [Forest wisps](#72-forest-wisps) | `forestWisps` | fantasy | event | uncommon | no | `lightEffect` | no |
+| 73 | [Ridge lift band](#73-ridge-lift-band) | `ridgeLiftBand` | flightplay | site | uncommon | no | `weatherVolume`, `fauna`, `windModifier` | yes |
+| 74 | [Wind shear line](#74-wind-shear-line) | `windShearLine` | weather | event | uncommon | no | `weatherVolume`, `windModifier` | yes |
+| 75 | [Thermal street](#75-thermal-street) | `thermalStreet` | flightplay | event | common | no | `weatherVolume`, `windModifier` | yes |
+| 76 | [Canyon gauntlet](#76-canyon-gauntlet) | `canyonGauntlet` | flightplay | site | uncommon | no | `structure` | no |
+| 77 | [Cave tunnel](#77-cave-tunnel) | `caveTunnel` | flightplay | site | rare | no | `structure` | no |
+| 78 | [Waterfall wall](#78-waterfall-wall) | `waterfallWall` | flightplay | site | rare | no | `structure`, `emitter` | yes |
+| 79 | [Balloon festival](#79-balloon-festival) | `balloonFestival` | flightplay | site | uncommon | no | `structure` | no |
+| 80 | [Kite-string slalom](#80-kite-string-slalom) | `kiteSlalom` | flightplay | site | uncommon | no | `structure` | no |
 
 In all: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy. The
 journal's collection count is found / 30 over these presets (`PRESETS` in
@@ -731,6 +741,253 @@ and the storm decays.
 - **Lifetime:** 570-600 s; despawned beyond 30 + 5 km after 60 s out of view.
 - **Journal:** the "Storm Chaser" entry; `closestTornado` (min, the closest pass to the funnel) and
   `stormsChased` (+1 when you came within 5 km of the funnel).
+
+### Fantasy (Phase 3, presets 71-72)
+
+#### 71. Reverse waterfall
+
+A river that runs the wrong way: its strands rise out of the plunge pool, climb the cliff face, leave
+the lip and twist into a column of water that climbs hundreds of metres into the sky before it frays
+into a cloud of mist. Spray boils up the column, and the air goes up with the water: an updraft a
+glider can ride.
+[src/spawns/presets/reverseWaterfall.js](../src/spawns/presets/reverseWaterfall.js)
+
+- **Kind:** site, rare, heavy. Plume lure, 640 m tall and 200 m wide, pale blue-white. It has no
+  active state, so it holds one of the 2 heavy slots for as long as it exists.
+- **Placement:** pine, snow, meadows or archipelago; land; ground from 60 m; chance 0.03; at least
+  26 km apart; 400 m clearance; aligned downhill.
+- **Stamp:** `cliffStep`, 300-380 m wide, a 120-150 m drop, a pool of 50-65 m, painted `wetRock`
+  (`structureStamps('waterfall', ...)`).
+- **Engines:** `structure` (recipe `waterfall` with `reverse`: 7-9 rising strands with veils, a column
+  46 m out from the lip and 16 m in radius climbing 460 m, the river flowing toward the pool, mist at
+  the pool and a mist cloud at the top; owns the voice at a constant 0.85); `emitter` (6000 spray
+  particles rising up the column on buoyancy, cloud-lit); `waterEffect` (the plunge pool's churn and
+  mist, silent).
+- **Wind:** an updraft column round the water (windModifier `updraft`): 10 m/s at its core, 170 m in
+  radius, from the pool to 720 m up, a light sink ring and swirl, turbulence 0.5 with 3.5 m/s gusts.
+  `tools/lab/preset-flight-71-80.mjs` flies a glider through it (carried up 40+ m) and a jet (a load
+  bump).
+- **Sound:** `waterfall` (the roar).
+- **LOD:** near 2200 m, mid 7000 m, far 32 km. **Discovery:** 3.5 km, in view.
+- **Lifetime:** a site; removed beyond 32 + 4 km.
+- **Tags:** water, thermal, spectacle, farLure.
+
+#### 72. Forest wisps
+
+A knot of pale blue-green lights hangs over the night forest. Come close and they fall in behind
+you, trailing your craft for half a minute; then they drift away toward the nearest place you have
+not discovered yet, waiting whenever you fall behind, and gather over it when you arrive. They
+shimmer and ting softly and light the treetops around them.
+[src/spawns/presets/forestWisps.js](../src/spawns/presets/forestWisps.js)
+
+- **Kind:** event, uncommon.
+- **Engines:** `lightEffect` with a `guide` (9 breathing orbs and 64 blinking motes, a real light of
+  220 m range; they wait at the anchor until the craft comes within 500 m, trail 35 m behind it for
+  35 s, then lead at 14 m/s toward the nearest undiscovered site within 16 km, holding while the craft
+  is more than 280 m behind, between 12 m and 300 m above the ground, and gather within 140 m of the
+  site; owns the voice, intensity = the approach). A notice and the bus event `lightEffect:guide`
+  mark each change of phase.
+- **Filters:** pine forests; night; clear, clearing or building weather; over land; player 0-2500 m;
+  1.5-4 km ahead.
+- **Candidates:** 6 km cells, 600 s buckets, chance 0.45. **Cooldown:** 1500 s.
+- **Wind:** none.
+- **Sound:** `wisps` (a glassy shimmer with tings).
+- **LOD:** near 800 m, mid 3000 m, far 9 km. **Discovery:** 700 m, in view.
+- **Lifetime:** 420-600 s, easing out over 8 s; despawned beyond 9 + 2 km after 30 s out of view.
+- **Tags:** night, forest, spectacle, slow.
+
+### Flight-play (Phase 3, presets 73-80)
+
+#### 73. Ridge lift band
+
+Along a long ridgeline the wind is forced up the slopes and rises in a band over the crest: a smooth
+cap cloud drapes the crest, and hawks soar the line without a wingbeat. Fly the crest and the band
+holds a glider up for kilometres.
+[src/spawns/presets/ridgeLiftBand.js](../src/spawns/presets/ridgeLiftBand.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** snow, pine, meadows or dunes; land; ground from 180 m on a `ridge`; chance 0.08; at
+  least 18 km apart; 300 m clearance; aligned along the ridge. No stamp.
+- **Engines:** `weatherVolume` (a `bank` turned onto the ridge's axis, 4.6 km long, 280 m wide and
+  110 m tall, 55 m above the crest and following it, 130 puffs, smooth and bright; no voice);
+  `fauna` (6-9 hawks circling 90-420 m up over the crest; owns the voice); `windModifier` (the band).
+- **Wind:** eight overlapping updraft columns along the ridge's axis, 600 m apart and 520 m in
+  radius: 3 m/s from 160 m below the crest to 700 m above it, turbulence 0.22, on top of the
+  WindField's own slope lift. The lab measures the band's own lift at 2.6-3.1 m/s all along the
+  crest; a glider along it climbs at 2.2 m/s where it sank at 0.6 m/s, and so does the bush plane.
+- **Sound:** `raptor` (pitch 0.95: the hawks' calls every 20-45 s).
+- **LOD:** near 2500 m, mid 9000 m, far 20 km. **Discovery:** 4 km, in view.
+- **Lifetime:** a site; removed beyond 20 + 3 km.
+- **Tags:** thermal, calm, spectacle.
+
+#### 74. Wind shear line
+
+A long, ruler-straight cloud edge stands across the sky, its leading side a sharp wall. Underneath
+it two air masses meet: cross the line and within a hundred metres the wind swings round by
+forty-five degrees or more and nearly doubles, with a band of chop right at the edge.
+[src/spawns/presets/windShearLine.js](../src/spawns/presets/windShearLine.js)
+
+- **Kind:** event, uncommon. The activation turns downwind (`anchor.align: 'downwind'`).
+- **Engines:** `weatherVolume` (a `bank` turned 90 degrees off the wind, 14 km long, 1100 m wide and
+  420 m tall, its base 650 m up, a sharp leading `wall`, forming over 40 s and dissipating over 45 s;
+  owns the voice); `windModifier` (the shear).
+- **Filters:** any biome; day, dawn or dusk; clear, building or clearing weather; any surface; player
+  0-6000 m; 3.5-9 km ahead.
+- **Candidates:** 9 km cells, 600 s buckets, chance 0.4.
+- **Wind:** a straight `gustFront` along the cloud's leading edge, 14 km long: behind it a new air
+  mass blowing 16 m/s across the prevailing wind up to 2600 m, a 140 m front with 1.5 m/s of lift,
+  turbulence 0.55 and 4 m/s gusts, fading in over 20 s. The lab measures a 48 degree veer and 1.8 x
+  the speed across it; a glider crossing it sees its airspeed swing by 13 m/s.
+- **Sound:** `windRush` (gusty, reference distance 600 m).
+- **LOD:** near 6 km, mid 16 km, far 40 km. **Discovery:** 7 km, in view.
+- **Lifetime:** 480-660 s; despawned beyond 25 + 4 km after 30 s out of view.
+- **Tags:** spectacle.
+
+#### 75. Thermal street
+
+Two rows of flat-based cumulus line up with the wind across the sky, 1.8 km apart, each cloud
+capping a thermal: run a row under the cloud bases and every kilometre the air lifts you again, a
+straight road of lift for cross-country gliding.
+[src/spawns/presets/thermalStreet.js](../src/spawns/presets/thermalStreet.js)
+
+- **Kind:** event, common. The activation turns downwind; the rows run with the wind.
+- **Engines:** two `weatherVolume` rows (each a `bank` in 8 `clumps`, turned along the wind and
+  offset 900 m to either side of the wind line, 8.4 km long, 900 m wide and 620 m tall, bases
+  1350 m up, forming over 45 s; the first owns the voice); two `windModifier` rows (the thermals).
+- **Filters:** meadows, dunes or pine; midday; clear or building weather; over land; player
+  0-4000 m; 3-8 km ahead.
+- **Candidates:** 7 km cells, 600 s buckets, chance 0.45.
+- **Wind:** an updraft under every clump, 16 in all, 1050 m apart along each row: 4.2 m/s at the
+  core, 330 m in radius, from the ground to the cloud base, a light sink ring, turbulence 0.35,
+  fading in over 20 s. A glider running a row holds its height where it sinks 190 m without the
+  street; the bush plane climbs 0.8 m/s better.
+- **Sound:** `windRush` (soft, reference distance 900 m).
+- **LOD:** near 5 km, mid 14 km, far 32 km. **Discovery:** 8 km, in view.
+- **Lifetime:** 600-840 s; despawned beyond 22 + 4 km after 30 s out of view.
+- **Tags:** thermal, calm, spectacle.
+
+#### 76. Canyon gauntlet
+
+A wide, winding canyon with a timed run down its floor through natural rock gates: weathered pillars
+either side of each opening, some bridged by rock arches. Fly the start gate and the clock runs;
+every gate gives a split against your best, and the finish earns a medal.
+[src/spawns/presets/canyonGauntlet.js](../src/spawns/presets/canyonGauntlet.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** dunes, pine or meadows; land; ground from 80 m; chance 0.07; at least 22 km apart;
+  400 m clearance; aligned downhill.
+- **Stamp:** `carve`, 2600-3000 m long, 110-150 m wide, 80-110 m deep, twisting 110-180 m, painted
+  `riverbed` (`structureStamps('canyonGates')`).
+- **Engines:** `structure` (recipe `canyonGates`: two rock pillars of 5-8 m beside every gate, half
+  the checkpoints arched, 16-26 rubble boulders; pillar hulls, arch boxes and boulder spheres are
+  colliders, the pillar tops and arches perches; owns the voice, intensity = the approach).
+- **Challenge:** "Canyon Gauntlet": start, six checkpoints and the finish along 2.3 km of the floor,
+  13-20 m up, rectangles 38-48 m wide; medals gold 46 s, silver 62 s, bronze 88 s; a missed gate
+  costs 5 s; the start prompt within 1.6 km; abandoned 4 km out; best times per craft in the journal.
+- **Wind:** none (the canyon's own WindField terrain effects).
+- **Sound:** `windRush` (a 240 Hz moan in the canyon).
+- **LOD:** near 2000 m, mid 7000 m, far 15 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 15 + 3 km.
+- **Tags:** challenge, desert.
+
+#### 77. Cave tunnel
+
+A lone rock mountain on a flattened plain with a winding tunnel bored clean through it, portal to
+portal, lit by lanterns along its walls. The run threads the bore against the clock.
+[src/spawns/presets/caveTunnel.js](../src/spawns/presets/caveTunnel.js)
+
+- **Kind:** site, rare.
+- **Placement:** meadows, pine, dunes or snow; land; ground 20-900 m on `flat` relief; chance 0.035;
+  at least 30 km apart; 500 m clearance.
+- **Stamp:** `flatten`, 860-920 m long and 440-480 m wide with a 150-190 m shoulder
+  (`structureStamps('caveTunnel')`).
+- **Engines:** `structure` (recipe `caveTunnel`: a mountain 640 m long and 230 m tall, a 22 m bore
+  winding 55 m and climbing 16 m, lanterns; the whole mountain, bore included, is one three-mesh-bvh
+  mesh collider (contract b.6), the summit a perch; owns the voice, intensity = the approach).
+- **Challenge:** "Cave Tunnel": the entry portal (start), four circle gates of 17 m in the bore and the
+  exit portal (finish), each facing along the bore; medals gold 15 s, silver 21 s, bronze 30 s; a
+  missed gate costs 4 s; the start prompt within 1.4 km; abandoned 3 km out.
+- **Wind:** none.
+- **Sound:** `windRush` (a 72 Hz moan in the bore, reference distance 160 m).
+- **LOD:** near 2500 m, mid 7000 m, far 16 km. **Discovery:** 3 km, in view.
+- **Lifetime:** a site; removed beyond 16 + 3 km.
+- **Tags:** challenge, perch.
+- **Build:** three-mesh-bvh resolves `three` to the game's own copy: the production bundle holds one
+  three.js core (one `Multiple instances` guard).
+
+#### 78. Waterfall wall
+
+A long cliff hung with ten thin waterfalls 75 m apart, each dragging a curtain of sinking air down
+its arc. The run weaves through the gaps: in behind the falls at one gap, out again at the next, all
+along the wall.
+[src/spawns/presets/waterfallWall.js](../src/spawns/presets/waterfallWall.js)
+
+- **Kind:** site, rare.
+- **Placement:** pine, snow, meadows or archipelago; land; ground from 80 m; chance 0.035; at least
+  26 km apart; 400 m clearance; aligned downhill.
+- **Stamp:** `cliffStep`, 840-900 m wide, a 125 m drop, a pool of 30-36 m, painted `wetRock`
+  (`structureStamps('fallsWall')`).
+- **Engines:** `structure` (recipe `fallsWall`: ten falls of 11-15 m launched at 15 m/s, streams over
+  the top, mist and boulder spheres at the foot; owns the voice at a constant 0.9); `emitter` (5000
+  mist particles hugging the ground along the foot).
+- **Challenge:** "Waterfall Wall": the start off one end, five gap gates on the falls' line 60 m up,
+  crossing in and out in turn, and the finish off the other end; medals gold 30 s, silver 40 s,
+  bronze 58 s; a missed gate costs 5 s; the start prompt within 1.5 km; abandoned 3.5 km out.
+- **Wind:** the falls' sinking air (the structure engine's `structure-falls` source): 9 m/s down on
+  every fall's arc, fading over 18 m, an outward spill at the foot, turbulence 0.55; the gaps stay
+  clear (under 0.5 m/s in the lab). A glider along the wall drops in each fall; a jet feels the bumps.
+- **Sound:** `waterfall` (reference distance 220 m).
+- **LOD:** near 2000 m, mid 6500 m, far 16 km. **Discovery:** 3 km, in view.
+- **Lifetime:** a site; removed beyond 16 + 3 km.
+- **Tags:** challenge, water, spectacle.
+
+#### 79. Balloon festival
+
+Thirty tethered hot-air balloons of the v1 family float over a flat field at different heights,
+burners roaring by turns. Pairs of them frame the gates of a weave course zigzagging across the
+field.
+[src/spawns/presets/balloonFestival.js](../src/spawns/presets/balloonFestival.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** meadows, pine or dunes; land; ground 10-700 m on `flat` relief; chance 0.07; at
+  least 22 km apart; 500 m clearance. No stamp.
+- **Filters:** dawn, day or golden hour (the festival flies by day).
+- **Engines:** `structure` (recipe `balloonCourse`: 30 balloons of 19-24 m, two flanking every gate
+  with 3 m to spare, the rest spread over 300 m; envelope hulls, basket boxes and tether capsules
+  are colliders; owns the voice, intensity = the approach).
+- **Challenge:** "Balloon Festival": start, six checkpoints zigzagging 60 m either side and 45-85 m up,
+  and the finish over 1.5 km of field; medals gold 40 s, silver 55 s, bronze 80 s; a missed gate
+  costs 5 s; the start prompt within 1.5 km; abandoned 3.5 km out.
+- **Wind:** none.
+- **Sound:** `burner` (propane bursts by turns over a breeze).
+- **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 3 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 2.5 km.
+- **Tags:** challenge, spectacle, calm, slow.
+
+#### 80. Kite-string slalom
+
+Kites fly from a hilltop, their strings rising steeply downwind from stakes along the summit. The
+strings are the poles of a slalom: each gate stands to one side of a string, so the run weaves left
+and right of them. Brushing a string counts as a miss, never a crash.
+[src/spawns/presets/kiteSlalom.js](../src/spawns/presets/kiteSlalom.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** meadows, pine, dunes or snow; land; ground 60-1200 m on a `peak`; chance 0.08; at
+  least 22 km apart; 300 m clearance. No stamp.
+- **Filters:** dawn, day or golden hour.
+- **Engines:** `structure` (recipe `kiteSlalom`: a kite beside each of the six checkpoints and four
+  more off to the sides, strings 110-165 m leaning 12 degrees downwind, staked 12 m past each gate's
+  inner edge, diamond kites of 2.6-3.6 m with tails and streamers; every string is a 0.35 m SENSOR
+  capsule tagged `kiteString`; owns the voice, intensity = the approach).
+- **Challenge:** "Kite-String Slalom": start, six checkpoints 26 m either side of the line and the
+  finish over 860 m of the summit, 26-30 m up; medals gold 26 s, silver 35 s, bronze 50 s; a missed
+  gate costs 5 s and a string touched 2 s (`sensors.kiteString`); the start prompt within 1.4 km;
+  abandoned 3 km out.
+- **Wind:** none.
+- **Sound:** `windRush` (with `flutter`: the kites snapping in the wind).
+- **LOD:** near 1800 m, mid 5000 m, far 12 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 12 + 2.5 km.
+- **Tags:** challenge, spectacle.
 
 ## Adding a preset
 
