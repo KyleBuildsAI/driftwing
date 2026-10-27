@@ -24,7 +24,7 @@ function randomBetween(min, max) {
 export default Object.freeze({
   name: 'wisps',
   summary: 'glassy twinkling shimmer and soft tings',
-  spatial: Object.freeze({ distanceModel: 'exponential', refDistance: 40, rolloffFactor: 1.6, panningModel: 'HRTF', size: 30, reverb: 0.8 }),
+  spatial: Object.freeze({ distanceModel: 'exponential', refDistance: 70, rolloffFactor: 1.4, panningModel: 'HRTF', size: 30, reverb: 0.8 }),
   level: 0.04,
   floor: 0.2,
   triggers: Object.freeze(['chime']),
