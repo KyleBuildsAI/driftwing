@@ -900,7 +900,7 @@ portal, lit by lanterns along its walls. The run threads the bore against the cl
 - **Placement:** meadows, pine, dunes or snow; land; ground 20-900 m on `flat` relief; chance 0.035;
   at least 30 km apart; 500 m clearance.
 - **Stamp:** `flatten`, 860-920 m long and 440-480 m wide with a 150-190 m shoulder, painted
-  `riverbed` gravel (`structureStamps('caveTunnel')`).
+  `basalt` scree round the mountain's foot (`structureStamps('caveTunnel')`).
 - **Engines:** `structure` (recipe `caveTunnel`: a mountain 640 m long and 230 m tall, a 22 m bore
   winding 55 m and climbing 16 m, lanterns; the whole mountain, bore included, is one three-mesh-bvh
   mesh collider (contract b.6), the summit a perch; owns the voice, intensity = the approach).

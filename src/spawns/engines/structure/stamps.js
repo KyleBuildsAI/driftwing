@@ -36,7 +36,7 @@ const RECIPE_STAMP_DEFAULTS = Object.freeze({
   gates: Object.freeze({ length: [2200, 2600], width: [36, 50], depth: [75, 95], wallWidth: [18, 26], twist: [180, 260], plateau: [40, 60], shoulder: [110, 140], paint: 'riverbed' }),
   waterfall: Object.freeze({ width: [380, 520], drop: [110, 160], length: [520, 680], face: [8, 12], falloff: [140, 180], pool: [55, 75], paint: 'wetRock' }),
   canyonGates: Object.freeze({ length: [2600, 3000], width: [110, 150], depth: [80, 110], wallWidth: [22, 32], twist: [110, 180], plateau: [50, 80], shoulder: [120, 160], paint: 'riverbed' }),
-  caveTunnel: Object.freeze({ length: [860, 920], width: [440, 480], margin: [50, 70], shoulder: [150, 190], paint: 'riverbed' }),
+  caveTunnel: Object.freeze({ length: [860, 920], width: [440, 480], margin: [50, 70], shoulder: [150, 190], paint: 'basalt' }),
   fallsWall: Object.freeze({ width: [840, 900], drop: 125, length: [560, 640], face: [8, 10], falloff: [140, 170], pool: [30, 36], paint: 'wetRock' }),
 });
 
