@@ -1271,7 +1271,9 @@ Nothing above changed meaning; every existing preset behaves as before.
   within `anchor.radius`, by the same grid and strides as `peak`, descending.
 - **Director dev API:** `forceSpawn(id, { at: { x, z } })` starts a preset (a combo with its members)
   on a spot; `forceSiteActive(siteId)` wakes a live site's active state, tracked like the director's
-  own. The F9 debugger's Force combo (`src/dev/comboStaging.js`) stages each legendary combo with them.
+  own; `releaseOverride(id)` drops an override forced on the current night (the night follows its own
+  roll again; the override schedule's `release(presetId)`). The F9 debugger's Force combo
+  (`src/dev/comboStaging.js`) stages each legendary combo with them.
 - **SpawnManager:** `nearestPart(presetId, engineName, x, z, radius)` returns the engine instance of
   the nearest live spawn of a preset (allocation-free), so an engine can follow a neighbour spawn.
 - **Sky:** the modifier field `aurora` (0..1, the maximum wins) raises the aurora curtains' presence
