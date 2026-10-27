@@ -15,7 +15,8 @@
 //             eruption (a site active state) too. Legendary combos and global overrides (Phase 3,
 //             contract i.3 and i.4) are rare by design (a legendary is due every 1-2 h of flight and
 //             shares that slot with every other legendary): each one the shared runs miss is run again
-//             on the same flights with the other combos and overrides set aside, until it starts
+//             on the same flights with every other legendary set aside and the sites its siteActive
+//             precondition names kept awake (the volcano's eruption), until it starts
 //   ahead     no director activation lies behind the player
 // Printed (not checked, see the batch notes): per scenario, the share of droughts that end within the
 // 90 s pacing window, the longest drought, and the activations per preset. The pacing floor is a
@@ -59,6 +60,8 @@ const SPEEDS = Object.freeze({
   jet: { speed: 220, altitude: [1500, 6000] },
 });
 const STEP_SECONDS = 0.1;
+/** Kept-awake sites (a legendary's own runs) are looked for this far (m) from the craft. */
+const SITE_WAKE_RADIUS = 30000;
 const SITE_VIEW_RANGE = 12000;
 
 function mulberry32(state) {
@@ -196,7 +199,11 @@ function createLenientManager({ bus, player, getTime, placement, isInView }) {
   };
 }
 
-function runScenario({ seed, craft, hours, startDayTime, presets = PRESETS }) {
+/**
+ * One flight. presets: the director's list; wakeSites: site preset ids whose live sites are kept in
+ * their active state (through the director's dev hook, as the F9 combo staging wakes the volcano).
+ */
+function runScenario({ seed, craft, hours, startDayTime, presets = PRESETS, wakeSites = [] }) {
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const world = createWorldGen(seed, WORLD_OPTIONS);
   const path = createFlightPath({ pathSeed: `${seed}-${craft}-${startDayTime}`, ...SPEEDS[craft] });
@@ -228,6 +235,11 @@ function runScenario({ seed, craft, hours, startDayTime, presets = PRESETS }) {
     if (time >= nextManagerTick) {
       nextManagerTick += 0.5;
       manager.update();
+      if (wakeSites.length > 0) {
+        for (const site of world.placement.sitesNear(path.player.position.x, path.player.position.z, SITE_WAKE_RADIUS)) {
+          if (wakeSites.includes(site.presetId) && manager.getSiteSpawn(site.id)) director.forceSiteActive(site.id);
+        }
+      }
     }
     director.update();
   }
@@ -282,17 +294,19 @@ for (const preset of legendaryNights) {
     focused.push(`${preset.id} ${counts.get(preset.id)} (shared runs)`);
     continue;
   }
-  // The same flights with the other combos and overrides set aside (their members and sites stay).
-  const presets = PRESETS.filter((candidate) => candidate === preset || !isLegendaryNight(candidate));
+  // The same flights with every other legendary set aside (members and sites stay), and the sites its
+  // siteActive precondition names kept awake.
+  const presets = PRESETS.filter((candidate) => candidate === preset || (!isLegendaryNight(candidate) && candidate.rarity !== 'legendary'));
+  const wakeSites = preset.combo && preset.combo.preconditions && preset.combo.preconditions.siteActive ? preset.combo.preconditions.siteActive : [];
   let reachedOn = null;
   for (const flight of FLIGHTS) {
-    const run = runScenario({ ...flight, hours: OPTIONS.hours, presets });
+    const run = runScenario({ ...flight, hours: OPTIONS.hours, presets, wakeSites });
     if (run.log.some((entry) => entry.presetId === preset.id)) {
       reachedOn = `${flight.seed} ${flight.craft} ${flight.startDayTime === 0.62 ? 'day' : 'night'}`;
       break;
     }
   }
-  focused.push(`${preset.id} ${reachedOn ? `on its own run (${reachedOn})` : 'never'}`);
+  focused.push(`${preset.id} ${reachedOn ? `on its own run (${reachedOn}${wakeSites.length > 0 ? `, ${wakeSites.join(', ')} kept awake` : ''})` : 'never'}`);
 }
 const unreached = focused.filter((line) => line.endsWith(' never'));
 check('reach', 'every legendary combo and global override starts at least once (on its own runs when the shared runs miss it)', unreached.length === 0, focused.join(', ') || 'none in the catalog');
