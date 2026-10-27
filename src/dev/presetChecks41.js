@@ -449,7 +449,7 @@ export function installPresetChecks41(game) {
       const berg = described.movers.list.filter((mover) => mover.motion === 'drift').map((mover) => ctx.colliders.get(mover.collider)).filter(Boolean)
         .sort((a, b) => b.bounds[4] - a.bounds[4])[0];
       if (berg && berg.bounds[4] - sea > 6) {
-        lines.push(await strike('calvingGlacier: a drifting berg', berg.id, { x: berg.center[0], y: sea + Math.min((berg.bounds[4] - sea) * 0.55, 10), z: berg.center[2] }));
+        lines.push(await strike('calvingGlacier: a drifting berg', berg.id, { x: berg.center[0], y: sea + Math.min((berg.bounds[4] - sea) * 0.55, 10), z: berg.center[2] }, part.colliderIds));
       } else {
         lines.push(check('calvingGlacier: a drifting berg', false, berg ? `the tallest berg stands only ${round(berg.bounds[4] - sea)} m out of the water` : 'no berg collider'));
       }
