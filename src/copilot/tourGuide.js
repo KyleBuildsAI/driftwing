@@ -87,6 +87,10 @@ const NAME_SYNONYMS = Object.freeze([
   [/\b(lens clouds?|ufo clouds?|lenticulars?)\b/g, 'lenticular'],
   [/\b(rainbows?)\b/g, 'glory rainbow'],
   [/\b(spouts?)\b/g, 'waterspout'],
+  [/\b(upside[- ]down (water)?falls?|waterfalls? going up|rising waterfalls?)\b/g, 'reverse waterfall'],
+  [/\b(will[- ]o'?[- ]the[- ]wisps?|ghost lights?|fairy lights?)\b/g, 'forest wisps'],
+  [/\b(cloud streets?|cumulus streets?)\b/g, 'thermal street'],
+  [/\b(kite strings?)\b/g, 'kite-string slalom'],
 ]);
 
 /**
