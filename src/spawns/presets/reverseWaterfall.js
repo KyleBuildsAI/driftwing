@@ -44,11 +44,12 @@ export default Object.freeze({
       }),
     }),
     Object.freeze({ engine: 'waterEffect', params: Object.freeze({ effect: 'plungePool', churn: 0.7, mistRate: 120, voice: false }) }),
-    // The column of rising air: from below the pool to well above the mist cloud.
+    // The column of rising air round the water: from below the pool to well above the mist cloud,
+    // wide enough for a glider to circle in.
     Object.freeze({
       engine: 'windModifier',
       params: Object.freeze({
-        type: 'updraft', offset: Object.freeze([42, 0, -100]), radius: 75, updraft: 13, base: 0, top: 720, sinkRing: 0.15, ringWidth: 1.2, swirl: 3,
+        type: 'updraft', offset: Object.freeze([42, 0, -100]), radius: 170, updraft: 10, base: 0, top: 720, sinkRing: 0.15, ringWidth: 1.2, swirl: 3,
         turbulence: 0.5, gust: 3.5, endWithDuration: false,
       }),
     }),

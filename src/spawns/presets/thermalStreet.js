@@ -3,7 +3,8 @@
 // under the clouds and every few hundred metres the air lifts you again, a straight road of lift for
 // cross-country gliding. The activation turns downwind; the rows run with the wind. Docs:
 // docs/engines/weatherVolume.md (clumps, turn, offset), windModifier.md (updraft).
-const STREET_ALONG = Object.freeze([-3600, -2400, -1200, 0, 1200, 2400, 3600]);
+// The clump centres of an 8400 m bank in 8 clumps (weatherVolume's clump layout), 1050 m apart.
+const STREET_ALONG = Object.freeze([-3675, -2625, -1575, -525, 525, 1575, 2625, 3675]);
 const ROW_SIDE = 900;
 
 /**
@@ -15,7 +16,7 @@ function cloudRow(side, ownsAudio) {
     engine: 'weatherVolume',
     params: Object.freeze({
       form: 'bank', clumps: STREET_ALONG.length, turn: -90, offset: Object.freeze([0, -side]), base: 1350, baseMode: 'agl', followTerrain: false,
-      length: 8400, width: 900, height: 620, puffs: 154, detail: 0.3, storm: 0, tint: 0xffffff, brightness: 1.04, billow: 0.18,
+      length: 8400, width: 900, height: 620, puffs: 176, detail: 0.3, storm: 0, tint: 0xffffff, brightness: 1.04, billow: 0.18,
       formSeconds: 45, dissipateSeconds: 45,
       haze: Object.freeze({ near: 2500, far: 36000, max: 0.88 }),
       insideFog: Object.freeze({ density: 3, color: 0xe6eaef, darkness: 0 }),
@@ -31,8 +32,8 @@ function thermalRow(side) {
     engine: 'windModifier',
     params: Object.freeze({
       sources: Object.freeze(STREET_ALONG.map((along) => Object.freeze({
-        type: 'updraft', direction: 'heading', offset: Object.freeze([along, side, 0]), radius: 260, updraft: 3.6, base: 0, top: 1350,
-        sinkRing: 0.25, ringWidth: 1.4, turbulence: 0.35, gust: 2.5, fadeIn: 20,
+        type: 'updraft', direction: 'heading', offset: Object.freeze([along, side, 0]), radius: 330, updraft: 4.2, base: 0, top: 1350,
+        sinkRing: 0.15, ringWidth: 1.4, turbulence: 0.35, gust: 2.5, fadeIn: 20,
       }))),
     }),
   });
