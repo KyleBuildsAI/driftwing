@@ -500,11 +500,14 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     for (const preset of family) manager.removePreset(preset.id);
   }
 
-  /** Spawns the director started meanwhile (a re-added preset's own candidate): ended, and counted. */
-  function endOtherSpawns() {
+  /**
+   * Spawns the director started meanwhile (a re-added preset's own candidate): ended, and counted. The
+   * sites the scenario stood up (keep: their ids) stay, an awake one too (its source is 'site').
+   */
+  function endOtherSpawns(keep = []) {
     let ended = 0;
     for (const spawn of manager.getActive()) {
-      if (spawn.source === 'debug') continue;
+      if (spawn.source === 'debug' || keep.includes(spawn.id)) continue;
       manager.deactivate(spawn.id, 'spawns test');
       ended++;
     }
@@ -874,7 +877,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
         row.notes.push('the spawn had ended on its own before the dispose');
       }
       ctx.setPhotoMode(false);
-      row.otherSpawnsEnded += endOtherSpawns();
+      row.otherSpawnsEnded += endOtherSpawns(siteIds);
       row.cycles.push(await dispose.compare(baseline, { presetIds: family.map((entry) => entry.id) }));
 
       // ---- The leak check: more creates and disposes from the same start, everything held ----
@@ -910,7 +913,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
         await frames(2);
         if (heapAvailable()) heapTrace.push(await settledHeapMB());
       }
-      row.otherSpawnsEnded += endOtherSpawns();
+      row.otherSpawnsEnded += endOtherSpawns(siteIds);
       const leakCheck = await dispose.compare(baseline2, { presetIds: family.map((entry) => entry.id), heapToleranceMB: HEAP_TOLERANCE_MB });
       leakCheck.heapTraceMB = heapTrace;
       leakCheck.warmupRetainedMB = Number.isFinite(warmupBeforeMB) && Number.isFinite(baseline2.heapMB) ? round(baseline2.heapMB - warmupBeforeMB, 2) : null;
