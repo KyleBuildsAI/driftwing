@@ -1,13 +1,14 @@
 // Recipe 'kiteSlalom': kites flying from a hilltop, their strings the poles of a slalom. The block's
-// gates are placed over the hill: each `height` above the highest ground under its legs of the course
+// course is laid over the hill along the gentlest of six lines through the site (courseHeading), and
+// its gates are placed each `height` above the highest ground under its legs of the course
 // (placeOverHill), so the line from gate to gate clears the summit. Every checkpoint of the preset's
 // `challenge` block that sits off the course line (a nonzero `across`) gets a kite whose string rises
 // from a stake `offset` metres beyond the gate's inner edge, toward the course line, so the gates
-// weave from one side of the strings to the other; `extra` more kites fly
-// off to the sides. Strings lean `lean` degrees downwind (the prevailing wind at create) up to the
-// kite, a diamond with spars and a bow-tie tail, with streamers along the line, all swaying with the
-// wind. Each string is a thin SENSOR collider tagged `kiteString`: touching one counts a miss on the
-// challenge (its `sensors.kiteString` penalty) and never crashes the craft.
+// weave from one side of the strings to the other; `extra` more kites fly off to the sides. Strings
+// lean `lean` degrees downwind (the prevailing wind at create) up to the kite, a diamond with spars
+// and a bow-tie tail, with streamers along the line, all swaying with the wind. Each string is a thin
+// SENSOR collider tagged `kiteString`: touching one counts a miss on the challenge (its
+// `sensors.kiteString` penalty) and never crashes the craft.
 import { paint } from '../meshBuilder.js';
 import { localCapsule } from '../colliders.js';
 import { courseFromBlock, localGate } from '../courseKit.js';
@@ -27,6 +28,8 @@ const DEG = Math.PI / 180;
 /** Ground samples (m apart) along a gate's legs of the course, and how far (m) its own line is sampled. */
 const LEG_SAMPLE_STEP = 10;
 const GATE_LINE_REACH = 40;
+/** Turns (degrees from the site's heading) tried for the course's line over the hill. */
+const COURSE_TURNS = Object.freeze([0, 30, 60, 90, 120, 150]);
 const KITE_COLOURS = Object.freeze([0xe2452f, 0xf2b632, 0x2f7fd8, 0x35a05a, 0xd64d9a, 0xf07a2a].map((hex) => paint(hex)));
 const STRING = paint(0xf4efe2);
 const SPAR = paint(0x4e3b2a);
@@ -110,33 +113,62 @@ function addKite(context, x, groundY, z, height, lean, size, streamers) {
   return { from: [x, groundY - 1, z], to: [kiteX, kiteY, kiteZ] };
 }
 
-/**
- * Places the course over the hill: every gate stands its block `height` above the HIGHEST ground under
- * its legs of the course (the straight lines to the gates before and after it) and under its own line
- * GATE_LINE_REACH metres either side, so on a hilltop the course line between two gates clears the
- * ground between them by that height too (a straight line between two points above a convex summit
- * would cut into it). Positions in the local frame; headings as the block gives them.
- */
-function placeOverHill(context) {
-  const block = context.challenge;
-  const radians = context.heading * DEG;
+/** The highest ground (m, local) on the straight line between two local points. */
+function highestBetween(context, from, to) {
+  const length = Math.hypot(to.x - from.x, to.z - from.z);
+  const steps = Math.max(1, Math.ceil(length / LEG_SAMPLE_STEP));
+  let top = -Infinity;
+  for (let step = 0; step <= steps; step++) {
+    const share = step / steps;
+    top = Math.max(top, context.ground(from.x + (to.x - from.x) * share, from.z + (to.z - from.z) * share));
+  }
+  return top;
+}
+
+/** The block's gate positions (local) with the course laid along `heading` (compass degrees). */
+function gatePoints(block, heading) {
+  const radians = heading * DEG;
   const forwardX = Math.sin(radians);
   const forwardZ = -Math.cos(radians);
-  const at = (gate) => ({ x: forwardX * gate.along - forwardZ * (gate.across ?? 0), z: forwardZ * gate.along + forwardX * (gate.across ?? 0) });
-  const points = block.gates.map(at);
-  const highest = (from, to) => {
-    const length = Math.hypot(to.x - from.x, to.z - from.z);
-    const steps = Math.max(1, Math.ceil(length / LEG_SAMPLE_STEP));
+  return block.gates.map((gate) => ({ x: forwardX * gate.along - forwardZ * (gate.across ?? 0), z: forwardZ * gate.along + forwardX * (gate.across ?? 0) }));
+}
+
+/**
+ * The course's line over the hill: of the site's heading turned by COURSE_TURNS, the one whose course
+ * crosses the lowest highest ground (the gentlest way over the top, not up the side of a taller
+ * mountain beside the hill).
+ */
+function courseHeading(context) {
+  let best = context.heading;
+  let bestTop = Infinity;
+  for (const turn of COURSE_TURNS) {
+    const heading = context.heading + turn;
+    const points = gatePoints(context.challenge, heading);
     let top = -Infinity;
-    for (let step = 0; step <= steps; step++) {
-      const share = step / steps;
-      top = Math.max(top, context.ground(from.x + (to.x - from.x) * share, from.z + (to.z - from.z) * share));
+    for (let index = 1; index < points.length; index++) top = Math.max(top, highestBetween(context, points[index - 1], points[index]));
+    if (top < bestTop) {
+      bestTop = top;
+      best = heading;
     }
-    return top;
-  };
+  }
+  return best;
+}
+
+/**
+ * Places the course over the hill along courseLine (compass degrees): every gate stands its block
+ * `height` above the HIGHEST ground under its legs of the course (the straight lines to the gates
+ * before and after it) and under its own line GATE_LINE_REACH metres either side, so on a hilltop the
+ * course line between two gates clears the ground between them by that height too (a straight line
+ * between two points above a convex summit would cut into it). Positions in the local frame; each
+ * gate faces along courseLine turned by its block heading.
+ */
+function placeOverHill(context, courseLine) {
+  const block = context.challenge;
+  const points = gatePoints(block, courseLine);
+  const highest = (from, to) => highestBetween(context, from, to);
   return (gate, index) => {
     const point = points[index];
-    const heading = context.heading + (gate.heading ?? 0);
+    const heading = courseLine + (gate.heading ?? 0);
     const lineX = Math.sin(heading * DEG) * GATE_LINE_REACH;
     const lineZ = -Math.cos(heading * DEG) * GATE_LINE_REACH;
     let top = highest({ x: point.x - lineX, z: point.z - lineZ }, { x: point.x + lineX, z: point.z + lineZ });
@@ -156,7 +188,8 @@ export function buildKiteSlalom(context, read) {
   const kiteSize = read.range('kiteSize', KITE_SLALOM_DEFAULTS.kiteSize, 0.5, 12);
   const sensorRadius = read.number('sensorRadius', KITE_SLALOM_DEFAULTS.sensorRadius, 0.05, 3);
   if (!context.challenge) read.fail('recipe', 'kiteSlalom needs the preset\'s challenge block (see src/gameplay/challenges.js validateChallengeBlock)');
-  const definition = courseFromBlock(context, read, placeOverHill(context));
+  const courseLine = courseHeading(context);
+  const definition = courseFromBlock(context, read, placeOverHill(context, courseLine));
   const block = context.challenge;
   const strings = [];
   const roll = (range) => range[0] + (range[1] - range[0]) * rng();
@@ -175,7 +208,7 @@ export function buildKiteSlalom(context, read) {
   // More kites off to the sides of the course, beyond every gate.
   let farthest = 0;
   for (const gate of definition.gates) farthest = Math.max(farthest, Math.hypot(gate.center.x - anchor.x, gate.center.z - anchor.z));
-  const radians = context.heading * DEG;
+  const radians = courseLine * DEG;
   const forwardX = Math.sin(radians);
   const forwardZ = -Math.cos(radians);
   for (let index = 0; index < extra; index++) {

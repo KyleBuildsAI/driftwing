@@ -15,9 +15,10 @@ export default Object.freeze({
   placement: Object.freeze({
     chance: 0.08,
     minSpacing: 22000,
-    biomes: Object.freeze(['meadows', 'pine', 'dunes', 'snow']),
+    // Rolling country: a grassy or sandy hilltop, not a crag beside a taller mountain.
+    biomes: Object.freeze(['meadows', 'dunes']),
     surface: 'land',
-    terrain: Object.freeze({ minHeight: 60, maxHeight: 1200, relief: 'peak' }),
+    terrain: Object.freeze({ minHeight: 60, maxHeight: 600, relief: 'peak' }),
     clearance: 300,
     align: 'random',
   }),

@@ -972,17 +972,18 @@ and right of them. Brushing a string counts as a miss, never a crash.
 [src/spawns/presets/kiteSlalom.js](../src/spawns/presets/kiteSlalom.js)
 
 - **Kind:** site, uncommon.
-- **Placement:** meadows, pine, dunes or snow; land; ground 60-1200 m on a `peak`; chance 0.08; at
-  least 22 km apart; 300 m clearance. No stamp.
+- **Placement:** meadows or dunes (rolling country); land; ground 60-600 m on a `peak`; chance 0.08;
+  at least 22 km apart; 300 m clearance. No stamp.
 - **Filters:** dawn, day or golden hour.
-- **Engines:** `structure` (recipe `kiteSlalom`: a kite beside each of the six checkpoints and four
-  more off to the sides, strings 110-165 m leaning 12 degrees downwind, staked 12 m past each gate's
-  inner edge, diamond kites of 2.6-3.6 m with tails and streamers; every string is a 0.35 m SENSOR
-  capsule tagged `kiteString`; owns the voice, intensity = the approach).
+- **Engines:** `structure` (recipe `kiteSlalom`: the course laid along the gentlest of six lines over
+  the hilltop, each gate its height above the highest ground under its legs; a kite beside each of
+  the six checkpoints and four more off to the sides, strings 110-165 m leaning 12 degrees downwind,
+  staked 12 m past each gate's inner edge, diamond kites of 2.6-3.6 m with tails and streamers; every
+  string is a 0.35 m SENSOR capsule tagged `kiteString`; owns the voice, intensity = the approach).
 - **Challenge:** "Kite-String Slalom": start, six checkpoints 26 m either side of the line and the
-  finish over 860 m of the summit, 26-30 m up; medals gold 26 s, silver 35 s, bronze 50 s; a missed
-  gate costs 5 s and a string touched 2 s (`sensors.kiteString`); the start prompt within 1.4 km;
-  abandoned 3 km out.
+  finish over 860 m of the hilltop, 26-30 m over the highest ground of their legs; medals gold 26 s,
+  silver 35 s, bronze 50 s; a missed gate costs 5 s and a string touched 2 s
+  (`sensors.kiteString`); the start prompt within 1.4 km; abandoned 3 km out.
 - **Wind:** none.
 - **Sound:** `windRush` (with `flutter`: the kites snapping in the wind).
 - **LOD:** near 1800 m, mid 5000 m, far 12 km. **Discovery:** 2.5 km, in view.

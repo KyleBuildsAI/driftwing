@@ -335,8 +335,11 @@ the gates and of the line between them. Each balloon bobs with the wind by its o
 | `kiteSize` | m | 0.5..12 | [2.6, 3.6] | each diamond kite's span |
 | `sensorRadius` | m | 0.05..3 | 0.35 | the radius of each string's sensor capsule |
 
-Every checkpoint with a nonzero `across` gets a kite whose string rises beside it, so the course
-weaves from one side of the strings to the other. Every string is a SENSOR collider tagged
+The course is laid over the hill along the gentlest of six lines through the site (the one whose
+legs cross the lowest ground), and every gate stands its `height` above the highest ground under its
+legs of the course, so the line from gate to gate clears the summit. Every checkpoint with a nonzero
+`across` gets a kite whose string rises beside it, so the course weaves from one side of the strings
+to the other. Every string is a SENSOR collider tagged
 `kiteString`: the flight controller emits `colliderSensor` once per entry and the challenge system
 counts a miss with the course's `sensors.kiteString.penaltySeconds`; a string never crashes the craft.
 
