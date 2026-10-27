@@ -29,7 +29,8 @@
 //   kites        the kite strings are sensors tagged kiteString; every gate opening is clear of them;
 //                a sweep across a string meets its sensor and nothing solid
 //   challenge    a scripted run through every course's gates (the challenge system's crossings):
-//                started, every gate passed, finished with a medal and a stored best
+//                started, every gate passed, finished with a medal and a stored best; a kite run
+//                that brushes a string counts a miss and its penalty and still finishes
 //   dispose      every spawn ends with no collider, wind source, challenge course or leak left
 //
 // Usage: node --expose-gc tools/lab/presets-71-80.mjs [--verbose]
@@ -677,12 +678,12 @@ function openingsClear(definition, radius, sensors = false) {
 }
 
 // ---- challenge runs ----------------------------------------------------------------------------------------------------
-for (const presetId of ['canyonGauntlet', 'caveTunnel', 'waterfallWall', 'balloonFestival', 'kiteSlalom']) {
-  const definition = courseOf(presetId);
-  const finishedBefore = lab.events.finished.length;
-  const gatesBefore = lab.events.gates.length;
-  // Fly from 60 m before each gate through its centre to 30 m beyond it, at 40 m/s, gate after gate.
-  for (const gate of definition.gates) {
+/**
+ * Flies a course gate after gate: from 60 m before each gate through its centre to 30 m beyond it, at
+ * 40 m/s. afterGate(index) runs once the craft is through gate `index`.
+ */
+function flyCourse(definition, afterGate = null) {
+  definition.gates.forEach((gate, index) => {
     const from = alongGate(gate, -60);
     const to = alongGate(gate, 30);
     lab.moveTo(from.x, from.y, from.z);
@@ -693,11 +694,37 @@ for (const presetId of ['canyonGauntlet', 'caveTunnel', 'waterfallWall', 'balloo
       lab.moveTo(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t, from.z + (to.z - from.z) * t);
       lab.step(1);
     }
-  }
+    if (afterGate) afterGate(index);
+  });
+}
+for (const presetId of ['canyonGauntlet', 'caveTunnel', 'waterfallWall', 'balloonFestival', 'kiteSlalom']) {
+  const definition = courseOf(presetId);
+  const finishedBefore = lab.events.finished.length;
+  const gatesBefore = lab.events.gates.length;
+  flyCourse(definition);
   const finished = lab.events.finished.slice(finishedBefore).find((payload) => payload.id.includes(presetId)) ?? null;
   const passed = lab.events.gates.slice(gatesBefore).filter((payload) => !payload.missed).length;
   const best = finished ? lab.challenges.getBest(lab.challenges.list().find((entry) => entry.presetId === presetId).courseKey, 'glider') : null;
   check('challenge', `${presetId}: a run through every gate finishes with a medal and a stored best`, Boolean(finished) && finished.valid && finished.missed === 0 && passed === definition.gates.length && finished.medal !== 'none' && Boolean(best), finished ? `${round(finished.time, 1)} s, ${finished.medal}, ${passed}/${definition.gates.length} gates` : `${passed} gates, not finished`);
+  lab.step(60 * 7);
+}
+{
+  // A kite run that brushes a string after the first checkpoint: the flight controller's sensor
+  // event (colliderSensor, with the string's miss tag) counts a miss and its penalty, and the run
+  // still finishes (a string is never a crash).
+  const definition = courseOf('kiteSlalom');
+  const string = colliders.list().find((record) => record.tags.miss === 'kiteString');
+  const finishedBefore = lab.events.finished.length;
+  const misses = [];
+  const offMiss = lab.bus.on('challenge:sensorMiss', (payload) => misses.push(payload));
+  flyCourse(definition, (index) => {
+    if (index !== 1 || !string) return;
+    lab.bus.emitTyped('colliderSensor', { id: string.id, owner: string.owner, tag: string.tags.miss, craft: 'glider', position: { x: lab.state.player.position.x, y: lab.state.player.position.y, z: lab.state.player.position.z } });
+  });
+  offMiss();
+  const finished = lab.events.finished.slice(finishedBefore).find((payload) => payload.id.includes('kiteSlalom')) ?? null;
+  const penalty = PRESET_BY_ID.kiteSlalom.challenge.sensors.kiteString.penaltySeconds;
+  check('challenge', `kiteSlalom: touching a string counts a miss and its ${penalty} s penalty, and the run still finishes`, Boolean(string) && misses.length === 1 && misses[0].penaltySeconds === penalty && Boolean(finished) && finished.missed === 1, finished ? `${misses.length} sensor miss(es), finished in ${round(finished.time, 1)} s with ${finished.missed} missed, ${finished.medal}` : `${misses.length} sensor miss(es), not finished`);
   lab.step(60 * 7);
 }
 
