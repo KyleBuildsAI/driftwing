@@ -1067,7 +1067,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | not started |
 | B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | not started |
 | B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | not started |
-| B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | in progress |
+| B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | done (verified on both backends) |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
 | B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | not started |
 | B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | not started |
@@ -1112,8 +1112,32 @@ presets (92-100) use the wave 2 combo scheduling.
   and `tools/steps/presets-61-70.json` (every preset force-spawned and framed, the giant, galleon,
   tree, dragon and portal checks, dispose back to baseline; the portal crossing reloads into the next
   world as the last step).
-- **Next:** `src/dev/spawnScenarios/batch61.js`, the copilot synonyms, then the verification on both
-  backends.
+  Also: `src/dev/spawnScenarios/batch61.js` (the spawns test's staging, joined into SPAWN_SCENARIOS),
+  copilot synonyms (lunar eclipse, galaxy, ghost ship, stone giant, dragon race). Fixes found on the
+  way: the dragon racer's model scale is `dragonScale` (`scale` is the site's activation scale); the
+  course rival's dragon is one shared model built and prewarmed in the structure engine's init (a
+  create used to build and compile it: a 1 s stall and 0.4 MB of heap kept per create), and the
+  dragon mesh looks up the spawn light pool when its flame starts (`src/craft/eagleMeshes.js`); the
+  ghost galleon sails on cloudy nights only (building or clearing weather; on every clear night it
+  also took the rare slot the pacing lab's volcano eruption needs); the galleon's bell sits under
+  clipping. Lab changes: preset-pacing leaves the global overrides out of the event reach (the blood
+  moon is never a director candidate); the audio lab's budget holds one voice per recipe (21 now).
+- **Verified (2026-10-27):** `tools/steps/presets-61-70.json` on the dev server, WebGPU and WebGL2:
+  0 errors, 0 warnings, screenshots differ, 29/29 shared preset checks and every batch check (the
+  giant's heightfield 420 m up and landable, the galleon sailing, solid and lighting a lantern, the
+  tree's trunk, perches and lane achievement, the dragon's pace run, rival run, achievement and
+  return, the blood moon override, the portal crossing reloading into its world with the journal
+  updated). `run-harness --test spawns --presets <61-70>`: WebGPU and WebGL2 PASS (10/10 shown, GPU
+  memory, heap within 1 MB, wind, colliders, courses, ignitables, 0/0 console). `run-harness --test
+  terrain --presets real`: PASS (giant 864/864 offline seams, collision 0.00003 m). Labs: terrain
+  437/437, structure 75/75, spawns 101/101, audio 227/227 (the first run's one WebGL2 doppler
+  camera-cut check passed on the rerun), preset-pacing 4/4, colliders, path, setpiece, water,
+  director, discovery, copilot 240/240, fpv, input, storage, copilot-server and the rest pass;
+  eagle 49/50 (allocation 144 B/tick) and challenges 68/70 (allocation) fail identically at the base
+  commit f63fa29. build, build:single (V1 SHA-256 matches), test:v1 2/2, the built V2 (both
+  backends) and shell smoke 0/0. docs-check 278/288: the ten rows are numbered 61-70 by spec, which
+  matches the PRESETS order once I3 merges presets 31-60 ahead of them.
+- **Next:** I3 (integration).
 
 ### Wave 4: discovery and verification, then the tag
 
