@@ -9,6 +9,11 @@ import { SPIRES_DEFAULTS, buildSpires } from './spires.js';
 import { WATERFALL_DEFAULTS, buildWaterfall } from './waterfall.js';
 import { WIND_FARM_DEFAULTS, buildWindFarm } from './windFarm.js';
 import { CHALLENGE_GATES_DEFAULTS, buildChallengeGates } from './challengeGates.js';
+import { CANYON_GATES_DEFAULTS, buildCanyonGates } from './canyonGates.js';
+import { CAVE_TUNNEL_DEFAULTS, buildCaveTunnel } from './caveTunnel.js';
+import { FALLS_WALL_DEFAULTS, buildFallsWall } from './fallsWall.js';
+import { BALLOON_COURSE_DEFAULTS, buildBalloonCourse } from './balloonCourse.js';
+import { KITE_SLALOM_DEFAULTS, buildKiteSlalom } from './kiteSlalom.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -23,6 +28,11 @@ export const RECIPES = Object.freeze({
   gates: Object.freeze({ build: buildGates, defaults: GATES_DEFAULTS, audioIntensity: 'constant' }),
   waterfall: Object.freeze({ build: buildWaterfall, defaults: WATERFALL_DEFAULTS, audioIntensity: 'constant' }),
   challengeGates: Object.freeze({ build: buildChallengeGates, defaults: CHALLENGE_GATES_DEFAULTS, audioIntensity: 'approach' }),
+  canyonGates: Object.freeze({ build: buildCanyonGates, defaults: CANYON_GATES_DEFAULTS, audioIntensity: 'approach' }),
+  caveTunnel: Object.freeze({ build: buildCaveTunnel, defaults: CAVE_TUNNEL_DEFAULTS, audioIntensity: 'approach' }),
+  fallsWall: Object.freeze({ build: buildFallsWall, defaults: FALLS_WALL_DEFAULTS, audioIntensity: 'constant' }),
+  balloonCourse: Object.freeze({ build: buildBalloonCourse, defaults: BALLOON_COURSE_DEFAULTS, audioIntensity: 'approach' }),
+  kiteSlalom: Object.freeze({ build: buildKiteSlalom, defaults: KITE_SLALOM_DEFAULTS, audioIntensity: 'approach' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));
