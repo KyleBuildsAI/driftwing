@@ -11,7 +11,8 @@
 //
 // Checks:
 //   presets   every preset validates and the director takes every one of them
-//   reach     every event preset is activated at least once across the runs, and the volcano's
+//   reach     every event preset (but the global overrides) is activated at least once across the
+//             runs, and the volcano's
 //             eruption (a site active state) too
 //   ahead     no director activation lies behind the player
 // Printed (not checked, see the batch notes): per scenario, the share of droughts that end within the
@@ -260,7 +261,9 @@ for (const seed of ['DRIFTWING', 'HARNESS-1', 'P2-TERRAIN']) {
     }
   }
 }
-const events = PRESETS.filter((preset) => preset.kind === 'event');
+// An override preset (the blood moon) is never a director candidate: its nights are scheduled by
+// src/spawns/overrides.js (tools/steps/director-p3.json and the presets 61-70 steps cover it).
+const events = PRESETS.filter((preset) => preset.kind === 'event' && !preset.override);
 const missing = events.filter((preset) => counts.get(preset.id) === 0).map((preset) => preset.id);
 check('reach', 'every event preset is activated at least once across the runs', missing.length === 0, missing.length ? `never: ${missing.join(', ')}` : [...counts].map(([id, count]) => `${id} ${count}`).join(', '));
 const activeStates = PRESETS.filter((preset) => preset.activeState);
