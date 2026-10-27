@@ -4,8 +4,10 @@
 //   links      every relative link and image in README.md, CHANGELOG.md and docs/**/*.md points at
 //              a file or folder that exists, and every #anchor (in the same page or another
 //              Markdown page) matches a heading there, slugged the way GitHub slugs headings
-//   presets    the table in docs/spawns.md has one row per preset, in PRESETS order, with the
-//              preset's id, category, kind, rarity, heavy flag and engines; every preset has its own
+//   presets    the table in docs/spawns.md has one row per preset, in PRESETS order, numbered with the
+//              preset's spec number (the "Preset NN" in its file's first line; its place in PRESETS
+//              when the line names none), with the preset's id, category, kind, rarity, heavy flag
+//              and engines; every preset has its own
 //              section linked from its row; the whole preset list validates against the schema with
 //              the registered engine names, and every audio recipe a preset names exists
 //   templates  the two copy-paste templates in docs/spawns.md (an event and a site) are valid
@@ -134,6 +136,18 @@ function testLinks() {
 }
 
 // ---- Presets -------------------------------------------------------------------------------------
+/**
+ * The spec number of a preset: the "Preset NN" (or "preset NN") in its file's first line, else its
+ * place in PRESETS (1-based). The wave 3 batches land presets 31-100 in parallel, so a branch's
+ * PRESETS skips numbers until every batch has merged.
+ */
+function presetNumber(preset, index) {
+  const path = join(ROOT, 'src', 'spawns', 'presets', `${preset.id}.js`);
+  const firstLine = existsSync(path) ? readFileSync(path, 'utf8').split('\n', 1)[0] : '';
+  const match = /\b[Pp]reset (\d+)\b/.exec(firstLine);
+  return match ? match[1] : String(index + 1);
+}
+
 /** The rows of the "The 30 presets at a glance" table: arrays of trimmed cell texts. */
 function presetTableRows(text) {
   const rows = [];
@@ -175,7 +189,7 @@ function testPresets() {
     const [number, link, id, category, kind, rarity, heavy, engines] = row;
     const expectedEngines = [...new Set(preset.engines.map((entry) => entry.engine))].map((name) => `\`${name}\``).join(', ');
     const problems = [];
-    if (number !== String(index + 1)) problems.push(`number ${number}`);
+    if (number !== presetNumber(preset, index)) problems.push(`number ${number} (file: ${presetNumber(preset, index)})`);
     if (id !== `\`${preset.id}\``) problems.push(`id ${id}`);
     if (category !== preset.category) problems.push(`category ${category} (file: ${preset.category})`);
     if (kind !== preset.kind) problems.push(`kind ${kind} (file: ${preset.kind})`);
