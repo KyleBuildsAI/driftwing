@@ -362,6 +362,7 @@ export function createWaterEffectEngine() {
       data.waveRunning = true;
       data.travelled = 0;
       data.runs++;
+      data.crashed = false;
     }
     data.travelled += params.speed * dt;
     const total = data.waveTravel;
@@ -378,6 +379,11 @@ export function createWaterEffectEngine() {
     const rise = Math.min(data.travelled / WAVE_FADE_IN, 1);
     const fall = Math.min((total - data.travelled) / WAVE_FADE_OUT, 1);
     wave.weight = data.fade * rise * rise * (3 - 2 * rise) * fall * fall * (3 - 2 * fall);
+    // The crest breaks once per run as it reaches its full height (the voice's big breaker).
+    if (!data.crashed && rise >= 1 && data.voice) {
+      data.crashed = true;
+      data.voice.trigger('crash', { strength: 1 });
+    }
     wave.front = data.travelled;
     let height = data.waveHeight * (1 + (params.growth - 1) * share);
     if (wave.ring) height /= Math.sqrt(1 + data.travelled / params.spreadLoss);
@@ -691,6 +697,8 @@ export function createWaterEffectEngine() {
           waveHeight: 0,
           travelled: 0,
           runs: 0,
+          /** Whether this run's crest has broken yet (the voice's 'crash', once per run). */
+          crashed: false,
           estuary: null,
           shallows: null,
           /** Where the voice sits (a wave's crest or a reef's surf near the camera), or null: the anchor. */
