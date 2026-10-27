@@ -19,7 +19,8 @@ export default Object.freeze({
     biomes: null,
     timeOfDay: Object.freeze(['night']),
     altitude: Object.freeze({ min: 100, max: 4000 }),
-    weather: Object.freeze(['clear', 'building', 'clearing']),
+    // A night with clouds about (building or clearing weather): it sails their tops.
+    weather: Object.freeze(['building', 'clearing']),
     surface: 'any',
     minDistance: 2500,
     maxDistance: 7000,

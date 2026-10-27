@@ -45,7 +45,7 @@ export const BATCH61_SCENARIOS = Object.freeze([
     view: { distance: 2800, height: 800, bearing: 120, lift: 150 },
   },
   {
-    id: 'ghostGalleon', why: 'a clear night at the cloud tops', sun: -24, weather: 'clear',
+    id: 'ghostGalleon', why: 'a night with clouds about, at their tops', sun: -24, weather: 'clearing',
     anchor: 'land', distance: 2500, runSeconds: 3,
     view: { distance: 230, height: 40, bearing: 120, lift: 20 },
   },

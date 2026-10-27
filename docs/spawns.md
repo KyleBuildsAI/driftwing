@@ -903,7 +903,7 @@ A flame (the dragon's breath) lights its lanterns warm, one by one.
 - **Engines:** `structure` (`ghostGalleon`: the `ghost` part; a PathFollower loop 700 m above the sea
   or 160 m over the ground; moving capsule colliders for the hull, castle, bowsprit and masts (the
   sails are not solid); eleven ignitable lanterns; the `bell` voice trigger).
-- **Filters:** any biome; night; clear, building or clearing weather; any surface; 100 m-4 km up;
+- **Filters:** any biome; night; building or clearing weather (clouds about); any surface; 100 m-4 km up;
   2.5-7 km ahead.
 - **Candidates:** 8 km cells, 1200 s buckets, chance 0.4.
 - **Wind:** none.

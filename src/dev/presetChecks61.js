@@ -85,11 +85,14 @@ export function installPresetChecks61(game) {
       const id = ctx.systems.spawns.forceSpawn(presetId, { distance: 0, force: true });
       const started = performance.now();
       while (!spawnOf(presetId) && performance.now() - started < seconds * 1000) await frames(10);
+      // The override's sky eases in with its weight: wait (within the same time) for the night to darken.
+      const moon = ctx.systems.sky.moonLight.color;
+      const darkened = () => ctx.systems.sky.getModifierState().darkness > 0.2 && moon.r > moon.g * 1.5 && moon.r > moon.b * 1.5;
+      while (!darkened() && performance.now() - started < seconds * 1000) await frames(10);
       const celestial = partOf(presetId, 'celestial');
       const engine = manager.registry.get('celestial');
       const described = celestial ? engine.describe(celestial) : null;
       const sky = ctx.systems.sky.getModifierState();
-      const moon = ctx.systems.sky.moonLight.color;
       const red = moon.r > moon.g * 1.5 && moon.r > moon.b * 1.5;
       if (celestial) {
         ctx.setPhotoMode(true);
