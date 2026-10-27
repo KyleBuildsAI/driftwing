@@ -329,7 +329,8 @@ async function testUpdateAllocations() {
   const issues = [];
   const spawnVoices = createSpawnVoices({ THREE, onIssue: (error) => issues.push(error.message) });
   spawnVoices.attach({ context, noise: { duration: 4 }, mixer, spatializer: listener });
-  spawnVoices.setBudget(16);
+  // Every recipe at once, so the budget holds them all (Phase 3 took the count past the old 16).
+  spawnVoices.setBudget(Math.max(16, RECIPE_NAMES.length));
   const handles = RECIPE_NAMES.map((name) => spawnVoices.spawnVoice(name, { intensity: 0.6 }));
   const position = new THREE.Vector3();
   const frame = { time: 0, realTime: 0, interval: 0.05, interior: false, profile: { interiorCutoff: 0 } };
@@ -513,7 +514,8 @@ async function testLifecycle(page, label) {
   const result = await page.evaluate(async (names) => {
     const { spawn, audio, sleep } = window.audioLab;
     const tools = spawn();
-    tools.setBudget(16);
+    // Every recipe at once, so the budget holds them all (Phase 3 took the count past the old 16).
+    tools.setBudget(Math.max(16, names.length));
     const before = tools.stats();
     const ids = names.map((name, index) => tools.play(name, { distance: name === 'thunder' ? 400 : 150, bearing: (index * 360) / names.length, intensity: 0.8 }));
     await sleep(900);
