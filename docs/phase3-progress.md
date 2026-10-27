@@ -1099,9 +1099,21 @@ presets (92-100) use the wave 2 combo scheduling.
   69 (ghost galleon): the structure recipe `ghostGalleon` (a lofted ghost-kind ship sailing an
   out.motion loop over the cloud band, capsule colliders carried with it, eleven ignitable lanterns,
   the `bell` voice trigger) and the `galleon` audio recipe.
-- **Next:** 70 (dragon racer), the batch kit
-  `src/dev/presetChecks61.js` with `tools/steps/presets-61-70.json`, `src/dev/spawnScenarios/batch61.js`,
-  docs/spawns.md rows and sections, then the verification on both backends.
+  70 (dragon racer): the structure recipe `dragonRace` (a crag on a peak, the `challenge` course
+  through the `challengeGates` builder) and the structure engine's course rival `out.rival`
+  (`src/spawns/engines/structure/rival.js`: the dragon craft's mesh racing the line on two
+  PathFollower paces, the challenge `rival` registered while the player flies the dragon skin, the
+  roar, the `dragonRival` achievement, the flight home), and the `dragon` audio recipe.
+  Docs: the ten rows and sections of docs/spawns.md (numbered 61-70: docs-check's row-number check
+  passes once I3 merges batches 31-60 ahead of them), the night-sky components in
+  docs/engines/celestial.md, the Phase 3 recipes and features (portal, ghost, voice triggers, motion,
+  lanterns, course rival, `localHeightfield`) in docs/engines/structure.md.
+  The batch kit: `src/dev/presetChecks61.js` (window.__dwPresets61 over the shared presetChecks.js)
+  and `tools/steps/presets-61-70.json` (every preset force-spawned and framed, the giant, galleon,
+  tree, dragon and portal checks, dispose back to baseline; the portal crossing reloads into the next
+  world as the last step).
+- **Next:** `src/dev/spawnScenarios/batch61.js`, the copilot synonyms, then the verification on both
+  backends.
 
 ### Wave 4: discovery and verification, then the tag
 
