@@ -149,40 +149,51 @@ export function installPresetChecks41(game) {
   }
 
   /**
-   * The craft flown into a collider: a direction (of 8) whose start, 70 m short of `target`, lies in
+   * The craft flown into a collider: a direction (of 8) whose start, `approach` m short of `target`, lies in
    * open air with nothing solid between it and the collider (a swept sphere hits the collider first).
    * The craft, out of photo mode, starts there heading at it; it must soft-crash with 'structure strike'
    * and stop short of the target. Returns the check line.
    */
-  async function strike(label, colliderId, target, ownIds = [colliderId]) {
+  async function strike(label, colliderId, target, ownIds = [colliderId], approach = 70) {
     const hit = { t: 0, point: new THREE.Vector3(), normal: new THREE.Vector3(), id: null, owner: null, tags: null, velocity: new THREE.Vector3() };
     let chosen = null;
     for (let index = 0; index < 8 && !chosen; index++) {
       const angle = (index / 8) * Math.PI * 2;
       const dirX = Math.sin(angle);
       const dirZ = -Math.cos(angle);
-      const from = new THREE.Vector3(target.x - dirX * 70, target.y, target.z - dirZ * 70);
+      const from = new THREE.Vector3(target.x - dirX * approach, target.y, target.z - dirZ * approach);
       if (ctx.colliders.insideSolid(from.x, from.y, from.z, 2)) continue;
       // The terrain stays well under the approach all the way to the target, and the approach clear of
       // the water (a berg is struck a few metres over the sea).
       let clear = from.y > sea + 3;
-      for (let along = 0; along <= 70 && clear; along += 5) if (groundAt(from.x + dirX * along, from.z + dirZ * along) > from.y - 6) clear = false;
+      for (let along = 0; along <= approach && clear; along += 5) if (groundAt(from.x + dirX * along, from.z + dirZ * along) > from.y - 6) clear = false;
       if (!clear) continue;
       const to = new THREE.Vector3(target.x + dirX * 20, target.y, target.z + dirZ * 20);
       if (ctx.colliders.sweepSphere(from, to, 0.5, { sensors: false, landableTops: true }, hit) && ownIds.includes(hit.id) && withinBounds(colliderId, hit.point, 2)) chosen = { dirX, dirZ, from };
     }
     if (!chosen) return check(`${label}: solid (a swept sphere hits it; a craft flown into it soft-crashes)`, false, { collider: colliderId, reason: 'no clear approach from any of 8 directions' });
     ctx.setPhotoMode(false);
+    // A soft crash still fading (an earlier strike) would respawn the craft mid-run: let it finish.
+    await until(() => !ctx.systems.flight.getStats().crash, 15);
     const crashesBefore = events.crashes.length;
     const heading = (Math.atan2(chosen.dirX, -chosen.dirZ) * 180) / Math.PI;
     ctx.systems.flight.resetTo({ x: chosen.from.x, y: chosen.from.y, z: chosen.from.z, heading });
-    await until(() => events.crashes.length > crashesBefore, 8);
+    // The craft's centre is never inside a solid on the way (it stops at the surface or is stopped).
+    let insideFrames = 0;
+    let frame = 0;
+    const track = [];
+    await until(() => {
+      const position = state.player.position;
+      if (ctx.colliders.insideSolid(position.x, position.y, position.z, 0)) insideFrames++;
+      if (frame++ % 8 === 0 && track.length < 12) track.push([round((position.x - target.x) * chosen.dirX + (position.z - target.z) * chosen.dirZ), round(position.y - sea)]);
+      return events.crashes.length > crashesBefore;
+    }, 8);
     const crash = events.crashes.slice(crashesBefore)[0] ?? null;
     const player = state.player.position;
     const beyond = (player.x - target.x) * chosen.dirX + (player.z - target.z) * chosen.dirZ;
     return check(`${label}: solid (a swept sphere hits it; a craft flown into it soft-crashes 'structure strike', never through)`,
-      crash !== null && crash.reason === 'structure strike' && beyond < 0, {
-        collider: colliderId, crash: crash ? { reason: crash.reason, speed: Math.round(crash.impactSpeed) } : null, beyondTarget: round(beyond),
+      crash !== null && crash.reason === 'structure strike' && beyond < 0 && insideFrames === 0, {
+        collider: colliderId, targetAboveSea: round(target.y - sea), insideFrames, track, crash: crash ? { reason: crash.reason, speed: Math.round(crash.impactSpeed) } : null, beyondTarget: round(beyond),
       });
   }
 
@@ -450,7 +461,7 @@ export function installPresetChecks41(game) {
       const berg = described.movers.list.filter((mover) => mover.motion === 'drift').map((mover) => ctx.colliders.get(mover.collider)).filter(Boolean)
         .sort((a, b) => b.bounds[4] - a.bounds[4])[0];
       if (berg && berg.bounds[4] - sea > 6) {
-        lines.push(await strike('calvingGlacier: a drifting berg', berg.id, { x: berg.center[0], y: sea + Math.min((berg.bounds[4] - sea) * 0.55, 10), z: berg.center[2] }, part.colliderIds));
+        lines.push(await strike('calvingGlacier: a drifting berg', berg.id, { x: berg.center[0], y: sea + Math.max(3, Math.min((berg.bounds[4] - sea) * 0.4, 8)), z: berg.center[2] }, part.colliderIds, 50));
       } else {
         lines.push(check('calvingGlacier: a drifting berg', false, berg ? `the tallest berg stands only ${round(berg.bounds[4] - sea)} m out of the water` : 'no berg collider'));
       }
