@@ -24,7 +24,7 @@ export const BATCH81_SCENARIOS = Object.freeze([
   {
     id: 'lavenderTulipStripes', why: 'a clear midday sun, the rows bright from above', sun: 45, weather: 'clear',
     anchor: 'site', distance: 1800, altitude: 250, runSeconds: 4,
-    view: { distance: 900, height: 520, bearing: 200, lift: 0 },
+    view: { distance: 700, height: 260, bearing: 200, lift: 0 },
   },
   {
     id: 'riceTerraces', why: 'just after sunrise: the mist in the steps, the flooded paddies mirroring the sky', sun: 4, morning: true, weather: 'clear',
@@ -44,7 +44,7 @@ export const BATCH81_SCENARIOS = Object.freeze([
   {
     id: 'mangroveDelta', why: 'dawn: the mist lying over the channels and the roots', sun: 3, morning: true, weather: 'clear',
     anchor: 'site', distance: 2200, altitude: 200, runSeconds: 6,
-    view: { distance: 900, height: 260, bearing: 180, lift: 0 },
+    view: { distance: 480, height: 110, bearing: 180, lift: 0 },
   },
   {
     id: 'cactusDustDevils', why: 'a hot afternoon, the dust devils lit against the desert', sun: 38, weather: 'clear',
