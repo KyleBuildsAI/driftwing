@@ -44,6 +44,7 @@ import worldTree from './worldTree.js';
 import portalRing from './portalRing.js';
 import sleepingGiant from './sleepingGiant.js';
 import ghostGalleon from './ghostGalleon.js';
+import dragonRacer from './dragonRacer.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -89,6 +90,7 @@ export const PRESETS = Object.freeze([
   portalRing,
   sleepingGiant,
   ghostGalleon,
+  dragonRacer,
 ]);
 
 /** Presets by id. */

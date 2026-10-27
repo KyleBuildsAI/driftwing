@@ -14,6 +14,7 @@ import { WORLD_TREE_DEFAULTS, buildWorldTree } from './worldTree.js';
 import { PORTAL_RING_DEFAULTS, buildPortalRing } from './portalRing.js';
 import { SLEEPING_GIANT_DEFAULTS, buildSleepingGiant } from './sleepingGiant.js';
 import { GHOST_GALLEON_DEFAULTS, buildGhostGalleon } from './ghostGalleon.js';
+import { DRAGON_RACE_DEFAULTS, buildDragonRace } from './dragonRace.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -33,6 +34,7 @@ export const RECIPES = Object.freeze({
   portalRing: Object.freeze({ build: buildPortalRing, defaults: PORTAL_RING_DEFAULTS, audioIntensity: 'approach' }),
   sleepingGiant: Object.freeze({ build: buildSleepingGiant, defaults: SLEEPING_GIANT_DEFAULTS, audioIntensity: 'constant' }),
   ghostGalleon: Object.freeze({ build: buildGhostGalleon, defaults: GHOST_GALLEON_DEFAULTS, audioIntensity: 'approach' }),
+  dragonRace: Object.freeze({ build: buildDragonRace, defaults: DRAGON_RACE_DEFAULTS, audioIntensity: 'approach' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

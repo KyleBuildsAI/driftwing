@@ -410,6 +410,7 @@ const RENDER_PLAN = Object.freeze({
   portal: { intensity: 1, seconds: 5, triggers: [{ at: 2, name: 'surge' }] },
   giant: { intensity: 1, seconds: 5, triggers: [] },
   galleon: { intensity: 1, seconds: 6, triggers: [{ at: 1, name: 'bell' }] },
+  dragon: { intensity: 1, seconds: 5, triggers: [{ at: 1.5, name: 'roar' }] },
 });
 
 async function testRecipes(page, label) {

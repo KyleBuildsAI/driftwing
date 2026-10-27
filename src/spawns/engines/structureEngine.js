@@ -49,6 +49,10 @@
 //                lanterns on a shared instanced pool; an ignitable one registers with the game's
 //                ignition service (instance.ignitableIds, removed on dispose) and turns to litColor
 //                when a flame lights it (the dragon's fire breath)
+//   rival        (Phase 3) out.rival = { points (local xyz), name, scale, paceTime, rivalTime,
+//                achievement }: a creature racing the recipe's challenge course (structure/rival.js,
+//                the dragon racer): it registers the course itself (with the challenge `rival` while
+//                the player flies the dragon), flies the racing line during a run, and carries the voice
 //
 // update() allocates nothing: per-instance numbers live in typed arrays, matrices are composed into
 // scratch objects made in init(), and the wind is probed a few times a second into a reused record.
@@ -61,6 +65,7 @@ import { createParamView, createWindSample, ownsPresetAudio } from './engineKit.
 import { applyRigidDrop } from '../../render/curvature.js';
 import { addStructureColliders, islandTopCollider, removeStructureColliders, updateTurbineColliders } from './structure/colliders.js';
 import { createPath, createPathFollower } from '../../world/pathFollower.js';
+import { createCourseRival } from './structure/rival.js';
 
 const ENGINE_NAME = 'structure';
 /** Structure spawns alive at once (the director's cap is the same). */
@@ -126,6 +131,8 @@ const KIND_TIERS = Object.freeze({
   portal: [true, true, true],
   ghost: [true, true, true],
 });
+/** The voice trigger a course rival's launch sends (its roar). */
+const ROAR_TRIGGER = Object.freeze({ strength: 1 });
 /** Moving structures: the flight time read by their PathFollower (a typed array, no boxed doubles). */
 const motionTime = new Float64Array(1);
 
@@ -327,7 +334,7 @@ export function createStructureEngine() {
       turbines: [], socks: [], puffs: [], gates: [], surfaces: [], zones: [], courses: [], colliders: [],
       challenge: null,
       wake: null, turbineSettings: null, sway: null, audioPoint: null, windProbe: null, approach: 0, radius: 20,
-      voiceTrigger: null, motion: null, lanterns: [],
+      voiceTrigger: null, motion: null, lanterns: [], rival: null,
     };
     const context = {
       presetId: preset.id,
@@ -1319,6 +1326,8 @@ export function createStructureEngine() {
         portalId: params.site ? params.site.id : `${preset.id}:${params.seed}`,
         startTime: Number.isFinite(params.startTime) ? params.startTime : ctx.time.elapsed,
         motion: null,
+        /** The course rival (out.rival, structure/rival.js), or null. */
+        rival: null,
         lanternSlots: new Int32Array(0),
         lanternLocal: null,
         lanternColors: null,
@@ -1420,7 +1429,21 @@ export function createStructureEngine() {
         // Landing zones (world space).
         data.zones = out.zones.map((zone) => ({ ...zone, x: anchor.x + zone.x, z: anchor.z + zone.z, y: anchor.y + zone.y }));
         registerSurfaces(data, out.surfaces, anchor, instance, colliderPrefix);
-        registerChallenge(data, out.challenge, preset, params);
+        if (out.rival) {
+          if (!out.challenge) throw new Error(`[DRIFTWING] structure preset "${preset.id}": out.rival needs the recipe's challenge course (out.challenge)`);
+          data.rival = createCourseRival(ctx, THREE, {
+            anchor,
+            spec: out.rival,
+            definition: out.challenge,
+            owner: `${preset.id}:${params.seed}`,
+            onRoar: () => {
+              if (data.voice) data.voice.trigger('roar', ROAR_TRIGGER);
+            },
+          });
+          if (data.rival.courseKey !== null) data.challengeKeys.push(data.rival.courseKey);
+        } else {
+          registerChallenge(data, out.challenge, preset, params);
+        }
         // First pose of the moving parts (an instance may start at the far tier, where they freeze).
         updateWind(data, 0);
         if (data.turbineCount > 0) updateTurbines(data, 0);
@@ -1460,6 +1483,11 @@ export function createStructureEngine() {
       if (data.meshes.body !== null || data.meshes.detail !== null) updateSway(data);
       checkGates(instance);
       if (data.courses.length > 0) checkCorridors(instance);
+      if (data.rival) {
+        data.rival.update(dt);
+        data.audioPosition.copy(data.rival.position);
+        if (data.voice) data.voice.setPosition(data.audioPosition);
+      }
       updateAudio(data, dt);
       updateVoiceTrigger(data, dt);
     },
@@ -1470,6 +1498,7 @@ export function createStructureEngine() {
       // The wake reaches a few rotor diameters downwind; at the far tier the player is kilometres away.
       if (tier === 'far') removeWake(instance);
       else addWake(instance);
+      if (instance.data.rival) instance.data.rival.setVisible(tier !== 'far');
     },
 
     dispose(instance) {
@@ -1483,6 +1512,10 @@ export function createStructureEngine() {
       removeSurfaces(data);
       removeStructureColliders(colliderWorld(), instance, data);
       removeLanterns(instance, data);
+      if (data.rival) {
+        data.rival.dispose();
+        data.rival = null;
+      }
       unregisterChallenge(data);
       releaseMeshes(data);
       if (data.nacelleSlots.length > 0) {
