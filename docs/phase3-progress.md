@@ -1096,7 +1096,11 @@ Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file
   - audio recipes `stoneWind`, `rustle`, `meadowHum`, `marsh` (and their audio-lab render plans);
   - weatherVolume `hours` (dawn / day / dusk / night share of a volume, for morning mists);
   - stamp type `delta` (tidal flats and channels the ocean fills; `stamps.js`, schema's list, the
-    mangrove fixture now stamped, the terrain lab's delta shape check).
+    mangrove fixture now stamped, the terrain lab's delta shape check);
+  - placement `separateRegions` (opt-in, default off; `placement.js` rule 7, schema's placement keys):
+    two separating sites never place where their region overlays could meet. The nine overlay presets
+    (82-90) set it: on seed A9ENE9 a cherry valley 730 m from a redwood grove had replaced every redwood
+    (the contract's overlap rule, the lower site id wins), so the grove had no trunks to slalom.
 - **Presets:** all ten files registered under "Batch 9" in `presets/index.js`; `validatePresets` passes
   (40 presets on this branch). Placement on DRIFTWING / HARNESS-1 / P2-TERRAIN / SPAWNS-1: every preset
   has sites within 60 km (the mangrove delta 2-6, the arch chain 2-5, the rest 5-16).
@@ -1108,7 +1112,15 @@ Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file
 - **Docs:** docs/spawns.md has the ten table rows (numbered 81-90) and a section each; docs-check
   numbers a row by the "Preset NN" in its preset file's first line (its place in PRESETS when the line
   names none), so a batch's rows keep their spec numbers before the other batches merge: 284/284.
-- **Next:** the spawn scenarios (`batch81.js`), the step file and the checks on both backends.
+- **Checks:** `src/dev/spawnScenarios/batch81.js` (one import in `spawnScenarios.js`) and
+  `tools/steps/presets-81-90.json` with its kit `src/dev/presetChecks81.js` (on top of `presetChecks.js`;
+  it holds the other game presets so the director's events cannot move the baselines): each preset on its
+  real site and force-spawned, framed, disposed back to its baselines; strikes (bush plane and jet, 60 and
+  250 m/s, kinematic) into the arch chain's crown rib, a hoodoo shaft and a redwood trunk; the five-arch
+  run (the registered course, start, three splits, gold, no stone touched); the gust bursts of the
+  cherry, autumn, lavender, redwood and bamboo emitters; the rice terraces' and mangroves' mists by hour;
+  the dust devils' rising, spinning, wandering cores; the paddies' water bodies and the delta's sea.
+  Run with `--query seed=DRIFTWING` (a random seed gives other sites).
 
 ### Wave 4: discovery and verification, then the tag
 
