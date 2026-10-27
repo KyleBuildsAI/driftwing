@@ -360,7 +360,9 @@ function testMapTiles() {
     }
   }
   check('maptiles', 'map tiles colour every water body sample in its own tint (lakes, pools, films and ice)', covered > 200 && wrong === 0, `${covered} body samples over ${bodies.length} bodies (${[...kinds].join(', ')}), ${wrong} off-tint`);
-  check('maptiles', 'the cache tag of presets without waters or overlays is the Phase 2 tag', mapTileCacheTag('HARNESS-1', PRESETS) === phase2TileTag('HARNESS-1', PRESETS));
+  // The game's presets that hold no water and no overlay (wave 3 adds site presets that hold them).
+  const plain = PRESETS.filter((preset) => !(preset.waters && preset.waters.length > 0) && !(preset.overlays && preset.overlays.length > 0));
+  check('maptiles', 'the cache tag of presets without waters or overlays is the Phase 2 tag', mapTileCacheTag('HARNESS-1', plain) === phase2TileTag('HARNESS-1', plain));
   check('maptiles', 'the cache tag changes with the waters and overlays of the fixture presets', mapTileCacheTag('HARNESS-1', WATER_FIXTURES) !== phase2TileTag('HARNESS-1', WATER_FIXTURES));
 }
 
