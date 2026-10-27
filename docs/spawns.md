@@ -83,7 +83,7 @@ preset's section below.
 | 28 | [Crystal spires](#28-crystal-spires) | `crystalSpires` | fantasy | site | uncommon | no | `structure`, `lightEffect` | no |
 | 29 | [Jet stream ribbon](#29-jet-stream-ribbon) | `jetStream` | flightplay | event | uncommon | no | `emitter`, `windModifier` | yes |
 | 30 | [Storm chase](#30-storm-chase) | `stormChase` | setpiece | event | legendary | no | `setPiece` | children |
-| 71 | [Reverse waterfall](#71-reverse-waterfall) | `reverseWaterfall` | fantasy | site | rare | yes | `structure`, `emitter`, `waterEffect`, `windModifier` | yes |
+| 71 | [Reverse waterfall](#71-reverse-waterfall) | `reverseWaterfall` | fantasy | site | rare | no | `structure`, `emitter`, `waterEffect`, `windModifier` | yes |
 | 72 | [Forest wisps](#72-forest-wisps) | `forestWisps` | fantasy | event | uncommon | no | `lightEffect` | no |
 | 73 | [Ridge lift band](#73-ridge-lift-band) | `ridgeLiftBand` | flightplay | site | uncommon | no | `weatherVolume`, `fauna`, `windModifier` | yes |
 | 74 | [Wind shear line](#74-wind-shear-line) | `windShearLine` | weather | event | uncommon | no | `weatherVolume`, `windModifier` | yes |
@@ -752,8 +752,8 @@ into a cloud of mist. Spray boils up the column, and the air goes up with the wa
 glider can ride.
 [src/spawns/presets/reverseWaterfall.js](../src/spawns/presets/reverseWaterfall.js)
 
-- **Kind:** site, rare, heavy. Plume lure, 640 m tall and 200 m wide, pale blue-white. It has no
-  active state, so it holds one of the 2 heavy slots for as long as it exists.
+- **Kind:** site, rare. Not heavy (no lure): an always-there site would hold one of the 2 heavy
+  slots for as long as it exists and keep tornadoes and eruptions away around it.
 - **Placement:** pine, snow, meadows or archipelago; land; ground from 60 m; chance 0.03; at least
   26 km apart; 400 m clearance; aligned downhill.
 - **Stamp:** `cliffStep`, 300-380 m wide, a 120-150 m drop, a pool of 50-65 m, painted `wetRock`
@@ -768,9 +768,9 @@ glider can ride.
   `tools/lab/preset-flight-71-80.mjs` flies a glider through it (carried up 40+ m) and a jet (a load
   bump).
 - **Sound:** `waterfall` (the roar).
-- **LOD:** near 2200 m, mid 7000 m, far 32 km. **Discovery:** 3.5 km, in view.
-- **Lifetime:** a site; removed beyond 32 + 4 km.
-- **Tags:** water, thermal, spectacle, farLure.
+- **LOD:** near 2200 m, mid 7000 m, far 16 km. **Discovery:** 3.5 km, in view.
+- **Lifetime:** a site; removed beyond 16 + 3 km.
+- **Tags:** water, thermal, spectacle.
 
 #### 72. Forest wisps
 

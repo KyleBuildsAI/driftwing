@@ -1,8 +1,10 @@
-// Preset 71: Reverse waterfall (rare site, heavy; affects flight). A river that runs the wrong way:
+// Preset 71: Reverse waterfall (rare site; affects flight). A river that runs the wrong way:
 // its strands rise out of the plunge pool, climb the cliff face, leave the lip and twist into a
 // column of water that climbs hundreds of metres into the sky before it frays into a cloud of mist.
 // Spray boils up the column, the falls roar, and the air goes up with the water: an updraft column
-// strong enough to loft a glider. Seen from far off as a pale plume on the horizon. Docs:
+// strong enough to loft a glider. Not heavy: an always-there site that held one of the two heavy
+// slots would keep tornadoes and eruptions away wherever it stands (as the mega-waterfall, it is
+// built within 16 km and its column is seen from there). Docs:
 // docs/engines/structure.md (recipe waterfall, reverse), emitter.md, waterEffect.md, windModifier.md.
 import { structureStamps } from '../engines/structure/stamps.js';
 
@@ -12,8 +14,8 @@ export default Object.freeze({
   category: 'fantasy',
   kind: 'site',
   rarity: 'rare',
-  heavy: true,
-  tags: Object.freeze(['water', 'thermal', 'spectacle', 'farLure']),
+  heavy: false,
+  tags: Object.freeze(['water', 'thermal', 'spectacle']),
   placement: Object.freeze({
     chance: 0.03,
     minSpacing: 26000,
@@ -54,8 +56,8 @@ export default Object.freeze({
       }),
     }),
   ]),
-  lod: Object.freeze({ near: 2200, mid: 7000, far: 32000 }),
-  lure: Object.freeze({ type: 'plume', height: 640, width: 200, color: 0xdce8f1 }),
+  lod: Object.freeze({ near: 2200, mid: 7000, far: 16000 }),
+  lure: null,
   wind: Object.freeze([]),
   audio: Object.freeze({ recipe: 'waterfall', params: Object.freeze({}) }),
   journal: Object.freeze({
@@ -68,5 +70,5 @@ export default Object.freeze({
     'Reverse waterfall {direction}. The air rises with the column, so you can ride it up.',
     'The {name} is about {eta} away, {direction}. Follow the pale plume.',
   ]),
-  lifetime: Object.freeze({ duration: null, despawn: Object.freeze({ distance: 32000, hysteresis: 4000, outOfViewSeconds: 20 }) }),
+  lifetime: Object.freeze({ duration: null, despawn: Object.freeze({ distance: 16000, hysteresis: 3000, outOfViewSeconds: 20 }) }),
 });
