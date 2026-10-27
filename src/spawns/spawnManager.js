@@ -66,10 +66,22 @@ const PEAK_SEEK_GRID = 25;
 const PEAK_CLIMBS = 4;
 const PEAK_MIN_STRIDE = 8;
 /**
- * preset.anchor seek 'valley' (Phase 3): the same grid and strides, descending, over dry ground only:
- * at least this many metres above the water level (a valley floor, not its lake or the sea).
+ * preset.anchor seek 'valley' (Phase 3): the peak seek's strides over dry ground only (at least
+ * VALLEY_DRY_MARGIN m above the water level: a valley floor, not its lake or the sea), climbing the
+ * valley depth: the mean ground of a ring VALLEY_RING_RADIUS out (placement's relief ring) less the
+ * ground at the point. A coastal plain's lowest dry ground is its beach, whose ring holds the sea and
+ * scores low; a valley floor's ring holds both its slopes and scores high.
  */
 const VALLEY_DRY_MARGIN = 4;
+const VALLEY_RING_RADIUS = 450;
+const VALLEY_RING_SAMPLES = 8;
+/**
+ * The valley's grid is sparser than the peak's, fewer samples climb and the strides stop coarser (a
+ * herd's valley floor needs no metre precision): every probe reads its ring too.
+ */
+const VALLEY_SEEK_GRID = 13;
+const VALLEY_CLIMBS = 3;
+const VALLEY_MIN_STRIDE = 40;
 /** Spawns alive at once (far above the budgets; activations past it are refused as 'capacity'). */
 export const MAX_SPAWNS = 512;
 const DEG = Math.PI / 180;
@@ -573,8 +585,8 @@ export function createSpawnManager(options) {
   /**
    * preset.anchor (events): seek 'peak' moves the activation point to the highest ground within
    * anchor.radius (a coarse grid over the disc, then a finer one around its best sample); seek
-   * 'valley' to the lowest DRY ground there (VALLEY_DRY_MARGIN above the water level; the activation
-   * itself when the disc holds none); align
+   * 'valley' to the deepest valley floor on DRY ground there (seekValley; the activation itself when
+   * the disc holds no dry ground); align
    * 'downwind' turns the heading downwind of the prevailing wind. Writes the result into out
    * ({ x, y, z, heading }); without an anchor rule it is the activation itself. Runs once per
    * activation, so it may allocate.
@@ -644,32 +656,43 @@ export function createSpawnManager(options) {
     return out;
   }
 
+  /** The valley depth at (x, z) whose ground is y: the relief ring's mean ground less y. */
+  function valleyDepth(x, z, y) {
+    let sum = 0;
+    for (let index = 0; index < VALLEY_RING_SAMPLES; index++) {
+      const angle = (index / VALLEY_RING_SAMPLES) * Math.PI * 2;
+      sum += world.groundHeight(x + Math.sin(angle) * VALLEY_RING_RADIUS, z - Math.cos(angle) * VALLEY_RING_RADIUS);
+    }
+    return sum / VALLEY_RING_SAMPLES - y;
+  }
+
   /**
-   * anchor seek 'valley': the lowest dry ground within radius of position, as { x, y, z }, or null when
-   * the disc holds no dry ground. A coarse grid, then its lowest few samples descend in halving strides
-   * (never onto water), and the lowest floor wins. Runs once per activation, so it may allocate.
+   * anchor seek 'valley': the deepest valley floor (VALLEY_RING_RADIUS) on dry ground within radius of
+   * position, as { x, y, z }, or null when the disc holds no dry ground. A coarse grid, then its deepest
+   * few samples climb the depth in halving strides (never onto water), and the deepest floor wins. Runs
+   * once per activation, so it may allocate.
    */
   function seekValley(position, radius) {
     const radiusSquared = radius * radius;
     const dryFloor = world.WATER_LEVEL + VALLEY_DRY_MARGIN;
     const inside = (x, z) => (x - position.x) * (x - position.x) + (z - position.z) * (z - position.z) <= radiusSquared;
-    const step = (2 * radius) / (PEAK_SEEK_GRID - 1);
+    const step = (2 * radius) / (VALLEY_SEEK_GRID - 1);
     const samples = [];
-    for (let row = 0; row < PEAK_SEEK_GRID; row++) {
-      for (let column = 0; column < PEAK_SEEK_GRID; column++) {
+    for (let row = 0; row < VALLEY_SEEK_GRID; row++) {
+      for (let column = 0; column < VALLEY_SEEK_GRID; column++) {
         const x = position.x - radius + column * step;
         const z = position.z - radius + row * step;
         if (!inside(x, z)) continue;
         const y = world.groundHeight(x, z);
-        if (y > dryFloor) samples.push({ x, z, y });
+        if (y > dryFloor) samples.push({ x, z, y, depth: valleyDepth(x, z, y) });
       }
     }
     if (samples.length === 0) return null;
-    samples.sort((first, second) => first.y - second.y);
+    samples.sort((first, second) => second.depth - first.depth);
     let best = samples[0];
-    for (let index = 0; index < Math.min(PEAK_CLIMBS, samples.length); index++) {
+    for (let index = 0; index < Math.min(VALLEY_CLIMBS, samples.length); index++) {
       const floor = { ...samples[index] };
-      for (let stride = step; stride >= PEAK_MIN_STRIDE; stride /= 2) {
+      for (let stride = step; stride >= VALLEY_MIN_STRIDE; stride /= 2) {
         let moved = true;
         while (moved) {
           moved = false;
@@ -679,18 +702,21 @@ export function createSpawnManager(options) {
             const z = floor.z + Math.sin(angle) * stride;
             if (!inside(x, z)) continue;
             const y = world.groundHeight(x, z);
-            if (y < floor.y && y > dryFloor) {
+            if (y <= dryFloor) continue;
+            const depth = valleyDepth(x, z, y);
+            if (depth > floor.depth) {
               floor.x = x;
               floor.z = z;
               floor.y = y;
+              floor.depth = depth;
               moved = true;
             }
           }
         }
       }
-      if (floor.y < best.y) best = floor;
+      if (floor.depth > best.depth) best = floor;
     }
-    return best;
+    return { x: best.x, y: best.y, z: best.z };
   }
 
   /** Whether the spawn's FAR lure shows: at the far tier, and for a dormant site (activeState) not at all. */

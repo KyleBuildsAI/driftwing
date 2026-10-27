@@ -1267,8 +1267,10 @@ Nothing above changed meaning; every existing preset behaves as before.
   preconditions is still refused.
 - **A combo whose own preset seeks its ground** (`anchor.seek`) places its members around the point
   the SpawnManager moved it to.
-- **`anchor.seek: 'valley'`** (`ANCHOR_SEEKS`): the lowest dry ground (4 m above the water level)
-  within `anchor.radius`, by the same grid and strides as `peak`, descending.
+- **`anchor.seek: 'valley'`** (`ANCHOR_SEEKS`): the deepest valley floor on dry ground (4 m above the
+  water level) within `anchor.radius`: the valley depth is the mean ground of a ring 450 m out (the
+  placement relief ring) less the ground at the point, climbed from a coarse grid in halving strides
+  like `peak` (a beach, whose ring holds the sea, scores low).
 - **Director dev API:** `forceSpawn(id, { at: { x, z } })` starts a preset (a combo with its members)
   on a spot; `forceSiteActive(siteId)` wakes a live site's active state, tracked like the director's
   own; `releaseOverride(id)` drops an override forced on the current night (the night follows its own

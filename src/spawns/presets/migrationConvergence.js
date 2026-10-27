@@ -1,5 +1,5 @@
 // Preset 97: Migration convergence (legendary combo, day, in a valley). Three migrations meet in one
-// valley: the combo seeks the lowest dry ground within 2.5 km (anchor seek 'valley') and the director
+// valley: the combo seeks the deepest valley floor within 2.5 km (anchor seek 'valley') and the director
 // places its members around it (contract i.3): the butterfly migration cloud on the valley floor (the
 // anchor), a V of geese 500 m on, and the caribou column 700 m off to the side ten seconds later. Its own
 // part is the haze the gathering raises: warm dust and seed fluff hanging over the valley floor in the

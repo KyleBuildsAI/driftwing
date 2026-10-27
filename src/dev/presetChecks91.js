@@ -400,7 +400,7 @@ export function installPresetChecks91(game) {
         { comet: described.comet, meteorsActive: described.meteorsActive, meteorsSpawned: described.meteorsSpawned });
     },
 
-    /** The migration met in a valley: the combo's spot is the lowest dry ground near it, its members around it. */
+    /** The migration met in a valley: the combo's spot is a valley floor (little dry ground around it lower), its members around it. */
     valley(presetId) {
       const record = open.get(presetId);
       const main = record.mainId ? manager.getInstance(record.mainId) : null;

@@ -29,7 +29,8 @@ export const LANDMARK_TYPES = Object.freeze(['arch', 'monoliths', 'lighthouse', 
 export const LURE_TYPES = Object.freeze(['plume', 'anvil', 'funnel', 'whale', 'islands', 'comet']);
 /**
  * How the SpawnManager may move an activation before the engines see it (preset.anchor): 'peak' the
- * highest ground in reach, 'valley' the lowest dry ground in reach (Phase 3: a migration's valley).
+ * highest ground in reach, 'valley' the deepest valley floor on dry ground in reach (Phase 3: a
+ * migration's valley).
  */
 export const ANCHOR_SEEKS = Object.freeze(['peak', 'valley']);
 export const ANCHOR_ALIGNS = Object.freeze(['downwind']);

@@ -874,7 +874,8 @@ fluff they stir up.
 [src/spawns/presets/migrationConvergence.js](../src/spawns/presets/migrationConvergence.js)
 
 - **Kind:** event, legendary combo.
-- **Anchor:** `seek: 'valley'` within 2.5 km: the lowest dry ground; the members stand around it.
+- **Anchor:** `seek: 'valley'` within 2.5 km: the deepest valley floor on dry ground (never a beach);
+  the members stand around it.
 - **Combo:** preconditions meadows or pine, day or golden, clear or clearing; members
   `butterflyMigration` (the anchor, optional), `geeseFormation` (500 m on), `caribouMigration`
   (700 m at 70 degrees, 10 s later, optional); exclusive. The optional members belong to presets 51

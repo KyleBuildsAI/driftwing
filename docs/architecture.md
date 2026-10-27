@@ -1778,7 +1778,8 @@ flight time. It is `ctx.systems.spawns.director`.
   `spawnCount()`, and `canActivate`, `getSiteSpawn` / `setSiteActive` when offered. Engines reach a
   neighbour spawn's part through the manager's allocation-free `nearestPart(presetId, engine, x, z,
   radius)` (the resonating spires' arcs find the crystal spires with it). Since wave 3 the manager's
-  anchor rules also take `seek: 'valley'` (the lowest dry ground within the radius).
+  anchor rules also take `seek: 'valley'` (the deepest valley floor on dry ground within the radius: the
+  relief ring's mean ground 450 m out less the ground at the point).
 
 ### Regional weather (`ctx.systems.weather`, `src/spawns/weather.js`)
 
