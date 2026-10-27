@@ -304,6 +304,11 @@ export function resolveWeatherParams(params, { event = true } = {}) {
       color: colorParam(glowSource.color, 'glow.color', 0x9fd4ff),
       strength: numberParam(glowSource.strength, 'glow.strength', 1, 0, 8),
       when: oneOf(glowSource.when, GLOW_TIMES, 'glow.when', 'twilight'),
+      // 0: every puff glows alike; above 0 the glow falls off with the puff's distance from the anchor
+      // (full within 35 % of it, gone at it): clouds lit from below by a fire on the ground.
+      radius: numberParam(glowSource.radius, 'glow.radius', 0, 0, 60000),
+      // The share of the glow a dormant site keeps (its active state not running).
+      dormant: numberParam(glowSource.dormant, 'glow.dormant', 1, 0, 1),
     }) : null,
     drift: driftSource ? Object.freeze({
       speed: numberParam(driftSource.speed, 'drift.speed', 0, 0, 200),

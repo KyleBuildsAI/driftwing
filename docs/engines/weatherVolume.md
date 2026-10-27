@@ -74,7 +74,7 @@ waves lift upwind of the cloud (`-z`).
 | `tint` | 0xRRGGBB | | 0xffffff (bank 0xe6eaee, mist 0xf4f7f9) | albedo tint: ochre for dust, cold blue-white for snow |
 | `brightness` | factor | 0.3..2 | 1 | per-puff brightness around this value |
 | `billow` | 0..1 | | 0.15 | slow breathing of the puffs |
-| `glow` | object or null | | null | `{ color 0x9fd4ff, strength 1 (0..8), when 'twilight' \| 'night' \| 'always' }`. The light is added after the haze. `twilight` means the sun is 1.5-18 degrees below the horizon (noctilucent clouds) |
+| `glow` | object or null | | null | `{ color 0x9fd4ff, strength 1 (0..8), when 'twilight' \| 'night' \| 'always', radius m = 0, dormant 0..1 = 1 }`. The light is added after the haze. `twilight` means the sun is 1.5-18 degrees below the horizon (noctilucent clouds). `radius` above 0 fades the glow with each puff's distance from the anchor (full within 35 % of it, none beyond it): low clouds lit from below by a fire on the ground (the fissure eruption). `dormant` is the share of the glow a site keeps while its active state is not running |
 | `haze` | object | | varies | `{ near m, far m, max 0..1 }`: aerial perspective from the true distance. It closes in with the sky's fog density |
 | `farMode` | | `auto`, `coarse`, `hide` | `auto` | at the FAR tier: `auto` hides a heavy preset's volume (its lure takes over) and keeps a coarse mass otherwise |
 

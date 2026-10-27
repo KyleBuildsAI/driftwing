@@ -456,12 +456,13 @@ export function createWeatherVolumeEngine() {
     }
   }
 
-  function refreshGlow(data) {
+  function refreshGlow(data, active) {
     const glow = data.params.glow;
     if (!glow) return;
-    let factor = 1;
-    if (glow.when === 'night') factor = frame.nightFactor;
-    else if (glow.when === 'twilight') factor = smooth(-frame.sunElevation, 1.5, 5) * (1 - smooth(-frame.sunElevation, 13, 18));
+    // A dormant site (instance.active false: a fissure between eruptions) keeps glow.dormant of it.
+    let factor = active === false ? glow.dormant : 1;
+    if (glow.when === 'night') factor *= frame.nightFactor;
+    else if (glow.when === 'twilight') factor *= smooth(-frame.sunElevation, 1.5, 5) * (1 - smooth(-frame.sunElevation, 13, 18));
     const scale = glow.strength * factor * GLOW_SCALE;
     data.glowNow.r = data.glowColor.r * scale;
     data.glowNow.g = data.glowColor.g * scale;
@@ -633,9 +634,11 @@ export function createWeatherVolumeEngine() {
       tints[attribute + 1] = data.tint.g;
       tints[attribute + 2] = data.tint.b;
       tints[attribute + 3] = groups[group + 5];
-      glows[attribute] = data.glowNow.r;
-      glows[attribute + 1] = data.glowNow.g;
-      glows[attribute + 2] = data.glowNow.b;
+      // glow.radius: a fire's glow on the clouds above it, fading with the puff's distance from the anchor.
+      const glowShare = data.glowRadius > 0 ? 1 - smooth(Math.hypot(worldX - anchor.x, worldZ - anchor.z), data.glowRadius * 0.35, data.glowRadius) : 1;
+      glows[attribute] = data.glowNow.r * glowShare;
+      glows[attribute + 1] = data.glowNow.g * glowShare;
+      glows[attribute + 2] = data.glowNow.b * glowShare;
       glows[attribute + 3] = 0;
       puffCursor++;
       written++;
@@ -920,6 +923,7 @@ export function createWeatherVolumeEngine() {
         fogColor: new THREE.Color(resolved.insideFog.color),
         glowColor,
         glowNow: { r: 0, g: 0, b: 0 },
+        glowRadius: resolved.glow ? resolved.glow.radius : 0,
         windSource: null,
         windActive: false,
         windBounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
@@ -977,7 +981,7 @@ export function createWeatherVolumeEngine() {
       data.writtenFrame = stamp;
       const step = Number.isFinite(dt) && dt > 0 ? dt : 0;
       advanceLifecycle(instance, step);
-      refreshGlow(data);
+      refreshGlow(data, instance.active);
       // The camera can only be inside (or under the rain of) a volume within its reach.
       const dx = frame.cameraX - instance.anchor.x;
       const dz = frame.cameraZ - instance.anchor.z;
