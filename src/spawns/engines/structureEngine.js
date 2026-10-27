@@ -65,7 +65,7 @@ import { createParamView, createWindSample, ownsPresetAudio } from './engineKit.
 import { applyRigidDrop } from '../../render/curvature.js';
 import { addStructureColliders, islandTopCollider, removeStructureColliders, updateTurbineColliders } from './structure/colliders.js';
 import { createPath, createPathFollower } from '../../world/pathFollower.js';
-import { createCourseRival } from './structure/rival.js';
+import { createCourseRival, createRivalModel } from './structure/rival.js';
 
 const ENGINE_NAME = 'structure';
 /** Structure spawns alive at once (the director's cap is the same). */
@@ -145,6 +145,9 @@ export function createStructureEngine() {
   let rotors = null;
   let socks = null;
   let puffs = null;
+  /** The one shared course-rival model (structure/rival.js), and whether a rival holds it. */
+  let rivalModel = null;
+  let rivalModelHeld = false;
   let lanterns = null;
   let serial = 0;
   let proxies = [];
@@ -1254,6 +1257,9 @@ export function createStructureEngine() {
         }
         for (const pool of [nacelles, rotors, socks, puffs, lanterns]) ctx.registerPrewarm(pool.mesh);
       }
+      // The course rival's creature, built once (a create neither builds it nor compiles its pipelines).
+      rivalModel = createRivalModel(ctx.game, ctx.scene);
+      if (rivalModel && typeof ctx.registerPrewarm === 'function') ctx.registerPrewarm(rivalModel.root);
       if (ctx.bus && typeof ctx.bus.onTyped === 'function') {
         ctx.bus.onTyped('landed', onLanded);
         ctx.bus.onTyped('softCrash', onSoftCrash);
@@ -1326,8 +1332,9 @@ export function createStructureEngine() {
         portalId: params.site ? params.site.id : `${preset.id}:${params.seed}`,
         startTime: Number.isFinite(params.startTime) ? params.startTime : ctx.time.elapsed,
         motion: null,
-        /** The course rival (out.rival, structure/rival.js), or null. */
+        /** The course rival (out.rival, structure/rival.js), or null; whether it holds the shared model. */
         rival: null,
+        rivalModel: false,
         lanternSlots: new Int32Array(0),
         lanternLocal: null,
         lanternColors: null,
@@ -1431,15 +1438,21 @@ export function createStructureEngine() {
         registerSurfaces(data, out.surfaces, anchor, instance, colliderPrefix);
         if (out.rival) {
           if (!out.challenge) throw new Error(`[DRIFTWING] structure preset "${preset.id}": out.rival needs the recipe's challenge course (out.challenge)`);
+          const model = rivalModel && !rivalModelHeld ? rivalModel : null;
           data.rival = createCourseRival(ctx, THREE, {
             anchor,
             spec: out.rival,
             definition: out.challenge,
             owner: `${preset.id}:${params.seed}`,
+            model,
             onRoar: () => {
               if (data.voice) data.voice.trigger('roar', ROAR_TRIGGER);
             },
           });
+          if (model) {
+            rivalModelHeld = true;
+            data.rivalModel = true;
+          }
           if (data.rival.courseKey !== null) data.challengeKeys.push(data.rival.courseKey);
         } else {
           registerChallenge(data, out.challenge, preset, params);
@@ -1515,6 +1528,10 @@ export function createStructureEngine() {
       if (data.rival) {
         data.rival.dispose();
         data.rival = null;
+        if (data.rivalModel) {
+          rivalModelHeld = false;
+          data.rivalModel = false;
+        }
       }
       unregisterChallenge(data);
       releaseMeshes(data);
@@ -1598,6 +1615,10 @@ export function createStructureEngine() {
       for (const pool of [nacelles, rotors, socks, puffs, lanterns]) pool.dispose({ keepMaterial: true });
       for (const proxy of proxies) proxy.geometry.dispose();
       proxies = [];
+      if (rivalModel) {
+        rivalModel.dispose();
+        rivalModel = null;
+      }
       for (const material of Object.values(materials)) material.dispose();
     },
   };

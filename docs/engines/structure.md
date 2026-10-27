@@ -491,13 +491,15 @@ run's start (the challenge's live elapsed time): `pace` reaches the finish gate 
 in `rivalTime`. While the player flies the dragon skin the course is registered with the rival
 follower as its `rival` (the challenge HUD shows the gap); otherwise without one. The course is
 registered again (same key, records kept) whenever that changes, never while a run on it is armed or
-running. The creature is the dragon craft's mesh (`buildDragonMesh`, its shared materials) scaled up,
-posed through the same visual state the craft writes: perched on its crag, launching when the run
+running. The creature is the dragon craft's mesh (`buildDragonMesh`, its shared materials) scaled up:
+one shared model the engine builds and prewarms in `init()` (`createRivalModel`), so a create builds
+no geometry and compiles no pipeline; a rival borrows it and hides it on dispose (a second rival alive
+at the same time races unseen). It is posed through the same visual state the craft writes: perched on its crag, launching when the run
 starts (as a rival it roars, the voice's `roar` trigger, and breathes fire), flapping as it climbs,
 tucking as it dives, banking into turns, and flying home on a return path made when the run ends or
 is cancelled. A valid finish ahead of `rivalTime` in a rival run sends the typed `achievement`. The
 voice follows the creature. Without the game context (the node labs) only the model is skipped. Hidden
-at the far tier; dispose removes the model and its listener, and unregisters the course.
+at the far tier; dispose hides the model, removes the listener and unregisters the course.
 
 ### Wind
 

@@ -17,9 +17,11 @@
 // craft materials) scaled up, driven through the same visual state the craft writes: perched on its
 // crag (wings folded, the head looking about), flapping as it climbs, tucking as it dives, banking into
 // its turns. After a run (finished, cancelled or done) it flies back to its perch on a return path made
-// at that moment (an event; the frame update allocates nothing). It needs the game context (the
-// craft materials and the light pool for its fire): without it (the node labs) the course still
-// registers and only the model is skipped.
+// at that moment (an event; the frame update allocates nothing). The model is the structure engine's
+// one shared rival model (createRivalModel, built and prewarmed in its init, so a create neither
+// builds geometry nor compiles a pipeline); the rival borrows it and hides it again on dispose.
+// Without it (the node labs, or a second rival while one holds it) the course still registers and
+// races, unseen.
 import { createPath, createPathFollower } from '../../../world/pathFollower.js';
 import { FEET, buildDragonMesh } from '../../../craft/eagleMeshes.js';
 import { applyRigidDrop } from '../../../render/curvature.js';
@@ -44,12 +46,27 @@ function playerIsDragon(state) {
 }
 
 /**
+ * The shared rival model: the dragon craft's mesh, hidden, in the scene (the engine builds it once in
+ * init and registers it for the pipeline prewarm). game: the game context (its uniforms and craft
+ * materials). Returns the mesh ({ root, update(visual, dt), dispose() }) or null without a game context.
+ */
+export function createRivalModel(game, scene) {
+  if (!game || !game.uniforms) return null;
+  const model = buildDragonMesh(game);
+  model.root.name = 'structure-rival';
+  model.root.visible = false;
+  scene.add(model.root);
+  return model;
+}
+
+/**
  * The rival of one structure instance. ctx: the engine context; THREE: the engine's three; anchor:
  * the instance anchor (world); spec: out.rival; definition: out.challenge (world, unregistered);
- * owner: the registration owner; onRoar(): the launch roar (the engine sends the voice trigger).
+ * owner: the registration owner; model: the shared rival model to fly, or null; onRoar(): the launch
+ * roar (the engine sends the voice trigger).
  * Returns { courseKey, position (world, live), update(dt), setVisible(visible), dispose(), describe() }.
  */
-export function createCourseRival(ctx, THREE, { anchor, spec, definition, owner, onRoar }) {
+export function createCourseRival(ctx, THREE, { anchor, spec, definition, owner, model = null, onRoar }) {
   const challenges = ctx.game?.systems?.challenges ?? null;
   const local = spec.points;
   if (!Array.isArray(local) || local.length < 6 || local.length % 3 !== 0) throw new Error(`[DRIFTWING] structure rival "${definition.id}": out.rival.points must hold at least two xyz points`);
@@ -93,8 +110,7 @@ export function createCourseRival(ctx, THREE, { anchor, spec, definition, owner,
   register(playerIsDragon(ctx.state));
 
   // ---- The creature ---------------------------------------------------------------------------------
-  const game = ctx.game ?? null;
-  const model = game && game.uniforms ? buildDragonMesh(game) : null;
+  let visible = true;
   const visual = {
     craftState: { flapPhase: 0, flapAmplitude: 0, wingTuck: 0, landing: 0, perched: true, perchedSeconds: 0, screechCount: 0, roarCount: 0, fireIntensity: 0 },
     time: ctx.time,
@@ -106,8 +122,7 @@ export function createCourseRival(ctx, THREE, { anchor, spec, definition, owner,
   const euler = new THREE.Euler(0, 0, 0, 'YXZ');
   if (model) {
     model.root.scale.setScalar(spec.scale);
-    model.root.name = 'structure-rival';
-    ctx.scene.add(model.root);
+    model.root.visible = true;
   }
 
   const offFinished = ctx.bus && typeof ctx.bus.onTyped === 'function'
@@ -220,17 +235,23 @@ export function createCourseRival(ctx, THREE, { anchor, spec, definition, owner,
       model.update(visual, dt);
     },
 
-    setVisible(visible) {
-      if (model) model.root.visible = visible;
+    setVisible(show) {
+      visible = show;
+      if (model) model.root.visible = show;
     },
 
     dispose() {
       if (offFinished) offFinished();
-      if (model) model.dispose();
+      if (model) {
+        model.root.visible = false;
+        visual.craftState.fireIntensity = 0;
+        // One more pose with the fire out returns the borrowed light.
+        model.update(visual, 0);
+      }
     },
 
     describe() {
-      return { mode: ['perched', 'racing', 'returning'][mode], rival: registeredRival, launches, beaten, finishAlong, model: model !== null };
+      return { mode: ['perched', 'racing', 'returning'][mode], rival: registeredRival, launches, beaten, finishAlong, model: model !== null, visible };
     },
   };
 }
