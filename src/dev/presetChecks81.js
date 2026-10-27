@@ -23,6 +23,7 @@ import { installPresetChecks } from './presetChecks.js';
 import { frames, holdConditions, wait } from './spawnCheckKit.js';
 import { buildSiteCourse } from '../gameplay/challenges.js';
 import { createWaterSample } from '../world/waterQuery.js';
+import { PRESETS } from '../spawns/presets/index.js';
 
 const DEG = Math.PI / 180;
 const STRIKE_REASON = 'structure strike';
@@ -37,6 +38,11 @@ const MAX_RUN_FRAMES = 2400;
 /** The arch run starts this far (m) before the first arch and ends this far past the last. */
 const ARCH_RUN_IN = 400;
 const ARCH_RUN_OUT = 120;
+/** The batch's presets (spec order 81-90): the only game presets left live while the checks run. */
+const BATCH_PRESET_IDS = Object.freeze([
+  'fiveArchChain', 'cherryBlossomValley', 'autumnColourWave', 'lavenderTulipStripes', 'riceTerraces',
+  'redwoodGiants', 'badlandsHoodoos', 'mangroveDelta', 'cactusDustDevils', 'bambooForest',
+]);
 /** The stored challenge records (src/gameplay/challenges.js). */
 const RECORDS_KEY = 'driftwing-v2.challenges';
 
@@ -48,6 +54,7 @@ function round(value, digits = 1) {
 export function installBatch81Checks(game) {
   const api = installPresetChecks(game);
   const sharedStart = api.start;
+  const sharedSetup = api.setup;
   const { ctx, state } = game;
   const THREE = ctx.THREE;
   const manager = ctx.systems.spawns.manager;
@@ -246,10 +253,13 @@ export function installBatch81Checks(game) {
     return colliders.list().filter((entry) => ids.has(entry.id) && !entry.tags.sensor);
   }
 
-  /** The tallest of the records whose id contains `piece`. */
-  function tallest(records, piece) {
-    const height = (record) => record.bounds.max.y - record.bounds.min.y;
-    return records.filter((record) => record.id.includes(piece)).sort((first, second) => height(second) - height(first))[0] ?? null;
+  /**
+   * Of the records whose id contains `piece`, the tallest (pick 'tallest') or the one reaching highest
+   * (pick 'highest': an arch's crown rib, clear of the ground on every side).
+   */
+  function pickPiece(records, piece, pick) {
+    const measure = pick === 'highest' ? (record) => record.bounds.max.y : (record) => record.bounds.max.y - record.bounds.min.y;
+    return records.filter((record) => record.id.includes(piece)).sort((first, second) => measure(second) - measure(first))[0] ?? null;
   }
 
   /** Vegetation trunk colliders (the provider's, contract d.4) within radius of the site at trunk height. */
@@ -308,6 +318,25 @@ export function installBatch81Checks(game) {
   }
 
   Object.assign(api, {
+    /**
+     * Holds every other game preset (the director's events would otherwise add sky modifiers, wind
+     * sources and geometry mid-check), keeps the batch's ten, then the shared setup.
+     */
+    setup() {
+      const debug = ctx.systems.spawns.debug;
+      const held = debug.holdGamePresets();
+      const kept = [];
+      for (const id of BATCH_PRESET_IDS) {
+        const preset = PRESETS.find((entry) => entry.id === id);
+        if (preset && !manager.getPreset(id)) {
+          manager.addPreset(preset);
+          kept.push(id);
+        }
+      }
+      const line = check('setup: the other game presets held, the batch kept', kept.length === BATCH_PRESET_IDS.length, { held: held.length, kept });
+      return `${line} | ${sharedSetup()}`;
+    },
+
     /** The shared start; a refused spawn also reports why the SpawnManager refused it. */
     async start(presetId, options) {
       const line = await sharedStart(presetId, options);
@@ -318,11 +347,11 @@ export function installBatch81Checks(game) {
 
 
     /**
-     * Collision for a solid site: strikes into the tallest `piece` collider of the live site (the
-     * structure parts' own colliders), or into a redwood trunk (piece 'trunk': the vegetation
+     * Collision for a solid site: strikes into the tallest (or highest) `piece` collider of the live
+     * site (the structure parts' own colliders), or into a redwood trunk (piece 'trunk': the vegetation
      * provider's colliders). Each craft at each speed must end in a structure strike.
      */
-    async strikes(presetId, { piece, crafts = ['bushplane', 'jet'], speeds = [60, 250] } = {}) {
+    async strikes(presetId, { piece, pick = 'tallest', crafts = ['bushplane', 'jet'], speeds = [60, 250] } = {}) {
       const { site, spawnId, parts } = liveSite(presetId);
       if (!spawnId) return check(`${presetId}: strikes`, false, 'no live site spawn (run site() first)');
       await hover(site);
@@ -337,7 +366,7 @@ export function installBatch81Checks(game) {
       } else {
         const solids = ownSolids(parts);
         available = solids.length;
-        target = tallest(solids, `:${piece}`);
+        target = pickPiece(solids, `:${piece}`, pick);
         accept = new Set(solids.map((record) => record.id));
       }
       if (!target) return check(`${presetId}: strikes`, false, { piece, available });
@@ -510,10 +539,11 @@ export function installBatch81Checks(game) {
       return check(`${presetId}: water on the site (${bodies} local bodies or more${ocean ? ', open sea in its channels' : ''})`, ok, { bodies: found, grid: counts, stamps: site.stamps.map((stamp) => stamp.type) });
     },
 
-    /** Puts the craft back on its craft and the stored records as they were, then the shared finish. */
+    /** Puts the craft and the held game presets back, then the shared finish. */
     finishBatch() {
       ctx.settings.set('craft', craftBefore);
-      return api.finish();
+      const released = ctx.systems.spawns.debug.releaseGamePresets();
+      return `${api.finish()} | ${released.length} game presets back`;
     },
   });
   return api;
