@@ -65,6 +65,8 @@ export function installPresetChecks61(game) {
     return part ? part.colliderIds.filter((id) => ctx.colliders.has(id)) : [];
   }
   const sweep = createSweepResult();
+  sweep.point = { x: 0, y: 0, z: 0 };
+  sweep.normal = { x: 0, y: 0, z: 0 };
   /** A sphere swept from `from` to `to` (world): the collider id it hits first, or null. */
   function sweepHit(from, to, radius = 1) {
     return ctx.colliders.sweepSphere(from, to, radius, null, sweep) ? sweep.id : null;
@@ -72,6 +74,44 @@ export function installPresetChecks61(game) {
 
   const api = {
     results: helpers.results,
+
+    /**
+     * The blood moon: F9 schedules its global override on the current night, and the director starts
+     * the preset's own part at the override's half weight. Waits (up to `seconds`) for it, checks the
+     * lunar eclipse part and the override's sky (the moon light reddened, the night darker), and frames
+     * the moon from the craft.
+     */
+    async bloodMoon(presetId = 'bloodMoon', { seconds = 40 } = {}) {
+      const id = ctx.systems.spawns.forceSpawn(presetId, { distance: 0, force: true });
+      const started = performance.now();
+      while (!spawnOf(presetId) && performance.now() - started < seconds * 1000) await frames(10);
+      const celestial = partOf(presetId, 'celestial');
+      const engine = manager.registry.get('celestial');
+      const described = celestial ? engine.describe(celestial) : null;
+      const sky = ctx.systems.sky.getModifierState();
+      const moon = ctx.systems.sky.moonLight.color;
+      const red = moon.r > moon.g * 1.5 && moon.r > moon.b * 1.5;
+      if (celestial) {
+        ctx.setPhotoMode(true);
+        await frames(2);
+        const player = state.player.position;
+        const anchor = celestial.anchor;
+        ctx.systems.camera.setFreeCameraPose({ position: new helpers.THREE.Vector3(player.x, player.y + 30, player.z), target: new helpers.THREE.Vector3(anchor.x, anchor.y, anchor.z) });
+        await frames(30);
+      }
+      return check(`${presetId}: the override's night brings the eclipse (copper moon light, a darker night, the halo and limb)`,
+        id === `override:${presetId}` && Boolean(described && described.lunarEclipse) && red && sky.darkness > 0.2,
+        { id, spawn: spawnOf(presetId) ? spawnOf(presetId).id : null, lunarEclipse: described ? described.lunarEclipse : null, darkness: round(sky.darkness), moonLight: moon.getHexString() });
+    },
+
+    /** Day breaks: the override's weight falls and the blood moon's spawn ends, leaving nothing behind. */
+    async bloodMoonEnds(presetId = 'bloodMoon', { seconds = 60 } = {}) {
+      ctx.setPhotoMode(false);
+      const started = performance.now();
+      while (spawnOf(presetId) && performance.now() - started < seconds * 1000) await frames(10);
+      const leaks = manager.getStats().leaks ?? null;
+      return check(`${presetId}: the blood moon ends with its night`, spawnOf(presetId) === null, { leaks, sky: ctx.systems.sky.getModifierState().count });
+    },
 
     /** The sleeping giant (free-standing, as a debug spawn builds it). */
     async giant(presetId = 'sleepingGiant') {
@@ -98,6 +138,9 @@ export function installPresetChecks61(game) {
     async galleon(presetId = 'ghostGalleon') {
       const structure = partOf(presetId, 'structure');
       if (!structure) return check(`${presetId}: galleon live`, false, 'no structure part');
+      // Photo mode holds the flight clock (and every PathFollower with it): fly on.
+      ctx.setPhotoMode(false);
+      await frames(2);
       const start = { x: structure.anchor.x, y: structure.anchor.y, z: structure.anchor.z };
       await wait(2500);
       const moved = Math.hypot(structure.anchor.x - start.x, structure.anchor.z - start.z);
@@ -189,6 +232,9 @@ export function installPresetChecks61(game) {
     async dragon(presetId = 'dragonRacer') {
       const structure = partOf(presetId, 'structure');
       if (!structure || !structure.data.rival) return check(`${presetId}: dragon race live`, false, 'no rival');
+      // Photo mode holds the flight clock: the course and the rival run on it.
+      ctx.setPhotoMode(false);
+      await frames(2);
       const rival = structure.data.rival;
       const key = rival.courseKey;
       const ids = colliderIdsOf(structure);
