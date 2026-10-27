@@ -409,6 +409,7 @@ const RENDER_PLAN = Object.freeze({
   canopy: { intensity: 1, seconds: 6, triggers: [{ at: 2, name: 'creak' }] },
   portal: { intensity: 1, seconds: 5, triggers: [{ at: 2, name: 'surge' }] },
   giant: { intensity: 1, seconds: 5, triggers: [] },
+  galleon: { intensity: 1, seconds: 6, triggers: [{ at: 1, name: 'bell' }] },
 });
 
 async function testRecipes(page, label) {

@@ -1096,7 +1096,10 @@ presets (92-100) use the wave 2 combo scheduling.
   the terrain fixture `fixtureGiant` and the terrain lab's giant shape and paint checks. The lab's
   "site-list hash unchanged" check now hashes the Phase 2 presets' sites (the Phase 3 sites join the
   world without moving any of them; the portal rings had already changed the full list).
-- **Next:** 69-70 (ghost galleon, dragon racer), the batch kit
+  69 (ghost galleon): the structure recipe `ghostGalleon` (a lofted ghost-kind ship sailing an
+  out.motion loop over the cloud band, capsule colliders carried with it, eleven ignitable lanterns,
+  the `bell` voice trigger) and the `galleon` audio recipe.
+- **Next:** 70 (dragon racer), the batch kit
   `src/dev/presetChecks61.js` with `tools/steps/presets-61-70.json`, `src/dev/spawnScenarios/batch61.js`,
   docs/spawns.md rows and sections, then the verification on both backends.
 
