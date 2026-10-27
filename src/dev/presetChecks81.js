@@ -68,6 +68,7 @@ export function installBatch81Checks(game) {
   ctx.bus.onTyped('challengeGate', (payload) => events.gates.push(payload));
   ctx.bus.onTyped('challengeFinished', (payload) => events.finished.push(payload));
   const craftBefore = ctx.settings.get('craft');
+  const qualityBefore = ctx.settings.get('quality');
 
   function check(name, ok, detail) {
     const line = `${ok ? 'PASS' : 'FAIL'} ${name}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`;
@@ -320,9 +321,12 @@ export function installBatch81Checks(game) {
   Object.assign(api, {
     /**
      * Holds every other game preset (the director's events would otherwise add sky modifiers, wind
-     * sources and geometry mid-check), keeps the batch's ten, then the shared setup.
+     * sources and geometry mid-check), keeps the batch's ten, then the shared setup. The quality is
+     * held at 'high' (before any baseline): its three vegetation rings draw the groves the stills
+     * frame (a headless page picks 'minimal', whose one ring ends about 200 m from the craft).
      */
     setup() {
+      ctx.settings.set('quality', 'high');
       const debug = ctx.systems.spawns.debug;
       const held = debug.holdGamePresets();
       const kept = [];
@@ -539,9 +543,10 @@ export function installBatch81Checks(game) {
       return check(`${presetId}: water on the site (${bodies} local bodies or more${ocean ? ', open sea in its channels' : ''})`, ok, { bodies: found, grid: counts, stamps: site.stamps.map((stamp) => stamp.type) });
     },
 
-    /** Puts the craft and the held game presets back, then the shared finish. */
+    /** Puts the craft, the quality and the held game presets back, then the shared finish. */
     finishBatch() {
       ctx.settings.set('craft', craftBefore);
+      ctx.settings.set('quality', qualityBefore);
       const released = ctx.systems.spawns.debug.releaseGamePresets();
       return `${api.finish()} | ${released.length} game presets back`;
     },
