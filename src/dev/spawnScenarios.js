@@ -1,7 +1,8 @@
 // How ?test=spawns (src/dev/spawnsTest.js) shows each of the 30 Phase 2 presets: one scenario per
 // preset, in spec order. Dev builds only. The staging comes from the preset step files
 // (tools/steps/presets-batch1.json, presets-batch2.json and presets-21-30.json), so every preset is
-// seen at a time of day and in weather that suit it.
+// seen at a time of day and in weather that suit it. The Phase 3 batches add theirs from
+// src/dev/spawnScenarios/batch<N>.js, one import each, in spec order.
 //
 // A scenario:
 //   id          the preset id
@@ -33,13 +34,15 @@
 //               look 'antisolar' down-sun at the craft's shadow, or look 'pair' between the craft and
 //               the spawn, a wingman off the wing); fov in degrees
 
+import { BATCH81_SCENARIOS } from './spawnScenarios/batch81.js';
+
 /** Activation overrides the batch 1 step file used to show a storm at its mature stage at once. */
 const MATURE_VORTEX = Object.freeze({
   vortex: Object.freeze({ startStage: 'mature', trackSpeed: 0 }),
   weatherVolume: Object.freeze({ formSeconds: 0, drift: Object.freeze({ speed: 0 }) }),
 });
 
-export const SPAWN_SCENARIOS = Object.freeze([
+const PHASE2_SCENARIOS = Object.freeze([
   // ---- Weather and sky (1-6) ----
   {
     id: 'tornado', why: 'a storm in the late afternoon light', sun: 28, weather: 'storm',
@@ -202,4 +205,10 @@ export const SPAWN_SCENARIOS = Object.freeze([
     anchor: 'land', distance: 9000, runSeconds: 8, stage: 'wallCloud',
     view: { child: 'supercell', distance: 9000, height: 250, bearing: 180, lift: 900 },
   },
+]);
+
+/** Every scenario, in spec order: the Phase 2 presets, then each Phase 3 batch. */
+export const SPAWN_SCENARIOS = Object.freeze([
+  ...PHASE2_SCENARIOS,
+  ...BATCH81_SCENARIOS,
 ]);
