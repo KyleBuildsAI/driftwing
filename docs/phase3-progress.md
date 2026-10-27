@@ -1065,7 +1065,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | # | Presets | Branch | Status |
 | --- | --- | --- | --- |
 | B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | not started |
-| B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | not started |
+| B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | done (not merged) |
 | B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | not started |
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
@@ -1077,6 +1077,78 @@ Each preset ships with its journal title and one-liner, 3+ callouts, its audio r
 FAR lure where heavy, colliders where solid, rarity, filters and lifetime (docs/spawns.md
 template). The challenge-based presets (70, 76-81) use the wave 1 challenge system; the combo
 presets (92-100) use the wave 2 combo scheduling.
+
+### Wave 3 - p3/presets-41-50
+
+Presets 41-50, each its own file under `src/spawns/presets/`, registered under "Batch 5" in
+`presets/index.js`, with rows and sections in docs/spawns.md (rows numbered by spec number; the
+docs check takes the "Preset NN" of the file's first line, the same change as batch 81-90):
+`calvingGlacier` (site), `coralAtoll` (site), `reefShipwreck` (site), `dolphinPod` (event),
+`seaStacks` (site, achievement `seaArch`), `rogueWave` (event), `tidalBore` (site), `batsAtDusk`
+(event), `herdStampede` (event), `flamingoLake` (site, a pink lake). None is starred (no wind).
+
+Engine additions (all additive and inert until a preset uses them; contract section l):
+- Water effects layer: travelling waves (4 slots; a sech-squared crest, a straight front with tapered
+  ends or a ring, lifting `surfaceHeightAt` and so the water query) and shallows regions (4 slots;
+  clear tinted water with a surf ring), sharing one packed uniform array; the ocean material reads
+  `nodes.shallows()`. waterEffect engine: `wave` (front, ring, estuary mode, repeating, `crash` once
+  per run) and `shallows` (fitted to an atoll or reef stamp), `describe()`.
+- Stamps `atoll`, `reef`, `seaStacks`, `estuary` and the paint `coral`. The atoll shrank to about a
+  kilometre across and fits on its own depth test (open water wider than that is rare in these
+  worlds); the estuary finds the shore on its axis, needs its channel on land, and its levees fade out
+  under open water.
+- Structure engine: recipes `glacier`, `shipwreck`, `seaArches`, `caveMouth`; movers (calving slabs
+  and drifting bergs on pooled meshes, each with a hull collider posed every frame);
+  `out.underwater` depth shading; `localHeightfield`; `setParam('calve')`; `describe()`;
+  `structure:calve`. The underwater shading now reads no render origin on hosts without one (the
+  colliders lab crashed on it).
+- Fauna engine: the `stream` behaviour and the `bat` species (`cliffFace.js` shared with the cave
+  mouth); the bats start 90 s into their flow.
+- Audio recipes `surf`, `herd`, `calving`, `dolphin`. Tour guide synonyms for the ten.
+
+Tests: `src/dev/presetChecks41.js` + `tools/steps/presets-41-50.json` (seed `P3-B5-37`, all six
+sites within 35 km; the game's presets held), `src/dev/spawnScenarios/batch41.js`; the terrain lab
+checks the four stamps (shapes, paint) and looks on `P3-B5-22` for a tidal bore; the water lab's
+map-tile tag check now compares the presets without waters or overlays (any wave 3 lake changed the
+game list's tag).
+
+Verification (2026-10-27, dev server, owner's rule: each run once, numbers as they came):
+- `tools/steps/presets-41-50.json` (`seed=P3-B5-37&dev=1`): WebGPU 51/51, 0 errors / 0 warnings;
+  WebGL2 51/51, 0 / 0. Every preset shown, discovered (toast and journal), and disposed back to GPU
+  memory, colliders, wind sources, sky modifiers and lights; a slab calved (crack, splash, a 1.95 m
+  ring wave in the water query), the bergs drifted with their hulls, the ice front, a berg and an arch
+  lintel each soft-crashed a craft ('structure strike', never through), a pass through the sea arch
+  sent its gate and `seaArch`, the rogue wave lifted the water query 13.9 m at its crest, the bore ran
+  up its estuary, the dolphins raced the craft's shadow, 900+ bats out of the cave and scattered by a
+  pass, the herd stampeded with dust, the flamingos flushed off their pink lake.
+- `run-harness --test spawns --seeds P3-B5-37 --presets <the ten>`: WebGPU PASS 10/10 (0 / 0; lowest
+  31.7 fps, worst p99 72.4 ms, the glacier); WebGL2 PASS 10/10 (0 / 0; lowest 44.1 fps, worst p99
+  49 ms). Frame times reported, not judged.
+- `run-harness --test terrain --presets real --seeds P3-B5-37`: every batch stamp PASS on both
+  backends (atoll, reef, seaStacks, estuary, basin: shapes, 0 seam cracks, worker meshes identical,
+  collision 0.00003 m); the run FAILs only on the types this seed lacks (the volcano's cone within
+  40 km; crater and terraces await their batches): a seed for every stamp type is the I3 pass's pick.
+- Labs: terrain 452/452, water 34/34, structure 75/75, colliders 84/84, fauna-modes 44/44, spawns
+  101/101, director 88/88, preset-pacing 4/4, preset-wind 12/12, preset-flight 13/13, copilot 240/240,
+  discovery 43/43, setpiece 47/47, every craft lab passes (seaplane 113/113, origin 32/32 and
+  challenges 70/70 rerun alone with `--expose-gc`), eagle 49/50 (its allocation, also on the base);
+  audio 214/215 (all four new recipes sound, stay finite and fire their triggers on both backends; the
+  WebGL2 doppler camera-cut check failed on 2 of 3 runs, passing on the first).
+- `npm run build` and `npm run build:single` clean (V1 SHA-256 matches, no dev kit in the bundle),
+  `npm run test:v1` 2/2, docs-check 284/284, `validatePresets` 40 presets valid.
+
+Known issues: the eagle lab's allocation check (144 B/tick scanning) fails on the base commit
+f63fa29 too (wave 2 leftover, unchanged here). The audio lab's WebGL2 doppler camera-cut check is
+timing-sensitive (failed on 2 of 3 runs on the busy machine). The calving glacier site of seed
+P3-B5-37 lies in a narrow fjord, so only 2 of its 6-9 bergs find water deep enough.
+
+Merge notes for I3: `presets/index.js` (Batch 5 block), `spawnScenarios.js` (one import, one spread;
+the header line is batch 91's verbatim), `docs/spawns.md` (rows 41-50 after row 30, the section
+before "Adding a preset"), `tools/docs-check.mjs` and the terrain lab's Phase 2 world (batch 81-90's
+hunks verbatim), `src/audio/recipes/index.js` and `tools/lab/audio.mjs` (the budget line conflicts
+with batch 81-90's equivalent; RENDER_PLAN gains four lines), `structure/recipes/index.js`,
+`structure/stamps.js`, `src/world/stamps.js` and `schema.js` (appended stamp types and paint),
+`tourGuide.js` synonyms, the water lab's tag check.
 
 ### Wave 4: discovery and verification, then the tag
 
