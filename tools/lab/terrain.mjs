@@ -79,6 +79,11 @@ for (const flag of process.argv.slice(2)) {
 }
 
 const SEEDS = ['DRIFTWING', 'HARNESS-1', 'P2-TERRAIN'];
+/**
+ * Further seeds the real-preset checks look on when a site preset is placed on none of the seeds
+ * above within the search radius (the wave 3 tidal bore is rarer than that).
+ */
+const REAL_SITE_SEEDS = ['P3-B5-22'];
 /** The seed the stamp checks run on (every stamp type lies within 13 km of its origin). */
 const STAMP_SEED = 'P2-TERRAIN';
 const SEARCH_RADIUS = 30000;
@@ -503,6 +508,36 @@ function testShapes(world, sites) {
         }
         check('shapes', `${label}: every shelf's pool floor is flat (within 1 cm)`, worstFlat <= 0.01, `${round(worstFlat, 4)} m`);
         check('shapes', `${label}: the shelves step down the slope`, stepsDown, `${stamp.shelves.length} shelves, ${round(stamp.topY, 1)} -> ${round(stamp.bottomY, 1)} m`);
+      } else if (stamp.type === 'atoll') {
+        // The islets stand out of the sea on the rim, around a lagoon under it.
+        const islets = stamp.islets.map((islet) => world.heightAt(islet.x, islet.z) - WATER);
+        const lagoon = world.heightAt(stamp.x, stamp.z) - WATER;
+        check('shapes', `${label}: every islet stands out of the sea around a lagoon under it`, islets.every((height) => height > 0.5) && lagoon < -3,
+          `islets ${islets.map((height) => round(height, 1)).join(', ')} m, lagoon ${round(lagoon, 1)} m`);
+      } else if (stamp.type === 'reef') {
+        // The sand hollow lies deep, and nothing on the reef flat breaks the surface.
+        let highest = -Infinity;
+        for (let index = 0; index < 32; index++) {
+          const angle = (index / 32) * Math.PI * 2;
+          for (const reach of [stamp.pocketRadius * 1.4, stamp.radius * 0.6, stamp.radius * 0.85]) {
+            highest = Math.max(highest, world.heightAt(stamp.x + Math.sin(angle) * reach, stamp.z - Math.cos(angle) * reach));
+          }
+        }
+        const hollow = world.heightAt(stamp.x, stamp.z) - WATER;
+        check('shapes', `${label}: the hollow lies deep and the reef flat stays under the sea`, hollow < -6 && highest < WATER - 0.4, `hollow ${round(hollow, 1)} m, highest flat ${round(highest - WATER, 2)} m`);
+      } else if (stamp.type === 'seaStacks') {
+        // Every stack and every arch leg stands well out of the sea.
+        const stacks = stamp.stacks.map((stack) => world.heightAt(stack.x, stack.z) - WATER);
+        const legs = stamp.arches.flatMap((arch) => arch.legs.map((leg) => world.heightAt(leg.x, leg.z) - WATER));
+        check('shapes', `${label}: every stack and arch leg stands out of the sea`, stacks.length >= 2 && stacks.every((height) => height > 20) && legs.every((height) => height > 15),
+          `stacks ${stacks.map((height) => round(height)).join(', ')} m, legs ${legs.map((height) => round(height)).join(', ')} m`);
+      } else if (stamp.type === 'estuary') {
+        // The channel lies below the sea from its mouth to its head.
+        const depths = [];
+        for (let share = 0.05; share <= 0.96; share += 0.15) {
+          depths.push(world.heightAt(stamp.mouthX + stamp.inlandX * stamp.channelLength * share, stamp.mouthZ + stamp.inlandZ * stamp.channelLength * share) - WATER);
+        }
+        check('shapes', `${label}: the channel is carved below the sea from its mouth to its head`, depths.every((depth) => depth < -0.5), `${depths.map((depth) => round(depth, 1)).join(', ')} m`);
       } else {
         const top = world.heightAt(stamp.x, stamp.z);
         check('shapes', `${label}: the islet stands at least 70 % of its height above the sea`, top - WATER >= stamp.height * 0.7, `${round(top, 1)} m, height ${round(stamp.height, 1)} m`);
@@ -599,6 +634,10 @@ function testPaint(world, sites, seed = STAMP_SEED) {
     basin: (stamp) => [{ x: stamp.x, z: stamp.z }, stamp.paint],
     crater: (stamp) => [{ x: stamp.x, z: stamp.z }, stamp.paint],
     terraces: (stamp) => [{ x: stamp.shelves[0].x, z: stamp.shelves[0].z }, stamp.paint],
+    atoll: (stamp) => [{ x: stamp.x, z: stamp.z }, stamp.paint],
+    reef: (stamp) => [{ x: stamp.x + stamp.dirX * stamp.radius * 0.6, z: stamp.z + stamp.dirZ * stamp.radius * 0.6 }, stamp.paint],
+    seaStacks: (stamp) => [{ x: stamp.stacks[0].x, z: stamp.stacks[0].z }, stamp.paint],
+    estuary: (stamp) => [{ x: stamp.mouthX + stamp.inlandX * stamp.channelLength * 0.5, z: stamp.mouthZ + stamp.inlandZ * stamp.channelLength * 0.5 }, stamp.paint],
   };
   for (const site of sites) {
     const stamp = site.stamps[0];
@@ -708,7 +747,7 @@ function testRealPresets() {
   testDeterminism(realWorld, PRESETS, 'real presets, ');
   for (const preset of stamped) {
     let found = null;
-    for (const seed of [STAMP_SEED, ...SEEDS]) {
+    for (const seed of [STAMP_SEED, ...SEEDS, ...REAL_SITE_SEEDS]) {
       const world = realWorld(seed);
       const sites = world.sitesNear(0, 0, SEARCH_RADIUS).filter((site) => site.presetId === preset.id).slice(0, SITES_PER_TYPE);
       if (sites.length > 0) {
@@ -823,6 +862,16 @@ const PHASE2_REAL_DIGESTS = Object.freeze({
   'HARNESS-1': { meshes: '01d73057fae7adf80e6b498c653d4933380eab87df71c702f242fa5f25c40e53', sites: '40179d8108de3ff2' },
   'P2-TERRAIN': { meshes: '94f279ad6b775a08843693be7f693119cee66e2bb175589b7c4e4a003f8ea152', sites: '06628e3c54a53137' },
 });
+/**
+ * The Phase 2 presets (wave 3 adds site presets of its own, which change the world as they must): the
+ * Phase 2 world is rebuilt from these alone.
+ */
+const PHASE2_PRESET_IDS = Object.freeze([
+  'tornado', 'supercell', 'waterspout', 'lenticular', 'microburst', 'glory', 'volcano', 'geyserField', 'slotCanyon', 'megaWaterfall',
+  'whalePod', 'maelstrom', 'bioluminescentBay', 'starlingMurmuration', 'geeseFormation', 'thermalHawks', 'fireflies', 'eagleWingman', 'windFarm', 'ropeBridge',
+  'abandonedAirfield', 'meteorShower', 'totalSolarEclipse', 'comet', 'skyLanternFestival', 'floatingIslands', 'skyWhale', 'crystalSpires', 'jetStream', 'stormChase',
+]);
+const PHASE2_OPTIONS = Object.freeze({ ...WORLD_OPTIONS, presets: PRESETS.filter((preset) => PHASE2_PRESET_IDS.includes(preset.id)) });
 /** The seed the water and overlay fixtures are checked on (every one lies within 14 km of its origin). */
 const WATER_SEED = 'HARNESS-1';
 const WATER_OPTIONS = Object.freeze({ ...WORLD_OPTIONS, presets: WATER_FIXTURES });
@@ -854,10 +903,10 @@ function withoutOverlays(presets) {
 
 function testPhase3Worlds() {
   for (const seed of SEEDS) {
-    const digest = phase2RealDigest(createWorldGen(seed, WORLD_OPTIONS));
+    const digest = phase2RealDigest(createWorldGen(seed, PHASE2_OPTIONS));
     const golden = PHASE2_REAL_DIGESTS[seed];
-    check('phase3', `${seed}: the real presets (no waters, no overlays): meshes, colours and scatter bit-identical to Phase 2`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
-    check('phase3', `${seed}: the real presets: the site-list hash unchanged from Phase 2`, digest.sites === golden.sites, digest.sites);
+    check('phase3', `${seed}: the Phase 2 presets (no waters, no overlays): meshes, colours and scatter bit-identical to Phase 2`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
+    check('phase3', `${seed}: the Phase 2 presets: the site-list hash unchanged from Phase 2`, digest.sites === golden.sites, digest.sites);
   }
 }
 
