@@ -539,12 +539,12 @@ for (const presetId of ['canyonGauntlet', 'caveTunnel', 'waterfallWall', 'balloo
   const forwardZ = -Math.cos(heading);
   const lifts = [];
   for (const side of [900, -900]) {
-    for (const along of [-2400, 0, 2400]) lifts.push(lab.windAt(position.x + forwardX * along - forwardZ * side, position.y + 700, position.z + forwardZ * along + forwardX * side).y);
+    for (const along of [-2625, 525, 2625]) lifts.push(lab.windAt(position.x + forwardX * along - forwardZ * side, position.y + 700, position.z + forwardZ * along + forwardX * side).y);
   }
   const between = lab.windAt(position.x, position.y + 700, position.z).y;
   check('street', 'lift under the clouds of both rows (>= 2.5 m/s), none between the rows', lifts.every((value) => value >= 2.5) && between < 0.5, `rows ${lifts.map((value) => round(value, 1)).join(', ')} m/s, between ${round(between, 2)}`);
   const cloud = partsOf(id).filter((part) => part.engine === 'weatherVolume');
-  check('street', 'two rows of seven cumulus clumps along the wind', cloud.length === 2 && cloud.every((part) => part.data.layout.groupCount === 7), cloud.map((part) => part.data.layout.groupCount).join(', '));
+  check('street', 'two rows of eight cumulus clumps along the wind', cloud.length === 2 && cloud.every((part) => part.data.layout.groupCount === 8), cloud.map((part) => part.data.layout.groupCount).join(', '));
   siteSpawns.set('thermalStreet', id);
 }
 
