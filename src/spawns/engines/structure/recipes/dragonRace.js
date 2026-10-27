@@ -22,7 +22,7 @@ export const DRAGON_RACE_DEFAULTS = Object.freeze({
   cragRadius: 26,
   paceTime: 70,
   rivalTime: 84,
-  scale: 9,
+  dragonScale: 9,
   rivalName: 'the wild dragon',
   achievement: null,
 });
@@ -109,7 +109,8 @@ export function buildDragonRace(context, read) {
   const radius = read.number('cragRadius', DRAGON_RACE_DEFAULTS.cragRadius, 5, 120);
   const paceTime = read.number('paceTime', DRAGON_RACE_DEFAULTS.paceTime, 5, 1200);
   const rivalTime = read.number('rivalTime', DRAGON_RACE_DEFAULTS.rivalTime, 5, 1200);
-  const scale = read.number('scale', DRAGON_RACE_DEFAULTS.scale, 1, 40);
+  // Not `scale`: that is the site's own activation scale.
+  const scale = read.number('dragonScale', DRAGON_RACE_DEFAULTS.dragonScale, 1, 40);
   const name = read.string('rivalName', DRAGON_RACE_DEFAULTS.rivalName);
   const achievement = read.object('achievement', null);
   if (achievement !== null && (typeof achievement.id !== 'string' || !achievement.id || typeof achievement.title !== 'string' || !achievement.title)) {

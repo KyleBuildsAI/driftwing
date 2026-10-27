@@ -325,7 +325,7 @@ cloth a craft passes through. Its lanterns burn a cold green (0x9fffd8) until a 
 | `cragRadius` | m | 5..120 | 26 | at its foot |
 | `paceTime` | s | 5..1200 | 70 | the dragon's time to the finish leading any craft but a dragon |
 | `rivalTime` | s | 5..1200 | 84 | its time racing a dragon (the course's rival) |
-| `scale` | | 1..40 | 9 | the dragon craft's mesh scaled up |
+| `dragonScale` | | 1..40 | 9 | the dragon craft's mesh scaled up |
 | `rivalName` | | | `the wild dragon` | the challenge HUD's rival name |
 | `achievement` | `{ id, title }` or null | | null | earned by finishing ahead of the rival as a dragon |
 
