@@ -152,7 +152,9 @@ export function createStructureEngine() {
     // wreck reads through clear water. Exactly the vertex colour where objectLook.y is 0.
     const { positionWorld, exp, max } = ctx.TSL;
     const seaLevel = ctx.uniforms.waterLevel ? ctx.uniforms.waterLevel : float(ctx.terrain.waterLevel);
-    const depthBelowSea = max(seaLevel.sub(ctx.uniforms.renderOrigin.y).sub(positionWorld.y), 0);
+    // The sea in the render frame (a host without the floating origin, such as the node labs, has none).
+    const renderSeaLevel = ctx.uniforms.renderOrigin ? seaLevel.sub(ctx.uniforms.renderOrigin.y) : seaLevel;
+    const depthBelowSea = max(renderSeaLevel.sub(positionWorld.y), 0);
     const depthColor = mix(vec3(0.092, 0.495, 0.43), vec3(0.0103, 0.0685, 0.117), smoothstep(1.5, 12, depthBelowSea));
     const depthFade = float(1).sub(exp(max(depthBelowSea.sub(0.3), 0).div(-6))).mul(0.9).mul(objectLook.y);
     solid.colorNode = mix(rgba.rgb, depthColor, depthFade);
