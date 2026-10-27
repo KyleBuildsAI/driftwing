@@ -47,6 +47,7 @@ function round(value, digits = 1) {
 
 export function installBatch81Checks(game) {
   const api = installPresetChecks(game);
+  const sharedStart = api.start;
   const { ctx, state } = game;
   const THREE = ctx.THREE;
   const manager = ctx.systems.spawns.manager;
@@ -211,9 +212,10 @@ export function installBatch81Checks(game) {
 
   /**
    * A level (or gently climbing) approach into the collider whose line stays clear of the terrain and
-   * meets this collider first. Returns { start, direction, aim } or null.
+   * meets this collider first (or, with `accept`, any collider of that set: the arch's own stone,
+   * where a leg meets its ribs). Returns { start, direction, aim } or null.
    */
-  function approachFor(record, speed) {
+  function approachFor(record, speed, accept = null) {
     const bounds = record.bounds;
     const centre = interiorPoint(record);
     const size = Math.hypot(bounds[3] - bounds[0], bounds[4] - bounds[1], bounds[5] - bounds[2]) * 0.5;
@@ -230,7 +232,8 @@ export function installBatch81Checks(game) {
           if (point.y < Math.max(ctx.world.groundHeight(point.x, point.z), ctx.world.WATER_LEVEL) + 4) clear = false;
         }
         if (!clear || colliders.insideSolid(start.x, start.y, start.z) !== null) continue;
-        if (!colliders.raycast(start, direction, distance + size, null, out) || out.id !== record.id) continue;
+        if (!colliders.raycast(start, direction, distance + size, null, out)) continue;
+        if (out.id !== record.id && !(accept && accept.has(out.id))) continue;
         return { start, direction, aim: new THREE.Vector3(out.point.x, out.point.y, out.point.z) };
       }
     }
@@ -259,12 +262,12 @@ export function installBatch81Checks(game) {
     return found;
   }
 
-  async function strikeAll(presetId, record, crafts, speeds) {
+  async function strikeAll(presetId, record, crafts, speeds, accept = null) {
     const runs = [];
     for (const craft of crafts) {
       for (const speed of speeds) {
         const full = colliders.get(record.id) ?? record;
-        const approach = approachFor(full, speed);
+        const approach = approachFor(full, speed, accept);
         if (!approach) {
           runs.push({ craft, speed, approach: 'none clear' });
           continue;
@@ -289,7 +292,7 @@ export function installBatch81Checks(game) {
       presetName: preset.name,
       anchor,
       heading: site.rotation / DEG,
-      ground: (x, z) => Math.max(ctx.terrain.groundHeight(x, z), ctx.terrain.waterLevel),
+      ground: (x, z) => Math.max(ctx.world.groundHeight(x, z), ctx.world.WATER_LEVEL),
     });
     return { course, keys: gatesPart.data.challengeKeys.slice() };
   }
@@ -305,6 +308,15 @@ export function installBatch81Checks(game) {
   }
 
   Object.assign(api, {
+    /** The shared start; a refused spawn also reports why the SpawnManager refused it. */
+    async start(presetId, options) {
+      const line = await sharedStart(presetId, options);
+      if (line.startsWith('PASS')) return line;
+      const stats = manager.getStats();
+      return `${line} | refusals ${JSON.stringify(stats.refusals)}, last ${stats.lastRefusal}`;
+    },
+
+
     /**
      * Collision for a solid site: strikes into the tallest `piece` collider of the live site (the
      * structure parts' own colliders), or into a redwood trunk (piece 'trunk': the vegetation
@@ -316,6 +328,7 @@ export function installBatch81Checks(game) {
       await hover(site);
       let target = null;
       let available = 0;
+      let accept = null;
       if (piece === 'trunk') {
         const trunks = trunksNear(site, 400);
         available = trunks.length;
@@ -325,9 +338,10 @@ export function installBatch81Checks(game) {
         const solids = ownSolids(parts);
         available = solids.length;
         target = tallest(solids, `:${piece}`);
+        accept = new Set(solids.map((record) => record.id));
       }
       if (!target) return check(`${presetId}: strikes`, false, { piece, available });
-      return strikeAll(presetId, target, crafts, speeds);
+      return strikeAll(presetId, target, crafts, speeds, accept);
     },
 
     /** The live site's colliders and perches: `min` solids of its own (or trunks of the grove), each with a perch. */
