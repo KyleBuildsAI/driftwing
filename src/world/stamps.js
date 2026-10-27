@@ -103,8 +103,15 @@ const ESTUARY_MOUTH_BEYOND = 0.1;
 const ESTUARY_HEAD_REACH = 1 - ESTUARY_SHORE_FROM - ESTUARY_MOUTH_BEYOND;
 /** The shore search steps along the axis by this much (m). */
 const ESTUARY_SHORE_STEP = 25;
-/** An estuary fits only where the land along its channel stays under this height (m above the sea). */
+/** An estuary fits only where the land along its channel, from the head to the shore, stays above
+ * ESTUARY_MIN_LAND and under ESTUARY_MAX_LAND (m above the sea). */
+const ESTUARY_MIN_LAND = 0.5;
 const ESTUARY_MAX_LAND = 45;
+/** Its channel, levees and flats lift the ground only where it lies above the sea or just under it
+ * (fully from ESTUARY_LIFT_FULL, none below ESTUARY_LIFT_NONE, m relative to the sea), so no levee
+ * ever rises out of open water. */
+const ESTUARY_LIFT_NONE = -2.5;
+const ESTUARY_LIFT_FULL = 0.5;
 /** Per-segment scratch of the canyon's two passes (segments are validated to at most 32). */
 const carveCutFloor = new Float64Array(32);
 const carveCutShare = new Float64Array(32);
@@ -1015,20 +1022,26 @@ function resolveEstuary(stamp, spec, random, context) {
   stamp.floorMouthY = context.waterLevel - depth;
   stamp.floorHeadY = context.waterLevel - depth * 0.45;
   stamp.flatY = context.waterLevel + 1.5;
+  stamp.liftNoneY = context.waterLevel + ESTUARY_LIFT_NONE;
+  stamp.liftFullY = context.waterLevel + ESTUARY_LIFT_FULL;
   stamp.mouthX = stamp.x + stamp.dirX * mouthAlong;
   stamp.mouthZ = stamp.z + stamp.dirZ * mouthAlong;
   stamp.headX = stamp.x + stamp.dirX * headAlong;
   stamp.headZ = stamp.z + stamp.dirZ * headAlong;
   stamp.inlandX = -stamp.dirX;
   stamp.inlandZ = -stamp.dirZ;
+  // The channel runs through land from its head to the shore (never across a bay), none of it too high.
   let highest = -Infinity;
+  let lowest = Infinity;
+  const landEnd = Number.isFinite(shoreAlong) ? shoreAlong - ESTUARY_SHORE_STEP : headAlong;
   for (let index = 0; index <= 8; index++) {
-    const along = headAlong + (index / 8) * (length - mouthAlong);
+    const along = headAlong + (index / 8) * (landEnd - headAlong);
     const height = context.baseHeight(stamp.x + stamp.dirX * along, stamp.z + stamp.dirZ * along);
     if (height > highest) highest = height;
+    if (height < lowest) lowest = height;
   }
   stamp.fits = Number.isFinite(shoreAlong) && context.baseHeight(stamp.headX, stamp.headZ) > context.waterLevel + 1 && context.baseHeight(stamp.mouthX, stamp.mouthZ) < context.waterLevel + 1
-    && highest <= context.waterLevel + ESTUARY_MAX_LAND;
+    && highest <= context.waterLevel + ESTUARY_MAX_LAND && lowest > context.waterLevel + ESTUARY_MIN_LAND;
   const halfAlong = length / 2 + headHalfWidth + bankWidth + falloff;
   const halfAcross = mouthHalfWidth + bankWidth + falloff;
   const centreAlong = (mouthAlong + headAlong) / 2;
@@ -1760,6 +1773,8 @@ function estuaryHeight(stamp, x, z, height) {
     const mask = 1 - smoothstep(0, stamp.falloff, across - halfWidth - stamp.bankWidth);
     target = height < stamp.flatY ? height + (stamp.flatY - height) * mask : height;
   }
+  // Ground under open water keeps its depth: lifts fade out below the sea.
+  if (target > height) target = height + (target - height) * smoothstep(stamp.liftNoneY, stamp.liftFullY, height);
   return height + (target - height) * seaFade;
 }
 
