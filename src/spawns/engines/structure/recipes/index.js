@@ -9,6 +9,9 @@ import { SPIRES_DEFAULTS, buildSpires } from './spires.js';
 import { WATERFALL_DEFAULTS, buildWaterfall } from './waterfall.js';
 import { WIND_FARM_DEFAULTS, buildWindFarm } from './windFarm.js';
 import { CHALLENGE_GATES_DEFAULTS, buildChallengeGates } from './challengeGates.js';
+import { LAVA_CHANNELS_DEFAULTS, buildLavaChannels } from './lavaChannels.js';
+import { EJECTA_DEFAULTS, buildEjecta } from './ejecta.js';
+import { SALT_PILES_DEFAULTS, buildSaltPiles } from './saltPiles.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -23,6 +26,9 @@ export const RECIPES = Object.freeze({
   gates: Object.freeze({ build: buildGates, defaults: GATES_DEFAULTS, audioIntensity: 'constant' }),
   waterfall: Object.freeze({ build: buildWaterfall, defaults: WATERFALL_DEFAULTS, audioIntensity: 'constant' }),
   challengeGates: Object.freeze({ build: buildChallengeGates, defaults: CHALLENGE_GATES_DEFAULTS, audioIntensity: 'approach' }),
+  lavaChannels: Object.freeze({ build: buildLavaChannels, defaults: LAVA_CHANNELS_DEFAULTS, audioIntensity: 'constant' }),
+  ejecta: Object.freeze({ build: buildEjecta, defaults: EJECTA_DEFAULTS, audioIntensity: 'constant' }),
+  saltPiles: Object.freeze({ build: buildSaltPiles, defaults: SALT_PILES_DEFAULTS, audioIntensity: 'constant' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

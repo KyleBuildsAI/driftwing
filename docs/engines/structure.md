@@ -19,7 +19,7 @@ SpawnManager refuses that activation.
 
 One structure instance is built once at create, in the instance's local frame (metres from its
 anchor), and shown on pooled meshes (never a new mesh per instance: see "Mesh lifetime in three
-r184" in docs/architecture.md). Up to five geometries per instance:
+r184" in docs/architecture.md). Up to six geometries per instance:
 
 | part | material | shown at | used for |
 | --- | --- | --- | --- |
@@ -28,6 +28,7 @@ r184" in docs/architecture.md). Up to five geometries per instance:
 | decal | flat, polygon-offset over the terrain | near, mid, far | runway tarmac and markings |
 | glow | crystal: emissive rising toward the tip, pulsing in its own phase, brighter at night (bloom picks it up), a fresnel rim | near, mid, far | crystal spires and shards |
 | water | transparent streaks scrolling down a ribbon, lit by the sun colour, dimmed at night | near, mid | waterfalls and streams |
+| lava | molten lava: dark crust plates (two octaves of noise) drifting downstream at 1.4 m/s over glowing cracks, hottest and thinnest-crusted mid-flow, an HDR glow that the bloom carries and that reads brighter at night; polygon-offset over the channel floor; the vertex colour is the crust, its alpha the heat | near, mid, far | lava channels, the fissure's crack |
 
 Moving parts are shared instanced meshes built once in `init()` (capacity in brackets): turbine
 nacelles and rotors (256), windsock segments (64 socks of 5 segments) and mist puffs (512 soft
@@ -50,6 +51,9 @@ The frame: a compass `heading` (degrees) from the activation; `along` is forward
 | `gates` | a timed course: start and finish gates marked by cairns with pennants, an optional river down the canyon floor | `carve` | a timed course, a journal best run, an optional corridor |
 | `waterfall` | a river spilling over the cliff step as a wide curtain of falling strands into the plunge pool, the river on downstream, boulders and mist puffs | `cliffStep` | a voice at the pool (the `waterfall` recipe) |
 | `challengeGates` | the gate frames of the preset's `challenge` course: posts and a lintel for rectangle gates, a hoop on a post for circle gates, pennants (white start, red checkpoints, chequered finish) | none | a challenge course registered with the challenge system (start prompt, splits, medals, bests per craft) |
+| `lavaChannels` | molten lava down every carve stamp of the site, on to the sea (or a stand-in channel along the heading), cooled basalt blocks along the levees, crust slabs at the sea entry | `carve` (all of them) | lava ribbons, colliders on the larger blocks, `facts` (lavaFlows, seaEntries, lavaLength) |
+| `ejecta` | impact blocks strewn over a crater's rim and outer flank, densest and largest on the crest, a few on the inner wall | `crater` | colliders on the larger blocks, perches on the biggest crest blocks, `facts` (blocks, solidBlocks, perches) |
+| `saltPiles` | rows of harvested salt cones with crust rims at the edge of a salt pan's water film | `basin` | a small cylinder collider per cone, `facts` (saltPiles) |
 
 Without its stamp (a debug spawn, or a site whose preset lists none) every recipe still builds:
 the bridge spans `span` metres across the heading on trestles, the strip is draped along the
@@ -236,6 +240,51 @@ The recipe resolves it to a world course with the id `${presetId}:${siteId}` (`$
 an event) and hands it to the engine as `out.challenge`; the engine registers it with
 `ctx.game.systems.challenges` at create (`data.challengeKeys`) and unregisters it at dispose. The
 frames are visual only: a preset that wants solid frames adds its own collider boxes.
+
+## lavaChannels
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `toSea` | bool | | true | after the channel's exit the flow runs on down the real ground to the sea (src/spawns/engines/lavaPath.js); false keeps it in the channel (a fissure) |
+| `reach` | m | 0..8000 | 2500 | how far beyond the channel the flow may run looking for the sea; it ends in a lobe where it finds no lower ground |
+| `width` | share of the channel | 0.2..1.5 | 0.8 | the lava's half width over the carve's floor half width |
+| `spread` | factor | 1..4 | 1.6 | how much wider the flow fans out on its way to the sea (and 1.3 x that on the water) |
+| `crust` | 0xRRGGBB | | 0x2b2522 | the cooled crust between the glowing cracks |
+| `blocks` | per km | 0..80 | 12 | cooled basalt blocks along the levees; those of at least 2.2 m radius are solid colliders |
+| `blockSize` | m | 0.3..12 | [1.5, 4] | block radius (smaller ones more often) |
+
+The flow follows each carve stamp's resolved centre line (`stamp.path`) from its uphill entry to its
+exit; beyond it, each 20 m step takes the lowest of five headings within 50 degrees of the current
+one, until the ground drops below the sea (the sea entry; the lava runs 30 m on into the water) or no
+step falls. The emitter's `seaEntry` param traces the same path, so a preset's steam stands exactly
+where its lava meets the water. Pair it with the stamps of `structureStamps('lavaChannels', options)`
+(a shallow channel between low levees, painted basalt; offset and rotate each channel through
+`options`).
+
+## ejecta
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `stamp` | index | 0..16 | 0 | which crater stamp of the site |
+| `count` | blocks | 0..400 | [90, 130] | blocks on the rim and the flank (as many small fragments again on the crest, near only) |
+| `size` | m | 0.3..20 | [1.5, 7] | block radius; the crest gets the big ones |
+| `inner` | share | 0..0.5 | 0.12 | share of the blocks tumbled onto the inner wall |
+| `perches` | count | 0..12 | 4 | the largest solid crest blocks carry a perch point on their top |
+| `radius` | m | 50..3000 | 400 | without a crater stamp: the ring's radius around the anchor |
+
+Blocks of 2.5 m radius or more are sphere colliders (`surface: 'stone'`); the flank's blocks thin out
+with distance from the crest.
+
+## saltPiles
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `stamp` | index | 0..16 | 0 | which basin stamp of the site |
+| `rows`, `perRow` | count | 1..12, 1..80 | [3, 5], [24, 40] | rows of cones across the heading |
+| `spacing`, `rowGap` | m | 2..40, 2..60 | 7, 9 | between cones in a row, and between rows |
+| `height` | m | 0.3..4 | [0.9, 1.5] | cone height (the radius follows it) |
+| `edge` | share of the basin radius | 0..0.95 | 0.62 | how far out from the basin's centre the rows stand, along the heading (at the water's edge for a pan filled to 70 %) |
+| `radius` | m | 20..3000 | 300 | without a basin stamp: how far ahead of the anchor the rows stand |
 
 ## Generic features
 
