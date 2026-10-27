@@ -1068,7 +1068,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | not started |
 | B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | not started |
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
-| B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
+| B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | in progress |
 | B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | not started |
 | B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | not started |
 | I3 | Integration pass: presets/index.js and spawnScenarios in spec order; `?test=spawns` for all 100 on both backends | `v2-phase3` | not started |
@@ -1077,6 +1077,30 @@ Each preset ships with its journal title and one-liner, 3+ callouts, its audio r
 FAR lure where heavy, colliders where solid, rarity, filters and lifetime (docs/spawns.md
 template). The challenge-based presets (70, 76-81) use the wave 1 challenge system; the combo
 presets (92-100) use the wave 2 combo scheduling.
+
+### Wave 3 - p3/presets-71-80
+
+- **Done:** the ten presets in `src/spawns/presets/` (registered under the batch 8 comment), the
+  engine extensions they need (see contract additions), the audio recipes `wisps`, `windRush` and
+  `burner`, the structure recipes `canyonGates`, `caveTunnel`, `fallsWall`, `balloonCourse` and
+  `kiteSlalom` with `structure/courseKit.js`, the docs (docs/spawns.md rows and sections 71-80,
+  docs/engines/structure.md, lightEffect.md, weatherVolume.md, docs/architecture.md audio), the
+  labs `tools/lab/presets-71-80.mjs` (60 checks) and `tools/lab/preset-flight-71-80.mjs` (16
+  checks: glider, bush plane and jet through the five wind presets), the `?test=spawns` scenarios
+  (`src/dev/spawnScenarios/batch8.js`) and the browser step file `tools/steps/presets-71-80.json`
+  with `src/dev/presetChecksBatch8.js` (run on seed SOAK-1, where all seven site presets have a
+  real site within 38 km).
+- Resumed from a cut-off session: its uncommitted work was reviewed and committed in pieces; the
+  lab's failures were fixed (the wisps allocation check measured the loop's own boxing and ran the
+  spawn past its lifetime; the ridge check counted the stub hills' lee sink; the shear line veered
+  only 33-37 degrees, now turned square to the wind with a 16 m/s outflow).
+- Tuned by the flight lab: the reverse waterfall's updraft column is 170 m in radius and 10 m/s
+  (75 m was too narrow to ride), and the thermal street has eight thermals of 330 m and 4.2 m/s
+  per row under eight cloud clumps (seven of 260 m gave a glider no net gain).
+- **Next:** the browser runs on both backends, `?test=spawns` for the batch, builds, `test:v1`,
+  every lab.
+- **Open issues:** docs-check fails only the ten row numbers 71-80 (it wants each row's number to be
+  its index in PRESETS, 31-40 on this branch); they match once batches 31-70 are merged.
 
 ### Wave 4: discovery and verification, then the tag
 
