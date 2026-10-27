@@ -6,7 +6,12 @@
 // Floating island tops become landable heightfields (their crown a perch) that publish the exact top
 // the mesh is built from (islandTopHeight over islandOutline), so the Phase 2 ground surface moves onto
 // the collider.
-// Pure apart from the service it is handed: the node labs (no collider service) skip all of it.
+// A recipe whose solid part no primitive set can stand in for (the cave tunnel's rock mountain with its
+// bore, contract b.6) lists a local `mesh` spec (localMesh: positions and indices in the local frame);
+// the engine hands addStructureColliders a factory that builds its three-mesh-bvh MeshCollider
+// (src/world/colliderMesh.js), and removeStructureColliders releases the BVH and its geometry.
+// Pure apart from the service and the factory it is handed: the node labs (no collider service) skip
+// all of it.
 import { islandOutline, islandTopHeight } from './recipes/islands.js';
 
 const DEG = Math.PI / 180;
@@ -83,6 +88,15 @@ export function localSphere(part, x, y, z, radius, tags) {
   return localCapsule(part, x, y, z, x, y, z, radius, tags);
 }
 
+/**
+ * A triangle mesh in the local frame (positions: Float32Array xyz triples, indices: Uint32Array
+ * triangles, closed and outward facing so the collider's depth test works): a mesh BVH collider, only
+ * where no primitive set fits (contract b.6: the cave tunnel).
+ */
+export function localMesh(part, positions, indices, tags) {
+  return { part, type: 'mesh', positions, indices, tags };
+}
+
 /** A hull of local points ([x, y, z] arrays, at most 64). */
 export function localHull(part, points, tags) {
   return { part, type: 'hull', points, tags };
@@ -130,14 +144,17 @@ function toWorld(point, anchor) {
 }
 
 /** A recipe's local spec as a world collider spec (id and owner set). */
-function worldSpec(local, anchor, id, owner) {
+/** A local spec's tags in the world frame: perch points come in the local frame too. */
+function worldTags(local, anchor) {
   const tags = local.tags ?? { surface: 'stone' };
-  // Perch points come in the local frame too.
   const perch = tags.perch;
-  const worldTags = perch && typeof perch === 'object'
+  return perch && typeof perch === 'object'
     ? { ...tags, perch: Array.isArray(perch) ? perch.map((point) => toWorld(point, anchor)) : toWorld(perch, anchor) }
     : tags;
-  const spec = { id, owner, type: local.type, tags: worldTags };
+}
+
+function worldSpec(local, anchor, id, owner) {
+  const spec = { id, owner, type: local.type, tags: worldTags(local, anchor) };
   switch (local.type) {
     case 'box':
       spec.center = toWorld(local.center, anchor);
@@ -170,9 +187,11 @@ function worldSpec(local, anchor, id, owner) {
 /**
  * Registers a structure instance's colliders: out.colliders (local specs) and the moving turbine
  * parts. prefix: `${preset.id}:${params.seed}:${serial}` (contract b.5). Every id goes into
- * instance.colliderIds; on a failure the ones added are removed and the error rethrown.
+ * instance.colliderIds; on a failure the ones added are removed and the error rethrown. meshFactory
+ * (local mesh spec, anchor) -> MeshCollider builds the BVH of a `mesh` spec; those colliders are kept
+ * in data.meshColliders for removeStructureColliders.
  */
-export function addStructureColliders(colliders, instance, data, out, anchor, prefix) {
+export function addStructureColliders(colliders, instance, data, out, anchor, prefix, meshFactory = null) {
   if (!colliders) return;
   const owner = prefix;
   const add = (spec) => {
@@ -180,7 +199,18 @@ export function addStructureColliders(colliders, instance, data, out, anchor, pr
     instance.colliderIds.push(spec.id);
   };
   try {
-    out.colliders.forEach((local, index) => add(worldSpec(local, anchor, `${prefix}:${local.part}${index}`, owner)));
+    out.colliders.forEach((local, index) => {
+      const id = `${prefix}:${local.part}${index}`;
+      if (local.type !== 'mesh') {
+        add(worldSpec(local, anchor, id, owner));
+        return;
+      }
+      if (typeof meshFactory !== 'function') throw new Error(`[DRIFTWING] structure collider "${id}" is a mesh, but no mesh collider factory was given`);
+      const mesh = meshFactory(local, anchor);
+      if (!data.meshColliders) data.meshColliders = [];
+      data.meshColliders.push(mesh);
+      add({ id, owner, type: 'mesh', mesh, tags: worldTags(local, anchor) });
+    });
     if (data.turbineCount > 0) addTurbineColliders(colliders, data, prefix, owner, add);
   } catch (error) {
     removeStructureColliders(colliders, instance, data);
@@ -258,11 +288,18 @@ export function updateTurbineColliders(colliders, data) {
   }
 }
 
-/** Removes every collider an instance registered (dispose, and a failed create). */
+/** Removes every collider an instance registered (dispose, and a failed create), and frees its BVHs. */
 export function removeStructureColliders(colliders, instance, data) {
   if (colliders) for (const id of instance.colliderIds) colliders.remove(id);
   instance.colliderIds.length = 0;
   data.turbineColliders = null;
+  if (data.meshColliders) {
+    for (const mesh of data.meshColliders) {
+      mesh.dispose();
+      if (mesh.geometry) mesh.geometry.dispose();
+    }
+    data.meshColliders = null;
+  }
 }
 
 /**

@@ -27,7 +27,9 @@
 //                ctx.game.colliders (instance.colliderIds); turbine nacelles and rotors turn with yaw
 //   groundStart  engine.groundStart(preset, params, site): ground-start spots a discovered site offers
 //   wind         the wind farm's wake turbulence source (removed at the far tier, where the player is
-//                kilometres from it and cannot fly through the wake)
+//                kilometres from it and cannot fly through the wake), and the sinking air in falling
+//                water a recipe lists (out.falls: the waterfall wall), each fall's column following
+//                its ballistic arc exactly, added and removed by tier the same way
 //   audio        preset.audio as a spawn voice, driven by approach, wind or a constant level
 //   setParam     glow, sway, rotorSpeed and audio multipliers the set-piece engine can ramp
 //
@@ -41,6 +43,7 @@ import { GATE_TELEPORT_DISTANCE, createGateSet, crossGates } from './gateDetecto
 import { createParamView, createWindSample, ownsPresetAudio } from './engineKit.js';
 import { applyRigidDrop } from '../../render/curvature.js';
 import { addStructureColliders, islandTopCollider, removeStructureColliders, updateTurbineColliders } from './structure/colliders.js';
+import { createMeshCollider } from '../../world/colliderMesh.js';
 
 const ENGINE_NAME = 'structure';
 /** Structure spawns alive at once (the director's cap is the same). */
@@ -269,7 +272,7 @@ export function createStructureEngine() {
     const out = {
       turbines: [], socks: [], puffs: [], gates: [], surfaces: [], zones: [], courses: [], colliders: [],
       challenge: null,
-      wake: null, turbineSettings: null, sway: null, audioPoint: null, windProbe: null, approach: 0, radius: 20,
+      wake: null, falls: null, turbineSettings: null, sway: null, audioPoint: null, windProbe: null, approach: 0, radius: 20,
     };
     const context = {
       presetId: preset.id,
@@ -306,6 +309,8 @@ export function createStructureEngine() {
    */
   function registerChallenge(data, definition, preset, params) {
     if (!definition) return;
+    // Kept for the dev checks: the course as the recipe built it (world frame).
+    data.challengeDefinitions.push(definition);
     const challenges = ctx.game?.systems?.challenges;
     if (!challenges || typeof challenges.register !== 'function') return;
     data.challengeKeys.push(challenges.register(definition, { owner: `${preset.id}:${params.seed}` }));
@@ -410,6 +415,21 @@ export function createStructureEngine() {
   /** The game's collider service (Phase 3), or null (the node labs run the engine without one). */
   function colliderWorld() {
     return ctx.game && ctx.game.colliders ? ctx.game.colliders : null;
+  }
+
+  /**
+   * A recipe's local mesh spec (structure/colliders.js localMesh) as a three-mesh-bvh MeshCollider at
+   * the anchor (a pure translation: the recipe builds in the local frame). The BufferGeometry lives
+   * on the CPU only (it is never drawn); removeStructureColliders disposes it with the BVH.
+   */
+  function buildMeshCollider(local, anchor) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(local.positions, 3));
+    geometry.setIndex(new THREE.BufferAttribute(local.indices, 1));
+    const matrix = new Float64Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, anchor.x, anchor.y, anchor.z, 1]);
+    const mesh = createMeshCollider(geometry, matrix);
+    mesh.geometry = geometry;
+    return mesh;
   }
 
   function registerSurfaces(data, surfaces, anchor, instance, prefix) {
@@ -524,6 +544,135 @@ export function createStructureEngine() {
     });
     data.wakeId = id;
     instance.windSourceIds.push(id);
+  }
+
+  // ---- Sinking air in falling water (out.falls) ------------------------------------------------------
+  /**
+   * The falls' WindField source (kind 'structure-falls', id `<spawnId>:falls`): every fall drags a
+   * column of sinking air down its own ballistic arc (from the lip, `speed` m/s out along the
+   * downstream axis, falling under gravity), strongest on the arc, fading over `radius`, with
+   * turbulence around it and an outward spill where it meets the ground. Allocation-free.
+   */
+  function addFalls(instance) {
+    const data = instance.data;
+    if (!data.falls || data.fallsId || !instance.id) return;
+    const falls = data.falls;
+    const id = `${instance.id}:falls`;
+    const table = falls.table;
+    const count = falls.count;
+    const result = data.fallsResult;
+    const radius = falls.radius;
+    const reach = radius * 1.6;
+    ctx.wind.addSource({
+      id,
+      kind: 'structure-falls',
+      bounds: falls.bounds,
+      sample(point, time) {
+        const below = falls.lipY - point.y;
+        if (below < -falls.above || below > falls.drop + falls.foot) return null;
+        // Seconds into the fall at this height, and how far out from the lip the water is then.
+        const seconds = below > 0 ? Math.sqrt((2 * below) / falls.gravity) : 0;
+        const vertical = (below < 0 ? 1 + below / falls.above : 1) * (below > falls.drop ? 1 - (below - falls.drop) / falls.foot : 1);
+        let sink = 0;
+        let spillX = 0;
+        let spillZ = 0;
+        let turbulence = 0;
+        for (let index = 0; index < count; index++) {
+          const base = index * 3;
+          const out = table[base + 2] * seconds;
+          const offsetX = point.x - (table[base] + falls.dirX * out);
+          const offsetZ = point.z - (table[base + 1] + falls.dirZ * out);
+          const distanceSq = offsetX * offsetX + offsetZ * offsetZ;
+          if (distanceSq > reach * reach) continue;
+          const share = Math.sqrt(distanceSq) / radius;
+          const core = share < 1 ? (1 - share * share) * (1 - share * share) : 0;
+          sink += core;
+          const edge = share < 1.6 ? 1 - Math.abs(share - 1) / 0.6 : 0;
+          const chop = Math.max(core * 0.7, edge > 0 ? edge : 0);
+          if (chop > turbulence) turbulence = chop;
+          if (below > falls.drop - falls.spillDepth && share > 0.2) {
+            // The spill: outward along the ground from the foot.
+            const push = (1 - (falls.drop - below > 0 ? (falls.drop - below) / falls.spillDepth : 0)) * Math.max(0, 1 - share / 1.6);
+            const distance = Math.sqrt(distanceSq) || 1;
+            spillX += (offsetX / distance) * push;
+            spillZ += (offsetZ / distance) * push;
+          }
+        }
+        if (sink === 0 && turbulence === 0) return null;
+        const strength = vertical > 0 ? vertical : 0;
+        result.vel.x = spillX * falls.spill * strength;
+        result.vel.y = -falls.sink * (sink > 1 ? 1 : sink) * strength;
+        result.vel.z = spillZ * falls.spill * strength;
+        result.turbulence = falls.turbulence * turbulence * strength;
+        if (falls.gust > 0 && result.turbulence > 0) {
+          wakeGustInput[0] = time;
+          wakeGustInput[1] = result.turbulence * falls.gust;
+          wakeGustInput[2] = table[0] * 0.0113;
+          addWakeGust(result, point);
+        }
+        return result;
+      },
+    });
+    data.fallsId = id;
+    instance.windSourceIds.push(id);
+  }
+
+  function removeFalls(instance) {
+    const data = instance.data;
+    if (!data.fallsId) return;
+    ctx.wind.removeSource(data.fallsId);
+    const index = instance.windSourceIds.indexOf(data.fallsId);
+    if (index >= 0) instance.windSourceIds.splice(index, 1);
+    data.fallsId = null;
+  }
+
+  /**
+   * A recipe's out.falls in world terms: { radius, sink, spill, turbulence, gust, gravity, drop,
+   * lipY, dirX, dirZ, list: [{ x, z, speed }] } (local) -> the table the sampler reads and its bounds.
+   */
+  function resolveFalls(spec, anchor) {
+    if (!spec || !Array.isArray(spec.list) || spec.list.length === 0) return null;
+    const table = new Float64Array(spec.list.length * 3);
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    const seconds = Math.sqrt((2 * spec.drop) / spec.gravity);
+    const reach = spec.radius * 1.6 + spec.spillReach;
+    spec.list.forEach((fall, index) => {
+      table[index * 3] = anchor.x + fall.x;
+      table[index * 3 + 1] = anchor.z + fall.z;
+      table[index * 3 + 2] = fall.speed;
+      for (const out of [0, fall.speed * seconds]) {
+        const x = anchor.x + fall.x + spec.dirX * out;
+        const z = anchor.z + fall.z + spec.dirZ * out;
+        minX = Math.min(minX, x - reach);
+        maxX = Math.max(maxX, x + reach);
+        minZ = Math.min(minZ, z - reach);
+        maxZ = Math.max(maxZ, z + reach);
+      }
+    });
+    const lipY = anchor.y + spec.lipY;
+    const above = 30;
+    const foot = 25;
+    return {
+      table,
+      count: spec.list.length,
+      radius: spec.radius,
+      sink: spec.sink,
+      spill: spec.spill,
+      spillDepth: 30,
+      turbulence: spec.turbulence,
+      gust: spec.gust,
+      gravity: spec.gravity,
+      drop: spec.drop,
+      lipY,
+      above,
+      foot,
+      dirX: spec.dirX,
+      dirZ: spec.dirZ,
+      bounds: { min: { x: minX, y: lipY - spec.drop - foot, z: minZ }, max: { x: maxX, y: lipY + above, z: maxZ } },
+    };
   }
 
   function removeWake(instance) {
@@ -1032,10 +1181,18 @@ export function createStructureEngine() {
         courses: out.courses.map((course) => ({ ...course, startGate: -1, startTime: 0, crashed: false })),
         /** Challenge course keys registered with the challenge system (recipe challengeGates). */
         challengeKeys: [],
+        /** The course definitions the recipe built (world frame), for the dev checks. */
+        challengeDefinitions: [],
+        /** Mesh BVH colliders (structure/colliders.js localMesh), released on dispose. */
+        meshColliders: null,
         zones: [],
         surfaceIds: [],
         wake: out.wake,
         wakeId: null,
+        /** The falls' sinking air (out.falls, resolved to the world), its source id and its result. */
+        falls: resolveFalls(out.falls, anchor),
+        fallsId: null,
+        fallsResult: createWindSample(),
         wakeBounds: null,
         wakeResult: createWindSample(),
         voice: null,
@@ -1142,7 +1299,7 @@ export function createStructureEngine() {
         updateWind(data, 0);
         if (data.turbineCount > 0) updateTurbines(data, 0);
         if (data.sockCount > 0) updateSocks(data);
-        addStructureColliders(colliderWorld(), instance, data, out, anchor, colliderPrefix);
+        addStructureColliders(colliderWorld(), instance, data, out, anchor, colliderPrefix, buildMeshCollider);
         // The preset's voice (engineKit's ownsPresetAudio: params.voice, else the first engine entry).
         if (ownsPresetAudio(preset, ENGINE_NAME, read.boolean('voice', null)) && ctx.audio && typeof ctx.audio.spawnVoice === 'function') {
           data.audioMode = read.choice('audioIntensity', recipe.audioIntensity, ['approach', 'wind', 'constant']);
@@ -1178,8 +1335,13 @@ export function createStructureEngine() {
       instance.tier = tier;
       applyVisibility(instance);
       // The wake reaches a few rotor diameters downwind; at the far tier the player is kilometres away.
-      if (tier === 'far') removeWake(instance);
-      else addWake(instance);
+      if (tier === 'far') {
+        removeWake(instance);
+        removeFalls(instance);
+      } else {
+        addWake(instance);
+        addFalls(instance);
+      }
     },
 
     dispose(instance) {
@@ -1190,6 +1352,7 @@ export function createStructureEngine() {
         counts.instances--;
       }
       removeWake(instance);
+      removeFalls(instance);
       removeSurfaces(data);
       removeStructureColliders(colliderWorld(), instance, data);
       unregisterChallenge(data);
