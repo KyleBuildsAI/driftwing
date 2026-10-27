@@ -781,7 +781,7 @@ petals off the canopy in a swirling pink storm.
 
 - **Kind:** site, uncommon.
 - **Placement:** meadows or pine; land; ground 20-700 m, valley relief; chance 0.12; at least 18 km
-  apart; 400 m clearance.
+  apart; 400 m clearance; its region kept apart from the other biome regions (`separateRegions`).
 - **Overlay:** a disc of 1500-1900 m (350 m falloff), palette `cherryBlossom`, the `cherry` species
   replacing the biome's plants (density 0.72).
 - **Engines:** `emitter` (petals: a light fall from the crowns all the time and 1600-2600 more on
@@ -800,7 +800,7 @@ the ground and the broadleaf crowns while leaves twist down from the canopy.
 
 - **Kind:** site, uncommon.
 - **Placement:** pine or meadows; land; ground 20-900 m; chance 0.12; at least 18 km apart; 400 m
-  clearance.
+  clearance; its region kept apart from the other biome regions (`separateRegions`).
 - **Overlay:** a disc of 2200-2800 m (450 m falloff), palette `autumnForest`, a tint sweep from gold
   (0xe0a030) to crimson (0xb8402a) moving downwind, 600 s period, 900 m width (a 3.6 km wave whose
   front moves at about 6 m/s). The broadleaf trees turn with the ground under them; the pines stay
@@ -820,7 +820,7 @@ tulips in red, yellow, pink and white bands, with pollen drifting over them and 
 
 - **Kind:** site, uncommon.
 - **Placement:** meadows or dunes; land; ground 6-450 m, flat relief; chance 0.12; at least 16 km
-  apart; 400 m clearance.
+  apart; 400 m clearance; its region kept apart from the other biome regions (`separateRegions`).
 - **Overlays:** two ellipses across the site heading, 400 m behind and ahead of its centre: the
   lavender field (palette `lavenderFields`, 6 m stripes of `lavender`, purple rows alternating with
   darker soil-toned ones) and the tulip field (palette `tulipFields`, 14 m stripes of `tulip` in four
@@ -839,7 +839,7 @@ dawn a mist lies in the steps.
 
 - **Kind:** site, uncommon.
 - **Placement:** archipelago, meadows or pine; land; ground 40-900 m; chance 0.14; at least 16 km
-  apart; 400 m clearance; aligned downhill.
+  apart; 400 m clearance; aligned downhill; its region kept apart from the other biome regions (`separateRegions`).
 - **Stamps:** two `terraces` side by side (165 m either side of the centre), each 380-460 m down the
   slope, 150-170 m wide, 7-9 shelves behind 0.7-1 m bunds, painted `mud`.
 - **Waters:** a `pool` on every shelf of both, filled to 72 % of the bund, tinted green-grey, nearly
@@ -859,7 +859,7 @@ drifting down through the light.
 [src/spawns/presets/redwoodGiants.js](../src/spawns/presets/redwoodGiants.js)
 
 - **Kind:** site, uncommon.
-- **Placement:** pine; land; ground 30-900 m; chance 0.12; at least 18 km apart; 400 m clearance.
+- **Placement:** pine; land; ground 30-900 m; chance 0.12; at least 18 km apart; 400 m clearance; its region kept apart from the other biome regions (`separateRegions`).
 - **Overlay:** a disc of 1300-1700 m (300 m falloff), palette `redwoodForest`, the `redwood` species
   replacing the biome's trees at density 0.075 (about one giant per 40 m square).
 - **Colliders:** every trunk is a cylinder (the vegetation collider provider, from the overlay's own
@@ -879,7 +879,7 @@ gathered in clusters with lanes between them.
 
 - **Kind:** site, uncommon.
 - **Placement:** dunes or meadows; land; ground 30-900 m; chance 0.12; at least 16 km apart; 500 m
-  clearance.
+  clearance; its region kept apart from the other biome regions (`separateRegions`).
 - **Overlay:** a disc of 900-1100 m, palette `badlands`, the biome's plants replaced by a rare saguaro
   (density 0.015).
 - **Engines:** `structure` (recipe `hoodoos`: 44-64 pillars 12-36 m tall within 400 m, in 3-5
@@ -898,7 +898,7 @@ on their roots across them; a mist lies low at dawn and fireflies blink at night
 
 - **Kind:** site, uncommon.
 - **Placement:** archipelago, meadows or pine; on a coast; chance 0.6 (few coastal cells take a
-  delta); at least 18 km apart; 150 m clearance; aligned downhill (the fan opens out to sea).
+  delta); at least 18 km apart; 150 m clearance; aligned downhill (the fan opens out to sea); its region kept apart from the other biome regions (`separateRegions`).
 - **Stamp:** `delta`, 550 m seaward of the site, 1300-1600 m long and 1200-1600 m wide at the sea,
   4-7 channels 26-42 m wide cut 2.5-4 m below sea level (the sea fills them), flats between 1.2 m below
   and 0.5-0.85 m above sea level, unpainted (plants grow on it). It fits only where the fan's core
@@ -919,7 +919,7 @@ A forest of tall saguaros on warm desert ground, with two dust devils wandering 
 [src/spawns/presets/cactusDustDevils.js](../src/spawns/presets/cactusDustDevils.js)
 
 - **Kind:** site, uncommon; affects flight.
-- **Placement:** dunes; land; ground 10-900 m; chance 0.14; at least 16 km apart; 400 m clearance.
+- **Placement:** dunes; land; ground 10-900 m; chance 0.14; at least 16 km apart; 400 m clearance; its region kept apart from the other biome regions (`separateRegions`).
 - **Overlay:** a disc of 1200-1500 m, palette `saguaroDesert`, the `saguaro` species added to the
   desert's own plants (density 0.22; their tops are perches).
 - **Engines:** two `vortex` dust devils, slim collarless sand columns (6 m core and 230 m tall; 4 m and
@@ -940,7 +940,7 @@ across it as a ripple, knocking hollow wood against wood.
 
 - **Kind:** site, uncommon.
 - **Placement:** meadows, archipelago or pine; land; ground 10-800 m; chance 0.12; at least 16 km
-  apart; 400 m clearance.
+  apart; 400 m clearance; its region kept apart from the other biome regions (`separateRegions`).
 - **Overlay:** a disc of 800-1100 m (220 m falloff), palette `bambooGrove`, the `bamboo` species
   replacing the biome's plants (density 0.85). The sway reads the wind-sway texture (spawn wind
   sources included), and bamboo answers its gusts more than any other plant.
