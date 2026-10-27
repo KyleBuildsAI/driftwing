@@ -33,6 +33,8 @@
 //               look 'antisolar' down-sun at the craft's shadow, or look 'pair' between the craft and
 //               the spawn, a wingman off the wing); fov in degrees
 
+import { BATCH8_SCENARIOS } from './spawnScenarios/batch8.js';
+
 /** Activation overrides the batch 1 step file used to show a storm at its mature stage at once. */
 const MATURE_VORTEX = Object.freeze({
   vortex: Object.freeze({ startStage: 'mature', trackSpeed: 0 }),
@@ -202,4 +204,6 @@ export const SPAWN_SCENARIOS = Object.freeze([
     anchor: 'land', distance: 9000, runSeconds: 8, stage: 'wallCloud',
     view: { child: 'supercell', distance: 9000, height: 250, bearing: 180, lift: 900 },
   },
+  // ---- Phase 3 presets, one file per wave 3 batch (src/dev/spawnScenarios/) ----
+  ...BATCH8_SCENARIOS,
 ]);
