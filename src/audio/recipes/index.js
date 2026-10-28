@@ -22,8 +22,13 @@ import volcano from './volcano.js';
 import waterfall from './waterfall.js';
 import { skyWhale, whale } from './whale.js';
 // Presets 51-60.
+import caribou from './caribou.js';
 import bells from './bells.js';
 import observatory from './observatory.js';
+import train from './train.js';
+import dam from './dam.js';
+import caravan from './caravan.js';
+import fireball from './fireball.js';
 
 export const RECIPES = Object.freeze({
   tornado,
@@ -42,8 +47,13 @@ export const RECIPES = Object.freeze({
   raptor,
   goose,
   // Presets 51-60.
+  caribou,
   bells,
   observatory,
+  train,
+  dam,
+  caravan,
+  fireball,
 });
 
 /**

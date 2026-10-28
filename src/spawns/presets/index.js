@@ -35,6 +35,8 @@ import crystalSpires from './crystalSpires.js';
 import jetStream from './jetStream.js';
 import stormChase from './stormChase.js';
 // Batch 6: presets 51-60.
+import butterflyMigration from './butterflyMigration.js';
+import caribouMigration from './caribouMigration.js';
 import cliffsideMonastery from './cliffsideMonastery.js';
 import seaCliffCastle from './seaCliffCastle.js';
 import mountaintopObservatory from './mountaintopObservatory.js';
@@ -74,6 +76,8 @@ export const PRESETS = Object.freeze([
   jetStream,
   stormChase,
   // Batch 6: presets 51-60.
+  butterflyMigration,
+  caribouMigration,
   cliffsideMonastery,
   seaCliffCastle,
   mountaintopObservatory,

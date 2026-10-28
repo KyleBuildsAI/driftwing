@@ -21,6 +21,8 @@
 // (wading birds), cruise, speed: [min, max] m/s, minPixels, capacity, spotColor, build(THREE) ->
 // BufferGeometry }. Phase 3 wave 1 adds the bison and the caribou (ground herds and columns), the
 // dolphin and the flamingo (the water surface); bats, butterflies and camels come with their presets.
+// Presets 51-60 add the butterfly (a migrating cloud that rides the WindField, preset 51) and the
+// camel (the oasis caravan, preset 58: a quadruped with a raised neck and a saddle blanket).
 
 /**
  * Collects flat triangles with a colour (sRGB hex) and an emissive weight per triangle, and (after
@@ -239,7 +241,9 @@ function box(builder, cx, cy, cz, sx, sy, sz, hex, sideHex = hex) {
  * A quadruped standing with its hooves at y = 0, nose toward -z: a lofted body (hump, barrel,
  * haunches), a head and muzzle, four legs (diagonal pairs share a gait phase: front left and back
  * right 0, the others pi), a tail, and horns or antlers. spec (m): length, hip (leg top), shoulder,
- * hump, rump, width, legWidth, head: { length, drop, width }, horns | antlers, colours.
+ * hump, rump, width, legWidth, head: { length, drop, width }, horns | antlers, colours; optional humpAt
+ * (where the hump peaks, a share of the half length; default -0.45, the shoulders; a negative head drop
+ * raises the head on its neck) and saddle: { color, stripe, pack, packColor } (a blanket and packs).
  */
 function buildQuadruped(THREE, spec) {
   const builder = createMeshBuilder(THREE);
@@ -247,7 +251,9 @@ function buildQuadruped(THREE, spec) {
   const hip = spec.hip;
   const width = spec.width;
   // Body rings: z, half width, half height, centre height.
-  const bodyTop = (share) => spec.rump + (spec.shoulder + spec.hump - spec.rump) * Math.max(0, 1 - Math.abs(share + 0.45) / 0.55) ** 1.4;
+  // The hump peaks at humpAt (a share of the half length; the shoulders by default, mid-back on a camel).
+  const humpAt = spec.humpAt ?? -0.45;
+  const bodyTop = (share) => spec.rump + (spec.shoulder + spec.hump - spec.rump) * Math.max(0, 1 - Math.abs(share - humpAt) / 0.55) ** 1.4;
   const ringAt = (share, widthShare) => {
     const top = Math.max(bodyTop(share), spec.rump);
     const bottom = hip - 0.08;
@@ -287,6 +293,17 @@ function buildQuadruped(THREE, spec) {
     for (const [from, to] of beams) {
       builder.mirrored(from, to, [from[0] + thick, from[1] - thick, from[2]], spec.antlers.color);
       builder.mirrored(from, [from[0] + thick, from[1] - thick, from[2]], to, spec.antlers.color);
+    }
+  }
+  // A saddle blanket over the back with packs hanging at the flanks (the caravan's camels).
+  if (spec.saddle) {
+    const saddle = spec.saddle;
+    const top = bodyTop(humpAt) + 0.04;
+    const saddleZ = humpAt * half;
+    box(builder, 0, top - 0.1, saddleZ, width * 2.3, 0.22, spec.length * 0.3, saddle.color);
+    box(builder, 0, top + 0.03, saddleZ, width * 2.35, 0.06, spec.length * 0.06, saddle.stripe);
+    for (const side of [-1, 1]) {
+      box(builder, side * (width + saddle.pack * 0.5), top - 0.25 - saddle.pack * 0.6, saddleZ + spec.length * 0.03, saddle.pack, saddle.pack * 1.1, spec.length * 0.2, saddle.packColor);
     }
   }
   // Tail.
@@ -367,6 +384,51 @@ function buildWader(THREE, spec) {
     box(builder, x, -legHeight + 0.01, spec.legZ - 0.04, spec.legWidth * 2.2, 0.02, spec.legWidth * 4, spec.legColor);
   }
   builder.setLeg(null);
+  return builder.finish();
+}
+
+/**
+ * A butterfly (the monarch): a thin dark body, broad forewings and rounded hindwings in orange with
+ * black veins and a black border dotted white. spec (m): span, length, colours. The wings are flat in
+ * the x-z plane beyond the hinge, so the bird shader flaps them through a deep stroke.
+ */
+function buildButterfly(THREE, spec) {
+  const builder = createMeshBuilder(THREE);
+  const half = spec.span / 2;
+  const length = spec.length;
+  const body = length * 0.09;
+  loft(builder, [
+    { z: -length * 0.42, width: body * 0.8, height: body * 0.8, lift: 0 },
+    { z: -length * 0.2, width: body, height: body, lift: 0 },
+    { z: length * 0.15, width: body * 0.75, height: body * 0.75, lift: 0 },
+  ], 4, () => spec.body, [0, 0, -length * 0.55], [0, 0, length * 0.5]);
+  // Antennae: two thin slivers forward from the head.
+  builder.mirrored([body * 0.3, body * 0.4, -length * 0.5], [half * 0.22, body * 1.6, -length * 0.95], [body * 0.5, body * 0.4, -length * 0.48], spec.body);
+  const y = 0.0004;
+  const root = half * 0.1;
+  // Forewing: the orange field, then the black border along the leading edge and the tip.
+  const foreRootFront = [root, y, -length * 0.3];
+  const foreRootBack = [root, y, length * 0.02];
+  const foreTip = [half, y, -length * 0.42];
+  const foreTrail = [half * 0.78, y, length * 0.12];
+  const foreLead = [half * 0.62, y, -length * 0.5];
+  builder.mirrored(foreRootFront, foreLead, foreRootBack, spec.wing);
+  builder.mirrored(foreLead, foreTrail, foreRootBack, spec.wing);
+  builder.mirrored(foreLead, foreTip, foreTrail, spec.border);
+  builder.mirrored([root, y * 2, -length * 0.3], [half * 0.62, y * 2, -length * 0.5], [half * 0.55, y * 2, -length * 0.4], spec.border);
+  // Hindwing: rounded, behind the forewing, a black rim.
+  const hindRoot = [root, -y, length * 0.02];
+  const hindOuter = [half * 0.7, -y, length * 0.2];
+  const hindBack = [half * 0.42, -y, length * 0.62];
+  const hindTail = [root * 1.4, -y, length * 0.5];
+  builder.mirrored(hindRoot, hindOuter, hindBack, spec.wing);
+  builder.mirrored(hindRoot, hindBack, hindTail, spec.wing);
+  builder.mirrored(hindOuter, [half * 0.72, -y * 2, length * 0.34], hindBack, spec.border);
+  // White dots in the black border.
+  for (const [share, along] of [[0.86, -0.4], [0.76, -0.2], [0.68, 0.32], [0.55, 0.5]]) {
+    const dot = half * 0.05;
+    builder.mirrored([half * share, y * 3, length * along - dot], [half * share + dot, y * 3, length * along + dot], [half * share - dot, y * 3, length * along + dot], spec.dots);
+  }
   return builder.finish();
 }
 
@@ -538,6 +600,41 @@ export const SPECIES = Object.freeze({
     build: (THREE) => buildWhale(THREE, {
       length: 1, girth: 0.13, fin: 0.21, flukes: 0.34, spots: 9,
       back: 0x7d8fa6, belly: 0xd8e2ec, finColor: 0x8a9db3, spotColor: 0xbff4ff,
+    }),
+  }),
+  // Presets 51-60.
+  butterfly: Object.freeze({
+    id: 'butterfly',
+    kind: 'bird',
+    size: 0.1,
+    halfSpan: 0.05,
+    hinge: 0.005,
+    flap: Object.freeze({ rate: Object.freeze([6, 9]), amplitude: 1.05, dihedral: 0.35, glideDihedral: 0.32, glideShare: 0.3 }),
+    cruise: 3,
+    speed: Object.freeze([1, 8]),
+    minPixels: 1.4,
+    capacity: 4096,
+    build: (THREE) => buildButterfly(THREE, {
+      span: 0.1, length: 0.06, body: 0x1c1512, wing: 0xe8852a, border: 0x1a120e, dots: 0xf3ecdc,
+    }),
+  }),
+  camel: Object.freeze({
+    id: 'camel',
+    kind: 'quadruped',
+    size: 3.0,
+    halfSpan: 0.5,
+    hinge: 0,
+    gait: Object.freeze({ hip: 1.2, stride: 2.2, amplitude: Object.freeze([0.28, 0.62]), bob: 0.07 }),
+    cruise: 1.4,
+    speed: Object.freeze([0, 11]),
+    minPixels: 1.6,
+    capacity: 64,
+    build: (THREE) => buildQuadruped(THREE, {
+      length: 3.0, hip: 1.2, shoulder: 1.8, hump: 0.5, humpAt: -0.05, rump: 1.7, width: 0.36, legWidth: 0.13,
+      head: { length: 1.15, drop: -0.55, width: 0.26 },
+      back: 0xc49a68, belly: 0xd6b385, headColor: 0xbd9262, muzzle: 0x8a6a48,
+      tail: 0x9a7650, leg: 0xb88e60, legShade: 0xa98052, hoof: 0x5a4632,
+      saddle: { color: 0x9c2f2a, stripe: 0xe2b84a, pack: 0.32, packColor: 0x6e5236 },
     }),
   }),
 });

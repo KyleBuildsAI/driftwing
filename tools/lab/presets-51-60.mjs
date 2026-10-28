@@ -2,8 +2,14 @@
 // the viaduct, the dam, the oasis, the labyrinth and the fireball's scar) run headless in the real
 // structure engine inside a real SpawnManager, with the game's real collider world and ignition
 // service, on a stub world whose height function applies each preset's own resolved terrain stamps.
+// The batch's fauna (the butterflies, the caribou and the oasis camels) run in the real fauna engine
+// in the same manager.
 //
 // Tests:
+//   fauna        the butterfly cloud rides the WindField wind (its centre drifts downwind at about the
+//                wind speed) as a loose cloud above its floor, and scatters from the craft; the caribou
+//                column walks its planned route on the ground, moving with flight time, the same in a
+//                second manager
 //   recipes      every preset validates; every structure part builds on its real stamped site and
 //                free-standing (a debug spawn), with finite geometry; the same site builds the same
 //                geometry
@@ -36,6 +42,7 @@ import { createGroundSurfaces } from '../../src/world/groundSurfaces.js';
 import { createColliderWorld } from '../../src/world/colliders.js';
 import { createIgnitionService } from '../../src/gameplay/ignition.js';
 import { createStructureEngine } from '../../src/spawns/engines/structureEngine.js';
+import { createFaunaEngine } from '../../src/spawns/engines/faunaEngine.js';
 import { buildTestSite } from '../../src/dev/structureTestKit.js';
 import { PRESETS, PRESET_BY_ID } from '../../src/spawns/presets/index.js';
 
@@ -63,8 +70,10 @@ console.error = (...args) => {
   if (VERBOSE) originalError(...args);
 };
 
-/** The batch's presets that have a structure part, in spec order, with what each must show. */
+/** The batch's presets, in spec order, with what each must show (fauna: its fauna check). */
 const ALL_ENTRIES = Object.freeze([
+  Object.freeze({ id: 'butterflyMigration', fauna: 'drift' }),
+  Object.freeze({ id: 'caribouMigration', fauna: 'column' }),
   Object.freeze({ id: 'cliffsideMonastery', colliders: 8, perches: true, torches: true, cloth: true }),
   Object.freeze({ id: 'seaCliffCastle', colliders: 16, perches: true, torches: true, cloth: true }),
   Object.freeze({ id: 'mountaintopObservatory', colliders: 6, perches: true, movers: 3 }),
@@ -99,11 +108,13 @@ const world = {
   },
 };
 
-/** Each batch preset with only its structure parts (this lab registers the structure engine alone). */
-function structureOnly(preset) {
-  return Object.freeze({ ...preset, engines: Object.freeze(preset.engines.filter((entry) => entry.engine === 'structure')) });
+/** Each batch preset with only its structure and fauna parts (the engines this lab registers). */
+function labParts(preset) {
+  return Object.freeze({ ...preset, engines: Object.freeze(preset.engines.filter((entry) => entry.engine === 'structure' || entry.engine === 'fauna')) });
 }
-const LAB_PRESETS = BATCH.map((entry) => structureOnly(PRESET_BY_ID[entry.id]));
+const LAB_PRESETS = BATCH.map((entry) => labParts(PRESET_BY_ID[entry.id]));
+/** Whether a batch entry has a structure part (the structure checks run on those). */
+const hasStructure = (entry) => PRESET_BY_ID[entry.id].engines.some((part) => part.engine === 'structure');
 /** One test site per preset, 8 km apart on an east-west line. */
 const SITES = LAB_PRESETS.map((preset, index) => (preset.kind === 'site'
   ? buildTestSite(preset, { x: index * 8000, z: 0, rotation: 0.5 + index * 0.4, seed: 2000 + index }, { baseHeight, waterLevel: WATER_LEVEL })
@@ -111,7 +122,8 @@ const SITES = LAB_PRESETS.map((preset, index) => (preset.kind === 'site'
 for (const site of SITES) if (site) for (const stamp of site.stamps) stamps.push(stamp);
 const siteOf = (presetId) => SITES.find((site) => site && site.presetId === presetId) ?? null;
 
-function createLab() {
+/** The lab: a SpawnManager with the structure and fauna engines; withAudio: false runs it without voices. */
+function createLab({ withAudio = true } = {}) {
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(60, 16 / 9, 1, 20000);
@@ -131,7 +143,8 @@ function createLab() {
   const state = {
     seed: 'LAB51',
     time: { elapsed: 0, frameDt: 0, sunElevation: 30, dayTime: 0.4, nightFactor: 0, goldenFactor: 0, sunDirection: new THREE.Vector3(0.3, 0.5, -0.8).normalize(), moonDirection: new THREE.Vector3(-0.2, 0.6, 0.77).normalize() },
-    player: { position: new THREE.Vector3(0, 400, 1200), quaternion: new THREE.Quaternion(), forward: new THREE.Vector3(0, 0, -1), heading: 0, speed: 60 },
+    player: { position: new THREE.Vector3(0, 400, 1200), quaternion: new THREE.Quaternion(), forward: new THREE.Vector3(0, 0, -1), heading: 0, speed: 60, velocity: new THREE.Vector3(0, 0, -60) },
+    flight: { craft: 'glider' },
   };
   const surfaces = createGroundSurfaces();
   const game = { systems: {}, colliders: createColliderWorld({ groundSurfaces: surfaces }), ignition: createIgnitionService() };
@@ -155,10 +168,11 @@ function createLab() {
   };
   const registry = createEngineRegistry();
   const manager = createSpawnManager({
-    THREE, TSL, scene, camera, renderer: { info: { memory } }, backend: 'WebGPU', wind, audio, world, state, sky: null,
+    THREE, TSL, scene, camera, renderer: { info: { memory } }, backend: 'WebGPU', wind, audio: withAudio ? audio : null, world, state, sky: null,
     bus, perf: null, settings: null, uniforms, registry, presets: [], seed: 'LAB51', surfaces, game,
   });
   const engine = manager.register(createStructureEngine());
+  const fauna = manager.register(createFaunaEngine());
   // A stand-in for the celestial engine's skyTarget (the observatory aims at it): sky.direction while
   // sky.kind is 1 (a comet) or 2 (a radiant), nothing while it is 0.
   const sky = { kind: 0, direction: [0, 1, 0] };
@@ -212,12 +226,17 @@ function createLab() {
     visit(30000, -4000);
     return spawnFree(presetId, 30000, -4000);
   }
-  return { bus, scene, camera, uniforms, state, wind, memory, voices, surfaces, registry, manager, engine, game, sky, step, spawnSite, spawnFree, spawn, visit };
+  return { bus, scene, camera, uniforms, state, wind, memory, voices, surfaces, registry, manager, engine, fauna, game, sky, step, spawnSite, spawnFree, spawn, visit };
 }
 
-/** The spawn's structure instance (the lab presets carry only their structure parts). */
+/** The spawn's structure instance (its part with movers), or null. */
 function partOf(lab, id) {
-  return lab.manager.getParts(id)[0] ?? null;
+  return lab.manager.getParts(id).find((part) => part.data && part.data.moverMeshes !== undefined) ?? null;
+}
+
+/** The spawn's fauna instance (its part with an agent pool), or null. */
+function faunaOf(lab, id) {
+  return lab.manager.getParts(id).find((part) => part.data && part.data.pool !== undefined) ?? null;
 }
 
 function finiteGeometry(mesh) {
@@ -253,6 +272,7 @@ function testRecipes() {
   check('recipes', `the ${PRESETS.length} presets validate with the registered engines`, valid === '', valid);
   const lab = createLab();
   for (const entry of BATCH) {
+    if (!hasStructure(entry)) continue;
     const placed = siteOf(entry.id) !== null;
     const id = lab.spawn(entry.id);
     const freeId = lab.spawnFree(entry.id, 60000, -5000, 75);
@@ -431,7 +451,7 @@ function testMemory() {
   const lab = createLab();
   const before = lab.engine.stats();
   const geometries = [];
-  const ids = BATCH.map((entry) => lab.spawn(entry.id));
+  const ids = BATCH.filter(hasStructure).map((entry) => lab.spawn(entry.id));
   for (const id of ids) {
     const part = partOf(lab, id);
     for (const mesh of Object.values(part.data.meshes)) if (mesh) geometries.push(mesh.geometry);
@@ -448,9 +468,28 @@ function testMemory() {
 }
 
 // ---- allocation -------------------------------------------------------------------------------------------
+/**
+ * The young generation's growth per frame over `frames` frames of `frame`, after `warm` frames of JIT
+ * warm-up and a full collection, and the collections seen meanwhile.
+ */
+async function measureAllocation(frame, warm, frames) {
+  for (let index = 0; index < warm; index++) frame();
+  if (typeof globalThis.gc === 'function') globalThis.gc();
+  const youngUsed = () => v8.getHeapSpaceStatistics().find((space) => space.space_name === 'new_space').space_used_size;
+  let collections = 0;
+  const observer = new PerformanceObserver((list) => { collections += list.getEntries().length; });
+  observer.observe({ entryTypes: ['gc'] });
+  const youngBefore = youngUsed();
+  for (let index = 0; index < frames; index++) frame();
+  const youngAfter = youngUsed();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  observer.disconnect();
+  return { collections, perFrame: (youngAfter - youngBefore) / frames };
+}
+
 async function testAllocation() {
   const lab = createLab();
-  const ids = BATCH.map((entry) => lab.spawn(entry.id));
+  const ids = BATCH.filter(hasStructure).map((entry) => lab.spawn(entry.id));
   const parts = ids.map((id) => partOf(lab, id));
   for (const part of parts) lab.engine.setLOD(part, 'near');
   const orbit = { angle: 0 };
@@ -460,24 +499,161 @@ async function testAllocation() {
     lab.state.time.elapsed += 1 / 60;
     for (let index = 0; index < parts.length; index++) lab.engine.update(parts[index], 1 / 60);
   };
-  for (let index = 0; index < 90000; index++) frame();
-  if (typeof globalThis.gc === 'function') globalThis.gc();
-  const youngUsed = () => v8.getHeapSpaceStatistics().find((space) => space.space_name === 'new_space').space_used_size;
-  let collections = 0;
-  const observer = new PerformanceObserver((list) => { collections += list.getEntries().length; });
-  observer.observe({ entryTypes: ['gc'] });
-  const youngBefore = youngUsed();
-  const frames = 60000;
-  for (let index = 0; index < frames; index++) frame();
-  const youngAfter = youngUsed();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  observer.disconnect();
-  const perFrame = (youngAfter - youngBefore) / frames;
-  check('allocation', `${parts.length} structure parts live through ${frames} frames with no garbage collection`, collections === 0, `${collections} collections`);
-  check('allocation', 'young generation grows under 0.1 byte per frame', collections === 0 && perFrame < 0.1, `${perFrame.toFixed(3)} B/frame`);
+  if (parts.length > 0) {
+    const frames = 60000;
+    const { collections, perFrame } = await measureAllocation(frame, 90000, frames);
+    check('allocation', `${parts.length} structure parts live through ${frames} frames with no garbage collection`, collections === 0, `${collections} collections`);
+    check('allocation', 'structure: the young generation grows under 0.1 byte per frame', collections === 0 && perFrame < 0.1, `${perFrame.toFixed(3)} B/frame`);
+  }
   for (const id of ids) lab.manager.deactivate(id, 'test');
 }
 
+/**
+ * The batch's fauna groups (the butterflies, the caribou, the camels) at a few dozen agents each,
+ * through the fauna engine's own update (as the structure parts are measured), against a
+ * baseline: the butterfly preset as a plain Phase 2 starling flock (no wind drift).
+ * Runs first, on a fresh heap. A drifting group's WindField probe (about 140 B, once a second: the
+ * field's own sampling) is the only allocation it adds.
+ */
+async function testFaunaAllocation() {
+  const faunaEntries = BATCH.filter((entry) => PRESET_BY_ID[entry.id].engines.some((part) => part.engine === 'fauna'));
+  const measureHerds = async (overrides) => {
+    const herdLab = createLab({ withAudio: false });
+    herdLab.visit(70000, 0);
+    const spawned = overrides.map(({ presetId, params }, index) => {
+      const x = 70000 + index * 300;
+      return herdLab.manager.activate(presetId, { position: { x, y: groundHeight(x, 0), z: 0 }, heading: 40, source: 'debug', force: true, duration: 1e6, params: { fauna: params } });
+    });
+    // The camera follows the first group (the butterflies drift kilometres downwind), in whole metres.
+    const lead = faunaOf(herdLab, spawned[0]);
+    const counter = new Int32Array(1);
+    const groups = spawned.map((id) => faunaOf(herdLab, id));
+    const herdFrame = () => {
+      herdLab.state.time.elapsed += 1 / 60;
+      for (let index = 0; index < groups.length; index++) herdLab.fauna.update(groups[index], 1 / 60);
+      counter[0]++;
+      if (counter[0] % 600 !== 0) return;
+      herdLab.state.player.position.set(lead.anchor.x, lead.anchor.y + 150, lead.anchor.z + 300);
+      herdLab.camera.position.copy(herdLab.state.player.position);
+    };
+    // The median of three windows after one warm-up (single windows swing with V8's own work).
+    const windows = [await measureAllocation(herdFrame, 150000, 50000)];
+    windows.push(await measureAllocation(herdFrame, 0, 50000), await measureAllocation(herdFrame, 0, 50000));
+    windows.sort((first, second) => first.perFrame - second.perFrame);
+    const measured = { perFrame: windows[1].perFrame, collections: windows.reduce((sum, window) => sum + window.collections, 0) };
+    const agents = spawned.reduce((sum, id) => sum + faunaOf(herdLab, id).data.count, 0);
+    for (const id of spawned) herdLab.manager.deactivate(id, 'test');
+    return { ...measured, groups: spawned.length, agents };
+  };
+  if (faunaEntries.length > 0) {
+    const baseline = await measureHerds([{ presetId: 'butterflyMigration', params: { species: 'starling', windDrift: 0, count: 48 } }]);
+    const measured = await measureHerds(faunaEntries.map((entry) => ({ presetId: entry.id, params: { count: 48 } })));
+    const perGroup = measured.perFrame / measured.groups;
+    check('allocation', `fauna: ${measured.groups} groups (${measured.agents} agents) allocate per group and frame no more than a Phase 2 flock (within 3 B: a drifting group's WindField probe)`, perGroup <= baseline.perFrame + 3,
+      `${perGroup.toFixed(3)} B per group and frame (median of 3 windows), Phase 2 flock ${baseline.perFrame.toFixed(3)} B; ${measured.collections} collections over 150 000 frames`);
+  }
+}
+
+// ---- fauna ------------------------------------------------------------------------------------------------
+/** Puts the player and the camera at a fauna group's centre, 120 m up (the group stays near). */
+function followGroup(lab, id) {
+  const centre = lab.fauna.describe(id).center;
+  lab.state.player.position.set(Math.round(centre.x), Math.round(centre.y + 120), Math.round(centre.z + 200));
+  lab.camera.position.copy(lab.state.player.position);
+  lab.camera.updateMatrixWorld();
+}
+
+function testButterflies() {
+  const lab = createLab();
+  const x = 40000;
+  const z = -3000;
+  lab.visit(x, z);
+  const id = lab.spawnFree('butterflyMigration', x, z, 0);
+  const part = faunaOf(lab, id);
+  lab.fauna.setLOD(part, 'near');
+  for (let second = 0; second < 20; second++) {
+    lab.step(60);
+    followGroup(lab, id);
+  }
+  const before = lab.fauna.describe(id).center;
+  const ambient = lab.wind.ambientAt({ x: before.x, y: before.y, z: before.z });
+  const toward = (ambient.fromDegrees + 180) * Math.PI / 180;
+  const downX = Math.sin(toward);
+  const downZ = -Math.cos(toward);
+  const seconds = 60;
+  for (let second = 0; second < seconds; second++) {
+    lab.step(60);
+    followGroup(lab, id);
+  }
+  const after = lab.fauna.describe(id);
+  const along = (after.center.x - before.x) * downX + (after.center.z - before.z) * downZ;
+  const across = Math.abs((after.center.x - before.x) * -downZ + (after.center.z - before.z) * downX);
+  const expected = ambient.speed * seconds;
+  check('fauna', 'butterflies: the cloud drifts downwind with the WindField wind', along > expected * 0.5 && along < expected * 1.6 + 200, `${along.toFixed(0)} m downwind in ${seconds} s (wind ${ambient.speed.toFixed(1)} m/s: ${expected.toFixed(0)} m), ${across.toFixed(0)} m across`);
+  check('fauna', 'butterflies: a loose cloud, not a ball nor a scatter', after.radius > 8 && after.radius < 260, `radius ${after.radius.toFixed(1)} m, ${after.count} butterflies`);
+  const pool = part.data.pool;
+  let lowest = Infinity;
+  let highest = -Infinity;
+  for (let index = part.data.start; index < part.data.start + part.data.count; index++) {
+    const above = pool.py[index] - groundHeight(pool.px[index], pool.pz[index]);
+    lowest = Math.min(lowest, above);
+    highest = Math.max(highest, above);
+  }
+  check('fauna', 'butterflies: they flutter low over the land, above their floor', lowest >= 2.5 && highest < 160, `${lowest.toFixed(1)}..${highest.toFixed(1)} m above the ground`);
+  const scatters = [];
+  lab.bus.on('fauna:scatter', (payload) => scatters.push(payload));
+  const centre = lab.fauna.describe(id).center;
+  for (let frame = 0; frame < 180; frame++) {
+    const share = frame / 180;
+    lab.state.player.position.set(centre.x - 200 + 400 * share, centre.y, centre.z);
+    lab.state.player.velocity.set(133, 0, 0);
+    lab.camera.position.copy(lab.state.player.position);
+    lab.camera.updateMatrixWorld();
+    lab.step(1);
+  }
+  check('fauna', 'butterflies: a craft flying through scatters them', scatters.length > 0, `${scatters.length} scatter events, ${scatters[0] ? scatters[0].count : 0} butterflies`);
+  lab.manager.deactivate(id, 'test');
+  check('fauna', 'butterflies: dispose frees the group and its voice', lab.fauna.stats().instances === 0 && lab.voices.every((voice) => voice.disposed), `${lab.fauna.stats().instances} groups left`);
+}
+
+/** A caribou column spawned free-standing and walked for `seconds` of flight time. */
+function walkCaribou(seconds) {
+  const lab = createLab();
+  const x = 52000;
+  const z = 6000;
+  lab.visit(x, z);
+  const id = lab.spawnFree('caribouMigration', x, z, 70);
+  const part = faunaOf(lab, id);
+  lab.fauna.setLOD(part, 'near');
+  lab.step(60 * seconds);
+  return { lab, id, part };
+}
+
+function testCaribou() {
+  const first = walkCaribou(30);
+  const describe = first.lab.fauna.describe(first.id);
+  const pool = first.part.data.pool;
+  let offGround = 0;
+  for (let index = first.part.data.start; index < first.part.data.start + first.part.data.count; index++) {
+    if (Math.abs(pool.py[index] - groundHeight(pool.px[index], pool.pz[index])) > 0.5) offGround++;
+  }
+  check('fauna', 'caribou: a long column walks its planned route on the ground', describe.count >= 320 && describe.pathLength > 2500 && offGround === 0, `${describe.count} caribou, route ${describe.pathLength.toFixed(0)} m, ${offGround} off the ground`);
+  const centreBefore = { ...describe.center };
+  first.lab.step(60 * 30);
+  const centreAfter = first.lab.fauna.describe(first.id).center;
+  const moved = Math.hypot(centreAfter.x - centreBefore.x, centreAfter.z - centreBefore.z);
+  check('fauna', 'caribou: the column moves on with flight time', moved > 20, `${moved.toFixed(0)} m in 30 s`);
+  const second = walkCaribou(60);
+  const other = second.lab.fauna.describe(second.id).center;
+  check('fauna', 'caribou: the same flight time gives the same column in a second manager', Math.abs(centreAfter.x - other.x) < 1e-6 && Math.abs(centreAfter.z - other.z) < 1e-6, `${centreAfter.x.toFixed(2)}, ${centreAfter.z.toFixed(2)} vs ${other.x.toFixed(2)}, ${other.z.toFixed(2)}`);
+  first.lab.manager.deactivate(first.id, 'test');
+  check('fauna', 'caribou: dispose frees the column and its voice', first.lab.voices.every((voice) => voice.disposed) && first.lab.fauna.stats().instances === 0, `${first.lab.fauna.stats().instances} groups left`);
+  second.lab.manager.deactivate(second.id, 'test');
+}
+
+await testFaunaAllocation();
+if (BATCH.some((entry) => entry.fauna === 'drift')) testButterflies();
+if (BATCH.some((entry) => entry.fauna === 'column')) testCaribou();
 testRecipes();
 testColliders();
 testTorches();

@@ -86,6 +86,9 @@ export const FAUNA_DEFAULTS = Object.freeze({
   fadeOut: 6,
   voice: null,
   voiceIntensity: 1,
+  // Presets 51-60: the share of the WindField wind a wandering group (flock, murmuration) drifts with:
+  // its goal and leash ride the wind, and a flock's agents fly with it (the butterflies). 0 = none.
+  windDrift: 0,
   flocking: Object.freeze({ separation: 1.4, separationRadius: 3, alignment: 1.1, cohesion: 0.12, neighborRadius: 12, maxNeighbors: 7 }),
   scatter: Object.freeze({ radius: 60, burst: 24, recover: 3.5, spread: 0.9, trigger: 'scatter', cooldown: 6 }),
   murmuration: Object.freeze({ radius: 110, flatten: 0.45, morphSeconds: 11, fold: 0.35, wave: 0.18, seek: 0.9 }),
@@ -180,8 +183,11 @@ const G = Object.freeze({
   STAMPEDE: 51, STAMPEDE_X: 52, STAMPEDE_Z: 53, STAMPEDE_COOLDOWN: 54, GAIT: 55, AVOID_TIMER: 56, STAMPEDE_TIMER: 57,
   FLUSH: 58, FLUSH_X: 59, FLUSH_Z: 60, FLUSH_Y: 61, RACE: 62, SHADOW_X: 63, SHADOW_Z: 64, PATH_TIME: 65, HOME_X: 66,
   HOME_Y: 67, HOME_Z: 68, DUST_LIVE: 69, FLUSH_COUNT: 70, WATER_CURSOR: 71, SHADOW_WET: 72,
+  DRIFT_X: 73, DRIFT_Y: 74, DRIFT_Z: 75, DRIFT_TIMER: 76,
 });
-const G_LENGTH = 73;
+const G_LENGTH = 77;
+/** A wind-drifting group probes the WindField at its goal this often (s). */
+const DRIFT_PROBE_SECONDS = 1;
 // Call registers (io) by index. A caller writes the slots a helper reads, then calls it.
 const IO = Object.freeze({
   TARGET_X: 0, TARGET_Y: 1, TARGET_Z: 2, FEED_X: 3, FEED_Y: 4, FEED_Z: 5, GAIN: 6, SEEK_MAX: 7, WEIGHT: 8,
@@ -243,6 +249,8 @@ function resolveParams(params) {
   if (!Number.isFinite(count[0]) || !Number.isFinite(count[1]) || count[0] < 1) throw new Error(`fauna: params.count must be a positive number or [min, max], got ${JSON.stringify(params.count)}`);
   resolved.countRange = count;
   if (!Number.isFinite(resolved.fadeOut) || resolved.fadeOut < 0 || resolved.fadeOut > 600) throw new Error(`fauna: params.fadeOut must be within 0..600 s, got ${JSON.stringify(params.fadeOut)}`);
+  if (!(Number.isFinite(resolved.windDrift) && resolved.windDrift >= 0 && resolved.windDrift <= 2)) throw new Error(`fauna: params.windDrift must be within 0..2, got ${JSON.stringify(params.windDrift)}`);
+  if (resolved.windDrift > 0 && resolved.behavior !== 'flock' && resolved.behavior !== 'murmuration') throw new Error(`fauna: params.windDrift is for the flock and murmuration behaviours, got ${resolved.behavior}`);
   if (resolved.drift.slipstream === true) resolved.drift.slipstream = { ...SLIPSTREAM_DEFAULTS };
   else if (isPlainObject(resolved.drift.slipstream)) resolved.drift.slipstream = { ...SLIPSTREAM_DEFAULTS, ...resolved.drift.slipstream };
   validateGroundAndSurface(resolved, params);
@@ -1147,9 +1155,40 @@ export function createFaunaEngine() {
     }
     g[G.VX] = Math.sin(g[G.HEADING]) * g[G.SPEED];
     g[G.VZ] = (-Math.cos(g[G.HEADING])) * g[G.SPEED];
+    if (params.windDrift > 0) {
+      // A drifting cloud: the goal and its leash ride the wind (the agents add it to their flight).
+      probeDrift(data);
+      g[G.VX] += g[G.DRIFT_X];
+      g[G.VZ] += g[G.DRIFT_Z];
+      //A
+      //B
+    }
     g[G.X] += g[G.VX] * dt;
     g[G.Z] += g[G.VZ] * dt;
     settleAltitude(data, dt);
+  }
+
+  /**
+   * The wind a drifting group rides (g[DRIFT_X..Z] = windDrift x the WindField velocity at its goal),
+   * probed every DRIFT_PROBE_SECONDS at whole-metre coordinates into the group's reused record. The
+   * step comes from the frameStep register (a double argument would be boxed).
+   */
+  function probeDrift(data) {
+    const g = data.g;
+    g[G.DRIFT_TIMER] -= frameStep[0];
+    if (g[G.DRIFT_TIMER] > 0) return;
+    g[G.DRIFT_TIMER] += DRIFT_PROBE_SECONDS;
+    if (g[G.DRIFT_TIMER] < 0) g[G.DRIFT_TIMER] = DRIFT_PROBE_SECONDS;
+    const probe = data.driftProbe;
+    probe.point.x = Math.round(g[G.X]);
+    probe.point.y = Math.round(g[G.Y]);
+    probe.point.z = Math.round(g[G.Z]);
+    // The WindField's own clock is the same elapsed time (passing it would box it).
+    ctx.wind.probe(probe.point, undefined, probe.result);
+    const share = data.params.windDrift;
+    g[G.DRIFT_X] = probe.result.vel.x * share;
+    g[G.DRIFT_Y] = probe.result.vel.y * share;
+    g[G.DRIFT_Z] = probe.result.vel.z * share;
   }
 
   /** Eases the goal's height toward the altitude mode's target over the ground. */
@@ -1274,11 +1313,14 @@ export function createFaunaEngine() {
     io[IO.TARGET_X] = g[G.X] + Math.sin(g[G.HEADING]) * 60;
     io[IO.TARGET_Y] = g[G.Y];
     io[IO.TARGET_Z] = g[G.Z] - Math.cos(g[G.HEADING]) * 60;
-    io[IO.FEED_X] = 0;
-    io[IO.FEED_Y] = 0;
-    io[IO.FEED_Z] = 0;
+    // A wind-drifting flock flies with the wind it rides (zero without windDrift).
+    io[IO.FEED_X] = g[G.DRIFT_X];
+    io[IO.FEED_Y] = g[G.DRIFT_Y] * 0.3;
+    io[IO.FEED_Z] = g[G.DRIFT_Z];
     io[IO.GAIN] = 0.25;
-    io[IO.SEEK_MAX] = g[G.SPEED];
+    const driftSpeed = Math.sqrt(g[G.DRIFT_X] * g[G.DRIFT_X] + g[G.DRIFT_Z] * g[G.DRIFT_Z]);
+    io[IO.SEEK_MAX] = g[G.SPEED] + driftSpeed;
+    io[IO.MAX_SPEED] = speedRange[1] + driftSpeed;
     let sumX = 0;
     let sumY = 0;
     let sumZ = 0;
@@ -3960,6 +4002,8 @@ export function createFaunaEngine() {
       dustCursor: 0,
       dustParams: null,
       dustColor: null,
+      // A wind-drifting group's WindField probe (a whole-metre point and a reused result).
+      driftProbe: resolved.windDrift > 0 ? { point: new THREE.Vector3(), result: { vel: new THREE.Vector3(), turbulence: 0 } } : null,
     };
     if (resolved.behavior === 'pod' && resolved.pod.seekWater > 0 && !seekOpenWater(g, resolved.pod.seekWater, resolved.pod.spread)) data.noWater = true;
     fillGround(data);
