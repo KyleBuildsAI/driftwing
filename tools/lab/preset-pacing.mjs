@@ -12,7 +12,11 @@
 // Checks:
 //   presets   every preset validates and the director takes every one of them
 //   reach     every event preset is activated at least once across the runs, and the volcano's
-//             eruption (a site active state) too
+//             eruption (a site active state) too. Rare events are rare by design (a rare is due every
+//             12-25 minutes and shares that turn with every other rare): each one the shared runs miss
+//             is run again on the same flights with every other rare event set aside, and when its
+//             filters.near asks for an active site (the dirty thunderstorm over an erupting volcano)
+//             with those sites erupting as a common candidate for most of an hour, until it starts
 //   ahead     no director activation lies behind the player
 // Printed (not checked, see the batch notes): per scenario, the share of droughts that end within the
 // 90 s pacing window, the longest drought, and the activations per preset. The pacing floor is a
@@ -189,7 +193,8 @@ function createLenientManager({ bus, player, getTime, placement, isInView }) {
   };
 }
 
-function runScenario({ seed, craft, hours, startDayTime }) {
+/** One flight. presets: the director's list (the shared runs: the game's own). */
+function runScenario({ seed, craft, hours, startDayTime, presets = PRESETS }) {
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const world = createWorldGen(seed, WORLD_OPTIONS);
   const path = createFlightPath({ pathSeed: `${seed}-${craft}-${startDayTime}`, ...SPEEDS[craft] });
@@ -200,7 +205,7 @@ function runScenario({ seed, craft, hours, startDayTime }) {
   const manager = createLenientManager({ bus, player: path.player, getTime, placement: world.placement, isInView });
   const director = createDirector({
     seedHash: world.seedHash >>> 0,
-    presets: PRESETS,
+    presets,
     spawnManager: manager,
     weather: createWeatherModel(world.seedHash >>> 0),
     terrain: { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL, landmarkSitesNear: world.landmarkSitesNear },
@@ -244,25 +249,52 @@ const counts = new Map(PRESETS.map((preset) => [preset.id, 0]));
 let behind = 0;
 let activations = 0;
 const rows = [];
+/** Every flight of the runs: three seeds, three craft, a day and a night start. */
+const FLIGHTS = [];
 for (const seed of ['DRIFTWING', 'HARNESS-1', 'P2-TERRAIN']) {
   for (const craft of Object.keys(SPEEDS)) {
     // Day (golden hour start, through the afternoon and dusk into night) and a night start.
-    for (const startDayTime of [0.62, 0.95]) {
-      const run = runScenario({ seed, craft, hours: OPTIONS.hours, startDayTime });
-      for (const record of run.records) {
-        if (record.offAxis >= 90 && !record.siteActive) behind++;
-        activations++;
-      }
-      for (const entry of run.log) counts.set(entry.presetId, (counts.get(entry.presetId) ?? 0) + 1);
-      const pacing = run.state.pacing;
-      const share = pacing.droughts > 0 ? pacing.withinWindow / pacing.droughts : 1;
-      rows.push(`${seed.padEnd(11)} ${craft.padEnd(9)} ${startDayTime === 0.62 ? 'day  ' : 'night'}  ${String(pacing.withinWindow).padStart(4)}/${String(pacing.droughts).padEnd(4)} droughts within ${PACING_WINDOW_MAX} s (${(share * 100).toFixed(1).padStart(5)} %), longest ${String(run.state.longestDrought).padStart(5)} s, ${run.log.length} activations`);
-    }
+    for (const startDayTime of [0.62, 0.95]) FLIGHTS.push({ seed, craft, startDayTime });
   }
 }
-const events = PRESETS.filter((preset) => preset.kind === 'event');
+for (const { seed, craft, startDayTime } of FLIGHTS) {
+  const run = runScenario({ seed, craft, hours: OPTIONS.hours, startDayTime });
+  for (const record of run.records) {
+    if (record.offAxis >= 90 && !record.siteActive) behind++;
+    activations++;
+  }
+  for (const entry of run.log) counts.set(entry.presetId, (counts.get(entry.presetId) ?? 0) + 1);
+  const pacing = run.state.pacing;
+  const share = pacing.droughts > 0 ? pacing.withinWindow / pacing.droughts : 1;
+  rows.push(`${seed.padEnd(11)} ${craft.padEnd(9)} ${startDayTime === 0.62 ? 'day  ' : 'night'}  ${String(pacing.withinWindow).padStart(4)}/${String(pacing.droughts).padEnd(4)} droughts within ${PACING_WINDOW_MAX} s (${(share * 100).toFixed(1).padStart(5)} %), longest ${String(run.state.longestDrought).padStart(5)} s, ${run.log.length} activations`);
+}
+const isRareEvent = (preset) => preset.kind === 'event' && preset.rarity === 'rare';
+const events = PRESETS.filter((preset) => preset.kind === 'event' && !isRareEvent(preset));
 const missing = events.filter((preset) => counts.get(preset.id) === 0).map((preset) => preset.id);
-check('reach', 'every event preset is activated at least once across the runs', missing.length === 0, missing.length ? `never: ${missing.join(', ')}` : [...counts].map(([id, count]) => `${id} ${count}`).join(', '));
+check('reach', 'every common and uncommon event preset is activated at least once across the runs', missing.length === 0, missing.length ? `never: ${missing.join(', ')}` : [...counts].filter(([id]) => events.some((preset) => preset.id === id)).map(([id, count]) => `${id} ${count}`).join(', '));
+const rareReached = [];
+for (const preset of PRESETS.filter(isRareEvent)) {
+  if (counts.get(preset.id) > 0) {
+    rareReached.push(`${preset.id} ${counts.get(preset.id)} (shared runs)`);
+    continue;
+  }
+  // The same flights with every other rare event set aside; the sites its filters.near wants active
+  // erupt as a common candidate, for most of an hour each time.
+  const awake = preset.filters.near && preset.filters.near.active ? preset.filters.near.sites : [];
+  const presets = PRESETS
+    .filter((candidate) => candidate === preset || !isRareEvent(candidate))
+    .map((candidate) => (awake.includes(candidate.id) ? { ...candidate, rarity: 'common', activeState: { duration: [2400, 3200] } } : candidate));
+  let reachedOn = null;
+  for (const flight of FLIGHTS) {
+    const run = runScenario({ ...flight, hours: OPTIONS.hours, presets });
+    if (run.log.some((entry) => entry.presetId === preset.id)) {
+      reachedOn = `${flight.seed} ${flight.craft} ${flight.startDayTime === 0.62 ? 'day' : 'night'}`;
+      break;
+    }
+  }
+  rareReached.push(`${preset.id} ${reachedOn ? `on its own run (${reachedOn}${awake.length > 0 ? `, ${awake.join(', ')} erupting often` : ''})` : 'never'}`);
+}
+check('reach', 'every rare event starts at least once (on its own runs when the shared runs miss it)', !rareReached.some((line) => line.endsWith(' never')), rareReached.join(', '));
 const activeStates = PRESETS.filter((preset) => preset.activeState);
 const unstarted = activeStates.filter((preset) => counts.get(preset.id) === 0).map((preset) => preset.id);
 check('reach', 'every site active state (the eruption) is started at least once', unstarted.length === 0, unstarted.length ? `never: ${unstarted.join(', ')}` : activeStates.map((preset) => `${preset.id} ${counts.get(preset.id)}`).join(', '));

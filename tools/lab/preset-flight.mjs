@@ -23,6 +23,14 @@
 //   thermal hawks  the glider circling at 45 degrees of bank where the hawks circle (their group
 //                  centre and height), at midday: it climbs with the hawks, against the same circle at
 //                  night when the thermals are off; the jet straight through the column: a load bump
+//   storm walls    (presets 31 and 32, the sandstorm wall and the snow squall) both craft head on
+//                  into the wall through its gust front, the spawn grown first: the glider meets rough
+//                  air and an airspeed swing, the jet load bumps; neither loses control
+//   hurricane      (preset 33) the glider through the eyewall into the eye: violent, rough air and a
+//                  large airspeed swing in the wall, calm air inside the eye; the jet straight through
+//                  the wall, the eye and out the far side: load bumps, no loss of control
+//                  (each storm spawn flies without its emitter part: its dust, snow and spray carry no
+//                  wind source, so the air is the same)
 //
 // Usage: node tools/lab/preset-flight.mjs [--verbose]
 // Prints one line per check and the flight log, and exits non-zero if any check fails.
@@ -43,6 +51,8 @@ import { createVortexEngine } from '../../src/spawns/engines/vortexEngine.js';
 import { createFaunaEngine } from '../../src/spawns/engines/faunaEngine.js';
 import { createStructureEngine } from '../../src/spawns/engines/structureEngine.js';
 import { createWaterEffectEngine } from '../../src/spawns/engines/waterEffectEngine.js';
+import { createWeatherVolumeEngine } from '../../src/spawns/engines/weatherVolumeEngine.js';
+import { createWindModifierEngine } from '../../src/spawns/engines/windModifierEngine.js';
 import { PRESET_BY_ID } from '../../src/spawns/presets/index.js';
 import glider from '../../src/craft/glider.js';
 import jet from '../../src/craft/jet.js';
@@ -58,6 +68,13 @@ const DT = 1 / 120;
 const FRAME = 1 / 60;
 const SEEDS = Object.freeze(['HARNESS-1', 'DRIFTWING', 'P2-TERRAIN', 'INTEG-A', 'INTEG-B', 'PRESETS-2']);
 const SEARCH_RADIUS = 60000;
+/** The wind presets 31-33 without their emitter part (dust, snow and spray: no wind source of their own). */
+const STORM_PRESETS = Object.freeze(['sandstormWall', 'snowSquall', 'hurricaneEye'].map((id) => Object.freeze({
+  ...PRESET_BY_ID[id],
+  engines: PRESET_BY_ID[id].engines.filter((entry) => entry.engine !== 'emitter'),
+})));
+/** Seconds a storm spawn runs (grown, its sources faded in) before the flight. */
+const STORM_WARM_SECONDS = 50;
 
 const results = [];
 function check(test, name, pass, detail = '') {
@@ -114,8 +131,9 @@ function createLab(seed, { sunElevation = 50 } = {}) {
     THREE, TSL, scene, camera, renderer: { info: { memory: { geometries: 0, textures: 0 } } }, backend: 'WebGPU', wind, audio: null, world, state,
     sky: null, bus, perf: null, settings: null, uniforms, registry, presets: [], seed, water, surfaces: createGroundSurfaces(),
   });
-  for (const createEngine of [createVortexEngine, createFaunaEngine, createStructureEngine, createWaterEffectEngine]) manager.register(createEngine());
+  for (const createEngine of [createVortexEngine, createFaunaEngine, createStructureEngine, createWaterEffectEngine, createWeatherVolumeEngine, createWindModifierEngine]) manager.register(createEngine());
   for (const id of ['maelstrom', 'windFarm', 'thermalHawks']) manager.addPreset(PRESET_BY_ID[id]);
+  for (const preset of STORM_PRESETS) manager.addPreset(preset);
   manager.init();
   const ground = (x, z) => Math.max(world.groundHeight(x, z), CONFIG.WATER_LEVEL);
   /** Advances the world one frame with the camera (LOD, view) at the craft. */
@@ -481,6 +499,101 @@ function testThermalHawks() {
   check('hawks', 'jet straight through the hawks\' column: a load bump against the night', jetMidday.air.maxLoad - jetMidday.air.minLoad > jetNight.maxLoad - jetNight.minLoad + 0.05 && !jetMidday.air.crashed, jetDetail);
 }
 
+/**
+ * A point on `surface` ('land': dry ground 20-400 m high; 'water': open sea `clear` m all around) near
+ * the origin of seed's world, or null.
+ */
+function findSurface(seed, surface, clear) {
+  const lab = createLab(seed);
+  for (let ring = 1; ring <= 30; ring++) {
+    for (let step = 0; step < 24; step++) {
+      const point = offset(0, 0, (step / 24) * 360, ring * 2000);
+      const ground = lab.world.groundHeight(point.x, point.z);
+      if (surface === 'land' && ground > 20 && ground < 400) return point;
+      if (surface === 'water' && [0, 45, 90, 135, 180, 225, 270, 315].every((bearing) => {
+        const around = offset(point.x, point.z, bearing, clear);
+        return lab.world.groundHeight(around.x, around.z) < CONFIG.WATER_LEVEL - 10;
+      }) && ground < CONFIG.WATER_LEVEL - 10) return point;
+    }
+  }
+  return null;
+}
+
+/**
+ * Activates a storm preset at point and runs it STORM_WARM_SECONDS with the camera parked above it, so
+ * the volume has formed and the wind sources have faded in. Returns its heading (degrees, the weather
+ * volume's frame: a wall's forward is downwind).
+ */
+function startStorm(lab, presetId, point) {
+  const id = lab.manager.activate(presetId, { position: { x: point.x, y: lab.ground(point.x, point.z), z: point.z }, source: 'debug', force: true });
+  if (!id) throw new Error(`${presetId} was refused`);
+  const parked = new THREE.Vector3(point.x, lab.ground(point.x, point.z) + 6000, point.z);
+  for (let frame = 0; frame < STORM_WARM_SECONDS / FRAME; frame++) lab.frame(parked, new THREE.Vector3());
+  const volume = lab.manager.getParts(id).find((part) => part.engine === 'weatherVolume');
+  return Math.atan2(volume.data.forwardX, -volume.data.forwardZ) / DEG;
+}
+
+/** compare() for a storm: both labs run the warm-up first (the calm one with nothing in it). */
+function compareStorm(seed, entry, presetId, point, planFor) {
+  const calmLab = createLab(seed);
+  const parked = new THREE.Vector3(point.x, calmLab.ground(point.x, point.z) + 6000, point.z);
+  for (let frame = 0; frame < STORM_WARM_SECONDS / FRAME; frame++) calmLab.frame(parked, new THREE.Vector3());
+  const lab = createLab(seed);
+  const heading = startStorm(lab, presetId, point);
+  const plan = planFor(heading, lab);
+  const calm = fly(entry.craft, calmLab, { ...plan, speed: entry.speed, throttle: entry.throttle });
+  const air = fly(entry.craft, lab, { ...plan, speed: entry.speed, throttle: entry.throttle });
+  return { calm, air };
+}
+
+function testStormWalls() {
+  const seed = 'DRIFTWING';
+  const point = findSurface(seed, 'land');
+  check('storm walls', 'a land point for the storm walls', point !== null, point ? `${Math.round(point.x)}, ${Math.round(point.z)}` : 'none');
+  if (!point) return;
+  for (const [presetId, label, front] of [['sandstormWall', 'sandstorm wall', 1150], ['snowSquall', 'snow squall', 900]]) {
+    for (const entry of [GLIDER, JET]) {
+      // Head on into the wall from downwind: from `ahead` metres in front of it, back along its heading.
+      const ahead = entry === JET ? 7000 : front + 1500;
+      const seconds = entry === JET ? 40 : 75;
+      const { calm, air } = compareStorm(seed, entry, presetId, point, (heading, lab) => {
+        const start = offset(point.x, point.z, heading, ahead);
+        let altitude = 0;
+        for (let step = 0; step <= 40; step++) {
+          const sample = offset(start.x, start.z, heading + 180, (entry.speed * seconds * step) / 40);
+          altitude = Math.max(altitude, lab.ground(sample.x, sample.z) + 250);
+        }
+        return { altitude, heading: (heading + 180) % 360, start, seconds };
+      });
+      const detail = record(`${label}: head on through the gust front`, entry.label, calm, air);
+      if (entry === GLIDER) {
+        check('storm walls', `glider into the ${label}: rough air and an airspeed swing, no loss of control`, air.maxTurbulence > calm.maxTurbulence + 0.3 && swing(air) > swing(calm) + 3 && !air.crashed, detail);
+      } else {
+        check('storm walls', `jet into the ${label}: load bumps, no tumble`, bumped(calm, air, 1.5) && air.minLoad > -1 && air.maxLoad < 4 && !air.crashed, detail);
+      }
+    }
+  }
+}
+
+function testHurricane() {
+  const found = SEEDS.map((seed) => ({ seed, point: findSurface(seed, 'water', 14000) })).find((entry) => entry.point !== null) ?? null;
+  check('hurricane', 'an open-sea point 14 km clear on one of the lab seeds', found !== null, found ? `${found.seed}: ${Math.round(found.point.x)}, ${Math.round(found.point.z)}` : 'none');
+  if (!found) return;
+  const { seed, point } = found;
+  // The glider from 7 km out on the eye's east side, west through the wall into the eye.
+  const wall = compareStorm(seed, GLIDER, 'hurricaneEye', point, () => ({ altitude: 1500, heading: 270, start: offset(point.x, point.z, 90, 7000), seconds: 110 }));
+  const wallDetail = record('hurricane: through the eyewall', GLIDER.label, wall.calm, wall.air);
+  check('hurricane', 'glider through the eyewall: violent, rough air and a large airspeed swing, no loss of control', wall.air.maxTurbulence > 0.6 && swing(wall.air) > swing(wall.calm) + 8 && !wall.air.crashed, wallDetail);
+  // The glider across the eye itself, 1.5 km either side of its centre.
+  const eye = compareStorm(seed, GLIDER, 'hurricaneEye', point, () => ({ altitude: 2000, heading: 0, start: offset(point.x, point.z, 180, 1500), seconds: 90 }));
+  const eyeDetail = record('hurricane: across the eye', GLIDER.label, eye.calm, eye.air);
+  check('hurricane', 'glider across the eye: calm air (turbulence and airspeed swing close to the calm flight)', eye.air.meanTurbulence < 0.2 && swing(eye.air) < swing(eye.calm) + 6 && !eye.air.crashed, eyeDetail);
+  // The jet straight through: wall, eye, wall and out.
+  const through = compareStorm(seed, JET, 'hurricaneEye', point, () => ({ altitude: 2500, heading: 270, start: offset(point.x, point.z, 90, 9000), seconds: 80 }));
+  const throughDetail = record('hurricane: straight through', JET.label, through.calm, through.air);
+  check('hurricane', 'jet straight through the hurricane: load bumps, no tumble', bumped(through.calm, through.air, 1.5) && through.air.minLoad > -1 && through.air.maxLoad < 4.5 && !through.air.crashed, throughDetail);
+}
+
 // ============================================================================================
 // RUN
 // ============================================================================================
@@ -488,6 +601,8 @@ const started = Date.now();
 testMaelstrom();
 testWindFarm();
 testThermalHawks();
+testStormWalls();
+testHurricane();
 check('console', 'no console errors from the engines and the manager', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 
 process.stdout.write('\nflight log (calm -> with the preset)\n');

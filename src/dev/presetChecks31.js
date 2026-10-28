@@ -7,7 +7,10 @@
 //   - cockpit(presetId, offset, expect): the craft parked inside the spawn in the cockpit view, the
 //     weather volume's camera weather judged (a sandstorm's grit, a squall's whiteout);
 //   - chase(): back to the chase view and out of photo mode;
-//   - parts(presetId, expect): engine facts of a live spawn (colliders, lava ribbons, water bodies).
+//   - parts(presetId, expect): engine facts of a live spawn (colliders, lava ribbons, water bodies);
+//   - siteActive(presetId, active): the active state of presetId's nearest live site (an eruption);
+//   - siteFacts(presetId, expect): its nearest live site's recipe facts, colliders and perches, its
+//     emitters' sea entries (on the water, by the lava's end) and the water bodies its stamps hold.
 // tools/steps/presets-31-40.json drives it (a dev server: it imports this module by URL). Never part of
 // a production build: only step files import it. Every failed check calls console.error.
 import { installPresetChecks } from './presetChecks.js';
@@ -253,6 +256,83 @@ export function installPresetChecks31(game) {
         }
       }
       return check(`${presetId}: its parts (${Object.keys(expect).join(', ')})`, ok, facts);
+    },
+
+    /**
+     * The river form of presetId's live spawn: its flow paths (streams and pours) and the puffs it
+     * draws; expect { paths, puffs } minimums.
+     */
+    river(presetId, expect = {}) {
+      const record = spawnOf(presetId);
+      const part = record ? manager.getParts(record.id).find((entry) => entry.engine === 'weatherVolume') : null;
+      if (!part) return check(`${presetId}: river`, false, 'no live weather volume');
+      const flow = part.data.layout.flow;
+      const facts = { paths: flow ? flow.paths : 0, points: flow ? flow.pointCount : 0, puffs: part.data.layout.puffCount, drawn: part.data.puffsDrawn };
+      const ok = facts.paths >= (expect.paths ?? 1) && facts.drawn >= (expect.puffs ?? 1);
+      return check(`${presetId}: fog flowing on its paths (${facts.paths} paths, ${facts.drawn} puffs drawn)`, ok, facts);
+    },
+
+    /**
+     * Counts presetId's lightning over `seconds` of live flight (the engine's strike counters, shared
+     * by every lightEffect instance, so the batch runs it with the game's presets held): at least
+     * `minimum` strikes, `inCloud` of them at least in the cloud.
+     */
+    async strikes(presetId, { seconds = 8, minimum = 1, inCloud = 0 } = {}) {
+      const record = spawnOf(presetId);
+      const part = record ? manager.getParts(record.id).find((entry) => entry.engine === 'lightEffect') : null;
+      if (!part) return check(`${presetId}: lightning`, false, 'no live lightEffect');
+      const engine = manager.registry.get('lightEffect');
+      ctx.setPhotoMode(false);
+      const before = engine.describe(part).strikes;
+      await wait(seconds * 1000);
+      const after = engine.describe(part).strikes;
+      const delta = {};
+      for (const key of Object.keys(after)) delta[key] = after[key] - (before[key] ?? 0);
+      return check(`${presetId}: lightning in ${seconds} s (${delta.strikes} strikes, ${delta.cloud} in the cloud)`, delta.strikes >= minimum && delta.cloud >= inCloud, delta);
+    },
+
+    /** Starts or ends the active state (an eruption) of presetId's nearest live site. */
+    async siteActive(presetId, active = true) {
+      const site = manager.findNearestSite(presetId, state.player.position.x, state.player.position.z, 30000);
+      const spawnId = site ? manager.getSiteSpawn(site.id) : null;
+      if (!spawnId) return check(`${presetId}: its site's active state ${active ? 'started' : 'ended'}`, false, 'no live site spawn within 30 km');
+      const result = manager.setSiteActive(spawnId, active);
+      await frames(10);
+      const instance = manager.getInstance(spawnId);
+      return check(`${presetId}: its site's active state ${active ? 'started' : 'ended'}`, result !== false && instance && instance.active === active, { spawnId, active: instance ? instance.active : null });
+    },
+
+    /**
+     * The facts of presetId's nearest live site spawn, judged against expect: { facts: { [name]:
+     * minimum } (the structure recipe's out.facts), colliders (minimum), perches (minimum perch
+     * colliders), seaEntries (minimum emitters with seaEntry that reached the sea, each standing on the
+     * water), waters: { count, kind, mirror } (the local water bodies within the site's reach) }.
+     */
+    siteFacts(presetId, expect = {}) {
+      const site = manager.findNearestSite(presetId, state.player.position.x, state.player.position.z, 30000);
+      const spawnId = site ? manager.getSiteSpawn(site.id) : null;
+      if (!spawnId) return check(`${presetId}: site facts`, false, 'no live site spawn within 30 km');
+      const parts = manager.getParts(spawnId);
+      const structure = parts.find((part) => part.engine === 'structure');
+      const facts = structure && structure.data.facts ? { ...structure.data.facts } : {};
+      const colliderIds = parts.flatMap((part) => part.colliderIds ?? []);
+      const colliderSet = new Set(colliderIds);
+      const perches = ctx.colliders ? ctx.colliders.list().filter((entry) => colliderSet.has(entry.id) && entry.tags && entry.tags.perch).length : 0;
+      const entries = parts.filter((part) => part.engine === 'emitter' && part.data.config.seaEntry);
+      const seaEntries = entries.filter((part) => part.data.reachedSea === true && ctx.world.groundHeight(part.anchor.x, part.anchor.z) < ctx.world.WATER_LEVEL).length;
+      const bodies = [];
+      ctx.waterQuery.bodiesNear(site.x, site.z, 2500, (body) => bodies.push({ kind: body.kind, mirror: body.mirror, level: Math.round(body.level * 10) / 10 }));
+      const result = { site: site.id, facts, colliders: colliderIds.length, perches, seaEntries: `${seaEntries}/${entries.length}`, waters: bodies.length, waterKinds: [...new Set(bodies.map((body) => body.kind))] };
+      let ok = true;
+      for (const [name, minimum] of Object.entries(expect.facts ?? {})) ok = ok && Number.isFinite(facts[name]) && facts[name] >= minimum;
+      if (expect.colliders !== undefined) ok = ok && colliderIds.length >= expect.colliders;
+      if (expect.perches !== undefined) ok = ok && perches >= expect.perches;
+      if (expect.seaEntries !== undefined) ok = ok && seaEntries >= expect.seaEntries;
+      if (expect.waters) {
+        const matching = bodies.filter((body) => (expect.waters.kind === undefined || body.kind === expect.waters.kind) && (expect.waters.mirror === undefined || body.mirror >= expect.waters.mirror));
+        ok = ok && matching.length >= (expect.waters.count ?? 1);
+      }
+      return check(`${presetId}: its site's parts (${Object.keys(expect).join(', ')})`, ok, result);
     },
 
     /** The player's position and the state the step file reports (debug). */
