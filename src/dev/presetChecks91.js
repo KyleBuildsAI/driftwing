@@ -284,7 +284,7 @@ export function installPresetChecks91(game) {
         { id: comboId, members: started ? started.members : null, expected, live: spawns.map((spawn) => spawn.presetId), view: prepared.view, woke: prepared.woke, nightsSkipped: prepared.nightsSkipped });
     },
 
-    /** Waits (up to `seconds`) for every member a combo names (that this build has) to be live with the combo as parent. */
+    /** Waits (up to `seconds`) for every member a combo names to be live with the combo as parent. */
     async members(presetId, { wait: waitSeconds = 20 } = {}) {
       const record = open.get(presetId);
       const preset = presetById.get(presetId);

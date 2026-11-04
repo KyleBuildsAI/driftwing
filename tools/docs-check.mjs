@@ -138,8 +138,8 @@ function testLinks() {
 // ---- Presets -------------------------------------------------------------------------------------
 /**
  * The spec number of a preset: the "Preset NN" (or "preset NN") in its file's first line, else its
- * place in PRESETS (1-based). The wave 3 batches land presets 31-100 in parallel, so a branch's
- * PRESETS skips numbers until every batch has merged.
+ * place in PRESETS (1-based). With every batch merged, PRESETS holds the spec's 100 in order, so a
+ * row's number is both the file's number and its place.
  */
 function presetNumber(preset, index) {
   const path = join(ROOT, 'src', 'spawns', 'presets', `${preset.id}.js`);
@@ -148,7 +148,7 @@ function presetNumber(preset, index) {
   return match ? match[1] : String(index + 1);
 }
 
-/** The rows of the "The 30 presets at a glance" table: arrays of trimmed cell texts. */
+/** The rows of the "The 100 presets at a glance" table: arrays of trimmed cell texts. */
 function presetTableRows(text) {
   const rows = [];
   let inTable = false;
@@ -183,21 +183,13 @@ function testPresets() {
   const rows = presetTableRows(text);
   check('presets', 'docs/spawns.md has one table row per preset', rows.length === PRESETS.length, `${rows.length} rows, ${PRESETS.length} presets`);
   const anchors = anchorsOf(SPAWNS_DOC);
-  // A batch branch holds the spec's later presets without the batches before them, so a row's number
-  // is the spec number from the preset file's header line ("// Preset 56: ..."), not its place.
-  const specNumber = (preset, index) => {
-    const path = join(ROOT, 'src', 'spawns', 'presets', `${preset.id}.js`);
-    const header = existsSync(path) ? readFileSync(path, 'utf8').split(/\r?\n/, 1)[0] : '';
-    const match = /\bpreset (\d+)\b/i.exec(header);
-    return match ? match[1] : String(index + 1);
-  };
   PRESETS.forEach((preset, index) => {
     const row = rows[index];
     if (!row) return;
     const [number, link, id, category, kind, rarity, heavy, engines] = row;
     const expectedEngines = [...new Set(preset.engines.map((entry) => entry.engine))].map((name) => `\`${name}\``).join(', ');
     const problems = [];
-    if (number !== presetNumber(preset, index)) problems.push(`number ${number} (file: ${presetNumber(preset, index)})`);
+    if (number !== presetNumber(preset, index) || number !== String(index + 1)) problems.push(`number ${number} (file: ${presetNumber(preset, index)}, place ${index + 1})`);
     if (id !== `\`${preset.id}\``) problems.push(`id ${id}`);
     if (category !== preset.category) problems.push(`category ${category} (file: ${preset.category})`);
     if (kind !== preset.kind) problems.push(`kind ${kind} (file: ${preset.kind})`);
