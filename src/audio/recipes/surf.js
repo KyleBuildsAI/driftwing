@@ -60,9 +60,9 @@ export default Object.freeze({
         if (name !== 'crash') return false;
         const strength = option(options, 'strength', 1, 0, 1.5);
         crashes++;
-        swell(breakerGain.gain, time, 2.6 * strength, 0.3, 0.9, 3.4);
+        swell(breakerGain.gain, time, 2.1 * strength, 0.3, 0.9, 3.4);
         sweep(breaker.filter.frequency, time, 420, 2600, 0.6);
-        strike(thumpGain.gain, time + 0.35, 2.4 * strength, 0.05, 2.2);
+        strike(thumpGain.gain, time + 0.35, 1.9 * strength, 0.05, 2.2);
         swell(fizzGain.gain, time + 1.2, 0.7 * strength, 0.5, 0.8, 3.5);
         nextAt = Math.max(nextAt, time + 4);
         return true;
