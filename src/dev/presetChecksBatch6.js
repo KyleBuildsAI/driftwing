@@ -116,6 +116,9 @@ export function installBatch6Checks(game) {
       if (!preset || !site) return check(`${presetId}: real site`, true, 'no site within 90 km of the start (shown as a debug spawn instead)');
       const { distance = 600, height = 160, bearing = 200, lift = 30 } = view;
       const since = discoveries.length;
+      // A site can be found from a neighbouring site's visit (one discovery each, ever): then it is
+      // already in the journal and no new event comes.
+      const knownBefore = ctx.systems.journal.hasDiscovered(site.id);
       ctx.setPhotoMode(false);
       ctx.systems.flight.resetTo({ x: site.x - 600, y: site.groundY + 300, z: site.z - 600, heading: 135 });
       let spawnId = null;
@@ -128,7 +131,7 @@ export function installBatch6Checks(game) {
       ctx.systems.flight.resetTo({ x: site.x - 900, y: site.groundY + 250, z: site.z - 900, heading: 135 });
       let discovery = null;
       const waitStarted = performance.now();
-      while (!discovery && performance.now() - waitStarted < 25000) {
+      while (!discovery && !knownBefore && performance.now() - waitStarted < 25000) {
         discovery = discoveries.slice(since).find((payload) => payload.id === site.id) ?? null;
         await frames(5);
       }
@@ -136,9 +139,9 @@ export function installBatch6Checks(game) {
       const settled = await frameView(viewpoint(target, distance, height, bearing + (site.rotation * 180) / Math.PI), target);
       await terrainIdle();
       const waters = (site.waters ?? []).map((water) => ({ id: water.id, level: Math.round(water.level * 10) / 10 }));
-      return check(`${presetId}: built on its real site and discovered`, Boolean(spawnId) && site.stamps.length === (preset.stamps ?? []).length && Boolean(discovery) && ctx.systems.journal.hasDiscovered(site.id), {
+      return check(`${presetId}: built on its real site and discovered`, Boolean(spawnId) && site.stamps.length === (preset.stamps ?? []).length && (Boolean(discovery) || knownBefore) && ctx.systems.journal.hasDiscovered(site.id), {
         site: { id: site.id, x: Math.round(site.x), z: Math.round(site.z), groundY: Math.round(site.groundY), stamps: site.stamps.map((stamp) => stamp.type), waters },
-        spawnId, terrainSettled: settled, discovered: discovery ? discovery.name : null,
+        spawnId, terrainSettled: settled, discovered: discovery ? discovery.name : knownBefore ? 'before (from a neighbouring visit)' : null,
       });
     },
 
