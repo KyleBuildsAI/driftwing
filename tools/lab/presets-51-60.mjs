@@ -79,6 +79,7 @@ const ALL_ENTRIES = Object.freeze([
   Object.freeze({ id: 'mountaintopObservatory', colliders: 6, perches: true, movers: 3 }),
   Object.freeze({ id: 'steamTrainViaduct', colliders: 30, perches: true, movers: 4, gates: true }),
   Object.freeze({ id: 'damSpillway', colliders: 10, perches: true }),
+  Object.freeze({ id: 'desertOasisCaravan', colliders: 15, perches: true, torches: true, fauna: 'caravan' }),
 ]);
 const BATCH = ONLY ? ALL_ENTRIES.filter((entry) => ONLY.includes(entry.id)) : ALL_ENTRIES;
 
@@ -363,7 +364,10 @@ function testTorches() {
     }
     lab.uniforms.nightFactor.value = 0;
     lab.step(2);
-    check('torches', `${entry.id}: by day only the torch a flame lit burns`, lab.engine.stats().litFlames === 1, `${lab.engine.stats().litFlames} lit by day`);
+    // A torch that waits for a flame keeps burning by day; when every torch is a dusk lamp, the one a
+    // flame lit goes out at dawn with the others.
+    const byDay = manual >= 0 ? 1 : 0;
+    check('torches', `${entry.id}: by day ${byDay === 1 ? 'only the torch a flame lit burns' : 'every dusk lamp is out, the one a flame lit too'}`, lab.engine.stats().litFlames === byDay, `${lab.engine.stats().litFlames} lit by day`);
     lab.manager.deactivate(id, 'test');
     check('torches', `${entry.id}: dispose removes every ignitable and frees the flames`, ids.every((ignitableId) => !ignition.isLit(ignitableId) && ignition.ids().indexOf(ignitableId) < 0) && lab.engine.stats().flames === 0 && lab.engine.stats().litFlames === 0, `${ignition.count} left`);
   }
@@ -755,9 +759,42 @@ function testCaribou() {
   second.lab.manager.deactivate(second.id, 'test');
 }
 
+function testCaravan() {
+  const walk = (seconds) => {
+    const lab = createLab();
+    const id = lab.spawn('desertOasisCaravan');
+    const part = faunaOf(lab, id);
+    lab.fauna.setLOD(part, 'near');
+    lab.step(60 * seconds);
+    return { lab, id, part };
+  };
+  const first = walk(20);
+  const describe = first.lab.fauna.describe(first.id);
+  const pool = first.part.data.pool;
+  let offGround = 0;
+  for (let index = first.part.data.start; index < first.part.data.start + first.part.data.count; index++) {
+    if (Math.abs(pool.py[index] - groundHeight(pool.px[index], pool.pz[index])) > 0.5) offGround++;
+  }
+  check('fauna', 'caravan: a single file of camels walks its route across the dunes on the ground', describe.count >= 12 && describe.pathLength > 2000 && offGround === 0, `${describe.count} camels, route ${describe.pathLength.toFixed(0)} m, ${offGround} off the ground`);
+  const before = { ...describe.center };
+  first.lab.step(60 * 40);
+  const after = first.lab.fauna.describe(first.id).center;
+  const moved = Math.hypot(after.x - before.x, after.z - before.z);
+  check('fauna', 'caravan: the camels move on with flight time', moved > 25, `${moved.toFixed(0)} m in 40 s`);
+  const second = walk(60);
+  const other = second.lab.fauna.describe(second.id).center;
+  check('fauna', 'caravan: the same flight time gives the same caravan in a second manager', Math.abs(after.x - other.x) < 1e-6 && Math.abs(after.z - other.z) < 1e-6, `${after.x.toFixed(2)}, ${after.z.toFixed(2)} vs ${other.x.toFixed(2)}, ${other.z.toFixed(2)}`);
+  const voice = first.lab.voices.find((entry) => entry.recipe === 'caravan');
+  check('fauna', 'caravan: the caravan bells are the preset voice, on the camels (not the oasis)', Boolean(voice) && first.lab.voices.filter((entry) => !entry.disposed).length === 1, `${first.lab.voices.filter((entry) => !entry.disposed).length} live voices`);
+  first.lab.manager.deactivate(first.id, 'test');
+  second.lab.manager.deactivate(second.id, 'test');
+  check('fauna', 'caravan: dispose frees the camels and the voice', first.lab.fauna.stats().instances === 0 && first.lab.voices.every((entry) => entry.disposed), `${first.lab.fauna.stats().instances} groups left`);
+}
+
 await testFaunaAllocation();
 if (BATCH.some((entry) => entry.fauna === 'drift')) testButterflies();
 if (BATCH.some((entry) => entry.fauna === 'column')) testCaribou();
+if (BATCH.some((entry) => entry.fauna === 'caravan')) testCaravan();
 testRecipes();
 testColliders();
 testTorches();

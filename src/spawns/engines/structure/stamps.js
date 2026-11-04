@@ -29,6 +29,7 @@ export const RECIPE_STAMP_TYPES = Object.freeze({
   observatory: 'flatten',
   viaduct: 'gorge',
   dam: 'basin',
+  oasis: 'basin',
 });
 
 /** Stamp sizes each recipe prefers over the stamp type's own defaults (m, or [min, max] ranges). */
@@ -45,6 +46,7 @@ const RECIPE_STAMP_DEFAULTS = Object.freeze({
   viaduct: Object.freeze({ length: [900, 1100], width: [170, 240], depth: [55, 80], falloff: [180, 240], pad: [80, 100], paint: 'riverbed' }),
   // The reservoir: a basin centred up the valley, so its down-valley rim (where its berm stands
   // tallest) lies at the site centre, the dam's line. A narrow, steep berm: the dam's face covers it.
+  oasis: Object.freeze({ radius: [55, 80], depth: [4, 7], rim: [22, 32], falloff: [40, 60], paint: 'sand' }),
   dam: Object.freeze({ radius: [220, 280], depth: [24, 32], rim: [10, 14], falloff: [14, 20], paint: 'riverbed', offset: Object.freeze({ along: -250, across: 0 }) }),
 });
 
