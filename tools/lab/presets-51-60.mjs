@@ -194,6 +194,8 @@ function createLab({ withAudio = true } = {}) {
     },
   });
   for (const preset of LAB_PRESETS) manager.addPreset(preset);
+  // The fauna allocation baseline runs on the butterfly preset, so it is there under --only too.
+  if (!LAB_PRESETS.some((preset) => preset.id === 'butterflyMigration')) manager.addPreset(labParts(PRESET_BY_ID.butterflyMigration));
   manager.init();
   function step(frames = 1, dt = 1 / 60) {
     for (let frame = 0; frame < frames; frame++) {
@@ -511,9 +513,9 @@ async function testAllocation() {
 /**
  * The batch's fauna groups (the butterflies, the caribou, the camels) at a few dozen agents each,
  * through the fauna engine's own update (as the structure parts are measured), against a
- * baseline: the butterfly preset as a plain Phase 2 starling flock (no wind drift).
- * Runs first, on a fresh heap. A drifting group's WindField probe (about 140 B, once a second: the
- * field's own sampling) is the only allocation it adds.
+ * baseline: the butterfly preset as a plain Phase 2 starling flock (no wind drift). Runs first, on a
+ * fresh heap. A drifting group reads the field's ambient layer once at create and the craft's gusts
+ * per frame, so it adds nothing.
  */
 async function testFaunaAllocation() {
   const faunaEntries = BATCH.filter((entry) => PRESET_BY_ID[entry.id].engines.some((part) => part.engine === 'fauna'));
@@ -549,7 +551,7 @@ async function testFaunaAllocation() {
     const baseline = await measureHerds([{ presetId: 'butterflyMigration', params: { species: 'starling', windDrift: 0, count: 48 } }]);
     const measured = await measureHerds(faunaEntries.map((entry) => ({ presetId: entry.id, params: { count: 48 } })));
     const perGroup = measured.perFrame / measured.groups;
-    check('allocation', `fauna: ${measured.groups} groups (${measured.agents} agents) allocate per group and frame no more than a Phase 2 flock (within 3 B: a drifting group's WindField probe)`, perGroup <= baseline.perFrame + 3,
+    check('allocation', `fauna: ${measured.groups} groups (${measured.agents} agents) allocate per group and frame no more than a Phase 2 flock`, perGroup <= baseline.perFrame + 0.5,
       `${perGroup.toFixed(3)} B per group and frame (median of 3 windows), Phase 2 flock ${baseline.perFrame.toFixed(3)} B; ${measured.collections} collections over 150 000 frames`);
   }
 }

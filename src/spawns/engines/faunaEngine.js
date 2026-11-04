@@ -183,11 +183,11 @@ const G = Object.freeze({
   STAMPEDE: 51, STAMPEDE_X: 52, STAMPEDE_Z: 53, STAMPEDE_COOLDOWN: 54, GAIT: 55, AVOID_TIMER: 56, STAMPEDE_TIMER: 57,
   FLUSH: 58, FLUSH_X: 59, FLUSH_Z: 60, FLUSH_Y: 61, RACE: 62, SHADOW_X: 63, SHADOW_Z: 64, PATH_TIME: 65, HOME_X: 66,
   HOME_Y: 67, HOME_Z: 68, DUST_LIVE: 69, FLUSH_COUNT: 70, WATER_CURSOR: 71, SHADOW_WET: 72,
-  DRIFT_X: 73, DRIFT_Y: 74, DRIFT_Z: 75, DRIFT_TIMER: 76,
+  DRIFT_X: 73, DRIFT_Y: 74, DRIFT_Z: 75, DRIFT_AMBIENT_X: 76, DRIFT_AMBIENT_Z: 77, DRIFT_STRENGTH: 78,
 });
-const G_LENGTH = 77;
-/** A wind-drifting group probes the WindField at its goal this often (s). */
-const DRIFT_PROBE_SECONDS = 1;
+const G_LENGTH = 79;
+/** A wind-drifting group feels the craft's gusts (wind.lastLayers) within this distance (m). */
+const DRIFT_GUST_REACH = 600;
 // Call registers (io) by index. A caller writes the slots a helper reads, then calls it.
 const IO = Object.freeze({
   TARGET_X: 0, TARGET_Y: 1, TARGET_Z: 2, FEED_X: 3, FEED_Y: 4, FEED_Z: 5, GAIN: 6, SEEK_MAX: 7, WEIGHT: 8,
@@ -1157,11 +1157,11 @@ export function createFaunaEngine() {
     g[G.VZ] = (-Math.cos(g[G.HEADING])) * g[G.SPEED];
     if (params.windDrift > 0) {
       // A drifting cloud: the goal and its leash ride the wind (the agents add it to their flight).
-      probeDrift(data);
+      updateDrift(data);
       g[G.VX] += g[G.DRIFT_X];
       g[G.VZ] += g[G.DRIFT_Z];
-      //A
-      //B
+      g[G.ANCHOR_X] += g[G.DRIFT_X] * dt;
+      g[G.ANCHOR_Z] += g[G.DRIFT_Z] * dt;
     }
     g[G.X] += g[G.VX] * dt;
     g[G.Z] += g[G.VZ] * dt;
@@ -1169,26 +1169,51 @@ export function createFaunaEngine() {
   }
 
   /**
-   * The wind a drifting group rides (g[DRIFT_X..Z] = windDrift x the WindField velocity at its goal),
-   * probed every DRIFT_PROBE_SECONDS at whole-metre coordinates into the group's reused record. The
-   * step comes from the frameStep register (a double argument would be boxed).
+   * The wind a drifting group rides (g[DRIFT_X..Z] = windDrift x the wind): the WindField's ambient
+   * layer at the group's height (read once at create through wind.ambientAt, then scaled by the live
+   * windStrength uniform the field itself uses), plus the gusts and thermal lift the craft is feeling
+   * (wind.lastLayers) while it is within DRIFT_GUST_REACH of the group. Nothing here calls into the
+   * field per frame (its full sample allocates in its terrain and thermal lookups), as the structure
+   * engine's wind does.
    */
-  function probeDrift(data) {
+  function updateDrift(data) {
     const g = data.g;
-    g[G.DRIFT_TIMER] -= frameStep[0];
-    if (g[G.DRIFT_TIMER] > 0) return;
-    g[G.DRIFT_TIMER] += DRIFT_PROBE_SECONDS;
-    if (g[G.DRIFT_TIMER] < 0) g[G.DRIFT_TIMER] = DRIFT_PROBE_SECONDS;
-    const probe = data.driftProbe;
-    probe.point.x = Math.round(g[G.X]);
-    probe.point.y = Math.round(g[G.Y]);
-    probe.point.z = Math.round(g[G.Z]);
-    // The WindField's own clock is the same elapsed time (passing it would box it).
-    ctx.wind.probe(probe.point, undefined, probe.result);
     const share = data.params.windDrift;
-    g[G.DRIFT_X] = probe.result.vel.x * share;
-    g[G.DRIFT_Y] = probe.result.vel.y * share;
-    g[G.DRIFT_Z] = probe.result.vel.z * share;
+    const strength = ctx.uniforms && ctx.uniforms.windStrength ? ctx.uniforms.windStrength.value : g[G.DRIFT_STRENGTH];
+    const scale = g[G.DRIFT_STRENGTH] > 0 ? strength / g[G.DRIFT_STRENGTH] : 1;
+    let windX = g[G.DRIFT_AMBIENT_X] * scale;
+    let windY = 0;
+    let windZ = g[G.DRIFT_AMBIENT_Z] * scale;
+    const layers = ctx.wind ? ctx.wind.lastLayers : null;
+    const player = ctx.state && ctx.state.player ? ctx.state.player.position : null;
+    if (layers && player) {
+      const offsetX = player.x - g[G.X];
+      const offsetZ = player.z - g[G.Z];
+      const distance = Math.sqrt(offsetX * offsetX + offsetZ * offsetZ);
+      if (distance < DRIFT_GUST_REACH * 2) {
+        const near = distance < DRIFT_GUST_REACH ? 1 : 2 - distance / DRIFT_GUST_REACH;
+        windX += layers.gust.x * near;
+        windY += (layers.gust.y + layers.thermal) * near;
+        windZ += layers.gust.z * near;
+      }
+    }
+    g[G.DRIFT_X] = windX * share;
+    g[G.DRIFT_Y] = windY * share;
+    g[G.DRIFT_Z] = windZ * share;
+  }
+
+  /**
+   * Reads the ambient wind a drifting group rides once, at create: the WindField's ambient layer at
+   * the goal (its height above the ground there) and the windStrength it was read under.
+   */
+  function readDriftAmbient(data) {
+    const g = data.g;
+    if (!ctx.wind || typeof ctx.wind.ambientAt !== 'function') return;
+    const ambient = ctx.wind.ambientAt({ x: g[G.X], y: g[G.Y], z: g[G.Z] });
+    const toward = (ambient.fromDegrees + 180) * Math.PI / 180;
+    g[G.DRIFT_AMBIENT_X] = Math.sin(toward) * ambient.speed;
+    g[G.DRIFT_AMBIENT_Z] = -Math.cos(toward) * ambient.speed;
+    g[G.DRIFT_STRENGTH] = ctx.uniforms && ctx.uniforms.windStrength ? ctx.uniforms.windStrength.value : 1;
   }
 
   /** Eases the goal's height toward the altitude mode's target over the ground. */
@@ -4002,8 +4027,6 @@ export function createFaunaEngine() {
       dustCursor: 0,
       dustParams: null,
       dustColor: null,
-      // A wind-drifting group's WindField probe (a whole-metre point and a reused result).
-      driftProbe: resolved.windDrift > 0 ? { point: new THREE.Vector3(), result: { vel: new THREE.Vector3(), turbulence: 0 } } : null,
     };
     if (resolved.behavior === 'pod' && resolved.pod.seekWater > 0 && !seekOpenWater(g, resolved.pod.seekWater, resolved.pod.spread)) data.noWater = true;
     fillGround(data);
@@ -4026,6 +4049,7 @@ export function createFaunaEngine() {
     if (resolved.behavior === 'wingman') g[G.Y] = Math.max(g[G.Y], ground + resolved.wingman.waitAltitude);
     g[G.BASE_Y] = g[G.Y];
     if (resolved.behavior === 'drift') g[G.Y] += Math.sin(data.phaseSeed * TWO_PI) * resolved.drift.bob;
+    if (resolved.windDrift > 0) readDriftAmbient(data);
     if (resolved.behavior === 'circling') {
       data.thermals = {
         count: 0,
