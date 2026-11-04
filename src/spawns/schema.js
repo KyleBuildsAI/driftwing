@@ -21,12 +21,12 @@ export const PLACEMENT_ALIGNMENTS = Object.freeze(['random', 'downhill', 'ridge'
 /** Time-of-day classes a preset may be limited to (filters.timeOfDay; director.js matchesTimeOfDay). */
 export const TIME_OF_DAY_CLASSES = Object.freeze(['dawn', 'day', 'golden', 'dusk', 'night', 'midday']);
 export const WEATHER_STATE_NAMES = Object.freeze(['clear', 'building', 'storm', 'clearing']);
-export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces', 'atoll', 'reef', 'seaStacks', 'estuary']);
+export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces', 'atoll', 'reef', 'seaStacks', 'estuary', 'giant']);
 export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed', 'salt', 'sand', 'travertine', 'mud', 'ice', 'coral']);
 /** Phase 1 landmark types (src/world/worldgen.js) a filters.near block may name. */
 export const LANDMARK_TYPES = Object.freeze(['arch', 'monoliths', 'lighthouse', 'balloons']);
 /** FAR lure silhouettes drawn by src/spawns/lure.js. */
-export const LURE_TYPES = Object.freeze(['plume', 'anvil', 'funnel', 'whale', 'islands', 'comet']);
+export const LURE_TYPES = Object.freeze(['plume', 'anvil', 'funnel', 'whale', 'islands', 'comet', 'tree']);
 /** How the SpawnManager may move an activation before the engines see it (preset.anchor). */
 export const ANCHOR_SEEKS = Object.freeze(['peak']);
 export const ANCHOR_ALIGNS = Object.freeze(['downwind']);
@@ -176,7 +176,8 @@ function validateFilters(check, filters) {
   }
   if (filters.near !== undefined && filters.near !== null) {
     // The director moves the candidate onto the nearest landmark of these types, or placed site of
-    // these site presets (with active: true, one whose active state runs), within radius (m).
+    // these site presets (with active: true, one whose active state runs; a placed site lends the
+    // event its heading, as the moonbow at a waterfall), within radius (m).
     const near = check.object(filters.near, 'filters.near');
     check.onlyKeys(near, ['landmarks', 'sites', 'active', 'radius'], 'filters.near');
     if (near.landmarks === undefined && near.sites === undefined) check.fail('filters.near', 'must name landmarks, sites or both');
@@ -561,6 +562,20 @@ function validateComboReferences(presets) {
   }
 }
 
+/** filters.near.sites (Phase 3): every preset it names is a site preset of the list. */
+function validateNearReferences(presets) {
+  const byId = new Map(presets.map((preset) => [preset.id, preset]));
+  for (const preset of presets) {
+    const sites = preset.filters && preset.filters.near && preset.filters.near.sites;
+    if (!sites) continue;
+    const check = createChecker(preset.id);
+    sites.forEach((siteId, index) => {
+      const target = byId.get(siteId);
+      if (!target || target.kind !== 'site') check.fail(`filters.near.sites[${index}]`, `names ${describe(siteId)}, which is not a site preset`);
+    });
+  }
+}
+
 /** Validates every preset and that their ids are unique. Returns the list. */
 export function validatePresets(presets, options = {}) {
   if (!Array.isArray(presets)) throw new TypeError('[DRIFTWING] validatePresets needs an array of presets');
@@ -571,5 +586,6 @@ export function validatePresets(presets, options = {}) {
     seen.add(preset.id);
   }
   validateComboReferences(presets);
+  validateNearReferences(presets);
   return presets;
 }

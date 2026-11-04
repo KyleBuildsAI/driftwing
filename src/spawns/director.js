@@ -27,7 +27,9 @@
 //   filters    per preset: biome, time of day, altitude band (player MSL), weather state at the
 //              candidate, surface (land, water, coast), distance band, and `near`: a candidate moves
 //              onto the nearest Phase 1 landmark of the named types within the radius of its seeded
-//              point (a lantern festival at a lighthouse), or is rejected when there is none
+//              point (a lantern festival at a lighthouse), or onto the nearest placed site of the
+//              named site presets, taking the site's heading (Phase 3: a moonbow at a waterfall),
+//              or is rejected when there is none
 //   ahead      every director activation lies within 45 degrees of the ground track (60 for a
 //              drought past 80 s) and inside the preset's distance band; nothing is ever started
 //              behind the player. The ground track is the bearing of the horizontal velocity,
@@ -741,9 +743,11 @@ export function createDirector({
 
   /**
    * filters.near: the nearest Phase 1 landmark of the preset's types, or placed site of its site
-   * presets, within its radius of the seeded point, as { x, z }, or null. Cached by the candidate's
-   * hash (landmarks and sites never move). With near.active the site must be one whose active state
-   * runs now (a volcano erupting), which changes, so that answer is worked out again every tick.
+   * presets, within its radius of the seeded point, as { x, z, heading } (heading: a placed site's own
+   * compass heading, so the event faces the way the site does (the moonbow at a waterfall); null for a
+   * landmark or a live site), or null. Cached by the candidate's hash (landmarks and sites never move).
+   * With near.active the site must be one whose active state runs now (a volcano erupting), which
+   * changes, so that answer is worked out again every tick.
    */
   function nearLandmark(info, record) {
     const near = info.near;
@@ -759,13 +763,13 @@ export function createDirector({
         const distance = Math.hypot(site.x - record.x, site.z - record.z);
         if (distance < bestDistance) {
           bestDistance = distance;
-          best = { x: site.x, z: site.z };
+          best = { x: site.x, z: site.z, heading: null };
         }
       }
     }
     if (near.sites && near.active) {
       const site = activeSiteNear(near.sites, record.x, record.z, near.radius);
-      if (site && site.distance < bestDistance) best = { x: site.x, z: site.z };
+      if (site && site.distance < bestDistance) best = { x: site.x, z: site.z, heading: null };
     } else if (near.sites && placement) {
       const sites = placement.sitesNear(record.x, record.z, near.radius);
       for (let index = 0; index < sites.length; index++) {
@@ -774,7 +778,7 @@ export function createDirector({
         const distance = Math.hypot(site.x - record.x, site.z - record.z);
         if (distance < bestDistance) {
           bestDistance = distance;
-          best = { x: site.x, z: site.z };
+          best = { x: site.x, z: site.z, heading: Number.isFinite(site.rotation) ? (site.rotation * 180) / Math.PI : null };
         }
       }
     }
@@ -1054,6 +1058,7 @@ export function createDirector({
       if (point) {
         record.x = point.x;
         record.z = point.z;
+        if (Number.isFinite(point.heading)) record.heading = point.heading;
         record.distance = Math.hypot(point.x - player.x, point.z - player.z);
       }
     }

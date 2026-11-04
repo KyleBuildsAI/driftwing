@@ -25,6 +25,12 @@ import { DAM_DEFAULTS, buildDam } from './dam.js';
 import { OASIS_DEFAULTS, buildOasis } from './oasis.js';
 import { LABYRINTH_DEFAULTS, buildLabyrinth } from './labyrinth.js';
 import { FIREBALL_DEFAULTS, buildFireball } from './fireball.js';
+// Phase 3 presets 61-70.
+import { WORLD_TREE_DEFAULTS, buildWorldTree } from './worldTree.js';
+import { PORTAL_RING_DEFAULTS, buildPortalRing } from './portalRing.js';
+import { SLEEPING_GIANT_DEFAULTS, buildSleepingGiant } from './sleepingGiant.js';
+import { GHOST_GALLEON_DEFAULTS, buildGhostGalleon } from './ghostGalleon.js';
+import { DRAGON_RACE_DEFAULTS, buildDragonRace } from './dragonRace.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -56,6 +62,12 @@ export const RECIPES = Object.freeze({
   oasis: Object.freeze({ build: buildOasis, defaults: OASIS_DEFAULTS, audioIntensity: 'constant' }),
   labyrinth: Object.freeze({ build: buildLabyrinth, defaults: LABYRINTH_DEFAULTS, audioIntensity: 'constant' }),
   fireball: Object.freeze({ build: buildFireball, defaults: FIREBALL_DEFAULTS, audioIntensity: 'recipe' }),
+  // Phase 3 presets 61-70.
+  worldTree: Object.freeze({ build: buildWorldTree, defaults: WORLD_TREE_DEFAULTS, audioIntensity: 'approach' }),
+  portalRing: Object.freeze({ build: buildPortalRing, defaults: PORTAL_RING_DEFAULTS, audioIntensity: 'approach' }),
+  sleepingGiant: Object.freeze({ build: buildSleepingGiant, defaults: SLEEPING_GIANT_DEFAULTS, audioIntensity: 'constant' }),
+  ghostGalleon: Object.freeze({ build: buildGhostGalleon, defaults: GHOST_GALLEON_DEFAULTS, audioIntensity: 'approach' }),
+  dragonRace: Object.freeze({ build: buildDragonRace, defaults: DRAGON_RACE_DEFAULTS, audioIntensity: 'approach' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

@@ -556,6 +556,20 @@ function testShapes(world, sites) {
           depths.push(world.heightAt(stamp.mouthX + stamp.inlandX * stamp.channelLength * share, stamp.mouthZ + stamp.inlandZ * stamp.channelLength * share) - WATER);
         }
         check('shapes', `${label}: the channel is carved below the sea from its mouth to its head`, depths.every((depth) => depth < -0.5), `${depths.map((depth) => round(depth, 1)).join(', ')} m`);
+      } else if (stamp.type === 'giant') {
+        // The breath of preset 68 stands at a fixed offset from the site: the base is the site's ground.
+        check('shapes', `${label}: the base is the site's own ground`, Math.abs(stamp.baseY - site.groundY) < 1e-6, `base ${round(stamp.baseY, 2)} m, site ${round(site.groundY, 2)} m`);
+        const nose = world.heightAt(stamp.faceX, stamp.faceZ);
+        check('shapes', `${label}: the nose's tip stands at faceY (within 1 m)`, Math.abs(nose - stamp.faceY) < 1, `${round(nose, 2)} m, faceY ${round(stamp.faceY, 2)} m`);
+        const chest = localPoint(stamp, stamp.length * 0.19, 0);
+        const chestHeight = world.heightAt(chest.x, chest.z) - stamp.baseY;
+        check('shapes', `${label}: the chest stands at least 90 % of the height above the base`, chestHeight >= stamp.height * 0.9, `${round(chestHeight, 1)} m, height ${round(stamp.height, 1)} m`);
+        // The face reads: the nose stands above the brow, the brow above the eye hollows.
+        const brow = localPoint(stamp, stamp.length * 0.43, 0);
+        const eye = localPoint(stamp, stamp.length * 0.415, stamp.length * 0.024);
+        const browHeight = world.heightAt(brow.x, brow.z);
+        const eyeHeight = world.heightAt(eye.x, eye.z);
+        check('shapes', `${label}: the face reads (nose over brow over eye hollow)`, nose > browHeight && browHeight > eyeHeight + 5, `nose ${round(nose, 1)} m, brow ${round(browHeight, 1)} m, eye ${round(eyeHeight, 1)} m`);
       } else {
         const top = world.heightAt(stamp.x, stamp.z);
         check('shapes', `${label}: the islet stands at least 70 % of its height above the sea`, top - WATER >= stamp.height * 0.7, `${round(top, 1)} m, height ${round(stamp.height, 1)} m`);
@@ -656,6 +670,7 @@ function testPaint(world, sites, seed = STAMP_SEED) {
     reef: (stamp) => [{ x: stamp.x + stamp.dirX * stamp.radius * 0.6, z: stamp.z + stamp.dirZ * stamp.radius * 0.6 }, stamp.paint],
     seaStacks: (stamp) => [{ x: stamp.stacks[0].x, z: stamp.stacks[0].z }, stamp.paint],
     estuary: (stamp) => [{ x: stamp.mouthX + stamp.inlandX * stamp.channelLength * 0.5, z: stamp.mouthZ + stamp.inlandZ * stamp.channelLength * 0.5 }, stamp.paint],
+    giant: (stamp) => [localPoint(stamp, stamp.length * 0.19, 0), stamp.paint],
   };
   for (const site of sites) {
     const stamp = site.stamps[0];

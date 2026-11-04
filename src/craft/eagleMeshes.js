@@ -581,8 +581,9 @@ export function buildDragonMesh(ctx) {
   eyeAnchor.position.fromArray(EYES.dragon);
   root.add(eyeAnchor);
 
-  // The fire's light: borrowed from the spawn light pool while the flame burns.
-  const lightPool = ctx.systems?.spawns?.manager?.lights ?? null;
+  // The fire's light: borrowed from the spawn light pool while the flame burns. The pool is looked
+  // up when a flame starts, so a mesh built before the spawn system (a prewarmed model) finds it too.
+  const lightPool = () => ctx.systems?.spawns?.manager?.lights ?? null;
   let light = null;
   // The light sits in the flame a few metres out and a little under it: it lights what the flame
   // passes and the dragon's belly, not the top of its own snout.
@@ -592,7 +593,8 @@ export function buildDragonMesh(ctx) {
     light = null;
   }
   function releaseLight() {
-    if (light && lightPool) lightPool.release(light);
+    const pool = lightPool();
+    if (light && pool) pool.release(light);
     light = null;
   }
 
@@ -656,8 +658,8 @@ export function buildDragonMesh(ctx) {
       jaw.rotation.set(0.42 * pose.jaw, 0, 0);
       neck.rotation.set(-0.3 * pose.screech + 0.1 * pose.perch - 0.12 * level, pose.look, 0);
       fire.set(level, time);
-      if (level > 0.02 && !light && lightPool) {
-        light = lightPool.acquire(5, revokeLight);
+      if (level > 0.02 && !light && lightPool()) {
+        light = lightPool().acquire(5, revokeLight);
         if (light) light.color.setRGB(1, 0.62, 0.28);
       } else if (level <= 0.02 && light) {
         releaseLight();

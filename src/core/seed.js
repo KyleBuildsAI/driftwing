@@ -24,6 +24,27 @@ export function normalizeSeed(value) {
   return SEED_PATTERN.test(normalised) ? normalised : null;
 }
 
+/**
+ * The world a portal leads to (Phase 3, preset 67): new seed = hash(currentSeed, portalId), as six
+ * characters of the seed alphabet. Pure and deterministic, so a portal always opens onto the same world
+ * from the same world, for everyone.
+ */
+export function portalSeed(currentSeed, portalId) {
+  const text = `${currentSeed}>${portalId}`;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193) >>> 0;
+  let state = hash;
+  let seed = '';
+  for (let index = 0; index < RANDOM_SEED_LENGTH; index++) {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    seed += SEED_ALPHABET[((mixed ^ (mixed >>> 14)) >>> 0) % SEED_ALPHABET.length];
+  }
+  // A seed that would lead straight back to itself takes the next character of the alphabet.
+  return seed === currentSeed ? `${seed.slice(0, -1)}${SEED_ALPHABET[(SEED_ALPHABET.indexOf(seed.at(-1)) + 1) % SEED_ALPHABET.length]}` : seed;
+}
+
 /** A fresh random seed from an alphabet without look-alike characters. */
 export function randomSeed() {
   const bytes = new Uint8Array(RANDOM_SEED_LENGTH);

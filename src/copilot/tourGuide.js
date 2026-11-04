@@ -109,6 +109,12 @@ const NAME_SYNONYMS = Object.freeze([
   [/\b(camels?|palm trees?|caravans?)\b/g, 'oasis caravan'],
   [/\b(hedge mazes?|mazes?)\b/g, 'labyrinth'],
   [/\b(bolides?)\b/g, 'fireball impact'],
+  // Phase 3 presets 61-70.
+  [/\b(lunar eclipses?|red moons?)\b/g, 'blood moon'],
+  [/\b(galaxy|galactic (core|centre|center))\b/g, 'milky way core'],
+  [/\b(ghost ships?|phantom ships?)\b/g, 'ghost galleon'],
+  [/\b(stone giants?|sleeping giants?)\b/g, 'sleeping stone giant'],
+  [/\b(dragon races?|wild dragons?)\b/g, 'dragon racer'],
 ]);
 
 /**

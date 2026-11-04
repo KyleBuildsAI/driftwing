@@ -65,6 +65,17 @@ import damSpillway from './damSpillway.js';
 import desertOasisCaravan from './desertOasisCaravan.js';
 import labyrinth from './labyrinth.js';
 import fireballImpact from './fireballImpact.js';
+// Batch 7: presets 61-70.
+import bloodMoon from './bloodMoon.js';
+import greenFlash from './greenFlash.js';
+import noctilucentClouds from './noctilucentClouds.js';
+import milkyWayCore from './milkyWayCore.js';
+import moonbow from './moonbow.js';
+import worldTree from './worldTree.js';
+import portalRing from './portalRing.js';
+import sleepingGiant from './sleepingGiant.js';
+import ghostGalleon from './ghostGalleon.js';
+import dragonRacer from './dragonRacer.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -133,6 +144,17 @@ export const PRESETS = Object.freeze([
   desertOasisCaravan,
   labyrinth,
   fireballImpact,
+  // Batch 7: presets 61-70.
+  bloodMoon,
+  greenFlash,
+  noctilucentClouds,
+  milkyWayCore,
+  moonbow,
+  worldTree,
+  portalRing,
+  sleepingGiant,
+  ghostGalleon,
+  dragonRacer,
 ]);
 
 /** Presets by id. */

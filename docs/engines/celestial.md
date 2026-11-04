@@ -6,7 +6,8 @@ mist.
 
 - Code: `src/spawns/engines/celestialEngine.js`.
 - Parameters and their checks: `src/spawns/engines/celestial/params.js`.
-- Meshes: `src/spawns/engines/celestial/materials.js`.
+- Meshes: `src/spawns/engines/celestial/materials.js`; the Phase 3 night-sky meshes (lunar eclipse,
+  green flash, noctilucent clouds, galaxy) in `src/spawns/engines/celestial/nightSky.js`.
 
 Preset authors use this page as the reference. A preset names the engine as
 `{ engine: 'celestial', params: { ... } }`. A bad value throws a clear error that names the field,
@@ -26,6 +27,10 @@ comet, or an eclipse that also raises the stars.
 | `glory` | drives the shared cloud optics (`uniforms.cloudGlory`, `uniforms.cloudBow`): the glory's coloured rings and the full-circle rainbow shine on every cloud (v1 field and weather volumes) around the antisolar point, where the craft's own shadow falls on the cloud tops below | glory + full-circle rainbow |
 | `rainbow` | a rainbow (or a moonbow) inside a sphere of mist, lit by the sun or moon behind the viewer | the waterfall's daytime rainbow, Phase 3 moonbow |
 | `sky` | a static sky modifier eased in and out with the instance | Phase 3: Milky Way core, blood moon, aurora nights |
+| `lunarEclipse` | (Phase 3) a copper halo and a bright umbral limb around the dome's own moon disc, strongest at night; the disc's reddening and the darker night come from the blood moon's global override | blood moon (61) |
+| `greenFlash` | (Phase 3) a thin green rim and a detached sliver on the sun's upper limb as it sets into an open-ocean horizon (the terrain toward the sun is sampled once a second), and a brief green flash as it vanishes | green flash (62) |
+| `noctilucent` | (Phase 3) electric-blue rippled cloud sheets low over the sun's azimuth, lit while the sun is 6-16 degrees below the horizon, drifting slowly | noctilucent clouds (63) |
+| `galaxy` | (Phase 3) the Milky Way core on the star field's band: a warm bulge, star clouds and grain, the dark dust lanes of the Great Rift; stronger over the desert, fainter under a bright moon | Milky Way core (64) |
 
 ## Parameters
 
@@ -123,6 +128,52 @@ volume `sheet` in the same preset put the cloud there.
 | `strength` | 0..3 | | 1 | |
 | `secondary` | 0..1 | | 0.35 | the secondary bow |
 | `light` | `sun` or `moon` | | `sun` | `moon` makes a faint, nearly white moonbow at night |
+
+### lunarEclipse
+
+| field | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `glow` | | 0..3 | 1 | the copper halo around the disc |
+| `rim` | | 0..3 | 0.8 | the bright limb on the side leaving the earth's shadow |
+| `haloRadius` | moon radii | 1.5..20 | 5 | |
+| `color` | hex | | 0xc8442a | |
+| `rimAngle` | deg | -360..360 | null | where the bright limb sits on the disc; null draws it from the spawn's seeded random stream |
+
+### greenFlash
+
+| field | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `strength` | | 0..4 | 1 | |
+| `flashSeconds` | s | 0.2..10 | 1.6 | the flash as the last of the limb sinks |
+| `color` | hex | | 0x3dff7a | |
+| `ocean` | bool | | true | only toward an open-ocean horizon: the terrain is sampled toward the sun out to `horizonReach` |
+| `horizonReach` | m | 2000..60000 | 24000 | |
+| `afterSeconds` | s | 0..120 | 8 | how long the event lingers once the sun has gone |
+
+An activation in the morning or after sunset ends at create (declined); the sun must be setting.
+
+### noctilucent
+
+| field | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `strength` | | 0..4 | 1 | |
+| `color` | hex | | 0x6fb8ff | |
+| `spread` | deg | 20..85 | 75 | the azimuth span of the sheets around the sun's azimuth |
+| `top` | deg | 6..40 | 22 | how high above the horizon the sheets reach |
+| `sunWindow` | [deg, deg] | -24..0 | [-16, -6] | the sun elevations that light them; an early event waits for the window, and ends once the sun has sunk past it |
+| `drift` | | 0..10 | 1 | the ripples' drift |
+
+### galaxy
+
+| field | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `strength` | | 0..4 | 1 | |
+| `dust` | 0..1 | | 0.75 | the dust lanes' depth |
+| `core` | | 0..3 | 1 | the bulge's brightness |
+| `coreLongitude` | deg | -180..180 | 0 | where on the band the core sits |
+| `width` | | 0.3..3 | 1 | the band's width |
+| `desert` | 0..1 | | 0.45 | the share of its strength that needs the desert: away from the dunes it shows at 1 - `desert` (the dune share round the camera, sampled every 2 s, eased over 3 s) |
+| `moonFade` | 0..1 | | 0.55 | how much a bright moon fades it |
 
 ### sky
 

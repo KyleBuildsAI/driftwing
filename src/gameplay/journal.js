@@ -22,6 +22,9 @@ export const JOURNAL_STATS = Object.freeze({
 const STAT_KEY_PATTERN = /^[a-z][A-Za-z0-9]{0,39}$/;
 const CRAFT_ID_PATTERN = /^[a-z][A-Za-z0-9]{0,31}$/;
 const MAX_CRAFT_TIMES = 64;
+/** Worlds visited through portals kept in the records (the oldest drop first). */
+const MAX_WORLDS_VISITED = 200;
+const WORLD_SEED_PATTERN = /^[A-Z0-9-]{1,24}$/;
 
 /**
  * The journal stats the registered craft modules declare (module journal.stats), rebuilt when a module
@@ -63,8 +66,9 @@ export function journalStatInfo(key) {
  * The global records live under `driftwing-v2.records`, shared by every world: the journal
  * statistics from the typed 'journalStat' events (storms chased, closest tornado, best canyon run,
  * each craft module's own journal.stats and any other key a preset sends), the achievements from the
- * typed 'achievement' events, the best landing in any world, and the flight time per craft
- * (craftTime: seconds, counted every frame of flight for the craft flying it).
+ * typed 'achievement' events, the best landing in any world, the flight time per craft
+ * (craftTime: seconds, counted every frame of flight for the craft flying it) and the worlds visited
+ * through portal rings (worldsVisited, from the typed 'worldVisited' event, saved at once).
  *
  * The spawn collection counts implemented presets only: found / total over the spawn registry (the
  * SpawnManager's presets, which is PRESETS in a player's build).
@@ -122,7 +126,7 @@ export function createJournal(ctx) {
   }
 
   function createEmptyRecords() {
-    return { stats: {}, achievements: [], bestLanding: null, craftTime: {} };
+    return { stats: {}, achievements: [], bestLanding: null, craftTime: {}, worldsVisited: [] };
   }
 
   /**
@@ -285,6 +289,13 @@ export function createJournal(ctx) {
     return data;
   }
 
+  /** One portal crossing as stored: { seed, from, portalId, at (ms epoch) }, or null when unusable. */
+  function sanitizeWorldVisit(raw) {
+    if (!raw || typeof raw !== 'object' || !WORLD_SEED_PATTERN.test(raw.seed ?? '') || !WORLD_SEED_PATTERN.test(raw.from ?? '')) return null;
+    if (typeof raw.portalId !== 'string' || raw.portalId.length === 0 || raw.portalId.length > 128) return null;
+    return { seed: raw.seed, from: raw.from, portalId: raw.portalId, at: finiteNumber(raw.at, 0) };
+  }
+
   /** Reads the global records (every world), repairing anything malformed. */
   function loadRecords() {
     const loaded = createEmptyRecords();
@@ -308,6 +319,13 @@ export function createJournal(ctx) {
       }
     }
     loaded.bestLanding = sanitizeLanding(stored.bestLanding);
+    if (Array.isArray(stored.worldsVisited)) {
+      for (const raw of stored.worldsVisited) {
+        const entry = sanitizeWorldVisit(raw);
+        if (entry) loaded.worldsVisited.push(entry);
+      }
+      loaded.worldsVisited.splice(0, Math.max(0, loaded.worldsVisited.length - MAX_WORLDS_VISITED));
+    }
     if (stored.craftTime && typeof stored.craftTime === 'object') {
       for (const [craft, seconds] of Object.entries(stored.craftTime)) {
         if (!CRAFT_ID_PATTERN.test(craft) || Object.keys(loaded.craftTime).length >= MAX_CRAFT_TIMES) continue;
@@ -367,6 +385,7 @@ export function createJournal(ctx) {
       achievements: records.achievements.map((entry) => ({ ...entry })),
       bestLanding: records.bestLanding ? { ...records.bestLanding } : null,
       craftTime,
+      worldsVisited: records.worldsVisited.map((entry) => ({ ...entry })),
     };
   }
 
@@ -608,6 +627,16 @@ export function createJournal(ctx) {
   bus.onTyped('discovery', (payload) => recordSpawnDiscovery(payload));
   bus.onTyped('journalStat', (payload) => recordStat(payload));
   bus.onTyped('achievement', (payload) => recordAchievement(payload));
+  // Portals (preset 67): the world the player went through to, saved at once (the page reloads next).
+  bus.onTyped('worldVisited', (payload) => {
+    const entry = sanitizeWorldVisit({ seed: payload.seed, from: payload.previous, portalId: payload.portalId, at: Date.now() });
+    if (!entry) return;
+    records.worldsVisited.push(entry);
+    records.worldsVisited.splice(0, Math.max(0, records.worldsVisited.length - MAX_WORLDS_VISITED));
+    saveRecords();
+    save();
+    markChanged('world');
+  });
   // Challenges: the challenge system keeps the bests (driftwing-v2.challenges); a new best refreshes the panel.
   bus.onTyped('challengeFinished', (payload) => {
     if (payload?.improved) markChanged('challenge');
@@ -645,7 +674,7 @@ export function createJournal(ctx) {
     /** The challenge bests: { version, courses: { courseKey: { name, presetId, best: { craft: { time, medal, splits, missed, date } } } } } or null. */
     getChallengeRecords: challengeRecords,
 
-    /** The global records: { stats: { key: { value, op, at, seed, presetId } }, achievements, bestLanding, craftTime: { craft: seconds } }. */
+    /** The global records: { stats: { key: { value, op, at, seed, presetId } }, achievements, bestLanding, craftTime: { craft: seconds }, worldsVisited: [{ seed, from, portalId, at }] }. */
     getRecords() {
       return recordsSnapshot();
     },

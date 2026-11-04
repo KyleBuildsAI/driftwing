@@ -11,9 +11,10 @@
 //
 // Checks:
 //   presets   every preset validates and the director takes every one of them
-//   reach     every event preset is activated at least once across the runs, and the volcano's
-//             eruption (a site active state) too. Rare events are rare by design (a rare is due every
-//             12-25 minutes and shares that turn with every other rare): each one the shared runs miss
+//   reach     every event preset (but the global overrides) is activated at least once across the
+//             runs, and the volcano's eruption (a site active state) too. Rare events are rare by
+//             design (a rare is due every 12-25 minutes and shares that turn with every other rare):
+//             each one the shared runs miss
 //             is run again on the same flights with every other rare event set aside, and when its
 //             filters.near asks for an active site (the dirty thunderstorm over an erupting volcano)
 //             with those sites erupting as a common candidate (due every 2 minutes, outside the heavy
@@ -269,8 +270,10 @@ for (const { seed, craft, startDayTime } of FLIGHTS) {
   const share = pacing.droughts > 0 ? pacing.withinWindow / pacing.droughts : 1;
   rows.push(`${seed.padEnd(11)} ${craft.padEnd(9)} ${startDayTime === 0.62 ? 'day  ' : 'night'}  ${String(pacing.withinWindow).padStart(4)}/${String(pacing.droughts).padEnd(4)} droughts within ${PACING_WINDOW_MAX} s (${(share * 100).toFixed(1).padStart(5)} %), longest ${String(run.state.longestDrought).padStart(5)} s, ${run.log.length} activations`);
 }
-const isRareEvent = (preset) => preset.kind === 'event' && preset.rarity === 'rare';
-const events = PRESETS.filter((preset) => preset.kind === 'event' && !isRareEvent(preset));
+// An override preset (the blood moon) is never a director candidate: its nights are scheduled by
+// src/spawns/overrides.js (tools/steps/director-p3.json and the presets 61-70 steps cover it).
+const isRareEvent = (preset) => preset.kind === 'event' && preset.rarity === 'rare' && !preset.override;
+const events = PRESETS.filter((preset) => preset.kind === 'event' && !preset.override && !isRareEvent(preset));
 const missing = events.filter((preset) => counts.get(preset.id) === 0).map((preset) => preset.id);
 check('reach', 'every common and uncommon event preset is activated at least once across the runs', missing.length === 0, missing.length ? `never: ${missing.join(', ')}` : [...counts].filter(([id]) => events.some((preset) => preset.id === id)).map(([id, count]) => `${id} ${count}`).join(', '));
 const rareReached = [];

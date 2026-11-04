@@ -1067,7 +1067,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | done, verified on both backends |
 | B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | done (not merged) |
 | B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | done (on its branch; awaiting I3) |
-| B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
+| B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | done (verified on both backends) |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
 | B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | not started |
 | B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | not started |
@@ -1286,6 +1286,66 @@ with batch 81-90's equivalent; RENDER_PLAN gains four lines), `structure/recipes
   spec order); the checklist's recipe list in docs/spawns.md ("audio.recipe must be one of") still
   names the Phase 2 recipes only; CHANGELOG has no Phase 3 section yet (Milestone P).
 - **Status:** done on the branch.
+### Wave 3 - p3/presets-61-70
+
+- **Done:** 61-65 (blood moon, green flash, noctilucent clouds, Milky Way core, moonbow): the celestial
+  engine's night-sky components `lunarEclipse`, `greenFlash`, `noctilucent` and `galaxy`
+  (`src/spawns/engines/celestial/nightSky.js`), the moonbow on the existing `rainbow` (`light: 'moon'`)
+  at a mega-waterfall through the new `filters.near.sites`, and the `skyShimmer` audio recipe.
+  66-67 (world tree, portal ring): structure recipes `worldTree` and `portalRing`, the `tree` lure, the
+  structure engine's `portal` / `ghost` geometry kinds, `out.voiceTrigger`, the `portal` gate action,
+  `out.motion` (PathFollower movers with moving capsule colliders) and `out.lanterns` (ignitables);
+  the portal system `src/gameplay/portals.js` (`portalSeed`, `worldVisited`, the journal's
+  `worldsVisited`), and the `canopy` and `portal` audio recipes.
+  68 (sleeping giant): the `giant` terrain stamp (src/world/stamps.js: `giantFigure`, `giantRaise`,
+  `GIANT_NOSE`; base at the site's own ground, so the breath emitter stands at a fixed offset), the
+  structure recipe `sleepingGiant` (standing stones and scree on the stamp; free-standing, the figure
+  as a body mesh and a landable heightfield collider, `localHeightfield`), the `giant` audio recipe,
+  the terrain fixture `fixtureGiant` and the terrain lab's giant shape and paint checks. The lab's
+  "site-list hash unchanged" check now hashes the Phase 2 presets' sites (the Phase 3 sites join the
+  world without moving any of them; the portal rings had already changed the full list).
+  69 (ghost galleon): the structure recipe `ghostGalleon` (a lofted ghost-kind ship sailing an
+  out.motion loop over the cloud band, capsule colliders carried with it, eleven ignitable lanterns,
+  the `bell` voice trigger) and the `galleon` audio recipe.
+  70 (dragon racer): the structure recipe `dragonRace` (a crag on a peak, the `challenge` course
+  through the `challengeGates` builder) and the structure engine's course rival `out.rival`
+  (`src/spawns/engines/structure/rival.js`: the dragon craft's mesh racing the line on two
+  PathFollower paces, the challenge `rival` registered while the player flies the dragon skin, the
+  roar, the `dragonRival` achievement, the flight home), and the `dragon` audio recipe.
+  Docs: the ten rows and sections of docs/spawns.md (numbered 61-70: docs-check's row-number check
+  passes once I3 merges batches 31-60 ahead of them), the night-sky components in
+  docs/engines/celestial.md, the Phase 3 recipes and features (portal, ghost, voice triggers, motion,
+  lanterns, course rival, `localHeightfield`) in docs/engines/structure.md.
+  The batch kit: `src/dev/presetChecks61.js` (window.__dwPresets61 over the shared presetChecks.js)
+  and `tools/steps/presets-61-70.json` (every preset force-spawned and framed, the giant, galleon,
+  tree, dragon and portal checks, dispose back to baseline; the portal crossing reloads into the next
+  world as the last step).
+  Also: `src/dev/spawnScenarios/batch61.js` (the spawns test's staging, joined into SPAWN_SCENARIOS),
+  copilot synonyms (lunar eclipse, galaxy, ghost ship, stone giant, dragon race). Fixes found on the
+  way: the dragon racer's model scale is `dragonScale` (`scale` is the site's activation scale); the
+  course rival's dragon is one shared model built and prewarmed in the structure engine's init (a
+  create used to build and compile it: a 1 s stall and 0.4 MB of heap kept per create), and the
+  dragon mesh looks up the spawn light pool when its flame starts (`src/craft/eagleMeshes.js`); the
+  ghost galleon sails on cloudy nights only (building or clearing weather; on every clear night it
+  also took the rare slot the pacing lab's volcano eruption needs); the galleon's bell sits under
+  clipping. Lab changes: preset-pacing leaves the global overrides out of the event reach (the blood
+  moon is never a director candidate); the audio lab's budget holds one voice per recipe (21 now).
+- **Verified (2026-10-27):** `tools/steps/presets-61-70.json` on the dev server, WebGPU and WebGL2:
+  0 errors, 0 warnings, screenshots differ, 29/29 shared preset checks and every batch check (the
+  giant's heightfield 420 m up and landable, the galleon sailing, solid and lighting a lantern, the
+  tree's trunk, perches and lane achievement, the dragon's pace run, rival run, achievement and
+  return, the blood moon override, the portal crossing reloading into its world with the journal
+  updated). `run-harness --test spawns --presets <61-70>`: WebGPU and WebGL2 PASS (10/10 shown, GPU
+  memory, heap within 1 MB, wind, colliders, courses, ignitables, 0/0 console). `run-harness --test
+  terrain --presets real`: PASS (giant 864/864 offline seams, collision 0.00003 m). Labs: terrain
+  437/437, structure 75/75, spawns 101/101, audio 227/227 (the first run's one WebGL2 doppler
+  camera-cut check passed on the rerun), preset-pacing 4/4, colliders, path, setpiece, water,
+  director, discovery, copilot 240/240, fpv, input, storage, copilot-server and the rest pass;
+  eagle 49/50 (allocation 144 B/tick) and challenges 68/70 (allocation) fail identically at the base
+  commit f63fa29. build, build:single (V1 SHA-256 matches), test:v1 2/2, the built V2 (both
+  backends) and shell smoke 0/0. docs-check 278/288: the ten rows are numbered 61-70 by spec, which
+  matches the PRESETS order once I3 merges presets 31-60 ahead of them.
+- **Next:** I3 (integration).
 
 ### Wave 4: discovery and verification, then the tag
 

@@ -34,6 +34,13 @@ import train from './train.js';
 import dam from './dam.js';
 import caravan from './caravan.js';
 import fireball from './fireball.js';
+// Phase 3 presets 61-70.
+import skyShimmer from './skyShimmer.js';
+import canopy from './canopy.js';
+import portal from './portal.js';
+import giant from './giant.js';
+import galleon from './galleon.js';
+import dragon from './dragon.js';
 
 export const RECIPES = Object.freeze({
   tornado,
@@ -65,6 +72,13 @@ export const RECIPES = Object.freeze({
   dam,
   caravan,
   fireball,
+  // Phase 3 presets 61-70.
+  skyShimmer,
+  canopy,
+  portal,
+  giant,
+  galleon,
+  dragon,
 });
 
 /**
