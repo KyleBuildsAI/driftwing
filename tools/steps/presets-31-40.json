@@ -43,7 +43,7 @@
 {"wait":600},
 {"shot":"p33-hurricane-far"},
 {"eval":"(async () => { try { const result = await window.__dwPresets.wind('hurricaneEye', [{\"label\":\"the calm eye\",\"offset\":[0,2000,0],\"speedMax\":15,\"turbulenceMax\":0.25},{\"label\":\"the eyewall\",\"offset\":[4900,1500,0],\"speedMin\":30,\"turbulenceMin\":0.7},{\"label\":\"outer bands\",\"offset\":[0,800,15000],\"speedMin\":10,\"speedMax\":35}]); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] wind hurricane failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"},
-{"eval":"(async () => { try { const result = await window.__dwPresets.cockpit('hurricaneEye', [4900, 1500, 0], {\"inside\":0.3}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] cockpit hurricane failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"},
+{"eval":"(async () => { try { const result = await window.__dwPresets.cockpit('hurricaneEye', [4900, 1500, 0], {\"rain\":0.5,\"canopy\":0.5}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] cockpit hurricane failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"},
 {"wait":600},
 {"shot":"p33-hurricane-eyewall-cockpit"},
 {"eval":"(async () => { try { const result = await window.__dwPresets.chase(); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] chase hurricane failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"},

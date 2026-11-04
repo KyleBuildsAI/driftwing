@@ -8,8 +8,9 @@
 //     weather volume's camera weather judged (a sandstorm's grit, a squall's whiteout);
 //   - chase(): back to the chase view and out of photo mode;
 //   - parts(presetId, expect): engine facts of a live spawn (colliders, lava ribbons, water bodies);
-//   - siteActive(presetId, active): the active state of presetId's nearest live site (an eruption);
-//   - siteFacts(presetId, expect): its nearest live site's recipe facts, colliders and perches, its
+//   - siteActive(presetId, active): the active state of presetId's site (an eruption): the site the
+//     generic kit's site() built, the nearest real one to the world's spawn;
+//   - siteFacts(presetId, expect): that site's recipe facts, colliders and perches, its
 //     emitters' sea entries (on the water, by the lava's end) and the water bodies its stamps hold.
 // tools/steps/presets-31-40.json drives it (a dev server: it imports this module by URL). Never part of
 // a production build: only step files import it. Every failed check calls console.error.
@@ -18,6 +19,8 @@ import { createFraming, frames, wait } from './spawnCheckKit.js';
 import { PRESET_BY_ID } from '../spawns/presets/index.js';
 
 const DEG = Math.PI / 180;
+/** How far from the world's spawn the generic kit's site() looks for a real site (m). */
+const SITE_SEARCH_RADIUS = 90000;
 
 export function installPresetChecks31(game) {
   const api = installPresetChecks(game);
@@ -36,10 +39,21 @@ export function installPresetChecks31(game) {
     return line;
   }
 
-  /** The live spawn of presetId (the newest), or null. */
+  /** The site the generic kit's site() builds for presetId (the nearest real one to the world's spawn), or null. */
+  function siteOf(presetId) {
+    return manager.findNearestSite(presetId, state.spawn.x, state.spawn.z, SITE_SEARCH_RADIUS);
+  }
+
+  /**
+   * The live spawn of presetId: for a site preset the spawn of siteOf(presetId) while it is live (other
+   * sites of the preset may be live too), else the newest; or null.
+   */
   function spawnOf(presetId) {
     const active = manager.getActive().filter((record) => record.presetId === presetId);
-    return active.length > 0 ? active[active.length - 1] : null;
+    const site = PRESET_BY_ID[presetId] && PRESET_BY_ID[presetId].kind === 'site' ? siteOf(presetId) : null;
+    const siteSpawnId = site ? manager.getSiteSpawn(site.id) : null;
+    const own = siteSpawnId ? active.find((record) => record.id === siteSpawnId) : null;
+    return own ?? (active.length > 0 ? active[active.length - 1] : null);
   }
 
   /** The spawn's activation heading (degrees), read from a weather volume part's frame (else 0). */
@@ -292,13 +306,14 @@ export function installPresetChecks31(game) {
     },
 
     /**
-     * Starts or ends the active state (an eruption) of presetId's nearest live site, out of photo mode
-     * (photo mode holds the simulation clock, so the eruption builds only while the game runs).
+     * Starts or ends the active state (an eruption) of presetId's site (siteOf: the one site() built),
+     * out of photo mode (photo mode holds the simulation clock, so the eruption builds only while the
+     * game runs).
      */
     async siteActive(presetId, active = true) {
-      const site = manager.findNearestSite(presetId, state.player.position.x, state.player.position.z, 30000);
+      const site = siteOf(presetId);
       const spawnId = site ? manager.getSiteSpawn(site.id) : null;
-      if (!spawnId) return check(`${presetId}: its site's active state ${active ? 'started' : 'ended'}`, false, 'no live site spawn within 30 km');
+      if (!spawnId) return check(`${presetId}: its site's active state ${active ? 'started' : 'ended'}`, false, 'its site (the one site() built) is not live');
       ctx.setPhotoMode(false);
       const result = manager.setSiteActive(spawnId, active);
       await frames(10);
@@ -307,15 +322,16 @@ export function installPresetChecks31(game) {
     },
 
     /**
-     * The facts of presetId's nearest live site spawn, judged against expect: { facts: { [name]:
-     * minimum } (the structure recipe's out.facts), colliders (minimum), perches (minimum perch
-     * colliders), seaEntries (minimum emitters with seaEntry that reached the sea, each standing on the
-     * water), waters: { count, kind, mirror } (the local water bodies within the site's reach) }.
+     * The facts of presetId's site spawn (siteOf: the one site() built), judged against expect: {
+     * facts: { [name]: minimum } (the structure recipe's out.facts), colliders (minimum), perches
+     * (minimum perch colliders), seaEntries (minimum emitters with seaEntry that reached the sea, each
+     * standing on the water), waters: { count, kind, mirror } (the local water bodies within the
+     * site's reach) }.
      */
     siteFacts(presetId, expect = {}) {
-      const site = manager.findNearestSite(presetId, state.player.position.x, state.player.position.z, 30000);
+      const site = siteOf(presetId);
       const spawnId = site ? manager.getSiteSpawn(site.id) : null;
-      if (!spawnId) return check(`${presetId}: site facts`, false, 'no live site spawn within 30 km');
+      if (!spawnId) return check(`${presetId}: site facts`, false, 'its site (the one site() built) is not live');
       const parts = manager.getParts(spawnId);
       const structure = parts.find((part) => part.engine === 'structure');
       const facts = structure && structure.data.facts ? { ...structure.data.facts } : {};
