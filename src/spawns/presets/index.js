@@ -40,6 +40,7 @@ import caribouMigration from './caribouMigration.js';
 import cliffsideMonastery from './cliffsideMonastery.js';
 import seaCliffCastle from './seaCliffCastle.js';
 import mountaintopObservatory from './mountaintopObservatory.js';
+import steamTrainViaduct from './steamTrainViaduct.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -81,6 +82,7 @@ export const PRESETS = Object.freeze([
   cliffsideMonastery,
   seaCliffCastle,
   mountaintopObservatory,
+  steamTrainViaduct,
 ]);
 
 /** Presets by id. */

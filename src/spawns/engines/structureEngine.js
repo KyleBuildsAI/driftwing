@@ -1383,6 +1383,15 @@ export function createStructureEngine() {
     audio[1] -= dt;
     if (audio[1] > 0) return;
     audio[1] = 1 / AUDIO_RATE;
+    const follow = data.moverState.voice;
+    if (follow[3] === 1) {
+      // Field writes, not Vector3.set: doubles passed to a call that is not inlined would be boxed.
+      const point = data.audioPosition;
+      point.x = data.moverAnchor[0] + follow[0];
+      point.y = data.moverAnchor[1] + follow[1];
+      point.z = data.moverAnchor[2] + follow[2];
+      voice.setPosition(point);
+    }
     let level = data.audioLevel;
     if (data.audioMode === 'wind') level = data.wind[2] / data.audioReference;
     else if (data.audioMode === 'recipe') level = data.moverState.level[0];
@@ -1642,7 +1651,9 @@ export function createStructureEngine() {
         blockShownWritten: -1,
       };
       // The animate hook's state (what it writes) and env (what it reads), made once per instance.
-      data.moverState = { poses: data.moverPoses, steam: new Float64Array(0), level: new Float64Array([0.8]), glow: new Float64Array([1]), custom: out.animateState ?? null };
+      // voice: [local x, y, z, 1 = follow]: a hook that sets [3] moves the voice there (the train's
+      // locomotive, the fireball's head); 0 keeps it at the recipe's audio point.
+      data.moverState = { poses: data.moverPoses, steam: new Float64Array(0), level: new Float64Array([0.8]), glow: new Float64Array([1]), voice: new Float64Array(4), custom: out.animateState ?? null };
       data.moverEnv = {
         /** [time (s), step (s), night factor, sun elevation (deg), shown (1 near and mid, else 0)]. */
         clock: new Float64Array(5),

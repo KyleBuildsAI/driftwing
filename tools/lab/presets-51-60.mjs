@@ -77,6 +77,7 @@ const ALL_ENTRIES = Object.freeze([
   Object.freeze({ id: 'cliffsideMonastery', colliders: 8, perches: true, torches: true, cloth: true }),
   Object.freeze({ id: 'seaCliffCastle', colliders: 16, perches: true, torches: true, cloth: true }),
   Object.freeze({ id: 'mountaintopObservatory', colliders: 6, perches: true, movers: 3 }),
+  Object.freeze({ id: 'steamTrainViaduct', colliders: 30, perches: true, movers: 4, gates: true }),
 ]);
 const BATCH = ONLY ? ALL_ENTRIES.filter((entry) => ONLY.includes(entry.id)) : ALL_ENTRIES;
 
@@ -427,6 +428,81 @@ function testObservatory() {
   lab.manager.deactivate(id, 'test');
 }
 
+/** The train's cars (its movers, in order: locomotive, tender, coaches) on a viaduct spawn. */
+function trainPoses(part) {
+  const count = part.data.moverMeshes.length;
+  const poses = [];
+  for (let index = 0; index < count; index++) {
+    const base = index * 8;
+    const list = part.data.moverState.poses;
+    poses.push({ x: list[base], y: list[base + 1], z: list[base + 2], yaw: list[base + 3], visible: list[base + 7] });
+  }
+  return poses;
+}
+
+function testViaduct() {
+  const lab = createLab();
+  const id = lab.spawn('steamTrainViaduct');
+  const part = partOf(lab, id);
+  lab.engine.setLOD(part, 'near');
+  const custom = part.data.moverState.custom;
+  const cars = part.data.moverMeshes.length;
+  check('movers', 'viaduct: the locomotive, tender and coaches are movers with colliders that follow them', cars >= 4 && part.data.moverColliderIds.length === cars, `${cars} cars, ${part.data.moverColliderIds.length} car colliders`);
+  check('movers', 'viaduct: every arch with headroom is a pass-under gate with the achievement', part.data.gates !== null && part.data.gateMeta.length >= 3 && part.data.gateMeta.every((gate) => gate.kind === 'under' && gate.achievement && gate.achievement.id === 'underTheArches'), `${part.data.gateMeta.length} arch gates`);
+  // A full cycle at 10 Hz: the train shows on the viaduct, hides in each tunnel, and whistles out.
+  const voice = lab.voices.at(-1);
+  const period = custom.follower.period;
+  let shownFrames = 0;
+  let hiddenFrames = 0;
+  let maxPuffs = 0;
+  let maxLevel = 0;
+  const loco = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+  const steps = Math.ceil(period * 10) + 20;
+  for (let step = 0; step < steps; step++) {
+    lab.step(6, 1 / 60);
+    const pose = trainPoses(part)[0];
+    if (pose.visible === 1) {
+      shownFrames++;
+      loco.minX = Math.min(loco.minX, pose.x);
+      loco.maxX = Math.max(loco.maxX, pose.x);
+      loco.minZ = Math.min(loco.minZ, pose.z);
+      loco.maxZ = Math.max(loco.maxZ, pose.z);
+    } else {
+      hiddenFrames++;
+    }
+    const steam = part.data.moverState.steam;
+    let puffs = 0;
+    for (let index = 3; index < steam.length; index += 4) if (steam[index] > 0) puffs++;
+    maxPuffs = Math.max(maxPuffs, puffs);
+    maxLevel = Math.max(maxLevel, part.data.moverState.level[0]);
+  }
+  const crossed = Math.hypot(loco.maxX - loco.minX, loco.maxZ - loco.minZ);
+  check('movers', 'viaduct: over one cycle the train crosses in the open and waits hidden in the tunnels', shownFrames > 0 && hiddenFrames > 0 && crossed > 100, `period ${period.toFixed(0)} s, shown ${shownFrames}, hidden ${hiddenFrames} samples, crossed ${crossed.toFixed(0)} m`);
+  const whistles = voice.triggers.filter((name) => name === 'whistle').length;
+  check('movers', 'viaduct: it whistles as it leaves a tunnel, steams in the open and the chuff follows its speed', whistles >= 1 && maxPuffs >= 6 && maxLevel > 0.9, `${whistles} whistles, up to ${maxPuffs} steam puffs, level up to ${maxLevel.toFixed(2)}`);
+  // The car colliders follow the cars.
+  const colliders = lab.game.colliders;
+  const first = colliders.get(part.data.moverColliderIds[0]);
+  const pose = trainPoses(part)[0];
+  const centreX = (first.bounds[0] + first.bounds[3]) / 2;
+  const centreZ = (first.bounds[2] + first.bounds[5]) / 2;
+  check('movers', 'viaduct: the locomotive collider rides with the locomotive', Math.hypot(centreX - (part.anchor.x + pose.x), centreZ - (part.anchor.z + pose.z)) < 1, `collider ${centreX.toFixed(1)}, ${centreZ.toFixed(1)} vs ${(part.anchor.x + pose.x).toFixed(1)}, ${(part.anchor.z + pose.z).toFixed(1)}`);
+  // Determinism: a second manager at the same flight time puts the train in the same place.
+  const other = createLab();
+  other.state.time.elapsed = lab.state.time.elapsed - 1 / 60;
+  const otherId = other.spawn('steamTrainViaduct');
+  const otherPart = partOf(other, otherId);
+  other.engine.setLOD(otherPart, 'near');
+  other.step(1, 1 / 60);
+  const a = trainPoses(part)[1];
+  const b = trainPoses(otherPart)[1];
+  check('movers', 'viaduct: the same flight time gives the same train in a second manager', Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.z - b.z) < 1e-6, `${a.x.toFixed(2)}, ${a.z.toFixed(2)} vs ${b.x.toFixed(2)}, ${b.z.toFixed(2)}`);
+  other.manager.deactivate(otherId, 'test');
+  lab.engine.setLOD(part, 'far');
+  check('movers', 'viaduct: the train hides at the far tier', part.data.moverMeshes.every((mesh) => !mesh.visible), '');
+  lab.manager.deactivate(id, 'test');
+}
+
 // ---- wind -------------------------------------------------------------------------------------------------
 function testWind() {
   const lab = createLab();
@@ -660,6 +736,7 @@ testRecipes();
 testColliders();
 testTorches();
 if (BATCH.some((entry) => entry.id === 'mountaintopObservatory')) testObservatory();
+if (BATCH.some((entry) => entry.id === 'steamTrainViaduct')) testViaduct();
 testWind();
 testMemory();
 await testAllocation();
