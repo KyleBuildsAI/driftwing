@@ -80,6 +80,7 @@ const ALL_ENTRIES = Object.freeze([
   Object.freeze({ id: 'steamTrainViaduct', colliders: 30, perches: true, movers: 4, gates: true }),
   Object.freeze({ id: 'damSpillway', colliders: 10, perches: true }),
   Object.freeze({ id: 'desertOasisCaravan', colliders: 15, perches: true, torches: true, fauna: 'caravan' }),
+  Object.freeze({ id: 'labyrinth', colliders: 60, perches: true, blocks: 60 }),
 ]);
 const BATCH = ONLY ? ALL_ENTRIES.filter((entry) => ONLY.includes(entry.id)) : ALL_ENTRIES;
 
@@ -508,6 +509,35 @@ function testViaduct() {
   lab.manager.deactivate(id, 'test');
 }
 
+/** The labyrinth's hedge blocks: count and a hash of their local boxes. */
+function blockDigest(part) {
+  const local = part.data.blockLocal;
+  let hash = 2166136261;
+  for (let index = 0; index < local.length; index++) hash = Math.imul(hash ^ Math.round(local[index] * 100), 16777619) >>> 0;
+  return `${part.data.blockSlots.length}:${hash.toString(16)}`;
+}
+
+function testLabyrinth() {
+  const lab = createLab();
+  const id = lab.spawn('labyrinth');
+  const part = partOf(lab, id);
+  const blocks = part.data.blockSlots.length;
+  const hedges = part.colliderIds.filter((colliderId) => colliderId.includes(':hedge')).length;
+  check('recipes', 'labyrinth: the hedges are instanced blocks, one solid run each', blocks >= 60 && hedges === blocks && lab.engine.stats().blocks === blocks, `${blocks} hedge runs, ${hedges} hedge colliders`);
+  const digest = blockDigest(part);
+  lab.engine.setLOD(part, 'far');
+  lab.step(1);
+  const array = lab.engine.stats().blocks > 0 ? part.data.blockSlots : [];
+  check('recipes', 'labyrinth: the hedges stay drawn at the far tier (the body shows there)', array.length === blocks && part.data.blocksShown === 1, `blocks shown ${part.data.blocksShown}`);
+  lab.manager.deactivate(id, 'test');
+  const again = lab.spawn('labyrinth');
+  const second = blockDigest(partOf(lab, again));
+  check('recipes', 'labyrinth: the same site grows the same maze', second === digest, `${digest} vs ${second}`);
+  check('recipes', 'labyrinth: the heart is a gate with the achievement', partOf(lab, again).data.gateMeta.some((gate) => gate.id === 'heart' && gate.achievement && gate.achievement.id === 'heartOfTheMaze'), '');
+  lab.manager.deactivate(again, 'test');
+  check('memory', 'labyrinth: dispose frees every hedge block', lab.engine.stats().blocks === 0, `${lab.engine.stats().blocks} blocks left`);
+}
+
 function testDam() {
   const lab = createLab();
   const id = lab.spawn('damSpillway');
@@ -801,6 +831,7 @@ testTorches();
 if (BATCH.some((entry) => entry.id === 'mountaintopObservatory')) testObservatory();
 if (BATCH.some((entry) => entry.id === 'steamTrainViaduct')) testViaduct();
 if (BATCH.some((entry) => entry.id === 'damSpillway')) testDam();
+if (BATCH.some((entry) => entry.id === 'labyrinth')) testLabyrinth();
 testWind();
 testMemory();
 await testAllocation();
