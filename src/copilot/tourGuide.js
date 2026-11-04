@@ -87,6 +87,17 @@ const NAME_SYNONYMS = Object.freeze([
   [/\b(lens clouds?|ufo clouds?|lenticulars?)\b/g, 'lenticular'],
   [/\b(rainbows?)\b/g, 'glory rainbow'],
   [/\b(spouts?)\b/g, 'waterspout'],
+  // Presets 51-60.
+  [/\b(monarchs?|butterfl(y|ies))\b/g, 'butterfly migration'],
+  [/\b(reindeer)\b/g, 'caribou'],
+  [/\b(temples?|gompas?|prayer flags?)\b/g, 'monastery'],
+  [/\b(fortress(es)?|ruined castles?)\b/g, 'castle'],
+  [/\b(telescopes?)\b/g, 'observatory'],
+  [/\b(trains?|railways?|railroads?|locomotives?|steam engines?)\b/g, 'steam train viaduct'],
+  [/\b(reservoirs?|spillways?)\b/g, 'dam spillway'],
+  [/\b(camels?|palm trees?|caravans?)\b/g, 'oasis caravan'],
+  [/\b(hedge mazes?|mazes?)\b/g, 'labyrinth'],
+  [/\b(bolides?)\b/g, 'fireball impact'],
 ]);
 
 /**
