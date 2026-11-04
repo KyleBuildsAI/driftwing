@@ -5,8 +5,9 @@ is a **preset**: a pure-data file in `src/spawns/presets/` that names the reusab
 it, the rules that decide where and when it appears, the wind it blows, the sound it makes and what
 WREN and the journal say about it. Nothing about a single spawn is hard-coded anywhere else.
 
-This page lists the 30 presets of Phase 2, read from the preset files themselves, and then shows
-how to add a new one (Phase 3 adds 70 more on the same engines). The schema is enforced by
+This page lists all 100 presets, read from the preset files themselves: the 30 of Phase 2 and the
+70 of Phase 3 (presets 31-100, on the same engines and the Phase 3 systems), and then shows how to
+add a new one. The schema is enforced by
 [src/spawns/schema.js](../src/spawns/schema.js); the systems that read it are described in
 [architecture.md](architecture.md#spawns-ctxsystemsspawns-srcspawns); every engine param is in
 [docs/engines/](#engine-reference-pages).
@@ -46,7 +47,7 @@ When a spawn comes within `discovery.radius` and into view, the SpawnManager emi
 description, and the journal records the find. WREN calls a spawn out with one of its `callouts`
 lines as it activates (or as an undiscovered site comes into range) and offers a heading.
 
-## The 30 presets at a glance
+## The 100 presets at a glance
 
 "Wind" says whether the preset changes the air the craft flies through. The details are in each
 preset's section below.
@@ -154,8 +155,9 @@ preset's section below.
 | 99 | [Resonating crystal spires](#99-resonating-crystal-spires) | `resonatingSpires` | fantasy | event | legendary | no | `lightEffect` | no |
 | 100 | [Lighthouse beacons](#100-lighthouse-beacons) | `lighthouseBeacons` | structure | event | legendary | no | `lightEffect` | no |
 
-In all: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy. The
-journal's collection count is found / 30 over these presets (`PRESETS` in
+In all: 51 sites and 49 events; 14 common, 52 uncommon, 23 rare and 11 legendary; 9 heavy (Phase 2
+alone: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy). The
+journal's collection count is found / 100 over these presets (`PRESETS` in
 [src/spawns/presets/index.js](../src/spawns/presets/index.js)).
 
 ## Rarity, pacing and the budgets
@@ -2335,11 +2337,13 @@ it needs an engine feature that does not exist yet.
    weather volume's `wind`, an emitter's `windSource`, the wind farm's wake, a fauna `drift`
    slipstream).
 5. **Sound.** `audio.recipe` must be one of the recipes in
-   [src/audio/recipes/index.js](../src/audio/recipes/index.js): `tornado`, `thunder`, `volcano`,
-   `geyser`, `waterfall`, `whale`, `skyWhale`, `crystal`, `turbine`, `murmuration`, `meteor`,
-   `lantern`, `discovery`, `raptor` or `goose`, and the Phase 3 additions (`stoneWind`, `rustle`,
-   `meadowHum` and `marsh` with presets 81-90). A preset has one voice. Without a flag the first
-   `lantern`, `discovery`, `raptor`, `goose`, or Phase 3's `iceSing`, `aurora` and `foghorn`. A preset has one voice. Without a flag the first
+   [src/audio/recipes/index.js](../src/audio/recipes/index.js): Phase 2's `tornado`, `thunder`,
+   `volcano`, `geyser`, `waterfall`, `whale`, `skyWhale`, `crystal`, `turbine`, `murmuration`,
+   `meteor`, `lantern`, `discovery`, `raptor` and `goose`, and Phase 3's (in spec order) `gale`,
+   `surf`, `herd`, `calving`, `dolphin`, `caribou`, `bells`, `observatory`, `train`, `dam`,
+   `caravan`, `fireball`, `skyShimmer`, `canopy`, `portal`, `giant`, `galleon`, `dragon`, `wisps`,
+   `windRush`, `burner`, `stoneWind`, `rustle`, `meadowHum`, `marsh`, `iceSing`, `aurora` and
+   `foghorn`. A preset has one voice. Without a flag the first
    engine entry opens it; each engine has its own flag: `voice` (vortex, structure, fauna,
    waterEffect), `sound` (emitter, lightEffect) or `ownsAudio` (weatherVolume, celestial). On a
    multi-engine preset set the flags explicitly: `true` on the part that should own the voice and
