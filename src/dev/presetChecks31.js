@@ -291,11 +291,15 @@ export function installPresetChecks31(game) {
       return check(`${presetId}: lightning in ${seconds} s (${delta.strikes} strikes, ${delta.cloud} in the cloud)`, delta.strikes >= minimum && delta.cloud >= inCloud, delta);
     },
 
-    /** Starts or ends the active state (an eruption) of presetId's nearest live site. */
+    /**
+     * Starts or ends the active state (an eruption) of presetId's nearest live site, out of photo mode
+     * (photo mode holds the simulation clock, so the eruption builds only while the game runs).
+     */
     async siteActive(presetId, active = true) {
       const site = manager.findNearestSite(presetId, state.player.position.x, state.player.position.z, 30000);
       const spawnId = site ? manager.getSiteSpawn(site.id) : null;
       if (!spawnId) return check(`${presetId}: its site's active state ${active ? 'started' : 'ended'}`, false, 'no live site spawn within 30 km');
+      ctx.setPhotoMode(false);
       const result = manager.setSiteActive(spawnId, active);
       await frames(10);
       const instance = manager.getInstance(spawnId);
