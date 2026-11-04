@@ -1064,7 +1064,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 | # | Presets | Branch | Status |
 | --- | --- | --- | --- |
-| B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | in progress |
+| B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | done, verified on both backends |
 | B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | not started |
 | B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | not started |
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
@@ -1114,14 +1114,43 @@ Done:
 - Presets 36 lava rivers to the sea, 37 fissure eruption, 38 meteor crater lake, 39 hot spring
   terraces, 40 salt flat mirror lake (sites; placement tuned so each lies within 40 km of the spawn on
   DRIFTWING, HARNESS-1 and HARNESS-2), with their docs/spawns.md rows and sections.
-- Browser checks so far (WebGPU, dev server, seed DRIFTWING): 31-33 force-spawned, framed and
-  disposed back to their baselines; the sandstorm's gust front and inside turbulence, grit 0.9 in the
-  cockpit; the squall's gust front (24.7 m/s, turbulence 0.72), whiteout and snow in the cockpit; the
-  hurricane's calm eye (6.6 m/s with the ambient wind, turbulence 0.08), eyewall 47 m/s with
-  turbulence 0.95, outer bands 21 m/s.
+- The batch's step file `tools/steps/presets-31-40.json` (on `src/dev/presetChecks31.js`), the
+  `?test=spawns` scenarios `src/dev/spawnScenarios/batch31.js`, the meteor crater's ejecta blocks in
+  `?test=collision`, the storm walls and the hurricane in `tools/lab/preset-flight.mjs` (glider and
+  jet), and the rare events on their own runs in `tools/lab/preset-pacing.mjs` (the dirty
+  thunderstorm with the volcano due every 2 minutes outside the heavy budget, since a volcano erupts
+  about once in the shared runs' 54 flight hours).
+- The salt flat's mirror is the water material's sky-dome reflection: its comment, docs section and
+  callout no longer claim mirrored clouds, stars or craft.
 
-Next: the batch's step file (tools/steps/presets-31-40.json), spawn scenarios
-(src/dev/spawnScenarios/batch31.js), the labs and the verification on both backends.
+Verified (2026-11-03/04, dev server and dist-single, seed DRIFTWING unless noted):
+- `tools/steps/presets-31-40.json`: 68/68 on WebGPU and 68/68 on WebGL2, 0 console errors and 0
+  warnings on each. Numbers (WebGPU): sandstorm gust front 14.5 m/s turbulence 0.8, grit 0.9 in the
+  cockpit; squall gust front 23.7 m/s turbulence 0.75, downdraft -6.5 m/s under the core; hurricane
+  eye 7.6 m/s turbulence 0.07, eyewall 44.5 m/s turbulence 0.95 with rain 0.8 on the canopy, outer
+  bands 16.4 m/s; fog river 10 flow paths, 253 puffs; dirty thunderstorm 6 strikes in 10 s, all in
+  the cloud; lava rivers 2 flows, 1909 m of lava, 3/3 sea entries on the water, 12 colliders; fissure
+  eruption started and ended on its site (the curtain of fire and the glowing cloud deck in the
+  shot), 6 colliders; crater 109 blocks, 73 solid, 4 perches, its lake; hot springs 6 pools; salt flat
+  175 salt cones (colliders) and its thin mirror film. Every spawn disposed back to its GPU memory,
+  wind source, collider and sky modifier baselines.
+- `run-harness --test spawns --presets <31-40>`: PASS on WebGPU and WebGL2 (10/10 each: GPU memory,
+  heap, wind sources, lights, modifiers, colliders back; 0/0 console). One 0.54 s frame while the
+  lava rivers show on both backends (not attributed by the harness; reported, not chased).
+- `run-harness --test collision`: PASS on both backends (155/155 strikes, 16/16 targets with the
+  crater's blocks, 0 pass-throughs, 0 penetrations). `--test terrain --presets real` (WebGPU): PASS,
+  9/9 stamp types on real sites (the crater, terraces and basin now on presets 38-40, the fissure's
+  carve), 0 cracks, worker parity, collision 0.00003 m worst.
+- Labs: preset-flight 22/22, preset-pacing 5/5, director 90/90, terrain 474/474, water 34/34, spawns
+  101/101, preset-wind 12/12, structure 75/75, wind-engines 56/56, colliders 84/84, audio 197/197
+  (alone), every other lab passing, except eagle 49/50 (its allocation check, 144 B/tick on the base
+  commit too: the known issue in the wave 3 notes). docs-check 285/285, test:v1 2/2, build and
+  build:single (V1 SHA-256 matches); the built shell and V2 smoke 0/0 on both backends, screenshots
+  differ.
+
+Open: none for this batch. Merge notes for I3: presets/index.js, spawnScenarios.js, the audio recipe
+index (gale), docs/spawns.md (table rows 31-40 and sections), docs/architecture.md (the batch kit,
+lavaPath.js and two lab rows) and the engine pages carry this batch's additions.
 
 ### Wave 4: discovery and verification, then the tag
 
