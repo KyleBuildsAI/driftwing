@@ -3047,6 +3047,9 @@ export function createFaunaEngine() {
   }
 
   function simulateColumn(data) {
+    // No route (a column that found no walkable ground ends at create; a forced debug spawn is still
+    // updated until the manager removes it): nothing to walk.
+    if (data.follower === null) return;
     const dt = frameStep[0];
     const pool = data.pool;
     const g = data.g;
