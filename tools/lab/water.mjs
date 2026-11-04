@@ -360,7 +360,9 @@ function testMapTiles() {
     }
   }
   check('maptiles', 'map tiles colour every water body sample in its own tint (lakes, pools, films and ice)', covered > 200 && wrong === 0, `${covered} body samples over ${bodies.length} bodies (${[...kinds].join(', ')}), ${wrong} off-tint`);
-  check('maptiles', 'the cache tag of presets without waters or overlays is the Phase 2 tag', mapTileCacheTag('HARNESS-1', PRESETS) === phase2TileTag('HARNESS-1', PRESETS));
+  // The Phase 2 presets (the first 30) have no waters or overlays; the Phase 3 batches append theirs.
+  const phase2Presets = PRESETS.slice(0, 30);
+  check('maptiles', 'the cache tag of presets without waters or overlays is the Phase 2 tag', mapTileCacheTag('HARNESS-1', phase2Presets) === phase2TileTag('HARNESS-1', phase2Presets));
   check('maptiles', 'the cache tag changes with the waters and overlays of the fixture presets', mapTileCacheTag('HARNESS-1', WATER_FIXTURES) !== phase2TileTag('HARNESS-1', WATER_FIXTURES));
 }
 

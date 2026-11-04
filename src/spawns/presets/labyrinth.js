@@ -16,11 +16,11 @@ export default Object.freeze({
   heavy: false,
   tags: ['calm', 'perch', 'spectacle'],
   placement: {
-    chance: 0.08,
+    chance: 0.1,
     minSpacing: 20000,
     biomes: ['meadows', 'pine'],
     surface: 'land',
-    terrain: { minHeight: 10, maxHeight: 700, relief: 'flat' },
+    terrain: { minHeight: 10, maxHeight: 700, relief: 'any' },
     clearance: 500,
     align: 'random',
   },

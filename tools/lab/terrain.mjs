@@ -852,12 +852,18 @@ function withoutOverlays(presets) {
   });
 }
 
+/**
+ * The Phase 2 presets: the first 30 of the list (the Phase 3 batches append theirs after them), so the
+ * Phase 2 world is still rebuilt as it was while Phase 3 adds sites of its own.
+ */
+const PHASE2_PRESETS = Object.freeze(PRESETS.slice(0, 30));
+
 function testPhase3Worlds() {
   for (const seed of SEEDS) {
-    const digest = phase2RealDigest(createWorldGen(seed, WORLD_OPTIONS));
+    const digest = phase2RealDigest(createWorldGen(seed, { ...WORLD_OPTIONS, presets: PHASE2_PRESETS }));
     const golden = PHASE2_REAL_DIGESTS[seed];
-    check('phase3', `${seed}: the real presets (no waters, no overlays): meshes, colours and scatter bit-identical to Phase 2`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
-    check('phase3', `${seed}: the real presets: the site-list hash unchanged from Phase 2`, digest.sites === golden.sites, digest.sites);
+    check('phase3', `${seed}: the Phase 2 presets (no waters, no overlays): meshes, colours and scatter bit-identical to Phase 2`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
+    check('phase3', `${seed}: the Phase 2 presets: the site-list hash unchanged from Phase 2`, digest.sites === golden.sites, digest.sites);
   }
 }
 

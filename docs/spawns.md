@@ -924,8 +924,8 @@ its heart.
 [src/spawns/presets/labyrinth.js](../src/spawns/presets/labyrinth.js)
 
 - **Kind:** site, rare.
-- **Placement:** meadows or pine; land; flat ground 10-700 m; chance 0.08; at least 20 km apart;
-  500 m clearance.
+- **Placement:** meadows or pine; land; ground 10-700 m; chance 0.1; at least 20 km apart; 500 m
+  clearance.
 - **Stamp:** `flatten` 130-150 m square, painted sand (`structureStamps('labyrinth')`).
 - **Engines:** `structure` (recipe `labyrinth`: a seeded depth-first maze of 17-21 cells a side,
   hedges 3.4 m tall as instanced blocks merged into solid runs, an entrance and an exit, the heart a
