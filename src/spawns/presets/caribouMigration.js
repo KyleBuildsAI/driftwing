@@ -29,7 +29,7 @@ export default Object.freeze({
         species: 'caribou', behavior: 'column', count: [320, 520], size: 1, voiceIntensity: 0.9, fadeOut: 10,
         column: {
           path: 'auto', length: 3600, lanes: 4, laneWidth: 3.4, spacing: 4.5, speed: 1.7, jitter: 0.9, mode: 'pingpong',
-          maxSlope: 0.4, dust: { rate: 1.5, size: 4, color: 0xd9d6cc },
+          maxSlope: 0.4, turns: [35, -35, 70, -70, 110, -110], dust: { rate: 1.5, size: 4, color: 0xd9d6cc },
         },
       },
     },

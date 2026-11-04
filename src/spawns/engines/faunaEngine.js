@@ -116,6 +116,9 @@ export const FAUNA_DEFAULTS = Object.freeze({
   column: Object.freeze({
     path: 'auto', length: 2600, spacing: 5, lanes: 2, laneWidth: 3.2, speed: null, jitter: 0.6, mode: 'pingpong',
     maxSlope: null, resample: 8, dust: Object.freeze({ rate: 0, size: 4, color: 0xc4ab84 }),
+    // Presets 51-60: headings (degrees off the spawn's) an 'auto' route also tries when the first one
+    // falls short of 60 % of `length`; the longest is kept. [] tries the spawn's heading alone.
+    turns: Object.freeze([]),
   }),
   surface: Object.freeze({
     spread: 10,
@@ -320,6 +323,7 @@ function validateGroundAndSurface(resolved, params) {
     if (!['loop', 'pingpong', 'once'].includes(column.mode)) fail('column.mode', 'must be loop, pingpong or once');
     if (column.maxSlope !== null && !positive(column.maxSlope)) fail('column.maxSlope', 'must be null or a positive number');
     if (!(Number.isFinite(column.resample) && column.resample >= 2)) fail('column.resample', 'must be a number >= 2 (m)');
+    if (!Array.isArray(column.turns) || column.turns.length > 12 || !column.turns.every((turn) => Number.isFinite(turn) && turn >= -180 && turn <= 180)) fail('column.turns', 'must be an array of at most 12 headings within -180..180 degrees');
     column.dust = validateDust({ ...FAUNA_DEFAULTS.column.dust, ...(isPlainObject(params.column?.dust) ? params.column.dust : {}) }, 'column.dust', fail);
   }
   if (behavior === 'surface') {
@@ -3006,14 +3010,24 @@ export function createFaunaEngine() {
     const forwardZ = -Math.cos(heading);
     let planar;
     if (column.path === 'auto') {
-      const route = buildGroundPath(ctx.terrain, ctx.game ? ctx.game.waterQuery ?? null : null, {
-        from: { x: g[G.ANCHOR_X], z: g[G.ANCHOR_Z] },
-        to: { x: g[G.ANCHOR_X] + forwardX * column.length, z: g[G.ANCHOR_Z] + forwardZ * column.length },
-        maxSlope: column.maxSlope ?? data.params.herd.slopeLimit,
-        seed: Math.floor(data.phaseSeed * 2147483647),
-        spacing: 50,
-        waterLevel: ctx.terrain.waterLevel,
-      });
+      const plan = (turn) => {
+        const angle = heading + turn * (Math.PI / 180);
+        return buildGroundPath(ctx.terrain, ctx.game ? ctx.game.waterQuery ?? null : null, {
+          from: { x: g[G.ANCHOR_X], z: g[G.ANCHOR_Z] },
+          to: { x: g[G.ANCHOR_X] + Math.sin(angle) * column.length, z: g[G.ANCHOR_Z] - Math.cos(angle) * column.length },
+          maxSlope: column.maxSlope ?? data.params.herd.slopeLimit,
+          seed: Math.floor(data.phaseSeed * 2147483647),
+          spacing: 50,
+          waterLevel: ctx.terrain.waterLevel,
+        });
+      };
+      let route = plan(0);
+      // A short route (blocked by water or steep ground): the other headings, the longest kept.
+      for (const turn of column.turns) {
+        if (route.length >= column.length * 0.6) break;
+        const other = plan(turn);
+        if (other.length > route.length) route = other;
+      }
       if (route.points.length < 6) return false;
       planar = route.points;
     } else {

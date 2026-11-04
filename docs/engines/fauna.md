@@ -302,6 +302,7 @@ clear ground within 1.5 km; with none it ends at once.
 | `mode` | `'loop'`, `'pingpong'`, `'once'` | | `'pingpong'` | the PathFollower mode (a closed path loops) |
 | `maxSlope` | rise over run | > 0 or null | `herd.slopeLimit` | for the 'auto' route |
 | `resample` | m | >= 2 | 8 | |
+| `turns` | degrees | up to 12, -180..180 | `[]` | other headings (off the spawn's) an `'auto'` route tries when the first falls short of 60 % of `length` (water or steep ground in the way); the longest route is kept. The caribou migration tries six |
 | `dust` | `{ rate, size, color }` | | `{ rate: 0, size: 4, color: 0xc4ab84 }` | a caravan in sand sets a rate |
 
 The column is a pure function of flight time: the PathFollower places every walker (`carAtFrom`),

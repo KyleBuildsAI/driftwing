@@ -94,15 +94,17 @@ export function installBatch6Checks(game) {
         await frames(5);
         spawnId = manager.getSiteSpawn(site.id);
       }
-      const target = { x: site.x, y: site.groundY + lift, z: site.z };
-      const settled = await frameView(viewpoint(target, distance, height, bearing + (site.rotation * 180) / Math.PI), target);
-      await terrainIdle();
+      // The discovery while the craft flies in (the photo camera holds the simulation).
+      ctx.systems.flight.resetTo({ x: site.x - 900, y: site.groundY + 250, z: site.z - 900, heading: 135 });
       let discovery = null;
       const waitStarted = performance.now();
-      while (!discovery && performance.now() - waitStarted < 20000) {
+      while (!discovery && performance.now() - waitStarted < 25000) {
         discovery = discoveries.slice(since).find((payload) => payload.id === site.id) ?? null;
         await frames(5);
       }
+      const target = { x: site.x, y: site.groundY + lift, z: site.z };
+      const settled = await frameView(viewpoint(target, distance, height, bearing + (site.rotation * 180) / Math.PI), target);
+      await terrainIdle();
       const waters = (site.waters ?? []).map((water) => ({ id: water.id, level: Math.round(water.level * 10) / 10 }));
       return check(`${presetId}: built on its real site and discovered`, Boolean(spawnId) && site.stamps.length === (preset.stamps ?? []).length && Boolean(discovery) && ctx.systems.journal.hasDiscovered(site.id), {
         site: { id: site.id, x: Math.round(site.x), z: Math.round(site.z), groundY: Math.round(site.groundY), stamps: site.stamps.map((stamp) => stamp.type), waters },
