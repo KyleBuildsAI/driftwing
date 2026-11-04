@@ -832,8 +832,11 @@ export function createDirector({
       const cap = caps[name];
       if (!cap || !perEngine || !perEngine[name]) continue;
       const used = perEngine[name];
+      // Each of the preset's parts on this engine takes an instance (the volcano runs several emitters).
+      let need = 0;
+      for (let other = 0; other < info.engines.length; other++) if (info.engines[other] === name) need++;
       // Combo members waiting for their delay hold their share (reserved.engines).
-      if ((used.instances || 0) + (reserved.engines[name] || 0) + 1 > cap.instances) return true;
+      if ((used.instances || 0) + (reserved.engines[name] || 0) + need > cap.instances) return true;
       if (cap.particles > 0 && (used.particles || 0) >= cap.particles * PARTICLE_HEADROOM) return true;
     }
     return false;

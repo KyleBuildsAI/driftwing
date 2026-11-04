@@ -507,11 +507,20 @@ export function createSpawnManager(options) {
     }
     if (spawnSlots.available === 0) return 'capacity';
     if (preset.heavy && source !== 'site' && heavyActive >= heavyLimit) return 'heavy';
+    // A preset may run several parts on one engine (the volcano's emitters): each part takes an
+    // instance, so the preset needs room for all of them (and all their particles) at once.
     for (let index = 0; index < preset.engines.length; index++) {
-      const entry = preset.engines[index];
-      const counts = countersFor(entry.engine);
-      if (counts.instances + 1 > counts.budget.instances) return 'instances';
-      const estimate = entry.params && Number.isFinite(entry.params.particles) ? entry.params.particles : 0;
+      const name = preset.engines[index].engine;
+      let wanted = 0;
+      let estimate = 0;
+      for (let other = 0; other < preset.engines.length; other++) {
+        const entry = preset.engines[other];
+        if (entry.engine !== name) continue;
+        wanted++;
+        if (entry.params && Number.isFinite(entry.params.particles)) estimate += entry.params.particles;
+      }
+      const counts = countersFor(name);
+      if (counts.instances + wanted > counts.budget.instances) return 'instances';
       if (counts.particles + estimate > counts.budget.particles) return 'particles';
     }
     return null;
