@@ -16,7 +16,8 @@
 //             12-25 minutes and shares that turn with every other rare): each one the shared runs miss
 //             is run again on the same flights with every other rare event set aside, and when its
 //             filters.near asks for an active site (the dirty thunderstorm over an erupting volcano)
-//             with those sites erupting as a common candidate for most of an hour, until it starts
+//             with those sites erupting as a common candidate (due every 2 minutes, outside the heavy
+//             budget) for most of an hour, until it starts
 //   ahead     no director activation lies behind the player
 // Printed (not checked, see the batch notes): per scenario, the share of droughts that end within the
 // 90 s pacing window, the longest drought, and the activations per preset. The pacing floor is a
@@ -279,11 +280,12 @@ for (const preset of PRESETS.filter(isRareEvent)) {
     continue;
   }
   // The same flights with every other rare event set aside; the sites its filters.near wants active
-  // erupt as a common candidate, for most of an hour each time.
+  // erupt as a common candidate due every 2 minutes, outside the heavy budget (a volcano erupts about
+  // once in the shared runs' 54 flight hours), for most of an hour each time.
   const awake = preset.filters.near && preset.filters.near.active ? preset.filters.near.sites : [];
   const presets = PRESETS
     .filter((candidate) => candidate === preset || !isRareEvent(candidate))
-    .map((candidate) => (awake.includes(candidate.id) ? { ...candidate, rarity: 'common', activeState: { duration: [2400, 3200] } } : candidate));
+    .map((candidate) => (awake.includes(candidate.id) ? { ...candidate, rarity: 'common', heavy: false, candidates: { bucketSeconds: 120, chance: 1 }, activeState: { duration: [2400, 3200] } } : candidate));
   let reachedOn = null;
   for (const flight of FLIGHTS) {
     const run = runScenario({ ...flight, hours: OPTIONS.hours, presets });
