@@ -62,6 +62,8 @@ Offsets and directions are `[right, up, forward]` in metres, in the frame of the
 | `bursts` | object or null | | null | seeded bursts on top of the rate: `{ interval [s,s] = [4,10], count [n,n] = [20,60], speedScale = 1 (0..100), minLevel 0..1 = 0.2 }`. A burst fires only while the level is at least `minLevel` |
 | `warmStart` | bool | | true (false for an emitter with bursts and no `rate`) | see above |
 | `endRamp` | s | 0..600 | 3 | an event fades its emission over this after its duration, and ends once the last particle has died |
+| `startDelay` | s | 0..600 | 0 | the emission (and the light, the wind source and the voice level, which follow it) stays at 0 for this long after create, then starts: the fireball impact's smoke and embers start at its impact. A warm start then has nothing to settle, so the plume grows from its first particles |
+| `startRamp` | s | 0..120 | 0 | after `startDelay`, the level ramps in over this (0: at once) |
 | `particles` per frame | | | | at most 4096 emitted per frame, so a long stall never floods the pool |
 
 ### Shape and placement

@@ -74,7 +74,7 @@ const TOP_LEVEL_PARAMS = Object.freeze([
   'buoyancyDecay', 'drag', 'windFollow', 'turbulence', 'ground', 'groundOffset', 'restitution', 'life', 'size', 'sizeCurve',
   'sizeJitter', 'stretch', 'colors', 'colorMid', 'brightnessJitter', 'opacity', 'fadeIn', 'fadeOut', 'emissive',
   'emissiveDecay', 'nightBoost', 'lit', 'softness', 'fog', 'depthFade', 'underglow', 'lod', 'lodSizeBoost', 'field',
-  'light', 'windSource', 'immersion', 'sound', 'soundTriggers', 'endRamp', 'warmStart',
+  'light', 'windSource', 'immersion', 'sound', 'soundTriggers', 'endRamp', 'warmStart', 'startDelay', 'startRamp',
 ]);
 /** What the SpawnManager merges into every engine's params (not preset params). */
 const ACTIVATION_PARAMS = Object.freeze(['position', 'heading', 'site', 'startTime', 'scale', 'duration', 'seed']);
@@ -315,6 +315,10 @@ export function resolveEmitterConfig(preset, params) {
       burst: triggerParams ? read.oneOf(triggerParams.burst, 'soundTriggers.burst', null, ['burst', 'boom', 'streak', 'fireball', 'call', 'chime', 'scatter']) : null,
     },
     endRamp: read.number(params.endRamp, 'endRamp', 3, 0, 600),
+    // Presets 51-60: seconds after create before the emission (and its light, wind and voice) starts,
+    // and the ramp in after it (the fireball's smoke starts at its impact). 0 starts at once, as before.
+    startDelay: read.number(params.startDelay, 'startDelay', 0, 0, 600),
+    startRamp: read.number(params.startRamp, 'startRamp', 0, 0, 120),
     warmStart: read.boolean(params.warmStart, 'warmStart', !bursts || Boolean(params.rate)),
     duration: Number.isFinite(params.duration) && params.duration > 0 ? params.duration : null,
     scale,
@@ -940,6 +944,10 @@ export function createEmitterEngine() {
     if (config.pulse) {
       const wave = 0.5 + 0.5 * Math.sin(data.age[0] * Math.PI * 2 / config.pulse.period);
       level *= 1 - config.pulse.depth * wave;
+    }
+    if (config.startDelay > 0) {
+      const since = data.age[0] - config.startDelay;
+      level *= since <= 0 ? 0 : config.startRamp > 0 && since < config.startRamp ? since / config.startRamp : 1;
     }
     if (config.duration !== null) {
       const over = data.age[0] - config.duration;
