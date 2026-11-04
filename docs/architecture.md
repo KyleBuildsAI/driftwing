@@ -1749,6 +1749,19 @@ flight time. It is `ctx.systems.spawns.director`.
   nothing away is refused (no heavy candidates and no live spawns for level 1, no live spawns for
   levels 2 and 3, from `spawnManager.spawnCount()`), so with no content the governor behaves as in
   Phase 1. A headroom miss defers heavy activations too.
+- **Combos, wave 3 additions (presets 91-100).** A combo member may be `optional: true`: a preset this
+  build lacks (another batch's) is dropped when the combos resolve, and the combo starts with the
+  members it has (the migration convergence's butterflies and caribou). A combo with preconditions may
+  name no member: its own engines carry it at the site, landmark or sky its preconditions bring (the
+  volcano's lightning and aurora, the comet breakup, the lighthouse chain). A combo whose own preset
+  seeks its ground (`anchor.seek`, the migration's `valley`) places its members around the point the
+  SpawnManager moved it to (read back from `getInstance(id).anchor`).
+- **F9 combo staging** (`src/dev/comboStaging.js`, dev only): the debugger's Force combo button holds
+  a combo's time of day and weather, finds its place near the craft deterministically (the nearest
+  snow, open water, coast, landmark of a type or site of a preset), puts the craft at a viewpoint,
+  wakes what the place needs (`forceSiteActive`: the volcano) and forces the combo there
+  (`forceSpawn` with `at`); the midnight sun is scheduled on the current night with the clock at
+  midnight.
 - **Site active states.** A site preset with `activeState: { duration }` (the volcano's eruption)
   gets bucketed candidates at its sites from `placement.sitesNear`; the director activates one with
   `spawnManager.activate(presetId, { source: 'director', site, ... })`.
@@ -1760,15 +1773,22 @@ flight time. It is `ctx.systems.spawns.director`.
   `getLog()` (every `{ time, presetId, candidateId, reason, craft, combo?, members? }`; reasons
   `schedule`, `drought`, `debug`, `comboMember`, `comboMemberDropped`, `override`);
   `getOverrides()`; `hasPreset(presetId)`;
-  `forceSpawn(presetId, { distance, bearingOffset, force })` in dev builds and with `?debug=1` or
-  `?dev=1`; `shedder`; `dispose()`. Sites of presets it does not know (the terrain test's fixtures)
+  `forceSpawn(presetId, { distance, bearingOffset, force, at })` in dev builds and with `?debug=1` or
+  `?dev=1` (`at: { x, z }` starts it on that spot instead of a point ahead: the F9 combo staging);
+  `forceSiteActive(siteId)` (dev: wakes a live site's active state now, tracked like the director's
+  own, so it ends after its seeded duration and a combo's `siteActive` sees it); `shedder`;
+  `dispose()`. Sites of presets it does not know (the terrain test's fixtures)
   are left out of `getNearby`.
 - **SpawnManager calls.** `activate(presetId, { position: { x, y, z }, heading, source, seed,
   duration, site?, parent? })` (`parent`: a combo's id, kept on the record and in `getActive()`),
   `deactivate(id, reason)` with reasons `lifetime`, `despawn`, `dispose` and `override`,
   `getActive()`, `getInstance(id)` (`anchor`, `radius`, `heavy`, `ended`), `getStats()` as
   `{ engines: { name: { instances, particles } }, total: { lights } }`, `setLodBias(bias)`,
-  `spawnCount()`, and `canActivate`, `getSiteSpawn` / `setSiteActive` when offered.
+  `spawnCount()`, and `canActivate`, `getSiteSpawn` / `setSiteActive` when offered. Engines reach a
+  neighbour spawn's part through the manager's allocation-free `nearestPart(presetId, engine, x, z,
+  radius)` (the resonating spires' arcs find the crystal spires with it). Since wave 3 the manager's
+  anchor rules also take `seek: 'valley'` (the deepest valley floor on dry ground within the radius: the
+  relief ring's mean ground 450 m out less the ground at the point).
 
 ### Regional weather (`ctx.systems.weather`, `src/spawns/weather.js`)
 
@@ -1804,8 +1824,10 @@ every light), `overcast` (hides the sun disc, god rays, moon, stars and aurora b
 `skyTintAmount` (a `THREE.Color` or `0xRRGGBB`, mixed in at the amount while keeping the luminance
 of what they tint), `flash` (0..1) with `flashColor` (a lightning strike: the one brightening
 field, it adds its colour to the palette and the fog colour and lifts the hemisphere light; the
-strongest flash wins), and `weight` (0..1, default 1, eases the whole modifier). Fields left out
-keep their value; a duplicate id or a non-finite value throws.
+strongest flash wins), `aurora` (0..1, Phase 3: the aurora curtains' presence is raised to at least
+this much wherever the sky is dark, the snow's own presence staying the floor; the maximum wins), and
+`weight` (0..1, default 1, eases the whole modifier). Fields left out keep their value; a duplicate id
+or a non-finite value throws.
 
 Each frame the modifiers fold in priority order (lowest first): multipliers multiply, darkness and
 overcast stack like filters, stars takes the maximum and the tints composite over each other. Each
@@ -2036,6 +2058,7 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders); Phase 3: the ground track (a drifting craft, a hover, a turn), the craft weighting (seaplane, eagle, balloon, a high spaceplane, a module's own profile), combos on dev fixtures (preconditions, placement, delays, parents, the log and `comboStarted`, budgets, exclusivity, determinism, a forced combo), the global overrides (schedule, night window, the midnight sun's bend, the regional blend, the director's wiring) and the combo / override / tags validation |
 | `node tools/lab/director.mjs --presets real` | the pacing checks against the game's own 30 presets: the first notable, the drought fill with no sites, a world with the real placement's sites, and a per-preset activation report per speed |
 | `node tools/lab/preset-pacing.mjs [--hours N]` | the game's presets under the real director with the real placement over simulated hours (3 seeds, 3 speeds, day and night): every common and uncommon event preset activates, every rare one too (on its own runs when the shared runs miss it, the dirty thunderstorm with the volcano erupting often), the volcano's and the fissure's eruptions start, nothing activates behind; prints the drought shares and the activations per preset |
+| `node tools/lab/preset-pacing.mjs [--hours N]` | the game's presets under the real director with the real placement over simulated hours (3 seeds, 3 speeds, day and night): every event preset activates (each legendary combo and global override too, on its own runs with every other legendary set aside and the sites its `siteActive` precondition names kept awake when the shared runs miss it: a legendary is due only every 1-2 h), the volcano's eruption starts, nothing activates behind; prints the drought shares and the activations per preset |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/copilot-guide.json` (add `--query renderer=webgl`) | WREN's tour guide in the game: a callout on `spawnActivated` with an open offer, the Guide chips, "yes" placing the waypoint, the 45 s rate limit, "take me to", "find a thermal" against the WindField, "chase the storm", "next discovery", "guide help", and the remote flight state's `nearby[]`, `activeEvents[]`, `weather` and `callouts` |
 | `node tools/smoke-test.mjs --url <shell>/?v=2#seed=LINKTEST&t=0.300 --steps-file tools/steps/seed-link.json` | a share link opens V2 in the launcher in its seed at its time of day, Copy link inside the shell gives the shell URL, and a seed applied in V2 reloads the game inside the shell into that world |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --query seed=ENGINEFAUNA --steps-file tools/steps/engine-fauna.json` (and `engine-waterEffect.json` with `seed=ENGINEWATER`) | the fauna and waterEffect engines force-spawned ahead with screenshots, their behaviours, and dispose back to the memory baseline |

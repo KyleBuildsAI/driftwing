@@ -11,14 +11,17 @@
 //
 // Checks:
 //   presets   every preset validates and the director takes every one of them
-//   reach     every event preset (but the global overrides) is activated at least once across the
-//             runs, and the volcano's eruption (a site active state) too. Rare events are rare by
-//             design (a rare is due every 12-25 minutes and shares that turn with every other rare):
-//             each one the shared runs miss
+//   reach     every event preset is activated at least once across the runs, and the volcano's
+//             eruption (a site active state) too. Rare events are rare by design (a rare is due every
+//             12-25 minutes and shares that turn with every other rare): each one the shared runs miss
 //             is run again on the same flights with every other rare event set aside, and when its
 //             filters.near asks for an active site (the dirty thunderstorm over an erupting volcano)
 //             with those sites erupting as a common candidate (due every 2 minutes, outside the heavy
-//             budget) for most of an hour, until it starts
+//             budget) for most of an hour, until it starts. Legendary combos and global overrides
+//             (Phase 3, contract i.3 and i.4) are rarer still (a legendary is due every 1-2 h of flight
+//             and shares that slot with every other legendary): each one the shared runs miss is run
+//             again on the same flights with every other legendary set aside and the sites its
+//             siteActive precondition names kept awake (the volcano's eruption), until it starts
 //   ahead     no director activation lies behind the player
 // Printed (not checked, see the batch notes): per scenario, the share of droughts that end within the
 // 90 s pacing window, the longest drought, and the activations per preset. The pacing floor is a
@@ -62,6 +65,8 @@ const SPEEDS = Object.freeze({
   jet: { speed: 220, altitude: [1500, 6000] },
 });
 const STEP_SECONDS = 0.1;
+/** Kept-awake sites (a legendary's own runs) are looked for this far (m) from the craft. */
+const SITE_WAKE_RADIUS = 30000;
 const SITE_VIEW_RANGE = 12000;
 
 function mulberry32(state) {
@@ -99,13 +104,17 @@ function createFlightPath({ pathSeed, speed, altitude: [lowAltitude, highAltitud
   };
 }
 
-/** The sun on the game's day clock, starting at startDayTime. */
+/**
+ * The sun on the game's day clock, starting at startDayTime on day 0; days is the sky's day counter
+ * (state.time.days: whole days plus dayTime), which the override schedule's night index reads.
+ */
 function createSun(startDayTime) {
-  const sun = { sunElevation: 0, dayTime: startDayTime };
+  const sun = { sunElevation: 0, dayTime: startDayTime, days: startDayTime };
   return {
     sun,
     update(time) {
-      sun.dayTime = (startDayTime + time / CONFIG.DAY_LENGTH_DEFAULT) % 1;
+      sun.days = startDayTime + time / CONFIG.DAY_LENGTH_DEFAULT;
+      sun.dayTime = sun.days % 1;
       sun.sunElevation = Math.sin((sun.dayTime - 0.25) * Math.PI * 2) * CONFIG.SUN_MAX_ELEVATION_DEG;
     },
   };
@@ -195,8 +204,11 @@ function createLenientManager({ bus, player, getTime, placement, isInView }) {
   };
 }
 
-/** One flight. presets: the director's list (the shared runs: the game's own). */
-function runScenario({ seed, craft, hours, startDayTime, presets = PRESETS }) {
+/**
+ * One flight. presets: the director's list; wakeSites: site preset ids whose live sites are kept in
+ * their active state (through the director's dev hook, as the F9 combo staging wakes the volcano).
+ */
+function runScenario({ seed, craft, hours, startDayTime, presets = PRESETS, wakeSites = [] }) {
   const bus = attachTypedEvents(new EventBus(), { validate: true });
   const world = createWorldGen(seed, WORLD_OPTIONS);
   const path = createFlightPath({ pathSeed: `${seed}-${craft}-${startDayTime}`, ...SPEEDS[craft] });
@@ -228,6 +240,11 @@ function runScenario({ seed, craft, hours, startDayTime, presets = PRESETS }) {
     if (time >= nextManagerTick) {
       nextManagerTick += 0.5;
       manager.update();
+      if (wakeSites.length > 0) {
+        for (const site of world.placement.sitesNear(path.player.position.x, path.player.position.z, SITE_WAKE_RADIUS)) {
+          if (wakeSites.includes(site.presetId) && manager.getSiteSpawn(site.id)) director.forceSiteActive(site.id);
+        }
+      }
     }
     director.update();
   }
@@ -270,10 +287,10 @@ for (const { seed, craft, startDayTime } of FLIGHTS) {
   const share = pacing.droughts > 0 ? pacing.withinWindow / pacing.droughts : 1;
   rows.push(`${seed.padEnd(11)} ${craft.padEnd(9)} ${startDayTime === 0.62 ? 'day  ' : 'night'}  ${String(pacing.withinWindow).padStart(4)}/${String(pacing.droughts).padEnd(4)} droughts within ${PACING_WINDOW_MAX} s (${(share * 100).toFixed(1).padStart(5)} %), longest ${String(run.state.longestDrought).padStart(5)} s, ${run.log.length} activations`);
 }
-// An override preset (the blood moon) is never a director candidate: its nights are scheduled by
-// src/spawns/overrides.js (tools/steps/director-p3.json and the presets 61-70 steps cover it).
-const isRareEvent = (preset) => preset.kind === 'event' && preset.rarity === 'rare' && !preset.override;
-const events = PRESETS.filter((preset) => preset.kind === 'event' && !preset.override && !isRareEvent(preset));
+/** Legendary combos and global overrides (the blood moon, the midnight sun): reached on their own runs when missed. */
+const isLegendaryNight = (preset) => Boolean(preset.combo || preset.override);
+const isRareEvent = (preset) => preset.kind === 'event' && preset.rarity === 'rare' && !isLegendaryNight(preset);
+const events = PRESETS.filter((preset) => preset.kind === 'event' && !isLegendaryNight(preset) && !isRareEvent(preset));
 const missing = events.filter((preset) => counts.get(preset.id) === 0).map((preset) => preset.id);
 check('reach', 'every common and uncommon event preset is activated at least once across the runs', missing.length === 0, missing.length ? `never: ${missing.join(', ')}` : [...counts].filter(([id]) => events.some((preset) => preset.id === id)).map(([id, count]) => `${id} ${count}`).join(', '));
 const rareReached = [];
@@ -300,6 +317,29 @@ for (const preset of PRESETS.filter(isRareEvent)) {
   rareReached.push(`${preset.id} ${reachedOn ? `on its own run (${reachedOn}${awake.length > 0 ? `, ${awake.join(', ')} erupting often` : ''})` : 'never'}`);
 }
 check('reach', 'every rare event starts at least once (on its own runs when the shared runs miss it)', !rareReached.some((line) => line.endsWith(' never')), rareReached.join(', '));
+const legendaryNights = PRESETS.filter(isLegendaryNight);
+const focused = [];
+for (const preset of legendaryNights) {
+  if (counts.get(preset.id) > 0) {
+    focused.push(`${preset.id} ${counts.get(preset.id)} (shared runs)`);
+    continue;
+  }
+  // The same flights with every other legendary set aside (members and sites stay), and the sites its
+  // siteActive precondition names kept awake.
+  const presets = PRESETS.filter((candidate) => candidate === preset || (!isLegendaryNight(candidate) && candidate.rarity !== 'legendary'));
+  const wakeSites = preset.combo && preset.combo.preconditions && preset.combo.preconditions.siteActive ? preset.combo.preconditions.siteActive : [];
+  let reachedOn = null;
+  for (const flight of FLIGHTS) {
+    const run = runScenario({ ...flight, hours: OPTIONS.hours, presets, wakeSites });
+    if (run.log.some((entry) => entry.presetId === preset.id)) {
+      reachedOn = `${flight.seed} ${flight.craft} ${flight.startDayTime === 0.62 ? 'day' : 'night'}`;
+      break;
+    }
+  }
+  focused.push(`${preset.id} ${reachedOn ? `on its own run (${reachedOn}${wakeSites.length > 0 ? `, ${wakeSites.join(', ')} kept awake` : ''})` : 'never'}`);
+}
+const unreached = focused.filter((line) => line.endsWith(' never'));
+check('reach', 'every legendary combo and global override starts at least once (on its own runs when the shared runs miss it)', unreached.length === 0, focused.join(', ') || 'none in the catalog');
 const activeStates = PRESETS.filter((preset) => preset.activeState);
 const unstarted = activeStates.filter((preset) => counts.get(preset.id) === 0).map((preset) => preset.id);
 check('reach', 'every site active state (the eruption) is started at least once', unstarted.length === 0, unstarted.length ? `never: ${unstarted.join(', ')}` : activeStates.map((preset) => `${preset.id} ${counts.get(preset.id)}`).join(', '));

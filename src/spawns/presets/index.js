@@ -96,6 +96,16 @@ import badlandsHoodoos from './badlandsHoodoos.js';
 import mangroveDelta from './mangroveDelta.js';
 import cactusDustDevils from './cactusDustDevils.js';
 import bambooForest from './bambooForest.js';
+import frozenLake from './frozenLake.js';
+import auroraMeteorShower from './auroraMeteorShower.js';
+import volcanoAurora from './volcanoAurora.js';
+import doubleRainbowWhales from './doubleRainbowWhales.js';
+import eclipseMonoliths from './eclipseMonoliths.js';
+import cometBreakup from './cometBreakup.js';
+import migrationConvergence from './migrationConvergence.js';
+import midnightSun from './midnightSun.js';
+import resonatingSpires from './resonatingSpires.js';
+import lighthouseBeacons from './lighthouseBeacons.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -197,6 +207,17 @@ export const PRESETS = Object.freeze([
   mangroveDelta,
   cactusDustDevils,
   bambooForest,
+  // Batch 10: presets 91-100.
+  frozenLake,
+  auroraMeteorShower,
+  volcanoAurora,
+  doubleRainbowWhales,
+  eclipseMonoliths,
+  cometBreakup,
+  migrationConvergence,
+  midnightSun,
+  resonatingSpires,
+  lighthouseBeacons,
 ]);
 
 /** Presets by id. */

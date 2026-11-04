@@ -168,7 +168,8 @@ export function createRegionField({ biomes, blendKm, biomeAt, biomeKeys = null }
  * biomeKeys (createRegionField) feed the regional ones. update(days, dayTime, x, z) refreshes every entry in place (no allocation)
  * and returns the entry list: [{ id, presetId, kind, night, scheduled, forced, weight, region }].
  * force(presetId, night) schedules a preset on that night whatever its roll (the debugger); a forced
- * night ignores the region (weight = the night window).
+ * night ignores the region (weight = the night window). release(presetId) drops a forced night (the
+ * night then follows its own roll again).
  */
 export function createOverrideSchedule({ seedHash, presets, biomeAt = null, biomeKeys = null }) {
   const entries = [];
@@ -211,6 +212,12 @@ export function createOverrideSchedule({ seedHash, presets, biomeAt = null, biom
       const entry = entries.find((candidate) => candidate.presetId === presetId);
       if (!entry) return false;
       entry.forcedNight = night;
+      return true;
+    },
+    release(presetId) {
+      const entry = entries.find((candidate) => candidate.presetId === presetId);
+      if (!entry || entry.forcedNight === null) return false;
+      entry.forcedNight = null;
       return true;
     },
     has(presetId) {

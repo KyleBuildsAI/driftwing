@@ -8,6 +8,7 @@
 // triggers: the trigger names the recipe answers.
 // build(kit, params) returns { setIntensity(value, time, immediate), trigger(name, options, time),
 //   update?(time, interval), describe() }.
+import aurora from './aurora.js';
 import bells from './bells.js';
 import { goose, raptor } from './birdCall.js';
 import burner from './burner.js';
@@ -21,11 +22,13 @@ import discovery from './discovery.js';
 import dolphin from './dolphin.js';
 import dragon from './dragon.js';
 import fireball from './fireball.js';
+import foghorn from './foghorn.js';
 import gale from './gale.js';
 import galleon from './galleon.js';
 import geyser from './geyser.js';
 import giant from './giant.js';
 import herd from './herd.js';
+import iceSing from './iceSing.js';
 import lantern from './lantern.js';
 import marsh from './marsh.js';
 import meadowHum from './meadowHum.js';
@@ -89,6 +92,9 @@ export const RECIPES = Object.freeze({
   rustle,
   meadowHum,
   marsh,
+  iceSing,
+  aurora,
+  foghorn,
 });
 
 /**

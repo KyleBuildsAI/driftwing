@@ -41,6 +41,7 @@ import { BATCH6_SCENARIOS } from './spawnScenarios/batch6.js';
 import { BATCH61_SCENARIOS } from './spawnScenarios/batch61.js';
 import { BATCH8_SCENARIOS } from './spawnScenarios/batch8.js';
 import { BATCH81_SCENARIOS } from './spawnScenarios/batch81.js';
+import { BATCH91_SCENARIOS } from './spawnScenarios/batch91.js';
 
 /** Activation overrides the batch 1 step file used to show a storm at its mature stage at once. */
 const MATURE_VORTEX = Object.freeze({
@@ -222,4 +223,5 @@ export const SPAWN_SCENARIOS = Object.freeze([
   ...BATCH61_SCENARIOS,
   ...BATCH8_SCENARIOS,
   ...BATCH81_SCENARIOS,
+  ...BATCH91_SCENARIOS,
 ]);

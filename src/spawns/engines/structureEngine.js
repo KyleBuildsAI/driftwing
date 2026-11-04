@@ -77,6 +77,8 @@
 //                achievement }: a creature racing the recipe's challenge course (structure/rival.js,
 //                the dragon racer): it registers the course itself (with the challenge `rival` while
 //                the player flies the dragon), flies the racing line during a run, and carries the voice
+//   arcPoints    points a recipe offers for arcs of light (out.arcPoints: the spires' tips), kept in
+//                world space as instance.data.arcPoints for the light-effect engine's arcs
 //
 // update() allocates nothing: per-instance numbers live in typed arrays, matrices are composed into
 // scratch objects made in init(), and the wind is probed a few times a second into a reused record.
@@ -458,6 +460,7 @@ export function createStructureEngine() {
     const wind = windDirection();
     const out = {
       turbines: [], socks: [], puffs: [], gates: [], surfaces: [], zones: [], courses: [], colliders: [],
+      arcPoints: [],
       challenge: null,
       wake: null, falls: null, turbineSettings: null, sway: null, audioPoint: null, windProbe: null, approach: 0, radius: 20,
       // Plain numbers a recipe reports about what it built (lava sea entries, blocks), for checks.
@@ -2186,7 +2189,14 @@ export function createStructureEngine() {
         trigger: triggerVoice,
         /** The instance data (the voice), for trigger. */
         data,
+        /** The recipe's arc points in world space (x, y, z per point): the spires' tips. */
+        arcPoints: new Float64Array(out.arcPoints.length * 3),
       };
+      out.arcPoints.forEach((point, index) => {
+        data.arcPoints[index * 3] = anchor.x + point[0];
+        data.arcPoints[index * 3 + 1] = anchor.y + point[1];
+        data.arcPoints[index * 3 + 2] = anchor.z + point[2];
+      });
       // Probe point and audio position in world space; the ambient wind there, once.
       data.probe = [anchor.x + data.probe[0], anchor.y + data.probe[1], anchor.z + data.probe[2]];
       const ambient = ctx.wind.ambientAt({ x: data.probe[0], y: data.probe[1], z: data.probe[2] });

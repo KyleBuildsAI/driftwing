@@ -10,9 +10,12 @@
 //     lights the cloud base, a sky and ambient flash through the sky modifier API (the flash field),
 //     one real light for the strike, and thunder (audio.thunder, delayed by distance / 343 m/s);
 //   - glows and swarms (glowPoints.js): points in one shared additive pool, animated in the vertex
-//     shader (drift, blink, pulse, flicker) with no per-point CPU work;
+//     shader (drift, blink, pulse, flicker) with no per-point CPU work; a glow group may stand on the
+//     world's landmarks of a type (every lighthouse in sight) and blink in a chain, one after another;
 //   - a steady real light (a vent, a lantern launch, a lighthouse lamp) with flicker and pulse;
-//   - beams (ribbons.js): a lighthouse's sweeping spokes in one of BEAM_SLOTS ribbon slots.
+//   - beams (ribbons.js): a lighthouse's sweeping spokes in one of BEAM_SLOTS ribbon slots;
+//   - arcs (Phase 3): bolts leaping between the arc points of a neighbouring structure spawn (the
+//     crystal spires' tips), in the same bolt slots, while that structure's glow swells with them.
 // Night looks come first: glows, swarms and beams fade by the time of day (params.visibility).
 //
 // LOD: strikes happen only at the near and mid tiers (a heavy storm's lure flashes beyond); glows
@@ -59,8 +62,11 @@ const MIN_STRIKE_GAP = 0.25;
 const STRIKE_RANDOMS = 21;
 const DEG = Math.PI / 180;
 const COMPASS_POINTS = Object.freeze(['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west']);
-const LAYOUTS = Object.freeze(['point', 'ring', 'scatter', 'line']);
-const TOP_LEVEL_PARAMS = Object.freeze(['lightning', 'glows', 'swarm', 'light', 'beam', 'visibility', 'fog', 'lod', 'sound', 'soundIntensity', 'endRamp', 'guide']);
+const LAYOUTS = Object.freeze(['point', 'ring', 'scatter', 'line', 'landmarks']);
+const LANDMARK_LAYOUT = LAYOUTS.indexOf('landmarks');
+/** Landmark types a glow group may stand on (src/world/worldgen.js landmark sites). */
+const GLOW_LANDMARKS = Object.freeze(['arch', 'monoliths', 'lighthouse', 'balloons']);
+const TOP_LEVEL_PARAMS = Object.freeze(['lightning', 'arcs', 'glows', 'swarm', 'light', 'beam', 'visibility', 'fog', 'lod', 'sound', 'soundIntensity', 'endRamp', 'guide']);
 const GUIDE_PARAMS = Object.freeze(['joinRadius', 'trailDistance', 'trailSeconds', 'speed', 'height', 'ceiling', 'lead', 'search', 'arrive', 'retarget']);
 /** Guide phases (data.guide[GUIDE.PHASE]): waiting at the anchor, trailing the craft, leading, arrived. */
 const GUIDE_WAITING = 0;
@@ -71,6 +77,8 @@ const GUIDE_ARRIVED = 3;
 const GUIDE = Object.freeze({ PHASE: 0, CLOCK: 1, TARGET_X: 2, TARGET_Z: 3, HAS_TARGET: 4, SEARCH_IN: 5, GROUND: 6, GROUND_IN: 7 });
 /** The ground under a moving guide is sampled at this rate (s between samples). */
 const GUIDE_GROUND_INTERVAL = 0.25;
+/** Seconds between two searches for an arc target that is not there (yet). */
+const ARC_TARGET_RETRY = 1;
 const ACTIVATION_PARAMS = Object.freeze(['position', 'heading', 'site', 'startTime', 'scale', 'duration', 'seed']);
 
 /** Linear RGB of a 0xRRGGBB colour times gain into target[offset..offset + 2]. */
@@ -158,17 +166,53 @@ export function resolveLightEffectConfig(preset, params) {
     };
   }
 
+  const arcParams = read.object(params.arcs, 'arcs');
+  read.onlyKeys(arcParams, 'arcs', ['target', 'radius', 'rate', 'maxGap', 'color', 'width', 'brightness', 'branches', 'duration', 'glow', 'thunder', 'resonance', 'chime']);
+  let arcs = null;
+  if (arcParams) {
+    if (typeof arcParams.target !== 'string' || arcParams.target.length === 0) read.fail('arcs.target', 'must name the preset whose structure offers arc points (for example "crystalSpires")');
+    arcs = {
+      target: arcParams.target,
+      radius: read.number(arcParams.radius, 'arcs.radius', 3000, 1, 20000),
+      rate: read.number(arcParams.rate, 'arcs.rate', 24, 0, 600),
+      maxGap: read.number(arcParams.maxGap, 'arcs.maxGap', 180, 5, 2000),
+      color: read.color(arcParams.color, 'arcs.color', 0xbfe8ff),
+      width: read.number(arcParams.width, 'arcs.width', 1.6, 0.1, 50),
+      brightness: read.number(arcParams.brightness, 'arcs.brightness', 8, 0, 100),
+      branches: Math.round(read.number(arcParams.branches, 'arcs.branches', 3, 0, 24)),
+      duration: read.number(arcParams.duration, 'arcs.duration', 0.45, 0.1, 5),
+      glow: read.number(arcParams.glow, 'arcs.glow', 0.8, 0, 50),
+      thunder: read.number(arcParams.thunder, 'arcs.thunder', 0.35, 0, 1.5),
+      resonance: read.number(arcParams.resonance, 'arcs.resonance', 1.5, 0, 4),
+      chime: read.boolean(arcParams.chime, 'arcs.chime', true),
+    };
+  }
+
   if (params.glows !== undefined && params.glows !== null && !Array.isArray(params.glows)) read.fail('glows', 'must be an array of glow specs');
   const glows = (params.glows ?? []).map((glow, index) => {
     const path = `glows[${index}]`;
     read.object(glow, path);
-    read.onlyKeys(glow, path, ['offset', 'count', 'layout', 'radius', 'length', 'height', 'onGround', 'size', 'color', 'colors', 'intensity', 'pulse', 'blink', 'flicker', 'wander', 'shape']);
+    read.onlyKeys(glow, path, ['offset', 'count', 'layout', 'radius', 'length', 'height', 'onGround', 'size', 'color', 'colors', 'intensity', 'pulse', 'blink', 'flicker', 'wander', 'shape', 'landmark', 'chain']);
     const pulse = read.object(glow.pulse, `${path}.pulse`);
     read.onlyKeys(pulse, `${path}.pulse`, ['period', 'depth']);
+    const chain = read.object(glow.chain, `${path}.chain`);
+    read.onlyKeys(chain, `${path}.chain`, ['interval', 'period', 'duty', 'delay', 'trigger']);
+    if (chain && chain.trigger !== undefined && (typeof chain.trigger !== 'string' || chain.trigger.length === 0)) read.fail(`${path}.chain.trigger`, 'must name a trigger of the preset audio recipe (for example "horn")');
+    const layout = LAYOUTS.indexOf(read.oneOf(glow.layout, `${path}.layout`, 'point', LAYOUTS));
+    if (layout === LANDMARK_LAYOUT && glow.landmark === undefined) read.fail(`${path}.landmark`, `is needed with layout 'landmarks' (one of ${GLOW_LANDMARKS.join(', ')})`);
+    if (layout !== LANDMARK_LAYOUT && glow.landmark !== undefined) read.fail(`${path}.landmark`, "is only for layout 'landmarks'");
     return {
       offset: read.vector(glow.offset, `${path}.offset`, [0, 0, 0]).map((value) => value * scale),
       count: Math.round(read.number(glow.count, `${path}.count`, 1, 1, MAX_POINTS_PER_INSTANCE)),
-      layout: LAYOUTS.indexOf(read.oneOf(glow.layout, `${path}.layout`, 'point', LAYOUTS)),
+      layout,
+      landmark: layout === LANDMARK_LAYOUT ? read.oneOf(glow.landmark, `${path}.landmark`, 'lighthouse', GLOW_LANDMARKS) : null,
+      chain: chain ? {
+        interval: read.number(chain.interval, `${path}.chain.interval`, 2.5, 0, 600),
+        period: read.number(chain.period, `${path}.chain.period`, 30, 0.5, 3600),
+        duty: read.number(chain.duty, `${path}.chain.duty`, 0.15, 0.01, 1),
+        delay: read.number(chain.delay, `${path}.chain.delay`, 0, 0, 600),
+        trigger: chain.trigger ?? null,
+      } : null,
       radius: read.number(glow.radius, `${path}.radius`, 50, 0, 100000) * scale,
       length: read.number(glow.length, `${path}.length`, 500, 0, 100000) * scale,
       height: read.range(glow.height, `${path}.height`, [0, 0], -10000, 30000).map((value) => value * scale),
@@ -200,6 +244,8 @@ export function resolveLightEffectConfig(preset, params) {
     sync: read.number(swarmParams.sync, 'swarm.sync', 0.2, 0, 1),
     wander: readWander(read, read.object(swarmParams.wander, 'swarm.wander'), 'swarm.wander', { radius: 1.5, speed: 0.35, vertical: 0.5 }),
   } : null;
+  // A chain's timing reads the full spread of the blink phases, which a swarm's sync narrows.
+  if (swarm && glows.some((glow) => glow.chain)) read.fail('swarm', 'cannot share an instance with a chained glow group (its sync would shift the chain)');
   const glowPoints = glows.reduce((sum, glow) => sum + glow.count, 0) + (swarm ? swarm.count : 0);
   if (glowPoints > MAX_POINTS_PER_INSTANCE) read.fail('glows', `and swarm together ask for ${glowPoints} points; one instance holds at most ${MAX_POINTS_PER_INSTANCE}`);
 
@@ -218,6 +264,7 @@ export function resolveLightEffectConfig(preset, params) {
 
   return {
     lightning,
+    arcs,
     glows,
     swarm,
     points: glowPoints,
@@ -292,7 +339,9 @@ export function createLightEffectEngine() {
   const live = [];
   /** thunderRequests: strikes that asked for thunder; thunder: those the audio engine queued (it
    * needs a listener, so none before the audio has started). */
-  const strikeCounters = { strikes: 0, ground: 0, cloud: 0, thunderRequests: 0, thunder: 0, skipped: 0 };
+  const strikeCounters = { strikes: 0, ground: 0, cloud: 0, arcs: 0, thunderRequests: 0, thunder: 0, skipped: 0 };
+  /** chainTiming's reused result. */
+  const chainScratch = { phase: 0, period: 1, duty: 0.1 };
 
   // ---- The engine's real-light cap ------------------------------------------------------------------
   /** Real lights the engine's instances hold right now (steady and strike). */
@@ -575,6 +624,7 @@ export function createLightEffectEngine() {
       strikeCounters.cloud++;
     }
     bolt.brightness[0] = lightning.brightness * (toGround ? 1 : 0.45);
+    bolt.glow[0] = lightning.cloudGlow.intensity;
     bolt.slot.color.value.setHex(lightning.color);
     bolt.flash.color.value.setHex(lightning.cloudGlow.color);
     bolt.flash.params.value.y = lightning.cloudGlow.radius * (toGround ? 1 : 1.4);
@@ -607,6 +657,143 @@ export function createLightEffectEngine() {
     }
   }
 
+  /**
+   * One arc of instance's arcs: a bolt from a random arc point of its target structure to another
+   * within maxGap (strikeRandoms filled by the caller), its flash at the middle, its real light (when
+   * the instance has a strike light), a crack of thunder and the voice's chime.
+   */
+  function arc(instance) {
+    const data = instance.data;
+    const arcs = data.config.arcs;
+    const points = data.arcTarget.data.arcPoints;
+    const count = points.length / 3;
+    const random = strikeRandoms;
+    const from = Math.min(count - 1, Math.floor(random[0] * count));
+    // The partner: a seeded pick among the other points within maxGap (the nearest when none is).
+    let to = -1;
+    let nearest = -1;
+    let nearestSquared = Infinity;
+    let within = 0;
+    const gapSquared = arcs.maxGap * arcs.maxGap;
+    const fromX = points[from * 3];
+    const fromY = points[from * 3 + 1];
+    const fromZ = points[from * 3 + 2];
+    for (let index = 0; index < count; index++) {
+      if (index === from) continue;
+      const dx = points[index * 3] - fromX;
+      const dy = points[index * 3 + 1] - fromY;
+      const dz = points[index * 3 + 2] - fromZ;
+      const squared = dx * dx + dy * dy + dz * dz;
+      if (squared < nearestSquared) {
+        nearestSquared = squared;
+        nearest = index;
+      }
+      if (squared <= gapSquared) within++;
+    }
+    if (within > 0) {
+      let pick = Math.min(within - 1, Math.floor(random[1] * within));
+      for (let index = 0; index < count && to < 0; index++) {
+        if (index === from) continue;
+        const dx = points[index * 3] - fromX;
+        const dy = points[index * 3 + 1] - fromY;
+        const dz = points[index * 3 + 2] - fromZ;
+        if (dx * dx + dy * dy + dz * dz > gapSquared) continue;
+        if (pick === 0) to = index;
+        pick--;
+      }
+    } else {
+      to = nearest;
+    }
+    if (to < 0) {
+      strikeCounters.skipped++;
+      return;
+    }
+    const bolt = takeBoltSlot();
+    bolt.owner = instance;
+    bolt.start[0] = ctx.time.elapsed;
+    bolt.duration[0] = arcs.duration * (0.8 + 0.4 * random[9]);
+    bolt.strokeCount = Math.round(1 + 2 * random[10]);
+    bolt.strokes[0] = 0;
+    for (let stroke = 1; stroke < bolt.strokeCount; stroke++) bolt.strokes[stroke] = bolt.strokes[stroke - 1] + 0.04 + random[10 + stroke] * 0.08;
+    bolt.ground[0] = 1;
+    const slotPosition = bolt.slot.mesh.position;
+    slotPosition.x = fromX;
+    slotPosition.y = fromY;
+    slotPosition.z = fromZ;
+    const ends = boltScratch.ends;
+    ends[0] = points[to * 3] - fromX;
+    ends[1] = points[to * 3 + 1] - fromY;
+    ends[2] = points[to * 3 + 2] - fromZ;
+    ends[3] = 0;
+    ends[4] = 0;
+    ends[5] = 0;
+    ends[6] = arcs.width;
+    generateBolt(bolt.slot, boltScratch, random, STRIKE_RANDOMS, arcs.branches);
+    const flashPosition = bolt.flash.mesh.position;
+    flashPosition.x = fromX + ends[0] * 0.5;
+    flashPosition.y = fromY + ends[1] * 0.5;
+    flashPosition.z = fromZ + ends[2] * 0.5;
+    bolt.brightness[0] = arcs.brightness;
+    bolt.glow[0] = arcs.glow;
+    bolt.slot.color.value.setHex(arcs.color);
+    bolt.flash.color.value.setHex(arcs.color);
+    bolt.flash.params.value.y = arcs.maxGap * 0.9;
+    bolt.slot.mesh.visible = true;
+    bolt.flash.mesh.visible = arcs.glow > 0;
+    strikeCounters.arcs++;
+    if (data.strikeLight) {
+      data.strikeLight.update(false, 0);
+      if (makeRoomForLight(data.strikeLight.priority)) data.strikeLight.update(true, 1);
+      const strikeState = data.strikeLight.state;
+      strikeState[0] = flashPosition.x;
+      strikeState[1] = flashPosition.y;
+      strikeState[2] = flashPosition.z;
+      strikeState[3] = 0;
+      data.strikeLight.apply();
+      data.strikeBolt = bolt;
+    }
+    if (arcs.thunder > 0 && ctx.audio && typeof ctx.audio.thunder === 'function') {
+      strikeCounters.thunderRequests++;
+      const options = data.thunderOptions;
+      options.position.x = flashPosition.x;
+      options.position.y = flashPosition.y;
+      options.position.z = flashPosition.z;
+      options.intensity = arcs.thunder;
+      if (ctx.audio.thunder(options)) strikeCounters.thunder++;
+    }
+    if (arcs.chime && data.voice) {
+      data.chimeOptions.strength = 0.6 + 0.6 * random[20];
+      data.voice.trigger('chime', data.chimeOptions);
+    }
+  }
+
+  /**
+   * The structure part the arcs leap across: the nearest live spawn of arcs.target within arcs.radius
+   * whose structure offers at least two arc points, looked up again every ARC_TARGET_RETRY seconds
+   * (a target that ended drops out of the manager's live list, and its glow is given back).
+   * Allocation-free.
+   */
+  function findArcTarget(instance, dt) {
+    const data = instance.data;
+    data.arcRetry[0] -= dt;
+    if (data.arcRetry[0] > 0) return data.arcTarget;
+    data.arcRetry[0] = ARC_TARGET_RETRY;
+    const spawns = ctx.spawns;
+    const arcs = data.config.arcs;
+    const found = spawns && typeof spawns.nearestPart === 'function' ? spawns.nearestPart(arcs.target, 'structure', instance.anchor.x, instance.anchor.z, arcs.radius) : null;
+    const usable = found && found.data && found.data.arcPoints && found.data.arcPoints.length >= 6 ? found : null;
+    if (usable !== data.arcTarget) releaseResonance(data);
+    data.arcTarget = usable;
+    return usable;
+  }
+
+  /** Gives the target structure its own glow back (the arcs' resonance ends). */
+  function releaseResonance(data) {
+    if (data.arcTarget && data.resonance[0] !== 1 && data.arcTarget.params) data.arcTarget.params.glow = 1;
+    data.resonance[0] = 1;
+    data.arcTarget = null;
+  }
+
   /** Once per frame: the glow pool, the bolts' envelopes (a slot whose owner is gone goes dark). */
   function frameStep() {
     if (ctx.state.frame === lastFrame) return;
@@ -625,7 +812,7 @@ export function createLightEffectEngine() {
       }
       const level = bolt.level[0];
       bolt.slot.params.value.x = bolt.brightness[0] * level;
-      bolt.flash.params.value.x = bolt.owner.data.config.lightning.cloudGlow.intensity * (0.35 + 0.65 * Math.min(1, level));
+      bolt.flash.params.value.x = bolt.glow[0] * (0.35 + 0.65 * Math.min(1, level));
     }
   }
 
@@ -672,10 +859,29 @@ export function createLightEffectEngine() {
     const limit = config.points;
     let written = 0;
     const slotOf = (index) => data.pages[Math.floor(index / GLOW_PAGE_SIZE)] * GLOW_PAGE_SIZE + (index % GLOW_PAGE_SIZE);
-    for (const glow of config.glows) {
-      for (let index = 0; index < glow.count && written < limit; index++) {
+    for (let glowIndex = 0; glowIndex < config.glows.length; glowIndex++) {
+      const glow = config.glows[glowIndex];
+      const sites = glow.layout === LANDMARK_LAYOUT ? data.landmarkPoints[glowIndex] : null;
+      const count = sites ? Math.min(glow.count, sites.length / 3) : glow.count;
+      for (let index = 0; index < count && written < limit; index++) {
         let right = glow.offset[0];
         let forward = glow.offset[2];
+        if (sites) {
+          // On a landmark: the world point itself (offset[1] lifts it to the lamp).
+          const siteX = sites[index * 3];
+          const siteZ = sites[index * 3 + 2];
+          const y = sites[index * 3 + 1] + glow.offset[1] + randomIn(rng, glow.height[0], glow.height[1]);
+          writeColor(scratchColor, glow.colors[Math.floor(rng() * glow.colors.length)], glow.intensity, color, 0);
+          const timing = chainTiming(glow, index, data.chainStart);
+          points.write(
+            slotOf(written), siteX - origin[0], y - origin[1], siteZ - origin[2], randomIn(rng, glow.size[0], glow.size[1]),
+            color[0], color[1], color[2], data.group, glow.shape,
+            glow.wander.radius, glow.wander.speed, timing.phase, glow.wander.vertical,
+            timing.period, timing.duty, 0, glow.flicker,
+          );
+          written++;
+          continue;
+        }
         if (glow.layout === 1) {
           const angle = (index / glow.count) * Math.PI * 2;
           right += Math.cos(angle) * glow.radius;
@@ -694,10 +900,26 @@ export function createLightEffectEngine() {
         const y = base + glow.offset[1] + randomIn(rng, glow.height[0], glow.height[1]);
         writeColor(scratchColor, glow.colors[Math.floor(rng() * glow.colors.length)], glow.intensity, color, 0);
         const blinkPeriod = glow.blink ? randomIn(rng, glow.blink.period[0], glow.blink.period[1]) : glow.pulse ? glow.pulse.period : 0;
+        // Drawn in this order (size, wander rate, phase), as every glow always has been.
+        const size = randomIn(rng, glow.size[0], glow.size[1]);
+        const wanderRate = glow.wander.speed * (0.7 + 0.6 * rng());
+        const seededPhase = rng() * Math.PI * 2;
+        if (glow.chain) {
+          // A chained group blinks point after point (the line layout runs along forward).
+          const timing = chainTiming(glow, index, data.chainStart);
+          points.write(
+            slotOf(written), x - origin[0], y - origin[1], z - origin[2], size,
+            color[0], color[1], color[2], data.group, glow.shape,
+            glow.wander.radius, wanderRate, timing.phase, glow.wander.vertical,
+            timing.period, timing.duty, 0, glow.flicker,
+          );
+          written++;
+          continue;
+        }
         points.write(
-          slotOf(written), x - origin[0], y - origin[1], z - origin[2], randomIn(rng, glow.size[0], glow.size[1]),
+          slotOf(written), x - origin[0], y - origin[1], z - origin[2], size,
           color[0], color[1], color[2], data.group, glow.shape,
-          glow.wander.radius, glow.wander.speed * (0.7 + 0.6 * rng()), rng() * Math.PI * 2, glow.wander.vertical,
+          glow.wander.radius, wanderRate, seededPhase, glow.wander.vertical,
           blinkPeriod, glow.blink ? glow.blink.duty : 0, glow.pulse ? glow.pulse.depth : 0, glow.flicker,
         );
         written++;
@@ -724,6 +946,80 @@ export function createLightEffectEngine() {
     return written;
   }
 
+  /**
+   * The blink of point `order` of a chained glow group: lit for duty of each period, point after point
+   * interval seconds apart from the chain's start (the shader's blink cycle is fract(time / period +
+   * phase / 2 pi), so the phase sets the moment each point lights). Returns the shared record.
+   */
+  function chainTiming(glow, order, start) {
+    const chain = glow.chain;
+    const lit = start + chain.delay + order * chain.interval;
+    const cycle = -lit / chain.period;
+    chainScratch.phase = (cycle - Math.floor(cycle)) * Math.PI * 2;
+    chainScratch.period = chain.period;
+    chainScratch.duty = chain.duty;
+    return chainScratch;
+  }
+
+  /**
+   * A chained glow group's voice: as each point of the chain lights, the voice's chain trigger fires
+   * once (the lighthouse's horn answering), louder for a point near the camera, its pitch a little
+   * different per point. A frame that skips several steps fires only the newest. Allocation-free.
+   */
+  function fireChain(instance, glowIndex, now, camera) {
+    const data = instance.data;
+    const glow = data.config.glows[glowIndex];
+    const chain = glow.chain;
+    const since = now - data.chainStart - chain.delay;
+    if (since < 0) return;
+    const sites = data.landmarkPoints[glowIndex];
+    const count = sites ? Math.min(glow.count, sites.length / 3) : glow.count;
+    if (count <= 0) return;
+    const cycle = Math.floor(since / chain.period);
+    const within = since - cycle * chain.period;
+    const order = Math.min(count - 1, chain.interval > 0 ? Math.floor(within / chain.interval) : count - 1);
+    const step = cycle * count + order;
+    if (step <= data.chainFired[glowIndex]) return;
+    data.chainFired[glowIndex] = step;
+    let distance = 0;
+    if (sites) {
+      const dx = sites[order * 3] - camera.x;
+      const dz = sites[order * 3 + 2] - camera.z;
+      distance = Math.sqrt(dx * dx + dz * dz);
+    }
+    const options = data.chainOptions;
+    options.strength = Math.max(0.3, Math.min(1.2, 1.2 - distance / 12000));
+    const golden = order * 0.618034;
+    options.pitch = 0.85 + 0.3 * (golden - Math.floor(golden));
+    data.voice.trigger(chain.trigger, options);
+  }
+
+  /**
+   * For every glow group on landmarks: the world points (x, ground y, z per site) of the landmarks of
+   * its type within its radius of the anchor, nearest first (the anchor's own landmark leads a chain).
+   * The game's world answers (ctx.game.world.landmarkSitesNear); without it (the labs) the group is
+   * empty. Runs at create only.
+   */
+  function landmarkPoints(config, anchor) {
+    const world = ctx.game && ctx.game.world ? ctx.game.world : null;
+    return config.glows.map((glow) => {
+      if (glow.layout !== LANDMARK_LAYOUT) return null;
+      if (!world || typeof world.landmarkSitesNear !== 'function') return new Float64Array(0);
+      const sites = world.landmarkSitesNear(anchor.x, anchor.z, glow.radius)
+        .filter((site) => site.type === glow.landmark)
+        .map((site) => ({ site, distance: Math.hypot(site.x - anchor.x, site.z - anchor.z) }))
+        .sort((first, second) => first.distance - second.distance)
+        .slice(0, glow.count);
+      const out = new Float64Array(sites.length * 3);
+      sites.forEach(({ site }, index) => {
+        out[index * 3] = site.x;
+        out[index * 3 + 1] = ctx.terrain.groundHeight(site.x, site.z);
+        out[index * 3 + 2] = site.z;
+      });
+      return out;
+    });
+  }
+
   // ---- Engine interface ----------------------------------------------------------------------------
   const engine = {
     name: 'lightEffect',
@@ -742,6 +1038,8 @@ export function createLightEffectEngine() {
           start: new Float64Array(1),
           duration: new Float64Array(1),
           brightness: new Float64Array(1),
+          /** The flash billboard's intensity for this bolt (the storm's cloud glow, or the arcs' glow). */
+          glow: new Float64Array(1),
           level: new Float64Array(1),
           ground: new Float64Array(1),
           strokes: new Float64Array(8),
@@ -796,6 +1094,20 @@ export function createLightEffectEngine() {
         age: new Float64Array([0]),
         activity: new Float64Array([1]),
         nextStrike: new Float64Array([config.lightning && config.lightning.rate > 0 ? randomIn(rng, 0.5, 3) : Infinity]),
+        nextArc: new Float64Array([config.arcs && config.arcs.rate > 0 ? randomIn(rng, 0.3, 1.5) : Infinity]),
+        /** The structure part the arcs leap across (findArcTarget), and the seconds to the next search. */
+        arcTarget: null,
+        arcRetry: new Float64Array([0]),
+        /** The glow multiplier last written to the arc target (1: its own glow). */
+        resonance: new Float64Array([1]),
+        chimeOptions: { strength: 1, notes: 2 },
+        /** Chained glow groups count their blinks from here (the scene clock at create). */
+        chainStart: ctx.time.elapsed,
+        /** Per glow group: its landmarks' world points (layout 'landmarks'), else null. */
+        landmarkPoints: landmarkPoints(config, anchor),
+        /** Per glow group: the last chain step whose voice trigger fired (-1 before the first). */
+        chainFired: new Float64Array(config.glows.length).fill(-1),
+        chainOptions: { strength: 1, pitch: 1 },
         colorScratch: new Float64Array(3),
         lightPhase: rng() * 100,
         /** The strike generator's state (fillRandoms), seeded from the spawn's rng. */
@@ -946,6 +1258,29 @@ export function createLightEffectEngine() {
         }
       }
 
+      // Arcs: across the target structure's arc points, at the near and mid tiers, while active; its
+      // glow swells with the activity (the spires resonate) and goes back when the arcs end.
+      const arcs = config.arcs;
+      if (arcs) {
+        const target = findArcTarget(instance, dt);
+        if (target) {
+          const swell = 1 + arcs.resonance * data.fade[0];
+          if (swell !== data.resonance[0]) {
+            data.resonance[0] = swell;
+            target.params.glow = swell;
+          }
+          const rate = arcs.rate / 60 * activity;
+          if (dt > 0 && data.tier !== 'far' && rate > 0) {
+            data.nextArc[0] -= dt;
+            if (data.nextArc[0] <= 0) {
+              fillRandoms(data.randomState, strikeRandoms, strikeRandoms.length);
+              arc(instance);
+              data.nextArc[0] = MIN_STRIKE_GAP * 0.5 - Math.log(1 - strikeRandoms[19] * 0.999) / rate;
+            }
+          }
+        }
+      }
+
       // The steady real light.
       if (data.light) {
         const lightConfig = config.light;
@@ -994,6 +1329,9 @@ export function createLightEffectEngine() {
 
       if (data.voice) {
         data.voice.setPosition(anchor);
+        for (let glowIndex = 0; glowIndex < config.glows.length; glowIndex++) {
+          if (config.glows[glowIndex].chain && config.glows[glowIndex].chain.trigger) fireChain(instance, glowIndex, time.elapsed, camera);
+        }
         if (config.soundIntensity === 'approach') {
           const dx = anchor.x - camera.x;
           const dy = anchor.y - camera.y;
@@ -1032,6 +1370,7 @@ export function createLightEffectEngine() {
       if (data.light) data.light.release();
       if (data.strikeLight) data.strikeLight.release();
       instance.lights = 0;
+      if (data.config.arcs) releaseResonance(data);
       if (data.flash) {
         data.flash.remove();
         data.flash = null;
@@ -1082,6 +1421,10 @@ export function createLightEffectEngine() {
         flash: data.flashValues ? data.flashValues.flash : null,
         beam: data.beam !== null,
         voice: data.voice !== null,
+        arcTarget: data.config.arcs ? (data.arcTarget ? data.arcTarget.data.arcPoints.length / 3 : 0) : null,
+        landmarks: data.landmarkPoints.map((sites) => (sites ? sites.length / 3 : null)),
+        chainStart: data.chainStart,
+        resonance: data.resonance[0],
         strikes: { ...strikeCounters },
         guide: data.guide ? {
           phase: ['waiting', 'trailing', 'leading', 'arrived'][data.guide[GUIDE.PHASE]],

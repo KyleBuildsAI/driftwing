@@ -38,6 +38,7 @@ import { BALLOON_COURSE_DEFAULTS, buildBalloonCourse } from './balloonCourse.js'
 import { KITE_SLALOM_DEFAULTS, buildKiteSlalom } from './kiteSlalom.js';
 import { ARCH_CHAIN_DEFAULTS, buildArchChain } from './archChain.js';
 import { HOODOOS_DEFAULTS, buildHoodoos } from './hoodoos.js';
+import { ICE_RIDGES_DEFAULTS, buildIceRidges } from './iceRidges.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -82,6 +83,7 @@ export const RECIPES = Object.freeze({
   kiteSlalom: Object.freeze({ build: buildKiteSlalom, defaults: KITE_SLALOM_DEFAULTS, audioIntensity: 'approach' }),
   archChain: Object.freeze({ build: buildArchChain, defaults: ARCH_CHAIN_DEFAULTS, audioIntensity: 'wind' }),
   hoodoos: Object.freeze({ build: buildHoodoos, defaults: HOODOOS_DEFAULTS, audioIntensity: 'wind' }),
+  iceRidges: Object.freeze({ build: buildIceRidges, defaults: ICE_RIDGES_DEFAULTS, audioIntensity: 'approach' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

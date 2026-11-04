@@ -119,6 +119,14 @@ const NAME_SYNONYMS = Object.freeze([
   [/\b(will[- ]o'?[- ]the[- ]wisps?|ghost lights?|fairy lights?)\b/g, 'forest wisps'],
   [/\b(cloud streets?|cumulus streets?)\b/g, 'thermal street'],
   [/\b(kite strings?)\b/g, 'kite-string slalom'],
+  // Phase 3, presets 91-100.
+  [/\b(frozen ponds?|ice lakes?|lake ice)\b/g, 'frozen lake'],
+  [/\b(northern lights|aurora borealis|auroras)\b/g, 'aurora'],
+  [/\b(broken comet|split comet|comet breaking up|disintegrating comet)\b/g, 'comet breakup'],
+  [/\b(endless day|sun that never sets|polar day)\b/g, 'midnight sun'],
+  [/\b(singing (crystals?|spires?)|crystal lightning)\b/g, 'resonating crystal spires'],
+  // "double rainbow" became "double glory rainbow" above: the double one is the whales' combo.
+  [/\b(double glory rainbows?)\b/g, 'double rainbow whales'],
 ]);
 
 /**

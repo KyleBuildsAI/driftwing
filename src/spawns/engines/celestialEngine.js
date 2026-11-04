@@ -9,7 +9,8 @@
 //            stream at `rate` per minute, fireballs that flash the sky and the land; the 'meteor'
 //            voice sizzles with the bright ones
 //   comet    nucleus, coma, a curved dust tail pointing away from the sun and a straight ion tail,
-//            fixed among the stars
+//            fixed among the stars; a breakup splits it (a flare, then fragments drifting apart along
+//            the orbit, each with its own short tail), and meteors fromComet stream away from it
 //   eclipse  the moon's disc crossing the sun over crossingSeconds, slowing through totality; the
 //            corona, the chromosphere and Baily's beads; a sky modifier (priority 30, above the
 //            weather) dims the sun and the ambient light, darkens and tints the sky and the fog and
@@ -46,14 +47,21 @@
 // returns GPU memory exactly. No allocation per frame: typed arrays, reused scratch vectors and
 // persistent update ranges.
 import { CELESTIAL_POLE_ELEVATION_DEG, MOON_ANGULAR_RADIUS, SUN_ANGULAR_RADIUS } from '../../render/sky.js';
-import { resolveCelestialParams } from './celestial/params.js';
+import { MAX_COMET_FRAGMENTS, resolveCelestialParams } from './celestial/params.js';
 import { ownsPresetAudio, sendVoiceLevel } from './engineKit.js';
 import { CORONA_EXTENT, createCometMesh, createEclipseMeshes, createMeteorMesh, createRainbowMesh } from './celestial/materials.js';
 import { GREEN_FLASH_EXTENT, createNightSkyMeshes, galacticFrame } from './celestial/nightSky.js';
 
 const METEOR_CAPACITY = 48;
 const METEOR_STRIDE = 16;
-const COMET_CAPACITY = 3;
+/** Comet quads: three comets' heads and the fragments of a breakup (MAX_COMET_FRAGMENTS). */
+const COMET_CAPACITY = 3 + MAX_COMET_FRAGMENTS + 1;
+/** Numbers per breakup fragment: along-orbit share, lateral offset, tail scale, head scale, brightness, delay. */
+const FRAGMENT_STRIDE = 6;
+/** Seconds the breakup's flare takes to fall back (time constant). */
+const FLARE_DECAY = 10;
+/** A fragment's lateral scatter reaches its full size this many seconds after it splits off. */
+const FRAGMENT_SPREAD_SECONDS = 60;
 const ECLIPSE_CAPACITY = 2;
 const RAINBOW_CAPACITY = 3;
 /** Instances of each night-sky component drawn at once (blood moon, green flash, noctilucent, galaxy). */
@@ -361,10 +369,12 @@ export function createCelestialEngine() {
     data.visibility = darkSky(params.daylight);
     if (dt <= 0) return;
     data.meteorTimer -= dt;
+    // Meteors from a breaking comet stream in only once it has split.
+    const streaming = data.meteorsAfter <= 0 || data.age >= data.meteorsAfter;
     while (data.meteorTimer <= 0) {
       // Poisson arrivals at `rate` per minute (the seeded generator keeps the stream reproducible).
       data.meteorTimer += -Math.log(1 - data.rng() * 0.999999) * (60 / params.rate);
-      if (data.visibility * data.presence > 0.05) spawnMeteor(instance);
+      if (streaming && data.visibility * data.presence > 0.05) spawnMeteor(instance);
     }
     data.flash *= Math.exp(-FLASH_DECAY * dt);
     if (data.voice) data.voice.setIntensity(data.visibility * data.presence * Math.min(1, params.rate / 30));
@@ -389,7 +399,12 @@ export function createCelestialEngine() {
     writeSkyQuad(comets.mesh.instanceMatrix.array, slot, direction, away, length, width, length * 0.5);
     const out = slot * 4;
     const looks = comets.look.array;
-    looks[out] = params.brightness * visibility * data.presence * data.tierVisibility;
+    // A breakup flares the nucleus as it splits, then leaves it dimmer (its mass shared out).
+    const breakup = params.breakup;
+    const since = breakup ? data.age - breakup.start : -1;
+    const split = since >= 0 ? breakup.remain + (breakup.flare - breakup.remain) * Math.exp(-since / FLARE_DECAY) : 1;
+    data.cometSplit = since >= 0 ? split : 0;
+    looks[out] = params.brightness * visibility * data.presence * data.tierVisibility * split;
     looks[out + 1] = params.curvature;
     looks[out + 2] = params.ionTail;
     looks[out + 3] = data.seedValue;
@@ -404,7 +419,59 @@ export function createCelestialEngine() {
     ion[out + 2] = data.cometIon.b;
     ion[out + 3] = width / length;
     cometCursor++;
+    if (since >= 0) writeFragments(instance, direction, away, since, visibility);
     flushMesh(comets.mesh, cometCursor, lists.comets);
+  }
+
+  /**
+   * The breakup's fragments, each a small comet of its own: split off one by one (stagger), drifting
+   * along the orbit behind the nucleus (the anti-sun line on the sky, the away vector) at its own
+   * share of the drift and scattering sideways, each with a short tail pointing away from the sun.
+   */
+  function writeFragments(instance, direction, away, since, visibility) {
+    const data = instance.data;
+    const params = data.params.comet;
+    const breakup = params.breakup;
+    const fragments = data.fragments;
+    const side = scratch.side.crossVectors(direction, away).normalize();
+    const looks = comets.look.array;
+    const dust = comets.dust.array;
+    const ion = comets.ion.array;
+    let shown = 0;
+    for (let index = 0; index < data.fragmentCount && cometCursor < COMET_CAPACITY; index++) {
+      const record = index * FRAGMENT_STRIDE;
+      const age = since - fragments[record + 5];
+      if (age < 0) continue;
+      const alongAngle = breakup.drift * age * fragments[record] * DEG;
+      const lateral = breakup.spread * fragments[record + 1] * Math.min(1, age / FRAGMENT_SPREAD_SECONDS) * DEG;
+      const fragment = scratch.fragment.copy(direction).addScaledVector(away, alongAngle).addScaledVector(side, lateral).normalize();
+      // Its tail points away from the sun along the sky at its own place.
+      const tail = scratch.tailAxis.copy(ctx.state.time.sunDirection).multiplyScalar(-1);
+      tail.addScaledVector(fragment, -tail.dot(fragment));
+      if (tail.lengthSq() < 1e-8) tail.copy(away);
+      tail.normalize();
+      const length = params.tailLength * fragments[record + 2] * DEG;
+      const width = params.tailWidth * fragments[record + 2] * 0.7 * DEG;
+      const slot = cometCursor;
+      writeSkyQuad(comets.mesh.instanceMatrix.array, slot, fragment, tail, length, width, length * 0.5);
+      const out = slot * 4;
+      const emerge = smooth(age, 0, 4);
+      looks[out] = params.brightness * fragments[record + 4] * visibility * data.presence * data.tierVisibility * emerge;
+      looks[out + 1] = params.curvature * 0.6;
+      looks[out + 2] = params.ionTail * 0.5;
+      looks[out + 3] = data.seedValue + index * 7.3;
+      dust[out] = data.cometDust.r;
+      dust[out + 1] = data.cometDust.g;
+      dust[out + 2] = data.cometDust.b;
+      dust[out + 3] = Math.min(0.4, (params.headSize * fragments[record + 3] * DEG) / length);
+      ion[out] = data.cometIon.r;
+      ion[out + 1] = data.cometIon.g;
+      ion[out + 2] = data.cometIon.b;
+      ion[out + 3] = width / length;
+      cometCursor++;
+      shown++;
+    }
+    data.fragmentsShown = shown;
   }
 
   // ---- Eclipse ------------------------------------------------------------------------------------
@@ -769,6 +836,7 @@ export function createCelestialEngine() {
     const params = data.params;
     const values = data.modifierValues;
     let weight = 0;
+    values.aurora = 0;
     if (params.eclipse) {
       weight = data.eclipseWeight;
     } else {
@@ -793,6 +861,7 @@ export function createCelestialEngine() {
       if (skyValues.fogDensity !== undefined) values.fogDensity = 1 + (skyValues.fogDensity - 1) * staticWeight;
       if (skyValues.skyTintAmount !== undefined) values.skyTintAmount = Math.max(values.skyTintAmount, skyValues.skyTintAmount * staticWeight);
       if (skyValues.fogColorAmount !== undefined) values.fogColorAmount = Math.max(values.fogColorAmount, skyValues.fogColorAmount * staticWeight);
+      if (skyValues.aurora !== undefined) values.aurora = skyValues.aurora * staticWeight;
       weight = Math.max(weight, staticWeight > 0 ? 1 : 0);
     }
     if (data.flash > 0.002) {
@@ -852,6 +921,9 @@ export function createCelestialEngine() {
         across: new THREE.Vector3(),
         target: new THREE.Vector3(),
         matrix: new THREE.Matrix4(),
+        side: new THREE.Vector3(),
+        fragment: new THREE.Vector3(),
+        tailAxis: new THREE.Vector3(),
       };
       galaxyFrame = galacticFrame(THREE);
     },
@@ -882,6 +954,11 @@ export function createCelestialEngine() {
         rightZ: Math.sin(heading),
         radiant: null,
         cometDirection: null,
+        cometSplit: 0,
+        fragmentCount: 0,
+        fragments: null,
+        fragmentsShown: 0,
+        meteorsAfter: 0,
         meteorTimer: 0,
         meteorsActive: 0,
         meteorsSpawned: 0,
@@ -957,7 +1034,11 @@ export function createCelestialEngine() {
       if (resolved.comet) {
         const comet = resolved.comet;
         let now;
-        if (comet.position) now = directionFrom(comet.position.azimuth, comet.position.elevation, new THREE.Vector3());
+        if (comet.aim === 'heading') {
+          // Toward the activation heading (a comet over the sea ahead); position turns and lifts it.
+          const azimuth = (Number.isFinite(params.heading) ? params.heading : 0) + (comet.position ? comet.position.azimuth : 0);
+          now = directionFrom(azimuth, comet.position ? comet.position.elevation : 18, new THREE.Vector3());
+        } else if (comet.position) now = directionFrom(comet.position.azimuth, comet.position.elevation, new THREE.Vector3());
         else {
           // Seeded and circumpolar: 18-32 degrees from the pole, so it stays up all night.
           const u = new THREE.Vector3();
@@ -971,6 +1052,25 @@ export function createCelestialEngine() {
         data.cometDirection = comet.sidereal ? toStarFrame(now, new THREE.Vector3()) : now;
         data.cometDust = new THREE.Color(comet.color);
         data.cometIon = new THREE.Color(comet.ionColor);
+        if (comet.breakup) {
+          const breakup = comet.breakup;
+          data.fragmentCount = Math.round(breakup.fragments[0] + rng() * (breakup.fragments[1] - breakup.fragments[0]));
+          data.fragments = new Float64Array(data.fragmentCount * FRAGMENT_STRIDE);
+          for (let index = 0; index < data.fragmentCount; index++) {
+            const record = index * FRAGMENT_STRIDE;
+            data.fragments[record] = 0.3 + 0.7 * rng();
+            data.fragments[record + 1] = rng() * 2 - 1;
+            data.fragments[record + 2] = 0.22 + 0.3 * rng();
+            data.fragments[record + 3] = 0.35 + 0.3 * rng();
+            data.fragments[record + 4] = 0.35 + 0.45 * rng();
+            data.fragments[record + 5] = index * breakup.stagger * (0.6 + 0.8 * rng());
+          }
+        }
+        // Meteors fromComet stream away from the comet itself (with a breakup, from the split on).
+        if (resolved.meteors && resolved.meteors.fromComet) {
+          data.radiant = comet.sidereal ? data.cometDirection.clone() : toStarFrame(now, new THREE.Vector3());
+          data.meteorsAfter = comet.breakup ? comet.breakup.start : 0;
+        }
       }
       if (resolved.eclipse) {
         const eclipse = resolved.eclipse;
@@ -988,7 +1088,7 @@ export function createCelestialEngine() {
         if (resolved.eclipse || resolved.sky || resolved.meteors) {
           data.modifier = ctx.sky && typeof ctx.sky.addModifier === 'function' ? ctx.sky.addModifier(`${id}:celestial`, { priority: MODIFIER_PRIORITY }) : null;
           data.modifierValues = {
-            weight: 0, sunIntensity: 1, ambient: 1, fogDensity: 1, darkness: 0, stars: 0, overcast: 0,
+            weight: 0, sunIntensity: 1, ambient: 1, fogDensity: 1, darkness: 0, stars: 0, overcast: 0, aurora: 0,
             skyTint: new THREE.Color(resolved.sky && resolved.sky.values.skyTint !== undefined ? resolved.sky.values.skyTint : resolved.meteors && !resolved.eclipse ? 0xcff7e2 : 0x1b2350),
             skyTintAmount: 0,
             fogColor: new THREE.Color(resolved.sky && resolved.sky.values.fogColor !== undefined ? resolved.sky.values.fogColor : 0x4a3a4c),
@@ -1178,6 +1278,7 @@ export function createCelestialEngine() {
         meteorsSpawned: data.meteorsSpawned,
         visibility: data.visibility,
         flash: data.flash,
+        comet: data.params.comet ? { split: data.cometSplit, fragments: data.fragmentCount, fragmentsShown: data.fragmentsShown } : null,
         eclipse: data.params.eclipse ? { uncovered: data.eclipseUncovered, totality: data.eclipseTotality, weight: data.eclipseWeight, quiet: data.quiet } : null,
         glory: { cloudGlory: ctx.uniforms.cloudGlory.value, cloudBow: ctx.uniforms.cloudBow.value },
         lunarEclipse: data.params.lunarEclipse ? { visibility: data.nightLevel, rimAngle: data.rimAngle } : null,

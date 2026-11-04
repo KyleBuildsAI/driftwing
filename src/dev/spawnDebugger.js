@@ -4,7 +4,10 @@
 // Sections:
 //   Presets    the preset list, filtered by category, kind, rarity and heavy; Spawn force-spawns a
 //              preset ahead of the craft (at the chosen distance, ignoring the budgets); Nearest
-//              teleports to the nearest site of that preset from the site feed
+//              teleports to the nearest site of that preset from the site feed; Force combo (the
+//              legendary combos and the midnight sun) stages one deterministically: its time and
+//              weather, its place (snow, sea, coast, landmark or site), a viewpoint, what it needs
+//              awake, then the combo with its members on that spot (comboStaging.js)
 //   Time       a time-of-day scrubber and presets
 //   Director   the spawns system's director (getState and getNearby): drought and pacing, weather,
 //              heavy count and shed level, lights and engine use, rarity tiers, cooldowns,
@@ -19,6 +22,7 @@
 // from inside. While it has focus, keys stay in the panel; while it is closed it listens to F9 only,
 // so it never takes a flight key.
 import './spawnDebugger.css';
+import { hasComboStaging, stageCombo } from './comboStaging.js';
 
 const TOGGLE_KEY = 'F9';
 const REFRESH_HZ = 4;
@@ -204,6 +208,21 @@ export function createSpawnDebugger(ctx) {
     renderActive(true);
   }
 
+  /** Stages and forces a legendary combo (or the midnight sun) the way the owner's checklist does. */
+  async function forceCombo(preset) {
+    notify(`Staging ${preset.name}...`);
+    let result = null;
+    let failure = null;
+    try {
+      result = await stageCombo(ctx, preset.id);
+    } catch (error) {
+      failure = error && error.message ? error.message : String(error);
+    }
+    if (result) notify(`${preset.name}: forced at ${result.place.label} (${result.id}).`);
+    else notify(`${preset.name} could not be staged: ${failure}.`, 'warning');
+    renderActive(true);
+  }
+
   function teleportToNearest(preset) {
     const player = state.player.position;
     if (!manager.getSiteFeed()) {
@@ -270,6 +289,11 @@ export function createSpawnDebugger(ctx) {
       const nearestButton = button('Nearest', preset.kind === 'site' ? `Teleport near the nearest ${preset.name}` : 'Only sites have places to teleport to', () => teleportToNearest(preset));
       nearestButton.disabled = preset.kind !== 'site';
       item.append(text, spawnButton, nearestButton);
+      if (hasComboStaging(preset.id)) {
+        item.append(button('Force combo', `Stage ${preset.name}: its time, weather and place, then force it there`, () => {
+          forceCombo(preset);
+        }));
+      }
       presetList.append(item);
     }
     presetEmpty.textContent = presets.length === 0 ? 'No presets registered yet.' : shown.length === 0 ? 'No preset matches these filters.' : '';

@@ -82,6 +82,7 @@ The frame: a compass `heading` (degrees) from the activation; `along` is forward
 | `kiteSlalom` | kites flying from a hilltop on long strings, one beside every off-line checkpoint of the `challenge` course, with tails and streamers | none | a challenge course; every string a SENSOR capsule tagged `kiteString` (a miss, never a crash) |
 | `archChain` | a line of v1-style natural stone arches with strata, caps and rubble, one around each of the preset's challenge gates (Phase 3, the five-arch chain) | `flatten` (optional: a level floor) | colliders (box legs, capsule ribs), crown perches, a wind-driven voice |
 | `hoodoos` | a field of banded badland hoodoos with capstones and fallen blocks, in seeded clusters (Phase 3) | none | colliders (capsule shafts, capstone cylinders), perches on every top, a wind-driven voice |
+| `iceRidges` | pressure ridges on a frozen lake: wandering lines of tilted ice slabs, only where the site's ice body holds ice | the site's `waters[water]` (its level and basin) | capsule colliders along every ridge, approach-driven voice |
 
 Without its stamp (a debug spawn, or a site whose preset lists none) every recipe still builds:
 the bridge spans `span` metres across the heading on trestles, the strip is draped along the
@@ -223,6 +224,28 @@ spread around the site, kept apart.
 | `chimes` | bool | | true | a fly-through gate between every pair of neighbouring spires that rings the voice's `chime` |
 | `maxGap` | m | 5..500 | 75 | spires farther apart get no chime gate |
 | `approach` | m | 50..20000 | 1500 | the approach voice rises from silent at this distance to full at 40 m (the crystal recipe's pitch follows the intensity) |
+
+## iceRidges
+
+Phase 3, the frozen lake (91). Reads the site's ice body (`params.site.waters[water]`: its level and
+the basin that clips it, `waterOutlineContains`) and lays ridges across it, walking from a seeded
+start on the ice both ways, wandering a little; a slab stands only inside the body's outline over
+ground below its level. Each slab is a thin block standing along the ridge, leaning 15-50 degrees to
+one side, with a rimed top. Every 26 m stretch of a ridge is one capsule collider (`iceRidge`,
+surface `ice`). A site whose body holds no ice for a ridge is refused (an error naming `water`).
+Without a site (a debug spawn) the ridges lie on the ground around the anchor within `spread`.
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `water` | index | 0..16 | 0 | which water body of the site |
+| `ridges` | count | 1..12 | [3, 5] | |
+| `length` | m | 20..2000 | [160, 340] | each ridge, end to end |
+| `height` | m | 0.3..12 | [1.2, 3.4] | a ridge's slab height (each slab 0.55-1.15 times) |
+| `slab` | m | 0.5..20 | [2.4, 5.5] | slab length; slabs stand 0.62 of a slab apart |
+| `wander` | deg | 0..90 | 18 | how much a ridge bends along its way |
+| `colors` | 0xRRGGBB array | | `[0xe6f2f8, 0xc4dceb, 0x9fc4da]` | ice white to deep blue, a seeded pick per slab |
+| `spread` | m | 10..3000 | 220 | the reach without a site's basin |
+| `approach` | m | 50..20000 | 1500 | the approach voice rises from silent at this distance |
 
 ## gates
 
@@ -864,7 +887,14 @@ and lintel capsules and its landings, the airfield's hangar hulls (landable roof
 control tower and windsock pole, the crystal and shard hulls (perches on the spire tips) and boulder
 spheres, the islands' rock body (four wedge hulls of the actual ring vertices), trees, boulders and
 roots. Props under 2 m tall carry none. The node labs run the engine without a collider service and
-skip all of it.
+skip all of it. Phase 3: the ice ridges' capsules (`iceRidges`).
+
+### Arc points (Phase 3)
+
+A recipe may offer points for arcs of light in `out.arcPoints` (local `[x, y, z]` arrays); the engine
+keeps them in world space as `instance.data.arcPoints` (x, y, z per point). The `spires` recipe
+offers each spire's tip (96 % of its height up its leaning axis), and the light-effect engine's
+`arcs` (the resonating spires, 99) leap between them and raise the instance's live `glow` param.
 
 Phase 3 adds `localHeightfield(part, x0, z0, cell, cols, rows, heights, bottom, surfaceHeightAt, tags)`
 (a landable top such as the glacier's; `surfaceHeightAt` publishes the exact top for landings) and
