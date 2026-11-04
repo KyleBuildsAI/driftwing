@@ -17,6 +17,7 @@ import { VIADUCT_DEFAULTS, buildViaduct } from './viaduct.js';
 import { DAM_DEFAULTS, buildDam } from './dam.js';
 import { OASIS_DEFAULTS, buildOasis } from './oasis.js';
 import { LABYRINTH_DEFAULTS, buildLabyrinth } from './labyrinth.js';
+import { FIREBALL_DEFAULTS, buildFireball } from './fireball.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -39,6 +40,7 @@ export const RECIPES = Object.freeze({
   dam: Object.freeze({ build: buildDam, defaults: DAM_DEFAULTS, audioIntensity: 'constant' }),
   oasis: Object.freeze({ build: buildOasis, defaults: OASIS_DEFAULTS, audioIntensity: 'constant' }),
   labyrinth: Object.freeze({ build: buildLabyrinth, defaults: LABYRINTH_DEFAULTS, audioIntensity: 'constant' }),
+  fireball: Object.freeze({ build: buildFireball, defaults: FIREBALL_DEFAULTS, audioIntensity: 'recipe' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

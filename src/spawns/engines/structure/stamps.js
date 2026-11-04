@@ -31,6 +31,7 @@ export const RECIPE_STAMP_TYPES = Object.freeze({
   dam: 'basin',
   oasis: 'basin',
   labyrinth: 'flatten',
+  fireball: null,
 });
 
 /** Stamp sizes each recipe prefers over the stamp type's own defaults (m, or [min, max] ranges). */

@@ -81,6 +81,7 @@ const ALL_ENTRIES = Object.freeze([
   Object.freeze({ id: 'damSpillway', colliders: 10, perches: true }),
   Object.freeze({ id: 'desertOasisCaravan', colliders: 15, perches: true, torches: true, fauna: 'caravan' }),
   Object.freeze({ id: 'labyrinth', colliders: 60, perches: true, blocks: 60 }),
+  Object.freeze({ id: 'fireballImpact', movers: 3 }),
 ]);
 const BATCH = ONLY ? ALL_ENTRIES.filter((entry) => ONLY.includes(entry.id)) : ALL_ENTRIES;
 
@@ -538,6 +539,44 @@ function testLabyrinth() {
   check('memory', 'labyrinth: dispose frees every hedge block', lab.engine.stats().blocks === 0, `${lab.engine.stats().blocks} blocks left`);
 }
 
+function testFireball() {
+  const lab = createLab();
+  const id = lab.spawn('fireballImpact');
+  const part = partOf(lab, id);
+  lab.engine.setLOD(part, 'near');
+  const movers = ['bolide', 'flash', 'scar'];
+  const timeline = part.data.moverState.custom.timeline;
+  const delay = timeline[1];
+  const fall = timeline[2];
+  const voice = lab.voices.at(-1);
+  const preset = PRESET_BY_ID.fireballImpact;
+  check('movers', 'fireball: no terrain stamp (the ground keeps its height) and the emitters start at the impact', (preset.stamps ?? []).length === 0
+    && preset.engines.filter((entry) => entry.engine === 'emitter').every((entry) => entry.params.startDelay === delay + fall), `impact at ${delay + fall} s`);
+  lab.step(Math.round(60 * delay * 0.5));
+  check('movers', 'fireball: before its delay the sky is empty and the voice silent', movers.every((name) => moverPose(part, name, movers).visible === 0) && part.data.moverState.level[0] === 0, '');
+  lab.step(Math.round(60 * (delay * 0.5 + fall * 0.2)));
+  const early = moverPose(part, 'bolide', movers);
+  const earlyLevel = part.data.moverState.level[0];
+  lab.step(Math.round(60 * fall * 0.6));
+  const late = moverPose(part, 'bolide', movers);
+  const lateLevel = part.data.moverState.level[0];
+  const range = (pose) => Math.hypot(pose.x, pose.y - timeline[3], pose.z);
+  check('movers', 'fireball: the bolide comes down its line toward the impact, its roar rising, the voice on its head', early.visible === 1 && late.visible === 1 && range(late) < range(early) * 0.6 && late.y < early.y && lateLevel > earlyLevel && part.data.moverState.voice[3] === 1,
+    `${(range(early) / 1000).toFixed(1)} km -> ${(range(late) / 1000).toFixed(1)} km out, ${early.y.toFixed(0)} -> ${late.y.toFixed(0)} m up, level ${earlyLevel.toFixed(2)} -> ${lateLevel.toFixed(2)}`);
+  lab.step(Math.round(60 * fall * 0.2) + 6);
+  const flash = moverPose(part, 'flash', movers);
+  const scar = moverPose(part, 'scar', movers);
+  const boomsAtImpact = voice.triggers.filter((name) => name === 'boom').length;
+  check('movers', 'fireball: at the impact the flash swells, the scar appears and the bolide is gone', flash.visible === 1 && scar.visible === 1 && moverPose(part, 'bolide', movers).visible === 0, `flash scale ${flash.scale.toFixed(0)}, scar scale ${scar.scale.toFixed(2)}`);
+  const due = timeline[9] - (delay + fall);
+  lab.step(Math.round(60 * (due + 0.5)));
+  check('movers', 'fireball: the boom arrives after the sound has crossed the distance to the player', boomsAtImpact === 0 && voice.triggers.filter((name) => name === 'boom').length === 1 && due > 0.5, `due ${due.toFixed(2)} s after the impact`);
+  lab.step(60 * 60);
+  const glow = part.data.moverState.glow[0];
+  check('movers', 'fireball: the scar cools (its glow falls) and the flash is long gone', glow < 0.5 && glow > 0.05 && moverPose(part, 'flash', movers).visible === 0 && moverPose(part, 'scar', movers).visible === 1, `glow ${glow.toFixed(2)} a minute on`);
+  lab.manager.deactivate(id, 'test');
+}
+
 function testDam() {
   const lab = createLab();
   const id = lab.spawn('damSpillway');
@@ -832,6 +871,7 @@ if (BATCH.some((entry) => entry.id === 'mountaintopObservatory')) testObservator
 if (BATCH.some((entry) => entry.id === 'steamTrainViaduct')) testViaduct();
 if (BATCH.some((entry) => entry.id === 'damSpillway')) testDam();
 if (BATCH.some((entry) => entry.id === 'labyrinth')) testLabyrinth();
+if (BATCH.some((entry) => entry.id === 'fireballImpact')) testFireball();
 testWind();
 testMemory();
 await testAllocation();

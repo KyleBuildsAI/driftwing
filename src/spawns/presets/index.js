@@ -44,6 +44,7 @@ import steamTrainViaduct from './steamTrainViaduct.js';
 import damSpillway from './damSpillway.js';
 import desertOasisCaravan from './desertOasisCaravan.js';
 import labyrinth from './labyrinth.js';
+import fireballImpact from './fireballImpact.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -89,6 +90,7 @@ export const PRESETS = Object.freeze([
   damSpillway,
   desertOasisCaravan,
   labyrinth,
+  fireballImpact,
 ]);
 
 /** Presets by id. */
