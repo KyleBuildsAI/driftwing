@@ -78,15 +78,15 @@ export default Object.freeze({
         const strength = option(options, 'strength', 1, 0, 1.5);
         if (name === 'crack') {
           cracks++;
-          strike(reportGain.gain, time, 3 * strength, 0.003, 0.5);
-          strike(boomGain.gain, time + 0.02, 2.2 * strength, 0.02, 2.4);
+          strike(reportGain.gain, time, 2.2 * strength, 0.003, 0.5);
+          strike(boomGain.gain, time + 0.02, 1.8 * strength, 0.02, 2.4);
           sweep(boom.filter.frequency, time, 180, 70, 1.6);
           swell(rumbleGain.gain, time + 0.3, 1.1 * strength, 0.8, 2.2, 4);
           return true;
         }
         if (name === 'splash') {
           splashes++;
-          strike(boomGain.gain, time, 2.6 * strength, 0.05, 2.8);
+          strike(boomGain.gain, time, 2.1 * strength, 0.05, 2.8);
           sweep(boom.filter.frequency, time, 320, 55, 2);
           swell(washGain.gain, time + 0.15, 1.6 * strength, 0.5, 1.4, 4.5);
           sweep(wash.filter.frequency, time + 0.15, 1800, 500, 3);
