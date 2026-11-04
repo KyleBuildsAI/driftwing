@@ -1064,7 +1064,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 | # | Presets | Branch | Status |
 | --- | --- | --- | --- |
-| B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | not started |
+| B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | done, verified on both backends |
 | B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | not started |
 | B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | not started |
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
@@ -1077,6 +1077,80 @@ Each preset ships with its journal title and one-liner, 3+ callouts, its audio r
 FAR lure where heavy, colliders where solid, rarity, filters and lifetime (docs/spawns.md
 template). The challenge-based presets (70, 76-81) use the wave 1 challenge system; the combo
 presets (92-100) use the wave 2 combo scheduling.
+
+### Wave 3 - p3/presets-31-40
+
+Presets 31-40 (weather and sky, volcanic and geo), each its own file in `src/spawns/presets/`.
+
+Done:
+- `gale` audio recipe (`src/audio/recipes/gale.js`): a howling storm wind with gust swells, a grit
+  hiss and a low rumble (params `grit`, `howl`, `depth`), for the storm walls of presets 31-33.
+- weatherVolume `canopyGrit` (grit streaks and a sandblasted rim on the canopy in the first-person
+  views, inside the volume or its dust shafts; 0 by default, the canopy unchanged).
+- weatherVolume form `ring` (hurricane: stadium eyewall flaring with height, spiral bands, canopy;
+  params `flare`, `spin`, `bands`, `canopy`; its voice stands on the eyewall nearest the camera and
+  ducks in the eye) and the windModifier source type `cyclone` (calm eye, eyewall, decay, inflow,
+  lift, eye subsidence, spiral band gusts turning with the visible bands).
+- Presets 31 sandstorm wall, 32 snow squall, 33 hurricane eye, with their docs/spawns.md rows and
+  sections; `src/dev/presetChecks31.js` (the batch's dev check kit on top of presetChecks.js).
+- weatherVolume form `river` (valley fog river: a fog lake in the valleys connected to the lowest
+  ground, puffs streaming down the valley floors and pouring over saddles on paths traced over the
+  terrain at create; params `flow`, `pours`).
+- `filters.near.sites` with `active` (schema and director): an event gathers at the nearest placed
+  site of the named site presets, or with `active: true` at one whose active state runs (an erupting
+  volcano's live anchor); the director lab's `near` group checks it (90/90).
+- Presets 34 valley fog river (dawn, the `river` form) and 35 dirty thunderstorm (rare; storm weather
+  over an erupting volcano; lightning inside an ash-dark thunderhead), with their docs/spawns.md rows
+  and sections.
+- structure geometry kind `lava` (the lava material: crust plates drifting downstream over glowing
+  cracks, hottest mid-flow, HDR glow brighter at night) and the recipes `lavaChannels` (lava down
+  every carve stamp and on over the real ground to the sea, src/spawns/engines/lavaPath.js; levee
+  blocks; crust slabs at the sea entry), `ejecta` (crater rim blocks, perches on the largest) and
+  `saltPiles` (salt cones at a salt pan's water edge); `structureStamps('lavaChannels')`; the recipe
+  context's `groundAt` and `out.facts`.
+- emitter `seaEntry` (the anchor where the lava flow down a carve stamp meets the sea, traced as the
+  recipe traces it; a flow that finds no sea only fumes); weatherVolume `glow.radius` and
+  `glow.dormant`.
+- Presets 36 lava rivers to the sea, 37 fissure eruption, 38 meteor crater lake, 39 hot spring
+  terraces, 40 salt flat mirror lake (sites; placement tuned so each lies within 40 km of the spawn on
+  DRIFTWING, HARNESS-1 and HARNESS-2), with their docs/spawns.md rows and sections.
+- The batch's step file `tools/steps/presets-31-40.json` (on `src/dev/presetChecks31.js`), the
+  `?test=spawns` scenarios `src/dev/spawnScenarios/batch31.js`, the meteor crater's ejecta blocks in
+  `?test=collision`, the storm walls and the hurricane in `tools/lab/preset-flight.mjs` (glider and
+  jet), and the rare events on their own runs in `tools/lab/preset-pacing.mjs` (the dirty
+  thunderstorm with the volcano due every 2 minutes outside the heavy budget, since a volcano erupts
+  about once in the shared runs' 54 flight hours).
+- The salt flat's mirror is the water material's sky-dome reflection: its comment, docs section and
+  callout no longer claim mirrored clouds, stars or craft.
+
+Verified (2026-11-03/04, dev server and dist-single, seed DRIFTWING unless noted):
+- `tools/steps/presets-31-40.json`: 68/68 on WebGPU and 68/68 on WebGL2, 0 console errors and 0
+  warnings on each. Numbers (WebGPU): sandstorm gust front 14.5 m/s turbulence 0.8, grit 0.9 in the
+  cockpit; squall gust front 23.7 m/s turbulence 0.75, downdraft -6.5 m/s under the core; hurricane
+  eye 7.6 m/s turbulence 0.07, eyewall 44.5 m/s turbulence 0.95 with rain 0.8 on the canopy, outer
+  bands 16.4 m/s; fog river 10 flow paths, 253 puffs; dirty thunderstorm 6 strikes in 10 s, all in
+  the cloud; lava rivers 2 flows, 1909 m of lava, 3/3 sea entries on the water, 12 colliders; fissure
+  eruption started and ended on its site (the curtain of fire and the glowing cloud deck in the
+  shot), 6 colliders; crater 109 blocks, 73 solid, 4 perches, its lake; hot springs 6 pools; salt flat
+  175 salt cones (colliders) and its thin mirror film. Every spawn disposed back to its GPU memory,
+  wind source, collider and sky modifier baselines.
+- `run-harness --test spawns --presets <31-40>`: PASS on WebGPU and WebGL2 (10/10 each: GPU memory,
+  heap, wind sources, lights, modifiers, colliders back; 0/0 console). One 0.54 s frame while the
+  lava rivers show on both backends (not attributed by the harness; reported, not chased).
+- `run-harness --test collision`: PASS on both backends (155/155 strikes, 16/16 targets with the
+  crater's blocks, 0 pass-throughs, 0 penetrations). `--test terrain --presets real` (WebGPU): PASS,
+  9/9 stamp types on real sites (the crater, terraces and basin now on presets 38-40, the fissure's
+  carve), 0 cracks, worker parity, collision 0.00003 m worst.
+- Labs: preset-flight 22/22, preset-pacing 5/5, director 90/90, terrain 474/474, water 34/34, spawns
+  101/101, preset-wind 12/12, structure 75/75, wind-engines 56/56, colliders 84/84, audio 197/197
+  (alone), every other lab passing, except eagle 49/50 (its allocation check, 144 B/tick on the base
+  commit too: the known issue in the wave 3 notes). docs-check 285/285, test:v1 2/2, build and
+  build:single (V1 SHA-256 matches); the built shell and V2 smoke 0/0 on both backends, screenshots
+  differ.
+
+Open: none for this batch. Merge notes for I3: presets/index.js, spawnScenarios.js, the audio recipe
+index (gale), docs/spawns.md (table rows 31-40 and sections), docs/architecture.md (the batch kit,
+lavaPath.js and two lab rows) and the engine pages carry this batch's additions.
 
 ### Wave 4: discovery and verification, then the tag
 

@@ -34,7 +34,9 @@
 //   api           getNearby is sorted and well formed; getState carries the debugger's fields
 //   near          filters.near: every activation of a preset gathered at landmarks lies exactly on a
 //                 Phase 1 landmark of its types (the real world generator's landmarkSitesNear), still
-//                 ahead and inside its distance band; without landmarkSitesNear it never activates
+//                 ahead and inside its distance band; without landmarkSitesNear it never activates;
+//                 with active sites (preset 35's rule) every start sits on a volcano whose eruption
+//                 runs, and with no volcano in the world it never starts
 //   track         (Phase 3, contract i.1) a craft drifting east with its nose north gets its content
 //                 within 60 degrees of the drift line; a hover keeps the nose; a turn of the track eases
 //                 over about a second
@@ -1622,6 +1624,36 @@ function testNearFilter() {
 }
 
 /**
+ * filters.near with active sites (the dirty thunderstorm's rule): a common event gathered at erupting
+ * volcanoes flies twelve hours with the often-erupting volcano fixture; every start must sit on a
+ * volcano's anchor while its eruption runs. With no volcano in the world it never starts.
+ */
+function testNearActiveSites() {
+  // Its own engine (the volcano holds the emitter budget), and no other events to outrank it: the
+  // presets are the stub sites (the stub placement places them all) and this one event.
+  const ashStorm = eventPreset('ashStorm', 'geo', 'common', {
+    engines: ['lightEffect'], candidates: { cellSize: 6000, bucketSeconds: 300, chance: 0.8 }, duration: [90, 120],
+    filters: { minDistance: 2000, maxDistance: 20000, near: { sites: ['volcano'], active: true, radius: 8000 } },
+  });
+  const base = STUB_PRESETS.filter((preset) => preset.kind === 'site').map((preset) => (preset.id === 'volcano' ? FREQUENT_VOLCANO : preset));
+  const fly = (presets, siteChance) => {
+    const wanderer = wanderingPlayer('near-active', 55, [400, 1400]);
+    return runCustom({ seed: 'COMBO-VOLCANO', presets, hours: 12, player: wanderer.player, step: (dt, time) => wanderer.step(dt, time), siteChance });
+  };
+  const run = fly([...base, ashStorm], 0.2);
+  const storms = run.manager.records.filter((record) => record.presetId === 'ashStorm' && !record.refused);
+  const eruptions = run.manager.records.filter((record) => record.presetId === 'volcano' && record.source === 'director' && !record.refused);
+  const erupting = (storm) => eruptions.some((eruption) => eruption.time <= storm.time && Math.hypot(eruption.x - storm.x, eruption.z - storm.z) < 1
+    && !run.manager.ends.some((end) => end.id === eruption.id && end.time <= storm.time));
+  const off = storms.filter((storm) => !erupting(storm));
+  check('near', 'with active sites every start sits on a volcano while its eruption runs', storms.length > 0 && off.length === 0, `${storms.length} starts, ${eruptions.length} eruptions, ${off.length} off an erupting volcano`);
+  // No sites at all: the stub placement would place volcanoes the list no longer knows.
+  const without = fly([ashStorm], 0);
+  const strays = without.manager.records.filter((record) => record.presetId === 'ashStorm');
+  check('near', 'with active sites and no volcano it never starts', strays.length === 0, `${strays.length} starts`);
+}
+
+/**
  * --presets real: which of the game's presets filled the drought flights, per speed (a report next to
  * the pacing checks, which run on the same presets).
  */
@@ -1653,6 +1685,7 @@ if (REAL_MODE) {
   testWeather();
   await testShedding();
   testNearFilter();
+  testNearActiveSites();
   testTrack();
   testCraftWeighting();
   testCombos();

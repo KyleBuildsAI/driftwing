@@ -307,8 +307,15 @@ function describePreset(preset, index) {
     settings.chance = SITE_ACTIVE_DEFAULTS.chance;
   }
   const engines = (preset.engines || []).map((entry) => entry.engine);
-  const near = filters.near && Array.isArray(filters.near.landmarks) && Number.isFinite(filters.near.radius)
-    ? { landmarks: filters.near.landmarks, radius: filters.near.radius }
+  // filters.near: landmarks and / or site presets (with active: true, a site whose active state runs).
+  const nearFilter = filters.near;
+  const near = nearFilter && Number.isFinite(nearFilter.radius) && (Array.isArray(nearFilter.landmarks) || Array.isArray(nearFilter.sites))
+    ? {
+      landmarks: Array.isArray(nearFilter.landmarks) ? nearFilter.landmarks : null,
+      sites: Array.isArray(nearFilter.sites) ? nearFilter.sites : null,
+      active: nearFilter.active === true,
+      radius: nearFilter.radius,
+    }
     : null;
   // An override preset is scheduled per night (src/spawns/overrides.js), never rolled as a candidate.
   const override = preset.override || null;
@@ -733,19 +740,37 @@ export function createDirector({
   }
 
   /**
-   * filters.near: the nearest Phase 1 landmark of the preset's types within its radius of the seeded
-   * point, as { x, z }, or null. Cached by the candidate's hash (landmarks never move).
+   * filters.near: the nearest Phase 1 landmark of the preset's types, or placed site of its site
+   * presets, within its radius of the seeded point, as { x, z }, or null. Cached by the candidate's
+   * hash (landmarks and sites never move). With near.active the site must be one whose active state
+   * runs now (a volcano erupting), which changes, so that answer is worked out again every tick.
    */
   function nearLandmark(info, record) {
-    if (nearCache.has(record.hash)) return nearCache.get(record.hash);
+    const near = info.near;
+    if (!near.active && nearCache.has(record.hash)) return nearCache.get(record.hash);
     if (nearCache.size >= SURFACE_CACHE_LIMIT) nearCache.clear();
     let best = null;
-    if (typeof terrain.landmarkSitesNear === 'function') {
-      let bestDistance = Infinity;
-      const sites = terrain.landmarkSitesNear(record.x, record.z, info.near.radius);
+    let bestDistance = Infinity;
+    if (near.landmarks && typeof terrain.landmarkSitesNear === 'function') {
+      const sites = terrain.landmarkSitesNear(record.x, record.z, near.radius);
       for (let index = 0; index < sites.length; index++) {
         const site = sites[index];
-        if (!info.near.landmarks.includes(site.type)) continue;
+        if (!near.landmarks.includes(site.type)) continue;
+        const distance = Math.hypot(site.x - record.x, site.z - record.z);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = { x: site.x, z: site.z };
+        }
+      }
+    }
+    if (near.sites && near.active) {
+      const site = activeSiteNear(near.sites, record.x, record.z, near.radius);
+      if (site && site.distance < bestDistance) best = { x: site.x, z: site.z };
+    } else if (near.sites && placement) {
+      const sites = placement.sitesNear(record.x, record.z, near.radius);
+      for (let index = 0; index < sites.length; index++) {
+        const site = sites[index];
+        if (!near.sites.includes(site.presetId)) continue;
         const distance = Math.hypot(site.x - record.x, site.z - record.z);
         if (distance < bestDistance) {
           bestDistance = distance;
@@ -754,6 +779,24 @@ export function createDirector({
       }
     }
     nearCache.set(record.hash, best);
+    return best;
+  }
+
+  /**
+   * The nearest site of one of the presets in siteIds whose active state runs now within radius of
+   * (x, z): { x, z, distance } (its live anchor), or null.
+   */
+  function activeSiteNear(siteIds, x, z, radius) {
+    let best = null;
+    for (let index = 0; index < activations.length; index++) {
+      const record = activations[index];
+      if (record.siteId === null || !siteIds.includes(record.info.id)) continue;
+      const instance = spawnManager.getInstance(record.id);
+      const anchor = instance ? instance.anchor || instance.position : null;
+      if (!anchor) continue;
+      const distance = Math.hypot(anchor.x - x, anchor.z - z);
+      if (distance <= radius && (!best || distance < best.distance)) best = { x: anchor.x, z: anchor.z, distance };
+    }
     return best;
   }
 

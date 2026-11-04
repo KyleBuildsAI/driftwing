@@ -83,6 +83,16 @@ preset's section below.
 | 28 | [Crystal spires](#28-crystal-spires) | `crystalSpires` | fantasy | site | uncommon | no | `structure`, `lightEffect` | no |
 | 29 | [Jet stream ribbon](#29-jet-stream-ribbon) | `jetStream` | flightplay | event | uncommon | no | `emitter`, `windModifier` | yes |
 | 30 | [Storm chase](#30-storm-chase) | `stormChase` | setpiece | event | legendary | no | `setPiece` | children |
+| 31 | [Sandstorm wall](#31-sandstorm-wall) | `sandstormWall` | weather | event | uncommon | no | `weatherVolume`, `windModifier`, `emitter` | yes |
+| 32 | [Snow squall](#32-snow-squall) | `snowSquall` | weather | event | common | no | `weatherVolume`, `windModifier`, `emitter` | yes |
+| 33 | [Hurricane eye](#33-hurricane-eye) | `hurricaneEye` | weather | event | rare | yes | `weatherVolume`, `windModifier`, `emitter` | yes |
+| 34 | [Valley fog river](#34-valley-fog-river) | `valleyFogRiver` | weather | event | common | no | `weatherVolume` | no |
+| 35 | [Dirty thunderstorm](#35-dirty-thunderstorm) | `dirtyThunderstorm` | geo | event | rare | no | `weatherVolume`, `lightEffect`, `emitter` | yes |
+| 36 | [Lava rivers to the sea](#36-lava-rivers-to-the-sea) | `lavaRiversToSea` | geo | site | uncommon | no | `structure`, `emitter` | no |
+| 37 | [Fissure eruption](#37-fissure-eruption) | `fissureEruption` | geo | site | rare | yes | `structure`, `emitter`, `weatherVolume` | no |
+| 38 | [Meteor crater lake](#38-meteor-crater-lake) | `meteorCraterLake` | geo | site | uncommon | no | `structure` | no |
+| 39 | [Hot spring terraces](#39-hot-spring-terraces) | `hotSpringTerraces` | geo | site | uncommon | no | `emitter` | slight |
+| 40 | [Salt flat mirror lake](#40-salt-flat-mirror-lake) | `saltFlatMirror` | geo | site | uncommon | no | `structure` | no |
 
 In all: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy. The
 journal's collection count is found / 30 over these presets (`PRESETS` in
@@ -732,6 +742,242 @@ and the storm decays.
 - **Journal:** the "Storm Chaser" entry; `closestTornado` (min, the closest pass to the funnel) and
   `stormsChased` (+1 when you came within 5 km of the funnel).
 
+### Weather and sky (Phase 3)
+
+#### 31. Sandstorm wall
+
+A haboob: a rolling orange wall of dust a kilometre and a half tall and fourteen wide marches downwind
+across the dunes with dust boiling along its foot. Its gust front hits first as a headwind and rough
+air; inside, the world shrinks to a few hundred metres of ochre gloom and grit streaks race across the
+canopy.
+[src/spawns/presets/sandstormWall.js](../src/spawns/presets/sandstormWall.js)
+
+- **Kind:** event, uncommon.
+- **Anchor:** turned downwind (`anchor: { align: 'downwind' }`), so the wall rolls with the wind.
+- **Engines:** `weatherVolume` (a `bank` 14 km long and 2.2 km deep with a tall leading wall (`wall`
+  0.85), 420 ochre puffs, three dust shafts, a dark ochre inside fog, `canopyGrit` 0.9, drifting at
+  11 m/s; owns the voice); `windModifier` (the gust front, following the volume); `emitter` (dust
+  boiling up along the wall's foot, travelling with it).
+- **Filters:** dunes; day, dawn or dusk; clear or building weather; over land; player 0-4500 m;
+  5-12 km ahead.
+- **Candidates:** 9 km cells, 600 s buckets, chance 0.45.
+- **Wind:** a gust front 1150 m ahead of the wall's centre line, 14 km long: 15 m/s of outflow below
+  900 m, 3 m/s of lift at its edge, turbulence 0.8 with 7 m/s gusts; inside the dust, turbulence 0.6.
+- **Sound:** `gale` (howling wind with a thick grit hiss).
+- **LOD:** near 4 km, mid 12 km, far 30 km. **Discovery:** 9 km, in view.
+- **Lifetime:** 360-480 s; despawned beyond 25 + 5 km after 30 s out of view.
+
+#### 32. Snow squall
+
+A squall line sweeps downwind over the snow country: a low, dark-bellied cloud deck dragging curtains
+of heavy snow, a white wall of blowing snow at its foot and spindrift smoking off the ground ahead of
+its gust front. Inside it is a whiteout, with snow streaming past the canopy.
+[src/spawns/presets/snowSquall.js](../src/spawns/presets/snowSquall.js)
+
+- **Kind:** event, common (the snow biome's pacing).
+- **Anchor:** turned downwind.
+- **Engines:** `weatherVolume` (the squall deck: a `bank` 5 km long held 1000 m above the ground,
+  storm 0.7, with three snow shafts and canopy rain, drifting at 9 m/s; owns the voice);
+  `weatherVolume` (the whiteout: a ground-hugging `bank` with a low wall, a white inside fog and
+  `canopyGrit` 0.35 of snow); `windModifier` (the gust front and the downdraft under the core,
+  following the deck); `emitter` (spindrift along the gust front, travelling with it).
+- **Filters:** snow; any hour; building, storm or clearing weather; over land; player 0-5000 m;
+  3-8 km ahead.
+- **Candidates:** 5 km cells, 360 s buckets, chance 0.5.
+- **Wind:** a gust front 900 m ahead: 13 m/s of outflow, 2 m/s of lift, turbulence 0.75 with 8 m/s
+  gusts; under the core a 4 m/s downdraft spreading as an 8 m/s outflow; inside, turbulence 0.45-0.5.
+- **Sound:** `gale` (a howling wind with a snow hiss).
+- **LOD:** near 2500 m, mid 9 km, far 20 km. **Discovery:** 4.5 km, in view.
+- **Lifetime:** 240-360 s; despawned beyond 12 + 3 km after 20 s out of view.
+
+#### 33. Hurricane eye
+
+A hurricane over the open ocean, fifty kilometres across: spiral rain bands sweep in toward a towering
+eyewall, and its cloud canopy stands on the horizon 60 km away. Fly in through the bands and the dark,
+violent eyewall, with 40 m/s winds, heavy rain on the canopy and the sea whipped white below, and punch
+through into the calm eye: still air, a stadium of cloud curving up all around, blue sky above.
+[src/spawns/presets/hurricaneEye.js](../src/spawns/presets/hurricaneEye.js)
+
+- **Kind:** event, rare, heavy. Anvil lure, 12 km tall and 42 km wide.
+- **Engines:** `weatherVolume` (the `ring` form: an eyewall of radius 4.2 km, 11 km tall, flaring
+  1.7 km outward at the top around the clear eye; four spiral rain bands out to 26 km; a canopy out to
+  2.6 radii; rain at the foot of the wall; canopy rain inside; drifting at 5 m/s; its voice stands on
+  the eyewall nearest the camera and ducks in the eye); `windModifier` (the `cyclone` source, following
+  the volume); `emitter` (sea spray swept around under the eyewall).
+- **Filters:** any biome; day, dawn or dusk; clear, building or clearing weather (the eye shows the
+  sky above); over water; player 0-14 000 m; 18-34 km ahead.
+- **Candidates:** 30 km cells, 1800 s buckets, chance 0.4.
+- **Wind:** a cyclone: the eye calm (under 5 m/s, turbulence 0.04), the eyewall 42 m/s with lift and
+  turbulence 0.95 with 9 m/s gusts, falling off as (wall / r)^0.6 to 28 km, inflow at low level, and
+  four spiral bands of gusty air (turbulence 0.5) turning with the visible bands.
+- **Sound:** `gale` (a deep roar with a high howl, reference distance 900 m).
+- **LOD:** near 9 km, mid 30 km, far 70 km. **Discovery:** 25 km, in view.
+- **Lifetime:** 600-780 s; despawned beyond 60 + 8 km after 45 s out of view.
+
+#### 34. Valley fog river
+
+At dawn, cold fog fills the valley floors around the activation to a fixed depth above the lowest
+ground: a white river winding between the ridges, streaming slowly down the valleys and pouring over
+the low saddles into the next valley like a slow waterfall, the peaks standing clear above it in the
+low sun.
+[src/spawns/presets/valleyFogRiver.js](../src/spawns/presets/valleyFogRiver.js)
+
+- **Kind:** event, common.
+- **Engines:** `weatherVolume` (the `river` form: a 33 x 33 terrain grid 3.2 km to each side of the
+  anchor finds the lowest ground; the fog fills the valleys connected to it up to 80 m above it, about
+  two fifths of its 260 puffs lie still in that fog lake and the rest stream at 2.2 m/s along paths
+  traced down the valley floors and over up to three saddles; it forms over 60 s and owns the voice).
+- **Filters:** pine, meadows or snow; dawn only; clear or clearing weather; over land; player
+  0-3500 m; 3-8 km ahead.
+- **Candidates:** 5 km cells, 600 s buckets, chance 0.5.
+- **Wind:** none (the fog lies in still air).
+- **Sound:** `lantern` (a soft, slowly breathing ambient pad, reference distance 600 m).
+- **LOD:** near 3 km, mid 8 km, far 18 km. **Discovery:** 5 km, in view.
+- **Lifetime:** 420-600 s; despawned beyond 12 + 3 km after 30 s out of view.
+
+### Volcanic and geo (Phase 3)
+
+#### 35. Dirty thunderstorm
+
+Over an erupting volcano in storm weather the ash plume builds into a towering, ash-dark thunderhead
+with a spreading anvil, and lightning crackles inside the plume itself: violet-white bolts and
+flickering in-cloud flashes, thunder rolling down the mountain, ash falling from the cloud and grit
+hissing on the canopy inside it.
+[src/spawns/presets/dirtyThunderstorm.js](../src/spawns/presets/dirtyThunderstorm.js)
+
+- **Kind:** event, rare.
+- **Near an erupting volcano:** `filters.near: { sites: ['volcano'], active: true, radius: 8000 }`:
+  the director moves each candidate onto the nearest placed volcano within 8 km whose eruption runs
+  (its live anchor), or rejects it; with no volcano erupting it never starts.
+- **Engines:** `weatherVolume` (a `tower` 7.5 km tall from 2 km up, ash-dark (tint 0x5f5852,
+  storm 0.95) with an anvil leaning 2.4 km downwind, an ash fall shaft, a dark inside fog and
+  `canopyGrit` 0.5); `lightEffect` (26 strikes a minute within 900 m, 70 % in-cloud, violet-white,
+  with the lit cloud glow and thunder; owns the voice); `emitter` (the ash column feeding the cloud,
+  lit from below by the lava).
+- **Filters:** any biome and hour; storm weather; over land; player 0-12 000 m; 3-30 km ahead.
+- **Candidates:** 8 km cells, 600 s buckets, chance 0.6.
+- **Wind:** the volume's own: turbulence 0.6 and a 6 m/s updraft inside the cloud.
+- **Sound:** `thunder` (the strikes' thunder, delayed by distance).
+- **LOD:** near 6 km, mid 20 km, far 45 km. **Discovery:** 9 km, in view.
+- **Lifetime:** 300-420 s; despawned beyond 30 + 5 km after 30 s out of view.
+
+#### 36. Lava rivers to the sea
+
+On a volcanic coast two rivers of molten lava run down channels between basalt levees, their dark
+crust drifting over glowing cracks, and pour on down the slope into the sea, where the water flashes
+to steam: white plumes boil up from each sea entry, littoral explosions throw glowing spatter, and at
+night the lava and the steam's underside glow orange.
+[src/spawns/presets/lavaRiversToSea.js](../src/spawns/presets/lavaRiversToSea.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** any biome; on a coast; ground 4-300 m; downhill-aligned (the channels run down the
+  fall line toward the water); chance 0.35 per cell; at least 18 km apart; 500 m clearance.
+- **Stamps:** two `carve` lava channels (`structureStamps('lavaChannels')`: 600-800 m long, a floor
+  16-24 m wide, 8-12 m deep between levees, painted basalt), side by side 300 m apart, upslope of the
+  shore.
+- **Engines:** `structure` (the `lavaChannels` recipe: the lava ribbons down both channels and on over
+  the natural ground to the sea, traced by src/spawns/engines/lavaPath.js; cooled basalt blocks on the
+  levees, the larger ones solid; crust slabs at the sea entries); two `emitter` steam plumes, each at
+  its flow's sea entry (`seaEntry`), boiling up with littoral explosions (bursts) and lit from below
+  at night, the first with a real orange light and the voice (each burst a `burst`); an `emitter` of
+  glowing spatter at the first entry. A flow that finds no sea within 2.6 km ends in a lobe, and its
+  steam only fumes.
+- **Wind:** none.
+- **Sound:** `geyser` (a bubbling seethe with roaring hiss bursts, reference distance 160 m).
+- **LOD:** near 2 km, mid 6 km, far 20 km (the plumes keep 15 % of their emission at far).
+  **Discovery:** 4 km, in view.
+- **Lifetime:** a site; removed beyond 20 + 4 km.
+
+#### 37. Fissure eruption
+
+A crack a kilometre long splits a lava plain between ramparts of black spatter, lava glowing in its
+floor. Usually it only steams. When it erupts, a curtain of fire stands along the whole crack: lava
+fountains surging a hundred metres high and falling back, a grey gas plume lit orange from below,
+and at night the low cloud deck above glows orange over the fissure.
+[src/spawns/presets/fissureEruption.js](../src/spawns/presets/fissureEruption.js)
+
+- **Kind:** site, rare, heavy. Plume lure, 3.5 km tall with a lava glow, shown only while it erupts.
+- **Active state:** the eruption lasts 300-540 s (`activeState`), started by the director as a rare
+  candidate at a placed fissure; dormant, the crack steams and its lava glows dimly.
+- **Placement:** snow, pine, meadows or dunes; land; ground 20-900 m; chance 0.06 per cell; at least
+  32 km apart; 600 m clearance.
+- **Stamp:** a narrow `carve` crack 900-1200 m long, 8-12 m wide and 10-16 m deep, turned to run
+  along the site's right axis (the emitters' line), painted basalt.
+- **Filters (the eruption):** any biome, hour and weather; over land; player 0-9000 m; 3-25 km ahead.
+- **Engines:** `structure` (the `lavaChannels` recipe with `toSea: false`: lava in the crack floor and
+  spatter blocks along both lips); `emitter` (the curtain of fire: lava fountains on an 860 m `line`
+  shape along the crack, surging in bursts that boom, with a real orange light; owns the voice);
+  `emitter` (the gas plume off the crack, lit from below; a thin steam while dormant); `weatherVolume`
+  (a low cloud `sheet` 900 m up, glowing orange at night over the fissure: `glow.radius` 3.2 km,
+  `glow.dormant` 0.2).
+- **Wind:** none.
+- **Sound:** `volcano` (a deep rumble, each fountain surge a `boom`).
+- **LOD:** near 2 km, mid 6 km, far 40 km. **Discovery:** 8 km, in view.
+- **Lifetime:** a site; removed beyond 40 + 5 km.
+
+#### 38. Meteor crater lake
+
+A near-perfect bowl punched into the plain by an ancient impact, with a raised rim, steep inner walls
+and a still teal lake on its flat floor; blocks of shattered rock lie strewn over the rim and down its
+outer flank, the biggest of them perches.
+[src/spawns/presets/meteorCraterLake.js](../src/spawns/presets/meteorCraterLake.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** dunes, meadows, pine or snow; land; ground 15-700 m; chance 0.1 per cell; at least
+  22 km apart; 400 m clearance.
+- **Stamp:** `crater`, rim radius 380-480 m, 70-100 m deep, the rim 30-45 m above the plain, a flank
+  200-280 m wide, a flat floor 32-45 % of the radius, painted ash.
+- **Water:** a `lake` on the crater floor filled to 38 % of its depth, deep teal (0x2a7f8f), calm.
+- **Engines:** `structure` (the `ejecta` recipe: 100-140 breccia blocks on the rim and the outer flank,
+  densest and largest on the crest, a few on the inner wall; those of 2.5 m radius and more are
+  solid, the four largest on the crest are perches; owns the voice at a constant level).
+- **Wind:** none.
+- **Sound:** `gale` (a soft wind sighing over the rim, reference distance 500 m).
+- **LOD:** near 1.8 km, mid 5 km, far 14 km. **Discovery:** 3 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 3 km.
+
+#### 39. Hot spring terraces
+
+A hillside of white travertine stepping down in shelves, each holding a pool of hot turquoise water
+behind its lip, steam curling off the pools and drifting downhill with the breeze, and a gentle
+thermal over them.
+[src/spawns/presets/hotSpringTerraces.js](../src/spawns/presets/hotSpringTerraces.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** meadows, pine, snow or dunes; land; ground 30-1400 m; downhill-aligned (the shelves
+  step down the real slope); chance 0.06 per cell; at least 22 km apart; 350 m clearance.
+- **Stamp:** `terraces`, 340-460 m downhill, 160-220 m wide, 5-7 shelves, lips 1.4-2.2 m, painted
+  travertine.
+- **Water:** a `pool` on every shelf filled to 85 %, turquoise (0x40c8c4), nearly still.
+- **Engines:** `emitter` (steam over the terraces: a 180 x 400 m box on the ground, drifting with the
+  wind, with an `updraft` wind source of 1.6 m/s, 200 m wide and 450 m tall; owns the voice).
+- **Wind:** the steam's gentle updraft (enough for an eagle or a paraglider to circle in).
+- **Sound:** `geyser` (bubbling pools and a faint steam hiss, reference distance 90 m).
+- **LOD:** near 1.5 km, mid 4.5 km, far 10 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 10 + 2.5 km.
+
+#### 40. Salt flat mirror lake
+
+A dead-flat white salt pan under a thin film of still water that mirrors the sky: its colours, the
+sunset glow and the sun's glint lie at your feet. Rows of harvested salt cones stand at the water's
+edge.
+[src/spawns/presets/saltFlatMirror.js](../src/spawns/presets/saltFlatMirror.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** dunes or meadows; land; ground 8-600 m; flat relief; chance 0.6 per cell; at least
+  20 km apart; 150 m clearance.
+- **Stamp:** a wide, shallow `basin` (radius 500-600 m, 2.5-3.5 m deep, a 40-60 m berm), painted salt.
+- **Water:** a `thin` film filled to 70 % of the pan's depth (about 700 m across), `mirror` 1 (the
+  water material's sky reflection: the sky dome's radiance, no extra render pass, so clouds, stars and
+  the craft are not mirrored), nearly no waves, no foam.
+- **Overlay:** the `saltFlat` palette over the stamp and 160 m beyond it (fading over 220 m).
+- **Engines:** `structure` (the `saltPiles` recipe: 3-5 rows of 24-40 salt cones at the water's edge,
+  each a small solid cylinder; owns the voice at a constant level).
+- **Wind:** none.
+- **Sound:** `gale` (a faint breeze, reference distance 500 m).
+- **LOD:** near 1.5 km, mid 5 km, far 14 km. **Discovery:** 3.5 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 3 km.
+
 ## Adding a preset
 
 Phase 3 adds 70 presets on these same engines. A new preset needs no engine or system code unless
@@ -994,7 +1240,7 @@ export default Object.freeze({
 | `heavy` | both | yes | counts toward the heavy limit (2) and needs a `lure` | SpawnManager, director |
 | `placement` | site | yes for sites, absent for events | `chance` (0 < c <= 1), `minSpacing`, `biomes`, `surface`, `clearance`; optional `terrain`, `align`, `scale` | placement.js (both threads) |
 | `candidates` | event | yes for events, absent for sites | `cellSize`, `bucketSeconds`, `chance` | candidates.js, director |
-| `filters` | both | yes | `biomes`, `timeOfDay`, `altitude`, `weather`, `surface`, `minDistance`, `maxDistance`, `near` | director; site hours (`timeOfDay`) |
+| `filters` | both | yes | `biomes`, `timeOfDay`, `altitude`, `weather`, `surface`, `minDistance`, `maxDistance`, `near` (`{ landmarks?, sites?, active?, radius }`: the candidate moves onto the nearest Phase 1 landmark of those types or placed site of those site presets within radius, else it is rejected; `active: true` takes only a site whose active state runs, such as an erupting volcano) | director; site hours (`timeOfDay`) |
 | `stamps` | site | optional (must be empty for events) | terrain stamp specs | placement.js, stamps.js, worldgen |
 | `engines` | both | yes, at least one | `[{ engine, params }]`, one part each | SpawnManager, engines |
 | `lod` | both | yes | `{ near, mid, far }` m, ascending | SpawnManager |

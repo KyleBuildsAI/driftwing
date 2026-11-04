@@ -6,8 +6,8 @@
 // terrain near the spawn,
 // a kite-string slalom of sensor capsules, every retrofitted v1-derived landmark (the nearest arch,
 // monolith circle, lighthouse and balloon fair, streamed in by the real landmark system) and every
-// Phase 2 structure preset (wind farm, rope bridge, airfield, crystal spires, floating islands,
-// force-spawned by the real SpawnManager). Then:
+// Phase 2 structure preset (wind farm, rope bridge, airfield, crystal spires, floating islands) and
+// the meteor crater lake's ejecta blocks (preset 38), force-spawned by the real SpawnManager. Then:
 //   - strikes: the jet and the bush plane (and the spaceplane once it is registered) fly a scripted
 //     straight line into each target at 60, 250 and 1500 m/s: every run must end in a soft crash with
 //     reason 'structure strike' and never pass through; with the real flight model, the bush plane
@@ -51,7 +51,7 @@ const PENETRATION_TOLERANCE = 0.05;
 const LANDABLE_SINK = 0.5;
 const LANDMARK_TYPES = Object.freeze(['arch', 'monoliths', 'lighthouse', 'balloons']);
 const LANDMARK_SEARCH = Object.freeze([12000, 30000, 60000, 120000]);
-const STRUCTURE_PRESETS = Object.freeze(['windFarm', 'ropeBridge', 'abandonedAirfield', 'crystalSpires', 'floatingIslands']);
+const STRUCTURE_PRESETS = Object.freeze(['windFarm', 'ropeBridge', 'abandonedAirfield', 'crystalSpires', 'floatingIslands', 'meteorCraterLake']);
 const TUNNEL_BORE = 16;
 const TUNNEL_OUTER = 70;
 const KITE_STRINGS = 5;
@@ -757,7 +757,7 @@ function createCollisionTestSystem(ctx, { capture, parts }) {
       // This spawn's own colliders (instance.colliderIds of its engine parts).
       const ownIds = new Set(manager.getParts(spawnId).flatMap((instance) => (Array.isArray(instance.colliderIds) ? instance.colliderIds : [])));
       const own = colliders.list().filter((entry) => ownIds.has(entry.id) && !entry.tags.sensor);
-      const part = { windFarm: ':mast', ropeBridge: ':deck', abandonedAirfield: ':hangar', crystalSpires: ':spire', floatingIslands: ':rock' }[presetId];
+      const part = { windFarm: ':mast', ropeBridge: ':deck', abandonedAirfield: ':hangar', crystalSpires: ':spire', floatingIslands: ':rock', meteorCraterLake: ':block' }[presetId];
       const pieces = own.filter((entry) => entry.id.includes(part));
       const pick = pieces.sort((first, second) => (second.bounds.max.y - second.bounds.min.y) - (first.bounds.max.y - first.bounds.min.y))[0];
       if (!pick) harnessErrors.push(`${presetId} registered no ${part.slice(1)} collider`);

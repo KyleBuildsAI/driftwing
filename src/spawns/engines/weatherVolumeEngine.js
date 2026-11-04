@@ -25,7 +25,8 @@
 // Inside a volume the engine closes the world in through one sky modifier ('weatherVolume', priority
 // 15: above the regional weather, below an eclipse) weighted by how deep the camera is, shows the
 // veil, and inside a rain or snow shaft drives the local streaks and, in first-person views, the
-// canopy rain. With no volume alive the modifier is removed and every mesh hidden, so the sky runs
+// canopy rain; a volume with canopyGrit (a sandstorm's dust, a squall's snow) blasts grit streaks
+// across the canopy instead, inside it or in its dust shafts. With no volume alive the modifier is removed and every mesh hidden, so the sky runs
 // its untouched path.
 //
 // Wind: a volume registers one WindField source (id `weather-<n>:weather`) sampling its parts:
@@ -36,7 +37,9 @@
 // removed on dispose. A drifting volume re-indexes its bounds only after moving WIND_REINDEX_METRES.
 //
 // Audio: the volume plays preset.audio when it owns the preset's voice (its entry is the first in
-// preset.engines, or its params set ownsAudio: true), at the anchor, with the growth as intensity.
+// preset.engines, or its params set ownsAudio: true), at the anchor, with the growth as intensity. A
+// 'ring' (hurricane) voice stands on the eyewall nearest the camera instead, and ducks in the calm
+// eye, so the roar is loudest in the wall and quiet at the eye's centre.
 //
 // No allocation per frame: puffs, groups and shafts live in typed arrays laid out at create, the
 // instance buffers are written in place with persistent update ranges, and the wind sample and the
@@ -74,7 +77,12 @@ const FIRST_PERSON_VIEWS = Object.freeze(['cockpit', 'fpv']);
 /** Canopy drops: airspeed (m/s) at which they stop running down and start streaking back. */
 const CANOPY_HOLD_SPEED = 22;
 const CANOPY_STREAK_SPEED = 55;
+/** Canopy grit: drift (screen heights per second) at rest, and the airspeed (m/s) that doubles it. */
+const GRIT_DRIFT = 0.6;
+const GRIT_DRIFT_SPEED = 40;
 const GLOW_SCALE = 0.6;
+/** A ring's voice keeps this share of its level at the centre of the eye. */
+const RING_EYE_VOICE = 0.3;
 
 function smooth(value, edge0, edge1) {
   const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
@@ -114,8 +122,8 @@ export function createWeatherVolumeEngine() {
     sunElevation: 0, nightFactor: 0,
   };
   // What the camera met last frame (the strongest volume), applied at the start of the next.
-  const met = { inside: 0, rain: 0, canopy: 0, rainKind: 0, rainFall: 9, fogDensity: 1, fogDarkness: 0, fogColor: null, tint: null };
-  const shown = { inside: 0, rain: 0, canopy: 0, rainKind: 0, rainFall: 9, fogDensity: 1, fogDarkness: 0, fogColor: null };
+  const met = { inside: 0, rain: 0, canopy: 0, grit: 0, rainKind: 0, rainFall: 9, fogDensity: 1, fogDarkness: 0, fogColor: null, tint: null, gritTint: null };
+  const shown = { inside: 0, rain: 0, canopy: 0, grit: 0, rainKind: 0, rainFall: 9, fogDensity: 1, fogDarkness: 0, fogColor: null };
   const modifierValues = { weight: 0, fogDensity: 1, fogColor: null, fogColorAmount: 0, darkness: 0, sunIntensity: 1, ambient: 1 };
   const canopyFlow = { x: 0, y: 1 };
   const scratchColor = { value: null };
@@ -160,6 +168,7 @@ export function createWeatherVolumeEngine() {
     met.inside = 0;
     met.rain = 0;
     met.canopy = 0;
+    met.grit = 0;
     puffCursor = 0;
     shaftCursor = 0;
   }
@@ -169,6 +178,7 @@ export function createWeatherVolumeEngine() {
     shown.inside = approach(shown.inside, met.inside, INSIDE_RATE, dt);
     shown.rain = approach(shown.rain, met.rain, RAIN_RATE, dt);
     shown.canopy = approach(shown.canopy, met.canopy * (isFirstPerson() ? 1 : 0), RAIN_RATE, dt);
+    shown.grit = approach(shown.grit, met.grit * (isFirstPerson() ? 1 : 0), RAIN_RATE, dt);
     if (met.inside > 0.001 || met.rain > 0.001) {
       shown.fogDensity = met.fogDensity;
       shown.fogDarkness = met.fogDarkness;
@@ -179,6 +189,7 @@ export function createWeatherVolumeEngine() {
     if (shown.inside < 1e-4 && met.inside === 0) shown.inside = 0;
     if (shown.rain < 1e-4 && met.rain === 0) shown.rain = 0;
     if (shown.canopy < 1e-4 && met.canopy === 0) shown.canopy = 0;
+    if (shown.grit < 1e-4 && met.grit === 0) shown.grit = 0;
     const weight = Math.max(shown.inside, shown.rain * 0.7);
     if (modifier) {
       modifierValues.weight = weight;
@@ -238,11 +249,14 @@ export function createWeatherVolumeEngine() {
 
   function updateCanopy(dt) {
     const uniforms = canopy.uniforms;
-    canopy.mesh.visible = shown.canopy > 0.01;
+    canopy.mesh.visible = shown.canopy > 0.01 || shown.grit > 0.01;
     uniforms.amount.value = shown.canopy;
+    uniforms.grit.value = shown.grit;
     if (!canopy.mesh.visible) return;
     const speed = ctx.state.player.speed;
     const airspeed = Number.isFinite(speed) ? speed : 0;
+    // Grit streaks race across the canopy with the wind, faster with airspeed.
+    uniforms.gritShift.value = (uniforms.gritShift.value + GRIT_DRIFT * (1 + airspeed / GRIT_DRIFT_SPEED) * dt) % 64;
     // Slow: drops run down the canopy (screen y is down); fast: they are blown back up and stretch.
     const blown = smooth(airspeed, CANOPY_HOLD_SPEED, CANOPY_STREAK_SPEED);
     const rundown = 1 - smooth(airspeed, 0, CANOPY_HOLD_SPEED);
@@ -255,6 +269,8 @@ export function createWeatherVolumeEngine() {
     uniforms.light.value.copy(ctx.uniforms.fogColor.value).multiplyScalar(0.9);
     scratchColor.value.copy(look.litColor.value).multiplyScalar(0.25);
     uniforms.light.value.add(scratchColor.value);
+    // The grit takes the volume's own tint (ochre dust, white snow), lit like the drops.
+    uniforms.gritColor.value.copy(met.gritTint).multiply(uniforms.light.value).multiplyScalar(1.15);
   }
 
   /** Marks the written instance ranges of an attribute for upload (persistent range, no allocation). */
@@ -440,12 +456,13 @@ export function createWeatherVolumeEngine() {
     }
   }
 
-  function refreshGlow(data) {
+  function refreshGlow(data, active) {
     const glow = data.params.glow;
     if (!glow) return;
-    let factor = 1;
-    if (glow.when === 'night') factor = frame.nightFactor;
-    else if (glow.when === 'twilight') factor = smooth(-frame.sunElevation, 1.5, 5) * (1 - smooth(-frame.sunElevation, 13, 18));
+    // A dormant site (instance.active false: a fissure between eruptions) keeps glow.dormant of it.
+    let factor = active === false ? glow.dormant : 1;
+    if (glow.when === 'night') factor *= frame.nightFactor;
+    else if (glow.when === 'twilight') factor *= smooth(-frame.sunElevation, 1.5, 5) * (1 - smooth(-frame.sunElevation, 13, 18));
     const scale = glow.strength * factor * GLOW_SCALE;
     data.glowNow.r = data.glowColor.r * scale;
     data.glowNow.g = data.glowColor.g * scale;
@@ -484,6 +501,8 @@ export function createWeatherVolumeEngine() {
     // Coarse far mass: the core puffs swell a little while the body is hidden.
     const coreSwell = 1 + 0.25 * (1 - weights[1]);
     const checkInside = data.cameraNear;
+    // A river's flow paths (layout.flow), or null.
+    const flowPaths = layout.flow;
     let nearest = Infinity;
     let written = 0;
     for (let puff = 0; puff < layout.puffCount; puff++) {
@@ -527,11 +546,32 @@ export function createWeatherVolumeEngine() {
         size *= (0.55 + 0.75 * fraction) * smooth(fraction, 0, 0.12) * (1 - smooth(fraction, 0.72, 1));
         if (size < 0.04) continue;
       }
+      // A river's path puff rides its path, fading in at the start and out at the end.
+      let pathGround = 0;
+      let onPath = false;
+      const flowSpeed = groups[group + 10];
+      if (flowSpeed > 0 && flowPaths !== null && flowPaths.puffPath[puff] >= 0) {
+        const path = flowPaths.puffPath[puff];
+        const count = flowPaths.pathCount[path];
+        const cycle = flowPaths.puffPhase[puff] + (age * flowSpeed) / flowPaths.pathLength[path];
+        const fraction = cycle - Math.floor(cycle);
+        const along = fraction * (count - 1);
+        const index = Math.min(count - 2, Math.floor(along));
+        const blend = along - index;
+        const points = flowPaths.points;
+        const base = (flowPaths.pathStart[path] + index) * 4;
+        x = points[base] + (points[base + 4] - points[base]) * blend;
+        z = points[base + 1] + (points[base + 5] - points[base + 1]) * blend;
+        pathGround = points[base + 2] + (points[base + 6] - points[base + 2]) * blend;
+        size *= (points[base + 3] + (points[base + 7] - points[base + 3]) * blend) * smooth(fraction, 0, 0.1) * (1 - smooth(fraction, 0.85, 1));
+        if (size < 0.04) continue;
+        onPath = true;
+      }
       if (billow > 0) {
         radius *= 1 + billow * 0.06 * Math.sin(age * 0.4 + phase);
         y += billow * radius * 0.03 * Math.sin(age * 0.3 + phase * 1.3);
       }
-      const ground = follow ? source[offset + 11] + data.followLift : data.baseAltitude;
+      const ground = onPath ? pathGround : follow ? source[offset + 11] + data.followLift : data.baseAltitude;
       const worldX = anchor.x + x * data.rightX + z * data.forwardX;
       const worldZ = anchor.z + x * data.rightZ + z * data.forwardZ;
       const worldY = ground + y;
@@ -594,9 +634,11 @@ export function createWeatherVolumeEngine() {
       tints[attribute + 1] = data.tint.g;
       tints[attribute + 2] = data.tint.b;
       tints[attribute + 3] = groups[group + 5];
-      glows[attribute] = data.glowNow.r;
-      glows[attribute + 1] = data.glowNow.g;
-      glows[attribute + 2] = data.glowNow.b;
+      // glow.radius: a fire's glow on the clouds above it, fading with the puff's distance from the anchor.
+      const glowShare = data.glowRadius > 0 ? 1 - smooth(Math.hypot(worldX - anchor.x, worldZ - anchor.z), data.glowRadius * 0.35, data.glowRadius) : 1;
+      glows[attribute] = data.glowNow.r * glowShare;
+      glows[attribute + 1] = data.glowNow.g * glowShare;
+      glows[attribute + 2] = data.glowNow.b * glowShare;
       glows[attribute + 3] = 0;
       puffCursor++;
       written++;
@@ -704,6 +746,26 @@ export function createWeatherVolumeEngine() {
     }
   }
 
+  /**
+   * A ring's voice: on the eyewall where the camera's bearing from the eye crosses it, at the camera's
+   * height within the wall, ducked toward the centre of the eye. (dx, dz): the camera from the anchor.
+   */
+  function placeRingVoice(instance, dx, dz) {
+    const data = instance.data;
+    const params = data.params;
+    const distance = Math.sqrt(dx * dx + dz * dz);
+    const wall = params.radius + params.flare * 0.3;
+    const unitX = distance > 1 ? dx / distance : data.forwardX;
+    const unitZ = distance > 1 ? dz / distance : data.forwardZ;
+    const point = data.voicePoint;
+    point.x = instance.anchor.x + unitX * wall;
+    point.z = instance.anchor.z + unitZ * wall;
+    point.y = Math.min(data.baseAltitude + params.height * 0.6, Math.max(data.baseAltitude, frame.cameraY));
+    data.voice.setPosition(point);
+    const duck = RING_EYE_VOICE + (1 - RING_EYE_VOICE) * smooth(distance, params.radius * 0.6, params.radius);
+    data.voice.setIntensity(data.growth * duck);
+  }
+
   /** Records what this volume does to the camera, when it beats the strongest so far this frame. */
   /**
    * Approach journal (params.journal): the player's closest horizontal distance to the volume's
@@ -723,6 +785,7 @@ export function createWeatherVolumeEngine() {
     const params = data.params;
     const inside = data.inside * data.growth;
     const canopyRain = Math.max(data.rainKind === 2 ? 0 : data.rain, inside * params.canopyRain);
+    const grit = params.canopyGrit > 0 ? Math.max(inside, data.rainKind === 2 ? data.rain : 0) * params.canopyGrit : 0;
     if (inside > met.inside || data.rain > met.rain) {
       met.fogDensity = params.insideFog.density;
       met.fogDarkness = params.insideFog.darkness;
@@ -736,6 +799,10 @@ export function createWeatherVolumeEngine() {
       met.rainFall = data.rainFall;
     }
     if (canopyRain > met.canopy) met.canopy = canopyRain;
+    if (grit > met.grit) {
+      met.grit = grit;
+      met.gritTint.copy(data.tint);
+    }
   }
 
   function levelTargetsFor(instance, tier) {
@@ -792,6 +859,7 @@ export function createWeatherVolumeEngine() {
       buffersOwned = 5 + 3 + 4 + 8;
       met.fogColor = new THREE.Color();
       met.tint = new THREE.Color(1, 1, 1);
+      met.gritTint = new THREE.Color(0.78, 0.62, 0.42);
       shown.fogColor = new THREE.Color();
       modifierValues.fogColor = shown.fogColor;
       scratchColor.value = new THREE.Color();
@@ -855,12 +923,15 @@ export function createWeatherVolumeEngine() {
         fogColor: new THREE.Color(resolved.insideFog.color),
         glowColor,
         glowNow: { r: 0, g: 0, b: 0 },
+        glowRadius: resolved.glow ? resolved.glow.radius : 0,
         windSource: null,
         windActive: false,
         windBounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
         windIndexedX: anchor.x,
         windIndexedZ: anchor.z,
         voice: null,
+        /** Where a ring's voice stands (the eyewall nearest the camera), written in place. */
+        voicePoint: new THREE.Vector3(),
         cameraNear: false,
         inside: 0,
         rain: 0,
@@ -910,7 +981,7 @@ export function createWeatherVolumeEngine() {
       data.writtenFrame = stamp;
       const step = Number.isFinite(dt) && dt > 0 ? dt : 0;
       advanceLifecycle(instance, step);
-      refreshGlow(data);
+      refreshGlow(data, instance.active);
       // The camera can only be inside (or under the rain of) a volume within its reach.
       const dx = frame.cameraX - instance.anchor.x;
       const dz = frame.cameraZ - instance.anchor.z;
@@ -932,7 +1003,8 @@ export function createWeatherVolumeEngine() {
           ctx.wind.setSourceBounds(data.windSource.id, data.windBounds);
         }
       }
-      if (data.voice) {
+      if (data.voice && data.params.form === 'ring') placeRingVoice(instance, dx, dz);
+      else if (data.voice) {
         data.voice.setPosition(instance.anchor);
         data.voice.setIntensity(data.growth);
       }
@@ -968,9 +1040,11 @@ export function createWeatherVolumeEngine() {
         met.inside = 0;
         met.rain = 0;
         met.canopy = 0;
+        met.grit = 0;
         shown.inside = 0;
         shown.rain = 0;
         shown.canopy = 0;
+        shown.grit = 0;
         veil.mesh.visible = false;
         localRain.mesh.visible = false;
         canopy.mesh.visible = false;
@@ -991,7 +1065,7 @@ export function createWeatherVolumeEngine() {
 
     /** Dev and tests: the camera's weather as the engine last applied it. */
     getCameraWeather() {
-      return { inside: shown.inside, rain: shown.rain, canopy: shown.canopy, rainKind: shown.rainKind, firstPerson: ctx ? isFirstPerson() : false, modifier: modifier !== null };
+      return { inside: shown.inside, rain: shown.rain, canopy: shown.canopy, grit: shown.grit, rainKind: shown.rainKind, firstPerson: ctx ? isFirstPerson() : false, modifier: modifier !== null };
     },
   };
 }

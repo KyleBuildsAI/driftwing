@@ -2,13 +2,15 @@
 // recipes (src/spawns/engines/structure/recipes/): wind farms, rope bridges, airfields, floating
 // islands, crystal spires and timed gate courses. docs/engines/structure.md lists every param.
 //
-// Per instance the recipe fills up to five geometries in the instance's local frame (metres from its
+// Per instance the recipe fills up to six geometries in the instance's local frame (metres from its
 // anchor), each shown on a pooled mesh (pools.js explains why meshes are pooled):
 //   body     solid, flat-shaded, v1 palette; casts shadows at the near tier
 //   detail   small props (ropes, weeds, crates, lights), near tier only
 //   decal    ground paint (runway tarmac and markings), polygon-offset over the terrain
 //   glow     crystal (emissive, pulsing in the shader, brighter at night)
 //   water    waterfall ribbons and streams (transparent streaks scrolling in the shader)
+//   lava     molten lava ribbons (dark crust plates drifting downstream over glowing cracks, hot in
+//            the middle of the flow, brighter at night), polygon-offset over the channel floor
 // Moving parts are shared instanced meshes built once in init(): turbine nacelles and rotors (yawed
 // into the real WindField wind, spun with its speed), windsock segments (a chain hanging in the wind)
 // and mist puffs (soft luminous blobs). The sway weight in the geometry lets the bridge deck, ropes,
@@ -90,7 +92,7 @@ function addWakeGust(result, point) {
   result.vel.y += 0.6 * sigma * (0.5 * Math.sin(time * 1.9 + z * 0.061 + offsetY) + 0.3 * Math.sin(time * 3.7 - x * 0.093 + offsetY * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z) * 0.147 + offsetY * 2.3));
   result.vel.z += sigma * (0.5 * Math.sin(time * 1.9 + (x + 311) * 0.061 + offsetZ) + 0.3 * Math.sin(time * 3.7 - (z - 173) * 0.093 + offsetZ * 1.7) + 0.2 * Math.sin(time * 6.1 + (x + z + 138) * 0.147 + offsetZ * 2.3));
 }
-const GEOMETRY_KINDS = Object.freeze(['body', 'detail', 'decal', 'glow', 'water']);
+const GEOMETRY_KINDS = Object.freeze(['body', 'detail', 'decal', 'glow', 'water', 'lava']);
 
 /** Visibility of each geometry kind per tier: [near, mid, far] (far: non-heavy presets only). */
 const KIND_TIERS = Object.freeze({
@@ -99,7 +101,10 @@ const KIND_TIERS = Object.freeze({
   decal: [true, true, true],
   glow: [true, true, true],
   water: [true, true, false],
+  lava: [true, true, true],
 });
+/** The lava's crust drifts downstream at this speed (m/s); its ribbon's uv.y is in metres along the flow. */
+const LAVA_FLOW_SPEED = 1.4;
 
 export function createStructureEngine() {
   let ctx = null;
@@ -125,7 +130,7 @@ export function createStructureEngine() {
   function buildMaterials() {
     const {
       attribute, vertexColor, uniform, positionLocal, float, vec3, sin, mix, pow, saturate, dot, smoothstep,
-      normalView, positionViewDirection, uv, mx_noise_float, instanceIndex,
+      normalView, positionViewDirection, uv, mx_noise_float, instanceIndex, abs,
     } = ctx.TSL;
     const time = ctx.uniforms.time;
     const nightFactor = ctx.uniforms.nightFactor;
@@ -166,6 +171,22 @@ export function createStructureEngine() {
     water.colorNode = rgba.rgb.mul(sunColor.mul(0.45).add(0.5)).mul(float(1).sub(nightFactor.mul(0.72)));
     water.opacityNode = rgba.a.mul(streaks).mul(edges).mul(0.72);
 
+    // Lava: uv.x runs across the ribbon (0..1), uv.y along it in metres. Two octaves of noise drifting
+    // downstream make the crust plates; the glowing cracks are where the noise crosses zero, widest
+    // and hottest in the middle of the flow, where the crust is thinnest. The vertex colour is the
+    // crust, its alpha the heat (1 in a live channel, falling where the flow cools or fans out). The
+    // glow is HDR, so the bloom carries it, and it reads brighter at night.
+    const lava = new THREE.MeshStandardNodeMaterial({ roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
+    const flowV = ribbon.y.sub(time.mul(LAVA_FLOW_SPEED));
+    const plates = mx_noise_float(vec3(ribbon.x.mul(2.6), flowV.mul(0.045), float(1.7))).add(mx_noise_float(vec3(ribbon.x.mul(7), flowV.mul(0.13), float(4.1))).mul(0.45));
+    const middle = float(1).sub(abs(ribbon.x.sub(0.5)).mul(2));
+    const heat = rgba.a.mul(smoothstep(float(0), float(0.75), middle));
+    const crack = float(1).sub(smoothstep(float(0.02), mix(float(0.06), float(0.26), heat), abs(plates)));
+    const molten = saturate(crack.mul(heat).add(pow(heat, 4).mul(0.55)));
+    const lavaHot = vec3(1, 0.32, 0.05);
+    lava.colorNode = mix(rgba.rgb, vec3(0.42, 0.12, 0.03), molten);
+    lava.emissiveNode = lavaHot.mul(molten.mul(mix(float(2.2), float(5.5), nightFactor)).mul(sin(time.mul(0.8).add(ribbon.y.mul(0.05))).mul(0.12).add(0.88)));
+
     // Mist: soft blobs, thin in the middle and gone at their silhouette, breathing slowly, lit by
     // the sun's colour and leaning toward the fog colour so they sit in the air.
     const mist = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
@@ -178,7 +199,7 @@ export function createStructureEngine() {
     const moving = new THREE.MeshStandardNodeMaterial({ flatShading: true, roughness: 0.7, metalness: 0.05, side: THREE.DoubleSide });
     moving.colorNode = rgba.rgb;
 
-    return { solid, decal, glow, water, mist, moving };
+    return { solid, decal, glow, water, lava, mist, moving };
   }
 
   // ---- Shared moving-part geometry ------------------------------------------------------------------
@@ -270,6 +291,8 @@ export function createStructureEngine() {
       turbines: [], socks: [], puffs: [], gates: [], surfaces: [], zones: [], courses: [], colliders: [],
       challenge: null,
       wake: null, turbineSettings: null, sway: null, audioPoint: null, windProbe: null, approach: 0, radius: 20,
+      // Plain numbers a recipe reports about what it built (lava sea entries, blocks), for checks.
+      facts: {},
     };
     const context = {
       presetId: preset.id,
@@ -286,11 +309,14 @@ export function createStructureEngine() {
       windZ: wind.z,
       waterLevel: ctx.terrain.waterLevel - anchor.y,
       ground: (x, z) => Math.max(ctx.terrain.groundHeight(anchor.x + x, anchor.z + z), ctx.terrain.waterLevel) - anchor.y,
+      /** The world ground height at WORLD (x, z), the seabed under the sea (not clamped to the water). */
+      groundAt: (x, z) => ctx.terrain.groundHeight(x, z),
       body: createMeshBuilder(),
       detail: createMeshBuilder(),
       decal: createMeshBuilder(),
       glow: createMeshBuilder(),
       water: createMeshBuilder({ uv: true }),
+      lava: createMeshBuilder({ uv: true }),
       out,
       /** Adds a gate (local metres); source names the param for error messages. */
       addGate(gate) {
@@ -955,7 +981,7 @@ export function createStructureEngine() {
       THREE = ctx.THREE;
       hiddenMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
       materials = buildMaterials();
-      const poolMaterial = { body: materials.solid, detail: materials.solid, decal: materials.decal, glow: materials.glow, water: materials.water };
+      const poolMaterial = { body: materials.solid, detail: materials.solid, decal: materials.decal, glow: materials.glow, water: materials.water, lava: materials.lava };
       meshPools = {};
       for (const kind of GEOMETRY_KINDS) {
         meshPools[kind] = ctx.pools.createMeshPool({ material: poolMaterial[kind], capacity: MAX_INSTANCES + 8, parent: ctx.scene, name: `structure-${kind}` });
@@ -974,7 +1000,10 @@ export function createStructureEngine() {
         const solidProxy = new THREE.Mesh(proxyGeometry(false), materials.solid);
         solidProxy.castShadow = true;
         solidProxy.receiveShadow = true;
-        proxies = [solidProxy, new THREE.Mesh(proxyGeometry(false), materials.decal), new THREE.Mesh(proxyGeometry(false), materials.glow), new THREE.Mesh(proxyGeometry(true), materials.water)];
+        proxies = [
+          solidProxy, new THREE.Mesh(proxyGeometry(false), materials.decal), new THREE.Mesh(proxyGeometry(false), materials.glow),
+          new THREE.Mesh(proxyGeometry(true), materials.water), new THREE.Mesh(proxyGeometry(true), materials.lava),
+        ];
         for (const proxy of proxies) {
           proxy.userData.swayOffset = new THREE.Vector3();
           proxy.userData.look = new THREE.Vector4(1, 0, 0, 0);
@@ -1001,7 +1030,7 @@ export function createStructureEngine() {
         recipe: recipeName,
         name: preset.name,
         siteId: params.site ? params.site.id : null,
-        meshes: { body: null, detail: null, decal: null, glow: null, water: null },
+        meshes: { body: null, detail: null, decal: null, glow: null, water: null, lava: null },
         swayOffset: new THREE.Vector3(),
         sway: out.sway ? { ...out.sway, followWind: false } : { dirX: 1, dirZ: 0, amplitude: read.number('sway', 0.35, 0, 5), frequency: 0.3, followWind: true },
         /** Per-object shader values: x = the glow multiplier. */
@@ -1030,6 +1059,8 @@ export function createStructureEngine() {
         previousPlayer: new Float64Array(3),
         hasPrevious: 0,
         courses: out.courses.map((course) => ({ ...course, startGate: -1, startTime: 0, crashed: false })),
+        /** The recipe's facts (out.facts). */
+        facts: out.facts,
         /** Challenge course keys registered with the challenge system (recipe challengeGates). */
         challengeKeys: [],
         zones: [],

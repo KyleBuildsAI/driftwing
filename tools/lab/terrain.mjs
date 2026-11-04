@@ -20,7 +20,8 @@
 //                 worker receives (structured-cloned) build bit-identical chunk meshes; other seeds
 //                 give other site lists
 //   shapes        the crater is lower than its rim and the cone stands above its base; the canyon
-//                 floor lies below its walls, only runs downhill and the canyon is 2-4 km long; the
+//                 floor lies below its walls, only runs downhill and is as long as its spec says (a slot
+//                 canyon 2-4 km, a lava channel or a fissure's crack under 1.5 km); the
 //                 cliff drops; the gorge floor lies below its rims and the bridge pads are level; the
 //                 airfield strip is flat (heightAt and groundHeight); the islet stands above the sea
 //   falloff       outside its bounds a stamp changes nothing (exactly the unstamped height), and lines
@@ -410,6 +411,22 @@ function localPoint(stamp, along, across) {
   return { x: stamp.x + stamp.dirX * along - stamp.dirZ * across, z: stamp.z + stamp.dirZ * along + stamp.dirX * across };
 }
 
+/** Every site preset the lab places (the game's and the fixtures), by id. */
+const SITE_PRESET_BY_ID = new Map([...PRESETS, ...TERRAIN_FIXTURES].map((preset) => [preset.id, preset]));
+
+/**
+ * The length (m) a site's carve stamp may have: its spec's range (the carve default, 2-3.2 km, when
+ * the spec leaves it out), from 95 % of the shortest to 135 % of the longest (the meander lengthens
+ * the path).
+ */
+function carveLengthRange(site, stamp) {
+  const preset = SITE_PRESET_BY_ID.get(site.presetId);
+  const spec = preset && preset.stamps ? preset.stamps[site.stamps.indexOf(stamp)] : null;
+  const range = spec && spec.length !== undefined ? spec.length : [2000, 3200];
+  const [low, high] = Array.isArray(range) ? range : [range, range];
+  return [low * 0.95, high * 1.35];
+}
+
 function testShapes(world, sites) {
   for (const site of sites) {
     for (const stamp of site.stamps) {
@@ -439,7 +456,8 @@ function testShapes(world, sites) {
         check('shapes', `${label}: the canyon floor lies at least 40 % of its depth below both walls`, checked > 0 && worstWall >= stamp.depth * 0.4, `${checked} cross-sections, lowest wall ${round(worstWall, 1)} m above the floor, depth ${round(stamp.depth, 1)} m`);
         const downhill = path.every((point, index) => index === 0 || point.floorY <= path[index - 1].floorY);
         check('shapes', `${label}: the river floor only runs downhill`, downhill, `${round(path[0].floorY, 1)} m -> ${round(path[path.length - 1].floorY, 1)} m`);
-        check('shapes', `${label}: the canyon is 2-4 km long`, stamp.length >= 2000 && stamp.length <= 4000, `${round(stamp.length, 0)} m`);
+        const [shortest, longest] = carveLengthRange(site, stamp);
+        check('shapes', `${label}: the canyon is ${round(shortest, 0)}-${round(longest, 0)} m long (its spec)`, stamp.length >= shortest && stamp.length <= longest, `${round(stamp.length, 0)} m`);
       } else if (stamp.type === 'cliffStep') {
         const side = stamp.channelWidth + 25;
         const top = localPoint(stamp, -70, side);
@@ -823,6 +841,16 @@ const PHASE2_REAL_DIGESTS = Object.freeze({
   'HARNESS-1': { meshes: '01d73057fae7adf80e6b498c653d4933380eab87df71c702f242fa5f25c40e53', sites: '40179d8108de3ff2' },
   'P2-TERRAIN': { meshes: '94f279ad6b775a08843693be7f693119cee66e2bb175589b7c4e4a003f8ea152', sites: '06628e3c54a53137' },
 });
+/**
+ * The Phase 2 presets (wave 3 adds site presets of its own, which change the world as they must): the
+ * Phase 2 world is rebuilt from these alone.
+ */
+const PHASE2_PRESET_IDS = Object.freeze([
+  'tornado', 'supercell', 'waterspout', 'lenticular', 'microburst', 'glory', 'volcano', 'geyserField', 'slotCanyon', 'megaWaterfall',
+  'whalePod', 'maelstrom', 'bioluminescentBay', 'starlingMurmuration', 'geeseFormation', 'thermalHawks', 'fireflies', 'eagleWingman', 'windFarm', 'ropeBridge',
+  'abandonedAirfield', 'meteorShower', 'totalSolarEclipse', 'comet', 'skyLanternFestival', 'floatingIslands', 'skyWhale', 'crystalSpires', 'jetStream', 'stormChase',
+]);
+const PHASE2_OPTIONS = Object.freeze({ ...WORLD_OPTIONS, presets: PRESETS.filter((preset) => PHASE2_PRESET_IDS.includes(preset.id)) });
 /** The seed the water and overlay fixtures are checked on (every one lies within 14 km of its origin). */
 const WATER_SEED = 'HARNESS-1';
 const WATER_OPTIONS = Object.freeze({ ...WORLD_OPTIONS, presets: WATER_FIXTURES });
@@ -854,10 +882,10 @@ function withoutOverlays(presets) {
 
 function testPhase3Worlds() {
   for (const seed of SEEDS) {
-    const digest = phase2RealDigest(createWorldGen(seed, WORLD_OPTIONS));
+    const digest = phase2RealDigest(createWorldGen(seed, PHASE2_OPTIONS));
     const golden = PHASE2_REAL_DIGESTS[seed];
-    check('phase3', `${seed}: the real presets (no waters, no overlays): meshes, colours and scatter bit-identical to Phase 2`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
-    check('phase3', `${seed}: the real presets: the site-list hash unchanged from Phase 2`, digest.sites === golden.sites, digest.sites);
+    check('phase3', `${seed}: the Phase 2 presets (no waters, no overlays): meshes, colours and scatter bit-identical to Phase 2`, digest.meshes === golden.meshes, digest.meshes.slice(0, 16));
+    check('phase3', `${seed}: the Phase 2 presets: the site-list hash unchanged from Phase 2`, digest.sites === golden.sites, digest.sites);
   }
 }
 

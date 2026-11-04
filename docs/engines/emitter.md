@@ -79,6 +79,7 @@ Offsets and directions are `[right, up, forward]` in metres, in the frame of the
 | `attach` | | `anchor`, `camera` | `anchor` | `camera` emits around the camera (sandstorm grit, snow, ash fall inside a plume). The wind grid follows it |
 | `hugGround` | bool | | false | each birth sits on the ground (or the water) under it, plus `offset[1]` and the shape's height. Use it for mist, dust rings and lanterns |
 | `snapToGround` | bool | | false | the anchor takes the (stamped) ground or water height under it once at create. A site is activated at its unstamped ground, so this finds a vent on a stamped cone (the volcano's crater floor); `offset` and the shape then apply from there |
+| `seaEntry` | object or null | | null | `{ stamp 0..16 = 0 (the site's carve stamps, counted), reach m = 2500 }`: at create the anchor moves to where the lava flow down that carve stamp meets the sea, traced exactly as the structure recipe `lavaChannels` traces it (src/spawns/engines/lavaPath.js), or to the flow's end when it finds no sea, and takes the ground or water height there (lava rivers to the sea: the steam explosions). A spawn without carve stamps traces a stand-in channel from its anchor along its heading |
 | `travel` | m/s | [r, u, f] | null | moves the spawn's anchor (a meteor's spark trail, a drifting column). The anchor is shared with the LOD, the lure and discovery, and moves in whole metres; the emission point, the light and the velocity follow the exact position |
 
 ### Launch

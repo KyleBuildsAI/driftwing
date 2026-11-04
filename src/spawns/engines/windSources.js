@@ -13,6 +13,9 @@
 //   waveLift    smooth lee-wave lift and sink downwind of a peak, with rotor turbulence beneath
 //   gustFront   a moving outflow boundary: lift at the front, gusty outflow behind it
 //   curtain     a sheet of sinking air (a waterfall, a rain curtain) spilling outward at its foot
+//   cyclone     a hurricane: a calm eye, a violent eyewall of the strongest wind (flaring outward with
+//               height), winds falling off outward, low-level inflow, lift in the wall, sinking air in
+//               the eye, and spiral rain bands of gusty air turning with the storm's bands
 //
 // Every source reads a frame (a Float64Array written by its engine each frame: anchor, direction,
 // strength, age, speed, noise phase and per-type extras) and returns one reused result object, so
@@ -37,7 +40,7 @@ export const FRAME = Object.freeze({
 });
 export const FRAME_SIZE = 13;
 
-export const WIND_SOURCE_TYPES = Object.freeze(['rankine', 'updraft', 'downburst', 'wake', 'jetStream', 'slipstream', 'waveLift', 'gustFront', 'curtain']);
+export const WIND_SOURCE_TYPES = Object.freeze(['rankine', 'updraft', 'downburst', 'wake', 'jetStream', 'slipstream', 'waveLift', 'gustFront', 'curtain', 'cyclone']);
 
 /**
  * Parameter tables per type: [name, default, min, max, isLength]. Lengths are multiplied by the
@@ -149,6 +152,28 @@ const PARAMETERS = Object.freeze({
     ['reach', 320, 10, 20000, true],
     ['turbulence', 0.5, 0, 1, false],
     ['gust', 3, 0, 30, false],
+  ],
+  cyclone: [
+    ['eyeRadius', 3600, 100, 30000, true],
+    ['wallRadius', 4800, 200, 40000, true],
+    ['wallWidth', 1400, 50, 10000, true],
+    ['outerRadius', 28000, 1000, 150000, true],
+    ['flare', 1600, 0, 20000, true],
+    ['maxTangential', 42, 0, 90, false],
+    ['decay', 0.6, 0.2, 1.5, false],
+    ['inflow', 8, 0, 40, false],
+    ['inflowTop', 1500, 50, 6000, true],
+    ['updraft', 8, 0, 40, false],
+    ['subsidence', 1, 0, 10, false],
+    ['top', 12000, 200, 20000, true],
+    ['bands', 4, 0, 8, false],
+    ['bandTurns', 1.1, 0, 4, false],
+    ['bandSpin', 0, -0.2, 0.2, false],
+    ['turbulence', 0.95, 0, 1, false],
+    ['bandTurbulence', 0.5, 0, 1, false],
+    ['eyeTurbulence', 0.04, 0, 1, false],
+    ['gust', 9, 0, 30, false],
+    ['rotation', 1, -1, 1, false],
   ],
 });
 
@@ -638,6 +663,74 @@ function createCurtainSampler(p, frame, result) {
   };
 }
 
+/**
+ * The cyclone's frame of reference is the volume frame of its weather volume (x right of the
+ * direction, z along it), so its band angles match the 'ring' form's band layout
+ * (weatherVolume/forms.js): band arm k leaves the wall at angle 2 pi k / bands and turns by
+ * -rotation x bandTurns x 2 pi on its way out to outerRadius (log-spiral in radius), and the whole
+ * pattern turns at bandSpin rad/s (the bands' visible spin).
+ */
+function createCycloneSampler(p, frame, result) {
+  const spin = p.rotation >= 0 ? 1 : -1;
+  const bandCount = Math.round(p.bands);
+  const spiralLog = Math.log(Math.max(1.05, p.outerRadius / (p.wallRadius + p.wallWidth)));
+  return function sampleCyclone(pos, time) {
+    const strength = frame[FRAME.STRENGTH];
+    const height = pos.y - frame[FRAME.Y];
+    result.vel.x = 0;
+    result.vel.y = 0;
+    result.vel.z = 0;
+    result.turbulence = 0;
+    if (strength <= 0 || height > p.top || height < -60) return result;
+    const dx = pos.x - frame[FRAME.X];
+    const dz = pos.z - frame[FRAME.Z];
+    const radius = Math.sqrt(dx * dx + dz * dz) + 1e-3;
+    if (radius > p.outerRadius) return result;
+    const heightShare = Math.max(0, height) / p.top;
+    // The eye and the wall flare outward with height (the stadium).
+    const flare = p.flare * Math.pow(heightShare, 1.6);
+    const eye = p.eyeRadius + flare;
+    const wall = p.wallRadius + flare;
+    const vertical = smoothstep(-60, 10, height) * (1 - smoothstep(0.8, 1, heightShare));
+    // Tangential: near calm across the eye, rising steeply up the inner wall to the maximum, then
+    // falling off as (wall / r)^decay and fading out at the outer radius.
+    let tangential;
+    if (radius <= wall) tangential = p.maxTangential * (0.1 * (radius / wall) + 0.9 * smoothstep(0.85 * eye, wall, radius));
+    else tangential = p.maxTangential * Math.pow(wall / radius, p.decay) * (1 - smoothstep(0.7 * p.outerRadius, p.outerRadius, radius));
+    const inflow = p.inflow * smoothstep(wall, 1.5 * wall, radius) * (1 - smoothstep(0.6 * p.outerRadius, p.outerRadius, radius)) * (1 - smoothstep(0.5 * p.inflowTop, p.inflowTop, height));
+    const wallShare = (radius - wall) / p.wallWidth;
+    const wallBand = Math.exp(-wallShare * wallShare);
+    const liftProfile = smoothstep(0, 0.1 * p.top, height) * (1 - smoothstep(0.75, 0.95, heightShare));
+    const eyeCore = 1 - smoothstep(0.5 * eye, eye, radius);
+    const updraft = (p.updraft * wallBand - p.subsidence * eyeCore) * liftProfile;
+    // The rain bands: arms of gusty air outside the wall, at the bands' angle (see the header).
+    let bandShare = 0;
+    if (bandCount > 0 && radius > wall) {
+      const rightX = -frame[FRAME.DIR_Z];
+      const rightZ = frame[FRAME.DIR_X];
+      const localX = dx * rightX + dz * rightZ;
+      const localZ = dx * frame[FRAME.DIR_X] + dz * frame[FRAME.DIR_Z];
+      const along = Math.log(radius / (p.wallRadius + p.wallWidth)) / spiralLog;
+      const phase = Math.atan2(localZ, localX) + spin * p.bandTurns * Math.PI * 2 * along - p.bandSpin * frame[FRAME.AGE];
+      const wave = 0.5 + 0.5 * Math.cos(bandCount * phase);
+      bandShare = wave * wave * wave * wave * (1 - smoothstep(0.75 * p.outerRadius, p.outerRadius, radius)) * smoothstep(wall, wall + p.wallWidth, radius);
+    }
+    const scale = strength * vertical;
+    const radialX = dx / radius;
+    const radialZ = dz / radius;
+    // Counterclockwise from above for rotation 1: the tangent is (dz, -dx) / r.
+    result.vel.x = (tangential * spin * radialZ - inflow * radialX) * scale;
+    result.vel.z = (-tangential * spin * radialX - inflow * radialZ) * scale;
+    result.vel.y = updraft * scale;
+    const turbulence = Math.max(p.turbulence * wallBand, p.bandTurbulence * bandShare, p.eyeTurbulence * eyeCore) * vertical * Math.min(1, strength);
+    result.turbulence = turbulence;
+    gustInput[0] = time;
+    gustInput[1] = turbulence * p.gust;
+    addGusts(result, frame, pos);
+    return result;
+  };
+}
+
 const SAMPLERS = Object.freeze({
   rankine: createRankineSampler,
   updraft: createUpdraftSampler,
@@ -648,6 +741,7 @@ const SAMPLERS = Object.freeze({
   waveLift: createWaveLiftSampler,
   gustFront: createGustFrontSampler,
   curtain: createCurtainSampler,
+  cyclone: createCycloneSampler,
 });
 
 // ---- Bounds --------------------------------------------------------------------------------------
@@ -823,6 +917,14 @@ const BOUNDS_WRITERS = Object.freeze({
     extent[4] = p.top;
     orientedBounds(bounds, frame);
     metrics[0] = Math.sqrt(p.reach * p.reach + (0.5 * p.length + p.thickness) * (0.5 * p.length + p.thickness));
+  },
+  cyclone(source) {
+    const { params: p, frame, bounds, metrics } = source;
+    extent[2] = p.outerRadius;
+    extent[3] = -60;
+    extent[4] = p.top;
+    circleBounds(bounds, frame);
+    metrics[0] = p.outerRadius;
   },
 });
 

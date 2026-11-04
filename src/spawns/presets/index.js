@@ -34,6 +34,16 @@ import skyWhale from './skyWhale.js';
 import crystalSpires from './crystalSpires.js';
 import jetStream from './jetStream.js';
 import stormChase from './stormChase.js';
+import sandstormWall from './sandstormWall.js';
+import snowSquall from './snowSquall.js';
+import hurricaneEye from './hurricaneEye.js';
+import valleyFogRiver from './valleyFogRiver.js';
+import dirtyThunderstorm from './dirtyThunderstorm.js';
+import lavaRiversToSea from './lavaRiversToSea.js';
+import fissureEruption from './fissureEruption.js';
+import meteorCraterLake from './meteorCraterLake.js';
+import hotSpringTerraces from './hotSpringTerraces.js';
+import saltFlatMirror from './saltFlatMirror.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -69,6 +79,17 @@ export const PRESETS = Object.freeze([
   crystalSpires,
   jetStream,
   stormChase,
+  // Batch 4: presets 31-40.
+  sandstormWall,
+  snowSquall,
+  hurricaneEye,
+  valleyFogRiver,
+  dirtyThunderstorm,
+  lavaRiversToSea,
+  fissureEruption,
+  meteorCraterLake,
+  hotSpringTerraces,
+  saltFlatMirror,
 ]);
 
 /** Presets by id. */
