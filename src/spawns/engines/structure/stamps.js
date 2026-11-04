@@ -26,6 +26,10 @@ export const RECIPE_STAMP_TYPES = Object.freeze({
   lavaChannels: 'carve',
   ejecta: 'crater',
   saltPiles: 'basin',
+  glacier: null,
+  shipwreck: 'reef',
+  seaArches: 'seaStacks',
+  caveMouth: null,
 });
 
 /** Stamp sizes each recipe prefers over the stamp type's own defaults (m, or [min, max] ranges). */
@@ -38,6 +42,8 @@ const RECIPE_STAMP_DEFAULTS = Object.freeze({
   // A lava channel between basalt levees (the mesa band) down the fall line, short enough to fit the
   // uneven ground of a coast (the flow runs on to the sea over the natural ground).
   lavaChannels: Object.freeze({ length: [600, 800], width: [16, 24], depth: [8, 12], wallWidth: [8, 12], twist: [20, 40], plateau: [10, 16], shoulder: [40, 60], segments: 10, paint: 'basalt' }),
+  shipwreck: Object.freeze({ radius: [200, 270], depth: [1.8, 2.6], pocket: [8, 10], pocketRadius: [60, 80], heads: [12, 18], falloff: [140, 190], paint: 'coral' }),
+  seaArches: Object.freeze({ count: [4, 6], radius: [12, 19], height: [40, 68], spread: [280, 400], arches: [1, 2], span: [44, 60], archHeight: [30, 40], paint: 'wetRock' }),
 });
 
 /** Islet layout for the islands recipe: how many islets, and how far out the others ring the first. */

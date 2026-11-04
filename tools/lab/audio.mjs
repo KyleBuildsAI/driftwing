@@ -58,7 +58,7 @@ import { findBrowser } from '../browser.mjs';
 import { findFreePort } from '../ports.mjs';
 import { SPEED_OF_SOUND, dopplerFactor } from '../../src/audio/spatial.js';
 import { RECIPES, RECIPE_NAMES } from '../../src/audio/recipes/index.js';
-import { createSpawnVoices, distanceGain, frontArrival, resolveSpatial } from '../../src/audio/spawnVoices.js';
+import { MAX_VOICE_BUDGET, createSpawnVoices, distanceGain, frontArrival, resolveSpatial } from '../../src/audio/spawnVoices.js';
 import * as THREE from 'three/webgpu';
 import { Session } from 'node:inspector';
 
@@ -329,7 +329,8 @@ async function testUpdateAllocations() {
   const issues = [];
   const spawnVoices = createSpawnVoices({ THREE, onIssue: (error) => issues.push(error.message) });
   spawnVoices.attach({ context, noise: { duration: 4 }, mixer, spatializer: listener });
-  spawnVoices.setBudget(16);
+  // Every recipe realized at once: the budget grows with the recipe list (up to MAX_VOICE_BUDGET).
+  spawnVoices.setBudget(Math.min(MAX_VOICE_BUDGET, Math.max(16, RECIPE_NAMES.length)));
   const handles = RECIPE_NAMES.map((name) => spawnVoices.spawnVoice(name, { intensity: 0.6 }));
   const position = new THREE.Vector3();
   const frame = { time: 0, realTime: 0, interval: 0.05, interior: false, profile: { interiorCutoff: 0 } };
@@ -367,10 +368,12 @@ async function testUpdateAllocations() {
   };
   check('updateAllocations', 'every recipe realized on the stand-in', after.realized === RECIPE_NAMES.length && issues.length === 0,
     `${after.realized}/${after.voices}${issues.length ? `; ${issues.join(' | ')}` : ''}`);
-  // An object created per update (or even per hundred updates) would leave thousands of samples.
+  // An object created per update (or even per hundred updates) would leave thousands of samples. The
+  // sporadic runtime samples grow with the voices moving (the Phase 2 catalog's 15 had 50).
+  const sporadicLimit = Math.round((updates / 1000) * Math.max(1, after.voices / 15));
   check('updateAllocations', `${updates} updates of ${after.voices} moving voices create no objects`,
-    sampled.otherSamples < updates / 1000 && after.realizations === warm.realizations,
-    `${sampled.otherSamples} sporadic non-box samples ${JSON.stringify(sampled.otherSites)} (limit ${updates / 1000});`
+    sampled.otherSamples < sporadicLimit && after.realizations === warm.realizations,
+    `${sampled.otherSamples} sporadic non-box samples ${JSON.stringify(sampled.otherSites)} (limit ${sporadicLimit});`
     + ` V8 boxed doubles ${numbers.updateAllocations.boxedDoubleSampleBytesPerUpdate} sampled B per update; realizations during the run ${after.realizations - warm.realizations}`);
   for (const handle of handles) handle.dispose();
 }
@@ -404,6 +407,10 @@ const RENDER_PLAN = Object.freeze({
   discovery: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.2, name: 'chime' }] },
   raptor: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.3, name: 'call' }, { at: 2.6, name: 'call', options: { strength: 0.8 } }] },
   goose: { intensity: 1, seconds: 6, skip: 0.2, triggers: [{ at: 0.2, name: 'call' }] },
+  surf: { intensity: 0.8, seconds: 6, triggers: [{ at: 2, name: 'crash', options: { strength: 1 } }] },
+  herd: { intensity: 1, seconds: 5, triggers: [{ at: 1.5, name: 'bellow', options: { strength: 1 } }] },
+  calving: { intensity: 0.7, seconds: 7, triggers: [{ at: 1, name: 'crack', options: { strength: 1 } }, { at: 4, name: 'splash', options: { strength: 1 } }] },
+  dolphin: { intensity: 1, seconds: 6, skip: 0.2, triggers: [{ at: 0.3, name: 'call' }] },
 });
 
 async function testRecipes(page, label) {
@@ -510,7 +517,8 @@ async function testLifecycle(page, label) {
   const result = await page.evaluate(async (names) => {
     const { spawn, audio, sleep } = window.audioLab;
     const tools = spawn();
-    tools.setBudget(16);
+    // Every recipe realized at once (the page caps the budget at MAX_VOICE_BUDGET).
+    tools.setBudget(Math.max(16, names.length));
     const before = tools.stats();
     const ids = names.map((name, index) => tools.play(name, { distance: name === 'thunder' ? 400 : 150, bearing: (index * 360) / names.length, intensity: 0.8 }));
     await sleep(900);

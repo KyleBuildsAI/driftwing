@@ -59,6 +59,7 @@ export function createWorldGen(seedString, options) {
     [0xeee2c8, 0xe6d3ae, 0xd8c094, 0xf6eedc], // travertine: cream, warm stone, ochre stain, white rim
     [0x5a4c3c, 0x4a3e32, 0x6b5a46, 0x3c3229], // mud: lake mud, dark mud, dry mud, wet black mud
     [0xd6e6f2, 0xbcd6ea, 0xe8f2fa, 0xa8c8e0], // ice: rime, blue ice, snow dusted, clear blue ice
+    [0xd9826e, 0xc9a25a, 0x7fa86a, 0xe9dcc4], // coral: pink coral, ochre coral, brain coral, bleached coral
   ];
   // Ids 0-5 are the Phase 1 types; 6-12 the Phase 3 species, which grow only inside overlays.
   const VEGETATION = VEGETATION_IDS;
@@ -792,10 +793,14 @@ export function createWorldGen(seedString, options) {
       case 8:
         if (slope > 0.3) return 2;
         return patch < -0.15 ? 3 : patch < 0.25 ? 0 : 1;
-      default:
+      case 9:
         // Ice: rime, blue ice and snow-dusted patches; clear blue on single faces.
         if (faceHash > 0.94) return 3;
         return patch < -0.2 ? 1 : patch < 0.3 ? 0 : 2;
+      default:
+        // Coral: patches of pink, ochre and green heads, bleached faces scattered between them.
+        if (faceHash > 0.88) return 3;
+        return patch < -0.15 ? 2 : patch < 0.2 ? 0 : 1;
     }
   }
 

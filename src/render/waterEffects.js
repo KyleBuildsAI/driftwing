@@ -23,6 +23,13 @@ import { createInstancedPool, createSlotAllocator } from '../spawns/pools.js';
  *   lit by the sun and sky, glowing in a glow region; a droplet that falls back onto the water leaves
  *   a small splat in the trail buffer.
  * - Pools: local water discs above sea level (a waterfall's plunge pool) with churning foam.
+ * - Travelling waves (up to 4, Phase 3): a solitary crest (a sech^2 hump, steeper on its front face)
+ *   moving across the ocean, either a straight front with tapered ends (a rogue wave, a tidal bore)
+ *   or an expanding ring (a calving glacier's wave), with foam along the crest. They lift the
+ *   surface the water query reports too (surfaceHeightAt), so a craft on the water rides them.
+ * - Shallows regions (up to 4, Phase 3): clear turquoise water over a lagoon or a reef, where the
+ *   ocean turns more transparent so the seabed and a wreck read through it, with an optional surf
+ *   ring breaking along a reef crest.
  *
  * With nothing registered and an empty trail buffer every added term is exactly zero, so the ocean
  * renders exactly as in Phase 1; the shader work is also skipped then (uniform branches).
@@ -38,7 +45,7 @@ import { createInstancedPool, createSlotAllocator } from '../spawns/pools.js';
  * rather than closure variables, and the float uniforms are vector components updated in place. Positions reach the GPU relative to the ocean grid's
  * camera-snapped anchor (float32-safe far from the origin).
  */
-export const WATER_EFFECT_LIMITS = Object.freeze({ vortices: 4, ripples: 8, glowRegions: 4, pools: 4, droplets: 6144 });
+export const WATER_EFFECT_LIMITS = Object.freeze({ vortices: 4, ripples: 8, glowRegions: 4, pools: 4, droplets: 6144, waves: 4, shallows: 4 });
 
 const TRAIL_SIZE = 256;
 const TRAIL_TEXEL = 2.5;
@@ -100,6 +107,31 @@ const POOL_DEFAULTS = Object.freeze({ x: 0, y: 0, z: 0, radius: 50, churn: 0.8, 
 const GLOW_REGION_DEFAULTS = Object.freeze({ x: 0, z: 0, radius: 900, strength: 1, surf: 0.6, color: 0x1f9dff });
 
 /**
+ * Defaults of a travelling wave descriptor (createWave): the origin (x, z), the unit travel direction
+ * (dirX, dirZ; a ring spreads in every direction), the crest's distance along it from the origin
+ * (front; a ring's radius), its height (m), the half width of its hump (width, m; the front face is
+ * steeper by lean 0..1), the crest's half length across the travel (crestLength, m) fading out over
+ * taper metres at its ends (a straight front only), ring, foam 0..1 and weight 0..1.
+ */
+const WAVE_DEFAULTS = Object.freeze({
+  x: 0, z: 0, dirX: 1, dirZ: 0, front: 0, height: 4, width: 40, lean: 0.3, crestLength: 400, taper: 120, ring: false, foam: 0.8, weight: 1,
+});
+
+/**
+ * Defaults of a shallows region descriptor (createShallows): clear water in a disc at (x, z) of
+ * radius (m), fading out over its outer fade metres, tinted color with clarity 0..1 (how much more
+ * transparent the ocean turns), and an optional surf ring breaking at surfRadius (m, 0 for none),
+ * surfWidth wide, of strength surf 0..1; weight 0..1 fades the whole region.
+ */
+const SHALLOWS_DEFAULTS = Object.freeze({
+  x: 0, z: 0, radius: 400, fade: 120, color: 0x46d6c8, clarity: 0.7, surfRadius: 0, surfWidth: 14, surf: 0, weight: 1,
+});
+/** The CPU height skips a wave this many half widths from its crest (sech^2 is below 2.5e-5 there). */
+const WAVE_REACH = 6;
+/** The front face's half width is width x (1 - WAVE_LEAN_SHARE x lean), the back's x (1 + ...). */
+const WAVE_LEAN_SHARE = 0.6;
+
+/**
  * Defaults of a mark descriptor (createMark): one write into the trail buffer or the ripples. A disc
  * uses x, z, radius, foam and glow; a trail runs from (x, z) to (x1, z1); a ring adds width; a ripple
  * and a splash use strength (and a splash glow).
@@ -121,7 +153,7 @@ const SPRAY_NOISE_SIZE = 4096;
 export function createWaterEffects(ctx) {
   const { THREE: T, TSL: L, scene, state, uniforms } = ctx;
   const {
-    Fn, If, uniform, uniformArray, float, vec3, vec4, sin, cos, atan, log, exp, length, max, min,
+    Fn, If, uniform, uniformArray, float, vec3, vec4, sin, cos, atan, log, exp, length, max, min, step, sign,
     smoothstep, saturate, mix, texture, mx_noise_float, varying, positionGeometry, abs, uv, pow, oneMinus,
     instancedDynamicBufferAttribute, normalize, dot, reflect, cameraViewMatrix, positionView, color,
   } = L;
@@ -339,9 +371,21 @@ export function createWaterEffects(ctx) {
   // Region i: (x, z relative to the anchor, radius, strength); regionSurf: surf glow per region.
   const regionData = uniformArray(vectors(MAX_REGIONS), 'vec4');
   const regionSurf = uniformArray(vectors(MAX_REGIONS), 'vec4');
+  const MAX_WAVES = WATER_EFFECT_LIMITS.waves;
+  const MAX_SHALLOWS = WATER_EFFECT_LIMITS.shallows;
+  // The travelling waves and the shallows share ONE packed array (each uniform array is a uniform
+  // buffer, and a stage may bind only 12). Wave i at 3i .. 3i + 2: A = (origin x, origin z relative to
+  // the anchor, travel direction x, z), B = (front, height x weight, back half width, front half
+  // width), C = (crest half length, taper, ring 0 | 1, foam x weight). Shallows i at SHALLOWS_BASE + 3i
+  // .. + 2: A = (x, z relative to the anchor, radius, fade), B = (tint linear rgb, clarity x weight),
+  // C = (surf radius, surf width, surf x weight, 0).
+  const SHALLOWS_BASE = 3 * MAX_WAVES;
+  const layerData = uniformArray(vectors(3 * (MAX_WAVES + MAX_SHALLOWS)), 'vec4');
   const vortexCount = uniform(0);
   const rippleCount = uniform(0);
   const regionCount = uniform(0);
+  const waveCount = uniform(0);
+  const shallowsCount = uniform(0);
   const trailsActive = uniform(0);
   const trailOrigin = uniform(new T.Vector2());
   // The ocean grid's anchor (world xz) the trail coordinates are relative to, for nodes.trailFoam.
@@ -364,6 +408,11 @@ export function createWaterEffects(ctx) {
   const rippleAge = new Float32Array(MAX_RIPPLES).fill(RIPPLE_LIFE_SECONDS);
   const rippleStrength = new Float32Array(MAX_RIPPLES);
   let rippleCursor = 0;
+  const waveSlots = createSlotAllocator(MAX_WAVES);
+  const waveState = Array.from({ length: MAX_WAVES }, () => ({ ...WAVE_DEFAULTS, used: false }));
+  const shallowsSlots = createSlotAllocator(MAX_SHALLOWS);
+  const shallowsState = Array.from({ length: MAX_SHALLOWS }, () => ({ ...SHALLOWS_DEFAULTS, colorHex: -1, red: 0, green: 0, blue: 0, used: false }));
+  const shallowsColor = new T.Color();
 
   // =============================================================================================
   // SHADER NODES (used by water.js)
@@ -400,7 +449,31 @@ export function createWaterEffects(ctx) {
     return envelope.mul(RIPPLE_MAX_HEIGHT).mul(sin(distance.sub(front).mul(RIPPLE_WAVENUMBER)));
   }
 
-  /** Vertex stage: the vertical offset (m) at grid-local p from every vortex and ripple. */
+  /**
+   * The geometry of travelling wave index at grid-local p: vec4(height share (sech^2 x the crest-end
+   * fade, 0..1), signed distance from the crest along the travel (m), the travel direction x, z there).
+   * A straight front measures along its direction and fades over its taper at the crest ends; a ring
+   * measures from its origin, outward.
+   */
+  function waveGeometryNode(p, index) {
+    const a = layerData.element(index * 3);
+    const b = layerData.element(index * 3 + 1);
+    const c = layerData.element(index * 3 + 2);
+    const rel = p.sub(a.xy);
+    const radial = max(length(rel), 0.01);
+    const ring = c.z;
+    const along = mix(rel.x.mul(a.z).add(rel.y.mul(a.w)), radial, ring);
+    const across = abs(rel.y.mul(a.z).sub(rel.x.mul(a.w)));
+    const ends = mix(oneMinus(smoothstep(c.x.sub(c.y), c.x, across)), float(1), ring);
+    const offset = along.sub(b.x);
+    const halfWidth = mix(b.z, b.w, step(0, offset));
+    // sech^2(q) = 4 e^-2|q| / (1 + e^-2|q|)^2, written with the decaying exponential (no overflow).
+    const decay = exp(abs(offset.div(halfWidth)).mul(-2));
+    const share = decay.mul(4).div(float(1).add(decay).mul(float(1).add(decay))).mul(ends);
+    return vec4(share, offset, mix(a.z, rel.x.div(radial), ring), mix(a.w, rel.y.div(radial), ring));
+  }
+
+  /** Vertex stage: the vertical offset (m) at grid-local p from every vortex, ripple and travelling wave. */
   const displacementFn = Fn(([p]) => {
     const height = float(0).toVar();
     If(vortexCount.greaterThan(0.5), () => {
@@ -408,6 +481,9 @@ export function createWaterEffects(ctx) {
     });
     If(rippleCount.greaterThan(0.5), () => {
       for (let index = 0; index < MAX_RIPPLES; index++) height.addAssign(rippleHeightNode(p, index));
+    });
+    If(waveCount.greaterThan(0.5), () => {
+      for (let index = 0; index < MAX_WAVES; index++) height.addAssign(waveGeometryNode(p, index).x.mul(layerData.element(index * 3 + 1).y));
     });
     return height;
   });
@@ -488,6 +564,41 @@ export function createWaterEffects(ctx) {
         foam.addAssign(envelope.mul(smoothstep(0.2, 0.9, sin(offset.mul(RIPPLE_WAVENUMBER)))).mul(0.35));
       }
     });
+    If(waveCount.greaterThan(0.5).or(shallowsCount.greaterThan(0.5)), () => {
+      // Foam on a crest or a reef breaks up into drifting lace.
+      const lace = saturate(mx_noise_float(vec3(p.add(trailOrigin).mul(0.09), flowTime.mul(0.3))).mul(0.9).add(0.55));
+      If(waveCount.greaterThan(0.5), () => {
+        for (let index = 0; index < MAX_WAVES; index++) {
+          const b = layerData.element(index * 3 + 1);
+          const geometry = waveGeometryNode(p, index);
+          const offset = geometry.y;
+          const halfWidth = mix(b.z, b.w, step(0, offset));
+          const decay = exp(abs(offset.div(halfWidth)).mul(-2));
+          const tanh = sign(offset).mul(oneMinus(decay)).div(float(1).add(decay));
+          // d(height)/d(along) of the sech^2 hump: -2 h tanh(q) / half width, along the travel.
+          const slope = geometry.x.mul(b.y).mul(tanh).mul(-2).div(halfWidth);
+          slopeX.addAssign(geometry.z.mul(slope));
+          slopeZ.addAssign(geometry.w.mul(slope));
+          // White water on the crest, and on the steep front face where it breaks.
+          const crest = smoothstep(0.42, 0.92, geometry.x);
+          const face = smoothstep(0.12, 0.6, geometry.x).mul(step(0, offset)).mul(0.65);
+          foam.addAssign(saturate(crest.add(face)).mul(lace).mul(layerData.element(index * 3 + 2).w));
+        }
+      });
+      If(shallowsCount.greaterThan(0.5), () => {
+        for (let index = 0; index < MAX_SHALLOWS; index++) {
+          const a = layerData.element(SHALLOWS_BASE + index * 3);
+          const c = layerData.element(SHALLOWS_BASE + index * 3 + 2);
+          const distance = length(p.sub(a.xy));
+          const across = distance.sub(c.x).div(max(c.y, 1));
+          const band = exp(across.mul(across).negate());
+          // Sets of breakers rolling onto the reef crest, out of step around the ring.
+          const rolling = sin(flowTime.mul(0.8).add(distance.mul(0.06)).add(lace.mul(3.2))).mul(0.5).add(0.5);
+          const breakers = smoothstep(0.3, 0.95, rolling).mul(0.65).add(0.35);
+          foam.addAssign(band.mul(breakers).mul(lace).mul(c.z));
+        }
+      });
+    });
     If(trailsActive.greaterThan(0.5), () => {
       const trail = texture(trailTexture, p.add(trailOrigin).div(TRAIL_SPAN)).rg;
       const window = max(abs(p.x), abs(p.y));
@@ -536,6 +647,25 @@ export function createWaterEffects(ctx) {
   });
 
   /**
+   * Fragment stage: vec4(tint linear rgb, amount 0..1) of the shallows regions at grid-local p: the
+   * clarity-weighted tint and how strongly it applies (exactly 0 outside every region).
+   */
+  const shallowsFn = Fn(([p]) => {
+    const tint = vec3(0, 0, 0).toVar();
+    const amount = float(0).toVar();
+    If(shallowsCount.greaterThan(0.5), () => {
+      for (let index = 0; index < MAX_SHALLOWS; index++) {
+        const a = layerData.element(SHALLOWS_BASE + index * 3);
+        const b = layerData.element(SHALLOWS_BASE + index * 3 + 1);
+        const mask = oneMinus(smoothstep(a.z.sub(a.w), a.z, length(p.sub(a.xy)))).mul(b.w);
+        tint.addAssign(b.xyz.mul(mask));
+        amount.addAssign(mask);
+      }
+    });
+    return vec4(tint.div(max(amount, 0.0001)), saturate(amount));
+  });
+
+  /**
    * Foam (0..1) from the trail buffer at a RENDER-frame xz node (positionWorld.xz; the lake material's
    * craft trail): the same texels, lace and window fade as the ocean's trail foam, exactly zero while
    * no row holds anything. The trail anchor (world) moves into the render frame first, so the
@@ -564,6 +694,8 @@ export function createWaterEffects(ctx) {
     darken: () => funnelDarkenFn(gridPosition),
     /** Fragment stage: the craft-trail foam (0..1) at a render-frame xz node (local water bodies). */
     trailFoam: (renderXZ) => trailFoamFn(renderXZ),
+    /** Fragment stage: vec4(tint, amount) of the shallows regions (clear lagoon and reef water). */
+    shallows: () => shallowsFn(gridPosition),
     glowColor,
     foamColor,
   };
@@ -904,9 +1036,45 @@ export function createWaterEffects(ctx) {
   // CPU QUERIES AND UNIFORM UPLOAD
   // =============================================================================================
   /**
-   * The water surface height (m) at (x, z): sea level plus every vortex funnel (swell excluded). Each
-   * funnel is the normalised Rankine pressure dip, 1 at the eye's centre and 0 at its radius, as in
-   * the shader. Away from every funnel it returns sea level itself (an integer: nothing is boxed).
+   * The lift (m) of every travelling wave at (x, z): the shader's sech^2 hump (steeper on the front
+   * face), faded over the taper at a straight crest's ends, times the wave's height and weight.
+   */
+  function waveLiftAt(x, z) {
+    let lift = 0;
+    for (let slot = 0; slot < MAX_WAVES; slot++) {
+      const wave = waveState[slot];
+      if (!wave.used || wave.weight <= 0) continue;
+      const offsetX = x - wave.x;
+      const offsetZ = z - wave.z;
+      let along;
+      let ends = 1;
+      if (wave.ring) {
+        along = Math.sqrt(offsetX * offsetX + offsetZ * offsetZ);
+      } else {
+        along = offsetX * wave.dirX + offsetZ * wave.dirZ;
+        const across = Math.abs(offsetZ * wave.dirX - offsetX * wave.dirZ);
+        if (across >= wave.crestLength) continue;
+        const start = wave.crestLength - wave.taper;
+        if (across > start) {
+          const share = (across - start) / wave.taper;
+          ends = 1 - share * share * (3 - 2 * share);
+        }
+      }
+      const offset = along - wave.front;
+      const halfWidth = wave.width * (offset >= 0 ? 1 - WAVE_LEAN_SHARE * wave.lean : 1 + WAVE_LEAN_SHARE * wave.lean);
+      const reach = (offset < 0 ? -offset : offset) / halfWidth;
+      if (reach > WAVE_REACH) continue;
+      const decay = Math.exp(-2 * reach);
+      lift += ((4 * decay) / ((1 + decay) * (1 + decay))) * ends * wave.height * wave.weight;
+    }
+    return lift;
+  }
+
+  /**
+   * The water surface height (m) at (x, z): sea level plus every vortex funnel and travelling wave
+   * (swell excluded). Each funnel is the normalised Rankine pressure dip, 1 at the eye's centre and 0
+   * at its radius, as in the shader; each wave its sech^2 hump. Away from every funnel and wave it
+   * returns sea level itself (an integer: nothing is boxed).
    */
   function surfaceHeightAt(x, z) {
     let dip = 0;
@@ -923,8 +1091,9 @@ export function createWaterEffects(ctx) {
       const ratio = distance / eyeRadius;
       dip += ((1 / (1 + ratio * ratio) - edge) / (1 - edge)) * vortex.depth * vortex.weight;
     }
-    if (dip === 0) return waterLevel;
-    return waterLevel - dip;
+    const lift = waveSlots.used > 0 ? waveLiftAt(x, z) : 0;
+    if (dip === 0 && lift === 0) return waterLevel;
+    return waterLevel - dip + lift;
   }
 
   // The grid anchor and the last flight-clock reading (doubles in a typed array: no boxing).
@@ -986,6 +1155,43 @@ export function createWaterEffects(ctx) {
       surf.x = region.surf;
     }
     regionCount.value = regions;
+    let waves = 0;
+    for (let slot = 0; slot < MAX_WAVES; slot++) {
+      const wave = waveState[slot];
+      const a = layerData.array[slot * 3];
+      const b = layerData.array[slot * 3 + 1];
+      const c = layerData.array[slot * 3 + 2];
+      if (!wave.used || wave.weight <= 0) {
+        a.x = 1e6; a.y = 1e6; a.z = 1; a.w = 0;
+        b.x = 0; b.y = 0; b.z = 1; b.w = 1;
+        c.x = 1; c.y = 1; c.z = 0; c.w = 0;
+        continue;
+      }
+      waves++;
+      a.x = wave.x - anchorX; a.y = wave.z - anchorZ; a.z = wave.dirX; a.w = wave.dirZ;
+      b.x = wave.front; b.y = wave.height * wave.weight;
+      b.z = wave.width * (1 + WAVE_LEAN_SHARE * wave.lean); b.w = wave.width * (1 - WAVE_LEAN_SHARE * wave.lean);
+      c.x = wave.crestLength; c.y = wave.taper; c.z = wave.ring ? 1 : 0; c.w = wave.foam * wave.weight;
+    }
+    waveCount.value = waves;
+    let shallows = 0;
+    for (let slot = 0; slot < MAX_SHALLOWS; slot++) {
+      const region = shallowsState[slot];
+      const a = layerData.array[SHALLOWS_BASE + slot * 3];
+      const b = layerData.array[SHALLOWS_BASE + slot * 3 + 1];
+      const c = layerData.array[SHALLOWS_BASE + slot * 3 + 2];
+      if (!region.used || region.weight <= 0) {
+        a.x = 1e6; a.y = 1e6; a.z = 1; a.w = 1;
+        b.x = 0; b.y = 0; b.z = 0; b.w = 0;
+        c.x = 0; c.y = 1; c.z = 0;
+        continue;
+      }
+      shallows++;
+      a.x = region.x - anchorX; a.y = region.z - anchorZ; a.z = region.radius; a.w = region.fade;
+      b.x = region.red; b.y = region.green; b.z = region.blue; b.w = region.clarity * region.weight;
+      c.x = region.surfRadius; c.y = region.surfWidth; c.z = region.surf * region.weight;
+    }
+    shallowsCount.value = shallows;
     trailAnchor.value.x = anchorX;
     trailAnchor.value.y = anchorZ;
     trailOrigin.value.x = ((anchorX % TRAIL_SPAN) + TRAIL_SPAN) % TRAIL_SPAN;
@@ -1324,6 +1530,99 @@ export function createWaterEffects(ctx) {
       pools.flush();
       return true;
     },
+    /** A travelling wave descriptor with defaults (see setWave). */
+    createWave(overrides = {}) {
+      return { ...WAVE_DEFAULTS, ...overrides };
+    },
+    /** Takes a travelling wave slot (or -1 when all WATER_EFFECT_LIMITS.waves are in use). */
+    acquireWave() {
+      const slot = waveSlots.alloc();
+      if (slot >= 0) {
+        Object.assign(waveState[slot], WAVE_DEFAULTS);
+        waveState[slot].weight = 0;
+        waveState[slot].used = true;
+      }
+      return slot;
+    },
+    /**
+     * Copies a travelling wave descriptor (createWave) into the slot: x, z (the origin, m), dirX, dirZ
+     * (the travel direction, normalised here), front (m from the origin along it; a ring's radius),
+     * height (m), width (the hump's half width, m), lean 0..1 (a steeper front face), crestLength (the
+     * crest's half length across the travel, m), taper (m), ring, foam 0..1, weight 0..1.
+     */
+    setWave(slot, wave) {
+      const target = waveState[slot];
+      if (!target || !target.used) return false;
+      const length = Math.sqrt(wave.dirX * wave.dirX + wave.dirZ * wave.dirZ);
+      target.x = wave.x;
+      target.z = wave.z;
+      target.dirX = length > 1e-6 ? wave.dirX / length : 1;
+      target.dirZ = length > 1e-6 ? wave.dirZ / length : 0;
+      target.front = wave.front;
+      target.height = Math.max(wave.height, 0);
+      target.width = Math.max(wave.width, 1);
+      target.lean = Math.min(Math.max(wave.lean, 0), 1);
+      target.crestLength = Math.max(wave.crestLength, 2);
+      target.taper = Math.min(Math.max(wave.taper, 1), target.crestLength);
+      target.ring = wave.ring === true;
+      target.foam = Math.min(Math.max(wave.foam, 0), 1);
+      target.weight = Math.min(Math.max(wave.weight, 0), 1);
+      return true;
+    },
+    releaseWave(slot) {
+      if (!waveSlots.free(slot)) return false;
+      waveState[slot].used = false;
+      return true;
+    },
+    /** How many travelling waves are live (while 0 and no vortex is, the surface is sea level everywhere). */
+    get activeWaves() {
+      return waveSlots.used;
+    },
+    /** A shallows region descriptor with defaults (see setShallows). */
+    createShallows(overrides = {}) {
+      return { ...SHALLOWS_DEFAULTS, ...overrides };
+    },
+    /** Takes a shallows region slot (or -1 when all WATER_EFFECT_LIMITS.shallows are in use). */
+    acquireShallows() {
+      const slot = shallowsSlots.alloc();
+      if (slot >= 0) {
+        Object.assign(shallowsState[slot], SHALLOWS_DEFAULTS);
+        shallowsState[slot].weight = 0;
+        shallowsState[slot].colorHex = -1;
+        shallowsState[slot].used = true;
+      }
+      return slot;
+    },
+    /**
+     * Copies a shallows region descriptor (createShallows) into the slot: x, z, radius, fade (m), color
+     * 0xRRGGBB (sRGB), clarity 0..1, surfRadius, surfWidth (m), surf 0..1, weight 0..1.
+     */
+    setShallows(slot, descriptor) {
+      const region = shallowsState[slot];
+      if (!region || !region.used) return false;
+      region.x = descriptor.x;
+      region.z = descriptor.z;
+      region.radius = Math.max(descriptor.radius, 2);
+      region.fade = Math.min(Math.max(descriptor.fade, 1), region.radius);
+      region.clarity = Math.min(Math.max(descriptor.clarity, 0), 1);
+      region.surfRadius = Math.max(descriptor.surfRadius, 0);
+      region.surfWidth = Math.max(descriptor.surfWidth, 1);
+      region.surf = Math.min(Math.max(descriptor.surf, 0), 1);
+      region.weight = Math.min(Math.max(descriptor.weight, 0), 1);
+      if (Number.isInteger(descriptor.color) && descriptor.color !== region.colorHex) {
+        region.colorHex = descriptor.color;
+        shallowsColor.setHex(descriptor.color);
+        region.red = shallowsColor.r;
+        region.green = shallowsColor.g;
+        region.blue = shallowsColor.b;
+      }
+      return true;
+    },
+    releaseShallows(slot) {
+      if (!shallowsSlots.free(slot)) return false;
+      shallowsState[slot].used = false;
+      return true;
+    },
     surfaceHeightAt,
     /** Whether (x, z) has water a splash can land on: the sea or a local body (the shared water query). */
     isWaterAt(x, z) {
@@ -1355,6 +1654,8 @@ export function createWaterEffects(ctx) {
         vortices,
         ripples,
         glowRegions: regions,
+        waves: waveSlots.used,
+        shallows: shallowsSlots.used,
         pools: pools.used,
         droplets: liveDroplets,
         dropletsDropped: droppedDroplets,

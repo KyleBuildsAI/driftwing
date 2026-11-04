@@ -8,8 +8,9 @@
 // sits where the crest is drawn. Local water bodies (waters.js) come from placement through worldgen:
 // flat surfaces at their own levels, clipped to their basins.
 //
-// Everything is a pure function of (seed, presets, x, z, t), plus the whirlpool funnels, which come
-// from deterministic spawns through the water effects layer (attachEffects). Queries allocate nothing;
+// Everything is a pure function of (seed, presets, x, z, t), plus the whirlpool funnels and the
+// travelling waves (rogue waves, tidal bores, calving waves), which come from deterministic spawns
+// through the water effects layer (attachEffects). Queries allocate nothing;
 // a direct-mapped cache of the terrain lattice heights keeps the ocean test (is the ground below sea
 // level?) cheap for queries near each other, and only ever saves work: its answers are bit-identical
 // to worldgen.groundHeight.
@@ -306,9 +307,12 @@ export function createWaterQuery({ world, effects = null, windDirection, clock =
     return best;
   }
 
-  /** The whirlpool funnels' dip (m, >= 0) at (x, z), into scratch[DIP]. */
+  /**
+   * The whirlpool funnels' dip at (x, z), less the travelling waves' lift (m; negative on a wave),
+   * into scratch[DIP].
+   */
   function funnelDipInto(x, z) {
-    scratch[DIP] = waterEffects === null || !(waterEffects.activeVortices > 0) ? 0 : seaLevel - waterEffects.surfaceHeightAt(x, z);
+    scratch[DIP] = waterEffects === null || !(waterEffects.activeVortices > 0 || waterEffects.activeWaves > 0) ? 0 : seaLevel - waterEffects.surfaceHeightAt(x, z);
   }
 
   /** The swell scale at flight time t (oceanSwellScale, written out), into scratch[SWELL]. */

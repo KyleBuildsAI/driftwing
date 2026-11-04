@@ -20,7 +20,8 @@
 // gait: { hip, stride, amplitude: [walk, run], bob } (quadrupeds), wade: { legHeight, neckBase }
 // (wading birds), cruise, speed: [min, max] m/s, minPixels, capacity, spotColor, build(THREE) ->
 // BufferGeometry }. Phase 3 wave 1 adds the bison and the caribou (ground herds and columns), the
-// dolphin and the flamingo (the water surface); bats, butterflies and camels come with their presets.
+// dolphin and the flamingo (the water surface); bats, butterflies and camels come with their presets
+// (the bat with the bats at dusk, preset 48: a membrane-winged bird kind with slotted wing tips).
 
 /**
  * Collects flat triangles with a colour (sRGB hex) and an emissive weight per triangle, and (after
@@ -538,6 +539,23 @@ export const SPECIES = Object.freeze({
     build: (THREE) => buildWhale(THREE, {
       length: 1, girth: 0.13, fin: 0.21, flukes: 0.34, spots: 9,
       back: 0x7d8fa6, belly: 0xd8e2ec, finColor: 0x8a9db3, spotColor: 0xbff4ff,
+    }),
+  }),
+  // Phase 3 wave 3: the bats pouring out of a cave at dusk (preset 48, behaviour 'stream').
+  bat: Object.freeze({
+    id: 'bat',
+    kind: 'bird',
+    size: 0.34,
+    halfSpan: 0.17,
+    hinge: 0.025,
+    flap: Object.freeze({ rate: Object.freeze([9, 13]), amplitude: 0.95, dihedral: 0.04, glideDihedral: 0.02, glideShare: 0.04 }),
+    cruise: 10,
+    speed: Object.freeze([5, 17]),
+    minPixels: 1.5,
+    capacity: 4096,
+    build: (THREE) => buildBird(THREE, {
+      span: 0.34, length: 0.11, chord: 0.11, sweep: 0.02, bodyWidth: 0.026, neck: 0, tail: 'wedge', tailLength: 0.03, tailWidth: 0.07, fingers: true,
+      head: 0x2a211d, back: 0x33271f, belly: 0x463629, beak: 0x2a211d, wing: 0x2b2420, wingTip: 0x1d1815, tailColor: 0x2b2420,
     }),
   }),
 });

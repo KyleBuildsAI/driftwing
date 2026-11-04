@@ -89,6 +89,15 @@ export function localHull(part, points, tags) {
 }
 
 /**
+ * A heightfield in the local frame (Phase 3: a glacier's landable top): its grid corner (x0, z0), cell
+ * size and counts, heights (local y per grid point, NaN for a hole), the prism's bottom (local y) and
+ * optionally surfaceHeightAt(x, z) (local) -> the exact top (NaN off it), published for landings.
+ */
+export function localHeightfield(part, x0, z0, cell, cols, rows, heights, bottom, surfaceHeightAt, tags) {
+  return { part, type: 'heightfield', x0, z0, cell, cols, rows, heights, bottom, surfaceHeightAt, tags };
+}
+
+/**
  * meshBuilder.setTransform's frame as a function local [x, y, z] -> [x, y, z]: origin, compass yaw,
  * then tilts about local x and z (R = Ry(-yaw) * Rx(tiltX) * Rz(tiltZ)).
  */
@@ -159,6 +168,22 @@ function worldSpec(local, anchor, id, owner) {
       const points = new Float64Array(local.points.length * 3);
       local.points.forEach(([x, y, z], index) => points.set([anchor.x + x, anchor.y + y, anchor.z + z], index * 3));
       spec.points = points;
+      break;
+    }
+    case 'heightfield': {
+      spec.x0 = anchor.x + local.x0;
+      spec.z0 = anchor.z + local.z0;
+      spec.cell = local.cell;
+      spec.cols = local.cols;
+      spec.rows = local.rows;
+      const heights = new Float32Array(local.heights.length);
+      for (let index = 0; index < heights.length; index++) heights[index] = local.heights[index] + anchor.y;
+      spec.heights = heights;
+      spec.bottom = anchor.y + local.bottom;
+      if (typeof local.surfaceHeightAt === 'function') {
+        const top = local.surfaceHeightAt;
+        spec.surfaceHeightAt = (x, z) => top(x - anchor.x, z - anchor.z) + anchor.y;
+      }
       break;
     }
     default:

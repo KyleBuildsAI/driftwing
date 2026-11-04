@@ -61,8 +61,9 @@ import { createWindSample, ownsPresetAudio } from './engineKit.js';
 import { SLOPE_RUN, buildGroundPath, createPath, createPathFollower } from '../../world/pathFollower.js';
 import { rigidCurvatureDrop } from '../../render/curvature.js';
 import { faunaThreatOf } from '../../craft/registry.js';
+import { findCliffFace } from './cliffFace.js';
 
-export const FAUNA_BEHAVIORS = Object.freeze(['murmuration', 'flock', 'formation', 'circling', 'pod', 'wingman', 'drift', 'herd', 'column', 'surface']);
+export const FAUNA_BEHAVIORS = Object.freeze(['murmuration', 'flock', 'formation', 'circling', 'pod', 'wingman', 'drift', 'herd', 'column', 'surface', 'stream']);
 /** Altitude modes: above the ground, above sea level, on the water, near the player, on the ground. */
 export const ALTITUDE_MODES = Object.freeze(['agl', 'msl', 'water', 'player', 'ground']);
 /** Stampede triggers of a herd. */
@@ -124,6 +125,10 @@ export const FAUNA_DEFAULTS = Object.freeze({
     }),
   }),
   calls: Object.freeze({ trigger: 'call', interval: null }),
+  stream: Object.freeze({
+    source: 'cliff', faceSearch: 1500, length: 1700, climb: 260, drop: 25, width: Object.freeze([6, 34]), meander: 90,
+    meanderWave: 650, turn: 35, clearance: 30, disperse: 18, spreadSpeed: 7, prewarm: 0,
+  }),
 });
 
 /**
@@ -141,7 +146,10 @@ const BEHAVIOR_DEFAULTS = Object.freeze({
   herd: Object.freeze({ scatter: null, altitude: Object.freeze({ mode: 'ground', value: 0, spread: 0 }), fadeIn: 0.8, sizeJitter: 0.08 }),
   column: Object.freeze({ scatter: null, altitude: Object.freeze({ mode: 'ground', value: 0, spread: 0 }), fadeIn: 0.8, sizeJitter: 0.08 }),
   surface: Object.freeze({ scatter: null, altitude: Object.freeze({ mode: 'water', value: 0, spread: 0 }) }),
+  stream: Object.freeze({ scatter: Object.freeze({ radius: 45, burst: 16, recover: 3, spread: 0.7 }), fadeIn: 2, sizeJitter: 0.12 }),
 });
+/** A bat stream's path is tabled at this many points (the agents interpolate along it). */
+const STREAM_POINTS = 64;
 
 /** Slipstream defaults (drift.slipstream: true or an object). */
 const SLIPSTREAM_DEFAULTS = Object.freeze({ length: 900, radius: 80, speed: 16, lift: 3.5, turbulence: 0.15 });
@@ -275,6 +283,15 @@ function validateGroundAndSurface(resolved, params) {
   if (walks && resolved.altitude.mode !== 'ground') fail('altitude.mode', `must be ground for behavior ${behavior}`);
   if (resolved.altitude.mode === 'ground' && !walks) fail('altitude.mode', 'ground is for herd and column behaviours');
   if (behavior === 'surface' && def.kind !== 'whale' && !def.wade) fail('species', `must swim (a whale kind) or wade for behavior surface, got ${def.id}`);
+  if (behavior === 'stream') {
+    if (def.kind !== 'bird' || def.wade) fail('species', `must be a flying bird kind for behavior stream, got ${def.id}`);
+    const stream = resolved.stream;
+    if (stream.source !== 'cliff' && stream.source !== 'anchor') fail('stream.source', "must be 'cliff' or 'anchor'");
+    for (const field of ['faceSearch', 'length', 'meanderWave', 'disperse']) if (!positive(stream[field])) fail(`stream.${field}`, 'must be a positive number');
+    for (const field of ['climb', 'drop', 'meander', 'clearance', 'spreadSpeed', 'prewarm']) if (!(Number.isFinite(stream[field]) && stream[field] >= 0)) fail(`stream.${field}`, 'must be a number >= 0');
+    if (!Number.isFinite(stream.turn) || Math.abs(stream.turn) > 180) fail('stream.turn', 'must be within -180..180 degrees');
+    if (!isRange(stream.width, 0.5)) fail('stream.width', 'must be [at the mouth, at the end] metres (min >= 0.5)');
+  }
   if (behavior === 'herd') {
     const herd = resolved.herd;
     if (!positive(herd.slopeLimit) || herd.slopeLimit > 5) fail('herd.slopeLimit', `must be within 0..5 (rise over ${SLOPE_RUN} m), got ${JSON.stringify(herd.slopeLimit)}`);
@@ -3544,6 +3561,245 @@ export function createFaunaEngine() {
     else simulateDolphins(data);
   }
 
+  // ---- stream (bats pouring out of a cave) ---------------------------------------------------------
+  /**
+   * The stream's flight path, tabled once at create (STREAM_POINTS points, world metres): out of the
+   * cave mouth on the steepest high face near the anchor (cliffFace.js, the same face the cave mouth's
+   * structure part finds), dipping as the bats drop out, then climbing away over the valley along a
+   * slow turn with a lazy meander, never closer than stream.clearance to the ground below. Source
+   * 'anchor' starts at the anchor itself. Returns false when no face is near (the group then ends).
+   */
+  function buildStreamPath(data) {
+    const g = data.g;
+    const stream = data.params.stream;
+    let startX = g[G.ANCHOR_X];
+    let startZ = g[G.ANCHOR_Z];
+    let startY = ctx.terrain.groundHeight(startX, startZ) + 40;
+    let faceX = Math.sin(g[G.HEADING]);
+    let faceZ = -Math.cos(g[G.HEADING]);
+    if (stream.source === 'cliff') {
+      const face = findCliffFace(ctx.terrain.groundHeight, g[G.ANCHOR_X], g[G.ANCHOR_Z], stream.faceSearch, ctx.terrain.waterLevel);
+      if (face === null) return false;
+      // Inside the dark mouth: a few metres into the face, at the opening's middle height.
+      startX = face.x - face.faceX * 6;
+      startZ = face.z - face.faceZ * 6;
+      startY = face.y + 5;
+      faceX = face.faceX;
+      faceZ = face.faceZ;
+    }
+    const points = new Float64Array(STREAM_POINTS * 3);
+    const tangents = new Float64Array(STREAM_POINTS * 3);
+    const step = stream.length / (STREAM_POINTS - 1);
+    const turn = stream.turn * DEG;
+    const phase = data.phaseSeed * TWO_PI;
+    let x = startX;
+    let z = startZ;
+    for (let point = 0; point < STREAM_POINTS; point++) {
+      const along = point * step;
+      const share = along / stream.length;
+      const angle = turn * share * share * (3 - 2 * share);
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      const directionX = faceX * cosine - faceZ * sine;
+      const directionZ = faceZ * cosine + faceX * sine;
+      if (point > 0) {
+        x += directionX * step;
+        z += directionZ * step;
+      }
+      const settle = Math.min(1, along / 200);
+      const meander = stream.meander * Math.sin((along / stream.meanderWave) * TWO_PI + phase) * settle * settle;
+      const px = x - directionZ * meander;
+      const pz = z + directionX * meander;
+      const dip = along < 160 ? Math.sin((along / 160) * Math.PI) * stream.drop : 0;
+      const rise = share < 0.08 ? 0 : (share - 0.08) / 0.92;
+      let py = startY - dip + stream.climb * rise * rise * (3 - 2 * rise);
+      // Whole metres reach the terrain unboxed (create-time work; the path is a table afterwards).
+      const ground = Math.max(ctx.terrain.groundHeight(Math.round(px), Math.round(pz)), ctx.terrain.waterLevel);
+      if (point > 2 && py < ground + stream.clearance) py = ground + stream.clearance;
+      points[point * 3] = px;
+      points[point * 3 + 1] = py;
+      points[point * 3 + 2] = pz;
+    }
+    // The path never dips again once it has climbed over a ridge: a running maximum from the first
+    // climbing point, eased so the climb stays smooth.
+    for (let point = 4; point < STREAM_POINTS; point++) {
+      const previous = points[(point - 1) * 3 + 1];
+      if (points[point * 3 + 1] < previous - step * 0.15) points[point * 3 + 1] = previous - step * 0.15;
+    }
+    for (let point = 0; point < STREAM_POINTS; point++) {
+      const before = Math.max(0, point - 1);
+      const after = Math.min(STREAM_POINTS - 1, point + 1);
+      const tx = points[after * 3] - points[before * 3];
+      const ty = points[after * 3 + 1] - points[before * 3 + 1];
+      const tz = points[after * 3 + 2] - points[before * 3 + 2];
+      const length = Math.sqrt(tx * tx + ty * ty + tz * tz) || 1;
+      tangents[point * 3] = tx / length;
+      tangents[point * 3 + 1] = ty / length;
+      tangents[point * 3 + 2] = tz / length;
+    }
+    data.streamPath = points;
+    data.streamTangents = tangents;
+    data.streamStep = step;
+    data.streamPathTime = stream.length / data.cruise;
+    data.streamPeriod = data.streamPathTime + stream.disperse;
+    g[G.HOME_X] = startX;
+    g[G.HOME_Y] = startY;
+    g[G.HOME_Z] = startZ;
+    g[G.X] = points[(STREAM_POINTS >> 1) * 3];
+    g[G.Y] = points[(STREAM_POINTS >> 1) * 3 + 1];
+    g[G.Z] = points[(STREAM_POINTS >> 1) * 3 + 2];
+    return true;
+  }
+
+  /**
+   * The stream: a pure function of the group clock. Agent k leaves the mouth at aux[k] of the period,
+   * flies the tabled path at its own pace, its place in the ribbon (homeX across, homeY up) widening
+   * from stream.width[0] to width[1], then spreads out of the ribbon's end into the night and fades
+   * (aux2: its visibility), and leaves the mouth again next period. The player scattering the stream
+   * pushes agents aside (an offset in flockX/Y/Z that springs back as they calm). The voice sits on
+   * the agent nearest the player (SLOT_*).
+   */
+  function simulateStream(data) {
+    const dt = frameStep[0];
+    const pool = data.pool;
+    const g = data.g;
+    const params = data.params;
+    const stream = params.stream;
+    const start = data.start;
+    const end = start + data.count;
+    const path = data.streamPath;
+    const tangents = data.streamTangents;
+    const period = data.streamPeriod;
+    const time = g[G.TIME] + data.streamWarm;
+    const step = data.streamStep;
+    const last = STREAM_POINTS - 1;
+    const endX = path[last * 3];
+    const endY = path[last * 3 + 1];
+    const endZ = path[last * 3 + 2];
+    const scatter = params.scatter;
+    const burst = scatter ? scatter.burst : 0;
+    io[IO.DECAY] = Math.exp(-dt / Math.max(0.2, scatter ? scatter.recover : 3));
+    io[IO.TIME] = g[G.TIME];
+    io[IO.GLIDE] = pool.def.flap.glideShare;
+    const relax = Math.exp(-dt / 2.5);
+    const player = ctx.state.player.position;
+    let nearestSq = Infinity;
+    let sumX = 0;
+    let sumY = 0;
+    let sumZ = 0;
+    let visible = 0;
+    for (let index = start; index < end; index++) {
+      const seed = pool.seed[index];
+      const pace = data.cruise * (0.9 + 0.2 * seed);
+      let clock = time - pool.aux[index] * period;
+      let x = g[G.HOME_X];
+      let y = g[G.HOME_Y];
+      let z = g[G.HOME_Z];
+      let vx = 0;
+      let vy = 0;
+      let vz = 0;
+      let show = 0;
+      if (clock >= 0) {
+        clock -= period * Math.floor(clock / period);
+        const travelled = clock * pace;
+        if (travelled < stream.length) {
+          const position = travelled / step;
+          const point = position < last ? Math.floor(position) : last - 1;
+          const share = position - point;
+          const a = point * 3;
+          const b = a + 3;
+          const tx = tangents[a] + (tangents[b] - tangents[a]) * share;
+          const ty = tangents[a + 1] + (tangents[b + 1] - tangents[a + 1]) * share;
+          const tz = tangents[a + 2] + (tangents[b + 2] - tangents[a + 2]) * share;
+          const horizontal = Math.sqrt(tx * tx + tz * tz) || 1;
+          const rightX = -tz / horizontal;
+          const rightZ = tx / horizontal;
+          const width = stream.width[0] + (stream.width[1] - stream.width[0]) * (travelled / stream.length);
+          const across = pool.homeX[index] * width + Math.sin(time * 1.7 + seed * 20) * 2.5;
+          const up = pool.homeY[index] * width * 0.45 + Math.cos(time * 2.3 + seed * 13) * 1.5;
+          x = path[a] + (path[b] - path[a]) * share + rightX * across;
+          y = path[a + 1] + (path[b + 1] - path[a + 1]) * share + up;
+          z = path[a + 2] + (path[b + 2] - path[a + 2]) * share + rightZ * across;
+          vx = tx * pace;
+          vy = ty * pace;
+          vz = tz * pace;
+          show = clock < 0.6 ? clock / 0.6 : 1;
+        } else {
+          // Out of the ribbon's end: spreading into the night, fading.
+          const spread = (travelled - stream.length) / pace;
+          const fade = 1 - spread / stream.disperse;
+          const outX = pool.homeX[index];
+          const outY = pool.homeY[index] * 0.4 + 0.25;
+          const outZ = pool.homeZ[index] * 2 - 1;
+          const tx = tangents[last * 3];
+          const ty = tangents[last * 3 + 1];
+          const tz = tangents[last * 3 + 2];
+          vx = tx * pace + (outX * -tz + outZ * tx) * stream.spreadSpeed;
+          vy = ty * pace + outY * stream.spreadSpeed;
+          vz = tz * pace + (outX * tx + outZ * tz) * stream.spreadSpeed;
+          x = endX + vx * spread;
+          y = endY + vy * spread;
+          z = endZ + vz * spread;
+          show = fade > 0 ? fade : 0;
+        }
+      }
+      // A scattered agent is pushed aside, and springs back into the ribbon as it calms.
+      const excitement = pool.excite[index];
+      if (excitement > 0.01) {
+        const push = burst * excitement * dt;
+        pool.flockX[index] += pool.fleeX[index] * push;
+        pool.flockY[index] += pool.fleeY[index] * push;
+        pool.flockZ[index] += pool.fleeZ[index] * push;
+      } else {
+        pool.flockX[index] *= relax;
+        pool.flockY[index] *= relax;
+        pool.flockZ[index] *= relax;
+      }
+      pool.px[index] = x + pool.flockX[index];
+      pool.py[index] = y + pool.flockY[index];
+      pool.pz[index] = z + pool.flockZ[index];
+      pool.vx[index] = vx;
+      pool.vy[index] = vy;
+      pool.vz[index] = vz;
+      pool.aux2[index] = show;
+      animateBird(pool, index, excitement > 0.2);
+      calm(pool, index);
+      if (show <= 0) continue;
+      visible++;
+      sumX += pool.px[index];
+      sumY += pool.py[index];
+      sumZ += pool.pz[index];
+      const dx = pool.px[index] - player.x;
+      const dy = pool.py[index] - player.y;
+      const dz = pool.pz[index] - player.z;
+      const distanceSq = dx * dx + dy * dy + dz * dz;
+      if (distanceSq < nearestSq) {
+        nearestSq = distanceSq;
+        g[G.SLOT_X] = pool.px[index];
+        g[G.SLOT_Y] = pool.py[index];
+        g[G.SLOT_Z] = pool.pz[index];
+      }
+    }
+    g[G.FLUSH_COUNT] = visible;
+    g[G.SLOT_DISTANCE] = visible > 0 ? Math.sqrt(nearestSq) : 1e6;
+    if (visible === 0) {
+      // Nothing out yet (or every bat back inside): the centre is the mouth.
+      g[G.CX] = g[G.HOME_X];
+      g[G.CY] = g[G.HOME_Y];
+      g[G.CZ] = g[G.HOME_Z];
+      g[G.RADIUS] = 20;
+      g[G.SLOT_X] = g[G.HOME_X];
+      g[G.SLOT_Y] = g[G.HOME_Y];
+      g[G.SLOT_Z] = g[G.HOME_Z];
+      return;
+    }
+    g[G.CX] = sumX / visible;
+    g[G.CY] = sumY / visible;
+    g[G.CZ] = sumZ / visible;
+    // The ribbon's reach from its centre (its full length is the path's).
+    g[G.RADIUS] = stream.length * 0.5 + stream.width[1] + 4;
+  }
+
   // =============================================================================================
   // SHARED PER-GROUP STEPS
   // =============================================================================================
@@ -3697,6 +3953,13 @@ export function createFaunaEngine() {
       g[G.FLUSH] = 0;
       g[G.STAMPEDE_COOLDOWN] = 10;
     }
+    if (behavior === 'stream') {
+      // Placed along the path at the group clock with no time step (the frame's step is restored after).
+      const step = frameStep[0];
+      frameStep[0] = 0;
+      simulateStream(data);
+      frameStep[0] = step;
+    }
   }
 
   /** Writes the group's agents into the species buffers (hidden: scale 0). */
@@ -3711,6 +3974,8 @@ export function createFaunaEngine() {
     const positionData = pool.positionData;
     const directionData = pool.directionData;
     const animData = pool.animData;
+    // A stream's agents each carry their own visibility (aux2: in the cave, emerging, fading away).
+    const streaming = data.params.behavior === 'stream';
     for (let index = start; index < end; index++) {
       const offset = index * 4;
       if (hidden) {
@@ -3721,7 +3986,7 @@ export function createFaunaEngine() {
       // Drawn lowered by the planet curvature (render/curvature.js; 0 below 5 km camera altitude).
       positionData[offset + 1] = pool.py[index] - origin.y - rigidCurvatureDrop(ctx, pool.px[index], pool.pz[index]);
       positionData[offset + 2] = pool.pz[index] - origin.z;
-      positionData[offset + 3] = pool.scale[index] * size * fade;
+      positionData[offset + 3] = pool.scale[index] * size * fade * (streaming ? pool.aux2[index] : 1);
       const vx = pool.vx[index];
       const vy = pool.vy[index];
       const vz = pool.vz[index];
@@ -3763,7 +4028,15 @@ export function createFaunaEngine() {
   function updateVoice(instance, data) {
     if (!data.voice) return;
     const g = data.g;
-    data.voice.setPosition(instance.anchor);
+    if (data.voicePoint !== null) {
+      // A stream's voice rides the bat nearest the player (whole metres: an integer store never boxes).
+      data.voicePoint.x = Math.round(g[G.SLOT_X]);
+      data.voicePoint.y = Math.round(g[G.SLOT_Y]);
+      data.voicePoint.z = Math.round(g[G.SLOT_Z]);
+      data.voice.setPosition(data.voicePoint);
+    } else {
+      data.voice.setPosition(instance.anchor);
+    }
     // While the wildlife is quiet the level drops to 0 (the audio engine eases between levels).
     let intensity = quietSources.size > 0 ? 0 : data.params.voiceIntensity * g[G.FADE];
     if (data.params.behavior === 'murmuration' || data.params.behavior === 'flock') {
@@ -3773,6 +4046,8 @@ export function createFaunaEngine() {
     }
     // A herd's rumble swells with its gait (a stampede is loud).
     if (data.params.behavior === 'herd') intensity *= 0.3 + 0.7 * g[G.GAIT];
+    // A stream's wing rush swells as the player nears the ribbon, and with the bats out of the cave.
+    if (data.params.behavior === 'stream') intensity *= Math.min(Math.max(1 - (g[G.SLOT_DISTANCE] - 20) / 450, 0.12), 1) * Math.min(1, g[G.FLUSH_COUNT] / 150);
     data.voice.setIntensity(intensity);
   }
 
@@ -3787,6 +4062,7 @@ export function createFaunaEngine() {
     herd: moveHerdGoal,
     column: null,
     surface: moveSurfaceGoal,
+    stream: null,
   });
 
   function playerDistance(data) {
@@ -3868,6 +4144,13 @@ export function createFaunaEngine() {
         pool.mode[index] = 0;
         pool.timer[index] = rangeValue(params.surface.porpoise.interval, rng) * rng();
         pool.gate[index] = SPECIES[params.species].wade ? -1 : 1;
+      } else if (params.behavior === 'stream') {
+        // A place in the ribbon (across, up), a spreading direction at its end, a staggered launch.
+        pool.homeX[index] = rng() * 2 - 1;
+        pool.homeY[index] = rng() * 2 - 1;
+        pool.homeZ[index] = rng();
+        pool.aux[index] = (k + rng()) / data.count;
+        pool.aux2[index] = 0;
       } else if (params.behavior === 'drift') {
         pool.homeX[index] = k === 0 ? 0 : (k % 2 === 1 ? -1 : 1) * Math.ceil(k / 2);
         pool.homeY[index] = k === 0 ? 0 : -0.5 * Math.ceil(k / 2);
@@ -3960,6 +4243,14 @@ export function createFaunaEngine() {
       dustCursor: 0,
       dustParams: null,
       dustColor: null,
+      // A stream's tabled path (world metres), its pace and its voice point (behavior 'stream').
+      streamPath: null,
+      streamTangents: null,
+      streamStep: 0,
+      streamPathTime: 0,
+      streamPeriod: 1,
+      streamWarm: resolved.stream.prewarm,
+      voicePoint: resolved.behavior === 'stream' ? new THREE.Vector3() : null,
     };
     if (resolved.behavior === 'pod' && resolved.pod.seekWater > 0 && !seekOpenWater(g, resolved.pod.seekWater, resolved.pod.spread)) data.noWater = true;
     fillGround(data);
@@ -4011,6 +4302,7 @@ export function createFaunaEngine() {
       g[G.STAMPEDE_COOLDOWN] = 4;
     }
     if (resolved.behavior === 'column' && !buildColumnPath(data, heading)) data.noGround = true;
+    if (resolved.behavior === 'stream' && !buildStreamPath(data)) data.noGround = true;
     if (resolved.behavior === 'surface') {
       g[G.SPEED] = speeds.cruise;
       if (def.wade) {
@@ -4143,6 +4435,7 @@ export function createFaunaEngine() {
         else if (behavior === 'herd') simulateHerd(data);
         else if (behavior === 'column') simulateColumn(data);
         else if (behavior === 'surface') simulateSurface(data);
+        else if (behavior === 'stream') simulateStream(data);
         else simulateDrift(data, dt);
         if (behavior !== 'pod' && behavior !== 'drift' && behavior !== 'herd' && behavior !== 'column' && behavior !== 'surface') scatterFromPlayer(data.pool, data, data.start, data.start + data.count);
         updateCalls(data, dt);
@@ -4261,6 +4554,9 @@ export function createFaunaEngine() {
           leaping,
           flushed: g[G.FLUSH] > 0,
           racing: g[G.RACE] > 0.5,
+          // A stream: the bats out of the cave now, and the cave mouth they pour from.
+          emerged: data.params.behavior === 'stream' ? g[G.FLUSH_COUNT] : 0,
+          mouth: data.params.behavior === 'stream' ? { x: g[G.HOME_X], y: g[G.HOME_Y], z: g[G.HOME_Z] } : null,
         };
       }
       return null;

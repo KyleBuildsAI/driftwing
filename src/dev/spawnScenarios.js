@@ -35,6 +35,7 @@
 //               the spawn, a wingman off the wing); fov in degrees
 
 import { BATCH31_SCENARIOS } from './spawnScenarios/batch31.js';
+import { BATCH41_SCENARIOS } from './spawnScenarios/batch41.js';
 
 /** Activation overrides the batch 1 step file used to show a storm at its mature stage at once. */
 const MATURE_VORTEX = Object.freeze({
@@ -211,4 +212,5 @@ const PHASE2_SCENARIOS = Object.freeze([
 export const SPAWN_SCENARIOS = Object.freeze([
   ...PHASE2_SCENARIOS,
   ...BATCH31_SCENARIOS,
+  ...BATCH41_SCENARIOS,
 ]);

@@ -4,8 +4,9 @@ The fauna engine draws and simulates groups of animals: instanced boids with per
 It covers the starling murmuration, the geese V-formation, thermal hawks, the eagle wingman, the
 whale pod and the sky whale, and since Phase 3 the ground and water surface: terrain-following
 herds that stampede with dust (bison), columns of walkers along a path (caribou), dolphins that
-ride the swell and race your shadow, and flamingos that wade and flush in a wave. Bats,
-butterflies and camels join with their presets in wave 3.
+ride the swell and race your shadow, and flamingos that wade and flush in a wave. Wave 3 adds a
+stream of bats pouring out of a cave (the bats at dusk); butterflies and camels join with their
+presets.
 
 - Code: `src/spawns/engines/faunaEngine.js` (behaviours, buffers, shader).
 - Species meshes and animation constants: `src/spawns/engines/faunaSpecies.js`.
@@ -66,6 +67,7 @@ A bad `species`, `behavior` or `count` throws a clear error that names the field
 | `herd` | a terrain-following herd (altitude mode `ground`): grazing and walking on the ground, never onto slopes over `herd.slopeLimit` (rise over 6 m) or into water within `herd.waterMargin`. A stampede (the player buzzing it, a timer, or `setParam('stampede', 1)`) runs it away from the trigger, bent downhill, raising dust | herd stampede (49), migration convergence (97) |
 | `column` | a long line of walkers along a PathFollower path (src/world/pathFollower.js): a path given in the spawn frame, or `'auto'` (buildGroundPath around slopes and water). Lanes, spacing and jitter; a pure function of flight time | caribou migration (52), oasis caravan (58) |
 | `surface` | animals on the water surface of `ctx.game.waterQuery` (the ocean and local lakes, with the swell). Swimmers (a whale kind: dolphins) porpoise and race the craft's shadow when it flies low over the water; wading birds (flamingos) stand in the shallows, take off in a wave when buzzed, fly as a flock and settle back | dolphin pod (44), flamingo lake (50) |
+| `stream` | a ribbon of flyers pouring out of a cave mouth on the steepest high face near the anchor (`cliffFace.js`, the same face a `caveMouth` structure part finds), dipping as they drop out, then climbing away along a slow, meandering turn and spreading out at its end; each agent leaves the mouth on its own staggered clock, so the stream is a pure function of the group clock. The player scatters it (the agents burst aside and spring back) | bats at dusk (48) |
 
 ## Species
 
@@ -81,6 +83,7 @@ A bad `species`, `behavior` or `count` throws a clear error that names the field
 | `caribou` | quadruped | 2.0 long | 1.6 | 0..16 | 1.4 | 2048 |
 | `dolphin` | whale | 2.4 long | 5 | 1..11 | 1.3 | 128 |
 | `flamingo` | bird (wading) | 1.5 span | 14 | 0..22 | 1.8 | 512 |
+| `bat` | bird | 0.34 span | 10 | 5..17 | 1.5 | 4096 |
 
 - **Capacity is per species, across every live group.** A `create()` that does not fit throws
   `fauna: no room for N more <species>`, and the SpawnManager refuses the spawn.
@@ -90,8 +93,9 @@ A bad `species`, `behavior` or `count` throws a clear error that names the field
   file's header (`kind` is `bird`, `whale` or `quadruped`; a bird with `wade` wades). Its pool is
   built in `init()` automatically.
 - **Kinds and behaviours.** Quadrupeds only `herd` or walk in a `column` (altitude mode `ground`);
-  `surface` takes a whale kind (swimming) or a wading bird. Anything else is refused with an error
-  naming the field.
+  `surface` takes a whale kind (swimming) or a wading bird; `stream` a flying bird kind (the bat, a
+  membrane-winged bird with slotted wing tips and a fast flutter). Anything else is refused with an
+  error naming the field.
 
 ## Parameters
 
@@ -322,6 +326,28 @@ flushes it: every bird takes off `delay` seconds per 10 m from the craft later t
 later it can be flushed again. A flock flushed and left at the far tier lands at home once the
 longest `flySeconds` and 25 s of glide are over. With no shallows in reach the group ends at once.
 
+### stream
+
+| field | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `source` | id | `'cliff'`, `'anchor'` | `'cliff'` | `'cliff'`: out of the steepest high face within `faceSearch` (none: the group ends at once); `'anchor'`: out of a point 40 m over the anchor, along the activation heading |
+| `faceSearch` | m | > 0 | 1500 | |
+| `length` | m | > 0 | 1700 | the stream's path, tabled once at create (64 points) |
+| `climb` | m | >= 0 | 260 | how far the path climbs from the mouth (eased), never closer than `clearance` to the ground below and never dipping again once it has climbed |
+| `drop` | m | >= 0 | 25 | the dip over the first 160 m as the flyers drop out of the opening |
+| `width` | `[at the mouth, at the end]` m | min >= 0.5 | `[6, 34]` | the ribbon widens along the path (and is 0.45 as tall) |
+| `meander`, `meanderWave` | m | >= 0, > 0 | 90, 650 | a lazy side-to-side sway of the path, settling in over its first 200 m |
+| `turn` | deg | -180..180 | 35 | the path's heading turns this far over its length |
+| `clearance` | m | >= 0 | 30 | |
+| `disperse` | s | > 0 | 18 | after the path's end each agent spreads out and fades over this long, then leaves the mouth again |
+| `spreadSpeed` | m/s | >= 0 | 7 | how fast they spread out at the end |
+| `prewarm` | s | >= 0 | 0 | the stream starts this far into its clock |
+
+Agents fade in over 0.6 s at the mouth and their size carries their visibility (inside the cave,
+emerging, fading away). The voice rides the agent nearest the player, its level swelling within
+about 450 m of the ribbon and with the number of agents out (full from 150). `describe(spawnId)`
+adds `emerged` (agents out of the cave now) and `mouth` (`{ x, y, z }`).
+
 ### Predators
 
 The scatter radius (and a herd's stampede reach, and a wading flock's flush radius) scale with the
@@ -340,6 +366,7 @@ Each behaviour applies these under the preset's own values:
 | `pod`, `wingman`, `drift` | `scatter: null` (they never scatter) |
 | `herd`, `column` | `scatter: null`, `altitude: { mode: 'ground', value: 0, spread: 0 }`, `fadeIn: 0.8`, `sizeJitter: 0.08` |
 | `surface` | `scatter: null`, `altitude: { mode: 'water', value: 0, spread: 0 }` |
+| `stream` | `scatter: { radius: 45, burst: 16, recover: 3, spread: 0.7 }`, `fadeIn: 2`, `sizeJitter: 0.12` |
 
 ## Allocation
 
@@ -402,6 +429,7 @@ voice is disposed with the instance.
 | `skyWhale` | drift | `call` on `calls.interval` |
 | any | wingman | `wingman.trigger` on joining and peeling off |
 | any | herd | none; the voice level follows the herd's gait (0.3 at a walk, 1 in a stampede: the rumble) |
+| `murmuration` | stream | `scatter`; the voice rides the nearest agent and swells as the player nears the ribbon |
 
 **Quiet wildlife.** While any source holds the typed `wildlifeQuiet` event (the celestial engine's
 eclipse through totality), every fauna group falls silent: no calls, breach calls or scatter cries,
@@ -456,6 +484,8 @@ The engine object (`ctx.systems.spawns.manager.registry.get('fauna')`) has two r
 { engine: 'fauna', params: { species: 'dolphin', behavior: 'surface', count: [5, 9], surface: { raceShadow: { radius: 800 } } } }
 // Flamingos wading in a lake's shallows
 { engine: 'fauna', params: { species: 'flamingo', behavior: 'surface', count: [40, 80], surface: { wade: { depthMax: 0.5 } } } }
+// Bats pouring out of a cave mouth on the nearest cliff face at dusk
+{ engine: 'fauna', params: { species: 'bat', behavior: 'stream', count: [1800, 2600], stream: { length: 1700, climb: 260 } } }
 ```
 
 ## Cost

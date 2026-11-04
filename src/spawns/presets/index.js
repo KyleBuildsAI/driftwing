@@ -44,6 +44,16 @@ import fissureEruption from './fissureEruption.js';
 import meteorCraterLake from './meteorCraterLake.js';
 import hotSpringTerraces from './hotSpringTerraces.js';
 import saltFlatMirror from './saltFlatMirror.js';
+import calvingGlacier from './calvingGlacier.js';
+import coralAtoll from './coralAtoll.js';
+import reefShipwreck from './reefShipwreck.js';
+import dolphinPod from './dolphinPod.js';
+import seaStacks from './seaStacks.js';
+import rogueWave from './rogueWave.js';
+import tidalBore from './tidalBore.js';
+import batsAtDusk from './batsAtDusk.js';
+import herdStampede from './herdStampede.js';
+import flamingoLake from './flamingoLake.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -90,6 +100,17 @@ export const PRESETS = Object.freeze([
   meteorCraterLake,
   hotSpringTerraces,
   saltFlatMirror,
+  // Batch 5: presets 41-50.
+  calvingGlacier,
+  coralAtoll,
+  reefShipwreck,
+  dolphinPod,
+  seaStacks,
+  rogueWave,
+  tidalBore,
+  batsAtDusk,
+  herdStampede,
+  flamingoLake,
 ]);
 
 /** Presets by id. */
