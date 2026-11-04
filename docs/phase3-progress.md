@@ -1080,25 +1080,45 @@ presets (92-100) use the wave 2 combo scheduling.
 
 ### Wave 3 - p3/presets-51-60
 
-- **Engine extensions (additive; the Phase 2 recipes build exactly as before):** the structure engine's
-  `cloth` geometry kind (flags and banners swinging and rippling in the WindField wind the structure
-  shows), movers (`context.addMover`, posed by a recipe's `out.animate(state, env)` hook, with box
-  colliders that follow them), dynamic steam puffs on the mist pool, torches (`out.torches`: flames on a
-  shared instanced pool, each an ignitable in `ctx.game.ignition`, optionally lit at dusk;
-  `instance.ignitableIds`), instanced blocks (`out.blocks`), the `recipe` audio intensity mode and an
-  emissive decal channel (vertex alpha; the Phase 2 decals paint 0). The celestial engine's
-  `skyTarget(out)` (a live comet, else a meteor radiant). Shared props in
-  `src/spawns/engines/structure/heritage.js`.
-- **Presets:** 53 cliffside monastery (recipe `monastery` on a `cliffStep` stamp, audio `bells`); 54
-  sea-cliff castle ruin (recipe `castleRuin` on a coastal `cliffStep`, the surf as a low `waterfall`); 55
-  mountaintop observatory (recipe `observatory` on a summit `flatten`, its dome, shutter and telescope
-  movers aimed by the celestial engine's `skyTarget`, audio `observatory`).
-- **Allocation rule found on the way:** an animate hook must be a module-level function (one per
-  recipe, per-instance numbers in `out.animateState`, read as `state.custom`): per-instance closures
-  share their optimised code and deoptimise each other, and the baseline code then boxes every double
-  (about 190 B a frame in the lab).
-- **Lab:** `node --expose-gc tools/lab/presets-51-60.mjs`.
-- **Next:** the remaining nine presets, the scenario file, the step file, the docs and the test runs.
+- **Presets (all ten, spec order, each its own file):** 51 butterfly migration (fauna `butterfly`
+  flock with `windDrift` 1, audio `murmuration`); 52 caribou migration (fauna `caribou` column on an
+  `auto` route, audio `caribou`); 53 cliffside monastery (recipe `monastery` on a `cliffStep`, audio
+  `bells`); 54 sea-cliff castle ruin (recipe `castleRuin` on a coastal `cliffStep`, the surf as a low
+  `waterfall`); 55 mountaintop observatory (recipe `observatory` on a summit `flatten`, movers aimed
+  by the celestial `skyTarget`, audio `observatory`); 56 steam train viaduct (recipe `viaduct` on a
+  `gorge`, a PathFollower train of movers with colliders between two tunnels, chimney steam, audio
+  `train` riding the locomotive, achievement `underTheArches`); 57 dam spillway (recipe `dam` on a
+  `basin` centred up a valley, the preset's lake in it, an emitter spray and a celestial rainbow,
+  audio `dam`); 58 desert oasis caravan (recipe `oasis` on a `basin` with its pool, a fauna `camel`
+  column on an explicit PathFollower route, audio `caravan`); 59 labyrinth (recipe `labyrinth` on a
+  `flatten`, instanced hedge blocks, achievement `heartOfTheMaze`, the fountain as a soft
+  `waterfall`); 60 fireball impact (recipe `fireball`: bolide, flash and a glowing scar decal mover,
+  no ground edit, audio `fireball` with a distance-delayed `boom`; smoke and sparks emitters with
+  `startDelay`).
+- **Engine extensions (additive; every earlier preset builds and behaves as before):** the structure
+  engine's `cloth` kind, movers (`context.addMover`, posed by `out.animate(state, env)`, box colliders
+  that follow them), dynamic steam, torches (ignitables, optional dusk lighting), instanced blocks, the
+  `recipe` audio mode, an emissive decal channel, and `state.voice` (a hook moves the voice; written by
+  field, since Vector3.set boxed its doubles: 7 B a frame); the celestial engine's `skyTarget(out)`;
+  the fauna engine's `windDrift` (flock and murmuration: the ambient wind at the group's height, read
+  once at create and scaled by the live windStrength, plus the craft's gusts within 600 m: a
+  WindField probe per second allocated about 1.7 KB in the lab) and species `butterfly` and `camel`;
+  the emitter engine's `startDelay` and `startRamp` (default 0). Recipe params for tests: the viaduct's
+  `start`.
+- **Shared-file edits (appended lines only, except where noted):** presets/index.js, audio
+  recipes/index.js (caribou, bells, observatory, train, dam, caravan, fireball), structure
+  recipes/index.js and stamps.js, docs/spawns.md (rows 51-60 and a "Phase 3 batch 6" section),
+  docs/engines/structure.md, fauna.md, emitter.md, celestial.md, src/dev/spawnScenarios.js (one import
+  and one spread of `src/dev/spawnScenarios/batch6.js`), NAME_SYNONYMS in tourGuide.js. Two tool
+  fixes the other batches need too: `tools/docs-check.mjs` reads a row's number from the preset file's
+  header line ("// Preset 56: ..."), so a batch branch without the earlier batches checks; and
+  `tools/lab/audio.mjs` auditions with a budget covering every recipe (it failed past 16 recipes).
+- **Tests:** `node --expose-gc tools/lab/presets-51-60.mjs [--only ids]` (fauna drift, columns and
+  the caravan, recipes on stamped sites, colliders, torches, movers, the train's cycle, the dam's line
+  outside the shoreline, the maze, the fireball's timeline, cloth, memory, allocation); browser:
+  `tools/steps/presets-51-60.json` (src/dev/presetChecksBatch6.js, window.__dwBatch6) and
+  `?test=spawns&testPresets=<ids>` with `src/dev/spawnScenarios/batch6.js`.
+- **Status:** all ten presets built and committed with their lab checks (presets-51-60 lab passes); browser step file and ?test=spawns runs, the terrain checks and the full lab sweep next.
 
 ### Wave 4: discovery and verification, then the tag
 
