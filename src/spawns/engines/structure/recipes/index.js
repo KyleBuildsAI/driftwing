@@ -14,6 +14,7 @@ import { MONASTERY_DEFAULTS, buildMonastery } from './monastery.js';
 import { CASTLE_RUIN_DEFAULTS, buildCastleRuin } from './castleRuin.js';
 import { OBSERVATORY_DEFAULTS, buildObservatory } from './observatory.js';
 import { VIADUCT_DEFAULTS, buildViaduct } from './viaduct.js';
+import { DAM_DEFAULTS, buildDam } from './dam.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -33,6 +34,7 @@ export const RECIPES = Object.freeze({
   castleRuin: Object.freeze({ build: buildCastleRuin, defaults: CASTLE_RUIN_DEFAULTS, audioIntensity: 'constant' }),
   observatory: Object.freeze({ build: buildObservatory, defaults: OBSERVATORY_DEFAULTS, audioIntensity: 'recipe' }),
   viaduct: Object.freeze({ build: buildViaduct, defaults: VIADUCT_DEFAULTS, audioIntensity: 'recipe' }),
+  dam: Object.freeze({ build: buildDam, defaults: DAM_DEFAULTS, audioIntensity: 'constant' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

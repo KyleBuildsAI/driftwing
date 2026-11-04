@@ -41,6 +41,7 @@ import cliffsideMonastery from './cliffsideMonastery.js';
 import seaCliffCastle from './seaCliffCastle.js';
 import mountaintopObservatory from './mountaintopObservatory.js';
 import steamTrainViaduct from './steamTrainViaduct.js';
+import damSpillway from './damSpillway.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -83,6 +84,7 @@ export const PRESETS = Object.freeze([
   seaCliffCastle,
   mountaintopObservatory,
   steamTrainViaduct,
+  damSpillway,
 ]);
 
 /** Presets by id. */

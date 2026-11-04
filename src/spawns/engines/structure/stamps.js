@@ -28,6 +28,7 @@ export const RECIPE_STAMP_TYPES = Object.freeze({
   castleRuin: 'cliffStep',
   observatory: 'flatten',
   viaduct: 'gorge',
+  dam: 'basin',
 });
 
 /** Stamp sizes each recipe prefers over the stamp type's own defaults (m, or [min, max] ranges). */
@@ -42,6 +43,9 @@ const RECIPE_STAMP_DEFAULTS = Object.freeze({
   castleRuin: Object.freeze({ width: [280, 360], drop: [45, 75], length: [380, 480], face: [5, 8], falloff: [110, 150], pool: [16, 22], paint: 'basalt' }),
   observatory: Object.freeze({ length: [64, 76], width: [44, 52], margin: [8, 12], shoulder: [50, 70], paint: 'tarmac' }),
   viaduct: Object.freeze({ length: [900, 1100], width: [170, 240], depth: [55, 80], falloff: [180, 240], pad: [80, 100], paint: 'riverbed' }),
+  // The reservoir: a basin centred up the valley, so its down-valley rim (where its berm stands
+  // tallest) lies at the site centre, the dam's line. A narrow, steep berm: the dam's face covers it.
+  dam: Object.freeze({ radius: [220, 280], depth: [24, 32], rim: [10, 14], falloff: [14, 20], paint: 'riverbed', offset: Object.freeze({ along: -250, across: 0 }) }),
 });
 
 /** Islet layout for the islands recipe: how many islets, and how far out the others ring the first. */

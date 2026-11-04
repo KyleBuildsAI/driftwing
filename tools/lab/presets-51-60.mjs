@@ -37,7 +37,7 @@ import { validatePresets } from '../../src/spawns/schema.js';
 import { ENGINE_NAMES } from '../../src/spawns/engineRegistry.js';
 import { createEngineRegistry } from '../../src/spawns/engineRegistry.js';
 import { createSpawnManager } from '../../src/spawns/spawnManager.js';
-import { applyStampHeight } from '../../src/world/stamps.js';
+import { applyStampHeight, basinReach } from '../../src/world/stamps.js';
 import { createGroundSurfaces } from '../../src/world/groundSurfaces.js';
 import { createColliderWorld } from '../../src/world/colliders.js';
 import { createIgnitionService } from '../../src/gameplay/ignition.js';
@@ -78,6 +78,7 @@ const ALL_ENTRIES = Object.freeze([
   Object.freeze({ id: 'seaCliffCastle', colliders: 16, perches: true, torches: true, cloth: true }),
   Object.freeze({ id: 'mountaintopObservatory', colliders: 6, perches: true, movers: 3 }),
   Object.freeze({ id: 'steamTrainViaduct', colliders: 30, perches: true, movers: 4, gates: true }),
+  Object.freeze({ id: 'damSpillway', colliders: 10, perches: true }),
 ]);
 const BATCH = ONLY ? ALL_ENTRIES.filter((entry) => ONLY.includes(entry.id)) : ALL_ENTRIES;
 
@@ -503,6 +504,31 @@ function testViaduct() {
   lab.manager.deactivate(id, 'test');
 }
 
+function testDam() {
+  const lab = createLab();
+  const id = lab.spawn('damSpillway');
+  const part = partOf(lab, id);
+  const site = siteOf('damSpillway');
+  const basin = site.stamps[0];
+  const colliders = lab.game.colliders;
+  const walls = part.colliderIds.map((colliderId) => colliders.get(colliderId)).filter((record) => record.id.includes(':wall'));
+  // Every wall hull stands outside the reservoir's shoreline (no lake water below the dam).
+  let inside = 0;
+  for (const wall of walls) {
+    const [minX, , minZ, maxX, , maxZ] = wall.bounds;
+    for (const [x, z] of [[minX, minZ], [maxX, minZ], [minX, maxZ], [maxX, maxZ], [(minX + maxX) / 2, (minZ + maxZ) / 2]]) {
+      if (basinReach(basin, x, z) < basin.radius - 30) inside++;
+    }
+  }
+  check('recipes', 'dam: the wall stands on the down-valley rim of the reservoir, outside its shoreline', walls.length >= 3 && inside === 0, `${walls.length} wall hulls, ${inside} points inside the shoreline`);
+  const water = part.data.meshes.water;
+  check('recipes', 'dam: the spillway chute and the river are water, the spray mist puffs at its foot', Boolean(water) && water.geometry.attributes.position.count >= 60 && part.data.puffSlots.length >= 8, `${water ? water.geometry.attributes.position.count : 0} water vertices, ${part.data.puffSlots.length} mist puffs`);
+  const crest = walls.reduce((high, wall) => Math.max(high, wall.bounds[4]), -Infinity) - part.anchor.y;
+  const toe = walls.reduce((low, wall) => Math.min(low, wall.bounds[1]), Infinity) - part.anchor.y;
+  check('recipes', 'dam: the crest stands above the rim and the face reaches down to the valley', crest > basin.rimY - part.anchor.y && crest - toe > 4, `crest ${crest.toFixed(1)} m, toe ${toe.toFixed(1)} m, rim ${(basin.rimY - part.anchor.y).toFixed(1)} m (local)`);
+  lab.manager.deactivate(id, 'test');
+}
+
 // ---- wind -------------------------------------------------------------------------------------------------
 function testWind() {
   const lab = createLab();
@@ -737,6 +763,7 @@ testColliders();
 testTorches();
 if (BATCH.some((entry) => entry.id === 'mountaintopObservatory')) testObservatory();
 if (BATCH.some((entry) => entry.id === 'steamTrainViaduct')) testViaduct();
+if (BATCH.some((entry) => entry.id === 'damSpillway')) testDam();
 testWind();
 testMemory();
 await testAllocation();
