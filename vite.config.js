@@ -75,8 +75,9 @@ export default defineConfig(({ mode }) => {
       target: 'es2022',
       outDir: single ? 'dist-single' : 'dist',
       emptyOutDir: true,
-      // three.webgpu.js alone is ~2 MB; the game is one app chunk by design.
-      chunkSizeWarningLimit: 4096,
+      // The game is one app chunk by design (the single-file build inlines it anyway): three.webgpu.js
+      // alone is ~2 MB, and the 14 craft, the engines and the 100 presets bring it to ~4.5 MB.
+      chunkSizeWarningLimit: 6144,
       rollupOptions: single ? {} : { input: PAGES },
     },
     plugins: single ? [gameDirectories(), viteSingleFile({ removeViteModuleLoader: true })] : [gameDirectories()],
