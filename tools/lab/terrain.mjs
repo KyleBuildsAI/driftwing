@@ -82,13 +82,12 @@ for (const flag of process.argv.slice(2)) {
 const SEEDS = ['DRIFTWING', 'HARNESS-1', 'P2-TERRAIN'];
 /**
  * Further seeds the real-preset checks look on when a site preset is placed on none of the seeds
- * above within the search radius (the wave 3 tidal bore is rarer than that).
+ * above within the search radius: with all 100 presets, TERRAIN-REAL-3 places the tidal bore and the
+ * cave tunnel within 30 km, P3-B5-22 the flamingo lake and SOAK-3 the sleeping giant.
  */
-const REAL_SITE_SEEDS = ['P3-B5-22'];
+const REAL_SITE_SEEDS = Object.freeze(['TERRAIN-REAL-3', 'P3-B5-22', 'SOAK-3']);
 /** The seed the stamp checks run on (every stamp type lies within 13 km of its origin). */
 const STAMP_SEED = 'P2-TERRAIN';
-/** More seeds searched for a stamped preset none of the seeds above places: the rare Phase 3 sites (the cave tunnel). */
-const RARE_STAMP_SEEDS = Object.freeze(['SOAK-2']);
 const SEARCH_RADIUS = 30000;
 /** Stamp checks run on this many sites of each fixture (nearest first). */
 const SITES_PER_TYPE = 2;
@@ -816,7 +815,7 @@ function testRealPresets() {
   testDeterminism(realWorld, PRESETS, 'real presets, ');
   for (const preset of stamped) {
     let found = null;
-    for (const seed of [STAMP_SEED, ...SEEDS, ...REAL_SITE_SEEDS, ...RARE_STAMP_SEEDS]) {
+    for (const seed of [STAMP_SEED, ...SEEDS, ...REAL_SITE_SEEDS]) {
       const world = realWorld(seed);
       const sites = world.sitesNear(0, 0, SEARCH_RADIUS).filter((site) => site.presetId === preset.id).slice(0, SITES_PER_TYPE);
       if (sites.length > 0) {
