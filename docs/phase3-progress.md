@@ -1066,7 +1066,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | --- | --- | --- | --- |
 | B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | done, verified on both backends |
 | B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | done (not merged) |
-| B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | not started |
+| B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | done (on its branch; awaiting I3) |
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
 | B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | not started |
@@ -1222,6 +1222,70 @@ hunks verbatim), `src/audio/recipes/index.js` and `tools/lab/audio.mjs` (the bud
 with batch 81-90's equivalent; RENDER_PLAN gains four lines), `structure/recipes/index.js`,
 `structure/stamps.js`, `src/world/stamps.js` and `schema.js` (appended stamp types and paint),
 `tourGuide.js` synonyms, the water lab's tag check.
+### Wave 3 - p3/presets-51-60
+
+- **Presets (all ten, spec order, each its own file):** 51 butterfly migration (fauna `butterfly`
+  flock with `windDrift` 1, audio `murmuration`); 52 caribou migration (fauna `caribou` column on an
+  `auto` route, audio `caribou`); 53 cliffside monastery (recipe `monastery` on a `cliffStep`, audio
+  `bells`); 54 sea-cliff castle ruin (recipe `castleRuin` on a coastal `cliffStep`, the surf as a low
+  `waterfall`); 55 mountaintop observatory (recipe `observatory` on a summit `flatten`, movers aimed
+  by the celestial `skyTarget`, audio `observatory`); 56 steam train viaduct (recipe `viaduct` on a
+  `gorge`, a PathFollower train of movers with colliders between two tunnels, chimney steam, audio
+  `train` riding the locomotive, achievement `underTheArches`); 57 dam spillway (recipe `dam` on a
+  `basin` centred up a valley, the preset's lake in it, an emitter spray and a celestial rainbow,
+  audio `dam`); 58 desert oasis caravan (recipe `oasis` on a `basin` with its pool, a fauna `camel`
+  column on an explicit PathFollower route, audio `caravan`); 59 labyrinth (recipe `labyrinth` on a
+  `flatten`, instanced hedge blocks, achievement `heartOfTheMaze`, the fountain as a soft
+  `waterfall`); 60 fireball impact (recipe `fireball`: bolide, flash and a glowing scar decal mover,
+  no ground edit, audio `fireball` with a distance-delayed `boom`; smoke and sparks emitters with
+  `startDelay`).
+- **Engine extensions (additive; every earlier preset builds and behaves as before):** the structure
+  engine's `cloth` kind, movers (`context.addMover`, posed by `out.animate(state, env)`, box colliders
+  that follow them), dynamic steam, torches (ignitables, optional dusk lighting), instanced blocks, the
+  `recipe` audio mode, an emissive decal channel, and `state.voice` (a hook moves the voice; written by
+  field, since Vector3.set boxed its doubles: 7 B a frame); the celestial engine's `skyTarget(out)`;
+  the fauna engine's `windDrift` (flock and murmuration: the ambient wind at the group's height, read
+  once at create and scaled by the live windStrength, plus the craft's gusts within 600 m: a
+  WindField probe per second allocated about 1.7 KB in the lab) and species `butterfly` and `camel`;
+  the emitter engine's `startDelay` and `startRamp` (default 0). Recipe params for tests: the viaduct's
+  `start`.
+- **Shared-file edits (appended lines only, except where noted):** presets/index.js, audio
+  recipes/index.js (caribou, bells, observatory, train, dam, caravan, fireball), structure
+  recipes/index.js and stamps.js, docs/spawns.md (rows 51-60 and a "Phase 3 batch 6" section),
+  docs/engines/structure.md, fauna.md, emitter.md, celestial.md, src/dev/spawnScenarios.js (one import
+  and one spread of `src/dev/spawnScenarios/batch6.js`), NAME_SYNONYMS in tourGuide.js. Two tool
+  fixes the other batches need too: `tools/docs-check.mjs` reads a row's number from the preset file's
+  header line ("// Preset 56: ..."), so a batch branch without the earlier batches checks; and
+  `tools/lab/audio.mjs` auditions with a budget covering every recipe (it failed past 16 recipes).
+- **Tests:** `node --expose-gc tools/lab/presets-51-60.mjs [--only ids]` (fauna drift, columns and
+  the caravan, recipes on stamped sites, colliders, torches, movers, the train's cycle, the dam's line
+  outside the shoreline, the maze, the fireball's timeline, cloth, memory, allocation); browser:
+  `tools/steps/presets-51-60.json` (src/dev/presetChecksBatch6.js, window.__dwBatch6) and
+  `?test=spawns&testPresets=<ids>` with `src/dev/spawnScenarios/batch6.js`.
+- **More engine extensions found while testing:** the fauna column's `turns` (an `auto` route that
+  falls short tries other headings; default [] keeps every column as it was) and a guard so a column
+  with no route is not updated (a forced debug spawn of one threw on its missing PathFollower).
+- **Placement tuning:** the dam's basin is 150-190 m and 34-42 m deep, uphill of the site on any
+  relief (the 250 m basin fitted 0.6 % of tries, so no dam was ever placed; now about 8 %, lifting the
+  rim 20-80 m: the dam's height); the oasis is rarer (chance 0.08, 18 km); the labyrinth stands on any
+  relief (chance 0.1), so it places on the terrain lab's seeds.
+- **Phase 2 goldens:** `tools/lab/terrain.mjs` and `tools/lab/water.mjs` built the "Phase 2 world"
+  from the whole growing preset list, so every batch's new site or lake failed them; they now use the
+  first 30 presets (PRESETS.slice(0, 30)). Every batch needs this.
+- **Verification (2026-11-04):** presets-51-60 lab 117/117; every node lab once (all pass except the
+  known eagle allocation sample, 144 B/tick beside a browser run, and the known audio thunder check
+  near its 6 dB threshold, 232/233); terrain 488/488, water 34/34 after the golden scoping; step file
+  `tools/steps/presets-51-60.json` 57/57 on WebGPU and on WebGL2, 0 errors and 0 warnings, all seven
+  sites on real stamped sites (the dam's lake in the water query); `run-harness --test spawns
+  --presets <the ten>` 10/10 on both backends (GPU memory, heap, wind, colliders, ignitables, lights
+  back; 0/0 console); `--test terrain --presets real` PASS (basin seen at every LOD); `--test
+  determinism` PASS; docs-check 288/288; build, build:single, test:v1; smoke of the shell and of V2
+  (dist-single) on WebGPU and WebGL2, 0/0.
+- **For I3:** the docs-check row number and the two golden scopings above; the audio lab budget;
+  `src/dev/spawnScenarios.js` spreads `BATCH6_SCENARIOS` after the Phase 2 list (put the batches in
+  spec order); the checklist's recipe list in docs/spawns.md ("audio.recipe must be one of") still
+  names the Phase 2 recipes only; CHANGELOG has no Phase 3 section yet (Milestone P).
+- **Status:** done on the branch.
 
 ### Wave 4: discovery and verification, then the tag
 

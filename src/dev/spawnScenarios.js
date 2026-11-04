@@ -34,8 +34,10 @@
 //               look 'antisolar' down-sun at the craft's shadow, or look 'pair' between the craft and
 //               the spawn, a wingman off the wing); fov in degrees
 
+// Phase 3: each batch's scenarios live in src/dev/spawnScenarios/batch<N>.js, appended in spec order.
 import { BATCH31_SCENARIOS } from './spawnScenarios/batch31.js';
 import { BATCH41_SCENARIOS } from './spawnScenarios/batch41.js';
+import { BATCH6_SCENARIOS } from './spawnScenarios/batch6.js';
 
 /** Activation overrides the batch 1 step file used to show a storm at its mature stage at once. */
 const MATURE_VORTEX = Object.freeze({
@@ -213,4 +215,5 @@ export const SPAWN_SCENARIOS = Object.freeze([
   ...PHASE2_SCENARIOS,
   ...BATCH31_SCENARIOS,
   ...BATCH41_SCENARIOS,
+  ...BATCH6_SCENARIOS,
 ]);

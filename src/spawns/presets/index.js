@@ -54,6 +54,17 @@ import tidalBore from './tidalBore.js';
 import batsAtDusk from './batsAtDusk.js';
 import herdStampede from './herdStampede.js';
 import flamingoLake from './flamingoLake.js';
+// Batch 6: presets 51-60.
+import butterflyMigration from './butterflyMigration.js';
+import caribouMigration from './caribouMigration.js';
+import cliffsideMonastery from './cliffsideMonastery.js';
+import seaCliffCastle from './seaCliffCastle.js';
+import mountaintopObservatory from './mountaintopObservatory.js';
+import steamTrainViaduct from './steamTrainViaduct.js';
+import damSpillway from './damSpillway.js';
+import desertOasisCaravan from './desertOasisCaravan.js';
+import labyrinth from './labyrinth.js';
+import fireballImpact from './fireballImpact.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -111,6 +122,17 @@ export const PRESETS = Object.freeze([
   batsAtDusk,
   herdStampede,
   flamingoLake,
+  // Batch 6: presets 51-60.
+  butterflyMigration,
+  caribouMigration,
+  cliffsideMonastery,
+  seaCliffCastle,
+  mountaintopObservatory,
+  steamTrainViaduct,
+  damSpillway,
+  desertOasisCaravan,
+  labyrinth,
+  fireballImpact,
 ]);
 
 /** Presets by id. */

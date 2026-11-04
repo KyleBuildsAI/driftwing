@@ -16,6 +16,15 @@ import { GLACIER_DEFAULTS, buildGlacier } from './glacier.js';
 import { SHIPWRECK_DEFAULTS, buildShipwreck } from './shipwreck.js';
 import { SEA_ARCHES_DEFAULTS, buildSeaArches } from './seaArches.js';
 import { CAVE_MOUTH_DEFAULTS, buildCaveMouth } from './caveMouth.js';
+// Presets 51-60.
+import { MONASTERY_DEFAULTS, buildMonastery } from './monastery.js';
+import { CASTLE_RUIN_DEFAULTS, buildCastleRuin } from './castleRuin.js';
+import { OBSERVATORY_DEFAULTS, buildObservatory } from './observatory.js';
+import { VIADUCT_DEFAULTS, buildViaduct } from './viaduct.js';
+import { DAM_DEFAULTS, buildDam } from './dam.js';
+import { OASIS_DEFAULTS, buildOasis } from './oasis.js';
+import { LABYRINTH_DEFAULTS, buildLabyrinth } from './labyrinth.js';
+import { FIREBALL_DEFAULTS, buildFireball } from './fireball.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -38,6 +47,15 @@ export const RECIPES = Object.freeze({
   shipwreck: Object.freeze({ build: buildShipwreck, defaults: SHIPWRECK_DEFAULTS, audioIntensity: 'constant' }),
   seaArches: Object.freeze({ build: buildSeaArches, defaults: SEA_ARCHES_DEFAULTS, audioIntensity: 'constant' }),
   caveMouth: Object.freeze({ build: buildCaveMouth, defaults: CAVE_MOUTH_DEFAULTS, audioIntensity: 'constant' }),
+  // Presets 51-60.
+  monastery: Object.freeze({ build: buildMonastery, defaults: MONASTERY_DEFAULTS, audioIntensity: 'wind' }),
+  castleRuin: Object.freeze({ build: buildCastleRuin, defaults: CASTLE_RUIN_DEFAULTS, audioIntensity: 'constant' }),
+  observatory: Object.freeze({ build: buildObservatory, defaults: OBSERVATORY_DEFAULTS, audioIntensity: 'recipe' }),
+  viaduct: Object.freeze({ build: buildViaduct, defaults: VIADUCT_DEFAULTS, audioIntensity: 'recipe' }),
+  dam: Object.freeze({ build: buildDam, defaults: DAM_DEFAULTS, audioIntensity: 'constant' }),
+  oasis: Object.freeze({ build: buildOasis, defaults: OASIS_DEFAULTS, audioIntensity: 'constant' }),
+  labyrinth: Object.freeze({ build: buildLabyrinth, defaults: LABYRINTH_DEFAULTS, audioIntensity: 'constant' }),
+  fireball: Object.freeze({ build: buildFireball, defaults: FIREBALL_DEFAULTS, audioIntensity: 'recipe' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

@@ -30,6 +30,15 @@ export const RECIPE_STAMP_TYPES = Object.freeze({
   shipwreck: 'reef',
   seaArches: 'seaStacks',
   caveMouth: null,
+  // Presets 51-60.
+  monastery: 'cliffStep',
+  castleRuin: 'cliffStep',
+  observatory: 'flatten',
+  viaduct: 'gorge',
+  dam: 'basin',
+  oasis: 'basin',
+  labyrinth: 'flatten',
+  fireball: null,
 });
 
 /** Stamp sizes each recipe prefers over the stamp type's own defaults (m, or [min, max] ranges). */
@@ -44,6 +53,17 @@ const RECIPE_STAMP_DEFAULTS = Object.freeze({
   lavaChannels: Object.freeze({ length: [600, 800], width: [16, 24], depth: [8, 12], wallWidth: [8, 12], twist: [20, 40], plateau: [10, 16], shoulder: [40, 60], segments: 10, paint: 'basalt' }),
   shipwreck: Object.freeze({ radius: [200, 270], depth: [1.8, 2.6], pocket: [8, 10], pocketRadius: [60, 80], heads: [12, 18], falloff: [140, 190], paint: 'coral' }),
   seaArches: Object.freeze({ count: [4, 6], radius: [12, 19], height: [40, 68], spread: [280, 400], arches: [1, 2], span: [44, 60], archHeight: [30, 40], paint: 'wetRock' }),
+  // Presets 51-60.
+  monastery: Object.freeze({ width: [300, 380], drop: [95, 140], length: [440, 560], face: [6, 9], falloff: [130, 170], pool: [18, 26], paint: 'basalt' }),
+  castleRuin: Object.freeze({ width: [280, 360], drop: [45, 75], length: [380, 480], face: [5, 8], falloff: [110, 150], pool: [16, 22], paint: 'basalt' }),
+  observatory: Object.freeze({ length: [64, 76], width: [44, 52], margin: [8, 12], shoulder: [50, 70], paint: 'tarmac' }),
+  viaduct: Object.freeze({ length: [900, 1100], width: [170, 240], depth: [55, 80], falloff: [180, 240], pad: [80, 100], paint: 'riverbed' }),
+  // The reservoir: a basin centred uphill of the site (aligned downhill), so its down-slope rim, where
+  // its berm stands tallest, lies at the site centre: the dam's line. Small and deep, so it fits on the
+  // slopes of this terrain (lifting that rim 20-80 m); a narrow, steep berm the dam's face covers.
+  labyrinth: Object.freeze({ length: [130, 150], width: [130, 150], margin: [8, 12], shoulder: [40, 60], paint: 'sand' }),
+  oasis: Object.freeze({ radius: [55, 80], depth: [4, 7], rim: [22, 32], falloff: [40, 60], paint: 'sand' }),
+  dam: Object.freeze({ radius: [150, 190], depth: [34, 42], rim: [10, 14], falloff: [14, 20], paint: 'riverbed', offset: Object.freeze({ along: -170, across: 0 }) }),
 });
 
 /** Islet layout for the islands recipe: how many islets, and how far out the others ring the first. */

@@ -183,6 +183,14 @@ function testPresets() {
   const rows = presetTableRows(text);
   check('presets', 'docs/spawns.md has one table row per preset', rows.length === PRESETS.length, `${rows.length} rows, ${PRESETS.length} presets`);
   const anchors = anchorsOf(SPAWNS_DOC);
+  // A batch branch holds the spec's later presets without the batches before them, so a row's number
+  // is the spec number from the preset file's header line ("// Preset 56: ..."), not its place.
+  const specNumber = (preset, index) => {
+    const path = join(ROOT, 'src', 'spawns', 'presets', `${preset.id}.js`);
+    const header = existsSync(path) ? readFileSync(path, 'utf8').split(/\r?\n/, 1)[0] : '';
+    const match = /\bpreset (\d+)\b/i.exec(header);
+    return match ? match[1] : String(index + 1);
+  };
   PRESETS.forEach((preset, index) => {
     const row = rows[index];
     if (!row) return;

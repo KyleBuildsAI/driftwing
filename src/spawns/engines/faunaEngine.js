@@ -87,6 +87,9 @@ export const FAUNA_DEFAULTS = Object.freeze({
   fadeOut: 6,
   voice: null,
   voiceIntensity: 1,
+  // Presets 51-60: the share of the WindField wind a wandering group (flock, murmuration) drifts with:
+  // its goal and leash ride the wind, and a flock's agents fly with it (the butterflies). 0 = none.
+  windDrift: 0,
   flocking: Object.freeze({ separation: 1.4, separationRadius: 3, alignment: 1.1, cohesion: 0.12, neighborRadius: 12, maxNeighbors: 7 }),
   scatter: Object.freeze({ radius: 60, burst: 24, recover: 3.5, spread: 0.9, trigger: 'scatter', cooldown: 6 }),
   murmuration: Object.freeze({ radius: 110, flatten: 0.45, morphSeconds: 11, fold: 0.35, wave: 0.18, seek: 0.9 }),
@@ -114,6 +117,9 @@ export const FAUNA_DEFAULTS = Object.freeze({
   column: Object.freeze({
     path: 'auto', length: 2600, spacing: 5, lanes: 2, laneWidth: 3.2, speed: null, jitter: 0.6, mode: 'pingpong',
     maxSlope: null, resample: 8, dust: Object.freeze({ rate: 0, size: 4, color: 0xc4ab84 }),
+    // Presets 51-60: headings (degrees off the spawn's) an 'auto' route also tries when the first one
+    // falls short of 60 % of `length`; the longest is kept. [] tries the spawn's heading alone.
+    turns: Object.freeze([]),
   }),
   surface: Object.freeze({
     spread: 10,
@@ -188,8 +194,11 @@ const G = Object.freeze({
   STAMPEDE: 51, STAMPEDE_X: 52, STAMPEDE_Z: 53, STAMPEDE_COOLDOWN: 54, GAIT: 55, AVOID_TIMER: 56, STAMPEDE_TIMER: 57,
   FLUSH: 58, FLUSH_X: 59, FLUSH_Z: 60, FLUSH_Y: 61, RACE: 62, SHADOW_X: 63, SHADOW_Z: 64, PATH_TIME: 65, HOME_X: 66,
   HOME_Y: 67, HOME_Z: 68, DUST_LIVE: 69, FLUSH_COUNT: 70, WATER_CURSOR: 71, SHADOW_WET: 72,
+  DRIFT_X: 73, DRIFT_Y: 74, DRIFT_Z: 75, DRIFT_AMBIENT_X: 76, DRIFT_AMBIENT_Z: 77, DRIFT_STRENGTH: 78,
 });
-const G_LENGTH = 73;
+const G_LENGTH = 79;
+/** A wind-drifting group feels the craft's gusts (wind.lastLayers) within this distance (m). */
+const DRIFT_GUST_REACH = 600;
 // Call registers (io) by index. A caller writes the slots a helper reads, then calls it.
 const IO = Object.freeze({
   TARGET_X: 0, TARGET_Y: 1, TARGET_Z: 2, FEED_X: 3, FEED_Y: 4, FEED_Z: 5, GAIN: 6, SEEK_MAX: 7, WEIGHT: 8,
@@ -251,6 +260,8 @@ function resolveParams(params) {
   if (!Number.isFinite(count[0]) || !Number.isFinite(count[1]) || count[0] < 1) throw new Error(`fauna: params.count must be a positive number or [min, max], got ${JSON.stringify(params.count)}`);
   resolved.countRange = count;
   if (!Number.isFinite(resolved.fadeOut) || resolved.fadeOut < 0 || resolved.fadeOut > 600) throw new Error(`fauna: params.fadeOut must be within 0..600 s, got ${JSON.stringify(params.fadeOut)}`);
+  if (!(Number.isFinite(resolved.windDrift) && resolved.windDrift >= 0 && resolved.windDrift <= 2)) throw new Error(`fauna: params.windDrift must be within 0..2, got ${JSON.stringify(params.windDrift)}`);
+  if (resolved.windDrift > 0 && resolved.behavior !== 'flock' && resolved.behavior !== 'murmuration') throw new Error(`fauna: params.windDrift is for the flock and murmuration behaviours, got ${resolved.behavior}`);
   if (resolved.drift.slipstream === true) resolved.drift.slipstream = { ...SLIPSTREAM_DEFAULTS };
   else if (isPlainObject(resolved.drift.slipstream)) resolved.drift.slipstream = { ...SLIPSTREAM_DEFAULTS, ...resolved.drift.slipstream };
   validateGroundAndSurface(resolved, params);
@@ -329,6 +340,7 @@ function validateGroundAndSurface(resolved, params) {
     if (!['loop', 'pingpong', 'once'].includes(column.mode)) fail('column.mode', 'must be loop, pingpong or once');
     if (column.maxSlope !== null && !positive(column.maxSlope)) fail('column.maxSlope', 'must be null or a positive number');
     if (!(Number.isFinite(column.resample) && column.resample >= 2)) fail('column.resample', 'must be a number >= 2 (m)');
+    if (!Array.isArray(column.turns) || column.turns.length > 12 || !column.turns.every((turn) => Number.isFinite(turn) && turn >= -180 && turn <= 180)) fail('column.turns', 'must be an array of at most 12 headings within -180..180 degrees');
     column.dust = validateDust({ ...FAUNA_DEFAULTS.column.dust, ...(isPlainObject(params.column?.dust) ? params.column.dust : {}) }, 'column.dust', fail);
   }
   if (behavior === 'surface') {
@@ -1164,9 +1176,65 @@ export function createFaunaEngine() {
     }
     g[G.VX] = Math.sin(g[G.HEADING]) * g[G.SPEED];
     g[G.VZ] = (-Math.cos(g[G.HEADING])) * g[G.SPEED];
+    if (params.windDrift > 0) {
+      // A drifting cloud: the goal and its leash ride the wind (the agents add it to their flight).
+      updateDrift(data);
+      g[G.VX] += g[G.DRIFT_X];
+      g[G.VZ] += g[G.DRIFT_Z];
+      g[G.ANCHOR_X] += g[G.DRIFT_X] * dt;
+      g[G.ANCHOR_Z] += g[G.DRIFT_Z] * dt;
+    }
     g[G.X] += g[G.VX] * dt;
     g[G.Z] += g[G.VZ] * dt;
     settleAltitude(data, dt);
+  }
+
+  /**
+   * The wind a drifting group rides (g[DRIFT_X..Z] = windDrift x the wind): the WindField's ambient
+   * layer at the group's height (read once at create through wind.ambientAt, then scaled by the live
+   * windStrength uniform the field itself uses), plus the gusts and thermal lift the craft is feeling
+   * (wind.lastLayers) while it is within DRIFT_GUST_REACH of the group. Nothing here calls into the
+   * field per frame (its full sample allocates in its terrain and thermal lookups), as the structure
+   * engine's wind does.
+   */
+  function updateDrift(data) {
+    const g = data.g;
+    const share = data.params.windDrift;
+    const strength = ctx.uniforms && ctx.uniforms.windStrength ? ctx.uniforms.windStrength.value : g[G.DRIFT_STRENGTH];
+    const scale = g[G.DRIFT_STRENGTH] > 0 ? strength / g[G.DRIFT_STRENGTH] : 1;
+    let windX = g[G.DRIFT_AMBIENT_X] * scale;
+    let windY = 0;
+    let windZ = g[G.DRIFT_AMBIENT_Z] * scale;
+    const layers = ctx.wind ? ctx.wind.lastLayers : null;
+    const player = ctx.state && ctx.state.player ? ctx.state.player.position : null;
+    if (layers && player) {
+      const offsetX = player.x - g[G.X];
+      const offsetZ = player.z - g[G.Z];
+      const distance = Math.sqrt(offsetX * offsetX + offsetZ * offsetZ);
+      if (distance < DRIFT_GUST_REACH * 2) {
+        const near = distance < DRIFT_GUST_REACH ? 1 : 2 - distance / DRIFT_GUST_REACH;
+        windX += layers.gust.x * near;
+        windY += (layers.gust.y + layers.thermal) * near;
+        windZ += layers.gust.z * near;
+      }
+    }
+    g[G.DRIFT_X] = windX * share;
+    g[G.DRIFT_Y] = windY * share;
+    g[G.DRIFT_Z] = windZ * share;
+  }
+
+  /**
+   * Reads the ambient wind a drifting group rides once, at create: the WindField's ambient layer at
+   * the goal (its height above the ground there) and the windStrength it was read under.
+   */
+  function readDriftAmbient(data) {
+    const g = data.g;
+    if (!ctx.wind || typeof ctx.wind.ambientAt !== 'function') return;
+    const ambient = ctx.wind.ambientAt({ x: g[G.X], y: g[G.Y], z: g[G.Z] });
+    const toward = (ambient.fromDegrees + 180) * Math.PI / 180;
+    g[G.DRIFT_AMBIENT_X] = Math.sin(toward) * ambient.speed;
+    g[G.DRIFT_AMBIENT_Z] = -Math.cos(toward) * ambient.speed;
+    g[G.DRIFT_STRENGTH] = ctx.uniforms && ctx.uniforms.windStrength ? ctx.uniforms.windStrength.value : 1;
   }
 
   /** Eases the goal's height toward the altitude mode's target over the ground. */
@@ -1291,11 +1359,14 @@ export function createFaunaEngine() {
     io[IO.TARGET_X] = g[G.X] + Math.sin(g[G.HEADING]) * 60;
     io[IO.TARGET_Y] = g[G.Y];
     io[IO.TARGET_Z] = g[G.Z] - Math.cos(g[G.HEADING]) * 60;
-    io[IO.FEED_X] = 0;
-    io[IO.FEED_Y] = 0;
-    io[IO.FEED_Z] = 0;
+    // A wind-drifting flock flies with the wind it rides (zero without windDrift).
+    io[IO.FEED_X] = g[G.DRIFT_X];
+    io[IO.FEED_Y] = g[G.DRIFT_Y] * 0.3;
+    io[IO.FEED_Z] = g[G.DRIFT_Z];
     io[IO.GAIN] = 0.25;
-    io[IO.SEEK_MAX] = g[G.SPEED];
+    const driftSpeed = Math.sqrt(g[G.DRIFT_X] * g[G.DRIFT_X] + g[G.DRIFT_Z] * g[G.DRIFT_Z]);
+    io[IO.SEEK_MAX] = g[G.SPEED] + driftSpeed;
+    io[IO.MAX_SPEED] = speedRange[1] + driftSpeed;
     let sumX = 0;
     let sumY = 0;
     let sumZ = 0;
@@ -2956,14 +3027,24 @@ export function createFaunaEngine() {
     const forwardZ = -Math.cos(heading);
     let planar;
     if (column.path === 'auto') {
-      const route = buildGroundPath(ctx.terrain, ctx.game ? ctx.game.waterQuery ?? null : null, {
-        from: { x: g[G.ANCHOR_X], z: g[G.ANCHOR_Z] },
-        to: { x: g[G.ANCHOR_X] + forwardX * column.length, z: g[G.ANCHOR_Z] + forwardZ * column.length },
-        maxSlope: column.maxSlope ?? data.params.herd.slopeLimit,
-        seed: Math.floor(data.phaseSeed * 2147483647),
-        spacing: 50,
-        waterLevel: ctx.terrain.waterLevel,
-      });
+      const plan = (turn) => {
+        const angle = heading + turn * (Math.PI / 180);
+        return buildGroundPath(ctx.terrain, ctx.game ? ctx.game.waterQuery ?? null : null, {
+          from: { x: g[G.ANCHOR_X], z: g[G.ANCHOR_Z] },
+          to: { x: g[G.ANCHOR_X] + Math.sin(angle) * column.length, z: g[G.ANCHOR_Z] - Math.cos(angle) * column.length },
+          maxSlope: column.maxSlope ?? data.params.herd.slopeLimit,
+          seed: Math.floor(data.phaseSeed * 2147483647),
+          spacing: 50,
+          waterLevel: ctx.terrain.waterLevel,
+        });
+      };
+      let route = plan(0);
+      // A short route (blocked by water or steep ground): the other headings, the longest kept.
+      for (const turn of column.turns) {
+        if (route.length >= column.length * 0.6) break;
+        const other = plan(turn);
+        if (other.length > route.length) route = other;
+      }
       if (route.points.length < 6) return false;
       planar = route.points;
     } else {
@@ -2997,6 +3078,9 @@ export function createFaunaEngine() {
   }
 
   function simulateColumn(data) {
+    // No route (a column that found no walkable ground ends at create; a forced debug spawn is still
+    // updated until the manager removes it): nothing to walk.
+    if (data.follower === null) return;
     const dt = frameStep[0];
     const pool = data.pool;
     const g = data.g;
@@ -4273,6 +4357,7 @@ export function createFaunaEngine() {
     if (resolved.behavior === 'wingman') g[G.Y] = Math.max(g[G.Y], ground + resolved.wingman.waitAltitude);
     g[G.BASE_Y] = g[G.Y];
     if (resolved.behavior === 'drift') g[G.Y] += Math.sin(data.phaseSeed * TWO_PI) * resolved.drift.bob;
+    if (resolved.windDrift > 0) readDriftAmbient(data);
     if (resolved.behavior === 'circling') {
       data.thermals = {
         count: 0,

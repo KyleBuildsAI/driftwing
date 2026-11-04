@@ -11,7 +11,8 @@
 //           the water and the voice's 'crack' and 'splash'), floats away as a berg, melts under the
 //           surface, and slides back out of the face as the glacier advances
 //
-// A recipe adds movers through context.addMover(spec) (structureEngine.js): spec { builder (a mesh
+// A recipe adds these movers through context.addMover(spec) with a `motion` (structureEngine.js keeps
+// them in out.drifters, apart from the animated movers): spec { builder (a mesh
 // builder holding the part in its own frame: origin at its base centre, -z its face direction for a
 // slab), x, y, z (its rest position, local to the anchor), yaw (radians, compass), motion, hull (local
 // [x, y, z] points of its collider, at most 64; empty for none), drift: { speed, heading, leash,
@@ -132,10 +133,10 @@ function writeMatrix(elements, pose, dropY) {
 
 /**
  * Builds the movers of one structure instance from the recipe's specs (world positions from the
- * anchor). Returns the record the engine keeps in data.movers, or null when the recipe added none.
+ * anchor). Returns the record the engine keeps in data.drifters, or null when the recipe added none.
  */
 export function createMovers(THREE, out, anchor, rng) {
-  const specs = out.movers;
+  const specs = out.drifters;
   if (specs.length === 0) return null;
   const count = specs.length;
   const movers = {

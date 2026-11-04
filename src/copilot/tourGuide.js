@@ -98,6 +98,17 @@ const NAME_SYNONYMS = Object.freeze([
   [/\b(bat (caves?|swarms?|colon(y|ies)))\b/g, 'bats at dusk'],
   [/\b(bison|buffalo(e?s)?|stampedes?)\b/g, 'herd stampede'],
   [/\b(pink lakes?|flamingoes)\b/g, 'flamingo lake'],
+  // Presets 51-60.
+  [/\b(monarchs?|butterfl(y|ies))\b/g, 'butterfly migration'],
+  [/\b(reindeer)\b/g, 'caribou'],
+  [/\b(temples?|gompas?|prayer flags?)\b/g, 'monastery'],
+  [/\b(fortress(es)?|ruined castles?)\b/g, 'castle'],
+  [/\b(telescopes?)\b/g, 'observatory'],
+  [/\b(trains?|railways?|railroads?|locomotives?|steam engines?)\b/g, 'steam train viaduct'],
+  [/\b(reservoirs?|spillways?)\b/g, 'dam spillway'],
+  [/\b(camels?|palm trees?|caravans?)\b/g, 'oasis caravan'],
+  [/\b(hedge mazes?|mazes?)\b/g, 'labyrinth'],
+  [/\b(bolides?)\b/g, 'fireball impact'],
 ]);
 
 /**

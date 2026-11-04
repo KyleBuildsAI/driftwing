@@ -5,8 +5,8 @@ It covers the starling murmuration, the geese V-formation, thermal hawks, the ea
 whale pod and the sky whale, and since Phase 3 the ground and water surface: terrain-following
 herds that stampede with dust (bison), columns of walkers along a path (caribou), dolphins that
 ride the swell and race your shadow, and flamingos that wade and flush in a wave. Wave 3 adds a
-stream of bats pouring out of a cave (the bats at dusk); butterflies and camels join with their
-presets.
+stream of bats pouring out of a cave (the bats at dusk), the butterfly (a migrating cloud that
+rides the wind, `windDrift`) and the camel (the oasis caravan's column).
 
 - Code: `src/spawns/engines/faunaEngine.js` (behaviours, buffers, shader).
 - Species meshes and animation constants: `src/spawns/engines/faunaSpecies.js`.
@@ -84,6 +84,8 @@ A bad `species`, `behavior` or `count` throws a clear error that names the field
 | `dolphin` | whale | 2.4 long | 5 | 1..11 | 1.3 | 128 |
 | `flamingo` | bird (wading) | 1.5 span | 14 | 0..22 | 1.8 | 512 |
 | `bat` | bird | 0.34 span | 10 | 5..17 | 1.5 | 4096 |
+| `butterfly` | bird | 0.1 span | 3 | 1..8 | 1.4 | 4096 |
+| `camel` | quadruped | 3.0 long (a saddle blanket and packs) | 1.4 | 0..11 | 1.6 | 64 |
 
 - **Capacity is per species, across every live group.** A `create()` that does not fit throws
   `fauna: no room for N more <species>`, and the SpawnManager refuses the spawn.
@@ -121,6 +123,7 @@ accept a range, drawn once per group from the spawn's seeded generator.
 | `fadeOut` | s | 0..600 | 6 | an event (a spawn with a duration) fades out over the last `fadeOut` seconds of its duration: the agents shrink away (the reverse of `fadeIn`), and the voice and a drift slipstream follow. The group then ends (`instance.ended`) at its duration, so it never vanishes at the manager's grace (a sky whale leaves its lane instead). 0 ends it at its duration with no fade. A wingman ends this way only while it is still waiting; once it has joined it finishes its escort and peels off |
 | `voice` | bool | | unset | `true` or `false` decides whether this entry opens the preset's `audio` voice; unset, the preset's first engine entry owns it, so a preset opens one voice. Set `false` on the extra entries of a multi-group preset |
 | `voiceIntensity` | 0..1 | | 1 | the voice's intensity at full presence. Murmurations and flocks swell it from 0.15 to 1 as the player nears the flock |
+| `windDrift` | share | 0..2 | 0 | murmuration and flock only: the share of the wind the group rides. Its goal, its leash anchor and (in a flock) every agent's flight drift with the WindField's ambient wind at the group's height (read once at create, scaled live with the `windStrength` uniform the field uses), plus the gusts and thermal lift the craft feels while it is within 600 m. 0 keeps the Phase 2 behaviour. The butterfly migration uses 1 |
 
 ### flocking (murmuration and flock)
 
@@ -302,6 +305,7 @@ clear ground within 1.5 km; with none it ends at once.
 | `mode` | `'loop'`, `'pingpong'`, `'once'` | | `'pingpong'` | the PathFollower mode (a closed path loops) |
 | `maxSlope` | rise over run | > 0 or null | `herd.slopeLimit` | for the 'auto' route |
 | `resample` | m | >= 2 | 8 | |
+| `turns` | degrees | up to 12, -180..180 | `[]` | other headings (off the spawn's) an `'auto'` route tries when the first falls short of 60 % of `length` (water or steep ground in the way); the longest route is kept. The caribou migration tries six |
 | `dust` | `{ rate, size, color }` | | `{ rate: 0, size: 4, color: 0xc4ab84 }` | a caravan in sand sets a rate |
 
 The column is a pure function of flight time: the PathFollower places every walker (`carAtFrom`),
@@ -414,7 +418,10 @@ whale (heavy, with a `whale` lure) `{ near: 3000, mid: 7000, far: 40000 }`.
 Only `drift.slipstream` authors a wind source. It is listed in `instance.windSourceIds`, removed at
 the far tier and removed in `dispose()`. Its bounds only move when the leader leaves their margin
 (30 % of the length), so the WindField re-indexes rarely. The sample reads the group's live state, so
-the field itself stays exact. Circling birds read `WindField.thermalsNear` and author nothing.
+the field itself stays exact. Circling birds read `WindField.thermalsNear` and author nothing. A
+`windDrift` group reads the wind and authors nothing; it never calls the field per frame (the
+field's full sample allocates in its terrain and thermal lookups), as the structure engine's flags
+and turbines do.
 
 ## Audio
 
