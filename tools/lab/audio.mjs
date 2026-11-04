@@ -317,7 +317,26 @@ async function sampleAllocations(run) {
   return { boxSize, boxBytes, otherSamples, otherSites: Object.fromEntries(objectSites) };
 }
 
+/**
+ * The recipes in groups of at most MAX_VOICE_BUDGET (the most voices the budget realizes at once): with
+ * more recipes than that, every "all at once" check runs once per group.
+ */
+function recipeGroups() {
+  const groups = [];
+  for (let first = 0; first < RECIPE_NAMES.length; first += MAX_VOICE_BUDGET) groups.push(RECIPE_NAMES.slice(first, first + MAX_VOICE_BUDGET));
+  return groups;
+}
+
 async function testUpdateAllocations() {
+  const groups = recipeGroups();
+  numbers.updateAllocations = [];
+  for (let group = 0; group < groups.length; group++) {
+    const first = group * MAX_VOICE_BUDGET + 1;
+    await testGroupAllocations(groups[group], groups.length > 1 ? ` (recipes ${first}-${first + groups[group].length - 1})` : '');
+  }
+}
+
+async function testGroupAllocations(names, groupLabel) {
   const context = installFakeWebAudio();
   const mixer = { input: () => new GainNode(context), send: () => new GainNode(context) };
   const listener = {
@@ -329,9 +348,9 @@ async function testUpdateAllocations() {
   const issues = [];
   const spawnVoices = createSpawnVoices({ THREE, onIssue: (error) => issues.push(error.message) });
   spawnVoices.attach({ context, noise: { duration: 4 }, mixer, spatializer: listener });
-  // Every recipe realized at once: the budget grows with the recipe list (up to MAX_VOICE_BUDGET).
-  spawnVoices.setBudget(Math.min(MAX_VOICE_BUDGET, Math.max(16, RECIPE_NAMES.length)));
-  const handles = RECIPE_NAMES.map((name) => spawnVoices.spawnVoice(name, { intensity: 0.6 }));
+  // Every recipe of the group realized at once: the budget grows with the group (at most MAX_VOICE_BUDGET).
+  spawnVoices.setBudget(Math.max(16, names.length));
+  const handles = names.map((name) => spawnVoices.spawnVoice(name, { intensity: 0.6 }));
   const position = new THREE.Vector3();
   const frame = { time: 0, realTime: 0, interval: 0.05, interior: false, profile: { interiorCutoff: 0 } };
   // Voices circle the listener, who flies north at 45 m/s; intensities change every update.
@@ -357,7 +376,8 @@ async function testUpdateAllocations() {
     for (let tick = warmUpdates; tick < warmUpdates + updates; tick++) step(tick);
   });
   const after = spawnVoices.describe();
-  numbers.updateAllocations = {
+  const groupNumbers = {
+    recipes: names.length,
     updates,
     voices: after.voices,
     realized: after.realized,
@@ -366,15 +386,16 @@ async function testUpdateAllocations() {
     otherSamples: sampled.otherSamples,
     otherSites: sampled.otherSites,
   };
-  check('updateAllocations', 'every recipe realized on the stand-in', after.realized === RECIPE_NAMES.length && issues.length === 0,
+  numbers.updateAllocations.push(groupNumbers);
+  check('updateAllocations', `every recipe realized on the stand-in${groupLabel}`, after.realized === names.length && issues.length === 0,
     `${after.realized}/${after.voices}${issues.length ? `; ${issues.join(' | ')}` : ''}`);
   // An object created per update (or even per hundred updates) would leave thousands of samples. The
   // sporadic runtime samples grow with the voices moving (the Phase 2 catalog's 15 had 50).
   const sporadicLimit = Math.round((updates / 1000) * Math.max(1, after.voices / 15));
-  check('updateAllocations', `${updates} updates of ${after.voices} moving voices create no objects`,
+  check('updateAllocations', `${updates} updates of ${after.voices} moving voices create no objects${groupLabel}`,
     sampled.otherSamples < sporadicLimit && after.realizations === warm.realizations,
     `${sampled.otherSamples} sporadic non-box samples ${JSON.stringify(sampled.otherSites)} (limit ${sporadicLimit});`
-    + ` V8 boxed doubles ${numbers.updateAllocations.boxedDoubleSampleBytesPerUpdate} sampled B per update; realizations during the run ${after.realizations - warm.realizations}`);
+    + ` V8 boxed doubles ${groupNumbers.boxedDoubleSampleBytesPerUpdate} sampled B per update; realizations during the run ${after.realizations - warm.realizations}`);
   for (const handle of handles) handle.dispose();
 }
 
@@ -407,17 +428,28 @@ const RENDER_PLAN = Object.freeze({
   discovery: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.2, name: 'chime' }] },
   raptor: { intensity: 1, seconds: 5, skip: 0, triggers: [{ at: 0.3, name: 'call' }, { at: 2.6, name: 'call', options: { strength: 0.8 } }] },
   goose: { intensity: 1, seconds: 6, skip: 0.2, triggers: [{ at: 0.2, name: 'call' }] },
+  // Phase 3 presets 31-100, in spec order.
+  gale: { intensity: 0.8, seconds: 6, params: { grit: 0.9, howl: 0.45, depth: 0.45 } },
   surf: { intensity: 0.8, seconds: 6, triggers: [{ at: 2, name: 'crash', options: { strength: 1 } }] },
   herd: { intensity: 1, seconds: 5, triggers: [{ at: 1.5, name: 'bellow', options: { strength: 1 } }] },
   calving: { intensity: 0.7, seconds: 7, triggers: [{ at: 1, name: 'crack', options: { strength: 1 } }, { at: 4, name: 'splash', options: { strength: 1 } }] },
   dolphin: { intensity: 1, seconds: 6, skip: 0.2, triggers: [{ at: 0.3, name: 'call' }] },
-  // Phase 3 presets 61-70.
+  caribou: { intensity: 1, seconds: 6, triggers: [{ at: 2, name: 'grunt' }] },
+  bells: { intensity: 1, seconds: 6, triggers: [{ at: 1, name: 'bell' }, { at: 3.5, name: 'chime' }] },
+  observatory: { intensity: 1, seconds: 5, triggers: [{ at: 2, name: 'clunk' }] },
+  train: { intensity: 1, seconds: 6, triggers: [{ at: 1.5, name: 'whistle' }] },
+  dam: { intensity: 1, seconds: 5 },
+  caravan: { intensity: 1, seconds: 6, triggers: [{ at: 1, name: 'bell' }, { at: 3, name: 'grumble' }] },
+  fireball: { intensity: 1, seconds: 7, triggers: [{ at: 1, name: 'boom', options: { strength: 1 } }] },
   skyShimmer: { intensity: 1, seconds: 5, triggers: [{ at: 2, name: 'flash' }] },
   canopy: { intensity: 1, seconds: 6, triggers: [{ at: 2, name: 'creak' }] },
   portal: { intensity: 1, seconds: 5, triggers: [{ at: 2, name: 'surge' }] },
   giant: { intensity: 1, seconds: 5, triggers: [] },
   galleon: { intensity: 1, seconds: 6, triggers: [{ at: 1, name: 'bell' }] },
   dragon: { intensity: 1, seconds: 5, triggers: [{ at: 1.5, name: 'roar' }] },
+  wisps: { intensity: 1, seconds: 5, triggers: [{ at: 1.5, name: 'chime' }] },
+  windRush: { intensity: 0.8, seconds: 5 },
+  burner: { intensity: 1, seconds: 6, triggers: [{ at: 0.5, name: 'burst', options: { strength: 1, seconds: 2 } }, { at: 3, name: 'burst', options: { strength: 1, seconds: 2 } }] },
   stoneWind: { intensity: 0.8, seconds: 5 },
   rustle: { intensity: 0.7, seconds: 6, params: { knocks: 0.6, chirps: 0.5 }, triggers: [{ at: 2, name: 'burst' }] },
   meadowHum: { intensity: 0.8, seconds: 6 },
@@ -528,17 +560,35 @@ async function testCrystalPitch(page, label) {
 }
 
 async function testLifecycle(page, label) {
-  const result = await page.evaluate(async (names) => {
+  const runs = [];
+  for (const group of recipeGroups()) runs.push(await page.evaluate(auditionGroup, group));
+  const sum = (pick) => runs.reduce((total, run) => total + pick(run), 0);
+  const result = {
+    playing: { voices: sum((run) => run.playing.voices), realized: sum((run) => run.playing.realized), nodesLive: sum((run) => run.playing.nodesLive) },
+    voices: runs.flatMap((run) => run.voices),
+    triggers: runs.find((run) => run.triggers !== null).triggers,
+    outputDb: Math.max(...runs.map((run) => run.outputDb)),
+    stopped: sum((run) => run.stopped),
+    afterStop: { voices: sum((run) => run.afterStop.voices), nodesLive: sum((run) => run.afterStop.nodesLive) },
+    afterOneShots: { oneShotNodesLive: sum((run) => run.afterOneShots.oneShotNodesLive), thunderPlayed: sum((run) => run.afterOneShots.thunderPlayed) },
+    oneShotsWaited: sum((run) => run.oneShotsWaited),
+  };
+  return reportLifecycle(result, label);
+}
+
+/** Page side: plays one group of recipes at once, fires the Phase 2 triggers when the group holds them, stops them all. */
+async function auditionGroup(names) {
+  {
     const { spawn, audio, sleep } = window.audioLab;
     const tools = spawn();
-    // Every recipe realized at once (the page caps the budget at MAX_VOICE_BUDGET).
+    // Every recipe of the group realized at once (a group holds at most MAX_VOICE_BUDGET).
     tools.setBudget(Math.max(16, names.length));
     const before = tools.stats();
     const ids = names.map((name, index) => tools.play(name, { distance: name === 'thunder' ? 400 : 150, bearing: (index * 360) / names.length, intensity: 0.8 }));
     await sleep(900);
     const playing = tools.stats();
     const voices = tools.voices();
-    const triggers = {
+    const triggers = !names.includes('volcano') ? null : {
       volcano: tools.trigger(ids[names.indexOf('volcano')], 'boom'),
       geyser: tools.trigger(ids[names.indexOf('geyser')], 'burst', { duration: 2 }),
       crystal: tools.trigger(ids[names.indexOf('crystal')], 'chime'),
@@ -568,7 +618,10 @@ async function testLifecycle(page, label) {
     const afterOneShots = tools.stats();
     tools.setBudget(10);
     return { before, playing, voices, triggers, outputDb: output.outputDb, environment: output.buses.environment, stopped, afterStop, afterOneShots, oneShotsWaited };
-  }, RECIPE_NAMES);
+  }
+}
+
+function reportLifecycle(result, label) {
   const nodeSum = result.voices.reduce((sum, voice) => sum + voice.nodes, 0);
   check('lifecycle', `${label} every recipe auditioned and realized`, result.playing.voices === RECIPE_NAMES.length && result.playing.realized === RECIPE_NAMES.length,
     `${result.playing.realized}/${result.playing.voices} realized`);
