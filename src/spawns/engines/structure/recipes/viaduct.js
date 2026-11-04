@@ -27,6 +27,7 @@ export const VIADUCT_DEFAULTS = Object.freeze({
   wait: [35, 60],
   length: 260,
   achievement: null,
+  start: null,
 });
 
 /** The rail bed sits this far (m) above the gorge's rim (the anchor pads). */
@@ -73,6 +74,9 @@ export function buildViaduct(context, read) {
   const speed = roll(read.range('speed', VIADUCT_DEFAULTS.speed, 2, 40), rng);
   const waitSeconds = roll(read.range('wait', VIADUCT_DEFAULTS.wait, 0, 600), rng);
   const achievement = read.object('achievement', VIADUCT_DEFAULTS.achievement);
+  // null: the train is a pure function of flight time (from a seeded place); a share puts it there at
+  // the activation (a debug or test spawn that wants it on the viaduct now).
+  const start = read.has('start') ? read.number('start', 0, 0, 1) : null;
   const stamp = findStamp(context.site, 'gorge', read.number('stamp', 0, 0, 16));
 
   // ---- The line: anchor pad A to anchor pad B (the gorge's anchors, or across the heading) ----
@@ -270,8 +274,8 @@ export function buildViaduct(context, read) {
     path,
     speed,
     mode: 'pingpong',
-    startTime: 0,
-    startDistance: rng() * path.length,
+    startTime: start === null || !Number.isFinite(context.params.startTime) ? 0 : context.params.startTime,
+    startDistance: (start === null ? rng() : start) * path.length,
     waits: [{ distance: 0, seconds: waitSeconds }, { distance: path.length, seconds: waitSeconds }],
   });
   out.steam = PUFFS;

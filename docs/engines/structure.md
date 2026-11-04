@@ -303,6 +303,7 @@ Without a flatten stamp it stands on a stone plinth.
 | `wait` | s | 0..600 | [35, 60] | the wait in each tunnel before it comes back |
 | `achievement` | `{ id, title }` or null | | null | awarded (once per spawn) by every arch's pass-under gate |
 | `length` | m | 60..1200 | 260 | free-standing only: the span across the heading, its deck 30 m over the ground |
+| `start` | share | 0..1 or null | null | null: the train is a pure function of flight time from a seeded place; a share of its path puts it there at the activation instead (debug and test spawns) |
 
 The line runs between the gorge's two anchor pads; the deck spans the lips (where the ground falls
 2 m below the deck) on semicircular arches over piers that batter out 1 in 30 toward their feet. Each
