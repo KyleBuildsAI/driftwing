@@ -300,7 +300,16 @@ const events = PRESETS.filter((preset) => preset.kind === 'event' && !isLegendar
 const ownCounts = new Map();
 const flightLabel = (flight) => `${flight.seed} ${flight.craft} ${flight.startDayTime === 0.62 ? 'day' : 'night'}`;
 /** The same flights with `presets` until `preset` starts: the flight it started on, or null. */
-function ownRun(preset, presets, wakeSites = []) {
+function ownRun(preset, chosen, wakeSites = []) {
+  // A combo kept in the list keeps its members (set aside or not), so the director can resolve it.
+  const presets = [...chosen];
+  for (const kept of chosen) {
+    for (const member of kept.combo ? kept.combo.members : []) {
+      if (presets.some((candidate) => candidate.id === member.presetId)) continue;
+      const memberPreset = PRESETS.find((candidate) => candidate.id === member.presetId);
+      if (memberPreset) presets.push(memberPreset);
+    }
+  }
   for (const flight of FLIGHTS) {
     const run = runScenario({ ...flight, hours: OPTIONS.hours, presets, wakeSites });
     for (const entry of run.log) ownCounts.set(entry.presetId, (ownCounts.get(entry.presetId) ?? 0) + 1);
