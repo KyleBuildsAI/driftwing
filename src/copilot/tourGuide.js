@@ -115,6 +115,10 @@ const NAME_SYNONYMS = Object.freeze([
   [/\b(ghost ships?|phantom ships?)\b/g, 'ghost galleon'],
   [/\b(stone giants?|sleeping giants?)\b/g, 'sleeping stone giant'],
   [/\b(dragon races?|wild dragons?)\b/g, 'dragon racer'],
+  [/\b(upside[- ]down (water)?falls?|waterfalls? going up|rising waterfalls?)\b/g, 'reverse waterfall'],
+  [/\b(will[- ]o'?[- ]the[- ]wisps?|ghost lights?|fairy lights?)\b/g, 'forest wisps'],
+  [/\b(cloud streets?|cumulus streets?)\b/g, 'thermal street'],
+  [/\b(kite strings?)\b/g, 'kite-string slalom'],
 ]);
 
 /**

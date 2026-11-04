@@ -8,39 +8,40 @@
 // triggers: the trigger names the recipe answers.
 // build(kit, params) returns { setIntensity(value, time, immediate), trigger(name, options, time),
 //   update?(time, interval), describe() }.
+import bells from './bells.js';
 import { goose, raptor } from './birdCall.js';
+import burner from './burner.js';
 import calving from './calving.js';
+import canopy from './canopy.js';
+import caravan from './caravan.js';
+import caribou from './caribou.js';
 import crystal from './crystal.js';
+import dam from './dam.js';
 import discovery from './discovery.js';
 import dolphin from './dolphin.js';
+import dragon from './dragon.js';
+import fireball from './fireball.js';
 import gale from './gale.js';
+import galleon from './galleon.js';
 import geyser from './geyser.js';
+import giant from './giant.js';
 import herd from './herd.js';
 import lantern from './lantern.js';
 import meteor from './meteor.js';
 import murmuration from './murmuration.js';
+import observatory from './observatory.js';
+import portal from './portal.js';
+import skyShimmer from './skyShimmer.js';
 import surf from './surf.js';
 import thunder from './thunder.js';
 import tornado from './tornado.js';
+import train from './train.js';
 import turbine from './turbine.js';
 import volcano from './volcano.js';
 import waterfall from './waterfall.js';
 import { skyWhale, whale } from './whale.js';
-// Presets 51-60.
-import caribou from './caribou.js';
-import bells from './bells.js';
-import observatory from './observatory.js';
-import train from './train.js';
-import dam from './dam.js';
-import caravan from './caravan.js';
-import fireball from './fireball.js';
-// Phase 3 presets 61-70.
-import skyShimmer from './skyShimmer.js';
-import canopy from './canopy.js';
-import portal from './portal.js';
-import giant from './giant.js';
-import galleon from './galleon.js';
-import dragon from './dragon.js';
+import windRush from './windRush.js';
+import wisps from './wisps.js';
 
 export const RECIPES = Object.freeze({
   tornado,
@@ -58,13 +59,12 @@ export const RECIPES = Object.freeze({
   discovery,
   raptor,
   goose,
-  // Phase 3 presets, in spec order.
+  // Phase 3 presets 31-100, in spec order.
   gale,
   surf,
   herd,
   calving,
   dolphin,
-  // Presets 51-60.
   caribou,
   bells,
   observatory,
@@ -72,18 +72,20 @@ export const RECIPES = Object.freeze({
   dam,
   caravan,
   fireball,
-  // Phase 3 presets 61-70.
   skyShimmer,
   canopy,
   portal,
   giant,
   galleon,
   dragon,
+  wisps,
+  windRush,
+  burner,
 });
 
 /**
  * Every recipe name, in the contract's order, then the later additions (raptor and goose, for the
- * wildlife presets) and the Phase 3 recipes in Milestone G's order; a preset's audio.recipe must be
- * one of these.
+ * wildlife presets) and the Phase 3 preset recipes in spec order; a preset's audio.recipe must be one
+ * of these.
  */
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

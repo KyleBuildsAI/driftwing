@@ -87,6 +87,8 @@ const SEEDS = ['DRIFTWING', 'HARNESS-1', 'P2-TERRAIN'];
 const REAL_SITE_SEEDS = ['P3-B5-22'];
 /** The seed the stamp checks run on (every stamp type lies within 13 km of its origin). */
 const STAMP_SEED = 'P2-TERRAIN';
+/** More seeds searched for a stamped preset none of the seeds above places: the rare Phase 3 sites (the cave tunnel). */
+const RARE_STAMP_SEEDS = Object.freeze(['SOAK-2']);
 const SEARCH_RADIUS = 30000;
 /** Stamp checks run on this many sites of each fixture (nearest first). */
 const SITES_PER_TYPE = 2;
@@ -780,7 +782,7 @@ function testRealPresets() {
   testDeterminism(realWorld, PRESETS, 'real presets, ');
   for (const preset of stamped) {
     let found = null;
-    for (const seed of [STAMP_SEED, ...SEEDS, ...REAL_SITE_SEEDS]) {
+    for (const seed of [STAMP_SEED, ...SEEDS, ...REAL_SITE_SEEDS, ...RARE_STAMP_SEEDS]) {
       const world = realWorld(seed);
       const sites = world.sitesNear(0, 0, SEARCH_RADIUS).filter((site) => site.presetId === preset.id).slice(0, SITES_PER_TYPE);
       if (sites.length > 0) {
@@ -889,7 +891,11 @@ function testBenchmark() {
 }
 
 // ---- phase 3: water-holding stamps, water bodies and region overlays ------------------------------------
-/** The Phase 2 real-preset world, recorded from the Phase 2 code (commit f4c2a50, before any Phase 3 change). */
+/**
+ * The Phase 2 real-preset world, recorded from the Phase 2 code (commit f4c2a50, before any Phase 3
+ * change). The site-list hash covers the Phase 2 presets' sites (the first 30 of PRESETS): the Phase 3
+ * site presets add sites of their own and must leave those where they were.
+ */
 const PHASE2_REAL_DIGESTS = Object.freeze({
   DRIFTWING: { meshes: '4ca2d12e93a5440a40928acd8f02754be8a76d96f1518bdd006e6e4cc3fb63e2', sites: '753c7ad07728b9a1' },
   'HARNESS-1': { meshes: '01d73057fae7adf80e6b498c653d4933380eab87df71c702f242fa5f25c40e53', sites: '40179d8108de3ff2' },

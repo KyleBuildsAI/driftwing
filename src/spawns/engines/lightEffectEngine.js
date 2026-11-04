@@ -18,6 +18,11 @@
 // LOD: strikes happen only at the near and mid tiers (a heavy storm's lure flashes beyond); glows
 // fade by params.lod; the real lights are released at the far tier.
 //
+// Guides (params.guide, the forest wisps): the instance's anchor moves, and every glow, the light and
+// the voice follow it. The wisps wait at the anchor, trail the craft once it comes near, then drift
+// toward the nearest undiscovered site the director knows of (spawns.getNearby, asked as event work
+// every few seconds, never per frame) and wait for the craft whenever it falls behind.
+//
 // No allocations in update(), strikes included: the instance's numbers live in typed arrays; a
 // strike's random numbers come in one typed-array batch (fillRandoms: a double returned per call
 // would be boxed); the strike records, the sky modifier values and the thunder options are reused;
@@ -53,8 +58,19 @@ const MIN_STRIKE_GAP = 0.25;
  */
 const STRIKE_RANDOMS = 21;
 const DEG = Math.PI / 180;
+const COMPASS_POINTS = Object.freeze(['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west']);
 const LAYOUTS = Object.freeze(['point', 'ring', 'scatter', 'line']);
-const TOP_LEVEL_PARAMS = Object.freeze(['lightning', 'glows', 'swarm', 'light', 'beam', 'visibility', 'fog', 'lod', 'sound', 'soundIntensity', 'endRamp']);
+const TOP_LEVEL_PARAMS = Object.freeze(['lightning', 'glows', 'swarm', 'light', 'beam', 'visibility', 'fog', 'lod', 'sound', 'soundIntensity', 'endRamp', 'guide']);
+const GUIDE_PARAMS = Object.freeze(['joinRadius', 'trailDistance', 'trailSeconds', 'speed', 'height', 'ceiling', 'lead', 'search', 'arrive', 'retarget']);
+/** Guide phases (data.guide[GUIDE.PHASE]): waiting at the anchor, trailing the craft, leading, arrived. */
+const GUIDE_WAITING = 0;
+const GUIDE_TRAILING = 1;
+const GUIDE_LEADING = 2;
+const GUIDE_ARRIVED = 3;
+/** Slots of a guide's state (a Float64Array: numbers written every frame stay unboxed). */
+const GUIDE = Object.freeze({ PHASE: 0, CLOCK: 1, TARGET_X: 2, TARGET_Z: 3, HAS_TARGET: 4, SEARCH_IN: 5, GROUND: 6, GROUND_IN: 7 });
+/** The ground under a moving guide is sampled at this rate (s between samples). */
+const GUIDE_GROUND_INTERVAL = 0.25;
 const ACTIVATION_PARAMS = Object.freeze(['position', 'heading', 'site', 'startTime', 'scale', 'duration', 'seed']);
 
 /** Linear RGB of a 0xRRGGBB colour times gain into target[offset..offset + 2]. */
@@ -197,6 +213,8 @@ export function resolveLightEffectConfig(preset, params) {
   read.onlyKeys(visibilityParams, 'visibility', ['day', 'night']);
   const lodParams = read.object(params.lod, 'lod');
   read.onlyKeys(lodParams, 'lod', ['near', 'mid', 'far']);
+  const guideParams = read.object(params.guide, 'guide');
+  read.onlyKeys(guideParams, 'guide', GUIDE_PARAMS);
 
   return {
     lightning,
@@ -240,6 +258,18 @@ export function resolveLightEffectConfig(preset, params) {
     sound: read.boolean(params.sound, 'sound', null),
     soundIntensity: read.oneOf(params.soundIntensity, 'soundIntensity', 'activity', ['activity', 'approach']),
     endRamp: read.number(params.endRamp, 'endRamp', 4, 0, 600),
+    guide: guideParams ? {
+      joinRadius: read.number(guideParams.joinRadius, 'guide.joinRadius', 450, 10, 20000),
+      trailDistance: read.number(guideParams.trailDistance, 'guide.trailDistance', 40, 0, 2000),
+      trailSeconds: read.number(guideParams.trailSeconds, 'guide.trailSeconds', 40, 0, 3600),
+      speed: read.number(guideParams.speed, 'guide.speed', 14, 0.5, 200),
+      height: read.number(guideParams.height, 'guide.height', 10, 0, 2000),
+      ceiling: read.number(guideParams.ceiling, 'guide.ceiling', 350, 0, 5000),
+      lead: read.number(guideParams.lead, 'guide.lead', 260, 20, 20000),
+      search: read.number(guideParams.search, 'guide.search', 15000, 500, 60000),
+      arrive: read.number(guideParams.arrive, 'guide.arrive', 120, 10, 5000),
+      retarget: read.number(guideParams.retarget, 'guide.retarget', 5, 1, 120),
+    } : null,
     duration: Number.isFinite(params.duration) && params.duration > 0 ? params.duration : null,
     scale,
   };
@@ -290,6 +320,134 @@ export function createLightEffectEngine() {
     if (weakest === null) return false;
     weakest.release();
     return true;
+  }
+
+  // ---- Guides (the forest wisps) -----------------------------------------------------------------------
+  /**
+   * Event work (every `retarget` seconds): the nearest undiscovered site to the craft within
+   * guide.search, from the game's site placement and the SpawnManager's discoveries. Writes the target
+   * into the guide state; returns whether one was found. Allocates (the site list), never per frame.
+   */
+  function findGuideTarget(instance) {
+    const data = instance.data;
+    const guide = data.guide;
+    const spawns = ctx.game && ctx.game.systems ? ctx.game.systems.spawns : null;
+    const world = ctx.game ? ctx.game.world : null;
+    if (!spawns || !spawns.manager || !world || typeof world.sitesNear !== 'function') return false;
+    const player = ctx.state.player.position;
+    let best = null;
+    let bestDistance = Infinity;
+    for (const site of world.sitesNear(player.x, player.z, data.config.guide.search)) {
+      if (spawns.manager.isDiscovered(site.id) || !spawns.manager.getPreset(site.presetId)) continue;
+      const distance = Math.hypot(site.x - player.x, site.z - player.z);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = site;
+      }
+    }
+    if (best === null) {
+      guide[GUIDE.HAS_TARGET] = 0;
+      return false;
+    }
+    const changed = guide[GUIDE.HAS_TARGET] === 0 || Math.abs(best.x - guide[GUIDE.TARGET_X]) > 1 || Math.abs(best.z - guide[GUIDE.TARGET_Z]) > 1;
+    guide[GUIDE.TARGET_X] = best.x;
+    guide[GUIDE.TARGET_Z] = best.z;
+    guide[GUIDE.HAS_TARGET] = 1;
+    if (changed) {
+      const bearing = (Math.atan2(best.x - instance.anchor.x, -(best.z - instance.anchor.z)) / DEG + 360) % 360;
+      const point = COMPASS_POINTS[Math.round(bearing / 45) % 8];
+      ctx.bus.emit('notify', { text: `The wisps drift away to the ${point}, as if leading you somewhere.`, kind: 'info' });
+      ctx.bus.emit('lightEffect:guide', { presetId: data.presetId, phase: 'leading', x: best.x, z: best.z, siteId: best.id });
+    }
+    return true;
+  }
+
+  /**
+   * Moves a guide's anchor one frame (allocation-free): waiting at the anchor until the craft comes
+   * within joinRadius, trailing trailDistance behind it for trailSeconds, then leading toward its
+   * target at `speed` (holding while the craft is more than `lead` behind, hurrying when the craft is
+   * ahead), and gathering over the target once there. The ground under it is sampled four times a
+   * second; it stays between `height` above the ground and `ceiling` above it.
+   */
+  function updateGuide(instance, dt) {
+    const data = instance.data;
+    const config = data.config.guide;
+    const guide = data.guide;
+    const anchor = instance.anchor;
+    const player = ctx.state.player;
+    const position = player.position;
+    const offsetX = position.x - anchor.x;
+    const offsetZ = position.z - anchor.z;
+    const craftDistance = Math.sqrt(offsetX * offsetX + offsetZ * offsetZ);
+    guide[GUIDE.CLOCK] += dt;
+    guide[GUIDE.GROUND_IN] -= dt;
+    if (guide[GUIDE.GROUND_IN] <= 0) {
+      guide[GUIDE.GROUND_IN] = GUIDE_GROUND_INTERVAL;
+      guide[GUIDE.GROUND] = Math.max(ctx.terrain.groundHeight(anchor.x, anchor.z), ctx.terrain.waterLevel);
+    }
+    const phase = guide[GUIDE.PHASE];
+    if (phase === GUIDE_WAITING) {
+      if (craftDistance < config.joinRadius) {
+        guide[GUIDE.PHASE] = GUIDE_TRAILING;
+        guide[GUIDE.CLOCK] = 0;
+        ctx.bus.emit('lightEffect:guide', { presetId: data.presetId, phase: 'trailing', x: anchor.x, z: anchor.z, siteId: null });
+      }
+      return;
+    }
+    if (phase === GUIDE_TRAILING && guide[GUIDE.CLOCK] >= config.trailSeconds) {
+      guide[GUIDE.SEARCH_IN] -= dt;
+      if (guide[GUIDE.SEARCH_IN] <= 0) {
+        guide[GUIDE.SEARCH_IN] = config.retarget;
+        if (findGuideTarget(instance)) guide[GUIDE.PHASE] = GUIDE_LEADING;
+      }
+    } else if (phase >= GUIDE_LEADING) {
+      guide[GUIDE.SEARCH_IN] -= dt;
+      if (guide[GUIDE.SEARCH_IN] <= 0) {
+        guide[GUIDE.SEARCH_IN] = config.retarget;
+        // A target the craft has discovered meanwhile gives way to the next one (or back to trailing).
+        if (!findGuideTarget(instance)) guide[GUIDE.PHASE] = GUIDE_TRAILING;
+        else if (guide[GUIDE.PHASE] === GUIDE_ARRIVED) guide[GUIDE.PHASE] = GUIDE_LEADING;
+      }
+    }
+    let targetX;
+    let targetZ;
+    let targetY;
+    let speed;
+    const ground = guide[GUIDE.GROUND];
+    if (guide[GUIDE.PHASE] === GUIDE_TRAILING) {
+      // Behind the craft along its ground track (its heading when it hovers).
+      const velocity = player.velocity;
+      const groundSpeed = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
+      const heading = player.heading * DEG;
+      const directionX = groundSpeed > 2 ? velocity.x / groundSpeed : Math.sin(heading);
+      const directionZ = groundSpeed > 2 ? velocity.z / groundSpeed : -Math.cos(heading);
+      targetX = position.x - directionX * config.trailDistance;
+      targetZ = position.z - directionZ * config.trailDistance;
+      targetY = Math.min(Math.max(position.y - 6, ground + config.height), ground + config.ceiling);
+      speed = Math.max(config.speed, player.speed * 1.25);
+    } else {
+      targetX = guide[GUIDE.TARGET_X];
+      targetZ = guide[GUIDE.TARGET_Z];
+      targetY = ground + config.height;
+      const toTargetX = targetX - anchor.x;
+      const toTargetZ = targetZ - anchor.z;
+      const remaining = Math.sqrt(toTargetX * toTargetX + toTargetZ * toTargetZ);
+      if (remaining < config.arrive) guide[GUIDE.PHASE] = GUIDE_ARRIVED;
+      // The craft ahead of the wisps along the way: they hurry; far behind them: they wait.
+      const ahead = remaining > 1 ? (offsetX * toTargetX + offsetZ * toTargetZ) / remaining : 0;
+      speed = ahead > 0 ? Math.max(config.speed, player.speed * 1.1) : craftDistance > config.lead ? 0 : config.speed;
+    }
+    const dx = targetX - anchor.x;
+    const dy = targetY - anchor.y;
+    const dz = targetZ - anchor.z;
+    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (distance < 0.01) return;
+    // Eased toward the target, never faster than the speed allows this frame.
+    const eased = distance * (1 - Math.exp(-dt * 1.6));
+    const step = Math.min(eased, speed * dt);
+    anchor.x += (dx / distance) * step;
+    anchor.y += (dy / distance) * step;
+    anchor.z += (dz / distance) * step;
   }
 
   /** Writes four numbers into row (0 or 1) of a glow group (create and dispose: it boxes them). */
@@ -654,7 +812,11 @@ export function createLightEffectEngine() {
         beam: null,
         voice: null,
         thunderOptions: { position: new THREE.Vector3(), intensity: 1 },
+        presetId: preset.id,
+        /** A guide's state (GUIDE slots), or null: the wisps' phase, clock, target and ground. */
+        guide: config.guide ? new Float64Array(8) : null,
       };
+      if (data.guide) data.guide[GUIDE.GROUND] = Math.max(ctx.terrain.groundHeight(anchor.x, anchor.z), ctx.terrain.waterLevel);
       if (config.points > 0 && pageCount * GLOW_PAGE_SIZE < config.points) {
         // The pool is short: the points that fit are written, the rest are left out.
         config.points = pageCount * GLOW_PAGE_SIZE;
@@ -723,6 +885,7 @@ export function createLightEffectEngine() {
       const visibility = config.visibility.day + (config.visibility.night - config.visibility.day) * night;
       const fadeTarget = activity * data.tierShare[0];
       data.fade[0] += (fadeTarget - data.fade[0]) * (dt > 0 ? 1 - Math.exp(-dt * 1.5) : 0);
+      if (data.guide && dt > 0) updateGuide(instance, dt);
       const camera = engineCtx.camera.position;
       const groupTable = points.groupData;
       const groupOffset = data.group * 2 * 4;
@@ -920,6 +1083,12 @@ export function createLightEffectEngine() {
         beam: data.beam !== null,
         voice: data.voice !== null,
         strikes: { ...strikeCounters },
+        guide: data.guide ? {
+          phase: ['waiting', 'trailing', 'leading', 'arrived'][data.guide[GUIDE.PHASE]],
+          clock: data.guide[GUIDE.CLOCK],
+          target: data.guide[GUIDE.HAS_TARGET] === 1 ? { x: data.guide[GUIDE.TARGET_X], z: data.guide[GUIDE.TARGET_Z] } : null,
+          anchor: { x: instance.anchor.x, y: instance.anchor.y, z: instance.anchor.z },
+        } : null,
       };
     },
     stats() {

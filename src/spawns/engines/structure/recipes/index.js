@@ -31,6 +31,11 @@ import { PORTAL_RING_DEFAULTS, buildPortalRing } from './portalRing.js';
 import { SLEEPING_GIANT_DEFAULTS, buildSleepingGiant } from './sleepingGiant.js';
 import { GHOST_GALLEON_DEFAULTS, buildGhostGalleon } from './ghostGalleon.js';
 import { DRAGON_RACE_DEFAULTS, buildDragonRace } from './dragonRace.js';
+import { CANYON_GATES_DEFAULTS, buildCanyonGates } from './canyonGates.js';
+import { CAVE_TUNNEL_DEFAULTS, buildCaveTunnel } from './caveTunnel.js';
+import { FALLS_WALL_DEFAULTS, buildFallsWall } from './fallsWall.js';
+import { BALLOON_COURSE_DEFAULTS, buildBalloonCourse } from './balloonCourse.js';
+import { KITE_SLALOM_DEFAULTS, buildKiteSlalom } from './kiteSlalom.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -68,6 +73,11 @@ export const RECIPES = Object.freeze({
   sleepingGiant: Object.freeze({ build: buildSleepingGiant, defaults: SLEEPING_GIANT_DEFAULTS, audioIntensity: 'constant' }),
   ghostGalleon: Object.freeze({ build: buildGhostGalleon, defaults: GHOST_GALLEON_DEFAULTS, audioIntensity: 'approach' }),
   dragonRace: Object.freeze({ build: buildDragonRace, defaults: DRAGON_RACE_DEFAULTS, audioIntensity: 'approach' }),
+  canyonGates: Object.freeze({ build: buildCanyonGates, defaults: CANYON_GATES_DEFAULTS, audioIntensity: 'approach' }),
+  caveTunnel: Object.freeze({ build: buildCaveTunnel, defaults: CAVE_TUNNEL_DEFAULTS, audioIntensity: 'approach' }),
+  fallsWall: Object.freeze({ build: buildFallsWall, defaults: FALLS_WALL_DEFAULTS, audioIntensity: 'constant' }),
+  balloonCourse: Object.freeze({ build: buildBalloonCourse, defaults: BALLOON_COURSE_DEFAULTS, audioIntensity: 'approach' }),
+  kiteSlalom: Object.freeze({ build: buildKiteSlalom, defaults: KITE_SLALOM_DEFAULTS, audioIntensity: 'approach' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

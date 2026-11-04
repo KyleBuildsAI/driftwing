@@ -41,6 +41,9 @@ export const RECIPE_STAMP_TYPES = Object.freeze({
   fireball: null,
   // Phase 3 presets 61-70.
   sleepingGiant: 'giant',
+  canyonGates: 'carve',
+  caveTunnel: 'flatten',
+  fallsWall: 'cliffStep',
 });
 
 /** Stamp sizes each recipe prefers over the stamp type's own defaults (m, or [min, max] ranges). */
@@ -68,6 +71,9 @@ const RECIPE_STAMP_DEFAULTS = Object.freeze({
   dam: Object.freeze({ radius: [150, 190], depth: [34, 42], rim: [10, 14], falloff: [14, 20], paint: 'riverbed', offset: Object.freeze({ along: -170, across: 0 }) }),
   // Fixed sizes: the preset's breath emitter stands at the nose (GIANT_NOSE) by a fixed offset.
   sleepingGiant: Object.freeze({ length: 3200, height: 420, falloff: 0.26, paint: 'basalt' }),
+  canyonGates: Object.freeze({ length: [2600, 3000], width: [110, 150], depth: [80, 110], wallWidth: [22, 32], twist: [110, 180], plateau: [50, 80], shoulder: [120, 160], paint: 'riverbed' }),
+  caveTunnel: Object.freeze({ length: [860, 920], width: [440, 480], margin: [50, 70], shoulder: [150, 190], paint: 'basalt' }),
+  fallsWall: Object.freeze({ width: [840, 900], drop: 125, length: [560, 640], face: [8, 10], falloff: [140, 170], pool: [30, 36], paint: 'wetRock' }),
 });
 
 /** Islet layout for the islands recipe: how many islets, and how far out the others ring the first. */

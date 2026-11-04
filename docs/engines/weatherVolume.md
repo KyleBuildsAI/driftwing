@@ -27,8 +27,8 @@ The `form` sets the shape, and each form covers a family of phenomena:
 | `ring` | a hurricane: a stadium eyewall of towering cloud whose inner face flares outward with height around a clear eye, spiral rain bands leaving it, and a cloud canopy spreading from its top; the anchor is the eye's centre | hurricane eye |
 | `river` | fog filling the valley floors within `radius` of the anchor to `height` above the lowest ground: a still fog lake in the valleys, streams of puffs flowing slowly down the valley floors and pours climbing out over the low saddles and cascading down the far side (paths traced over the real terrain at create) | valley fog river |
 
-The volume frame follows the activation heading. `x` points right, `z` points forward along the
-heading, and `y` points up from the volume base. Towers lean their anvil forward (downwind), and lens
+The volume frame follows the activation heading (turned by `turn` and moved by `offset`). `x` points
+right, `z` points forward along the heading, and `y` points up from the volume base. Towers lean their anvil forward (downwind), and lens
 waves lift upwind of the cloud (`-z`).
 
 ## Parameters
@@ -54,6 +54,7 @@ waves lift upwind of the cloud (`-z`).
 | `wall` | 0..1 | | 0 | a bank's leading (`+z`) edge rises up to 4 times higher (a haboob wall) |
 | `curve` | deg | -300..300 | 0 | bends a bank along an arc (rain bands) |
 | `fillBelow` | m MSL | | null | a bank keeps only the puffs whose ground is below this height (valley fog rivers) |
+| `clumps` | count | 0..8 | 0 | a bank broken into this many heaped cumulus along its length, each with a flat base, its own shading and gaps between them (a cloud street, the thermal street); 0 keeps the continuous strip |
 | `ripple` | 0..1 | | 0 | a sheet's bands in height and brightness (noctilucent billows) |
 | `rise` | m/s | 0..200 | mist 6 | mist puffs climb the column, swelling and fading at the top |
 | `flow` | m/s | 0..20 | river 2 | a river's path puffs move along their paths at this speed, fading in at the start and out at the end (0: they stand still) |
@@ -65,6 +66,8 @@ waves lift upwind of the cloud (`-z`).
 | `spin` | rad/s | -0.2..0.2 | ring 0.004, else 0 | a ring turns its wall at this rate, its bands at 0.4 x and its canopy at 0.6 x (positive is counterclockwise from above); its bands spiral the other way going out |
 | `bands` | object or null | | ring: `{}` | a ring's spiral rain bands: `{ count 4 (0..8), turns 1.1 (0..4), reach 26000 m (the outer end), width 2400 m, height 4000 m (their tops, lower outward), puffs 340 }`; arm k leaves the wall at angle 2 pi k / count, log-spiral in radius (the `cyclone` wind source's bands) |
 | `canopy` | object or null | | ring: `{}` | a ring's cloud canopy at its top: `{ reach 2.6 (x radius), thickness 1600 m, puffs 150 }` |
+| `turn` | deg | -360..360 | 0 | turns the volume frame from the activation heading (a bank laid along the wind or along a ridge); a `drift` without a heading still follows the activation heading |
+| `offset` | [right, forward] m | -60000..60000 | [0, 0] | moves the volume off the activation point, in the turned frame (the second row of a cloud street) |
 
 ### Look
 

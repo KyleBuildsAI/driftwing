@@ -76,6 +76,16 @@ import portalRing from './portalRing.js';
 import sleepingGiant from './sleepingGiant.js';
 import ghostGalleon from './ghostGalleon.js';
 import dragonRacer from './dragonRacer.js';
+import reverseWaterfall from './reverseWaterfall.js';
+import forestWisps from './forestWisps.js';
+import ridgeLiftBand from './ridgeLiftBand.js';
+import windShearLine from './windShearLine.js';
+import thermalStreet from './thermalStreet.js';
+import canyonGauntlet from './canyonGauntlet.js';
+import caveTunnel from './caveTunnel.js';
+import waterfallWall from './waterfallWall.js';
+import balloonFestival from './balloonFestival.js';
+import kiteSlalom from './kiteSlalom.js';
 
 export const PRESETS = Object.freeze([
   // Batch 1: presets 1-10.
@@ -155,6 +165,17 @@ export const PRESETS = Object.freeze([
   sleepingGiant,
   ghostGalleon,
   dragonRacer,
+  // Batch 8: presets 71-80.
+  reverseWaterfall,
+  forestWisps,
+  ridgeLiftBand,
+  windShearLine,
+  thermalStreet,
+  canyonGauntlet,
+  caveTunnel,
+  waterfallWall,
+  balloonFestival,
+  kiteSlalom,
 ]);
 
 /** Presets by id. */
