@@ -52,6 +52,36 @@ export function installBatch6Checks(game) {
     const parts = partsOf(presetId);
     return parts.length > 0 ? parts[0].anchor : null;
   }
+  /**
+   * A walkable spot for a ground column near (x, z): of 16 headings and three distances from the
+   * craft, the one with the longest straight run of dry ground no steeper than 0.35 (sampled every
+   * 50 m up to 3 km), and that heading. The director only starts a column on open land; a blind spot
+   * ahead may be a coast or a mountain face.
+   */
+  function walkableSpot(fromX, fromZ, distance) {
+    const water = ctx.world.WATER_LEVEL;
+    let best = null;
+    for (const reach of [distance, distance * 1.6, distance * 0.6]) {
+      for (let step = 0; step < 16; step++) {
+        const heading = step * 22.5;
+        const radians = (heading * Math.PI) / 180;
+        const x = fromX + Math.sin(radians) * reach;
+        const z = fromZ - Math.cos(radians) * reach;
+        let run = 0;
+        let previous = helpers.ground(x, z);
+        if (previous < water + 8) continue;
+        for (let along = 50; along <= 3000; along += 50) {
+          const height = helpers.ground(x + Math.sin(radians) * along, z - Math.cos(radians) * along);
+          if (height < water + 4 || Math.abs(height - previous) / 50 > 0.35) break;
+          run = along;
+          previous = height;
+        }
+        if (!best || run > best.run) best = { x, z, heading, run };
+      }
+    }
+    return best;
+  }
+
   /** Seconds of wall time, frame by frame. */
   async function seconds(duration) {
     const until = performance.now() + duration * 1000;
@@ -115,19 +145,28 @@ export function installBatch6Checks(game) {
     /**
      * Spawns presetId `distance` m ahead of the craft (back at the start, `altitude` m up) through the
      * SpawnManager's debug path with the activation overrides `params` ({ [engine]: { ... } }), after
-     * the dispose baseline, then lets it run `runSeconds`.
+     * the dispose baseline, then lets it run `runSeconds`. walkable: a ground column's spot instead
+     * (walkableSpot), the craft moved to face it.
      */
-    async start(presetId, { distance = 1500, runSeconds = 2, altitude = 150, params = null } = {}) {
+    async start(presetId, { distance = 1500, runSeconds = 2, altitude = 150, params = null, walkable = false } = {}) {
       ctx.setPhotoMode(false);
       ctx.systems.flight.resetTo({ x: state.spawn.x, y: state.spawn.y + altitude, z: state.spawn.z, heading: state.spawn.heading });
       await frames(3);
+      let heading = state.player.heading;
+      const radians = (heading * Math.PI) / 180;
+      let x = state.player.position.x + Math.sin(radians) * distance;
+      let z = state.player.position.z - Math.cos(radians) * distance;
+      // A ground column goes where it can walk: the craft moves to face that spot (before the baseline).
+      const spot = walkable ? walkableSpot(state.player.position.x, state.player.position.z, distance) : null;
+      if (spot) {
+        ({ x, z, heading } = spot);
+        const back = (heading * Math.PI) / 180;
+        ctx.systems.flight.resetTo({ x: x - Math.sin(back) * distance, y: helpers.ground(x, z) + altitude, z: z + Math.cos(back) * distance, heading });
+        await frames(3);
+      }
       const idle = await terrainIdle();
       const record = { presetId, id: null, baseline: await dispose.baseline({ waitTerrain: false }), during: null };
       const preset = manager.getPreset(presetId);
-      const heading = state.player.heading;
-      const radians = (heading * Math.PI) / 180;
-      const x = state.player.position.x + Math.sin(radians) * distance;
-      const z = state.player.position.z - Math.cos(radians) * distance;
       const duration = preset.lifetime.duration ? preset.lifetime.duration[1] : null;
       record.id = manager.activate(presetId, {
         position: { x, y: helpers.ground(x, z), z }, heading, source: 'debug', force: true, seed: 5100 + spawned.size, duration,
