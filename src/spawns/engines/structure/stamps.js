@@ -44,6 +44,8 @@ export const RECIPE_STAMP_TYPES = Object.freeze({
   canyonGates: 'carve',
   caveTunnel: 'flatten',
   fallsWall: 'cliffStep',
+  archChain: 'flatten',
+  hoodoos: null,
 });
 
 /** Stamp sizes each recipe prefers over the stamp type's own defaults (m, or [min, max] ranges). */
@@ -74,6 +76,8 @@ const RECIPE_STAMP_DEFAULTS = Object.freeze({
   canyonGates: Object.freeze({ length: [2600, 3000], width: [110, 150], depth: [80, 110], wallWidth: [22, 32], twist: [110, 180], plateau: [50, 80], shoulder: [120, 160], paint: 'riverbed' }),
   caveTunnel: Object.freeze({ length: [860, 920], width: [440, 480], margin: [50, 70], shoulder: [150, 190], paint: 'basalt' }),
   fallsWall: Object.freeze({ width: [840, 900], drop: 125, length: [560, 640], face: [8, 10], falloff: [140, 170], pool: [30, 36], paint: 'wetRock' }),
+  // A level, unpainted valley floor along the chain, so the arches and their gates share one ground.
+  archChain: Object.freeze({ length: [1240, 1300], width: [150, 180], margin: [40, 50], shoulder: [160, 200], paint: null }),
 });
 
 /** Islet layout for the islands recipe: how many islets, and how far out the others ring the first. */

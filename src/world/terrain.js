@@ -34,7 +34,8 @@ import { createWindSway } from '../render/windSway.js';
  *   keep the original materials, so the golden-hour opening is untouched.
  * - Region overlays (Phase 3): the chunk attribute `overlay` drives animated tint sweeps (colour
  *   slots filled from the overlays near the focus), the glossy ice material and per-stripe shading;
- *   all zero (Phase 2 rendering) outside overlays. The species 6-12 are instanced like the Phase 1
+ *   all zero (Phase 2 rendering) outside overlays; broadleaf trees turn with a sweep through their
+ *   per-instance `vegetationSweep`. The species 6-12 are instanced like the Phase 1
  *   types, and every type sways by the WindField's near-ground wind (windSway.js). Redwood trunks
  *   are colliders through the vegetation provider (vegetationColliders.js) when ctx.colliders exists.
  */
@@ -84,10 +85,11 @@ export function createTerrainSystem(ctx) {
   const VEGETATION_TYPE_COUNT = SPECIES_TYPE_COUNT;
   const SCATTER_MAX_INSTANCES = 640;
   const SCATTER_HEADER_FLOATS = VEGETATION_TYPE_COUNT * 6;
-  const SCATTER_INSTANCE_FLOATS = 10;
+  const SCATTER_INSTANCE_FLOATS = 12;
   const SCATTER_FLOATS = SCATTER_HEADER_FLOATS + SCATTER_MAX_INSTANCES * SCATTER_INSTANCE_FLOATS;
   const SCATTER_SCALE_OFFSET = SCATTER_HEADER_FLOATS + SCATTER_MAX_INSTANCES * 4;
   const SCATTER_TINT_OFFSET = SCATTER_SCALE_OFFSET + SCATTER_MAX_INSTANCES * 3;
+  const SCATTER_SWEEP_OFFSET = SCATTER_TINT_OFFSET + SCATTER_MAX_INSTANCES * 3;
   const WARMUP_FRAMES = 3;
   const JOB_MESH = 0;
   const JOB_SCATTER = 1;
@@ -324,6 +326,22 @@ export function createTerrainSystem(ctx) {
     const instanceTint = attribute('vegetationTint', 'vec3');
     return vec4(vertex.rgb.mul(mix(vec3(1.0), instanceTint, vertex.a)).mul(cloudAlbedoDim), 1.0);
   })();
+  /**
+   * Broadleaf foliage turns with a tint sweep (an autumn colour wave): the same colour wave as the
+   * ground under it (overlayShade), read from the instance's own sweep slot, weight and phase
+   * (vegetationSweep, all zero outside a sweeping overlay, where this is the plain colour node).
+   */
+  const vegetationSweepColorNode = Fn(() => {
+    const vertex = vertexColor();
+    const instanceTint = attribute('vegetationTint', 'vec3');
+    const sweep = attribute('vegetationSweep', 'vec2');
+    const slot = int(floor(sweep.x));
+    const params = sweepParams.element(slot);
+    const wave = sin(sweep.y.div(params.y).sub(uniforms.time.div(params.x)).mul(Math.PI * 2)).mul(0.5).add(0.5);
+    const ramp = mix(mix(instanceTint, sweepColorA.element(slot), saturate(wave.mul(2))), sweepColorB.element(slot), saturate(wave.mul(2).sub(1)));
+    const swept = mix(instanceTint, ramp, fract(sweep.x).mul(0.9));
+    return vec4(vertex.rgb.mul(mix(vec3(1.0), swept, vertex.a)).mul(cloudAlbedoDim), 1.0);
+  })();
   const vegetationFadeRadius = uniform(600);
   const flowerFadeRadius = uniform(460);
   const vegetationFadeBand = uniform(220);
@@ -401,7 +419,7 @@ export function createTerrainSystem(ctx) {
       side: look.doubleSided ? THREE.DoubleSide : THREE.FrontSide,
     });
     if (look.doubleSided) vegetationMaterial.shadowSide = THREE.DoubleSide;
-    vegetationMaterial.colorNode = vegetationColorNode;
+    vegetationMaterial.colorNode = type === VEGETATION.BROADLEAF ? vegetationSweepColorNode : vegetationColorNode;
     vegetationMaterial.positionNode = createVegetationPositionNode(
       look.sway,
       isSmallType(type) ? flowerFadeRadius : vegetationFadeRadius,
@@ -1025,6 +1043,7 @@ export function createTerrainSystem(ctx) {
     geometry.setAttribute('vegetationPlacement', new THREE.InstancedBufferAttribute(new Float32Array(SCATTER_MAX_INSTANCES * 4), 4));
     geometry.setAttribute('vegetationScale', new THREE.InstancedBufferAttribute(new Float32Array(SCATTER_MAX_INSTANCES * 3), 3));
     geometry.setAttribute('vegetationTint', new THREE.InstancedBufferAttribute(new Float32Array(SCATTER_MAX_INSTANCES * 3).fill(1), 3));
+    geometry.setAttribute('vegetationSweep', new THREE.InstancedBufferAttribute(new Float32Array(SCATTER_MAX_INSTANCES * 2), 2));
     geometry.instanceCount = 0;
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(CHUNK_SIZE / 2, 0, CHUNK_SIZE / 2), CHUNK_SIZE);
     const mesh = new THREE.Mesh(geometry, vegetationMaterials[type]);
@@ -1472,6 +1491,7 @@ export function createTerrainSystem(ctx) {
       copyInstanceAttribute(geometry.attributes.vegetationPlacement, data, SCATTER_HEADER_FLOATS + start * 4, 4, count);
       copyInstanceAttribute(geometry.attributes.vegetationScale, data, SCATTER_SCALE_OFFSET + start * 3, 3, count);
       copyInstanceAttribute(geometry.attributes.vegetationTint, data, SCATTER_TINT_OFFSET + start * 3, 3, count);
+      copyInstanceAttribute(geometry.attributes.vegetationSweep, data, SCATTER_SWEEP_OFFSET + start * 2, 2, count);
       geometry.instanceCount = count;
       const extents = vegetationExtents[type];
       const minBase = data[header + 2];

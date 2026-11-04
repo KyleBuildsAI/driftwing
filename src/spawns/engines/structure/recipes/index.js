@@ -36,6 +36,8 @@ import { CAVE_TUNNEL_DEFAULTS, buildCaveTunnel } from './caveTunnel.js';
 import { FALLS_WALL_DEFAULTS, buildFallsWall } from './fallsWall.js';
 import { BALLOON_COURSE_DEFAULTS, buildBalloonCourse } from './balloonCourse.js';
 import { KITE_SLALOM_DEFAULTS, buildKiteSlalom } from './kiteSlalom.js';
+import { ARCH_CHAIN_DEFAULTS, buildArchChain } from './archChain.js';
+import { HOODOOS_DEFAULTS, buildHoodoos } from './hoodoos.js';
 
 /**
  * name -> { build, defaults, audioIntensity ('approach' | 'wind' | 'constant': how the engine drives
@@ -78,6 +80,8 @@ export const RECIPES = Object.freeze({
   fallsWall: Object.freeze({ build: buildFallsWall, defaults: FALLS_WALL_DEFAULTS, audioIntensity: 'constant' }),
   balloonCourse: Object.freeze({ build: buildBalloonCourse, defaults: BALLOON_COURSE_DEFAULTS, audioIntensity: 'approach' }),
   kiteSlalom: Object.freeze({ build: buildKiteSlalom, defaults: KITE_SLALOM_DEFAULTS, audioIntensity: 'approach' }),
+  archChain: Object.freeze({ build: buildArchChain, defaults: ARCH_CHAIN_DEFAULTS, audioIntensity: 'wind' }),
+  hoodoos: Object.freeze({ build: buildHoodoos, defaults: HOODOOS_DEFAULTS, audioIntensity: 'wind' }),
 });
 
 export const RECIPE_NAMES = Object.freeze(Object.keys(RECIPES));

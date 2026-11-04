@@ -1069,7 +1069,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | done (on its branch; awaiting I3) |
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | done (verified on both backends) |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | in progress |
-| B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | not started |
+| B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | done (not merged) |
 | B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | not started |
 | I3 | Integration pass: presets/index.js and spawnScenarios in spec order; `?test=spawns` for all 100 on both backends | `v2-phase3` | not started |
 
@@ -1402,6 +1402,70 @@ with batch 81-90's equivalent; RENDER_PLAN gains four lines), `structure/recipes
   the batch report): tools/lab/terrain.mjs (Phase 2 site hash over the Phase 2 presets, SOAK-2 for
   rare stamped sites), tools/lab/audio.mjs (a voice budget for every recipe), src/copilot/
   tourGuide.js (synonyms), src/dev/spawnScenarios.js (one import and one spread line).
+### Wave 3 - p3/presets-81-90
+
+Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file each under
+`src/spawns/presets/`, on the existing engines plus additive extensions listed here as they land.
+
+- **Engine and world extensions (additive; every existing preset unchanged):**
+  - overlay palettes `riceTerraces` and `badlands` (`src/world/overlays.js`);
+  - broadleaf trees turn with a tint sweep: the scatter output carries each instance's sweep slot,
+    weight and phase (`chunkBuilder.js`, zeros outside a sweeping overlay) and the terrain's broadleaf
+    material reads it as `vegetationSweep` (`terrain.js`; outside overlays the colour is exactly the
+    Phase 2 one);
+  - `WindField.gustAt(x, z, t)`: the ambient gusts' shape without a terrain lookup;
+  - emitter `gusts` (level follows the gusts, a burst on each gust, the voice's `gust` trigger);
+  - structure recipes `archChain` (v1-style arches built around a challenge block's gates) and
+    `hoodoos` (a banded pillar field), with colliders and perches; `structureStamps('archChain')`;
+  - audio recipes `stoneWind`, `rustle`, `meadowHum`, `marsh` (and their audio-lab render plans);
+  - weatherVolume `hours` (dawn / day / dusk / night share of a volume, for morning mists);
+  - stamp type `delta` (tidal flats and channels the ocean fills; `stamps.js`, schema's list, the
+    mangrove fixture now stamped, the terrain lab's delta shape check);
+  - placement `separateRegions` (opt-in, default off; `placement.js` rule 7, schema's placement keys):
+    two separating sites never place where their region overlays could meet. The nine overlay presets
+    (82-90) set it: on seed A9ENE9 a cherry valley 730 m from a redwood grove had replaced every redwood
+    (the contract's overlap rule, the lower site id wins), so the grove had no trunks to slalom.
+- **Presets:** all ten files registered under "Batch 9" in `presets/index.js`; `validatePresets` passes
+  (40 presets on this branch). Placement on DRIFTWING / HARNESS-1 / P2-TERRAIN / SPAWNS-1: every preset
+  has sites within 60 km (the mangrove delta 2-6, the arch chain 2-5, the rest 5-16).
+- **Labs so far:** `tools/lab/preset-flight.mjs` gains the dust devil scenario (the glider and the jet
+  through the larger devil's core: 17/17); `tools/lab/terrain.mjs` 463/463 after two lab changes: the
+  Phase 2 world digests are rebuilt from the 30 Phase 2 presets (`PHASE2_PRESET_IDS`; wave 3 site
+  presets change the real world's site list, as they must), the paint check accepts unpainted stamps
+  (the arch chain's floor, the delta) and knows the delta, plus the delta shape check.
+- **Docs:** docs/spawns.md has the ten table rows (numbered 81-90) and a section each; docs-check
+  numbers a row by the "Preset NN" in its preset file's first line (its place in PRESETS when the line
+  names none), so a batch's rows keep their spec numbers before the other batches merge: 284/284.
+- **Checks:** `src/dev/spawnScenarios/batch81.js` (one import in `spawnScenarios.js`) and
+  `tools/steps/presets-81-90.json` with its kit `src/dev/presetChecks81.js` (on top of `presetChecks.js`;
+  it holds the other game presets so the director's events cannot move the baselines): each preset on its
+  real site and force-spawned, framed, disposed back to its baselines; strikes (bush plane and jet, 60 and
+  250 m/s, kinematic) into the arch chain's crown rib, a hoodoo shaft and a redwood trunk; the five-arch
+  run (the registered course, start, three splits, gold, no stone touched); the gust bursts of the
+  cherry, autumn, lavender, redwood and bamboo emitters; the rice terraces' and mangroves' mists by hour;
+  the dust devils' rising, spinning, wandering cores; the paddies' water bodies and the delta's sea.
+  Run with `--query seed=DRIFTWING` (a random seed gives other sites).
+- **Lab fixes (wave 3 consequences, not batch logic):** `tools/lab/water.mjs` compares the map-tile
+  cache tag on the presets without waters or overlays (the batch presets add both to PRESETS);
+  `tools/lab/audio.mjs` sizes its all-recipes voice budget to the catalog (19 recipes > 16).
+- **Verification (2026-10-27, once each, owner's rule):**
+  - `tools/steps/presets-81-90.json` (dev server, `seed=DRIFTWING`): 59/59 on WebGPU and 59/59 on
+    WebGL2, 0 console errors and 0 warnings on both; 20 stills each (site and forced spawn per preset);
+  - `run-harness --test spawns --presets <the ten>`: 10/10 on both backends (memory, heap, wind
+    sources, lights, sky modifiers, colliders, challenges, ignitables back; 0/0 console); frame rates
+    reported only (WebGPU lowest avg 33.4 fps, worst p99 77.4 ms; WebGL2 42.3 fps, 74.7 ms);
+  - `run-harness --test terrain --presets real`: PASS on both backends, 8/8 stamp types (the delta and
+    the terraces included), 0 cracks, worker parity, 0/0 console;
+  - `npm run build` and `npm run build:single` (V1 SHA-256 matches); the built shell, V2 on WebGPU and
+    V2 on WebGL2 smoke with 0 errors and 0 warnings; `npm run test:v1` 2/2; docs-check 284/284;
+    `validatePresets` (40 presets);
+  - every lab: all pass alone (the gc labs with `--expose-gc`; terrain 470/470, preset-flight 17/17,
+    spawns 101/101, director 88/88, audio 215/215, water 34/34), except the eagle lab's allocation
+    check (below).
+- **Known:** the eagle lab's model-step allocation is bimodal (39 or 144 B/tick against 64): on the
+  base `f63fa29` 3 of 6 measuring children passed, on this branch 0 of 7; removing the batch presets
+  from PRESETS brings it back to the base's mix, though the measuring child never runs them (module
+  load order shifts V8's inlining). For the eagle owner or Milestone P; not chased here.
 
 ### Wave 4: discovery and verification, then the tag
 

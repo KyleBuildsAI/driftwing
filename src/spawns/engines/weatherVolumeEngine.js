@@ -41,6 +41,10 @@
 // 'ring' (hurricane) voice stands on the eyewall nearest the camera instead, and ducks in the calm
 // eye, so the roar is loudest in the wall and quiet at the eye's centre.
 //
+// Hours (Phase 3): with params.hours a volume shows only its share for the hour (dawn, day, dusk and
+// night weights blended by the sun's height, morning or evening), times its growth: a mangrove's
+// morning mist lies thick at dawn and thins to wisps by day. Its wind and voice keep the growth.
+//
 // No allocation per frame: puffs, groups and shafts live in typed arrays laid out at create, the
 // instance buffers are written in place with persistent update ranges, and the wind sample and the
 // scratch values are reused.
@@ -443,6 +447,7 @@ export function createWeatherVolumeEngine() {
     } else {
       data.growth = params.formSeconds > 0 ? Math.min(1, data.growth + dt / params.formSeconds) : 1;
     }
+    data.shown = data.growth * hoursWeight(params.hours);
     if (data.driftSpeed > 0 && dt > 0) {
       instance.anchor.x += data.driftX * dt;
       instance.anchor.z += data.driftZ * dt;
@@ -454,6 +459,20 @@ export function createWeatherVolumeEngine() {
       const target = targets[level];
       weights[level] = weights[level] < target ? Math.min(target, weights[level] + step) : Math.max(target, weights[level] - step);
     }
+  }
+
+  /**
+   * The share of a volume shown at this hour: params.hours' night, day and low-sun weights blended by
+   * the sun's height (night below -4 to -10 degrees, day above 6 to 16, dawn or dusk between, by the
+   * morning or evening side); 1 without hours.
+   */
+  function hoursWeight(hours) {
+    if (!hours) return 1;
+    const elevation = frame.sunElevation;
+    const night = smooth(-elevation, 4, 10);
+    const day = smooth(elevation, 6, 16);
+    const low = Math.max(0, 1 - night - day);
+    return night * hours.night + day * hours.day + low * (ctx.state.time.dayTime < 0.5 ? hours.dawn : hours.dusk);
   }
 
   function refreshGlow(data, active) {
@@ -493,7 +512,7 @@ export function createWeatherVolumeEngine() {
     const hazeMax = params.haze.max;
     const age = data.age;
     const billow = params.billow;
-    const growth = data.growth;
+    const growth = data.shown;
     // The wall cloud hangs control.wallCloud of its full drop below the base (a set piece lowers it).
     const wallGroup = layout.wallGroup;
     const wallControl = instance.control.wallCloud;
@@ -652,7 +671,7 @@ export function createWeatherVolumeEngine() {
     const data = instance.data;
     const layout = data.layout;
     if (layout.shaftCount === 0) return;
-    const visibility = data.levelWeights[1] * smooth(data.growth, 0.25, 0.7);
+    const visibility = data.levelWeights[1] * smooth(data.shown, 0.25, 0.7);
     data.groundTimer -= dt;
     if (data.driftSpeed > 0 && data.groundTimer <= 0) {
       data.groundTimer = GROUND_REFRESH_SECONDS;
@@ -783,7 +802,7 @@ export function createWeatherVolumeEngine() {
   function reportCamera(instance) {
     const data = instance.data;
     const params = data.params;
-    const inside = data.inside * data.growth;
+    const inside = data.inside * data.shown;
     const canopyRain = Math.max(data.rainKind === 2 ? 0 : data.rain, inside * params.canopyRain);
     const grit = params.canopyGrit > 0 ? Math.max(inside, data.rainKind === 2 ? data.rain : 0) * params.canopyGrit : 0;
     if (inside > met.inside || data.rain > met.rain) {
@@ -920,6 +939,8 @@ export function createWeatherVolumeEngine() {
         duration: Number.isFinite(params.duration) ? params.duration : null,
         age: 0,
         growth: resolved.formSeconds > 0 ? 0 : 1,
+        /** The growth times the share shown at this hour (params.hours); what the puffs, shafts and inside read. */
+        shown: resolved.formSeconds > 0 ? 0 : 1,
         ending: false,
         driftSpeed,
         driftX: Math.sin(driftHeading) * driftSpeed,

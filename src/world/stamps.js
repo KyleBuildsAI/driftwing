@@ -46,15 +46,20 @@
 //               reach, as a share of the height)                                 paint 'basalt'
 //               A mountain shaped like a stone giant asleep on its back (preset 68): head, face (brow,
 //               nose, lips, chin, eye hollows), chest, folded hands, hips, one knee raised, feet.
+//   delta       length (inland apex to the sea, along forward), width (the fan at the sea), channels
+//               (count, 2..9), channelWidth (at the mouth), depth (channel beds below sea level),
+//               plain (the flats' highest ground above sea level), falloff         paint 'mud'
 // The basin, crater and terraces hold water: a preset's `waters` list (waters.js) fills them, and
 // their resolved records carry the reference heights the water levels are measured from (floorY,
 // rimY; the terraces' shelves). The atoll and the reef sit in the sea and publish their clear water
-// (`shallows`: x, z, radius, fade, surfRadius, surfWidth) for the waterEffect engine's shallows.
+// (`shallows`: x, z, radius, fade, surfRadius, surfWidth) for the waterEffect engine's shallows. A
+// delta (Phase 3, the mangrove delta) lays coastal ground down to tidal flats and cuts meandering
+// channels below sea level, which the ocean itself fills.
 
-export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces', 'atoll', 'reef', 'seaStacks', 'estuary', 'giant']);
+export const STAMP_TYPES = Object.freeze(['cone', 'carve', 'cliffStep', 'gorge', 'flatten', 'islandBase', 'basin', 'crater', 'terraces', 'atoll', 'reef', 'seaStacks', 'estuary', 'giant', 'delta']);
 export const STAMP_PAINTS = Object.freeze(['ash', 'basalt', 'wetRock', 'tarmac', 'riverbed', 'salt', 'sand', 'travertine', 'mud', 'ice', 'coral']);
 
-const KIND = Object.freeze({ cone: 0, carve: 1, cliffStep: 2, gorge: 3, flatten: 4, islandBase: 5, basin: 6, crater: 7, terraces: 8, atoll: 9, reef: 10, seaStacks: 11, estuary: 12, giant: 13 });
+const KIND = Object.freeze({ cone: 0, carve: 1, cliffStep: 2, gorge: 3, flatten: 4, islandBase: 5, basin: 6, crater: 7, terraces: 8, atoll: 9, reef: 10, seaStacks: 11, estuary: 12, giant: 13, delta: 14 });
 const PAINT_INDEX = Object.freeze({ ash: 0, basalt: 1, wetRock: 2, tarmac: 3, riverbed: 4, salt: 5, sand: 6, travertine: 7, mud: 8, ice: 9, coral: 10 });
 const TAU = Math.PI * 2;
 /** A canyon may cut at most this many depths below the ground on its path, and lift it at most this many. */
@@ -78,6 +83,12 @@ const TERRACE_POOL_END = 0.68;
 const TERRACE_LIP_END = 0.8;
 /** The flat side walls that close a terrace's pools (m, inside the width). */
 const TERRACE_SIDE_WALL = 6;
+/** A delta fits only where its core ground rises at most this far above the sea (m) and some of it lies below it. */
+const DELTA_MAX_RISE = 60;
+/** The flats' lowest ground below sea level (m): shallow water over mud, where mangrove roots stand. */
+const DELTA_SHALLOW = 1.2;
+/** A delta channel's centre line is tabled every this many metres along the fan. */
+const DELTA_TABLE_STEP = 4;
 /** A gorge fits only where the ground at both bridge anchors lies within this of its rim (m). */
 const GORGE_ANCHOR_TOLERANCE = 14;
 /** The waterfall lip's largest wander (m) and the gorge wall's (m). */
@@ -137,6 +148,7 @@ const DEFAULTS = Object.freeze({
   seaStacks: Object.freeze({ count: [4, 6], radius: [11, 20], height: [38, 70], spread: [260, 400], arches: [1, 2], span: [42, 64], archHeight: [28, 42], paint: 'wetRock' }),
   estuary: Object.freeze({ length: [1600, 2200], mouthWidth: [260, 380], headWidth: [45, 70], depth: [3.5, 5.5], bank: [5, 8], bankWidth: [40, 70], falloff: [120, 180], paint: 'mud' }),
   giant: Object.freeze({ length: [2800, 3400], height: [360, 460], falloff: [0.22, 0.3], paint: 'basalt' }),
+  delta: Object.freeze({ length: [1600, 2200], width: [1300, 1800], channels: [4, 7], channelWidth: [26, 44], depth: [2.5, 4], plain: [0.5, 0.9], falloff: [180, 260], paint: 'mud' }),
 });
 
 /** Every size field per type, validated as a positive number or an ascending [min, max] range. */
@@ -155,6 +167,7 @@ const SIZE_FIELDS = Object.freeze({
   seaStacks: ['count', 'radius', 'height', 'spread', 'arches', 'span', 'archHeight'],
   estuary: ['length', 'mouthWidth', 'headWidth', 'depth', 'bank', 'bankWidth', 'falloff'],
   giant: ['length', 'height', 'falloff'],
+  delta: ['length', 'width', 'channels', 'channelWidth', 'depth', 'plain', 'falloff'],
 });
 
 // ---- The sleeping giant (stamp 'giant') -------------------------------------------------------------
@@ -419,6 +432,8 @@ export function validateStampSpec(spec, where) {
     if (maxOf(full.archHeight) >= minOf(full.height) * 1.5) throw new Error(`${where}.archHeight: must stay under 1.5 x the stack height`);
   }
   if (spec.type === 'estuary' && maxOf(full.headWidth) >= minOf(full.mouthWidth)) throw new Error(`${where}.headWidth: must be narrower than the mouthWidth`);
+  if (spec.type === 'delta' && !(minOf(full.channels) >= 2 && maxOf(full.channels) <= 9)) throw new Error(`${where}.channels: must be from 2 to 9 channels`);
+  if (spec.type === 'delta' && minOf(full.length) < 200) throw new Error(`${where}.length: must be at least 200 m`);
 }
 
 /**
@@ -452,6 +467,7 @@ export function stampReach(spec) {
       extent = maxOf(full.radius) + maxOf(full.rimWidth);
       break;
     case 'terraces':
+    case 'delta':
       extent = Math.hypot(maxOf(full.length) / 2 + maxOf(full.falloff), maxOf(full.width) / 2 + maxOf(full.falloff));
       break;
     case 'atoll':
@@ -1248,6 +1264,78 @@ function resolveGiant(stamp, spec, random, context) {
   ];
 }
 
+/**
+ * Delta: a fan of tidal flats opening toward the sea along the stamp's forward axis (downhill when the
+ * preset aligns its sites downhill, so forward points out to sea), from a quarter of `width` at the
+ * inland apex to all of it at the coast. Inside, the ground is laid between DELTA_SHALLOW below sea
+ * level and `plain` above it (mud flats and shallow water for mangrove roots), and `channels`
+ * meandering channels fan out from the apex to the sea, cut to `depth` below sea level and widening
+ * toward their mouths; the ocean fills them (the water query's ocean is wherever the ground lies below
+ * sea level). Each channel's centre line is a table sampled every DELTA_TABLE_STEP metres along the
+ * fan. It fits only where the fan's core rises at most DELTA_MAX_RISE above the sea and part of it
+ * lies below sea level (a real coast).
+ */
+function resolveDelta(stamp, spec, random, context) {
+  const length = roll(spec.length, random);
+  const width = roll(spec.width, random);
+  const channels = Math.round(roll(spec.channels, random));
+  const channelWidth = roll(spec.channelWidth, random);
+  const depth = roll(spec.depth, random);
+  const plain = roll(spec.plain, random);
+  const falloff = roll(spec.falloff, random);
+  const samples = Math.ceil(length / DELTA_TABLE_STEP) + 2;
+  const centres = new Float64Array(channels * samples);
+  for (let channel = 0; channel < channels; channel++) {
+    // Each channel keeps its share of the fan's width (evenly spread, jittered) and meanders on two waves.
+    const share = -0.78 + (1.56 * (channel + 0.2 + 0.6 * random())) / channels;
+    const amplitudeA = width * (0.02 + 0.03 * random());
+    const amplitudeB = width * (0.008 + 0.012 * random());
+    const frequencyA = (TAU * (1.2 + 1.3 * random())) / length;
+    const frequencyB = (TAU * (3 + 2.5 * random())) / length;
+    const phaseA = random() * TAU;
+    const phaseB = random() * TAU;
+    for (let sample = 0; sample < samples; sample++) {
+      const along = sample * DELTA_TABLE_STEP;
+      const fan = 0.25 + 0.25 * Math.min(1, along / length);
+      // The meander grows from nothing at the apex, where the channels split off one stem.
+      const grow = Math.min(1, along / (length * 0.25));
+      centres[channel * samples + sample] = share * width * fan + grow * (amplitudeA * Math.sin(along * frequencyA + phaseA) + amplitudeB * Math.sin(along * frequencyB + phaseB));
+    }
+  }
+  // The fit: the fan's core may rise only so far above the sea, and some of it must lie below it.
+  let highest = -Infinity;
+  let lowest = Infinity;
+  for (let row = 0; row <= 6; row++) {
+    const along = -length / 2 + (row / 6) * length;
+    const halfWidth = width * (0.25 + 0.25 * (row / 6));
+    for (let column = -3; column <= 3; column++) {
+      const across = (column / 3) * halfWidth * 0.8;
+      const ground = context.baseHeight(stamp.x + stamp.dirX * along - stamp.dirZ * across, stamp.z + stamp.dirZ * along + stamp.dirX * across);
+      if (ground > highest) highest = ground;
+      if (ground < lowest) lowest = ground;
+    }
+  }
+  stamp.fits = highest <= context.waterLevel + DELTA_MAX_RISE && lowest < context.waterLevel;
+  stamp.length = length;
+  stamp.width = width;
+  stamp.channels = channels;
+  stamp.channelWidth = channelWidth;
+  stamp.depth = depth;
+  stamp.falloff = falloff;
+  stamp.plainY = context.waterLevel + plain;
+  stamp.shallowY = context.waterLevel - DELTA_SHALLOW;
+  stamp.bedY = context.waterLevel - depth;
+  stamp.samples = samples;
+  stamp.centres = centres;
+  rotatedBounds(stamp, length / 2 + falloff, width / 2 + falloff);
+  const mouthAcross = centres[samples - 2];
+  stamp.keyPoints = [
+    { x: stamp.x, z: stamp.z },
+    { x: stamp.x - stamp.dirX * length / 2, z: stamp.z - stamp.dirZ * length / 2 },
+    { x: stamp.x + stamp.dirX * length / 2 - stamp.dirZ * mouthAcross, z: stamp.z + stamp.dirZ * length / 2 + stamp.dirX * mouthAcross },
+  ];
+}
+
 const RESOLVERS = Object.freeze({
   cone: resolveCone,
   carve: resolveCarve,
@@ -1263,6 +1351,7 @@ const RESOLVERS = Object.freeze({
   seaStacks: resolveSeaStacks,
   estuary: resolveEstuary,
   giant: resolveGiant,
+  delta: resolveDelta,
 });
 
 /**
@@ -1282,9 +1371,9 @@ const RESOLVERS = Object.freeze({
  * lagoonY, islets [{ x, z, topY }], shallows; reef: radius, crestY, pocketY, pocketRadius, shallows;
  * seaStacks: stacks [{ x, z, radius, topY }], arches [{ x, z, heading, spanX, spanZ, span, legRadius,
  * topY, legs: [{ x, z }, { x, z }] }], columns [{ x, z, reach }]; estuary: mouthX/Z, headX/Z,
- * inlandX/Z, channelLength, mouthHalfWidth, headHalfWidth, floorMouthY, floorHeadY).
- * bottomY, shelves [{ index, crestY, floorY, along, x, z }]; giant: length, height, skirt, halfWidth,
- * baseY, peakY, faceX/Y/Z (the nose's tip)).
+ * inlandX/Z, channelLength, mouthHalfWidth, headHalfWidth, floorMouthY, floorHeadY; giant: length,
+ * height, skirt, halfWidth, baseY, peakY, faceX/Y/Z (the nose's tip); delta: plainY, shallowY, bedY,
+ * channels, samples, centres (the channels' centre-line tables, across metres)).
  */
 export function resolveStamp(spec, site, index, random, context) {
   const full = withDefaults(spec);
@@ -1340,7 +1429,7 @@ function rectangleDistance(stamp, x, z, halfAlong, halfAcross) {
 
 /** Half extents (along, across) of the rectangle stamp types' footprints. */
 function rectangleExtents(stamp) {
-  if (stamp.kind === 2 || stamp.kind === 8) return [stamp.length / 2 + stamp.falloff, stamp.width / 2 + stamp.falloff];
+  if (stamp.kind === 2 || stamp.kind === 8 || stamp.kind === 14) return [stamp.length / 2 + stamp.falloff, stamp.width / 2 + stamp.falloff];
   if (stamp.kind === 13) return [stamp.length / 2, stamp.halfWidth];
   if (stamp.kind === 3) return [stamp.length / 2, stamp.halfWidth * 1.35 + stamp.pad * 1.1 + 10];
   return [stamp.length / 2 + stamp.margin + stamp.shoulder, stamp.width / 2 + stamp.margin + stamp.shoulder];
@@ -1814,6 +1903,49 @@ function terracesHeight(stamp, x, z, height) {
   return height + (profile - height) * mask;
 }
 
+/** A delta's fan mask at (along, across): 1 inside the fan, easing to 0 over the falloff beyond it. */
+function deltaMask(stamp, along, across) {
+  const halfLength = stamp.length / 2;
+  const share = (along + halfLength) / stamp.length;
+  const halfWidth = stamp.width * (0.25 + 0.25 * (share < 0 ? 0 : share > 1 ? 1 : share));
+  const absAlong = along < 0 ? -along : along;
+  const absAcross = across < 0 ? -across : across;
+  return (1 - smoothstep(halfWidth, halfWidth + stamp.falloff, absAcross)) * (1 - smoothstep(halfLength, halfLength + stamp.falloff, absAlong));
+}
+
+function deltaHeight(stamp, x, z, height) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const along = dx * stamp.dirX + dz * stamp.dirZ;
+  const across = dx * -stamp.dirZ + dz * stamp.dirX;
+  const mask = deltaMask(stamp, along, across);
+  if (mask <= 0) return height;
+  // The flats: ground laid between the shallows and the plain.
+  const flat = height > stamp.plainY ? stamp.plainY : height < stamp.shallowY ? stamp.shallowY : height;
+  let result = height + (flat - height) * mask;
+  // The channels: cut below sea level, only ever lowering, from the apex out past the coast.
+  const fromApex = along + stamp.length / 2;
+  if (fromApex <= 0) return result;
+  const position = (fromApex > stamp.length ? stamp.length : fromApex) / DELTA_TABLE_STEP;
+  const index = Math.floor(position);
+  const fraction = position - index;
+  const share = fromApex / stamp.length;
+  const halfWidth = stamp.channelWidth * (0.3 + 0.7 * (share > 1 ? 1 : share)) * 0.5;
+  const start = smoothstep(0, 0.08, share);
+  const samples = stamp.samples;
+  const centres = stamp.centres;
+  for (let channel = 0; channel < stamp.channels; channel++) {
+    const offset = channel * samples + index;
+    const centre = centres[offset] + (centres[offset + 1] - centres[offset]) * fraction;
+    const distance = across > centre ? across - centre : centre - across;
+    if (distance >= halfWidth * 1.6) continue;
+    const cut = (1 - smoothstep(halfWidth * 0.55, halfWidth * 1.6, distance)) * start * mask;
+    const bed = result + (stamp.bedY - result) * cut;
+    if (bed < result) result = bed;
+  }
+  return result;
+}
+
 /**
  * The shelf (0 .. steps - 1) whose pool holds (x, z), or -1: inside the shelf's pool floor and lip
  * span along the stamp and between its side walls. Water bodies on terraces clip to their shelf.
@@ -1996,7 +2128,7 @@ export function applyStampHeight(stamp, x, z, height) {
  */
 export const STAMP_HEIGHT = Object.freeze([
   coneHeight, carveHeight, cliffStepHeight, gorgeHeight, flattenHeight, islandBaseHeight, basinHeight, craterHeight, terracesHeight,
-  atollHeight, reefHeight, seaStacksHeight, estuaryHeight, giantHeight,
+  atollHeight, reefHeight, seaStacksHeight, estuaryHeight, giantHeight, deltaHeight,
 ]);
 
 /** applyStampHeight with the stamp's kind passed in. */
@@ -2015,7 +2147,8 @@ function stampHeightByKind(kind, stamp, x, z, height) {
     case 10: return reefHeight(stamp, x, z, height);
     case 11: return seaStacksHeight(stamp, x, z, height);
     case 12: return estuaryHeight(stamp, x, z, height);
-    default: return giantHeight(stamp, x, z, height);
+    case 13: return giantHeight(stamp, x, z, height);
+    default: return deltaHeight(stamp, x, z, height);
   }
 }
 
@@ -2238,6 +2371,19 @@ function paintGiant(stamp, x, z, out) {
   }
 }
 
+function paintDelta(stamp, x, z, out) {
+  const dx = x - stamp.x;
+  const dz = z - stamp.z;
+  const along = dx * stamp.dirX + dz * stamp.dirZ;
+  const across = dx * -stamp.dirZ + dz * stamp.dirX;
+  // The mud of the flats, fading out a little inside the fan's edge.
+  const weight = smoothstep(0.35, 0.8, deltaMask(stamp, along, across));
+  if (weight > out.weight) {
+    out.weight = weight;
+    out.paintIndex = stamp.paintIndex;
+  }
+}
+
 /**
  * Raises out.weight / out.paintIndex to this stamp's paint at (x, z) when it is stronger there
  * (weights 0..1). Stamps without a paint leave `out` alone.
@@ -2263,6 +2409,7 @@ export function accumulateStampPaintByKind(kind, stamp, x, z, out) {
     case 10: paintReef(stamp, x, z, out); return;
     case 11: paintSeaStacks(stamp, x, z, out); return;
     case 12: paintEstuary(stamp, x, z, out); return;
-    default: paintGiant(stamp, x, z, out);
+    case 13: paintGiant(stamp, x, z, out); return;
+    default: paintDelta(stamp, x, z, out);
   }
 }

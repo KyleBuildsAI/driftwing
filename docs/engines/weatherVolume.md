@@ -88,6 +88,7 @@ waves lift upwind of the cloud (`-z`).
 | `formSeconds` | s | 25 for events, 0 for sites | the volume grows in, base first |
 | `dissipateSeconds` | s | 30 | before the event's duration ends the volume dissipates, then sets `instance.ended` |
 | `drift` | object or null | null | `{ speed m/s, heading deg (default: the activation heading) }` moves the anchor (a storm tracking across the land) |
+| `hours` | object or null | null | `{ dawn, day, dusk, night }`, each 0..1 (default 1): the share of the volume shown at that hour, blended by the sun's height (night below -4 to -10 degrees, day above 6 to 16, dawn or dusk in between on the morning or evening side) and multiplied into its growth for the puffs, the shafts and the inside fog. Its wind and its voice keep the growth. A site's morning mist: `{ dawn: 1, day: 0.15, dusk: 0.45, night: 0.7 }` (Phase 3) |
 
 ### Rain shafts
 
@@ -203,6 +204,9 @@ null.
 
 // Phase 3: a valley fog river (dawn), streaming down the valleys and pouring over three saddles
 { engine: 'weatherVolume', params: { form: 'river', radius: 3200, height: 80, puffs: 260, flow: 2.2, pours: 3, tint: 0xf1f4f7 } }
+// Phase 3: morning mist lying low among the roots of a mangrove delta (thick at dawn, wisps by day)
+{ engine: 'weatherVolume', params: { form: 'bank', length: 1800, width: 1400, height: 45, puffs: 110, tint: 0xeef1f0, fillBelow: 6,
+  hours: { dawn: 1, day: 0.15, dusk: 0.45, night: 0.7 }, insideFog: { density: 5, color: 0xdfe5e4, darkness: 0 } } }
 
 // Phase 3: noctilucent clouds
 { engine: 'weatherVolume', params: { form: 'sheet', base: 7000, radius: 9000, thickness: 90, ripple: 0.8, tint: 0xcfe4ff, glow: { color: 0x9fd4ff, strength: 1.2, when: 'twilight' } } }

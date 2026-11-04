@@ -27,11 +27,15 @@ import geyser from './geyser.js';
 import giant from './giant.js';
 import herd from './herd.js';
 import lantern from './lantern.js';
+import marsh from './marsh.js';
+import meadowHum from './meadowHum.js';
 import meteor from './meteor.js';
 import murmuration from './murmuration.js';
 import observatory from './observatory.js';
 import portal from './portal.js';
+import rustle from './rustle.js';
 import skyShimmer from './skyShimmer.js';
+import stoneWind from './stoneWind.js';
 import surf from './surf.js';
 import thunder from './thunder.js';
 import tornado from './tornado.js';
@@ -81,6 +85,10 @@ export const RECIPES = Object.freeze({
   wisps,
   windRush,
   burner,
+  stoneWind,
+  rustle,
+  meadowHum,
+  marsh,
 });
 
 /**

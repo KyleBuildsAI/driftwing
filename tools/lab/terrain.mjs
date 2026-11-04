@@ -572,6 +572,33 @@ function testShapes(world, sites) {
         const browHeight = world.heightAt(brow.x, brow.z);
         const eyeHeight = world.heightAt(eye.x, eye.z);
         check('shapes', `${label}: the face reads (nose over brow over eye hollow)`, nose > browHeight && browHeight > eyeHeight + 5, `nose ${round(nose, 1)} m, brow ${round(browHeight, 1)} m, eye ${round(eyeHeight, 1)} m`);
+      } else if (stamp.type === 'delta') {
+        // Every channel lies below sea level halfway down the fan, and the flats between the shallows
+        // and the plain along the fan's middle (away from the channels).
+        const middle = Math.floor(stamp.samples / 2);
+        let deepest = -Infinity;
+        for (let channel = 0; channel < stamp.channels; channel++) {
+          const point = localPoint(stamp, 0, stamp.centres[channel * stamp.samples + middle]);
+          deepest = Math.max(deepest, world.heightAt(point.x, point.z));
+        }
+        check('shapes', `${label}: every channel is cut below sea level halfway down the fan`, deepest < WATER - 1, `shallowest channel ${round(deepest, 2)} m`);
+        let flatsOutside = 0;
+        let flats = 0;
+        for (let row = 1; row < 6; row++) {
+          const along = -stamp.length / 2 + (row / 6) * stamp.length;
+          const index = Math.min(stamp.samples - 2, Math.floor((along + stamp.length / 2) / 4));
+          for (const share of [-0.4, -0.2, 0, 0.2, 0.4]) {
+            const across = share * stamp.width * (0.25 + 0.25 * (row / 6));
+            let nearChannel = false;
+            for (let channel = 0; channel < stamp.channels; channel++) if (Math.abs(across - stamp.centres[channel * stamp.samples + index]) < stamp.channelWidth * 1.2) nearChannel = true;
+            if (nearChannel) continue;
+            const point = localPoint(stamp, along, across);
+            const height = world.heightAt(point.x, point.z);
+            flats++;
+            if (height < stamp.shallowY - 0.01 || height > stamp.plainY + 0.01) flatsOutside++;
+          }
+        }
+        check('shapes', `${label}: the flats lie between the shallows and the plain`, flats > 0 && flatsOutside === 0, `${flatsOutside} of ${flats} samples outside ${round(stamp.shallowY, 2)}..${round(stamp.plainY, 2)} m`);
       } else {
         const top = world.heightAt(stamp.x, stamp.z);
         check('shapes', `${label}: the islet stands at least 70 % of its height above the sea`, top - WATER >= stamp.height * 0.7, `${round(top, 1)} m, height ${round(stamp.height, 1)} m`);
@@ -673,11 +700,18 @@ function testPaint(world, sites, seed = STAMP_SEED) {
     seaStacks: (stamp) => [{ x: stamp.stacks[0].x, z: stamp.stacks[0].z }, stamp.paint],
     estuary: (stamp) => [{ x: stamp.mouthX + stamp.inlandX * stamp.channelLength * 0.5, z: stamp.mouthZ + stamp.inlandZ * stamp.channelLength * 0.5 }, stamp.paint],
     giant: (stamp) => [localPoint(stamp, stamp.length * 0.19, 0), stamp.paint],
+    delta: (stamp) => [{ x: stamp.x, z: stamp.z }, stamp.paint],
   };
   for (const site of sites) {
     const stamp = site.stamps[0];
     const [point, paint] = expected[stamp.type](stamp);
     const influence = world.stampInfluence(point.x, point.z);
+    if (paint === null) {
+      // An unpainted stamp (the arch chain's floor, the mangrove delta, where plants must grow) leaves
+      // the ground its own colours.
+      check('paint', `${stamp.type} (${site.id}): unpainted, the ground keeps its own colours`, influence.paint === null || influence.weight < 0.35, `${influence.paint} ${round(influence.weight, 2)}`);
+      continue;
+    }
     check('paint', `${stamp.type} (${site.id}): ${paint} paint at its place`, influence.paint === paint && influence.weight >= 0.6, `${influence.paint} ${round(influence.weight, 2)}`);
     const height = world.heightAt(point.x, point.z);
     world.faceColor(point.x, point.z, height, 0.05, 0, 0, 0.5, colour, 0);
@@ -1081,7 +1115,7 @@ function testWaterStamps() {
   check('phase3', `every water fixture (${stamped.length}) has ${SITES_PER_TYPE} sites on ${WATER_SEED}`, stamped.every((preset) => sites.filter((site) => site.presetId === preset.id).length === SITES_PER_TYPE),
     sites.map((site) => `${site.stamps[0].type} ${round(Math.hypot(site.x, site.z) / 1000, 1)} km`).join(', '));
   const typesPlaced = new Set(sites.map((site) => site.stamps[0].type));
-  check('phase3', 'every Phase 3 stamp type (basin, crater, terraces) is placed', ['basin', 'crater', 'terraces'].every((type) => typesPlaced.has(type)), [...typesPlaced].join(', '));
+  check('phase3', 'every Phase 3 stamp type (basin, crater, terraces, delta) is placed', ['basin', 'crater', 'terraces', 'delta'].every((type) => typesPlaced.has(type)), [...typesPlaced].join(', '));
   testShapes(world, sites);
   testFalloff(world, sites);
   testPaint(world, sites, WATER_SEED);

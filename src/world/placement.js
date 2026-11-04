@@ -18,7 +18,10 @@
 //                  priority roll wins (ties go to the lower cell), checked against every neighbouring
 //                  cell in a fixed order, so the answer never depends on which cell was asked first;
 //   7. clearance   the same rule between different sites: two sites whose stamp footprints come
-//                  closer than the larger of their clearances keep only the higher priority.
+//                  closer than the larger of their clearances keep only the higher priority. Two
+//                  sites that both set placement.separateRegions (Phase 3 biome regions: a cherry
+//                  valley, a redwood grove) also keep only the higher priority when their region
+//                  overlays could meet: centres closer than the sum of their overlays' reaches.
 // Rules 6 and 7 compare against the other sites' rule 1-6 results (never their final ones), so the
 // check is local, needs no recursion and gives the same answer from any starting cell.
 //
@@ -110,6 +113,8 @@ export function validateSitePreset(preset) {
     if (!RELIEFS.includes(terrain.relief ?? 'any')) throw new Error(`${where}.placement.terrain.relief: must be one of ${RELIEFS.join(', ')}`);
   }
   if (placement.clearance !== undefined && (!isNumber(placement.clearance) || placement.clearance < 0)) throw new Error(`${where}.placement.clearance: must be a number of metres >= 0`);
+  if (placement.separateRegions !== undefined && typeof placement.separateRegions !== 'boolean') throw new Error(`${where}.placement.separateRegions: must be a boolean`);
+  if (placement.separateRegions === true && (preset.overlays ?? EMPTY).length === 0) throw new Error(`${where}.placement.separateRegions: needs the preset's region overlays`);
   if (!ALIGNMENTS.includes(placement.align ?? 'random')) throw new Error(`${where}.placement.align: must be one of ${ALIGNMENTS.join(', ')}`);
   const scale = placement.scale;
   if (scale !== undefined && !(Array.isArray(scale) && scale.length === 2 && scale.every((value) => isNumber(value) && value > 0) && scale[0] <= scale[1])) {
@@ -183,6 +188,8 @@ export function createPlacement({ seed, world, presets }) {
       reach,
       overlayReach: overlayExtent,
       clearance: preset.placement.clearance ?? 0,
+      /** Rule 7: this site's region overlays never meet another separating site's. */
+      separateRegions: preset.placement.separateRegions === true && overlayExtent > 0,
       // The footprint probed for the surface filter: the stamps' own extent, within limits.
       surfaceRadius: Math.min(Math.max(reach * 0.5, 200), 1200),
     });
@@ -190,6 +197,8 @@ export function createPlacement({ seed, world, presets }) {
   const presetCount = entries.length;
   const maxReach = entries.reduce((largest, entry) => Math.max(largest, entry.reach), 0);
   const maxClearance = entries.reduce((largest, entry) => Math.max(largest, entry.clearance), 0);
+  // Rule 7's reach for separating regions: two of the largest overlays side by side (0 without any).
+  const regionRoom = 2 * entries.reduce((largest, entry) => (entry.separateRegions ? Math.max(largest, entry.overlayReach) : largest), 0);
   const hasStamps = entries.some((entry) => (entry.preset.stamps ?? EMPTY).length > 0);
   const hasWaters = entries.some((entry) => (entry.preset.waters ?? EMPTY).length > 0);
   const hasOverlays = entries.some((entry) => (entry.preset.overlays ?? EMPTY).length > 0);
@@ -431,7 +440,7 @@ export function createPlacement({ seed, world, presets }) {
     if (own.placed !== undefined) return own.placed;
     let result = spaced(own);
     if (result) {
-      const range = Math.ceil((own.entry.reach + maxReach + maxClearance) / SITE_CELL);
+      const range = Math.ceil((own.entry.reach + maxReach + Math.max(maxClearance, own.entry.separateRegions ? regionRoom : 0)) / SITE_CELL);
       for (let offsetZ = -range; offsetZ <= range && result; offsetZ++) {
         for (let offsetX = -range; offsetX <= range && result; offsetX++) {
           for (let index = 0; index < presetCount; index++) {
@@ -439,7 +448,7 @@ export function createPlacement({ seed, world, presets }) {
             if (entry === own.entry && offsetX === 0 && offsetZ === 0) continue;
             const other = candidate(own.cellX + offsetX, own.cellZ + offsetZ, entry);
             if (other === null || !beats(other, own) || !spaced(other)) continue;
-            if (!footprintsClear(own, other, Math.max(own.entry.clearance, entry.clearance))) {
+            if (!footprintsClear(own, other, Math.max(own.entry.clearance, entry.clearance)) || regionsMeet(own, other)) {
               result = false;
               break;
             }
@@ -449,6 +458,15 @@ export function createPlacement({ seed, world, presets }) {
     }
     own.placed = result;
     return result;
+  }
+
+  /** True when both candidates separate their regions and their overlays' reaches could meet. */
+  function regionsMeet(own, other) {
+    if (!own.entry.separateRegions || !other.entry.separateRegions) return false;
+    const room = own.entry.overlayReach + other.entry.overlayReach;
+    const dx = other.x - own.x;
+    const dz = other.z - own.z;
+    return dx * dx + dz * dz < room * room;
   }
 
   /** The site record of a candidate, with its stamps resolved (frozen). */
