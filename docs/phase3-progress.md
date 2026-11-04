@@ -1066,7 +1066,7 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 | --- | --- | --- | --- |
 | B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | not started |
 | B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | not started |
-| B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | in progress |
+| B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | done (on its branch; awaiting I3) |
 | B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | not started |
 | B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | not started |
 | B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | not started |
@@ -1118,7 +1118,30 @@ presets (92-100) use the wave 2 combo scheduling.
   outside the shoreline, the maze, the fireball's timeline, cloth, memory, allocation); browser:
   `tools/steps/presets-51-60.json` (src/dev/presetChecksBatch6.js, window.__dwBatch6) and
   `?test=spawns&testPresets=<ids>` with `src/dev/spawnScenarios/batch6.js`.
-- **Status:** all ten presets built and committed with their lab checks (presets-51-60 lab passes); browser step file and ?test=spawns runs, the terrain checks and the full lab sweep next.
+- **More engine extensions found while testing:** the fauna column's `turns` (an `auto` route that
+  falls short tries other headings; default [] keeps every column as it was) and a guard so a column
+  with no route is not updated (a forced debug spawn of one threw on its missing PathFollower).
+- **Placement tuning:** the dam's basin is 150-190 m and 34-42 m deep, uphill of the site on any
+  relief (the 250 m basin fitted 0.6 % of tries, so no dam was ever placed; now about 8 %, lifting the
+  rim 20-80 m: the dam's height); the oasis is rarer (chance 0.08, 18 km); the labyrinth stands on any
+  relief (chance 0.1), so it places on the terrain lab's seeds.
+- **Phase 2 goldens:** `tools/lab/terrain.mjs` and `tools/lab/water.mjs` built the "Phase 2 world"
+  from the whole growing preset list, so every batch's new site or lake failed them; they now use the
+  first 30 presets (PRESETS.slice(0, 30)). Every batch needs this.
+- **Verification (2026-11-04):** presets-51-60 lab 117/117; every node lab once (all pass except the
+  known eagle allocation sample, 144 B/tick beside a browser run, and the known audio thunder check
+  near its 6 dB threshold, 232/233); terrain 488/488, water 34/34 after the golden scoping; step file
+  `tools/steps/presets-51-60.json` 57/57 on WebGPU and on WebGL2, 0 errors and 0 warnings, all seven
+  sites on real stamped sites (the dam's lake in the water query); `run-harness --test spawns
+  --presets <the ten>` 10/10 on both backends (GPU memory, heap, wind, colliders, ignitables, lights
+  back; 0/0 console); `--test terrain --presets real` PASS (basin seen at every LOD); `--test
+  determinism` PASS; docs-check 288/288; build, build:single, test:v1; smoke of the shell and of V2
+  (dist-single) on WebGPU and WebGL2, 0/0.
+- **For I3:** the docs-check row number and the two golden scopings above; the audio lab budget;
+  `src/dev/spawnScenarios.js` spreads `BATCH6_SCENARIOS` after the Phase 2 list (put the batches in
+  spec order); the checklist's recipe list in docs/spawns.md ("audio.recipe must be one of") still
+  names the Phase 2 recipes only; CHANGELOG has no Phase 3 section yet (Milestone P).
+- **Status:** done on the branch.
 
 ### Wave 4: discovery and verification, then the tag
 
