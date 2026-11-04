@@ -515,6 +515,18 @@ export function createStructureEngine() {
        * frame that follows its pose). Returns { builder, index }. A spec with `motion` instead is a
        * drifter (structure/movers.js lists that spec; build it with context.newBuilder()); it returns null.
        */
+      /** The world's raw ground height at WORLD (x, z) (no sea floor clamp): shared searches use it. */
+      worldGround: (x, z) => ctx.terrain.groundHeight(x, z),
+      /** A fresh mesh builder (a drifter's part, built in its own frame). */
+      newBuilder: () => createMeshBuilder(),
+      /** The calving schedule of the structure's slabs: { interval: [min, max], first, wave }. */
+      setCalving(calving) {
+        out.calving = calving;
+      },
+      /** The grid of water deep enough for the drifting movers (movers.js createNavigationGrid). */
+      setNavigation(grid) {
+        out.navigation = grid;
+      },
       addMover(spec) {
         // A spec with a motion ('drift' or 'calve', structure/movers.js) is a drifter the engine moves itself.
         if (spec.motion !== undefined) {
