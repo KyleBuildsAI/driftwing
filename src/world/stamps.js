@@ -211,6 +211,11 @@ const GIANT_BLEND = 0.08;
 /** The figure's half width (in lengths): v runs from -GIANT_HALF_WIDTH to +GIANT_HALF_WIDTH. */
 export const GIANT_HALF_WIDTH = 0.21;
 /**
+ * The figure's half length (in lengths): u runs from -GIANT_HALF_LENGTH to +GIANT_HALF_LENGTH. The
+ * feet reach u = -0.514 and the head u = 0.472, so a clip at 0.5 would cut the toes off in a cliff.
+ */
+export const GIANT_HALF_LENGTH = 0.52;
+/**
  * The tip of the nose in figure units: `along` (u) and its top `figure` (h). The breath of preset 68
  * rises from here: the nose stands at along x length ahead of the site, (figure x (height + skirt) -
  * skirt) above the site's ground.
@@ -483,7 +488,7 @@ export function stampReach(spec) {
       extent = Math.hypot(maxOf(full.length) * ESTUARY_HEAD_REACH + maxOf(full.headWidth) / 2 + maxOf(full.bankWidth) + maxOf(full.falloff), maxOf(full.mouthWidth) / 2 + maxOf(full.bankWidth) + maxOf(full.falloff));
       break;
     case 'giant':
-      extent = Math.hypot(maxOf(full.length) / 2, maxOf(full.length) * GIANT_HALF_WIDTH) + 8;
+      extent = Math.hypot(maxOf(full.length) * GIANT_HALF_LENGTH, maxOf(full.length) * GIANT_HALF_WIDTH) + 8;
       break;
     default:
       extent = (maxOf(full.radius) + maxOf(full.falloff)) * (1 + ISLAND_LOBE_MAX);
@@ -1256,7 +1261,7 @@ function resolveGiant(stamp, spec, random, context) {
   stamp.faceZ = stamp.z + stamp.dirZ * length * GIANT_NOSE.along;
   stamp.faceY = baseY - skirt + (height + skirt) * GIANT_NOSE.figure;
   stamp.fits = highest - lowest < height * GIANT_MAX_RELIEF && lowest > context.waterLevel + 2;
-  rotatedBounds(stamp, length / 2 + 4, stamp.halfWidth + 4);
+  rotatedBounds(stamp, length * GIANT_HALF_LENGTH + 4, stamp.halfWidth + 4);
   stamp.keyPoints = [
     { x: stamp.x, z: stamp.z },
     { x: stamp.faceX, z: stamp.faceZ },
@@ -1430,7 +1435,7 @@ function rectangleDistance(stamp, x, z, halfAlong, halfAcross) {
 /** Half extents (along, across) of the rectangle stamp types' footprints. */
 function rectangleExtents(stamp) {
   if (stamp.kind === 2 || stamp.kind === 8 || stamp.kind === 14) return [stamp.length / 2 + stamp.falloff, stamp.width / 2 + stamp.falloff];
-  if (stamp.kind === 13) return [stamp.length / 2, stamp.halfWidth];
+  if (stamp.kind === 13) return [stamp.length * GIANT_HALF_LENGTH, stamp.halfWidth];
   if (stamp.kind === 3) return [stamp.length / 2, stamp.halfWidth * 1.35 + stamp.pad * 1.1 + 10];
   return [stamp.length / 2 + stamp.margin + stamp.shoulder, stamp.width / 2 + stamp.margin + stamp.shoulder];
 }
@@ -1970,7 +1975,7 @@ function giantHeight(stamp, x, z, height) {
   const dz = z - stamp.z;
   const u = (dx * stamp.dirX + dz * stamp.dirZ) / stamp.length;
   const v = (dx * -stamp.dirZ + dz * stamp.dirX) / stamp.length;
-  if (u < -0.5 || u > 0.5 || v < -GIANT_HALF_WIDTH || v > GIANT_HALF_WIDTH) return height;
+  if (u < -GIANT_HALF_LENGTH || u > GIANT_HALF_LENGTH || v < -GIANT_HALF_WIDTH || v > GIANT_HALF_WIDTH) return height;
   return giantRaise(giantFigure(u, v), stamp.baseY, stamp.skirt, stamp.height, height);
 }
 
@@ -2363,7 +2368,7 @@ function paintGiant(stamp, x, z, out) {
   const dz = z - stamp.z;
   const u = (dx * stamp.dirX + dz * stamp.dirZ) / stamp.length;
   const v = (dx * -stamp.dirZ + dz * stamp.dirX) / stamp.length;
-  if (u < -0.5 || u > 0.5 || v < -GIANT_HALF_WIDTH || v > GIANT_HALF_WIDTH) return;
+  if (u < -GIANT_HALF_LENGTH || u > GIANT_HALF_LENGTH || v < -GIANT_HALF_WIDTH || v > GIANT_HALF_WIDTH) return;
   const weight = smoothstep(0.12, 0.38, giantFigure(u, v));
   if (weight > out.weight) {
     out.weight = weight;

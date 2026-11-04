@@ -14,7 +14,7 @@ import { PALETTE, paint, shade } from '../palette.js';
 import { addBoulder, addCairn, findStamp, frameFromHeading } from '../common.js';
 import { roll, rollInteger } from '../../engineKit.js';
 import { localBox, localCylinder, localHeightfield, localSphere } from '../colliders.js';
-import { GIANT_HALF_WIDTH, GIANT_NOSE, giantFigure, giantRaise } from '../../../../world/stamps.js';
+import { GIANT_HALF_LENGTH, GIANT_HALF_WIDTH, GIANT_NOSE, giantFigure, giantRaise } from '../../../../world/stamps.js';
 
 export const SLEEPING_GIANT_DEFAULTS = Object.freeze({
   stamp: 0,
@@ -90,7 +90,7 @@ function figureShare(frame, x, z) {
   const dz = z - frame.z;
   const u = (dx * frame.forwardX + dz * frame.forwardZ) / frame.length;
   const v = (dx * frame.rightX + dz * frame.rightZ) / frame.length;
-  if (u < -0.5 || u > 0.5 || v < -GIANT_HALF_WIDTH || v > GIANT_HALF_WIDTH) return 0;
+  if (u < -GIANT_HALF_LENGTH || u > GIANT_HALF_LENGTH || v < -GIANT_HALF_WIDTH || v > GIANT_HALF_WIDTH) return 0;
   return Math.max(0, giantFigure(u, v));
 }
 
@@ -110,7 +110,7 @@ function surfaceAt(context, frame, x, z) {
 /** The free-standing figure's body: a grid over its footprint, faces only where it stands above the ground. */
 function buildFigureBody(context, frame) {
   const { body, rng } = context;
-  const columns = Math.ceil(frame.length / CELL);
+  const columns = Math.ceil((frame.length * GIANT_HALF_LENGTH * 2) / CELL);
   const rows = Math.ceil((frame.length * GIANT_HALF_WIDTH * 2) / CELL);
   const point = [0, 0];
   const vertices = new Float64Array((columns + 1) * (rows + 1) * 3);
@@ -119,7 +119,7 @@ function buildFigureBody(context, frame) {
   for (let row = 0; row <= rows; row++) {
     const v = -GIANT_HALF_WIDTH + (row / rows) * GIANT_HALF_WIDTH * 2;
     for (let column = 0; column <= columns; column++) {
-      const u = -0.5 + column / columns;
+      const u = -GIANT_HALF_LENGTH + (column / columns) * GIANT_HALF_LENGTH * 2;
       figurePoint(frame, u, v, point);
       const ground = context.ground(point[0], point[1]);
       const share = figureShare(frame, point[0], point[1]);
@@ -157,7 +157,7 @@ function buildFigureBody(context, frame) {
  * footprint (holes where the figure does not stand above the ground), publishing the exact top.
  */
 function figureCollider(context, frame) {
-  const halfAlong = frame.length / 2;
+  const halfAlong = frame.length * GIANT_HALF_LENGTH;
   const halfAcross = frame.length * GIANT_HALF_WIDTH;
   const reachX = Math.abs(frame.forwardX) * halfAlong + Math.abs(frame.rightX) * halfAcross;
   const reachZ = Math.abs(frame.forwardZ) * halfAlong + Math.abs(frame.rightZ) * halfAcross;
