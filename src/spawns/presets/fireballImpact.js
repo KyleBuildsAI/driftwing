@@ -43,7 +43,7 @@ export default Object.freeze({
         particles: 1200, style: 'spark', blend: 'additive', shape: { type: 'disc', radius: 22 }, hugGround: true, speed: [3, 9], spread: 35,
         gravity: 0.3, buoyancy: 1.2, drag: 0.3, life: [1.5, 4], size: [1.4, 0.4], stretch: 0.06, colors: [0xffd080, 0xff6a20, 0x501004],
         emissive: 6, emissiveDecay: 1.4, bursts: { interval: [1.5, 4], count: [60, 140], minLevel: 0.2 },
-        light: { color: 0xff6a2a, intensity: 3e5, range: 900, offset: [0, 15, 0], flicker: 0.4, night: 0 },
+        light: { color: 0xff5a1e, intensity: 6e4, range: 700, offset: [0, 12, 0], flicker: 0.45, night: 0 },
         startDelay: 11, sound: false,
       },
     },

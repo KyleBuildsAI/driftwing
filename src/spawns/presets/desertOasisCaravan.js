@@ -16,8 +16,8 @@ export default Object.freeze({
   heavy: false,
   tags: ['desert', 'calm', 'slow', 'perch'],
   placement: {
-    chance: 0.14,
-    minSpacing: 16000,
+    chance: 0.08,
+    minSpacing: 18000,
     biomes: ['dunes'],
     surface: 'land',
     terrain: { minHeight: 8, maxHeight: 500, relief: 'any' },

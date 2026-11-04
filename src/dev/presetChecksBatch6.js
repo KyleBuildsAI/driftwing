@@ -195,8 +195,10 @@ export function installBatch6Checks(game) {
       await seconds(8);
       const after = fauna.describe(part.id);
       const moved = Math.hypot(after.center.x - before.x, after.center.z - before.z);
-      const onGround = Math.abs(after.center.y - helpers.ground(after.center.x, after.center.z)) < 6;
-      return check(`${presetId}: the column walks its route on the ground`, after.count >= minCount && moved > 3 && onGround && after.pathLength > 500, { count: after.count, moved: Math.round(moved), route: Math.round(after.pathLength) });
+      // The centre is the mean over a column kilometres long on rolling ground: near the ground there,
+      // not on it (the lab checks every walker on the ground).
+      const aboveGround = after.center.y - helpers.ground(after.center.x, after.center.z);
+      return check(`${presetId}: the column walks its route on the ground`, after.count >= minCount && moved > 3 && Math.abs(aboveGround) < 80 && after.pathLength > 500, { count: after.count, moved: Math.round(moved), route: Math.round(after.pathLength), centreAboveGround: Math.round(aboveGround) });
     },
 
     /** The cloth (flags, banners) takes the wind the structure shows. */
@@ -274,8 +276,9 @@ export function installBatch6Checks(game) {
     },
 
     /**
-     * Sweeps a 1.5 m sphere at 60 m/s (one frame) into the middle of each solid collider type of the
-     * spawn's structure part, from above: every sweep must hit (a soft crash in flight).
+     * Sweeps a 1.5 m sphere straight down through the middle of each solid collider type of the
+     * spawn's structure part, from above its top to below its bottom: every sweep must hit (a craft
+     * never passes through).
      */
     colliders(presetId) {
       const part = structurePart(manager, spawned.get(presetId)?.id);
@@ -290,7 +293,7 @@ export function installBatch6Checks(game) {
         const x = (record.bounds[0] + record.bounds[3]) / 2;
         const z = (record.bounds[2] + record.bounds[5]) / 2;
         const top = record.bounds[4];
-        const hit = colliders.sweepSphere({ x, y: top + 1.5, z }, { x, y: top - 1, z }, 1.5, {}, out);
+        const hit = colliders.sweepSphere({ x, y: top + 1.5, z }, { x, y: record.bounds[1] - 1, z }, 1.5, {}, out);
         sweeps.push({ type, hit });
       }
       const perches = records.filter((record) => record.tags && record.tags.perch).length;

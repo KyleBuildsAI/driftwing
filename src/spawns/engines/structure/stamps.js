@@ -46,11 +46,12 @@ const RECIPE_STAMP_DEFAULTS = Object.freeze({
   castleRuin: Object.freeze({ width: [280, 360], drop: [45, 75], length: [380, 480], face: [5, 8], falloff: [110, 150], pool: [16, 22], paint: 'basalt' }),
   observatory: Object.freeze({ length: [64, 76], width: [44, 52], margin: [8, 12], shoulder: [50, 70], paint: 'tarmac' }),
   viaduct: Object.freeze({ length: [900, 1100], width: [170, 240], depth: [55, 80], falloff: [180, 240], pad: [80, 100], paint: 'riverbed' }),
-  // The reservoir: a basin centred up the valley, so its down-valley rim (where its berm stands
-  // tallest) lies at the site centre, the dam's line. A narrow, steep berm: the dam's face covers it.
+  // The reservoir: a basin centred uphill of the site (aligned downhill), so its down-slope rim, where
+  // its berm stands tallest, lies at the site centre: the dam's line. Small and deep, so it fits on the
+  // slopes of this terrain (lifting that rim 20-80 m); a narrow, steep berm the dam's face covers.
   labyrinth: Object.freeze({ length: [130, 150], width: [130, 150], margin: [8, 12], shoulder: [40, 60], paint: 'sand' }),
   oasis: Object.freeze({ radius: [55, 80], depth: [4, 7], rim: [22, 32], falloff: [40, 60], paint: 'sand' }),
-  dam: Object.freeze({ radius: [220, 280], depth: [24, 32], rim: [10, 14], falloff: [14, 20], paint: 'riverbed', offset: Object.freeze({ along: -250, across: 0 }) }),
+  dam: Object.freeze({ radius: [150, 190], depth: [34, 42], rim: [10, 14], falloff: [14, 20], paint: 'riverbed', offset: Object.freeze({ along: -170, across: 0 }) }),
 });
 
 /** Islet layout for the islands recipe: how many islets, and how far out the others ring the first. */

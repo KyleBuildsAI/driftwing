@@ -1,6 +1,6 @@
-// Preset 57: Dam with an open spillway (uncommon site). A concrete gravity dam closes a valley; behind
-// it lies a reservoir (a basin stamp up the valley with its own lake, which the seaplane can land on),
-// in front of it the valley floor far below. In the middle of the crest the spillway is open: the lake
+// Preset 57: Dam with an open spillway (uncommon site). A concrete gravity dam closes a slope; behind
+// it lies a reservoir (a basin stamp uphill with its own lake, which the seaplane can land on), in
+// front of it the ground far below. In the middle of the crest the spillway is open: the lake
 // pours over the lip and down a white chute between training walls into a stilling basin, throwing
 // up spray with a rainbow in it on a sunny day, and a river runs on down the valley. Intake towers
 // stand in the lake, a valve house on the crest, lamps along it at night. The roar and the surging
@@ -21,7 +21,7 @@ export default Object.freeze({
     minSpacing: 20000,
     biomes: ['pine', 'meadows', 'snow'],
     surface: 'land',
-    terrain: { minHeight: 90, maxHeight: 1600, relief: 'valley' },
+    terrain: { minHeight: 90, maxHeight: 1600, relief: 'any' },
     clearance: 700,
     align: 'downhill',
   },

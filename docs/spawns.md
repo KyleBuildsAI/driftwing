@@ -882,10 +882,11 @@ rainbow below and a river running on down the valley.
 [src/spawns/presets/damSpillway.js](../src/spawns/presets/damSpillway.js)
 
 - **Kind:** site, uncommon.
-- **Placement:** pine, meadows or snow; land; a valley floor 90-1600 m up; chance 0.12; at least
-  20 km apart; 700 m clearance; aligned downhill.
-- **Stamp:** `basin` 220-280 m in radius and 24-32 m deep, centred 250 m up the valley with a narrow,
-  steep berm (`structureStamps('dam')`). **Water:** a lake filling it to 97 %, tinted green-grey
+- **Placement:** pine, meadows or snow; land; ground 90-1600 m; chance 0.12; at least 20 km apart;
+  700 m clearance; aligned downhill (where the basin fits, its berm lifts the down-slope rim 20-80 m
+  over the ground below: the dam's height).
+- **Stamp:** `basin` 150-190 m in radius and 34-42 m deep, centred 170 m uphill of the site with a
+  narrow, steep berm (`structureStamps('dam')`). **Water:** a lake filling it to 97 %, tinted green-grey
   (the seaplane can land on it).
 - **Engines:** `structure` (recipe `dam`: the wall on a line outside the down-valley shoreline, its
   crest out to the valley sides, a 26-34 m spillway with training walls, a bridge, a stilling basin and
@@ -903,7 +904,7 @@ lamps light at dusk, and a caravan of laden camels walking single file out acros
 [src/spawns/presets/desertOasisCaravan.js](../src/spawns/presets/desertOasisCaravan.js)
 
 - **Kind:** site, uncommon.
-- **Placement:** dunes; land; ground 8-500 m; chance 0.14; at least 16 km apart; 500 m clearance.
+- **Placement:** dunes; land; ground 8-500 m; chance 0.08; at least 18 km apart; 500 m clearance.
 - **Stamp:** `basin` 55-80 m in radius, 4-7 m deep, painted sand (`structureStamps('oasis')`).
   **Water:** a pool filling it to 78 %.
 - **Engines:** `structure` (recipe `oasis`: 20-30 palms whose crowns sway and are perches, reeds, the
