@@ -2189,9 +2189,9 @@ export function createStructureEngine() {
         trigger: triggerVoice,
         /** The instance data (the voice), for trigger. */
         data,
-        /** The recipe's arc points in world space (x, y, z per point): the spires' tips. */
-        arcPoints: new Float64Array(out.arcPoints.length * 3),
       };
+      /** The recipe's arc points in world space (x, y, z per point): the spires' tips. */
+      data.arcPoints = new Float64Array(out.arcPoints.length * 3);
       out.arcPoints.forEach((point, index) => {
         data.arcPoints[index * 3] = anchor.x + point[0];
         data.arcPoints[index * 3 + 1] = anchor.y + point[1];
