@@ -5,7 +5,8 @@
 //              a file or folder that exists, and every #anchor (in the same page or another
 //              Markdown page) matches a heading there, slugged the way GitHub slugs headings
 //   presets    the table in docs/spawns.md has one row per preset, in PRESETS order, with the
-//              preset's id, category, kind, rarity, heavy flag and engines; every preset has its own
+//              preset's spec number (the "preset NN" its file's first comment line names, else its
+//              place in PRESETS), id, category, kind, rarity, heavy flag and engines; every preset has its own
 //              section linked from its row; the whole preset list validates against the schema with
 //              the registered engine names, and every audio recipe a preset names exists
 //   templates  the two copy-paste templates in docs/spawns.md (an event and a site) are valid
@@ -169,13 +170,21 @@ function testPresets() {
   const rows = presetTableRows(text);
   check('presets', 'docs/spawns.md has one table row per preset', rows.length === PRESETS.length, `${rows.length} rows, ${PRESETS.length} presets`);
   const anchors = anchorsOf(SPAWNS_DOC);
+  // A batch branch holds the spec's later presets without the batches before them, so a row's number
+  // is the spec number from the preset file's header line ("// Preset 56: ..."), not its place.
+  const specNumber = (preset, index) => {
+    const path = join(ROOT, 'src', 'spawns', 'presets', `${preset.id}.js`);
+    const header = existsSync(path) ? readFileSync(path, 'utf8').split(/\r?\n/, 1)[0] : '';
+    const match = /\bpreset (\d+)\b/i.exec(header);
+    return match ? match[1] : String(index + 1);
+  };
   PRESETS.forEach((preset, index) => {
     const row = rows[index];
     if (!row) return;
     const [number, link, id, category, kind, rarity, heavy, engines] = row;
     const expectedEngines = [...new Set(preset.engines.map((entry) => entry.engine))].map((name) => `\`${name}\``).join(', ');
     const problems = [];
-    if (number !== String(index + 1)) problems.push(`number ${number}`);
+    if (number !== specNumber(preset, index)) problems.push(`number ${number} (file: ${specNumber(preset, index)})`);
     if (id !== `\`${preset.id}\``) problems.push(`id ${id}`);
     if (category !== preset.category) problems.push(`category ${category} (file: ${preset.category})`);
     if (kind !== preset.kind) problems.push(`kind ${kind} (file: ${preset.kind})`);

@@ -83,6 +83,16 @@ preset's section below.
 | 28 | [Crystal spires](#28-crystal-spires) | `crystalSpires` | fantasy | site | uncommon | no | `structure`, `lightEffect` | no |
 | 29 | [Jet stream ribbon](#29-jet-stream-ribbon) | `jetStream` | flightplay | event | uncommon | no | `emitter`, `windModifier` | yes |
 | 30 | [Storm chase](#30-storm-chase) | `stormChase` | setpiece | event | legendary | no | `setPiece` | children |
+| 51 | [Butterfly migration](#51-butterfly-migration) | `butterflyMigration` | wildlife | event | uncommon | no | `fauna` | rides it |
+| 52 | [Caribou migration](#52-caribou-migration) | `caribouMigration` | wildlife | event | uncommon | no | `fauna` | no |
+| 53 | [Cliffside monastery](#53-cliffside-monastery) | `cliffsideMonastery` | structure | site | rare | no | `structure`, `lightEffect` | flags show it |
+| 54 | [Sea-cliff castle ruin](#54-sea-cliff-castle-ruin) | `seaCliffCastle` | structure | site | uncommon | no | `structure` | banners show it |
+| 55 | [Mountaintop observatory](#55-mountaintop-observatory) | `mountaintopObservatory` | structure | site | uncommon | no | `structure` | no |
+| 56 | [Steam train viaduct](#56-steam-train-viaduct) | `steamTrainViaduct` | structure | site | rare | no | `structure` | no |
+| 57 | [Dam spillway](#57-dam-spillway) | `damSpillway` | structure | site | uncommon | no | `structure`, `emitter`, `celestial` | no |
+| 58 | [Desert oasis caravan](#58-desert-oasis-caravan) | `desertOasisCaravan` | structure | site | uncommon | no | `structure`, `fauna` | no |
+| 59 | [Labyrinth](#59-labyrinth) | `labyrinth` | structure | site | rare | no | `structure` | no |
+| 60 | [Fireball impact](#60-fireball-impact) | `fireballImpact` | celestial | event | rare | no | `structure`, `emitter` | no |
 
 In all: 11 sites and 19 events; 9 common, 12 uncommon, 7 rare and 2 legendary; 6 heavy. The
 journal's collection count is found / 30 over these presets (`PRESETS` in
@@ -731,6 +741,222 @@ and the storm decays.
 - **Lifetime:** 570-600 s; despawned beyond 30 + 5 km after 60 s out of view.
 - **Journal:** the "Storm Chaser" entry; `closestTornado` (min, the closest pass to the funnel) and
   `stormsChased` (+1 when you came within 5 km of the funnel).
+
+### Phase 3 batch 6: presets 51-60
+
+Wildlife (51-52), structures (53-59) and one night-sky event (60), on the Phase 2 engines and their
+Phase 3 additions: the fauna engine's `windDrift`, the structure engine's cloth, movers, steam,
+torches, blocks and moving voice, and the emitter's `startDelay`
+([engines/structure.md](engines/structure.md#phase-3-recipe-features),
+[engines/fauna.md](engines/fauna.md#group), [engines/emitter.md](engines/emitter.md#emission)).
+
+#### 51. Butterfly migration
+
+A loose orange cloud of a couple of thousand monarch butterflies flutters low over open country and
+drifts downwind on the real WindField wind, each butterfly flitting and gliding on its own; fly
+through and they scatter softly round the craft.
+[src/spawns/presets/butterflyMigration.js](../src/spawns/presets/butterflyMigration.js)
+
+- **Kind:** event, uncommon.
+- **Engines:** `fauna` (species `butterfly`, behaviour `flock`: 1600-2400 butterflies 35 m above the
+  ground (floor 3 m), `windDrift` 1: the goal, its leash and every butterfly ride the WindField's
+  ambient wind at the cloud's height, scaled live with the world's wind strength, plus the gusts the
+  craft feels within 600 m; scattering within 35 m of the craft).
+- **Filters:** meadows, pine or dunes; day; clear or clearing weather; over land; player 0-2500 m;
+  3-7 km ahead.
+- **Candidates:** 5 km cells, 450 s buckets, chance 0.45.
+- **Wind:** none of its own; it rides the field's.
+- **Sound:** `murmuration` (a papery wing rush swelling as you close in).
+- **LOD:** near 1200 m, mid 3500 m, far 9 km. **Discovery:** 1.2 km, in view.
+- **Lifetime:** 240-360 s, fading out over the last 12 s; despawned beyond 9 + 2.5 km after 20 s out
+  of view.
+
+#### 52. Caribou migration
+
+A column of several hundred caribou walks four abreast across the tundra, a grey-brown ribbon
+kilometres long with pale manes and antlers, kicking up snow dust.
+[src/spawns/presets/caribouMigration.js](../src/spawns/presets/caribouMigration.js)
+
+- **Kind:** event, uncommon.
+- **Engines:** `fauna` (species `caribou`, behaviour `column`: 320-520 animals, 4 lanes 3.4 m apart,
+  rows 4.5 m apart, 1.7 m/s, on an `auto` route of 3.6 km planned by the PathFollower around slopes
+  over 0.4 and water, ping-ponging; snow dust; a pure function of flight time).
+- **Filters:** snow or pine; dawn, day or dusk; clear, building or clearing weather; over land;
+  player 0-3000 m; 3-8 km ahead.
+- **Candidates:** 6 km cells, 600 s buckets, chance 0.5.
+- **Wind:** none.
+- **Sound:** `caribou` (the herd rumble of hooves, clicking ankles and grunts).
+- **LOD:** near 1500 m, mid 4500 m, far 10 km. **Discovery:** 1.8 km, in view.
+- **Lifetime:** 360-540 s, fading out over the last 10 s; despawned beyond 10 + 2.5 km after 20 s
+  out of view.
+
+#### 53. Cliffside monastery
+
+A whitewashed Himalayan monastery on the lip of a sheer cliff: a main hall with a gilded roof, a
+chorten, a bell pavilion and a prayer pole on the plateau, smaller halls clinging to the face below.
+Strings of prayer flags swing out and ripple in the real WindField wind; the temple bell rings across
+the valley.
+[src/spawns/presets/cliffsideMonastery.js](../src/spawns/presets/cliffsideMonastery.js)
+
+- **Kind:** site, rare.
+- **Placement:** snow or pine; land; ground from 280 m; chance 0.05; at least 22 km apart; 500 m
+  clearance; aligned downhill.
+- **Stamp:** `cliffStep` 300-380 m wide, dropping 95-140 m, painted basalt (`structureStamps('monastery')`).
+- **Engines:** `structure` (recipe `monastery`: 2-3 halls, 11-15 prayer-flag strings of 18-26 flags
+  on the cloth kind, butter lamps (torches) that light at dusk and braziers that wait for a dragon's
+  breath, landable roofs and perches; voice level follows the wind) and `lightEffect` (26 warm lamp
+  glows at night).
+- **Wind:** none of its own; the flags show the field's.
+- **Sound:** `bells` (the temple bell and small bells tinkling in the gusts).
+- **LOD:** near 1500 m, mid 5000 m, far 12 km. **Discovery:** 2.2 km, in view.
+- **Lifetime:** a site; removed beyond 12 + 2 km.
+
+#### 54. Sea-cliff castle ruin
+
+A ruined stone castle on the edge of a sea cliff: curtain walls with battlements, broken through in
+places, round corner towers, a gatehouse and a roofless hall, and on the cliff edge the keep with
+banners streaming in the wind, the tower to fly around.
+[src/spawns/presets/seaCliffCastle.js](../src/spawns/presets/seaCliffCastle.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** archipelago, meadows or pine; coast; ground 2-160 m; chance 0.16; at least 16 km
+  apart; 500 m clearance; aligned downhill.
+- **Stamp:** `cliffStep` 280-360 m wide, dropping 45-75 m toward the sea (`structureStamps('castleRuin')`).
+- **Engines:** `structure` (recipe `castleRuin`: 5-7 towers on a 30-40 m ring, the keep 34-42 m tall,
+  ruin 0.35; every wall and tower a collider, the keep's top a landable perch, braziers that only a
+  dragon's breath lights, banners on the cloth kind).
+- **Wind:** none of its own; the banners show the field's.
+- **Sound:** `waterfall` as the surf booming at the cliff foot (constant, level 0.45).
+- **LOD:** near 1500 m, mid 5000 m, far 12 km. **Discovery:** 2.2 km, in view.
+- **Lifetime:** a site; removed beyond 12 + 2 km.
+
+#### 55. Mountaintop observatory
+
+A white telescope building on a pad cut into a summit: a drum under a silver dome, a second small
+dome, a control building and an antenna mast. At dusk the shutter slides back, the dome turns its
+slit and the telescope rises to the target: a comet if one is in the sky, else a meteor shower's
+radiant, else the moon, else a slow survey. At dawn it parks and closes.
+[src/spawns/presets/mountaintopObservatory.js](../src/spawns/presets/mountaintopObservatory.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** snow, pine, dunes or meadows; land; a peak from 650 m; chance 0.08; at least 20 km
+  apart; 400 m clearance.
+- **Stamp:** `flatten` pad 64-76 by 44-52 m (`structureStamps('observatory')`).
+- **Engines:** `structure` (recipe `observatory`: the dome, shutter and telescope are movers aimed
+  through the celestial engine's `skyTarget`, slewing at 3 degrees a second, opening over 22 s; the
+  dome and mast perches, the control roof landable; voice level from the motors).
+- **Wind:** none.
+- **Sound:** `observatory` (the motors' whir and the shutter latch's clunk).
+- **LOD:** near 1500 m, mid 5000 m, far 12 km. **Discovery:** 2 km, in view.
+- **Lifetime:** a site; removed beyond 12 + 2 km.
+
+#### 56. Steam train viaduct
+
+A line of tall stone arches carries a railway across a deep gorge between two tunnel portals in
+wooded hillocks. A steam train bursts out of one tunnel whistling, crosses trailing steam and
+disappears into the other, where it waits before coming back. Fly under the arches.
+[src/spawns/presets/steamTrainViaduct.js](../src/spawns/presets/steamTrainViaduct.js)
+
+- **Kind:** site, rare.
+- **Placement:** pine, meadows or snow; land; ground from 110 m; chance 0.07; at least 20 km apart;
+  600 m clearance.
+- **Stamp:** `gorge` 900-1100 m long, 170-240 m wide, 55-80 m deep, with 80-100 m anchor pads
+  (`structureStamps('viaduct')`).
+- **Engines:** `structure` (recipe `viaduct`: 20-26 m spans on tapering piers, the deck 0.6 m over the
+  pads, a portal with a dark bore on each pad; the locomotive, tender and 2-4 coaches are movers with
+  box colliders on a PathFollower that ping-pongs between the tunnels at 11-15 m/s with 35-60 s
+  waits, a pure function of flight time; chimney steam on the mist pool; every arch with headroom a
+  pass-under gate; the deck landable, the portals perches; the voice rides the locomotive).
+- **Wind:** none.
+- **Sound:** `train` (the chuff following the train's speed, the clank and hiss, the `whistle` as it
+  leaves a tunnel).
+- **LOD:** near 1800 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
+- **Lifetime:** a site; removed beyond 14 + 2.5 km.
+- **Achievement:** `underTheArches`, "Under the Arches": fly under an arch of the viaduct.
+
+#### 57. Dam spillway
+
+A concrete gravity dam closes a valley, a reservoir lake behind it; in the middle of the crest the
+spillway is open and the lake pours down a white chute into a stilling basin, with spray and a
+rainbow below and a river running on down the valley.
+[src/spawns/presets/damSpillway.js](../src/spawns/presets/damSpillway.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** pine, meadows or snow; land; a valley floor 90-1600 m up; chance 0.12; at least
+  20 km apart; 700 m clearance; aligned downhill.
+- **Stamp:** `basin` 220-280 m in radius and 24-32 m deep, centred 250 m up the valley with a narrow,
+  steep berm (`structureStamps('dam')`). **Water:** a lake filling it to 97 %, tinted green-grey
+  (the seaplane can land on it).
+- **Engines:** `structure` (recipe `dam`: the wall on a line outside the down-valley shoreline, its
+  crest out to the valley sides, a 26-34 m spillway with training walls, a bridge, a stilling basin and
+  the river; intake towers and a valve house; hull colliders, the crest landable), `emitter` (spray
+  at the foot) and `celestial` (a rainbow in the spray by day).
+- **Wind:** none.
+- **Sound:** `dam` (the spillway's roar over a surging sub rumble and the spray's hiss).
+- **LOD:** near 1800 m, mid 6000 m, far 15 km. **Discovery:** 2.8 km, in view.
+- **Lifetime:** a site; removed beyond 15 + 2.5 km.
+
+#### 58. Desert oasis caravan
+
+Date palms round a turquoise spring pool in the dunes, a well, goat-hair tents and a fire pit whose
+lamps light at dusk, and a caravan of laden camels walking single file out across the sand and back.
+[src/spawns/presets/desertOasisCaravan.js](../src/spawns/presets/desertOasisCaravan.js)
+
+- **Kind:** site, uncommon.
+- **Placement:** dunes; land; ground 8-500 m; chance 0.14; at least 16 km apart; 500 m clearance.
+- **Stamp:** `basin` 55-80 m in radius, 4-7 m deep, painted sand (`structureStamps('oasis')`).
+  **Water:** a pool filling it to 78 %.
+- **Engines:** `structure` (recipe `oasis`: 20-30 palms whose crowns sway and are perches, reeds, the
+  well, 2-4 tents with rugs, a shade shelter, three dusk lamps that are ignitables) and `fauna`
+  (species `camel`, behaviour `column`: 12-18 camels in single file at 1.3 m/s on a 2.3 km
+  PathFollower route out of the oasis and back, a little sand dust; a pure function of flight time).
+- **Wind:** none.
+- **Sound:** `caravan` (camel bells clonking out of step, footfalls and a grumble), on the camels.
+- **LOD:** near 1500 m, mid 4500 m, far 11 km. **Discovery:** 2 km, in view.
+- **Lifetime:** a site; removed beyond 11 + 2 km.
+
+#### 59. Labyrinth
+
+A hedge maze on a levelled square of pale gravel, grown from the site's seed: only green walls from
+the ground, a perfect pattern from a few hundred metres up, with a fountain and a gilded obelisk at
+its heart.
+[src/spawns/presets/labyrinth.js](../src/spawns/presets/labyrinth.js)
+
+- **Kind:** site, rare.
+- **Placement:** meadows or pine; land; flat ground 10-700 m; chance 0.08; at least 20 km apart;
+  500 m clearance.
+- **Stamp:** `flatten` 130-150 m square, painted sand (`structureStamps('labyrinth')`).
+- **Engines:** `structure` (recipe `labyrinth`: a seeded depth-first maze of 17-21 cells a side,
+  hedges 3.4 m tall as instanced blocks merged into solid runs, an entrance and an exit, the heart a
+  clearing with the obelisk perch; a low pass through the heart is a gate).
+- **Wind:** none.
+- **Sound:** `waterfall` as the fountain, soft and close (level 0.3, reference distance 25 m).
+- **LOD:** near 1500 m, mid 5000 m, far 11 km. **Discovery:** 1.8 km, in view.
+- **Lifetime:** a site; removed beyond 11 + 2 km.
+- **Achievement:** `heartOfTheMaze`, "Heart of the Maze": fly low through the clearing at its heart.
+
+#### 60. Fireball impact
+
+At night a bolide tears down the sky, a white-hot head with a long orange tail, and strikes the
+ground ahead in a blinding flash; the sonic boom and the thud arrive seconds later. It leaves a
+glowing scorched scar on the terrain (the ground's height never changes), sparks and a column of
+smoke lit from below.
+[src/spawns/presets/fireballImpact.js](../src/spawns/presets/fireballImpact.js)
+
+- **Kind:** event, rare.
+- **Engines:** `structure` (recipe `fireball`: after 4 s the bolide comes down a straight line from
+  11-14 km up at 24-38 degrees from a seeded bearing over 7 s, the voice on its head; the flash
+  swells to 160 m and dies in 2 s; the scar, 34-48 m with ejecta rays, is a decal mover whose embers
+  cool over 120 s; the boom is played when its sound reaches the player) and two `emitter` parts
+  (smoke with an orange underglow, and sparks with the real light), both starting at the impact
+  (`startDelay` 11 s).
+- **Filters:** any biome; night or dusk; clear or clearing weather; over land; player 0-8000 m;
+  3.5-8 km ahead.
+- **Candidates:** 8 km cells, 900 s buckets, chance 0.25. **Cooldown:** 3600 s.
+- **Wind:** none.
+- **Sound:** `fireball` (the roar rising as it comes, the `boom`, then the scar crackling).
+- **LOD:** near 4 km, mid 14 km, far 30 km. **Discovery:** 9 km, in view.
+- **Lifetime:** 150-210 s; despawned beyond 30 + 4 km after 30 s out of view.
 
 ## Adding a preset
 

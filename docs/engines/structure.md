@@ -50,16 +50,25 @@ The frame: a compass `heading` (degrees) from the activation; `along` is forward
 | `gates` | a timed course: start and finish gates marked by cairns with pennants, an optional river down the canyon floor | `carve` | a timed course, a journal best run, an optional corridor |
 | `waterfall` | a river spilling over the cliff step as a wide curtain of falling strands into the plunge pool, the river on downstream, boulders and mist puffs | `cliffStep` | a voice at the pool (the `waterfall` recipe) |
 | `challengeGates` | the gate frames of the preset's `challenge` course: posts and a lintel for rectangle gates, a hoop on a post for circle gates, pennants (white start, red checkpoints, chequered finish) | none | a challenge course registered with the challenge system (start prompt, splits, medals, bests per craft) |
+| `monastery` | a whitewashed cliffside monastery: halls on the plateau and down the face on buttresses, a chorten, a bell pavilion, a prayer pole, prayer-flag strings, stairs, pines | `cliffStep` | cloth flags in the wind, dusk lamps and braziers (torches), landable roofs and perches, a wind-driven voice |
+| `castleRuin` | a ruined castle on a sea cliff: curtain walls with battlements and breaches, round towers, a gatehouse, a roofless hall, the keep with banners | `cliffStep` | colliders on every wall and tower, cloth banners, braziers (torches), the keep a landable perch |
+| `observatory` | a summit observatory: a drum and silver dome, a second dome, a control building, a mast and a dish, red lamps | `flatten` | the dome, shutter and telescope as movers aimed at the celestial engine's sky target, a motor-driven voice (`recipe`) |
+| `viaduct` | a stone railway viaduct across a gorge between two tunnel portals, and a steam train on a PathFollower | `gorge` | train movers with colliders, chimney steam, a voice that rides the locomotive, pass-under arch gates |
+| `dam` | a concrete gravity dam on the down-valley rim of a reservoir basin, an open spillway chute, a stilling basin, the river below, intake towers, a valve house | `basin` | hull colliders, a landable crest, water ribbons, mist |
+| `oasis` | date palms round a spring pool, reeds, a well, goat-hair tents with rugs, a shade shelter, a fire pit | `basin` | swaying crowns as perches, dusk lamps (torches) |
+| `labyrinth` | a seeded hedge maze with an entrance, an exit, a fountain and an obelisk at its heart | `flatten` | instanced hedge blocks, one collider per run, a gate through the heart |
+| `fireball` | a bolide crossing the sky, its impact flash and a glowing scorched scar draped on the ground | none | movers on the event's clock, an emissive decal that cools through the glow, a voice on the head, a distance-delayed boom |
 
 Without its stamp (a debug spawn, or a site whose preset lists none) every recipe still builds:
 the bridge spans `span` metres across the heading on trestles, the strip is draped along the
 heading, the islands float over the ground, and the course runs `length` metres along the heading.
 
-Phase 3 adds hangars, a monastery, a castle, an observatory, a viaduct, a dam, a labyrinth and more
-as new recipes: a recipe is `build(context, read)` in `structure/recipes/`, registered by name in
-`recipes/index.js`. It fills the context's builders and its `out` record (turbines, socks, puffs,
-zones, surfaces, colliders, courses, wake, sway, audio point, radius) and adds gates with `context.addGate`;
-every generic feature below then works for it with no engine change.
+Phase 3 adds the recipes above from `monastery` on (presets 53-60) and more in later batches: a
+recipe is `build(context, read)` in `structure/recipes/`, registered by name in `recipes/index.js`. It
+fills the context's builders and its `out` record (turbines, socks, puffs, zones, surfaces, colliders,
+courses, wake, sway, audio point, radius, and the [Phase 3 recipe features](#phase-3-recipe-features):
+movers, an animate hook, steam, torches, blocks) and adds gates with `context.addGate`; every generic
+feature below then works for it with no engine change.
 
 ## Common params (every recipe)
 
@@ -70,7 +79,7 @@ every generic feature below then works for it with no engine change.
 | `sway` | m | 0..5 | 0.35 | sway amplitude for recipes without their own sway (tree tops and pennants swing with the wind in the vertex shader); the rope bridge uses `swayAmplitude` |
 | `gates` | array | | `[]` | extra gates in the site frame, see [Gates](#gates) |
 | `voice` | bool | | unset | `true` or `false` decides whether this entry plays `preset.audio` as its spawn voice; unset, the preset's first engine entry owns it, so a preset opens one voice |
-| `audioIntensity` | | `approach`, `wind`, `constant` | per recipe | how the voice's intensity is driven: the player's approach (spires), the wind speed over the rated wind (wind farm), or `audioLevel` (the others) |
+| `audioIntensity` | | `approach`, `wind`, `constant`, `recipe` | per recipe | how the voice's intensity is driven: the player's approach (spires), the wind speed over the rated wind (wind farm), the recipe's animate hook (`recipe`: the observatory's motors, the train's speed, the fireball's roar and fire), or `audioLevel` (the others) |
 | `audioLevel` | 0..1 | | 0.8 | the level for `constant` |
 
 ## windFarm
@@ -237,6 +246,145 @@ an event) and hands it to the engine as `out.challenge`; the engine registers it
 `ctx.game.systems.challenges` at create (`data.challengeKeys`) and unregisters it at dispose. The
 frames are visual only: a preset that wants solid frames adds its own collider boxes.
 
+## monastery
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `halls` | count | 0..5 | [2, 3] | lower halls clinging to the face below the main hall, each on a masonry buttress, reached by timber stairs |
+| `strings` | count | 0..40 | [10, 14] | prayer-flag strings from the pole and the roofs to posts along the edge and down to the lower halls |
+| `flags` | per string | 4..60 | [16, 26] | flags on each string, in the five colours in order (the cloth kind: they swing out downwind and ripple) |
+| `chorten` | bool | | true | a whitewashed chorten with a gilded spire |
+| `bell` | bool | | true | the bell pavilion |
+| `pines` | count | 0..30 | [4, 8] | pines round the plateau |
+| `drop`, `width` | m | 20..300, 80..800 | 90, 260 | free-standing only: the recipe raises its own basalt cliff |
+
+The butter lamps light themselves at dusk and the braziers wait for a dragon's breath; all are
+torches (ignitables). The roofs are landable perches. Pair it with `audioIntensity: 'wind'` and the
+`bells` recipe, and a `lightEffect` of warm glows at night (the cliffside monastery preset).
+
+## castleRuin
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `towers` | count | 4..9 | [5, 7] | round towers at the corners of the curtain wall; ruin topples some to stumps |
+| `radius` | m | 15..80 | [30, 40] | the bailey's radius |
+| `wallHeight` | m | 4..20 | [9, 12] | the curtain walls, with battlements |
+| `keepHeight` | m | 15..80 | [34, 42] | the keep on the cliff edge, its top a landable perch |
+| `ruin` | 0..0.9 | | 0.35 | breaches in the walls, fallen towers, missing merlons |
+| `banners` | bool | | true | banners on the keep and gatehouse (the cloth kind) |
+| `drop`, `width` | m | 20..300, 80..800 | 60, 300 | free-standing only |
+
+Every wall and tower is a collider; braziers on the gate, the keep and in the bailey are torches that
+only a dragon's breath lights.
+
+## observatory
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `radius` | m | 4..20 | [8, 10] | the main dome |
+| `drum` | m | 3..20 | [7, 9] | the drum's height under the dome |
+| `slewRate` | deg/s | 0.2..30 | 3 | how fast the dome and telescope turn (the telescope rises at 0.7 x this) |
+| `openSeconds` | s | 2..300 | 22 | the shutter's travel |
+
+Above night factor 0.45 the shutter opens (the voice's `clunk`), the dome turns its slit and the
+telescope rises to the target: the celestial engine's `skyTarget` (a comet, else a meteor radiant),
+else the moon more than about 12 degrees up, else a slow survey, kept between 12 and 70 degrees;
+below 0.25 it parks pointing up and closes. The voice level is the motors' work (`recipe` mode).
+Without a flatten stamp it stands on a stone plinth.
+
+## viaduct
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `span` | m | 10..60 | [20, 26] | the target arch spacing; the gap between the lips is divided evenly |
+| `deckWidth` | m | 3..14 | 6.4 | |
+| `coaches` | count | 0..6 | [2, 4] | behind the locomotive and its tender |
+| `speed` | m/s | 2..40 | [11, 15] | the train's speed |
+| `wait` | s | 0..600 | [35, 60] | the wait in each tunnel before it comes back |
+| `achievement` | `{ id, title }` or null | | null | awarded (once per spawn) by every arch's pass-under gate |
+| `length` | m | 60..1200 | 260 | free-standing only: the span across the heading, its deck 30 m over the ground |
+
+The line runs between the gorge's two anchor pads; the deck spans the lips (where the ground falls
+2 m below the deck) on semicircular arches over piers that batter out 1 in 30 toward their feet. Each
+pad has a tunnel portal (a stone headwall, a dark bore 26 m deep, a grassy cover with boulders and
+pines, a signal with a red lamp). The train's cars are movers with box colliders, posed on a
+`createPathFollower` ping-pong path whose ends lie a train's length beyond each portal, so it turns
+round out of sight; a car is hidden once it is 3 m past its half length inside a portal. The train
+is a pure function of flight time (the follower starts at time 0 from a seeded distance). The
+chimney puffs steam on the mist pool while it runs in the open, the voice rides the locomotive, and
+it `whistle`s as it comes out of a tunnel. Colliders: piers, abutments, the crown and two haunch
+steps of every arch (never below its soffit), the deck (landable), the portals (perches on their
+lintels) and their covers.
+
+## dam
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `spillway` | m | 8..120 | [26, 34] | the open spillway's width in the middle of the crest |
+| `freeboard` | m | 0.5..10 | 2.5 | the crest's height over the basin's rim |
+| `towers` | bool | | true | two intake towers in the lake with catwalks to the crest (on a basin) |
+| `height`, `length` | m | 10..200, 40..1200 | 36, 220 | free-standing only |
+
+The basin's frame runs down the valley. The wall stands on a straight line across it, just outside
+the farthest reach of the shoreline along the whole crest (so no lake water lies below the dam); the
+crest runs out each side until the valley side rises to it (at most 320 m), covers the berm's flat
+top, and the downstream face falls at 0.75 : 1 to the ground. The spillway lip sits 0.35 m under
+the lake, or 0.15 m over the rim crest beside it where that is higher (the lake brims just under it),
+with a bridge on piers over it, training walls down the chute, a stilling basin and a river ribbon
+220 m on down the valley. The resolved lake comes from `site.waters` (the preset's `waters`). Hull
+colliders per few columns of the wall (the crest landable), the bridge, the training walls, the
+basin walls, the towers and the valve house (perches).
+
+## oasis
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `palms` | count | 4..60 | [20, 30] | date palms round the shore (on dry ground only), plus young palms further out |
+| `tents` | count | 0..8 | [2, 4] | goat-hair tents beside the camp, each with a rug |
+| `radius` | m | 15..400 | 60 | free-standing only: the hollow's diameter |
+
+The palms follow the basin's lobed shoreline (`basinReach`), their trunks curving out over the water
+and their fronds swaying more toward the tips; each trunk is a capsule collider with a perch on its
+crown. The camp (well, tents, shelter, fire pit and two lamp posts) stands together on one side; the
+fire and the lamps are torches lit at dusk. The camel caravan is the preset's fauna column.
+
+## labyrinth
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `cells` | count | 7..41 | [17, 21] | cells a side (made odd, so there is a middle cell) |
+| `hedge` | m | 1..12 | 3.4 | the hedges' height |
+| `thickness` | m | 0.4..5 | 1.5 | |
+| `achievement` | `{ id, title }` or null | | null | awarded by the gate through the heart |
+| `size` | m | 30..600 | 140 | free-standing only (on a flatten stamp the maze fills the smaller side of the strip) |
+
+A depth-first search from the middle cell, with the spawn's seeded generator, carves a perfect maze;
+a clearing of 3 x 3 cells opens at the heart, and the entrance and the exit open on the near and far
+sides. Consecutive wall edges merge into runs: one instanced block (the engine's block pool) and one
+foliage box collider each. The heart holds a fountain and an obelisk (a perch); its gate spans the
+clearing up to 6 m over the hedges.
+
+## fireball
+
+| param | unit | range | default | notes |
+| --- | --- | --- | --- | --- |
+| `delay` | s | 0..120 | 4 | from the activation to the bolide's appearance |
+| `fall` | s | 1..60 | 7 | its flight down to the impact |
+| `altitude` | m | 1000..40000 | [11000, 14000] | where it appears, over the impact point |
+| `angle` | deg | 5..80 | [24, 38] | its descent above the horizon, from a seeded bearing |
+| `head` | m | 2..400 | 38 | the head's radius; the tail runs about 50 heads back |
+| `scar` | m | 5..300 | [34, 48] | the scar's radius (ejecta rays reach about 2-3 radii) |
+| `flash` | m | 10..2000 | 160 | the flash sphere's largest radius |
+| `cool` | s | 5..1200 | 120 | the scar's embers fall to a third of their glow in this long (never below 10 %) |
+
+The movers run on the event's own clock (from `params.startTime`): nothing before `delay`; the bolide
+down its line, growing, the voice on its head, level 0.15 rising to 1 (`recipe` mode); at the impact
+the flash swells over 0.18 s and is gone at 2.2 s, the scar (a `decal` mover draped on the ground, its
+vertex alpha the embers' glow) spreads in 0.6 s, and `boom` is due when the sound has crossed the
+distance to the player at 343 m/s (dropped, not played late, if the movers were hidden past it by
+more than 2 s). The scar's embers cool through the instance glow (`state.glow`). There are no
+colliders and no ground edits. A preset's other parts that should start at the impact set their own
+start time to `delay + fall` (the emitter's `startDelay`).
 ## Generic features
 
 ### Terrain stamps
@@ -379,6 +527,57 @@ and crystal glow), `sway` (the sway amplitude), `rotorSpeed` (the turbine speed)
 voice level), all 1 by default. `engine.setParam(instance, name, value)` sets the same numbers and
 returns whether the name is known.
 
+## Phase 3 recipe features
+
+Optional fields of a recipe's `out` record and context; a recipe that fills none of them builds
+exactly as a Phase 2 recipe does.
+
+- **Cloth** (`context.cloth`, a sixth geometry kind, shown at near and mid): flags and banners. Each
+  vertex's sway value is its hang (metres from the edge it is tied to); the material swings the cloth
+  out downwind about that edge by an angle growing with the wind speed (0.11 rad per m/s, at most 1.25)
+  and ripples it, faster in a stronger wind and harder in turbulence, from the wind the structure
+  shows (`data.clothWind`: unit direction, speed, turbulence). Helpers: `addFlagString` and
+  `addBanner` in `structure/heritage.js`.
+- **Movers** (`context.addMover({ name, kind, collider })`, returning `{ builder, index }`): parts with
+  their own geometry (built in the mover's frame, its origin the pose origin, forward -z) on pooled
+  meshes of the `body`, `glow` or `decal` material (64 of each kind at once). The recipe's animate
+  hook writes each pose into `state.poses[index * 8 ...]`: local x, y, z, yaw (a compass heading in
+  radians), pitch (nose up), roll, scale and visible. A `collider` (`{ center, halfExtents, tags }`, a
+  box in the mover's frame) follows its pose through `setPose`, only when it moved. Movers show and
+  animate at the near and mid tiers and hide at far; they cast shadows at near (body kind).
+- **The animate hook** (`out.animate(state, env)`, with `out.animateState`): one module-level
+  function per recipe, never a per-instance closure (closures deoptimise each other and the baseline
+  code then boxes every double); its instance's numbers arrive as `state.custom = out.animateState`.
+  It writes `state.poses`, `state.steam`, `state.level[0]` (the voice level in `recipe` mode),
+  `state.glow[0]` (a multiplier on the instance's emissive glow) and `state.voice` ([x, y, z, 1]: the
+  voice moves to that local point at the audio rate; 0 in [3] keeps it at the audio point). It reads
+  `env.clock` ([time, step, night factor, sun elevation, shown]), `env.wind` (the wind the structure
+  shows), `env.anchor`, `env.player`, `env.moonDirection`, `env.sunDirection`, `env.skyTarget(out)`
+  (the celestial engine's sky target: 1 comet, 2 radiant, 0 none) and `env.trigger(name, options)`
+  (a voice trigger: event work). It runs once at create (step 0) and every frame while the movers
+  show, and must not allocate (tools/lab/presets-51-60.mjs measures it).
+- **Steam** (`out.steam`, a count): dynamic puffs on the shared mist pool, hidden until the hook
+  sizes them through `state.steam[i * 4 ...]` (local x, y, z, radius; 0 hides one). The viaduct's
+  chimney.
+- **Torches** (`out.torches: [{ x, y, z, size, autoLight }]`): flames on a shared instanced pool
+  (512), flickering in their own phase and brighter at night. Each is an ignitable in the game's
+  ignition service (`ctx.game.ignition`, ids `${prefix}:torch<n>` in `instance.ignitableIds`) that a
+  dragon's breath lights; `autoLight` torches light through the service above night factor 0.55 and go
+  out below 0.2 (a dusk lamp a flame lit goes out at dawn too). Dispose removes every ignitable.
+  `addTorchPost` in heritage.js builds a post and returns the flame's height.
+- **Blocks** (`out.blocks: [{ x, y, z, sizeX, sizeY, sizeZ, yaw, paint }]`): boxes on a shared
+  instanced pool (4096) with instance colours, their base at `y`, `sizeX` across and `sizeZ` along
+  the compass `yaw`; they show where the body shows and are rewritten only when the curvature drop
+  moves by 0.25 m or the tier changes. The labyrinth's hedges.
+- **Emissive decals**: the decal material glows where a vertex's alpha (its paint's emissive gain)
+  says, times the instance glow; the Phase 2 decals paint 0 and stay unlit. The fireball's embers.
+- **Heritage props** (`structure/heritage.js`): `createSiteFrame`, `cliffSiteFrame` (the frame on a
+  cliffStep's lip, or a raised basalt cliff without one), `outwardQuad`, `addWhiteHall`,
+  `addHipRoof`, `addBattlements`, `addArchRing`, `addFlagString`, `addBanner`, `addTorchPost` and the
+  `HERITAGE` colours.
+
+`stats()` also returns `movers`, `flames`, `litFlames` and `blocks`.
+
 ## Events
 
 | event | kind | payload |
@@ -440,4 +639,9 @@ loading fade), so GPU memory returns to its level before the create
 - `node tools/smoke-test.mjs --url <dev server>/v2/ --query test=sites --steps-file
   tools/steps/engine-structure-sites.json`: the recipes on the terrain fixtures' real stamped sites
   (`?test=sites`, dev builds only).
+- `node --expose-gc tools/lab/presets-51-60.mjs [--only <ids>]`: the Phase 3 batch 6 recipes
+  (monastery, castle ruin, observatory, viaduct, dam, oasis, labyrinth, fireball) on their real
+  stamped sites and free-standing: colliders, perches, torches, movers and their colliders, the
+  train's cycle and whistle, the dam's line outside the shoreline, the maze, the fireball's timeline,
+  the cloth in the wind, memory and allocation.
 - The test presets are in `src/dev/structureTestKit.js` (dev only, never in a production build).

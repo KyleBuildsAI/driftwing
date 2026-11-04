@@ -144,6 +144,11 @@ folds them with an eclipse or a fireball flash into the instance's one modifier.
   scattered in front of the moon, and it turns black at totality. The rainbow volume is an instanced
   sphere seen from inside and out: each fragment lights the chord of its view ray through the mist
   with the bow bands, which it shares with the clouds' optics in `cloudShading.js`.
+- **Sky target (Phase 3).** `engine.skyTarget(out)` writes the unit world direction of the brightest
+  live sky target into `out` (a Float64Array(3)) and returns 1 for a comet, 2 for a meteor shower's
+  radiant (turning with the stars) or 0 for none; only instances that have faded in count, and a
+  comet wins over a radiant. Allocation-free. The structure engine hands it to animate hooks as
+  `env.skyTarget` (the mountaintop observatory's telescope points at it).
 - **Memory.** Every mesh is built once in `init()`; an instance only takes slots in them. So
   `dispose()` returns GPU memory exactly, and removes the instance's sky modifier, its voice, its
   meteors and (after the last instance) the cloud optics. The celestial engine registers no wind
