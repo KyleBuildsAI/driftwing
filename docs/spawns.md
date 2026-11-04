@@ -2233,7 +2233,7 @@ their own tails while debris streaks across the sky.
 
 #### 97. Migration convergence
 
-Butterflies, a V of geese and a caribou column all meet in one valley, the air hazy with the dust and
+Butterflies, a V of geese and a bison herd all meet in one valley, the air hazy with the dust and
 fluff they stir up.
 [src/spawns/presets/migrationConvergence.js](../src/spawns/presets/migrationConvergence.js)
 
@@ -2241,9 +2241,8 @@ fluff they stir up.
 - **Anchor:** `seek: 'valley'` within 2.5 km: the deepest valley floor on dry ground (never a beach);
   the members stand around it.
 - **Combo:** preconditions meadows or pine, day or golden, clear or clearing; members
-  `butterflyMigration` (the anchor, optional), `geeseFormation` (500 m on), `caribouMigration`
-  (700 m at 70 degrees, 10 s later, optional); exclusive. The optional members belong to presets 51
-  and 52: until they are in the build the combo starts without them.
+  `butterflyMigration` (51, the anchor), `geeseFormation` (15, 500 m on), `herdStampede` (49, 700 m
+  at 70 degrees, 10 s later: the grazing bison, which stampede when buzzed); exclusive.
 - **Engines:** `emitter` (3000 motes of warm dust and seed fluff over a 650 m disc of the valley floor,
   drifting on the real wind; owns the voice).
 - **Filters:** meadows or pine; day or golden; clear or clearing; over land; player below 3 km;

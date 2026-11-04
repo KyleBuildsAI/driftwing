@@ -1260,8 +1260,9 @@ Nothing above changed meaning; every existing preset behaves as before.
 
 - **Combo members** may carry `optional: true`: a member naming a preset the build lacks is accepted
   by `validatePresets` and dropped by the director when it resolves its combos (the log, `members`
-  and `comboStarted` then list only the members it has). The migration convergence (97) co-spawns
-  the butterflies (51) and the caribou (52) this way until their batch is merged.
+  and `comboStarted` then list only the members it has). The migration convergence (97) used it for
+  the butterflies (51) and its herd while their batches were apart; since the wave 3 integration its
+  members are the real butterflies (51), geese (15) and bison herd (49), none optional.
 - **A combo with preconditions may name no member** (`members: []`): its own engines carry it at the
   site, landmark or sky its preconditions bring (93, 96, 100). A combo with neither members nor
   preconditions is still refused.

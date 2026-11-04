@@ -5,9 +5,8 @@
 // The game's own presets are held out of the SpawnManager for the whole run (spawns.debug.
 // holdGamePresets: the director's own events never move a baseline); each check puts back only what
 // it shows: the preset, a combo's members, and the site presets its place needs (the site feed then
-// builds those sites as the craft nears them). The butterfly and caribou presets (51, 52) of the
-// migration convergence belong to another batch: until they are in the build, dev fixtures of those
-// ids stand in, given to a restarted director, so the combo's optional members can be proven.
+// builds those sites as the craft nears them). The migration convergence's members are the real
+// butterfly, geese and bison herd presets (51, 15, 49).
 //
 // Every combo is staged through the F9 debugger's own path (comboStaging.js: prepareCombo, then
 // forceCombo after the baselines), so the owner's manual check is the one proven here. Per preset:
@@ -16,7 +15,7 @@
 //     ridge soft-crashes with 'structure strike' and never passes through, discovery;
 //   - every combo: comboStarted with its members in order, each member live with the combo as its
 //     parent, and its own behaviour (the aurora's strength, the volcano's lightning, the eclipse's
-//     totality over the stones, the comet's fragments and debris, the valley and the late caribou,
+//     totality over the stones, the comet's fragments and debris, the valley and the late bison herd,
 //     the arcs and the spires' resonance, the beacon chain over several lighthouses);
 //   - the midnight sun: the sun above the horizon at midnight at full weight, and below it again once
 //     the forced night is released;
@@ -27,43 +26,6 @@ import { createBrowserHelpers } from './structureTestKit.js';
 import { createDisposeCheck, frames, holdConditions, wait } from './spawnCheckKit.js';
 import { COMBO_STAGING, forceCombo, prepareCombo } from './comboStaging.js';
 import { PRESETS } from '../spawns/presets/index.js';
-
-const FIXTURE_CALLOUTS = Object.freeze(['{name} {distance} {direction}.', '{name} ahead, {eta}.', 'Dev fixture: {name}.']);
-
-/** Dev fixtures of the migration convergence's optional members, used only while their presets are missing. */
-function memberFixture(id) {
-  const base = {
-    id,
-    kind: 'event',
-    rarity: 'uncommon',
-    heavy: false,
-    candidates: Object.freeze({ cellSize: 9000, bucketSeconds: 900, chance: 0.05 }),
-    filters: Object.freeze({ biomes: null, timeOfDay: null, altitude: null, weather: null }),
-    lod: Object.freeze({ near: 2000, mid: 5000, far: 10000 }),
-    lure: null,
-    wind: Object.freeze([]),
-    audio: null,
-    discovery: Object.freeze({ radius: 1500, requireInView: true }),
-    callouts: FIXTURE_CALLOUTS,
-    lifetime: Object.freeze({ duration: Object.freeze([300, 420]), despawn: Object.freeze({ distance: 9000, hysteresis: 2000, outOfViewSeconds: 20 }) }),
-  };
-  if (id === 'butterflyMigration') {
-    return Object.freeze({
-      ...base,
-      name: 'Butterfly migration (dev fixture)',
-      category: 'wildlife',
-      engines: Object.freeze([Object.freeze({ engine: 'lightEffect', params: Object.freeze({ swarm: Object.freeze({ count: 1200, radius: 260, height: Object.freeze([2, 30]), size: Object.freeze([0.6, 1]), colors: Object.freeze([0xffb347, 0xff8c1a, 0xfff07a]), intensity: 3, blink: Object.freeze({ period: Object.freeze([3, 6]), duty: 0.9 }), sync: 0, wander: Object.freeze({ radius: 8, speed: 0.3, vertical: 0.6 }) }), visibility: Object.freeze({ day: 1, night: 1 }) }) })]),
-      journal: Object.freeze({ title: 'Butterfly migration (dev fixture)', description: 'A dev fixture until the batch 51-60 presets are merged.' }),
-    });
-  }
-  return Object.freeze({
-    ...base,
-    name: 'Caribou migration (dev fixture)',
-    category: 'wildlife',
-    engines: Object.freeze([Object.freeze({ engine: 'fauna', params: Object.freeze({ species: 'caribou', behavior: 'herd', count: 18 }) })]),
-    journal: Object.freeze({ title: 'Caribou migration (dev fixture)', description: 'A dev fixture until the batch 51-60 presets are merged.' }),
-  });
-}
 
 /** A sky framing aimed at a comet looks this much (direction y) above its head, at its tail. */
 const SKY_FRAME_LIFT = 0.12;
@@ -137,16 +99,15 @@ export function installPresetChecks91(game) {
   const timeFrozenBefore = ctx.settings.get('timeFrozen');
   /** The open check of each preset: { presetId, family, baseline, comboId, mainId, prepared }. */
   const open = new Map();
-  const fixtures = [];
 
   const ground = (x, z) => Math.max(ctx.world.groundHeight(x, z), ctx.world.WATER_LEVEL);
 
-  /** The preset, a combo's members this build has (or the fixtures stand in for) and the sites its place needs. */
+  /** The preset, a combo's members and the sites its place needs. */
   function familyOf(presetId) {
     const preset = presetById.get(presetId) ?? manager.getPreset(presetId);
     const family = [preset];
     for (const member of preset.combo ? preset.combo.members : []) {
-      const memberPreset = presetById.get(member.presetId) ?? fixtures.find((fixture) => fixture.id === member.presetId) ?? null;
+      const memberPreset = presetById.get(member.presetId) ?? null;
       if (memberPreset && !family.includes(memberPreset)) family.push(memberPreset);
     }
     const staging = COMBO_STAGING[presetId];
@@ -162,7 +123,7 @@ export function installPresetChecks91(game) {
   }
 
   function removeFamily(family) {
-    for (const preset of family) if (!fixtures.includes(preset)) manager.removePreset(preset.id);
+    for (const preset of family) manager.removePreset(preset.id);
   }
 
   /** The live spawns of a combo (its own and its members'), by parent. */
@@ -177,17 +138,11 @@ export function installPresetChecks91(game) {
   const api = {
     results: helpers.results,
 
-    /** Holds the game's presets and puts in the member fixtures this build lacks (a restarted director knows them). */
+    /** Holds the game's presets (every combo member is a real preset of the build). */
     setup() {
       system.debug.holdGamePresets();
-      for (const id of ['butterflyMigration', 'caribouMigration']) {
-        if (presetById.has(id)) continue;
-        const fixture = memberFixture(id);
-        system.debug.addPreset(fixture);
-        fixtures.push(fixture);
-      }
-      if (fixtures.length > 0) system.debug.restartSpawns({ extraPresets: fixtures });
-      return check('setup: game presets held, member fixtures in place', Boolean(system.director), { fixtures: fixtures.map((fixture) => fixture.id), tracked: dispose.tracker !== null });
+      const missing = PRESETS.filter((preset) => preset.combo).flatMap((preset) => preset.combo.members).filter((member) => !presetById.has(member.presetId)).map((member) => member.presetId);
+      return check('setup: game presets held, every combo member in the build', Boolean(system.director) && missing.length === 0, { missing, tracked: dispose.tracker !== null });
     },
 
     /** The time of day (sun elevation, or a dayTime) and the regional weather, held. */
@@ -323,7 +278,7 @@ export function installPresetChecks91(game) {
       const spawns = comboSpawns(comboId);
       const main = spawns.find((spawn) => spawn.presetId === presetId) ?? null;
       record.mainId = main ? main.id : null;
-      const expected = preset.combo.members.filter((member) => manager.getPreset(member.presetId)).map((member) => member.presetId);
+      const expected = preset.combo.members.map((member) => member.presetId);
       return check(`${presetId}: staged at ${prepared.place.label} and forced; comboStarted lists its members in order`,
         Boolean(main) && Boolean(started) && JSON.stringify(started.members) === JSON.stringify(expected),
         { id: comboId, members: started ? started.members : null, expected, live: spawns.map((spawn) => spawn.presetId), view: prepared.view, woke: prepared.woke, nightsSkipped: prepared.nightsSkipped });
@@ -333,7 +288,7 @@ export function installPresetChecks91(game) {
     async members(presetId, { wait: waitSeconds = 20 } = {}) {
       const record = open.get(presetId);
       const preset = presetById.get(presetId);
-      const expected = preset.combo.members.filter((member) => manager.getPreset(member.presetId)).map((member) => member.presetId);
+      const expected = preset.combo.members.map((member) => member.presetId);
       const started = performance.now();
       let live = [];
       while (performance.now() - started < waitSeconds * 1000) {
@@ -568,7 +523,6 @@ export function installPresetChecks91(game) {
     /** The summary check; gives the presets, the weather, the clock and the renderer's geometry manager back. */
     finish() {
       dispose.restore();
-      for (const fixture of fixtures) manager.removePreset(fixture.id);
       system.debug.releaseGamePresets();
       ctx.systems.weather.forceState(null);
       ctx.settings.set('timeFrozen', timeFrozenBefore);

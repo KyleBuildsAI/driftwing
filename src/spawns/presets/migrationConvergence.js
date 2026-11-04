@@ -1,11 +1,11 @@
 // Preset 97: Migration convergence (legendary combo, day, in a valley). Three migrations meet in one
 // valley: the combo seeks the deepest valley floor within 2.5 km (anchor seek 'valley') and the director
 // places its members around it (contract i.3): the butterfly migration cloud on the valley floor (the
-// anchor), a V of geese 500 m on, and the caribou column 700 m off to the side ten seconds later. Its own
+// anchor, preset 51), a V of geese 500 m on (preset 15), and the bison herd (preset 49) 700 m off to
+// the side ten seconds later, grazing across the valley floor until a low pass sets it running. Its own
 // part is the haze the gathering raises: warm dust and seed fluff hanging over the valley floor in the
-// low light, drifting on the real wind (emitter), with the rush of many wings (murmuration voice). The
-// butterflies (51) and the caribou (52) are another batch's presets: they are optional members, so the
-// combo starts with what this build has. Docs: docs/engines/emitter.md, fauna.md.
+// low light, drifting on the real wind (emitter), with the rush of many wings (murmuration voice).
+// Docs: docs/engines/emitter.md, fauna.md.
 export default Object.freeze({
   id: 'migrationConvergence',
   name: 'Migration convergence',
@@ -57,7 +57,7 @@ export default Object.freeze({
   audio: Object.freeze({ recipe: 'murmuration', params: Object.freeze({ refDistance: 150 }) }),
   journal: Object.freeze({
     title: 'Migration convergence',
-    description: 'Butterflies, geese and a caribou column all meeting in one valley, the air hazy with the dust and fluff they stirred up.',
+    description: 'Butterflies, geese and a bison herd all meeting in one valley, the air hazy with the dust and fluff they stirred up.',
   }),
   discovery: Object.freeze({ radius: 3000, requireInView: true }),
   callouts: Object.freeze([
@@ -75,9 +75,9 @@ export default Object.freeze({
       weather: Object.freeze(['clear', 'clearing']),
     }),
     members: Object.freeze([
-      Object.freeze({ presetId: 'butterflyMigration', role: 'anchor', optional: true }),
+      Object.freeze({ presetId: 'butterflyMigration', role: 'anchor' }),
       Object.freeze({ presetId: 'geeseFormation', place: Object.freeze({ bearing: 0, distance: 500, jitter: 150 }) }),
-      Object.freeze({ presetId: 'caribouMigration', place: Object.freeze({ bearing: 70, distance: 700, jitter: 200 }), delay: 10, optional: true }),
+      Object.freeze({ presetId: 'herdStampede', place: Object.freeze({ bearing: 70, distance: 700, jitter: 200 }), delay: 10 }),
     ]),
     exclusive: true,
   }),
