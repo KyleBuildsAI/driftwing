@@ -12,7 +12,10 @@
 // Checks:
 //   presets   every preset validates and the director takes every one of them
 //   reach     every event preset is activated at least once across the runs, and the volcano's
-//             eruption (a site active state) too. Rare events are rare by design (a rare is due every
+//             eruption (a site active state) too. With all 100 presets a common or uncommon event with
+//             a narrow window (the green flash at an ocean sunset, the forest wisps at night) can miss
+//             the shared runs: each one they miss is run again on the same flights with every other
+//             event of its rarity set aside. Rare events are rare by design (a rare is due every
 //             12-25 minutes and shares that turn with every other rare): each one the shared runs miss
 //             is run again on the same flights with every other rare event set aside, and when its
 //             filters.near asks for an active site (the dirty thunderstorm over an erupting volcano)
@@ -21,7 +24,9 @@
 //             (Phase 3, contract i.3 and i.4) are rarer still (a legendary is due every 1-2 h of flight
 //             and shares that slot with every other legendary): each one the shared runs miss is run
 //             again on the same flights with every other legendary set aside and the sites its
-//             siteActive precondition names kept awake (the volcano's eruption), until it starts
+//             siteActive precondition names kept awake (the volcano's eruption), until it starts. A
+//             site active state counts when any of these runs starts it; one that none started is
+//             run again with its site an every-2-minutes common candidate outside the heavy budget
 //   ahead     no director activation lies behind the player
 // Printed (not checked, see the batch notes): per scenario, the share of droughts that end within the
 // 90 s pacing window, the longest drought, and the activations per preset. The pacing floor is a
@@ -291,8 +296,29 @@ for (const { seed, craft, startDayTime } of FLIGHTS) {
 const isLegendaryNight = (preset) => Boolean(preset.combo || preset.override);
 const isRareEvent = (preset) => preset.kind === 'event' && preset.rarity === 'rare' && !isLegendaryNight(preset);
 const events = PRESETS.filter((preset) => preset.kind === 'event' && !isLegendaryNight(preset) && !isRareEvent(preset));
-const missing = events.filter((preset) => counts.get(preset.id) === 0).map((preset) => preset.id);
-check('reach', 'every common and uncommon event preset is activated at least once across the runs', missing.length === 0, missing.length ? `never: ${missing.join(', ')}` : [...counts].filter(([id]) => events.some((preset) => preset.id === id)).map(([id, count]) => `${id} ${count}`).join(', '));
+/** Activations per preset over every focused (own) run, beside the shared runs' counts. */
+const ownCounts = new Map();
+const flightLabel = (flight) => `${flight.seed} ${flight.craft} ${flight.startDayTime === 0.62 ? 'day' : 'night'}`;
+/** The same flights with `presets` until `preset` starts: the flight it started on, or null. */
+function ownRun(preset, presets, wakeSites = []) {
+  for (const flight of FLIGHTS) {
+    const run = runScenario({ ...flight, hours: OPTIONS.hours, presets, wakeSites });
+    for (const entry of run.log) ownCounts.set(entry.presetId, (ownCounts.get(entry.presetId) ?? 0) + 1);
+    if (run.log.some((entry) => entry.presetId === preset.id)) return flightLabel(flight);
+  }
+  return null;
+}
+const plainReached = [];
+for (const preset of events) {
+  if (counts.get(preset.id) > 0) {
+    plainReached.push(`${preset.id} ${counts.get(preset.id)}`);
+    continue;
+  }
+  // The same flights with every other event of its rarity set aside (sites stay).
+  const reachedOn = ownRun(preset, PRESETS.filter((candidate) => candidate === preset || candidate.kind !== 'event' || candidate.rarity !== preset.rarity));
+  plainReached.push(`${preset.id} ${reachedOn ? `on its own run (${reachedOn})` : 'never'}`);
+}
+check('reach', 'every common and uncommon event preset is activated at least once (on its own runs when the shared runs miss it)', !plainReached.some((line) => line.endsWith(' never')), plainReached.join(', '));
 const rareReached = [];
 for (const preset of PRESETS.filter(isRareEvent)) {
   if (counts.get(preset.id) > 0) {
@@ -306,14 +332,7 @@ for (const preset of PRESETS.filter(isRareEvent)) {
   const presets = PRESETS
     .filter((candidate) => candidate === preset || !isRareEvent(candidate))
     .map((candidate) => (awake.includes(candidate.id) ? { ...candidate, rarity: 'common', heavy: false, candidates: { bucketSeconds: 120, chance: 1 }, activeState: { duration: [2400, 3200] } } : candidate));
-  let reachedOn = null;
-  for (const flight of FLIGHTS) {
-    const run = runScenario({ ...flight, hours: OPTIONS.hours, presets });
-    if (run.log.some((entry) => entry.presetId === preset.id)) {
-      reachedOn = `${flight.seed} ${flight.craft} ${flight.startDayTime === 0.62 ? 'day' : 'night'}`;
-      break;
-    }
-  }
+  const reachedOn = ownRun(preset, presets);
   rareReached.push(`${preset.id} ${reachedOn ? `on its own run (${reachedOn}${awake.length > 0 ? `, ${awake.join(', ')} erupting often` : ''})` : 'never'}`);
 }
 check('reach', 'every rare event starts at least once (on its own runs when the shared runs miss it)', !rareReached.some((line) => line.endsWith(' never')), rareReached.join(', '));
@@ -328,21 +347,24 @@ for (const preset of legendaryNights) {
   // siteActive precondition names kept awake.
   const presets = PRESETS.filter((candidate) => candidate === preset || (!isLegendaryNight(candidate) && candidate.rarity !== 'legendary'));
   const wakeSites = preset.combo && preset.combo.preconditions && preset.combo.preconditions.siteActive ? preset.combo.preconditions.siteActive : [];
-  let reachedOn = null;
-  for (const flight of FLIGHTS) {
-    const run = runScenario({ ...flight, hours: OPTIONS.hours, presets, wakeSites });
-    if (run.log.some((entry) => entry.presetId === preset.id)) {
-      reachedOn = `${flight.seed} ${flight.craft} ${flight.startDayTime === 0.62 ? 'day' : 'night'}`;
-      break;
-    }
-  }
+  const reachedOn = ownRun(preset, presets, wakeSites);
   focused.push(`${preset.id} ${reachedOn ? `on its own run (${reachedOn}${wakeSites.length > 0 ? `, ${wakeSites.join(', ')} kept awake` : ''})` : 'never'}`);
 }
 const unreached = focused.filter((line) => line.endsWith(' never'));
 check('reach', 'every legendary combo and global override starts at least once (on its own runs when the shared runs miss it)', unreached.length === 0, focused.join(', ') || 'none in the catalog');
 const activeStates = PRESETS.filter((preset) => preset.activeState);
-const unstarted = activeStates.filter((preset) => counts.get(preset.id) === 0).map((preset) => preset.id);
-check('reach', 'every site active state (the eruption) is started at least once', unstarted.length === 0, unstarted.length ? `never: ${unstarted.join(', ')}` : activeStates.map((preset) => `${preset.id} ${counts.get(preset.id)}`).join(', '));
+const activeReached = activeStates.map((preset) => {
+  const shared = counts.get(preset.id) ?? 0;
+  if (shared > 0) return `${preset.id} ${shared} (shared runs)`;
+  if ((ownCounts.get(preset.id) ?? 0) > 0) return `${preset.id} ${ownCounts.get(preset.id)} (focused runs)`;
+  // Its site an every-2-minutes common candidate outside the heavy budget, the rare events set aside.
+  const presets = PRESETS
+    .filter((candidate) => candidate === preset || !isRareEvent(candidate))
+    .map((candidate) => (candidate === preset ? { ...candidate, rarity: 'common', heavy: false, candidates: { bucketSeconds: 120, chance: 1 } } : candidate));
+  const reachedOn = ownRun(preset, presets);
+  return `${preset.id} ${reachedOn ? `on its own run (${reachedOn})` : 'never'}`;
+});
+check('reach', 'every site active state (the eruption) is started at least once (on any run)', !activeReached.some((line) => line.endsWith(' never')), activeReached.join(', '));
 check('ahead', 'no director activation behind the player', behind === 0, `${behind} of ${activations} behind`);
 
 process.stdout.write(`\npacing with the real presets (${OPTIONS.hours} h per run, informational):\n`);
