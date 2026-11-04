@@ -12,7 +12,7 @@
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
 //     [--presets real | --presets tornado,comet] [--leak-cycles N] [--parts fixture,special,landmarks,structures]
 //
-// The terrain test runs on one seed (the first of --seeds; by default P2-TERRAIN, or TERRAIN-REAL-8
+// The terrain test runs on one seed (the first of --seeds; by default P2-TERRAIN, or TERRAIN-ALL-35
 // with --presets real, a world with every real stamp type near its spawn) in the late
 // morning, and afterwards the runner flies its camera tour: one screenshot per stamp type from the
 // air (stamp-<type>.png), with the stamp paint in view. --presets real runs it on the game's own
@@ -28,9 +28,9 @@
 // The soak (--test soak: /v2/?test=1&testPlan=soak) is the flight test as a 10-minute run with the event
 // director live: 5 seeds (SOAK-1..5 unless --seeds), one craft per seed, both views, 60 s each.
 //
-// The spawns test (/v2/?test=spawns) force-spawns each of the 30 presets ahead of the craft on one seed
-// (the first of --seeds, by default TERRAIN-REAL-8, whose spawn has a real site of every stamped preset
-// in reach), and the runner takes one screenshot per preset when the page asks for it
+// The spawns test (/v2/?test=spawns) force-spawns each of the 100 presets ahead of the craft on one seed
+// (the first of --seeds, by default TERRAIN-REAL-8, with real sites of most stamped presets in reach; a
+// scenario without one falls back to the ground or water it needs), and the runner takes one screenshot per preset when the page asks for it
 // (spawn-<nn>-<preset>.png). --presets a,b,c shows only those presets; --leak-cycles N runs N held
 // creates and disposes per preset in its leak check instead of 3 (a longer heap trend).
 //
@@ -97,14 +97,18 @@ const EXPECTED_BACKEND = Object.freeze({ webgpu: 'WebGPU', webgl: 'WebGL2' });
 const TERRAIN_SEED = 'P2-TERRAIN';
 /**
  * The default world of --presets real: every stamp type the game's own site presets use (the volcano's
- * cone included, a rare site) lies within the terrain test's 40 km search radius of its spawn.
+ * cone, the tidal bore's estuary, the giant and the atoll included, all rare) lies within the terrain
+ * test's 40 km search radius of its spawn. With all 100 presets no TERRAIN-REAL-n seed holds every
+ * type any more; TERRAIN-ALL-35 was found by scanning TERRAIN-ALL-1.. for one that does.
  */
-const REAL_TERRAIN_SEED = 'TERRAIN-REAL-8';
+const REAL_TERRAIN_SEED = 'TERRAIN-ALL-35';
+/** The spawns test's default world (from Phase 2 on): real sites near its spawn, and open water. */
+const SPAWNS_REAL_SEED = 'TERRAIN-REAL-8';
 const TERRAIN_DAY_TIME = '0.42';
 /** The determinism test's default world. */
 const DETERMINISM_SEED = 'DETERMINISM-1';
 /** The spawns test's default world: a real site of every stamped preset near its spawn, and open water. */
-const SPAWNS_SEED = REAL_TERRAIN_SEED;
+const SPAWNS_SEED = SPAWNS_REAL_SEED;
 /** The spawns test asks for screenshots: the runner polls this often while it runs. */
 const SHOT_POLL_MS = 400;
 /** The collision test's default world. */
