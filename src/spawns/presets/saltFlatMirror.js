@@ -1,8 +1,9 @@
 // Preset 40: Salt flat mirror lake (uncommon site). A dead-flat white salt pan (a wide, shallow basin
 // stamp painted salt, inside a salt-white region overlay) under a thin film of still water that
-// mirrors the whole sky: clouds, the sunset and the stars lie at your feet, and a craft flying low
-// flies with its own reflection. Rows of harvested salt cones stand at the water's edge. A faint
-// breeze. The mirror is the water material's budgeted sky reflection (no extra render pass). Docs:
+// mirrors the sky: its colours, the sunset glow and the sun's glint lie at your feet. Rows of
+// harvested salt cones stand at the water's edge. A faint breeze. The mirror is the water material's
+// budgeted sky reflection (the sky dome's radiance, no extra render pass: clouds, stars and the craft
+// are not mirrored). Docs:
 // docs/engines/structure.md (the 'saltPiles' recipe); the film: src/world/waters.js (mirror),
 // src/render/waterMaterial.js.
 export default Object.freeze({
@@ -40,7 +41,7 @@ export default Object.freeze({
   discovery: { radius: 3500, requireInView: true },
   callouts: [
     'Salt flat {direction}, {distance} off. The water on it is a perfect mirror.',
-    'Mirror lake {direction}, {distance} out. Fly low and watch your reflection.',
+    'Mirror lake {direction}, {distance} out. Fly low over it and the sky lies below you.',
     'The {name} is about {eta} away, {direction}. It is best at sunset or under the stars.',
   ],
   lifetime: { duration: null, despawn: { distance: 14000, hysteresis: 3000, outOfViewSeconds: 20 } },

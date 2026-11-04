@@ -958,9 +958,9 @@ thermal over them.
 
 #### 40. Salt flat mirror lake
 
-A dead-flat white salt pan under a thin film of still water that mirrors the whole sky: clouds, the
-sunset and the stars lie at your feet, and a craft flying low flies with its own reflection. Rows of
-harvested salt cones stand at the water's edge.
+A dead-flat white salt pan under a thin film of still water that mirrors the sky: its colours, the
+sunset glow and the sun's glint lie at your feet. Rows of harvested salt cones stand at the water's
+edge.
 [src/spawns/presets/saltFlatMirror.js](../src/spawns/presets/saltFlatMirror.js)
 
 - **Kind:** site, uncommon.
@@ -968,7 +968,8 @@ harvested salt cones stand at the water's edge.
   20 km apart; 150 m clearance.
 - **Stamp:** a wide, shallow `basin` (radius 500-600 m, 2.5-3.5 m deep, a 40-60 m berm), painted salt.
 - **Water:** a `thin` film filled to 70 % of the pan's depth (about 700 m across), `mirror` 1 (the
-  water material's sky reflection, no extra render pass), nearly no waves, no foam.
+  water material's sky reflection: the sky dome's radiance, no extra render pass, so clouds, stars and
+  the craft are not mirrored), nearly no waves, no foam.
 - **Overlay:** the `saltFlat` palette over the stamp and 160 m beyond it (fading over 220 m).
 - **Engines:** `structure` (the `saltPiles` recipe: 3-5 rows of 24-40 salt cones at the water's edge,
   each a small solid cylinder; owns the voice at a constant level).
