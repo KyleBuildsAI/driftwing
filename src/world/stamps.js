@@ -20,7 +20,8 @@
 //               site's), paint (see STAMP_PAINTS; each type has a default, null for none)
 //   cone        radius, height, craterRadius, craterDepth, gullies (count)            paint 'ash'
 //   carve       length (2-4 km), width (floor), depth, wallWidth, twist (meander, m), plateau (the
-//               mesa band beyond each wall), shoulder (its falloff), segments      paint 'riverbed'
+//               mesa band beyond each wall), shoulder (its falloff), segments, maxFall (optional,
+//               m: the floor may fall at most this far end to end; none by default)  paint 'riverbed'
 //   cliffStep   width (along the lip), drop, length (upstream + downstream), face, falloff,
 //               pool (plunge pool radius)                                         paint 'wetRock'
 //   gorge       length, width (top), depth, falloff (end taper), pad (anchor pads) paint 'riverbed'
@@ -416,6 +417,9 @@ export function validateStampSpec(spec, where) {
   if (spec.type === 'carve' && spec.segments !== undefined && !(Number.isInteger(spec.segments) && spec.segments >= 4 && spec.segments <= 32)) {
     throw new Error(`${where}.segments: must be an integer from 4 to 32`);
   }
+  if (spec.type === 'carve' && spec.maxFall !== undefined && !(Number.isFinite(spec.maxFall) && spec.maxFall > 0)) {
+    throw new Error(`${where}.maxFall: must be a number of metres above 0`);
+  }
   const full = withDefaults(spec);
   if (spec.type === 'cone' && maxOf(full.craterRadius) >= maxOf(full.radius) * 0.6) throw new Error(`${where}.craterRadius: must stay under 60 % of the radius`);
   if (spec.type === 'crater' && maxOf(full.floor) > 0.8) throw new Error(`${where}.floor: must stay at or under 0.8 of the radius`);
@@ -552,7 +556,7 @@ function resolveCone(stamp, spec, random, context) {
  * rim (never cuts it), and the slot cut `depth` below the rim with twisting walls and a river channel.
  * Where the path crosses higher ground the slot simply runs deeper. The stamp does not fit (placement
  * drops the site) when that would cut deeper than MAX_CANYON_CUT depths or lift ground more than
- * MAX_CANYON_LIFT depths.
+ * MAX_CANYON_LIFT depths, or when its floor falls more than spec.maxFall (when set) end to end.
  */
 function resolveCarve(stamp, spec, random, context) {
   const length = roll(spec.length, random);
@@ -610,6 +614,7 @@ function resolveCarve(stamp, spec, random, context) {
     const inside = index > 0 && index < segments;
     if (inside && (ground[index] - floor[index] > depth * MAX_CANYON_CUT || rim[index] - ground[index] > depth * MAX_CANYON_LIFT)) fits = false;
   }
+  if (Number.isFinite(spec.maxFall) && floor[0] - floor[segments] > spec.maxFall) fits = false;
   stamp.fits = fits;
   let maxHalfWidth = 0;
   let maxWall = 0;

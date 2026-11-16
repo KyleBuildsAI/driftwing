@@ -653,6 +653,10 @@ metres along the canyon from its middle, `across` offsets it from the path, `hei
 the floor there, and it turns to face along the path (a gate on a bend faces along the bend). Two
 pillars stand outside the opening with 1.5 m to spare; their hulls hold the jagged lathe, and their
 tops and the arch spans are perches. The course is registered as `challengeGates` registers its own.
+The recipe's `carve` stamp sets `maxFall: 120` (src/spawns/engines/structure/stamps.js): a site
+whose canyon floor would fall more than 120 m end to end is dropped by placement, so the run is flown
+along a canyon rather than dived down a mountainside (the carve stamp's optional `maxFall`, see
+src/world/stamps.js; the Phase 2 slot canyon sets none and is unchanged).
 
 ## caveTunnel
 
