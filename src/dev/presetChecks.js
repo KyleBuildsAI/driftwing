@@ -23,6 +23,7 @@ import { createBrowserHelpers } from './structureTestKit.js';
 import { createDisposeCheck, frames, holdConditions, wait } from './spawnCheckKit.js';
 import { createWorldGen } from '../world/worldgen.js';
 import { hashSiteList } from '../world/placement.js';
+import { PRESETS } from '../spawns/presets/index.js';
 
 const STAND_IN_CALLOUTS = Object.freeze(['{name} {distance} {direction}.', '{name} ahead, {eta}.', 'Dev stand-in: {name}.']);
 
@@ -134,13 +135,30 @@ export function installPresetChecks(game) {
     });
   }
 
+  /** The game presets setup({ only }) held for the run. */
+  const heldPresets = [];
+
   const api = {
     results: helpers.results,
 
-    /** Attributes the engines for the memory checks and adds dev stand-ins for missing set-piece children. */
-    setup() {
+    /**
+     * Attributes the engines for the memory checks and adds dev stand-ins for missing set-piece
+     * children. options.only: the ids of the presets under test; every other game preset (event or
+     * site) is held for the run and the global overrides' own nights with it, so with all 100 presets
+     * in one world no other spawn adds geometry, emitter rows or sky modifiers mid-check. finish puts
+     * them back.
+     */
+    setup({ only = null } = {}) {
       // The load shedder must not demote the checks' spawns (their wind probes and lures) on a busy machine.
       system.debug.pinLodBias(1);
+      if (Array.isArray(only)) {
+        system.debug.holdOverrides();
+        for (const preset of PRESETS) {
+          if (only.includes(preset.id) || manager.getPreset(preset.id) !== preset) continue;
+          manager.removePreset(preset.id);
+          heldPresets.push(preset);
+        }
+      }
       const added = [];
       for (const preset of manager.listPresets()) {
         for (const entry of preset.engines) {
@@ -152,7 +170,7 @@ export function installPresetChecks(game) {
           }
         }
       }
-      return check('setup: engines attributed, set-piece children present', manager.listPresets().every((preset) => preset.engines.every((entry) => entry.engine !== 'setPiece' || Object.values(entry.params.children).every((child) => manager.getPreset(child.preset)))), { tracked: dispose.tracker !== null, standIns: added, presets: manager.listPresets().length });
+      return check('setup: engines attributed, set-piece children present', manager.listPresets().every((preset) => preset.engines.every((entry) => entry.engine !== 'setPiece' || Object.values(entry.params.children).every((child) => manager.getPreset(child.preset)))), { tracked: dispose.tracker !== null, standIns: added, presets: manager.listPresets().length, held: heldPresets.length });
     },
 
     /** The time of day (sun elevation in degrees, morning or evening, held there) and the regional weather. */
@@ -486,6 +504,8 @@ export function installPresetChecks(game) {
     /** The summary check; puts the renderer's geometry manager back. */
     finish() {
       dispose.restore();
+      for (const preset of heldPresets.splice(0)) if (!manager.getPreset(preset.id)) manager.addPreset(preset);
+      system.debug.releaseOverrides();
       ctx.systems.weather.forceState(null);
       ctx.settings.set('timeFrozen', timeFrozenBefore);
       return helpers.finish();

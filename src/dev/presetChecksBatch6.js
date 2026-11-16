@@ -100,6 +100,8 @@ export function installBatch6Checks(game) {
     setup() {
       // The load shedder must not demote the checks' spawns on a busy machine.
       system.debug.pinLodBias(1);
+      // A rolled midnight sun or blood moon would bend or tint the night the checks hold.
+      system.debug.holdOverrides();
       // With all 100 presets the director's own events (night skies, storms) would add sky modifiers
       // and geometry mid-check: the game's other events are held, its sites stay for the real sites.
       for (const preset of PRESETS) {
@@ -361,6 +363,7 @@ export function installBatch6Checks(game) {
     finish() {
       dispose.restore();
       for (const preset of heldEvents.splice(0)) if (!manager.getPreset(preset.id)) manager.addPreset(preset);
+      system.debug.releaseOverrides();
       ctx.systems.weather.forceState(null);
       ctx.settings.set('timeFrozen', timeFrozenBefore);
       return helpers.finish();
