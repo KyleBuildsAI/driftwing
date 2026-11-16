@@ -153,8 +153,14 @@ export function installPresetChecks(game) {
       system.debug.pinLodBias(1);
       if (Array.isArray(only)) {
         system.debug.holdOverrides();
+        // The kept presets' set-piece children stay too (the storm chase's real supercell and tornado).
+        const keep = new Set(only);
         for (const preset of PRESETS) {
-          if (only.includes(preset.id) || manager.getPreset(preset.id) !== preset) continue;
+          if (!keep.has(preset.id)) continue;
+          for (const entry of preset.engines) if (entry.engine === 'setPiece') for (const child of Object.values(entry.params.children)) keep.add(child.preset);
+        }
+        for (const preset of PRESETS) {
+          if (keep.has(preset.id) || manager.getPreset(preset.id) !== preset) continue;
           manager.removePreset(preset.id);
           heldPresets.push(preset);
         }

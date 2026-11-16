@@ -1,6 +1,6 @@
 [
 {
-"eval": "(async () => { try { const kit = await import('/src/dev/presetChecks.js'); const api = kit.installPresetChecks(window.DRIFTWING); return 'dev server only: imports /src/dev/presetChecks.js | ' + api.setup(); } catch (error) { console.error('[presets check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
+"eval": "(async () => { try { const kit = await import('/src/dev/presetChecks.js'); const api = kit.installPresetChecks(window.DRIFTWING); return 'dev server only: imports /src/dev/presetChecks.js | ' + api.setup({ only: ['abandonedAirfield', 'meteorShower', 'totalSolarEclipse', 'comet', 'skyLanternFestival', 'floatingIslands', 'skyWhale', 'crystalSpires', 'jetStream', 'stormChase'] }); } catch (error) { console.error('[presets check] setup failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
 },
 {
 "eval": "(async () => { try { const result = await window.__dwPresets.conditions({\"sun\": 12, \"weather\": \"clear\"}); return typeof result === 'string' ? result : JSON.stringify(result); } catch (error) { console.error('[presets check] conditions airfield failed: ' + (error && error.stack ? error.stack : error)); return 'ERROR ' + error; } })()"
