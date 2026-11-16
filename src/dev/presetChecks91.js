@@ -355,7 +355,11 @@ export function installPresetChecks91(game) {
         { comet: described.comet, meteorsActive: described.meteorsActive, meteorsSpawned: described.meteorsSpawned });
     },
 
-    /** The migration met in a valley: the combo's spot is a valley floor (little dry ground around it lower), its members around it. */
+    /**
+     * The migration met in a valley: the combo's spot is a valley floor (the ground 400 m round it
+     * stands 5 m+ above it on average, and at most 6 of 16 directions fall below it: a floor may fall
+     * away along the valley's own axis, both ways), its members around it.
+     */
     valley(presetId) {
       const record = open.get(presetId);
       const main = record.mainId ? manager.getInstance(record.mainId) : null;
@@ -363,17 +367,20 @@ export function installPresetChecks91(game) {
       const anchor = main.position;
       const anchorY = ctx.world.groundHeight(anchor.x, anchor.z);
       let lower = 0;
+      let ringSum = 0;
       for (let index = 0; index < 16; index++) {
         const angle = (index / 16) * Math.PI * 2;
         const y = ctx.world.groundHeight(anchor.x + Math.sin(angle) * 400, anchor.z - Math.cos(angle) * 400);
+        ringSum += y;
         if (y < anchorY - 1 && y > ctx.world.WATER_LEVEL + 4) lower++;
       }
+      const depth = ringSum / 16 - anchorY;
       const members = comboSpawns(record.comboId).filter((spawn) => spawn.id !== record.mainId).map((spawn) => {
         const memberAnchor = spawn.position;
         return { presetId: spawn.presetId, distance: Math.round(Math.hypot(memberAnchor.x - anchor.x, memberAnchor.z - anchor.z)) };
       });
-      return check(`${presetId}: the combo stands in a valley (no dry ground 400 m round it lower), its members around it`, lower <= 3 && members.every((member) => member.distance < 1600),
-        { anchorY: Math.round(anchorY), lowerAround: lower, members });
+      return check(`${presetId}: the combo stands on a valley floor (the ground 400 m round it 5 m+ higher on average, at most 6 of 16 directions lower), its members around it`, depth >= 5 && lower <= 6 && members.every((member) => member.distance < 1600),
+        { anchorY: Math.round(anchorY), depth: Math.round(depth), lowerAround: lower, members });
     },
 
     /** The arcs found the spires' tips and leap, and the spires' glow resonates. */
