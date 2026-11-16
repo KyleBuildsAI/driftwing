@@ -426,7 +426,7 @@ dev badge and touch controls build on:
 | `calibration` | per-device records: `get`, `save`, `reset`, `keys`, `onChange` (stored as `driftwing-v2.input.calibration.<deviceKey>`) |
 | `consumesKey(event)` | true when a keydown belongs to an input action (the UI leaves it alone) |
 | `isPointerLocked()`, `readPhotoControls()` | pointer-lock state; the photo-mode free-camera input |
-| `mock` | with `?test=hotas`: the scriptable mock devices from `src/dev/mockGamepads.js` (`plug`, `unplug`, `moveToSlot`, `setAxis`, `press`, `release`, `setButton`, `setHat`, `restAxes`, `get`, `list`) |
+| `mock` | with `?test=hotas` or `?test=hotplug`: the scriptable mock devices from `src/dev/mockGamepads.js` (`plug`, `unplug`, `moveToSlot`, `setAxis`, `press`, `release`, `setButton`, `setHat`, `restAxes`, `get`, `list`) |
 
 Fixed-wing models turn `ControlState.antenna` into flap notches with hysteresis (one notch
 width at every notch); craft whose `inputProfile.antenna` is `'zoom'` use it for the lens instead.

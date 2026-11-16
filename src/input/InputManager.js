@@ -35,7 +35,8 @@ export function createInputManager(ctx) {
   const { state, settings, bus, controls, storage } = ctx;
   const params = new URLSearchParams(window.location.search);
   const debug = params.get('debug') === '1';
-  const mock = params.get('test') === 'hotas' ? installMockGamepads() : null;
+  // ?test=hotas runs the HOTAS pipeline test on them; ?test=hotplug only installs them (tools/steps/hotplug.json).
+  const mock = params.get('test') === 'hotas' || params.get('test') === 'hotplug' ? installMockGamepads() : null;
 
   // A craft module's own default bindings (contract h.2) sit between the player's and the profile's.
   const bindings = createBindingStore({ storage, craftDefaults: (craft) => ctx.craftRegistry?.get(craft)?.bindings ?? null });

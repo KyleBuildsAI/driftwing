@@ -32,7 +32,7 @@
 //   { "shot": "name" }                       screenshot to <out>/<name>.png
 //
 // Reusable step files live in tools/steps/; their checks call console.error on a failure, so
-// the run fails. hotplug.json (run with --query test=hotas) unplugs and replugs the mock T.16000M
+// the run fails. hotplug.json (run with --query test=hotplug) unplugs and replugs the mock T.16000M
 // and TWCS in flight: sources by deviceKey, the hands-off hold, the throttle kept on a TWCS
 // dropout, and the release on reconnect. view-physics.json (a dev server, or any build with
 // ?debug=1) proves the view never changes the flight: it pauses the frame loop, steps frames by
