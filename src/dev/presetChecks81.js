@@ -34,7 +34,10 @@ const LANDABLE_SINK = 0.5;
 /** A strike run starts this far (m) from the target's surface, plus a third of a second of flight. */
 const STRIKE_RUN_IN = 180;
 /** Frames a run may take at most (a stuck run fails rather than hangs the step). */
-const MAX_RUN_FRAMES = 2400;
+const MAX_RUN_FRAMES = 20000;
+/** A run times out at this many times its planned flight time, plus RUN_TIMEOUT_MARGIN seconds (simulated). */
+const RUN_TIMEOUT_FACTOR = 1.5;
+const RUN_TIMEOUT_MARGIN = 4;
 /** The arch run starts this far (m) before the first arch and ends this far past the last. */
 const ARCH_RUN_IN = 400;
 const ARCH_RUN_OUT = 120;
@@ -135,7 +138,9 @@ export function installBatch81Checks(game) {
   /**
    * One kinematic run: the craft placed at start, then moved at `speed` along direction (level
    * attitude along it) by its own controller each tick, until it crashes, passes `beyond` m past aim,
-   * or runs out of frames. onFrame(position) runs after every frame. Returns the run's result.
+   * or runs out of simulated time (1.5 times the planned flight, plus 4 s: a frame count would cut a
+   * run short when the frames come fast). onFrame(position) runs after every frame. Returns the
+   * run's result.
    */
   async function flyRun({ craft, speed, start, direction, aim, beyond, onFrame = null }) {
     const result = { craft, speed, crashed: false, reason: null, impactSpeed: null, penetrations: 0, hits: 0, contacts: 0, hitIds: [], timedOut: false, seconds: 0 };
@@ -175,13 +180,17 @@ export function installBatch81Checks(game) {
       return undefined;
     };
     const reached = new THREE.Vector3();
+    const limit = ((start.distanceTo(aim) + beyond) / Math.max(speed, 1)) * RUN_TIMEOUT_FACTOR + RUN_TIMEOUT_MARGIN;
     try {
       for (let frame = 0; frame < MAX_RUN_FRAMES; frame++) {
         await frames(1);
         if (onFrame) onFrame(state.player.position);
         if (events.crashes.length > 0) break;
         if (reached.copy(model.state.position).sub(aim).dot(forward) > beyond) break;
-        if (frame === MAX_RUN_FRAMES - 1) result.timedOut = true;
+        if (elapsed > limit || frame === MAX_RUN_FRAMES - 1) {
+          result.timedOut = true;
+          break;
+        }
       }
     } finally {
       model.step = original;
