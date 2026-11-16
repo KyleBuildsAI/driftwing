@@ -41,6 +41,10 @@ export function installPresetChecks61(game) {
   /** The live spawn record of presetId (the newest), or null. */
   function spawnOf(presetId) {
     const active = manager.getActive().filter((record) => record.presetId === presetId);
+    // The check's own force-spawn, ahead of a real site of the same preset that the framing flight
+    // may have brought in (a sleeping giant's stamped site has no free-standing figure collider).
+    const forced = active.filter((record) => record.source === 'debug');
+    if (forced.length > 0) return forced[forced.length - 1];
     return active.length > 0 ? active[active.length - 1] : null;
   }
   /** The engine instance of presetId's `engine` part, or null. */
