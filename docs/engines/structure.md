@@ -1068,7 +1068,7 @@ exactly as a Phase 2 recipe does.
 | `structure:gate` | bus | `{ spawnId, presetId, siteId, gate, kind, direction }` |
 | `structure:course` | bus | `{ spawnId, presetId, siteId, course, time, clean }` |
 | `structure:landing` | bus | `{ spawnId, presetId, siteId, zone, runway, grade, sinkRate, centreline, fromThreshold, score, rating }` |
-| `structure:calve` | bus | `{ spawnId, presetId, slab, stage: 'crack' \| 'splash', position }` (a calving slab breaks away, then hits the sea) |
+| `structure:calve` | bus | `{ spawnId, presetId, slab, stage: 'crack' \| 'splash', position }` (a calving slab breaks away, then hits the sea; one reused object per glacier, so a listener that keeps it copies it) |
 | `achievement` | typed | `{ id, title }` (a gate's achievement) |
 | `journalStat` | typed | `{ key, value, op: 'min', presetId }` (a clean course run with `journal`) |
 | `notify` | bus | course times and landing scores |

@@ -64,7 +64,8 @@ export function installPresetChecks41(game) {
   ctx.bus.onTyped('softCrash', (payload) => events.crashes.push(payload));
   ctx.bus.onTyped('achievement', (payload) => events.achievements.push(payload));
   ctx.bus.on('structure:gate', (payload) => events.gates.push(payload));
-  ctx.bus.on('structure:calve', (payload) => events.calves.push(payload));
+  // The engine reuses one payload per glacier: keep a copy of each event.
+  ctx.bus.on('structure:calve', (payload) => events.calves.push({ ...payload, position: { ...payload.position } }));
   ctx.bus.on('fauna:race', (payload) => events.race.push(payload));
   ctx.bus.on('fauna:stampede', (payload) => events.stampede.push(payload));
   ctx.bus.on('fauna:flush', (payload) => events.flush.push(payload));

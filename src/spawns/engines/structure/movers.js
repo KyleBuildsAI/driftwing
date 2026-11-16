@@ -162,6 +162,8 @@ export function createMovers(THREE, out, anchor, rng) {
     waveSlot: -1,
     waveDescriptor: null,
     splash: null,
+    /** The structure:calve payload, reused for every crack and splash (a listener that keeps one copies it). */
+    calveEvent: { spawnId: '', presetId: '', slab: 0, stage: 'crack', position: { x: 0, y: 0, z: 0 } },
     events: 0,
     hidden: false,
     frame: 0,
@@ -283,10 +285,20 @@ function startCalving(movers, index, context) {
   movers.events++;
   if (context.voice) context.voice.trigger('crack', { strength: 1 });
   const state = index * STATE_STRIDE;
-  context.bus.emit('structure:calve', {
-    spawnId: context.instance.id, presetId: context.instance.presetId, slab: index, stage: 'crack',
-    position: { x: Math.round(movers.state[state]), y: Math.round(movers.state[state + 1]), z: Math.round(movers.state[state + 2]) },
-  });
+  emitCalve(movers, context, index, 'crack', movers.state[state], movers.state[state + 1], movers.state[state + 2]);
+}
+
+/** Emits structure:calve on the movers' one reused payload (no allocation per event). */
+function emitCalve(movers, context, slab, stage, x, y, z) {
+  const event = movers.calveEvent;
+  event.spawnId = context.instance.id;
+  event.presetId = context.instance.presetId;
+  event.slab = slab;
+  event.stage = stage;
+  event.position.x = Math.round(x);
+  event.position.y = Math.round(y);
+  event.position.z = Math.round(z);
+  context.bus.emit('structure:calve', event);
 }
 
 /** The plunge: a splash where the slab hits, a ring wave spreading from it, the voice's splash. */
@@ -313,9 +325,7 @@ function plunge(movers, index, context) {
     }
   }
   if (context.voice) context.voice.trigger('splash', { strength: 1 });
-  context.bus.emit('structure:calve', {
-    spawnId: context.instance.id, presetId: context.instance.presetId, slab: index, stage: 'splash', position: { x: Math.round(x), y: Math.round(context.waterLevel), z: Math.round(z) },
-  });
+  emitCalve(movers, context, index, 'splash', x, context.waterLevel, z);
 }
 
 /** The ring wave of the last plunge: spreading at the calving's wave speed, losing height, then gone. */
