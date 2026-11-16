@@ -30,7 +30,8 @@
 // crater and terraces stamps (and a salt-flat film on a flatten strip) get the same rows, and every
 // overlay-only fixture site gets a row of its own (its overlay's centre stands in for the stamp's
 // key point): offline seams, live parity (the chunk `overlay` attribute included), live seams and
-// collision around it. The overlays criterion needs every overlay kind (palette, vegetation,
+// collision around it. Wave 3: the sea-stamp fixtures (SEA_FIXTURES: atoll, reef, sea stacks,
+// estuary) join the fixture world too. The overlays criterion needs every overlay kind (palette, vegetation,
 // material, tint sweep, stripes) found and its rows passed, and the overlay attribute seen live. With
 // ?presets=real the Phase 3 stamp types no real preset uses yet (wave 3 adds them) are listed, not failed.
 // Criteria: fixtures placed (every stamp type within SEARCH_RADIUS of the spawn), 0 offline and live
@@ -48,7 +49,7 @@ import { STAMP_TYPES } from '../world/stamps.js';
 import { installConsoleCapture } from './testConsole.js';
 import { createTestPanel } from './testPanel.js';
 import { FIXTURE_STAMP_TYPE, TERRAIN_FIXTURES } from './terrainFixtures.js';
-import { OVERLAY_FIXTURE_KINDS, WATER_FIXTURES, WATER_FIXTURE_STAMP_TYPE } from './waterFixtures.js';
+import { OVERLAY_FIXTURE_KINDS, SEA_FIXTURES, WATER_FIXTURES, WATER_FIXTURE_STAMP_TYPE } from './waterFixtures.js';
 import { PRESETS } from '../spawns/presets/index.js';
 import {
   buildChunkMesh, checkSeam, checkSkirtAttachment, compareMeshBuffers, extractEdges, meshHeightAt, seamPairApplies, terrainBuilderConfig,
@@ -58,7 +59,7 @@ export const TEST_DATABASE = 'driftwing-v2-test-terrain';
 const REPORT_KIND = 'driftwing-terrain-test';
 const REPORT_VERSION = 2;
 /** The fixtures' world: one site per stamp type, the water bodies and the overlays. */
-const ALL_FIXTURES = Object.freeze([...TERRAIN_FIXTURES, ...WATER_FIXTURES]);
+const ALL_FIXTURES = Object.freeze([...TERRAIN_FIXTURES, ...WATER_FIXTURES, ...SEA_FIXTURES]);
 const ALL_STAMP_TYPES = Object.freeze({ ...FIXTURE_STAMP_TYPE, ...WATER_FIXTURE_STAMP_TYPE });
 /** Stamp types a real preset may not use yet: the Phase 3 ones, until the wave 3 presets land. */
 const PHASE3_STAMP_TYPES = Object.freeze(['basin', 'crater', 'terraces']);
@@ -66,8 +67,12 @@ const OVERLAY_KINDS = Object.freeze(['palette', 'vegetation', 'material', 'tintS
 /** Fixture sites are looked for this far from the spawn (m). */
 const SEARCH_RADIUS = 40000;
 const COLLISION_LIMIT_M = 0.5;
-/** Live poses: the camera over the key point, then this far away (m) so the stamp lies in the LOD2 and LOD3 rings. */
-const LIVE_OFFSETS = Object.freeze([0, 1150, 2050]);
+/**
+ * Live poses: the camera over the key point, then this far away (m) so the stamp lies in the LOD1, LOD2
+ * and LOD3 rings (a small stamp, such as the sea stacks, never reaches the LOD1 ring from over its key
+ * point).
+ */
+const LIVE_OFFSETS = Object.freeze([0, 640, 1150, 2050]);
 const CAMERA_HEIGHT = 320;
 /** The paused craft waits this far behind the photo camera (its tether is 900 m). */
 const CRAFT_PARK_M = 300;

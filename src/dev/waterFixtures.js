@@ -14,6 +14,11 @@
 //
 // Pure data, like every preset: the terrain worker receives them through its init message.
 
+import coralAtoll from '../spawns/presets/coralAtoll.js';
+import reefShipwreck from '../spawns/presets/reefShipwreck.js';
+import seaStacks from '../spawns/presets/seaStacks.js';
+import tidalBore from '../spawns/presets/tidalBore.js';
+
 const LIFETIME_SITE = Object.freeze({ duration: null, despawn: Object.freeze({ distance: 12000, hysteresis: 3000, outOfViewSeconds: 20 }) });
 const FILTERS = Object.freeze({ biomes: null, timeOfDay: null, altitude: Object.freeze({ min: 0, max: 5000 }), weather: null, surface: 'land', minDistance: 0, maxDistance: 40000 });
 const QUIET_ENGINE = Object.freeze([Object.freeze({ engine: 'lightEffect', params: Object.freeze({ effect: 'glowPoints', count: 1, radius: 1, intensity: 0 }) })]);
@@ -133,6 +138,23 @@ export const FIXTURE_MANGROVE = fixture('fixtureMangrove', 'Fixture mangrove del
   })]),
 });
 
+/**
+ * A sea-stamp fixture (wave 3: the atoll 42, the reef 43, the sea stacks 45 and the estuary 47): the
+ * real preset's placement and stamps, rolled far more often and packed closer, so each stamp type lies
+ * within a short flight of the terrain test's start.
+ */
+function seaFixture(id, name, preset) {
+  return fixture(id, name, 'geo', {
+    placement: Object.freeze({ ...preset.placement, chance: 0.9, minSpacing: 8000, clearance: 100 }),
+    stamps: preset.stamps,
+  });
+}
+
+export const FIXTURE_ATOLL = seaFixture('fixtureAtoll', 'Fixture atoll', coralAtoll);
+export const FIXTURE_REEF = seaFixture('fixtureReef', 'Fixture reef', reefShipwreck);
+export const FIXTURE_SEA_STACKS = seaFixture('fixtureSeaStacks', 'Fixture sea stacks', seaStacks);
+export const FIXTURE_ESTUARY = seaFixture('fixtureEstuary', 'Fixture estuary', tidalBore);
+
 /** Every water and overlay fixture. */
 export const WATER_FIXTURES = Object.freeze([
   FIXTURE_LAKE,
@@ -147,6 +169,12 @@ export const WATER_FIXTURES = Object.freeze([
   FIXTURE_MANGROVE,
 ]);
 
+/**
+ * The sea-stamp fixtures, kept out of WATER_FIXTURES so the water-bodies test, the seaplane lab and
+ * the craft test's water world keep their worlds; the terrain test adds them to its own.
+ */
+export const SEA_FIXTURES = Object.freeze([FIXTURE_ATOLL, FIXTURE_REEF, FIXTURE_SEA_STACKS, FIXTURE_ESTUARY]);
+
 /** The stamp type each stamped water fixture exercises. */
 export const WATER_FIXTURE_STAMP_TYPE = Object.freeze({
   fixtureLake: 'basin',
@@ -155,6 +183,10 @@ export const WATER_FIXTURE_STAMP_TYPE = Object.freeze({
   fixtureFrozenLake: 'basin',
   fixtureSaltFlat: 'flatten',
   fixtureMangrove: 'delta',
+  fixtureAtoll: 'atoll',
+  fixtureReef: 'reef',
+  fixtureSeaStacks: 'seaStacks',
+  fixtureEstuary: 'estuary',
 });
 
 /** The overlay kinds each overlay fixture exercises (palette, vegetation, material, tintSweep, stripes). */
