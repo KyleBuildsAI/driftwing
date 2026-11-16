@@ -49,6 +49,11 @@ const REST_STRIDE = 9;
 const DRIFT_STRIDE = 8;
 /** The water surface under each drifting body is refreshed on a round robin of this many frames. */
 const WATER_ROUND = 6;
+/** The crack's and the splash's voice trigger options (one shared object: no allocation per event). */
+const FULL_STRENGTH = Object.freeze({ strength: 1 });
+/** A drifting body's turn about when the water ahead shoals (radians). */
+const TURN_ABOUT = Math.PI * 0.6;
+const TWO_PI = Math.PI * 2;
 
 /** A navigable grid: cells of `cell` metres over the world box; 1 where the sea is deep enough. */
 export function createNavigationGrid(minX, minZ, cell, columns, rows, deepEnough) {
@@ -283,7 +288,7 @@ function startCalving(movers, index, context) {
   movers.status[index] = CRACKING;
   movers.state[index * STATE_STRIDE + 5] = 0;
   movers.events++;
-  if (context.voice) context.voice.trigger('crack', { strength: 1 });
+  if (context.voice) context.voice.trigger('crack', FULL_STRENGTH);
   const state = index * STATE_STRIDE;
   emitCalve(movers, context, index, 'crack', movers.state[state], movers.state[state + 1], movers.state[state + 2]);
 }
@@ -324,7 +329,7 @@ function plunge(movers, index, context) {
       if (movers.waveDescriptor === null) movers.waveDescriptor = water.createWave({ ring: true, lean: 0.35, foam: 0.85 });
     }
   }
-  if (context.voice) context.voice.trigger('splash', { strength: 1 });
+  if (context.voice) context.voice.trigger('splash', FULL_STRENGTH);
   emitCalve(movers, context, index, 'splash', x, context.waterLevel, z);
 }
 
@@ -354,6 +359,11 @@ function updateRingWave(movers, context, dt) {
   context.water.setWave(movers.waveSlot, descriptor);
 }
 
+/**
+ * One frame of a drifting body. Both steering cases (back toward home past the leash, turning about
+ * where the water ahead shoals) are computed every frame and chosen by a select, so a case first met
+ * late in a session does not deoptimise the frame update (unoptimised code boxes its doubles).
+ */
 function updateDrifting(movers, index, context, dt, time) {
   const state = index * STATE_STRIDE;
   const base = index * DRIFT_STRIDE;
@@ -364,22 +374,19 @@ function updateDrifting(movers, index, context, dt, time) {
   heading += Math.sin(time * 0.013 + movers.state[state + 6] * 7) * 0.02 * dt;
   const awayX = movers.state[state] - movers.drift[base + 6];
   const awayZ = movers.state[state + 2] - movers.drift[base + 7];
-  if (awayX * awayX + awayZ * awayZ > leash * leash) {
-    const homeward = Math.atan2(-awayX, awayZ);
-    let delta = homeward - heading;
-    delta -= Math.PI * 2 * Math.floor((delta + Math.PI) / (Math.PI * 2));
-    heading += (delta > 0 ? 1 : -1) * Math.min(Math.abs(delta), 0.12 * dt);
-  }
-  const nextX = movers.state[state] + Math.sin(heading) * speed * dt;
-  const nextZ = movers.state[state + 2] - Math.cos(heading) * speed * dt;
-  if (navigable(movers.navigation, nextX, nextZ)) {
-    movers.state[state] = nextX;
-    movers.state[state + 2] = nextZ;
-  } else {
-    // Shoaling ahead: turn about.
-    heading += Math.PI * 0.6;
-  }
-  movers.state[state + 4] = heading;
+  let delta = Math.atan2(-awayX, awayZ) - heading;
+  delta -= TWO_PI * Math.floor((delta + Math.PI) / TWO_PI);
+  const homeTurn = (delta > 0 ? 1 : -1) * Math.min(Math.abs(delta), 0.12 * dt);
+  heading += awayX * awayX + awayZ * awayZ > leash * leash ? homeTurn : 0;
+  const x = movers.state[state];
+  const z = movers.state[state + 2];
+  const nextX = x + Math.sin(heading) * speed * dt;
+  const nextZ = z - Math.cos(heading) * speed * dt;
+  const open = navigable(movers.navigation, nextX, nextZ);
+  movers.state[state] = open ? nextX : x;
+  movers.state[state + 2] = open ? nextZ : z;
+  // Shoaling ahead: turn about.
+  movers.state[state + 4] = heading + (open ? 0 : TURN_ABOUT);
   movers.state[state + 3] += movers.drift[base + 5] * dt;
 }
 
