@@ -125,6 +125,15 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
     if (devHooks) validatePresets(PRESETS, { engineNames: registry.names() });
     manager.init();
     director = createDirector();
+    applyOverrideHold();
+  }
+
+  /** Dev only: whether the overrides' own nightly rolls are held off (holdGamePresets, holdOverrides). */
+  let overridesHeld = false;
+
+  /** Gives the current director the override hold (a restarted director starts without it). */
+  function applyOverrideHold() {
+    if (devHooks && director && typeof director.holdOverrides === 'function') director.holdOverrides(overridesHeld);
   }
 
   /** The anchor distance metres ahead of the craft on its ground track, on the ground (or the water). */
@@ -277,6 +286,22 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
         manager.setLodBias(lodPin.requested);
         return lodPin.requested;
       },
+      /**
+       * Holds the global overrides' own nightly rolls off (the blood moon, the midnight sun), so a
+       * check's sky stays the one it set; a night forced through forceSpawn still shows. holdGamePresets
+       * does this too. Returns true.
+       */
+      holdOverrides() {
+        overridesHeld = true;
+        applyOverrideHold();
+        return true;
+      },
+      /** Ends holdOverrides: the overrides follow their nightly rolls again. Returns false. */
+      releaseOverrides() {
+        overridesHeld = false;
+        applyOverrideHold();
+        return false;
+      },
       /** Adds a preset (validated against the registered engines). */
       addPreset(preset) {
         validatePreset(preset, { engineNames: registry.names() });
@@ -292,6 +317,7 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
        */
       holdGamePresets() {
         system.debug.pinLodBias(1);
+        system.debug.holdOverrides();
         const held = [];
         for (const preset of PRESETS) {
           if (manager.getPreset(preset.id) !== preset) continue;
@@ -304,6 +330,7 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
       /** Puts the presets holdGamePresets took back and releases its LOD bias pin. Returns their ids. */
       releaseGamePresets() {
         system.debug.releaseLodBias();
+        system.debug.releaseOverrides();
         const released = [];
         for (const preset of heldGamePresets.splice(0)) {
           if (manager.getPreset(preset.id)) continue;
@@ -327,6 +354,7 @@ export function createSpawnSystem(ctx, { devHooks = import.meta.env.DEV } = {}) 
         }
         manager.resetForReplay();
         director = createDirector(extraPresets);
+        applyOverrideHold();
         return director;
       },
       registerEngine: (engine) => manager.register(engine),

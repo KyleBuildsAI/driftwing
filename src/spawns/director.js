@@ -479,6 +479,8 @@ export function createDirector({
   const overrides = createOverrideSchedule({ seedHash, presets, biomeAt: terrain.biomeAt, biomeKeys: terrain.biomeKeys ?? null });
   /** Per override entry: whether it is on, above half weight, and the spawn it started (discovery). */
   const overrideStatus = overrides.entries.map(() => ({ active: false, high: false, spawnId: null, spawnedNight: null, retryAt: -Infinity }));
+  /** Dev only (holdOverrides): the overrides' own nightly rolls are held off; a forced night still shows. */
+  let overridesHeld = false;
 
   const pool = createCandidatePool(128);
   /** candidate hash -> { surface bits, biome key } (a candidate's ground never changes). */
@@ -1396,6 +1398,7 @@ export function createDirector({
     const entries = overrides.update(sun.days, sun.dayTime, player.x, player.z);
     for (let index = 0; index < entries.length; index++) {
       const entry = entries[index];
+      if (overridesHeld && entry.forcedNight !== entry.night) entry.weight = 0;
       const status = overrideStatus[index];
       const active = entry.weight > 0;
       const high = entry.weight >= 0.5;
@@ -1756,6 +1759,17 @@ export function createDirector({
     releaseOverride(presetId) {
       if (!devHooks) throw new Error('director.releaseOverride is only available in development builds or with ?debug=1');
       return overrides.release(presetId);
+    },
+
+    /**
+     * Dev only: holds the overrides' own nightly rolls off (held true) or lets them show again (false),
+     * so a check's sky is not bent by a midnight sun or tinted by a blood moon it did not ask for. A
+     * night forced with forceSpawn still shows. Returns the held state.
+     */
+    holdOverrides(held = true) {
+      if (!devHooks) throw new Error('director.holdOverrides is only available in development builds or with ?debug=1');
+      overridesHeld = held === true;
+      return overridesHeld;
     },
 
     /**
