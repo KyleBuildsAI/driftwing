@@ -62,6 +62,9 @@ const TOW_REFUSE_AGL = 950;
 const PEAK_RELAUNCH_BELOW_AGL = 300;
 const MIN_SPAWN_AGL = 60;
 const SPAWN_LIFT_AGL = 150;
+/** An airborne spawn without a position clears the ground along this much of its first flight (s at cruise). */
+const SPAWN_CLEAR_SECONDS = 8;
+const SPAWN_CLEAR_SAMPLES = 8;
 const PENETRATION_LIMIT = 1;
 /** An extra ground surface counts for a craft whose centre is at most this far (m) below it. */
 const SURFACE_REACH = 12;
@@ -665,8 +668,27 @@ export function createFlightController(ctx) {
       return;
     }
     const spawnPosition = position.clone();
-    if (agl < MIN_SPAWN_AGL) spawnPosition.y = surfaceHeight(position.x, position.z) + SPAWN_LIFT_AGL;
+    const floor = surfaceAlongPath(position.x, position.z, heading, craft.spawn.hover ? 0 : simCruise());
+    if (spawnPosition.y - floor < MIN_SPAWN_AGL) spawnPosition.y = floor + SPAWN_LIFT_AGL;
+    liftClearOfStructures(spawnPosition);
     resetActiveModel(airbornePose(spawnPosition, heading));
+  }
+
+  /**
+   * The highest surface (terrain, landable tops, water) under the first SPAWN_CLEAR_SECONDS of level
+   * flight at speed from (x, z) along heading: a spawn lifted clear of it does not fly into a slope
+   * rising ahead of it. At speed 0 (a hover) it is the surface right below.
+   */
+  function surfaceAlongPath(x, z, heading, speed) {
+    let highest = surfaceHeight(x, z);
+    if (!(speed > 0)) return highest;
+    vectorFromHeading(heading, scratchVector);
+    const reach = speed * SPAWN_CLEAR_SECONDS;
+    for (let sample = 1; sample <= SPAWN_CLEAR_SAMPLES; sample++) {
+      const along = (reach * sample) / SPAWN_CLEAR_SAMPLES;
+      highest = Math.max(highest, surfaceHeight(x + scratchVector.x * along, z + scratchVector.z * along));
+    }
+    return highest;
   }
 
   // ---- situate (contract h.4) ------------------------------------------------------------------
@@ -799,7 +821,10 @@ export function createFlightController(ctx) {
       player.heading = heading;
     } else {
       // Airborne: never inside the ground; without a position, lifted clear as the Phase 1 rules do.
-      if (!placement.position && position.y - surface < MIN_SPAWN_AGL) position.y = surface + SPAWN_LIFT_AGL;
+      if (!placement.position) {
+        const floor = surfaceAlongPath(position.x, position.z, heading, mode === 'hover' || mode === 'drift' ? 0 : Number.isFinite(placement.speed) ? placement.speed : simCruise());
+        if (position.y - floor < MIN_SPAWN_AGL) position.y = floor + SPAWN_LIFT_AGL;
+      }
       if (position.y < surface + 1) position.y = surface + 1;
       liftClearOfStructures(position);
       resetActiveModel(flyingPose(position, heading, mode, placement));
