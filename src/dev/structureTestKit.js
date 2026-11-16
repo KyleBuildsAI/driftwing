@@ -362,9 +362,11 @@ export function installSiteChecks(game) {
         if (site) found.set(preset.id, site);
       }
       // Every fixture's engines are registered now (the emitter's volcano and waterfall included), and
-      // the four structure fixtures (airfield, bridge, islands, canyon) are the ones the checks below use.
-      const structureFixtures = TERRAIN_FIXTURES.filter((preset) => preset.engines.some((entry) => entry.engine === 'structure')).length;
-      return check('structure fixtures added; their stamped sites found', added.length === TERRAIN_FIXTURES.length && found.size === added.length && structureFixtures === 4, { added, sites: [...found.values()].map((site) => site.id) });
+      // the four structure fixtures the checks below use (airfield, bridge, islands, canyon) are among
+      // them (the sleeping giant's fixture, preset 68's, is a structure too; its own checks cover it).
+      const structureFixtures = TERRAIN_FIXTURES.filter((preset) => preset.engines.some((entry) => entry.engine === 'structure')).map((preset) => preset.id);
+      const used = ['fixtureAirfield', 'fixtureRopeBridge', 'fixtureFloatingIslands', 'fixtureSlotCanyon'];
+      return check('structure fixtures added; their stamped sites found', added.length === TERRAIN_FIXTURES.length && found.size === added.length && used.every((id) => structureFixtures.includes(id)), { added, sites: [...found.values()].map((site) => site.id) });
     },
     /** Frames the site of presetId from `view` { distance, height, bearing, lift }. */
     async show(presetId, view = {}) {
