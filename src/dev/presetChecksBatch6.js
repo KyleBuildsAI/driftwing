@@ -39,8 +39,8 @@ export function installBatch6Checks(game) {
   const discoveries = [];
   ctx.bus.onTyped('discovery', (payload) => discoveries.push(payload));
   const timeFrozenBefore = ctx.settings.get('timeFrozen');
-  /** The game's other event presets, held for the run (the real sites stay, so the batch's sites are built). */
-  const heldEvents = [];
+  /** The game's other presets (events and sites), held for the run; the batch's own sites stay, so its real sites are built. */
+  const heldPresets = [];
 
   function memory() {
     const info = ctx.renderer.info.memory;
@@ -102,14 +102,14 @@ export function installBatch6Checks(game) {
       system.debug.pinLodBias(1);
       // A rolled midnight sun or blood moon would bend or tint the night the checks hold.
       system.debug.holdOverrides();
-      // With all 100 presets the director's own events (night skies, storms) would add sky modifiers
-      // and geometry mid-check: the game's other events are held, its sites stay for the real sites.
+      // With all 100 presets the director's own events (night skies, storms) and the other presets' sites
+      // would add sky modifiers, emitter rows and geometry mid-check: every other game preset is held.
       for (const preset of PRESETS) {
-        if (preset.kind !== 'event' || BATCH_IDS.includes(preset.id) || manager.getPreset(preset.id) !== preset) continue;
+        if (BATCH_IDS.includes(preset.id) || manager.getPreset(preset.id) !== preset) continue;
         manager.removePreset(preset.id);
-        heldEvents.push(preset);
+        heldPresets.push(preset);
       }
-      return check('setup: the batch presets are registered, the other game events held', BATCH_IDS.every((id) => manager.getPreset(id)), { tracked: dispose.tracker !== null, presets: manager.listPresets().length, held: heldEvents.length });
+      return check('setup: the batch presets are registered, the other game presets held', BATCH_IDS.every((id) => manager.getPreset(id)), { tracked: dispose.tracker !== null, presets: manager.listPresets().length, held: heldPresets.length });
     },
 
     /** The time of day (sun elevation in degrees, held there) and the regional weather. */
@@ -362,7 +362,7 @@ export function installBatch6Checks(game) {
     /** The summary check; puts the clock and the weather back. */
     finish() {
       dispose.restore();
-      for (const preset of heldEvents.splice(0)) if (!manager.getPreset(preset.id)) manager.addPreset(preset);
+      for (const preset of heldPresets.splice(0)) if (!manager.getPreset(preset.id)) manager.addPreset(preset);
       system.debug.releaseOverrides();
       ctx.systems.weather.forceState(null);
       ctx.settings.set('timeFrozen', timeFrozenBefore);
