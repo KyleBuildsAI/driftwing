@@ -369,8 +369,9 @@ async function main() {
       const state = await evaluate(() => {
         const spawns = window.DRIFTWING.ctx.systems.spawns;
         // Heavy spawns of the game's own presets at the far tier (a floating islands site) draw their
-        // lures too.
-        const others = spawns.getActive().filter((record) => record.heavy && record.tier === 'far' && !window.__lureIds.includes(record.id)).length;
+        // lures too, except a dormant site (a volcano or fissure whose eruption is not running).
+        const dormant = (record) => record.active === false && Boolean(spawns.manager.getPreset(record.presetId)?.activeState);
+        const others = spawns.getActive().filter((record) => record.heavy && record.tier === 'far' && !dormant(record) && !window.__lureIds.includes(record.id)).length;
         return { label: window.DRIFTWING.state.time.label, lures: spawns.manager.lures.getStats(), tiers: spawns.getStats().tiers, others };
       });
       await page.screenshot({ path: join(options.out, `lure-${label}.png`) });
