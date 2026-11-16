@@ -142,15 +142,18 @@ export function installBatch6Checks(game) {
         await frames(5);
         spawnId = manager.getSiteSpawn(site.id);
       }
-      // The discovery while the craft flies in (the photo camera holds the simulation).
-      ctx.systems.flight.resetTo({ x: site.x - 900, y: site.groundY + 250, z: site.z - 900, heading: 135 });
+      // The discovery while the craft flies in (the photo camera holds the simulation), from a point
+      // 1.1 km out with a clear sight of the site (a cliff site seen from behind its own cliff is not
+      // in view), heading at it.
+      const target = { x: site.x, y: site.groundY + lift, z: site.z };
+      const approach = viewpoint(target, 1100, 250, bearing + (site.rotation * 180) / Math.PI);
+      ctx.systems.flight.resetTo({ x: approach.x, y: approach.y, z: approach.z, heading: (Math.atan2(site.x - approach.x, approach.z - site.z) * 180) / Math.PI });
       let discovery = null;
       const waitStarted = performance.now();
       while (!discovery && !knownBefore && performance.now() - waitStarted < 25000) {
         discovery = discoveries.slice(since).find((payload) => payload.id === site.id) ?? null;
         await frames(5);
       }
-      const target = { x: site.x, y: site.groundY + lift, z: site.z };
       const settled = await frameView(viewpoint(target, distance, height, bearing + (site.rotation * 180) / Math.PI), target);
       await terrainIdle();
       const waters = (site.waters ?? []).map((water) => ({ id: water.id, level: Math.round(water.level * 10) / 10 }));
