@@ -18,6 +18,10 @@
 import { createBrowserHelpers } from './structureTestKit.js';
 import { createDisposeCheck, frames, holdConditions } from './spawnCheckKit.js';
 import { createWaterSample } from '../world/waterQuery.js';
+import { PRESETS } from '../spawns/presets/index.js';
+
+/** The batch's presets: every other game event is held while the checks run. */
+const BATCH_IDS = Object.freeze(['butterflyMigration', 'caribouMigration', 'cliffsideMonastery', 'seaCliffCastle', 'mountaintopObservatory', 'steamTrainViaduct', 'damSpillway', 'desertOasisCaravan', 'labyrinth', 'fireballImpact']);
 
 /** The structure part of a spawn (the part whose data has movers), or null. */
 function structurePart(manager, spawnId) {
@@ -35,6 +39,8 @@ export function installBatch6Checks(game) {
   const discoveries = [];
   ctx.bus.onTyped('discovery', (payload) => discoveries.push(payload));
   const timeFrozenBefore = ctx.settings.get('timeFrozen');
+  /** The game's other event presets, held for the run (the real sites stay, so the batch's sites are built). */
+  const heldEvents = [];
 
   function memory() {
     const info = ctx.renderer.info.memory;
@@ -94,7 +100,14 @@ export function installBatch6Checks(game) {
     setup() {
       // The load shedder must not demote the checks' spawns on a busy machine.
       system.debug.pinLodBias(1);
-      return check('setup: the batch presets are registered', ['butterflyMigration', 'caribouMigration', 'cliffsideMonastery', 'seaCliffCastle', 'mountaintopObservatory', 'steamTrainViaduct', 'damSpillway', 'desertOasisCaravan', 'labyrinth', 'fireballImpact'].every((id) => manager.getPreset(id)), { tracked: dispose.tracker !== null, presets: manager.listPresets().length });
+      // With all 100 presets the director's own events (night skies, storms) would add sky modifiers
+      // and geometry mid-check: the game's other events are held, its sites stay for the real sites.
+      for (const preset of PRESETS) {
+        if (preset.kind !== 'event' || BATCH_IDS.includes(preset.id) || manager.getPreset(preset.id) !== preset) continue;
+        manager.removePreset(preset.id);
+        heldEvents.push(preset);
+      }
+      return check('setup: the batch presets are registered, the other game events held', BATCH_IDS.every((id) => manager.getPreset(id)), { tracked: dispose.tracker !== null, presets: manager.listPresets().length, held: heldEvents.length });
     },
 
     /** The time of day (sun elevation in degrees, held there) and the regional weather. */
@@ -347,6 +360,7 @@ export function installBatch6Checks(game) {
     /** The summary check; puts the clock and the weather back. */
     finish() {
       dispose.restore();
+      for (const preset of heldEvents.splice(0)) if (!manager.getPreset(preset.id)) manager.addPreset(preset);
       ctx.systems.weather.forceState(null);
       ctx.settings.set('timeFrozen', timeFrozenBefore);
       return helpers.finish();
