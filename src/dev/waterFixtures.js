@@ -143,17 +143,20 @@ export const FIXTURE_MANGROVE = fixture('fixtureMangrove', 'Fixture mangrove del
  * real preset's placement and stamps, rolled far more often and packed closer, so each stamp type lies
  * within a short flight of the terrain test's start.
  */
-function seaFixture(id, name, preset) {
+function seaFixture(id, name, preset, minSpacing = 8000, biomes = preset.placement.biomes) {
   return fixture(id, name, 'geo', {
-    placement: Object.freeze({ ...preset.placement, chance: 0.9, minSpacing: 8000, clearance: 100 }),
+    placement: Object.freeze({ ...preset.placement, biomes, chance: 0.9, minSpacing, clearance: 100 }),
     stamps: preset.stamps,
   });
 }
 
 export const FIXTURE_ATOLL = seaFixture('fixtureAtoll', 'Fixture atoll', coralAtoll);
-export const FIXTURE_REEF = seaFixture('fixtureReef', 'Fixture reef', reefShipwreck);
-export const FIXTURE_SEA_STACKS = seaFixture('fixtureSeaStacks', 'Fixture sea stacks', seaStacks);
-export const FIXTURE_ESTUARY = seaFixture('fixtureEstuary', 'Fixture estuary', tidalBore);
+export const FIXTURE_REEF = seaFixture('fixtureReef', 'Fixture reef', reefShipwreck, 16000);
+export const FIXTURE_SEA_STACKS = seaFixture('fixtureSeaStacks', 'Fixture sea stacks', seaStacks, 16000);
+// An estuary needs a straight shore across its axis, so few coast cells fit one, and the dense fixture
+// lakes win most of those by priority: it is rolled densely, and its id (which salts its rolls) is one
+// whose roll keeps an estuary within the terrain test's 40 km of the P2-TERRAIN start.
+export const FIXTURE_ESTUARY = seaFixture('fixtureRiverMouth', 'Fixture river mouth', tidalBore, 2000);
 
 /** Every water and overlay fixture. */
 export const WATER_FIXTURES = Object.freeze([
@@ -186,7 +189,7 @@ export const WATER_FIXTURE_STAMP_TYPE = Object.freeze({
   fixtureAtoll: 'atoll',
   fixtureReef: 'reef',
   fixtureSeaStacks: 'seaStacks',
-  fixtureEstuary: 'estuary',
+  fixtureRiverMouth: 'estuary',
 });
 
 /** The overlay kinds each overlay fixture exercises (palette, vegetation, material, tintSweep, stripes). */
