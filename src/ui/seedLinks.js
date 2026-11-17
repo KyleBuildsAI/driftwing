@@ -9,7 +9,8 @@ import { normalizeSeed, parseDayTime, randomSeed, shareLink, worldHash } from '.
 
 /**
  * Creates the seed-link helpers. ctx: state, bus and systems.shell (the bridge); toast(text, options)
- * is the UI's toast. Returns { shareUrl(), copyLink(), openWorld(seed, dayTime?), newWorld() }.
+ * is the UI's toast. Returns { shareUrl(), copyLink(), worldUrl(seed), copyWorldLink(seed),
+ * openWorld(seed, dayTime?), newWorld() }.
  */
 export function createSeedLinks({ ctx, toast }) {
   const { state } = ctx;
@@ -60,6 +61,27 @@ export function createSeedLinks({ ctx, toast }) {
     });
   }
 
+  /** The link to another world (any seed, normalised), at its opening time of day; null for a non-seed. */
+  function worldUrl(seed) {
+    const normalised = normalizeSeed(seed);
+    return normalised ? shareLink(window.location.href, normalised) : null;
+  }
+
+  /**
+   * Copies the link to the world seed (the journal's worlds visited); says so, or shows the link to
+   * copy by hand. Resolves the link, or null when seed is not a seed.
+   */
+  function copyWorldLink(seed) {
+    const link = worldUrl(seed);
+    if (!link) return Promise.resolve(null);
+    const normalised = normalizeSeed(seed);
+    return writeClipboard(link).then((copied) => {
+      if (copied) toast(`Link copied. It opens world ${normalised}.`, { kind: 'success', key: 'share-link' });
+      else toast(`World ${normalised}: ${link}`, { duration: 10, wrap: true, key: 'share-link' });
+      return link;
+    });
+  }
+
   /**
    * Reloads into the world seed (normalised; false when it is not a seed), at dayTime (0..1) when
    * given, else at the opening time of day.
@@ -96,5 +118,5 @@ export function createSeedLinks({ ctx, toast }) {
     });
   }
 
-  return { shareUrl, copyLink, openWorld, newWorld };
+  return { shareUrl, copyLink, worldUrl, copyWorldLink, openWorld, newWorld };
 }
