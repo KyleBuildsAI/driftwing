@@ -4,10 +4,10 @@
   { "wait": 2500 },
   { "eval": "(() => { window.DRIFTWING.debug.stepFrames(60); return 'settled the terrain uploads'; })()" },
   { "wait": 1500 },
-  { "eval": "(() => { const game = window.DRIFTWING; game.debug.stepFrames(30); const { ctx } = game; window.__dwRenderStill = () => { ctx.systems.sky.update(0, 0); if (ctx.post) ctx.post.pipeline.render(); else ctx.renderer.render(ctx.scene, ctx.camera); }; window.__dwRenderStill(); const weather = ctx.systems.weather; const sky = ctx.systems.sky; return JSON.stringify({ frame: game.frame, weather: weather && weather.getState ? weather.getState().state : 'no weather system', modifiers: sky.getModifierState ? sky.getModifierState() : 'no sky modifiers', terrainPending: ctx.systems.terrain.getStats().pending }); })()" },
+  { "eval": "(async () => { const game = window.DRIFTWING; game.debug.stepFrames(30); const { ctx } = game; window.__dwRenderStill = () => new Promise((resolve, reject) => { requestAnimationFrame(() => { try { ctx.systems.sky.update(0, 0); if (ctx.post) ctx.post.pipeline.render(); else ctx.renderer.render(ctx.scene, ctx.camera); resolve(); } catch (error) { reject(error); } }); }); await window.__dwRenderStill(); const weather = ctx.systems.weather; const sky = ctx.systems.sky; return JSON.stringify({ frame: game.frame, weather: weather && weather.getState ? weather.getState().state : 'no weather system', modifiers: sky.getModifierState ? sky.getModifierState() : 'no sky modifiers', terrainPending: ctx.systems.terrain.getStats().pending }); })()" },
   { "shot": "golden-1" },
-  { "eval": "(() => { window.__dwRenderStill(); return 'the same frame rendered again, nothing updated but the sky (at dt 0)'; })()" },
+  { "eval": "(async () => { await window.__dwRenderStill(); return 'the same frame rendered again in the next animation frame, nothing updated but the sky (at dt 0)'; })()" },
   { "shot": "golden-2" },
-  { "eval": "(() => { const game = window.DRIFTWING; const weather = game.ctx.systems.weather; if (weather && weather.dispose) weather.dispose(); window.__dwRenderStill(); const sky = game.ctx.systems.sky; return JSON.stringify({ weatherDisposed: Boolean(weather && weather.dispose), modifiers: sky.getModifierState ? sky.getModifierState() : 'no sky modifiers' }); })()" },
+  { "eval": "(async () => { const game = window.DRIFTWING; const weather = game.ctx.systems.weather; if (weather && weather.dispose) weather.dispose(); await window.__dwRenderStill(); const sky = game.ctx.systems.sky; return JSON.stringify({ weatherDisposed: Boolean(weather && weather.dispose), modifiers: sky.getModifierState ? sky.getModifierState() : 'no sky modifiers' }); })()" },
   { "shot": "golden-3" }
 ]

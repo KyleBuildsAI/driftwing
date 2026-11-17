@@ -16,11 +16,14 @@
 //              dev hook) mid-leg; the craft state stays finite.
 //   image      at fixed poses (low over the spawn area, with the wind overlay's arrows, a structure, a
 //              tornado and a supercell in view, 10 km up with a vertical rebase, and 400 km out from
-//              the world origin), the frame is captured with the origin on one lattice point, again
-//              (the control: what two identical frames differ by), then with the origin on the
-//              neighbouring lattice point: the rebased frame must differ from the previous one no more
-//              than the control does, plus a small allowance for float32 rounding at the new render
-//              coordinates.
+//              the world origin), once the scene is still (the terrain and the far field built, and
+//              two frames in a row alike: streaming that lands between two captures is not a rebase),
+//              the frame is captured with the origin on one lattice point, again (the control: what
+//              two identical frames differ by), then with the origin on the neighbouring lattice
+//              point, and once more back on the first: the rebased frame, and the frame back on the
+//              first point, must differ from the frame before the rebase no more than the control
+//              does, plus a small allowance for float32 rounding at the new render coordinates. Where
+//              the rebased frame differs is reported (the changed pixels' bounding box).
 //   identity   terrain heights on a grid and the site list around the craft, and the terrain's chunk
 //              builds, are identical before and after forced rebases (no rebuild, no re-placement).
 import { ORIGIN_QUANTUM, ORIGIN_REBASE_DISTANCE } from '../core/origin.js';
@@ -35,6 +38,9 @@ const IMAGE_MEAN_ALLOWANCE = 0.35;
 const IMAGE_CHANGED_ALLOWANCE = 0.002;
 /** A pixel counts as changed when a channel differs by more than this (0..255). */
 const IMAGE_CHANGED_LEVEL = 24;
+/** Image check: a still scene's frame pair differs by at most this mean (0..255); pairs tried to find one. */
+const STILL_MEAN = 0.05;
+const STILL_TRIES = 10;
 /** Identity check: the site list covers this many site cells on each side of the craft's cell. */
 const SITE_REACH = 10;
 const IMAGE_WIDTH = 320;
@@ -197,6 +203,67 @@ export function installOriginRebaseCheck(dw) {
       await sleep(40);
     }
     return false;
+  }
+
+  /** True when the far field is off or has built every tile it selected (nothing pending, no holes). */
+  function farFieldSettled() {
+    const farField = ctx.systems.farField;
+    if (!farField || typeof farField.getStats !== 'function') return true;
+    const stats = farField.getStats();
+    return !stats.active || (stats.pending === 0 && stats.holes === 0);
+  }
+
+  /** Waits (real time, stepping frames) until the far field has built what it selected. */
+  async function settleFarField(timeoutMs = 25000) {
+    const started = performance.now();
+    while (performance.now() - started < timeoutMs) {
+      await stepRendered();
+      if (farFieldSettled()) return true;
+      await sleep(40);
+    }
+    return false;
+  }
+
+  /**
+   * Captures frame pairs until two in a row are alike (mean at most STILL_MEAN): a tile, a chunk or a
+   * cloud refresh landing between two captures would otherwise read as a rebase difference. Returns
+   * { image (the later frame), mean (the last pair's), tries }.
+   */
+  async function captureStill() {
+    let previous = await renderAndCapture();
+    let mean = Infinity;
+    let tries = 0;
+    while (tries < STILL_TRIES) {
+      tries++;
+      const next = await renderAndCapture();
+      mean = compareImages(previous, next).mean;
+      previous = next;
+      if (mean <= STILL_MEAN) break;
+      await sleep(120);
+    }
+    return { image: previous, mean, tries };
+  }
+
+  /** The bounding box (capture pixels) of the pixels that changed between two images, or null. */
+  function changedRegion(first, second) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -1;
+    let maxY = -1;
+    for (let index = 0; index < first.length; index += 4) {
+      const changed = Math.abs(first[index] - second[index]) > IMAGE_CHANGED_LEVEL
+        || Math.abs(first[index + 1] - second[index + 1]) > IMAGE_CHANGED_LEVEL
+        || Math.abs(first[index + 2] - second[index + 2]) > IMAGE_CHANGED_LEVEL;
+      if (!changed) continue;
+      const pixel = index / 4;
+      const x = pixel % IMAGE_WIDTH;
+      const y = Math.floor(pixel / IMAGE_WIDTH);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+    return maxX < 0 ? null : { x0: minX, y0: minY, x1: maxX, y1: maxY };
   }
 
   /** Puts the craft at a pose (world), level on the autopilot at that height and heading. */
@@ -375,14 +442,15 @@ export function installOriginRebaseCheck(dw) {
     },
 
     /**
-     * The image check at pose: the frame on lattice point A, the control frame, then the frame on the
-     * neighbouring lattice point B (offset: lattice steps per axis). The pose must lie within the
-     * threshold of both points.
+     * The image check at pose: once the scene is still, the frame on lattice point A, the control
+     * frame, the frame on the neighbouring lattice point B (offset: lattice steps per axis), and the
+     * frame back on A. The pose must lie within the threshold of both points.
      */
     async imageCheck(id, pose, offset = { x: 1, y: 0, z: 0 }) {
       placeCraft(pose);
       const settled = await settleTerrain();
       state.paused = true;
+      const farSettled = await settleFarField();
       const position = state.player.position;
       // On an axis that moves, the lattice point below the craft and the one above; elsewhere the nearest.
       const latticeOf = (value, step) => (step === 0 ? Math.round(value / ORIGIN_QUANTUM) : Math.floor(value / ORIGIN_QUANTUM)) * ORIGIN_QUANTUM;
@@ -391,22 +459,31 @@ export function installOriginRebaseCheck(dw) {
       const reach = (lattice) => Math.hypot(position.x - lattice.x, position.y - lattice.y, position.z - lattice.z);
       origin.rebaseTo(latticeA);
       await stepRenderedFrames(4);
-      const first = await renderAndCapture();
+      const still = await captureStill();
+      const first = still.image;
       const second = await renderAndCapture();
       const versionBefore = origin.version;
       origin.rebaseTo(latticeB);
       const third = await renderAndCapture();
       const fourth = await renderAndCapture();
-      const brightness = meanBrightness(second);
       const stayed = origin.version === versionBefore + 1 && origin.offset.x === latticeB.x && origin.offset.y === latticeB.y && origin.offset.z === latticeB.z;
+      origin.rebaseTo(latticeA);
+      const fifth = await renderAndCapture();
+      const returned = origin.version === versionBefore + 2;
+      const brightness = meanBrightness(second);
       state.paused = false;
       const control = compareImages(first, second);
       const rebase = compareImages(second, third);
       const settledAfter = compareImages(third, fourth);
-      const passed = settled && stayed && brightness > 8 && reach(latticeA) < ORIGIN_REBASE_DISTANCE && reach(latticeB) < ORIGIN_REBASE_DISTANCE
-        && rebase.mean <= control.mean + IMAGE_MEAN_ALLOWANCE && rebase.changed <= control.changed + IMAGE_CHANGED_ALLOWANCE;
-      return report(id, passed, `pose ${Math.round(pose.x)}, ${Math.round(pose.y)}, ${Math.round(pose.z)} (terrain ${settled ? 'ready' : 'not ready'}); origin ${JSON.stringify(latticeA)} -> ${JSON.stringify(latticeB)} (${stayed ? 'held' : 'moved again'}); `
-        + `frame difference across the rebase: mean ${rebase.mean.toFixed(3)}, changed ${(rebase.changed * 100).toFixed(3)} %; control pair: mean ${control.mean.toFixed(3)}, changed ${(control.changed * 100).toFixed(3)} %; `
+      const back = compareImages(second, fifth);
+      const region = changedRegion(second, third);
+      const within = (pair) => pair.mean <= control.mean + IMAGE_MEAN_ALLOWANCE && pair.changed <= control.changed + IMAGE_CHANGED_ALLOWANCE;
+      const passed = settled && stayed && returned && brightness > 8 && reach(latticeA) < ORIGIN_REBASE_DISTANCE && reach(latticeB) < ORIGIN_REBASE_DISTANCE
+        && within(rebase) && within(back);
+      return report(id, passed, `pose ${Math.round(pose.x)}, ${Math.round(pose.y)}, ${Math.round(pose.z)} (terrain ${settled ? 'ready' : 'not ready'}, far field ${farSettled ? 'built' : 'still building'}, still after ${still.tries} pair(s) at mean ${still.mean.toFixed(3)}); `
+        + `origin ${JSON.stringify(latticeA)} -> ${JSON.stringify(latticeB)} (${stayed ? 'held' : 'moved again'}) -> back (${returned ? 'held' : 'moved again'}); `
+        + `frame difference across the rebase: mean ${rebase.mean.toFixed(3)}, changed ${(rebase.changed * 100).toFixed(3)} %${region ? ` in x ${region.x0}-${region.x1}, y ${region.y0}-${region.y1} of the capture` : ''}; `
+        + `back on the first point: mean ${back.mean.toFixed(3)}, changed ${(back.changed * 100).toFixed(3)} %; control pair: mean ${control.mean.toFixed(3)}, changed ${(control.changed * 100).toFixed(3)} %; `
         + `after: mean ${settledAfter.mean.toFixed(3)}; frame brightness ${brightness.toFixed(1)}/255; allowance +${IMAGE_MEAN_ALLOWANCE} mean, +${(IMAGE_CHANGED_ALLOWANCE * 100).toFixed(1)} % changed (${IMAGE_WIDTH} x ${IMAGE_HEIGHT}, changed above ${IMAGE_CHANGED_LEVEL}/255)`);
     },
 

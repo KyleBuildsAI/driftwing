@@ -11,10 +11,12 @@
 //   2. fixes everything the director reads that would otherwise depend on the loading frames: the time
 //      of day (held with the sun PATH_SUN_ELEVATION degrees up), the perf governor's frame time
 //      (perf.simulateLoad, a steady 8 ms, so the director's frame-miss deferral never fires), the
-//      quality level, the craft (the bush plane, at 100 % assists, in the chase view), and the flight
+//      quality level, the craft (the bush plane, at 100 % assists, in the chase view), the flight
 //      clock, which jumps to PATH_START_SECONDS so the regional weather, the director's ticks and its
-//      log times line up. One frame is stepped at the new clock, so every value a system derives from
-//      the clock for the next frame (the wind strength the clouds set) is the same in both runs;
+//      log times line up, and the frame counter, which jumps to PATH_START_FRAME (state.frame counts
+//      the loading frames too, a different number in every load, and some engines pace work on it).
+//      One frame is stepped at the new clock, so every value a system derives from the clock for the
+//      next frame (the wind strength the clouds set) is the same in both runs;
 //   3. restarts the spawns (spawns.debug.restartSpawns: every spawn ended, the SpawnManager's
 //      discoveries, site sweep and visibility rotation reset, a new director on the current clock),
 //      then puts the craft at the spawn on the autopilot, PATH_CLEARANCE above the highest ground
