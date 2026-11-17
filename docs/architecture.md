@@ -1,13 +1,16 @@
 # DRIFTWING v2 architecture
 
-This is the architecture of DRIFTWING v2 as of Phase 2 (the event director, the spawn engines and
-the first 30 environment spawns), built on Phase 1 (`2.0.0-phase.1`) and the structure correction
-(tag `v2-structure`): the two games behind the launcher shell, the module map, the runtime and
-frame loop, and the contracts between systems, from storage and input to site placement, terrain
-stamps, the ten spawn engines and the event director. The last sections list how it is tested and
-where Phases 3-4 attach without rewrites. The code is the source of truth; every contract here
-names the file that implements it. The 30 presets themselves, and how to add one, are in
-[spawns.md](spawns.md).
+This is the architecture of DRIFTWING v2 as of Phase 3 (14 craft, 100 environment spawns and the
+systems they need: the floating origin, structure collision, local water bodies, region overlays,
+challenges, high-altitude rendering and the far field), built on Phase 2 (the event director and
+the ten spawn engines), Phase 1 and the structure correction (tag `v2-structure`): the two games
+behind the launcher shell, the module map, the runtime and frame loop, and the contracts between
+systems, from storage and input to site placement, terrain stamps, the spawn engines and the event
+director. The last sections list how it is tested and where Phase 4 attaches without rewrites. The
+code is the source of truth; every contract here names the file that implements it. The 100 presets
+themselves, and how to add one, are in [spawns.md](spawns.md); the controls of every craft are in
+[controls.md](controls.md); the Phase 3 contracts the systems were built against are in
+[specs/phase3-contract.md](specs/phase3-contract.md).
 
 Units are SI everywhere in code: m, m/s, kg, N and s, with rad and rad/s inside the physics. Degrees
 appear only where a field name or comment says so (telemetry angles, headings, FOVs). World axes are
@@ -145,6 +148,7 @@ system, and then starts the frame loop.
 | `eventBus.js` | the `EventBus` (`on`, `off`, `emit`) |
 | `events.js` | typed events: payload shapes, `emitTyped` / `onTyped`, validation in dev and with `?debug=1` |
 | `clock.js` | `createFixedStepClock()`: 120 Hz ticks, accumulator, interpolation `alpha`, 0.1 s frame clamp |
+| `origin.js` | the floating render origin (Phase 3, [Floating origin](#floating-origin-ctxorigin-srccoreoriginjs)): `createRenderOrigin`, the 4096 m lattice, `worldPositionNode` / `worldCameraPositionNode` for shaders |
 | `loop.js` | the frame loop (`createFrameLoop(ctx, options)`): timing, the fade gate, the system update order, the safety net and telemetry calls, render |
 | `perf.js` | display refresh measurement, the frame target, dynamic resolution (stage one) and v1's quality governor (stage two) |
 | `seed.js` | the world seed (query, then hash, then the saved seed, else a new random one), the start time of day (`?time=`, then the link's `#t=`), world hashes and share links |
@@ -163,8 +167,11 @@ system, and then starts the frame loop.
 | `curvature.js` | the planet curvature (visual only): `curvatureDrop`, the rigid drop for discrete objects (`rigidCurvatureDrop`, `applyRigidDrop`), the TSL nodes (`curvatureDropNode`, `curvedPositionNode`) and the `planetRadiusKm` clamp |
 | `clouds.js` | instanced drifting clouds, cloud shadows (v1), plus a cumulus cap over every thermal; the palette follows the sky modifiers (storm undersides, eclipse) |
 | `cloudShading.js` | the cloud puff geometry, palette (`createCloudLook`) and light response (`createCloudRadiance`) shared by the v1 clouds and the weather volumes, and the cloud optics (glory and rainbow bands) |
-| `water.js` | animated water, sun glint and shoreline foam (v1), plus the local effects layer's terms |
-| `waterEffects.js` | the water effects layer: trail buffer, vortices, ripples, glow regions, spray droplets and pool discs for spawns |
+| `water.js` | the `water` system: the v1 ocean on its camera-following grid (its material is `waterMaterial.js`) and the water effects layer |
+| `waterMaterial.js` | the shared water material: the v1-derived ocean shader (kind `ocean`), its lake variant (the same wave table and sky shading on a flat surface clipped to the basin, scaled waves, shoreline foam, the salt-flat mirror) and ice; per-body values are per-object uniforms, so a new body compiles no pipeline |
+| `waterBodies.js` | the `waterBodies` system (Phase 3, right after `water`): one pooled flat mesh per local water body within 12 km of the camera (lakes, pools, thin films, ice; farther ones are the far field's), its vertices carrying the depth to the basin and the distance inside the outline, so the shared materials fade it in from its shore and discard everything outside the basin; built a few rows a frame |
+| `waterEffects.js` | the water effects layer: trail buffer, vortices, ripples, glow regions, spray droplets, pool discs, shallows regions and travelling waves for spawns |
+| `windSway.js` | the vegetation's wind: a 64 x 64 texture of 32 m cells around the focus holding the WindField's near-ground wind and gusts, refreshed a few texels a frame, so a spawn's wind source ripples the plants it reaches |
 | `birds.js` | boid flocks that scatter (v1), wider from a craft with a higher `faunaThreat` (the eagle) |
 | `fx.js` | contrails, wind streaks, bursts (v1) |
 | `jetEffects.js` | afterburner flame, vapor cones (Mach 0.9-1.05, low altitude) and wingtip vapour, attached to the jet mesh |
@@ -178,7 +185,13 @@ system, and then starts the frame loop.
 | --- | --- |
 | `worldgen.js` | `createWorldGen(seed, options)`: seeded noise, biomes, the SHARED height function (`heightAt`, `groundHeight`) with the site stamps applied, stamp-aware face colours, vegetation scatter and landmark sites. Imported by the main thread and the worker |
 | `placement.js` | deterministic site placement on the 2 km grid ([Placement and terrain stamps](#placement-and-terrain-stamps)); pure, imported by worldgen on both threads |
-| `stamps.js` | the terrain stamps (cone, carve, cliffStep, gorge, flatten, islandBase): resolution, height, paint, footprints; pure |
+| `stamps.js` | the terrain stamps (Phase 2's cone, carve, cliffStep, gorge, flatten and islandBase; Phase 3's basin, crater, terraces, atoll, reef, seaStacks, estuary, giant and delta): resolution, height, paint, footprints; pure |
+| `waters.js` | local water bodies (Phase 3, [Water](#water-the-query-local-bodies-and-rendering)): a site preset's `waters` resolved per site next to its stamps, each clipped to its host stamp's basin; pure, both threads |
+| `waterQuery.js` | the shared water-height query (`ctx.waterQuery`): the ocean's swell from the shader's own wave table plus every local body; pure, allocation-free |
+| `overlays.js` | region overlays (Phase 3, [Region overlays and vegetation](#region-overlays-and-vegetation)): a site preset's `overlays` resolved per site, overriding the ground's palette, vegetation, material, tint sweep and stripes inside a shape, never its height; pure, both threads |
+| `vegetationSpecies.js` | the Phase 1 scatter types (ids 0-5) and the seven overlay species (cherry, redwood, bamboo, saguaro, mangrove, lavender, tulip): sizes, trunks, perches, sway, tints; pure data |
+| `vegetationColliders.js` | the trunk cylinders and tree-top perches of the vegetation, as a collider provider and a perch provider for `ctx.colliders`; pure |
+| `pathFollower.js` | the PathFollower (Phase 3, [PathFollower](#pathfollower-srcworldpathfollowerjs)): smoothed paths, deterministic followers on the flight clock, and walking routes over the terrain; pure |
 | `groundSurfaces.js` | extra ground surfaces: landable ground that is not terrain (floating island tops, and from Phase 3 every landable collider's up-facing faces). `add({ id, minX, maxX, minZ, maxZ, top, heightAt })`, `remove(id)`, `setBounds(id, ...)` (a moving surface), `surfaceBelow(x, z, ceiling)`, `surfaceIdBelow(x, z, ceiling)`; filed in a 256 m cell grid, allocation-free queries. The game's instance is `ctx.groundSurfaces` |
 | `colliders.js` | the structure collision service (Phase 3, [Structure collision](#structure-collision-ctxcolliders)): `createColliderWorld({ groundSurfaces })` with box, cylinder, capsule, hull, heightfield and mesh colliders, a 256 m spatial hash, providers, perches, sensors and landable tops; pure JS. The game's instance is `ctx.colliders` |
 | `colliderMath.js` | the collider narrow phase: a sphere swept against points, segments, triangles, boxes, cylinders and convex hulls, and the deterministic hull builder; numbers pass through float64 registers, never call arguments (nothing is boxed or allocated) |
@@ -200,7 +213,7 @@ system, and then starts the frame loop.
 | --- | --- |
 | `FlightController.js` | `ctx.systems.flight`: active craft and its flight model, the fixed-step loop, speed blend, soft crash, relaunch, telemetry |
 | `models.js` | the model registry (`ctx.flightModels`) and the control-stage registry |
-| `SimFixedWing.js` | fixed-wing model (glider, bush plane, and the jet under kind `jet`), with the extension hooks |
+| `SimFixedWing.js` | fixed-wing model (glider, bush plane and seaplane; the jet, aerobatic and spaceplane under their own kinds), with the extension hooks |
 | `SimHelicopter.js` | single-main-rotor helicopter |
 | `SimWingsuit.js` | wingsuit and its canopy mode |
 | `SimQuad.js` | multirotor with its flight-controller firmware (rates, angle mode, altitude hold) |
@@ -215,6 +228,8 @@ system, and then starts the frame loop.
 | `aerobaticAero.js`, `aerobaticAssists.js`, `maneuverRecognizer.js` | the aerobatic (kind `aerobatic`, SimFixedWing): the stalled wing's autorotation (snap rolls) and the figure judging; its assists (no attitude protection at any level); the pure recognizer of the 12 figures (`figureFlown`) |
 | `spaceplaneAero.js`, `spaceplaneFcs.js` | the spaceplane (kind `spaceplane`, SimFixedWing): the air-augmented rocket, RCS blended by dynamic pressure, wave drag, heating (rho V^3), the apogee; its flight control system with attitude hold and auto re-entry |
 | `floats.js` | the seaplane's SimFixedWing extension: per-float buoyancy against the water query, planing and the hump, porpoising, water rudders, the amphibian wheels (nose-over, skid on land), water strikes, the gear advisory and the water handling assist |
+| `waterSurface.js` | the models' view of the water: the flight controller's `env.waterHeight` / `waterSample` (the shared water query at the tick time), with the flat sea as the fallback |
+| `parkingBrake.js` | a powered craft placed on the ground with the pilot's lever above idle (start on ground, a switch while landed) is held: both toe brakes on and the engine at idle until the pilot moves the lever, the brakes or the airbrake, or engages the autopilot |
 | `assists.js` | the assists control stage, assist catalogs and handlers per model kind, the fixed-wing handler |
 | `assistDefaults.js` | the one-time HOTAS assist default (50 % on craft the player never set) and which craft the player set |
 | `helicopterAssists.js` | helicopter assists (auto-hover, heading hold, attitude limits, torque and engine protection, autorotation) and autopilot |
@@ -301,7 +316,7 @@ system, and then starts the frame loop.
 | `WindField.js` | the wind field (ambient, ridge lift, thermals, turbulence, sources) and `createDebugUpdraft` |
 | `atmosphere.js` | the one air density model (re-exported from `flight/telemetry.js`) and `skyState(altitude, out, planetRadius)`: every high-altitude render input from the camera altitude (Phase 3) |
 
-### `src/spawns`: spawns, the event director and the regional weather (Phase 2)
+### `src/spawns`: spawns, the event director and the regional weather
 
 | file | what |
 | --- | --- |
@@ -316,7 +331,7 @@ system, and then starts the frame loop.
 | `lure.js` | FAR lures: the horizon silhouettes of heavy spawns |
 | `lightPool.js` | the real-light budget pool |
 | `pools.js` | pooling helpers for engines: scratch rings, slot allocators, object pools, instanced and mesh pools |
-| `presets/index.js`, `presets/<id>.js` | `PRESETS` (the 30 presets in spec order) and `PRESET_BY_ID`; one pure-data file per preset ([spawns.md](spawns.md)) |
+| `presets/index.js`, `presets/<id>.js` | `PRESETS` (the 100 presets in spec order) and `PRESET_BY_ID`; one pure-data file per preset ([spawns.md](spawns.md)) |
 | `engines/vortexEngine.js` | the vortex engine: tornado, waterspout and dust-devil funnels, their ground ring and their Rankine wind ([docs/engines/vortex.md](engines/vortex.md)) |
 | `engines/windModifierEngine.js` | the windModifier engine: WindField sources with no visuals ([docs/engines/windModifier.md](engines/windModifier.md)) |
 | `engines/windSources.js` | the allocation-free WindField source samplers both wind engines author (rankine, updraft, downburst, wake, jetStream, slipstream, waveLift, gustFront, curtain), their param tables and bounds; pure, so the labs use it too |
@@ -324,12 +339,13 @@ system, and then starts the frame loop.
 | `engines/lightEffectEngine.js`, `engines/glowPoints.js`, `engines/ribbons.js` | the `lightEffect` engine: lightning, glows, swarms, beams, the two-light budget ([docs/engines/lightEffect.md](engines/lightEffect.md)) |
 | `engines/engineKit.js` | helpers the engines share (one implementation each): param readers with clear errors naming the engine, preset and param (`createParamReader`, by value, and `createParamView`, by name), `[min, max]` rolls with the seeded generator, the wind source sample result (`createWindSample`), the one-voice rule (`ownsPresetAudio`: an entry's `voice` / `sound` / `ownsAudio` flag, else the preset's first engine entry opens `preset.audio`), heading frames, ground grids, pooled real lights, fixed-capacity update range lists, batched seeded random numbers, rationed voice levels |
 | `engines/weatherVolumeEngine.js`, `engines/weatherVolume/` | the weatherVolume engine: cloud masses, rain shafts, fog banks, the weather inside them ([docs/engines/weatherVolume.md](engines/weatherVolume.md)) |
-| `engines/celestialEngine.js`, `engines/celestial/` | the celestial engine: meteors, comets, the eclipse, the glory and rainbows ([docs/engines/celestial.md](engines/celestial.md)) |
-| `engines/faunaEngine.js`, `engines/faunaSpecies.js` | the fauna engine and its low-poly species ([docs/engines/fauna.md](engines/fauna.md)) |
-| `engines/waterEffectEngine.js` | the waterEffect engine: whirlpools, splashes, spray, bioluminescence and plunge pools on the water effects layer ([docs/engines/waterEffect.md](engines/waterEffect.md)) |
+| `engines/celestialEngine.js`, `engines/celestial/` | the celestial engine: meteors, comets (and their breakup), eclipses of the sun and the moon, the glory, rainbows, the aurora nights and the night-sky pieces (`celestial/nightSky.js`) ([docs/engines/celestial.md](engines/celestial.md)) |
+| `engines/faunaEngine.js`, `engines/faunaSpecies.js` | the fauna engine and its low-poly species, in the air, on the ground (herds and columns) and on the water ([docs/engines/fauna.md](engines/fauna.md)) |
+| `engines/waterEffectEngine.js` | the waterEffect engine: whirlpools, splashes, spray, bioluminescence, plunge pools, shallows and travelling waves on the water effects layer ([docs/engines/waterEffect.md](engines/waterEffect.md)) |
+| `engines/cliffFace.js` | the cave cliff of the bats at dusk (preset 48): the steepest high ground near a point, found the same way by the structure engine's cave mouth and the fauna engine's bat stream; pure |
 | `engines/gateDetector.js` | generic pass-through / pass-under gates: `createGateSet(gates)` and `crossGates(set, from, to, first, result)`, allocation-free |
 | `engines/lavaPath.js` | the path of a lava flow down a site's carve stamp and on over the real ground to the sea (`traceLavaPath`, `lavaSourceStamps`): the structure recipe `lavaChannels` drapes its lava there and the emitter's `seaEntry` stands where it meets the water; pure, runs at create only |
-| `engines/structureEngine.js`, `engines/structure/` | the structure engine and its recipes (wind farm, rope bridge, airfield, floating islands, crystal spires, gate course), the v1 palette, the mesh builder and `structureStamps` ([docs/engines/structure.md](engines/structure.md)) |
+| `engines/structureEngine.js`, `engines/structure/` | the structure engine and its recipes (Phase 2's seven and the Phase 3 sites', every one listed in [docs/engines/structure.md](engines/structure.md)), the v1 palette, the mesh builder (`meshBuilder.js`), `structureStamps`, the movers (`movers.js`: the glacier's calving slabs and drifting icebergs, each on its own pooled mesh with its own collider hull), the course kit (`courseKit.js`: challenge gates from a preset's `challenge` block), the heritage builds (`heritage.js`) and the dragon racer's rival (`rival.js`) |
 | `engines/setPieceEngine.js` | the set-piece engine: scripted multi-stage timelines over other presets through the SpawnManager ([docs/engines/setPiece.md](engines/setPiece.md)) |
 
 ### `src/ui`: glass UI
@@ -338,10 +354,11 @@ system, and then starts the frame loop.
 | --- | --- |
 | `ui.js`, `ui.css` | the v1 glass UI (HUD, compass, panels, toasts, command bar, help, journal) and the v2 chrome wiring |
 | `craftPicker.js` | the craft picker: the installed craft in their six groups, each with its favorite key, and the roster panel (favorites 1-0 by drag or slot menu, skins) |
+| `challengeHud.js` | the challenge HUD (Phase 3, system `challengeHud`): the start prompt, the gate arrow and 3D frame, the timer card with splits and the medal pace, the missed-gate flash and the medal toast |
 | `settingsPanel.js` | the tabbed settings panel (Flight, Graphics, Sound, Controls, General) |
 | `controlsPanel.js`, `controlsPanel.css` | the controls panel: device tabs, live readings, bindings, tuning, export / import |
 | `calibrationWizard.js` | the calibration wizard screens |
-| `instruments/` | 18 instrument renderers (`index.js` registry, `gaugeKit.js`, `units.js`) |
+| `instruments/` | 30 instrument renderers (`index.js` registry, `gaugeKit.js`, `units.js`; [the list](#craft-modules-srccraftjs)) |
 | `glassHud.js`, `glassHud.css` | the glass HUD's attitude indicator, stall / AoA warning and flight path marker, and when the glass HUD shows (the camera system drives it) |
 | `instrumentHud.js`, `instrumentHud.css` | the optional glass instrument HUD overlay |
 | `stickReticle.js`, `stickReticle.css` | the virtual-stick reticle |
@@ -369,7 +386,11 @@ system, and then starts the frame loop.
 `journal.js` (landmarks, biomes, distance, best landings from v1; spawn discoveries, the global
 records and the achievements from Phase 2, see [UI](#ui-ctxsystemsui)), `rings.js` (ring courses)
 and `waypoints.js` (waypoint beacon and arrow), from v1. `ignition.js` (Phase 3, contract h.5) is
-`ctx.ignition`, the registry of things a flame can light ([below](#ignition-ctxignition)).
+`ctx.ignition`, the registry of things a flame can light ([below](#ignition-ctxignition)). `challenges.js`
+(Phase 3, contract f) is the challenge system: timed gate courses for every craft, the ring course
+run on its core ([Challenges](#challenges-ctxsystemschallenges-srcgameplaychallengesjs)). `portals.js`
+(Phase 3, preset 67) carries a flight through a portal ring into the next world
+([Portals](#portals-srcgameplayportalsjs)).
 
 ### `src/dev`: developer tools (never player features)
 
@@ -384,16 +405,23 @@ and `waypoints.js` (waypoint beacon and arrow), from v1. `ignition.js` (Phase 3,
 | `setPieceTestKit.js` | dev builds only: the dev timeline (`DEV_TIMELINE`) over the test engines and a structure child, and the browser checks of `tools/steps/engine-setPiece.json` |
 | `debugWind.js` | dev-only debug updraft wind source (key L), proving the Phase 2 wind writer path |
 | `mockGamepads.js` | scriptable mock T.16000M, TWCS and standard gamepad devices |
-| `testHarness.js` | the flight-test harness at `?test=1` (dev builds only), and with `&testPlan=soak` the 10-minute soak (5 seeds, one craft each, both views, the event director live), with its scripted flights per craft (`testFlightScripts.js`), slow-frame attribution (`testFrameProfiler.js`), console capture (`testConsole.js`), statistics (`testStats.js`) and on-screen panel (`testPanel.js`, `testPanel.css`) |
+| `testHarness.js` | the flight-test harness at `?test=1` (dev builds only), and with `&testPlan=soak` the soak ([test entry points](#dev-tools-and-test-entry-points)), with its scripted flights for all 14 craft (`testFlightScripts.js`), slow-frame attribution (`testFrameProfiler.js`), console capture (`testConsole.js`), statistics (`testStats.js`) and on-screen panel (`testPanel.js`, `testPanel.css`) |
+| `craftTest.js`, `craftScenarios/index.js`, `craftScenarios/<craft>.js` | the craft test at `?test=craft` (contract k.1): the general flight test of every registered craft in both views and each craft's scenarios |
+| `collisionTest.js` | the collision test at `?test=collision` (contract k.2) |
+| `originRebaseCheck.js` | dev builds only: the floating origin's in-game checks (`tools/steps/origin-rebase.json`): image checks across forced rebases at fixed poses, camera-relative continuity, terrain and site identity |
+| `waterFixtures.js`, `waterBodiesTest.js` | dev builds only: the water and overlay fixture site presets and `?test=waters` (their world with no harness, for `tools/steps/water-bodies.json` and the craft scenarios with `world: 'waters'`) |
+| `shadowResizeCheck.js` | dev builds only: the perf governor's degrade path down to a 1024 shadow map with view swaps and resizes (`tools/steps/shadow-resize.json`) |
+| `comboStaging.js` | dev builds only: the F9 debugger's Force combo staging (below) |
 | `geometryTracker.js` | dev builds only: records the GPU geometries created between `start()` and `stop()` with their owners, so the engine memory checks tell a spawn's leftovers from the world's own new geometries |
 | `spawnCheckKit.js` | dev builds only: the one kit of the spawn checks (`?test=spawns`, `presetChecks.js`, `presetChecksBatch2.js` and `structureTestKit.js`'s browser helpers): frame and wall-clock waits, the held time of day and weather, the photo-camera framing over the terrain, and the dispose check (GPU memory with the geometry tracker, wind sources, colliders, challenge courses and ignitables added since the baseline, sky modifiers, real lights, leak counters and, on request, the JS heap) |
-| `spawnsTest.js`, `spawnScenarios.js` | the spawns test at `?test=spawns` (dev builds only): each of the 30 presets force-spawned ahead of the craft at the time of day and in the weather of its scenario (sites on their nearest real placed site), its frame times recorded, framed for a screenshot, and disposed back to its GPU memory, wind source, light and sky modifier baselines, with a held leak check on the JS heap |
+| `spawnsTest.js`, `spawnScenarios.js` | the spawns test at `?test=spawns` (dev builds only): each of the 100 presets force-spawned ahead of the craft at the time of day and in the weather of its scenario (sites on their nearest real placed site), its frame times recorded, framed for a screenshot, and disposed back to its GPU memory, wind source, light, sky modifier, collider and challenge baselines, with a held leak check on the JS heap |
 | `determinismTest.js` | the determinism test at `?test=determinism` (dev builds only): the same seed and scripted path in two page loads, stepped frame by frame from `spawns.debug.restartSpawns()`, with identical site-list hashes and director activation logs |
 | `hotasTest.js` | the HOTAS pipeline test at `?test=hotas` (dev builds only) |
 | `terrainTest.js` | the terrain test at `?test=terrain` (dev builds only): stamp seams at every LOD pair, worker parity, collision against the rendered mesh, on the fixtures or (`&presets=real`) the real stamped presets |
 | `presetChecks.js` | dev builds only: the browser checks of presets 21-30 (`tools/steps/presets-21-30.json` on a dev server), with dev stand-ins for a set piece's missing children: force-spawn ahead at the preset's time and weather, framing for screenshots, discovery (event, journal entry, card), memory, wind sources and sky modifiers back after dispose, real stamped sites with the site-list hash, ground start, eclipse, dawn and set-piece stages |
 | `presetChecks31.js` | dev builds only: the browser checks of presets 31-40 (`tools/steps/presets-31-40.json` on a dev server) on top of `presetChecks.js`: each preset isolated from the game's others, force-spawned at its time and weather (events over the surface they need), its weather volumes grown, framed in its own frame, its wind probed where the spec puts it (gust fronts, the hurricane's calm eye and eyewall), the cockpit weather inside it, the fog river's flow paths, the lightning in the ash, the sites' recipe facts, colliders, perches, sea entries and water bodies, an eruption started and ended, and every spawn disposed back to its baselines |
-| `spawnScenarios/batch<N>.js` | dev builds only: the `?test=spawns` scenarios of a Phase 3 batch of presets (one import each in `spawnScenarios.js`, in spec order) |
+| `spawnScenarios/batch<N>.js` | dev builds only: the `?test=spawns` scenarios of a Phase 3 batch of presets (`batch31.js` .. `batch91.js`, plus `batch6.js` and `batch8.js`; one import each in `spawnScenarios.js`, in spec order) |
+| `presetChecks41.js`, `presetChecksBatch6.js`, `presetChecks61.js`, `presetChecksBatch8.js`, `presetChecks91.js` | dev builds only: the browser checks of presets 41-50, 51-60, 61-70, 71-80 and 91-100 (`tools/steps/presets-<batch>.json`), on top of `presetChecks.js`: each preset on its real site or force-spawned at its time and weather, framed, discovered and disposed back to its baselines, plus each batch's own behaviours (movers, water bodies, challenges, ignitables, combos and overrides) |
 | `presetChecks81.js` | dev builds only: the browser checks of presets 81-90 (`tools/steps/presets-81-90.json`), on top of `presetChecks.js`: each preset on its real site and force-spawned, framed and disposed back to its baselines, plus kinematic strikes into an arch's crown rib, a hoodoo shaft and a redwood trunk (a structure strike, no probe inside), the five-arch run through the registered course (start, three splits, a medal, no stone touched), the gust bursts of the gust emitters, the mists' hours, the dust devils' rising, spinning, wandering cores and the paddies' and channels' water |
 | `terrainFixtures.js`, `terrainChecks.js` | the six fixture site presets (one per stamp type) and the seam / collision checks, shared by the terrain test and `tools/lab/terrain.mjs` |
 
@@ -410,7 +438,7 @@ and `waypoints.js` (waypoint beacon and arrow), from v1. `ignition.js` (Phase 3,
 | --- | --- |
 | `smoke-test.mjs` | headless Chrome check: console errors and warnings fail it; scripted steps and screenshots |
 | `steps/*.json` | reusable smoke steps; `view-physics.json` proves every craft flies the same in every view (below) |
-| `run-harness.mjs` | runs the `?test=1` (and its soak plan) / `?test=hotas` / `?test=terrain` / `?test=determinism` / `?test=spawns` harnesses headlessly on a spare port and saves the report (and one screenshot per stamp type for the terrain test, one per preset for the spawns test) |
+| `run-harness.mjs` | runs the `?test=1` (and its soak plan) / `?test=hotas` / `?test=terrain` / `?test=determinism` / `?test=spawns` / `?test=collision` / `?test=craft` harnesses headlessly on a spare port and saves the report (and one screenshot per stamp type for the terrain test, one per preset for the spawns test) |
 | `shell-test.mjs` | the launcher shell under load: 20 round trips, one live game, memory back to baseline, focus, hash forwarding, foreign origins ([Testing](#testing)) |
 | `shell-check.mjs` | the launcher shell's behaviour: first launch, the pill (shows, hides, clear of each game's HUD), persistence, `?v=`, forwarding, messages |
 | `build-single.mjs`, `v1-checksum.mjs` | the `dist-single/` build; the V1 freeze helpers shared with `tests/v1-checksum.test.mjs` |
@@ -421,6 +449,11 @@ and `waypoints.js` (waypoint beacon and arrow), from v1. `ignition.js` (Phase 3,
 | `lab/aerobatic.mjs`, `lab/paraglider.mjs`, `lab/balloon.mjs`, `lab/airship.mjs`, `lab/eagle.mjs`, `lab/spaceplane.mjs` | the other Phase 3 craft labs (`node --expose-gc`): each craft's handling targets of the spec, its situate, abilities, copilot commands and allocation |
 | `lab/seaplane.mjs` | the seaplane headless (`node --expose-gc`): flight targets, afloat and on a swell, the towing-tank hump, water takeoffs at 0 and 100 % assists, porpoising, water landings, the nose-over, wheels and keels on land, water rudders, the gear, situate, the copilot, the controller path and its `?test=craft` scenarios dry-run in their own world (CRAFT-1 with the water fixtures, a fresh world per flight) in calm air, three steady winds and the game's WindField at 1 and 1.2 x (`SEA_ONLY=id:label` flies one, `SEA_DEBUG=1` traces it) |
 | `lab/settings.mjs` | settings migrations (views per craft included) and the one-time HOTAS assist default |
+| `lab/craft.mjs` | the craft framework headless through the real controller ([Testing](#testing)) |
+| `lab/origin.mjs`, `lab/colliders.mjs`, `lab/water.mjs`, `lab/atmosphere.mjs` | the Phase 3 foundations headless: the floating origin, the collider service, the water query (with the vegetation trunk and perch providers) and the atmosphere and curvature numbers |
+| `lab/challenges.mjs`, `lab/ringsGolden.mjs`, `lab/path.mjs`, `lab/fauna-modes.mjs` | the challenge core (and the ring course against its Phase 2 golden logs), the PathFollower and the fauna ground, column and water-surface modes |
+| `lab/presets-51-60.mjs`, `lab/presets-71-80.mjs`, `lab/preset-flight-71-80.mjs` | headless checks of the presets 51-60 and 71-80 (their data, stamps, waters, paths and courses), and the SIM craft flown through the wind of presets 71-80 |
+| `lab/fixtures/rings-golden.json` | the ring course's six Phase 2 golden event logs (`lab/ringsGolden.mjs` records them, `lab/challenges.mjs` replays them) |
 | `lab/terrain.mjs` | site placement and terrain stamps: Phase 1 bit-identity, filters, determinism, stamp shapes, seams, collision (the fixtures and the real presets' stamps), and the height-sampling cost against Phase 1 |
 | `lab/spawns.mjs`, `lab/director.mjs`, `lab/audio.mjs`, `lab/discovery.mjs` | the spawn framework, the event director and the regional weather, the spawn voices and recipes, and the discovery loop, headless ([Testing](#testing)) |
 | `lab/wind-engines.mjs`, `lab/structure.mjs`, `lab/setpiece.mjs` | the vortex and windModifier engines, the structure engine and the set-piece engine, headless |
@@ -429,7 +462,7 @@ and `waypoints.js` (waypoint beacon and arrow), from v1. `ignition.js` (Phase 3,
 | `lab/input.mjs`, `lab/storage.mjs`, `lab/copilot-server.mjs` | input pipeline, storage and copilot-server origin labs |
 | `spawn-check.mjs`, `engine-alloc.mjs`, `engine-cost.mjs` | the spawn framework in the browser with the dev test kit; the sampled allocations of an engine's frame update; an engine's per-frame CPU, triangles and draw calls in representative scenes |
 | `png-diff.mjs`, `process-load.mjs` | pixel comparison of two screenshots; other programs' CPU and GPU load against the harness's own (Windows) |
-| `docs-check.mjs` | the docs against the code: every relative link and anchor, the preset table and sections of `docs/spawns.md`, its two preset templates validated as presets, and every WindField source param documented |
+| `docs-check.mjs` | the docs against the code: every relative link and anchor, the preset table of `docs/spawns.md` and its engine reference table, every preset section's stated fields against its file, its two preset templates validated as presets, and every WindField source param documented |
 | `copilot-server.mjs` | the reference remote copilot brain (see `docs/copilot-api.md`) |
 | `serve.mjs` | zero-dependency static server (`npm run serve:single`) |
 
@@ -463,10 +496,13 @@ and `waypoints.js` (waypoint beacon and arrow), from v1. `ignition.js` (Phase 3,
    throws if the renderer internals it needs are missing. `getStats().uniformUploadPatch` reports it.
 5. The scene, camera and shared TSL uniforms; the world generator and the opening spawn; the shared
    `state` and the `ctx` object.
-6. The wind field, then the perf governor (`ctx.perf`).
-7. Every system, created in this order: shell (the launcher bridge), audio, ui, assistDefaults, input, sky, weather, terrain, farField, water, clouds, birds,
-   spawns, journal, landmarks, waypoints, rings, flight, camera, fx, gEffects, copilot, windOverlay,
-   spawnDebugger (dev builds and `?dev=1` only) and debugWind (dev builds and `?debug=1` only). A
+6. The render origin (`ctx.origin`, right after the shared uniforms), the wind field, the collider
+   service (`ctx.colliders`), the perf governor (`ctx.perf`), the water query (`ctx.waterQuery`) and
+   the ignition registry (`ctx.ignition`).
+7. Every system, created in this order: shell (the launcher bridge), audio, ui, assistDefaults, input, sky, weather, terrain, farField, water, waterBodies,
+   clouds, birds, spawns, journal, landmarks, waypoints, rings, challenges, portals, flight, camera, fx,
+   gEffects, copilot, challengeHud, windOverlay, spawnDebugger (dev builds and `?dev=1` only), debugWind
+   (dev builds and `?debug=1` only) and the `?test` harness's own system (dev builds only). A
    factory that throws is logged and replaced by an inert system, so one failure never stops the
    game. The spawn engines (`SPAWN_ENGINE_FACTORIES` in `main.js`) register with the spawns system
    right after, and its prewarm hook starts it: it validates the presets (dev builds, `?debug=1` and `?dev=1`),
@@ -487,22 +523,26 @@ Every frame:
 1. **Timing.** `realDt` is the frame interval clamped to 1/20 s (1/60 after a stall over 0.25 s).
    `simDt` is `realDt`, or 0 while paused (photo mode). `state.time.frameDt` is the unclamped real
    frame time capped at 0.1 s: the fixed-step physics clock consumes it.
-2. **Systems.** Each system in `UPDATE_ORDER` runs `update(simDt, realDt)`: input, flight, camera,
-   terrain, farField, weather, sky, water, clouds, birds, spawns, landmarks, journal, waypoints, rings,
-   fx, gEffects, copilot, audio, ui, windOverlay, debugWind, spawnDebugger (the Phase 3 order also
-   names waterBodies, challenges and challengeHud; the loop skips names with no system). A system
-   that throws is disabled and logged; the rest carry on.
-3. **Safety net, right after flight.** A non-finite pose is restored from the last good one and the
+2. **Origin.** `ctx.origin.update(state.player.position)` rebases the floating render origin when
+   the craft is more than 5 km from it, before any system runs, so every system sees this frame's
+   origin.
+3. **Systems.** Each system in `UPDATE_ORDER` runs `update(simDt, realDt)`: input, test (the `?test`
+   harness), flight, camera, terrain, farField, weather, sky, water, waterBodies, clouds, birds,
+   spawns, landmarks, journal, waypoints, rings, challenges, fx, gEffects, copilot, audio, ui,
+   challengeHud, windOverlay, debugWind, spawnDebugger (the loop skips names with no system; the
+   shell bridge, the assist defaults and the portals have no per-frame work). A system that throws is
+   disabled and logged; the rest carry on.
+4. **Safety net, right after flight.** A non-finite pose is restored from the last good one and the
    model is reset from it. The flight model has real ground contact, so the net only keeps the
    last-resort guard: more than 1 m below the shared height function is a soft crash. The altitude
    ceiling comes from the controller: the active craft's `limits.ceiling`, 15000 m by default.
-4. **Telemetry.** `flight.publishTelemetry()` writes `state.flight` from the final, safety-checked
+5. **Telemetry.** `flight.publishTelemetry()` writes `state.flight` from the final, safety-checked
    pose.
-5. **Biome tracking** (`biome:changed`), then `perf.update({ frameMs, cpuMs })` with the real,
+6. **Biome tracking** (`biome:changed`), then `perf.update({ frameMs, cpuMs })` with the real,
    unclamped frame interval.
-6. **Render** through the post pipeline (screenshot capture raises the pixel ratio for that one
+7. **Render** through the post pipeline (screenshot capture raises the pixel ratio for that one
    frame).
-7. **Fade gate.** The loading fade lifts once the ground around the spawn is built and frames arrive
+8. **Fade gate.** The loading fade lifts once the ground around the spawn is built and frames arrive
    steadily (8 s cap). Then `state.ready` is set, `endPrewarm()` hooks run and `game:ready` fires.
 
 ### Physics inside the flight update
@@ -517,9 +557,11 @@ own behind the launcher shell). The flight controller advances a fixed-step cloc
 3. zeroes the stick while the hands-off hold of a disconnected controller is active;
 4. runs the control stages (autopilot, then assists);
 5. samples the wind (`ctx.wind.sample`) and the air density `rho = 1.225 * exp(-altitude / 8500)`
-   at the craft;
+   at the craft (`airDensity`, the one density model, re-exported by `src/env/atmosphere.js`);
 6. calls `model.step(dt, controls, env)`, guarding every tick against NaN / Infinity (it restores
-   the last good snapshot and logs once).
+   the last good snapshot and logs once);
+7. enforces the altitude ceiling and sweeps the craft's collision probes against `ctx.colliders`
+   ([Structure collision](#structure-collision-ctxcolliders)).
 
 The rendered pose is interpolated between the last two ticks with `alpha`.
 
@@ -529,6 +571,8 @@ The rendered pose is interpolated between the last two ticks with `alpha`.
 `getStats()` returns the backend, revision, fps, frame time, render scale, the frame target and a
 `perf` block, draw calls, quality, time of day, the copilot flight state, terrain, cloud, bird and
 landmark stats, and the disabled systems. The smoke test and the harnesses script the game through it.
+`debug` also has `rebaseOrigin(point?)`: a floating-origin rebase now, to the lattice point nearest
+`point` or one 4096 m step east (the origin checks).
 
 In dev builds, with `?debug=1` or with `?test`, `debug` steps the frame loop by hand:
 `pauseLoop()` stops the animation loop, `stepFrames(count, frameMs = 1000 / 60)` runs frames at a
@@ -554,14 +598,16 @@ plus optional `prewarm()` / `endPrewarm()` hooks and whatever API it offers. `ct
 | `groundSurfaces` | extra ground surfaces (`src/world/groundSurfaces.js`): landable tops that are not terrain; spawn engines add them (engine ctx `surfaces`), the flight controller stands on them |
 | `colliders` | the structure collision service (`src/world/colliders.js`): spawn engines (engine ctx `game.colliders`) and the landmarks register colliders, the flight controller sweeps its probes against them every tick |
 | `wind` | the WindField |
+| `origin` | the floating render origin (`src/core/origin.js`): `scene.position = -origin.offset`; [Floating origin](#floating-origin-ctxorigin-srccoreoriginjs) |
+| `waterQuery` | the shared water-height query (`src/world/waterQuery.js`): the ocean's swell and every local water body; [Water](#water-the-query-local-bodies-and-rendering) |
 | `ignition` | what a flame can light (`src/gameplay/ignition.js`): lantern and torch owners register ignitables (engine ctx `game.ignition`), the dragon's fire breath lights them |
 | `perf` | the perf governor |
 | `craftRegistry` | craft catalog and registered craft modules |
 | `flightModels` | the flight model and control-stage registry |
-| `state` | shared mutable game state (`frame`, `ready`, `paused`, `photoMode`, `seed`, `spawn`, `time`, `player`, `flight`, `waypoint`, `ringCourse`, `perf`, `atmosphere`) |
+| `state` | shared mutable game state (`frame`, `ready`, `paused`, `photoMode`, `seed`, `spawn`, `time`, `player`, `flight`, `waypoint`, `ringCourse`, `perf`, `atmosphere` (the sky's), `challenge` (the challenge system's)) |
 | `controls` | the v2 ControlState |
 | `systems` | every system by name |
-| `uniforms`, `textures`, `quality`, `util` | shared TSL uniforms (including `cloudGlory` and `cloudBow`, the cloud optics the celestial engine drives, and the high-altitude ones the sky writes: `atmosphereDensity`, `skyDarkness`, `starVisibility`, `limbStrength`, `sunSharpness`, `curvatureAmount`, `planetRadius`, `horizonDip`, `atmosphereAltitude`), textures (cloud shadow), the current quality level, helpers |
+| `uniforms`, `textures`, `quality`, `util` | shared TSL uniforms (including `renderOrigin`, the origin's world offset; `cloudGlory` and `cloudBow`, the cloud optics the celestial engine drives; and the high-altitude ones the sky writes: `atmosphereDensity`, `skyDarkness`, `starVisibility`, `limbStrength`, `sunSharpness`, `curvatureAmount`, `planetRadius`, `horizonDip`, `atmosphereAltitude`), textures (cloud shadow), the current quality level, helpers |
 | `registerPrewarm(object)` | registers a lazily shown object for the pipeline prewarm |
 | `executeAction`, `getFlightState`, `setPhotoMode`, `requestScreenshot`, `userHasInteracted` | v1 hooks shared by the UI, copilot and camera |
 
@@ -594,14 +640,19 @@ journals are copied under their new names, then the old database is deleted.
 | `driftwing-v2.input.bindings` | the binding profile `{ version, devices, global: { device: { target: Ref[] } }, crafts: { craftId: {...} } }` |
 | `driftwing-v2.input.calibration.<deviceKey>` | calibration per device |
 | `driftwing-v2.audio.vario` | the variometer audio (`on` \| `off`; Phase 1's `auto` reads as `on`) |
+| `driftwing-v2.challenges` | the challenge records (version 1): the best time, medal and splits per course, per craft, per world (at most 400 courses) |
+| `driftwing-v2.challengePath.<courseKey>.<craft>` | the best run's path at 10 Hz (t, x, y, z and the attitude quaternion, relative to the course's first gate) for Phase 4's ghosts |
 
 The map-tile worker keeps finished map tiles in its own IndexedDB database, `driftwing-v2-maptiles`
 (one store, `tiles`, keyed by the seed, the tile version, a hash of the presets' placement data and
 the tile; the oldest go beyond 1200 tiles). The dev harnesses use their own databases (`driftwing-v2-test`, `driftwing-v2-test-hotas`,
-`driftwing-v2-test-terrain`, `driftwing-v2-test-spawns`, `driftwing-v2-test-determinism-1` and `-2`;
-the spawns and determinism tests delete theirs before each page load) and sessionStorage keys
-(`driftwing-v2.test.flight`, `driftwing-v2.test.hotas`, `driftwing-v2.test.determinism`). The launcher shell
-keeps one key of its own, `driftwing.shell.lastVersion`.
+`driftwing-v2-test-terrain`, `driftwing-v2-test-spawns`, `driftwing-v2-test-determinism-1` and `-2`,
+`driftwing-v2-test-collision`, `driftwing-v2-test-craft`, `driftwing-v2-test-sites`,
+`driftwing-v2-test-waters`; the spawns and determinism tests delete theirs before each page load) and
+sessionStorage keys (`driftwing-v2.test.flight`, `driftwing-v2.test.hotas`,
+`driftwing-v2.test.determinism`, `driftwing-v2.test.craft`). A portal keeps the flight it carries into
+the next world in sessionStorage, `driftwing-v2.portalArrival`, read once by that world. The launcher
+shell keeps one key of its own, `driftwing.shell.lastVersion`.
 
 IndexedDB is scoped to the origin including the port. That is why the dev server is pinned to
 `127.0.0.1:5199` (`vite.config.js`: `strictPort`), and why `npm run serve:single` serves the
@@ -616,7 +667,7 @@ Every change emits `settings:changed { key, value, settings }`. The record is ve
 its default. Version 4 removed the CLASSIC | SIM `mode`, the per-mode `views` and `hotasPrompt`: the
 SIM view became `view`, and craft whose assists a record had moved off 100 % count as set by the
 player. Version 5 remembers the view per craft: `view` seeds every craft's `views` entry (and
-`thirdPersonViews` when it is a third-person view), and a first run starts every craft in chase
+`thirdPersonViews` when it is a third-person view), and a first run starts every craft in chase.
 Version 6 (Phase 3) adds the eight new craft to every per-craft key (at the defaults, or at 50 %
 assists when the one-time HOTAS default had already run), the ten `craftFavorites` and `craftSkins`
 (`tools/lab/settings.mjs` checks the migrations). List keys (`craftFavorites`) are replaced whole and
@@ -699,6 +750,14 @@ Typed events are emitted with `bus.emitTyped(name, payload)` and heard with
 | `viewChanged` | `{ view: chase\|cockpit\|wing\|flyby\|fpv, craft }` (also at start and on craft change) | camera |
 | `deviceConnected` / `deviceDisconnected` | `{ deviceKey, kind, name }`; kind `gamepad` \| `hotas-stick` \| `hotas-throttle` \| `hotas-pedals` | gamepad registry |
 | `relaunched` | `{ craft, method, position }` | flight controller |
+| `reentry` | `{ phase: heating\|blackout\|clear, heating }`: the spaceplane's re-entry: the plasma building, the radio blackout, the link back; `heating` 0..1 (from rho V^3) | spaceplane module |
+| `originRebased` | `{ offset, previous, delta, version }`: the floating render origin moved (`delta` a multiple of 4096 m on every axis); the payload object is reused, so a listener copies what it keeps | `ctx.origin` |
+| `figureFlown` | `{ figure, score, craft, position }`: the aerobatic recognizer named a figure (one of its 12 ids) with its precision 0-100 | aerobatic extension |
+| `challengeStarted` | `{ id, name, craft, gates, presetId? }`: a challenge run started; `id` is the course key `<seed>:<courseId>` | challenge system |
+| `challengeGate` | `{ id, index, role: start\|checkpoint\|finish, time, split?, delta?, missed }`: a gate passed or missed; `split` adds the penalties so far, `delta` compares it with this craft's best | challenge system |
+| `challengeFinished` | `{ id, craft, time, medal: gold\|silver\|bronze\|none, best, improved, missed, penalties, valid }`: `time` includes the penalties; a void run (`valid: false`) stores no best | challenge system |
+| `challengeCancelled` | `{ id, reason }`: cancelled, abandoned, crash, timeLimit, replaced or removed | challenge system |
+| `worldVisited` | `{ seed, previous, portalId }`: the player flew through a portal ring into the world `seed` | portals |
 | `perched` | `{ craft, perchId, kind: peak\|structure\|tree, position, perched }`: the eagle settled on a perch after its auto-landing (`perched: true`) or took off from it (`false`); standing on plain ground is a landing, not a perch | SimFlapper |
 | `spawnActivated` | `{ id, presetId, category, kind: site\|event, position }` | SpawnManager |
 | `spawnEnded` | `{ id, presetId, reason }`; reason `ended`, `expired`, `despawn`, `range`, `hours` (a site outside its hours), `error`, `removed`, `disposed`, or the `deactivate` caller's (default `deactivated`; the director's `lifetime`, `despawn`, `dispose`, `override`; the F9 debugger's `debug`) | SpawnManager |
@@ -720,6 +779,8 @@ Untyped events keep v1's `namespace:verb` names:
 - `quality:changed`, `time:changed`, `biome:changed`;
 - `autopilot:changed`, `safety:nonFinite { craft }`;
 - `rings:started`, `rings:finished`, `rings:cancelled`;
+- `challenge:sensorMiss { id, tag, penaltySeconds, missed }` (a kite string touched during a run);
+- `craft:skinChanged { craft, skin }`;
 - `waypoint:set`, `waypoint:reached`, `waypoint:cleared`;
 - `landmark:discovered`, `landmark:threaded`, `journal:changed`, `birds:scattered`;
 - `copilot:speech { text, source }`, `copilot:listening`, `copilot:transcript`, `mic:toggle`;
@@ -748,8 +809,8 @@ Every action is rebindable on every device:
 `copilotPTT, craftAbility, craftAbilityAlt, waypointNearest, waypointAhead, photoMode, viewCycle,
 viewToggle1P3P, viewForward, viewBack, viewLeft, viewRight, recenterView, craftNext, craftPrev,
 craftSelect1` .. `craftSelect10` (the ten favorites, "Favorite 1" .. "Favorite 10"), `gearToggle, flapsUp, flapsDown, airbrake, autopilotToggle, timeForward, timeBack,
-ringCourse, journal, mapToggle, settings, controlsPanel, relaunch, engineToggle, chuteDeploy, versionToggle`.
-Stored or imported bindings for the retired `modeToggle` and `boost`, and Phase 1 references
+ringCourse, challengeStart, journal, mapToggle, settings, controlsPanel, relaunch, engineToggle, chuteDeploy,
+versionToggle`. Stored or imported bindings for the retired `modeToggle` and `boost`, and Phase 1 references
 limited to the CLASSIC key layer, are dropped quietly on load.
 
 Each press and release is published as `input:action`. Each action has exactly one owner that
@@ -760,6 +821,7 @@ performs it:
 | flight (`FlightController.js`) | craftAbility, craftAbilityAlt, craftNext, craftPrev (cycle the favorites, skipping empty slots and craft without a module), craftSelect1-10 (the favorites), gearToggle, flapsUp, flapsDown, airbrake (held), relaunch, engineToggle, chuteDeploy. The flight model itself handles gearToggle, flapsUp, flapsDown, airbrake, engineToggle and chuteDeploy (they reach it in `controls.actions` on the frame's first tick, and held ones in `controls.held`) |
 | camera (`cameraManager.js`) | viewCycle, viewToggle1P3P, viewForward, viewBack, viewLeft, viewRight, recenterView |
 | ui (`ui.js`) | waypointAhead, waypointNearest, photoMode, autopilotToggle, timeForward, timeBack, ringCourse, journal, mapToggle, settings, controlsPanel |
+| challenges (`src/gameplay/challenges.js`) | challengeStart (the nearest course within its prompt radius, or cancel the run) |
 | copilot (`copilot.js`) | copilotPTT (held) |
 | shell bridge (`src/shell/bridge.js`) | versionToggle |
 
@@ -1008,6 +1070,15 @@ weight that ramps with the level.
 | quad (`SimQuad.js`) | angle mode (above 35 %) | altitude hold (above 85 %); 0 % is rate (acro) mode |
 | tiltrotor (`tiltrotorAssists.js`) | stability augmentation (rate damping, attitude hold, yaw damper), heading hold in the hover and turn coordination at speed | attitude command with limits (wings level hands off, stall protection in airplane mode), auto-hover in helicopter mode (position hold; the lever is a climb command around its detent) |
 | flapper (`SimFlapper.js`) | stability (rate damping, turn coordination, phugoid damping), stall warning | auto-level, stall protection |
+| aerobatic (`aerobaticAssists.js`) | auto-coordination, yaw damper, auto-trim, stall warning | AoA limiter, G limiter, auto-level, overspeed protection (no bank or pitch protection at any level, so every figure stays possible) |
+| paraglider (`SimParaglider.js`) | collapse recovery, surge damping, turn coordination (25-75 %) | active piloting (no collapses), stall protection, spiral and spin protection (60-100 %) |
+| balloon (`SimBalloon.js`) | envelope over-temperature protection, rotation damping | altitude hold, the auto-burner (50-75 %) |
+| airship (`SimAirship.js`) | pitch and yaw dampers | heading hold, altitude hold (75-100 %) |
+| spaceplane (`spaceplaneFcs.js`) | rate damping, auto-coordination | rate command and attitude hold, the AoA and G limiters, auto re-entry arming |
+
+The seaplane flies the fixed-wing assists; its floats extension adds the water handling assist above
+50 % (the planing trim). The balloon's assisted landing (the copilot's "land") and the spaceplane's
+attitude hold and auto re-entry are the pilot's own switches and act at any level.
 
 - At 100 % hands off, fixed-wing craft hold the air-mass flight path within 0.85-1.25 g.
 
@@ -1015,8 +1086,10 @@ weight that ramps with the level.
 heading, altitude and speed with PID loops, follows waypoints and rings, and uses a terrain
 look-ahead. Other kinds register theirs with `registerAutopilotHandler(kind, { createMemory(),
 apply(controls, context, memory) })`. `autopilotHandlerFor(kind)` lets a kind reuse another's (the
-jet flies the fixed-wing autopilot). The helicopter, wingsuit, quad and flapper have their own (the
-flapper's flies a perch approach when the craft state holds a `perchTarget`).
+jet, the aerobatic and the spaceplane fly the fixed-wing autopilot). The helicopter, wingsuit, quad,
+tiltrotor, paraglider, balloon (the altitude through its envelope controller, the heading as the
+basket's facing), airship (a crabbed track; the scenic cruise chases its path) and flapper have their
+own (the flapper's flies a perch approach when the craft state holds a `perchTarget`).
 
 **Trim** (`trim.js`). After every airborne reset (boot, respawn, airstart, craft switch, tow
 release, NaN fallback), the controller calls `trimModel(model, request)`, where
@@ -1024,7 +1097,8 @@ release, NaN fallback), the controller calls `trimModel(model, request)`, where
 targetLoad, flightPath, bank, speed, stallSpeed, vne, safeSpeed: { min, max }, aoaLimited }`. Then it
 calls `primeAssists`. Handlers are registered with `registerTrimHandler(kind, { trim(model,
 request) })` (also `hasTrimHandler`, `trimHandlerFor`, `neutralLoad(flightPath, bank)`). The
-`fixedWing` and `jet` kinds have trim handlers; other kinds are left as reset.
+`fixedWing`, `jet`, `aerobatic`, `spaceplane` (which leaves a ballistic state alone) and `tiltrotor`
+kinds have trim handlers; other kinds are left as reset.
 
 ### Telemetry (`state.flight`, `src/flight/telemetry.js`)
 
@@ -1088,7 +1162,7 @@ groups)` builds one over another catalog (the labs).
 | --- | --- |
 | `id`, `name` | as in `CRAFT_CATALOG` |
 | `buildMesh(ctx, { skin })` | returns `{ root, update(visual, dt), wingtips, eyeAnchor, anchors, dispose() }`. The mesh is procedural, low-poly and flat-shaded in the v1 palette, with animated surfaces, prop disc, rotor and gear. `skin` is the module's skin id (null without skins). `visual = { aileron, elevator, rudder, flaps, throttle, propSpeed, engineOn, onGround, gearDown, airbrake, groundSpeed, time, craftState }` (`craftState` read only, for craft-specific parts). `anchors` are named local points (`towHook`, `smoke`, `tail`, ...). Parts with `userData.hideInCockpit` hide in the cockpit view |
-| `simProfile` | `{ model, targets, mass, inertia, centerOfMass, contacts, ... }` plus the model's own blocks: fixedWing `wing, aero, fuselage, tail, controls, flaps, spoilers, gear, engine, ballast`; jet adds `jet, extension, maxSpeed, vneBasis, gEffects`; helicopter `rotor, tailRotor, engine, fuselage, stabilizers, vortexRing, bladeStall`; wingsuit `suit, pitch, roll, yaw, canopy, deploy, radarOffset`; quad `thrustToWeight, motors, motor, aero, controller` |
+| `simProfile` | `{ model, targets, mass, inertia, centerOfMass, contacts, ... }` plus the model's own blocks: fixedWing `wing, aero, fuselage, tail, controls, flaps, spoilers, gear, engine, ballast`; jet adds `jet, extension, maxSpeed, vneBasis, gEffects`; helicopter `rotor, tailRotor, engine, fuselage, stabilizers, vortexRing, bladeStall`; wingsuit `suit, pitch, roll, yaw, canopy, deploy, radarOffset`; quad `thrustToWeight, motors, motor, aero, controller`; the Phase 3 kinds (tiltrotor, paraglider, balloon, airship, flapper) and extensions (`aerobaticAero`, `floats`, the spaceplane's) document their blocks at the top of their model files |
 | `inputProfile` | `{ throttle: 'throttle' \| 'none' \| 'collective' \| 'thrust' \| 'burner' \| 'flapPower' \| 'speedBar' \| 'rocket', antenna?: 'flaps' \| 'zoom' \| 'nacelle' \| 'ballonet', rocker?: 'trim' \| 'vector', stickX?: 'roll' \| 'weightShift' \| 'rotationVents', flapNotches, toeBrakes: 'wheels' \| 'wheelsAndSpoilers' \| 'canopyToggles' \| 'none' \| 'waterRudders' \| 'paragliderBrakes', spoilers?, rudderSteersTailwheel?, afterburnerDetent?, rates? }` (`rates`: Betaflight `{ rcRate, superRate, expo }` per axis for the quad). The controller maps only `none` (no throttle) and `collective`; every other value passes the throttle axis through for the model to read (`INPUT_PROFILE_VALUES` in registry.js lists what the registry accepts) |
 | `audioProfile` | `{ engine: family, ...parameters }` (below) |
 | `cameraRig` | `{ eye, chase, wing, fpv, cockpit }` (below) |
@@ -1206,7 +1280,8 @@ controller refuses one without a module with a notice.
 5. **Abilities**: `abilities.craftAbility` (Space) and `abilities.craftAbilityAlt` (Shift+Space)
    with the ability api; hold-type abilities read `api.isHeld('craftAbility')` in `update`.
 6. **Input**: `inputProfile` values tell the model what the axes mean; `bindings` adds per-craft
-   default keys or HOTAS buttons (docs/controls.md gets the craft's HOTAS profile in Milestone O).
+   default keys or HOTAS buttons. Add the craft's row and its full profile to
+   [controls.md](controls.md#craft-profiles-the-phase-3-craft).
 7. **Audio**: a new engine family is `src/audio/engines/<family>.js` plus one line in
    `src/audio/engines/index.js`; the module names it in `audioProfile.engine`.
 8. **Instruments**: new ids are `src/ui/instruments/<id>.js` plus their import and list entry in
@@ -1241,7 +1316,8 @@ It keeps v1's API: `update`, `setPhotoMode`, `shake`, `snap`, `getMode()` (`chas
 
 Behaviour:
 
-- First person is the cockpit (the FPV camera on the drone, the helmet view on the wingsuit);
+- First person is the cockpit (the FPV camera on the drone, the helmet view on the wingsuit, the
+  custom gondola, basket, harness and creature views of the airship, balloon, paraglider and eagle);
   third person is chase, wing and flyby. `viewCycle` steps chase, cockpit, wing, flyby;
   `viewToggle1P3P` cuts at once between first person and the craft's last third-person view (the
   chase rig keeps integrating while detached, so it is already in place); the stick hat keeps its
@@ -1267,7 +1343,7 @@ Behaviour:
   projected along the craft's axis: sideslip shows as a lateral offset, angle of attack as a
   vertical one. Off screen it pins to the edge and dims; below 5 m/s it hides. A first-person view
   with an instrument panel shows the glass HUD only with `hud.cockpitGlass`; the panel-less first
-  person views (FPV camera, wingsuit) keep it. A warning keeps an idle HUD awake.
+  person views (FPV camera, wingsuit, eagle / dragon) keep it. A warning keeps an idle HUD awake.
 - **Views never touch the physics.** The camera writes no ControlState and no model state. Free
   look is its own ControlState axes (`lookX`, `lookY`), which no flight model, control stage or
   assist reads; the HOTAS antenna is flaps on fixed-wing craft (read by SimFixedWing in every view)
@@ -1313,7 +1389,11 @@ Behaviour:
     `wisps` (`chime`: the forest wisps' glassy shimmer, louder as they near), `windRush` (open-air
     wind with `params.gust`, a resonant `howlHz` / `howl` moan for canyons and bores, and `flutter`
     for kites; intensity = the wind's strength there) and `burner` (`burst`: propane burners firing
-    by turns across a balloon festival; intensity = the approach). A preset's
+    by turns across a balloon festival; intensity = the approach). The other Phase 3 recipes, one or
+    more presets each (`src/audio/recipes/index.js` lists every one with its triggers): `gale`,
+    `surf`, `herd`, `calving`, `dolphin`, `caribou`, `bells`, `observatory`, `train`, `dam`,
+    `caravan`, `fireball`, `skyShimmer`, `canopy`, `portal`, `giant`, `galleon`, `dragon`,
+    `stoneWind`, `rustle`, `meadowHum`, `marsh`, `iceSing`, `aurora` and `foghorn`. A preset's
     `audio.params` may set `intensity` and override `refDistance`, `rolloffFactor`,
     `distanceModel`, `size` and `reverb`;
   - `thunder({ position, intensity })` plays a crack and a rolling rumble when the sound front
@@ -1338,6 +1418,10 @@ Behaviour:
   thump. Silent at zero turbulence and through the calm-air floor, in photo mode and while paused.
   `getStats().turbulenceRattle` is `{ amount, interior, rattle, thump, levels }`.
 - **Typed events consumed**: `viewChanged`, `craftChanged`, `landed` and `softCrash`.
+- **Floating origin.** The panners and the listener sit in the render frame (world minus
+  `ctx.origin.offset`), so panning stays precise far from the world origin; after a rebase they are
+  snapped (`snapParameter`: scheduled glides dropped), never glided, so nothing sweeps across the
+  stereo field. The doppler is computed from world velocities.
 
 ### Ignition (`ctx.ignition`)
 
@@ -1409,6 +1493,55 @@ with the flap power at zero) and `dragonLanternsLit` (count).
 The flight model feels all of it every tick. `createDebugUpdraft({ id, center, radius, strength })` builds the dev source
 that `src/dev/debugWind.js` drops with the L key.
 
+### Floating origin (`ctx.origin`, `src/core/origin.js`)
+
+Phase 3 (contract a). The simulation stays in float64 WORLD coordinates and never reads the render
+origin: flight models, `state.player`, the WindField, placement, colliders, the ignition registry,
+the director, every `Object3D.position` and `camera.position` mean world. The GPU sees the RENDER
+frame, world minus `origin.offset`, applied in one place: `scene.position = -origin.offset`. The
+camera is a child of the scene, so `camera.matrixWorld` and every object's `matrixWorld` come out in
+the render frame, computed in float64 on the CPU, and a rebase moves everything at once, exactly, in
+the same frame (no pop). The origin sits on a 4096 m lattice (`ORIGIN_QUANTUM`) on all three axes (the
+y axis too, for the spaceplane's cockpit at 100 km) and rebases to the lattice point nearest the craft
+when the craft is more than 5 km from it (`ORIGIN_REBASE_DISTANCE`, 3D); after a rebase the craft is
+at most 3547 m (half the cube diagonal) from it, so rebases never thrash. The loop calls
+`origin.update(state.player.position)` before the systems run, so a teleport (`flight.resetTo`, a
+relaunch, the portal) needs nothing.
+
+| member | what |
+| --- | --- |
+| `offset` | `THREE.Vector3`, read only: the WORLD position of the render origin, a multiple of 4096 m per axis; starts at (0, 0, 0) |
+| `version` | +1 per rebase |
+| `update(focus)` | rebases when the focus is beyond the threshold; returns true on a rebase |
+| `rebaseTo(worldPoint)` | rebases now, to the lattice point nearest the point, even inside the threshold (tests, `window.DRIFTWING.debug.rebaseOrigin`) |
+| `toRender(world, out)`, `toWorld(render, out)` | `out = world - offset` / `render + offset`; allocation-free |
+| `onRebase(listener)` | `listener(delta, origin)` runs synchronously inside the rebase, before the typed event, for render-frame caches; returns an unsubscribe function; listeners must not allocate |
+| `getStats()` | `{ offset, version, rebases, lastRebaseFrame }` |
+
+A rebase, in order: `offset` changes, `scene.position` follows, `scene.updateMatrixWorld()`,
+`uniforms.renderOrigin` takes the offset, the listeners run, then the typed `originRebased`. What
+still needs care in a system:
+
+- **Shaders.** `positionWorld` and `cameraPosition` are render frame. A shader that compares them with
+  an absolute world value (a water level, world-space noise, a fog layer base) reads
+  `worldPositionNode(TSL, uniforms)` / `worldCameraPositionNode(TSL, uniforms)` (they add
+  `uniforms.renderOrigin`). Relative maths, and periodic patterns whose power-of-two period divides
+  4096 m (the terrain's `WRAP_PERIOD` 4096, the water's 4096 m wave tile, `CHUNK_SIZE` 256, the wind
+  sway's 2048 m texture), need nothing.
+- **CPU.** `matrixWorld`, `getWorldPosition()` and the view matrix are render frame: convert with
+  `toRender` / `toWorld`, or read `camera.position` (world). Screen projections (the glass HUD's
+  marker, the challenge arrow, lures) go through the origin.
+- **float32 buffers** of positions are stored relative to an anchor near the camera: the fx particles
+  (relative to the camera every frame), the trails, the emitter pools, ribbons and glow points, the
+  aerobatic's smoke ribbon (re-anchored every 2 km), anchored instanced pools
+  (`createInstancedPool({ origin })`) and the challenge's best path (relative to its first gate).
+- **Audio.** Panners and the listener in the render frame, snapped on a rebase ([Audio](#audio-ctxsystemsaudio)).
+- **World-frame only**: colliders, ground surfaces, ignition, placement, the water query and every
+  simulation position.
+
+`node --expose-gc tools/lab/origin.mjs` and `tools/steps/origin-rebase.json`
+(`src/dev/originRebaseCheck.js`) prove it ([Testing](#testing)).
+
 ### Placement and terrain stamps
 
 Milestone A of Phase 2 (`src/world/placement.js`, `src/world/stamps.js`, contract section 2).
@@ -1454,7 +1587,7 @@ Milestone A of Phase 2 (`src/world/placement.js`, `src/world/stamps.js`, contrac
   coarsest LOD segment holding it (sampled on the LOD0 lattice), so a neighbour at any LOD can never
   open a crack at a canyon wall or a cliff; untouched chunks keep the Phase 1 skirts bit for bit.
 
-The six stamp types and the presets that use them (the spec fields are listed at the top of
+The six Phase 2 stamp types and the presets that use them (the spec fields are listed at the top of
 `src/world/stamps.js`; the structure recipes build theirs with `structureStamps(recipe, options)`,
 which is safe in the terrain worker):
 
@@ -1467,10 +1600,137 @@ which is safe in the terrain worker):
 | `flatten` | a flat strip with an apron and a shoulder | `tarmac` | abandoned airfield |
 | `islandBase` | a lobed islet or sea stack rising from the water | `basalt` | floating islands |
 
+Phase 3 adds nine stamp types, two per-site data blocks resolved right after the stamps from the same
+per-site seed stream (so the worker, the main thread, the map tiles and the far field all see them),
+and `placement.near`:
+
+| type | shape | default paint | used by |
+| --- | --- | --- | --- |
+| `basin` | a lake bowl with a berm | `sand` | salt flat mirror lake, flamingo lake, dam spillway, desert oasis, frozen lake |
+| `crater` | an impact crater: rim crest, flank and flat floor | `ash` | meteor crater lake |
+| `terraces` | stepped shelves down a slope, each with a pool lip | `travertine` | hot spring terraces, rice terraces |
+| `atoll` | a ring reef with islets around a lagoon | `sand` | coral atoll |
+| `reef` | a reef flat with a sand hollow and coral heads | `coral` | reef shipwreck |
+| `seaStacks` | a field of stacks and rock arches seaward of the coast | `wetRock` | sea stacks and arches |
+| `estuary` | a river mouth with levees, cut below the sea | `mud` | tidal bore |
+| `giant` | a mountain shaped like a stone giant asleep on its back | `basalt` | sleeping stone giant |
+| `delta` | coastal flats down to the sea, cut by meandering channels the ocean fills | `mud` | mangrove delta |
+
+Phase 2's types serve Phase 3 sites too: `carve` (the lava rivers, the fissure eruption, the canyon
+gauntlet), `cliffStep` (the monastery, the castle ruin, the reverse waterfall, the waterfall wall),
+`gorge` (the viaduct) and `flatten` (the observatory, the labyrinth, the cave tunnel, the five-arch
+chain). The atoll and the reef publish their clear water (`shallows`) for the waterEffect engine.
+
+- **Waters** (`preset.waters`, `src/world/waters.js`): local water bodies, each held by a host stamp
+  (`basin` and `crater` one body, `terraces` one per shelf, `flatten` thin films) and clipped to its
+  basin: [Water](#water-the-query-local-bodies-and-rendering).
+- **Overlays** (`preset.overlays`, `src/world/overlays.js`): region looks that never change height:
+  [Region overlays and vegetation](#region-overlays-and-vegetation).
+- The site-list hash (version 2) includes every site's waters and overlays.
+
+### Water: the query, local bodies and rendering
+
+Phase 3 (contract c). One water model for everything that touches water.
+
+- **Local water bodies are data** (`src/world/waters.js`, pure, both threads). A site preset's `waters`
+  list names, per body: `kind` (`lake`, `pool`, or `thin`: a film over a flat, the salt flat and the
+  rice shelves), the host `stamp` (by index) whose basin clips it, the `level` (`{ mode: 'basin',
+  fill }` as a share of the basin's depth, `{ mode: 'absolute', height }`, or `{ mode: 'aboveGround',
+  height }` for films), the `material` (`water` or `ice`), an optional `tint` and `waves` (swell scale,
+  glint, foam, and the salt flat's sky `mirror`). Placement resolves them per site into world-space
+  records: a surface exists at (x, z) only inside its basin's outline AND where the ground lies below
+  its level, so a lake never spills over its rim. `world.watersAt`, `waterBodyAt` and
+  `waterBodiesNear` query them. Bodies in Phase 3: the meteor crater lake, the hot spring pools, the
+  salt flat's film, the flamingo lake, the dam's reservoir, the oasis pool, the rice paddies and the
+  frozen lake (ice).
+- **The query** (`ctx.waterQuery`, `src/world/waterQuery.js`, pure JS, allocation-free). The ocean's
+  swell is the SAME wave table the ocean shader draws (`createOceanWaves`, quantised to the 4096 m wave
+  tile for the world's prevailing wind) with the SAME swell scale (`oceanSwellScale(t)`, a pure
+  function of the flight clock), so a craft floating on a crest sits where the crest is drawn; the
+  whirlpool funnels and the travelling waves (rogue waves, tidal bores, calving waves) come in through
+  the water effects layer (`attachEffects`).
+
+  | member | what |
+  | --- | --- |
+  | `heightAt(x, z, t?)` | the water surface height (m) at the flight time (default `state.time`): the highest of the ocean (where the ground is below sea level: sea level plus the swell, minus a funnel's dip, plus a travelling wave) and every local body covering the point (ice included: its level is a solid surface); `-Infinity` where neither exists |
+  | `sample(x, z, t?, out?)` | `{ height, normalX/Y/Z, velocityX/Y/Z, kind, bodyId, body, material, depth, film }` (`createWaterSample()` makes a reusable `out`) |
+  | `isWater(x, z)`, `isOcean(x, z)` | static tests (no swell, no time): any water; open ocean with no local body over it |
+  | `bodiesNear(x, z, radius, visit)` | the resolved bodies within radius, nearest first |
+  | `swellScale(x, z, t?)`, `groundHeight(x, z)` | the ocean swell scale the shader follows; `worldgen.groundHeight` through the query's lattice cache (bit-identical, cheaper nearby) |
+  | `attachEffects(layer)`, `getStats()` | the water effects layer; query counters |
+
+  Every former `waterLevel` caller reads it: the flight controller (`env.waterHeight` /
+  `env.waterSample` through `waterSurface.js`), the floats, the balloon's basket and the paraglider's
+  water landings, the soft crash on water, spray and bioluminescence, the cameras, the copilot ("find
+  water to land"), the situate hooks (`situation.waterBody`, `waterHeight`) and the test harness.
+- **Rendering.** `src/render/waterMaterial.js` holds the v1-derived ocean shader (unchanged for the
+  ocean) and its lake and ice variants; the `waterBodies` system (`src/render/waterBodies.js`) draws a
+  clipped mesh per body within 12 km (the far field draws farther ones, its tiles carrying the visible
+  surface: terrain or water level, local bodies included). Per-body looks are per-object uniforms, so a
+  new body compiles no pipeline; both backends build the same node graphs. Every water surface takes the
+  curvature drop from altitude.
+- **Tests**: `node --expose-gc tools/lab/water.mjs`, `tools/steps/water-bodies.json` on `?test=waters`,
+  and the determinism test's water-height digest.
+
+### Region overlays and vegetation
+
+Phase 3 (contract d). A site preset may declare `overlays`; placement resolves them per site (after
+its waters) into world-space records kept with the site. An overlay NEVER changes height (so
+`heightAt` keeps its cost and its Phase 2 bit identity, and worlds without overlay sites are
+unchanged): inside its `shape` (`disc`, `ellipse`, or `stamp`: a stamp's footprint grown by a margin,
+each with a falloff) it overrides the vertex colour `palette` (`OVERLAY_PALETTES`: cherry blossom,
+autumn forest, lavender and tulip fields, redwood forest, bamboo grove, saguaro desert, mangrove,
+frozen, salt flat, rice terraces, badlands), the `vegetation` species set (`replace` or `add`, with a
+density), the surface `material` (`ice`: glossy icy ground), an animated `tintSweep` (two colours
+rolling downwind, the autumn colour wave) and static `stripes` (lavender and tulip rows). Overlapping
+overlays resolve by `priority`, then the lower site id. `world.overlayAt(x, z, out)` and
+`overlaysNear` query them; the chunk builder writes an `overlay` vertex attribute, so the worker and
+main-thread meshes stay bit-identical (the terrain test checks it). Eleven presets carry overlays
+(the salt flat, the cherry blossom valley, the autumn colour wave, the lavender and tulip stripes,
+the rice terraces, the redwoods, the badlands, the mangrove delta, the cactus forest, the bamboo
+forest and the frozen lake).
+
+- **Species** (`src/world/vegetationSpecies.js`): the Phase 1 scatter types keep ids 0-5; the seven
+  overlay species (`cherry`, `redwood`, `bamboo`, `saguaro`, `mangrove`, `lavender`, `tulip`, ids 6-12)
+  grow only inside overlays, each with its height range, trunk, perch flag, sway, rows and biome
+  tints. The terrain system builds one instanced mesh per type.
+- **Wind sway** (`src/render/windSway.js`): the vegetation shader sways by the WindField's near-ground
+  wind and gusts from a small texture around the focus, so a spawn's wind source (a dust devil, a
+  gust front, a microburst) ripples the plants it reaches; outside the texture it falls back to the
+  global wind uniforms, the Phase 1 sway.
+- **Colliders and perches** (`src/world/vegetationColliders.js`): every trunk species (the redwoods)
+  is a cylinder from a collider provider, and the tree tops are perches for the eagle, both read from
+  worldgen's scatter at full density (deterministic, independent of the quality setting) and cached
+  per cell.
+
+### PathFollower (`src/world/pathFollower.js`)
+
+Phase 3 (contract e.2): pure, deterministic movement along a path as a function of flight time, so
+replays and the determinism test see the same train, caravan or galleon, and a paused clock stops
+every follower. No three.js import; every query is allocation-free and takes an `out`.
+
+- `createPath({ points, closed, smoothing: 'catmullRom' | 'linear', samplesPerSegment })` tabulates a
+  smoothed polyline with its arc length (within 0.5 % at 16 samples a segment): `{ length, closed,
+  pointCount, sampleAt(distance, out), tangentAt(distance, out), sampleFrom, tangentFrom,
+  nearestDistance(x, y, z) }`.
+- `createPathFollower({ path, speed, mode: 'loop' | 'pingpong' | 'once', startDistance, startTime,
+  waits: [{ distance, seconds }], ground?, groundOffset? })`: `at(time, out)` writes `{ x, y, z, tx, ty,
+  tz, heading, distance, speed, done }`, `carAt(time, offset, out)` a trailing car (train cars,
+  camels); `duration`, `period`.
+- `buildGroundPath(world, waterQuery, options)`: an A* walking route over the terrain around slopes
+  steeper than a limit and around water, with a seeded wander (caravans and herds).
+
+Users: the train on the viaduct (preset 56), the camel caravan (58), the ghost galleon (69), the dragon
+racer's rival (70), the caribou column (52) and the airship's scenic cruise. Fauna ground and
+water-surface modes (contract e.1: herds, columns, stampedes, wading and floating birds, dolphins on
+the swell) are the fauna engine's ([docs/engines/fauna.md](engines/fauna.md)).
+`node --expose-gc tools/lab/path.mjs` and `tools/lab/fauna-modes.mjs` test them.
+
 ### Spawns (`ctx.systems.spawns`, `src/spawns/`)
 
 The Phase 2 contracts (sections 3 and 4 of [specs/phase2-contract.md](specs/phase2-contract.md))
-are implemented here. The preset schema (section 1) and the 30 presets are in [spawns.md](spawns.md).
+are implemented here, with the Phase 3 additions of contract sections i and l. The preset schema
+(section 1) and the 100 presets are in [spawns.md](spawns.md).
 
 - **System API.** `update`, `prewarm` (starts it), `register(engine)`, `activate(presetId, opts)`,
   `deactivate(id, reason)`, `getActive()`, `getInstance(id)`, `getStats()`, `setSiteFeed(feed)`,
@@ -1542,7 +1802,8 @@ are implemented here. The preset schema (section 1) and the 30 presets are in [s
   a drifting umbrella, lava glow at night), anvil (supercell: cauliflower tower, flat base, rain
   shaft, anvil and overshooting top, lightning flashes at night), funnel (tornado with wall cloud and
   debris), whale (sky whale, facing its heading, tail beat), islands (three floating islands with
-  trees and waterfalls) and comet (self-luminous head and tail pointing away from the sun). One
+  trees and waterfalls), comet (self-luminous head and tail pointing away from the sun) and tree (the
+  world tree's crown). One
   instanced mesh of camera-facing quads draws them all, fading in over 1.2 s at the FAR tier. A lure
   beyond 92 % of the fog's far distance is drawn at that distance, scaled to keep its direction and
   angular size, so it stays inside the camera's far plane; terrain nearer than that hides its foot
@@ -1610,8 +1871,10 @@ are implemented here. The preset schema (section 1) and the 30 presets are in [s
   whether it is known (a set piece's ramps). An instance may also expose live numbers directly as
   `instance.params` (the structure engine) or `instance.control` (the vortex engine), which a set
   piece writes without a call. Engine-specific bus events are namespaced (`fauna:formation`,
-  `fauna:scatter`, `fauna:call`, `structure:gate`, `structure:course`, `structure:landing`,
-  `setPiece:stage`, `setPiece:narrate`, `setPiece:ended`); the references are in `docs/engines/`.
+  `fauna:scatter`, `fauna:call`, `fauna:flush`, `fauna:race`, `fauna:stampede`, `structure:gate`,
+  `structure:course`, `structure:landing`, `structure:calve`, `structure:portal` (the portal ring's
+  membrane crossed: `portals.js` answers it), `lightEffect:guide`, `setPiece:stage`,
+  `setPiece:narrate`, `setPiece:ended`); the references are in `docs/engines/`.
 - **Clean-up.** After `dispose(instance)` the manager removes any wind source still listed in
   `instance.windSourceIds`, any collider still listed in `instance.colliderIds` and any ignitable still
   listed in `instance.ignitableIds` (Phase 3: lanterns and torches registered with `ctx.game.ignition`),
@@ -1642,10 +1905,10 @@ which presets use which.
 | `vortex` | [vortex.md](engines/vortex.md) | tornado, waterspout and dust-devil funnels with a debris or spray ring. Up to 4 vortices share one shell mesh and one instanced sprite (2 draw calls in all), moved in the vertex shaders from a per-slot uniform block, the same on both backends, so a spawn uploads no buffers and adds no GPU memory. Lifecycle forming, mature, ropeOut, dissipated (then `ended`) on a seeded track precomputed at create; one `rankine` WindField source per vortex; a wake in the water layer over the sea; live `control.{ intensity, ropeOut }` |
 | `emitter` | [emitter.md](engines/emitter.md) | GPU particles (plumes, jets, sprays, sparks, dust rings, mist, lanterns) in two shared instanced pools, `alpha` and `additive`, one draw call each. The CPU writes births only; a TSL compute kernel integrates them in storage buffers on WebGPU and the vertex shader evaluates the same motion in closed form on WebGL2. A coarse WindField grid per emitter, eruption schedules and bursts, and couplings: a real light, an underglow, a WindField source, an immersion fog (priority 20) and the voice's triggers |
 | `weatherVolume` | [weatherVolume.md](engines/weatherVolume.md) | cloud masses (tower, cumulus, lens, bank, sheet, mist) from instanced puffs in the v1 look on one shared mesh, rain, snow and dust shafts, distance compression of masses beyond the fog (an anvil reads at 30+ km before its lure takes over), an inside-fog sky modifier (priority 15), local streaks and canopy rain in the cockpit and FPV views, and one WindField source per volume (turbulence, updraft, shaft downdrafts and outflow, lens waves); live `control.wallCloud` |
-| `fauna` | [fauna.md](engines/fauna.md) | instanced boids, one `InstancedMesh` per species (one draw call however many groups): murmuration, flock, formation with the formation-slot API, circling in the WindField's thermals, whale pod, wingman and drift (a giant with a slipstream). The simulation runs on the CPU over typed arrays, the wings flap and the whales undulate in the vertex shader; flocks scatter near the player; `wildlifeQuiet` silences them |
-| `structure` | [structure.md](engines/structure.md) | procedural low-poly builds from parametric recipes (wind farm, rope bridge, airfield, floating islands, crystal spires, gate course, waterfall), built once at create on pooled meshes in the v1 palette. It registers the stamps its recipes need (`structureStamps`), pass-through and pass-under gates with achievements, timed courses, graded landings, ground-start spots, landable ground surfaces, the wind farm's wake; live `instance.params` and `setParam` |
-| `celestial` | [celestial.md](engines/celestial.md) | sky-dome additions: meteors, comets, the eclipse (a priority-30 sky modifier that really darkens the sun, sky, fog and lights, and `wildlifeQuiet` through totality), the glory and full-circle rainbow on every cloud (`uniforms.cloudGlory` / `cloudBow`), rainbows in mist and static sky values; sky objects on a shell at 96 % of the camera's far plane |
-| `waterEffect` | [waterEffect.md](engines/waterEffect.md) | whirlpools, splashes, spray, bioluminescence and plunge pools, written into the shared water effects layer (below) through its slot and mark APIs; it authors no wind |
+| `fauna` | [fauna.md](engines/fauna.md) | instanced boids, one `InstancedMesh` per species (one draw call however many groups): murmuration, flock, formation with the formation-slot API, circling in the WindField's thermals, whale pod, wingman and drift (a giant with a slipstream), and from Phase 3 herds and columns on the ground (stampedes, the caribou and camel columns on PathFollowers), birds and dolphins on the water surface and the bats' stream. The simulation runs on the CPU over typed arrays, the wings flap and the whales undulate in the vertex shader; flocks scatter near the player; `wildlifeQuiet` silences them |
+| `structure` | [structure.md](engines/structure.md) | procedural low-poly builds from parametric recipes (Phase 2's wind farm, rope bridge, airfield, floating islands, crystal spires, gate course and waterfall, and the Phase 3 sites from the glacier to the frozen lake), built once at create on pooled meshes in the v1 palette. It registers the stamps its recipes need (`structureStamps`), colliders, perches and landable tops, pass-through and pass-under gates with achievements, challenge courses, graded landings, ground-start spots, ignitable lanterns and torches, movers on PathFollowers, the portal ring's membrane, the wind farm's wake; live `instance.params` and `setParam` |
+| `celestial` | [celestial.md](engines/celestial.md) | sky-dome additions: meteors, comets, the eclipse (a priority-30 sky modifier that really darkens the sun, sky, fog and lights, and `wildlifeQuiet` through totality), the glory and full-circle rainbow on every cloud (`uniforms.cloudGlory` / `cloudBow`), rainbows in mist, static sky values, and from Phase 3 the lunar eclipse, the green flash, noctilucent clouds, the Milky Way core, a comet's breakup and the aurora nights (the `sky` component's `aurora`); sky objects on a shell at 96 % of the camera's far plane |
+| `waterEffect` | [waterEffect.md](engines/waterEffect.md) | whirlpools, splashes, spray, bioluminescence, plunge pools, and from Phase 3 the clear shallows (atoll, reef) and travelling waves (the rogue wave, the tidal bore), written into the shared water effects layer (below) through its slot and mark APIs; the water query reads the funnels and the waves; it authors no wind |
 | `lightEffect` | [lightEffect.md](engines/lightEffect.md) | lightning (seeded branching ribbons, an in-cloud flash, a sky flash at priority 30, a real light low in the channel, thunder delayed by distance), glows and swarms in one shared additive point pool (one draw call, animated in the vertex shader), steady lights and beams. It declares and never exceeds 2 real lights; everything else is emissive plus bloom |
 | `windModifier` | [windModifier.md](engines/windModifier.md) | up to 8 WindField sources per instance (updraft, downburst, wake, jetStream, slipstream, waveLift, gustFront, curtain), from its params or the preset's `wind` entries, with fades, start / stop windows, strength timelines, drift or `follow` a sibling part, and `control.strength` / `control.strengths[i]`; no visuals |
 | `setPiece` | [setPiece.md](engines/setPiece.md) | scripted multi-stage timelines over other presets: children started through the SpawnManager with every budget, stages with conditions, ramps and `set` values, records, journal statistics and copilot narration (`setPiece:narrate`); no geometry, wind or lights of its own |
@@ -1904,6 +2167,66 @@ below 3 km: `skyDarkness` (half at 20 km, black by 35 km), `sunSharpness`, `limb
   WebGL2 depth range usable out to the horizon.
 - **Flight**: the ceiling is the active craft's `limits.ceiling` (`flight.getCeiling()`), 15 km by
   default.
+
+### Challenges (`ctx.systems.challenges`, `src/gameplay/challenges.js`)
+
+Phase 3 (contract f): timed gate courses for every craft. A course is a sequence of gates (a start,
+checkpoints, a finish), each a circle or a rectangle in a plane with a pass direction. Courses come from
+the structure engine (the recipes `challengeGates` and the course kit's canyon, tunnel, falls, balloon,
+kite and arch runs, built from a preset's `challenge` block: `buildSiteCourse`, course id
+`<presetId>:<siteId>`), and from the ring course, which runs on this core through a legacy adapter with
+its Phase 2 events and state bit for bit (`tools/lab/challenges.mjs` replays the Phase 2 golden logs).
+
+- **Course definition**: `{ id, name, presetId?, gates: [{ id, role: start | checkpoint | finish,
+  center, normal, up, shape: circle | rect, radius | halfWidth, halfHeight }], medals: { gold, silver,
+  bronze } | null, missed: { mode: penalty | void | count, penaltySeconds (5), outsideCrossing,
+  skipDistance (150 m) }, sensors: { [tag]: { penaltySeconds } }, start: { mode: gate | immediate,
+  promptRadius (1500 m) }, abandonDistance (4500 m), teleportDistance (400 m), timeLimit, rival,
+  record, legacyRings }`, validated with errors naming the course and the field.
+- **API**: `register(definition, { owner })` returns the course key `<seed>:<id>` (a second register
+  replaces the gates and keeps the records), `unregister(key)`, `start(key, { source: gate | key |
+  copilot | ui | rings })`, `cancel(reason)`, `nearest(radius)`, `toggleNearest()` (the
+  `challengeStart` action: the nearest course within its prompt radius, or cancel the run),
+  `getState()`, `getBest(key, craft)`, `getRecords()` (the journal reads the medals),
+  `getBestPath(key, craft)` (`{ hz: 10, anchor, frames: Float32Array }`, 8 floats a frame: t, x, y, z
+  relative to the anchor and the attitude quaternion; Phase 4's ghosts read it), `count()`, `list()`,
+  `reloadRecords()`.
+- **Rules.** Crossings are detected every frame on the segment flown that frame (world frame,
+  `crossGates` from `gateDetector.js`), their times interpolated inside the frame on the flight clock
+  (paused in photo mode). Gates are sequential: crossing the current gate's plane outside its shape, or
+  passing `skipDistance` beyond it, misses it, and the miss mode adds penalty seconds, voids the run (no
+  best stored) or only counts. A `colliderSensor` with a course's sensor tag (a kite string) is a miss
+  too (`challenge:sensorMiss`). Splits compare with this craft's best; the medal is the best threshold
+  the final time (with penalties) meets. Bests per craft, per course, per world go to
+  `driftwing-v2.challenges`; the best run's path at 10 Hz (at most 12 000 frames) to
+  `driftwing-v2.challengePath.<key>.<craft>`, only when the best improves. Owners unregister their
+  courses on dispose, and the spawn checks count `count()` against their baseline. `update()`
+  allocates nothing.
+- **`state.challenge`** (live, reused): `{ active, courseKey, name, phase: armed | running | finished |
+  null, elapsed, gateIndex, gatesTotal, nextGate (the gate's position, frame, size, distance and
+  bearing), missed, penalties, lastSplit { index, time, delta }, medalPace, best, rival {
+  distanceAhead, name, done }, prompt { courseKey, name, distance, bearing } }`. The HUD, the copilot
+  and telemetry read it; the ring course is not shown in it.
+- **The HUD** (`src/ui/challengeHud.js`, system `challengeHud` after `ui`): the start prompt near a start
+  gate (the name, the distance, this craft's best and medal, the `challengeStart` key), a screen-edge
+  chevron toward the next gate with a distance tag and a glowing 3D frame in the gate, the timer card
+  (elapsed, gates, penalties, the medal on pace, the last split green or red, a rival's lead), the
+  missed-gate flash and the medal toast. Its DOM text changes only when a value does.
+
+### Portals (`src/gameplay/portals.js`)
+
+Preset 67, the portal ring: flying through a ring's membrane takes the player into the next world.
+The structure engine sends `structure:portal`; the portal system derives the new seed
+(`portalSeed(currentSeed, portalId)` in `src/core/seed.js`, so a portal always opens onto the same
+world from the same world), keeps the flight with `flight.captureFlight()` (the craft, its place over
+the ground, height above it, heading, pitch, airspeed, throttle and the craft's plain state) in
+sessionStorage (`driftwing-v2.portalArrival`) and the time of day in the world link, emits the typed
+`worldVisited` (the journal records the world at once), fades into the portal's light and reloads into
+the new world through the seed links (inside the launcher shell through its bridge). On the new world's
+`game:ready`, a pending arrival for that seed is resumed with `flight.resumeFlight(carry)`: the craft's
+`situate` hook picks hover, drift or flight as after a craft switch, then the carried attitude, speed,
+throttle and state win, and a toast names the world. It has no per-frame work; storage the browser
+refuses still lets the player through, with a notice that the flight could not be carried.
 
 ### Performance (`ctx.perf`, `src/core/perf.js`)
 
