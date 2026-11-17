@@ -1578,7 +1578,9 @@ drift in the canopy at night, the leaves rustle and the limbs groan.
 A ring of rune-carved stone 80-90 m across on two leaning pillars, holding a membrane of violet light
 that spirals into its centre. Fly through it, either way, and the screen fades into its light: the
 next world's seed is `portalSeed(seed, the site id)`, the URL hash updates, the craft arrives as it
-left (position, height above the ground, heading, speed, every setting) and the journal logs the world.
+left (position, height above the ground, heading, pitch, airspeed, throttle, its own state such as the
+tiltrotor's nacelles or the balloon's envelope heat, every setting; a hovering tiltrotor hovers and a
+balloon drifts, as its situate hook places it) and the journal logs the world.
 [src/spawns/presets/portalRing.js](../src/spawns/presets/portalRing.js)
 
 - **Kind:** site, rare.

@@ -842,6 +842,78 @@ export function createFlightController(ctx) {
     if (placement.craftState && typeof placement.craftState === 'object') Object.assign(craftState, placement.craftState);
   }
 
+  // ---- carried flights (a portal, preset 67) ------------------------------------------------------
+  /** True for the values a carried craft state keeps: finite numbers, booleans, strings and null. */
+  function isPlainStateValue(value) {
+    return value === null || typeof value === 'boolean' || typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value));
+  }
+
+  /**
+   * The fields of source that the active craft's own state starts with (its abilities' initialState)
+   * and whose values are plain (isPlainStateValue). Nested records (a cruise plan, a wind column, a
+   * conversion corridor) describe the old world or are worked out again every tick, so they start
+   * fresh; a field another craft wrote is left out. Returns a new plain object.
+   */
+  function ownPlainState(source) {
+    const kept = {};
+    if (!source || typeof source !== 'object') return kept;
+    for (const key of Object.keys(initialCraftState(craft))) {
+      if (Object.prototype.hasOwnProperty.call(source, key) && isPlainStateValue(source[key])) kept[key] = source[key];
+    }
+    return kept;
+  }
+
+  /** Why a carried flight cannot be resumed, or '' when it can. */
+  function carryProblem(carry) {
+    if (!carry || typeof carry !== 'object') return 'a non-object';
+    const position = carry.position;
+    if (!(position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z))) return 'a position that is not { x, y, z }';
+    if (!Number.isFinite(carry.heading)) return 'a heading that is not a number';
+    for (const field of ['pitch', 'speed', 'throttle']) {
+      if (carry[field] !== undefined && !Number.isFinite(carry[field])) return `a ${field} that is not a number`;
+    }
+    if (carry.craftState !== undefined && (carry.craftState === null || typeof carry.craftState !== 'object')) return 'a craftState that is not an object';
+    return '';
+  }
+
+  /** The pose a carried flight left in: its place, heading and pitch, its airspeed along the nose on the air's motion. */
+  function carriedPose(carry) {
+    const position = new THREE.Vector3(carry.position.x, carry.position.y, carry.position.z);
+    const quaternion = levelQuaternion(carry.heading);
+    const pitch = Number.isFinite(carry.pitch) ? carry.pitch : 0;
+    if (pitch !== 0) quaternion.multiply(scratchQuaternion.setFromAxisAngle(scratchRight.set(1, 0, 0), pitch * DEG));
+    const onGround = carry.onGround === true;
+    const speed = Number.isFinite(carry.speed) ? Math.max(0, carry.speed) : 0;
+    const velocity = new THREE.Vector3(0, 0, -speed).applyQuaternion(quaternion);
+    if (!onGround) {
+      situateApi.windAt(position, situationWind);
+      if (isFiniteVector(situationWind.vel)) velocity.add(situationWind.vel);
+    }
+    return { position, quaternion, velocity, angularVelocity: new THREE.Vector3(), throttle: Number.isFinite(carry.throttle) ? carry.throttle : player.throttle, onGround, onWater: false };
+  }
+
+  /**
+   * Resumes a carried flight with the active craft (see resumeFlight in the API). A craft with a
+   * situate hook chooses its mode from the carried pose as after a craft switch; the carried heading,
+   * pitch, speed, throttle and own craft state then win over the hook's defaults.
+   */
+  function resumeCarriedFlight(carry) {
+    const pose = carriedPose(carry);
+    const situated = typeof craft.situate === 'function' ? situateCraft(pose, craftId) : null;
+    const placement = {
+      mode: situated && situated.mode ? situated.mode : pose.onGround ? 'ground' : 'air',
+      position: situated && situated.position ? situated.position : carry.position,
+      heading: carry.heading,
+      craftState: { ...(situated && situated.craftState ? situated.craftState : {}), ...ownPlainState(carry.craftState) },
+    };
+    if (Number.isFinite(carry.speed)) placement.speed = Math.max(0, carry.speed);
+    if (Number.isFinite(carry.pitch)) placement.pitch = carry.pitch;
+    if (Number.isFinite(carry.throttle)) placement.throttle = carry.throttle;
+    else if (situated && Number.isFinite(situated.throttle)) placement.throttle = situated.throttle;
+    if (situated && situated.flatSpot === true) placement.flatSpot = true;
+    return applyPlacement(placement, pose);
+  }
+
   /** Airborne poses: 'air' and 'climb' fly at an airspeed, 'hover' holds still, 'drift' moves with the air. */
   function flyingPose(position, heading, mode, placement) {
     const quaternion = levelQuaternion(heading);
@@ -2244,6 +2316,44 @@ export function createFlightController(ctx) {
       if (tow) releaseTow('reset');
       if (crash.active) finishCrash();
       const mode = applyPlacement(placement, capturePose());
+      syncVisual();
+      snapCamera();
+      return mode;
+    },
+
+    /**
+     * The flight to carry into another world (a portal, preset 67): { craft, position, heading, pitch
+     * (degrees, nose up), speed (airspeed, m/s), throttle, onGround, craftState } as plain data (JSON
+     * safe); craftState holds the craft's own plain fields (see resumeFlight).
+     */
+    captureFlight() {
+      const pose = capturePose();
+      return {
+        craft: craftId,
+        position: { x: pose.position.x, y: pose.position.y, z: pose.position.z },
+        heading: Number.isFinite(player.heading) ? player.heading : currentHeading(),
+        pitch: Number.isFinite(player.pitch) ? player.pitch : 0,
+        speed: Number.isFinite(player.speed) ? player.speed : 0,
+        throttle: Number.isFinite(pose.throttle) ? pose.throttle : 0,
+        onGround: pose.onGround,
+        craftState: ownPlainState(craftState),
+      };
+    },
+    /**
+     * Resumes a flight carried from another world with the active craft: carry { position, heading,
+     * pitch?, speed?, throttle?, onGround?, craftState? } (captureFlight's shape). A craft with a
+     * situate hook picks its mode from that flight as after a craft switch (a slow tiltrotor hovers, a
+     * balloon drifts, a landed craft stands); the carried heading, pitch, airspeed, throttle and the
+     * craft's own plain state fields (the tiltrotor's nacelles, the balloon's envelope temperature) then
+     * win over the hook's defaults, so the craft goes on as it left. Nested state records start fresh.
+     * Returns the mode applied; throws on a carry it cannot use.
+     */
+    resumeFlight(carry) {
+      const problem = carryProblem(carry);
+      if (problem) throw new Error(`flight.resumeFlight: ${problem}`);
+      if (tow) releaseTow('reset');
+      if (crash.active) finishCrash();
+      const mode = resumeCarriedFlight(carry);
       syncVisual();
       snapCamera();
       return mode;

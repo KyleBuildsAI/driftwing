@@ -16,7 +16,8 @@
 //                    home
 //   portal(id)       the portal ring's gate leads through to portalSeed(seed, site id): crossing it sends
 //                    worldVisited, the journal counts the world and the page reloads into it (the last
-//                    step of the run); arrived() checks the new world afterwards
+//                    step of the run); arrived() checks the new world afterwards, and that the craft
+//                    and its own state came through (a glider's ballast set to 0.35 before the crossing)
 //   sky(id, kind)    a night-sky part (the celestial engine's components) reports itself live
 // Every failed check calls console.error, so the smoke run fails. Never part of a production build:
 // only tools/steps/presets-61-70.json imports it (dev server).
@@ -25,6 +26,11 @@ import { frames, wait } from './spawnCheckKit.js';
 import { installPresetChecks } from './presetChecks.js';
 import { createSweepResult } from '../world/colliderMath.js';
 import { GIANT_NOSE } from '../world/stamps.js';
+
+/** sessionStorage key of what the portal crossing expects to find on arrival (dev check only). */
+const PORTAL_CHECK_KEY = 'driftwing-v2.portalCheck';
+/** The glider's ballast before the crossing: a value no boot starts with. */
+const PORTAL_BALLAST = 0.35;
 
 export function installPresetChecks61(game) {
   const shared = installPresetChecks(game);
@@ -212,6 +218,12 @@ export function installPresetChecks61(game) {
       const base = portal * 8;
       const y = (gates[base + 5] + gates[base + 6]) * 0.5;
       const heading = (Math.atan2(gates[base + 2], -gates[base + 3]) * 180) / Math.PI;
+      // What the arrival must show: the craft and its own state (a glider's ballast at a value no
+      // boot starts with), kept across the reload under a dev key.
+      const own = state.flight.craftState;
+      if (typeof own.ballast === 'number') own.ballast = PORTAL_BALLAST;
+      const expected = ctx.systems.flight.captureFlight();
+      window.sessionStorage.setItem(PORTAL_CHECK_KEY, JSON.stringify({ craft: expected.craft, craftState: expected.craftState }));
       for (let step = -12; step <= 12 && worlds.length === before; step++) {
         ctx.systems.flight.resetTo({ x: gates[base] + gates[base + 2] * step * 5, y, z: gates[base + 1] + gates[base + 3] * step * 5, heading });
         await frames(1);
@@ -230,9 +242,17 @@ export function installPresetChecks61(game) {
       const arrival = ctx.systems.portals.getState().arrived;
       const records = ctx.systems.journal.getRecords();
       const logged = records.worldsVisited.some((entry) => entry.seed === state.seed);
-      return check(`portal: arrived in the portal's world with the craft kept, the URL and the journal updated`,
-        arrival !== null && arrival.seed === state.seed && window.location.hash.includes(`seed=${state.seed}`) && logged,
-        { seed: state.seed, arrival, hash: window.location.hash, worldsVisited: records.worldsVisited.length });
+      // The craft and its own state: every plain field that is not a number (numbers move in flight)
+      // as it left, and the glider's ballast exactly.
+      const expectedText = window.sessionStorage.getItem(PORTAL_CHECK_KEY);
+      window.sessionStorage.removeItem(PORTAL_CHECK_KEY);
+      const expected = expectedText ? JSON.parse(expectedText) : null;
+      const now = ctx.systems.flight.captureFlight();
+      const changed = expected ? Object.keys(expected.craftState).filter((key) => (key === 'ballast' || typeof expected.craftState[key] !== 'number') && now.craftState[key] !== expected.craftState[key]) : ['no expectation stored'];
+      const kept = expected !== null && now.craft === expected.craft && changed.length === 0;
+      return check(`portal: arrived in the portal's world with the craft and its state kept, the URL and the journal updated`,
+        arrival !== null && arrival.seed === state.seed && window.location.hash.includes(`seed=${state.seed}`) && logged && kept,
+        { seed: state.seed, arrival, hash: window.location.hash, worldsVisited: records.worldsVisited.length, craft: now.craft, craftState: now.craftState, changed });
     },
 
     /** The dragon racer: crag, course, the pace run, the rival run as the dragon, the achievement. */

@@ -1652,6 +1652,18 @@ Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed fiv
     km from any volcano); 1 lava site per 7-8 volcanoes within 200 km on DRIFTWING, HARNESS-1 and
     TERRAIN-ALL-35. Terrain lab 780/780 (the new near checks; the lava's per-site checks now run on
     its one DRIFTWING site).
+  - S2-1, the portal ring (67) kept the place, height, heading and speed but dropped the craft's own
+    state, throttle and attitude (a tiltrotor at 110 m/s arrived with its nacelles at the boot's 90
+    degrees, a hot balloon at the boot's 77 C). The flight controller gains `captureFlight()` (plain
+    data: the craft, pose, pitch, airspeed, throttle and the craft's own plain state fields; nested
+    records such as a cruise plan or a wind column start fresh) and `resumeFlight(carry)` (the craft's
+    situate hook picks hover, drift or flight as after a switch, then the carried heading, pitch,
+    airspeed, throttle and state win); the portal stores the capture and resumes it on arrival,
+    choosing the carried craft first if the page booted another. Craft lab 89/89 (a new `carry`
+    group: tiltrotor in airplane mode keeps nacelles 0, 110 m/s and its lever; a slow one hovers; a
+    balloon drifts at 104.7 C, still climbing; a glider keeps 20 degrees of pitch and its ballast;
+    foreign or nested state is not taken); the presets 61-70 arrival check now also requires the
+    craft and its state (the glider's ballast set to 0.35 before the crossing).
 
 ### Wave 4: discovery and verification, then the tag
 

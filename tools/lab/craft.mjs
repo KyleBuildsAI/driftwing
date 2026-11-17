@@ -21,6 +21,11 @@
 //               ground (flies); a placement's craftState is merged; a hook that throws or returns an
 //               unknown mode logs one error and falls back to the Phase 1 rules; startAt applies a
 //               placement and refuses a bad one
+//   carry       (the portal ring, preset 67) flight.captureFlight is plain data and flight.resumeFlight
+//               puts a fresh boot back in that flight: a tiltrotor in airplane mode keeps its nacelles,
+//               airspeed and throttle, a slow one hovers, a balloon drifts on its hot envelope, a
+//               climbing glider keeps its pitch and ballast; another craft's or nested state is not
+//               taken; a broken carry is refused
 //   abilities   Space and Shift+Space run craftAbility / craftAbilityAlt with the ability api (isHeld,
 //               controls, setCraftState, colliders, waterQuery, wind, skin); both updates run every
 //               frame; coloured smoke ('smokeColor') emits puffs
@@ -189,12 +194,14 @@ function ensureDocumentStandIn() {
   globalThis.document = { body: { appendChild() {} }, getElementById: () => null, createElement: () => element };
 }
 
-function createRig({ craft = 'glider', favorites = DEFAULT_CRAFT_FAVORITES.slice(), wind = null, skins = {} } = {}) {
+function createRig({ craft = 'glider', favorites = DEFAULT_CRAFT_FAVORITES.slice(), wind = null, skins = {}, modules = [] } = {}) {
   ensureDocumentStandIn();
   const registry = createCraftRegistry();
   registry.register(glider);
   registry.register(bushplane);
   registry.register(testCraft);
+  // Real game modules a test flies besides the lab's three (the portal carry: tiltrotor, balloon).
+  for (const id of modules) registry.register(gameRegistry.get(id));
   const world = {
     groundHeight: (x) => (x > SEA_EAST_OF ? CONFIG.WATER_LEVEL - 40 : GROUND),
     heightAt: (x) => (x > SEA_EAST_OF ? CONFIG.WATER_LEVEL - 40 : GROUND),
@@ -425,6 +432,63 @@ function testSituate() {
   check('situate', 'getStats counts the calls, errors and placements', stats.situateCalls >= 8 && stats.situateErrors === 2 && stats.placements >= 6, JSON.stringify({ calls: stats.situateCalls, errors: stats.situateErrors, placements: stats.placements }));
 }
 
+// ---- carry: a flight resumed in another world (the portal ring, preset 67) ------------------------------
+/** Flies a placement in a fresh rig for `seconds`, captures the flight, and resumes it in another fresh rig. */
+function carryFlight(craft, placement, seconds, { wind = null, edit = null } = {}) {
+  const before = createRig({ craft, modules: ['tiltrotor', 'balloon'], wind });
+  before.flight.startAt(placement);
+  if (edit) edit(before.state.flight.craftState);
+  before.run(seconds);
+  const carry = JSON.parse(JSON.stringify(before.flight.captureFlight()));
+  const after = createRig({ craft, modules: ['tiltrotor', 'balloon'], wind });
+  after.run(0.2);
+  after.presets.length = 0;
+  const mode = after.flight.resumeFlight(carry);
+  return { before, after, carry, mode };
+}
+
+function testCarry() {
+  // A tiltrotor in airplane mode at 110 m/s: it arrives in airplane mode, nacelles forward, at speed.
+  const airplane = carryFlight('tiltrotor', { mode: 'air', position: { x: 0, y: 1500, z: 0 }, heading: 30, speed: 110, throttle: 0.62, craftState: { nacelleAngle: 0, nacelleTarget: 0, nacelleCommand: 0, mode: 'airplane' } }, 2);
+  const airplaneState = airplane.after.state.flight.craftState;
+  check('carry', 'captureFlight is plain data: the craft, its pose, throttle and own plain state (no nested records)', airplane.carry.craft === 'tiltrotor' && Number.isFinite(airplane.carry.pitch) && Number.isFinite(airplane.carry.throttle)
+    && Number.isFinite(airplane.carry.craftState.nacelleAngle) && airplane.carry.craftState.corridor === undefined, JSON.stringify(airplane.carry.craftState));
+  check('carry', 'tiltrotor in airplane mode: resumed in the air with its nacelles forward (not the boot hover angle)', airplane.mode === 'air' && Math.abs(airplaneState.nacelleAngle - airplane.carry.craftState.nacelleAngle) < 1 && airplaneState.nacelleAngle < 20,
+    `mode ${airplane.mode}, nacelles ${airplane.carry.craftState.nacelleAngle.toFixed(1)} -> ${airplaneState.nacelleAngle.toFixed(1)} deg`);
+  airplane.after.run(0.5);
+  const airplaneSpeed = airplane.after.state.player.speed;
+  check('carry', 'tiltrotor in airplane mode: at its carried airspeed and throttle', Math.abs(airplaneSpeed - airplane.carry.speed) < 8 && airplane.after.presets.length === 1 && Math.abs(airplane.after.presets[0] - airplane.carry.throttle) < 1e-9,
+    `${airplane.carry.speed.toFixed(1)} -> ${airplaneSpeed.toFixed(1)} m/s, lever ${JSON.stringify(airplane.after.presets)} for ${airplane.carry.throttle.toFixed(3)}`);
+  // A tiltrotor hovering at 8 m/s: its situate hook makes it hover.
+  const hover = carryFlight('tiltrotor', { mode: 'hover', position: { x: 0, y: 900, z: 0 }, heading: 120, speed: 8, craftState: { nacelleAngle: 90, nacelleTarget: 90 } }, 1);
+  check('carry', 'tiltrotor hovering: resumed in a hover (its situate hook), nacelles up', hover.mode === 'hover' && hover.after.state.flight.craftState.nacelleAngle > 80, `mode ${hover.mode}, nacelles ${hover.after.state.flight.craftState.nacelleAngle.toFixed(1)} deg`);
+  // A balloon climbing on a hot envelope: it drifts with the air and keeps its envelope's heat.
+  const balloon = carryFlight('balloon', { mode: 'drift', position: { x: 0, y: 1200, z: 0 }, heading: 0, craftState: { envelopeTemperature: 105 } }, 1, { wind: new THREE.Vector3(3, 0, 0) });
+  const carriedHeat = balloon.carry.craftState.envelopeTemperature;
+  balloon.after.run(0.5);
+  const heat = balloon.after.state.flight.craftState.envelopeTemperature;
+  const climb = balloon.after.flight.getModel().state.velocity.y;
+  check('carry', 'balloon on a hot envelope: drifts (its situate hook) and keeps its heat, still climbing', balloon.mode === 'drift' && carriedHeat > 95 && Math.abs(heat - carriedHeat) < 3 && climb > 0,
+    `mode ${balloon.mode}, envelope ${carriedHeat.toFixed(1)} -> ${heat.toFixed(1)} C, vy ${climb.toFixed(2)} m/s`);
+  // A glider in a 20 degree climb: the attitude comes through, and its own state.
+  const climbing = carryFlight('glider', { mode: 'air', position: { x: 0, y: 1500, z: 0 }, heading: 200, speed: 45, pitch: 20 }, 0.1, { edit: (craftState) => { craftState.ballast = 0.35; } });
+  const pitch = climbing.after.state.player.pitch;
+  check('carry', 'glider climbing: resumed at its carried pitch with its own state (ballast)', climbing.mode === 'air' && Math.abs(pitch - climbing.carry.pitch) < 2 && climbing.carry.pitch > 12 && climbing.after.state.flight.craftState.ballast === 0.35,
+    `pitch ${climbing.carry.pitch.toFixed(1)} -> ${pitch.toFixed(1)} deg, ballast ${climbing.after.state.flight.craftState.ballast}`);
+  // Another craft's state is not taken over, and a broken carry is refused.
+  const foreign = createRig({ craft: 'glider' });
+  foreign.flight.resumeFlight({ position: { x: 0, y: 1500, z: 0 }, heading: 10, speed: 40, craftState: { nacelleAngle: 30, ballast: 0.5, corridor: { min: 0 } } });
+  const foreignState = foreign.state.flight.craftState;
+  check('carry', "only the craft's own plain fields are taken (another craft's and nested ones are not)", foreignState.ballast === 0.5 && foreignState.nacelleAngle === undefined && foreignState.corridor === undefined, JSON.stringify(foreignState));
+  let refused = '';
+  try {
+    foreign.flight.resumeFlight({ position: { x: 0, y: 'high', z: 0 }, heading: 10 });
+  } catch (error) {
+    refused = error.message;
+  }
+  check('carry', 'resumeFlight refuses a carry it cannot use', /resumeFlight: a position that is not/.test(refused), refused);
+}
+
 // ---- abilities, commands, skins, state ---------------------------------------------------------------
 function testAbilitiesAndCommands() {
   const rig = createRig({ craft: 'aerobatic', skins: { aerobatic: 'blue' } });
@@ -537,6 +601,7 @@ testRoster();
 testValidation();
 testFavorites();
 testSituate();
+testCarry();
 testAbilitiesAndCommands();
 testBindings();
 await testJournal();

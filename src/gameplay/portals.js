@@ -3,15 +3,19 @@
 // with action 'portal' is crossed; this system then:
 //   1. derives the world it leads to: new seed = portalSeed(currentSeed, portalId) (src/core/seed.js),
 //      deterministic, so a portal always opens onto the same world from the same world;
-//   2. keeps the flight for the arrival: the craft (and its skin and every setting, which persist on
-//      their own), the position over the ground, the height above it, the heading and the airspeed,
-//      in sessionStorage (PORTAL_ARRIVAL_KEY), and the time of day in the world link;
+//   2. keeps the flight for the arrival (flight.captureFlight): the craft (its skin and every setting
+//      persist on their own), the position over the ground, the height above it, the heading, pitch,
+//      airspeed and throttle, and the craft's own state (the tiltrotor's nacelles, the balloon's
+//      envelope temperature), in sessionStorage (PORTAL_ARRIVAL_KEY), and the time of day in the
+//      world link;
 //   3. sends the typed 'worldVisited' { seed, previous, portalId } (the journal records the world at
 //      once) and fades the screen into the portal's light;
 //   4. opens the new world through the seed links (src/ui/seedLinks.js): the URL hash and query update
 //      (#seed=NEW&t=...), inside the launcher shell through its bridge, and the page reloads.
 // On the new world's first frame (bus 'game:ready') a pending arrival for this seed puts the craft
-// back exactly as it left (flight.startAt), the light fades out and a toast names the world.
+// back as it left (flight.resumeFlight: the craft's situate hook picks hover, drift or flight as on a
+// craft switch, then the carried attitude, speed, throttle and state win), the light fades out and a
+// toast names the world.
 //
 // No per-frame work: the fades are CSS transitions and the reload a single timer. Errors are explicit:
 // storage the browser refuses still lets the player through, with a notice that the flight could not
@@ -50,22 +54,30 @@ export function createPortalSystem(ctx) {
     bus.emit('notify', { text, kind });
   }
 
-  /** The flight to carry: where the craft is over the ground, how high above it, its heading and speed. */
+  /**
+   * The flight to carry: where the craft is over the ground and how high above it, its heading, pitch,
+   * airspeed and throttle, whether it stands on the ground, and its own plain state (flight.captureFlight).
+   */
   function captureFlight(destination, portalId) {
     const player = state.player;
+    const flight = ctx.systems.flight;
+    const flown = flight && typeof flight.captureFlight === 'function' ? flight.captureFlight() : null;
     const agl = isFiniteNumber(player.agl) ? player.agl : 120;
-    const speed = isFiniteNumber(player.speed) ? player.speed : 0;
+    const speed = flown ? flown.speed : isFiniteNumber(player.speed) ? player.speed : 0;
     return {
       seed: destination,
       from: state.seed,
       portalId,
-      craft: ctx.systems.flight && typeof ctx.systems.flight.getCraft === 'function' ? ctx.systems.flight.getCraft() : ctx.settings.get('craft'),
+      craft: flown ? flown.craft : ctx.settings.get('craft'),
       x: player.position.x,
       z: player.position.z,
       agl: Math.max(0, agl),
-      heading: isFiniteNumber(player.heading) ? player.heading : 0,
+      heading: flown ? flown.heading : isFiniteNumber(player.heading) ? player.heading : 0,
+      pitch: flown ? flown.pitch : 0,
       speed,
-      onGround: agl < 3 && speed < 15,
+      throttle: flown ? flown.throttle : isFiniteNumber(player.throttle) ? player.throttle : 0,
+      onGround: flown ? flown.onGround : agl < 3 && speed < 15,
+      craftState: flown ? flown.craftState : {},
       at: Date.now(),
     };
   }
@@ -103,7 +115,9 @@ export function createPortalSystem(ctx) {
       return null;
     }
     const valid = carry && typeof carry === 'object' && SEED_PATTERN.test(carry.seed ?? '') && SEED_PATTERN.test(carry.from ?? '')
-      && ['x', 'z', 'agl', 'heading', 'speed', 'at'].every((field) => isFiniteNumber(carry[field]));
+      && ['x', 'z', 'agl', 'heading', 'speed', 'at'].every((field) => isFiniteNumber(carry[field]))
+      && ['pitch', 'throttle'].every((field) => carry[field] === undefined || isFiniteNumber(carry[field]))
+      && (carry.craftState === undefined || (carry.craftState !== null && typeof carry.craftState === 'object' && !Array.isArray(carry.craftState)));
     if (!valid || carry.seed !== state.seed || Date.now() - carry.at > ARRIVAL_MAX_AGE_MS) return null;
     return carry;
   }
@@ -136,6 +150,17 @@ export function createPortalSystem(ctx) {
     return { seed, previous: travel.previous, portalId, carried };
   }
 
+  /**
+   * The carried craft flying: the page normally boots in it (the craft setting persists); otherwise it
+   * is chosen now. False (and a notice) when it cannot fly here, so its state is not carried.
+   */
+  function boardCarriedCraft(flight, craft) {
+    if (typeof craft !== 'string' || typeof flight.getCraft !== 'function' || flight.getCraft() === craft) return true;
+    if (typeof flight.setCraft === 'function' && flight.setCraft(craft)) return true;
+    notify(`The craft you flew through the portal is not available here, so you go on in the ${flight.getCraft()}.`, 'warning');
+    return false;
+  }
+
   /** The new world's first frame: put the craft back as it left the old one, then fade the light out. */
   function arrive() {
     const carry = pending;
@@ -144,11 +169,15 @@ export function createPortalSystem(ctx) {
     const flight = ctx.systems.flight;
     const ground = Math.max(ctx.world.groundHeight(carry.x, carry.z), ctx.world.WATER_LEVEL);
     try {
-      flight.startAt({
-        mode: carry.onGround ? 'ground' : 'air',
+      const boarded = boardCarriedCraft(flight, carry.craft);
+      flight.resumeFlight({
         position: { x: carry.x, y: ground + Math.max(carry.onGround ? 0 : 30, carry.agl), z: carry.z },
         heading: carry.heading,
+        pitch: carry.pitch,
         speed: carry.speed,
+        throttle: carry.throttle,
+        onGround: carry.onGround === true,
+        craftState: boarded ? carry.craftState : undefined,
       });
     } catch (error) {
       console.error('[DRIFTWING] portal: the craft could not be placed on arrival', error);

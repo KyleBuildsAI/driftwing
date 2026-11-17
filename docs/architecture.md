@@ -838,6 +838,7 @@ v1 methods keep their v1 meaning.
 | `getCraftCommands()`, `getCraftStatus()` | the active craft's commands as `[{ id, phrases }]`, and its own status line (`copilot.status`) |
 | `getSkin()` | the active craft's skin id, or `null` without skins |
 | `startAt(placement)` | places the active craft as a situate placement says (below); returns the mode applied. Tests, tools and commands use it |
+| `captureFlight()`, `resumeFlight(carry)` | a flight as plain data `{ craft, position, heading, pitch, speed, throttle, onGround, craftState }` (craftState: the fields the craft's abilities start with whose values are plain; nested records start fresh), and that flight resumed by the active craft: its situate hook picks the mode as after a switch, then the carried heading, pitch, airspeed, throttle and plain state win. The portal ring (src/gameplay/portals.js) carries a flight into the next world with them |
 
 The controller boots straight into the craft's flight model at the spawn: level at its cruise, or
 on the ground with "Start on ground", which prefers the nearest discovered site offering a
