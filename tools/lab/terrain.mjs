@@ -35,6 +35,9 @@
 //                 Phase 1 edges the pairs the ring layout makes (LODs at most one apart)
 //   collision     groundHeight against the rendered LOD0 mesh (its own triangles) near every stamp
 //                 type: within 0.5 m
+//   near          placement.near (the lava rivers by a volcano): its validation, every lava site within
+//                 reach of a placed volcano, none without the volcano preset, the same in any query order
+//                 (and in the real-preset placement checks: every near site has its near site in reach)
 //   real          the real presets' stamps (Milestone E onward): placement filters, determinism (the
 //                 site-list hash twice and worker-cloned options), and around the nearest sites of every
 //                 stamped real preset the shapes, falloff, paint, seams and collision checks above
@@ -264,6 +267,10 @@ function testValidation() {
   expectThrow('a water body on a stamp that cannot hold one names waters[0].stamp', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, waters: [{ kind: 'lake', stamp: 0, level: { mode: 'basin', fill: 0.5 } }] }] }), ['fixtureVolcano', 'waters[0].stamp', 'cone']);
   expectThrow('an unknown overlay palette names overlays[0].palette', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, overlays: [{ shape: { kind: 'disc', radius: 500, falloff: 100 }, palette: 'neon' }] }] }), ['fixtureVolcano', 'overlays[0].palette', 'neon']);
   expectThrow('an unknown species names overlays[0].vegetation.species', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [{ ...volcano, overlays: [{ shape: { kind: 'disc', radius: 500, falloff: 100 }, vegetation: { species: ['oak'], density: 0.5, mode: 'add' } }] }] }), ['overlays[0].vegetation.species', 'oak']);
+  const nearFixture = (id, near) => ({ ...volcano, id, placement: { ...volcano.placement, near } });
+  expectThrow('placement.near without a radius names the field', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [volcano, nearFixture('nearLava', { presets: ['fixtureVolcano'] })] }), ['nearLava', 'placement.near.radius']);
+  expectThrow('placement.near naming the preset itself is refused', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [nearFixture('nearLava', { presets: ['nearLava'], radius: 5000 })] }), ['nearLava', 'placement.near.presets', 'itself']);
+  expectThrow('a placement.near chain is refused (rule 8 never recurses)', () => createWorldGen('X', { ...WORLD_OPTIONS, presets: [nearFixture('nearA', { presets: ['nearB'], radius: 5000 }), nearFixture('nearB', { presets: ['fixtureVolcano'], radius: 5000 }), volcano] }), ['nearA', 'nearB', 'near of its own']);
   for (const preset of WATER_FIXTURES) {
     let problem = '';
     try {
@@ -348,6 +355,18 @@ function testPlacement(presets = TERRAIN_FIXTURES, worldFor = fixtureWorld, labe
       }
     }
     check('placement', `${label}${seed}: no stamp changes the ground at a Phase 1 landmark`, landmarkFailures === 0, `${landmarkFailures} failures`);
+    // placement.near (Phase 3, the lava rivers by a volcano): a placed site of a near preset in reach.
+    if (presets.some((preset) => preset.placement && preset.placement.near)) {
+      let nearSites = 0;
+      let nearFailures = 0;
+      for (const site of sites) {
+        const near = presetsById.get(site.presetId).placement.near;
+        if (!near) continue;
+        nearSites++;
+        if (!world.sitesNear(site.x, site.z, near.radius).some((other) => near.presets.includes(other.presetId))) nearFailures++;
+      }
+      check('placement', `${label}${seed}: every site with placement.near has a placed site of its near presets in reach`, nearFailures === 0, `${nearSites} such sites, ${nearFailures} without`);
+    }
   }
   // The Phase 2 stamp types (the Phase 3 ones are placed by the water fixtures, testWaterStamps).
   if (presets === TERRAIN_FIXTURES) for (const type of STAMP_TYPES.filter((name) => Object.values(FIXTURE_STAMP_TYPE).includes(name))) check('placement', `stamp type ${type} is placed on some seed`, typesPlaced.has(type));
@@ -805,6 +824,27 @@ function realWorld(seed) {
  * stamped real preset (on the first seed that has them) the shapes, falloff, paint, seams at every LOD
  * pair and collision against the rendered mesh. Nothing runs while no real preset stamps.
  */
+/**
+ * placement.near on the real lava rivers (36, "volcano near coast"): with the volcano preset in the list
+ * every lava site has a placed volcano within its radius (seed DRIFTWING places one); without it the
+ * lava rivers are never placed; the answer does not depend on the query order.
+ */
+function testNearPlacement() {
+  const lava = PRESETS.find((preset) => preset.id === 'lavaRiversToSea');
+  const volcano = PRESETS.find((preset) => preset.id === 'volcano');
+  const radius = lava.placement.near.radius;
+  const paired = createWorldGen('DRIFTWING', { ...WORLD_OPTIONS, presets: [volcano, lava] });
+  const lavaSites = paired.sitesNear(0, 0, 90000).filter((site) => site.presetId === 'lavaRiversToSea');
+  const distances = lavaSites.map((site) => Math.min(...paired.sitesNear(site.x, site.z, radius).filter((other) => other.presetId === 'volcano').map((other) => Math.hypot(other.x - site.x, other.z - site.z))));
+  check('placement', 'lavaRiversToSea: placed only within its near radius of a placed volcano (DRIFTWING, 90 km)', lavaSites.length > 0 && distances.every((distance) => distance <= radius), `${lavaSites.length} sites, volcano at ${distances.map((distance) => round(distance / 1000, 1)).join(', ')} km`);
+  const alone = createWorldGen('DRIFTWING', { ...WORLD_OPTIONS, presets: [lava] });
+  check('placement', 'lavaRiversToSea: never placed in a world without the volcano preset', alone.sitesNear(0, 0, 90000).length === 0, `${alone.sitesNear(0, 0, 90000).length} sites`);
+  const reversed = createWorldGen('DRIFTWING', { ...WORLD_OPTIONS, presets: [volcano, lava] });
+  reversed.sitesNear(120000, 80000, 9000);
+  for (const site of lavaSites) reversed.sitesNear(site.x, site.z, 2000);
+  check('placement', 'lavaRiversToSea: the near rule gives the same sites in any query order', hashSiteList(reversed.sitesNear(0, 0, 90000)) === hashSiteList(paired.sitesNear(0, 0, 90000)));
+}
+
 function testRealPresets() {
   const stamped = PRESETS.filter((preset) => preset.kind === 'site' && (preset.stamps ?? []).length > 0);
   if (stamped.length === 0) {
@@ -1135,6 +1175,7 @@ testShapes(stampWorld, sites);
 testFalloff(stampWorld, sites);
 testPaint(stampWorld, sites);
 testSeamsAndCollision(stampWorld, sites);
+testNearPlacement();
 testRealPresets();
 testPhase3Worlds();
 testOverlays();

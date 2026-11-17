@@ -1642,6 +1642,16 @@ Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed fiv
     `rise` below the crown and curves up to it, the lintel is `thickness` thick at its crown, and the
     gate's top sits 1 m under the lowest lintel box over the opening (300 random arches: 0 boxes
     over the gate below its top + 1 m; the crown's box bottom at least 2.2 m above the gate edge's).
+  - S1-02, the lava rivers to the sea (36) ignored the spec's "volcano near coast": placement gains an
+    optional `near { presets, radius }` (src/world/placement.js: checked right after the relief, so
+    rule 6 only weighs candidates that could stand, and rule 8 needs one of those near sites placed;
+    a named preset cannot have a near of its own, so nothing recurses; schema and docs list it). The
+    preset needs a placed volcano within 10 km, and every coastal cell that near is a candidate
+    (chance 1, still 18 km apart). Volcanoes rarely stand by the sea, so the site is as rare as that:
+    on DRIFTWING the nearest is 21 km from the origin, 6 km from its volcano (before: 75 km out, 28
+    km from any volcano); 1 lava site per 7-8 volcanoes within 200 km on DRIFTWING, HARNESS-1 and
+    TERRAIN-ALL-35. Terrain lab 780/780 (the new near checks; the lava's per-site checks now run on
+    its one DRIFTWING site).
 
 ### Wave 4: discovery and verification, then the tag
 

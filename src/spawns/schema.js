@@ -130,7 +130,7 @@ function createChecker(presetId) {
 
 function validatePlacement(check, placement) {
   check.object(placement, 'placement');
-  check.onlyKeys(placement, ['chance', 'minSpacing', 'biomes', 'surface', 'terrain', 'clearance', 'align', 'scale', 'separateRegions'], 'placement');
+  check.onlyKeys(placement, ['chance', 'minSpacing', 'biomes', 'surface', 'terrain', 'clearance', 'align', 'scale', 'separateRegions', 'near'], 'placement');
   check.number(placement.chance, 'placement.chance', { above: 0, max: 1 });
   check.number(placement.minSpacing, 'placement.minSpacing', { min: 0 });
   check.listOrNull(placement.biomes, null, 'placement.biomes');
@@ -153,6 +153,17 @@ function validatePlacement(check, placement) {
       check.fail('placement.terrain.maxHeight', `must not be below placement.terrain.minHeight (${terrain.minHeight}), got ${terrain.maxHeight}`);
     }
     if (terrain.relief !== undefined) check.oneOf(terrain.relief, TERRAIN_RELIEFS, 'placement.terrain.relief');
+  }
+  // Optional: the site stands only within radius metres of a placed site of one of these presets.
+  if (placement.near !== undefined) {
+    const near = check.object(placement.near, 'placement.near');
+    check.onlyKeys(near, ['presets', 'radius'], 'placement.near');
+    check.array(near.presets, 'placement.near.presets');
+    if (near.presets.length === 0) check.fail('placement.near.presets', 'must name at least one site preset');
+    near.presets.forEach((id, index) => {
+      if (typeof id !== 'string' || id.length === 0) check.fail(`placement.near.presets[${index}]`, `must be a preset id, got ${describe(id)}`);
+    });
+    check.number(near.radius, 'placement.near.radius', { above: 0 });
   }
 }
 
@@ -588,6 +599,24 @@ function validateNearReferences(presets) {
   }
 }
 
+/**
+ * placement.near (Phase 3): every preset it names is a site preset of the list without a near of its
+ * own (src/world/placement.js rule 8 never chains).
+ */
+function validatePlacementNearReferences(presets) {
+  const byId = new Map(presets.map((preset) => [preset.id, preset]));
+  for (const preset of presets) {
+    const near = preset.placement && preset.placement.near;
+    if (!near) continue;
+    const check = createChecker(preset.id);
+    near.presets.forEach((siteId, index) => {
+      const target = byId.get(siteId);
+      if (!target || target.kind !== 'site') check.fail(`placement.near.presets[${index}]`, `names ${describe(siteId)}, which is not a site preset`);
+      if (target.placement && target.placement.near) check.fail(`placement.near.presets[${index}]`, `names ${describe(siteId)}, which has a near of its own`);
+    });
+  }
+}
+
 /** Validates every preset and that their ids are unique. Returns the list. */
 export function validatePresets(presets, options = {}) {
   if (!Array.isArray(presets)) throw new TypeError('[DRIFTWING] validatePresets needs an array of presets');
@@ -599,5 +628,6 @@ export function validatePresets(presets, options = {}) {
   }
   validateComboReferences(presets);
   validateNearReferences(presets);
+  validatePlacementNearReferences(presets);
   return presets;
 }

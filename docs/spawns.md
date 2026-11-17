@@ -933,7 +933,10 @@ night the lava and the steam's underside glow orange.
 
 - **Kind:** site, uncommon.
 - **Placement:** any biome; on a coast; ground 4-300 m; downhill-aligned (the channels run down the
-  fall line toward the water); chance 0.35 per cell; at least 18 km apart; 500 m clearance.
+  fall line toward the water); only within 10 km of a placed volcano site (`placement.near`, the
+  spec's "volcano near coast"), where every coastal cell is a candidate (chance 1); at least 18 km
+  apart; 500 m clearance. The site is therefore as rare as a volcano by the sea: on seed DRIFTWING
+  the nearest is 21 km from the origin, 6 km from its volcano.
 - **Stamps:** two `carve` lava channels (`structureStamps('lavaChannels')`: 600-800 m long, a floor
   16-24 m wide, 8-12 m deep between levees, painted basalt), side by side 300 m apart, upslope of the
   shore.
@@ -2575,7 +2578,7 @@ export default Object.freeze({
 | `kind` | both | yes | `site` or `event` | placement, director, SpawnManager |
 | `rarity` | both | yes | `common`, `uncommon`, `rare`, `legendary` | director, callout priority |
 | `heavy` | both | yes | counts toward the heavy limit (2) and needs a `lure` | SpawnManager, director |
-| `placement` | site | yes for sites, absent for events | `chance` (0 < c <= 1), `minSpacing`, `biomes`, `surface`, `clearance`; optional `terrain`, `align`, `scale`, `separateRegions` (Phase 3: true keeps this site's region overlays from meeting another separating site's) | placement.js (both threads) |
+| `placement` | site | yes for sites, absent for events | `chance` (0 < c <= 1), `minSpacing`, `biomes`, `surface`, `clearance`; optional `terrain`, `align`, `scale`, `separateRegions` (Phase 3: true keeps this site's region overlays from meeting another separating site's), `near` (Phase 3: `{ presets, radius }`, the site stands only within `radius` m of a placed site of one of those site presets, which have no `near` of their own) | placement.js (both threads) |
 | `candidates` | event | yes for events, absent for sites | `cellSize`, `bucketSeconds`, `chance` | candidates.js, director |
 | `filters` | both | yes | `biomes`, `timeOfDay`, `altitude`, `weather`, `surface`, `minDistance`, `maxDistance`, `near` (`{ landmarks?, sites?, active?, radius }`: the candidate moves onto the nearest Phase 1 landmark of those types or placed site of those site presets within radius, else it is rejected; `active: true` takes only a site whose active state runs, such as an erupting volcano) | director; site hours (`timeOfDay`) |
 | `stamps` | site | optional (must be empty for events) | terrain stamp specs | placement.js, stamps.js, worldgen |

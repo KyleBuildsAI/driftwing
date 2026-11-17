@@ -12,6 +12,10 @@
 //                  'ridge' | 'any', from a ring of samples RELIEF_RADIUS out;
 //      stamps      every stamp must fit the ground it lands on (stamps.js `fits`: a canyon path that
 //                  crosses a ridge far above its rim does not);
+//      near        with placement.near { presets, radius }: a candidate of one of those site presets
+//                  that passes rules 1-6 lies within radius metres of the centre (the lava rivers need
+//                  a volcano near their coast), so rule 6 only weighs candidates that could stand
+//                  (checked before the stamps resolve, as it reads only the centre);
 //   5. landmarks   placement.clearance metres between the site's stamp footprints (their real shapes:
 //                  a canyon is a corridor, a runway a rectangle) and every Phase 1 landmark;
 //   6. minSpacing  two sites of one preset closer than placement.minSpacing: the one with the higher
@@ -22,8 +26,11 @@
 //                  sites that both set placement.separateRegions (Phase 3 biome regions: a cherry
 //                  valley, a redwood grove) also keep only the higher priority when their region
 //                  overlays could meet: centres closer than the sum of their overlays' reaches.
+//   8. near        with placement.near, one of those nearby candidates must itself be placed (rule 7).
 // Rules 6 and 7 compare against the other sites' rule 1-6 results (never their final ones), so the
-// check is local, needs no recursion and gives the same answer from any starting cell.
+// check is local, needs no recursion and gives the same answer from any starting cell. A preset named
+// by placement.near cannot have a near of its own, so rule 8 never recurses either; a near naming no
+// preset of the list never places the site.
 //
 // Everything is a pure function of (seed, presets, the unstamped world): the main thread and the
 // terrain worker each build their own placement and agree without any messaging. Results are cached
@@ -116,6 +123,15 @@ export function validateSitePreset(preset) {
   if (placement.separateRegions !== undefined && typeof placement.separateRegions !== 'boolean') throw new Error(`${where}.placement.separateRegions: must be a boolean`);
   if (placement.separateRegions === true && (preset.overlays ?? EMPTY).length === 0) throw new Error(`${where}.placement.separateRegions: needs the preset's region overlays`);
   if (!ALIGNMENTS.includes(placement.align ?? 'random')) throw new Error(`${where}.placement.align: must be one of ${ALIGNMENTS.join(', ')}`);
+  const near = placement.near;
+  if (near !== undefined) {
+    if (near === null || typeof near !== 'object') throw new Error(`${where}.placement.near: must be { presets, radius }`);
+    if (!Array.isArray(near.presets) || near.presets.length === 0 || !near.presets.every((id) => typeof id === 'string' && id.length > 0)) {
+      throw new Error(`${where}.placement.near.presets: must be a non-empty array of site preset ids`);
+    }
+    if (near.presets.includes(preset.id)) throw new Error(`${where}.placement.near.presets: cannot name the preset itself`);
+    if (!isNumber(near.radius) || near.radius <= 0) throw new Error(`${where}.placement.near.radius: must be a number of metres > 0`);
+  }
   const scale = placement.scale;
   if (scale !== undefined && !(Array.isArray(scale) && scale.length === 2 && scale.every((value) => isNumber(value) && value > 0) && scale[0] <= scale[1])) {
     throw new Error(`${where}.placement.scale: must be an ascending [min, max] range of positive numbers`);
@@ -192,7 +208,18 @@ export function createPlacement({ seed, world, presets }) {
       separateRegions: preset.placement.separateRegions === true && overlayExtent > 0,
       // The footprint probed for the surface filter: the stamps' own extent, within limits.
       surfaceRadius: Math.min(Math.max(reach * 0.5, 200), 1200),
+      /** Rule 5's near and rule 8: the entries of placement.near.presets and the radius, or null. */
+      near: null,
     });
+  }
+  for (const entry of entries) {
+    const near = entry.preset.placement.near;
+    if (!near) continue;
+    const targets = entries.filter((other) => near.presets.includes(other.preset.id));
+    for (const target of targets) {
+      if (target.preset.placement.near) throw new Error(`preset "${entry.preset.id}".placement.near.presets: "${target.preset.id}" has a near of its own (chains are not supported)`);
+    }
+    entry.near = { targets, radius: near.radius, cellRange: Math.ceil(near.radius / SITE_CELL) };
   }
   const presetCount = entries.length;
   const maxReach = entries.reduce((largest, entry) => Math.max(largest, entry.reach), 0);
@@ -367,6 +394,9 @@ export function createPlacement({ seed, world, presets }) {
     const relief = terrain ? terrain.relief ?? 'any' : 'any';
     if (relief !== 'any' || align !== 'random') sampleRing(x, z, RELIEF_RADIUS, ringHeights);
     if (!reliefMatches(relief, centre)) return null;
+    // The near rule before the stamps resolve: it reads only the centre, and most cells fail it.
+    const nearBy = entry.near ? nearCandidates(cellX, cellZ, x, z, entry.near) : EMPTY;
+    if (entry.near && nearBy.length === 0) return null;
     const scaleRange = placement.scale ?? [0.85, 1.15];
     const site = createSite(entry, cellX, cellZ, {
       x,
@@ -387,10 +417,35 @@ export function createPlacement({ seed, world, presets }) {
       x,
       z,
       priority: cellRandom(cellX, cellZ, entry.salt, 3),
+      nearBy,
       discs: null,
       spaced: undefined,
       placed: undefined,
     };
+  }
+
+  /**
+   * Rule 5's near: the candidates of near.targets that pass rules 1-6 within near.radius of (x, z),
+   * nearest first (a frozen array, empty when none). The targets have no near of their own, so this
+   * never comes back here.
+   */
+  function nearCandidates(cellX, cellZ, x, z, near) {
+    const found = [];
+    const range = near.cellRange;
+    for (let offsetZ = -range; offsetZ <= range; offsetZ++) {
+      for (let offsetX = -range; offsetX <= range; offsetX++) {
+        for (const target of near.targets) {
+          const other = candidate(cellX + offsetX, cellZ + offsetZ, target);
+          if (other === null) continue;
+          const dx = other.x - x;
+          const dz = other.z - z;
+          if (dx * dx + dz * dz > near.radius * near.radius || !spaced(other)) continue;
+          found.push(other);
+        }
+      }
+    }
+    found.sort((first, second) => Math.hypot(first.x - x, first.z - z) - Math.hypot(second.x - x, second.z - z) || (beats(first, second) ? -1 : 1));
+    return found.length === 0 ? EMPTY : Object.freeze(found);
   }
 
   function candidate(cellX, cellZ, entry) {
@@ -456,6 +511,8 @@ export function createPlacement({ seed, world, presets }) {
         }
       }
     }
+    // Rule 8: a site that needs a near site needs one that is placed.
+    if (result && own.entry.near) result = own.nearBy.some((other) => placed(other));
     own.placed = result;
     return result;
   }

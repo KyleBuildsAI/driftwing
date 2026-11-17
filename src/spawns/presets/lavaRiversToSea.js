@@ -1,9 +1,10 @@
-// Preset 36: Lava rivers to the sea (uncommon site). On a volcanic coast two rivers of molten lava run
-// down shallow channels between low basalt levees, their dark crust drifting over glowing cracks, and
-// pour on down the slope into the sea, where the water flashes to steam: white plumes boil up from
-// each sea entry, littoral explosions throw glowing spatter, and at night the lava and the steam's
-// underside glow orange. The sea entries hiss and roar. Docs: docs/engines/structure.md (the
-// 'lavaChannels' recipe and the lava material), emitter.md (seaEntry).
+// Preset 36: Lava rivers to the sea (uncommon site). On a volcanic coast (a volcano within 10 km, so
+// the site is as rare as a volcano by the sea) two rivers of molten lava run down shallow channels
+// between low basalt levees, their dark crust drifting over glowing cracks, and pour on down the slope
+// into the sea, where the water flashes to steam: white plumes boil up from each sea entry, littoral
+// explosions throw glowing spatter, and at night the lava and the steam's underside glow orange. The
+// sea entries hiss and roar. Docs: docs/engines/structure.md (the 'lavaChannels' recipe and the lava
+// material), emitter.md (seaEntry).
 import { structureStamps } from '../engines/structure/stamps.js';
 
 export default Object.freeze({
@@ -14,15 +15,18 @@ export default Object.freeze({
   rarity: 'uncommon',
   heavy: false,
   tags: ['coast', 'spectacle'],
-  // Downhill-aligned on a coast, so the channels run down the fall line toward the water.
+  // Downhill-aligned on a coast, so the channels run down the fall line toward the water, and only
+  // where a volcano stands near that coast (the spec's condition): a placed volcano site within 10 km.
+  // Every coastal cell that near is a candidate (chance 1); the spacing keeps one per 18 km.
   placement: {
-    chance: 0.35,
+    chance: 1,
     minSpacing: 18000,
     biomes: null,
     surface: 'coast',
     terrain: { minHeight: 4, maxHeight: 300, relief: 'any' },
     clearance: 500,
     align: 'downhill',
+    near: { presets: ['volcano'], radius: 10000 },
   },
   filters: { biomes: null, timeOfDay: null, altitude: null, weather: null, surface: 'any' },
   // Two lava channels, side by side, upslope of the shore (each flow runs on from its exit to the sea).

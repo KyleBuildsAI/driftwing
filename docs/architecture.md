@@ -1421,7 +1421,10 @@ Milestone A of Phase 2 (`src/world/placement.js`, `src/world/stamps.js`, contrac
   too much, or a gorge on a slope or too low for its depth, is dropped); the preset's `clearance` between its stamp footprints and every Phase 1
   landmark; `minSpacing` from sites of the same preset; and `clearance` between its footprints and
   every other site's (two sites that both set `placement.separateRegions`, Phase 3 biome regions, also
-  keep their region overlays from meeting). The two spacing rules keep the candidate with the higher priority roll, compared
+  keep their region overlays from meeting). A site with `placement.near { presets, radius }` (Phase 3:
+  the lava rivers by a volcano) also needs a candidate of one of those presets that passes the first
+  six rules within `radius` (checked right after the relief, before the spacing), and in the end one
+  of them placed. The two spacing rules keep the candidate with the higher priority roll, compared
   against the neighbours' rule 1-6 results, so the answer is local and the same from any starting
   cell. `placement.align` (`random` | `downhill` | `ridge`) orients the site.
 - **Site records.** `{ id: '<presetId>:<cellX>:<cellZ>', presetId, cellX, cellZ, x, z, groundY,
