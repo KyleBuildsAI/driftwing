@@ -346,11 +346,11 @@ system, and then starts the frame loop.
 | `instrumentHud.js`, `instrumentHud.css` | the optional glass instrument HUD overlay |
 | `stickReticle.js`, `stickReticle.css` | the virtual-stick reticle |
 | `soundPill.js`, `soundPill.css` | the "Sound off - click to enable" pill |
-| `journalPanel.js`, `journalPanel.css` | the journal panel's body: this world's totals, discoveries (x / N), the global records and achievements, biomes, landmarks, ring courses and landings |
+| `journalPanel.js`, `journalPanel.css` | the journal panel's body: this world's totals, the section jumps, discoveries (x / N), the global records (with the highest altitude and the perches landed) and achievements, Craft (flight time per craft and skin, each craft's own statistics), Figures, Challenges (best time and medal per course and craft), Worlds (portal crossings with their seed links), biomes, landmarks, ring courses and landings |
 | `discoveryToast.js`, `discoveryToast.css` | the glass discovery card (name, category, one-liner, count) and achievement card; toasts for improved records |
 | `worldMap.js`, `worldMap.css` | the world map panel (M): relief tiles, discovered sites, trail, craft, waypoint; click to set a waypoint |
 | `seedLinks.js` | the Copy link buttons and reloading into another world through the shell bridge |
-| `categoryIcons.js`, `journalFormat.js` | the discovery icons and colours per category and landmark type (SVG and Path2D), and the journal's number, time and coordinate formats |
+| `categoryIcons.js`, `journalFormat.js` | the discovery icons and colours per category and landmark type (SVG and Path2D), and the journal's number, altitude (m, km above 10 km), duration, time and coordinate formats |
 
 ### `src/copilot`: WREN
 
@@ -367,7 +367,8 @@ system, and then starts the frame loop.
 ### `src/gameplay`
 
 `journal.js` (landmarks, biomes, distance, best landings from v1; spawn discoveries, the global
-records and the achievements from Phase 2, see [UI](#ui-ctxsystemsui)), `rings.js` (ring courses)
+records and the achievements from Phase 2; the Phase 3 records: flight time per craft and skin,
+figures, perches, worlds visited and the highest altitude, see [UI](#ui-ctxsystemsui)), `rings.js` (ring courses)
 and `waypoints.js` (waypoint beacon and arrow), from v1. `ignition.js` (Phase 3, contract h.5) is
 `ctx.ignition`, the registry of things a flame can light ([below](#ignition-ctxignition)).
 
@@ -589,7 +590,7 @@ journals are copied under their new names, then the old database is deleted.
 | --- | --- |
 | `driftwing-v2.settings` | settings |
 | `driftwing-v2.journal.<seed>` | the per-world journal (landmarks, biomes, totals, ring courses, landings, spawn discoveries) |
-| `driftwing-v2.records` | the global records: journal statistics, achievements and the best landing in any world |
+| `driftwing-v2.records` | the global records (`version` 3): journal statistics (the highest altitude among them), achievements, the best landing in any world, flight time per craft and skin, aerobatic figures, perches landed and the worlds visited through portals |
 | `driftwing-v2.ui.firstRunHintSeen` | first-run hint flag |
 | `driftwing-v2.input.bindings` | the binding profile `{ version, devices, global: { device: { target: Ref[] } }, crafts: { craftId: {...} } }` |
 | `driftwing-v2.input.calibration.<deviceKey>` | calibration per device |
@@ -1216,7 +1217,8 @@ controller refuses one without a module with a notice.
    (`flightState.craftCommands`).
 10. **Journal**: `journal.stats` declares the craft's stat keys; emit them with
     `bus.emitTyped('journalStat', { key, value, op })`. Flight time per craft is counted for every
-    craft (`records.craftTime`).
+    craft (`records.craftTime`), and per skin for a craft with skins (`records.skinTime`); the
+    journal panel's Craft section lists the module's statistics under the craft.
 11. **Tests**: `tools/lab/<id>.mjs` (the handling targets) and `src/dev/craftScenarios/<id>.js`
     (`?test=craft` scenarios) plus one import line and one list line in
     `src/dev/craftScenarios/index.js`. `?test=craft` then flies the general flight test of the craft
@@ -1950,6 +1952,30 @@ The UI system offers `update`, `toast`, `setSubtitle`, `setMicState`, `showPanel
   (`listPresets()`, which is `PRESETS` in a player's build). `journalStat` and `achievement`
   events fold into the global records (`driftwing-v2.records`); achievements and bests are shared by
   every world, discoveries belong to their seed.
+- **Journal records (Phase 3, Milestone O, contract j.1).** The records are version 3:
+  `stats` (every `journalStat`, plus `maxAltitude`, op `max`, metres above sea level, followed every
+  frame of flight with space included; the unit `altitude` shows metres below 10 km and kilometres
+  above), `achievements`, `bestLanding`, `craftTime { craftId: seconds }` and `skinTime { craftId:
+  { skinId: seconds } }` (every frame of flight, for the craft and skin flying), `figures { figureId:
+  { count, bestScore } }` (from `figureFlown`, the recognizer's figure ids only, scores 0-100),
+  `perches { count, kinds: { peak, structure, tree } }` (from `perched` when the bird settles) and
+  `worldsVisited [{ seed, from, portalId, at }]` (from `worldVisited`, the newest 200, saved at once).
+  Challenge medals and best times are never copied: the journal reads them from
+  `ctx.systems.challenges.getRecords()` (`getMedals()` tallies them). `listJournalStats()` lists the
+  game's statistics (`JOURNAL_STATS`) and then every registered craft module's `journal.stats` in
+  catalog order; `journalStatInfo(key)` answers for one. Older records migrate on load and are saved
+  back as version 3 at once (`migrateRecordsToV3`): versions 1 and 2 have no figures, perches or
+  altitude record, so a figure's best-score statistic becomes that figure flown once, `eaglePerches`
+  the perch count, and the highest of every world's journal, `balloonMaxAltitude` and
+  `spaceplaneApogee` the altitude record. Everything read from storage is sanitized (types,
+  prototype keys, NaN and Infinity, negative and impossible values) and capped: 200 statistics, 500
+  achievements, 64 craft, 8 skins a craft, 200 worlds, counts and seconds at 1e9, altitudes at
+  10 000 km. A frame of flight writes only a `Float64Array` (this world's totals, the timers, the
+  pending seconds of the craft and skin, the highest altitude), folded into the records on every
+  read and save and when the craft or skin changes, so the journal's update allocates nothing; the
+  records save on the 5 s throttle and when the page hides. The panel's Worlds rows copy a world's
+  link (`seedLinks.copyWorldLink(seed)`) and open it after a confirming second press
+  (`seedLinks.openWorld(seed)`).
 - **World map** (`worldMap.js`). A panel like the others, so the flight goes on. Tiles come from
   `createMapTileService` at 128 samples a side, 1 km to 256 km per tile (the level whose tiles show
   about 256 px wide), a memory LRU of 220 decoded tiles over the worker's IndexedDB cache, and a
@@ -2062,6 +2088,8 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/spawn-check.mjs --url <dev server>/v2/` | the spawn framework in V2 on either backend: 200 instances created and disposed three times with `renderer.info.memory` back to its baseline exactly and the heap within 1 MB, LOD transitions with hysteresis, lures at 12-30 km at golden hour, midday and night (screenshots), a wind source removed on dispose, discovery firing once, the sampled allocation of the manager's frame update, and the F9 debugger's keyboard behaviour |
 | `npm test` | the V1 check, `build:single` and a smoke test of the built shell |
 | `node tools/lab/discovery.mjs` | seed links (resolution order, times, world hashes, share links), the journal's spawn discoveries and collection count, the global records (add / min / max, known ops, bad payloads), achievements, and the map tiles (fields, determinism, no seams, water, cost) |
+| `node --expose-gc tools/lab/journal.mjs` | the Milestone O records headless: the collection x / 100, figures, perches, the highest altitude into space, flight time per craft and skin, the craft modules' statistics, medals read from the challenge system, worlds visited, the migrations from versions 1 and 2, hostile and corrupt storage with every cap, and 100 000 allocation-free climbing frames |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --query seed=JOURNAL-P3 --steps-file tools/steps/journal-p3.json` (add `renderer=webgl`) | the journal in the game: figures on the aerobatic, perches and skin time on the dragon, the spaceplane at 101 km, a challenge finish on the real challenge system, a world visited, then the panel's x / 100, records, Craft (all 14), Figures, Challenges and Worlds sections reached by their jump buttons (screenshots), a world's link and Open's confirmation, cleanup |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/discovery.json` | with the spawn test kit: forced discoveries give a toast, the chime and a journal entry and raise the count; journalStat and achievement events reach the records and the journal panel; M opens the map with the discovered site only, terrain tiles and the trail; a click sets the waypoint; Copy link is the shell link with the seed and time; the seed is saved |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/engine-weatherVolume.json` (and `engine-celestial.json`; `--query renderer=webgl` for WebGL2) | each engine's forms and components force-spawned ahead of the craft with screenshots, their wind, inside and eclipse effects, and create/dispose with `renderer.info.memory`, wind sources and sky modifiers back to their baseline exactly |
 | `node tools/lab/director.mjs [--hours 24]` | the director over simulated hours: pacing, rarity rates, nothing behind, cooldowns, budgets, lifetimes, heavy deferral, the weather distribution and session variety, determinism of the activation log, and load shedding before dynamic resolution (with Phase 1's governor unchanged without shedders); Phase 3: the ground track (a drifting craft, a hover, a turn), the craft weighting (seaplane, eagle, balloon, a high spaceplane, a module's own profile), combos on dev fixtures (preconditions, placement, delays, parents, the log and `comboStarted`, budgets, exclusivity, determinism, a forced combo), the global overrides (schedule, night window, the midnight sun's bend, the regional blend, the director's wiring) and the combo / override / tags validation |
