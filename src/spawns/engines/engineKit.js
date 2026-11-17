@@ -21,9 +21,28 @@
 //                                engine's WindField source returns one (windSources.js included)
 //   createApproachJournal(label, spec)  journal stats about the player's closest approach to a
 //                                spawn (closest tornado, storms chased), sent when the spawn ends
+//   EngineCapacityError          what create throws when a fixed pool it draws from is full (the
+//                                SpawnManager frees room for a forced debug spawn; see the class)
 //
 // Nothing here allocates after construction: the frame update paths of the engines call only the
 // per-frame members (the grid's step and sample, the light's update, the range list's add).
+
+/**
+ * Thrown by an engine's create when a fixed pool it draws from (emitter rows, glow groups, vortex
+ * slots, a species' agent range, a structure mesh pool) has no room left. Budgets keep the director's
+ * and the sites' spawns inside those pools, so only a forced debug spawn (F9, force: true) meets one:
+ * the SpawnManager then ends the lowest-priority live instance of that engine and tries again, and
+ * refuses the spawn quietly ('full') when none can go. Any other error from create stays an error.
+ * holds(instance), when given, says whether ending that live instance of the engine frees room for the
+ * one that failed (a fauna group of the same species); without it any instance of the engine does.
+ */
+export class EngineCapacityError extends Error {
+  constructor(message, holds = null) {
+    super(message);
+    this.name = 'EngineCapacityError';
+    this.holds = typeof holds === 'function' ? holds : null;
+  }
+}
 
 /** A readable description of a param value for error messages. */
 function describe(value) {

@@ -34,7 +34,7 @@
 // create).
 import { GLOW_PAGE_SIZE, GLOW_SHAPES, createGlowPoints } from './glowPoints.js';
 import { BOLT_RANDOMS, BOLT_SEGMENTS, createBoltScratch, createRibbonSlot, generateBeams, generateBolt } from './ribbons.js';
-import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, ownsPresetAudio, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
+import { EngineCapacityError, MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, fillRandoms, ownsPresetAudio, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
 
 /** Light-effect instances at once (glow groups); the director's budget is 8. */
 const MAX_INSTANCES = 8;
@@ -1061,7 +1061,7 @@ export function createLightEffectEngine() {
       const config = resolveLightEffectConfig(preset, params);
       const anchor = params.position;
       const group = points.groups.alloc();
-      if (group < 0) throw new Error(`[DRIFTWING] lightEffect: every glow group (${MAX_INSTANCES}) is in use; preset "${preset.id}" cannot start`);
+      if (group < 0) throw new EngineCapacityError(`[DRIFTWING] lightEffect: every glow group (${MAX_INSTANCES}) is in use; preset "${preset.id}" cannot start`);
       const wanted = Math.ceil(config.points / GLOW_PAGE_SIZE);
       const pages = new Int32Array(wanted);
       let pageCount = 0;

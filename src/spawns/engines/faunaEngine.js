@@ -57,7 +57,7 @@
 // back in. A slipstream is removed at far (the player cannot reach it there) and re-added nearer.
 // Params, units and ranges: docs/engines/fauna.md.
 import { SPECIES } from './faunaSpecies.js';
-import { createWindSample, ownsPresetAudio } from './engineKit.js';
+import { EngineCapacityError, createWindSample, ownsPresetAudio } from './engineKit.js';
 import { SLOPE_RUN, buildGroundPath, createPath, createPathFollower } from '../../world/pathFollower.js';
 import { rigidCurvatureDrop } from '../../render/curvature.js';
 import { faunaThreatOf } from '../../craft/registry.js';
@@ -4254,7 +4254,10 @@ export function createFaunaEngine() {
     const pool = pools[def.id];
     const count = Math.max(1, Math.round(rangeValue(resolved.countRange, rng)));
     const start = pool.ranges.alloc(count);
-    if (start < 0) throw new Error(`fauna: no room for ${count} more ${def.id} (${pool.ranges.used} of ${pool.capacity} in use)`);
+    if (start < 0) {
+      // Only a group of the same species gives agents back to this pool.
+      throw new EngineCapacityError(`[DRIFTWING] fauna: no room for ${count} more ${def.id} (${pool.ranges.used} of ${pool.capacity} in use)`, (instance) => instance.data.pool === pool);
+    }
     // The setup can refuse (an unknown audio recipe throws): the manager never receives an instance
     // to dispose then, so the agent range goes back to the species pool before the error goes on.
     try {

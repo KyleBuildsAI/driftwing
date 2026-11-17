@@ -87,8 +87,9 @@ A bad `species`, `behavior` or `count` throws a clear error that names the field
 | `butterfly` | bird | 0.1 span | 3 | 1..8 | 1.4 | 4096 |
 | `camel` | quadruped | 3.0 long (a saddle blanket and packs) | 1.4 | 0..11 | 1.6 | 64 |
 
-- **Capacity is per species, across every live group.** A `create()` that does not fit throws
-  `fauna: no room for N more <species>`, and the SpawnManager refuses the spawn.
+- **Capacity is per species, across every live group.** A `create()` that does not fit throws an
+  `EngineCapacityError` (`fauna: no room for N more <species>`), and the SpawnManager refuses the
+  spawn; a forced debug spawn instead ends a live group of the same species for room.
 - **The engine budget** (`DIRECTOR_BUDGETS.engines.fauna`, 8 instances and 12000 particles) caps
   the total. Each group counts its agents as particles.
 - **Adding a species.** Add an entry to `SPECIES` in faunaSpecies.js with the fields listed in that

@@ -87,7 +87,7 @@ import { PALETTE, paint } from './structure/palette.js';
 import { RECIPES, RECIPE_NAMES } from './structure/recipes/index.js';
 import { islandOutline, islandTopHeight } from './structure/recipes/islands.js';
 import { GATE_TELEPORT_DISTANCE, createGateSet, crossGates } from './gateDetector.js';
-import { createParamView, createWindSample, ownsPresetAudio } from './engineKit.js';
+import { EngineCapacityError, createParamView, createWindSample, ownsPresetAudio } from './engineKit.js';
 import { applyRigidDrop, rigidCurvatureDrop } from '../../render/curvature.js';
 import { addStructureColliders, islandTopCollider, removeStructureColliders, updateTurbineColliders } from './structure/colliders.js';
 import {
@@ -608,7 +608,7 @@ export function createStructureEngine() {
     const mesh = meshPools[kind].acquire(geometry);
     if (!mesh) {
       geometry.dispose();
-      throw new Error(`[DRIFTWING] structure: every ${kind} mesh is in use (${MAX_INSTANCES + 8} at once)`);
+      throw new EngineCapacityError(`[DRIFTWING] structure: every ${kind} mesh is in use (${MAX_INSTANCES + 8} at once)`);
     }
     mesh.position.copy(anchor);
     // A pooled mesh may come back turned by a moving structure that used it before.
@@ -648,7 +648,7 @@ export function createStructureEngine() {
       const mesh = moverPools[mover.kind].acquire(geometry);
       if (!mesh) {
         geometry.dispose();
-        throw new Error(`[DRIFTWING] structure: every ${mover.kind} mover mesh is in use (${MOVER_CAPACITY} at once)`);
+        throw new EngineCapacityError(`[DRIFTWING] structure: every ${mover.kind} mover mesh is in use (${MOVER_CAPACITY} at once)`);
       }
       mesh.matrixAutoUpdate = false;
       mesh.frustumCulled = true;
@@ -1065,7 +1065,7 @@ export function createStructureEngine() {
       const slot = pool.alloc();
       if (slot < 0) {
         freeSlots(pool, slots);
-        throw new Error(`[DRIFTWING] structure: every ${name} slot is in use`);
+        throw new EngineCapacityError(`[DRIFTWING] structure: every ${name} slot is in use`);
       }
       slots[index] = slot;
     }

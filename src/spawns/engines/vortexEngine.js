@@ -36,7 +36,7 @@
 // No allocations in update(): per-instance numbers live in a Float64Array, the slot block is written
 // into pre-built Vector4s, the path is precomputed, and the wind source moves in place.
 import { FRAME, FRAME_SIZE, checkSourceParamNames, createWindSource, resolveSourceParams } from './windSources.js';
-import { createApproachJournal, ownsPresetAudio } from './engineKit.js';
+import { EngineCapacityError, createApproachJournal, ownsPresetAudio } from './engineKit.js';
 
 export const MAX_VORTICES = 4;
 const SHELL_SEGMENTS = 28;
@@ -871,7 +871,7 @@ export function createVortexEngine() {
       const { THREE } = ctx;
       const p = resolveVortexParams(preset, params);
       const slot = slots.alloc();
-      if (slot < 0) throw new Error(`[DRIFTWING] vortex: all ${MAX_VORTICES} vortex slots are in use`);
+      if (slot < 0) throw new EngineCapacityError(`[DRIFTWING] vortex: all ${MAX_VORTICES} vortex slots are in use`);
       const heading = Number.isFinite(params.heading) ? params.heading : 0;
       const duration = Number.isFinite(params.duration) && params.duration > 0 ? params.duration : null;
       const path = buildPath(p, params.position, heading, duration, rng);

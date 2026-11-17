@@ -32,7 +32,7 @@
 // the WindField probes (worldgen's noise), which is why they are rationed.
 import { FIELD_NODES, FIELD_X, FIELD_Y, FRAME_ROWS, GROUND_MODES, PAGE_SIZE, PARAM_ROWS, PARTICLE_STYLES, createParticleSystem } from './particleSystem.js';
 import { lavaSourceStamps, traceLavaPath } from './lavaPath.js';
-import { MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, createWindSample, fillRandoms, ownsPresetAudio, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
+import { EngineCapacityError, MAX_POOLED_LIGHT_INTENSITY, createGroundGrid, createHeadingFrame, createParamReader, createPooledLight, createWindSample, fillRandoms, ownsPresetAudio, randomIn, sendVoiceLevel, smoothstep } from './engineKit.js';
 
 /** Emitter instances at once (rows of the particle tables); the director's budget is 16. */
 const MAX_EMITTERS = 16;
@@ -1313,7 +1313,7 @@ export function createEmitterEngine() {
       const config = resolveEmitterConfig(preset, params);
       const pool = system.pools[config.pool];
       const row = system.rows.alloc();
-      if (row < 0) throw new Error(`[DRIFTWING] emitter: every emitter row (${MAX_EMITTERS}) is in use; preset "${preset.id}" cannot emit`);
+      if (row < 0) throw new EngineCapacityError(`[DRIFTWING] emitter: every emitter row (${MAX_EMITTERS}) is in use; preset "${preset.id}" cannot emit`);
       // Whole pages; when the pool is short the emitter runs on what is free (its rate follows).
       const wanted = Math.ceil(config.particles / PAGE_SIZE);
       const pages = new Int32Array(wanted);

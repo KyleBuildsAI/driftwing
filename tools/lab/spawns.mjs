@@ -14,6 +14,11 @@
 //   budgets      the heavy limit, per-engine instance caps and particle estimates refuse activations;
 //                debug force spawns pass; refusals are counted; a director activation whose engines
 //                all end at create is declined (no spawn, no spawnActivated), a debug one still spawns
+//   room         a forced debug spawn that meets a full engine pool (EngineCapacityError) ends the
+//                lowest-priority holder (a director event, then a debug spawn, then a site, then a
+//                combo member; never one of its own combo; only holders the error names) and spawns,
+//                without a console error; with no holder left it is refused quietly as 'full'; an
+//                unforced spawn that meets a full pool still reports the error
 //   lure         a heavy spawn 30 km out is FAR with its lure faded in, drawn at the projection limit
 //                with its angular size kept; it fades out when the spawn comes within mid range
 //   discovery    fires once when in range and in view; not while a ridge hides the sight line; a
@@ -52,6 +57,7 @@ import { createTestMarkerEngine, createTestPresets, createTestSiteFeed, createTe
 import { createCelestialEngine } from '../../src/spawns/engines/celestialEngine.js';
 import { createWeatherVolumeEngine } from '../../src/spawns/engines/weatherVolumeEngine.js';
 import { createFaunaEngine } from '../../src/spawns/engines/faunaEngine.js';
+import { EngineCapacityError } from '../../src/spawns/engines/engineKit.js';
 import { PRESET_BY_ID } from '../../src/spawns/presets/index.js';
 import { createIgnitionService } from '../../src/gameplay/ignition.js';
 
@@ -493,6 +499,77 @@ function createLanternEngine(name, tidy) {
   };
 }
 
+/**
+ * An engine with a fixed pool of `capacity` slots and no budget of its own (the manager's default caps
+ * are far above it), so only its create can refuse: like the emitter's rows. Each instance has a
+ * colour; the capacity error's holds names the instances of the colour that was asked for when
+ * byColour is set (like the fauna engine's per-species ranges).
+ */
+function createPoolEngine(capacity, byColour) {
+  let used = 0;
+  return {
+    name: 'testPool',
+    init() {},
+    create(preset, params) {
+      const colour = params.colour ?? 'red';
+      if (used >= capacity) {
+        throw new EngineCapacityError(`testPool: all ${capacity} slots are in use`, byColour ? (instance) => instance.data.colour === colour : null);
+      }
+      used++;
+      return { anchor: params.position, radius: 20, windSourceIds: [], lights: 0, particles: 0, data: { colour } };
+    },
+    update() {},
+    setLOD() {},
+    dispose() {
+      used--;
+    },
+    stats() { return { instances: used, particles: 0, lights: 0, buffers: 0, drawCalls: 0 }; },
+  };
+}
+
+function testForcedRoom() {
+  const lab = createLab();
+  lab.manager.register(createPoolEngine(3, true));
+  const base = createTestPresets()[0];
+  const preset = (id, colour) => Object.freeze({ ...base, id, engines: [{ engine: 'testPool', params: { colour } }] });
+  for (const entry of [preset('poolRed', 'red'), preset('poolBlue', 'blue')]) lab.manager.addPreset(entry);
+  const at = (z) => ({ x: 0, y: 0, z });
+  const site = lab.manager.activate('poolRed', { position: at(-600), heading: 0, source: 'debug' });
+  lab.step(1);
+  const director = lab.manager.activate('poolRed', { position: at(-700), heading: 0, source: 'director' });
+  lab.step(1);
+  const blue = lab.manager.activate('poolBlue', { position: at(-800), heading: 0, source: 'director' });
+  const errorsBefore = consoleErrors.length;
+  const forced = lab.manager.activate('poolRed', { position: at(-900), heading: 0, source: 'debug', force: true });
+  const evicted = lab.events.ended.filter((event) => event.reason === 'evicted').map((event) => event.id);
+  check('room', 'a forced spawn into a full pool ends the lowest-priority holder of its kind (a director event before an older debug spawn; not the other colour) and spawns', Boolean(forced) && evicted.length === 1 && evicted[0] === director && lab.manager.getInstance(blue) && lab.manager.getInstance(site), `forced ${forced}, evicted ${evicted.join(', ')}`);
+  const second = lab.manager.activate('poolRed', { position: at(-950), heading: 0, source: 'debug', force: true });
+  const evictedNow = lab.events.ended.filter((event) => event.reason === 'evicted').map((event) => event.id);
+  check('room', 'the next forced spawn ends the oldest debug spawn of its kind', Boolean(second) && evictedNow.length === 2 && evictedNow[1] === site, evictedNow.join(', '));
+  check('room', 'making room reaches the console with nothing', consoleErrors.length === errorsBefore, consoleErrors.slice(errorsBefore).join(' | '));
+
+  // Members of one combo never make room for each other: with only those holding the pool, the next
+  // member is refused quietly as 'full'.
+  const combo = createLab();
+  combo.manager.register(createPoolEngine(2, false));
+  combo.manager.addPreset(preset('poolRed', 'red'));
+  const members = [-600, -700, -800].map((z) => combo.manager.activate('poolRed', { position: at(z), heading: 0, source: 'debug', force: true, parent: 'combo:debug:1' }));
+  const comboStats = combo.manager.getStats();
+  check('room', 'a full pool held by its own combo refuses the next member quietly as full', Boolean(members[0]) && Boolean(members[1]) && members[2] === null && comboStats.lastRefusal === 'full' && comboStats.refusals.full === 1 && consoleErrors.length === errorsBefore, `${members.join(', ')}; ${JSON.stringify(comboStats.refusals)}`);
+  const other = combo.manager.activate('poolRed', { position: at(-900), heading: 0, source: 'debug', force: true, parent: 'combo:debug:2' });
+  check('room', "another combo's member ends one of the first combo's members (the last rank) for room", Boolean(other) && combo.events.ended.some((event) => event.reason === 'evicted' && event.id === members[0]), `${other}; ended ${combo.events.ended.map((event) => `${event.id} ${event.reason}`).join(', ')}`);
+
+  // An unforced spawn that meets a full pool is a budget the engine never declared: still an error.
+  const plain = createLab();
+  plain.manager.register(createPoolEngine(1, false));
+  plain.manager.addPreset(preset('poolRed', 'red'));
+  plain.manager.activate('poolRed', { position: at(-600), heading: 0, source: 'director' });
+  const unforced = plain.manager.activate('poolRed', { position: at(-700), heading: 0, source: 'director' });
+  const plainErrors = consoleErrors.slice(errorsBefore);
+  check('room', 'an unforced spawn into a full pool is refused as an error and reported once', unforced === null && plain.manager.getStats().lastRefusal === 'error' && plainErrors.length === 1 && /failed to create/.test(plainErrors[0]), plainErrors.join(' | '));
+  consoleErrors.length = errorsBefore;
+}
+
 function testIgnitableLeaks() {
   const ignition = createIgnitionService();
   const lab = createLab({ game: { ignition } });
@@ -694,6 +771,7 @@ testSites();
 testWind();
 testLeaks();
 testIgnitableLeaks();
+testForcedRoom();
 testLifetime();
 testMemoryLog();
 testCouplings();

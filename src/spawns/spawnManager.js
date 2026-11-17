@@ -33,6 +33,7 @@ import { createLureSystem } from './lure.js';
 import { createLightPool } from './lightPool.js';
 import { createInstancedPool, createMeshPool, createObjectPool, createScratch, createSlotAllocator } from './pools.js';
 import { matchesTimeOfDay } from './director.js';
+import { EngineCapacityError } from './engines/engineKit.js';
 
 export const DEFAULT_HEAVY_LIMIT = 2;
 export const DEFAULT_ENGINE_BUDGET = Object.freeze({ instances: 32, particles: 60000 });
@@ -84,6 +85,11 @@ const VALLEY_CLIMBS = 3;
 const VALLEY_MIN_STRIDE = 40;
 /** Spawns alive at once (far above the budgets; activations past it are refused as 'capacity'). */
 export const MAX_SPAWNS = 512;
+/**
+ * The most live spawns a forced debug activation ends to make room in a full engine pool (an
+ * EngineCapacityError) before it gives up and is refused as 'full'.
+ */
+const MAX_FORCED_EVICTIONS = 24;
 const DEG = Math.PI / 180;
 
 /** 32-bit FNV-1a hash of a string (seeds from ids). */
@@ -204,7 +210,7 @@ export function createSpawnManager(options) {
   const engineCaps = {};
   /** The LOD bias (setLodBias): LOD distances are multiplied by it. */
   const lodScale = new Float64Array([1]);
-  const refusals = { preset: 0, engine: 0, heavy: 0, instances: 0, particles: 0, capacity: 0, error: 0, declined: 0 };
+  const refusals = { preset: 0, engine: 0, heavy: 0, instances: 0, particles: 0, capacity: 0, error: 0, declined: 0, full: 0 };
   // Per-spawn doubles written every frame live in typed arrays indexed by the spawn's slot: a double
   // field on an object can lose its unboxed representation (a map shared with records that stored
   // something else), after which every write allocates.
@@ -733,6 +739,100 @@ export function createSpawnManager(options) {
     return rank === 2 && !(record.dormantStart && !record.active);
   }
 
+  /** The error of the last createParts that failed (read and cleared by activate). */
+  const createFailure = { error: null };
+  /**
+   * Whether the frame's record pass is running: an activation from inside it (a debug set piece's
+   * child) ends nothing for room, since that would move records under the pass's indices.
+   */
+  let updatingRecords = false;
+
+  /**
+   * Creates the record's parts, one per preset engine entry, at the placed anchor. Returns null when
+   * every part was created, else the name of the engine whose create threw (the error is left in
+   * createFailure; the parts made so far stay on the record for the caller to dispose).
+   */
+  function createParts(record, placed, scale, overridesByEngine) {
+    const preset = record.preset;
+    let engineName = null;
+    lightPool.currentOwner = record;
+    try {
+      for (let index = 0; index < preset.engines.length; index++) {
+        const entry = preset.engines[index];
+        const engine = registry.get(entry.engine);
+        engineName = engine.name;
+        const overrides = overridesByEngine && typeof overridesByEngine === 'object' ? overridesByEngine[entry.engine] : null;
+        const params = {
+          ...(entry.params ?? {}),
+          ...(overrides && typeof overrides === 'object' ? overrides : {}),
+          position: new THREE.Vector3(placed.x, placed.y, placed.z),
+          heading: record.heading,
+          site: record.site,
+          startTime: record.startTime,
+          scale,
+          duration: record.duration,
+          seed: record.seed,
+        };
+        const instance = engine.create(preset, params, createSeededRandom((record.seed + Math.imul(index + 1, 0x9e3779b1)) >>> 0));
+        if (instance && typeof instance === 'object') {
+          instance.id = record.id;
+          instance.presetId = record.presetId;
+          instance.engine = engine.name;
+          instance.heavy = preset.heavy;
+          if (instance.ended === undefined) instance.ended = false;
+          if (record.dormantStart) instance.active = false;
+        }
+        record.parts.push({ engine, instance });
+        validateInstance(engine.name, instance);
+      }
+    } catch (error) {
+      createFailure.error = error;
+      return engineName ?? preset.id;
+    } finally {
+      lightPool.currentOwner = null;
+    }
+    return null;
+  }
+
+  /**
+   * Which live spawns a forced debug spawn ends first for room (lower goes first): a director event,
+   * then a debug spawn, then a site, then a member of a combo.
+   */
+  function evictionRank(record) {
+    if (record.parent !== null) return 3;
+    if (record.source === 'director') return 0;
+    if (record.source === 'debug') return 1;
+    return 2;
+  }
+
+  /**
+   * Ends the lowest-priority live spawn with a part on engineName that holds the full pool (holds,
+   * when given, tests the part's instance), never a member of the same combo (parent): of one rank,
+   * the oldest event or the farthest site. Returns whether one was ended. Debug only: it may allocate.
+   */
+  function evictHolder(engineName, holds, parent) {
+    if (updatingRecords) return false;
+    let victim = null;
+    let victimRank = Infinity;
+    let victimOrder = Infinity;
+    for (let index = 0; index < records.length; index++) {
+      const record = records[index];
+      if (parent !== null && record.parent === parent) continue;
+      const holder = record.parts.some((part) => part.engine.name === engineName && (holds === null || holds(part.instance)));
+      if (!holder) continue;
+      const rank = evictionRank(record);
+      const order = record.source === 'site' ? -distances[record.slot] : record.startTime;
+      if (rank < victimRank || (rank === victimRank && order < victimOrder)) {
+        victim = record;
+        victimRank = rank;
+        victimOrder = order;
+      }
+    }
+    if (!victim) return false;
+    removeRecordAt(records.indexOf(victim), 'evicted');
+    return true;
+  }
+
   /**
    * Activates presetId. opts: { position: {x, y, z} (required), heading (compass degrees),
    * source: 'site' | 'director' | 'debug', site?, seed?, scale?, force? (debug only: ignore the
@@ -797,46 +897,34 @@ export function createSpawnManager(options) {
       memory: nextMemoryEntry(id, presetId, serial),
     };
     readMemory(record.memory.before);
-    lightPool.currentOwner = record;
-    try {
-      for (let index = 0; index < preset.engines.length; index++) {
-        const entry = preset.engines[index];
-        const engine = registry.get(entry.engine);
-        const overrides = opts.params && typeof opts.params === 'object' ? opts.params[entry.engine] : null;
-        const params = {
-          ...(entry.params ?? {}),
-          ...(overrides && typeof overrides === 'object' ? overrides : {}),
-          position: new THREE.Vector3(placed.x, placed.y, placed.z),
-          heading,
-          site,
-          startTime: record.startTime,
-          scale: Number.isFinite(opts.scale) ? opts.scale : site && Number.isFinite(site.scale) ? site.scale : 1,
-          duration,
-          seed: spawnSeed,
-        };
-        const instance = engine.create(preset, params, createSeededRandom((spawnSeed + Math.imul(index + 1, 0x9e3779b1)) >>> 0));
-        if (instance && typeof instance === 'object') {
-          instance.id = id;
-          instance.presetId = presetId;
-          instance.engine = engine.name;
-          instance.heavy = preset.heavy;
-          if (instance.ended === undefined) instance.ended = false;
-          if (record.dormantStart) instance.active = false;
-        }
-        record.parts.push({ engine, instance });
-        validateInstance(engine.name, instance);
-      }
-    } catch (error) {
-      lightPool.currentOwner = null;
-      refusals.error++;
-      lastRefusal = 'error';
-      console.error(`[DRIFTWING] spawn "${presetId}" failed to create`, error);
+    const scale = Number.isFinite(opts.scale) ? opts.scale : site && Number.isFinite(site.scale) ? site.scale : 1;
+    // A forced debug spawn that meets a full engine pool (EngineCapacityError) ends the
+    // lowest-priority live spawn holding that pool and tries again; it never reaches the console.
+    let evictions = 0;
+    let failure = null;
+    for (;;) {
+      const failedEngine = createParts(record, placed, scale, opts.params);
+      if (failedEngine === null) break;
+      const error = createFailure.error;
+      createFailure.error = null;
       record.parts = record.parts.filter((part) => part.instance && typeof part.instance === 'object');
       disposeParts(record);
+      record.parts = [];
+      if (forced && error instanceof EngineCapacityError && evictions < MAX_FORCED_EVICTIONS && evictHolder(failedEngine, error.holds, record.parent)) {
+        evictions++;
+        continue;
+      }
+      failure = error;
+      break;
+    }
+    if (failure !== null) {
       recordDisposed(record);
+      if (forced && failure instanceof EngineCapacityError) return refuse('full');
+      refusals.error++;
+      lastRefusal = 'error';
+      console.error(`[DRIFTWING] spawn "${presetId}" failed to create`, failure);
       return null;
     }
-    lightPool.currentOwner = null;
 
     // Every engine ended its instance at create (thermal hawks that found no working thermal, a pod
     // with no open water in reach): nothing would ever be drawn. A director activation is declined,
@@ -1153,7 +1241,12 @@ export function createSpawnManager(options) {
       refreshCamera();
       farLureView = cameraPosition.y > (farLureView ? FAR_LURE_EXIT : FAR_LURE_ALTITUDE);
       // Backwards: a record removed during the pass swaps in one already updated.
-      for (let index = records.length - 1; index >= 0; index--) updateRecord(records[index], index, simDt, realDt);
+      updatingRecords = true;
+      try {
+        for (let index = records.length - 1; index >= 0; index--) updateRecord(records[index], index, simDt, realDt);
+      } finally {
+        updatingRecords = false;
+      }
       let checks = 0;
       for (let visited = 0; visited < records.length && checks < VISIBILITY_CHECKS_PER_FRAME; visited++) {
         if (visibilityCursor >= records.length) visibilityCursor = 0;
