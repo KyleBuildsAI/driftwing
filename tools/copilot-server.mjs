@@ -52,7 +52,15 @@ const ACTION_TYPES = [
   'find', 'describe', 'photoMode', 'journal', 'none',
   'setCraft', 'setAssists', 'setView', 'deployChute', 'engine', 'relaunch', 'calibrate', 'switchVersion', 'craftCommand',
   'nearby', 'goTo', 'findThermal', 'chaseStorm', 'nextDiscovery',
+  'findWater', 'findPerch', 'windAt', 'challengeStart', 'challengeCancel', 'toSpace', 'scenicCruise', 'smoke',
 ];
+/** Cross-craft actions that take an optional autopilot flag, and the ones that take an optional enabled flag. */
+const AUTOPILOT_ACTIONS = ['findWater', 'findPerch'];
+const SWITCH_ACTIONS = ['toSpace', 'scenicCruise', 'smoke'];
+/** windAt: the highest altitude it answers for (m), its references and the units it speaks the height in. */
+const MAX_WIND_ALTITUDE = 150000;
+const WIND_REFERENCES = ['msl', 'agl'];
+const HEIGHT_UNITS = ['metres', 'feet', 'km'];
 /** Tour-guide actions that take an optional autopilot flag. */
 const GUIDE_ACTIONS = ['goTo', 'findThermal', 'chaseStorm', 'nextDiscovery'];
 const MAX_GOTO_NAME_LENGTH = 48;
@@ -67,8 +75,9 @@ const CRAFT_IDS = [
   'glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv',
   'aerobatic', 'seaplane', 'tiltrotor', 'paraglider', 'balloon', 'airship', 'eagle', 'spaceplane',
 ];
-/** A craft command id (flightState.craftCommands[].id) and the longest string value it carries. */
+/** A craft command id (flightState.craftCommands[].id) and the longest string value it carries; a skin id. */
 const COMMAND_PATTERN = /^[a-z][A-Za-z0-9]{0,31}$/;
+const SKIN_PATTERN = COMMAND_PATTERN;
 const MAX_COMMAND_VALUE_LENGTH = 48;
 /** switchVersion can only ask for V1: V2 hands over to the original game, the shell switches back. */
 const SWITCH_VERSIONS = ['v1'];
@@ -102,6 +111,9 @@ const ACTION_JSON_SCHEMA = {
     id: { type: 'string' },
     command: { type: 'string' },
     value: { anyOf: [{ type: 'number' }, { type: 'boolean' }, { type: 'string' }] },
+    skin: { type: 'string' },
+    reference: { type: 'string', enum: WIND_REFERENCES },
+    unit: { type: 'string', enum: HEIGHT_UNITS },
   },
   required: ['type'],
   additionalProperties: false,
@@ -131,7 +143,7 @@ action: at most one, or null for pure conversation. Types:
 - {"type":"ringCourse","count":3-24} starts a fly-through ring course; {"type":"cancelRingCourse"} stops it.
 - {"type":"describe"} for where-am-I questions, {"type":"photoMode","enabled":bool}, {"type":"journal"}, {"type":"none"}.
 Aircraft actions (the game reports whether each one worked, so keep speech to a short lead-in or an empty string):
-- {"type":"setCraft","craft":one of ${CRAFT_IDS.join('/')}} (sailplane = glider, cub or taildragger = bushplane, fighter = jet, heli or chopper = helicopter, drone or quad = fpv). flightState.availableCraft lists what is installed.
+- {"type":"setCraft","craft":one of ${CRAFT_IDS.join('/')},"skin":optional skin id} (sailplane = glider, cub or taildragger = bushplane, fighter = jet, heli or chopper = helicopter, drone or quad = fpv, stunt plane = aerobatic, float plane = seaplane, osprey = tiltrotor, hot air balloon = balloon, blimp or zeppelin = airship, rocket plane = spaceplane, dragon = eagle with skin "dragon"). flightState.availableCraft lists what is installed.
 - {"type":"setAssists","change":"up"/"down"/"full"/"off"} or {"type":"setAssists","level":0..1}: flight assists for the current craft (the only difficulty control; every craft flies the real flight model); up and down move 25 percent.
 - {"type":"switchVersion","version":"v1"}: switch to version one, the original DRIFTWING ("version one", "v1", "play the original"). This game is version two.
 - {"type":"craftCommand","craft":flightState.craft,"command":an id from flightState.craftCommands,"value":optional number, boolean or short string}: the current craft's own commands (smoke, water rudders, scenic cruise, ...); each lists the phrases it answers. flightState.craftStatus is the craft's own status line.
@@ -140,6 +152,13 @@ Tour-guide actions (the game adds the distances, directions and headings, so kee
 - {"type":"nearby"} for "what's nearby": the game lists the closest spawns (flightState.nearby) with distance, direction and state.
 - {"type":"goTo","name":"rope bridge","autopilot":bool} or {"type":"goTo","id":an id from flightState.nearby or flightState.activeEvents,"autopilot":bool} for "take me to the ...": a waypoint on the named place, event or category (weather, wildlife, structure, ...). autopilot only when the pilot asks you to fly there.
 - {"type":"findThermal","autopilot":bool} finds the nearest working thermal. {"type":"chaseStorm","autopilot":bool} guides to the nearest active storm or honestly says none is active. {"type":"nextDiscovery","autopilot":bool} guides to the nearest place not in the journal yet.
+Cross-craft actions (the game finds the place, reads the air and reports, so keep speech to a short lead-in or an empty string):
+- {"type":"findWater","autopilot":bool} "find water to land": a waypoint on the nearest lake big enough or the open sea. {"type":"findPerch","autopilot":bool} "find a perch": a waypoint on the nearest tree top or structure top (the eagle lands on it).
+- {"type":"windAt","altitude":metres above sea level,"unit":"metres"/"feet"/"km","reference":"msl"/"agl"} "wind at 2000 feet" (altitude 609.6, unit feet); without altitude, the wind where we fly.
+- {"type":"challengeStart"} "start the challenge" (the course whose start prompt is in flightState.challenge.prompt, else a waypoint to the nearest course), {"type":"challengeCancel"}.
+- {"type":"toSpace"} "take me to space": the spaceplane's climb to space; from another craft the game asks the pilot yes or no first and answers that reply itself (flightState.confirm). {"type":"toSpace","enabled":false} aborts the climb.
+- {"type":"scenicCruise","enabled":bool} the airship's scenic cruise (the same yes / no offer from another craft). {"type":"smoke","enabled":bool} the craft's smoke, or the game says it has none.
+flightState.onWater says we float on water; flightState.craftState is the active craft's own state (nacelleAngle, envelopeTemperature, apogee, perched, spaceClimb, ...); flightState.challenge the challenge run or start prompt.
 flightState.nearby lists spawns within 15 km (state active, dormant (only a possibility), site (not discovered yet) or discovered); flightState.activeEvents the live events; flightState.weather.state the regional weather (clear, building, storm, clearing). Never claim a storm or an event that is not listed.
 Use flightState to answer questions about altitude, speed, heading, time and nearby landmarks. For airspeed use flightState.airspeed (indicated, in flightState.units: knots for "aviation", km/h for "metric"); for landings use flightState.lastLanding and bestLanding (grade butter/smooth/firm/hard, sinkRate m/s); flightState.windAtCraft.fromName is where the wind blows from. There are no penalties: after a soft crash the craft is simply back in the air. When you mention where we are, use flightState.place (what the ground below actually looks like, e.g. "the foothills of the Snow Peaks"); the biome name alone can be misleading. If the request is unclear, reply kindly with a couple of example commands and action null.`;
 
@@ -231,6 +250,22 @@ function sanitizeAction(raw) {
     case 'setCraft':
       if (!CRAFT_IDS.includes(raw.craft)) return null;
       action.craft = raw.craft;
+      if (present(raw.skin)) {
+        if (typeof raw.skin !== 'string' || !SKIN_PATTERN.test(raw.skin)) return null;
+        action.skin = raw.skin;
+      }
+      return action;
+    case 'windAt':
+      if (present(raw.altitude) && (!finite(raw.altitude) || raw.altitude < 0 || raw.altitude > MAX_WIND_ALTITUDE)) return null;
+      if (present(raw.altitude)) action.altitude = raw.altitude;
+      if (present(raw.reference)) {
+        if (!WIND_REFERENCES.includes(raw.reference)) return null;
+        action.reference = raw.reference;
+      }
+      if (present(raw.unit)) {
+        if (!HEIGHT_UNITS.includes(raw.unit)) return null;
+        action.unit = raw.unit;
+      }
       return action;
     case 'craftCommand':
       if (!CRAFT_IDS.includes(raw.craft) || typeof raw.command !== 'string' || !COMMAND_PATTERN.test(raw.command)) return null;
@@ -280,7 +315,8 @@ function sanitizeAction(raw) {
       return copyBoolean('autopilot') ? action : null;
     }
     default:
-      if (GUIDE_ACTIONS.includes(raw.type)) return copyBoolean('autopilot') ? action : null;
+      if (GUIDE_ACTIONS.includes(raw.type) || AUTOPILOT_ACTIONS.includes(raw.type)) return copyBoolean('autopilot') ? action : null;
+      if (SWITCH_ACTIONS.includes(raw.type)) return copyBoolean('enabled') ? action : null;
       return action;
   }
 }
@@ -345,6 +381,14 @@ function parseDistance(text) {
 }
 
 const CRAFT_RULES = [
+  ['paraglider', /\bpara ?glider\b/],
+  ['spaceplane', /\b(space ?plane|rocket ?plane)\b/],
+  ['seaplane', /\b(sea ?plane|float ?plane)\b/],
+  ['aerobatic', /\b(aerobatic|stunt ?plane)\b/],
+  ['tiltrotor', /\b(tilt ?rotor|osprey)\b/],
+  ['balloon', /\bballoon\b/],
+  ['airship', /\b(air ?ship|blimp|zeppelin)\b/],
+  ['eagle', /\b(eagle|dragon)\b/],
   ['glider', /\b(glider|sailplane)\b/],
   ['bushplane', /\b(bush ?plane|cub|tail ?dragger)\b/],
   ['jet', /\b(jet|fighter)\b/],
@@ -396,7 +440,39 @@ function aircraftRule(text, flight) {
     return { speech: `Assists are at ${level}.`, action: null };
   }
   const craft = matchFirst(CRAFT_RULES, text);
-  if (craft && /\b(switch|change|fly|take|use|try|give me|to the)\b|^\S+$/.test(text)) return { speech: '', action: { type: 'setCraft', craft } };
+  if (craft && /\b(switch|change|fly|take|use|try|give me|to the)\b|^\S+$/.test(text)) {
+    const action = { type: 'setCraft', craft };
+    if (craft === 'eagle' && /\bdragon\b/.test(text)) action.skin = 'dragon';
+    return { speech: '', action };
+  }
+  return null;
+}
+
+/** A height in "wind at ..." (digits and a unit; metres without one, feet in aviation units). */
+function windHeight(text, units) {
+  const match = text.match(/\bwinds?\b.*\bat (\d+(?:\.\d+)?)\s*(feet|foot|ft|km|kilomet(?:er|re)s?|m|met(?:er|re)s?)?\b/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  const unit = match[2] ? (/^(feet|foot|ft)$/.test(match[2]) ? 'feet' : /^k/.test(match[2]) ? 'km' : 'metres') : units === 'aviation' ? 'feet' : 'metres';
+  const metres = unit === 'feet' ? value * 0.3048 : unit === 'km' ? value * 1000 : value;
+  return metres <= MAX_WIND_ALTITUDE ? { altitude: Math.round(metres * 10) / 10, unit } : null;
+}
+
+/** The cross-craft rules: space, the scenic cruise, smoke, water, perches, the wind aloft and challenges. */
+function crossCraftRule(text, flight) {
+  const autopilot = /\b(autopilot|fly (me|us) there|you fly)\b/.test(text);
+  const stop = /\b(stop|abort|cancel|off|end)\b/.test(text);
+  if (/\b(?:in)?to space\b|\bspace ?flight\b/.test(text)) return { speech: '', action: stop ? { type: 'toSpace', enabled: false } : { type: 'toSpace' } };
+  if (/\bscenic (cruise|tour)\b/.test(text)) return { speech: '', action: { type: 'scenicCruise', enabled: !stop } };
+  if (/\bsmoke (on|off)\b|\b(start|stop) (the )?smoke\b/.test(text)) return { speech: '', action: { type: 'smoke', enabled: !/\b(off|stop)\b/.test(text) } };
+  if (/\bwater to land\b|\b(find|nearest)\b.*\b(water|lake)\b.*\bland\b|^find (some )?water$/.test(text)) return { speech: '', action: { type: 'findWater', autopilot } };
+  if (/\b(find|nearest|where)\b.*\bperch\b|^perch$/.test(text)) return { speech: '', action: { type: 'findPerch', autopilot } };
+  const height = windHeight(text, flight.units);
+  if (height) return { speech: '', action: { type: 'windAt', altitude: height.altitude, unit: height.unit } };
+  if (/\bchallenge\b/.test(text)) {
+    if (/\b(cancel|stop|abort|quit)\b/.test(text)) return { speech: '', action: { type: 'challengeCancel' } };
+    if (/\b(start|begin|race|fly|run)\b|^(the )?challenge$/.test(text)) return { speech: '', action: { type: 'challengeStart' } };
+  }
   return null;
 }
 
@@ -426,8 +502,10 @@ function ruleReply(flightState, transcript) {
 
   if (!text) return { speech: "I'm here whenever you need me.", action: null };
   if (/\b(help|what can you do|commands)\b/.test(text)) {
-    return { speech: "From the ground station I can find places, set waypoints, fly the autopilot, change the time and lay out ring courses, switch craft, assists, views, the engine, the chute, relaunch and back to version one, and guide you: what's nearby, take me to, find a thermal, chase the storm, next discovery.", action: null };
+    return { speech: "From the ground station I can find places, set waypoints, fly the autopilot, change the time and lay out ring courses, switch craft, assists, views, the engine, the chute, relaunch and back to version one, guide you (what's nearby, take me to, find a thermal, chase the storm, next discovery), and find water to land, a perch, the wind at a height, start the challenge, take you to space, the scenic cruise and smoke.", action: null };
   }
+  const crossCraft = crossCraftRule(text, flight);
+  if (crossCraft) return crossCraft;
   const guide = guideRule(text, flight);
   if (guide) return guide;
   const aircraft = aircraftRule(text, flight);
@@ -532,6 +610,12 @@ function summarizeFlightState(flight) {
     engineOn: state.engineOn,
     lastLanding: state.lastLanding,
     bestLanding: state.bestLanding,
+    craftCommands: Array.isArray(state.craftCommands) ? state.craftCommands.map((command) => command && command.id).slice(0, 12) : undefined,
+    // Milestone O fields (docs/copilot-api.md): onWater, the craft's own state, the challenge, an open confirm.
+    onWater: state.onWater,
+    craftState: state.craftState,
+    challenge: state.challenge,
+    confirm: state.confirm,
     // v2 tour-guide fields (docs/copilot-api.md).
     nearby: Array.isArray(state.nearby) ? state.nearby.slice(0, 6) : undefined,
     activeEvents: Array.isArray(state.activeEvents) ? state.activeEvents.slice(0, 6) : undefined,

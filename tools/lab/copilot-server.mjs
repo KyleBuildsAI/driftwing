@@ -10,6 +10,9 @@
 //              an id from flightState.nearby, findThermal, chaseStorm, nextDiscovery), every reply
 //              passes the game's own validation (Copilot.sanitizeReply), and /health lists them.
 //              These send POST /copilot with a rules-only server (no Claude key)
+//   crossCraft the rules brain answers the cross-craft phrases (space, the scenic cruise, smoke, water,
+//              perches, the wind at a height, the challenge, craft and skins by name) with the game's
+//              own actions, each valid for the game, and /health lists them
 //
 // Usage: node tools/lab/copilot-server.mjs [--verbose]
 // Prints one line per check and exits non-zero if any check fails.
@@ -171,7 +174,38 @@ async function testGuide() {
   }
 }
 
-for (const test of [testDefault, testFileOptIn, testGuide]) {
+/** The cross-craft phrases (Milestone O): the rules brain answers each with the game's own action. */
+async function testCrossCraft() {
+  const { Copilot } = await import('../../src/copilot/copilot.js');
+  const { child, base } = await startServer({});
+  try {
+    const healthBody = await (await fetch(`${base}/health`)).json();
+    const types = ['findWater', 'findPerch', 'windAt', 'challengeStart', 'challengeCancel', 'toSpace', 'scenicCruise', 'smoke'];
+    check('crossCraft', '/health lists the cross-craft actions', types.every((type) => healthBody.actions.includes(type)), JSON.stringify(healthBody.actions));
+    for (const [transcript, expected] of [
+      ['take me to space', { type: 'toSpace' }],
+      ['abort the climb to space', { type: 'toSpace', enabled: false }],
+      ['scenic cruise', { type: 'scenicCruise', enabled: true }],
+      ['smoke on', { type: 'smoke', enabled: true }],
+      ['find water to land', { type: 'findWater', autopilot: false }],
+      ['find a perch', { type: 'findPerch', autopilot: false }],
+      ['wind at 2000 feet', { type: 'windAt', altitude: 609.6, unit: 'feet' }],
+      ['start the challenge', { type: 'challengeStart' }],
+      ['cancel the challenge', { type: 'challengeCancel' }],
+      ['switch to the dragon', { type: 'setCraft', craft: 'eagle', skin: 'dragon' }],
+      ['switch to the blimp', { type: 'setCraft', craft: 'airship' }],
+    ]) {
+      const { status, body } = await ask(base, transcript);
+      const valid = Copilot.sanitizeReply(body);
+      const sorted = (value) => JSON.stringify(Object.fromEntries(Object.entries(value ?? {}).sort(([first], [second]) => first.localeCompare(second))));
+      check('crossCraft', `"${transcript}" -> ${JSON.stringify(expected)}, valid for the game`, status === 200 && valid && sorted(valid.action) === sorted(expected), `${status} ${JSON.stringify(body)}`);
+    }
+  } finally {
+    await stopServer(child);
+  }
+}
+
+for (const test of [testDefault, testFileOptIn, testGuide, testCrossCraft]) {
   try {
     await test();
   } catch (error) {
