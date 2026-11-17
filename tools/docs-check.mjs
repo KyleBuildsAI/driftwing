@@ -7,9 +7,16 @@
 //   presets    the table in docs/spawns.md has one row per preset, in PRESETS order, numbered with the
 //              preset's spec number (the "Preset NN" in its file's first line; its place in PRESETS
 //              when the line names none), with the preset's id, category, kind, rarity, heavy flag
-//              and engines; every preset has its own
-//              section linked from its row; the whole preset list validates against the schema with
-//              the registered engine names, and every audio recipe a preset names exists
+//              and engines, its name as the link text, and "no" wind only when the file makes none;
+//              every preset has its own section linked from its row; the whole preset list validates
+//              against the schema with the registered engine names, and every audio recipe a preset
+//              names exists
+//   sections   each preset's section in docs/spawns.md agrees with its file: the heading names it;
+//              Kind (kind, rarity, heavy), Wind ("none" only without wind), Sound (the recipe, or
+//              "none"), Journal (the journal title and the callout count), LOD and Discovery,
+//              Lifetime (duration or "a site", the despawn distance + hysteresis), Filters (player
+//              altitude and the distance band), and Candidates (events; not for a global override,
+//              which is never rolled) or Placement (sites: chance and spacing)
 //   templates  the two copy-paste templates in docs/spawns.md (an event and a site) are valid
 //              presets: each code block is evaluated as the preset file it would become and passes
 //              validatePreset with the registered engine names, and its audio recipe exists
@@ -165,6 +172,19 @@ function presetTableRows(text) {
   return rows;
 }
 
+/** Where a preset's file makes wind: its own sources, the wind engines, and non-zero engine wind params. */
+function windSourcesOf(preset) {
+  const sources = (preset.wind ?? []).map((source) => `wind ${source.type}`);
+  const nonZero = (value) => (typeof value === 'number'
+    ? value !== 0
+    : value !== null && typeof value === 'object' && Object.values(value).some(nonZero));
+  for (const entry of preset.engines) {
+    if (entry.engine === 'windModifier' || entry.engine === 'vortex') sources.push(`engine ${entry.engine}`);
+    else if (nonZero(entry.params?.wind) || nonZero(entry.params?.windSource)) sources.push(`${entry.engine} wind params`);
+  }
+  return sources;
+}
+
 function testPresets() {
   let valid = true;
   let detail = '';
@@ -186,7 +206,7 @@ function testPresets() {
   PRESETS.forEach((preset, index) => {
     const row = rows[index];
     if (!row) return;
-    const [number, link, id, category, kind, rarity, heavy, engines] = row;
+    const [number, link, id, category, kind, rarity, heavy, engines, wind] = row;
     const expectedEngines = [...new Set(preset.engines.map((entry) => entry.engine))].map((name) => `\`${name}\``).join(', ');
     const problems = [];
     if (number !== presetNumber(preset, index) || number !== String(index + 1)) problems.push(`number ${number} (file: ${presetNumber(preset, index)}, place ${index + 1})`);
@@ -196,10 +216,214 @@ function testPresets() {
     if (rarity !== preset.rarity) problems.push(`rarity ${rarity} (file: ${preset.rarity})`);
     if (heavy !== (preset.heavy ? 'yes' : 'no')) problems.push(`heavy ${heavy} (file: ${preset.heavy})`);
     if (engines !== expectedEngines) problems.push(`engines ${engines} (file: ${expectedEngines})`);
+    const linkName = /^\[([^\]]+)\]/.exec(link);
+    if (!linkName || linkName[1] !== preset.name) problems.push(`link text ${link} (name: ${preset.name})`);
+    const sources = windSourcesOf(preset);
+    if (wind === 'no' && sources.length > 0) problems.push(`wind "no" (file: ${sources.join(', ')})`);
     const anchor = /\]\(#([^)]+)\)/.exec(link);
     if (!anchor || !anchors.has(anchor[1])) problems.push(`no section for ${link}`);
     if (!text.includes(`(../src/spawns/presets/${preset.id}.js)`)) problems.push('its section does not link the preset file');
     check('presets', `row ${index + 1} matches ${preset.id}`, problems.length === 0, problems.join('; '));
+  });
+}
+
+// ---- Preset sections -----------------------------------------------------------------------------
+/** The lines of preset `number`'s section in docs/spawns.md: from its "#### N. " heading to the next heading. */
+function presetSection(text, number) {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.startsWith(`#### ${number}. `));
+  if (start < 0) return null;
+  const end = lines.findIndex((line, index) => index > start && /^#{1,4}\s/.test(line));
+  return lines.slice(start, end < 0 ? lines.length : end);
+}
+
+/**
+ * The bullets of a section as { label, text }: a bullet starts with "- **Label:**" and runs over its
+ * indented continuation lines, joined with single spaces.
+ */
+function sectionBullets(lines) {
+  const bullets = [];
+  let current = null;
+  for (const line of lines) {
+    const start = /^- \*\*([^*]+?):\*\*\s*(.*)$/.exec(line);
+    if (start) {
+      current = { label: start[1], text: start[2] };
+      bullets.push(current);
+    } else if (current && /^\s+\S/.test(line)) {
+      current.text += ` ${line.trim()}`;
+    } else {
+      current = null;
+    }
+  }
+  return bullets;
+}
+
+/** The first bullet whose label is `label` or starts with it ("Filters" also finds "Filters (the eruption)"). */
+function bulletOf(bullets, label) {
+  return bullets.find((entry) => entry.label === label || entry.label.startsWith(`${label} `)) ?? null;
+}
+
+/** A number as the docs write it: plain decimal, no trailing zeros. */
+function plain(value) {
+  return String(Number(value.toFixed(3)));
+}
+
+/** True when `text` holds `phrase` with no digit or decimal point glued to its start. */
+function mentions(text, phrase) {
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\d.])${escaped}`).test(text);
+}
+
+/** True when `text` names the distance `metres` as "N m" or "N km". */
+function mentionsDistance(text, metres) {
+  return mentions(text, `${plain(metres)} m`) || mentions(text, `${plain(metres / 1000)} km`);
+}
+
+/** True when `text` names the range min-max metres as "a-b m" or "a-b km". */
+function mentionsRange(text, min, max) {
+  return mentions(text, `${plain(min)}-${plain(max)} m`) || mentions(text, `${plain(min / 1000)}-${plain(max / 1000)} km`);
+}
+
+/** True when `text` names "D + H" (despawn distance and hysteresis), both in m or both in km. */
+function mentionsDespawn(text, distance, hysteresis) {
+  return mentions(text, `${plain(distance)} + ${plain(hysteresis)} m`)
+    || mentions(text, `${plain(distance / 1000)} + ${plain(hysteresis / 1000)} km`);
+}
+
+/** The Kind bullet against kind, rarity and heavy. */
+function kindProblems(preset, bullets) {
+  const kind = bulletOf(bullets, 'Kind');
+  const match = kind && /^(site|event), (common|uncommon|rare|legendary)\b/.exec(kind.text);
+  if (!match) return ['no "Kind: <kind>, <rarity>" bullet'];
+  const problems = [];
+  if (match[1] !== preset.kind) problems.push(`Kind says ${match[1]} (file: ${preset.kind})`);
+  if (match[2] !== preset.rarity) problems.push(`Kind says ${match[2]} (file: ${preset.rarity})`);
+  const saysHeavy = /^[^.;:(]*\bheavy\b/.test(kind.text);
+  if (saysHeavy !== Boolean(preset.heavy)) problems.push(`Kind says ${saysHeavy ? '' : 'not '}heavy (file: heavy ${Boolean(preset.heavy)})`);
+  return problems;
+}
+
+/** The Sound bullet against the audio recipe (its first code span), or "none" without audio. */
+function soundProblems(preset, bullets) {
+  const sound = bulletOf(bullets, 'Sound');
+  if (!sound) return ['no Sound bullet'];
+  if (!preset.audio) return /^none\b/.test(sound.text) ? [] : [`Sound is "${sound.text}" (file: no audio)`];
+  const recipe = /`([^`]+)`/.exec(sound.text);
+  return recipe && recipe[1] === preset.audio.recipe ? [] : [`Sound names ${recipe ? recipe[1] : 'no recipe'} (file: ${preset.audio.recipe})`];
+}
+
+/** The Wind bullet: it may say "none" only when the file makes no wind. */
+function windProblems(preset, bullets) {
+  const wind = bulletOf(bullets, 'Wind');
+  if (!wind) return ['no Wind bullet'];
+  const sources = windSourcesOf(preset);
+  return sources.length > 0 && /^none\b/.test(wind.text) ? [`Wind says none (file: ${sources.join(', ')})`] : [];
+}
+
+/** The Journal bullet:it opens with the journal title in quotes and counts WREN's callout lines. */
+function journalProblems(preset, bullets) {
+  const journal = bulletOf(bullets, 'Journal');
+  if (!journal) return ['no Journal bullet'];
+  const problems = [];
+  if (!journal.text.startsWith(`"${preset.journal.title}"`)) problems.push(`Journal does not open with "${preset.journal.title}"`);
+  const count = preset.callouts.length;
+  if (!mentions(journal.text, `${count} callout lines`)) problems.push(`Journal does not say "${count} callout lines"`);
+  return problems;
+}
+
+/** The LOD bullet (with its Discovery) against lod and discovery. */
+function lodProblems(preset, bullets) {
+  const lod = bulletOf(bullets, 'LOD');
+  if (!lod) return ['no LOD bullet'];
+  const problems = [];
+  for (const band of ['near', 'mid', 'far']) {
+    if (!mentionsDistance(lod.text, preset.lod[band])) problems.push(`LOD ${band} is not ${preset.lod[band]} m`);
+  }
+  const discovery = /\*\*Discovery:\*\*\s*(.*)$/.exec(lod.text);
+  if (!discovery || !mentionsDistance(discovery[1], preset.discovery.radius)) problems.push(`Discovery is not ${preset.discovery.radius} m`);
+  else if (/\bin view\b/.test(discovery[1]) !== Boolean(preset.discovery.requireInView)) problems.push(`Discovery "in view" (file: requireInView ${preset.discovery.requireInView})`);
+  return problems;
+}
+
+/** The Lifetime bullet: the drawn duration (or "a site") and the despawn distance plus hysteresis. */
+function lifetimeProblems(preset, bullets) {
+  const lifetime = bulletOf(bullets, 'Lifetime');
+  if (!lifetime) return ['no Lifetime bullet'];
+  const problems = [];
+  const { duration, despawn } = preset.lifetime;
+  if (duration) {
+    const [min, max] = duration;
+    const phrase = min === max ? `${plain(min)} s` : `${plain(min)}-${plain(max)} s`;
+    if (!mentions(lifetime.text, phrase)) problems.push(`Lifetime does not say ${phrase}`);
+  } else if (!/\ba site\b/.test(lifetime.text)) problems.push('Lifetime does not say "a site" (file: no duration)');
+  if (despawn && !mentionsDespawn(lifetime.text, despawn.distance, despawn.hysteresis)) {
+    problems.push(`Lifetime does not say beyond ${despawn.distance} + ${despawn.hysteresis} m`);
+  }
+  return problems;
+}
+
+/** The Filters bullet's player altitude band and "ahead" distance band. */
+function filterProblems(preset, bullets) {
+  const filters = bulletOf(bullets, 'Filters');
+  if (!filters) return preset.kind === 'event' ? ['no Filters bullet'] : [];
+  if (!preset.filters) return ['a Filters bullet without filters in the file'];
+  const problems = [];
+  const { altitude, minDistance, maxDistance } = preset.filters;
+  if (altitude && !mentionsRange(filters.text, altitude.min, altitude.max)) problems.push(`Filters do not say player ${altitude.min}-${altitude.max} m`);
+  if (Number.isFinite(minDistance) && Number.isFinite(maxDistance) && !mentionsRange(filters.text, minDistance, maxDistance)) {
+    problems.push(`Filters do not say ${minDistance}-${maxDistance} m ahead`);
+  }
+  return problems;
+}
+
+/** The Candidates bullet (events) and the Placement bullet (sites). */
+function rollProblems(preset, bullets) {
+  const problems = [];
+  // A global override preset is scheduled per night and never rolled, so its candidates are unused.
+  if (preset.candidates && !preset.override) {
+    const candidates = bulletOf(bullets, 'Candidates');
+    const { cellSize, bucketSeconds, chance } = preset.candidates;
+    if (!candidates) problems.push('no Candidates bullet');
+    else {
+      if (!mentionsDistance(candidates.text, cellSize)) problems.push(`Candidates cells are not ${cellSize} m`);
+      if (!mentions(candidates.text, `${plain(bucketSeconds)} s buckets`)) problems.push(`Candidates buckets are not ${bucketSeconds} s`);
+      if (!mentions(candidates.text, `chance ${plain(chance)}`)) problems.push(`Candidates chance is not ${chance}`);
+    }
+  }
+  if (preset.placement) {
+    const placement = bulletOf(bullets, 'Placement');
+    const { chance, minSpacing } = preset.placement;
+    if (!placement) problems.push('no Placement bullet');
+    else {
+      if (!mentions(placement.text, `chance ${plain(chance)}`)) problems.push(`Placement chance is not ${chance}`);
+      if (minSpacing && !mentionsDistance(placement.text, minSpacing)) problems.push(`Placement spacing is not ${minSpacing} m`);
+    }
+  }
+  return problems;
+}
+
+function testSections() {
+  const text = readFileSync(SPAWNS_DOC, 'utf8');
+  PRESETS.forEach((preset, index) => {
+    const lines = presetSection(text, index + 1);
+    if (!lines) {
+      check('sections', `${index + 1}. ${preset.id}: has a section`, false, 'not found');
+      return;
+    }
+    const bullets = sectionBullets(lines);
+    const heading = /^#### \d+\. (.*)$/.exec(lines[0])[1];
+    const problems = [
+      ...(heading === preset.name ? [] : [`heading "${heading}" (name: "${preset.name}")`]),
+      ...kindProblems(preset, bullets),
+      ...windProblems(preset, bullets),
+      ...soundProblems(preset, bullets),
+      ...journalProblems(preset, bullets),
+      ...lodProblems(preset, bullets),
+      ...lifetimeProblems(preset, bullets),
+      ...filterProblems(preset, bullets),
+      ...rollProblems(preset, bullets),
+    ];
+    check('sections', `${index + 1}. ${preset.id}: its section matches the file`, problems.length === 0, problems.join('; '));
   });
 }
 
@@ -272,6 +496,7 @@ function testWindParams() {
 
 testLinks();
 testPresets();
+testSections();
 testTemplates();
 testWindParams();
 
