@@ -7,6 +7,7 @@ import { createFlightActionHandlers, createOutcomeWaiter, helpLine, keyFor } fro
 import { createFlightChatter } from './flightChatter.js';
 import { createCommandChips, createGuideChips } from './commandChips.js';
 import { TOUR_ACTION_TYPES, createTourGrammar, createTourGuide, formatDistance, sanitizeTourAction } from './tourGuide.js';
+import { CRAFT_GUIDE_ACTION_TYPES, createCraftGuide, createCraftGuideGrammar, sanitizeCraftGuideAction } from './craftGuide.js';
 
 /**
  * COPILOT "WREN".
@@ -15,7 +16,9 @@ import { TOUR_ACTION_TYPES, createTourGrammar, createTourGuide, formatDistance, 
  *   aircraft grammar (craft, assists, views, chute, engine, relaunch, version one,
  *   calibration, airspeed, landings) lives in grammar.js, the tour guide ("what's
  *   nearby", "take me to the ...", "find a thermal", "chase the storm", "next
- *   discovery") in tourGuide.js.
+ *   discovery") in tourGuide.js, and the cross-craft guide ("find water to land", "find a
+ *   perch", "wind at 2000 feet", "start the challenge", "take me to space", "scenic
+ *   cruise", "smoke on") with its yes / no offer to switch craft in craftGuide.js.
  * - RemoteCopilot: POSTs { flightState, transcript } to an HTTP brain with an
  *   800 ms budget, validates the reply, and falls back to the local grammar
  *   ('local-fallback') on any timeout, network error, bad JSON or bad shape.
@@ -32,6 +35,7 @@ export class Copilot {
     'find', 'describe', 'photoMode', 'journal', 'none',
     ...FLIGHT_ACTION_TYPES,
     ...TOUR_ACTION_TYPES,
+    ...CRAFT_GUIDE_ACTION_TYPES,
   ]);
 
   static FIND_TARGETS = Object.freeze([
@@ -194,6 +198,7 @@ export class Copilot {
       }
       default:
         if (TOUR_ACTION_TYPES.includes(type)) return sanitizeTourAction(raw);
+        if (CRAFT_GUIDE_ACTION_TYPES.includes(type)) return sanitizeCraftGuideAction(raw);
         return FLIGHT_ACTION_TYPES.includes(type) ? sanitizeFlightAction(raw) : action;
     }
   }
@@ -544,9 +549,11 @@ export class Copilot {
     const pick = (key, options) => this.pick(key, options);
     const flightGrammar = createFlightGrammar({ pick, helpLine: () => helpLine(ctx, pick) });
     const tourGrammar = createTourGrammar({ listPresets: () => ctx.systems?.spawns?.manager?.listPresets?.() ?? [] });
-    // Help first, then the tour guide, the v2 aircraft commands, and v1's grammar unchanged.
+    const craftGuideGrammar = createCraftGuideGrammar();
+    // Help first, then the cross-craft guide, the tour guide, the v2 aircraft commands, and v1's grammar unchanged.
     this.matchers = [
-      tourGrammar.matchHelp, flightGrammar.matchHelp, ...tourGrammar.matchers, ...flightGrammar.matchers, this.matchCancelCourse, this.matchAutopilotOff, this.matchClearWaypoint,
+      tourGrammar.matchHelp, craftGuideGrammar.matchHelp, flightGrammar.matchHelp, ...craftGuideGrammar.matchers, ...tourGrammar.matchers, ...flightGrammar.matchers,
+      this.matchCancelCourse, this.matchAutopilotOff, this.matchClearWaypoint,
       this.matchPhotoMode, this.matchJournal, this.matchRingCourse,
       this.matchHome, this.matchFind, this.matchFlyToWaypoint, this.matchSetWaypoint, this.matchHeading,
       this.matchAltitude, this.matchAutopilotOn, this.matchStatus, this.matchGreeting, this.matchTime,
@@ -1295,6 +1302,7 @@ export function createCopilotSystem(ctx) {
 
   let flightFieldsFailed = false;
   let tourFieldsFailed = false;
+  let craftGuideFieldsFailed = false;
   /** The core snapshot plus the visually honest place phrase and the v2 flight fields, for both brains. */
   function flightSnapshot() {
     const snapshot = ctx.getFlightState ? ctx.getFlightState() : {};
@@ -1315,6 +1323,14 @@ export function createCopilotSystem(ctx) {
       if (!tourFieldsFailed) {
         tourFieldsFailed = true;
         console.error('[DRIFTWING] WREN could not read the tour-guide state', error);
+      }
+    }
+    try {
+      Object.assign(snapshot, craftGuide.snapshotFields());
+    } catch (error) {
+      if (!craftGuideFieldsFailed) {
+        craftGuideFieldsFailed = true;
+        console.error('[DRIFTWING] WREN could not read the cross-craft guide state', error);
       }
     }
     return snapshot;
@@ -1551,6 +1567,20 @@ export function createCopilotSystem(ctx) {
     getView: () => currentView,
   }));
 
+  // The cross-craft guide (craftGuide.js): water, perches, wind aloft, challenges, space, the scenic
+  // cruise and smoke, with the yes / no offer before a craft switch.
+  const craftGuide = createCraftGuide(ctx, {
+    succeed,
+    fail,
+    pick,
+    placeWaypoint,
+    engageFollow,
+    directionPhrase: Copilot.directionPhrase,
+    waiter: outcomeWaiter,
+    setCraft: (action) => handlers.setCraft(action),
+  });
+  Object.assign(handlers, craftGuide.handlers);
+
   // The tour guide (tourGuide.js): its actions, the callouts and the "yes" that answers them.
   const tourGuide = createTourGuide(ctx, {
     succeed,
@@ -1561,7 +1591,7 @@ export function createCopilotSystem(ctx) {
     say,
     directionPhrase: Copilot.directionPhrase,
     /** WREN is answering, listening or speaking, or spoke within quietSeconds. */
-    isBusy: (quietSeconds) => asksQueued > 0 || voiceInput.isListening() || voiceOutput.isSpeaking() || state.time.realElapsed - lastLineAt < quietSeconds,
+    isBusy: (quietSeconds) => asksQueued > 0 || voiceInput.isListening() || voiceOutput.isSpeaking() || state.time.realElapsed - lastLineAt < quietSeconds || craftGuide.getConfirm() !== null,
   });
   Object.assign(handlers, tourGuide.handlers);
 
@@ -1619,7 +1649,14 @@ export function createCopilotSystem(ctx) {
   }
 
   async function answerAsk(text, inputSource) {
-    // A "yes" or "no" to an open callout offer is answered here, whatever brain is active.
+    // A "yes" or "no" to an open offer to switch craft, then to an open callout offer, is answered
+    // here, whatever brain is active.
+    const confirmReply = craftGuide.handleReply(Copilot.normalize(text));
+    if (confirmReply) {
+      const answered = await confirmReply;
+      const spoken = say(answered.speech, 'local');
+      return { speech: spoken, action: null, source: 'local', ok: answered.ok, result: answered.speech };
+    }
     const offerReply = tourGuide.handleReply(Copilot.normalize(text));
     if (offerReply) {
       const spoken = say(offerReply.speech, 'local');
@@ -1706,7 +1743,7 @@ export function createCopilotSystem(ctx) {
 
   const flightChatter = createFlightChatter(ctx, { offerChatter, pick, formatDistance: Copilot.formatDistance, directionPhrase: Copilot.directionPhrase });
   const commandChips = createCommandChips(ctx);
-  const guideChips = createGuideChips(ctx, tourGuide);
+  const guideChips = createGuideChips(ctx, tourGuide, craftGuide);
 
   function flushPendingChatter() {
     const pending = chatter.pending;
@@ -1862,6 +1899,7 @@ export function createCopilotSystem(ctx) {
       watchSky();
       flightChatter.update(realDt);
       tourGuide.update(realDt);
+      craftGuide.update();
       guideChips.update(realDt);
       flushPendingChatter();
     },
@@ -1876,6 +1914,8 @@ export function createCopilotSystem(ctx) {
     getBrainName: () => (brain instanceof RemoteCopilot ? 'remote' : 'local'),
     /** The tour guide: gatherEntries(radiusKm), getOffer(), snapshotFields() (the eval steps read these). */
     tourGuide,
+    /** The cross-craft guide: getConfirm(), snapshotFields(), getStats(). */
+    craftGuide,
     getStats() {
       return {
         brain: brain instanceof RemoteCopilot ? 'remote' : 'local',
@@ -1893,6 +1933,7 @@ export function createCopilotSystem(ctx) {
         flight: flightChatter.getStats(),
         quickChips: commandChips.getStats(),
         tourGuide: tourGuide.getStats(),
+        craftGuide: craftGuide.getStats(),
         guideChips: guideChips.getStats(),
       };
     },
