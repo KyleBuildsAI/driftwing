@@ -2432,7 +2432,7 @@ coast, a flare in each lantern and a foghorn each.
 
 ## Adding a preset
 
-Phase 3 adds 70 presets on these same engines. A new preset needs no engine or system code unless
+All 100 presets run on the ten engines below. A new preset needs no engine or system code unless
 it needs an engine feature that does not exist yet.
 
 ### Checklist
@@ -2781,18 +2781,18 @@ Spawn button schedules the override on the current night (set the time to night 
 
 ### Engine reference pages
 
-| engine | page | draws or does | used by |
+| engine | page | draws or does | used by (preset numbers) |
 | --- | --- | --- | --- |
-| `vortex` | [engines/vortex.md](engines/vortex.md) | funnels, debris and spray rings, the Rankine wind | tornado, waterspout, maelstrom |
-| `emitter` | [engines/emitter.md](engines/emitter.md) | GPU particles: plumes, jets, sprays, sparks, dust, mist, lanterns; optional light, glow, wind source, immersion fog | microburst, volcano, geyser field, mega-waterfall, lantern festival, jet stream |
-| `weatherVolume` | [engines/weatherVolume.md](engines/weatherVolume.md) | cloud masses, rain shafts, fog banks, the weather inside them | tornado, supercell, waterspout, lenticular, microburst, glory |
-| `fauna` | [engines/fauna.md](engines/fauna.md) | instanced flocks, formations, circling birds, whale pods, wingmen, drifting giants | whale pod, bay, murmuration, geese, hawks, eagle, sky whale |
-| `structure` | [engines/structure.md](engines/structure.md) | procedural builds: wind farms, bridges, airfields, islands, spires, gate courses, waterfalls; stamps, gates, landings | slot canyon, mega-waterfall, wind farm, rope bridge, airfield, floating islands, crystal spires |
-| `celestial` | [engines/celestial.md](engines/celestial.md) | meteors, comets, the eclipse, the glory and rainbows | glory, mega-waterfall, meteor shower, eclipse, comet |
-| `waterEffect` | [engines/waterEffect.md](engines/waterEffect.md) | whirlpools, splashes, spray, bioluminescence, plunge pools | waterspout, mega-waterfall, maelstrom, bay |
-| `lightEffect` | [engines/lightEffect.md](engines/lightEffect.md) | lightning, glows, swarms, beams, the real-light budget | tornado, supercell, volcano, fireflies, lantern festival, crystal spires |
-| `windModifier` | [engines/windModifier.md](engines/windModifier.md) | WindField sources with no visuals | supercell, lenticular, microburst, volcano, mega-waterfall, sky whale, jet stream |
-| `setPiece` | [engines/setPiece.md](engines/setPiece.md) | multi-stage timelines over other presets | storm chase |
+| `vortex` | [engines/vortex.md](engines/vortex.md) | funnels, debris and spray rings, dust devils, the Rankine wind | 1, 3, 12, 89 |
+| `emitter` | [engines/emitter.md](engines/emitter.md) | GPU particles: plumes, jets, sprays, sparks, dust, mist, lanterns, petals and leaves; optional light, glow, wind source, immersion fog | 5, 7, 8, 10, 25, 29, 31, 32, 33, 35, 36, 37, 39, 57, 60, 65, 68, 71, 78, 82, 83, 84, 86, 90, 97 |
+| `weatherVolume` | [engines/weatherVolume.md](engines/weatherVolume.md) | cloud masses, rain shafts, fog banks and rivers, dust walls, eyewalls, the weather inside them | 1, 2, 3, 4, 5, 6, 31, 32, 33, 34, 35, 37, 73, 74, 75, 85, 88, 94 |
+| `fauna` | [engines/fauna.md](engines/fauna.md) | instanced flocks, formations, circling birds, pods, herds on the ground, birds on the water, wingmen, drifting giants | 11, 13, 14, 15, 16, 18, 27, 44, 48, 49, 50, 51, 52, 58, 73 |
+| `structure` | [engines/structure.md](engines/structure.md) | procedural builds and their colliders, stamps, gates, landings, movers and challenges | 9, 10, 19, 20, 21, 26, 28, 36, 37, 38, 40, 41, 43, 45, 48, 53, 54, 55, 56, 57, 58, 59, 60, 66, 67, 68, 69, 70, 71, 76, 77, 78, 79, 80, 81, 87, 91 |
+| `celestial` | [engines/celestial.md](engines/celestial.md) | meteors, comets, eclipses, the glory, rainbows, the aurora, sky modifiers | 6, 10, 22, 23, 24, 57, 61, 62, 63, 64, 65, 92, 93, 94, 96, 98 |
+| `waterEffect` | [engines/waterEffect.md](engines/waterEffect.md) | whirlpools, splashes, spray, bioluminescence, plunge pools, shallows, travelling waves | 3, 10, 12, 13, 42, 43, 46, 47, 71 |
+| `lightEffect` | [engines/lightEffect.md](engines/lightEffect.md) | lightning, glows, swarms, beams, the real-light budget | 1, 2, 7, 17, 25, 28, 35, 53, 66, 67, 72, 88, 93, 95, 99, 100 |
+| `windModifier` | [engines/windModifier.md](engines/windModifier.md) | WindField sources with no visuals | 2, 4, 5, 7, 10, 27, 29, 31, 32, 33, 71, 73, 74, 75 |
+| `setPiece` | [engines/setPiece.md](engines/setPiece.md) | multi-stage timelines over other presets | 30 |
 
 The engine API itself (the interface, the engine ctx, the budgets) is in
 [architecture.md](architecture.md#spawns-ctxsystemsspawns-srcspawns) and the lead's contract

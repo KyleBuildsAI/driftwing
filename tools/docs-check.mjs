@@ -10,7 +10,8 @@
 //              and engines, its name as the link text, and "no" wind only when the file makes none;
 //              every preset has its own section linked from its row; the whole preset list validates
 //              against the schema with the registered engine names, and every audio recipe a preset
-//              names exists
+//              names exists; the engine reference table lists every registered engine with the exact
+//              preset numbers that use it
 //   sections   each preset's section in docs/spawns.md agrees with its file: the heading names it;
 //              Kind (kind, rarity, heavy), Wind ("none" only without wind), Sound (the recipe, or
 //              "none"), Journal (the journal title and the callout count), LOD and Discovery,
@@ -427,6 +428,33 @@ function testSections() {
   });
 }
 
+/** The engine reference table of docs/spawns.md: one row per registered engine, "used by" exact. */
+function testEngineTable() {
+  const text = readFileSync(SPAWNS_DOC, 'utf8');
+  const rows = new Map();
+  let inTable = false;
+  for (const { line } of proseLines(text)) {
+    if (/^\| engine \| page \|/.test(line)) {
+      inTable = true;
+      continue;
+    }
+    if (!inTable) continue;
+    if (!line.startsWith('|')) break;
+    if (/^\|\s*-/.test(line)) continue;
+    const cells = line.slice(1, -1).split('|').map((cell) => cell.trim());
+    rows.set(cells[0].replaceAll('`', ''), cells[cells.length - 1]);
+  }
+  for (const engine of ENGINE_NAMES) {
+    const usedBy = [];
+    PRESETS.forEach((preset, index) => {
+      if (preset.engines.some((entry) => entry.engine === engine)) usedBy.push(index + 1);
+    });
+    const expected = usedBy.join(', ');
+    const documented = rows.get(engine);
+    check('presets', `engine table: ${engine} is used by presets ${expected}`, documented === expected, documented === undefined ? 'no row' : `the row says ${documented}`);
+  }
+}
+
 // ---- Templates -----------------------------------------------------------------------------------
 /** The first js code block after a heading line in a Markdown text, or null. */
 function codeBlockAfter(text, heading) {
@@ -497,6 +525,7 @@ function testWindParams() {
 testLinks();
 testPresets();
 testSections();
+testEngineTable();
 testTemplates();
 testWindParams();
 
