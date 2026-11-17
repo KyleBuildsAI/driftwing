@@ -1672,6 +1672,14 @@ Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed fiv
     allocation-free; dispose unsubscribes); all seven structure pools use it and the engine's one
     direct writer (`writeTransform`) writes relative to the anchor. Origin lab 36/36 (a new `pools`
     group: 0.06 mm 400 km out, 0.43 mm after a rebase, 0 B over 1000 rebases of a 256-slot pool).
+  - E-2, the director's `filters.near.active` path (the dirty thunderstorm, 35) skipped the near
+    cache and built two objects per candidate every 0.5 s tick while a volcano erupted within 8 km.
+    The active answer is now written into one reused point (and `activeSiteNear` into one scratch),
+    the cache keeps it only for the rejection's null test, and a near.active preset's landmark part
+    is cached per candidate (landmarks never move); the static path is unchanged. Director lab 90/90
+    (the near group: 2 starts, 3 eruptions, 0 off an erupting volcano). The saving (two small objects
+    per candidate per tick) is too small to show against the lab's stub manager in a heap probe, so
+    the evidence is the code path: no object literal is left on it.
 
 ### Wave 4: discovery and verification, then the tag
 

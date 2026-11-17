@@ -485,8 +485,18 @@ export function createDirector({
   const pool = createCandidatePool(128);
   /** candidate hash -> { surface bits, biome key } (a candidate's ground never changes). */
   const groundCache = new Map();
-  /** candidate hash -> the landmark { x, z } a `near` candidate moved onto, or null (none in reach). */
+  /**
+   * candidate hash -> the landmark { x, z } a `near` candidate moved onto, or null (none in reach). A
+   * near.active candidate's entry is this tick's answer: activeNearPoint (shared, rewritten every tick)
+   * or null; only its null-ness is read back (environmentRejection).
+   */
   const nearCache = new Map();
+  /** candidate hash -> the nearest landmark of a near.active candidate's types, { x, z, distance } or null (landmarks never move). */
+  const activeLandmarkCache = new Map();
+  /** A near.active answer, rewritten in place every tick (its callers copy it at once). */
+  const activeNearPoint = { x: 0, z: 0, heading: null };
+  /** activeSiteNear's answer, rewritten in place. */
+  const activeSiteScratch = { x: 0, z: 0, distance: 0 };
   /** candidate hash -> time until which it is not considered again (activated, or refused). */
   const usedUntil = new Map();
   const refusedUntil = new Map();
@@ -753,30 +763,21 @@ export function createDirector({
    * compass heading, so the event faces the way the site does (the moonbow at a waterfall); null for a
    * landmark or a live site), or null. Cached by the candidate's hash (landmarks and sites never move).
    * With near.active the site must be one whose active state runs now (a volcano erupting), which
-   * changes, so that answer is worked out again every tick.
+   * changes, so that answer is worked out again every tick (activeNear, allocation-free).
    */
   function nearLandmark(info, record) {
     const near = info.near;
-    if (!near.active && nearCache.has(record.hash)) return nearCache.get(record.hash);
+    if (near.active) return activeNear(near, record);
+    if (nearCache.has(record.hash)) return nearCache.get(record.hash);
     if (nearCache.size >= SURFACE_CACHE_LIMIT) nearCache.clear();
     let best = null;
     let bestDistance = Infinity;
-    if (near.landmarks && typeof terrain.landmarkSitesNear === 'function') {
-      const sites = terrain.landmarkSitesNear(record.x, record.z, near.radius);
-      for (let index = 0; index < sites.length; index++) {
-        const site = sites[index];
-        if (!near.landmarks.includes(site.type)) continue;
-        const distance = Math.hypot(site.x - record.x, site.z - record.z);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          best = { x: site.x, z: site.z, heading: null };
-        }
-      }
+    const landmark = near.landmarks ? findNearestLandmark(near, record) : null;
+    if (landmark) {
+      bestDistance = landmark.distance;
+      best = { x: landmark.x, z: landmark.z, heading: null };
     }
-    if (near.sites && near.active) {
-      const site = activeSiteNear(near.sites, record.x, record.z, near.radius);
-      if (site && site.distance < bestDistance) best = { x: site.x, z: site.z, heading: null };
-    } else if (near.sites && placement) {
+    if (near.sites && placement) {
       const sites = placement.sitesNear(record.x, record.z, near.radius);
       for (let index = 0; index < sites.length; index++) {
         const site = sites[index];
@@ -792,12 +793,63 @@ export function createDirector({
     return best;
   }
 
+  /** The nearest Phase 1 landmark of near.landmarks within near.radius of the candidate: { x, z, distance } or null (a new object). */
+  function findNearestLandmark(near, record) {
+    if (typeof terrain.landmarkSitesNear !== 'function') return null;
+    let best = null;
+    const sites = terrain.landmarkSitesNear(record.x, record.z, near.radius);
+    for (let index = 0; index < sites.length; index++) {
+      const site = sites[index];
+      if (!near.landmarks.includes(site.type)) continue;
+      const distance = Math.hypot(site.x - record.x, site.z - record.z);
+      if (!best || distance < best.distance) best = { x: site.x, z: site.z, distance };
+    }
+    return best;
+  }
+
+  /**
+   * filters.near with active: the nearest landmark of its types (cached: landmarks never move) or the
+   * nearest of its sites whose active state runs now (worked out every tick), written into the shared
+   * activeNearPoint, or null. The cache keeps that answer for environmentRejection's null test. Once the
+   * candidate's landmark answer is cached, a tick allocates nothing (a quiet tick reuses everything).
+   */
+  function activeNear(near, record) {
+    if (nearCache.size >= SURFACE_CACHE_LIMIT) nearCache.clear();
+    let found = false;
+    let bestDistance = Infinity;
+    if (near.landmarks) {
+      let landmark = activeLandmarkCache.get(record.hash);
+      if (landmark === undefined) {
+        if (activeLandmarkCache.size >= SURFACE_CACHE_LIMIT) activeLandmarkCache.clear();
+        landmark = findNearestLandmark(near, record);
+        activeLandmarkCache.set(record.hash, landmark);
+      }
+      if (landmark) {
+        activeNearPoint.x = landmark.x;
+        activeNearPoint.z = landmark.z;
+        bestDistance = landmark.distance;
+        found = true;
+      }
+    }
+    const site = near.sites ? activeSiteNear(near.sites, record.x, record.z, near.radius) : null;
+    if (site && site.distance < bestDistance) {
+      activeNearPoint.x = site.x;
+      activeNearPoint.z = site.z;
+      found = true;
+    }
+    activeNearPoint.heading = null;
+    const point = found ? activeNearPoint : null;
+    nearCache.set(record.hash, point);
+    return point;
+  }
+
   /**
    * The nearest site of one of the presets in siteIds whose active state runs now within radius of
-   * (x, z): { x, z, distance } (its live anchor), or null.
+   * (x, z): activeSiteScratch { x, z, distance } (its live anchor, rewritten in place: read it at
+   * once), or null.
    */
   function activeSiteNear(siteIds, x, z, radius) {
-    let best = null;
+    let found = false;
     for (let index = 0; index < activations.length; index++) {
       const record = activations[index];
       if (record.siteId === null || !siteIds.includes(record.info.id)) continue;
@@ -805,9 +857,14 @@ export function createDirector({
       const anchor = instance ? instance.anchor || instance.position : null;
       if (!anchor) continue;
       const distance = Math.hypot(anchor.x - x, anchor.z - z);
-      if (distance <= radius && (!best || distance < best.distance)) best = { x: anchor.x, z: anchor.z, distance };
+      if (distance <= radius && (!found || distance < activeSiteScratch.distance)) {
+        activeSiteScratch.x = anchor.x;
+        activeSiteScratch.z = anchor.z;
+        activeSiteScratch.distance = distance;
+        found = true;
+      }
     }
-    return best;
+    return found ? activeSiteScratch : null;
   }
 
   /** The preset's environment filters at the candidate: time of day, altitude, weather, surface, biome, near. */
