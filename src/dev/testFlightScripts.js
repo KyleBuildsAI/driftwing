@@ -13,11 +13,15 @@
 //   pilot.brakes(value | null)          both toe brakes 0..1 (spoilers / airbrake in the air)
 //   pilot.action(id)                    one press of a flight-owned action
 //   pilot.relaunch()                    the craft's relaunch
+//   pilot.autopilotHeading(heading)     turns the engaged autopilot to a compass heading (its height kept)
+//   pilot.steer(fn | null)              fn(view, pilot) runs every frame until replaced (view: { state,
+//                                       wind, seen }): a closed-loop pilot such as the soak's lift seeker
 // Sign conventions: pitch +1 pulls (nose up), roll +1 banks right, yaw +1 yaws right.
 //
 // Each script also lists checks: the observations (collected every frame by the harness) that
 // prove the manoeuvres really happened. They are reported as script coverage. A check's test(seen,
 // seconds) gets the run length, so its time thresholds scale down for shortened runs (testSeconds).
+import { headingFromVector } from '../core/util.js';
 
 /** Autopilot cruise: current heading, a safe height above the ground, the craft's own cruise speed. */
 function cruise(pilot, headingOffset = 0) {
@@ -215,6 +219,162 @@ const SCRIPTS = Object.freeze({
   eagle: EAGLE,
   spaceplane: SPACEPLANE,
 });
+
+// ---- The soak's legs (testPlan=soak, contract k.5) ---------------------------------------------------
+// A soak leg flies one craft for two runs in a row (third person, then first person: the view swap)
+// without a reset between them, so step times are fractions of the whole leg. Craft without a leg
+// script of their own fly their flight-test script over the leg. Each leg flies its craft the way a
+// player would: the gliders seek lift, the balloon burns, the spaceplane climbs.
+
+/** How far (m) the lift seeker looks for a thermal, and how often (s) it looks again. */
+const LIFT_SEARCH_RADIUS = 2500;
+const LIFT_RESEARCH_SECONDS = 6;
+/** The circle (m) flown around a thermal's core, and the reach (m) inside which the seeker circles. */
+const LIFT_CIRCLE_RADIUS = 60;
+const LIFT_CIRCLING_REACH = 160;
+/** The seeker turns the autopilot once a second. */
+const LIFT_STEER_SECONDS = 1;
+
+/**
+ * A closed-loop lift seeker for the gliders (pilot.steer): every LIFT_RESEARCH_SECONDS it asks the
+ * WindField for the thermals within LIFT_SEARCH_RADIUS and picks the strongest near one (rising at
+ * least 1 m/s); then once a second it turns the engaged autopilot toward the core, and inside
+ * LIFT_CIRCLING_REACH onto a circle around it. With no thermal in reach (night, the sea) it glides on.
+ * It books its searches, the thermals found and the seconds circled into the run's observations.
+ */
+function createLiftSeeker() {
+  const memo = { x: 0, z: 0, found: false, searchedAt: -Infinity, steeredAt: -Infinity };
+  const best = { x: 0, z: 0, fromX: 0, fromZ: 0, score: -Infinity };
+  const visit = (thermal) => {
+    if (!(thermal.strength >= 1)) return;
+    const score = thermal.strength - Math.hypot(thermal.x - best.fromX, thermal.z - best.fromZ) / 500;
+    if (score <= best.score) return;
+    best.score = score;
+    best.x = thermal.x;
+    best.z = thermal.z;
+  };
+  return function seekLift(view, pilot) {
+    const { state, wind, seen } = view;
+    const now = state.time.elapsed;
+    const position = state.player.position;
+    if (now - memo.searchedAt >= LIFT_RESEARCH_SECONDS && wind && typeof wind.thermalsNear === 'function') {
+      memo.searchedAt = now;
+      best.score = -Infinity;
+      best.fromX = position.x;
+      best.fromZ = position.z;
+      wind.thermalsNear(position.x, position.z, LIFT_SEARCH_RADIUS, visit);
+      seen.liftSearches++;
+      memo.found = best.score > -Infinity;
+      if (memo.found) {
+        memo.x = best.x;
+        memo.z = best.z;
+        seen.thermalsFound++;
+      }
+    }
+    if (!memo.found || now - memo.steeredAt < LIFT_STEER_SECONDS) return;
+    memo.steeredAt = now;
+    const offsetX = position.x - memo.x;
+    const offsetZ = position.z - memo.z;
+    const distance = Math.hypot(offsetX, offsetZ);
+    if (distance > LIFT_CIRCLING_REACH) {
+      pilot.autopilotHeading(headingFromVector(-offsetX, -offsetZ));
+      return;
+    }
+    // On the circle: the tangent (circling right), turning in when wide and out when tight.
+    const correction = Math.min(60, Math.max(-60, (distance - LIFT_CIRCLE_RADIUS) * 0.8));
+    pilot.autopilotHeading(headingFromVector(offsetX, offsetZ) + 90 + correction);
+    seen.circlingSeconds += LIFT_STEER_SECONDS;
+  };
+}
+
+function seekLift(pilot) {
+  pilot.stick({ roll: null, pitch: null, yaw: null });
+  pilot.steer(createLiftSeeker());
+}
+
+const LIFT_CHECK = Object.freeze({
+  id: 'lift',
+  label: `seeks lift: circles a thermal 15 s when one rises within ${LIFT_SEARCH_RADIUS / 1000} km, else glides on`,
+  test: (seen) => seen.liftSearches > 0 && (seen.thermalsFound === 0 || seen.circlingSeconds >= 15),
+});
+
+/** Glider leg: a glide on the autopilot, the lift seeker, the spoilers, then on along the autopilot. */
+const GLIDER_LEG = Object.freeze({
+  steps: [
+    { at: 0, label: 'autopilot glide', run: (pilot) => cruise(pilot) },
+    { at: 0.1, label: 'seek lift (thermals within 2.5 km)', run: (pilot) => seekLift(pilot) },
+    { at: 0.6, label: 'stop seeking, spoilers out (both toe brakes)', run: (pilot) => { pilot.steer(null); pilot.brakes(1); } },
+    { at: 0.68, label: 'spoilers in, autopilot glide', run: (pilot) => { pilot.brakes(null); cruise(pilot); } },
+    { at: 0.82, label: 'autopilot turn 90 deg left', run: (pilot) => cruise(pilot, -90) },
+  ],
+  checks: [CHECK.autopilot, LIFT_CHECK, { id: 'spoilers', label: 'spoilers deployed', test: (seen) => seen.maxAirbrake >= 0.5 }],
+});
+
+/** Paraglider leg: a glide, the lift seeker, big ears in and out (B), then a glide on. */
+const PARAGLIDER_LEG = Object.freeze({
+  steps: [
+    { at: 0, label: 'autopilot glide', run: (pilot) => cruise(pilot) },
+    { at: 0.08, label: 'seek lift (thermals within 2.5 km)', run: (pilot) => seekLift(pilot) },
+    { at: 0.6, label: 'stop seeking, big ears in (B)', run: (pilot) => { pilot.steer(null); pilot.action('airbrake'); } },
+    { at: 0.7, label: 'big ears out (B)', run: (pilot) => pilot.action('airbrake') },
+    { at: 0.74, label: 'autopilot glide', run: (pilot) => cruise(pilot) },
+  ],
+  checks: [CHECK.autopilot, LIFT_CHECK, { id: 'bigEars', label: 'big ears folded', test: (seen) => seen.maxAirbrake >= 0.5 }],
+});
+
+/** Balloon leg: the altitude autopilot, a long burn by hand, the rotation vents, a vent pull, a second burn. */
+const BALLOON_LEG = Object.freeze({
+  steps: [
+    { at: 0, label: 'autopilot altitude', run: (pilot) => cruise(pilot) },
+    { at: 0.18, label: 'autopilot off, burner lever full', run: (pilot) => { handsOff(pilot); pilot.throttle(1); } },
+    { at: 0.36, label: 'burner lever closed', run: (pilot) => pilot.throttle(0) },
+    { at: 0.42, label: 'rotation vents right', run: (pilot) => pilot.stick({ roll: 0.8, pitch: 0, yaw: 0 }) },
+    { at: 0.52, label: 'rotation vents closed', run: (pilot) => pilot.stick({ roll: 0, pitch: 0, yaw: 0 }) },
+    { at: 0.56, label: 'parachute vent pull', run: (pilot) => pilot.action('craftAbilityAlt') },
+    { at: 0.64, label: 'burner lever full again', run: (pilot) => pilot.throttle(1) },
+    { at: 0.74, label: 'burner lever released, autopilot altitude', run: (pilot) => { pilot.throttle(null); cruise(pilot); } },
+  ],
+  checks: [
+    CHECK.autopilot,
+    { id: 'burn', label: 'the burner heats the envelope 3 K', test: (seen) => seen.envelopeRise >= 3 },
+    { id: 'vent', label: 'parachute vent opened', test: (seen) => seen.maxAirbrake >= 0.5 },
+  ],
+});
+
+/**
+ * Spaceplane leg: cruise, then the rocket at full thrust pulled into a climb and held there by the
+ * attitude hold, then the thrust back with the speed brake out, and the autopilot brings it down.
+ */
+const SPACEPLANE_LEG = Object.freeze({
+  steps: [
+    { at: 0, label: 'autopilot cruise', run: (pilot) => cruise(pilot) },
+    { at: 0.12, label: 'autopilot off, full rocket thrust, pull up', run: (pilot) => { handsOff(pilot); pilot.throttle(1); pilot.stick({ roll: 0, pitch: 0.6, yaw: 0 }); } },
+    { at: 0.17, label: 'hands off, attitude hold on (second ability): the climb', run: (pilot) => { pilot.stick({ roll: 0, pitch: 0, yaw: 0 }); pilot.action('craftAbilityAlt'); } },
+    { at: 0.4, label: 'attitude hold off, thrust back, speed brake out', run: (pilot) => { pilot.action('craftAbilityAlt'); pilot.throttle(0.07); pilot.brakes(1); } },
+    { at: 0.5, label: 'speed brake in, autopilot down to cruise', run: (pilot) => { pilot.brakes(null); pilot.throttle(null); cruise(pilot); } },
+    { at: 0.8, label: 'autopilot turn 90 deg left', run: (pilot) => cruise(pilot, -90) },
+  ],
+  checks: [
+    CHECK.autopilot,
+    { id: 'climb', label: 'climbed 2000 m on the rocket', test: (seen) => seen.maxClimb >= 2000 },
+    { id: 'speedBrake', label: 'speed brake out', test: (seen) => seen.maxAirbrake >= 0.5 },
+  ],
+});
+
+const LEG_SCRIPTS = Object.freeze({
+  glider: GLIDER_LEG,
+  paraglider: PARAGLIDER_LEG,
+  balloon: BALLOON_LEG,
+  spaceplane: SPACEPLANE_LEG,
+});
+
+/** The soak's ten legs in order (contract k.5; testSoakCraft overrides). */
+export const SOAK_CRAFT = Object.freeze(['aerobatic', 'seaplane', 'tiltrotor', 'paraglider', 'balloon', 'airship', 'eagle', 'spaceplane', 'jet', 'glider']);
+
+/** The soak leg script for a craft: its own leg script, else its flight-test script; null when none exists. */
+export function soakScriptFor(craft) {
+  return LEG_SCRIPTS[craft] ?? SCRIPTS[craft] ?? null;
+}
 
 /** The script for a craft ({ steps, checks }), or null when none exists. */
 export function flightScriptFor(craft) {

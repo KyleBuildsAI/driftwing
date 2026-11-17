@@ -1749,7 +1749,12 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 
 ### Wave 4 - p3/verify-hooks
 
-- **Status:** in progress (the soak plan of k.5, the determinism digests, the terrain and spawns coverage, the golden-frame first shot and the origin-rebase image check).
+- **Status:** in progress. Done so far: the k.5 soak plan (`testPlan=soak`: 5 seeds x 2 legs, a craft
+  switch every 2 minutes, a view swap every minute, the ten legs of `SOAK_CRAFT`, `testSoakCraft=`,
+  leg scripts that seek lift, burn and climb, structure penetrations, soft crashes after a switch;
+  `run-harness --test soak`, `--help`). Next: the determinism digests and the WebGL2 spawn-event
+  difference, the terrain and spawns coverage, the golden-frame first shot, the origin-rebase image
+  check, then every run on both backends.
 
 ### Wave 4 - p3/verify-craft
 

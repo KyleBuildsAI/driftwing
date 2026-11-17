@@ -10,7 +10,7 @@
 //   node tools/run-harness.mjs --test 1|soak|hotas|terrain|determinism|spawns|collision|craft [--backend webgpu|webgl] [--seeds A,B,C] [--seconds N]
 //     [--crafts glider,jet] [--views first,third] [--scenarios id,general-glider] [--out <dir>] [--timeout-minutes N]
 //     [--width 1280] [--height 720] [--headful] [--browser <path>] [--alloc-profile <seconds>]
-//     [--presets real | --presets tornado,comet] [--leak-cycles N] [--parts fixture,special,landmarks,structures]
+//     [--presets real | --presets tornado,comet] [--leak-cycles N] [--parts fixture,special,landmarks,structures] [--help]
 //
 // The terrain test runs on one seed (the first of --seeds; by default P2-TERRAIN, or TERRAIN-ALL-35
 // with --presets real, a world with every real stamp type near its spawn) in the late
@@ -25,8 +25,12 @@
 // first of --seeds, by default DETERMINISM-1) in two page loads and compares the site-list hash and the
 // director's activation log; the runner follows it through its reload.
 //
-// The soak (--test soak: /v2/?test=1&testPlan=soak) is the flight test as a 10-minute run with the event
-// director live: 5 seeds (SOAK-1..5 unless --seeds), one craft per seed, both views, 60 s each.
+// The soak (--test soak: /v2/?test=1&testPlan=soak, Phase 3 contract k.5) is the flight test as a
+// 20-minute run with the event director live: 5 seeds (SOAK-1..5 unless --seeds) x 4 minutes, two legs
+// per world (a craft switch every 2 minutes through the settings channel), each leg a minute in third
+// person and a minute in first person (a view swap every minute). The ten legs fly aerobatic, seaplane,
+// tiltrotor, paraglider, balloon, airship, eagle, spaceplane, jet and glider; --crafts a,b overrides
+// them (?testSoakCraft=, in order, repeated when shorter) and --seconds sets the minute per view.
 //
 // The spawns test (/v2/?test=spawns) force-spawns each of the 100 presets ahead of the craft on one seed
 // (the first of --seeds, by default TERRAIN-REAL-8, with real sites of most stamped presets in reach; a
@@ -116,8 +120,42 @@ const COLLISION_SEED = 'COLLIDERS-LAB';
 /** The craft test's default world (src/dev/craftTest.js DEFAULT_SEED). */
 const CRAFT_SEED = 'CRAFT-1';
 const TESTS = Object.freeze(['1', 'soak', 'hotas', 'terrain', 'determinism', 'spawns', 'collision', 'craft']);
-/** The soak's default worlds (src/dev/testHarness.js SOAK_SEEDS). */
+/** The soak's default worlds and its legs per world (src/dev/testHarness.js SOAK_SEEDS, SOAK_LEGS_PER_WORLD). */
 const SOAK_SEED_COUNT = 5;
+const SOAK_LEGS_PER_WORLD = 2;
+
+/** --help: the usage, the tests and their options. */
+const HELP = `Usage: node tools/run-harness.mjs --test <test> [options]
+
+Tests:
+  1            the flight test (?test=1): every scripted craft in both views on 3 seeds
+  soak         the 20-minute soak (?test=1&testPlan=soak): 5 seeds x 2 legs (a craft switch every
+               2 minutes), each leg a minute per view (a view swap every minute), the director live
+  hotas        the HOTAS pipeline test (?test=hotas)
+  terrain      the terrain stamps, overlays, worker parity, seams and collision (?test=terrain)
+  determinism  two page loads of one stepped path, compared (?test=determinism)
+  spawns       the 100 presets force-spawned, screenshotted and disposed (?test=spawns)
+  collision    every collider type struck at speed (?test=collision)
+  craft        the craft scenarios of every craft (?test=craft)
+
+Options:
+  --backend webgpu|webgl     the renderer (default webgpu)
+  --seeds A,B,C              the world seed(s); the first one for single-world tests
+  --seconds N                run length (1, soak: the seconds per view; craft: the general runs)
+  --crafts a,b               1, craft: the craft flown; soak: the legs in order (?testSoakCraft)
+  --views first,third        1, soak, craft: the views flown
+  --scenarios id,general-x   craft: the scenarios flown
+  --presets real|a,b         terrain: real runs the game's stamped site presets; spawns: the presets shown (?testPresets)
+  --leak-cycles N            spawns: held create / dispose cycles per preset in the leak check (default 3)
+  --parts a,b                collision: fixture, special, landmarks, structures
+  --out <dir>                where the report, console and screenshots go (default: the temp folder)
+  --timeout-minutes N        overrides the time limit
+  --width N --height N       the viewport (default 1280 x 720)
+  --headful                  a visible browser
+  --browser <path>           the browser executable
+  --alloc-profile N          1: samples allocations for N seconds of the first run
+  --help                     this text
+`;
 
 function parseArgs(argv) {
   const options = {
@@ -164,6 +202,7 @@ function parseArgs(argv) {
       case '--headful': options.headful = true; break;
       case '--browser': options.browser = next(); break;
       case '--alloc-profile': options.allocProfileSeconds = Number(next()); break;
+      case '--help': process.stdout.write(HELP); process.exit(0); break;
       default: throw new Error(`Unknown flag ${flag}`);
     }
   }
@@ -366,7 +405,8 @@ function harnessUrl(port, options) {
   if (options.test === '1' || options.test === 'soak') {
     if (options.seeds) url.searchParams.set('testSeeds', options.seeds);
     if (options.seconds) url.searchParams.set('testSeconds', String(options.seconds));
-    if (options.crafts) url.searchParams.set('testCraft', options.crafts);
+    // The soak's legs come from testSoakCraft (src/dev/testHarness.js).
+    if (options.crafts) url.searchParams.set(options.test === 'soak' ? 'testSoakCraft' : 'testCraft', options.crafts);
     if (options.views) url.searchParams.set('testViews', options.views);
   }
   return url.href;
@@ -382,8 +422,8 @@ function timeLimitMs(options) {
   if (options.test === 'spawns') return 90 * 60000;
   const soak = options.test === 'soak';
   const seeds = options.seeds ? options.seeds.split(',').filter(Boolean).length : soak ? SOAK_SEED_COUNT : 3;
-  // The soak flies one craft per seed.
-  const crafts = soak ? 1 : options.crafts ? options.crafts.split(',').filter(Boolean).length : 6;
+  // The soak flies SOAK_LEGS_PER_WORLD legs (one craft each) per seed.
+  const crafts = soak ? SOAK_LEGS_PER_WORLD : options.crafts ? options.crafts.split(',').filter(Boolean).length : 14;
   const views = options.views ? options.views.split(',').filter(Boolean).length : 2;
   const seconds = options.seconds ?? 60;
   const plannedSeconds = seeds * crafts * views * (seconds + 3 + 3) + (seeds + 1) * 90;
@@ -508,7 +548,7 @@ function slowFrameEvidence(report) {
 }
 
 function flightTable(report) {
-  const lines = ['  #  seed        craft       view   fps  p99ms  maxms  >50  sys/gc/main/delay  NaN  pen  crash  err/warn  heapMB  script  result  machineCPU%avg/peak  GPU%avg/peak  mainThread busy%/cpuShare%  otherCPU%avg/peak  otherGPU%avg/peak'];
+  const lines = ['  #  seed        craft       view   fps  p99ms  maxms  >50  sys/gc/main/delay  NaN  pen  str  crash  err/warn  heapMB  script  result  machineCPU%avg/peak  GPU%avg/peak  mainThread busy%/cpuShare%  otherCPU%avg/peak  otherGPU%avg/peak'];
   for (const run of report.runs) {
     const checks = run.script.checks;
     lines.push([
@@ -523,7 +563,8 @@ function flightTable(report) {
       `${run.slowByCause.systems}/${run.slowByCause.gc}/${run.slowByCause.mainThread}/${run.slowByCause.delayed}`.padStart(18),
       String(run.nanEvents).padStart(4),
       String(run.penetrations).padStart(4),
-      String(run.softCrashes).padStart(6),
+      String(run.structurePenetrations ?? 0).padStart(4),
+      `${run.softCrashes}${run.switchCrashes > 0 ? '!' : ''}`.padStart(6),
       `${run.consoleErrors}/${run.consoleWarnings}`.padStart(9),
       String(run.heapDeltaMB).padStart(7),
       `${checks.filter((check) => check.passed).length}/${checks.length}`.padStart(7),
