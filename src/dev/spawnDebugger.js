@@ -3,7 +3,10 @@
 //
 // Sections:
 //   Presets    the preset list, filtered by category, kind, rarity and heavy; Spawn force-spawns a
-//              preset ahead of the craft (at the chosen distance, ignoring the budgets); Nearest
+//              preset ahead of the craft (at the chosen distance, ignoring the budgets; an engine
+//              whose pool is full gives up its lowest-priority spawn for it), except a site-bound
+//              preset (a site with stamps, waters or overlays: its look is in the terrain), which
+//              starts on its nearest placed site or is refused in the panel when none is near; Nearest
 //              teleports to the nearest site of that preset from the site feed; Force combo (the
 //              legendary combos and the midnight sun) stages one deterministically: its time and
 //              weather, its place (snow, sea, coast, landmark or site), a viewpoint, what it needs
@@ -73,6 +76,31 @@ function section(title) {
 function formatDistance(metres) {
   if (!Number.isFinite(metres)) return '-';
   return metres >= 1000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
+}
+
+/** What a SpawnManager refusal means, for the panel's notice. */
+const REFUSAL_TEXT = Object.freeze({
+  preset: 'the preset is not registered',
+  engine: 'one of its engines is not running',
+  capacity: 'the spawn table is full',
+  full: 'its engine pool is full of spawns that cannot give way',
+  error: 'it failed to create; see the console',
+});
+
+/**
+ * Whether a site preset's look lives in the terrain (its stamps, waters or overlays exist only on its
+ * placed sites), so a spawn away from one would stand on the wrong ground.
+ */
+function isSiteBound(preset) {
+  if (preset.kind !== 'site') return false;
+  const count = (list) => (Array.isArray(list) ? list.length : 0);
+  return count(preset.stamps) + count(preset.waters) + count(preset.overlays) > 0;
+}
+
+/** Compass point (N, NE, ...) of a bearing in degrees. */
+function compassPoint(bearing) {
+  const points = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  return points[Math.round((((bearing % 360) + 360) % 360) / 45) % 8];
 }
 
 export function createSpawnDebugger(ctx) {
@@ -195,7 +223,40 @@ export function createSpawnDebugger(ctx) {
     return Math.min(4000, Math.max(600, preset.lod.near * 0.6));
   }
 
+  function refusalNotice(preset) {
+    const reason = manager.getStats().lastRefusal;
+    return `${preset.name} was refused: ${REFUSAL_TEXT[reason] ?? reason ?? 'see the console'}.`;
+  }
+
+  /** Spawn for a site-bound preset: its nearest placed site starts (the site feed's own, if active). */
+  function forceSpawnAtSite(preset) {
+    const player = state.player.position;
+    if (!manager.getSiteFeed()) {
+      notify(`${preset.name} needs its own site, and no site feed is attached yet.`, 'warning');
+      return;
+    }
+    const site = manager.findNearestSite(preset.id, player.x, player.z);
+    if (!site) {
+      notify(`${preset.name} stands only on its own site, and none lies within 60 km: not spawned.`, 'warning');
+      return;
+    }
+    let id = null;
+    try {
+      id = spawns.forceSpawn(preset.id, { site, force: true });
+    } catch (error) {
+      console.error(`[DRIFTWING] spawn debugger: force spawn of "${preset.id}" at ${site.id} failed`, error);
+    }
+    const where = `${formatDistance(Math.hypot(site.x - player.x, site.z - player.z))} ${compassPoint(ctx.util.bearingTo(player.x, player.z, site.x, site.z))}`;
+    if (id) notify(`${preset.name} started on its nearest site, ${where} (Nearest flies you there).`);
+    else notify(refusalNotice(preset), 'warning');
+  }
+
   function forceSpawn(preset) {
+    if (isSiteBound(preset)) {
+      forceSpawnAtSite(preset);
+      renderActive(true);
+      return;
+    }
     const distance = spawnDistanceFor(preset);
     let id = null;
     try {
@@ -204,7 +265,7 @@ export function createSpawnDebugger(ctx) {
       console.error(`[DRIFTWING] spawn debugger: force spawn of "${preset.id}" failed`, error);
     }
     if (id) notify(`${preset.name} spawned ${formatDistance(distance)} ahead.`);
-    else notify(`${preset.name} was refused (${manager.getStats().lastRefusal ?? 'see the console'}).`, 'warning');
+    else notify(refusalNotice(preset), 'warning');
     renderActive(true);
   }
 
@@ -285,7 +346,7 @@ export function createSpawnDebugger(ctx) {
       const name = element('div', 'dw-spawndbg-item-name', preset.name);
       if (preset.heavy) name.append(' ', element('span', 'dw-spawndbg-heavy', 'heavy'));
       text.append(name, element('div', 'dw-spawndbg-item-meta', `${preset.category} - ${preset.kind} - ${preset.rarity} - ${preset.engines.map((entry) => entry.engine).join(', ')}`));
-      const spawnButton = button('Spawn', `Force-spawn ${preset.name} ahead of the craft`, () => forceSpawn(preset));
+      const spawnButton = button('Spawn', isSiteBound(preset) ? `Force-spawn ${preset.name} on its nearest site` : `Force-spawn ${preset.name} ahead of the craft`, () => forceSpawn(preset));
       const nearestButton = button('Nearest', preset.kind === 'site' ? `Teleport near the nearest ${preset.name}` : 'Only sites have places to teleport to', () => teleportToNearest(preset));
       nearestButton.disabled = preset.kind !== 'site';
       item.append(text, spawnButton, nearestButton);

@@ -1474,9 +1474,12 @@ are implemented here. The preset schema (section 1) and the 30 presets are in [s
 
 - **System API.** `update`, `prewarm` (starts it), `register(engine)`, `activate(presetId, opts)`,
   `deactivate(id, reason)`, `getActive()`, `getInstance(id)`, `getStats()`, `setSiteFeed(feed)`,
-  `director`, `getNearby(radiusKm)`, `forceSpawn(presetId, { distance, force })` (ahead of the
-  craft; through `director.forceSpawn` for the director's own presets, straight through the manager
-  for presets added with `debug.addPreset`), `pointAhead(distance)`, `findGroundStart(x, z,
+  `director`, `getNearby(radiusKm)`, `forceSpawn(presetId, { distance, force, at, site })` (ahead of
+  the craft; through `director.forceSpawn` for the director's own presets, straight through the
+  manager for presets added with `debug.addPreset`; with `site`, a placed site of the preset from the
+  site feed, on that site: the F9 Spawn button starts a site-bound preset, one with stamps, waters
+  or overlays, on its nearest site within 60 km, or refuses it in the panel),
+  `pointAhead(distance)`, `findGroundStart(x, z,
   { maxDistance })` (the ground-start spot of the nearest discovered site within 80 km that offers
   one, facing most nearly into the ambient wind; "Start on ground" uses it) and `manager` (the
   SpawnManager). In dev builds and with `?debug=1` or `?dev=1`, `debug`: `addPreset`,
@@ -1508,7 +1511,12 @@ are implemented here. The preset schema (section 1) and the 30 presets are in [s
   `activeState` only while `setSiteActive(id, true)`), `instances` or `particles` (per-engine
   caps from `engine.budget` `{ instances, particles, lights? }`, else the engine's entry in
   `DIRECTOR_BUDGETS.engines`, else 32 instances and 60 000 particles; `setBudget`, `setHeavyLimit`).
-  A debug activation with `force: true` passes the budgets. A director activation whose engines all
+  A debug activation with `force: true` passes the budgets; when it meets an engine's fixed pool full
+  (the engine's create throws `EngineCapacityError`, src/spawns/engines/engineKit.js), the manager
+  ends the lowest-priority live spawn holding that pool (a director event, then a debug spawn, then a
+  site, then a combo member; never one of its own combo; the oldest event or farthest site first) with
+  the reason `evicted` and tries again, and refuses it quietly as `full` when nothing can give way.
+  A director activation whose engines all
   end their instance at create (`instance.ended` already true: thermal hawks with no working
   thermal, a whale pod with no open water) is declined: it returns null with the refusal `declined`,
   so the director leaves that candidate for its bucket and counts no notable, cooldown or tier turn.
