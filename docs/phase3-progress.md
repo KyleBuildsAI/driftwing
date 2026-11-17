@@ -1064,14 +1064,14 @@ Status values: `not started`, `in progress`, `merged`, `done` (merged and verifi
 
 | # | Presets | Branch | Status |
 | --- | --- | --- | --- |
-| B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | done, verified on both backends |
-| B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | done (not merged) |
-| B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | done (on its branch; awaiting I3) |
-| B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | done (verified on both backends) |
-| B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | in progress |
-| B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | done (not merged) |
-| B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | done |
-| I3 | Integration pass: presets/index.js and spawnScenarios in spec order; `?test=spawns` for all 100 on both backends | `v2-phase3` | not started |
+| B4 | 31-40: sandstorm wall, snow squall, hurricane eye, valley fog river, dirty thunderstorm, lava rivers, fissure eruption, crater lake, hot spring terraces, salt flat mirror | `p3/presets-31-40` | merged (`dac4c73`), verified on both backends |
+| B5 | 41-50: calving glacier, coral atoll, reef shipwreck, dolphin pod, sea stacks and arches, rogue wave, tidal bore, bats at dusk, herd stampede, flamingo lake | `p3/presets-41-50` | merged (`144dc94`), verified on both backends |
+| B6 | 51-60: butterfly migration, caribou migration, cliffside monastery, sea-cliff castle, observatory, steam train viaduct, dam spillway, oasis caravan, labyrinth, fireball impact | `p3/presets-51-60` | merged (`a4705da`), verified on both backends |
+| B7 | 61-70: blood moon, green flash, noctilucent clouds, Milky Way core, moonbow, world tree, portal ring, sleeping giant, ghost galleon, dragon racer | `p3/presets-61-70` | merged (`9c30cc9`), verified on both backends |
+| B8 | 71-80: reverse waterfall, forest wisps, ridge lift band, wind shear line, thermal street, canyon gauntlet, cave tunnel, waterfall wall, balloon festival, kite-string slalom | `p3/presets-71-80` | merged (`98c9104`), verified on both backends |
+| B9 | 81-90: five-arch chain, cherry blossom valley, autumn colour wave, lavender and tulip stripes, rice terraces, redwood giants, badlands hoodoos, mangrove delta, cactus forest with dust devils, bamboo forest | `p3/presets-81-90` | merged (`2f43600`), verified on both backends |
+| B10 | 91-100: frozen lake and the legendary combos (aurora + meteors, volcano + lightning + aurora, double rainbow over whales, eclipse over the monoliths, comet breakup, migration convergence, midnight sun, resonating spires, lighthouse chain) | `p3/presets-91-100` | merged (`050589e`), verified on both backends |
+| I3 | Integration pass: presets/index.js and spawnScenarios in spec order; `?test=spawns` for all 100 on both backends | `v2-phase3` | done (the I3 subsection below) |
 
 Each preset ships with its journal title and one-liner, 3+ callouts, its audio recipe, LOD and a
 FAR lure where heavy, colliders where solid, rarity, filters and lifetime (docs/spawns.md
@@ -1518,6 +1518,120 @@ Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file
 | smoke of dist-single: V2 WebGPU, V2 WebGL2, the shell | 0 / 0 each, screenshots differ |
 | Labs | preset-pacing 5/5 (every legendary reached: five in the shared runs, the volcano, rainbow and comet combos on their own runs), terrain 421/421, water 34/34, director 88/88, spawns 101/101, structure 75/75, setpiece 47/47, wind-engines 56/56, preset-flight 13/13, preset-wind 12/12, colliders 84/84, challenges 70/70, origin 32/32, seaplane 113/113, fauna-modes 44/44, path 37/37, discovery 43/43, copilot 240/240, copilot-server 17/17, craft 81/81, aerobatic 81/81, atmosphere 28/28, settings 45/45, storage 54/54, input 34/34, fpv 87/87, ringsGolden 6/6, flight-lab and the craft labs pass (allocation checks with `--expose-gc`); audio 208/209 alone (its known WebGPU waterfall distance-law flake, 1.24 dB against 1 dB); eagle 49/50 (its allocation check, 144 B/tick, the known issue from wave 2; eagle code untouched) |
 
+### Wave 3 - integration (I3, on `v2-phase3`)
+
+- **Merged** in spec order with `--no-ff`, one commit each: presets 31-40 `dac4c73`, 41-50 `144dc94`,
+  51-60 `a4705da`, 61-70 `9c30cc9`, 71-80 `98c9104`, 81-90 `2f43600`, 91-100 `050589e`. List files
+  (presets/index.js, the audio recipe list, spawnScenarios, the docs/spawns.md table and sections,
+  the step-file and lab lists, this file's rows) were resolved in spec order; where two batches
+  extended one engine (structure, fauna, weatherVolume, lightEffect, celestial, placement) one
+  implementation serves both with defaults that keep every earlier preset identical.
+- **Wiring** (first parent after `050589e`):
+  - the legendary combos name their real partners by id: aurora + meteors (92) anchors on
+    `meteorShower`; volcano + lightning + aurora (93) needs an active `volcano` site; the double
+    rainbow (94) anchors on `whalePod`; the eclipse (95) on `totalSolarEclipse` near the monolith
+    landmark; the migration convergence (97) gathers the real `butterflyMigration` (51),
+    `geeseFormation` and `herdStampede` (49) in a valley floor, with the dev fixtures removed
+    (`f906c5d`); the resonating spires (99) need a `crystalSpires` site and start a `supercell`; the
+    lighthouse chain (100) needs the lighthouse landmark. Every combo is forced through the F9 staging
+    with its real members in `tools/steps/presets-91-100.json` on both backends;
+  - the blood moon (61) and the midnight sun (98) are the only presets with an `override` block, so the
+    director's global override schedule serves each exactly once; dev checks can now hold the
+    overrides' own rolled nights (`director.holdOverrides`, `spawns.debug.holdOverrides`, and
+    `holdGamePresets` does it too), while a night forced with F9 still shows (`bc7dc0c`);
+  - the dragon's ignition service reaches every preset that registers ignitables (the cliffside
+    monastery, the sea-cliff castle, the oasis caravan and the ghost galleon; the cave tunnel's lanterns
+    only glow): `tools/steps/ignition-p3.json` (`22a5625`);
+  - the challenge presets (70 dragon racer, 76 canyon, 77 cave, 78 waterfall wall, 79 balloons, 80
+    kites, 81 arch chain) all run on the challenge system with medals and best times per craft; the
+    cave tunnel's mountain is a three-mesh-bvh mesh collider in production code
+    (src/world/colliderMesh.js), and the built V2 bundle holds one three.js core (one `Multiple
+    instances` guard string, no duplicate-three warning in either build);
+  - `validatePresets(PRESETS)` passes with exactly 100 presets in spec order; docs/spawns.md lists
+    all 100 (docs-check 536/536);
+  - the pacing lab reaches every narrow-window event and active state with all 100 real presets
+    (`a068efd`), the audio lab auditions every Phase 3 recipe in budget-sized groups (`3042ff0`), the
+    real-preset terrain harness runs on `TERRAIN-ALL-35`, a seed with every stamp type (`ab4b6d7`), and
+    the one-chunk size warning limit is raised for the 100-preset bundle (`f462042`).
+- **Fixes** (real problems found on the merged tree):
+  - a preset is admitted only when every part on an engine fits its budget (`d268f17`); the structure
+    arc points live on the instance data (`1b9e916`); the structure recipes get the drifter context
+    calls back (`dbcfa6d`); the sleeping giant's feet stay inside its stamp (`3d0ba98`); the calving
+    crack and splash and the surf's crash stay below full scale (`0404357`, `e67efdf`);
+  - the calving glacier emits `structure:calve` on one reused payload per glacier (`5c3569e`);
+  - the canyon gauntlet (76) landed on a coastal slope on SOAK-1 once all 100 presets were placed: its
+    floor fell 400 m and the start gate's approach was underground. The carve stamp gains an optional
+    `maxFall` (none by default, so the Phase 2 slot canyon is unchanged) and the canyon gates recipe
+    sets 120 m (`2a2e3f9`);
+  - the drifting icebergs' and the calving glacier's frame update allocated again whenever a steering
+    case (back home past the leash, turning about at shoaling water) first ran late in a session and
+    deoptimised it (spawn-check WebGPU: 0.136 B/frame, `updateDrifting` 792 B and `plunge` 380 B over
+    20000 frames): both cases are computed every frame and selected, and the crack and splash
+    triggers share one options object (`b0e4303`; 0.025-0.082 B/frame after);
+  - a craft switch placed by the Phase 1 rules (no situate hook, as for the glider) or by a situate
+    placement without a position was lifted only by the height right under it and never out of a
+    structure collider: the glider chosen in the picker beside rising ground struck its nose within
+    6 s (WebGPU craft-picker run; not a structure, a terrain contact). Such a spawn now clears the
+    highest surface under its first 8 s of level flight at cruise, and the Phase 1 rules lift it out of
+    any collider as placements already did (`0d3d6fd`); the picker check names the place and the
+    previous craft of any soft crash (`940fed8`).
+- **Test fixes** (checks that broke because 100 presets now share one world): the batch 6-8 kits
+  hold every other game preset and the overrides (`4ad4395`, `673950e`, `ed867b5`); the presets 61-70
+  checks prefer their own force-spawn (`7e9c41d`); the far-lure count leaves dormant volcano and
+  fissure sites out (`c1d4e52`); the migration's valley is judged by its depth (`29a83f0`); the
+  presets 81-90 kinematic runs end by simulated time, not a frame count (`072163b`); the presets 51-60
+  sites are approached from a point that sees them (`d7a0dd7`); the terrain test gets sea-stamp
+  fixtures (atoll, reef, sea stacks, a river mouth for the estuary) and a LOD1 pose (`5226cc4`,
+  `985b5b8`); the hotplug step runs on `?test=hotplug`, which installs the mock gamepads without the
+  HOTAS pipeline test (under `?test=hotas` that test moved its own mock throttle on the same page, and
+  on the slower WebGPU boot it overlapped the step's dropout checks: throttle 0.985, no hold)
+  (`d430a06`).
+- **Verification** (owner's rule: each check run once on the merged tree, numbers reported, frame
+  times not chased; `v2-phase3` after `f3fb526`; dev servers on ports from `findFreePort`, one Chrome at a
+  time):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `npm run build:single`, `npm run test:v1`, `node tools/docs-check.mjs` | built, no warnings; V1 SHA-256 matches; 2/2; 536/536 (the spawns table lists all 100) | - |
+  | `validatePresets(PRESETS)`; one three.js core | 100 presets in spec order, valid; the V2 bundle holds one `Multiple instances` guard and REVISION 184, three-mesh-bvh once; no duplicate-three warning in either build | - |
+  | Labs (node, `--expose-gc` where needed) | aerobatic 81, airship 47, atmosphere 28, balloon 66, challenges 70, colliders 84, copilot 240, copilot-server 17, craft 81, director 90 (pacing with all 100 real presets), discovery 43, fauna-modes 44, flight-lab 82, fpv 87, helicopter 46, input 34, jet 60, origin 32, paraglider 45, path 37, preset-flight 26, preset-flight-71-80 16, preset-pacing 6 (every narrow-window event and legendary reached), preset-wind 12, presets-51-60 117, presets-71-80 61, ringsGolden 6, seaplane 113, setpiece 47, settings 45, spaceplane 24, spawns 101, storage 54, structure 75, terrain 787, tiltrotor 41, water 34, wind-engines 56, wingsuit 37: all pass; audio 359/361 (its known flaky checks: surf / rustle spectral distance 1.22, a WebGPU Doppler camera cut); eagle 49/50 (its allocation check, 144 B/tick, the wave 2 issue) | - |
+  | `run-harness --test spawns` (all 100) | PASS 100/100 on every criterion (spawned, GPU memory, heap within 1 MB, wind sources, lights / sky modifiers / colliders / courses / ignitables / leaks, 100 screenshots), 0/0, 1634 s | PASS, same, 1867 s |
+  | `--test collision` (after `0d3d6fd`) | PASS: 155/155 strikes, 16/16 collider types and structures, 0 pass-throughs, 0 probes inside, bump, deck, dives, tunnel centreline 0 hits, arch threaded, 15/15 kite misses, one three.js core, 0/0 | PASS, same |
+  | `--test determinism` | PASS: site list 2dc32734cfe98b0e, water 61f315c9, director log c9c91732 (3 activations), path 27c9fb37, spawn events 7f6be877 | PASS, identical hashes |
+  | `--test terrain` (fixtures) | PASS: 15/15 stamp types, 5/5 overlays, 0 cracks, 2028 chunks parity, every LOD seen per type | PASS, same |
+  | `--test terrain --presets real` (TERRAIN-ALL-35) | PASS: 15/15 stamp types, 0 cracks, 2588 chunks parity, 124/124 poses | PASS, same |
+  | `--test hotas` | PASS 140/140 | PASS 140/140 |
+  | `--test craft` (14 craft, 96 runs) | 96/96 runs flown as planned, 28/28 general runs, 0 NaN, 0 penetrations, 0 soft crashes, 0/0; checks 379/386: balloon-wind-layer "the target band is the nearest for 30 s" in both views and "riding the layer" in first person, balloon-burner-lag "the burn heats the envelope 3 K at once" in third person (first person passed), eagle-find-perch in first person (perched, released, take-off; third person passed). Those three scenarios rerun alone (`--scenarios`, both views): PASS, 28/28 checks, 0/0 | the full 96-run WebGL2 pass was still running when this subsection was committed; its result is recorded in the wave 3 review subsection |
+  | reduced `--test 1` (HARNESS-1/2, glider and jet, both views, 20 s) | 0 NaN, 0 penetrations, 0/0, heap 18.3 MB, 8/8 runs, 24/24 manoeuvres; frames over 50 ms 1 (reported, not chased) | same criteria; heap 14.84 MB; frames over 50 ms 5 (reported, not chased) |
+  | `tools/spawn-check.mjs` | 55/55 (allocation 0.082 B/frame after `b0e4303`; before it 0.136) | 55/55 (0.025 B/frame) |
+  | Batch step files | presets-31-40 69, 41-50 52, 51-60 58, 61-70 42, 71-80 55 (rerun after `5b1b3ee` changed the shared kit: WebGPU one check failed (53/55 with the batch summary line): the ridge lift band's third column rose 0.2 m/s against 0.5, with a 2.7 m/s mean; 55/55 in the first run; WebGL2 55/55), 81-90 60, 91-100 46 (every combo forced with its real members), ignition-p3 5: all pass, 0/0 | same counts, 0/0 |
+  | Wave 1 / 2 and Phase 2 step files | craft-picker 28 (after `0d3d6fd`), director-p3 14, director-game 3, view-physics 14, copilot-guide 13, input-review 9, hotplug 6 (`?test=hotplug`), origin-rebase 10, high-altitude 20, water-bodies 41, challenge 23, engine-fauna-modes 20, shadow-resize 5, discovery 17, terrain-worker-start 4, engine vortex 9, weatherVolume 19, celestial 11, structure-sites 10 (after `4d7c854`; before, 9/10: the check counted four structure fixtures, the sleeping giant's is a fifth), emitter 13, lightEffect 13, fauna 25 (after `c8a2d01` and `f3fb526`; before, 24/25: the pod's watch never saw a whale at the surface), waterEffect 19, windModifier 9, structure 21, setPiece 2, presets-batch1 58 (after `b27c789` and `3c93d9f`; before, 57/58 and 53/58: the geyser field found every emitter row taken), presets-batch2 31, presets-21-30 51, weather-sky 5, golden-frame, env-fixes, seed-link 7: 0/0 each | same, except as noted: presets-21-30 44/51 before `5b1b3ee` (the sky lantern festival and the jet stream found every emitter row taken), 51/51 after; origin-rebase 9/10 once (image-high: the frame across a y rebase differed, mean 1.64, 3.6 % of pixels, on seed UGTZV7), 10/10 on two reruns, one on that seed; engine-fauna-modes 19/20 in two runs on random seeds (once the flamingo flush, once a flamingo flock that found no shallows), 20/20 on WebGPU |
+  | Built `dist-single/v2` and `dist-single/index.html` smoke | PASS: V2 and the shell each load on WebGPU, 0 errors, 0 warnings, the frames move | PASS: V2 and the shell each load on WebGL2, 0 errors, 0 warnings, the frames move |
+
+- **Open issues (reported, not chased; for the wave 3 review and Milestone P):**
+  - the full craft harness shares one game world across 96 runs, and three scenarios missed checks
+    in it (balloon-wind-layer in both views, the wave 2 run-order issue now in third person too;
+    balloon-burner-lag's "heats 3 K at once" in third person; eagle-find-perch in first person); all
+    three pass alone in both views;
+  - the WebGL2 origin-rebase high image check failed once (seed UGTZV7) and passed twice; the
+    flamingo checks of engine-fauna-modes depend on the random seed's shore (one flush miss, one
+    flock without shallows on WebGL2); one of the ridge lift band's eight columns rose 0.2 m/s in one
+    WebGPU run of the presets 71-80 file;
+  - an intermediate spawn-check run missed its 1 MB JS-heap check once per backend (+1.19 MB and
+    +1.45 MB, the next cycle back, -615 KB once); 55/55 on both in the final runs;
+  - a forced spawn past the budgets (F9 Spawn, `force: true`) can meet a full engine (the emitter's 16
+    rows) and logs `spawn "<id>" failed to create` as a console error; the director's admission
+    (`d268f17`) refuses quietly, so only the debug path and tests meet it, and the step kits now hold
+    the game's presets;
+  - frames over 50 ms in the reduced flight harness (1 WebGPU, 5 WebGL2), the audio lab's two flaky
+    checks and the eagle lab's allocation check (144 B/tick), as before;
+  - the batches' own known issues: the hurricane eye mostly over land (no open ocean in the
+    generated worlds), the dam's long low end sections on open slopes, debug spawns of the viaduct
+    and dam away from a site, the frozen lake's paint over another biome's trees, the legendary combos
+    rare by design (F9 Force combo shows each), the moonbow only near a mega waterfall, the cave
+    tunnel's lanterns only glowing, the salt flat reflecting only the sky dome, the migration
+    convergence's valley seek (13-27 ms once per activation).
+
 ### Wave 4: discovery and verification, then the tag
 
 | # | Work | Branch | Status |
@@ -1587,18 +1701,27 @@ Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file
 
 ## What's next
 
-Waves 1 and 2 are done: the craft framework, the eight craft and the picker / director branch are
-merged into `v2-phase3`, wired and verified (the I2 subsection above). Not pushed or tagged (the owner
-pushes).
+Waves 1, 2 and 3 are done: the 100 presets (31-100 in seven batches) are merged into `v2-phase3` in
+spec order, wired across batches and verified on both backends (the I3 subsection above). Not tagged yet: `v2-phase3` is tagged at the end of the phase.
 
-Next: **wave 3, presets 31-100 in seven batches of ten** (`p3/presets-31-40` .. `p3/presets-91-100`,
-the spec's numbering), cut from `v2-phase3`; then I3 merges them in spec order (presets/index.js
-and spawnScenarios in order) and runs `?test=spawns` for all 100 on both backends. The wave 2
-worktrees under `.claude/worktrees/p3-*` can be removed (unlink each `node_modules` junction
-first).
+Next: **the wave 3 review**, then **wave 4**: Milestone O (`p3/discovery`: the journal x / 100, flight
+time per craft, figures, medals, worlds visited, perches, max altitude; the copilot grammar and its
+keyboard / UI equivalents; the remote `flightState` craft fields; the docs) and Milestone P
+(`p3/verify`: the verify loop, `?test=spawns` with 100 presets, `?test=craft`, collision,
+determinism and terrain, the 20-minute soak with craft switching, the final report and the manual
+checklist). The wave 3 worktrees under `.claude/worktrees/p3-presets-*` are removed; the verify worktree
+`.claude/worktrees/p3-i3-verify` can go after the review (unlink its `node_modules` junction first).
 
 ## Open issues
 
+- **Wave 3 integration leftovers:** see the I3 subsection (open issues there): the WebGL2
+  origin-rebase high image check failed once and passed on two reruns; the flamingo checks
+  depend on the random seed's shore; the craft harness's three scenarios that miss checks in the full
+  run and pass alone; frames over 50 ms in the reduced flight harness; the audio lab's two
+  known flaky checks; the eagle lab's allocation check; forced spawns past the budgets can still
+  meet a full engine (the emitter's 16 rows) and log a create error; the batches' own known issues
+  (the hurricane over land, the dam's long end sections, debug spawns of the viaduct and dam away
+  from a site, the frozen lake's paint over other biomes' trees, the rare legendaries).
 - **Wave 2 integration leftovers:** see the I2 subsection (the eagle's perch fly-out strike, the
   balloon wind-layer run-order dependence, the Milestone O items the craft reports left).
 - **Wave 1 integration leftovers:** the WebGPU flight harness's frames over 50 ms on the busy
