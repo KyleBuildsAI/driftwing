@@ -89,7 +89,7 @@ preset's section below.
 | 33 | [Hurricane eye](#33-hurricane-eye) | `hurricaneEye` | weather | event | rare | yes | `weatherVolume`, `windModifier`, `emitter` | yes |
 | 34 | [Valley fog river](#34-valley-fog-river) | `valleyFogRiver` | weather | event | common | no | `weatherVolume` | no |
 | 35 | [Dirty thunderstorm](#35-dirty-thunderstorm) | `dirtyThunderstorm` | geo | event | rare | no | `weatherVolume`, `lightEffect`, `emitter` | yes |
-| 36 | [Lava rivers to the sea](#36-lava-rivers-to-the-sea) | `lavaRiversToSea` | geo | site | uncommon | no | `structure`, `emitter` | no |
+| 36 | [Lava rivers to the sea](#36-lava-rivers-to-the-sea) | `lavaRiversToSea` | geo | site | rare | no | `structure`, `emitter` | no |
 | 37 | [Fissure eruption](#37-fissure-eruption) | `fissureEruption` | geo | site | rare | yes | `structure`, `emitter`, `weatherVolume` | no |
 | 38 | [Meteor crater lake](#38-meteor-crater-lake) | `meteorCraterLake` | geo | site | uncommon | no | `structure` | no |
 | 39 | [Hot spring terraces](#39-hot-spring-terraces) | `hotSpringTerraces` | geo | site | uncommon | no | `emitter` | slight |
@@ -931,12 +931,15 @@ to steam: white plumes boil up from each sea entry, littoral explosions throw gl
 night the lava and the steam's underside glow orange.
 [src/spawns/presets/lavaRiversToSea.js](../src/spawns/presets/lavaRiversToSea.js)
 
-- **Kind:** site, uncommon.
+- **Kind:** site, rare.
 - **Placement:** any biome; on a coast; ground 4-300 m; downhill-aligned (the channels run down the
   fall line toward the water); only within 10 km of a placed volcano site (`placement.near`, the
   spec's "volcano near coast"), where every coastal cell is a candidate (chance 1); at least 18 km
   apart; 500 m clearance. The site is therefore as rare as a volcano by the sea: on seed DRIFTWING
-  the nearest is 21 km from the origin, 6 km from its volcano.
+  the nearest is 21 km from the origin, 6 km from its volcano. Its rarity is `rare` for that reason:
+  over the seeds DRIFTWING, HARNESS-1, SOAK-1, TERRAIN-ALL-35 and UGTZV7 a world holds 0.6 lava
+  sites within 90 km of the origin on average, fewer than any other rare site (1.2-19.2) and any
+  uncommon one (1.8 and up).
 - **Stamps:** two `carve` lava channels (`structureStamps('lavaChannels')`: 600-800 m long, a floor
   16-24 m wide, 8-12 m deep between levees, painted basalt), side by side 300 m apart, upslope of the
   shore.

@@ -1,4 +1,4 @@
-// Preset 36: Lava rivers to the sea (uncommon site). On a volcanic coast (a volcano within 10 km, so
+// Preset 36: Lava rivers to the sea (rare site). On a volcanic coast (a volcano within 10 km, so
 // the site is as rare as a volcano by the sea) two rivers of molten lava run down shallow channels
 // between low basalt levees, their dark crust drifting over glowing cracks, and pour on down the slope
 // into the sea, where the water flashes to steam: white plumes boil up from each sea entry, littoral
@@ -12,7 +12,9 @@ export default Object.freeze({
   name: 'Lava rivers to the sea',
   category: 'geo',
   kind: 'site',
-  rarity: 'uncommon',
+  // Rare: a volcano by the sea is rarer than any other rare site (0.6 sites within 90 km over five
+  // seeds, against 1.2-19 for the rare sites and 1.8 and up for the uncommon ones).
+  rarity: 'rare',
   heavy: false,
   tags: ['coast', 'spectacle'],
   // Downhill-aligned on a coast, so the channels run down the fall line toward the water, and only

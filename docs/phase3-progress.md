@@ -1730,7 +1730,7 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 | O3 | Docs: docs/controls.md (a full HOTAS profile per new craft, the j.2 equivalents), docs/spawns.md (all 100 checked against the code), docs/architecture.md (every Phase 3 system) | `p3/docs` | not started |
 | P1 | Test hooks to the contract: the 20-minute soak of k.5 (craft switch every 2 minutes, view swap every minute, structure penetrations, no soft crash within 10 s of a switch), the k.4 determinism digests (collider sweep battery, PathFollower positions) and the WebGL2 spawn-event frame difference, the k.3 / k.4 coverage audit, the golden-frame first shot and the origin-rebase image check on WebGL2 | `p3/verify-hooks` | not started |
 | P2 | Craft runs (k.1): every scenario passes in the full shared-world run on both backends: the WebGL2 spaceplane climb and re-entry (page stall, rebase continuity, far-field holes, depth and load), eagle find-perch and the perch fly-out, the balloon wind layer, burner lag and the subset's soft crashes, the eagle lab's allocation | `p3/verify-craft` | not started |
-| P3 | Content open issues from I3 and the review: the forced-spawn create error, the sleeping giant's figure check, whale pods on the swell, the hurricane over open ocean, the dam's end sections, debug spawns away from a site, the frozen lake's paint, the flamingo shore checks, the meteor shower's sky modifier on WebGL2, the migration convergence's valley seek, the lava rivers' rarity; each fixed or recorded as a decision | `p3/content-fixes` | not started |
+| P3 | Content open issues from I3 and the review: the forced-spawn create error, the sleeping giant's figure check, whale pods on the swell, the hurricane over open ocean, the dam's end sections, debug spawns away from a site, the frozen lake's paint, the flamingo shore checks, the meteor shower's sky modifier on WebGL2, the migration convergence's valley seek, the lava rivers' rarity; each fixed or recorded as a decision | `p3/content-fixes` | in progress |
 | I4 | Integration: merge O1-O3 and P1-P3 into `v2-phase3`, reconcile the docs, run every lab and the affected step files on both backends | `v2-phase3` | not started |
 | P | Milestone P final run on the integrated tree: the verify loop (dev server and build:single, 0/0, screenshots differ, golden-hour opening unchanged), `?test=spawns` (100), `?test=craft` (14), `?test=collision`, determinism and terrain, the 20-minute soak, the final report, CHANGELOG, the manual checklist for Kyle | `v2-phase3` | not started |
 | R | Review, fixes, version bump, `docs/phase3-progress.md` marked complete, then the lead tags `v2-phase3` | `v2-phase3` | not started |
@@ -1757,7 +1757,12 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 
 ### Wave 4 - p3/content-fixes
 
-- **Status:** not started.
+- **Status:** in progress.
+- **Built:**
+  - the lava rivers to the sea (36) are `rare`: a volcano by the sea is rarer than any other rare
+    site (0.6 lava sites within 90 km of the origin on average over DRIFTWING, HARNESS-1, SOAK-1,
+    TERRAIN-ALL-35 and UGTZV7, against 1.2-19.2 for the rare sites and 1.8 and up for the uncommon
+    ones); docs/spawns.md says why.
 
 ## Decisions
 
