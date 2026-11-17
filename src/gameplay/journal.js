@@ -1,30 +1,187 @@
 import { storage } from '../core/storage.js';
-import { JOURNAL_STAT_OPS } from '../core/events.js';
+import { EVENT_TYPES, JOURNAL_STAT_OPS } from '../core/events.js';
 import { LANDING_GRADES, isBetterLanding } from '../flight/landing.js';
+import { FIGURES, FIGURE_IDS } from '../flight/maneuverRecognizer.js';
 import { PRESETS, PRESET_BY_ID } from '../spawns/presets/index.js';
 import { PRESET_CATEGORIES } from '../spawns/schema.js';
 import { craftRegistry } from '../craft/registry.js';
 
 /** Where the global records (achievements and bests across every world) are kept. */
 export const RECORDS_STORAGE_KEY = 'driftwing-v2.records';
-/** Version 2 (Phase 3) adds craftTime; a version 1 record reads with none. */
-const RECORDS_VERSION = 2;
+/**
+ * The records' persisted version. Version 2 (Phase 3 wave 2) added craftTime and worldsVisited;
+ * version 3 (Milestone O) adds figures, perches, skinTime and the maxAltitude statistic. Older
+ * records migrate on load (migrateRecordsToV3) and are saved back at once as this version.
+ */
+export const RECORDS_VERSION = 3;
 
 /**
  * The journal statistics the game knows (typed event journalStat): how each folds and what it
- * measures. Other keys are kept too, folded with the op they arrive with.
+ * measures. Other keys are kept too, folded with the op they arrive with. The unit 'altitude' is
+ * metres above sea level, shown in metres below 10 km and in kilometres above (space included).
  */
 export const JOURNAL_STATS = Object.freeze({
   stormsChased: Object.freeze({ op: 'add', unit: 'count', label: 'Storms chased' }),
   closestTornado: Object.freeze({ op: 'min', unit: 'metres', label: 'Closest tornado' }),
   bestCanyonRun: Object.freeze({ op: 'min', unit: 'seconds', label: 'Best canyon run' }),
+  maxAltitude: Object.freeze({ op: 'max', unit: 'altitude', label: 'Highest altitude' }),
 });
+/** The medals a challenge best can hold (challengeFinished's medal without 'none'). */
+const MEDALS = Object.freeze(EVENT_TYPES.challengeFinished.medal.filter((medal) => medal !== 'none'));
+/** The perch kinds of the typed 'perched' event (a terrain peak, a structure, a tree top). */
+export const PERCH_KINDS = Object.freeze([...EVENT_TYPES.perched.kind]);
 const STAT_KEY_PATTERN = /^[a-z][A-Za-z0-9]{0,39}$/;
 const CRAFT_ID_PATTERN = /^[a-z][A-Za-z0-9]{0,31}$/;
 const MAX_CRAFT_TIMES = 64;
+/** Skins kept per craft in skinTime (the eagle has two). */
+const MAX_SKINS_PER_CRAFT = 8;
 /** Worlds visited through portals kept in the records (the oldest drop first). */
 const MAX_WORLDS_VISITED = 200;
 const WORLD_SEED_PATTERN = /^[A-Z0-9-]{1,24}$/;
+/** Counts (figures flown, perches landed) and flight seconds stop here: anything larger is storage damage. */
+const MAX_COUNT = 1e9;
+const MAX_SECONDS = 1e9;
+/** A stored altitude above this (m) is storage damage, not flight (the spaceplane's ceiling is 150 km). */
+const MAX_RECORDED_ALTITUDE = 1e7;
+const FIGURE_ID_SET = new Set(FIGURE_IDS);
+/** The figure each aerobatic best-score statistic belongs to (the version 3 migration reads them). */
+const FIGURE_BY_STAT = new Map(FIGURES.map((figure) => [figure.stat, figure.id]));
+/** The per-world journals the version 3 migration reads for the highest altitude flown before it. */
+const JOURNAL_KEY_PREFIX = 'driftwing-v2.journal.';
+const MAX_MIGRATED_JOURNALS = 1000;
+/** Module statistics the version 3 migration takes as altitudes already reached. */
+const MIGRATED_ALTITUDE_STATS = Object.freeze(['balloonMaxAltitude', 'spaceplaneApogee']);
+
+function finiteOr(value, fallback) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+/** True for a storage key that matches pattern and is not an Object.prototype name (constructor, toString, ...). */
+function isOwnKey(key, pattern) {
+  return typeof key === 'string' && pattern.test(key) && !(key in Object.prototype);
+}
+
+/** A whole count in 0..MAX_COUNT (0 for anything unusable). */
+function boundedCount(value) {
+  return Math.min(MAX_COUNT, Math.max(0, Math.floor(finiteOr(value, 0))));
+}
+
+/** A figure score in 0..100 to 0.1, or null when unusable. */
+function figureScore(value) {
+  const score = finiteOr(value, NaN);
+  return score >= 0 ? Math.round(Math.min(100, score) * 10) / 10 : null;
+}
+
+/** Positive flight seconds (capped), or null. */
+function flightSeconds(value) {
+  const seconds = finiteOr(value, NaN);
+  return seconds > 0 ? Math.min(MAX_SECONDS, seconds) : null;
+}
+
+/** figures { [figureId]: { count, bestScore } } repaired: known figures only, flown at least once. */
+function sanitizeFigures(raw) {
+  const figures = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return figures;
+  for (const id of FIGURE_IDS) {
+    const entry = Object.hasOwn(raw, id) ? raw[id] : null;
+    if (!entry || typeof entry !== 'object') continue;
+    const count = boundedCount(entry.count);
+    const bestScore = figureScore(entry.bestScore);
+    if (count >= 1 && bestScore !== null) figures[id] = { count, bestScore };
+  }
+  return figures;
+}
+
+/** perches { count, kinds: { peak, structure, tree } } repaired: the count is at least the kinds' sum. */
+function sanitizePerches(raw) {
+  const perches = { count: 0, kinds: {} };
+  for (const kind of PERCH_KINDS) perches.kinds[kind] = 0;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return perches;
+  let sum = 0;
+  if (raw.kinds && typeof raw.kinds === 'object' && !Array.isArray(raw.kinds)) {
+    for (const kind of PERCH_KINDS) {
+      perches.kinds[kind] = Object.hasOwn(raw.kinds, kind) ? boundedCount(raw.kinds[kind]) : 0;
+      sum += perches.kinds[kind];
+    }
+  }
+  perches.count = Math.min(MAX_COUNT, Math.max(boundedCount(raw.count), sum));
+  return perches;
+}
+
+/** craftTime { [craftId]: seconds } repaired: craft-id keys, positive seconds, at most MAX_CRAFT_TIMES. */
+function sanitizeCraftTime(raw) {
+  const craftTime = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return craftTime;
+  let kept = 0;
+  for (const [craft, value] of Object.entries(raw)) {
+    if (kept >= MAX_CRAFT_TIMES) break;
+    const seconds = flightSeconds(value);
+    if (!isOwnKey(craft, CRAFT_ID_PATTERN) || seconds === null) continue;
+    craftTime[craft] = seconds;
+    kept++;
+  }
+  return craftTime;
+}
+
+/** skinTime { [craftId]: { [skinId]: seconds } } repaired, capped per craft and in crafts. */
+function sanitizeSkinTime(raw) {
+  const skinTime = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return skinTime;
+  let crafts = 0;
+  for (const [craft, skins] of Object.entries(raw)) {
+    if (crafts >= MAX_CRAFT_TIMES) break;
+    const clean = sanitizeCraftTime(skins);
+    const ids = Object.keys(clean).slice(0, MAX_SKINS_PER_CRAFT);
+    if (!isOwnKey(craft, CRAFT_ID_PATTERN) || ids.length === 0) continue;
+    skinTime[craft] = {};
+    for (const skin of ids) skinTime[craft][skin] = clean[skin];
+    crafts++;
+  }
+  return skinTime;
+}
+
+/**
+ * Brings records loaded from version 1 or 2 up to version 3 (in place; `loaded` is already
+ * sanitized). Version 1 had no craftTime or worldsVisited (they start empty, as version 2 read
+ * them). Neither had figures, perches or the maxAltitude statistic, so those start from what the
+ * older records already prove: each aerobatic figure's best-score statistic means that figure was
+ * flown at least once with that score, the eagle's eaglePerches statistic is the perches landed
+ * (their kinds were never kept), and the highest altitude is the highest of every world's journal
+ * (its maxAltitude), the balloon's highest flight and the spaceplane's highest apogee.
+ */
+export function migrateRecordsToV3(loaded, readJournalMaxAltitudes = journalMaxAltitudes) {
+  for (const [stat, figure] of FIGURE_BY_STAT) {
+    const record = loaded.stats[stat];
+    const bestScore = record ? figureScore(record.value) : null;
+    if (bestScore !== null && !loaded.figures[figure]) loaded.figures[figure] = { count: 1, bestScore };
+  }
+  const eaglePerches = loaded.stats.eaglePerches;
+  if (eaglePerches) loaded.perches.count = Math.max(loaded.perches.count, boundedCount(eaglePerches.value));
+  if (!loaded.stats.maxAltitude) {
+    let highest = { value: 0, seed: null };
+    for (const key of MIGRATED_ALTITUDE_STATS) {
+      const record = loaded.stats[key];
+      if (record && record.value > highest.value && record.value <= MAX_RECORDED_ALTITUDE) highest = { value: record.value, seed: record.seed };
+    }
+    for (const journal of readJournalMaxAltitudes()) {
+      if (journal.value > highest.value) highest = journal;
+    }
+    if (highest.value > 0) loaded.stats.maxAltitude = { value: Math.round(highest.value * 10) / 10, op: 'max', at: 0, seed: highest.seed, presetId: null };
+  }
+  return loaded;
+}
+
+/** The highest point of every stored per-world journal: [{ value (m), seed }] (at most MAX_MIGRATED_JOURNALS). */
+function journalMaxAltitudes() {
+  const highest = [];
+  for (const key of storage.keys(JOURNAL_KEY_PREFIX).slice(0, MAX_MIGRATED_JOURNALS)) {
+    const journal = storage.read(key, null);
+    const value = journal && typeof journal === 'object' ? finiteOr(journal.maxAltitude, NaN) : NaN;
+    const seed = key.slice(JOURNAL_KEY_PREFIX.length);
+    if (value > 0 && value <= MAX_RECORDED_ALTITUDE) highest.push({ value, seed: WORLD_SEED_PATTERN.test(seed) ? seed : null });
+  }
+  return highest;
+}
 
 /**
  * The journal stats the registered craft modules declare (module journal.stats), rebuilt when a module
@@ -56,6 +213,17 @@ export function journalStatInfo(key) {
 }
 
 /**
+ * Every journal statistic the game knows, in order: the game's own (JOURNAL_STATS, craft null), then
+ * each registered craft module's journal.stats in catalog order (craft: its id). Each is
+ * { key, op, unit, label, craft }.
+ */
+export function listJournalStats() {
+  const list = Object.entries(JOURNAL_STATS).map(([key, stat]) => ({ key, op: stat.op, unit: stat.unit, label: stat.label, craft: null }));
+  for (const [key, stat] of craftJournalStats()) list.push({ key, op: stat.op, unit: stat.unit, label: stat.label, craft: stat.craft });
+  return list;
+}
+
+/**
  * JOURNAL: the per-seed discovery log. Records biomes visited, landmarks found, spawns discovered
  * (the typed 'discovery' events that carry a presetId: name, category, seed, coordinates, time of
  * day and the first-seen date), distance flown, highest altitude, flight time, ring-course results
@@ -63,18 +231,26 @@ export function journalStatInfo(key) {
  * landings (count, last and best, from the typed 'landed' event), and persists them with `storage`
  * under `driftwing-v2.journal.<seed>`.
  *
- * The global records live under `driftwing-v2.records`, shared by every world: the journal
- * statistics from the typed 'journalStat' events (storms chased, closest tornado, best canyon run,
- * each craft module's own journal.stats and any other key a preset sends), the achievements from the
- * typed 'achievement' events, the best landing in any world, the flight time per craft
- * (craftTime: seconds, counted every frame of flight for the craft flying it) and the worlds visited
- * through portal rings (worldsVisited, from the typed 'worldVisited' event, saved at once).
+ * The global records live under `driftwing-v2.records` (RECORDS_VERSION, migrated from every older
+ * version on load), shared by every world: the journal statistics from the typed 'journalStat' events
+ * (storms chased, closest tornado, best canyon run, each craft module's own journal.stats and any
+ * other key a preset sends) plus the highest altitude ever flown (maxAltitude, op 'max', metres above
+ * sea level, followed every frame, space included), the achievements from the typed 'achievement'
+ * events, the best landing in any world, the flight time per craft (craftTime: seconds, counted every
+ * frame of flight for the craft flying it) and per skin (skinTime, for a craft with skins), the
+ * aerobatic figures flown (figures: count and best score per figure, from the typed 'figureFlown'
+ * event), the perches landed (perches: count and kinds, from the typed 'perched' event when the bird
+ * settles) and the worlds visited through portal rings (worldsVisited, from the typed 'worldVisited'
+ * event, saved at once). Challenge medals and best times stay with the challenge system
+ * (driftwing-v2.challenges); the journal reads them through ctx.systems.challenges.getRecords().
  *
  * The spawn collection counts implemented presets only: found / total over the spawn registry (the
  * SpawnManager's presets, which is PRESETS in a player's build).
  *
- * Saves are throttled (every ~5 s while flying), immediate on discoveries, biome firsts, finished
- * ring courses, new best landings, records and achievements, and flushed when the page hides.
+ * Saves are throttled (every ~5 s while flying: the journal, and the records whenever flight time,
+ * the highest altitude, a figure or a perch changed them), immediate on discoveries, biome firsts,
+ * finished ring courses, new best landings, statistics, achievements and worlds visited, and flushed
+ * when the page hides.
  * Besides 'journal:changed' { reason }, the journal announces 'journal:discovery' { entry, found,
  * total }, 'journal:record' { key, value, previous, improved, op, presetId } and
  * 'journal:achievement' { entry } for the discovery toast and the map.
@@ -126,7 +302,7 @@ export function createJournal(ctx) {
   }
 
   function createEmptyRecords() {
-    return { stats: {}, achievements: [], bestLanding: null, craftTime: {}, worldsVisited: [] };
+    return { stats: {}, achievements: [], bestLanding: null, craftTime: {}, skinTime: {}, worldsVisited: [], figures: {}, perches: sanitizePerches(null) };
   }
 
   /**
@@ -216,14 +392,21 @@ export function createJournal(ctx) {
     };
   }
 
-  /** Validates one stored record statistic ({ value, op, at, seed, presetId }); null when unusable. */
-  function sanitizeStat(stat) {
+  /**
+   * Validates one stored record statistic ({ value, op, at, seed, presetId }); null when unusable. A
+   * known key (the game's or a craft module's) keeps its own op and never goes negative, and the
+   * highest altitude never passes MAX_RECORDED_ALTITUDE.
+   */
+  function sanitizeStat(stat, key) {
     if (!stat || typeof stat !== 'object') return null;
     const value = finiteNumber(stat.value, NaN);
     if (!Number.isFinite(value) || !JOURNAL_STAT_OPS.includes(stat.op)) return null;
+    const known = journalStatInfo(key);
+    if (known && !(value >= 0)) return null;
+    if (key === 'maxAltitude' && value > MAX_RECORDED_ALTITUDE) return null;
     return {
       value,
-      op: stat.op,
+      op: known ? known.op : stat.op,
       at: nonNegative(stat.at),
       seed: boundedString(stat.seed, 24),
       presetId: boundedString(stat.presetId, MAX_ID_LENGTH),
@@ -293,19 +476,26 @@ export function createJournal(ctx) {
   function sanitizeWorldVisit(raw) {
     if (!raw || typeof raw !== 'object' || !WORLD_SEED_PATTERN.test(raw.seed ?? '') || !WORLD_SEED_PATTERN.test(raw.from ?? '')) return null;
     if (typeof raw.portalId !== 'string' || raw.portalId.length === 0 || raw.portalId.length > 128) return null;
-    return { seed: raw.seed, from: raw.from, portalId: raw.portalId, at: finiteNumber(raw.at, 0) };
+    return { seed: raw.seed, from: raw.from, portalId: raw.portalId, at: nonNegative(raw.at) };
   }
 
-  /** Reads the global records (every world), repairing anything malformed. */
+  /**
+   * Reads the global records (every world), repairing anything malformed, and migrates a version 1 or
+   * 2 record to RECORDS_VERSION (migrateRecordsToV3). Returns { records, migratedFrom } (migratedFrom:
+   * the stored version that was migrated, else null).
+   */
   function loadRecords() {
     const loaded = createEmptyRecords();
     const stored = storage.read(RECORDS_STORAGE_KEY, null);
-    if (!stored || typeof stored !== 'object') return loaded;
-    if (stored.stats && typeof stored.stats === 'object') {
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return { records: loaded, migratedFrom: null };
+    if (stored.stats && typeof stored.stats === 'object' && !Array.isArray(stored.stats)) {
+      let kept = 0;
       for (const [key, raw] of Object.entries(stored.stats)) {
-        if (!STAT_KEY_PATTERN.test(key) || Object.keys(loaded.stats).length >= MAX_STATS) continue;
-        const stat = sanitizeStat(raw);
-        if (stat) loaded.stats[key] = stat;
+        if (!isOwnKey(key, STAT_KEY_PATTERN) || kept >= MAX_STATS) continue;
+        const stat = sanitizeStat(raw, key);
+        if (!stat) continue;
+        loaded.stats[key] = stat;
+        kept++;
       }
     }
     if (Array.isArray(stored.achievements)) {
@@ -320,24 +510,25 @@ export function createJournal(ctx) {
     }
     loaded.bestLanding = sanitizeLanding(stored.bestLanding);
     if (Array.isArray(stored.worldsVisited)) {
-      for (const raw of stored.worldsVisited) {
-        const entry = sanitizeWorldVisit(raw);
+      // The newest MAX_WORLDS_VISITED usable entries, oldest first.
+      for (let index = stored.worldsVisited.length - 1; index >= 0 && loaded.worldsVisited.length < MAX_WORLDS_VISITED; index--) {
+        const entry = sanitizeWorldVisit(stored.worldsVisited[index]);
         if (entry) loaded.worldsVisited.push(entry);
       }
-      loaded.worldsVisited.splice(0, Math.max(0, loaded.worldsVisited.length - MAX_WORLDS_VISITED));
+      loaded.worldsVisited.reverse();
     }
-    if (stored.craftTime && typeof stored.craftTime === 'object') {
-      for (const [craft, seconds] of Object.entries(stored.craftTime)) {
-        if (!CRAFT_ID_PATTERN.test(craft) || Object.keys(loaded.craftTime).length >= MAX_CRAFT_TIMES) continue;
-        const value = finiteNumber(seconds, NaN);
-        if (value > 0) loaded.craftTime[craft] = value;
-      }
-    }
-    return loaded;
+    loaded.craftTime = sanitizeCraftTime(stored.craftTime);
+    loaded.skinTime = sanitizeSkinTime(stored.skinTime);
+    loaded.figures = sanitizeFigures(stored.figures);
+    loaded.perches = sanitizePerches(stored.perches);
+    const storedVersion = Number.isInteger(stored.version) && stored.version >= 1 ? stored.version : 1;
+    if (storedVersion >= RECORDS_VERSION) return { records: loaded, migratedFrom: null };
+    migrateRecordsToV3(loaded);
+    return { records: loaded, migratedFrom: storedVersion };
   }
 
   const data = loadData();
-  const records = loadRecords();
+  const { records, migratedFrom } = loadRecords();
   const foundIds = new Set(data.landmarksFound.map((entry) => entry.id));
   const spawnIds = new Set(data.spawnsFound.map((entry) => entry.id));
   const statOpMismatchReported = new Set();
@@ -348,8 +539,11 @@ export function createJournal(ctx) {
   let statsTimer = STATS_EVENT_INTERVAL_SECONDS;
   let saveFailureReported = false;
   let recordsSaveFailureReported = false;
-  /** craftTime grew since the records were last saved (saved with the journal's throttled saves). */
-  let craftTimeDirty = false;
+  /**
+   * The records changed without a save of their own (flight time, the highest altitude, a figure, a
+   * perch): saved with the journal's throttled saves and when the page hides.
+   */
+  let recordsDirty = false;
 
   /** JSON-safe copy of the journal (also the persisted shape). */
   function snapshot() {
@@ -378,14 +572,25 @@ export function createJournal(ctx) {
   function recordsSnapshot() {
     const stats = {};
     for (const [key, stat] of Object.entries(records.stats)) stats[key] = { ...stat };
+    if (stats.maxAltitude) stats.maxAltitude.value = roundTo(stats.maxAltitude.value, 1);
     const craftTime = {};
     for (const [craft, seconds] of Object.entries(records.craftTime)) craftTime[craft] = roundTo(seconds, 1);
+    const skinTime = {};
+    for (const [craft, skins] of Object.entries(records.skinTime)) {
+      skinTime[craft] = {};
+      for (const [skin, seconds] of Object.entries(skins)) skinTime[craft][skin] = roundTo(seconds, 1);
+    }
+    const figures = {};
+    for (const [figure, entry] of Object.entries(records.figures)) figures[figure] = { ...entry };
     return {
       stats,
       achievements: records.achievements.map((entry) => ({ ...entry })),
       bestLanding: records.bestLanding ? { ...records.bestLanding } : null,
       craftTime,
+      skinTime,
       worldsVisited: records.worldsVisited.map((entry) => ({ ...entry })),
+      figures,
+      perches: { count: records.perches.count, kinds: { ...records.perches.kinds } },
     };
   }
 
@@ -405,7 +610,7 @@ export function createJournal(ctx) {
   }
 
   function saveRecords() {
-    craftTimeDirty = false;
+    recordsDirty = false;
     if (storage.write(RECORDS_STORAGE_KEY, { version: RECORDS_VERSION, ...recordsSnapshot() })) return true;
     if (!recordsSaveFailureReported) {
       recordsSaveFailureReported = true;
@@ -416,6 +621,13 @@ export function createJournal(ctx) {
 
   function markChanged(reason) {
     dirty = true;
+    changePending = true;
+    changeReason = reason;
+  }
+
+  /** The global records changed (saved on the throttle); the panel hears 'journal:changed' { reason }. */
+  function markRecordsChanged(reason) {
+    recordsDirty = true;
     changePending = true;
     changeReason = reason;
   }
@@ -469,17 +681,56 @@ export function createJournal(ctx) {
     return true;
   }
 
+  /** Flight time per craft (and per skin for a craft with skins), for the craft flying this frame. */
+  function accumulateCraftTime(dt) {
+    const flight = state.flight;
+    const craft = flight ? flight.craft : null;
+    if (typeof craft !== 'string' || !isOwnKey(craft, CRAFT_ID_PATTERN)) return;
+    if (Object.hasOwn(records.craftTime, craft)) {
+      records.craftTime[craft] = Math.min(MAX_SECONDS, records.craftTime[craft] + dt);
+    } else if (Object.keys(records.craftTime).length < MAX_CRAFT_TIMES) {
+      records.craftTime[craft] = dt;
+    } else {
+      return;
+    }
+    recordsDirty = true;
+    const skin = flight.craftState ? flight.craftState.skin : null;
+    if (typeof skin !== 'string' || !isOwnKey(skin, CRAFT_ID_PATTERN)) return;
+    let skins = Object.hasOwn(records.skinTime, craft) ? records.skinTime[craft] : null;
+    if (!skins) {
+      if (Object.keys(records.skinTime).length >= MAX_CRAFT_TIMES) return;
+      skins = records.skinTime[craft] = {};
+    }
+    if (Object.hasOwn(skins, skin)) skins[skin] = Math.min(MAX_SECONDS, skins[skin] + dt);
+    else if (Object.keys(skins).length < MAX_SKINS_PER_CRAFT) skins[skin] = dt;
+  }
+
+  /**
+   * The highest altitude ever flown (the maxAltitude statistic, op 'max'), followed every frame of
+   * flight, space included: the record object is updated in place, saved on the throttle.
+   */
+  function followMaxAltitude(altitude) {
+    if (!Number.isFinite(altitude) || altitude <= 0) return;
+    const record = records.stats.maxAltitude;
+    if (record && !(altitude > record.value)) return;
+    if (record) {
+      record.value = altitude;
+      record.at = Date.now();
+      record.seed = state.seed;
+      record.presetId = null;
+    } else {
+      records.stats.maxAltitude = { value: altitude, op: 'max', at: Date.now(), seed: state.seed, presetId: null };
+    }
+    recordsDirty = true;
+  }
+
   function accumulateFlight(dt) {
     const player = state.player;
     if (Number.isFinite(player.speed) && player.speed > 0) data.distanceFlown += player.speed * dt;
     if (Number.isFinite(player.altitude) && player.altitude > data.maxAltitude) data.maxAltitude = player.altitude;
     data.flightTime += dt;
-    // Flight time per craft (global records), for the craft flying this frame.
-    const craft = state.flight ? state.flight.craft : null;
-    if (typeof craft === 'string' && CRAFT_ID_PATTERN.test(craft) && (craft in records.craftTime || Object.keys(records.craftTime).length < MAX_CRAFT_TIMES)) {
-      records.craftTime[craft] = (records.craftTime[craft] ?? 0) + dt;
-      craftTimeDirty = true;
-    }
+    accumulateCraftTime(dt);
+    followMaxAltitude(player.altitude);
     dirty = true;
     statsTimer -= dt;
     if (statsTimer <= 0) {
@@ -606,27 +857,82 @@ export function createJournal(ctx) {
     return { ...entry };
   }
 
+  /**
+   * Records an aerobatic figure (the typed 'figureFlown' payload { figure, score, craft, position }):
+   * one more of it and its best score (0-100). Returns { figure, count, bestScore, improved }, or null
+   * for a figure the recognizer does not know or an unusable score.
+   */
+  function recordFigure(payload) {
+    if (!payload || !FIGURE_ID_SET.has(payload.figure)) return null;
+    const score = figureScore(payload.score);
+    if (score === null) return null;
+    const figure = payload.figure;
+    let entry = records.figures[figure];
+    const improved = !entry || score > entry.bestScore;
+    if (!entry) entry = records.figures[figure] = { count: 0, bestScore: score };
+    entry.count = Math.min(MAX_COUNT, entry.count + 1);
+    if (improved) entry.bestScore = score;
+    markRecordsChanged('figure');
+    return { figure, count: entry.count, bestScore: entry.bestScore, improved };
+  }
+
+  /**
+   * Records a perch landing (the typed 'perched' payload when the bird settles, perched true; a
+   * take-off, perched false, is not a landing). Returns { count, kinds } or null when unusable.
+   */
+  function recordPerch(payload) {
+    if (!payload || payload.perched !== true || !PERCH_KINDS.includes(payload.kind)) return null;
+    const perches = records.perches;
+    perches.count = Math.min(MAX_COUNT, perches.count + 1);
+    perches.kinds[payload.kind] = Math.min(MAX_COUNT, perches.kinds[payload.kind] + 1);
+    markRecordsChanged('perch');
+    return { count: perches.count, kinds: { ...perches.kinds } };
+  }
+
   /** The challenge system's stored bests (src/gameplay/challenges.js), or null when it is absent. */
   function challengeRecords() {
     const challenges = ctx.systems.challenges;
     return challenges && typeof challenges.getRecords === 'function' ? challenges.getRecords() : null;
   }
 
+  /**
+   * The medals of every best run (per course and craft) the challenge system keeps: { gold, silver,
+   * bronze, none, runs, courses }, all zero without the challenge system. Read, never stored here.
+   */
+  function medalTally() {
+    const tally = { gold: 0, silver: 0, bronze: 0, none: 0, runs: 0, courses: 0 };
+    const courses = challengeRecords()?.courses;
+    if (!courses || typeof courses !== 'object') return tally;
+    for (const course of Object.values(courses)) {
+      let flown = false;
+      for (const best of Object.values(course?.best ?? {})) {
+        if (!best || !Number.isFinite(best.time)) continue;
+        flown = true;
+        tally.runs++;
+        tally[MEDALS.includes(best.medal) ? best.medal : 'none']++;
+      }
+      if (flown) tally.courses++;
+    }
+    return tally;
+  }
+
   function flushOnHide() {
     if (document.visibilityState !== 'hidden') return;
     save();
-    if (craftTimeDirty) saveRecords();
+    if (recordsDirty) saveRecords();
   }
   document.addEventListener('visibilitychange', flushOnHide);
   window.addEventListener('pagehide', () => {
     save();
-    if (craftTimeDirty) saveRecords();
+    if (recordsDirty) saveRecords();
   });
   bus.on('biome:changed', (payload) => visitBiome(payload?.biome?.key));
   bus.on('landed', (landing) => recordLanding(landing));
   bus.onTyped('discovery', (payload) => recordSpawnDiscovery(payload));
   bus.onTyped('journalStat', (payload) => recordStat(payload));
   bus.onTyped('achievement', (payload) => recordAchievement(payload));
+  bus.onTyped('figureFlown', (payload) => recordFigure(payload));
+  bus.onTyped('perched', (payload) => recordPerch(payload));
   // Portals (preset 67): the world the player went through to, saved at once (the page reloads next).
   bus.onTyped('worldVisited', (payload) => {
     const entry = sanitizeWorldVisit({ seed: payload.seed, from: payload.previous, portalId: payload.portalId, at: Date.now() });
@@ -641,6 +947,8 @@ export function createJournal(ctx) {
   bus.onTyped('challengeFinished', (payload) => {
     if (payload?.improved) markChanged('challenge');
   });
+  // Records read from an older version were migrated: keep them as the current version at once.
+  if (migratedFrom !== null) saveRecords();
   visitBiome(state.player.biome?.key);
   // The spawns this world's journal already holds are discovered: they never announce again.
   ctx.systems.spawns?.manager?.markDiscovered?.(data.spawnsFound.map((entry) => entry.id));
@@ -652,7 +960,7 @@ export function createJournal(ctx) {
       if (saveTimer <= 0) {
         saveTimer = SAVE_INTERVAL_SECONDS;
         if (dirty) save();
-        if (craftTimeDirty) saveRecords();
+        if (recordsDirty) saveRecords();
       }
       if (changePending) {
         changePending = false;
@@ -674,9 +982,22 @@ export function createJournal(ctx) {
     /** The challenge bests: { version, courses: { courseKey: { name, presetId, best: { craft: { time, medal, splits, missed, date } } } } } or null. */
     getChallengeRecords: challengeRecords,
 
-    /** The global records: { stats: { key: { value, op, at, seed, presetId } }, achievements, bestLanding, craftTime: { craft: seconds }, worldsVisited: [{ seed, from, portalId, at }] }. */
+    /**
+     * The global records: { stats: { key: { value, op, at, seed, presetId } } (maxAltitude among them),
+     * achievements, bestLanding, craftTime: { craft: seconds }, skinTime: { craft: { skin: seconds } },
+     * worldsVisited: [{ seed, from, portalId, at }], figures: { figure: { count, bestScore } },
+     * perches: { count, kinds: { peak, structure, tree } } }.
+     */
     getRecords() {
       return recordsSnapshot();
+    },
+
+    /** The medals of the challenge bests: { gold, silver, bronze, none, runs, courses } (medalTally). */
+    getMedals: medalTally,
+
+    /** The stored version the records were migrated from on this load (1 or 2), or null. */
+    getMigratedFrom() {
+      return migratedFrom;
     },
 
     /** The spawn collection over the implemented presets: { found, total, presets }. */
@@ -698,6 +1019,8 @@ export function createJournal(ctx) {
     recordSpawnDiscovery,
     recordStat,
     recordAchievement,
+    recordFigure,
+    recordPerch,
 
     /** Records a discovered landmark. Returns true only the first time. */
     recordLandmark(site, name) {

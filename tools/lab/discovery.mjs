@@ -14,8 +14,9 @@
 //               reported once); bad payloads are refused; achievements are recorded once; records and
 //               achievements are global (another world sees them) while discoveries stay per seed;
 //               the best landing in any world is kept; flight time per craft accrues frame by frame
-//               (records version 2, a version 1 record reads with none) and is saved with the
-//               throttled saves
+//               (a version 1 record reads with none) and is saved with the throttled saves; the
+//               Milestone O records (figures, perches, skins, the highest altitude, migrations, hostile
+//               storage, caps) are tools/lab/journal.mjs
 //   tiles       every field has the right size and type; the same request gives the same bytes; tiles
 //               share their edges (no seams in height or colour); water is tinted by depth; bad
 //               requests throw; the cache tag follows the seed and the preset placement data; the
@@ -41,7 +42,7 @@ for (const flag of process.argv.slice(2)) {
 // The journal listens for the page hiding; node has no document or window, so give it inert ones.
 globalThis.document ??= { visibilityState: 'visible', addEventListener() {} };
 globalThis.window ??= { addEventListener() {} };
-const { RECORDS_STORAGE_KEY, createJournal } = await import('../../src/gameplay/journal.js');
+const { RECORDS_STORAGE_KEY, RECORDS_VERSION, createJournal } = await import('../../src/gameplay/journal.js');
 
 const results = [];
 function check(test, name, pass, detail = '') {
@@ -198,7 +199,7 @@ function testRecords() {
   const times = flying.journal.getRecords().craftTime;
   check('records', 'flight time accrues per craft, frame by frame', Math.abs(times.jet - 2) < 0.05 && Math.abs(times.balloon - 1) < 0.05, JSON.stringify(times));
   const savedTimes = storage.read(RECORDS_STORAGE_KEY, null);
-  check('records', 'the records are saved as version 2 with craftTime (throttled save)', savedTimes.version === 2 && Math.abs(savedTimes.craftTime.jet - 2) < 0.05, JSON.stringify(savedTimes.craftTime));
+  check('records', 'the records are saved as the current version with craftTime (throttled save)', savedTimes.version === RECORDS_VERSION && Math.abs(savedTimes.craftTime.jet - 2) < 0.05, JSON.stringify(savedTimes.craftTime));
   const paused = session('CRAFTTIME');
   paused.state.flight = { craft: 'jet' };
   paused.journal.update(0, 1);

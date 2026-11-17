@@ -1725,7 +1725,7 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 
 | # | Work | Branch | Status |
 | --- | --- | --- | --- |
-| O1 | Journal (contract j.1): records version 2 with craft time, figures, medals, worlds visited, perches and max altitude; the journal panel's Craft, Figures, Challenges and Worlds sections | `p3/journal` | not started |
+| O1 | Journal (contract j.1): records version 2 with craft time, figures, medals, worlds visited, perches and max altitude; the journal panel's Craft, Figures, Challenges and Worlds sections | `p3/journal` | in progress |
 | O2 | Copilot (contract j.2, h.3, h.6): the cross-craft grammar and the keyboard / UI equivalent of each (Guide chips "Find water", "Find a perch", "To space"; the spaceplane's climb-to-space autopilot); the remote `flightState` fields `onWater`, `craftState`, `challenge`; docs/copilot-api.md | `p3/copilot` | not started |
 | O3 | Docs: docs/controls.md (a full HOTAS profile per new craft, the j.2 equivalents), docs/spawns.md (all 100 checked against the code), docs/architecture.md (every Phase 3 system) | `p3/docs` | not started |
 | P1 | Test hooks to the contract: the 20-minute soak of k.5 (craft switch every 2 minutes, view swap every minute, structure penetrations, no soft crash within 10 s of a switch), the k.4 determinism digests (collider sweep battery, PathFollower positions) and the WebGL2 spawn-event frame difference, the k.3 / k.4 coverage audit, the golden-frame first shot and the origin-rebase image check on WebGL2 | `p3/verify-hooks` | not started |
@@ -1737,7 +1737,9 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 
 ### Wave 4 - p3/journal
 
-- **Status:** not started.
+- **Status:** in progress: records version 3 (figures, perches, skin time, the highest altitude, the
+  migrations from versions 1 and 2) landed in `src/gameplay/journal.js`; the panel sections and the
+  tests are next.
 
 ### Wave 4 - p3/copilot
 
