@@ -138,10 +138,10 @@ preset's section below.
 | 82 | [Cherry blossom valley](#82-cherry-blossom-valley) | `cherryBlossomValley` | geo | site | uncommon | no | `emitter` | no |
 | 83 | [Autumn colour wave](#83-autumn-colour-wave) | `autumnColourWave` | geo | site | uncommon | no | `emitter` | no |
 | 84 | [Lavender and tulip stripes](#84-lavender-and-tulip-stripes) | `lavenderTulipStripes` | geo | site | uncommon | no | `emitter` | no |
-| 85 | [Rice terraces](#85-rice-terraces) | `riceTerraces` | geo | site | uncommon | no | `weatherVolume` | no |
+| 85 | [Rice terraces](#85-rice-terraces) | `riceTerraces` | geo | site | uncommon | no | `weatherVolume` | slight |
 | 86 | [Redwood giants](#86-redwood-giants) | `redwoodGiants` | geo | site | uncommon | no | `emitter` | no |
 | 87 | [Badlands hoodoos](#87-badlands-hoodoos) | `badlandsHoodoos` | geo | site | uncommon | no | `structure` | no |
-| 88 | [Mangrove delta](#88-mangrove-delta) | `mangroveDelta` | ocean | site | uncommon | no | `weatherVolume`, `lightEffect` | no |
+| 88 | [Mangrove delta](#88-mangrove-delta) | `mangroveDelta` | ocean | site | uncommon | no | `weatherVolume`, `lightEffect` | slight |
 | 89 | [Cactus forest with dust devils](#89-cactus-forest-with-dust-devils) | `cactusDustDevils` | geo | site | uncommon | no | `vortex` | yes |
 | 90 | [Bamboo forest](#90-bamboo-forest) | `bambooForest` | geo | site | uncommon | no | `emitter` | no |
 | 91 | [Frozen lake](#91-frozen-lake) | `frozenLake` | geo | site | uncommon | no | `structure` | no |
@@ -190,9 +190,14 @@ The full rules are in [architecture.md: Event director](architecture.md#event-di
 ## The presets
 
 Each section gives what the player sees, then the preset's fields as the file sets them. The
-time-of-day classes are `day` (sun up), `night` (sun more than 6 degrees down), `dawn` and `dusk`
-(the low sun, -10 to 14 degrees), `golden` (-3 to 14 degrees) and `midday` (14 degrees up or more).
-"Ahead" is the director's activation distance band in front of the player.
+**Journal** line opens with the title the discovery card and the journal show (`journal.title`,
+which is not always the preset's `name`) and counts WREN's `callouts` lines; any journal stats
+follow. `node tools/docs-check.mjs` checks every section's kind, rarity, heavy flag, wind, sound
+recipe, journal title, callout count, LOD, discovery radius, lifetime, filters and candidates or
+placement against the preset files. The time-of-day classes are `day` (sun up), `night` (sun more
+than 6 degrees down), `dawn` and `dusk` (the low sun, -10 to 14 degrees), `golden` (-3 to 14
+degrees) and `midday` (14 degrees up or more). "Ahead" is the director's activation distance band in
+front of the player.
 
 ### Weather and sky
 
@@ -217,7 +222,8 @@ the land with a ring of debris, then ropes out and lifts.
 - **Sound:** `tornado` (low roar and debris rattle).
 - **LOD:** near 2000 m, mid 4500 m, far 45 km. **Discovery:** 5 km, in view.
 - **Lifetime:** 240-360 s; despawned beyond 15 + 3 km after 30 s out of view.
-- **Journal:** `closestTornado` (min, within 15 km) and `stormsChased` (+1 within 3 km).
+- **Journal:** "Tornado"; WREN has 4 callout lines; `closestTornado` (min, within 15 km) and
+  `stormsChased` (+1 within 3 km).
 
 #### 2. Supercell
 
@@ -240,7 +246,7 @@ rain shafts, lightning and delayed thunder, a gust front ahead and a rear-flank 
 - **Sound:** `thunder` (crack and rolling rumble, delayed by distance / 343 m/s).
 - **LOD:** near 6 km, mid 22 km, far 60 km. **Discovery:** 14 km, in view.
 - **Lifetime:** 420-600 s; despawned beyond 30 + 5 km after 30 s out of view.
-- **Journal:** `stormsChased` (+1 within 6 km).
+- **Journal:** "Supercell"; WREN has 4 callout lines; `stormsChased` (+1 within 6 km).
 
 #### 3. Waterspout
 
@@ -260,6 +266,7 @@ ring churning the water at its foot and a foam wake behind it.
 - **Sound:** `tornado`.
 - **LOD:** near 2000 m, mid 7000 m, far 22 km. **Discovery:** 3 km, in view.
 - **Lifetime:** 180-300 s; despawned beyond 12 + 3 km after 20 s out of view.
+- **Journal:** "Waterspout"; WREN has 3 callout lines.
 
 #### 4. Lenticular clouds
 
@@ -280,6 +287,7 @@ A stack of smooth lens clouds parked over a peak in the prevailing wind, riding 
 - **Sound:** none.
 - **LOD:** near 4 km, mid 14 km, far 40 km. **Discovery:** 9 km, in view.
 - **Lifetime:** 600-900 s; despawned beyond 20 + 4 km after 30 s out of view.
+- **Journal:** "Lenticular clouds"; WREN has 3 callout lines.
 
 #### 5. Microburst
 
@@ -300,6 +308,7 @@ as a ring gust throwing a ring of dust across the land.
 - **Sound:** `waterfall` (the rain's roar, reference distance 260 m).
 - **LOD:** near 2500 m, mid 9000 m, far 22 km. **Discovery:** 4 km, in view.
 - **Lifetime:** 150-240 s; despawned beyond 12 + 3 km after 20 s out of view.
+- **Journal:** "Microburst"; WREN has 3 callout lines.
 
 #### 6. Glory
 
@@ -318,6 +327,7 @@ the glory's coloured rings, inside a full-circle rainbow.
 - **Sound:** none.
 - **LOD:** near 2500 m, mid 9000 m, far 30 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** 300-480 s; despawned beyond 12 + 3 km after 30 s out of view.
+- **Journal:** "Glory"; WREN has 3 callout lines.
 
 ### Volcanic and geo
 
@@ -347,7 +357,8 @@ night, and lightning flickers in the ash.
   darkens.
 - **Sound:** `volcano` (sub-bass rumble and eruption booms).
 - **LOD:** near 1500 m, mid 4000 m, far 45 km. **Discovery:** 8 km, in view.
-- **Lifetime:** a site; removed beyond 45 + 5 km.
+- **Lifetime:** a site; removed beyond 40 + 5 km.
+- **Journal:** "Erupting volcano"; WREN has 4 callout lines.
 
 #### 8. Geyser field
 
@@ -364,7 +375,8 @@ is a brief strong updraft column.
   43 m, 400, 320 and 288 m tall, turbulence 0.65. It kicks a glider upward.
 - **Sound:** `geyser` (hiss bursts).
 - **LOD:** near 1500 m, mid 5000 m, far 9000 m. **Discovery:** 2.5 km, in view.
-- **Lifetime:** a site; removed beyond 9 + 3 km.
+- **Lifetime:** a site; removed beyond 12 + 3 km.
+- **Journal:** "Geyser field"; WREN has 3 callout lines.
 
 #### 9. Slot canyon
 
@@ -383,8 +395,8 @@ keeps your best clean run.
 - **Sound:** `waterfall` (the river, reference distance 60 m).
 - **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 3 km.
-- **Journal:** `bestCanyonRun` (min, seconds, clean runs only: no soft crash and never above the
-  rim). Either end may be the start.
+- **Journal:** "Slot canyon"; WREN has 3 callout lines; `bestCanyonRun` (min, seconds, clean runs
+  only: no soft crash and never above the rim). Either end may be the start.
 
 #### 10. Mega-waterfall
 
@@ -404,6 +416,7 @@ cloud, a daytime rainbow, a roar that carries for kilometres and sinking air at 
 - **Sound:** `waterfall` (pink-noise roar).
 - **LOD:** near 1800 m, mid 6000 m, far 16 km. **Discovery:** 3 km, in view.
 - **Lifetime:** a site; removed beyond 16 + 3 km.
+- **Journal:** "Mega-waterfall"; WREN has 3 callout lines.
 
 ### Ocean
 
@@ -425,6 +438,7 @@ full.
 - **LOD:** near 2000 m, mid 4500 m, far 9000 m. **Discovery:** 1.6 km, in view.
 - **Lifetime:** 240-420 s, fading out over the last 10 s; despawned beyond 9 + 2.5 km after 20 s out
   of view.
+- **Journal:** "Whale pod"; WREN has 4 callout lines.
 
 #### 12. Maelstrom
 
@@ -442,6 +456,7 @@ wide pale air vortex rising to a lowered collar of cloud.
 - **Sound:** `tornado` (a deep roar, reference distance 260 m).
 - **LOD:** near 2500 m, mid 5000 m, far 14 km. **Discovery:** 3 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 3 km.
+- **Journal:** "Maelstrom"; WREN has 4 callout lines.
 
 #### 13. Bioluminescent bay
 
@@ -461,6 +476,7 @@ your craft, the whales feeding there and the jumping fish.
 - **Sound:** `waterfall` at a low flow (the surf, reference distance 200 m, reverb 0.5).
 - **LOD:** near 2000 m, mid 4000 m, far 9000 m. **Discovery:** 2 km, in view.
 - **Lifetime:** a site in its hours; removed beyond 9 + 2 km.
+- **Journal:** "Bioluminescent bay"; WREN has 4 callout lines.
 
 ### Wildlife
 
@@ -481,6 +497,7 @@ away from your path, then re-form behind you.
 - **LOD:** near 2500 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** 140-220 s, fading out over the last 12 s; despawned beyond 9 + 2.5 km after 20 s out
   of view.
+- **Journal:** "Starling murmuration"; WREN has 4 callout lines.
 
 #### 15. Geese V-formation
 
@@ -500,6 +517,7 @@ end of the line and the flock follows your gentle turns.
 - **LOD:** near 1500 m, mid 4000 m, far 8000 m. **Discovery:** 1.5 km, in view.
 - **Lifetime:** 300-420 s, fading out over the last 10 s; despawned beyond 9 + 2.5 km after 20 s out
   of view.
+- **Journal:** "Geese V-formation"; WREN has 4 callout lines.
 - **Achievement:** `vFormation`, "V-Formation": hold the slot for 10 s.
 
 #### 16. Thermal hawks
@@ -521,6 +539,7 @@ Three to six hawks circle inside the Phase 1 thermals, the visual marker for lif
 - **LOD:** near 1500 m, mid 4000 m, far 8000 m. **Discovery:** 1.5 km, in view.
 - **Lifetime:** 300-480 s, fading out over the last 10 s; despawned beyond 9 + 2.5 km after 20 s out
   of view.
+- **Journal:** "Thermal hawks"; WREN has 4 callout lines.
 
 #### 17. Fireflies
 
@@ -539,6 +558,7 @@ Thousands of soft yellow-green lights drifting and blinking a few metres over a 
 - **LOD:** near 1200 m, mid 3000 m, far 6000 m. **Discovery:** 1 km, in view.
 - **Lifetime:** 240-400 s, ramping out over the last 8 s; despawned beyond 8 + 2 km after 20 s out of
   view.
+- **Journal:** "Fireflies"; WREN has 4 callout lines.
 
 #### 18. Eagle wingman
 
@@ -557,6 +577,7 @@ speed within its own, then peels off with a scream.
 - **LOD:** near 1500 m, mid 4000 m, far 8000 m. **Discovery:** 1.5 km, in view.
 - **Lifetime:** 300-420 s, fading out over the last 8 s if you never come; despawned beyond
   9 + 2.5 km after 20 s out of view.
+- **Journal:** "Eagle wingman"; WREN has 4 callout lines.
 
 ### Structures
 
@@ -578,6 +599,7 @@ rough.
 - **Sound:** `turbine` (a rhythmic whoosh that follows the wind speed).
 - **LOD:** near 2500 m, mid 7000 m, far 16 km. **Discovery:** 3 km, in view.
 - **Lifetime:** a site; removed beyond 16 + 3 km.
+- **Journal:** "Wind farm"; WREN has 4 callout lines.
 
 #### 20. Rope bridge
 
@@ -594,6 +616,7 @@ A timber-plank rope bridge, a few planks missing, swaying across a gorge. Fly un
 - **Sound:** none.
 - **LOD:** near 1200 m, mid 4000 m, far 10 km. **Discovery:** 1.5 km, in view.
 - **Lifetime:** a site; removed beyond 10 + 2 km.
+- **Journal:** "Rope bridge"; WREN has 4 callout lines.
 - **Achievement:** `threadTheNeedle`, "Thread the Needle": fly under the bridge.
 
 #### 21. Abandoned airfield
@@ -615,6 +638,7 @@ shows the real WindField wind. Landings on the runway are graded.
 - **Sound:** none.
 - **LOD:** near 1800 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2 km.
+- **Journal:** "Abandoned airfield"; WREN has 4 callout lines.
 
 ### Night and celestial
 
@@ -634,6 +658,7 @@ and the land.
 - **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, not needing a view (it is
   discovered as it starts overhead).
 - **Lifetime:** 180-300 s; despawned beyond 20 + 3 km after 30 s out of view.
+- **Journal:** "Meteor shower"; WREN has 3 callout lines.
 
 #### 23. Total solar eclipse
 
@@ -654,6 +679,7 @@ out around the corona and every bird falls silent.
 - **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, not needing a view (the darkening
   world announces it).
 - **Lifetime:** 150-170 s; despawned beyond 20 + 3 km after 30 s out of view.
+- **Journal:** "Total solar eclipse"; WREN has 3 callout lines.
 
 #### 24. Comet
 
@@ -672,7 +698,9 @@ fixed among the stars for the rest of the night.
 - **Wind:** none.
 - **Sound:** none.
 - **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, in view.
-- **Lifetime:** until dawn; 900-1200 s caps it when the clock is frozen at night.
+- **Lifetime:** until dawn; 900-1200 s caps it when the clock is frozen at night; despawned beyond
+  20 + 3 km after 30 s out of view.
+- **Journal:** "Comet"; WREN has 3 callout lines.
 
 #### 25. Sky lantern festival
 
@@ -695,6 +723,7 @@ wind, with the launch crowd's lights on the ground.
 - **LOD:** near 3 km, mid 9 km, far 22 km. **Discovery:** 4.5 km, in view.
 - **Lifetime:** 570-600 s, so the last lanterns live out their 110-150 s; despawned beyond
   14 + 3 km after 25 s out of view.
+- **Journal:** "Sky lantern festival"; WREN has 3 callout lines.
 
 ### Fantasy
 
@@ -716,6 +745,7 @@ their edges into mist, and every top is landable.
 - **Sound:** `waterfall`.
 - **LOD:** near 2500 m, mid 9000 m, far 40 km. **Discovery:** 4.5 km, in view.
 - **Lifetime:** a site; removed beyond 40 + 3 km.
+- **Journal:** "Floating islands"; WREN has 3 callout lines.
 
 #### 27. Sky whale
 
@@ -736,6 +766,7 @@ beats and song. Its slipstream is a free speed and lift lane.
 - **LOD:** near 3 km, mid 7 km, far 40 km. **Discovery:** 4.5 km, in view.
 - **Lifetime:** 480-720 s, fading out over the last 12 s; despawned beyond 14 + 3 km after 25 s out
   of view.
+- **Journal:** "Sky whale"; WREN has 3 callout lines.
 
 #### 28. Crystal spires
 
@@ -753,6 +784,7 @@ fly between two of them.
 - **Sound:** `crystal` (a harmonic hum that rises with the approach, and `chime`).
 - **LOD:** near 1800 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2 km.
+- **Journal:** "Crystal spires"; WREN has 3 callout lines.
 
 ### Flight-play
 
@@ -774,6 +806,7 @@ core for a roaring tailwind.
 - **Sound:** none.
 - **LOD:** near 15 km, mid 30 km, far 50 km. **Discovery:** 9 km, in view.
 - **Lifetime:** 540-600 s; despawned beyond 20 + 4 km after 25 s out of view.
+- **Journal:** "Jet stream ribbon"; WREN has 3 callout lines.
 
 ### Legendary set piece
 
@@ -798,11 +831,11 @@ and the storm decays.
 - **Candidates:** 9 km cells, 900 s buckets, chance 0.4.
 - **Wind:** through its children: the supercell's gust front, downdrafts and updraft, then the
   tornado's Rankine vortex.
-- **Sound:** through its children.
+- **Sound:** none of its own; its children sound.
 - **LOD:** near 8 km, mid 25 km, far 60 km. **Discovery:** 15 km, in view.
 - **Lifetime:** 570-600 s; despawned beyond 30 + 5 km after 60 s out of view.
-- **Journal:** the "Storm Chaser" entry; `closestTornado` (min, the closest pass to the funnel) and
-  `stormsChased` (+1 when you came within 5 km of the funnel).
+- **Journal:** "Storm Chaser"; WREN has 3 callout lines; `closestTornado` (min, the closest pass to
+  the funnel) and `stormsChased` (+1 when you came within 5 km of the funnel).
 
 ### Weather and sky (Phase 3)
 
@@ -828,6 +861,7 @@ canopy.
 - **Sound:** `gale` (howling wind with a thick grit hiss).
 - **LOD:** near 4 km, mid 12 km, far 30 km. **Discovery:** 9 km, in view.
 - **Lifetime:** 360-480 s; despawned beyond 25 + 5 km after 30 s out of view.
+- **Journal:** "Sandstorm wall"; WREN has 4 callout lines.
 
 #### 32. Snow squall
 
@@ -851,6 +885,7 @@ its gust front. Inside it is a whiteout, with snow streaming past the canopy.
 - **Sound:** `gale` (a howling wind with a snow hiss).
 - **LOD:** near 2500 m, mid 9 km, far 20 km. **Discovery:** 4.5 km, in view.
 - **Lifetime:** 240-360 s; despawned beyond 12 + 3 km after 20 s out of view.
+- **Journal:** "Snow squall"; WREN has 4 callout lines.
 
 #### 33. Hurricane eye
 
@@ -867,7 +902,7 @@ through into the calm eye: still air, a stadium of cloud curving up all around, 
   the eyewall nearest the camera and ducks in the eye); `windModifier` (the `cyclone` source, following
   the volume); `emitter` (sea spray swept around under the eyewall).
 - **Filters:** any biome; day, dawn or dusk; clear, building or clearing weather (the eye shows the
-  sky above); over water; player 0-14 000 m; 18-34 km ahead.
+  sky above); over water; player 0-14000 m; 18-34 km ahead.
 - **Candidates:** 30 km cells, 1800 s buckets, chance 0.4.
 - **Wind:** a cyclone: the eye calm (under 5 m/s, turbulence 0.04), the eyewall 42 m/s with lift and
   turbulence 0.95 with 9 m/s gusts, falling off as (wall / r)^0.6 to 28 km, inflow at low level, and
@@ -875,6 +910,7 @@ through into the calm eye: still air, a stadium of cloud curving up all around, 
 - **Sound:** `gale` (a deep roar with a high howl, reference distance 900 m).
 - **LOD:** near 9 km, mid 30 km, far 70 km. **Discovery:** 25 km, in view.
 - **Lifetime:** 600-780 s; despawned beyond 60 + 8 km after 45 s out of view.
+- **Journal:** "Hurricane eye"; WREN has 4 callout lines.
 
 #### 34. Valley fog river
 
@@ -896,6 +932,7 @@ low sun.
 - **Sound:** `lantern` (a soft, slowly breathing ambient pad, reference distance 600 m).
 - **LOD:** near 3 km, mid 8 km, far 18 km. **Discovery:** 5 km, in view.
 - **Lifetime:** 420-600 s; despawned beyond 12 + 3 km after 30 s out of view.
+- **Journal:** "Valley fog river"; WREN has 3 callout lines.
 
 ### Volcanic and geo (Phase 3)
 
@@ -916,12 +953,13 @@ hissing on the canopy inside it.
   `canopyGrit` 0.5); `lightEffect` (26 strikes a minute within 900 m, 70 % in-cloud, violet-white,
   with the lit cloud glow and thunder; owns the voice); `emitter` (the ash column feeding the cloud,
   lit from below by the lava).
-- **Filters:** any biome and hour; storm weather; over land; player 0-12 000 m; 3-30 km ahead.
+- **Filters:** any biome and hour; storm weather; over land; player 0-12000 m; 3-30 km ahead.
 - **Candidates:** 8 km cells, 600 s buckets, chance 0.6.
 - **Wind:** the volume's own: turbulence 0.6 and a 6 m/s updraft inside the cloud.
 - **Sound:** `thunder` (the strikes' thunder, delayed by distance).
 - **LOD:** near 6 km, mid 20 km, far 45 km. **Discovery:** 9 km, in view.
 - **Lifetime:** 300-420 s; despawned beyond 30 + 5 km after 30 s out of view.
+- **Journal:** "Dirty thunderstorm"; WREN has 3 callout lines.
 
 #### 36. Lava rivers to the sea
 
@@ -952,6 +990,7 @@ night the lava and the steam's underside glow orange.
 - **LOD:** near 2 km, mid 6 km, far 20 km (the plumes keep 15 % of their emission at far).
   **Discovery:** 4 km, in view.
 - **Lifetime:** a site; removed beyond 20 + 4 km.
+- **Journal:** "Lava rivers to the sea"; WREN has 4 callout lines.
 
 #### 37. Fissure eruption
 
@@ -979,6 +1018,7 @@ and at night the low cloud deck above glows orange over the fissure.
 - **Sound:** `volcano` (a deep rumble, each fountain surge a `boom`).
 - **LOD:** near 2 km, mid 6 km, far 40 km. **Discovery:** 8 km, in view.
 - **Lifetime:** a site; removed beyond 40 + 5 km.
+- **Journal:** "Fissure eruption"; WREN has 4 callout lines.
 
 #### 38. Meteor crater lake
 
@@ -1000,6 +1040,7 @@ outer flank, the biggest of them perches.
 - **Sound:** `gale` (a soft wind sighing over the rim, reference distance 500 m).
 - **LOD:** near 1.8 km, mid 5 km, far 14 km. **Discovery:** 3 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 3 km.
+- **Journal:** "Meteor crater lake"; WREN has 3 callout lines.
 
 #### 39. Hot spring terraces
 
@@ -1020,6 +1061,7 @@ thermal over them.
 - **Sound:** `geyser` (bubbling pools and a faint steam hiss, reference distance 90 m).
 - **LOD:** near 1.5 km, mid 4.5 km, far 10 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 10 + 2.5 km.
+- **Journal:** "Hot spring terraces"; WREN has 3 callout lines.
 
 #### 40. Salt flat mirror lake
 
@@ -1042,6 +1084,7 @@ edge.
 - **Sound:** `gale` (a faint breeze, reference distance 500 m).
 - **LOD:** near 1.5 km, mid 5 km, far 14 km. **Discovery:** 3.5 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 3 km.
+- **Journal:** "Salt flat mirror lake"; WREN has 3 callout lines.
 ### Ocean and wildlife (presets 41-50)
 
 Presets 41-47 are the spec's ocean set and 48-50 open its wildlife set. They add the Phase 3 water
@@ -1070,6 +1113,7 @@ drift in the water before the front.
 - **Sound:** `calving` (groaning ice; `crack` as a slab breaks, `splash` as it hits the water).
 - **LOD:** near 2200 m, mid 6000 m, far 14 km. **Discovery:** 3 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2.5 km.
+- **Journal:** "Calving glacier"; WREN has 4 callout lines.
 
 #### 42. Coral atoll
 
@@ -1090,6 +1134,7 @@ a clear turquoise lagoon, the surf breaking in a white ring along the reef.
 - **Sound:** `surf` (breakers on the reef).
 - **LOD:** near 2500 m, mid 6000 m, far 14 km. **Discovery:** 3 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2.5 km.
+- **Journal:** "Coral atoll"; WREN has 3 callout lines.
 
 #### 43. Reef shipwreck
 
@@ -1109,6 +1154,7 @@ breaking the surface, all of it plain through the clear shallows.
 - **Sound:** `surf`.
 - **LOD:** near 1800 m, mid 4500 m, far 10 km. **Discovery:** 1.8 km, in view.
 - **Lifetime:** a site; removed beyond 10 + 2 km.
+- **Journal:** "Reef shipwreck"; WREN has 3 callout lines.
 
 #### 44. Dolphin pod
 
@@ -1128,6 +1174,7 @@ your shadow.
 - **LOD:** near 1800 m, mid 4000 m, far 8000 m. **Discovery:** 1.5 km, in view.
 - **Lifetime:** 240-400 s, fading out over the last 8 s; despawned beyond 8 + 2 km after 20 s out of
   view.
+- **Journal:** "Dolphin pod"; WREN has 3 callout lines.
 
 #### 45. Sea stacks and arches
 
@@ -1147,6 +1194,7 @@ enough to fly through.
 - **Sound:** `surf`.
 - **LOD:** near 1800 m, mid 5000 m, far 11 km. **Discovery:** 2.2 km, in view.
 - **Lifetime:** a site; removed beyond 11 + 2 km.
+- **Journal:** "Sea stacks and arches"; WREN has 3 callout lines.
 - **Achievement:** `seaArch`, "Through the Sea Arch" (the first pass through an arch).
 
 #### 46. Rogue wave
@@ -1169,6 +1217,7 @@ breaking white along its crest.
 - **LOD:** near 2500 m, mid 6000 m, far 12 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** the wave's own run (225 s) ends it inside its 250-270 s; despawned beyond 12 + 2.5 km
   after 30 s out of view.
+- **Journal:** "Rogue wave"; WREN has 3 callout lines.
 
 #### 47. Tidal bore
 
@@ -1189,6 +1238,7 @@ surges inland up the channel every minute or two.
 - **Sound:** `surf` (reference distance 150 m; `crash` as each bore rises).
 - **LOD:** near 2000 m, mid 5000 m, far 11 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 11 + 2 km.
+- **Journal:** "Tidal bore"; WREN has 3 callout lines.
 
 #### 48. Bats at dusk
 
@@ -1211,6 +1261,7 @@ and climbs away over the valley; fly through it and they burst aside.
 - **LOD:** near 2200 m, mid 5000 m, far 10 km. **Discovery:** 2.2 km, in view.
 - **Lifetime:** 300-480 s, fading out over the last 15 s; despawned beyond 10 + 2 km after 20 s out
   of view.
+- **Journal:** "Bats at dusk"; WREN has 3 callout lines.
 
 #### 49. Herd stampede
 
@@ -1231,6 +1282,7 @@ of dust.
 - **LOD:** near 2000 m, mid 4500 m, far 9000 m. **Discovery:** 1.8 km, in view.
 - **Lifetime:** 300-480 s, fading out over the last 10 s; despawned beyond 9 + 2 km after 20 s out of
   view.
+- **Journal:** "Herd stampede"; WREN has 3 callout lines.
 
 #### 50. Flamingo lake
 
@@ -1250,6 +1302,7 @@ them, circle the lake and settle again.
 - **Sound:** `goose` (honking calls).
 - **LOD:** near 1800 m, mid 4500 m, far 9000 m. **Discovery:** 2 km, in view.
 - **Lifetime:** a site; removed beyond 9 + 2 km.
+- **Journal:** "Flamingo lake"; WREN has 3 callout lines.
 ### Phase 3 batch 6: presets 51-60
 
 Wildlife (51-52), structures (53-59) and one night-sky event (60), on the Phase 2 engines and their
@@ -1278,6 +1331,7 @@ through and they scatter softly round the craft.
 - **LOD:** near 1200 m, mid 3500 m, far 9 km. **Discovery:** 1.2 km, in view.
 - **Lifetime:** 240-360 s, fading out over the last 12 s; despawned beyond 9 + 2.5 km after 20 s out
   of view.
+- **Journal:** "Butterfly migration"; WREN has 3 callout lines.
 
 #### 52. Caribou migration
 
@@ -1297,6 +1351,7 @@ kilometres long with pale manes and antlers, kicking up snow dust.
 - **LOD:** near 1500 m, mid 4500 m, far 10 km. **Discovery:** 1.8 km, in view.
 - **Lifetime:** 360-540 s, fading out over the last 10 s; despawned beyond 10 + 2.5 km after 20 s
   out of view.
+- **Journal:** "Caribou migration"; WREN has 3 callout lines.
 
 #### 53. Cliffside monastery
 
@@ -1318,6 +1373,7 @@ the valley.
 - **Sound:** `bells` (the temple bell and small bells tinkling in the gusts).
 - **LOD:** near 1500 m, mid 5000 m, far 12 km. **Discovery:** 2.2 km, in view.
 - **Lifetime:** a site; removed beyond 12 + 2 km.
+- **Journal:** "Cliffside monastery"; WREN has 3 callout lines.
 
 #### 54. Sea-cliff castle ruin
 
@@ -1337,6 +1393,7 @@ banners streaming in the wind, the tower to fly around.
 - **Sound:** `waterfall` as the surf booming at the cliff foot (constant, level 0.45).
 - **LOD:** near 1500 m, mid 5000 m, far 12 km. **Discovery:** 2.2 km, in view.
 - **Lifetime:** a site; removed beyond 12 + 2 km.
+- **Journal:** "Sea-cliff castle"; WREN has 3 callout lines.
 
 #### 55. Mountaintop observatory
 
@@ -1357,6 +1414,7 @@ radiant, else the moon, else a slow survey. At dawn it parks and closes.
 - **Sound:** `observatory` (the motors' whir and the shutter latch's clunk).
 - **LOD:** near 1500 m, mid 5000 m, far 12 km. **Discovery:** 2 km, in view.
 - **Lifetime:** a site; removed beyond 12 + 2 km.
+- **Journal:** "Mountaintop observatory"; WREN has 3 callout lines.
 
 #### 56. Steam train viaduct
 
@@ -1380,6 +1438,7 @@ disappears into the other, where it waits before coming back. Fly under the arch
   leaves a tunnel).
 - **LOD:** near 1800 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2.5 km.
+- **Journal:** "Steam train viaduct"; WREN has 3 callout lines.
 - **Achievement:** `underTheArches`, "Under the Arches": fly under an arch of the viaduct.
 
 #### 57. Dam spillway
@@ -1404,6 +1463,7 @@ rainbow below and a river running on down the valley.
 - **Sound:** `dam` (the spillway's roar over a surging sub rumble and the spray's hiss).
 - **LOD:** near 1800 m, mid 6000 m, far 15 km. **Discovery:** 2.8 km, in view.
 - **Lifetime:** a site; removed beyond 15 + 2.5 km.
+- **Journal:** "Dam spillway"; WREN has 3 callout lines.
 
 #### 58. Desert oasis caravan
 
@@ -1423,6 +1483,7 @@ lamps light at dusk, and a caravan of laden camels walking single file out acros
 - **Sound:** `caravan` (camel bells clonking out of step, footfalls and a grumble), on the camels.
 - **LOD:** near 1500 m, mid 4500 m, far 11 km. **Discovery:** 2 km, in view.
 - **Lifetime:** a site; removed beyond 11 + 2 km.
+- **Journal:** "Desert oasis"; WREN has 3 callout lines.
 
 #### 59. Labyrinth
 
@@ -1442,6 +1503,7 @@ its heart.
 - **Sound:** `waterfall` as the fountain, soft and close (level 0.3, reference distance 25 m).
 - **LOD:** near 1500 m, mid 5000 m, far 11 km. **Discovery:** 1.8 km, in view.
 - **Lifetime:** a site; removed beyond 11 + 2 km.
+- **Journal:** "Labyrinth"; WREN has 3 callout lines.
 - **Achievement:** `heartOfTheMaze`, "Heart of the Maze": fly low through the clearing at its heart.
 
 #### 60. Fireball impact
@@ -1466,6 +1528,7 @@ smoke lit from below.
 - **Sound:** `fireball` (the roar rising as it comes, the `boom`, then the scar crackling).
 - **LOD:** near 4 km, mid 14 km, far 30 km. **Discovery:** 9 km, in view.
 - **Lifetime:** 150-210 s; despawned beyond 30 + 4 km after 30 s out of view.
+- **Journal:** "Fireball impact"; WREN has 3 callout lines.
 ### Night and celestial (Phase 3, 61-65)
 
 #### 61. Blood moon
@@ -1482,11 +1545,14 @@ darkens while the stars brighten.
   own part starts at the override's half weight and ends with it.
 - **Engines:** `celestial` (`lunarEclipse`: the copper halo and the bright umbral limb; a `sky`
   modifier raising the stars at night; sky-anchored, 30 s fades).
-- **Filters:** any biome; dusk or night; any weather, surface and altitude; 2-6 km ahead.
+- **Filters:** never tested: the override starts the spawn 3 km ahead on the ground track (the
+  file's any biome, dusk or night, any weather, surface and altitude, 2-6 km ahead go unused).
 - **Wind:** none.
 - **Sound:** `skyShimmer` (a low, dark shimmer: base 98 Hz, brightness 0.15).
 - **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, in view.
-- **Lifetime:** the night (the override ends it); 1500-2100 s caps a frozen night clock.
+- **Lifetime:** the night (the override ends it); 1500-2100 s caps a frozen night clock; despawned
+  beyond 20 + 3 km after 60 s out of view.
+- **Journal:** "Blood moon"; WREN has 3 callout lines.
 
 #### 62. Green flash
 
@@ -1497,11 +1563,15 @@ a detached green sliver show on it, and as it vanishes a brief green flash fires
 - **Kind:** event, uncommon.
 - **Engines:** `celestial` (`greenFlash`: only toward an open-ocean horizon, sampled toward the sun
   once a second; an activation in the morning or after sunset ends at create; sky-anchored at the sun).
-- **Filters:** any biome; dusk; clear or clearing weather; over water; below 3 km; 2-8 km ahead.
+- **Filters:** any biome; dusk; clear or clearing weather; over water; player 0-3000 m; 2-8 km
+  ahead.
+- **Candidates:** 6 km cells, 600 s buckets, chance 0.5.
 - **Wind:** none.
 - **Sound:** `skyShimmer` (its `flash` trigger rings as the flash fires).
 - **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, in view.
-- **Lifetime:** 600-900 s; it ends 8 s after the sun has gone.
+- **Lifetime:** 600-900 s; it ends 8 s after the sun has gone; despawned beyond 20 + 3 km after 30 s
+  out of view.
+- **Journal:** "Green flash"; WREN has 3 callout lines.
 
 #### 63. Noctilucent clouds
 
@@ -1514,10 +1584,12 @@ the sun's azimuth: ice at the edge of space, still in sunlight while the sun is 
   event waits for the sun's window and ends once the sun has sunk past it; sky-anchored).
 - **Filters:** snow, pine, meadows or archipelago; dusk; clear or clearing weather; any surface and
   altitude; 2-8 km ahead.
+- **Candidates:** 6 km cells, 600 s buckets, chance 0.45.
 - **Wind:** none.
 - **Sound:** `skyShimmer` (a glassy, high shimmer).
 - **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, in view.
-- **Lifetime:** 600-900 s.
+- **Lifetime:** 600-900 s; despawned beyond 20 + 3 km after 30 s out of view.
+- **Journal:** "Noctilucent clouds"; WREN has 3 callout lines.
 
 #### 64. Milky Way core
 
@@ -1531,10 +1603,13 @@ desert, fainter under a bright moon or cloud.
   until dawn; sky-anchored at the core).
 - **Filters:** dunes, meadows, snow or pine; night; clear weather; any surface and altitude; 2-8 km
   ahead.
+- **Candidates:** 6 km cells, 900 s buckets, chance 0.5.
 - **Wind:** none.
 - **Sound:** `skyShimmer` (a deep, slow shimmer).
 - **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, in view.
-- **Lifetime:** until dawn; 600-900 s caps a frozen night clock.
+- **Lifetime:** until dawn; 600-900 s caps a frozen night clock; despawned beyond 20 + 3 km after
+  30 s out of view.
+- **Journal:** "Milky Way core"; WREN has 3 callout lines.
 
 #### 65. Moonbow
 
@@ -1545,13 +1620,15 @@ edges, with a faint secondary bow and a veil of moonlit mist rising from the plu
 - **Kind:** event, uncommon.
 - **Engines:** `celestial` (`rainbow` with `light: 'moon'`, seen with the moon behind the viewer) and
   `emitter` (the moonlit mist).
-- **Filters:** any biome; night; clear or clearing weather; below 5 km; 1.5-12 km ahead;
+- **Filters:** any biome; night; clear or clearing weather; player 0-5000 m; 1.5-12 km ahead;
   `near: { sites: ['megaWaterfall'], radius: 15000 }` moves the candidate onto the nearest placed
   mega-waterfall, facing the way the falls do (none in reach, no moonbow).
+- **Candidates:** 6 km cells, 900 s buckets, chance 0.6.
 - **Wind:** none (the falls keep their own).
 - **Sound:** `skyShimmer` (a soft night shimmer; the falls keep their roar).
 - **LOD:** near 1.8 km, mid 6 km, far 16 km. **Discovery:** 3 km, in view.
-- **Lifetime:** 480-720 s.
+- **Lifetime:** 480-720 s; despawned beyond 16 + 3 km after 30 s out of view.
+- **Journal:** "Moonbow"; WREN has 3 callout lines.
 
 ### Fantasy (Phase 3, 66-70)
 
@@ -1572,6 +1649,7 @@ drift in the canopy at night, the leaves rustle and the limbs groan.
 - **Sound:** `canopy` (rustle and groans growing with the approach; a `creak` now and then).
 - **LOD:** near 3 km, mid 12 km, far 50 km. **Discovery:** 6 km, in view.
 - **Lifetime:** a site; despawned beyond 50 + 4 km after 30 s out of view.
+- **Journal:** "World tree"; WREN has 3 callout lines.
 
 #### 67. Portal ring
 
@@ -1592,7 +1670,7 @@ balloon drifts, as its situate hook places it) and the journal logs the world.
 - **Sound:** `portal` (a beating hum with the approach; a `surge` as you cross).
 - **LOD:** near 1.5 km, mid 5 km, far 12 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; despawned beyond 12 + 2 km after 20 s out of view.
-- **Journal:** `worldsVisited` (the typed `worldVisited`).
+- **Journal:** "Portal ring"; WREN has 3 callout lines; `worldsVisited` (the typed `worldVisited`).
 
 #### 68. Sleeping stone giant
 
@@ -1616,6 +1694,7 @@ breathes, with a deep rush and a grinding snore.
 - **LOD:** near 3 km, mid 9 km, far 30 km (the figure is terrain at every distance). **Discovery:**
   5 km, in view.
 - **Lifetime:** a site; despawned beyond 30 + 3 km after 30 s out of view.
+- **Journal:** "Sleeping stone giant"; WREN has 3 callout lines.
 
 #### 69. Ghost galleon
 
@@ -1629,13 +1708,14 @@ A flame (the dragon's breath) lights its lanterns warm, one by one.
 - **Engines:** `structure` (`ghostGalleon`: the `ghost` part; a PathFollower loop 700 m above the sea
   or 160 m over the ground; moving capsule colliders for the hull, castle, bowsprit and masts (the
   sails are not solid); eleven ignitable lanterns; the `bell` voice trigger).
-- **Filters:** any biome; night; building or clearing weather (clouds about); any surface; 100 m-4 km up;
-  2.5-7 km ahead.
+- **Filters:** any biome; night; building or clearing weather (clouds about); any surface; player
+  100-4000 m; 2.5-7 km ahead.
 - **Candidates:** 8 km cells, 1200 s buckets, chance 0.4.
 - **Wind:** none.
 - **Sound:** `galleon` (rigging, timbers and choir with the approach; the bell every 14-28 s).
 - **LOD:** near 2.5 km, mid 8 km, far 20 km. **Discovery:** 3.5 km, in view.
 - **Lifetime:** 480-720 s; despawned beyond 14 + 3 km after 30 s out of view.
+- **Journal:** "Ghost galleon"; WREN has 3 callout lines.
 
 #### 70. Dragon racer
 
@@ -1657,7 +1737,8 @@ the finish earns "Out-flew the wild dragon".
 - **Sound:** `dragon` (wingbeats and breath following the dragon; a `roar` as the rival launches).
 - **LOD:** near 3 km, mid 8 km, far 16 km. **Discovery:** 3.5 km, in view.
 - **Lifetime:** a site; despawned beyond 16 + 2.5 km after 30 s out of view.
-- **Journal:** best times and medals per craft (the challenge system); the `dragonRival` achievement.
+- **Journal:** "Dragon racer"; WREN has 3 callout lines; best times and medals per craft (the
+  challenge system); the `dragonRival` achievement.
 ### Fantasy (Phase 3, presets 71-72)
 
 #### 71. Reverse waterfall
@@ -1686,6 +1767,7 @@ glider can ride.
 - **Sound:** `waterfall` (the roar).
 - **LOD:** near 2200 m, mid 7000 m, far 16 km. **Discovery:** 3.5 km, in view.
 - **Lifetime:** a site; removed beyond 16 + 3 km.
+- **Journal:** "Reverse waterfall"; WREN has 3 callout lines.
 - **Tags:** water, thermal, spectacle.
 
 #### 72. Forest wisps
@@ -1710,6 +1792,7 @@ shimmer and ting softly and light the treetops around them.
 - **Sound:** `wisps` (a glassy shimmer with tings).
 - **LOD:** near 800 m, mid 3000 m, far 9 km. **Discovery:** 700 m, in view.
 - **Lifetime:** 420-600 s, easing out over 8 s; despawned beyond 9 + 2 km after 30 s out of view.
+- **Journal:** "Forest wisps"; WREN has 3 callout lines.
 - **Tags:** night, forest, spectacle, slow.
 
 ### Flight-play (Phase 3, presets 73-80)
@@ -1734,6 +1817,7 @@ holds a glider up for kilometres.
 - **Sound:** `raptor` (pitch 0.95: the hawks' calls every 20-45 s).
 - **LOD:** near 2500 m, mid 9000 m, far 20 km. **Discovery:** 4 km, in view.
 - **Lifetime:** a site; removed beyond 20 + 3 km.
+- **Journal:** "Ridge lift band"; WREN has 3 callout lines.
 - **Tags:** thermal, calm, spectacle.
 
 #### 74. Wind shear line
@@ -1757,6 +1841,7 @@ forty-five degrees or more and nearly doubles, with a band of chop right at the 
 - **Sound:** `windRush` (gusty, reference distance 600 m).
 - **LOD:** near 6 km, mid 16 km, far 40 km. **Discovery:** 7 km, in view.
 - **Lifetime:** 480-660 s; despawned beyond 25 + 4 km after 30 s out of view.
+- **Journal:** "Wind shear line"; WREN has 3 callout lines.
 - **Tags:** spectacle.
 
 #### 75. Thermal street
@@ -1780,6 +1865,7 @@ straight road of lift for cross-country gliding.
 - **Sound:** `windRush` (soft, reference distance 900 m).
 - **LOD:** near 5 km, mid 14 km, far 32 km. **Discovery:** 8 km, in view.
 - **Lifetime:** 600-840 s; despawned beyond 22 + 4 km after 30 s out of view.
+- **Journal:** "Thermal street"; WREN has 3 callout lines.
 - **Tags:** thermal, calm, spectacle.
 
 #### 76. Canyon gauntlet
@@ -1804,6 +1890,7 @@ every gate gives a split against your best, and the finish earns a medal.
 - **Sound:** `windRush` (a 240 Hz moan in the canyon).
 - **LOD:** near 2000 m, mid 7000 m, far 15 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 15 + 3 km.
+- **Journal:** "Canyon gauntlet"; WREN has 3 callout lines.
 - **Tags:** challenge, desert.
 
 #### 77. Cave tunnel
@@ -1827,6 +1914,7 @@ portal, lit by lanterns along its walls. The run threads the bore against the cl
 - **Sound:** `windRush` (a 72 Hz moan in the bore, reference distance 160 m).
 - **LOD:** near 2500 m, mid 7000 m, far 16 km. **Discovery:** 3 km, in view.
 - **Lifetime:** a site; removed beyond 16 + 3 km.
+- **Journal:** "Cave tunnel"; WREN has 3 callout lines.
 - **Tags:** challenge, perch.
 - **Build:** three-mesh-bvh resolves `three` to the game's own copy: the production bundle holds one
   three.js core (one `Multiple instances` guard).
@@ -1855,6 +1943,7 @@ along the wall.
 - **Sound:** `waterfall` (reference distance 220 m).
 - **LOD:** near 2000 m, mid 6500 m, far 16 km. **Discovery:** 3 km, in view.
 - **Lifetime:** a site; removed beyond 16 + 3 km.
+- **Journal:** "Waterfall wall"; WREN has 3 callout lines.
 - **Tags:** challenge, water, spectacle.
 
 #### 79. Balloon festival
@@ -1878,6 +1967,7 @@ field.
 - **Sound:** `burner` (propane bursts by turns over a breeze).
 - **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 3 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2.5 km.
+- **Journal:** "Balloon festival"; WREN has 3 callout lines.
 - **Tags:** challenge, spectacle, calm, slow.
 
 #### 80. Kite-string slalom
@@ -1904,6 +1994,7 @@ and right of them. Brushing a string counts as a miss, never a crash.
 - **Sound:** `windRush` (with `flutter`: the kites snapping in the wind).
 - **LOD:** near 1800 m, mid 5000 m, far 12 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 12 + 2.5 km.
+- **Journal:** "Kite-string slalom"; WREN has 3 callout lines.
 - **Tags:** challenge, spectacle.
 ### Flight-play and biome set pieces (presets 81-90)
 
@@ -1935,6 +2026,7 @@ thread all five against the clock, with splits, medals and a best time per craft
 - **Sound:** `stoneWind` at pitch 0.8 (hollow moans through the stone, rising with the wind).
 - **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2 km.
+- **Journal:** "Five-Arch Chain"; WREN has 3 callout lines.
 
 #### 82. Cherry blossom valley
 
@@ -1954,6 +2046,7 @@ petals off the canopy in a swirling pink storm.
 - **Sound:** `rustle` with chirps (the leaves in the wind, small birds).
 - **LOD:** near 2500 m, mid 7000 m, far 16 km. **Discovery:** 3 km, in view.
 - **Lifetime:** a site; removed beyond 16 + 2 km.
+- **Journal:** "Cherry Blossom Valley"; WREN has 3 callout lines.
 
 #### 83. Autumn colour wave
 
@@ -1974,6 +2067,7 @@ the ground and the broadleaf crowns while leaves twist down from the canopy.
 - **Sound:** `rustle` with a few creaks and chirps.
 - **LOD:** near 2500 m, mid 7000 m, far 18 km. **Discovery:** 3.5 km, in view.
 - **Lifetime:** a site; removed beyond 18 + 2 km.
+- **Journal:** "Autumn Colour Wave"; WREN has 3 callout lines.
 
 #### 84. Lavender and tulip stripes
 
@@ -1993,6 +2087,7 @@ tulips in red, yellow, pink and white bands, with pollen drifting over them and 
 - **Sound:** `meadowHum` (a drone of bees, now and then one flying past).
 - **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2 km.
+- **Journal:** "Lavender and Tulip Stripes"; WREN has 3 callout lines.
 
 #### 85. Rice terraces
 
@@ -2014,6 +2109,7 @@ dawn a mist lies in the steps.
 - **Sound:** `marsh` with trickle (water running from paddy to paddy, frogs, insects).
 - **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2 km.
+- **Journal:** "Rice Terraces"; WREN has 3 callout lines.
 
 #### 86. Redwood giants
 
@@ -2033,6 +2129,7 @@ drifting down through the light.
 - **Sound:** `rustle` with creaks (the great trunks groaning).
 - **LOD:** near 2500 m, mid 7000 m, far 16 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 16 + 2 km.
+- **Journal:** "Redwood Giants"; WREN has 3 callout lines.
 
 #### 87. Badlands hoodoos
 
@@ -2052,6 +2149,7 @@ gathered in clusters with lanes between them.
 - **Sound:** `stoneWind` at pitch 1.25.
 - **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2 km.
+- **Journal:** "Badlands Hoodoos"; WREN has 3 callout lines.
 
 #### 88. Mangrove delta
 
@@ -2075,6 +2173,7 @@ on their roots across them; a mist lies low at dawn and fireflies blink at night
 - **Sound:** `marsh` (water lapping at the roots, frogs, insects).
 - **LOD:** near 2500 m, mid 7000 m, far 16 km. **Discovery:** 3 km, in view.
 - **Lifetime:** a site; removed beyond 16 + 2 km.
+- **Journal:** "Mangrove Delta"; WREN has 3 callout lines.
 
 #### 89. Cactus forest with dust devils
 
@@ -2094,6 +2193,7 @@ A forest of tall saguaros on warm desert ground, with two dust devils wandering 
 - **Sound:** `tornado` at a low intensity (the hiss and whirl of sand), reference distance 60 m.
 - **LOD:** near 2000 m, mid 5000 m, far 12 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 12 + 2 km.
+- **Journal:** "Cactus Forest"; WREN has 3 callout lines.
 
 #### 90. Bamboo forest
 
@@ -2113,6 +2213,7 @@ across it as a ripple, knocking hollow wood against wood.
 - **Sound:** `rustle` with knocks.
 - **LOD:** near 2000 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2 km.
+- **Journal:** "Bamboo Forest"; WREN has 3 callout lines.
 ### Frozen lake and the legendary combos (91-100)
 
 Preset 91 closes the biome set pieces; 92-97, 99 and 100 are the legendary combos the director
@@ -2143,6 +2244,7 @@ falling chirps and booms as it strains.
   you close in; `crack`).
 - **LOD:** near 1500 m, mid 5000 m, far 12 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 12 + 2 km.
+- **Journal:** "Frozen lake"; WREN has 4 callout lines.
 
 #### 92. Aurora and meteor shower
 
@@ -2161,6 +2263,7 @@ shower rains through the curtains.
 - **Sound:** `aurora` (an airy shimmer and a silky rustle); the shower's own `meteor` voice.
 - **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, not needing a view.
 - **Lifetime:** 300-420 s, or until dawn; despawned beyond 20 + 3 km after 30 s out of view.
+- **Journal:** "Aurora and meteor shower"; WREN has 4 callout lines.
 
 #### 93. Volcano, lightning and aurora
 
@@ -2175,12 +2278,13 @@ while the aurora burns overhead.
 - **Engines:** `lightEffect` (a dirty thunderstorm in the ash: 24 strikes a minute within 650 m,
   2300 m up the column, 30 % to the ground, a warm cloud glow, thunder); `celestial` (sky-anchored,
   `aurora: 1`; owns the voice).
-- **Filters:** snow; night; clear, clearing or building; over land; player below 9 km; 3-30 km.
+- **Filters:** snow; night; clear, clearing or building; over land; player 0-9000 m; 3-30 km ahead.
 - **Candidates:** 9 km cells, 600 s buckets, chance 0.6.
 - **Wind:** none of its own (the volcano's column).
 - **Sound:** `aurora`; thunder through the audio engine; the volcano's own rumble.
 - **LOD:** near 3 km, mid 12 km, far 45 km. **Discovery:** 12 km, in view.
 - **Lifetime:** 300-400 s; despawned beyond 40 + 5 km after 30 s out of view.
+- **Journal:** "Volcano, lightning and aurora"; WREN has 4 callout lines.
 
 #### 94. Double rainbow over whales
 
@@ -2194,12 +2298,13 @@ breaching underneath.
 - **Engines:** `celestial` (a `rainbow` in a 2400 m sphere of mist around the pod, 250 m up, the
   secondary bow at full); `weatherVolume` (a shower cumulus 1100 m up with a rain curtain 1.5 km
   beyond; no wind of its own; owns the voice).
-- **Filters:** any biome; golden; clearing or building; coast; player below 2500 m; 3-8 km ahead.
+- **Filters:** any biome; golden; clearing or building; coast; player 0-2500 m; 3-8 km ahead.
 - **Candidates:** 7 km cells, 900 s buckets, chance 0.4.
 - **Wind:** none.
 - **Sound:** `waterfall` as the shower's hiss; the pod's `whale` song.
 - **LOD:** near 4 km, mid 12 km, far 30 km. **Discovery:** 5 km, in view.
 - **Lifetime:** 300-420 s; despawned beyond 14 + 3 km after 30 s out of view.
+- **Journal:** "Double rainbow over whales"; WREN has 4 callout lines.
 
 #### 95. Eclipse over the monoliths
 
@@ -2218,6 +2323,7 @@ wakes among the standing stones and the stones hum.
 - **Sound:** `crystal` tuned down to E2 (82.4 Hz), a low drone swelling on approach.
 - **LOD:** near 1500 m, mid 4 km, far 12 km. **Discovery:** 4 km, not needing a view.
 - **Lifetime:** 160-180 s; despawned beyond 20 + 3 km after 30 s out of view.
+- **Journal:** "Eclipse over the monoliths"; WREN has 4 callout lines.
 
 #### 96. Comet breakup
 
@@ -2237,6 +2343,7 @@ their own tails while debris streaks across the sky.
 - **Sound:** `meteor` (a sizzle per bright streak, a boom per fireball).
 - **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, in view.
 - **Lifetime:** 360-480 s; despawned beyond 20 + 3 km after 30 s out of view.
+- **Journal:** "Comet breakup"; WREN has 4 callout lines.
 
 #### 97. Migration convergence
 
@@ -2252,13 +2359,14 @@ fluff they stir up.
   at 70 degrees, 10 s later: the grazing bison, which stampede when buzzed); exclusive.
 - **Engines:** `emitter` (3000 motes of warm dust and seed fluff over a 650 m disc of the valley floor,
   drifting on the real wind; owns the voice).
-- **Filters:** meadows or pine; day or golden; clear or clearing; over land; player below 3 km;
+- **Filters:** meadows or pine; day or golden; clear or clearing; over land; player 0-3000 m;
   3-8 km ahead.
 - **Candidates:** 7 km cells, 900 s buckets, chance 0.4.
 - **Wind:** none.
 - **Sound:** `murmuration` (the rush of many wings); the geese's honking.
 - **LOD:** near 2 km, mid 5 km, far 10 km. **Discovery:** 3 km, in view.
 - **Lifetime:** 360-480 s; despawned beyond 12 + 3 km after 25 s out of view.
+- **Journal:** "Migration convergence"; WREN has 4 callout lines.
 
 #### 98. Midnight sun
 
@@ -2270,10 +2378,14 @@ A night over the snow when the sun never sets, skimming the northern horizon in 
   so it stays 1.5 degrees up at midnight; `state.time` follows it.
 - **Engines:** `celestial` (sky-anchored; a warm amber over the sky and the haze, eased in and out;
   owns the voice), started once a night from half weight and ended with the override.
+- **Filters:** never tested: the override starts the spawn 3 km ahead on the ground track (the
+  file's snow, any hour, weather, surface and altitude, 3-8 km ahead go unused).
 - **Wind:** none.
 - **Sound:** `lantern` (a soft ambient pad).
 - **LOD:** near 4 km, mid 12 km, far 40 km. **Discovery:** 3 km, not needing a view.
-- **Lifetime:** with the override (1800-2400 s caps it).
+- **Lifetime:** with the override (1800-2400 s caps it); despawned beyond 40 + 5 km after 60 s out of
+  view.
+- **Journal:** "Midnight sun"; WREN has 4 callout lines.
 
 #### 99. Resonating crystal spires
 
@@ -2294,6 +2406,7 @@ spires glow brighter and lightning strikes into the grove.
 - **Sound:** `crystal` at D3 (146.8 Hz), at full intensity, a chime per arc; thunder.
 - **LOD:** near 2500 m, mid 8 km, far 20 km. **Discovery:** 4 km, in view.
 - **Lifetime:** 240-360 s; despawned beyond 16 + 3 km after 30 s out of view.
+- **Journal:** "Resonating crystal spires"; WREN has 4 callout lines.
 
 #### 100. Lighthouse beacons
 
@@ -2314,6 +2427,7 @@ coast, a flare in each lantern and a foghorn each.
   note each).
 - **LOD:** near 3 km, mid 10 km, far 30 km. **Discovery:** 6 km, in view.
 - **Lifetime:** 240-360 s; despawned beyond 30 + 4 km after 30 s out of view.
+- **Journal:** "Lighthouse beacons"; WREN has 4 callout lines.
 
 
 ## Adding a preset
