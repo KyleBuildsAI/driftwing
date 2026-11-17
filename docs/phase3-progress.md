@@ -1634,15 +1634,16 @@ Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file
 
 ### Wave 3 review (on `v2-phase3`)
 
-Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed five findings.
+Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed five findings. All five
+are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 
 - **Fixed:**
-  - S1-01, the sea arches (45): the lintel's underside sagged to its lowest point at mid-span and the
+  - S1-01 (`09adcd4`), the sea arches (45): the lintel's underside sagged to its lowest point at mid-span and the
     fly-through gate's top lay inside the centre lintel box. The underside now springs from the legs
     `rise` below the crown and curves up to it, the lintel is `thickness` thick at its crown, and the
     gate's top sits 1 m under the lowest lintel box over the opening (300 random arches: 0 boxes
     over the gate below its top + 1 m; the crown's box bottom at least 2.2 m above the gate edge's).
-  - S1-02, the lava rivers to the sea (36) ignored the spec's "volcano near coast": placement gains an
+  - S1-02 (`cdc46bd`), the lava rivers to the sea (36) ignored the spec's "volcano near coast": placement gains an
     optional `near { presets, radius }` (src/world/placement.js: checked right after the relief, so
     rule 6 only weighs candidates that could stand, and rule 8 needs one of those near sites placed;
     a named preset cannot have a near of its own, so nothing recurses; schema and docs list it). The
@@ -1652,7 +1653,7 @@ Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed fiv
     km from any volcano); 1 lava site per 7-8 volcanoes within 200 km on DRIFTWING, HARNESS-1 and
     TERRAIN-ALL-35. Terrain lab 780/780 (the new near checks; the lava's per-site checks now run on
     its one DRIFTWING site).
-  - S2-1, the portal ring (67) kept the place, height, heading and speed but dropped the craft's own
+  - S2-1 (`b92fea1`), the portal ring (67) kept the place, height, heading and speed but dropped the craft's own
     state, throttle and attitude (a tiltrotor at 110 m/s arrived with its nacelles at the boot's 90
     degrees, a hot balloon at the boot's 77 C). The flight controller gains `captureFlight()` (plain
     data: the craft, pose, pitch, airspeed, throttle and the craft's own plain state fields; nested
@@ -1664,7 +1665,7 @@ Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed fiv
     balloon drifts at 104.7 C, still climbing; a glider keeps 20 degrees of pitch and its ballast;
     foreign or nested state is not taken); the presets 61-70 arrival check now also requires the
     craft and its state (the glider's ballast set to 0.35 before the crossing).
-  - E-1, contract a.7: the structure engine's instanced pools (the wave 3 lanterns, torch flames,
+  - E-1 (`135b635`), contract a.7: the structure engine's instanced pools (the wave 3 lanterns, torch flames,
     blocks and steam, and the Phase 2 mist, nacelles, rotors and windsocks) held absolute world
     translations in float32 on meshes at the scene origin (14 mm off 400 km out). `createInstancedPool`
     takes an optional `origin` (pattern 2: the mesh at `origin.offset`, `setMatrix` subtracts it in
@@ -1672,7 +1673,7 @@ Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed fiv
     allocation-free; dispose unsubscribes); all seven structure pools use it and the engine's one
     direct writer (`writeTransform`) writes relative to the anchor. Origin lab 36/36 (a new `pools`
     group: 0.06 mm 400 km out, 0.43 mm after a rebase, 0 B over 1000 rebases of a 256-slot pool).
-  - E-2, the director's `filters.near.active` path (the dirty thunderstorm, 35) skipped the near
+  - E-2 (`a96c493`), the director's `filters.near.active` path (the dirty thunderstorm, 35) skipped the near
     cache and built two objects per candidate every 0.5 s tick while a volcano erupted within 8 km.
     The active answer is now written into one reused point (and `activeSiteNear` into one scratch),
     the cache keeps it only for the rejection's null test, and a near.active preset's landmark part
@@ -1680,6 +1681,45 @@ Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed fiv
     (the near group: 2 starts, 3 eruptions, 0 off an erupting volcano). The saving (two small objects
     per candidate per tick) is too small to show against the lab's stub manager in a heap probe, so
     the evidence is the code path: no object literal is left on it.
+- **Skipped:** none.
+- **Verification** (owner's rule: each check run once, numbers reported, frame times not chased;
+  `v2-phase3` at `a96c493`; dev servers on ports from `findFreePort`, one Chrome at a time):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `npm run build:single`, `npm run test:v1`, `node tools/docs-check.mjs` | built, no warnings; V1 SHA-256 matches; 2/2; 536/536 | - |
+  | three.js | 0.184.0 pinned; the V2 bundle holds one `Multiple instances` guard, REVISION 184 | - |
+  | Labs the fixes touch (node, `--expose-gc`) | craft 89 (new `carry` group), origin 36 (new `pools` group), terrain 780 (new near checks), director 90, director `--presets real` 6, preset-pacing 6 (2419 s), spawns 101, structure 75, colliders 84, flight-lab 82, tiltrotor 41, balloon 66, aerobatic 81, airship 47, seaplane 113, paraglider 45, spaceplane 24, jet 60, helicopter 46, fpv 87, wingsuit 37, presets-51-60 117, presets-71-80 61, setpiece 47, challenges 70, discovery 43, copilot 240: all pass; eagle 49/50 (its known allocation check); water 33/34 in two runs (its `heightAt` cost check, 1.29 and 1.11 us against 1 us; 34/34 in a run between them) | - |
+  | `tools/steps/presets-41-50.json` (sea arches; P3-B5-37) | 51/51, 0/0 (the arch gate pass and the lintel strike pass; the arches' openings rise to the crown in `p45-sea-arch.png`) | 51/51, 0/0 |
+  | `tools/steps/presets-31-40.json` (lava rivers, dirty thunderstorm; DRIFTWING) | 68/68, 0/0 (the lava rivers on their real site 21 km out, 6 km from its volcano: facts, colliders, sea entries) | 68/68, 0/0 |
+  | `tools/steps/presets-61-70.json` (portal ring) | the generic kit 29/29, the arrival PASS (the glider and its ballast 0.35 came through), the batch kit 14/15; 2 console errors, both the sleeping giant's figure check (`top` null: the downward sweep met no figure; it failed the same way on WebGL2 in two pre-review runs and passed on WebGPU there) | 29/29, every batch check and the arrival PASS (ballast 0.35 kept), 0/0 (the giant's top 418.6 m) |
+  | `tools/steps/origin-rebase.json` (E-1) | 10/10, 0/0 | 10/10, 0/0 |
+  | `tools/steps/engine-structure.json` (E-1: turbines, windsocks, mist) | 20/20, 0/0 (the wind farm's nacelles and rotors on their towers) | 20/20, 0/0 |
+  | `run-harness --test determinism` | PASS: site list 7bd3bc81ef4602ed (changed by S1-02, as expected), water 61f315c9, director log c9c91732 (3 activations, unchanged), path 27c9fb37, spawn events 3e0f9f16 | FAIL on the evidence check only: spawn events 6a0f08b3 / 3e0f9f16, the one difference a whale pod's range end one frame apart (9236 / 9235); site list, water, director log and path identical to WebGPU |
+  | `run-harness --test collision` (S1-01 changed the lintel colliders) | PASS: 155/155 strikes, 16/16 types and structures, 0 pass-throughs, 0 probes inside, arch threaded, 15/15 kite misses, one three.js core, 0/0 | PASS, same |
+  | `run-harness --test spawns` (all 100: every structure pool, the lava rivers, the arches, the portal ring) | PASS 100/100 on every criterion, 0/0, 2203 s (the labyrinth's blocks, the galleon's lanterns and the wind farm's rotors in place in their screenshots) | PASS 100/100 on every criterion, 0/0, 2578 s (the first run's navigation of its cold dev server timed out at 120 s, no report; this is the rerun) |
+  | `run-harness --test craft --crafts tiltrotor,balloon` (S2-1 touched the flight controller) | 21/21 runs flown, 4/4 general, 0 NaN, 0 penetrations, 0/0; checks 71/81 and 3 soft crashes, all balloon scenarios (landing, burner lag, drift start, wind layer). The same subset on the pre-review commit `7c3e9f3` (WebGPU): 72/81 and the same 3 soft crashes in the same scenarios; balloon-landing alone on `a96c493`: 8/8, 0 soft crashes. A run-order effect of this subset, not the fixes | 73/81, 3 soft crashes, the same balloon scenarios |
+  | Built `dist-single/v2` and `dist-single/index.html` smoke | PASS: V2 and the shell load, 0 errors, 0 warnings, the frames move | PASS, same |
+
+  The lead's full WebGL2 craft harness on `7c3e9f3` (the run the I3 table left open): 96/96 runs flown
+  as planned, 28/28 general, 0 NaN, 0 penetrations, 0 soft crashes, 0/0; checks 375/386:
+  balloon-wind-layer in both views and eagle-find-perch in first person (as on WebGPU),
+  spaceplane-climb in first person (the continuity check saw fewer than 10 rebase frames; a far-field
+  tile missing above 11 km) and spaceplane-reentry in third person (not down to 3 km, the load over
+  6.5 g, a far-field tile missing above 11 km).
+- **Open issues (reported, not chased):**
+  - the lava rivers now stand only near a volcano by the sea, so most worlds have none within 90 km
+    of the start (DRIFTWING, HARNESS-1 and SOAK-1 one each; TERRAIN-ALL-35 and UGTZV7 none); its
+    rarity label stays `uncommon` (the director's tier when one is in range), which the owner may
+    want to revisit;
+  - the director's near.active saving is proven by the code path, not by a heap measurement;
+  - a balloon run after the tiltrotor in a `--crafts tiltrotor,balloon` subset meets the same soft
+    crashes before and after the review (above); balloon-landing alone passes;
+  - the sleeping giant's figure check (presets 61-70) misses its downward sweep on some random seeds
+    (one WebGPU run here, two earlier WebGL2 runs);
+  - the WebGL2 craft harness's spaceplane-climb and spaceplane-reentry misses (the far-field tiles
+    above 11 km, the re-entry depth and load) belong to Milestone P's craft run;
+  - the determinism harness's spawn-event evidence can differ by a frame on WebGL2 (a range end).
 
 ### Wave 4: discovery and verification, then the tag
 
@@ -1753,7 +1793,7 @@ Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed fiv
 Waves 1, 2 and 3 are done: the 100 presets (31-100 in seven batches) are merged into `v2-phase3` in
 spec order, wired across batches and verified on both backends (the I3 subsection above). Not tagged yet: `v2-phase3` is tagged at the end of the phase.
 
-Next: **the wave 3 review**, then **wave 4**: Milestone O (`p3/discovery`: the journal x / 100, flight
+Next (the wave 3 review is done, see its subsection): **wave 4**: Milestone O (`p3/discovery`: the journal x / 100, flight
 time per craft, figures, medals, worlds visited, perches, max altitude; the copilot grammar and its
 keyboard / UI equivalents; the remote `flightState` craft fields; the docs) and Milestone P
 (`p3/verify`: the verify loop, `?test=spawns` with 100 presets, `?test=craft`, collision,
@@ -1763,6 +1803,10 @@ checklist). The wave 3 worktrees under `.claude/worktrees/p3-presets-*` are remo
 
 ## Open issues
 
+- **Wave 3 review leftovers:** see the review subsection (open issues there): the lava rivers' rarity
+  now that they need a volcano by the sea, the balloon subset's run-order soft crashes, the sleeping
+  giant's sweep on some seeds, the WebGL2 spaceplane craft misses, a one-frame spawn-event difference
+  in the determinism evidence.
 - **Wave 3 integration leftovers:** see the I3 subsection (open issues there): the WebGL2
   origin-rebase high image check failed once and passed on two reruns; the flamingo checks
   depend on the random seed's shore; the craft harness's three scenarios that miss checks in the full
