@@ -1578,7 +1578,11 @@ are implemented here. The preset schema (section 1) and the 30 presets are in [s
   `maxRealLights`, `lightsLimit`, `lightsActive`, `engines` (every engine's live `{ instances,
   particles }` caps), `instanceLimit(name)`, `instances(name)`, `particleLimit(name)`,
   `particles(name)`); the director reads this same view, so the two never disagree; `pools` has `scratch` (Vector3 / Quaternion / Matrix4 / Color rings),
-  `createSlotAllocator`, `createObjectPool`, `createInstancedPool` and `createMeshPool`; `spawns` is
+  `createSlotAllocator`, `createObjectPool`, `createInstancedPool` and `createMeshPool`
+  (`createInstancedPool({ ..., origin })` anchors the pool at the render origin, contract a.7 pattern
+  2: the mesh stands at `origin.offset`, `setMatrix` takes world matrices and stores them relative to
+  it, direct buffer writes subtract `pool.anchor`, and a rebase moves every drawn slot back by the
+  delta; the structure engine's seven instanced pools use it); `spawns` is
   the SpawnManager (the setPiece engine orchestrates through it). `registerPrewarm(object3D)` (null in the headless
   lab) registers a mesh from `init()` for core's pipeline prewarm, so it is drawn once behind the
   loading fade: the first spawn costs no pipeline build, and lazily counted geometries are in the

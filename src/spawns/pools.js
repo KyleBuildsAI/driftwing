@@ -126,8 +126,15 @@ export function createObjectPool(factory, { reset = null, prefill = 0, limit = I
  * construction and added to parent (if given). dispose(options) removes it and frees its instance
  * buffers, and the geometry and material too unless options.keepGeometry / options.keepMaterial
  * (shared resources) say otherwise; with a kept material, see the note on pooling at the top.
+ *
+ * With `origin` (the render origin, src/core/origin.js) the pool is anchored by contract a.7 pattern 2:
+ * the mesh stands at origin.offset and the float32 instance matrices hold translations relative to it,
+ * so they stay precise however far the instances are from the world origin. setMatrix still takes
+ * WORLD matrices (it subtracts the anchor in float64 before the float32 store); code that writes the
+ * instance buffer directly subtracts `anchor` (the mesh position) itself. On a rebase the anchor moves
+ * with the origin and every drawn slot's translation moves back by the delta (allocation-free).
  */
-export function createInstancedPool(THREE, { geometry, material, capacity, name = 'instanced-pool', parent = null, colors = false }) {
+export function createInstancedPool(THREE, { geometry, material, capacity, name = 'instanced-pool', parent = null, colors = false, origin = null }) {
   const mesh = new THREE.InstancedMesh(geometry, material, capacity);
   mesh.name = name;
   mesh.frustumCulled = false;
@@ -148,21 +155,52 @@ export function createInstancedPool(THREE, { geometry, material, capacity, name 
   let matricesDirty = false;
   let colorsDirty = false;
   let disposed = false;
+  const anchor = mesh.position;
+  let unsubscribeRebase = null;
+  if (origin) {
+    anchor.copy(origin.offset);
+    unsubscribeRebase = origin.onRebase((delta) => {
+      anchor.copy(origin.offset);
+      const array = mesh.instanceMatrix.array;
+      for (let slot = 0; slot < slots.highWater; slot++) {
+        const base = slot * 16;
+        array[base + 12] -= delta.x;
+        array[base + 13] -= delta.y;
+        array[base + 14] -= delta.z;
+      }
+      if (slots.highWater > 0) mesh.instanceMatrix.needsUpdate = true;
+    });
+  }
+
+  /** Writes a world matrix into slot, relative to the anchor (subtracted before the float32 store). */
+  function writeMatrix(slot, matrix) {
+    const elements = matrix.elements;
+    const array = mesh.instanceMatrix.array;
+    const base = slot * 16;
+    for (let index = 0; index < 12; index++) array[base + index] = elements[index];
+    array[base + 12] = elements[12] - anchor.x;
+    array[base + 13] = elements[13] - anchor.y;
+    array[base + 14] = elements[14] - anchor.z;
+    array[base + 15] = elements[15];
+  }
 
   return {
     mesh,
     slots,
+    /** The world point the instance translations are relative to (the mesh position; 0 unanchored). */
+    anchor,
     alloc() {
       return slots.alloc();
     },
     free(slot) {
       if (!slots.free(slot)) return false;
-      mesh.setMatrixAt(slot, hidden);
+      writeMatrix(slot, hidden);
       matricesDirty = true;
       return true;
     },
+    /** Writes slot's WORLD matrix (anchored pools store it relative to the anchor). */
     setMatrix(slot, matrix) {
-      mesh.setMatrixAt(slot, matrix);
+      writeMatrix(slot, matrix);
       matricesDirty = true;
     },
     setColor(slot, color) {
@@ -184,6 +222,8 @@ export function createInstancedPool(THREE, { geometry, material, capacity, name 
     dispose({ keepGeometry = false, keepMaterial = false } = {}) {
       if (disposed) return;
       disposed = true;
+      if (unsubscribeRebase) unsubscribeRebase();
+      unsubscribeRebase = null;
       mesh.removeFromParent();
       // InstancedMesh.dispose() dispatches 'dispose', which frees the instance attribute buffers.
       mesh.dispose();

@@ -835,7 +835,6 @@ export function createStructureEngine() {
   /** Writes the steam puffs from the animate state (radius 0 or the far tier hides one). */
   function writeSteam(data) {
     const steam = data.moverState.steam;
-    const array = puffs.mesh.instanceMatrix.array;
     const drop = rigidCurvatureDrop(ctx, data.moverAnchor[0], data.moverAnchor[2]);
     for (let index = 0; index < data.steamSlots.length; index++) {
       const base = index * STEAM_STRIDE;
@@ -852,7 +851,7 @@ export function createStructureEngine() {
       transform[9] = 0;
       transform[10] = 0;
       transform[11] = radius;
-      writeTransform(array, data.steamSlots[index] * 16, transform);
+      writeTransform(puffs, data.steamSlots[index], transform);
     }
     markMatrices(puffs);
   }
@@ -935,7 +934,6 @@ export function createStructureEngine() {
     if (Math.abs(drop - data.torchDrop) < DROP_STEP && shown === data.torchShownWritten) return;
     data.torchDrop = drop;
     data.torchShownWritten = shown;
-    const array = flames.mesh.instanceMatrix.array;
     for (let index = 0; index < data.torchSlots.length; index++) {
       const base = index * 4;
       const size = shown === 1 && data.torchLit[index] === 1 ? data.torchLocal[base + 3] : 0;
@@ -951,7 +949,7 @@ export function createStructureEngine() {
       transform[9] = 0;
       transform[10] = 0;
       transform[11] = size;
-      writeTransform(array, data.torchSlots[index] * 16, transform);
+      writeTransform(flames, data.torchSlots[index], transform);
     }
     markMatrices(flames);
   }
@@ -994,7 +992,6 @@ export function createStructureEngine() {
     if (Math.abs(drop - data.blockDrop) < DROP_STEP && shown === data.blockShownWritten) return;
     data.blockDrop = drop;
     data.blockShownWritten = shown;
-    const array = blocks.mesh.instanceMatrix.array;
     const local = data.blockLocal;
     for (let index = 0; index < data.blockSlots.length; index++) {
       const base = index * 8;
@@ -1014,7 +1011,7 @@ export function createStructureEngine() {
       transform[9] = -sine * local[base + 5] * visible;
       transform[10] = 0;
       transform[11] = cosine * local[base + 5] * visible;
-      writeTransform(array, data.blockSlots[index] * 16, transform);
+      writeTransform(blocks, data.blockSlots[index], transform);
     }
     markMatrices(blocks);
   }
@@ -1353,10 +1350,14 @@ export function createStructureEngine() {
   // arrays) and matrices are written straight into the instanced meshes' buffers.
 
   /**
-   * Writes a column-major 4x4 transform into array at offset from source: [px, py, pz, then the x,
-   * y and z axis columns, each already scaled].
+   * Writes a column-major 4x4 transform into an instanced pool's slot from source: [px, py, pz (world),
+   * then the x, y and z axis columns, each already scaled]. The translation is stored relative to the
+   * pool's anchor (the render origin, contract a.7), subtracted in float64 before the float32 store.
    */
-  function writeTransform(array, offset, source) {
+  function writeTransform(pool, slot, source) {
+    const array = pool.mesh.instanceMatrix.array;
+    const anchor = pool.anchor;
+    const offset = slot * 16;
     array[offset] = source[3];
     array[offset + 1] = source[4];
     array[offset + 2] = source[5];
@@ -1369,9 +1370,9 @@ export function createStructureEngine() {
     array[offset + 9] = source[10];
     array[offset + 10] = source[11];
     array[offset + 11] = 0;
-    array[offset + 12] = source[0];
-    array[offset + 13] = source[1];
-    array[offset + 14] = source[2];
+    array[offset + 12] = source[0] - anchor.x;
+    array[offset + 13] = source[1] - anchor.y;
+    array[offset + 14] = source[2] - anchor.z;
     array[offset + 15] = 1;
   }
 
@@ -1426,8 +1427,6 @@ export function createStructureEngine() {
       targetRpm = settings.maxRpm * Math.pow(share, 0.6) * data.params.rotorSpeed;
     }
     const positions = data.turbinePositions;
-    const nacelleArray = nacelles.mesh.instanceMatrix.array;
-    const rotorArray = rotors.mesh.instanceMatrix.array;
     const step = settings.yawRate * dt;
     for (let index = 0; index < data.turbineCount; index++) {
       const base = index * 3;
@@ -1456,7 +1455,7 @@ export function createStructureEngine() {
       transform[9] = -sinYaw * size;
       transform[10] = 0;
       transform[11] = cosYaw * size;
-      writeTransform(nacelleArray, data.nacelleSlots[index] * 16, transform);
+      writeTransform(nacelles, data.nacelleSlots[index], transform);
       // The rotor: its hub ahead of the tower (upwind: forward = (sin, -cos yaw)), spun about z'.
       const spin = turbineState[base + 1];
       const cosSpin = Math.cos(spin);
@@ -1469,7 +1468,7 @@ export function createStructureEngine() {
       transform[6] = -sinSpin * cosYaw * size;
       transform[7] = cosSpin * size;
       transform[8] = -sinSpin * sinYaw * size;
-      writeTransform(rotorArray, data.rotorSlots[index] * 16, transform);
+      writeTransform(rotors, data.rotorSlots[index], transform);
     }
     markMatrices(nacelles);
     markMatrices(rotors);
@@ -1484,7 +1483,6 @@ export function createStructureEngine() {
     const flowZ = speed > 0.05 ? state[1] / speed : 0;
     const elapsed = ctx.time.elapsed;
     const flutter = 0.08 + state[5] * 0.25;
-    const sockArray = socks.mesh.instanceMatrix.array;
     const sockData = data.sockData;
     for (let sock = 0; sock < data.sockCount; sock++) {
       const base = sock * 5;
@@ -1529,7 +1527,7 @@ export function createStructureEngine() {
         transform[9] = -dirX * length;
         transform[10] = -dirY * length;
         transform[11] = -dirZ * length;
-        writeTransform(sockArray, data.sockSlots[sock * SOCK_SEGMENTS + segment] * 16, transform);
+        writeTransform(socks, data.sockSlots[sock * SOCK_SEGMENTS + segment], transform);
         x += dirX * length;
         y += dirY * length;
         z += dirZ * length;
@@ -2002,24 +2000,27 @@ export function createStructureEngine() {
       hiddenMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
       identityQuaternion = new THREE.Quaternion();
       materials = buildMaterials();
+      // The instanced pools stand at the render origin (contract a.7): their float32 translations are
+      // relative to it, precise at any distance from the world origin.
+      const origin = ctx.game && ctx.game.origin ? ctx.game.origin : null;
       const poolMaterial = { body: materials.solid, detail: materials.solid, decal: materials.decal, glow: materials.glow, water: materials.water, lava: materials.lava, cloth: materials.cloth, portal: materials.portal, ghost: materials.ghost };
       meshPools = {};
       for (const kind of GEOMETRY_KINDS) {
         meshPools[kind] = ctx.pools.createMeshPool({ material: poolMaterial[kind], capacity: MAX_INSTANCES + 8, parent: ctx.scene, name: `structure-${kind}` });
       }
-      nacelles = ctx.pools.createInstancedPool({ geometry: buildNacelleGeometry(), material: materials.moving, capacity: TURBINE_CAPACITY, name: 'structure-nacelles', parent: ctx.scene });
-      rotors = ctx.pools.createInstancedPool({ geometry: buildRotorGeometry(), material: materials.moving, capacity: TURBINE_CAPACITY, name: 'structure-rotors', parent: ctx.scene });
-      socks = ctx.pools.createInstancedPool({ geometry: buildSockGeometry(), material: materials.moving, capacity: SOCK_CAPACITY, name: 'structure-windsocks', parent: ctx.scene, colors: true });
+      nacelles = ctx.pools.createInstancedPool({ geometry: buildNacelleGeometry(), material: materials.moving, capacity: TURBINE_CAPACITY, name: 'structure-nacelles', parent: ctx.scene, origin });
+      rotors = ctx.pools.createInstancedPool({ geometry: buildRotorGeometry(), material: materials.moving, capacity: TURBINE_CAPACITY, name: 'structure-rotors', parent: ctx.scene, origin });
+      socks = ctx.pools.createInstancedPool({ geometry: buildSockGeometry(), material: materials.moving, capacity: SOCK_CAPACITY, name: 'structure-windsocks', parent: ctx.scene, origin, colors: true });
       const puffGeometry = new THREE.IcosahedronGeometry(1, 2);
-      puffs = ctx.pools.createInstancedPool({ geometry: puffGeometry, material: materials.mist, capacity: PUFF_CAPACITY, name: 'structure-mist', parent: ctx.scene });
+      puffs = ctx.pools.createInstancedPool({ geometry: puffGeometry, material: materials.mist, capacity: PUFF_CAPACITY, name: 'structure-mist', parent: ctx.scene, origin });
       drifterPool = ctx.pools.createMeshPool({ material: materials.solid, capacity: MOVER_CAPACITY, parent: ctx.scene, name: 'structure-movers' });
       moverPools = {};
       for (const kind of MOVER_KINDS) {
         moverPools[kind] = ctx.pools.createMeshPool({ material: poolMaterial[kind], capacity: MOVER_CAPACITY, parent: ctx.scene, name: `structure-mover-${kind}` });
       }
-      flames = ctx.pools.createInstancedPool({ geometry: buildFlameGeometry(), material: materials.flame, capacity: FLAME_CAPACITY, name: 'structure-flames', parent: ctx.scene });
-      blocks = ctx.pools.createInstancedPool({ geometry: buildBlockGeometry(), material: materials.moving, capacity: BLOCK_CAPACITY, name: 'structure-blocks', parent: ctx.scene, colors: true });
-      lanterns = ctx.pools.createInstancedPool({ geometry: new THREE.OctahedronGeometry(1, 1), material: materials.lantern, capacity: LANTERN_CAPACITY, name: 'structure-lanterns', parent: ctx.scene, colors: true });
+      flames = ctx.pools.createInstancedPool({ geometry: buildFlameGeometry(), material: materials.flame, capacity: FLAME_CAPACITY, name: 'structure-flames', parent: ctx.scene, origin });
+      blocks = ctx.pools.createInstancedPool({ geometry: buildBlockGeometry(), material: materials.moving, capacity: BLOCK_CAPACITY, name: 'structure-blocks', parent: ctx.scene, origin, colors: true });
+      lanterns = ctx.pools.createInstancedPool({ geometry: new THREE.OctahedronGeometry(1, 1), material: materials.lantern, capacity: LANTERN_CAPACITY, name: 'structure-lanterns', parent: ctx.scene, origin, colors: true });
       nacelles.mesh.castShadow = true;
       rotors.mesh.castShadow = true;
       blocks.mesh.castShadow = true;

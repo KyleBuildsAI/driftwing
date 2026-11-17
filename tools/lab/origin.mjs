@@ -21,6 +21,12 @@
 //                  point and throws on a non-finite point; update ignores a non-finite focus
 //   allocation     100 000 update() calls (the focus wandering inside the threshold) and 1000 rebases
 //                  with a listener allocate nothing: no garbage collection, young generation flat
+//   pools          an instanced pool anchored at the origin (src/spawns/pools.js, contract a.7 pattern
+//                  2; the structure engine's lanterns, flames, blocks, mist, turbines and socks): an
+//                  instance 400 km out lands within 1 mm in the render frame (an unanchored float32
+//                  buffer is centimetres off there), through setMatrix and through a direct write
+//                  relative to pool.anchor; after a rebase every drawn slot still does; 1000 rebases
+//                  rewrite it without allocating; dispose unsubscribes
 //
 // Usage: node --expose-gc tools/lab/origin.mjs [--verbose]
 // Prints one line per check and exits non-zero if any check fails.
@@ -30,6 +36,7 @@ import * as THREE from 'three/webgpu';
 import { EventBus } from '../../src/core/eventBus.js';
 import { attachTypedEvents } from '../../src/core/events.js';
 import { ORIGIN_QUANTUM, ORIGIN_REBASE_DISTANCE, createRenderOrigin, quantizeOrigin } from '../../src/core/origin.js';
+import { createInstancedPool } from '../../src/spawns/pools.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -328,6 +335,71 @@ async function testAllocation() {
   check('allocation', 'the listener ran on every rebase', bare.getStats().rebases === 5000 && listenerCalls === 5000, `${bare.getStats().rebases} rebases`);
 }
 
+// ---- pools ----------------------------------------------------------------------------------------------
+/**
+ * An instanced pool anchored at the origin keeps instances 400 km out precise in the render frame,
+ * through a rebase, without allocating; an unanchored float32 buffer there is centimetres off.
+ */
+function testAnchoredPool() {
+  const { scene, origin } = createLab();
+  const world = new THREE.Vector3(400123.4567, 812.2468, -399876.7891);
+  origin.rebaseTo(world);
+  const pool = createInstancedPool(THREE, { geometry: new THREE.BoxGeometry(1, 1, 1), material: new THREE.MeshBasicMaterial(), capacity: 8, parent: scene, origin });
+  const listeners = origin.listenerCount;
+  const viaMatrix = pool.alloc();
+  const viaDirect = pool.alloc();
+  pool.setMatrix(viaMatrix, new THREE.Matrix4().makeTranslation(world.x, world.y, world.z));
+  // A direct buffer write, as the structure engine's writeTransform does: relative to pool.anchor.
+  const array = pool.mesh.instanceMatrix.array;
+  array.set([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, world.x - pool.anchor.x + 3, world.y - pool.anchor.y, world.z - pool.anchor.z, 1], viaDirect * 16);
+  pool.flush();
+  const instanceMatrix = new THREE.Matrix4();
+  const renderPoint = new THREE.Vector3();
+  /** Render-frame error (m) of slot against its expected world point. */
+  const renderError = (slot, expected) => {
+    scene.updateMatrixWorld(true);
+    pool.mesh.getMatrixAt(slot, instanceMatrix);
+    renderPoint.setFromMatrixPosition(instanceMatrix).applyMatrix4(pool.mesh.matrixWorld);
+    return renderPoint.distanceTo(new THREE.Vector3().subVectors(expected, origin.offset));
+  };
+  const shifted = world.clone().add(new THREE.Vector3(3, 0, 0));
+  const unanchored = Math.hypot(Math.fround(world.x) - world.x, Math.fround(world.y) - world.y, Math.fround(world.z) - world.z);
+  const before = Math.max(renderError(viaMatrix, world), renderError(viaDirect, shifted));
+  check('pools', 'an anchored pool keeps an instance 400 km out within 1 mm (setMatrix and a direct write)', before < 0.001 && pool.anchor.equals(origin.offset),
+    `${(before * 1000).toFixed(4)} mm; an unanchored float32 buffer there: ${(unanchored * 1000).toFixed(1)} mm`);
+  origin.rebaseTo(world.clone().add(new THREE.Vector3(9000, -5000, 13000)));
+  const after = Math.max(renderError(viaMatrix, world), renderError(viaDirect, shifted));
+  check('pools', 'after a rebase the anchor follows the origin and every drawn slot still lands within 1 mm', after < 0.001 && pool.anchor.equals(origin.offset),
+    `${(after * 1000).toFixed(4)} mm, anchor ${pool.anchor.x} ${pool.anchor.y} ${pool.anchor.z}`);
+  pool.dispose();
+  check('pools', 'dispose unsubscribes the pool from the origin', origin.listenerCount === listeners - 1, `${listeners} -> ${origin.listenerCount}`);
+  // 1000 rebases rewriting a full anchored pool allocate nothing (an origin without the bus, whose
+  // emit copies its listener set, as in the allocation test).
+  const bare = createRenderOrigin({ THREE, scene: new THREE.Scene(), uniforms: { renderOrigin: { value: new THREE.Vector3() } } });
+  bare.rebaseTo(world);
+  const full = createInstancedPool(THREE, { geometry: new THREE.BoxGeometry(1, 1, 1), material: new THREE.MeshBasicMaterial(), capacity: 256, origin: bare });
+  const placed = new THREE.Matrix4();
+  for (let slot = 0; slot < 256; slot++) full.setMatrix(full.alloc(), placed.makeTranslation(world.x + slot, world.y, world.z));
+  const youngUsed = () => v8.getHeapSpaceStatistics().find((space) => space.space_name === 'new_space').space_used_size;
+  const hop = new THREE.Vector3();
+  const rebase = (index) => {
+    hop.copy(world).x += index % 2 === 0 ? 8192 : 0;
+    bare.update(hop);
+  };
+  // Warm up until the listener is optimised (interpreted, its loop boxes the deltas).
+  for (let index = 0; index < 20000; index++) rebase(index);
+  if (typeof globalThis.gc === 'function') globalThis.gc();
+  const probeA = youngUsed();
+  const probeB = youngUsed();
+  const start = youngUsed();
+  for (let index = 0; index < 1000; index++) rebase(index);
+  const bytes = Math.max(0, youngUsed() - start - (probeB - probeA));
+  full.mesh.getMatrixAt(255, instanceMatrix);
+  const drift = renderPoint.setFromMatrixPosition(instanceMatrix).add(full.anchor).distanceTo(new THREE.Vector3(world.x + 255, world.y, world.z));
+  check('pools', '21000 rebases rewrite a full anchored pool (256 slots), the last 1000 without allocating, and its last slot stays within 1 mm', bytes < 256 && drift < 0.001, `${bytes} B over the last 1000, ${(drift * 1000).toFixed(4)} mm`);
+  full.dispose();
+}
+
 testQuantization();
 testThreshold();
 testOrder();
@@ -335,6 +407,7 @@ testFrames();
 testRoundTrip();
 testRebaseTo();
 await testAllocation();
+testAnchoredPool();
 check('console', 'no console errors (valid payloads, no listener failures)', consoleErrors.length === 0, consoleErrors.join(' | '));
 
 console.error = originalError;

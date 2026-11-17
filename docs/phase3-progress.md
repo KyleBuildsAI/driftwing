@@ -1664,6 +1664,14 @@ Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed fiv
     balloon drifts at 104.7 C, still climbing; a glider keeps 20 degrees of pitch and its ballast;
     foreign or nested state is not taken); the presets 61-70 arrival check now also requires the
     craft and its state (the glider's ballast set to 0.35 before the crossing).
+  - E-1, contract a.7: the structure engine's instanced pools (the wave 3 lanterns, torch flames,
+    blocks and steam, and the Phase 2 mist, nacelles, rotors and windsocks) held absolute world
+    translations in float32 on meshes at the scene origin (14 mm off 400 km out). `createInstancedPool`
+    takes an optional `origin` (pattern 2: the mesh at `origin.offset`, `setMatrix` subtracts it in
+    float64, direct writes subtract `pool.anchor`, a rebase moves every drawn slot back by the delta,
+    allocation-free; dispose unsubscribes); all seven structure pools use it and the engine's one
+    direct writer (`writeTransform`) writes relative to the anchor. Origin lab 36/36 (a new `pools`
+    group: 0.06 mm 400 km out, 0.43 mm after a rebase, 0 B over 1000 rebases of a 256-slot pool).
 
 ### Wave 4: discovery and verification, then the tag
 
