@@ -1727,7 +1727,7 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 | --- | --- | --- | --- |
 | O1 | Journal (contract j.1): records version 2 with craft time, figures, medals, worlds visited, perches and max altitude; the journal panel's Craft, Figures, Challenges and Worlds sections | `p3/journal` | not started |
 | O2 | Copilot (contract j.2, h.3, h.6): the cross-craft grammar and the keyboard / UI equivalent of each (Guide chips "Find water", "Find a perch", "To space"; the spaceplane's climb-to-space autopilot); the remote `flightState` fields `onWater`, `craftState`, `challenge`; docs/copilot-api.md | `p3/copilot` | not started |
-| O3 | Docs: docs/controls.md (a full HOTAS profile per new craft, the j.2 equivalents), docs/spawns.md (all 100 checked against the code), docs/architecture.md (every Phase 3 system) | `p3/docs` | not started |
+| O3 | Docs: docs/controls.md (a full HOTAS profile per new craft, the j.2 equivalents), docs/spawns.md (all 100 checked against the code), docs/architecture.md (every Phase 3 system) | `p3/docs` | in progress |
 | P1 | Test hooks to the contract: the 20-minute soak of k.5 (craft switch every 2 minutes, view swap every minute, structure penetrations, no soft crash within 10 s of a switch), the k.4 determinism digests (collider sweep battery, PathFollower positions) and the WebGL2 spawn-event frame difference, the k.3 / k.4 coverage audit, the golden-frame first shot and the origin-rebase image check on WebGL2 | `p3/verify-hooks` | not started |
 | P2 | Craft runs (k.1): every scenario passes in the full shared-world run on both backends: the WebGL2 spaceplane climb and re-entry (page stall, rebase continuity, far-field holes, depth and load), eagle find-perch and the perch fly-out, the balloon wind layer, burner lag and the subset's soft crashes, the eagle lab's allocation | `p3/verify-craft` | not started |
 | P3 | Content open issues from I3 and the review: the forced-spawn create error, the sleeping giant's figure check, whale pods on the swell, the hurricane over open ocean, the dam's end sections, debug spawns away from a site, the frozen lake's paint, the flamingo shore checks, the meteor shower's sky modifier on WebGL2, the migration convergence's valley seek, the lava rivers' rarity; each fixed or recorded as a decision | `p3/content-fixes` | not started |
@@ -1745,7 +1745,8 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 
 ### Wave 4 - p3/docs
 
-- **Status:** not started.
+- **Status:** in progress: checking docs/spawns.md, docs/controls.md, docs/architecture.md,
+  docs/engines/*.md and README.md against the code.
 
 ### Wave 4 - p3/verify-hooks
 
