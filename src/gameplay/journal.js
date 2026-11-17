@@ -51,6 +51,16 @@ const JOURNAL_KEY_PREFIX = 'driftwing-v2.journal.';
 const MAX_MIGRATED_JOURNALS = 1000;
 /** Module statistics the version 3 migration takes as altitudes already reached. */
 const MIGRATED_ALTITUDE_STATS = Object.freeze(['balloonMaxAltitude', 'spaceplaneApogee']);
+/** Slots of the journal's per-frame Float64Array (see createJournal's `live`). */
+const LIVE_DISTANCE = 0;
+const LIVE_WORLD_ALTITUDE = 1;
+const LIVE_FLIGHT_TIME = 2;
+const LIVE_SAVE_TIMER = 3;
+const LIVE_STATS_TIMER = 4;
+const LIVE_CRAFT_SECONDS = 5;
+const LIVE_SKIN_SECONDS = 6;
+const LIVE_MAX_ALTITUDE = 7;
+const LIVE_SLOTS = 8;
 
 function finiteOr(value, fallback) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -535,8 +545,23 @@ export function createJournal(ctx) {
   let dirty = false;
   let changePending = false;
   let changeReason = 'load';
-  let saveTimer = SAVE_INTERVAL_SECONDS;
-  let statsTimer = STATS_EVENT_INTERVAL_SECONDS;
+  /**
+   * Everything a frame of flight writes lives in one Float64Array (writing a double into an object
+   * field or a closure variable boxes it): this world's totals, the timers, the flight time of the
+   * craft and skin flying since the last fold, and the highest altitude ever. foldLive() writes them
+   * into the journal and the records before every read and save.
+   */
+  const live = new Float64Array(LIVE_SLOTS);
+  live[LIVE_DISTANCE] = data.distanceFlown;
+  live[LIVE_WORLD_ALTITUDE] = data.maxAltitude;
+  live[LIVE_FLIGHT_TIME] = data.flightTime;
+  live[LIVE_SAVE_TIMER] = SAVE_INTERVAL_SECONDS;
+  live[LIVE_STATS_TIMER] = STATS_EVENT_INTERVAL_SECONDS;
+  live[LIVE_MAX_ALTITUDE] = records.stats.maxAltitude ? records.stats.maxAltitude.value : 0;
+  /** The craft and skin the pending seconds belong to, as read from state.flight, and whether they may be kept. */
+  const liveCraft = { craft: null, skin: null, craftKept: false, skinKept: false };
+  /** The 'journal:changed' payload (reused: listeners read it at once). */
+  const changedPayload = { reason: 'load' };
   let saveFailureReported = false;
   let recordsSaveFailureReported = false;
   /**
@@ -545,8 +570,48 @@ export function createJournal(ctx) {
    */
   let recordsDirty = false;
 
+  /**
+   * Writes what the frames gathered into the journal and the records: this world's totals, the
+   * pending seconds of the craft (and skin) flying, and the highest altitude when it beat the record.
+   * Runs before every read and save, and when the craft or skin changes.
+   */
+  function foldLive() {
+    data.distanceFlown = live[LIVE_DISTANCE];
+    data.maxAltitude = live[LIVE_WORLD_ALTITUDE];
+    data.flightTime = live[LIVE_FLIGHT_TIME];
+    const seconds = live[LIVE_CRAFT_SECONDS];
+    const skinSeconds = live[LIVE_SKIN_SECONDS];
+    live[LIVE_CRAFT_SECONDS] = 0;
+    live[LIVE_SKIN_SECONDS] = 0;
+    if (seconds > 0 && liveCraft.craftKept) addCraftTime(liveCraft.craft, liveCraft.skinKept ? liveCraft.skin : null, seconds, skinSeconds);
+    const record = records.stats.maxAltitude;
+    const highest = live[LIVE_MAX_ALTITUDE];
+    if (highest > 0 && (!record || highest > record.value)) {
+      // Stamped when folded (within a save interval of the climb): Date.now() per frame would box.
+      records.stats.maxAltitude = { value: highest, op: 'max', at: Date.now(), seed: state.seed, presetId: null };
+    } else if (record && record.value > highest) {
+      live[LIVE_MAX_ALTITUDE] = record.value;
+    }
+  }
+
+  /** Adds flight seconds to a craft (and its skin), within the caps of the records. */
+  function addCraftTime(craft, skin, seconds, skinSeconds) {
+    if (Object.hasOwn(records.craftTime, craft)) records.craftTime[craft] = Math.min(MAX_SECONDS, records.craftTime[craft] + seconds);
+    else if (Object.keys(records.craftTime).length < MAX_CRAFT_TIMES) records.craftTime[craft] = Math.min(MAX_SECONDS, seconds);
+    else return;
+    if (skin === null || !(skinSeconds > 0)) return;
+    let skins = Object.hasOwn(records.skinTime, craft) ? records.skinTime[craft] : null;
+    if (!skins) {
+      if (Object.keys(records.skinTime).length >= MAX_CRAFT_TIMES) return;
+      skins = records.skinTime[craft] = {};
+    }
+    if (Object.hasOwn(skins, skin)) skins[skin] = Math.min(MAX_SECONDS, skins[skin] + skinSeconds);
+    else if (Object.keys(skins).length < MAX_SKINS_PER_CRAFT) skins[skin] = Math.min(MAX_SECONDS, skinSeconds);
+  }
+
   /** JSON-safe copy of the journal (also the persisted shape). */
   function snapshot() {
+    foldLive();
     return {
       seed: data.seed,
       biomesVisited: data.biomesVisited.slice(),
@@ -570,6 +635,7 @@ export function createJournal(ctx) {
 
   /** JSON-safe copy of the global records (the persisted shape, without its version). */
   function recordsSnapshot() {
+    foldLive();
     const stats = {};
     for (const [key, stat] of Object.entries(records.stats)) stats[key] = { ...stat };
     if (stats.maxAltitude) stats.maxAltitude.value = roundTo(stats.maxAltitude.value, 1);
@@ -681,60 +747,50 @@ export function createJournal(ctx) {
     return true;
   }
 
-  /** Flight time per craft (and per skin for a craft with skins), for the craft flying this frame. */
+  /**
+   * Flight time per craft (and per skin for a craft with skins), for the craft flying this frame: the
+   * seconds gather in `live` and fold into the records when the craft or skin changes (and on reads).
+   */
   function accumulateCraftTime(dt) {
     const flight = state.flight;
     const craft = flight ? flight.craft : null;
-    if (typeof craft !== 'string' || !isOwnKey(craft, CRAFT_ID_PATTERN)) return;
-    if (Object.hasOwn(records.craftTime, craft)) {
-      records.craftTime[craft] = Math.min(MAX_SECONDS, records.craftTime[craft] + dt);
-    } else if (Object.keys(records.craftTime).length < MAX_CRAFT_TIMES) {
-      records.craftTime[craft] = dt;
-    } else {
-      return;
+    const craftState = flight ? flight.craftState : null;
+    const skin = craftState && typeof craftState.skin === 'string' ? craftState.skin : null;
+    if (craft !== liveCraft.craft || skin !== liveCraft.skin) {
+      foldLive();
+      liveCraft.craft = craft;
+      liveCraft.skin = skin;
+      liveCraft.craftKept = isOwnKey(craft, CRAFT_ID_PATTERN);
+      liveCraft.skinKept = skin !== null && isOwnKey(skin, CRAFT_ID_PATTERN);
     }
+    if (!liveCraft.craftKept) return;
+    live[LIVE_CRAFT_SECONDS] += dt;
+    if (liveCraft.skinKept) live[LIVE_SKIN_SECONDS] += dt;
     recordsDirty = true;
-    const skin = flight.craftState ? flight.craftState.skin : null;
-    if (typeof skin !== 'string' || !isOwnKey(skin, CRAFT_ID_PATTERN)) return;
-    let skins = Object.hasOwn(records.skinTime, craft) ? records.skinTime[craft] : null;
-    if (!skins) {
-      if (Object.keys(records.skinTime).length >= MAX_CRAFT_TIMES) return;
-      skins = records.skinTime[craft] = {};
-    }
-    if (Object.hasOwn(skins, skin)) skins[skin] = Math.min(MAX_SECONDS, skins[skin] + dt);
-    else if (Object.keys(skins).length < MAX_SKINS_PER_CRAFT) skins[skin] = dt;
   }
 
   /**
    * The highest altitude ever flown (the maxAltitude statistic, op 'max'), followed every frame of
-   * flight, space included: the record object is updated in place, saved on the throttle.
+   * flight, space included (nothing clamps it); folded into the record on reads and saves.
    */
   function followMaxAltitude(altitude) {
-    if (!Number.isFinite(altitude) || altitude <= 0) return;
-    const record = records.stats.maxAltitude;
-    if (record && !(altitude > record.value)) return;
-    if (record) {
-      record.value = altitude;
-      record.at = Date.now();
-      record.seed = state.seed;
-      record.presetId = null;
-    } else {
-      records.stats.maxAltitude = { value: altitude, op: 'max', at: Date.now(), seed: state.seed, presetId: null };
-    }
+    if (!(altitude > live[LIVE_MAX_ALTITUDE])) return;
+    live[LIVE_MAX_ALTITUDE] = altitude;
     recordsDirty = true;
   }
 
   function accumulateFlight(dt) {
     const player = state.player;
-    if (Number.isFinite(player.speed) && player.speed > 0) data.distanceFlown += player.speed * dt;
-    if (Number.isFinite(player.altitude) && player.altitude > data.maxAltitude) data.maxAltitude = player.altitude;
-    data.flightTime += dt;
+    if (Number.isFinite(player.speed) && player.speed > 0) live[LIVE_DISTANCE] += player.speed * dt;
+    const altitude = Number.isFinite(player.altitude) ? player.altitude : 0;
+    if (altitude > live[LIVE_WORLD_ALTITUDE]) live[LIVE_WORLD_ALTITUDE] = altitude;
+    live[LIVE_FLIGHT_TIME] += dt;
     accumulateCraftTime(dt);
-    followMaxAltitude(player.altitude);
+    followMaxAltitude(altitude);
     dirty = true;
-    statsTimer -= dt;
-    if (statsTimer <= 0) {
-      statsTimer = STATS_EVENT_INTERVAL_SECONDS;
+    live[LIVE_STATS_TIMER] -= dt;
+    if (live[LIVE_STATS_TIMER] <= 0) {
+      live[LIVE_STATS_TIMER] = STATS_EVENT_INTERVAL_SECONDS;
       changePending = true;
       if (changeReason === 'load') changeReason = 'stats';
     }
@@ -956,9 +1012,9 @@ export function createJournal(ctx) {
   return {
     update(dt, realDt) {
       if (dt > 0) accumulateFlight(dt);
-      saveTimer -= realDt;
-      if (saveTimer <= 0) {
-        saveTimer = SAVE_INTERVAL_SECONDS;
+      live[LIVE_SAVE_TIMER] -= realDt;
+      if (live[LIVE_SAVE_TIMER] <= 0) {
+        live[LIVE_SAVE_TIMER] = SAVE_INTERVAL_SECONDS;
         if (dirty) save();
         if (recordsDirty) saveRecords();
       }
@@ -966,7 +1022,8 @@ export function createJournal(ctx) {
         changePending = false;
         const reason = changeReason;
         changeReason = 'stats';
-        bus.emit('journal:changed', { reason });
+        changedPayload.reason = reason;
+        bus.emit('journal:changed', changedPayload);
       }
     },
 
