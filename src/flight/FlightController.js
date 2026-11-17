@@ -297,14 +297,22 @@ export function createFlightController(ctx) {
     resetModelTelemetry();
   }
 
-  /** The craft state both abilities start from (craftAbility's initialState, then craftAbilityAlt's). */
+  /**
+   * The craft state both abilities start from (craftAbility's initialState, then craftAbilityAlt's).
+   * The first slot's own fresh object is the base and the other's fields join it: copying a big state
+   * onto an empty object (keyed stores) turns it into a dictionary past 16 fields, and every double
+   * the model then writes into a dictionary field boxes a new number each tick.
+   */
   function initialCraftState(module) {
-    const initial = {};
+    let initial = null;
     for (const slot of Object.keys(ABILITY_ACTIONS)) {
       const ability = module.abilities ? module.abilities[slot] : null;
-      if (ability && typeof ability.initialState === 'function') Object.assign(initial, ability.initialState());
+      if (!ability || typeof ability.initialState !== 'function') continue;
+      const part = ability.initialState();
+      if (initial === null && part && Object.getPrototypeOf(part) === Object.prototype && Object.isExtensible(part)) initial = part;
+      else initial = Object.assign(initial ?? {}, part);
     }
-    return initial;
+    return initial ?? {};
   }
 
   /** The skin a module flies in: settings.craftSkins when it names one of its skins, else its default; null without skins. */

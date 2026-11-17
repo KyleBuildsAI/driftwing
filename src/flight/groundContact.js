@@ -94,7 +94,12 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
   };
   const touchdown = { sinkRate: 0, part: '', groundSpeed: 0 };
   const strike = { part: '', speed: 0 };
-  let airborneSeconds = 0;
+  /**
+   * Seconds since any gear last touched, as a field seeded with a double: a closure variable holding a
+   * double boxes a new number on every airborne tick, an object field keeps its own.
+   */
+  const timers = { airborne: 0.5 };
+  timers.airborne = 0;
 
   const worldPoint = new THREE.Vector3();
   const offsetWorld = new THREE.Vector3();
@@ -159,7 +164,7 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
     // Broad phase: nothing can touch while the centre of mass is well clear of the ground below it
     // (twice the craft's reach covers slopes up to 45 degrees under a wingtip).
     if (position.y - surfaceBelow > boundingRadius * 2 + 3) {
-      airborneSeconds += dt;
+      timers.airborne += dt;
       return report;
     }
     inverseQuaternion.copy(body.quaternion).invert();
@@ -250,7 +255,7 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
         report.gearContacts++;
         if (!gearTouching) {
           gearTouching = true;
-          if (airborneSeconds >= TOUCHDOWN_AIRBORNE_SECONDS) {
+          if (timers.airborne >= TOUCHDOWN_AIRBORNE_SECONDS) {
             touchdown.sinkRate = Math.max(0, -body.velocity.dot(normal));
             touchdown.part = contact.id;
             touchdown.groundSpeed = Math.hypot(body.velocity.x, body.velocity.z);
@@ -267,7 +272,7 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
         }
       }
     }
-    airborneSeconds = gearTouching ? 0 : airborneSeconds + dt;
+    timers.airborne = gearTouching ? 0 : timers.airborne + dt;
     return report;
   }
 
@@ -279,21 +284,21 @@ export function createGroundContact(definitions, { centerOfMass, floats = false,
 
     /** Seconds since any gear last touched. */
     get airborneSeconds() {
-      return airborneSeconds;
+      return timers.airborne;
     },
 
     /** After a teleport: resting on the gear (no touchdown will be reported) or airborne. */
     reset(onGround) {
       clearReport();
-      airborneSeconds = onGround ? 0 : TOUCHDOWN_AIRBORNE_SECONDS;
+      timers.airborne = onGround ? 0 : TOUCHDOWN_AIRBORNE_SECONDS;
     },
 
     snapshot() {
-      return { airborneSeconds };
+      return { airborneSeconds: timers.airborne };
     },
 
     restore(data) {
-      if (data && Number.isFinite(data.airborneSeconds)) airborneSeconds = data.airborneSeconds;
+      if (data && Number.isFinite(data.airborneSeconds)) timers.airborne = data.airborneSeconds;
     },
   };
 }

@@ -511,13 +511,19 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
   /**
    * The doubles every tick rewrites, as fields of one object: a closure variable holding a double
    * would box a new number on every write, an object field keeps its box (no allocation per tick).
+   * The step hands the tick's air density, height above the surface and turbulence to its helpers
+   * here too: a double passed as an argument to a function the optimiser does not inline is boxed
+   * on every call.
    */
-  const tick = { time: 0.5, load: 1.5, horizontal: 0.5, sink: 0.5, flightPath: 0.5 };
+  const tick = { time: 0.5, load: 1.5, horizontal: 0.5, sink: 0.5, flightPath: 0.5, rho: 0.5, agl: 0.5, turbulence: 0.5 };
   tick.time = 0;
   tick.load = 1;
   tick.horizontal = 0;
   tick.sink = 0;
   tick.flightPath = 0;
+  tick.rho = SEA_LEVEL_DENSITY;
+  tick.agl = 0;
+  tick.turbulence = 0;
   let pendingRest = false;
   let lastEnv = null;
   /** Soaring: the lowest height since the flap power last went to zero, and what was reported. */
@@ -714,8 +720,11 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
   // ============================================================================================
   const wingData = { cl: 0, cd: 0, stall: 0, aoa: 0, sideslip: 0, airspeed: 0, dynamicPressure: 0 };
 
-  /** Wing, body and wingbeat forces and moments (body axes). */
-  function flightForces(rho, agl, turbulence) {
+  /** Wing, body and wingbeat forces and moments (body axes), in the tick's air (tick.rho, tick.agl, tick.turbulence). */
+  function flightForces() {
+    const rho = tick.rho;
+    const agl = tick.agl;
+    const turbulence = tick.turbulence;
     const airspeed = bodyAir.length();
     wingData.airspeed = airspeed;
     const tuck = wings.tuck;
@@ -742,7 +751,10 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
       wingData.dynamicPressure = 0;
       return;
     }
-    airDirection.copy(bodyAir).divideScalar(airspeed);
+    // Written out (as the force sums below): no vector call that takes a double per tick.
+    airDirection.x = bodyAir.x / airspeed;
+    airDirection.y = bodyAir.y / airspeed;
+    airDirection.z = bodyAir.z / airspeed;
     const aoa = Math.atan2(-bodyAir.y, -bodyAir.z);
     const sideslip = Math.asin(clamp(airDirection.x, -1, 1));
     evaluateLift(curve, aoa, 0, deltaClMax, liftResult);
@@ -756,8 +768,16 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     const load = dynamicPressure * area;
     liftDirection.set(0, -airDirection.z, airDirection.y);
     const planar = liftDirection.length();
-    if (planar > 1e-6) forceBody.addScaledVector(liftDirection, (load * cl) / planar);
-    forceBody.addScaledVector(airDirection, -(load * cd + dynamicPressure * profile.body.dragArea));
+    if (planar > 1e-6) {
+      const liftScale = (load * cl) / planar;
+      forceBody.x += liftDirection.x * liftScale;
+      forceBody.y += liftDirection.y * liftScale;
+      forceBody.z += liftDirection.z * liftScale;
+    }
+    const dragScale = -(load * cd + dynamicPressure * profile.body.dragArea);
+    forceBody.x += airDirection.x * dragScale;
+    forceBody.y += airDirection.y * dragScale;
+    forceBody.z += airDirection.z * dragScale;
     forceBody.x -= dynamicPressure * wing.sideArea * wing.sideForceSlope * Math.sin(sideslip);
 
     // Moments act on the control pressure: the air's, or the wingbeat's at low speed.
@@ -1141,6 +1161,11 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
   // ============================================================================================
   // STEP
   // ============================================================================================
+  /** The surface under a point (the position object passed whole: no boxed coordinates per tick). */
+  function surfaceUnder(env, position) {
+    return surfaceHeightAt(env, position.x, position.z);
+  }
+
   function step(dt, controls, env) {
     if (!(dt > 0)) return;
     tick.time += dt;
@@ -1152,8 +1177,11 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     const turbulence = env.wind && Number.isFinite(env.wind.turbulence) ? env.wind.turbulence : 0;
     airWorld.copy(state.velocity);
     if (env.wind && env.wind.vel) airWorld.sub(env.wind.vel);
-    const surface = surfaceHeightAt(env, state.position.x, state.position.z);
+    const surface = surfaceUnder(env, state.position);
     const agl = state.position.y - feetHeight - surface;
+    tick.rho = rho;
+    tick.agl = agl;
+    tick.turbulence = turbulence;
     previousQuaternion.copy(state.quaternion);
     updateCooldown(dt);
 
@@ -1165,7 +1193,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
       momentBody.set(0, 0, 0);
       inverseQuaternion.copy(state.quaternion).invert();
       bodyAir.copy(airWorld).applyQuaternion(inverseQuaternion);
-      flightForces(rho, agl, turbulence);
+      flightForces();
       forceWorld.copy(forceBody).applyQuaternion(state.quaternion);
 
       groundForce.set(0, 0, 0);
@@ -1209,7 +1237,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     if (perch.phase !== 'perched' && craftState) craftState.takeoffRequest = false;
 
     const report = activeReport;
-    updateFlightData(dt, agl, report);
+    updateFlightData(dt, report);
     landingObservation.dt = dt;
     landingObservation.agl = flightData.agl;
     landing.observe(report, landingObservation);
@@ -1277,7 +1305,8 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     }
   }
 
-  function updateFlightData(dt, agl, report) {
+  function updateFlightData(dt, report) {
+    const agl = tick.agl;
     computeAttitude();
     const airspeed = perch.phase === 'perched' ? 0 : airWorld.length();
     flightData.airspeed = airspeed;

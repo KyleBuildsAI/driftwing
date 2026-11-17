@@ -66,8 +66,13 @@ export function isBetterLanding(candidate, current) {
 export function createLandingMonitor({ bus, craftId, limits = {} }) {
   const crashSinkRate = Number.isFinite(limits.crashSinkRate) ? limits.crashSinkRate : DEFAULT_CRASH_SINK_RATE;
   const strikeLimit = Number.isFinite(limits.bodyStrikeSpeed) ? limits.bodyStrikeSpeed : DEFAULT_BODY_STRIKE_SPEED;
-  let flightSeconds = 0;
-  let peakAgl = 0;
+  /**
+   * The doubles every airborne tick rewrites, as fields of one object (seeded with doubles): a closure
+   * variable holding a double boxes a new number on every write, an object field keeps its own.
+   */
+  const flight = { seconds: 0.5, peakAgl: 0.5 };
+  flight.seconds = 0;
+  flight.peakAgl = 0;
   let airborne = false;
   let landings = 0;
 
@@ -99,15 +104,15 @@ export function createLandingMonitor({ bus, craftId, limits = {} }) {
       if (!report.onGround) {
         if (!airborne) {
           airborne = true;
-          flightSeconds = 0;
-          peakAgl = 0;
+          flight.seconds = 0;
+          flight.peakAgl = 0;
         }
-        flightSeconds += dt;
-        if (Number.isFinite(agl)) peakAgl = Math.max(peakAgl, agl);
+        flight.seconds += dt;
+        if (Number.isFinite(agl) && agl > flight.peakAgl) flight.peakAgl = agl;
         return null;
       }
       const touchdown = report.touchdown;
-      const qualifies = airborne && touchdown && flightSeconds >= FLIGHT_MIN_SECONDS && peakAgl >= FLIGHT_MIN_AGL;
+      const qualifies = airborne && touchdown && flight.seconds >= FLIGHT_MIN_SECONDS && flight.peakAgl >= FLIGHT_MIN_AGL;
       if (report.gearContacts > 0 || report.contacts > 0) airborne = false;
       if (!qualifies) return null;
       // A crash is the controller's business (fade and respawn), not a graded landing.
@@ -129,18 +134,18 @@ export function createLandingMonitor({ bus, craftId, limits = {} }) {
     /** After a teleport: on the ground (no pending flight) or airborne (a fresh flight starts). */
     reset(onGround) {
       airborne = !onGround;
-      flightSeconds = 0;
-      peakAgl = 0;
+      flight.seconds = 0;
+      flight.peakAgl = 0;
     },
 
     snapshot() {
-      return { flightSeconds, peakAgl, airborne };
+      return { flightSeconds: flight.seconds, peakAgl: flight.peakAgl, airborne };
     },
 
     restore(data) {
       if (!data) return;
-      if (Number.isFinite(data.flightSeconds)) flightSeconds = data.flightSeconds;
-      if (Number.isFinite(data.peakAgl)) peakAgl = data.peakAgl;
+      if (Number.isFinite(data.flightSeconds)) flight.seconds = data.flightSeconds;
+      if (Number.isFinite(data.peakAgl)) flight.peakAgl = data.peakAgl;
       if (typeof data.airborne === 'boolean') airborne = data.airborne;
     },
   };

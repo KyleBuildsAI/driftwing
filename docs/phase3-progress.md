@@ -1729,7 +1729,7 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 | O2 | Copilot (contract j.2, h.3, h.6): the cross-craft grammar and the keyboard / UI equivalent of each (Guide chips "Find water", "Find a perch", "To space"; the spaceplane's climb-to-space autopilot); the remote `flightState` fields `onWater`, `craftState`, `challenge`; docs/copilot-api.md | `p3/copilot` | not started |
 | O3 | Docs: docs/controls.md (a full HOTAS profile per new craft, the j.2 equivalents), docs/spawns.md (all 100 checked against the code), docs/architecture.md (every Phase 3 system) | `p3/docs` | not started |
 | P1 | Test hooks to the contract: the 20-minute soak of k.5 (craft switch every 2 minutes, view swap every minute, structure penetrations, no soft crash within 10 s of a switch), the k.4 determinism digests (collider sweep battery, PathFollower positions) and the WebGL2 spawn-event frame difference, the k.3 / k.4 coverage audit, the golden-frame first shot and the origin-rebase image check on WebGL2 | `p3/verify-hooks` | not started |
-| P2 | Craft runs (k.1): every scenario passes in the full shared-world run on both backends: the WebGL2 spaceplane climb and re-entry (page stall, rebase continuity, far-field holes, depth and load), eagle find-perch and the perch fly-out, the balloon wind layer, burner lag and the subset's soft crashes, the eagle lab's allocation | `p3/verify-craft` | not started |
+| P2 | Craft runs (k.1): every scenario passes in the full shared-world run on both backends: the WebGL2 spaceplane climb and re-entry (page stall, rebase continuity, far-field holes, depth and load), eagle find-perch and the perch fly-out, the balloon wind layer, burner lag and the subset's soft crashes, the eagle lab's allocation | `p3/verify-craft` | in progress |
 | P3 | Content open issues from I3 and the review: the forced-spawn create error, the sleeping giant's figure check, whale pods on the swell, the hurricane over open ocean, the dam's end sections, debug spawns away from a site, the frozen lake's paint, the flamingo shore checks, the meteor shower's sky modifier on WebGL2, the migration convergence's valley seek, the lava rivers' rarity; each fixed or recorded as a decision | `p3/content-fixes` | not started |
 | I4 | Integration: merge O1-O3 and P1-P3 into `v2-phase3`, reconcile the docs, run every lab and the affected step files on both backends | `v2-phase3` | not started |
 | P | Milestone P final run on the integrated tree: the verify loop (dev server and build:single, 0/0, screenshots differ, golden-hour opening unchanged), `?test=spawns` (100), `?test=craft` (14), `?test=collision`, determinism and terrain, the 20-minute soak, the final report, CHANGELOG, the manual checklist for Kyle | `v2-phase3` | not started |
@@ -1753,7 +1753,16 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 
 ### Wave 4 - p3/verify-craft
 
-- **Status:** not started.
+- **Status:** in progress.
+- **Done so far:**
+  - the eagle lab's allocation (wave 2 open issue, 144 B per tick): the doubles a tick rewrites no longer
+    live in closure variables (the landing monitor's flight time and peak height, the ground contact's
+    airborne timer: every craft shares them) or travel as arguments into functions the optimiser does
+    not inline (the flapper's surface lookup, wing forces and flight data read the tick's air density,
+    height and turbulence from one object; the force sums are written out); the controller builds a
+    craft's state from its first ability's own object, so a big state (the eagle's 23 fields) keeps fast
+    properties instead of becoming a dictionary that boxes every double it is given. Eagle lab 50/50:
+    flight 16.1, scanning 48.0, perched 18.2 B per tick (before: 144, 128, 18).
 
 ### Wave 4 - p3/content-fixes
 
