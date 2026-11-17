@@ -6,7 +6,7 @@ import { MathUtils, clamp } from '../core/util.js';
 /**
  * WAYPOINTS: a warm golden beacon marks the waypoint. It is a tall additive
  * light pillar (vertical alpha gradient, soft edges, slow upward light bands),
- * a terrain-hugging ripple ring on the ground or water, and a small floating
+ * a terrain-hugging ripple ring on the ground or water (a lake's surface too), and a small floating
  * diamond. It ignores fog and fades by distance instead, widens with distance
  * so it stays readable on the horizon, and is drawn through a homothety toward
  * the camera when it lies beyond the far plane. Flying within 180 m of it
@@ -152,6 +152,8 @@ export function createWaypointSystem(ctx) {
   // ---- Runtime state ----------------------------------------------------------------------
   const base = new T.Vector3();
   const toBase = new T.Vector3();
+  /** The static water level under a point (ctx.waterQuery.staticLevelInto writes it here). */
+  const waterLevelScratch = new Float64Array(1);
   let phase = 'hidden';
   let phaseTime = 0;
   let armed = false;
@@ -163,9 +165,18 @@ export function createWaypointSystem(ctx) {
     return text ? text.slice(0, MAX_LABEL_LENGTH) : 'Waypoint';
   }
 
+  /** The water level at (x, z): a local lake's (the copilot's "find water to land" marks lakes), else the sea's. */
+  function waterLevelAt(x, z) {
+    const query = ctx.waterQuery;
+    if (!query || typeof query.staticLevelInto !== 'function') return CONFIG.WATER_LEVEL;
+    query.staticLevelInto(x, z, waterLevelScratch, 0);
+    return Math.max(CONFIG.WATER_LEVEL, waterLevelScratch[0]);
+  }
+
   function surfaceHeight(x, z) {
     const height = world.heightAt(x, z);
-    return height > CONFIG.WATER_LEVEL ? height + GROUND_LIFT : CONFIG.WATER_LEVEL + WATER_LIFT;
+    const water = waterLevelAt(x, z);
+    return height > water ? height + GROUND_LIFT : water + WATER_LIFT;
   }
 
   /** Drapes the ripple ring over the terrain (or water) around the beacon, once per waypoint. */
@@ -189,7 +200,7 @@ export function createWaypointSystem(ctx) {
     const z = Number(position?.z);
     if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
     const cleanLabel = sanitizeLabel(label ?? position?.label);
-    const groundY = Math.max(world.heightAt(x, z), CONFIG.WATER_LEVEL);
+    const groundY = Math.max(world.heightAt(x, z), waterLevelAt(x, z));
     base.set(x, groundY, z);
     conformGround(x, z, groundY);
     state.waypoint = { x, z, label: cleanLabel, setAt: state.time.elapsed };
