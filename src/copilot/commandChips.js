@@ -72,11 +72,14 @@ const GUIDE_REFRESH_SECONDS = 2;
 /**
  * The "Guide" row: the tour-guide commands ("what's nearby", "find a thermal", "chase the storm",
  * "next discovery"), a "take me to" chip for the nearest live events and discovered sites (never an
- * undiscovered one), and "Yes, heading" / "No thanks" while a callout offer is open. The chips use
- * the same data-command hook as the Aircraft row.
+ * undiscovered one), and "Yes, heading" / "No thanks" while a callout offer is open; then the
+ * cross-craft guide's (craftGuide, optional): "Find water" always, "Find a perch" on a craft that
+ * perches (the eagle), "To space" on the spaceplane, "Start challenge" while a course's start prompt
+ * shows, and "Yes, switch" / "No" while an offer to switch craft is open. The chips use the same
+ * data-command hook as the Aircraft row.
  */
-export function createGuideChips(ctx, tourGuide) {
-  const { bus } = ctx;
+export function createGuideChips(ctx, tourGuide, craftGuide = null) {
+  const { bus, state } = ctx;
   const groups = typeof document !== 'undefined' ? document.querySelector('#dw-command .dw-command-groups') : null;
   if (!groups) {
     return { available: false, update() {}, refresh() {}, getStats: () => ({ available: false, chips: [] }) };
@@ -96,13 +99,30 @@ export function createGuideChips(ctx, tourGuide) {
   let signature = '';
   let dirty = true;
   let timer = 0;
+  let promptShown = false;
+
+  /** The active craft's id and module, for the craft-specific chips. */
+  function activeCraft() {
+    const flight = ctx.systems.flight;
+    const id = typeof flight?.getCraft === 'function' ? flight.getCraft() : state.flight.craft;
+    const module = typeof flight?.getCraftModule === 'function' ? flight.getCraftModule() : null;
+    return { id, module };
+  }
 
   function chipsFor() {
     const chips = [];
-    if (tourGuide.getOffer()) chips.push(['Yes, heading', 'yes'], ['No thanks', 'no thanks']);
+    if (craftGuide && craftGuide.getConfirm()) chips.push(['Yes, switch', 'yes'], ['No', 'no']);
+    else if (tourGuide.getOffer()) chips.push(['Yes, heading', 'yes'], ['No thanks', 'no thanks']);
     chips.push(["What's nearby", "what's nearby"]);
     for (const destination of tourGuide.listDestinations(2)) chips.push([`To ${destination.name}`, `take me to the ${destination.name.toLowerCase()}`]);
     chips.push(['Find a thermal', 'find a thermal'], ['Chase the storm', 'chase the storm'], ['Next discovery', 'next discovery']);
+    if (craftGuide) {
+      const { id, module } = activeCraft();
+      chips.push(['Find water', 'find water to land']);
+      if (module && module.capabilities && module.capabilities.perch === true) chips.push(['Find a perch', 'find a perch']);
+      if (id === 'spaceplane') chips.push(['To space', 'take me to space']);
+      if (state.challenge && state.challenge.prompt) chips.push(['Start challenge', 'start the challenge']);
+    }
     return chips;
   }
 
@@ -126,6 +146,8 @@ export function createGuideChips(ctx, tourGuide) {
     dirty = true;
   };
   bus.on('copilot:offer', refresh);
+  bus.on('copilot:confirm', refresh);
+  bus.onTyped('craftChanged', markDirty);
   bus.onTyped('spawnActivated', markDirty);
   bus.onTyped('spawnEnded', markDirty);
   bus.onTyped('discovery', markDirty);
@@ -136,6 +158,12 @@ export function createGuideChips(ctx, tourGuide) {
     refresh,
     /** Refreshes the destinations after spawns changed, at most every GUIDE_REFRESH_SECONDS. */
     update(realDt) {
+      // A challenge's start prompt coming or going changes the row at once.
+      const prompt = Boolean(state.challenge && state.challenge.prompt);
+      if (prompt !== promptShown) {
+        promptShown = prompt;
+        refresh();
+      }
       timer -= realDt;
       if (!dirty || timer > 0) return;
       timer = GUIDE_REFRESH_SECONDS;
