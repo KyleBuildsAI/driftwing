@@ -1,5 +1,5 @@
 // Formatting shared by the journal panel, the discovery toast and the world map: record statistics,
-// world coordinates, discovery times and dates.
+// altitudes, flight durations, world coordinates, discovery times and dates.
 import { journalStatInfo } from '../gameplay/journal.js';
 
 function padNumber(value, length) {
@@ -19,6 +19,25 @@ export function distanceParts(metres) {
   return [safe < 100000 ? (safe / 1000).toFixed(1) : String(Math.round(safe / 1000)), 'km'];
 }
 
+/**
+ * An altitude in metres as [value, unit]: whole metres up to 10 km ('8412', 'm'), then kilometres
+ * ('12.4', 'km' below 100 km, '102', 'km' above), so a climb to space reads at a glance.
+ */
+export function altitudeParts(metres) {
+  const safe = Math.max(0, Number(metres) || 0);
+  if (safe < 10000) return [String(Math.round(safe)), 'm'];
+  return [safe < 100000 ? (safe / 1000).toFixed(1) : String(Math.round(safe / 1000)), 'km'];
+}
+
+/** A flight duration in seconds as [value, unit]: '42', 's'; '12', 'min'; '1:05', 'h'. */
+export function durationParts(seconds) {
+  const safe = Math.max(0, Number(seconds) || 0);
+  if (safe < 60) return [String(Math.floor(safe)), 's'];
+  if (safe < 3600) return [String(Math.floor(safe / 60)), 'min'];
+  const hours = Math.floor(safe / 3600);
+  return [`${hours}:${String(Math.floor((safe - hours * 3600) / 60)).padStart(2, '0')}`, 'h'];
+}
+
 /** A run time in seconds as 'M:SS.t'. */
 export function formatRunTime(seconds) {
   const safe = Math.max(0, Number(seconds) || 0);
@@ -36,14 +55,15 @@ export function statLabel(key) {
 
 /**
  * A record statistic as [value, unit] for a stat card: counts as whole numbers, distances in m / km,
- * run times as M:SS.t; another declared unit ('m/s', 'points', ...) follows the number; undeclared
- * keys print their number.
+ * altitudes in m / km above 10 km, run times as M:SS.t; another declared unit ('m/s', 'points', ...)
+ * follows the number; undeclared keys print their number.
  */
 export function statParts(key, value) {
   const unit = journalStatInfo(key)?.unit ?? null;
   if (!Number.isFinite(value)) return ['None', ''];
   if (unit === 'count') return [String(Math.round(value)), ''];
   if (unit === 'metres') return distanceParts(value);
+  if (unit === 'altitude') return altitudeParts(value);
   if (unit === 'seconds') return [formatRunTime(value), ''];
   return [String(Math.round(value * 100) / 100), typeof unit === 'string' ? unit : ''];
 }

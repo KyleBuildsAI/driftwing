@@ -1,5 +1,6 @@
-/* Journal panel additions (journalPanel.js): the discoveries with their collection count, the global
-   records and the achievements, in the glass style of the Phase 1 journal (ui.css). */
+/* Journal panel additions (journalPanel.js): the section jumps, the discoveries with their collection
+   count, the global records, the achievements, craft, figures, challenges and worlds, in the glass
+   style of the Phase 1 journal (ui.css). */
 #ui-root .dw-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 #ui-root .dw-group-head > h3 { margin: 0; color: var(--dw-gold); opacity: 0.9; }
 #ui-root .dw-collection { font-size: 12.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--dw-text); font-variant-numeric: tabular-nums; }
@@ -71,3 +72,106 @@
 #ui-root .dw-challenge-badge.dw-medal-silver { background: radial-gradient(circle at 35% 30%, #ffffff, #d5dde6 60%, #8a95a3); }
 #ui-root .dw-challenge-badge.dw-medal-bronze { background: radial-gradient(circle at 35% 30%, #ffd9bd, #d99a6c 60%, #8d5b36); }
 #ui-root .dw-challenge-best { font-size: 15px; font-weight: 600; color: var(--dw-text); font-variant-numeric: tabular-nums; }
+
+/* Section jumps: a wrapping row of small pills under the totals (keyboard: Tab, Enter). */
+#ui-root .dw-journal-jumps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+#ui-root .dw-journal-jump {
+  pointer-events: auto;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--dw-hairline);
+  background: rgba(255, 240, 220, 0.04);
+  color: var(--dw-text-dim);
+  font-size: 11.5px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+#ui-root .dw-journal-jump:hover { background: rgba(255, 240, 220, 0.1); border-color: var(--dw-hairline-strong); color: var(--dw-text); }
+#ui-root .dw-group-head > h3:focus { outline: none; }
+#ui-root .dw-group-head > h3:focus-visible { outline: 2px solid rgba(243, 199, 122, 0.5); outline-offset: 3px; border-radius: 3px; }
+
+/* A stat card's small note under its value (the perch kinds). */
+#ui-root .dw-stat-note { display: block; margin-top: 4px; font-size: 11px; line-height: 1.4; color: var(--dw-text-faint); }
+
+/* Craft: picker groups, one row per craft with its silhouette, meta line and flight time; the row's
+   wash shows its share of the most flown craft. */
+#ui-root .dw-journal-subhead { margin: 12px 0 6px; font-size: 10px; font-weight: 650; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dw-text-faint); }
+#ui-root .dw-journal-subhead:first-of-type { margin-top: 2px; }
+#ui-root .dw-journal-craft-list,
+#ui-root .dw-journal-figure-list,
+#ui-root .dw-journal-world-list { list-style: none; margin: 0; padding: 0; }
+#ui-root .dw-journal-craft-list { display: flex; flex-direction: column; gap: 4px; }
+#ui-root .dw-journal-craft-entry {
+  --dw-share: 0%;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 6px;
+  border-radius: 11px;
+  background: linear-gradient(90deg, rgba(143, 211, 214, 0.13) var(--dw-share), rgba(255, 240, 220, 0.03) var(--dw-share));
+  box-shadow: inset 0 0 0 1px var(--dw-hairline);
+}
+#ui-root .dw-journal-craft-entry.dw-current { box-shadow: inset 0 0 0 1px rgba(243, 199, 122, 0.45); }
+#ui-root .dw-journal-craft-entry.dw-unflown { background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 240, 220, 0.06); }
+#ui-root .dw-journal-craft-entry.dw-unflown .dw-find-name { color: var(--dw-text-dim); }
+#ui-root .dw-journal-craft-badge { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: var(--dw-teal); background: rgba(143, 211, 214, 0.1); }
+#ui-root .dw-journal-craft-entry.dw-unflown .dw-journal-craft-badge { color: var(--dw-text-faint); background: rgba(255, 240, 220, 0.05); }
+#ui-root .dw-journal-craft-icon { width: 22px; height: 22px; }
+#ui-root .dw-journal-craft-time { font-size: 15px; font-weight: 400; color: var(--dw-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#ui-root .dw-journal-craft-time small { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; color: var(--dw-text-dim); margin-left: 3px; }
+#ui-root .dw-journal-craft-entry.dw-unflown .dw-journal-craft-time { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dw-text-faint); }
+
+/* Figures: two-column tiles with the count and a best-score bar (0-100). */
+#ui-root .dw-journal-figure-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+#ui-root .dw-journal-figure {
+  --dw-score: 0%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px 9px;
+  border-radius: 11px;
+  background: rgba(255, 240, 220, 0.05);
+  border: 1px solid var(--dw-hairline);
+}
+#ui-root .dw-journal-figure-name { font-size: 13px; color: var(--dw-text); }
+#ui-root .dw-journal-figure-detail { font-size: 11px; color: var(--dw-text-dim); font-variant-numeric: tabular-nums; }
+#ui-root .dw-journal-figure-bar { display: block; height: 3px; margin-top: 3px; border-radius: 3px; background: linear-gradient(90deg, var(--dw-teal), var(--dw-gold)) 0 0 / var(--dw-score) 100% no-repeat, rgba(255, 240, 220, 0.1); }
+#ui-root .dw-journal-figure.dw-unflown { background: transparent; border-color: rgba(255, 240, 220, 0.07); }
+#ui-root .dw-journal-figure.dw-unflown .dw-journal-figure-name { color: var(--dw-text-faint); }
+#ui-root .dw-journal-figure.dw-unflown .dw-journal-figure-detail { color: var(--dw-text-faint); }
+
+/* Challenges: the medal tally above the list. */
+#ui-root .dw-medal-tally { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 10px; }
+#ui-root .dw-medal-count { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dw-text-dim); font-variant-numeric: tabular-nums; }
+#ui-root .dw-medal-count .dw-challenge-badge { width: 18px; height: 18px; font-size: 9.5px; }
+
+/* Worlds: the seed, where it was reached from, and its link buttons (they wrap under on narrow panels). */
+#ui-root .dw-journal-world-list { display: flex; flex-direction: column; gap: 6px; }
+#ui-root .dw-journal-world {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 10px;
+  padding: 8px 10px;
+  border-radius: 11px;
+  background: rgba(255, 240, 220, 0.04);
+  box-shadow: inset 0 0 0 1px var(--dw-hairline);
+}
+#ui-root .dw-journal-world.dw-current { box-shadow: inset 0 0 0 1px rgba(243, 199, 122, 0.45); }
+#ui-root .dw-journal-world > .dw-find-text { flex: 1 1 140px; }
+#ui-root .dw-journal-world-seed { font-family: var(--font-mono); font-size: 14px; letter-spacing: 0.08em; color: var(--dw-text); overflow-wrap: anywhere; }
+#ui-root .dw-journal-world-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+#ui-root .dw-journal-world-actions .dw-text-button { height: 28px; padding: 0 10px; font-size: 12px; }
+#ui-root .dw-journal-world-here { font-size: 10px; font-weight: 650; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dw-gold); }
+
+/* Narrow panels (phones): tighter rows, the figures stay two-up. */
+@media (max-width: 420px) {
+  #ui-root .dw-journal-craft-entry { gap: 8px; padding-right: 8px; }
+  #ui-root .dw-journal-craft-time { font-size: 13.5px; }
+  #ui-root .dw-journal-figure { padding: 7px 8px 8px; }
+  #ui-root .dw-journal-figure-name { font-size: 12.5px; }
+}

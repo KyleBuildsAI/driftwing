@@ -1848,7 +1848,7 @@ export function createUISystem(ctx) {
   }
 
   // ---- Journal (src/ui/journalPanel.js) and the discovery toast (src/ui/discoveryToast.js) ------
-  const journalPanel = createJournalPanel({ body: dom.journalBody, seedLabel: dom.journalSeed, ctx });
+  const journalPanel = createJournalPanel({ body: dom.journalBody, seedLabel: dom.journalSeed, ctx, seedLinks });
   const discoveryToast = createDiscoveryToast({ root, bus, toast, onActivate: () => showPanel('journal') });
 
   // ---- Settings and controls ------------------------------------------------------
@@ -2563,7 +2563,7 @@ export function createUISystem(ctx) {
     update, toast, setSubtitle, setMicState, showPanel, togglePanel, setPhotoMode, wake, openControls,
     /** v2 chrome for tests and other systems: the craft picker, settings tabs and controls panel. */
     craftPicker, settingsPanel, controlsPanel, statusBadge,
-    /** Seed links: shareUrl(), copyLink(), openWorld(seed, dayTime?), newWorld(). */
+    /** Seed links: shareUrl(), copyLink(), worldUrl(seed), copyWorldLink(seed), openWorld(seed, dayTime?), newWorld(). */
     seedLinks,
     /** The world map (M) and the discovery toast, for tests and other systems. */
     worldMap, discoveryToast,
