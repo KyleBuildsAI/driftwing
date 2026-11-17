@@ -167,6 +167,22 @@ const simProfile = Object.freeze({
         rearmBelow: 40000,
       }),
     }),
+    // The copilot's climb to space (spaceplaneFcs.js; tools/lab/spaceplane.mjs flies it from several
+    // starts): a SpaceShipOne-style pull to a steep climb on full power, the engine cut at the target
+    // ballistic apogee, and a coast to the top.
+    climb: Object.freeze({
+      pitch: 72, // deg: the climb attitude
+      pullRate: 5, // deg/s: the fastest pull to it
+      rollOutBank: 30, // deg: past this bank the wings come level before the pull
+      loadShare: 0.7, // share of the G limit a pull may use
+      maxPressure: 55000, // Pa: the throttle backs off up to here (Vne 340 m/s equivalent is about 71 kPa)
+      pressureBand: 12000, // Pa
+      minThrottle: 0.15,
+      targetApogee: 112000, // m: the engine is cut once the ballistic apogee reaches it
+      cutoffAbove: 35000, // m: below this the drag still counts, so the ballistic apogee is not trusted
+      risingSpeed: 20, // m/s: the climb has begun (a descending start pulls up first)
+      handBackStick: 0.15, // stick or pedal deflection that hands the craft back
+    }),
   }),
   contacts: Object.freeze([
     Object.freeze({ id: 'noseWheel', kind: 'wheel', gear: true, retracts: true, steerable: true, steerAngle: 20, position: Object.freeze([0, -1.95, -4.2]), spring: 150000, damping: 14000, rollingFriction: 0.02, sideFriction: 0.8 }),
@@ -799,6 +815,118 @@ function smoothBuffet(heating) {
 }
 
 // ============================================================================================
+// CLIMB TO SPACE: the copilot's "take me to space" (the climbToSpace command). The flight control system
+// flies it every physics tick (src/flight/spaceplaneFcs.js, craftState.spaceClimb); here it starts, stops,
+// and WREN calls the engine cut-off, the apogee and the hand-back. The soft throttle lever follows the
+// profile (full power on, idle at the cut-off), so the pilot takes over with the lever where the engine is.
+// ============================================================================================
+const CLIMB = simProfile.space.climb;
+const climbLogs = new WeakMap();
+
+function presetThrottle(api, value) {
+  const input = api.systems ? api.systems.input : null;
+  if (input && typeof input.presetThrottle === 'function') input.presetThrottle(value);
+}
+
+function climbActive(craftState) {
+  return craftState.spaceClimb === 'boost' || craftState.spaceClimb === 'coast';
+}
+
+/** "Apogee 114 km. We made space." for the climb's top. */
+function climbApogeeLine(peak) {
+  const space = peak >= SPACE_ALTITUDE ? 'We made space.' : `${kilometres(SPACE_ALTITUDE - peak)} short of space.`;
+  return `Apogee ${kilometres(peak)}. ${space}`;
+}
+
+/** Starts the climb from the current state, or says why not. Returns the reply. */
+function startSpaceClimb(api) {
+  const craftState = api.craftState;
+  const telemetry = api.telemetry;
+  if (climbActive(craftState)) return `We're on our way already: ${craftState.spaceClimb === 'coast' ? 'coasting to the apogee' : 'climbing on full power'}, ${kilometres(telemetry.altitude)} now.`;
+  if (telemetry.crash && telemetry.crash.active) return "Hang on, we're resetting. Ask me again in a moment.";
+  if (telemetry.onGround) return "We need to be flying first. Take off, and I'll fly her up from there.";
+  if (telemetry.engineOn === false) return 'The engine is off. Light it up and ask me again.';
+  const altitude = Number.isFinite(telemetry.altitude) ? telemetry.altitude : 0;
+  const climb = Number.isFinite(telemetry.verticalSpeed) ? telemetry.verticalSpeed : 0;
+  const ballistic = climb > 0 ? altitude + (climb * climb) / (2 * 9.81) : null;
+  if (altitude >= SPACE_ALTITUDE && climb <= 0) return `We're in space already, at ${kilometres(altitude)}, on the way down.`;
+  craftState.spaceClimbEnd = null;
+  craftState.spaceClimbPeak = altitude;
+  craftState.spaceClimbCutoff = null;
+  craftState.autoReentry = false;
+  craftState.reentryPhase = 'off';
+  if (api.player.autopilot && api.player.autopilot.enabled) api.setAutopilot({ enabled: false, reason: 'climb to space' });
+  if (altitude > CLIMB.cutoffAbove && ballistic !== null && ballistic >= CLIMB.targetApogee) {
+    craftState.spaceClimb = 'coast';
+    presetThrottle(api, 0);
+    return `We're on a ballistic arc to ${kilometres(ballistic)} already. I'll hold her nose on the flight path to the top. Touch the stick and she's yours.`;
+  }
+  craftState.spaceClimb = 'boost';
+  presetThrottle(api, 1);
+  return `Climbing to space: full power, pulling up to ${CLIMB.pitch} degrees, engine cut-off for a ${kilometres(CLIMB.targetApogee)} apogee. Hands off; touch the stick and she's yours.`;
+}
+
+function stopSpaceClimb(api) {
+  const craftState = api.craftState;
+  if (!climbActive(craftState)) return 'The climb to space is off already.';
+  craftState.spaceClimb = 'off';
+  craftState.spaceClimbEnd = 'command';
+  return 'Climb to space off. You have control.';
+}
+
+/** WREN calls the cut-off and the hand-back as the flight control system's phases change (once per frame). */
+function updateSpaceClimbLog(api) {
+  const craftState = api.craftState;
+  let log = climbLogs.get(craftState);
+  if (!log) {
+    log = { phase: 'off' };
+    climbLogs.set(craftState, log);
+  }
+  if (climbActive(craftState) && api.telemetry.crash && api.telemetry.crash.active) {
+    craftState.spaceClimb = 'off';
+    craftState.spaceClimbEnd = 'crash';
+  }
+  const phase = craftState.spaceClimb;
+  if (phase === log.phase) return;
+  const previous = log.phase;
+  log.phase = phase;
+  if (phase === 'coast' && previous === 'boost') {
+    presetThrottle(api, 0);
+    const telemetry = api.telemetry;
+    const altitude = Number.isFinite(telemetry.altitude) ? telemetry.altitude : 0;
+    const climb = Math.max(0, Number.isFinite(telemetry.verticalSpeed) ? telemetry.verticalSpeed : 0);
+    api.notify(`Engine cut-off at ${kilometres(altitude)}.`, 'info');
+    copilotSay(api, `Engine cut-off at ${kilometres(altitude)}, Mach ${(Number(telemetry.mach) || 0).toFixed(1)}. Predicted apogee ${kilometres(altitude + (climb * climb) / (2 * 9.81))}. Coasting up now; enjoy the quiet.`);
+    return;
+  }
+  if (phase !== 'off' || previous === 'off') return;
+  switch (craftState.spaceClimbEnd) {
+    case 'apogee': {
+      presetThrottle(api, 0);
+      const peak = Number.isFinite(craftState.spaceClimbPeak) ? craftState.spaceClimbPeak : 0;
+      api.notify(climbApogeeLine(peak), peak >= SPACE_ALTITUDE ? 'success' : 'info');
+      copilotSay(api, `${climbApogeeLine(peak)} You have control. Auto re-entry is armed for the way down.`);
+      break;
+    }
+    case 'pilot':
+      copilotSay(api, 'You have control. The climb to space is off.');
+      break;
+    case 'autopilot':
+      copilotSay(api, 'The autopilot has her now, so the climb to space is off.');
+      break;
+    case 'ground':
+      copilotSay(api, 'We are on the ground, so the climb to space is off.');
+      break;
+    case 'engine':
+      copilotSay(api, 'Engine off, so the climb to space is off. You have control.');
+      break;
+    default:
+      // 'command' was answered by the command itself; a soft crash says nothing more.
+      break;
+  }
+}
+
+// ============================================================================================
 // ABILITIES: Space arms or disarms the auto re-entry guidance (and runs the flight log every
 // frame); Shift+Space toggles attitude hold (hands off holds the attitude at any assist level).
 // ============================================================================================
@@ -813,6 +941,7 @@ const craftAbility = Object.freeze({
     autoReentry: false, reentryPhase: 'off', reentry: 'none', blackout: false, commsBlackout: false,
     apogee: null, dynamicPressure: 0, rcsBlend: 1, heating: 0, mach: 0, thrust: 0, thrustLevel: 0,
     rcsPitch: 0, rcsYaw: 0, rcsRoll: 0, maxAltitude: 0,
+    spaceClimb: 'off', spaceClimbEnd: null, spaceClimbPeak: 0, spaceClimbCutoff: null,
   }),
   run(api) {
     const armed = api.craftState.autoReentry !== true;
@@ -822,6 +951,7 @@ const craftAbility = Object.freeze({
   },
   update(api, dt) {
     updateFlightLog(api, dt);
+    updateSpaceClimbLog(api);
   },
 });
 
@@ -891,6 +1021,15 @@ const copilot = Object.freeze({
         return `Mach ${mach.toFixed(1)} at ${kilometres(Number.isFinite(api.telemetry.altitude) ? api.telemetry.altitude : 0)}.`;
       },
     }),
+    Object.freeze({
+      // "Take me to space" from any craft reaches this through the copilot's toSpace action.
+      id: 'climbToSpace',
+      phrases: Object.freeze(['\\b(?:take (?:me|us)|fly (?:me|us)|climb|go) (?:up )?(?:in)?to space\\b', '\\b(abort|cancel|stop) (?:the )?(?:climb|space climb|climb to space)\\b']),
+      run(api, value) {
+        if (value === false || value === 'off' || value === 'abort' || value === 'cancel' || value === 'stop') return stopSpaceClimb(api);
+        return startSpaceClimb(api);
+      },
+    }),
   ]),
   status(craftState, telemetry) {
     const mach = Number.isFinite(telemetry.mach) ? telemetry.mach : 0;
@@ -901,6 +1040,7 @@ const copilot = Object.freeze({
     if (craftState.heating > 0.05) parts.push(`Heating ${Math.round(craftState.heating * 100)} percent.`);
     if (craftState.autoReentry) parts.push(craftState.reentryPhase === 'entry' ? 'Holding entry attitude.' : craftState.reentryPhase === 'glide' ? 'Hypersonic glide.' : 'Auto re-entry armed.');
     if (craftState.attitudeHold) parts.push('Attitude hold on.');
+    if (climbActive(craftState)) parts.push(craftState.spaceClimb === 'coast' ? 'Coasting to the apogee.' : 'Climbing to space on full power.');
     return parts.join(' ');
   },
 });

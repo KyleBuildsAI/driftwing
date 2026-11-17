@@ -23,17 +23,30 @@
 // (or below Mach 3 in dense air); 'glide' eases the angle of attack down to the hypersonic glide's and
 // hands the craft back below Mach 1.5 or 20 km (the hold then keeps its flight path). The phase machine runs here,
 // every physics tick; the craft's ability update announces the phases.
+//
+// Climb to space (craftState.spaceClimb, the copilot's "take me to space"): 'boost' rolls the wings level
+// and pulls to the climb attitude inside the load and angle-of-attack limits on full power, throttling
+// back where the dynamic pressure would pass its limit (the equivalent-airspeed Vne), and cuts the
+// engine once the ballistic apogee reaches the target; 'coast' holds the nose on the flight path on the
+// jets up to the apogee, then hands back with auto re-entry armed. Any stick or pedal input, the
+// autopilot, the ground or the engine switched off hands the craft back at once (craftState.spaceClimbEnd
+// says why). It flies at any assist level: the pilot asked for it.
 import * as THREE from 'three/webgpu';
 import { DEG, clamp } from '../core/util.js';
 import { GRAVITY, SEA_LEVEL_DENSITY, smoothstep } from './aero.js';
 import { registerAssistCatalog, registerAssistHandler } from './assists.js';
 import { autopilotHandlerFor, registerAutopilotHandler } from './autopilot.js';
 import { registerTrimHandler, trimHandlerFor } from './trim.js';
+import { ballisticApogee } from './spaceplaneAero.js';
 
 export const SPACEPLANE_MODEL_KIND = 'spaceplane';
 
 /** Re-entry guidance phases (craftState.reentryPhase). */
 export const REENTRY_PHASES = Object.freeze(['off', 'armed', 'entry', 'glide']);
+
+/** Climb-to-space phases (craftState.spaceClimb) and why a climb ended (craftState.spaceClimbEnd). */
+export const SPACE_CLIMB_PHASES = Object.freeze(['off', 'boost', 'coast']);
+export const SPACE_CLIMB_ENDS = Object.freeze(['apogee', 'pilot', 'autopilot', 'ground', 'engine', 'command', 'crash']);
 
 const IDLE = 0.05;
 const AXES = 3;
@@ -66,6 +79,9 @@ function createMemory() {
     arcPeak: 0,
     autoArmed: false,
     primed: null,
+    /** Seconds into the climb to space, and whether it has climbed yet (a climb started descending pulls up first). */
+    climbSeconds: 0,
+    climbRose: false,
     power: new Float64Array(AXES),
     rates: new Float64Array(AXES),
     sticks: new Float64Array(AXES),
@@ -188,6 +204,98 @@ function updateReentry(data, model, craftState, weights, memory, dt, tuning) {
   return phase;
 }
 
+/** Ends the climb to space: why, and the hold starts fresh from wherever the craft is. */
+function endSpaceClimb(craftState, memory, reason) {
+  craftState.spaceClimb = 'off';
+  craftState.spaceClimbEnd = reason;
+  memory.climbSeconds = 0;
+  memory.climbRose = false;
+  memory.holding = false;
+  memory.idleSeconds = 0;
+  if (reason === 'apogee') {
+    // The way down is the re-entry guidance's (with the hold at the top until it starts).
+    craftState.autoReentry = true;
+    craftState.reentryPhase = 'armed';
+  }
+}
+
+/**
+ * The climb to space, one physics tick: the pitch, roll and yaw rates it wants through the rate loops
+ * (the same law as the hold, on the jets and the surfaces) and the throttle. Returns true while it flies
+ * the craft; false once it is off or has just handed back.
+ */
+function flySpaceClimb(controls, context, craftState, memory, dt) {
+  const phase = craftState.spaceClimb;
+  if (phase !== 'boost' && phase !== 'coast') return false;
+  const model = context.model;
+  const data = model.flightData;
+  const tuning = model.profile.space.fcs;
+  const climb = model.profile.space.climb;
+  const pilot = Math.max(Math.abs(controls.pitch || 0), Math.abs(controls.roll || 0), Math.abs(controls.yaw || 0));
+  let ended = null;
+  if (context.autopilot && context.autopilot.enabled) ended = 'autopilot';
+  else if (pilot > climb.handBackStick) ended = 'pilot';
+  else if (data.onGround) ended = 'ground';
+  else if (context.telemetry && context.telemetry.engineOn === false && phase === 'boost') ended = 'engine';
+  const altitude = model.state.position.y;
+  craftState.spaceClimbPeak = Math.max(Number.isFinite(craftState.spaceClimbPeak) ? craftState.spaceClimbPeak : 0, altitude);
+  memory.climbSeconds += dt;
+  if (data.verticalSpeed > climb.risingSpeed) memory.climbRose = true;
+  // The top of the arc: after the climb has risen, the first tick that no longer climbs.
+  if (!ended && memory.climbRose && data.verticalSpeed <= 0) ended = 'apogee';
+  if (ended) {
+    endSpaceClimb(craftState, memory, ended);
+    return false;
+  }
+
+  const power = controlPower(data, tuning, memory.power);
+  const rates = memory.rates;
+  rates[PITCH] = data.pitchRate;
+  rates[YAW] = data.yawRate;
+  rates[ROLL] = data.rollRate;
+  const wanted = memory.wanted;
+  const inAir = airborneShare(data, model, tuning);
+  const maxRate = tuning.maxRate;
+  const pullRate = climb.pullRate * DEG;
+  // Wings level first: past the roll-out bank the nose waits (a pull while banked would turn, not climb).
+  const levelEnough = Math.abs(data.bank) < climb.rollOutBank * DEG;
+  if (phase === 'boost') {
+    const pitchError = climb.pitch * DEG - data.pitch;
+    wanted[PITCH] = levelEnough ? clamp(tuning.attitudeGain * pitchError * Math.cos(data.bank), -pullRate, pullRate) : 0;
+    // The pull stays inside the load share and the angle-of-attack margin while the air carries the craft.
+    if (inAir > 0 && data.airspeed > tuning.minAirspeed) {
+      const gLimit = Number.isFinite(data.gLimit) ? data.gLimit : 4;
+      const byLoad = ((gLimit * climb.loadShare - Math.cos(data.flightPath) * Math.cos(data.bank)) * GRAVITY) / data.airspeed;
+      const byAoa = tuning.aoaGain * (data.aoaCritical - tuning.aoaMargin * DEG - data.aoa);
+      wanted[PITCH] = Math.min(wanted[PITCH], byLoad, byAoa);
+    }
+  } else {
+    // Coasting: the nose follows the flight path (prograde), so it is level at the apogee.
+    wanted[PITCH] = clamp(tuning.attitudeGain * (data.flightPath - data.pitch), -maxRate[PITCH] * DEG, maxRate[PITCH] * DEG);
+  }
+  wanted[ROLL] = clamp(tuning.bankGain * -data.bank, -maxRate[ROLL] * DEG, maxRate[ROLL] * DEG);
+  wanted[YAW] = clamp(tuning.sideslipGain * data.sideslip * inAir, -maxRate[YAW] * DEG, maxRate[YAW] * DEG);
+  for (let axis = 0; axis < AXES; axis++) memory.sticks[axis] = commandAxis(memory, axis, wanted[axis], rates[axis], power[axis], tuning, dt);
+  writeSticks(controls, memory.sticks);
+
+  if (phase === 'boost') {
+    // Full power, backed off over the band below the dynamic-pressure limit; the engine is cut once the
+    // ballistic apogee (no thrust, no drag) reaches the target, high enough that the air no longer counts.
+    const pressure = Number.isFinite(data.dynamicPressure) ? data.dynamicPressure : 0;
+    controls.throttle = clamp((climb.maxPressure - pressure) / climb.pressureBand, climb.minThrottle, 1);
+    const ballistic = ballisticApogee(altitude, data.verticalSpeed);
+    if (altitude > climb.cutoffAbove && ballistic !== null && ballistic >= climb.targetApogee) {
+      craftState.spaceClimb = 'coast';
+      craftState.spaceClimbCutoff = altitude;
+      controls.throttle = 0;
+    }
+  } else {
+    controls.throttle = 0;
+  }
+  context.activeAssists.push('climb to space');
+  return true;
+}
+
 registerAssistHandler(SPACEPLANE_MODEL_KIND, Object.freeze({
   createMemory,
   prime: primeMemory,
@@ -199,6 +307,7 @@ registerAssistHandler(SPACEPLANE_MODEL_KIND, Object.freeze({
     const dt = context.dt;
     const craftState = context.env && context.env.craftState ? context.env.craftState : {};
     const phase = updateReentry(data, model, craftState, weights, memory, dt, tuning);
+    if (flySpaceClimb(controls, context, craftState, memory, dt)) return;
     if (data.onGround) {
       memory.holding = false;
       memory.idleSeconds = 0;

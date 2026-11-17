@@ -22,9 +22,16 @@
 //                  3 km at the end with 0 NaN
 //   trim at 40     the elevator the guidance needs at 40 degrees angle of attack in the entry has
 //                  margin left (the surfaces can hold the entry attitude on their own)
+//   climb to space the copilot's climb (craftState.spaceClimb, flown by the flight control system) from
+//                  the climb placement, cruise, a low slow banked descent and high and fast, at 100 % and
+//                  0 % assists, hands off: past 100 km, handed back at the apogee with auto re-entry
+//                  armed, inside the G limit and the Vne dynamic pressure, 0 NaN; a stick input and the
+//                  autopilot hand back at once
 //   low speed      the clean stall speed at sea level; hands off at cruise (100 %) holds its altitude
 //   controller     the FlightController headless: a craft switch from the jet climbs at 45 degrees on
-//                  full thrust (situate), hands off for 10 s with no soft crash
+//                  full thrust (situate), hands off for 10 s with no soft crash; the climbToSpace command
+//                  through runCraftCommand from cruise flies to the apogee past 100 km, with the soft
+//                  throttle lever preset to full power and then to idle at the cut-off
 //
 // Usage: node tools/lab/spaceplane.mjs [--verbose] [--only=name]
 // Prints a table (measured vs target) and exits non-zero if any check fails.
@@ -282,6 +289,77 @@ function testReentry() {
   record('trim at 40: elevator margin in the dense entry', elevator, 0.95, { compare: 'max', decimals: 2, note: `${result.elevator.length} ticks above 3 kPa` });
 }
 
+/**
+ * The copilot's climb to space (craftState.spaceClimb, flown by the flight control system) from a start,
+ * hands off: returns the numbers of the climb up to its hand-back at the apogee (or after `seconds`).
+ */
+function flySpaceClimb(rig, start, { seconds = 420, script = null } = {}) {
+  rig.airborne(start);
+  rig.craftState.spaceClimb = 'boost';
+  rig.craftState.spaceClimbEnd = null;
+  rig.craftState.spaceClimbPeak = start.altitude;
+  const vneQ = 0.5 * SEA_LEVEL_DENSITY * spaceplane.limits.vne ** 2;
+  const result = { peak: 0, maxQ: 0, maxLoad: 0, minLoad: Infinity, maxAoa: 0, cutoff: null, end: null, endTime: null, overQ: 0, maxThrottle: 0, climbAt100: null };
+  rig.run(seconds, (lab) => {
+    const data = lab.data;
+    lab.pilot.throttle = 0;
+    if (script) script(lab);
+    else lab.handsOff();
+    result.peak = Math.max(result.peak, lab.altitude());
+    result.maxQ = Math.max(result.maxQ, data.dynamicPressure);
+    if (data.dynamicPressure > vneQ) result.overQ++;
+    if (lab.time > 1) {
+      result.maxLoad = Math.max(result.maxLoad, data.gLoad);
+      result.minLoad = Math.min(result.minLoad, data.gLoad);
+    }
+    if (data.dynamicPressure > 2000) result.maxAoa = Math.max(result.maxAoa, data.aoa / DEG);
+    result.maxThrottle = Math.max(result.maxThrottle, lab.controls.throttle);
+    if (result.cutoff === null && lab.craftState.spaceClimb === 'coast') result.cutoff = lab.altitude();
+    if (result.climbAt100 === null && lab.altitude() > 100000) result.climbAt100 = lab.time;
+    if (lab.craftState.spaceClimb === 'off') {
+      result.end = lab.craftState.spaceClimbEnd;
+      result.endTime = lab.time;
+      return true;
+    }
+    if (VERBOSE && Math.round(lab.time * 120) % 2400 === 0) log(`  space climb t ${lab.time.toFixed(0)} h ${(lab.altitude() / 1000).toFixed(1)} km M ${data.mach.toFixed(2)} q ${data.dynamicPressure.toFixed(0)} pitch ${(data.pitch / DEG).toFixed(0)} bank ${(data.bank / DEG).toFixed(0)} g ${data.gLoad.toFixed(2)} thr ${lab.controls.throttle.toFixed(2)} phase ${lab.craftState.spaceClimb}`);
+    return false;
+  });
+  result.peak = Math.max(result.peak, rig.craftState.spaceClimbPeak);
+  return result;
+}
+
+function testClimbToSpace() {
+  const vneQ = 0.5 * SEA_LEVEL_DENSITY * spaceplane.limits.vne ** 2;
+  const gLimit = spaceplane.limits.gLimit;
+  const starts = [
+    ['the climb placement (2 km, 45 deg, 250 m/s)', { speed: 250, altitude: 2000, throttle: 1, pitch: 45 }],
+    ['cruise (3 km, level, 220 m/s)', { speed: 220, altitude: 3000, throttle: spaceplane.spawn.cruiseThrottle }],
+    ['low, slow, descending and banked (1.5 km, -10 deg, 150 m/s, 40 deg bank)', { speed: 150, altitude: 1500, throttle: 0.1, pitch: -8, path: -10, bank: 40 }],
+    ['high and fast (30 km, level, 900 m/s)', { speed: 900, altitude: 30000, throttle: 0 }],
+  ];
+  for (const [name, start] of starts) {
+    for (const assists of [1, 0]) {
+      const rig = createRig({ assists });
+      rig.setAssists(assists);
+      const result = flySpaceClimb(rig, start);
+      const label = `climb to space from ${name}, ${assists * 100} % assists`;
+      record(`${label}: past 100 km, handed back at the apogee`, result.peak / 1000, [100, 140], { compare: 'range', unit: 'km', note: `end ${result.end} at ${result.endTime === null ? '-' : result.endTime.toFixed(0)} s, cut-off ${result.cutoff === null ? 'none' : `${(result.cutoff / 1000).toFixed(1)} km`}, 100 km at ${result.climbAt100 === null ? 'never' : `${result.climbAt100.toFixed(0)} s`}` });
+      const inLimits = result.end === 'apogee' && result.maxLoad <= gLimit && result.minLoad >= -gLimit / 2 && result.overQ === 0 && rig.nan === 0;
+      record(`${label}: inside the limits, 0 NaN, re-entry armed`, result.maxLoad, gLimit, { compare: inLimits && rig.craftState.autoReentry === true, unit: 'g', decimals: 2, note: `load ${result.minLoad.toFixed(2)}..${result.maxLoad.toFixed(2)} g, max q ${(result.maxQ / 1000).toFixed(1)} kPa (Vne ${(vneQ / 1000).toFixed(1)}), max AoA ${result.maxAoa.toFixed(1)} deg, ${rig.nan} NaN` });
+    }
+  }
+  // Any stick input hands back at once, on the pilot's lever.
+  const rig = createRig({ assists: 1 });
+  rig.setAssists(1);
+  const handBack = flySpaceClimb(rig, starts[0][1], { seconds: 60, script: (lab) => { lab.handsOff(); if (lab.time > 20) lab.pilot.roll = 0.4; } });
+  record('climb to space: a stick input hands back', handBack.endTime ?? 99, [20, 20.2], { compare: 'range', unit: 's', decimals: 2, note: `end ${handBack.end}, re-entry armed ${rig.craftState.autoReentry}` });
+  // The autopilot engaged hands back too.
+  const autopilotRig = createRig({ assists: 1 });
+  autopilotRig.setAssists(1);
+  const byAutopilot = flySpaceClimb(autopilotRig, starts[1][1], { seconds: 30, script: (lab) => { lab.handsOff(); if (lab.time > 5) Object.assign(lab.env.autopilot, { enabled: true, heading: 0, altitude: 3000, speed: 220 }); } });
+  record('climb to space: the autopilot hands back', byAutopilot.end === 'autopilot' ? 1 : 0, 1, { compare: byAutopilot.end === 'autopilot', decimals: 0, note: `end ${byAutopilot.end} at ${byAutopilot.endTime === null ? '-' : byAutopilot.endTime.toFixed(1)} s` });
+}
+
 function testLowSpeed() {
   const rig = createRig({ assists: 0, ground: -3000 });
   rig.airborne({ speed: 150, altitude: 0, throttle: 0 });
@@ -398,6 +476,31 @@ function testCraftSwitch() {
   record('controller: 10 s hands off after the switch', climbed, 1000, { compare: climbed > 1000 && rig.events.softCrash.length === 0, unit: 'm', decimals: 0, note: `climbed, ${rig.events.softCrash.length} soft crashes, ceiling ${rig.flight.getCeiling()} m` });
 }
 
+function testClimbCommand() {
+  const rig = createControllerRig({ craft: 'spaceplane', altitude: 3000 });
+  rig.controls.throttle = spaceplane.spawn.cruiseThrottle;
+  rig.run(2, (lab) => Object.assign(lab.controls, { pitch: 0, roll: 0, yaw: 0 }));
+  const reply = rig.flight.runCraftCommand('climbToSpace');
+  const craftState = () => rig.telemetry.craftState;
+  const started = craftState().spaceClimb;
+  let peak = 0;
+  let nan = 0;
+  rig.run(420, (lab) => {
+    Object.assign(lab.controls, { pitch: 0, roll: 0, yaw: 0 });
+    // The rig's soft lever: the climb presets it, as the game's input system does.
+    if (lab.presets.length > 0) lab.controls.throttle = lab.presets[lab.presets.length - 1];
+    const position = lab.state.player.position;
+    if (!Number.isFinite(position.x + position.y + position.z)) nan++;
+    peak = Math.max(peak, position.y);
+    return craftState().spaceClimb === 'off';
+  });
+  record('controller: "take me to space" (climbToSpace) from cruise', peak / 1000, [100, 140], { compare: 'range', unit: 'km', note: `started ${started}, ended ${craftState().spaceClimbEnd} at ${rig.time.toFixed(0)} s; reply "${reply.text.slice(0, 60)}..."` });
+  const presets = rig.presets.join(',');
+  record('controller: the lever follows (full power, then idle at the cut-off), re-entry armed, 0 NaN', nan, 0, { compare: reply.ok && craftState().spaceClimbEnd === 'apogee' && rig.presets[0] === 1 && rig.presets.includes(0) && craftState().autoReentry === true && nan === 0 && rig.events.softCrash.length === 0, decimals: 0, note: `throttle presets ${presets}, cut-off at ${craftState().spaceClimbCutoff === null ? '-' : `${(craftState().spaceClimbCutoff / 1000).toFixed(1)} km`}` });
+  const again = rig.flight.runCraftCommand('climbToSpace', 'abort');
+  record('controller: "abort the climb" with no climb running says so', again.ok ? 1 : 0, 1, { compare: again.ok && /off already/.test(again.text), decimals: 0, note: again.text });
+}
+
 // ============================================================================================
 // RUN
 // ============================================================================================
@@ -422,7 +525,7 @@ function printTable() {
 
 const started = Date.now();
 const only = process.argv.find((argument) => argument.startsWith('--only='));
-const tests = { testEngine, testApogee, testRcsBlend, testAttitudeHold, testReentry, testLowSpeed, testCraftSwitch };
+const tests = { testEngine, testApogee, testRcsBlend, testAttitudeHold, testReentry, testClimbToSpace, testLowSpeed, testCraftSwitch, testClimbCommand };
 for (const [name, test] of Object.entries(tests)) {
   if (only && !name.toLowerCase().includes(only.slice(7).toLowerCase())) continue;
   test();
