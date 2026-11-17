@@ -89,7 +89,15 @@ export function createFlightActionHandlers(ctx, helpers) {
   const registry = ctx.craftRegistry;
   const { succeed, fail, pick, waiter, noteCopilotChange, getView } = helpers;
   const flight = () => ctx.systems.flight;
-  const craftName = (id) => craftPhrase(registry, id);
+  /** "the bush plane"; a craft with skins that is flying now is named by its skin ("the dragon"). */
+  const craftName = (id) => {
+    const system = flight();
+    if (typeof system?.getCraft === 'function' && system.getCraft() === id && typeof system.getSkin === 'function') {
+      const entry = skinEntry(registry?.get?.(id), system.getSkin());
+      if (entry) return `the ${entry.name.toLowerCase()}`;
+    }
+    return craftPhrase(registry, id);
+  };
 
   /** One press and release of an input action, published like any device would. */
   function emitInputAction(id) {
@@ -124,13 +132,40 @@ export function createFlightActionHandlers(ctx, helpers) {
     return text;
   }
 
+  /** A module's skin entry ({ id, name }) by id, or null. */
+  function skinEntry(module, skin) {
+    const list = module && module.skins && Array.isArray(module.skins.list) ? module.skins.list : [];
+    return list.find((entry) => entry.id === skin) ?? null;
+  }
+
+  /** Picks a skin through the craftSkins setting (the picker's channel); true once the controller flies it. */
+  function chooseSkin(craft, skin) {
+    if (!settings.update('craftSkins', { [craft]: skin })) return false;
+    const system = flight();
+    return system.getCraft() !== craft || typeof system.getSkin !== 'function' || system.getSkin() === skin;
+  }
+
   return {
+    /**
+     * Switches craft through the craft setting, as the picker does; with a skin ("the dragon") the
+     * craftSkins setting first, so the new craft is built in it. Reports what the controller flies.
+     */
     setCraft(action) {
       const system = flight();
       if (typeof system?.getCraft !== 'function') return fail("The flight controller isn't answering right now.");
       const target = action.craft;
       const current = system.getCraft();
-      if (current === target) return succeed(`We're already flying ${craftName(target)}.`);
+      const module = registry?.get?.(target) ?? null;
+      const skin = action.skin ? skinEntry(module, action.skin) : null;
+      if (action.skin && module && !skin) return fail(`${capitalize(craftName(target))} has no ${action.skin} skin.`);
+      const skinName = skin ? `the ${skin.name.toLowerCase()}` : null;
+      if (current === target) {
+        const flying = typeof system.getSkin === 'function' ? system.getSkin() : null;
+        if (!skin || flying === skin.id) return succeed(`We're already flying ${skinName ?? craftName(target)}.`);
+        noteCopilotChange('craft');
+        if (!chooseSkin(target, skin.id)) return fail(`The ${skin.name.toLowerCase()} skin didn't take.`);
+        return succeed(`${capitalize(skinName)} it is.`);
+      }
       if (!registry?.has?.(target)) {
         const available = installedCraft();
         const offer = available.length ? ` Right now we can fly ${listPhrase(available)}.` : '';
@@ -140,9 +175,11 @@ export function createFlightActionHandlers(ctx, helpers) {
         ]));
       }
       noteCopilotChange('craft');
+      if (skin && !chooseSkin(target, skin.id)) return fail(`The ${skin.name.toLowerCase()} skin didn't take.`);
       settings.set('craft', target);
       const now = system.getCraft();
       if (now !== target) return fail(`${capitalize(craftName(target))} didn't take, so we're still in ${craftName(now)}.`);
+      if (skinName) return succeed(`${capitalize(skinName)} it is.`);
       return succeed(pick(`craft-${target}`, [`${capitalize(craftName(target))} it is.`, `Switched to ${craftName(target)}.`]));
     },
 
@@ -306,9 +343,9 @@ export function keyFor(ctx, actionId, fallback) {
 /** The "what can you do" answer, with the keys and UI that do the same thing. */
 export function helpLine(ctx, pick) {
   const key = (actionId, fallback) => keyFor(ctx, actionId, fallback);
-  const flying = `Aircraft: 'switch to the bush plane' (1-6, picker), 'switch to version one' (${key('versionToggle', 'F8')}, the V1 | V2 pill), 'assists up' (settings), 'cockpit view' (${key('viewForward', 'Num 8')}), 'third person' (${key('viewToggle1P3P', 'V')}), 'engine off' (${key('engineToggle', 'Z')}), 'deploy chute' (${key('chuteDeploy', 'U')}), 'relaunch' (${key('relaunch', 'Backspace')}), 'calibrate controls' (${key('controlsPanel', '.')}), 'airspeed', 'how was my landing'. Hold ${key('copilotPTT', '`')} to talk.`;
+  const flying = `Aircraft: 'switch to the bush plane' (1-0, picker), 'switch to version one' (${key('versionToggle', 'F8')}, the V1 | V2 pill), 'assists up' (settings), 'cockpit view' (${key('viewForward', 'Num 8')}), 'third person' (${key('viewToggle1P3P', 'V')}), 'engine off' (${key('engineToggle', 'Z')}), 'deploy chute' (${key('chuteDeploy', 'U')}), 'relaunch' (${key('relaunch', 'Backspace')}), 'calibrate controls' (${key('controlsPanel', '.')}), 'airspeed', 'how was my landing'. Hold ${key('copilotPTT', '`')} to talk.`;
   return pick('help', [
-    `I guide and find places, fly the autopilot, set the time. Try 'guide help'. ${flying}`,
-    `Say 'guide help' for exploring, or 'find mountains', 'set a waypoint', 'make it dusk'. ${flying}`,
+    `I guide and find places, fly the autopilot, set the time. Try 'guide help' or 'craft help'. ${flying}`,
+    `Say 'guide help' for exploring, 'craft help' for craft tricks, or 'find mountains'. ${flying}`,
   ]);
 }

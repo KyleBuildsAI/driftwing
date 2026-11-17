@@ -28,22 +28,50 @@ export const VIEW_TARGETS = Object.freeze(['cockpit', 'chase', 'wing', 'flyby', 
 /** Assists up / down move along this grid (0, 25, 50, 75, 100 percent). */
 export const ASSIST_STEP = 0.25;
 
-/** Spoken craft names and their synonyms, most specific first. */
+/**
+ * Spoken craft names and their synonyms (all 14 catalog craft), most specific first: the paraglider
+ * before the glider ("para glider"), the spaceplane and the seaplane before anything that says
+ * "plane", the wingsuit's "bird suit" before the eagle's "bird".
+ */
 const CRAFT_SYNONYMS = Object.freeze([
+  ['paraglider', /\b(para ?glider|paragliding|paraglide|para ?wing)\b/],
+  ['spaceplane', /\b(space ?plane|rocket ?plane|rocket ship|rocket|space ?ship|space shuttle|shuttle|suborbital( plane)?)\b/],
+  ['seaplane', /\b(sea ?plane|float ?plane|amphibian|amphibious plane|flying boat|plane on floats)\b/],
+  ['aerobatic', /\b(aerobatics?( plane)?|stunt ?plane|acro ?plane|aerobat|extra 330|extra three thirty|display plane)\b/],
+  ['tiltrotor', /\b(tilt ?rotor|tilt-rotor|osprey|vtol|v-22)\b/],
+  ['balloon', /\b(hot[ -]?air balloon|balloon)\b/],
+  ['airship', /\b(air ?ship|blimp|zeppelin|dirigible)\b/],
+  ['wingsuit', /\b(wing ?suit|squirrel suit|bird ?suit)\b/],
+  ['eagle', /\b(eagle|dragon|bird|raptor)\b/],
   ['glider', /\b(glider|sailplane|sail plane|sailer)\b/],
   ['bushplane', /\b(bush ?plane|super ?cub|cub|tail ?dragger|piper)\b/],
   ['jet', /\b(jet|fighter|fighter jet|fast jet)\b/],
   ['helicopter', /\b(helicopter|heli|helo|chopper|copter)\b/],
-  ['wingsuit', /\b(wing ?suit|squirrel suit|bird ?suit)\b/],
   ['fpv', /\b(fpv|drone|quad|quadcopter|quad copter|racing drone)\b/],
 ]);
 
-const CRAFT_VERB = /\b(switch|change|swap|go|fly|flying|take|use|give me|let me|i want|i'd like|get in|hop in|jump in|put (me|us) in|try|back to|to the|into the|craft|aircraft|plane)\b/;
+/** Skins by name ("switch to the dragon" is the eagle in its dragon skin): [craft, skin, pattern]. */
+const SKIN_NAMES = Object.freeze([
+  ['eagle', 'dragon', /\bdragon\b/],
+  ['eagle', 'eagle', /\b(eagle|raptor)\b/],
+]);
+
+const CRAFT_VERB = /\b(switch|change|swap|go|fly|flying|take|use|give me|let me|i want|i'd like|get in|hop in|jump in|put (me|us) in|try|back to|to the|into the|craft|aircraft|plane|be (a|an|the))\b/;
 const CRAFT_FILLER = new Set(['to', 'in', 'into', 'fly', 'flying', 'switch', 'change', 'swap', 'take', 'use', 'try', 'go', 'back', 'let', 'let\'s', 'craft', 'aircraft', 'please']);
+/** Words of multi-word craft names, so a bare "hot air balloon" counts as a bare craft name. */
+const CRAFT_NAME_PARTS = /^(plane|bush|fighter|super|wing|suit|racing|sail|hot|air|hot-air|stunt|float|sea|space|rocket|tilt|rotor|para|extra|330|three|thirty|acro|flying|boat|on|floats|ship|shuttle|squirrel|quad|display)$/;
+/** A skin id (module skins.list[].id): camelCase, like a command id. */
+const SKIN_PATTERN = /^[a-z][A-Za-z0-9]{0,31}$/;
 
 /** Craft id named in the text, or null. */
 export function findCraft(text) {
   for (const [id, pattern] of CRAFT_SYNONYMS) if (pattern.test(text)) return id;
+  return null;
+}
+
+/** The skin the text names for a craft ("dragon" for the eagle), or null. */
+export function findSkin(text, craft) {
+  for (const [id, skin, pattern] of SKIN_NAMES) if (id === craft && pattern.test(text)) return skin;
   return null;
 }
 
@@ -56,9 +84,14 @@ export function sanitizeFlightAction(raw) {
   const action = { type: raw.type };
   switch (raw.type) {
     case 'setCraft': {
+      // craft: a catalog id; skin (optional): one of that craft's skins by id (the executor checks it).
       const craft = typeof raw.craft === 'string' ? raw.craft.toLowerCase() : '';
       if (!CRAFT_IDS.includes(craft)) return null;
       action.craft = craft;
+      if (present(raw.skin)) {
+        if (typeof raw.skin !== 'string' || !SKIN_PATTERN.test(raw.skin)) return null;
+        action.skin = raw.skin;
+      }
       return action;
     }
     case 'setAssists': {
@@ -329,12 +362,16 @@ export function createFlightGrammar({ pick, helpLine }) {
     return { speech: '', action: { type: 'switchVersion', version: 'v1' } };
   }
 
+  /** "Switch to the stunt plane", "blimp", "let's fly the dragon" (the eagle in its dragon skin). */
   function matchCraft(text, flight, core) {
     const craft = findCraft(text);
     if (!craft) return null;
-    const bare = core.every((word) => CRAFT_FILLER.has(word) || findCraft(word) !== null || /^(plane|bush|fighter|super|wing|suit|racing|sail)$/.test(word));
+    const bare = core.every((word) => CRAFT_FILLER.has(word) || findCraft(word) !== null || CRAFT_NAME_PARTS.test(word));
     if (!bare && !CRAFT_VERB.test(text)) return null;
-    return { speech: '', action: { type: 'setCraft', craft } };
+    const action = { type: 'setCraft', craft };
+    const skin = findSkin(text, craft);
+    if (skin) action.skin = skin;
+    return { speech: '', action };
   }
 
   return {
