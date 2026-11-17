@@ -11,7 +11,8 @@
 //   circling     birds circling inside the Phase 1 thermals (WindField.thermalsNear), climbing with
 //                the column's lean and gliding on to the next one; over the anchor with no thermal
 //   pod          whales travelling at the surface: spouting, fluke-up dives, occasional full breaches
-//                with a splash, and wakes (bioluminescent in a glowing bay) through the water layer
+//                with a splash, and wakes (bioluminescent in a glowing bay) through the water layer;
+//                they ride the swell of ctx.game.waterQuery (its surface carries them)
 //   wingman      a large bird that waits, joins off the player's wing, matches speed within its
 //                limits for escortSeconds, then peels off with a call (bus 'fauna:call')
 //   drift        colossal animals drifting along their heading at a cruise altitude with slow
@@ -779,11 +780,6 @@ export function createFaunaEngine() {
   /** The water surface at (x, z): sea level, unless a whirlpool funnel is active somewhere. */
   function waterSurface(x, z) {
     return ctx.water && ctx.water.activeVortices > 0 ? ctx.water.surfaceHeightAt(x, z) : ctx.terrain.waterLevel;
-  }
-
-  /** Whether the water is flat everywhere (no funnel): then its surface is sea level itself. */
-  function waterIsFlat() {
-    return !ctx.water || ctx.water.activeVortices === 0;
   }
 
   /** Whether (x, z) and four points margin metres around it are all open water (the pod's land test, 6 m deep). */
@@ -1828,7 +1824,8 @@ export function createFaunaEngine() {
     g[G.VZ] = (-Math.cos(g[G.HEADING])) * g[G.SPEED];
     g[G.X] += g[G.VX] * dt;
     g[G.Z] += g[G.VZ] * dt;
-    g[G.Y] = waterIsFlat() ? ctx.terrain.waterLevel : waterSurface(g[G.X], g[G.Z]);
+    waterHeightInto(Math.round(g[G.X]), Math.round(g[G.Z]));
+    g[G.Y] = surfaceHeight[0];
   }
 
   /**
@@ -1860,8 +1857,6 @@ export function createFaunaEngine() {
     const water = ctx.water;
     const bankBlend = 1 - Math.exp(-1.5 * dt);
     const scaleBase = g[G.SIZE];
-    const flat = waterIsFlat();
-    const seaLevel = ctx.terrain.waterLevel;
     io[IO.FEED_X] = g[G.VX];
     io[IO.FEED_Y] = 0;
     io[IO.FEED_Z] = g[G.VZ];
@@ -1876,7 +1871,13 @@ export function createFaunaEngine() {
       // Horizontal: each whale keeps its lane in the pod's frame.
       const laneX = g[G.X] + forwardX * pool.homeZ[index] - forwardZ * pool.homeX[index];
       const laneZ = g[G.Z] + forwardZ * pool.homeZ[index] + forwardX * pool.homeX[index];
-      const surfaceY = flat ? seaLevel : waterSurface(pool.px[index], pool.pz[index]);
+      // The surface over the whale: the shared water query (the swell, a passing wave, a whirlpool's
+      // dip, a lake's level). The swell carries the whale: the surface's rise or fall since the last
+      // frame (a pod whale's homeY) moves it too, and its mode's eased depth works below that surface.
+      waterHeightInto(Math.round(pool.px[index]), Math.round(pool.pz[index]));
+      const surfaceY = surfaceHeight[0];
+      if (pool.mode[index] !== WHALE_BREACH) pool.py[index] += surfaceY - pool.homeY[index];
+      pool.homeY[index] = surfaceY;
       let mode = pool.mode[index];
       pool.timer[index] -= dt;
       if (mode === WHALE_BREACH) {
@@ -2529,6 +2530,20 @@ export function createFaunaEngine() {
       if (height > -Infinity) return height;
     }
     return waterSurface(x, z);
+  }
+
+  /**
+   * waterHeightAt written into surfaceHeight[0], where the frame paths read it without boxing a returned
+   * double (the query's heightInto; a game without one, or no water at (x, z), falls back to the sea).
+   */
+  const surfaceHeight = new Float64Array(1);
+  function waterHeightInto(x, z) {
+    const query = ctx.game && ctx.game.waterQuery;
+    if (query && typeof query.heightInto === 'function') {
+      query.heightInto(x, z, surfaceHeight, 0);
+      if (surfaceHeight[0] > -Infinity) return;
+    }
+    surfaceHeight[0] = waterHeightAt(x, z);
   }
 
   /** The still water level at (x, z) (no swell): a lake's level, sea level over the sea, else -Infinity. */
@@ -3973,8 +3988,13 @@ export function createFaunaEngine() {
         const lane = behavior === 'drift' ? params.drift.lane * pool.scale[index] * sizeScale : 1;
         x += (forwardX * pool.homeZ[index] - forwardZ * pool.homeX[index]) * lane;
         z += (forwardZ * pool.homeZ[index] + forwardX * pool.homeX[index]) * lane;
-        if (behavior === 'drift') y += pool.homeY[index] * lane * 0.3;
-        else y = waterSurface(x, z) - (pool.mode[index] === WHALE_SURFACE ? pool.def.size * 0.125 * 0.55 : params.pod.depth) * pool.scale[index] * sizeScale;
+        if (behavior === 'drift') {
+          y += pool.homeY[index] * lane * 0.3;
+        } else {
+          // A pod whale's homeY is the water surface over it (simulatePod rides the swell from it).
+          pool.homeY[index] = waterHeightAt(Math.round(x), Math.round(z));
+          y = pool.homeY[index] - (pool.mode[index] === WHALE_SURFACE ? pool.def.size * 0.125 * 0.55 : params.pod.depth) * pool.scale[index] * sizeScale;
+        }
       } else if (behavior === 'wingman') {
         const angle = pool.seed[index] * TWO_PI;
         x += Math.cos(angle) * params.wingman.waitRadius;
@@ -4353,7 +4373,7 @@ export function createFaunaEngine() {
       altitude.value = Math.min(Math.max(wanted, ground + resolved.floor + 30), ground + Math.max(resolved.floor + 30, altitude.ceiling));
       altitude.mode = 'msl';
     }
-    if (resolved.behavior === 'pod') g[G.Y] = waterSurface(g[G.X], g[G.Z]);
+    if (resolved.behavior === 'pod') g[G.Y] = waterHeightAt(Math.round(g[G.X]), Math.round(g[G.Z]));
     else if (altitude.mode === 'msl') g[G.Y] = Math.max(altitude.value, ground + resolved.floor + 10);
     else if (altitude.mode === 'water') g[G.Y] = waterHeightAt(g[G.X], g[G.Z]);
     else g[G.Y] = ground + altitude.value + (rng() * 2 - 1) * altitude.spread;

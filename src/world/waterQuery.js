@@ -329,19 +329,28 @@ export function createWaterQuery({ world, effects = null, windDirection, clock =
    * -Infinity where neither exists.
    */
   function heightAt(x, z, t = clock.elapsed) {
+    heightInto(x, z, heightScratch, 0, t);
+    return heightScratch[0];
+  }
+  const heightScratch = new Float64Array(1);
+
+  /**
+   * heightAt written into out[offset]: for frame paths that must not box a returned double (the fauna
+   * engine's whale pods read the swell under every whale each frame).
+   */
+  function heightInto(x, z, out, offset, t = clock.elapsed) {
     counters.queries++;
     scratch[GROUND] = NaN;
     const lake = world.hasWaters ? lakeAt(x, z) : null;
-    let height = lake === null ? -Infinity : lake.level;
+    out[offset] = lake === null ? -Infinity : lake.level;
     measureGround(x, z);
     if (scratch[GROUND] < seaLevel) {
       swellInto(t);
       oceanHeightInto(x, z, t, scratch[SWELL], waves);
       funnelDipInto(x, z);
       const ocean = seaLevel + parameter[2] - scratch[DIP];
-      if (ocean > height) height = ocean;
+      if (ocean > out[offset]) out[offset] = ocean;
     }
-    return height;
   }
 
   /**
@@ -448,6 +457,7 @@ export function createWaterQuery({ world, effects = null, windDirection, clock =
     /** Mean sea level (m). */
     seaLevel,
     heightAt,
+    heightInto,
     sample,
     isWater,
     isOcean,

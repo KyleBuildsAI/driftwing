@@ -7,8 +7,9 @@
 //
 // Without a giant stamp (a debug spawn) the recipe raises the figure itself, laid along the heading
 // with its base at the anchor: a basalt body sampled from the same giantFigure on a CELL grid, mossy
-// on its lowest flanks, and a landable heightfield collider of the same top (its highest point a
-// perch), so a force-spawned giant looks, collides and lands as the stamped one does. Either way the
+// on its lowest flanks, and a landable heightfield collider of the same top (a perch on the chest
+// summit beside the cairn), so a force-spawned giant looks, collides and lands as the stamped one does.
+// Either way the
 // nose stands at GIANT_NOSE in front of and above the anchor, where the preset's breath emitter rises.
 import { PALETTE, paint, shade } from '../palette.js';
 import { addBoulder, addCairn, findStamp, frameFromHeading } from '../common.js';
@@ -34,6 +35,12 @@ const STONE_RING = 46;
 const STONE_HEIGHT = Object.freeze([7, 11]);
 /** The chest summit in figure units (the highest dome). */
 const CHEST = Object.freeze({ along: 0.19, across: 0 });
+/**
+ * The free-standing figure's perch: on the chest summit this far (m) toward the head from the cairn,
+ * inside the stone ring. The figure's highest grid sample lies within a few metres of the cairn on
+ * some headings, so a perch there would stand inside the cairn's collider.
+ */
+const CHEST_PERCH_OFFSET = 22;
 /** Scree lies where the figure's top is between these shares of its height (the lower flanks). */
 const SCREE_BAND = Object.freeze([0.03, 0.24]);
 const BASALT = Object.freeze([paint(0x4a4541), paint(0x55504a), paint(0x423e3a), paint(0x5c5650)]);
@@ -154,7 +161,8 @@ function buildFigureBody(context, frame) {
 
 /**
  * The free-standing figure's collider: a landable heightfield on a world-axis grid over its rotated
- * footprint (holes where the figure does not stand above the ground), publishing the exact top.
+ * footprint (holes where the figure does not stand above the ground), publishing the exact top, with
+ * its perch on the chest summit clear of the cairn (CHEST_PERCH_OFFSET).
  */
 function figureCollider(context, frame) {
   const halfAlong = frame.length * GIANT_HALF_LENGTH;
@@ -181,7 +189,9 @@ function figureCollider(context, frame) {
   // nothing): the same as the body wherever it stands clear of the ground, and under the ground (where
   // the terrain's higher surface wins) at its outline.
   const exactTop = (x, z) => figureTop(frame, x, z);
-  return localHeightfield('figure', x0, z0, CELL, columns, rows, heights, lowest - SINK * 4, exactTop, { landable: true, perch: true, surface: 'stone' });
+  const perch = figurePoint(frame, CHEST.along + CHEST_PERCH_OFFSET / frame.length, CHEST.across, [0, 0]);
+  const tags = { landable: true, perch: { x: perch[0], y: surfaceAt(context, frame, perch[0], perch[1]), z: perch[1] }, surface: 'stone' };
+  return localHeightfield('figure', x0, z0, CELL, columns, rows, heights, lowest - SINK * 4, exactTop, tags);
 }
 
 /** A ring of standing stones around the chest summit, a cairn at its centre; the tallest stone is a perch. */

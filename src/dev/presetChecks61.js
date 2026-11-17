@@ -135,7 +135,7 @@ export function installPresetChecks61(game) {
       const figure = ids.find((id) => id.includes(':figure'));
       const record = figure ? ctx.colliders.get(figure) : null;
       const anchor = structure.anchor;
-      // Straight down onto the figure's highest point (its perch: the raised knee or the chest).
+      // Straight down onto the figure's perch (on the chest summit, beside the cairn and inside the ring).
       const peak = record && record.perchPoints ? { x: record.perchPoints[0], y: record.perchPoints[1], z: record.perchPoints[2] } : null;
       const hit = peak ? sweepHit({ x: peak.x, y: peak.y + 600, z: peak.z }, { x: peak.x, y: anchor.y - 300, z: peak.z }, 2) : null;
       const top = hit === figure ? sweep.point.y - anchor.y : null;

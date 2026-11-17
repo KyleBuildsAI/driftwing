@@ -17,10 +17,12 @@
 //                from the craft), fly as a flock and settle back into the shallows
 //   dolphins     swimming on the swell (the water query's height at their position), porpoising with
 //                splashes, and racing toward the craft's shadow when it flies low over the water
+//   pods         whales at the surface ride the swell: their backs follow the water query's height at
+//                their position (not the flat sea level), rising and falling with it
 //   validation   bad params are refused naming the field (species and behaviour kinds, altitude mode,
 //                slope limit, column path, surface params)
-//   allocation   after a warm-up, 100 000 frames of a herd, a column, dolphins and flamingos allocate
-//                nothing
+//   allocation   after a warm-up, 100 000 frames of a herd, a column, dolphins, flamingos and a whale
+//                pod allocate nothing
 //
 // Usage: node --expose-gc tools/lab/fauna-modes.mjs [--verbose]
 import { PerformanceObserver } from 'node:perf_hooks';
@@ -125,6 +127,9 @@ function createLab({ craft = 'glider' } = {}) {
     heightAt(x, z, time = state.time.elapsed) {
       if (groundHeight(x, z) >= 0) return -Infinity;
       return z > SEA_Z - 600 ? swellAt(x, z, time) : 0;
+    },
+    heightInto(x, z, out, offset, time = state.time.elapsed) {
+      out[offset] = groundHeight(x, z) >= 0 ? -Infinity : z > SEA_Z - 600 ? swellAt(x, z, time) : 0;
     },
     isWater(x, z) {
       return groundHeight(x, z) < 0;
@@ -518,6 +523,37 @@ function testDolphins() {
   lab.manager.deactivate(id, 'lab');
 }
 
+// ---- pods ---------------------------------------------------------------------------------------------------------
+function testPods() {
+  const lab = createLab();
+  lab.state.player.position.set(0, 600, SEA_Z + 1500);
+  lab.follow();
+  const id = lab.spawn('labWhales', { species: 'whale', behavior: 'pod', count: 5, pod: { breachChance: 0 } }, { x: 0, y: 0, z: SEA_Z + 900 }, 90);
+  const data = lab.data(id);
+  const pool = data.pool;
+  // Seconds each whale has spent at the surface (its depth eases in over the first few).
+  const surfaced = new Float64Array(data.start + data.count);
+  let worst = 0;
+  let samples = 0;
+  let low = Infinity;
+  let high = -Infinity;
+  lab.step(60 * 60, 1 / 60, (frame) => {
+    for (let index = data.start; index < data.start + data.count; index++) {
+      surfaced[index] = pool.mode[index] === 0 ? surfaced[index] + 1 / 60 : 0;
+      if (frame % 5 !== 0 || surfaced[index] < 6) continue;
+      const surface = lab.waterQuery.heightAt(pool.px[index], pool.pz[index]);
+      const girth = pool.def.size * 0.125 * pool.scale[index] * data.g[49];
+      worst = Math.max(worst, Math.abs(pool.py[index] - (surface - girth * 0.55)));
+      low = Math.min(low, pool.py[index] + girth * 0.55);
+      high = Math.max(high, pool.py[index] + girth * 0.55);
+      samples++;
+    }
+  });
+  check('pods', 'whales at the surface ride the swell (their backs within 0.3 m of the water query surface)', samples > 100 && worst < 0.3, `worst ${worst.toFixed(3)} m over ${samples} samples`);
+  check('pods', 'the swell lifts and drops them (not the flat sea level)', samples > 100 && high - low > 0.8, `backs from ${low.toFixed(2)} to ${high.toFixed(2)} m`);
+  lab.manager.deactivate(id, 'lab');
+}
+
 // ---- validation -------------------------------------------------------------------------------------------------
 function testValidation() {
   const lab = createLab();
@@ -578,13 +614,14 @@ async function testAllocation() {
   lab.spawn('allocColumn', { species: 'caribou', behavior: 'column', count: 60, column: { path: 'auto', length: 1500, mode: 'pingpong' } }, { x: 0, y: 0, z: 600 }, 0);
   lab.spawn('allocDolphins', { species: 'dolphin', behavior: 'surface', count: 6, surface: { raceShadow: { radius: 1 } } }, { x: 0, y: 0, z: SEA_Z + 600 }, 90);
   lab.spawn('allocWaders', { species: 'flamingo', behavior: 'surface', count: 24, surface: { wade: { flushRadius: 1 } } }, { x: LAGOON.x, y: 0, z: LAGOON.z }, 0);
-  check('allocation', 'four groups live (herd, column, dolphins, flamingos)', lab.manager.getStats().spawns === 4, String(lab.manager.getStats().spawns));
+  lab.spawn('allocWhales', { species: 'whale', behavior: 'pod', count: 5 }, { x: 600, y: 0, z: SEA_Z + 900 }, 90);
+  check('allocation', 'five groups live (herd, column, dolphins, flamingos, whales)', lab.manager.getStats().spawns === 5, String(lab.manager.getStats().spawns));
   // Warm-up covers every branch the measure takes (leaps, the column's turn-around, grazing and walking).
   const measured = await measureFrames(lab);
-  check('allocation', `no garbage collection during 100 000 frames of the four groups`, measured.collections === 0 && baseline.collections === 0, `${measured.collections} collections (baseline ${baseline.collections})`);
+  check('allocation', `no garbage collection during 100 000 frames of the five groups`, measured.collections === 0 && baseline.collections === 0, `${measured.collections} collections (baseline ${baseline.collections})`);
   // Per group, the new modes cost no more than a Phase 2 group (its rationed probes: a terrain or
   // water height comes back as a double), within half a byte a frame.
-  const perGroup = measured.perFrame / 4;
+  const perGroup = measured.perFrame / 5;
   check('allocation', 'per group and frame, the new modes allocate no more than a Phase 2 group (within 0.5 B)', perGroup <= baseline.perFrame + 0.5, `${perGroup.toFixed(3)} B per group per frame, Phase 2 flock ${baseline.perFrame.toFixed(3)} B`);
 }
 
@@ -595,6 +632,7 @@ testColumn();
 testFlamingos();
 testFlamingosSteepBank();
 testDolphins();
+testPods();
 testValidation();
 
 const unexpected = consoleErrors.filter((line) => !/failed to create|params\./.test(line));
