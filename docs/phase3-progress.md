@@ -1632,6 +1632,17 @@ Presets 81-90 (the five-arch chain challenge and the biome set pieces), one file
     tunnel's lanterns only glowing, the salt flat reflecting only the sky dome, the migration
     convergence's valley seek (13-27 ms once per activation).
 
+### Wave 3 review (on `v2-phase3`)
+
+Three reviewers checked the merged tree after `7c3e9f3`; a skeptic confirmed five findings.
+
+- **Fixed:**
+  - S1-01, the sea arches (45): the lintel's underside sagged to its lowest point at mid-span and the
+    fly-through gate's top lay inside the centre lintel box. The underside now springs from the legs
+    `rise` below the crown and curves up to it, the lintel is `thickness` thick at its crown, and the
+    gate's top sits 1 m under the lowest lintel box over the opening (300 random arches: 0 boxes
+    over the gate below its top + 1 m; the crown's box bottom at least 2.2 m above the gate edge's).
+
 ### Wave 4: discovery and verification, then the tag
 
 | # | Work | Branch | Status |

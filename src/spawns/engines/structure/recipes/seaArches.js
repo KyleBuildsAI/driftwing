@@ -22,6 +22,11 @@ export const SEA_ARCHES_DEFAULTS = Object.freeze({
   gate: Object.freeze({ id: 'arch', achievement: null }),
 });
 
+/** The gate's top stays this far (m) under the lowest lintel collider over the opening. */
+const GATE_CLEARANCE = 1;
+/** Each lintel box reaches this far (m) past its segment's ends, so neighbouring boxes overlap. */
+const LINTEL_OVERLAP = 0.5;
+
 const ROCK = Object.freeze({
   face: Object.freeze([paint(0x6e655c), paint(0x7d7368), paint(0x5f5850)]),
   top: Object.freeze([paint(0x7f8a5a), paint(0x6f7a4e)]),
@@ -76,11 +81,14 @@ export function buildSeaArches(context, read) {
         out.colliders.push(localCylinder('leg', legX, ground, legZ, arch.legRadius * 1.1, arch.topY - ground - 4, { surface: 'stone' }));
       }
     }
-    // The lintel: segments along the span; each a slab whose bottom follows the arch.
+    // The lintel: segments along the span; each a slab whose bottom follows the arch. The underside
+    // springs from the legs `rise` metres below the crown and curves up to it at mid-span, so the
+    // lintel is `thickness` thick at its crown and the opening is tallest in the middle.
+    const springing = arch.topY - thickness - rise;
     const bottomAt = (u) => {
       const share = u / (arch.span / 2);
       const curve = Math.abs(share) < 1 ? 1 - share * share : 0;
-      return arch.topY - thickness - rise * curve;
+      return springing + rise * curve;
     };
     const topAt = (u) => arch.topY + 1.5 * Math.cos((u / half) * Math.PI * 0.5) + (rng() - 0.5) * 0.8;
     const tops = [];
@@ -89,8 +97,8 @@ export function buildSeaArches(context, read) {
     for (let segment = 0; segment <= segments; segment++) {
       const u = -half + (2 * half * segment) / segments;
       tops.push(topAt(u));
-      // Over the legs the lintel reaches down onto them.
-      bottoms.push(Math.abs(u) > arch.span / 2 - arch.legRadius * 0.4 ? arch.topY - thickness - 6 : bottomAt(u));
+      // Over the legs the lintel reaches down onto them (never above the arch's springing).
+      bottoms.push(Math.abs(u) > arch.span / 2 - arch.legRadius * 0.4 ? Math.min(springing, arch.topY - thickness - 6) : bottomAt(u));
       jag.push(0.85 + rng() * 0.3);
     }
     const point = (u, y, side, scale) => [
@@ -98,6 +106,10 @@ export function buildSeaArches(context, read) {
       y,
       arch.z + arch.spanZ * u + normalZ * side * depth * 0.5 * scale,
     ];
+    // The gate's half width across the span; its top stays under every lintel collider that reaches
+    // over it (each box runs down to the lower end of its segment's underside).
+    const gateHalfWidth = Math.max(2, arch.span / 2 - arch.legRadius * 0.9);
+    let gateTop = arch.topY - thickness;
     for (let segment = 0; segment < segments; segment++) {
       const u0 = -half + (2 * half * segment) / segments;
       const u1 = -half + (2 * half * (segment + 1)) / segments;
@@ -121,9 +133,10 @@ export function buildSeaArches(context, read) {
       const uMid = (u0 + u1) / 2;
       const top = Math.max(tops[segment], tops[segment + 1]);
       const bottom = Math.min(bottoms[segment], bottoms[segment + 1]);
+      if (u1 + LINTEL_OVERLAP > -gateHalfWidth && u0 - LINTEL_OVERLAP < gateHalfWidth) gateTop = Math.min(gateTop, bottom);
       const centre = [arch.x + arch.spanX * uMid, (top + bottom) / 2, arch.z + arch.spanZ * uMid];
       const tags = segment === Math.floor(segments / 2) ? { surface: 'stone', perch: { x: centre[0], y: top, z: centre[2] } } : { surface: 'stone' };
-      out.colliders.push(localBoxAxes('lintel', centre, [arch.spanX, 0, arch.spanZ], [0, 1, 0], [normalX, 0, normalZ], (u1 - u0) / 2 + 0.5, (top - bottom) / 2, depth * 0.5, tags));
+      out.colliders.push(localBoxAxes('lintel', centre, [arch.spanX, 0, arch.spanZ], [0, 1, 0], [normalX, 0, normalZ], (u1 - u0) / 2 + LINTEL_OVERLAP, (top - bottom) / 2, depth * 0.5, tags));
     }
     // Rubble fallen onto the shelf under the arch.
     for (let boulder = 0; boulder < 6; boulder++) {
@@ -141,9 +154,9 @@ export function buildSeaArches(context, read) {
       z: arch.z,
       normalX,
       normalZ,
-      halfWidth: Math.max(2, arch.span / 2 - arch.legRadius * 0.9),
+      halfWidth: gateHalfWidth,
       minY: sea - 2,
-      maxY: arch.topY - thickness - rise * 0.8,
+      maxY: gateTop - GATE_CLEARANCE,
       action: null,
       achievement,
     });

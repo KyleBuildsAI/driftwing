@@ -334,10 +334,12 @@ wreck reads through the clear water of a waterEffect `shallows` entry.
 | `rise` | m | 0..40 | [6, 10] | how far its underside arches up between the legs |
 | `segments` | count | 4..32 | 12 | lintel segments (a box collider each) |
 | `span`, `height` | m | 10..200 | [44, 60], [30, 40] | free-standing only: without a `seaStacks` stamp the recipe raises one arch across the heading, legs and all |
-| `gate` | `{ id, achievement }` | | `{ id: 'arch', achievement: null }` | the fly-through gate under every arch (`arch0`, `arch1`, ... with two or more); `achievement` `{ id, title }` is sent on the first pass |
+| `gate` | `{ id, achievement }` | | `{ id: 'arch', achievement: null }` | the fly-through gate under every arch (`arch0`, `arch1`, ... with two or more), its top 1 m under the lowest lintel box over the opening; `achievement` `{ id, title }` is sent on the first pass |
 
 The stacks and the arch legs are terrain (the `seaStacks` stamp), solid as ground; the lintels are
-box colliders with a perch at the middle of each.
+box colliders with a perch at the middle of each. The underside springs from the legs `thickness +
+rise` below the lintel's top and curves up to `thickness` below it at mid-span, so the opening is
+tallest in the middle.
 
 ## caveMouth
 
