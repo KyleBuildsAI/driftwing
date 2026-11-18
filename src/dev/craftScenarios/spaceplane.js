@@ -23,11 +23,22 @@
 // readback probes (the step file's method: sky dome and cloud shell hidden, a magenta background, the
 // camera pitched down for one render, the terrain and the far field culled for it) find ground on every
 // pixel below the rendered horizon, once in the handoff band and once from space.
+//
+// A probe renders the scene into a render target, which needs its own pipeline for every material it
+// draws (a render target's output differs from the canvas's). Compiled at the readback, they stalled a
+// WebGL2 page for tens of seconds at a time (a link waits on the GPU process) and the runs were cut
+// short. So the probe's pipelines are compiled ahead and asynchronously (renderer.compileAsync in the
+// probe's pose and target: WebGL2's parallel shader compile, WebGPU's async pipelines), once in each
+// altitude tier the flight enters (PROBE_TIERS: the ground, the far field's band, space).
 
 const CONTINUITY_TOLERANCE = 0.001;
 // The width keeps a WebGPU readback row a multiple of 256 bytes.
 const PROBE_SIZE = Object.freeze({ width: 256, height: 144 });
 const DEG = Math.PI / 180;
+/** Lower edges (m) of the altitude tiers whose probe pipelines are compiled ahead: what a probe draws changes between them. */
+const PROBE_TIERS = Object.freeze([0, 6000, 30000]);
+/** The pitch (degrees down) the ahead-of-time compile looks along. */
+const PREPARE_PITCH = 55;
 
 /** Flight path angle (deg) from the telemetry velocity. */
 function flightPath(flight) {
@@ -69,8 +80,12 @@ function continuityHolds(api) {
   return disagreement <= CONTINUITY_TOLERANCE;
 }
 
-/** Counts far-field frames above 11 km and those with a selected tile missing (once it has settled). */
+/**
+ * Counts far-field frames above 11 km and those with a selected tile missing (once it has settled);
+ * first, the probe pipelines of a newly entered altitude tier start compiling (prepareProbes).
+ */
 function watchFarField(api) {
+  prepareProbes(api);
   const memo = api.memo;
   const farField = api.ctx.systems.farField;
   if (!farField) return;
@@ -86,6 +101,83 @@ function watchFarField(api) {
   if (stats.holes > 0) memo.holeFrames++;
 }
 
+/** A render target of the probe's size and format (pipelines are keyed by the format, not the target). */
+function createProbeTarget(THREE) {
+  return new THREE.RenderTarget(PROBE_SIZE.width, PROBE_SIZE.height, { type: THREE.UnsignedByteType });
+}
+
+/**
+ * Runs draw(camera) with the scene in the probe's setup, then puts everything back: the camera at the
+ * craft pitched `pitch` degrees down along its heading, the terrain and the far field culled for that
+ * pose, the sky dome and the cloud shell hidden, a magenta background, `target` bound. Returns the
+ * probe camera's orientation.
+ */
+function inProbeSetup(api, pitch, target, draw) {
+  const { ctx, state } = api;
+  const THREE = ctx.THREE;
+  const camera = ctx.camera;
+  const sky = ctx.systems.sky;
+  const savedPosition = camera.position.clone();
+  const savedQuaternion = camera.quaternion.clone();
+  const shell = ctx.scene.getObjectByName('far-field-cloud-shell');
+  const shellVisible = shell ? shell.visible : false;
+  const background = ctx.scene.background;
+  camera.position.copy(state.player.position);
+  camera.quaternion.setFromEuler(new THREE.Euler(-pitch * DEG, -state.player.heading * DEG, 0, 'YXZ'));
+  camera.updateMatrixWorld();
+  const view = camera.quaternion.clone();
+  // The terrain and the far field cull against the camera in their updates: run them for the probe pose.
+  ctx.systems.terrain.update(0, 1 / 60);
+  ctx.systems.farField.update(0, 1 / 60);
+  if (sky && sky.dome) sky.dome.visible = false;
+  if (shell) shell.visible = false;
+  ctx.scene.background = new THREE.Color(1, 0, 1);
+  ctx.renderer.setRenderTarget(target);
+  try {
+    draw(camera);
+  } finally {
+    ctx.renderer.setRenderTarget(null);
+    if (sky && sky.dome) sky.dome.visible = true;
+    if (shell) shell.visible = shellVisible;
+    ctx.scene.background = background;
+    camera.position.copy(savedPosition);
+    camera.quaternion.copy(savedQuaternion);
+    camera.updateMatrixWorld();
+  }
+  return view;
+}
+
+/**
+ * Compiles the probe's pipelines ahead and asynchronously, once per altitude tier the flight enters
+ * (PROBE_TIERS): what the probe would draw from here, in its target's format. memo.probeCompiles counts
+ * the compiles started and finished; a failed compile is kept in memo.probeCompileError (the probe
+ * then compiles what it needs when it renders, as before).
+ */
+function prepareProbes(api) {
+  const memo = api.memo;
+  const altitude = api.flight.altitude;
+  let tier = 0;
+  while (tier + 1 < PROBE_TIERS.length && altitude >= PROBE_TIERS[tier + 1]) tier++;
+  memo.probeTiers = memo.probeTiers ?? [];
+  if (memo.probeTiers.includes(tier)) return;
+  memo.probeTiers.push(tier);
+  memo.probeCompiles = memo.probeCompiles ?? { started: 0, finished: 0 };
+  memo.probeCompiles.started++;
+  const { ctx } = api;
+  const target = createProbeTarget(ctx.THREE);
+  let compiling = null;
+  inProbeSetup(api, PREPARE_PITCH, target, (camera) => {
+    compiling = ctx.renderer.compileAsync(ctx.scene, camera);
+  });
+  compiling.then(() => {
+    memo.probeCompiles.finished++;
+    target.dispose();
+  }, (error) => {
+    memo.probeCompileError = String(error && error.message ? error.message : error);
+    target.dispose();
+  });
+}
+
 /**
  * One readback probe (async; the result lands in memo[key]): the camera pitched `pitch` degrees down
  * along the craft's heading, the sky dome and the cloud shell hidden, a magenta background; counts the
@@ -98,33 +190,8 @@ function startProbe(api, key, pitch) {
   const { ctx, state } = api;
   const THREE = ctx.THREE;
   const camera = ctx.camera;
-  const sky = ctx.systems.sky;
-  const target = new THREE.RenderTarget(PROBE_SIZE.width, PROBE_SIZE.height, { type: THREE.UnsignedByteType });
-  const savedPosition = camera.position.clone();
-  const savedQuaternion = camera.quaternion.clone();
-  const shell = ctx.scene.getObjectByName('far-field-cloud-shell');
-  const shellVisible = shell ? shell.visible : false;
-  const background = ctx.scene.background;
-  const euler = new THREE.Euler(-pitch * DEG, -state.player.heading * DEG, 0, 'YXZ');
-  camera.position.copy(state.player.position);
-  camera.quaternion.setFromEuler(euler);
-  camera.updateMatrixWorld();
-  const view = camera.quaternion.clone();
-  // The terrain and the far field cull against the camera in their updates: run them for the probe pose.
-  ctx.systems.terrain.update(0, 1 / 60);
-  ctx.systems.farField.update(0, 1 / 60);
-  if (sky && sky.dome) sky.dome.visible = false;
-  if (shell) shell.visible = false;
-  ctx.scene.background = new THREE.Color(1, 0, 1);
-  ctx.renderer.setRenderTarget(target);
-  ctx.renderer.render(ctx.scene, camera);
-  ctx.renderer.setRenderTarget(null);
-  if (sky && sky.dome) sky.dome.visible = true;
-  if (shell) shell.visible = shellVisible;
-  ctx.scene.background = background;
-  camera.position.copy(savedPosition);
-  camera.quaternion.copy(savedQuaternion);
-  camera.updateMatrixWorld();
+  const target = createProbeTarget(THREE);
+  const view = inProbeSetup(api, pitch, target, (probeCamera) => ctx.renderer.render(ctx.scene, probeCamera));
   const horizonY = -Math.sin(state.atmosphere.horizonDip + DEG);
   const altitude = state.player.position.y;
   const projectionInverse = camera.projectionMatrixInverse.clone();
