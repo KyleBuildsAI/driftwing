@@ -475,6 +475,22 @@ function testFlamingosSteepBank() {
   check('flamingos', 'on a steep bank each bird gets its own spot along the band (they do not pile up)', homes.size === bankData.count, `${homes.size} spots for ${bankData.count} birds`);
   check('flamingos', 'on a steep bank they stay in its narrow shallows (no deeper than depthMax)', bankX !== null && group && group.airborne === 0 && deepest < 0.6 + 0.05 && dry === 0, `bank at ${bankX}, ${bankZ}, deepest ${deepest.toFixed(2)} m, ${dry} dry samples`);
   if (group) lab.manager.deactivate(id, 'lab');
+
+  // Anchored 150 m inland of that bank: the search's rings (60 m apart) step from the plain straight
+  // into the lake's deep water, so only the bisection between them finds the band under a metre wide.
+  const inland = lab.spawn('labFlamingosInland', { species: 'flamingo', behavior: 'surface', count: 12, surface: { wade: { depthMax: 0.6, flushRadius: 60, searchRadius: 600 } } }, { x: bankX + 150, y: 0, z: bankZ }, 0);
+  const inlandGroup = inland ? lab.fauna.describe(inland) : null;
+  let inlandDeepest = 0;
+  let inlandDry = 0;
+  if (inlandGroup) {
+    for (const agent of agents(lab, inland)) {
+      const depth = -groundHeight(agent.x, agent.z);
+      inlandDeepest = Math.max(inlandDeepest, depth);
+      if (depth <= 0) inlandDry++;
+    }
+  }
+  check('flamingos', 'anchored inland of a steep bank they still find its narrow shallows (the search bisects across the shore)', Boolean(inlandGroup) && inlandGroup.count === 12 && inlandDeepest < 0.6 + 0.05 && inlandDry === 0, inlandGroup ? `centre ${Math.round(inlandGroup.center.x)}, ${Math.round(inlandGroup.center.z)}; deepest ${inlandDeepest.toFixed(2)} m, ${inlandDry} dry` : 'no shallows found (the group ended)');
+  if (inlandGroup) lab.manager.deactivate(inland, 'lab');
 }
 
 // ---- dolphins -------------------------------------------------------------------------------------------------

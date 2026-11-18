@@ -222,6 +222,10 @@ const WADE_SHUFFLE = 1;
 const WADE_SHUFFLE_NARROW = 0;
 /** Shallow-water probes the ring scan for wader homes may spend at create (a narrow band's spots). */
 const WADE_HOME_PROBES = 2500;
+/** The shallows search: rings this far apart (m) on this many bearings, and the bisections across a shore. */
+const SHALLOWS_RING = 60;
+const SHALLOWS_BEARINGS = 24;
+const SHALLOWS_BISECTIONS = 14;
 /** Seconds a flushed flock needs to glide home after its longest flight (the far tier's settle). */
 const WADER_RETURN_SECONDS = 25;
 const SWIM = 0;
@@ -3333,33 +3337,65 @@ export function createFaunaEngine() {
   // ---- wading birds ------------------------------------------------------------------------------
   /**
    * Finds shallow water to stand in: depth (the still water level minus the ground: the swell passing
-   * over a spot must not move the shallows) within (0.06, depthMax), at
-   * the anchor or the nearest point within searchRadius (rings 60 m apart, 24 bearings). Writes the
-   * wading centre into HOME_X / HOME_Z and the agents' home offsets; false when there is none.
+   * over a spot must not move the shallows) within (0.06, depthMax), at the anchor or the nearest point
+   * within searchRadius: rings SHALLOWS_RING apart on SHALLOWS_BEARINGS bearings, and wherever a
+   * bearing steps from dry ground (or a film under 0.06 m) to deep water, or back, between two rings,
+   * a bisection along it finds the shallow band in between (a steep shore's band is a metre or two
+   * wide, far narrower than the rings). Writes the wading centre into HOME_X / HOME_Z and the agents'
+   * home offsets; false when there is none. Create time only, so it may allocate.
    */
   function seekShallows(data) {
     const g = data.g;
     const wade = data.params.surface.wade;
-    const shallowAt = (x, z) => {
+    // 0 dry (or too shallow), 1 shallow, 2 deep.
+    const classAt = (x, z) => {
       const ground = groundAt(data, x, z);
-      if (!isWaterAt(x, z, ground)) return false;
+      if (!isWaterAt(x, z, ground)) return 0;
       const depth = stillWaterLevelAt(x, z) - ground;
-      return depth > 0.06 && depth < wade.depthMax;
+      return depth <= 0.06 ? 0 : depth < wade.depthMax ? 1 : 2;
     };
-    let found = shallowAt(Math.round(g[G.ANCHOR_X]), Math.round(g[G.ANCHOR_Z]));
+    const shallowAt = (x, z) => classAt(x, z) === 1;
+    const anchorX = g[G.ANCHOR_X];
+    const anchorZ = g[G.ANCHOR_Z];
+    const anchorClass = classAt(Math.round(anchorX), Math.round(anchorZ));
+    let found = anchorClass === 1;
     if (found) {
-      g[G.HOME_X] = Math.round(g[G.ANCHOR_X]);
-      g[G.HOME_Z] = Math.round(g[G.ANCHOR_Z]);
+      g[G.HOME_X] = Math.round(anchorX);
+      g[G.HOME_Z] = Math.round(anchorZ);
     }
-    for (let radius = 60; radius <= wade.searchRadius && !found; radius += 60) {
-      for (let step = 0; step < 24 && !found; step++) {
-        const angle = (step / 24) * TWO_PI;
-        const x = Math.round(g[G.ANCHOR_X] + Math.sin(angle) * radius);
-        const z = Math.round(g[G.ANCHOR_Z] - Math.cos(angle) * radius);
-        if (shallowAt(x, z)) {
+    const previous = new Int8Array(SHALLOWS_BEARINGS).fill(anchorClass);
+    for (let radius = SHALLOWS_RING; radius <= wade.searchRadius && !found; radius += SHALLOWS_RING) {
+      for (let step = 0; step < SHALLOWS_BEARINGS && !found; step++) {
+        const sin = Math.sin((step / SHALLOWS_BEARINGS) * TWO_PI);
+        const cos = Math.cos((step / SHALLOWS_BEARINGS) * TWO_PI);
+        const x = Math.round(anchorX + sin * radius);
+        const z = Math.round(anchorZ - cos * radius);
+        const kind = classAt(x, z);
+        const before = previous[step];
+        previous[step] = kind;
+        if (kind === 1) {
           found = true;
           g[G.HOME_X] = x;
           g[G.HOME_Z] = z;
+        } else if (kind + before === 2 && kind !== before) {
+          // Dry on one ring and deep on the other: the band lies between them.
+          let dryReach = kind === 0 ? radius : radius - SHALLOWS_RING;
+          let deepReach = kind === 0 ? radius - SHALLOWS_RING : radius;
+          for (let iteration = 0; iteration < SHALLOWS_BISECTIONS && !found; iteration++) {
+            const middle = (dryReach + deepReach) / 2;
+            const middleX = Math.round(anchorX + sin * middle);
+            const middleZ = Math.round(anchorZ - cos * middle);
+            const middleKind = classAt(middleX, middleZ);
+            if (middleKind === 1) {
+              found = true;
+              g[G.HOME_X] = middleX;
+              g[G.HOME_Z] = middleZ;
+            } else if (middleKind === 0) {
+              dryReach = middle;
+            } else {
+              deepReach = middle;
+            }
+          }
         }
       }
     }
