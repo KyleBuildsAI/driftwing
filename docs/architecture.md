@@ -1373,7 +1373,10 @@ point inside a solid (a railing's volume) moves up onto its top (`liftClear`). T
 kinematic cubic from the bird's position and velocity to the perch (0.9-2.8 s), flaring the body; then
 the bird stands with its feet on the point, held still (the structure sweep may ease it out of a
 collider: it stays where it was put), turns on the spot with the stick or pedals, and takes off with a
-hop when the flap power rises past where it was when it settled (or on the copilot's "take off"). A
+hop when the flap power rises past where it was when it settled (or on the copilot's "take off"). Off
+a tree top or a structure, a hop the ground ahead would rise into (within 50 m, closer under the
+perch than 1 m plus 0.1 m per metre out: a hillside it cannot out-climb) first turns it on the spot
+to the open way nearest its facing (one of 16), then hops. A
 perch that vanishes (a despawned structure) lets it go. A slow touchdown on its feet anywhere stands
 the same way (kind `ground`: a graded landing, no `perched` event); a fast one is the soft crash. A
 resting placement (`mode: 'perch'` or `'ground'`) stands on the surface when it is at most a leg above

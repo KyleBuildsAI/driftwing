@@ -24,6 +24,8 @@
 //   ground      a slow touchdown on flat ground stands (graded as a landing, no perched event); a
 //               fast dive into the ground strikes the body (the soft crash)
 //   placement   a resting reset at a perch point stands on it; at a ground point stands on the ground
+//   hillside    a tree top on a steep hillside: flapped off facing uphill, the bird turns on the spot
+//               to an open way and climbs clear of the slope; facing downhill it goes the way it faces
 //   autopilot   the copilot's perch approach (craftState.perchTarget) flies to the perch and lands,
 //               on flat ground, on a hillside, and at the real tree-top perches around the spawn of
 //               the CRAFT-1 world (the game's world generator and vegetation perch provider)
@@ -492,6 +494,43 @@ function placementTest() {
   record('ground takeoff at full flap power climbs away', ground.state().position.y, 8, { unit: 'm', compare: 'min', decimals: 1, note: `${ground.data.airspeed.toFixed(1)} m/s` });
 }
 
+/**
+ * A tree top on a hillside (a 0.6 slope rising north to 60 m): flapped off facing `heading`, then
+ * hands off at the same flap power for `seconds`. Returns { turned, heading, touched, lowest }.
+ */
+function hillsideLaunch(heading, seconds) {
+  const world = createRidgeWorld(0.6, 0, 60);
+  const perch = { x: 0, y: world.groundHeight(0, -30) + 13, z: -30, kind: 'tree', id: 'perch:pine:hillside' };
+  const rig = createRig({ assists: 1, world, colliders: createColliders([perch]) });
+  rig.model.reset({ position: new THREE.Vector3(perch.x, perch.y, perch.z), quaternion: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -heading * DEG), velocity: new THREE.Vector3(), onGround: true });
+  rig.pilot.throttle = 0.1;
+  rig.run(1);
+  const facing = rig.data.heading;
+  rig.pilot.throttle = 0.85;
+  let touched = false;
+  let lowest = Infinity;
+  let launchHeading = null;
+  rig.run(seconds, (current) => {
+    if (launchHeading === null && current.model.phase === 'flight') launchHeading = current.data.heading;
+    const position = current.state().position;
+    if (current.model.phase === 'flight') {
+      if (current.model.contact.onGround) touched = true;
+      lowest = Math.min(lowest, position.y - world.groundHeight(position.x, position.z));
+    }
+  });
+  const turned = launchHeading === null ? 0 : Math.abs(((launchHeading - facing + 540) % 360) - 180);
+  return { turned, heading: launchHeading, touched, lowest, phase: rig.model.phase };
+}
+
+function hillsideTest() {
+  // Facing up the slope: the hop would fly into the hillside; the bird turns to an open way first.
+  const uphill = hillsideLaunch(0, 8);
+  record('hillside tree top, facing uphill: turns to an open way, then climbs clear', uphill.turned, 90, { unit: 'deg', compare: uphill.turned >= 90 && !uphill.touched && uphill.phase === 'flight' && uphill.lowest > 5, decimals: 0, note: `launched on ${uphill.heading === null ? '-' : uphill.heading.toFixed(0)} deg, lowest ${uphill.lowest.toFixed(1)} m over the ground, ground ${uphill.touched ? 'touched' : 'clear'}` });
+  // Facing down the slope (open): it takes off the way it faces.
+  const downhill = hillsideLaunch(180, 8);
+  record('hillside tree top, facing downhill: takes off the way it faces', downhill.turned, 1, { unit: 'deg', compare: downhill.turned <= 1 && !downhill.touched && downhill.lowest > 5, decimals: 1, note: `lowest ${downhill.lowest.toFixed(1)} m over the ground` });
+}
+
 function autopilotTest() {
   const perch = { x: 220, y: 40, z: -260, kind: 'structure', id: 'landmark:arch:lintel' };
   const rig = createRig({ assists: 1, colliders: createColliders([perch]) });
@@ -761,6 +800,7 @@ perchTest();
 peakTest();
 groundTest();
 placementTest();
+hillsideTest();
 autopilotTest();
 realWorldTest();
 ignitionTest();

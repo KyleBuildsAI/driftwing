@@ -79,6 +79,21 @@ const STAND_SECONDS = 0.25;
 const PERCH_CHECK_SECONDS = 0.5;
 /** Stick or pedal past this turns the perched bird on the spot. */
 const PERCH_TURN_DEADBAND = 0.15;
+/**
+ * The launch off a raised perch (a tree top or a structure): the ground along the hop is looked at
+ * out to LAUNCH_LOOK metres (every LAUNCH_STEP); ground closer under the perch's height than
+ * LAUNCH_MARGIN plus LAUNCH_FALL per metre out blocks that way (the hop holds about the perch's
+ * height for its first tens of metres at a good flap power and sinks at a light one: it cannot
+ * out-climb a hillside). Blocked, the bird first turns on the spot (LAUNCH_TURN_RATE deg/s) to the
+ * open way nearest its facing, one of LAUNCH_HEADINGS.
+ */
+const LAUNCH_LOOK = 50;
+const LAUNCH_STEP = 5;
+const LAUNCH_MARGIN = 1;
+const LAUNCH_FALL = 0.1;
+const LAUNCH_HEADINGS = 16;
+const LAUNCH_TURN_RATE = 180;
+const LAUNCH_ALIGNED = 1;
 /** Soaring: a climb with the flap power at zero this many metres above its lowest point is reported. */
 const SOAR_REPORT_GAIN = 25;
 const SOAR_REPORT_SECONDS = 5;
@@ -498,6 +513,9 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     perchedSeconds: 0,
     minThrottle: 1,
     lastThrottle: 0,
+    /** Turning on the spot to an open way before the hop (a blocked launch), and that heading. */
+    launching: false,
+    launchHeading: 0,
     cooldownId: '',
     cooldownSeconds: 0,
     cooldownX: 0,
@@ -1027,6 +1045,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     perch.checkTimer = PERCH_CHECK_SECONDS;
     perch.minThrottle = 1;
     perch.standSeconds = 0;
+    perch.launching = false;
     setPhase('perched');
     restReport.onGround = true;
     restReport.contacts = 2;
@@ -1081,6 +1100,17 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
       perch.z = state.position.z;
     }
     perch.perchedSeconds += dt;
+    if (perch.launching) {
+      // A blocked launch: turning to the open way, then the hop.
+      const remaining = wrapSignedDegrees(perch.launchHeading - perch.heading);
+      const turnStep = LAUNCH_TURN_RATE * dt;
+      perch.heading = Math.abs(remaining) <= turnStep ? perch.launchHeading : ((perch.heading + Math.sign(remaining) * turnStep) % 360 + 360) % 360;
+      state.position.set(perch.x, perch.y + feetHeight, perch.z);
+      state.velocity.set(0, 0, 0);
+      levelAttitude(perch.heading, 0, state.quaternion);
+      if (Math.abs(wrapSignedDegrees(perch.launchHeading - perch.heading)) < LAUNCH_ALIGNED) takeOff();
+      return;
+    }
     const turn = axisValue(controls.yaw) + 0.5 * axisValue(controls.roll);
     if (Math.abs(turn) > PERCH_TURN_DEADBAND) perch.heading = ((perch.heading + perchProfile.turnRate * (turn - Math.sign(turn) * PERCH_TURN_DEADBAND) * dt) % 360 + 360) % 360;
     state.position.set(perch.x, perch.y + feetHeight, perch.z);
@@ -1099,10 +1129,63 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
       perch.checkTimer = PERCH_CHECK_SECONDS;
       vanished = !perchStillThere(env);
     }
-    if (flapped || requested || vanished) {
-      if (vanished) notify('The perch is gone. Back into the air.');
+    if (vanished) {
+      notify('The perch is gone. Back into the air.');
       takeOff();
+    } else if (flapped || requested) {
+      if (!startLaunchTurn(env)) takeOff();
     }
+  }
+
+  /**
+   * How far the ground (or water) along a hop on `heading` rises past the line LAUNCH_MARGIN under
+   * the perch's height, falling LAUNCH_FALL per metre out, within LAUNCH_LOOK metres (m; 0 or less:
+   * that way is open).
+   */
+  function launchRise(env, heading) {
+    const forwardX = Math.sin(heading * DEG);
+    const forwardZ = -Math.cos(heading * DEG);
+    let rise = -Infinity;
+    for (let along = LAUNCH_STEP; along <= LAUNCH_LOOK; along += LAUNCH_STEP) {
+      const height = surfaceHeightAt(env, perch.x + forwardX * along, perch.z + forwardZ * along) - (perch.y - LAUNCH_MARGIN - LAUNCH_FALL * along);
+      if (height > rise) rise = height;
+    }
+    return rise;
+  }
+
+  /**
+   * Off a raised perch (a tree top or a structure) on a hillside, the hop the bird faces may run into
+   * rising ground it cannot out-climb. Then it turns on the spot first, to the open way nearest its
+   * facing (else the way the ground rises least), and hops from there (stepPerched). Returns true
+   * when the turn starts; false takes off as it faces (an open way, a peak or plain ground: they fall
+   * away all round).
+   */
+  function startLaunchTurn(env) {
+    if (perch.kind !== 'tree' && perch.kind !== 'structure') return false;
+    if (launchRise(env, perch.heading) <= 0) return false;
+    const spacing = 360 / LAUNCH_HEADINGS;
+    let best = perch.heading;
+    let bestRise = launchRise(env, perch.heading);
+    // Nearest the facing first, alternating sides: the first open way wins.
+    for (let step = 1; step <= LAUNCH_HEADINGS / 2; step++) {
+      for (let side = -1; side <= 1; side += 2) {
+        if (step === LAUNCH_HEADINGS / 2 && side === 1) continue;
+        const heading = ((perch.heading + side * step * spacing) % 360 + 360) % 360;
+        const rise = launchRise(env, heading);
+        if (rise < bestRise) {
+          bestRise = rise;
+          best = heading;
+        }
+        if (rise <= 0) {
+          perch.launching = true;
+          perch.launchHeading = heading;
+          return true;
+        }
+      }
+    }
+    perch.launching = true;
+    perch.launchHeading = best;
+    return true;
   }
 
   /** True while the perch the bird stands on still exists (a despawned structure takes its perch away). */
@@ -1139,6 +1222,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     perch.cooldownZ = perch.z;
     perch.perchedSeconds = 0;
     perch.standSeconds = 0;
+    perch.launching = false;
     perch.scanTimer = SCAN_SECONDS;
     // Wings start beating at once: the hop is a full stroke at the flap power that asked for it.
     wings.amplitude = Math.max(wings.amplitude, 0.8);
@@ -1383,6 +1467,7 @@ export function createSimFlapperModel({ profile, craft, world, bus, craftState: 
     perch.cooldownId = '';
     perch.cooldownSeconds = 0;
     perch.standSeconds = 0;
+    perch.launching = false;
     perch.scanTimer = SCAN_SECONDS;
     tick.load = 1;
     soar.low = Infinity;
