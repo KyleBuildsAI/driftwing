@@ -1762,7 +1762,22 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
     height and turbulence from one object; the force sums are written out); the controller builds a
     craft's state from its first ability's own object, so a big state (the eagle's 23 fields) keeps fast
     properties instead of becoming a dictionary that boxes every double it is given. Eagle lab 50/50:
-    flight 16.1, scanning 48.0, perched 18.2 B per tick (before: 144, 128, 18).
+    flight 16.1, scanning 48.0, perched 18.2 B per tick (before: 144, 128, 18). Reviewed and kept after
+    the pause (save commit `2adf841`): rerun, eagle 50/50 (flight 16.1, scanning 48.0, perched 18.2,
+    wingsuit 78.4 B), craft 89/89, wingsuit 37/37; the eagle's 23-field state assigned onto `{}` is a
+    dictionary (`%HasFastProperties` false), onto its first ability's own object it stays fast (true);
+  - the WebGL2 spaceplane stall: a per-pipeline trace of `spaceplane-climb` on WebGL2 shows the
+    readback probe's render target needing its own pipeline for every material it draws (the ocean
+    water's link 16.9 s, the spawn lures' 8.2 s on this machine: one 26 s frame at 12 km); in the
+    shared world many more materials stand near the spawn, which is where the 40-127 s frames of the
+    full run came from. The probe's pipelines now compile ahead and asynchronously
+    (`renderer.compileAsync` in the probe's pose and target, once per altitude tier: ground, the far
+    field's band, space) (`60f38b9`);
+  - run-order independence in the craft test (`ba29ee5`, `d8b1c0e`): every run holds the page's opening
+    time of day (or its own), starts the craft's own state afresh (`flight.resetCraftState()`, new and
+    additive: a second run of the same craft inherited the first one's wind column, cruise, timers),
+    searches its start place from the world's spawn and takes the spawn's heading (before: from where
+    and how the previous run ended, so a perch start picked a different tree in each view).
 
 ### Wave 4 - p3/content-fixes
 
