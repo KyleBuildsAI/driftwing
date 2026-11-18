@@ -1726,7 +1726,7 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 | # | Work | Branch | Status |
 | --- | --- | --- | --- |
 | O1 | Journal (contract j.1): records version 2 with craft time, figures, medals, worlds visited, perches and max altitude; the journal panel's Craft, Figures, Challenges and Worlds sections | `p3/journal` | not started |
-| O2 | Copilot (contract j.2, h.3, h.6): the cross-craft grammar and the keyboard / UI equivalent of each (Guide chips "Find water", "Find a perch", "To space"; the spaceplane's climb-to-space autopilot); the remote `flightState` fields `onWater`, `craftState`, `challenge`; docs/copilot-api.md | `p3/copilot` | in progress |
+| O2 | Copilot (contract j.2, h.3, h.6): the cross-craft grammar and the keyboard / UI equivalent of each (Guide chips "Find water", "Find a perch", "To space"; the spaceplane's climb-to-space autopilot); the remote `flightState` fields `onWater`, `craftState`, `challenge`; docs/copilot-api.md | `p3/copilot` | done |
 | O3 | Docs: docs/controls.md (a full HOTAS profile per new craft, the j.2 equivalents), docs/spawns.md (all 100 checked against the code), docs/architecture.md (every Phase 3 system) | `p3/docs` | not started |
 | P1 | Test hooks to the contract: the 20-minute soak of k.5 (craft switch every 2 minutes, view swap every minute, structure penetrations, no soft crash within 10 s of a switch), the k.4 determinism digests (collider sweep battery, PathFollower positions) and the WebGL2 spawn-event frame difference, the k.3 / k.4 coverage audit, the golden-frame first shot and the origin-rebase image check on WebGL2 | `p3/verify-hooks` | not started |
 | P2 | Craft runs (k.1): every scenario passes in the full shared-world run on both backends: the WebGL2 spaceplane climb and re-entry (page stall, rebase continuity, far-field holes, depth and load), eagle find-perch and the perch fly-out, the balloon wind layer, burner lag and the subset's soft crashes, the eagle lab's allocation | `p3/verify-craft` | not started |
@@ -1741,8 +1741,69 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 
 ### Wave 4 - p3/copilot
 
-- **Status:** in progress: the cross-craft grammar (contract j.2), the remote `flightState` fields (h.3) and the
-  spaceplane's climb-to-space command (h.6).
+- **Status:** done.
+- **Built:**
+  - `src/copilot/craftGuide.js` (new): the cross-craft phrases of contract j.2 on the local grammar alone,
+    each with a spoken reply, listed in "craft help" and the Guide chips. "find water to land": the nearest
+    landable water, a local lake through `ctx.waterQuery.bodiesNear` (300 m across, 0.5 m deep) or the open
+    sea past the coast (a 400 m deep-water run), with distance, direction and heading, a waypoint, and a
+    note naming the craft that land on water when the active one cannot. "find a perch":
+    `colliders.perchesNear` in 400 / 1200 / 2500 m rings; the eagle flies its own approach within 300 m.
+    "wind at [altitude]": `ctx.wind.probe` over the craft (from-direction, degrees, speed in the pilot's
+    units, rising or sinking air, the wind here for comparison), heights in metres, feet, km, "thousand",
+    number words, "1,500 m", flight levels and "above the ground", clamped above the ground. "start the
+    challenge": `challengeStart` on the course whose start prompt shows, else the nearest course's start
+    gate as a waypoint, else a spoken "none within 20 km"; "cancel the challenge". "take me to space" and
+    "scenic cruise": the craft's own command, or from another craft a yes / no offer to switch first
+    (15 s, Yes, switch / No chips, `copilot:confirm`, `flightState.confirm`; a lapsed or declined offer
+    switches nothing). "smoke on / off": the aerobatic's `smoke` command, the bush plane's smoke ability,
+    and elsewhere "No smoke system on the glider." with the craft that carry smoke (the aerobatic, the bush plane). Negated
+    requests and questions ("don't start the challenge", "is the smoke on?", "smoke on the water", "are we
+    perched") never act.
+  - `grammar.js` / `flightActions.js`: "switch to [craft]" for all 14 craft by id, display name and
+    synonyms (stunt plane, float plane, osprey, paragliding, hot air balloon, blimp, zeppelin, rocket plane,
+    sailplane, cub, fighter, chopper, squirrel suit, drone, ...) and skins by name ("the dragon" is the
+    eagle in its dragon skin); a craft named as a place or in a negated request switches nothing; replies
+    name the craft by its skin.
+  - `flightState.js`: the remote `flightState` gains `onWater`, `craftState` (the active craft's h.3 fields
+    only, rounded, plain data, bounded: 12 list items, 48 characters, depth 3) and `challenge` (plain data
+    of `state.challenge`); `craftCommands` kept. Every new remote action goes through
+    `sanitizeCraftGuideAction` (from `Copilot.sanitizeAction`).
+  - `src/craft/spaceplane.js` + `src/flight/spaceplaneFcs.js`: the `climbToSpace` craft command (h.6, the
+    style of `autoReentry` / `attitudeHold`): wings level, a pull to 72 degrees at up to 5 deg/s inside 70 %
+    of the G limit and the angle-of-attack margin, full power backed off over 43-55 kPa (under the Vne
+    dynamic pressure), the engine cut once the ballistic apogee reaches 112 km above 35 km, a prograde
+    coast, hand-back at the apogee with auto re-entry armed; any stick or pedal input past 0.15, the
+    autopilot, the ground or the engine switched off hands back at once; WREN calls the cut-off and the
+    apogee; the soft throttle lever follows.
+  - `commandChips.js`: Guide chips Find water, Find a perch (craft that perch), To space (spaceplane), Start
+    challenge (while a start prompt shows), Yes, switch / No (while an offer is open).
+  - `src/gameplay/waypoints.js`: the beacon sits on a lake's surface (`waterQuery.staticLevelInto`).
+  - `tools/copilot-server.mjs`: the reference rules brain answers the cross-craft phrases with the same
+    actions (and leaves negated requests alone); docs/copilot-api.md documents the full `flightState`,
+    every action with its validation and examples, and the keyboard / UI equivalents.
+- **Decisions:**
+  - The confirm offer counts as WREN busy, so no tour-guide callout talks over an open yes / no
+    (`craftGuide.hasConfirm()`, allocation-free for the per-frame gate).
+  - Landable water follows the craft's own declarations (`capabilities.water`, `limits.waterLanding`):
+    the seaplane, the paraglider and the balloon.
+  - `tools/steps/copilot-guide.json` waits up to 20 s for its callout (the callout gate counts the game's
+    real seconds, which lag the wall clock when frames are slow, so the fixed 1.5 s wait failed twice on
+    WebGPU with the opening line still inside its 4 s quiet window), and a test spawn crowded out of
+    "what's nearby"'s top three by closer sites counts when the reply says how many more lie further out.
+- **Verification** (dev server, after `ae18fdf`):
+
+  | Check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `build:single`, `test:v1` (2/2), `docs-check` 538/538 | pass | |
+  | Labs: copilot 506/506 (240 before), copilot-server 31/31 (17 before), spaceplane 45/45 (climb to space from four starts at 100 % and 0 % assists: 111.4-112.0 km, end at the apogee, max 4.18 g of 6, max q 48.7 kPa of 70.8, 0 NaN; stick and autopilot hand-back; the command through the controller to 112.0 km with the lever presets 1, 0), craft 89/89, discovery 43/43, input 34/34, settings 45/45, airship 47/47, aerobatic 81/81, balloon 66/66, seaplane 113/113, eagle 49/50 (its known model-step allocation check, 144 B/tick; eagle code untouched here) | as listed | |
+  | `tools/steps/copilot-p3.json`: 14 craft by synonym and the dragon, picker, favourites 7, ] and [, smoke by voice and Space / Shift+Space, Find water (open sea, and the meteor crater lake: waypoint on the lake), the world map, Find a perch (a real tree-top perch; the eagle's own approach), wind at 2000 feet / three kilometres against `wind.probe`, the balloon's wind column, the challenge near a course (prompt, chip, voice, Y, negatives), scenic cruise (offer, Yes, Space), the remote `flightState` shape and sanitizing, "take me to space" from the airship (offer, Yes, switch) and the climb to 112.0 km apogee with 0 NaN | 61/61, 0/0 | 61/61, 0/0 |
+  | `tools/steps/copilot-guide.json` | 13/13, 0/0 (failed 3 checks twice before `ae18fdf`, the callout timing above) | 13/13, 0/0 |
+
+- **Open issues:** none of the branch's own. The eagle lab's allocation check is the craft engineer's
+  (P2).
+- **Next:** I4 merges the branch; docs/controls.md takes the equivalents listed in the copilot-api.md
+  "Keyboard and UI equivalents" table (no new key binding was added).
 
 ### Wave 4 - p3/docs
 
