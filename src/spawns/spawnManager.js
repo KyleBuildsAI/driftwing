@@ -10,7 +10,8 @@
 //   - draws the FAR lure of heavy presets (src/spawns/lure.js), crossfading with the engines' own
 //     geometry at the mid boundary;
 //   - ends events that finish (instance.ended), expire, or leave range and view (the despawn rule),
-//     and removes sites beyond lod.far plus their hysteresis;
+//     and starts sites within lod.far (3D, as the range check measures) and removes them beyond lod.far
+//     plus their hysteresis;
 //   - keeps a site to its hours: a site preset with filters.timeOfDay (a night-only bay) is created
 //     only inside those hours, and removed once they end and it is out of view;
 //   - detects discovery: within preset.discovery.radius and in view (in the camera frustum and not
@@ -976,8 +977,15 @@ export function createSpawnManager(options) {
     if (!preset) return;
     if (!siteHoursOpen(preset)) return;
     const offsetX = site.x - player.x;
+    const offsetY = site.groundY - player.y;
     const offsetZ = site.z - player.z;
-    if (offsetX * offsetX + offsetZ * offsetZ >= preset.lod.far * preset.lod.far) return;
+    // The same reach the range check (updateRecord) ends a site by: its 3D distance, or for a heavy
+    // site's far lure at high altitude (contract g.5) its horizontal one. Started by the horizontal
+    // distance alone, every site under a craft above lod.far plus the hysteresis started on one sweep
+    // and ended on the next frame, over and over (a spaceplane climb churned 1600 sites in 2 minutes).
+    const farLure = preset.heavy === true && (farLureView || player.y > FAR_LURE_ALTITUDE);
+    const reachSquared = offsetX * offsetX + offsetZ * offsetZ + (farLure ? 0 : offsetY * offsetY);
+    if (reachSquared >= preset.lod.far * preset.lod.far) return;
     if (refusalFor(preset, 'site')) return;
     activate(preset.id, { position: { x: site.x, y: site.groundY, z: site.z }, source: 'site', site });
   }
