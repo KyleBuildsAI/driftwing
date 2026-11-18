@@ -270,6 +270,7 @@ export function createDisposeCheck(ctx, framing) {
         courseKeys: new Set(spawnCourseKeys()),
         ignitableIds: new Set(spawnIgnitableIds()),
         sky: ctx.systems.sky.getModifierState().count,
+        skyIds: ctx.systems.sky.getModifierState().ids,
         lights: lightsInUse(),
         leaks: { ...manager.getStats().leaks },
       };
@@ -304,7 +305,11 @@ export function createDisposeCheck(ctx, framing) {
       const challengesLeft = spawnCourseKeys().filter((key) => !baseline.courseKeys.has(key) && !heldCourses.has(key));
       const heldIgnitables = heldIgnitableIds();
       const ignitablesLeft = spawnIgnitableIds().filter((id) => !baseline.ignitableIds.has(id) && !heldIgnitables.has(id));
-      const sky = ctx.systems.sky.getModifierState().count;
+      const skyState = ctx.systems.sky.getModifierState();
+      const sky = skyState.count;
+      // Which modifiers moved, by id, so a miss names its owner.
+      const skyEnded = baseline.skyIds.filter((id) => !skyState.ids.includes(id));
+      const skyAdded = skyState.ids.filter((id) => !baseline.skyIds.includes(id));
       const lights = lightsInUse();
       const leaks = manager.getStats().leaks;
       const judgeHeap = Number.isFinite(heapToleranceMB);
@@ -332,7 +337,7 @@ export function createDisposeCheck(ctx, framing) {
         ignitables: `${baseline.ignitableIds.size} -> ${baseline.ignitableIds.size + ignitablesLeft.length}`,
         ignitablesLeft,
         ignitablesOk: ignitablesLeft.length === 0,
-        skyModifiers: `${baseline.sky} -> ${sky}`,
+        skyModifiers: `${baseline.sky} -> ${sky}${skyEnded.length + skyAdded.length > 0 ? ` (ended: ${skyEnded.join(', ') || 'none'}; added: ${skyAdded.join(', ') || 'none'})` : ''}`,
         skyOk: sky === baseline.sky,
         lights: `${baseline.lights} -> ${lights}`,
         lightsOk: lights === baseline.lights,
