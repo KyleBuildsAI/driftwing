@@ -34,7 +34,7 @@
 //   craft      the craft table of docs/architecture.md has one row per craft with its model kind and
 //              its module's instruments in order, and the instrument count is right; docs/controls.md
 //              has a row per craft in "What the controls mean for each craft" and a full profile for
-//              every craft after the six of Phase 1
+//              every craft after the six of Phase 1, and its "Actions" list names every input action
 //   scripts    every npm script in package.json is named in README.md
 //
 // Usage: node tools/docs-check.mjs [--verbose]
@@ -57,6 +57,7 @@ import { GROUND_MODES, PARTICLE_STYLES } from '../src/spawns/engines/particleSys
 import { GLOW_SHAPES } from '../src/spawns/engines/glowPoints.js';
 import { craftRegistry } from '../src/craft/index.js';
 import { INSTRUMENT_IDS } from '../src/ui/instruments/index.js';
+import { ACTION_IDS } from '../src/input/controlState.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -725,6 +726,15 @@ function testCraftDocs() {
   }
 }
 
+/** The Actions list of docs/controls.md names every action id (the favorites as craftSelect1-N). */
+function testActionList() {
+  const section = levelTwoSection(readFileSync(CONTROLS_DOC, 'utf8'), 'Actions') ?? '';
+  const favorites = ACTION_IDS.filter((id) => /^craftSelect\d+$/.test(id));
+  const missing = ACTION_IDS.filter((id) => !/^craftSelect\d+$/.test(id) && !namesWord(section, id));
+  if (favorites.length > 0 && !section.includes(`craftSelect1-${favorites.length}`)) missing.push(`craftSelect1-${favorites.length}`);
+  check('craft', `controls: the Actions list names all ${ACTION_IDS.length} actions`, missing.length === 0, missing.length ? `missing ${missing.join(', ')}` : '');
+}
+
 // ---- npm scripts ---------------------------------------------------------------------------------
 function testScripts() {
   const scripts = Object.keys(JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts);
@@ -744,6 +754,7 @@ testPresetParams();
 testStructureRecipes();
 testEngineVocabulary();
 testCraftDocs();
+testActionList();
 testScripts();
 
 let failed = 0;
