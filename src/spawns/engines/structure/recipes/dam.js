@@ -6,9 +6,14 @@
 // and down a chute between training walls into a stilling basin, white water and mist at its foot (the
 // preset adds the spray and the rainbow), and a river runs on down the valley. Two intake towers stand
 // in the lake with catwalks to the crest, a valve house sits on the crest, and lamps line it at night.
+// The crest runs out until the valley side rises to it, but never past the reservoir's shoreline by
+// more than an abutment: beyond that the lake needs no wall, so on an open slope (the ground falling
+// away to the sides) each end steps down as a wing, its top falling WING_FALL a metre, until it meets
+// the ground.
 // The wall, the bridge over the spillway, the towers and the basin walls are solid; the crest is
 // landable, the towers and the valve house are perches.
-// Without a basin stamp (a debug spawn) the dam stands across the heading, `height` metres tall.
+// Without a basin stamp (a debug spawn) the dam stands across the heading, `height` metres tall,
+// `length` long at its crest, with the same wings down to the ground.
 import { PALETTE } from '../palette.js';
 import { findStamp, frameFromHeading } from '../common.js';
 import { paint, shade } from '../meshBuilder.js';
@@ -32,6 +37,14 @@ const FACE_FALL = 1 / 0.75;
 /** Across samples along the crest (m), and the farthest the crest runs out each side. */
 const COLUMN_STEP = 6;
 const MAX_HALF_LENGTH = 320;
+/**
+ * The full crest ends at most this far (m) past the reservoir's shoreline on the wall's line (its
+ * abutment); a wing's top falls this much a metre beyond it (a 1 : 1 batter) to the ground, reaching
+ * at most MAX_WING_REACH from the centre (the dam sites of four seeds all meet the ground inside it).
+ */
+const ABUTMENT = 12;
+const WING_FALL = 1;
+const MAX_WING_REACH = 480;
 /**
  * The lip sits this far (m) under the lake, so the lake spills; on a basin it never sits below the rim
  * crest beside it (the berm the dam stands on), so the lip stays clear of the ground and the lake
@@ -112,13 +125,29 @@ export function buildDam(context, read) {
     let farthest = wallAlong - 1;
     for (let across = -leftEnd; across <= rightEnd; across += 4) farthest = Math.max(farthest, rimAlong(across));
     wallAlong = farthest + 1;
-    leftEnd = halfLength(-1);
-    rightEnd = halfLength(1);
+    // The shoreline's reach across the wall's line on each side, plus the abutment: no farther.
+    const shoreEnd = (sign) => {
+      let reach = spillHalf + COLUMN_STEP;
+      for (let across = 0; across < MAX_HALF_LENGTH; across += 2) if (rimAlong(sign * across) > -Infinity) reach = Math.max(reach, across + ABUTMENT);
+      return reach;
+    };
+    leftEnd = Math.min(halfLength(-1), shoreEnd(-1));
+    rightEnd = Math.min(halfLength(1), shoreEnd(1));
   }
+  // Each wing: from the crest's end out to where its falling top meets the ground (the end itself
+  // when the valley side already stands at the crest there).
+  const wingEnd = (sign, crestEnd) => {
+    for (let reach = crestEnd; reach < MAX_WING_REACH; reach += 2) {
+      if (crestY - (reach - crestEnd) * WING_FALL <= groundAt(wallAlong, sign * reach) + 0.5) return reach;
+    }
+    return MAX_WING_REACH;
+  };
+  const leftWing = wingEnd(-1, leftEnd);
+  const rightWing = wingEnd(1, rightEnd);
 
   // ---- The columns across the wall: the top (crest or lip), the crest's width over the berm, the toe ----
   const columns = [];
-  const addColumn = (across, top) => {
+  const addColumn = (across, top, wing = false) => {
     // The crest covers the berm's flat top; the face starts where the berm begins to fall.
     let downstream = wallAlong + CREST_MIN;
     if (stamp) while (downstream < wallAlong + 40 && groundAt(downstream, across) > bermY - 1) downstream += 1;
@@ -134,16 +163,27 @@ export function buildDam(context, read) {
     }
     const upstreamGround = groundAt(wallAlong - 1, across);
     const bottom = Math.min(upstreamGround, level - 4) - 1.5;
-    columns.push({ across, top, downstream, toeAlong, toeY: toeY - 1.5, bottom });
+    columns.push({ across, top, downstream, toeAlong, toeY: toeY - 1.5, bottom, wing });
   };
   const crestColumns = (from, to) => {
     const steps = Math.max(1, Math.round(Math.abs(to - from) / COLUMN_STEP));
     for (let step = 0; step <= steps; step++) addColumn(from + (to - from) * (step / steps), crestY);
   };
+  // A wing's columns in across order, its first at the crest's end (at the crest's height).
+  const wingColumns = (sign, crestEnd, end) => {
+    if (end <= crestEnd) return;
+    const steps = Math.max(1, Math.round((end - crestEnd) / COLUMN_STEP));
+    for (let step = 0; step <= steps; step++) {
+      const reach = crestEnd + (end - crestEnd) * ((sign < 0 ? steps - step : step) / steps);
+      addColumn(sign * reach, crestY - (reach - crestEnd) * WING_FALL, true);
+    }
+  };
+  wingColumns(-1, leftEnd, leftWing);
   crestColumns(-leftEnd, -spillHalf);
   const spillSteps = Math.max(2, Math.round((spillHalf * 2) / COLUMN_STEP));
   for (let step = 0; step <= spillSteps; step++) addColumn(-spillHalf + (spillHalf * 2) * (step / spillSteps), lipY);
   crestColumns(spillHalf, rightEnd);
+  wingColumns(1, rightEnd, rightWing);
 
   // ---- The wall: crest (or lip) top, upstream face, downstream face, end caps ----
   for (let index = 0; index + 1 < columns.length; index++) {
@@ -153,7 +193,7 @@ export function buildDam(context, read) {
     const middle = (a.across + b.across) / 2;
     const spill = a.top === lipY && b.top === lipY;
     const insideTop = at((wallAlong + a.downstream) / 2, middle, Math.min(a.top, b.top) - 1);
-    body.setPaint(spill ? CONCRETE_LIGHT : ROAD);
+    body.setPaint(spill || (a.wing && b.wing) ? CONCRETE_LIGHT : ROAD);
     outwardQuad(body, at(wallAlong, a.across, a.top), at(a.downstream, a.across, a.top), at(b.downstream, b.across, b.top), at(wallAlong, b.across, b.top), insideTop);
     body.setPaint(index % 2 === 0 ? CONCRETE : shade(CONCRETE, 0.95));
     outwardQuad(body, at(a.downstream, a.across, a.top), at(a.toeAlong, a.across, a.toeY), at(b.toeAlong, b.across, b.toeY), at(b.downstream, b.across, b.top), at(wallAlong + 1, middle, Math.min(a.top, b.top) - 3));
@@ -169,13 +209,14 @@ export function buildDam(context, read) {
   for (let index = 0; index + 1 < columns.length; index++) {
     const a = columns[index];
     const b = columns[index + 1];
-    if (Math.abs(b.across - a.across) > 1e-6) continue;
+    if (Math.abs(b.across - a.across) > 1e-6 || a.top === b.top) continue;
     const high = a.top > b.top ? a : b;
     const low = a.top > b.top ? b : a;
     body.setPaint(CONCRETE_DARK);
     outwardQuad(body, at(wallAlong, high.across, high.top), at(high.downstream, high.across, high.top), at(low.downstream, low.across, low.top), at(wallAlong, low.across, low.top), at(wallAlong + 2, high.across - Math.sign(high.across) * 2, low.top - 1));
   }
-  // The wall's colliders: hulls of the sections, a few columns at a time.
+  // The wall's colliders: hulls of the sections, a few columns at a time (a wing's sloping columns
+  // share hulls; the level crest and lip break at every change of height).
   const wallTags = { surface: 'stone', landable: true };
   let group = [];
   let groupIndex = 0;
@@ -190,7 +231,8 @@ export function buildDam(context, read) {
   };
   for (let index = 0; index < columns.length; index++) {
     const column = columns[index];
-    if (group.length > 0 && group[group.length - 1].top !== column.top) {
+    const previous = group.length > 0 ? group[group.length - 1] : null;
+    if (previous && (previous.wing !== column.wing || (!column.wing && previous.top !== column.top))) {
       flush();
       group = [];
     }
@@ -331,7 +373,7 @@ export function buildDam(context, read) {
   const audio = at(toeAlong + 8, 0, toeY + 6);
   out.audioPoint = audio;
   out.windProbe = at(wallAlong, 0, crestY + 10);
-  out.radius = Math.max(out.radius, Math.max(leftEnd, rightEnd) + 40, toeAlong - wallAlong + BASIN_LENGTH + 60);
+  out.radius = Math.max(out.radius, Math.max(leftWing, rightWing) + 40, toeAlong - wallAlong + BASIN_LENGTH + 60);
 }
 
 /** A water ribbon through `points` ({ left, right, paint, alpha }), its streaks flowing toward the last. */

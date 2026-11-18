@@ -599,6 +599,41 @@ function testDam() {
   const crest = walls.reduce((high, wall) => Math.max(high, wall.bounds[4]), -Infinity) - part.anchor.y;
   const toe = walls.reduce((low, wall) => Math.min(low, wall.bounds[1]), Infinity) - part.anchor.y;
   check('recipes', 'dam: the crest stands above the rim and the face reaches down to the valley', crest > basin.rimY - part.anchor.y && crest - toe > 4, `crest ${crest.toFixed(1)} m, toe ${toe.toFixed(1)} m, rim ${(basin.rimY - part.anchor.y).toFixed(1)} m (local)`);
+  // Along the crest's line (through the bridge, across the valley): the level crest reaches no
+  // farther than the reservoir's shoreline plus its abutment, and each end comes down to the ground
+  // (this stub world's ground is level beside the berm: an open slope's case, no valley side to meet).
+  const bridge = colliders.get(part.colliderIds.find((colliderId) => colliderId.includes(':bridge')));
+  const centreX = (bridge.bounds[0] + bridge.bounds[3]) / 2;
+  const centreZ = (bridge.bounds[2] + bridge.bounds[5]) / 2;
+  const crestTop = crest + part.anchor.y;
+  const out = { t: 0, point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 }, id: null, owner: null, tags: null, velocity: null };
+  const ends = [];
+  for (const sign of [-1, 1]) {
+    let levelReach = 0;
+    let outer = null;
+    for (let across = 0; across <= 420; across += 2) {
+      const x = centreX - basin.dirZ * across * sign;
+      const z = centreZ + basin.dirX * across * sign;
+      if (!colliders.sweepSphere({ x, y: crestTop + 60, z }, { x, y: crestTop - 400, z }, 0.5, {}, out) || !out.id.includes(':wall')) continue;
+      if (out.point.y > crestTop - 1) levelReach = across;
+      outer = { across, top: out.point.y, ground: groundHeight(x, z) };
+    }
+    // The shoreline's reach across this line: how far upstream of it the lake still lies.
+    let shore = 0;
+    for (let across = 0; across <= 420; across += 2) {
+      for (let back = 0; back <= basin.radius * 2.6; back += 4) {
+        const x = centreX - basin.dirZ * across * sign - basin.dirX * back;
+        const z = centreZ + basin.dirX * across * sign - basin.dirZ * back;
+        if (basinReach(basin, x, z) < basin.radius) {
+          shore = across;
+          break;
+        }
+      }
+    }
+    ends.push({ levelReach, shore, outer });
+  }
+  check('recipes', 'dam: the level crest ends within its abutment of the reservoir\'s shoreline (no long end sections)', ends.every((end) => end.levelReach > 0 && end.levelReach <= end.shore + 12 + 8), ends.map((end) => `crest to ${end.levelReach} m, shoreline to ${end.shore} m`).join('; '));
+  check('recipes', 'dam: each end steps down as a wing to the ground (no wall end standing over open ground)', ends.every((end) => end.outer && end.outer.top - end.outer.ground < 2.5 && end.outer.across > end.levelReach), ends.map((end) => (end.outer ? `outermost at ${end.outer.across} m: top ${(end.outer.top - end.outer.ground).toFixed(1)} m over the ground` : 'no wall')).join('; '));
   lab.manager.deactivate(id, 'test');
 }
 
