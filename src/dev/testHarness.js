@@ -231,6 +231,13 @@ function buildPlan(config) {
   return plan;
 }
 
+/** The largest TOP_COUNTS entries of a { name: count } record, as "name count, ..." ('-' when empty). */
+const TOP_COUNTS = 4;
+function topCounts(counts) {
+  const entries = Object.entries(counts ?? {}).sort((first, second) => second[1] - first[1]).slice(0, TOP_COUNTS);
+  return entries.length > 0 ? entries.map(([name, count]) => `${name} ${count}`).join(', ') : '-';
+}
+
 function newSessionId() {
   const bytes = new Uint8Array(4);
   crypto.getRandomValues(bytes);
@@ -344,11 +351,23 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     runs: [],
     outside: createBucket(),
     // The event director and the spawns on this world (the soak reports them; the flight test too).
-    spawns: { directorTicks: null, directorActivations: null, directorLog: [], notables: null, declined: null, activated: { site: 0, event: 0 }, peak: 0 },
+    // startsByPreset and endsByReason (counts) tell a spawn that starts and ends over and over apart.
+    spawns: { directorTicks: null, directorActivations: null, directorLog: [], notables: null, declined: null, activated: { site: 0, event: 0 }, peak: 0, startsByPreset: {}, endsByReason: {} },
   };
+  /** The presets started since the last frame step (this frame's spawns update): a slow frame names them. */
+  const startedSinceStep = [];
   bus.onTyped('spawnActivated', (payload) => {
-    if (payload && payload.kind === 'site') worldRecord.spawns.activated.site++;
-    else worldRecord.spawns.activated.event++;
+    const record = worldRecord.spawns;
+    if (payload && payload.kind === 'site') record.activated.site++;
+    else record.activated.event++;
+    const presetId = payload && payload.presetId ? payload.presetId : 'unknown';
+    record.startsByPreset[presetId] = (record.startsByPreset[presetId] ?? 0) + 1;
+    startedSinceStep.push(presetId);
+  });
+  bus.onTyped('spawnEnded', (payload) => {
+    const record = worldRecord.spawns;
+    const reason = payload && payload.reason ? payload.reason : 'unknown';
+    record.endsByReason[reason] = (record.endsByReason[reason] ?? 0) + 1;
   });
   const pendingConsole = [];
   for (const entry of capture.entries) pendingConsole.push(entry);
@@ -1275,7 +1294,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
         })),
       },
     });
-    const slowList = report.runs.flatMap((run) => run.slowFrameList.map((frame) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): ${frame.ms} ms at ${frame.at} s after warmup, ${frame.cause} (systems ${frame.systemsMs} ms${frame.topSystems ? `: ${frame.topSystems}` : ''}${Number.isFinite(frame.heapDeltaMB) ? `; heap ${frame.heapDeltaMB} MB` : ''}${frame.loaf ? `; long frame ${frame.loaf.durationMs} ms, scripts ${frame.loaf.scriptsMs} ms` : ''})`));
+    const slowList = report.runs.flatMap((run) => run.slowFrameList.map((frame) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): ${frame.ms} ms at ${frame.at} s after warmup, ${frame.cause} (systems ${frame.systemsMs} ms${frame.topSystems ? `: ${frame.topSystems}` : ''}${Number.isFinite(frame.heapDeltaMB) ? `; heap ${frame.heapDeltaMB} MB` : ''}${frame.spawnsStarted ? `; spawns started: ${frame.spawnsStarted}` : ''}${frame.loaf ? `; long frame ${frame.loaf.durationMs} ms, scripts ${frame.loaf.scriptsMs} ms` : ''})`));
     if (slowList.length > 0) sections.push({ title: `Frames over ${FRAME_LIMIT_MS} ms`, notes: slowList.slice(0, 40) });
     const eventList = report.runs.flatMap((run) => [
       ...run.penetrationDetails.map((detail) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): penetration ${detail.depth} m below ${detail.surface} at ${detail.at} s for ${detail.frames} frame(s)`),
@@ -1286,7 +1305,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
       ...run.script.checks.filter((check) => !check.passed).map((check) => `Run ${run.index + 1} (${run.craft}, ${run.view} person, ${run.seed}): scripted manoeuvre not observed: ${check.label}`),
     ]);
     if (eventList.length > 0) sections.push({ title: 'Events', notes: eventList.slice(0, 60) });
-    const directorNotes = report.worlds.filter((entry) => entry.spawns && entry.spawns.directorTicks !== null).map((entry) => `${entry.seed}: ${entry.spawns.directorTicks} director ticks, ${entry.spawns.notables} notables, ${entry.spawns.declined ?? 0} declined, activations: ${entry.spawns.directorLog.length > 0 ? entry.spawns.directorLog.map((log) => `${log.presetId} at ${log.time} s (${log.reason})`).join(', ') : 'none'}; ${entry.spawns.activated.site} sites and ${entry.spawns.activated.event} events started, at most ${entry.spawns.peak} spawns at once`);
+    const directorNotes = report.worlds.filter((entry) => entry.spawns && entry.spawns.directorTicks !== null).map((entry) => `${entry.seed}: ${entry.spawns.directorTicks} director ticks, ${entry.spawns.notables} notables, ${entry.spawns.declined ?? 0} declined, activations: ${entry.spawns.directorLog.length > 0 ? entry.spawns.directorLog.map((log) => `${log.presetId} at ${log.time} s (${log.reason})`).join(', ') : 'none'}; ${entry.spawns.activated.site} sites and ${entry.spawns.activated.event} events started (most: ${topCounts(entry.spawns.startsByPreset)}), ends by reason: ${topCounts(entry.spawns.endsByReason)}, at most ${entry.spawns.peak} spawns at once`);
     if (directorNotes.length > 0) sections.push({ title: 'Event director and spawns', notes: directorNotes });
     if (report.console.length > 0) sections.push({ title: 'Console errors and warnings', notes: report.console.slice(0, 30).map((entry) => `[${entry.level}] ${entry.context}: ${entry.text}`) });
     if (report.harnessErrors.length > 0) sections.push({ title: 'Harness problems', notes: report.harnessErrors });
@@ -1350,6 +1369,8 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     lastHeapMB = heapNowMB;
     const frameMs = lastFrameMs === null ? null : now - lastFrameMs;
     lastFrameMs = now;
+    const spawnsStarted = frameMs !== null && frameMs > config.frameLimitMs && startedSinceStep.length > 0 ? startedSinceStep.join(', ') : null;
+    startedSinceStep.length = 0;
     if (phase === 'navigating') {
       if (!navigating) navigateToSeed(plan[session.nextRun].seed);
       return;
@@ -1392,7 +1413,7 @@ function createFlightTestSystem(ctx, { params, capture, listeners, hiddenGamepad
     const elapsed = (now - run.startMs) / 1000;
     if (frameMs !== null) {
       if (elapsed > config.runWarmupSeconds) {
-        const detail = frameMs > config.frameLimitMs ? { startMs: now - frameMs, endMs: now, systemsMs: frameWork.systemsMs, top: frameWork.top, heapDeltaMB } : null;
+        const detail = frameMs > config.frameLimitMs ? { startMs: now - frameMs, endMs: now, systemsMs: frameWork.systemsMs, top: frameWork.top, heapDeltaMB, spawnsStarted } : null;
         run.recorder.push(frameMs, elapsed - config.runWarmupSeconds, detail);
       } else {
         run.warmupFrames++;

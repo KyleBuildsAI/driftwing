@@ -539,7 +539,9 @@ function slowFrameEvidence(report) {
         cell(load.machineCpuPct, 12),
         cell(load.gpuPct, 5),
         ` ${load.topOtherCpu ?? 'n/a'}`,
-      ].join(' '));
+        // A frame our own systems made slow names them, and the spawns started in it.
+        frame.cause === 'systems' ? ` | ${frame.topSystems ?? 'n/a'}${frame.spawnsStarted ? `; started ${frame.spawnsStarted}` : ''}` : '',
+      ].join(' ').trimEnd());
     }
   }
   if (lines.length === 2) return '  frames over the limit: none';
@@ -586,13 +588,20 @@ function flightTable(report) {
   return lines.join('\n');
 }
 
+/** The largest TOP_COUNTS entries of a { name: count } record, as "name count, ..." ('-' when empty or missing). */
+const TOP_COUNTS = 4;
+function topCounts(counts) {
+  const entries = Object.entries(counts ?? {}).sort((first, second) => second[1] - first[1]).slice(0, TOP_COUNTS);
+  return entries.length > 0 ? entries.map(([name, count]) => `${name} ${count}`).join(', ') : '-';
+}
+
 /** The report's pass criteria, one line each, and (soak) each world's director and spawns. */
 function criteriaLines(report) {
   const lines = report.criteria.map((criterion) => `  ${criterion.status === 'pass' ? 'PASS' : criterion.status === 'fail' ? 'FAIL' : '----'}  ${criterion.label}: ${criterion.value}`);
   for (const world of report.worlds) {
     if (!world.spawns || world.spawns.directorTicks === null) continue;
     const log = world.spawns.directorLog.map((entry) => `${entry.presetId}@${entry.time}s(${entry.reason})`).join(', ') || 'none';
-    lines.push(`  world ${world.seed}: director ${world.spawns.directorTicks} ticks, ${world.spawns.directorActivations} activations [${log}], spawns started ${world.spawns.activated.site} sites + ${world.spawns.activated.event} events, peak ${world.spawns.peak}`);
+    lines.push(`  world ${world.seed}: director ${world.spawns.directorTicks} ticks, ${world.spawns.directorActivations} activations [${log}], spawns started ${world.spawns.activated.site} sites + ${world.spawns.activated.event} events (most: ${topCounts(world.spawns.startsByPreset)}; ends: ${topCounts(world.spawns.endsByReason)}), peak ${world.spawns.peak}`);
   }
   return lines.join('\n');
 }
