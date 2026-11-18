@@ -1179,10 +1179,18 @@ function createCraftGame({ craft = 'glider', units = 'metric' } = {}) {
   const same2 = handlers.setCraft({ type: 'setCraft', craft: 'eagle', skin: 'dragon' });
   check('executor', 'setCraft to the skin already flying says so', same2.ok && same2.text === "We're already flying the dragon.", same2.text);
   const bad = handlers.setCraft({ type: 'setCraft', craft: 'eagle', skin: 'phoenix' });
-  check('executor', 'setCraft with a skin the craft does not have is refused', !bad.ok && /no phoenix skin/.test(bad.text), bad.text);
+  check('executor', 'setCraft with a skin the craft does not have is refused', !bad.ok && /^No phoenix skin for that one: it comes as the eagle or the dragon.$/.test(bad.text), bad.text);
   flightSystem.current = 'jet';
   const back = handlers.setCraft({ type: 'setCraft', craft: 'eagle', skin: 'eagle' });
   check('executor', 'setCraft eagle + eagle from the jet: the skin first, then the craft', back.ok && flightSystem.current === 'eagle' && flightSystem.skin === 'eagle' && back.text === 'The eagle it is.', back.text);
+  // Without a skin, a craft with skins is named by the one the setting picks, never "the eagle / dragon".
+  ctx.settings.update('craftSkins', { eagle: 'dragon' });
+  flightSystem.current = 'jet';
+  const plain = handlers.setCraft({ type: 'setCraft', craft: 'eagle' });
+  check('executor', 'setCraft eagle (no skin) is named by the chosen skin', plain.ok && flightSystem.current === 'eagle' && /^(The dragon it is\.|Switched to the dragon\.)$/.test(plain.text), plain.text);
+  flightSystem.current = 'jet';
+  const missing = handlers.setCraft({ type: 'setCraft', craft: 'eagle', skin: 'gold' });
+  check('executor', 'a missing skin is refused with the skins the craft has', !missing.ok && missing.text === 'No gold skin for that one: it comes as the eagle or the dragon.', missing.text);
 }
 
 let failed = 0;

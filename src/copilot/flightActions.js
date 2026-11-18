@@ -89,11 +89,17 @@ export function createFlightActionHandlers(ctx, helpers) {
   const registry = ctx.craftRegistry;
   const { succeed, fail, pick, waiter, noteCopilotChange, getView } = helpers;
   const flight = () => ctx.systems.flight;
-  /** "the bush plane"; a craft with skins that is flying now is named by its skin ("the dragon"). */
+  /**
+   * "the bush plane"; a craft with skins is named by its skin: the one flying now, else the one the
+   * craftSkins setting picks, else its default ("the dragon", "the eagle"; never "the eagle / dragon").
+   */
   const craftName = (id) => {
     const system = flight();
-    if (typeof system?.getCraft === 'function' && system.getCraft() === id && typeof system.getSkin === 'function') {
-      const entry = skinEntry(registry?.get?.(id), system.getSkin());
+    const module = registry?.get?.(id) ?? null;
+    if (module && module.skins) {
+      const flying = typeof system?.getCraft === 'function' && system.getCraft() === id && typeof system.getSkin === 'function' ? system.getSkin() : null;
+      const chosen = settings.get('craftSkins');
+      const entry = skinEntry(module, flying) ?? skinEntry(module, chosen && typeof chosen === 'object' ? chosen[id] : null) ?? skinEntry(module, module.skins.default);
       if (entry) return `the ${entry.name.toLowerCase()}`;
     }
     return craftPhrase(registry, id);
@@ -157,7 +163,10 @@ export function createFlightActionHandlers(ctx, helpers) {
       const current = system.getCraft();
       const module = registry?.get?.(target) ?? null;
       const skin = action.skin ? skinEntry(module, action.skin) : null;
-      if (action.skin && module && !skin) return fail(`${capitalize(craftName(target))} has no ${action.skin} skin.`);
+      if (action.skin && module && !skin) {
+        const skins = module.skins && Array.isArray(module.skins.list) ? module.skins.list.map((entry) => `the ${entry.name.toLowerCase()}`) : [];
+        return fail(skins.length ? `No ${action.skin} skin for that one: it comes as ${skins.join(' or ')}.` : `${capitalize(craftName(target))} has no skins to pick from.`);
+      }
       const skinName = skin ? `the ${skin.name.toLowerCase()}` : null;
       if (current === target) {
         const flying = typeof system.getSkin === 'function' ? system.getSkin() : null;
