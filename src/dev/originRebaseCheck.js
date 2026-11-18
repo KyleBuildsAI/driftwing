@@ -17,13 +17,17 @@
 //   image      at fixed poses (low over the spawn area, with the wind overlay's arrows, a structure, a
 //              tornado and a supercell in view, 10 km up with a vertical rebase, and 400 km out from
 //              the world origin), once the scene is still (the terrain and the far field built, and
-//              two frames in a row alike: streaming that lands between two captures is not a rebase),
+//              two frames in a row alike, tried STILL_TRIES times: streaming that lands between two
+//              captures is not a rebase),
 //              the frame is captured with the origin on one lattice point, again (the control: what
 //              two identical frames differ by), then with the origin on the neighbouring lattice
-//              point, and once more back on the first: the rebased frame, and the frame back on the
-//              first point, must differ from the frame before the rebase no more than the control
-//              does, plus a small allowance for float32 rounding at the new render coordinates. Where
-//              the rebased frame differs is reported (the changed pixels' bounding box).
+//              point, and once more back on the first: the rebased frame and the frame back on the
+//              first point must each differ from the frame just before them no more than the control
+//              pair does (consecutive frames: a still scene still animates its water and
+//              foliage), plus a small allowance for float32 rounding at the new render coordinates.
+//              Where the rebased frame differs is reported (the changed pixels' bounding box), and
+//              no terrain chunk or far-field tile may start building across the two rebases (a
+//              rebase rebuilds nothing; streaming that lands between captures is not the rebase's).
 //   identity   terrain heights on a grid and the site list around the craft, and the terrain's chunk
 //              builds, are identical before and after forced rebases (no rebuild, no re-placement).
 import { ORIGIN_QUANTUM, ORIGIN_REBASE_DISTANCE } from '../core/origin.js';
@@ -244,6 +248,18 @@ export function installOriginRebaseCheck(dw) {
     return { image: previous, mean, tries };
   }
 
+  /**
+   * Streaming so far: terrain chunk meshes built (every LOD) and far-field tiles requested. Read across
+   * a rebase it must not move: a rebase rebuilds nothing, so a frame difference is never streaming.
+   */
+  function streamingCount() {
+    const terrain = ctx.systems.terrain.getStats();
+    const chunks = Array.isArray(terrain.meshesCreated) ? terrain.meshesCreated.reduce((sum, value) => sum + value, 0) : 0;
+    const farField = ctx.systems.farField;
+    const tiles = farField && typeof farField.getStats === 'function' ? farField.getStats().counters.requested : 0;
+    return { chunks, tiles };
+  }
+
   /** The bounding box (capture pixels) of the pixels that changed between two images, or null. */
   function changedRegion(first, second) {
     let minX = Infinity;
@@ -462,6 +478,7 @@ export function installOriginRebaseCheck(dw) {
       const still = await captureStill();
       const first = still.image;
       const second = await renderAndCapture();
+      const streamingBefore = streamingCount();
       const versionBefore = origin.version;
       origin.rebaseTo(latticeB);
       const third = await renderAndCapture();
@@ -470,18 +487,22 @@ export function installOriginRebaseCheck(dw) {
       origin.rebaseTo(latticeA);
       const fifth = await renderAndCapture();
       const returned = origin.version === versionBefore + 2;
+      const streamingAfter = streamingCount();
+      const chunksBuilt = streamingAfter.chunks - streamingBefore.chunks;
+      const tilesRequested = streamingAfter.tiles - streamingBefore.tiles;
       const brightness = meanBrightness(second);
       state.paused = false;
       const control = compareImages(first, second);
       const rebase = compareImages(second, third);
       const settledAfter = compareImages(third, fourth);
-      const back = compareImages(second, fifth);
+      const back = compareImages(fourth, fifth);
       const region = changedRegion(second, third);
       const within = (pair) => pair.mean <= control.mean + IMAGE_MEAN_ALLOWANCE && pair.changed <= control.changed + IMAGE_CHANGED_ALLOWANCE;
       const passed = settled && stayed && returned && brightness > 8 && reach(latticeA) < ORIGIN_REBASE_DISTANCE && reach(latticeB) < ORIGIN_REBASE_DISTANCE
-        && within(rebase) && within(back);
+        && within(rebase) && within(back) && chunksBuilt === 0 && tilesRequested === 0;
       return report(id, passed, `pose ${Math.round(pose.x)}, ${Math.round(pose.y)}, ${Math.round(pose.z)} (terrain ${settled ? 'ready' : 'not ready'}, far field ${farSettled ? 'built' : 'still building'}, still after ${still.tries} pair(s) at mean ${still.mean.toFixed(3)}); `
         + `origin ${JSON.stringify(latticeA)} -> ${JSON.stringify(latticeB)} (${stayed ? 'held' : 'moved again'}) -> back (${returned ? 'held' : 'moved again'}); `
+        + `streaming across the rebases: ${chunksBuilt} terrain chunks built, ${tilesRequested} far-field tiles requested; `
         + `frame difference across the rebase: mean ${rebase.mean.toFixed(3)}, changed ${(rebase.changed * 100).toFixed(3)} %${region ? ` in x ${region.x0}-${region.x1}, y ${region.y0}-${region.y1} of the capture` : ''}; `
         + `back on the first point: mean ${back.mean.toFixed(3)}, changed ${(back.changed * 100).toFixed(3)} %; control pair: mean ${control.mean.toFixed(3)}, changed ${(control.changed * 100).toFixed(3)} %; `
         + `after: mean ${settledAfter.mean.toFixed(3)}; frame brightness ${brightness.toFixed(1)}/255; allowance +${IMAGE_MEAN_ALLOWANCE} mean, +${(IMAGE_CHANGED_ALLOWANCE * 100).toFixed(1)} % changed (${IMAGE_WIDTH} x ${IMAGE_HEIGHT}, changed above ${IMAGE_CHANGED_LEVEL}/255)`);
