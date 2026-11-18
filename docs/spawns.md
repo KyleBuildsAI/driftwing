@@ -2148,8 +2148,12 @@ falling chirps and booms as it strains.
   steep snow and pine country takes); at least 14 km apart; 500 m clearance.
 - **Stamps, water and overlay:** a `basin` (radius 110-170 m, depth 16-22 m, painted `ice`) holding an
   ice body filled to 0.8 of its depth (`waters`, material `ice`: the water query's solid ice, so craft
-  land and skid on it), and the `frozen` overlay with the ice material around it, grown 180 m past the
-  basin.
+  land and skid on it), and two `frozen` overlays: the basin's own ground (its footprint, 1 m falloff)
+  takes the glossy ice material and is a clearing (`vegetation: { species: [], density: 0, mode:
+  'replace' }`: no tree, flower or palm grows there, steep ground included; the biome's boulders stay),
+  and beyond it, out to 180 m past the basin with a 120 m falloff, the forest stands on ground rimed
+  with hoarfrost (the palette only, no ice material). Before, the single overlay laid the ice material
+  180-300 m out under the surrounding trees (about 1700 plants a site on ice on four seeds); now none.
 - **Engines:** `structure` (recipe `iceRidges`: 3-5 ridges up to 120-280 m long across the ice, slabs
   1.4-3.4 m tall and 2.6-5.8 m long leaning this way and that, only where the body holds ice; every
   26 m stretch a capsule collider; owns the voice, its intensity the approach within 1.6 km).

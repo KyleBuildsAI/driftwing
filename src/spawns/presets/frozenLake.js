@@ -1,7 +1,8 @@
 // Preset 91: Frozen lake (uncommon site). A mountain tarn in the snow country frozen hard: a basin stamp
 // (small and deep, so it fits the steep snow and pine country) holds an ice body (the water query's
 // solid ice, so craft land and skid on it), shaded by the ice material with its white rime and its web
-// of cracks, the shore around it rimed in the 'frozen' overlay. Long
+// of cracks. Two 'frozen' overlays frame it: the basin's own ground is glossy ice and a clearing (no
+// tree stands on ice; only boulders), and the forest beyond is rimed with hoarfrost out to 300 m. Long
 // pressure ridges of tilted ice slabs buckle up across the ice (structure recipe iceRidges), each a
 // solid collider. Up close the ice sings: falling chirps, twangs and booms as it strains (iceSing,
 // louder as you approach). Docs: docs/engines/structure.md.
@@ -29,7 +30,14 @@ export default Object.freeze({
     Object.freeze({ kind: 'lake', stamp: 0, level: Object.freeze({ mode: 'basin', fill: 0.8 }), material: 'ice', tint: 0x9cc9dc }),
   ]),
   overlays: Object.freeze([
-    Object.freeze({ shape: Object.freeze({ kind: 'stamp', stamp: 0, grow: 180, falloff: 120 }), palette: 'frozen', material: 'ice' }),
+    Object.freeze({
+      shape: Object.freeze({ kind: 'stamp', stamp: 0, grow: 0, falloff: 1 }),
+      palette: 'frozen',
+      material: 'ice',
+      vegetation: Object.freeze({ species: Object.freeze([]), density: 0, mode: 'replace' }),
+      priority: 1,
+    }),
+    Object.freeze({ shape: Object.freeze({ kind: 'stamp', stamp: 0, grow: 180, falloff: 120 }), palette: 'frozen' }),
   ]),
   engines: Object.freeze([
     Object.freeze({

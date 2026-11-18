@@ -50,6 +50,9 @@
 //                 overlay and none outside, resolution is deterministic (a worker-cloned world asked in
 //                 the reverse order), the site-list hash covers them, and the chunk `overlay` attribute
 //                 is bit-identical on both threads and carries every kind
+//   frozen lake   (wave 4) on the real frozen lake sites (preset 91) of two seeds, nothing but the biome's
+//                 boulders stands where its ice material can show (the basin's clearing), while the
+//                 forest beyond keeps growing on the hoarfrost band (its palette, no ice)
 //   water stamps  the basin, crater and terraces stamps (and the flatten strip a film lies on): shapes
 //                 (each bowl holds its water: the ground along its outline stands above its level),
 //                 falloff, paint, seams and collision, as for the Phase 2 stamps
@@ -71,7 +74,8 @@ import { STAMP_TYPES, stampReach } from '../../src/world/stamps.js';
 import { PRESETS } from '../../src/spawns/presets/index.js';
 import { FIXTURE_STAMP_TYPE, TERRAIN_FIXTURES } from '../../src/dev/terrainFixtures.js';
 import { WATER_FIXTURES } from '../../src/dev/waterFixtures.js';
-import { overlayHashLine } from '../../src/world/overlays.js';
+import { OVERLAY_MATERIAL_ID, overlayHashLine } from '../../src/world/overlays.js';
+import { VEGETATION_IDS } from '../../src/world/vegetationSpecies.js';
 import { waterOutlineContains } from '../../src/world/waters.js';
 import {
   buildChunkMesh, checkSeam, checkSkirtAttachment, compareMeshBuffers, drainSteps, extractEdges, meshHeightAt, seamPairApplies, terrainBuilderConfig,
@@ -1146,6 +1150,37 @@ function testOverlays() {
   check('overlays', 'without overlays the attribute is all zeros', empty.overlays.every((value) => value === 0));
 }
 
+/**
+ * The frozen lake (91): its ice overlay is a clearing, so no plant but a boulder stands where the ice
+ * material can show (overlay weight from 0.35, where the chunk builder's face step may lay it), and
+ * the hoarfrost band around it keeps the forest.
+ */
+function testFrozenLakeClearing() {
+  const sample = { weight: 0, overlay: null, palette: null, material: 0, sweepPhase: 0, stripe: 0, stripeOffset: 0, stripeSpecies: -1, speciesSet: null };
+  let sites = 0;
+  let onIce = 0;
+  let boulders = 0;
+  let frosted = 0;
+  for (const seed of ['DRIFTWING', 'HARNESS-1']) {
+    const world = realWorld(seed);
+    for (const site of world.sitesNear(0, 0, 60000).filter((entry) => entry.presetId === 'frozenLake')) {
+      sites++;
+      world.vegetationNear(site.x, site.z, 700, (plant) => {
+        world.overlayAt(plant.x, plant.z, sample);
+        if (sample.overlay === null) return;
+        if (sample.material === OVERLAY_MATERIAL_ID.ice && sample.weight >= 0.35) {
+          if (plant.type === VEGETATION_IDS.ROCK) boulders++;
+          else onIce++;
+        } else if (plant.type !== VEGETATION_IDS.ROCK) {
+          frosted++;
+        }
+      });
+    }
+  }
+  check('frozen lake', 'no tree, flower or palm stands where a frozen lake\'s ice material can show (only boulders)', sites > 0 && onIce === 0, `${sites} sites: ${onIce} plants and ${boulders} boulders on the ice`);
+  check('frozen lake', 'the hoarfrost band around the ice keeps its forest', frosted > sites * 100, `${frosted} plants (${(frosted / Math.max(1, sites)).toFixed(0)} a site)`);
+}
+
 function testWaterStamps() {
   const world = createWorldGen(WATER_SEED, WATER_OPTIONS);
   const near = world.sitesNear(0, 0, SEARCH_RADIUS);
@@ -1179,6 +1214,7 @@ testNearPlacement();
 testRealPresets();
 testPhase3Worlds();
 testOverlays();
+testFrozenLakeClearing();
 testWaterStamps();
 testBenchmark();
 
