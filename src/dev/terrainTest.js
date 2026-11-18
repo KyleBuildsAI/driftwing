@@ -23,17 +23,22 @@
 //        - the LODs seen: every stamp type must be seen live at every LOD.
 // With ?presets=real the same checks run on the GAME'S OWN stamped site presets
 // (src/spawns/presets/index.js) in the world as a player gets it: the nearest site of every stamped
-// preset, which must cover all six stamp types (the volcano's cone, the slot canyon's carve, the
-// waterfall's cliff step, the rope bridge's gorge, the airfield's flatten strip and the floating
-// islands' islet bases); a type no real preset uses fails the coverage criterion by name.
+// preset, which must cover every stamp type of STAMP_TYPES (Phase 2's six: the volcano's cone, the
+// slot canyon's carve, the waterfall's cliff step, the rope bridge's gorge, the airfield's flatten
+// strip and the floating islands' islet bases; and Phase 3's nine); a type no real preset uses fails
+// the coverage criterion by name.
 // Phase 3: the fixtures also hold the water and overlay fixtures of waterFixtures.js, so the basin,
 // crater and terraces stamps (and a salt-flat film on a flatten strip) get the same rows, and every
 // overlay-only fixture site gets a row of its own (its overlay's centre stands in for the stamp's
 // key point): offline seams, live parity (the chunk `overlay` attribute included), live seams and
 // collision around it. Wave 3: the sea-stamp fixtures (SEA_FIXTURES: atoll, reef, sea stacks,
 // estuary) join the fixture world too. The overlays criterion needs every overlay kind (palette, vegetation,
-// material, tint sweep, stripes) found and its rows passed, and the overlay attribute seen live. With
-// ?presets=real the Phase 3 stamp types no real preset uses yet (wave 3 adds them) are listed, not failed.
+// material, tint sweep, stripes) found and its rows passed, and the overlay attribute seen live. Wave 4:
+// the wave 3 presets use every stamp type, so ?presets=real needs all of them (none is pending any
+// more); the fixtures gain PHASE3_FIXTURES (terrainFixtures.js): a site placed by placement.near (the
+// near criterion: placed within its radius of a fixture volcano, its rows passed) and the badlands and
+// rice terraces palettes (the palettes criterion: every OVERLAY_PALETTES entry painted by a found site
+// whose rows passed).
 // Criteria: fixtures placed (every stamp type within SEARCH_RADIUS of the spawn), 0 offline and live
 // seam violations, worker parity exact, collision within 0.5 m, every LOD seen per stamp type, every
 // pose settled, 0 console errors and 0 warnings, and no harness problems.
@@ -48,7 +53,8 @@ import { hashSiteList } from '../world/placement.js';
 import { STAMP_TYPES } from '../world/stamps.js';
 import { installConsoleCapture } from './testConsole.js';
 import { createTestPanel } from './testPanel.js';
-import { FIXTURE_STAMP_TYPE, TERRAIN_FIXTURES } from './terrainFixtures.js';
+import { OVERLAY_PALETTES } from '../world/overlays.js';
+import { FIXTURE_LAVA_COAST, FIXTURE_NEAR_RADIUS, FIXTURE_STAMP_TYPE, PHASE3_FIXTURES, PHASE3_FIXTURE_STAMP_TYPE, PHASE3_OVERLAY_KINDS, TERRAIN_FIXTURES } from './terrainFixtures.js';
 import { OVERLAY_FIXTURE_KINDS, SEA_FIXTURES, WATER_FIXTURES, WATER_FIXTURE_STAMP_TYPE } from './waterFixtures.js';
 import { PRESETS } from '../spawns/presets/index.js';
 import {
@@ -59,10 +65,10 @@ export const TEST_DATABASE = 'driftwing-v2-test-terrain';
 const REPORT_KIND = 'driftwing-terrain-test';
 const REPORT_VERSION = 2;
 /** The fixtures' world: one site per stamp type, the water bodies and the overlays. */
-const ALL_FIXTURES = Object.freeze([...TERRAIN_FIXTURES, ...WATER_FIXTURES, ...SEA_FIXTURES]);
-const ALL_STAMP_TYPES = Object.freeze({ ...FIXTURE_STAMP_TYPE, ...WATER_FIXTURE_STAMP_TYPE });
-/** Stamp types a real preset may not use yet: the Phase 3 ones, until the wave 3 presets land. */
-const PHASE3_STAMP_TYPES = Object.freeze(['basin', 'crater', 'terraces']);
+const ALL_FIXTURES = Object.freeze([...TERRAIN_FIXTURES, ...WATER_FIXTURES, ...SEA_FIXTURES, ...PHASE3_FIXTURES]);
+const ALL_STAMP_TYPES = Object.freeze({ ...FIXTURE_STAMP_TYPE, ...WATER_FIXTURE_STAMP_TYPE, ...PHASE3_FIXTURE_STAMP_TYPE });
+const ALL_OVERLAY_KINDS = Object.freeze({ ...OVERLAY_FIXTURE_KINDS, ...PHASE3_OVERLAY_KINDS });
+const PALETTES = Object.freeze(Object.keys(OVERLAY_PALETTES));
 const OVERLAY_KINDS = Object.freeze(['palette', 'vegetation', 'material', 'tintSweep', 'stripes']);
 /** Fixture sites are looked for this far from the spawn (m). */
 const SEARCH_RADIUS = 40000;
@@ -97,10 +103,9 @@ function testPresetSet() {
   // Every stamp type the terrain knows must be covered: a type no real preset uses fails the
   // coverage criterion by name (unusedTypes) instead of dropping out of the test unnoticed.
   const usedBy = (type) => presets.some((preset) => preset.stamps.some((stamp) => stamp.type === type));
-  const pendingTypes = PHASE3_STAMP_TYPES.filter((type) => !usedBy(type));
-  const types = STAMP_TYPES.filter((type) => !pendingTypes.includes(type));
+  const types = STAMP_TYPES.slice();
   const unusedTypes = types.filter((type) => !usedBy(type));
-  return { real, presets, types, unusedTypes, pendingTypes, stampTypeOf: (presetId) => typeById.get(presetId) };
+  return { real, presets, types, unusedTypes, stampTypeOf: (presetId) => typeById.get(presetId) };
 }
 
 /**
@@ -189,12 +194,33 @@ function createTerrainTestSystem(ctx, { capture, set }) {
       value: `${OVERLAY_KINDS.filter((kind) => kindsFound.has(kind)).length} / ${OVERLAY_KINDS.length} kinds, ${overlayRows.filter((row) => row.passed).length} / ${overlayRows.length} rows, live sweep ${attributeSeen.sweep ? 'yes' : 'no'}, ice ${attributeSeen.material ? 'yes' : 'no'}, stripes ${attributeSeen.stripe ? 'yes' : 'no'}`,
       status: OVERLAY_KINDS.every((kind) => kindsFound.has(kind)) && overlayRows.every((row) => row.passed) && attributeSeen.sweep && attributeSeen.material && attributeSeen.stripe ? 'pass' : 'fail',
     }];
+    // Wave 4 fixtures: the near site within its radius of a placed fixture volcano, and every palette.
+    const presetById = new Map(set.presets.map((preset) => [preset.id, preset]));
+    const passedPresets = new Set(sites.filter((site) => rows.some((row) => row.siteId === site.id) && rows.filter((row) => row.siteId === site.id).every((row) => row.passed)).map((site) => site.presetId));
+    const palettesPainted = new Set([...passedPresets].flatMap((presetId) => (presetById.get(presetId)?.overlays ?? []).map((overlay) => overlay.palette).filter(Boolean)));
+    const nearSite = sites.find((site) => site.presetId === FIXTURE_LAVA_COAST.id) ?? null;
+    const nearDistance = nearSite ? nearestVolcanoDistance(nearSite) : null;
+    const wave4Criteria = set.real ? [] : [
+      {
+        id: 'near',
+        label: `placement.near site within ${FIXTURE_NEAR_RADIUS / 1000} km of a placed fixture volcano, rows passed`,
+        value: nearSite ? `${nearSite.id}: volcano ${nearDistance === null ? 'none found' : `${Math.round(nearDistance)} m`} away, rows ${passedPresets.has(nearSite.presetId) ? 'passed' : 'not passed'}` : 'no near site within the search radius',
+        status: status !== 'complete' && rows.length === 0 ? 'muted' : nearSite && nearDistance !== null && nearDistance <= FIXTURE_NEAR_RADIUS && passedPresets.has(nearSite.presetId) ? 'pass' : 'fail',
+      },
+      {
+        id: 'palettes',
+        label: 'Every overlay palette painted by a found site whose rows passed',
+        value: `${PALETTES.filter((name) => palettesPainted.has(name)).length} / ${PALETTES.length}${PALETTES.some((name) => !palettesPainted.has(name)) ? ` (missing ${PALETTES.filter((name) => !palettesPainted.has(name)).join(', ')})` : ''}`,
+        status: status !== 'complete' && rows.length === 0 ? 'muted' : PALETTES.every((name) => palettesPainted.has(name)) ? 'pass' : 'fail',
+      },
+    ];
     return [
       ...overlayCriterion,
+      ...wave4Criteria,
       {
         id: 'fixtures',
         label: set.real ? 'Real preset sites (every stamp type)' : 'Fixture sites (every stamp type)',
-        value: `${set.types.filter((type) => typesFound.has(type)).length} / ${set.types.length} types${set.unusedTypes && set.unusedTypes.length > 0 ? ` (no real preset uses ${set.unusedTypes.join(', ')})` : ''}${set.pendingTypes && set.pendingTypes.length > 0 ? ` (awaiting the wave 3 presets: ${set.pendingTypes.join(', ')})` : ''}`,
+        value: `${set.types.filter((type) => typesFound.has(type)).length} / ${set.types.length} types${set.unusedTypes && set.unusedTypes.length > 0 ? ` (no real preset uses ${set.unusedTypes.join(', ')})` : ''}${set.types.some((type) => !typesFound.has(type)) ? ` (missing ${set.types.filter((type) => !typesFound.has(type)).join(', ')})` : ''}`,
         status: world.hasStamps && everyType ? 'pass' : 'fail',
       },
       { id: 'seams', label: 'Offline seams, every LOD pair', value: `${offlineViolations} cracks`, status: rows.length > 0 && offlineViolations === 0 ? 'pass' : 'fail' },
@@ -493,6 +519,13 @@ function createTerrainTestSystem(ctx, { capture, set }) {
     };
   }
 
+  /** Distance (m) from a site to the nearest placed fixture volcano (the near rule's target), or null. */
+  function nearestVolcanoDistance(site) {
+    const volcanoes = world.sitesNear(site.x, site.z, FIXTURE_NEAR_RADIUS * 2).filter((other) => other.presetId === FIXTURE_LAVA_COAST.placement.near.presets[0]);
+    if (volcanoes.length === 0) return null;
+    return Math.min(...volcanoes.map((other) => Math.hypot(other.x - site.x, other.z - site.z)));
+  }
+
   function newRow(site, stamp, index) {
     return {
       index,
@@ -500,7 +533,7 @@ function createTerrainTestSystem(ctx, { capture, set }) {
       presetId: site.presetId,
       type: stamp.type,
       stampIndex: stamp.index,
-      overlayKinds: OVERLAY_FIXTURE_KINDS[site.presetId] && stamp.index === 0 ? OVERLAY_FIXTURE_KINDS[site.presetId].slice() : [],
+      overlayKinds: ALL_OVERLAY_KINDS[site.presetId] && stamp.index === 0 ? ALL_OVERLAY_KINDS[site.presetId].slice() : [],
       distance: Math.round(Math.hypot(site.x - state.spawn.x, site.z - state.spawn.z)),
       offline: { chunks: 0, seams: 0, phase1Skipped: 0, violations: 0, maxSharedDiff: 0, maxGap: 0, worstCoverage: Infinity, worstAttachment: 0, collisionWorst: 0 },
       live: { chunks: 0, seams: 0, seamViolations: 0, worstCoverage: Infinity, lodPairs: {}, lodsSeen: new Set(), parityChunks: 0, parityWorst: 0, collisionSamples: 0, collisionWorst: 0, overlaySeen: { sweep: false, material: false, stripe: false } },

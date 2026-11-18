@@ -8,6 +8,14 @@
 // stamp type sits within a short flight of any spawn, which the tests need.
 //
 // Pure data, like every preset: the terrain worker receives them through its init message.
+//
+// Wave 4 (PHASE3_FIXTURES, added by the terrain test only, so the structure kit's and the terrain lab's
+// fixture worlds keep theirs): a site placed by placement.near (the lava rivers' "near a volcano"
+// rule, here near the fixture volcano) and the two overlay palettes no other fixture paints (badlands,
+// rice terraces, the latter on its real terraces stamps).
+import badlandsHoodoos from '../spawns/presets/badlandsHoodoos.js';
+import lavaRiversToSea from '../spawns/presets/lavaRiversToSea.js';
+import riceTerraces from '../spawns/presets/riceTerraces.js';
 
 const LIFETIME_SITE = Object.freeze({ duration: null, despawn: Object.freeze({ distance: 12000, hysteresis: 3000, outOfViewSeconds: 20 }) });
 
@@ -233,4 +241,69 @@ export const FIXTURE_STAMP_TYPE = Object.freeze({
   fixtureAirfield: 'flatten',
   fixtureFloatingIslands: 'islandBase',
   fixtureGiant: 'giant',
+});
+
+/** Shared preset fields of a wave 4 fixture (a quiet engine: these sites exist for the terrain only). */
+function quietFixture(id, name, fields) {
+  return Object.freeze({
+    id,
+    name,
+    category: 'geo',
+    kind: 'site',
+    rarity: 'uncommon',
+    heavy: false,
+    filters: Object.freeze({ biomes: null, timeOfDay: null, altitude: Object.freeze({ min: 0, max: 5000 }), weather: null, surface: 'land', minDistance: 0, maxDistance: 40000 }),
+    engines: Object.freeze([Object.freeze({ engine: 'lightEffect', params: Object.freeze({ effect: 'glowPoints', count: 1, radius: 1, intensity: 0 }) })]),
+    lod: Object.freeze({ near: 1500, mid: 5000, far: 12000 }),
+    lure: null,
+    wind: Object.freeze([]),
+    audio: null,
+    journal: Object.freeze({ title: name, description: `A ${name.toLowerCase()} for the terrain test.` }),
+    discovery: Object.freeze({ radius: 2000, requireInView: true }),
+    callouts: Object.freeze([`${name} {distance} {direction}.`, `${name} ahead, {eta}.`, `${name} {distance} out.`]),
+    lifetime: LIFETIME_SITE,
+    ...fields,
+  });
+}
+
+/** placement.near: the lava rivers' coast rule and carve stamps, near a placed fixture volcano. */
+export const FIXTURE_NEAR_RADIUS = 12000;
+export const FIXTURE_LAVA_COAST = quietFixture('fixtureLavaCoast', 'Fixture lava coast', {
+  placement: Object.freeze({
+    ...lavaRiversToSea.placement,
+    chance: 1,
+    minSpacing: 8000,
+    clearance: 200,
+    near: Object.freeze({ presets: Object.freeze([FIXTURE_VOLCANO.id]), radius: FIXTURE_NEAR_RADIUS }),
+  }),
+  stamps: lavaRiversToSea.stamps,
+});
+
+/** The badlands palette (an overlay-only site, as preset 87 is). */
+export const FIXTURE_BADLANDS = quietFixture('fixtureBadlands', 'Fixture badlands', {
+  placement: Object.freeze({ ...badlandsHoodoos.placement, chance: 0.8, minSpacing: 9000, clearance: 200, separateRegions: false }),
+  stamps: Object.freeze([]),
+  overlays: badlandsHoodoos.overlays,
+});
+
+/** The rice terraces palette over its real terraces stamps (preset 85). */
+export const FIXTURE_RICE_TERRACES = quietFixture('fixtureRiceTerraces', 'Fixture rice terraces', {
+  placement: Object.freeze({ ...riceTerraces.placement, chance: 0.8, minSpacing: 9000, clearance: 200, separateRegions: false }),
+  stamps: riceTerraces.stamps,
+  overlays: riceTerraces.overlays,
+});
+
+/** The wave 4 fixtures (the terrain test's world only). */
+export const PHASE3_FIXTURES = Object.freeze([FIXTURE_LAVA_COAST, FIXTURE_BADLANDS, FIXTURE_RICE_TERRACES]);
+
+/** The stamp type each stamped wave 4 fixture exercises. */
+export const PHASE3_FIXTURE_STAMP_TYPE = Object.freeze({
+  fixtureLavaCoast: 'carve',
+  fixtureRiceTerraces: 'terraces',
+});
+
+/** The overlay kinds each wave 4 overlay fixture exercises. */
+export const PHASE3_OVERLAY_KINDS = Object.freeze({
+  fixtureBadlands: Object.freeze(['palette', 'vegetation']),
+  fixtureRiceTerraces: Object.freeze(['palette']),
 });
