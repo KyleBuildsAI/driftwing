@@ -1762,7 +1762,43 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
   - the lava rivers to the sea (36) are `rare`: a volcano by the sea is rarer than any other rare
     site (0.6 lava sites within 90 km of the origin on average over DRIFTWING, HARNESS-1, SOAK-1,
     TERRAIN-ALL-35 and UGTZV7, against 1.2-19.2 for the rare sites and 1.8 and up for the uncommon
-    ones); docs/spawns.md says why.
+    ones); docs/spawns.md says why;
+  - a forced debug spawn (F9, `force: true`) that meets a full engine pool no longer logs a create
+    error: the engines throw an `EngineCapacityError` there, and the SpawnManager ends the
+    lowest-priority live spawn holding that pool (a director event, then a debug spawn, then a site,
+    then a combo member, never one of its own combo) and retries, or refuses it quietly as `full`; an
+    unforced spawn that meets a full pool is still an error (`d9d965f`);
+  - F9 Spawn of a site-bound preset (a site whose look is its stamps, waters or overlays: the viaduct,
+    the dam and 60 more) starts it on its nearest placed site, or refuses it in the panel when none
+    lies within 60 km, instead of building it on the wrong ground ahead (`a5a8e54`;
+    `tools/steps/forced-spawns.json`);
+  - the sleeping giant's figure check: the free-standing figure's perch was its heightfield's highest
+    grid sample, which lies 1-13 m from the cairn at the chest summit; on 100 of 1440 headings (7 %)
+    it lay within the check's 2 m sweep of the cairn's 1.4 m collider, so the sweep met the cairn,
+    not the figure (a perch beside a cairn is wrong for the eagle too). The perch now stands on the
+    chest summit 22 m toward the head, inside the stone ring and clear of the cairn (`6581a67`);
+  - whale pods ride the swell: every whale reads the shared water query (`heightInto`, a new
+    allocation-free form of `heightAt`) at its position each frame, the surface's rise and fall since
+    the last frame carries it, and its mode's eased depth works below that surface (`6581a67`; the
+    fauna-modes lab's new `pods` group judges the backs 10 s after surfacing, once the dive's damped
+    ease has settled: `d3afb87`);
+  - anchor seeks run in slices: every `anchor.seek` (peak, valley, and the new `openWater`) is one
+    search in `src/spawns/anchorSeek.js` that gives the same answer however it is cut (24/24 against
+    the unsliced answer on DRIFTWING). The director readies a seeking candidate with
+    `prepareAnchor(presetId, x, z)` and activates on its next tick; the SpawnManager runs the seek
+    200 ground probes a frame in between (the migration convergence's valley, 2500-4000 probes, 13-27
+    ms in one frame before), and the second ask finishes any slices left, so the director's log does
+    not depend on the frame rate. Debug spawns still seek at once (`8c52003`);
+  - the hurricane eye (33) seeks open water: the generated seas are archipelagos (within 60 km of the
+    start no point has more than 43-46 % sea within 5 km on DRIFTWING, HARNESS-1, SOAK-1 and UGTZV7),
+    so the eye moves to the point of the sea within 10 km whose 5 km eyewall disc holds the most sea:
+    14-18 % at the candidates, 24-27 % after (`a1fe7e1`). Its candidates, filters and rarity are
+    unchanged;
+  - the dam (57): the level crest ends at most a 12 m abutment past the reservoir's shoreline (or where
+    the valley side rises to it), and each end beyond steps down as a 1 : 1 wing to the ground. Before,
+    on open slopes the crest ran the full 320 m out on both sides over falling ground (17 real sites
+    on four seeds: 20 of 34 ends at the 320 m limit, up to 158 m over the ground); every one now meets
+    the ground within 480 m (`ccb340d`).
 
 ## Decisions
 
