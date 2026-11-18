@@ -8,8 +8,9 @@
 //   params.type      a single source whose type params sit beside it in params; or neither:
 //   preset.wind      every entry whose type this engine knows ({ type, params }).
 // Per source it adds: direction ('heading' | 'ambient' | compass degrees), turn, offset [along, side,
-// up], start / stop (s), fadeIn / fadeOut (s), strength (multiplier) and a timeline of strength keys
-// ({ keys: [[t, value], ...], loop, offset: seconds | 'seeded' }).
+// up], upFrom ('anchor' | 'ground': the up offset from the anchor's height or from the ground under the
+// source itself), start / stop (s), fadeIn / fadeOut (s), strength (multiplier) and a timeline of
+// strength keys ({ keys: [[t, value], ...], loop, offset: seconds | 'seeded' }).
 //
 // Motion (the whole instance): drift (m/s along driftHeading, riding the ground along a seeded path
 // precomputed at create), or follow (the registry name of a sibling engine in the same spawn: the
@@ -37,7 +38,9 @@ const PATH_STEP = 60;
 const PATH_MAX_POINTS = 512;
 const SITE_PATH_SECONDS = 600;
 const ACTIVITY_RATE = 0.5;
-const SOURCE_FIELDS = Object.freeze(['type', 'direction', 'turn', 'offset', 'start', 'stop', 'fadeIn', 'fadeOut', 'strength', 'timeline']);
+const SOURCE_FIELDS = Object.freeze(['type', 'direction', 'turn', 'offset', 'upFrom', 'start', 'stop', 'fadeIn', 'fadeOut', 'strength', 'timeline']);
+/** A ground-following source reads the ground again once it has moved this far (m). */
+const GROUND_MOVE = 1;
 /**
  * The instance's own params (and the ones the SpawnManager merges in): with a single params.type
  * source they sit beside its type params, so they are not type params.
@@ -59,8 +62,10 @@ const INSTANCE_SIZE = 9;
 const P = Object.freeze({
   START: 0, STOP: 1, FADE_IN: 2, FADE_OUT: 3, STRENGTH: 4, TURN: 5, ALONG: 6, SIDE: 7, UP: 8, MODE: 9, FIXED_X: 10, FIXED_Z: 11,
   WIND_ON: 12, TIMELINE_LOOP: 13, TIMELINE_OFFSET: 14, CURRENT: 15, TIME: 16, RAMP_FROM: 17, RAMP_TO: 18, RAMP_VALUE: 19,
+  // upFrom 'ground' (1) or 'anchor' (0), and the ground last read under the source and where.
+  UP_FROM_GROUND: 20, GROUND_X: 21, GROUND_Z: 22, GROUND_Y: 23,
 });
-const SOURCE_SIZE = 20;
+const SOURCE_SIZE = 24;
 const DIRECTION_MODES = Object.freeze({ heading: 0, ambient: 1, fixed: 2 });
 
 /**
@@ -168,6 +173,11 @@ export function createWindModifierEngine() {
     numbers[P.ALONG] = offset[0] * scale;
     numbers[P.SIDE] = offset[1] * scale;
     numbers[P.UP] = offset[2] * scale;
+    const upFrom = entry.upFrom ?? 'anchor';
+    if (upFrom !== 'anchor' && upFrom !== 'ground') throw new TypeError(`[DRIFTWING] windModifier: ${label}.upFrom must be 'anchor' or 'ground', got ${String(upFrom)}`);
+    numbers[P.UP_FROM_GROUND] = upFrom === 'ground' ? 1 : 0;
+    numbers[P.GROUND_X] = NaN;
+    numbers[P.GROUND_Z] = NaN;
     const direction = entry.direction ?? 'heading';
     if (typeof direction === 'number') {
       if (!Number.isFinite(direction)) throw new TypeError(`[DRIFTWING] windModifier: ${label}.direction must be 'heading', 'ambient' or compass degrees`);
@@ -193,6 +203,20 @@ export function createWindModifierEngine() {
     frame[FRAME.DIR_Z] = numbers[P.MODE] === DIRECTION_MODES.fixed ? numbers[P.FIXED_Z] : -Math.cos(headingRadians);
     if (numbers[P.MODE] === DIRECTION_MODES.ambient) writeAmbientDirection(frame);
     return { type, params, numbers, frame, timeline, source: null };
+  }
+
+  /**
+   * The ground (or the still water over it) under a ground-following source at (x, z), into
+   * numbers[P.GROUND_Y]; read again only once the source has moved GROUND_MOVE, so a site's sources
+   * read it once.
+   */
+  function writeGroundUnder(numbers, x, z) {
+    const movedX = x - numbers[P.GROUND_X];
+    const movedZ = z - numbers[P.GROUND_Z];
+    if (movedX * movedX + movedZ * movedZ < GROUND_MOVE * GROUND_MOVE) return;
+    numbers[P.GROUND_X] = x;
+    numbers[P.GROUND_Z] = z;
+    numbers[P.GROUND_Y] = Math.max(ctx.terrain.groundHeight(x, z), ctx.terrain.waterLevel);
   }
 
   /** The prevailing wind's downwind direction (the shared windDirection uniform) into the frame. */
@@ -356,8 +380,13 @@ export function createWindModifierEngine() {
     const dirX = frame[FRAME.DIR_X];
     const dirZ = frame[FRAME.DIR_Z];
     frame[FRAME.X] = anchor.x + dirX * numbers[P.ALONG] - dirZ * numbers[P.SIDE];
-    frame[FRAME.Y] = anchor.y + numbers[P.UP];
     frame[FRAME.Z] = anchor.z + dirZ * numbers[P.ALONG] + dirX * numbers[P.SIDE];
+    if (numbers[P.UP_FROM_GROUND] === 1) {
+      writeGroundUnder(numbers, frame[FRAME.X], frame[FRAME.Z]);
+      frame[FRAME.Y] = numbers[P.GROUND_Y] + numbers[P.UP];
+    } else {
+      frame[FRAME.Y] = anchor.y + numbers[P.UP];
+    }
     frame[FRAME.AGE] = age - numbers[P.START];
     frame[FRAME.SPEED] = record.numbers[I.SPEED];
     writeSourceStrength(instance, entry, index);

@@ -14,7 +14,8 @@
 //                duration; rope-out on control.ropeOut for a site; strength eases with the stages;
 //                terrain tracking; the far tier removes the source only when it cannot reach
 //   lifecycle    wind modifier fades, start / stop windows, timelines, control strengths, a site's
-//                active state, ending with the duration; dispose removes every source
+//                active state, ending with the duration; upFrom 'ground' stands a column on the ground
+//                under it (a ridge band's columns over a falling crest); dispose removes every source
 //   flight       the glider (30 m/s) and the jet (220 m/s) fly scripted inputs (wings level, pitch
 //                held) through each source and through the same path in calm air: vertical speed,
 //                load factor, airspeed, ground speed and drift are logged, and each source must move
@@ -420,6 +421,32 @@ function testModifierLifecycle() {
   const off = probe();
   check('lifecycle', "a site's active state fades its sources out", on > 6 && Math.abs(off) < 0.5 && !site.ended, `active ${round(on)}, inactive ${round(off)} m/s`);
   lab.modifier.dispose(site);
+
+  // upFrom: a band of columns along ground rising 3 m in 10 eastward (2 km out it is 600 m up). Laid
+  // from the anchor's height the far column's top lies below a craft 200 m over the ground there;
+  // laid from the ground under each column it lifts that craft as the near one does.
+  const slope = (x) => GROUND + 0.3 * x;
+  const flatGround = lab.ctx.terrain.groundHeight;
+  lab.ctx.terrain.groundHeight = slope;
+  const bandSource = (along, upFrom) => ({ type: 'updraft', direction: 90, offset: [along, 0, 0], upFrom, radius: 520, updraft: 3, base: -160, top: 700, sinkRing: 0, turbulence: 0, fadeIn: 0 });
+  const liftAt = (instance, x) => {
+    advance(lab, lab.modifier, instance, 0.1);
+    return air(lab, x, slope(x) + 200, 0).y;
+  };
+  const fromAnchor = lab.spawn(lab.modifier, preset('bandAnchor', 'windModifier', { sources: [bandSource(0, 'anchor'), bandSource(2000, 'anchor')] }), {}, { duration: null });
+  const anchorLift = [liftAt(fromAnchor, 0), liftAt(fromAnchor, 2000)];
+  lab.modifier.dispose(fromAnchor);
+  const fromGround = lab.spawn(lab.modifier, preset('bandGround', 'windModifier', { sources: [bandSource(0, 'ground'), bandSource(2000, 'ground')] }), {}, { duration: null });
+  const groundLift = [liftAt(fromGround, 0), liftAt(fromGround, 2000)];
+  lab.modifier.dispose(fromGround);
+  let badUpFrom = null;
+  try {
+    lab.spawn(lab.modifier, preset('badUpFrom', 'windModifier', { sources: [bandSource(0, 'crest')] }), {}, { duration: null });
+  } catch (error) {
+    badUpFrom = error.message;
+  }
+  lab.ctx.terrain.groundHeight = flatGround;
+  check('lifecycle', "upFrom 'ground' stands each column on the ground under it: 200 m over rising ground both columns lift (from the anchor the far one does not); a bad value is refused", groundLift.every((lift) => lift > 2.7) && anchorLift[0] > 2.7 && anchorLift[1] < 0.3 && /upFrom/.test(badUpFrom ?? ''), `ground ${groundLift.map((lift) => round(lift)).join(', ')} m/s, anchor ${anchorLift.map((lift) => round(lift)).join(', ')} m/s; ${badUpFrom}`);
 
   const fromPreset = lab.spawn(lab.modifier, { ...preset('lenticular', 'windModifier', {}), wind: [{ type: 'waveLift', params: { amplitude: 3 } }, { type: 'rankine', params: {} }] }, {}, { duration: 600 });
   const count = fromPreset.windSourceIds.length;

@@ -36,6 +36,7 @@ Each source is its type's params plus these source fields:
 | `direction` | `heading`, `ambient` or compass degrees | | `heading` | the source's facing. `heading`: the activation heading; with `drift` or `follow`, the direction of travel (once the anchor moves faster than 1 m/s). `ambient`: downwind of the prevailing wind, followed live. A number: a fixed compass direction |
 | `turn` | degrees | -360..360 | 0 | added to the direction |
 | `offset` | [along, side, up] m | | [0, 0, 0] | from the anchor: along the direction, to its right, and up (scaled) |
+| `upFrom` | `anchor` or `ground` | | `anchor` | what `up` (and a type's heights, such as an updraft's `base` and `top`) count from: the anchor's height, or the ground (or the still water) under the source itself, read again when the source moves a metre (a ridge band's columns over a crest that rises and falls) |
 | `start` | s | 0.. | 0 | when the source starts, from the activation; its timeline and a downburst's ring count from here |
 | `stop` | s | 0.. | never | when it starts fading out |
 | `fadeIn`, `fadeOut` | s | 0..600 | 4, 6 | eased ramps after `start` and after `stop`. `fadeOut` also ends the source with the event's duration |
