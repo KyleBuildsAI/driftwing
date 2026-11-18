@@ -1153,8 +1153,8 @@ height; `stall.warning` is the low-rotor-rpm horn.
 - balloon: `envelopeTemperature` and `ambientTemperature` (deg C), `equilibriumTemperature`,
   `redLine`, `overTemperature`, `tempFlag`, `burner`, `burnerHeld`, `burnTimer`, `vent` (0..1),
   `ventHeld`, `ventTimer`, `rotationVent`, `lift`, `inflation`, `landing`, `tethered`,
-  `altitudeHold` (m or null), `windColumn [{ altitude, fromDegrees, speed }]` and its
-  `windColumnTimer`;
+  `altitudeHold` (m or null), `windColumn` (one band per height of `WIND_BANDS`: `{ altitude, agl,
+  fromDegrees, towardDegrees, speed, vx, vz, primed }`) and its `windColumnTimer`;
 - airship: `ballonet` (0..1) and `ballonetTarget`, `vectorAngle` (deg) and `vectorTarget`,
   `heaviness`, `pressureHeight`, `propShare`, `sternThrust`, `engineOn`, `scenicCruise { active,
   index, waypoints, visited, legs, target, altitude, speed, startedAt }`;
