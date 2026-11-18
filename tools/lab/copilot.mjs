@@ -1000,7 +1000,8 @@ function createCraftGame({ craft = 'glider', units = 'metric' } = {}) {
       spawns: { manager: { getPreset: (id) => (id === 'flamingoLake' ? { id, name: 'Flamingo lake' } : null) } },
       challenges: {
         start(courseKey, options) { started.push({ courseKey, source: options.source }); state.challenge.active = true; state.challenge.phase = 'armed'; state.challenge.name = 'Canyon Gauntlet'; return true; },
-        cancel() { if (!state.challenge.active) return false; state.challenge.active = false; state.challenge.phase = null; return true; },
+        // Cleared in place, as the challenges system writes state.challenge.
+        cancel() { if (!state.challenge.active) return false; state.challenge.active = false; state.challenge.phase = null; state.challenge.name = null; return true; },
         nearest: (radius) => courses.find((course) => course.distance <= radius) ?? null,
         getBest: () => ({ time: 72.4, medal: 'silver' }),
       },
@@ -1103,7 +1104,7 @@ function createCraftGame({ craft = 'glider', units = 'metric' } = {}) {
   check('executor', 'challengeStart: armed already -> says so, starts nothing more', again.ok && game.started.length === 1 && /armed/.test(again.text), again.text);
   const cancelled = game.guide.handlers.challengeCancel();
   const noRun = game.guide.handlers.challengeCancel();
-  check('executor', 'challengeCancel: cancels the run, then says none is running', cancelled.ok && !noRun.ok && /no challenge running/.test(noRun.text), `${cancelled.text} | ${noRun.text}`);
+  check('executor', 'challengeCancel: cancels the run by name, then says none is running', cancelled.ok && cancelled.text === 'Canyon Gauntlet cancelled.' && !noRun.ok && /no challenge running/.test(noRun.text), `${cancelled.text} | ${noRun.text}`);
 }
 {
   // take me to space: the confirm offer, "yes" switches and climbs, "no" declines, and it lapses.

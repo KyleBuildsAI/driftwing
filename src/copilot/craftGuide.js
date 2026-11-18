@@ -685,8 +685,10 @@ export function createCraftGuide(ctx, helpers) {
       const challenges = ctx.systems.challenges;
       const live = state.challenge ?? null;
       if (!live || !live.active || (live.phase !== 'armed' && live.phase !== 'running')) return fail("There's no challenge running.");
+      // state.challenge is cleared in place by the cancel, so the name is read first.
+      const name = typeof live.name === 'string' && live.name ? live.name : 'The challenge';
       if (typeof challenges?.cancel !== 'function' || !challenges.cancel('cancelled')) return fail("I couldn't call the challenge off.");
-      return succeed(`${live.name ?? 'The challenge'} cancelled.`);
+      return succeed(`${name} cancelled.`);
     },
 
     /** "Take me to space": the spaceplane's climb; from another craft, a yes / no offer to switch first. */
