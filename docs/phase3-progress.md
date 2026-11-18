@@ -1787,6 +1787,23 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
     more after the hop (hands off, flying on into terrain, not the launch). Eagle lab 52/52 (new
     hillside checks: facing uphill it turns 90 degrees and stays 13.4 m clear; facing downhill it goes
     the way it faces).
+  - the full WebGL2 run on `959d415` (before the eagle fix): 96/96 runs flown, 0 NaN, 0 penetrations,
+    0/0 console, 382/386 checks; every spaceplane run passed (climb, re-entry, space-and-back in both
+    views: no stall, continuity and far-field holes clean, both readback probes), every eagle run, the
+    balloon wind layer in both views. Its four misses, each a start or a measure that depended on
+    what ran before:
+    - paraglider-thermal-climb, first person (no full circle, one hard landing): a thermal's core
+      waxes and wanes on the world clock, which runs on through every run, so the nearest thermal at a
+      later start could be dying by mid-run. A thermal start now takes the nearest thermal that stays
+      working for the run's whole length (`090d1bc`);
+    - balloon-steer, third person: the top band's compass direction was served best by the band the
+      balloon was already in (the column veers differently at the held time); the script now asks for
+      the direction nearest it whose best layer stands 150 m or more above the balloon (`4d1ff52`);
+    - balloon-burner-lag, first person ("heats 3 K at once"): measured from 0.5 s before the burn, the
+      envelope's own cooling (0.1 K/s at 0 % assists) left a 0.1 K margin that frame timing decided; it
+      is measured from the burn's first frame now (`3c00a4d`);
+    - the spaceplane probe now also waits for its ahead compiles to settle (a draw skips an object
+      whose pipeline is still compiling, which would read as a hole) (`9cafb9a`).
 
 ### Wave 4 - p3/content-fixes
 
