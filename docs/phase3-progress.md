@@ -1727,7 +1727,7 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 | --- | --- | --- | --- |
 | O1 | Journal (contract j.1): records version 2 with craft time, figures, medals, worlds visited, perches and max altitude; the journal panel's Craft, Figures, Challenges and Worlds sections | `p3/journal` | not started |
 | O2 | Copilot (contract j.2, h.3, h.6): the cross-craft grammar and the keyboard / UI equivalent of each (Guide chips "Find water", "Find a perch", "To space"; the spaceplane's climb-to-space autopilot); the remote `flightState` fields `onWater`, `craftState`, `challenge`; docs/copilot-api.md | `p3/copilot` | not started |
-| O3 | Docs: docs/controls.md (a full HOTAS profile per new craft, the j.2 equivalents), docs/spawns.md (all 100 checked against the code), docs/architecture.md (every Phase 3 system) | `p3/docs` | in progress |
+| O3 | Docs: docs/controls.md (a full HOTAS profile per new craft, the j.2 equivalents), docs/spawns.md (all 100 checked against the code), docs/architecture.md (every Phase 3 system) | `p3/docs` | done |
 | P1 | Test hooks to the contract: the 20-minute soak of k.5 (craft switch every 2 minutes, view swap every minute, structure penetrations, no soft crash within 10 s of a switch), the k.4 determinism digests (collider sweep battery, PathFollower positions) and the WebGL2 spawn-event frame difference, the k.3 / k.4 coverage audit, the golden-frame first shot and the origin-rebase image check on WebGL2 | `p3/verify-hooks` | not started |
 | P2 | Craft runs (k.1): every scenario passes in the full shared-world run on both backends: the WebGL2 spaceplane climb and re-entry (page stall, rebase continuity, far-field holes, depth and load), eagle find-perch and the perch fly-out, the balloon wind layer, burner lag and the subset's soft crashes, the eagle lab's allocation | `p3/verify-craft` | not started |
 | P3 | Content open issues from I3 and the review: the forced-spawn create error, the sleeping giant's figure check, whale pods on the swell, the hurricane over open ocean, the dam's end sections, debug spawns away from a site, the frozen lake's paint, the flamingo shore checks, the meteor shower's sky modifier on WebGL2, the migration convergence's valley seek, the lava rivers' rarity; each fixed or recorded as a decision | `p3/content-fixes` | not started |
@@ -1745,8 +1745,68 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 
 ### Wave 4 - p3/docs
 
-- **Status:** in progress: checking docs/spawns.md, docs/controls.md, docs/architecture.md,
-  docs/engines/*.md and README.md against the code.
+- **Status:** done (2026-11-18). Every statement checked against the code, not other docs; no runtime
+  code changed (only `tools/docs-check.mjs` among the tools).
+- **Built:**
+  - `docs/spawns.md`: all 100 rows and sections checked against the preset files and fixed (two
+    site despawn distances, the rice terraces' and mangrove delta's wind, the sky presets' missing
+    candidates and despawn rules, the filter bands' wording; every section names its journal title
+    and callout count); the engine reference table lists every preset that uses each engine.
+  - `docs/controls.md`: the per-craft table for all 14 craft with the second ability, a full
+    T.16000M FCS / keyboard / gamepad profile for each of the eight Phase 3 craft read from
+    `defaultBindings.js`, the modules' `inputProfile`, `bindings` and abilities, the contract j.2
+    copilot phrases with their keyboard / UI equivalents (as the contract defines them), the gamepad
+    and HOTAS notes and the hardware checklist for 14 craft.
+  - `docs/architecture.md`: every Phase 3 system as built (floating origin, colliders and perches,
+    the water query and local bodies, overlays and vegetation, fauna ground and water modes, the
+    PathFollower, challenges, high altitude and the far field, the craft framework, the picker, the
+    director's ground track, craft weighting, combos and global overrides, portals with
+    captureFlight / resumeFlight, ignition, `placement.near`, the anchored instanced pools); each
+    Phase 3 craft's `craftState` fields from the code; the test entry points and the Testing table
+    brought to Phase 3 (14 craft and 84 runs in the flight test, 100 presets in the spawns test, the
+    collision and craft modes, every lab and the wave 3 step files, no SIM wording, no duplicate
+    rows); "Plug points" in the present tense.
+  - `docs/engines/*.md`: checked against the engines after wave 3. Every param name the presets give
+    an engine, every recipe, component, effect, behaviour, species, mode and shape was already on its
+    page; fixed the weatherVolume `journal` entry shape and added the structure engine's
+    origin-anchored instanced pools.
+  - `README.md`: what V2 offers now (14 craft in six groups, 100 spawns, challenges, the journal,
+    WREN's new phrases), the changed controls and settings (Shift+Space, favorites, Y, the planet
+    radius, hiding the HUD), all 30 npm scripts, the folder layout, the tests, and the history
+    through Phase 3.
+  - `tools/docs-check.mjs`: new `sections` (every preset section against its file), `engines`
+    (preset params on the engine pages, including a set piece's child overrides; structure recipes'
+    sections, stamp types and defaults; engine vocabularies), `craft` (the architecture's craft
+    table against each module's model kind and instruments, the instrument count, a row and a profile
+    per craft in controls.md, every input action in its Actions list) and `scripts` (every npm script
+    in the README). 536 checks before wave 4, 863 now.
+- **Decisions:**
+  - The j.2 phrases, the journal sections of contract j.1 and the copilot's Guide chips are written
+    as the contract defines them, nothing marked pending; the integration pass reconciles any
+    difference with `p3/journal` and `p3/copilot`.
+  - The soak is documented as the code on this branch runs it (10 minutes, five craft from the
+    glider, 60 s per view); `p3/verify-hooks` builds the 20-minute soak of k.5, and the integration
+    pass updates the soak rows of the architecture and the README to match.
+  - docs-check reads the craft modules, the instruments, the actions and the engines' exported
+    vocabularies directly (node imports, no browser), so a new craft, instrument, action, recipe,
+    species or preset param fails the check until its docs follow.
+
+| Check | WebGPU | WebGL2 |
+| --- | --- | --- |
+| `node tools/docs-check.mjs` | PASS 863/863 (node, no renderer) | n/a (node) |
+| docs-check catches drift: an instrument out of order, a missing profile heading, an action removed from the Actions list (reverted after) | 3 FAIL as expected | n/a (node) |
+| `npm run test:v1` | 2/2 pass | n/a |
+| `npm run build` | pass | n/a (one build serves both) |
+| `npm run build:single` | pass, V1 SHA-256 matches | n/a (one build serves both) |
+| Browser runs | none needed: no runtime code changed | none needed |
+
+- **Open issues:** none in the docs. Code-side doubts found while reading (code untouched, for
+  `p3/verify-hooks`): `src/dev/testHarness.js`'s header says the soak flies "the six craft in turn",
+  but with 14 scripted craft its five legs are the glider, bush plane, jet, helicopter and wingsuit;
+  `src/dev/collisionTest.js` still says the spaceplane joins "once it is registered", though it is.
+- **Next:** the integration pass merges this branch; where `p3/journal`, `p3/copilot` or
+  `p3/verify-hooks` change a behaviour these docs describe (the journal sections, the j.2 phrases,
+  the soak), it updates the matching lines and reruns `node tools/docs-check.mjs`.
 
 ### Wave 4 - p3/verify-hooks
 
