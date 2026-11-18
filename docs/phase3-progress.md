@@ -1822,7 +1822,26 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
     at 4 m/s one in a thousand. The batch 8 check reads each column's mean lift over 4 s of the
     field's gusts (16 samples) instead of one instant; its thresholds are unchanged (`953d9df`);
   - the dispose checks name the sky modifiers that ended or appeared since their baseline, not only
-    the counts (`57e6bc5`), for the meteor shower item below.
+    the counts (`57e6bc5`);
+  - the meteor shower's sky modifier count on WebGL2: the miss (I2, 2026-10-13/14: "2 -> 1" in its
+    first cycle) was the director's own meteor shower, the night's common event with its preset
+    re-added, live at the baseline and ended with the other spawns before the compare. `d311e7b`
+    (2026-10-27, the midnight sun's same miss) ends a director spawn found under the baseline and reads
+    the baseline again, which covers it; nothing in the meteor shower changes. Reproduced on the
+    current tree: `--test spawns --presets abandonedAirfield,meteorShower` on WebGL2 2/2 every
+    criterion, and `presets-21-30.json` reads the meteor shower's modifiers "1 -> 1" on both backends
+    (the verification table). Closed with no code change beyond the ids in the readings;
+  - the migration convergence's valley (97): the valley seek scored a point by the ring's mean ground
+    less its own, so a hollow on a big mountain's flank, open below on half its sides, outscored real
+    floors (21 of 480 seeks on twelve seeds; the presets 91-100 check failed on seed AU9VRV with 7 of 16
+    directions lower). The score is now how far the ring rises in all but two of its eight directions
+    (its third lowest ground, sorted allocation-free): 0 of 480, and the director lab checks 160 seeks
+    on four seeds (`0756a37`);
+  - the batch 8 wind check read a site's sources at the strength of their first frames when the site was
+    built just before the photo view froze the simulation (the reverse waterfall on seed CBVDCU: -0.1
+    m/s against 5, every run on that seed). It now leaves the photo view and runs until the spawn's
+    wind modifier sources have faded in (a dev `describe(instance)` on the engine); 10 m/s on that seed
+    (`2b9bd5c`).
 
 ## Decisions
 
