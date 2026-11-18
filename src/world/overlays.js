@@ -12,7 +12,8 @@
 //               { kind: 'stamp', stamp (index), grow (m beyond its footprint), falloff }. Sizes may
 //               be [min, max] ranges (rolled per site); the falloff lies inside the radius
 //   palette     null or a name from OVERLAY_PALETTES
-//   vegetation  null or { species: [names from VEGETATION_SPECIES], density (0..1), mode: 'replace' | 'add' }
+//   vegetation  null or { species: [names from VEGETATION_SPECIES], density (0..1), mode: 'replace' | 'add' };
+//               { species: [], density: 0, mode: 'replace' } is a clearing: nothing grows inside it
 //   material    null | 'ice' (glossy icy ground)
 //   tintSweep   null or { colors: [hex, hex], periodSeconds, direction: 'downwind' | <deg compass>,
 //               width (m, the colour wave's length) }
@@ -129,7 +130,8 @@ export function validateOverlaySpec(spec, stampSpecs, where) {
   const vegetation = spec.vegetation;
   if (vegetation !== undefined && vegetation !== null) {
     if (typeof vegetation !== 'object') throw new Error(`${where}.vegetation: must be null or { species, density, mode }`);
-    checkSpecies(vegetation.species, `${where}.vegetation.species`);
+    const clearing = Array.isArray(vegetation.species) && vegetation.species.length === 0 && vegetation.density === 0 && vegetation.mode === 'replace';
+    if (!clearing) checkSpecies(vegetation.species, `${where}.vegetation.species`);
     if (!(isNumber(vegetation.density) && vegetation.density >= 0 && vegetation.density <= 1)) throw new Error(`${where}.vegetation.density: must be a number in [0, 1]`);
     if (!OVERLAY_VEGETATION_MODES.includes(vegetation.mode)) throw new Error(`${where}.vegetation.mode: must be one of ${OVERLAY_VEGETATION_MODES.join(', ')}`);
   }

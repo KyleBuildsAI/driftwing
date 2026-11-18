@@ -922,9 +922,11 @@ export function createWorldGen(seedString, options) {
   /**
    * The species an overlay plants in one scatter cell instead of (mode 'replace', and every row of
    * stripes) or besides (mode 'add') the biome's own pick, or -1. Steep ground keeps the biome's pick;
-   * below WATER_LEVEL + 0.9 only mangroves may grow (down to their waterline).
+   * below WATER_LEVEL + 0.9 only mangroves may grow (down to their waterline). A clearing (no species)
+   * grows nothing anywhere, steep ground included; only the biome's boulders stay.
    */
   function overlaySpecies(overlay, baseType, ix, iz, slope, height) {
+    if (overlay.vegetation !== null && overlay.vegetation.species.length === 0) return baseType === VEGETATION.ROCK ? baseType : -1;
     if (slope > 0.6) return baseType;
     let density;
     let replace;
@@ -979,7 +981,10 @@ export function createWorldGen(seedString, options) {
     if (hasOverlays) {
       overlayAt(x, z, scatterOverlay);
       const planting = scatterOverlay.weight > 0 && (scatterOverlay.overlay.vegetation !== null || scatterOverlay.overlay.stripes !== null);
-      if (planting && scatterOverlay.weight > hash2(ix, iz, 209)) overlay = scatterOverlay.overlay;
+      // A clearing holds wherever its ground look can show (from the weight the material steps in at),
+      // not by chance across its falloff.
+      const clearing = planting && scatterOverlay.overlay.vegetation !== null && scatterOverlay.overlay.vegetation.species.length === 0;
+      if (planting && (scatterOverlay.weight > hash2(ix, iz, 209) || (clearing && scatterOverlay.weight >= 0.35))) overlay = scatterOverlay.overlay;
       else if (culled) return false;
     }
     const height = heightAt(x, z);
