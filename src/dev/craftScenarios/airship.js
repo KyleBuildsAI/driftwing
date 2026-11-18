@@ -12,9 +12,9 @@ export default Object.freeze({
       id: 'airship-scenic-cruise',
       views: ['third', 'first'],
       // Above the spawn and clear of the hills around it; the cruise climbs to its own altitude.
-      // The second view's run starts with the first run's craft state (the same craft stays installed):
-      // the harness turns the autopilot off at the start, which ends that cruise, and the press at 2 s
-      // starts a new one (its visit count from zero), so the visits are checked from 3 s on.
+      // Every run starts with a fresh craft state (the harness resets it, and turns the autopilot off);
+      // the press at 2 s starts the cruise (its visit count from zero), so the visits are checked from
+      // 3 s on.
       start: { at: 'spawn', mode: 'air', agl: 400, clearRadius: 2500, clearance: 280, speed: 18, craftState: { ballonetTarget: 0.5, vectorTarget: 0 } },
       seconds: 480,
       script(t, api) {
