@@ -33,7 +33,8 @@
 //      every DIGEST_SECONDS of the path (and at its end) the collider sweep battery (sweepBattery: a
 //      fixed grid of vertical and radial sweeps around the craft's ground track, and sweeps down and
 //      across every live spawn within BATTERY_SPAWN_REACH, through ctx.colliders.sweepSphere, each hit's
-//      collider id, time of impact and normal) and the positions of every live PathFollower (the
+//      owner and collider id (both less the structure engine's instance serial, a count since boot),
+//      time of impact and normal) and the positions of every live PathFollower (the
 //      followers the live spawns' engine instances hold: trains, caravans, galleons, rivals, columns)
 //      at the flight clock are digested;
 //   5. records the site-list hash of every site within SITE_RADIUS of the spawn and of the path's end
@@ -114,6 +115,8 @@ const BATTERY_RAY_HEIGHT = 12;
 const BATTERY_RADIUS = 1;
 /** Live spawns within this horizontal reach of the craft are swept down and across their anchor. */
 const BATTERY_SPAWN_REACH = 6000;
+/** A structure collider owner or id: preset, spawn seed, the engine's instance serial (and the part). */
+const STRUCTURE_COLLIDER_NAME = /^([A-Za-z0-9]+):(\d+):\d+(:.+)?$/;
 /** How deep the follower search walks an engine instance's data (data.motion.follower and similar). */
 const FOLLOWER_SEARCH_DEPTH = 4;
 
@@ -430,7 +433,21 @@ function createDeterminismSystem(ctx, { capture, session }) {
   const sweepHit = { t: 0, point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 }, id: null, owner: null, tags: null, velocity: null };
   const followerPose = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, heading: 0, distance: 0, speed: 0, done: false };
 
-  /** One sweep of the battery: its line ('-' for a miss, else the collider id, t and normal). */
+  /**
+   * A collider owner or id without the structure engine's instance serial: its colliders are owned by
+   * `<preset>:<spawn seed>:<serial>` and named `<preset>:<spawn seed>:<serial>:<part>`, and the serial
+   * counts every structure the engine built since boot, the loading frames' too (restartSpawns does not
+   * reset it), so it differs between loads while the collider (its preset, spawn seed, part and shape)
+   * is the same. Only names whose first part is a spawn preset's id are rewritten; every other owner
+   * and id (landmarks, terrain, sensors) passes unchanged.
+   */
+  function stableColliderName(name) {
+    const match = STRUCTURE_COLLIDER_NAME.exec(name);
+    if (!match || ctx.systems.spawns.manager.getPreset(match[1]) === null) return name;
+    return `${match[1]}:${match[2]}:#${match[3] ?? ''}`;
+  }
+
+  /** One sweep of the battery: its line ('-' for a miss, else the owner, the collider id, t and normal). */
   function sweepLine(fromX, fromY, fromZ, toX, toY, toZ, tally) {
     sweepFrom.x = fromX;
     sweepFrom.y = fromY;
@@ -442,7 +459,7 @@ function createDeterminismSystem(ctx, { capture, session }) {
     if (!ctx.colliders.sweepSphere(sweepFrom, sweepTo, BATTERY_RADIUS, { sensors: true, landableTops: true }, sweepHit)) return '-';
     tally.hits++;
     const normal = sweepHit.normal;
-    return `${sweepHit.id}@${round(sweepHit.t, 5)}:${round(normal.x, 4)},${round(normal.y, 4)},${round(normal.z, 4)}`;
+    return `${stableColliderName(sweepHit.owner)}|${stableColliderName(sweepHit.id)}@${round(sweepHit.t, 5)}:${round(normal.x, 4)},${round(normal.y, 4)},${round(normal.z, 4)}`;
   }
 
   /**
@@ -530,6 +547,9 @@ function createDeterminismSystem(ctx, { capture, session }) {
       hits: tally.hits - before.hits,
       followers: hashText(followers.join(';')),
       followerCount: tally.followers - before.followers,
+      // The hits themselves (the misses are only hashed): where two runs part, the report shows them.
+      hitLines: battery.filter((line) => !line.endsWith('-')),
+      followerLines: followers,
     };
   }
 
