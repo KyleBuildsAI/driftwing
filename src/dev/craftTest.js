@@ -4,10 +4,13 @@
 //
 // A run switches the craft through the settings channel (as the picker does) at 100 % assists (a
 // scenario may set its own), picks the view through settings.views (first person: the 'cockpit'
-// slot, the FPV camera on the drone; third person: 'chase'), sets the time of day when the scenario
-// asks (and holds it for the run: the day clock is frozen, so the sky's time warp cannot carry a
-// noon start into the afternoon), places the craft with flight.startAt (the same placements a
-// module's situate returns: start.at finds the place, start.mode the state), then calls the script
+// slot, the FPV camera on the drone; third person: 'chase'), sets the time of day (the scenario's
+// time, else the page's opening time) and holds it for the run (the day clock is frozen, so the
+// sky's time warp cannot carry a noon start into the afternoon), starts the craft's own state afresh
+// (flight.resetCraftState: a run of the craft already installed must not inherit the last run's
+// wind column, cruise or timers), places the craft with flight.startAt (the same placements a
+// module's situate returns: start.at finds the place, searched from the world's spawn point, and
+// start.mode the state; the heading defaults to the spawn's), then calls the script
 // every frame for `seconds` of flight time, or until the scenario's optional endWhen(api) holds (a
 // long flight that is done early, such as the spaceplane's climb to space and back). A script returns ControlState fields (roll, pitch, yaw, throttle, collective,
 // brakeL, brakeR, flaps, trim, antenna, lookX, lookY) that override the live controls after the input
@@ -251,6 +254,12 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
   let activeRun = null;
   /** The day clock setting (timeFrozen) to restore after a run that held its time of day, or null. */
   let heldDayClock = null;
+  /**
+   * The page's opening time of day (the golden-hour opening, or ?time=): every run without a time of
+   * its own starts at it, so what a run meets in the sky and the WindField's thermals does not depend
+   * on how long the runs before it flew.
+   */
+  const openingDayTime = state.time.dayTime;
   const frameWaiters = [];
   const report = {};
 
@@ -466,15 +475,20 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     return highest;
   }
 
-  /** The placement for a start (flight.startAt) and the resolved start point. Throws when the place is not found. */
+  /**
+   * The placement for a start (flight.startAt) and the resolved start point. Throws when the place is
+   * not found. Every place is searched from the world's spawn point and the heading defaults to the
+   * spawn's, so a start never depends on where the run before it ended ('here' alone starts there).
+   */
   function resolveStart(start) {
-    const origin = state.player.position;
     const at = start.at ?? 'here';
     const mode = start.mode ?? 'air';
+    const spawn = state.spawn;
+    const origin = at === 'here' ? state.player.position : { x: spawn.x, y: surfaceAt(spawn.x, spawn.z), z: spawn.z };
     let x = origin.x;
     let z = origin.z;
     let y = null;
-    let heading = Number.isFinite(start.heading) ? start.heading : state.player.heading;
+    let heading = Number.isFinite(start.heading) ? start.heading : at === 'here' ? state.player.heading : spawn.heading;
     let place = null;
     if (typeof at === 'object') place = { x: at.x, z: at.z, y: Number.isFinite(at.y) ? at.y : null };
     else if (at === 'spawn') place = { x: state.spawn.x, z: state.spawn.z };
@@ -571,11 +585,10 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     if (!craftOk) notes.push(`asked for ${entry.craft}, flying ${flight().getCraft()}`);
     const viewOk = inPlannedView(entry);
     if (!viewOk) notes.push(`asked for the ${entry.view}-person view, the camera shows ${camera().getView()}`);
-    if (Number.isFinite(spec.time)) {
-      if (heldDayClock === null) heldDayClock = settings.get('timeFrozen') === true;
-      settings.set('timeFrozen', true);
-      ctx.systems.sky.setDayTime(spec.time, { transition: 0 });
-    }
+    if (heldDayClock === null) heldDayClock = settings.get('timeFrozen') === true;
+    settings.set('timeFrozen', true);
+    ctx.systems.sky.setDayTime(Number.isFinite(spec.time) ? spec.time : openingDayTime, { transition: 0 });
+    if (craftOk) flight().resetCraftState();
     return { ok: craftOk && viewOk, notes };
   }
 
