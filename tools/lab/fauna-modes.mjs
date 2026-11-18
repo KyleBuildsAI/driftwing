@@ -531,7 +531,9 @@ function testPods() {
   const id = lab.spawn('labWhales', { species: 'whale', behavior: 'pod', count: 5, pod: { breachChance: 0 } }, { x: 0, y: 0, z: SEA_Z + 900 }, 90);
   const data = lab.data(id);
   const pool = data.pool;
-  // Seconds each whale has spent at the surface (its depth eases in over the first few).
+  // Seconds each whale has spent at the surface. Its depth eases in from a dive 16 m down (a damped
+  // ease, decaying at 0.6 per second: 0.4 m left after 6 s, 4 cm after 10 s), so the swell is judged
+  // from 10 s on, when what is left of the ease is well inside the tolerance.
   const surfaced = new Float64Array(data.start + data.count);
   let worst = 0;
   let samples = 0;
@@ -540,7 +542,7 @@ function testPods() {
   lab.step(60 * 60, 1 / 60, (frame) => {
     for (let index = data.start; index < data.start + data.count; index++) {
       surfaced[index] = pool.mode[index] === 0 ? surfaced[index] + 1 / 60 : 0;
-      if (frame % 5 !== 0 || surfaced[index] < 6) continue;
+      if (frame % 5 !== 0 || surfaced[index] < 10) continue;
       const surface = lab.waterQuery.heightAt(pool.px[index], pool.pz[index]);
       const girth = pool.def.size * 0.125 * pool.scale[index] * data.g[49];
       worst = Math.max(worst, Math.abs(pool.py[index] - (surface - girth * 0.55)));
