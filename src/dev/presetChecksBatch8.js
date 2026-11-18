@@ -214,10 +214,18 @@ export function installBatch8Checks(game) {
       return check('setup: batch 8 checks installed', Boolean(challenges) && typeof ctx.wind.probe === 'function', { craft: state.flight.craft, backend: game.backend });
     },
 
-    /** The air the live spawn of presetId promises (see the file header). */
-    wind(presetId) {
+    /**
+     * The air the live spawn of presetId promises (see the file header). The simulation runs first
+     * until its wind modifier sources have faded in: a site built just before the photo view froze it
+     * holds them at the strength of their first frames.
+     */
+    async wind(presetId) {
       const spawn = liveSpawn(presetId);
       if (!spawn) return check(`${presetId}: wind`, false, 'no live spawn');
+      ctx.setPhotoMode(false);
+      const engine = manager.registry.get('windModifier');
+      const modifiers = partsOf(spawn, 'windModifier');
+      await until(() => modifiers.every((part) => engine.describe(part).sources.every((source) => source.fadedIn)), 20000);
       const sources = windIdsOf(spawn).length;
       if (presetId === 'ridgeLiftBand') {
         // 200 m over the ground under each column (each stands on the ground under it), the mean over

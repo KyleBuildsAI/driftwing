@@ -278,6 +278,8 @@ only sets `turbulence` and `gust` to be felt.
 - The director's budget: 12 instances, no particles. Up to 8 sources per instance.
 - No GPU resources, lights or draw calls. `stats()` adds `sources` (the registered source count) to
   the usual fields.
+- `describe(instance)` (dev and tests; it allocates) returns `{ age, sources: [{ type, strength,
+  fadedIn }] }`: each source's strength now and whether its age has passed `start + fadeIn`.
 - CPU: an update with 7 sources takes about 1.2-1.7 µs, with zero allocations; a WindField sample
   with 10 sources around it takes about 0.35-0.47 µs (lab).
 

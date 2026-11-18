@@ -497,5 +497,23 @@ export function createWindModifierEngine() {
     stats() {
       return { instances: live, particles: 0, lights: 0, buffers: 0, drawCalls: 0, sources: registered };
     },
+
+    /**
+     * The instance's state for the debugger and tests (allocates; never called per frame): its age (s)
+     * and per source its type, its strength now, and whether it has finished fading in (its age past
+     * start + fadeIn).
+     */
+    describe(instance) {
+      const record = instance.data;
+      const age = record.numbers[I.AGE];
+      return {
+        age,
+        sources: record.sources.map((entry) => ({
+          type: entry.type,
+          strength: entry.frame[FRAME.STRENGTH],
+          fadedIn: age >= entry.numbers[P.START] + entry.numbers[P.FADE_IN],
+        })),
+      };
+    },
   };
 }
