@@ -36,9 +36,9 @@
 // material, tint sweep, stripes) found and its rows passed, and the overlay attribute seen live. Wave 4:
 // the wave 3 presets use every stamp type, so ?presets=real needs all of them (none is pending any
 // more); the fixtures gain PHASE3_FIXTURES (terrainFixtures.js): a site placed by placement.near (the
-// near criterion: placed within its radius of a fixture volcano, its rows passed) and the badlands and
-// rice terraces palettes (the palettes criterion: every OVERLAY_PALETTES entry painted by a found site
-// whose rows passed).
+// near criterion: placed within its radius of a fixture volcano, its rows passed) and the badlands,
+// rice terraces and tulip fields palettes (the palettes criterion: every OVERLAY_PALETTES entry
+// painted by a found site whose rows passed).
 // Criteria: fixtures placed (every stamp type within SEARCH_RADIUS of the spawn), 0 offline and live
 // seam violations, worker parity exact, collision within 0.5 m, every LOD seen per stamp type, every
 // pose settled, 0 console errors and 0 warnings, and no harness problems.

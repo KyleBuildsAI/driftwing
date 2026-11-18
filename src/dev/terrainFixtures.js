@@ -11,10 +11,11 @@
 //
 // Wave 4 (PHASE3_FIXTURES, added by the terrain test only, so the structure kit's and the terrain lab's
 // fixture worlds keep theirs): a site placed by placement.near (the lava rivers' "near a volcano"
-// rule, here near the fixture volcano) and the two overlay palettes no other fixture paints (badlands,
-// rice terraces, the latter on its real terraces stamps).
+// rule, here near the fixture volcano) and the three overlay palettes no other fixture paints (badlands,
+// rice terraces, the latter on its real terraces stamps, and tulip fields).
 import badlandsHoodoos from '../spawns/presets/badlandsHoodoos.js';
 import lavaRiversToSea from '../spawns/presets/lavaRiversToSea.js';
+import lavenderTulipStripes from '../spawns/presets/lavenderTulipStripes.js';
 import riceTerraces from '../spawns/presets/riceTerraces.js';
 
 const LIFETIME_SITE = Object.freeze({ duration: null, despawn: Object.freeze({ distance: 12000, hysteresis: 3000, outOfViewSeconds: 20 }) });
@@ -293,8 +294,18 @@ export const FIXTURE_RICE_TERRACES = quietFixture('fixtureRiceTerraces', 'Fixtur
   overlays: riceTerraces.overlays,
 });
 
+/**
+ * The tulip fields palette: preset 84's tulip field alone (an overlay-only site's row stands on its
+ * first overlay, and the shared fields fixture already paints the lavender palette).
+ */
+export const FIXTURE_TULIP_FIELDS = quietFixture('fixtureTulipFields', 'Fixture tulip fields', {
+  placement: Object.freeze({ ...lavenderTulipStripes.placement, chance: 0.8, minSpacing: 9000, clearance: 200, separateRegions: false }),
+  stamps: Object.freeze([]),
+  overlays: Object.freeze(lavenderTulipStripes.overlays.filter((overlay) => overlay.palette === 'tulipFields')),
+});
+
 /** The wave 4 fixtures (the terrain test's world only). */
-export const PHASE3_FIXTURES = Object.freeze([FIXTURE_LAVA_COAST, FIXTURE_BADLANDS, FIXTURE_RICE_TERRACES]);
+export const PHASE3_FIXTURES = Object.freeze([FIXTURE_LAVA_COAST, FIXTURE_BADLANDS, FIXTURE_RICE_TERRACES, FIXTURE_TULIP_FIELDS]);
 
 /** The stamp type each stamped wave 4 fixture exercises. */
 export const PHASE3_FIXTURE_STAMP_TYPE = Object.freeze({
@@ -306,4 +317,5 @@ export const PHASE3_FIXTURE_STAMP_TYPE = Object.freeze({
 export const PHASE3_OVERLAY_KINDS = Object.freeze({
   fixtureBadlands: Object.freeze(['palette', 'vegetation']),
   fixtureRiceTerraces: Object.freeze(['palette']),
+  fixtureTulipFields: Object.freeze(['palette', 'stripes']),
 });
