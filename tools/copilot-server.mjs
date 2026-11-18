@@ -462,6 +462,8 @@ function windHeight(text, units) {
 function crossCraftRule(text, flight) {
   const autopilot = /\b(autopilot|fly (me|us) there|you fly)\b/.test(text);
   const stop = /\b(stop|abort|cancel|off|end)\b/.test(text);
+  // "Don't start the challenge" asks for nothing, as in the game's own grammar.
+  if (/\b(don'?t|dont|do not|never(?! ?mind))\b/.test(text) && /\b(space|scenic|smoke|water|perch|wind|challenge)\b/.test(text)) return { speech: "All right, I'll leave that be.", action: null };
   if (/\b(?:in)?to space\b|\bspace ?flight\b/.test(text)) return { speech: '', action: stop ? { type: 'toSpace', enabled: false } : { type: 'toSpace' } };
   if (/\bscenic (cruise|tour)\b/.test(text)) return { speech: '', action: { type: 'scenicCruise', enabled: !stop } };
   if (/\bsmoke (on|off)\b|\b(start|stop) (the )?smoke\b/.test(text)) return { speech: '', action: { type: 'smoke', enabled: !/\b(off|stop)\b/.test(text) } };

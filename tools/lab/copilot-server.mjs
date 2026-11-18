@@ -12,7 +12,8 @@
 //              These send POST /copilot with a rules-only server (no Claude key)
 //   crossCraft the rules brain answers the cross-craft phrases (space, the scenic cruise, smoke, water,
 //              perches, the wind at a height, the challenge, craft and skins by name) with the game's
-//              own actions, each valid for the game, and /health lists them
+//              own actions, each valid for the game, and /health lists them; "don't start the
+//              challenge" and "do not take me to space" act on nothing
 //
 // Usage: node tools/lab/copilot-server.mjs [--verbose]
 // Prints one line per check and exits non-zero if any check fails.
@@ -199,6 +200,11 @@ async function testCrossCraft() {
       const valid = Copilot.sanitizeReply(body);
       const sorted = (value) => JSON.stringify(Object.fromEntries(Object.entries(value ?? {}).sort(([first], [second]) => first.localeCompare(second))));
       check('crossCraft', `"${transcript}" -> ${JSON.stringify(expected)}, valid for the game`, status === 200 && valid && sorted(valid.action) === sorted(expected), `${status} ${JSON.stringify(body)}`);
+    }
+    for (const transcript of ["don't start the challenge", 'do not take me to space']) {
+      const { status, body } = await ask(base, transcript);
+      const valid = Copilot.sanitizeReply(body);
+      check('crossCraft', `"${transcript}" acts on nothing, valid for the game`, status === 200 && valid && valid.action === null && valid.speech.length > 0, `${status} ${JSON.stringify(body)}`);
     }
   } finally {
     await stopServer(child);
