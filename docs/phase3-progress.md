@@ -1725,7 +1725,7 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 
 | # | Work | Branch | Status |
 | --- | --- | --- | --- |
-| O1 | Journal (contract j.1): records version 2 with craft time, figures, medals, worlds visited, perches and max altitude; the journal panel's Craft, Figures, Challenges and Worlds sections | `p3/journal` | in progress |
+| O1 | Journal (contract j.1): records version 2 with craft time, figures, medals, worlds visited, perches and max altitude; the journal panel's Craft, Figures, Challenges and Worlds sections | `p3/journal` | done |
 | O2 | Copilot (contract j.2, h.3, h.6): the cross-craft grammar and the keyboard / UI equivalent of each (Guide chips "Find water", "Find a perch", "To space"; the spaceplane's climb-to-space autopilot); the remote `flightState` fields `onWater`, `craftState`, `challenge`; docs/copilot-api.md | `p3/copilot` | not started |
 | O3 | Docs: docs/controls.md (a full HOTAS profile per new craft, the j.2 equivalents), docs/spawns.md (all 100 checked against the code), docs/architecture.md (every Phase 3 system) | `p3/docs` | not started |
 | P1 | Test hooks to the contract: the 20-minute soak of k.5 (craft switch every 2 minutes, view swap every minute, structure penetrations, no soft crash within 10 s of a switch), the k.4 determinism digests (collider sweep battery, PathFollower positions) and the WebGL2 spawn-event frame difference, the k.3 / k.4 coverage audit, the golden-frame first shot and the origin-rebase image check on WebGL2 | `p3/verify-hooks` | not started |
@@ -1737,9 +1737,54 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 
 ### Wave 4 - p3/journal
 
-- **Status:** in progress: records version 3 (figures, perches, skin time, the highest altitude, the
-  migrations from versions 1 and 2) landed in `src/gameplay/journal.js`; the panel sections and the
-  tests are next.
+- **Status:** done (resumed after the 2026-11-17 pause; the save commit's `tools/steps/journal-p3.json`
+  was reviewed and runs unchanged).
+- **Built:**
+  - `src/gameplay/journal.js`: the global records (`driftwing-v2.records`) are now version 3. New:
+    `figures { [figure]: { count, bestScore } }` from the typed `figureFlown` (known figures only,
+    scores 0-100), `perches { count, kinds: { peak, structure, tree } }` from the typed `perched`
+    (settles only; a take-off does not count), `skinTime { [craft]: { [skin]: seconds } }` beside
+    `craftTime`, and the `maxAltitude` statistic in `JOURNAL_STATS` (op `max`, unit `altitude`, metres,
+    followed every frame, space included, never clamped; a stored value above 10 000 km is storage
+    damage). Every craft module's `journal.stats` joins the known statistics (`journalStatInfo`,
+    `listJournalStats`), so each folds with its module's op. Challenge medals and best times are read
+    from `ctx.systems.challenges.getRecords()` (`getChallengeRecords`, `getMedals`, `getData().challenges`)
+    and never stored by the journal. The collection reads found / `listPresets()` = x / 100.
+  - Migration: `migrateRecordsToV3` takes versions 1 and 2 to 3 (figures from the aerobatic best-score
+    statistics, perches from `eaglePerches`, the highest altitude from every world's journal plus the
+    balloon's and the spaceplane's records) and saves version 3 at once; version 3 loads unchanged.
+    Everything read is sanitized and capped (200 statistics, 64 craft, 8 skins a craft, 200 worlds,
+    counts and seconds at 1e9, prototype keys refused). Figures, perches, flight time and altitude save
+    on the existing 5 s throttle; worlds visited save at once (the page reloads next).
+  - Per-frame work writes only into one `Float64Array` (`live`), folded into the records on reads,
+    saves and craft or skin changes: 100 000 climbing frames allocate nothing.
+  - `src/ui/journalPanel.js` and its CSS: section jump buttons; Records gains the highest altitude
+    (m, km above 10 km) and perches landed with their kinds; new Craft (all 14 by picker group and
+    display name, the active skin's silhouette, time per craft, time per skin for the eagle, each
+    craft's own statistics), Figures (all 12 with count and best score), Challenges (best time and
+    medal per course and craft, the medal tally, the world's seed) and Worlds (seed, where from, when,
+    Copy link and a confirmed Open). Narrow windows read as one column (checked at 390 x 844).
+  - `src/ui/seedLinks.js`: `worldUrl(seed)` and `copyWorldLink(seed)` for any seed.
+- **Decisions:** the version bump to 3 (the persisted shape changed again); kinds of perches before
+  version 3 are unknown, so migrated perches count without kinds; the eagle's own `eaglePerches`
+  statistic stays as the craft module's record.
+- **Verification** (dist-single build unless noted; dev server for discovery.json, which needs the
+  spawn test kit):
+
+  | check | WebGPU | WebGL2 |
+  | --- | --- | --- |
+  | `npm run build`, `npm run build:single` | pass (V1 hash matches) | - |
+  | `npm run test:v1` | 2/2 | - |
+  | `node tools/docs-check.mjs` | 536/536 | - |
+  | `node --expose-gc tools/lab/journal.mjs` | 64/64 | - |
+  | `node tools/lab/discovery.mjs` | 43/43 | - |
+  | craft, challenges, storage, settings labs | 89/89, 70/70, 54/54, 45/45 | - |
+  | `tools/steps/journal-p3.json` (`seed=JOURNAL-P3`) | 17/17, 0 errors, 0 warnings | 17/17, 0 errors, 0 warnings |
+  | `tools/steps/journal-p3.json` at 390 x 844 (dev server) | 17/17, 0/0 | - |
+  | `tools/steps/discovery.json` (dev server) | 17/17, 0/0 | 17/17, 0/0 |
+
+- **Open issues:** none in this scope.
+- **Next:** the integration pass merges `p3/journal` (I4).
 
 ### Wave 4 - p3/copilot
 
