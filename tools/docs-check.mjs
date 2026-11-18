@@ -24,6 +24,18 @@
 //   wind       every param of every WindField source type (windSources.js) is documented in its
 //              section: docs/engines/vortex.md "Wind params" for rankine, docs/engines/
 //              windModifier.md "### <type>:" for the others
+//   engines    every param name a preset gives an engine (nested names included, and a set piece's
+//              per-child engine overrides on that child engine's page) is named in its
+//              docs/engines/<engine>.md; every structure recipe has its section, its row in the
+//              recipe table names the stamp type it reads (structure/stamps.js), and every recipe
+//              default is a param of its section; every celestial component and waterEffect effect
+//              has its section; every fauna behaviour, species and altitude mode, emitter particle
+//              style and ground mode, and lightEffect glow shape is named on its page
+//   craft      the craft table of docs/architecture.md has one row per craft with its model kind and
+//              its module's instruments in order, and the instrument count is right; docs/controls.md
+//              has a row per craft in "What the controls mean for each craft" and a full profile for
+//              every craft after the six of Phase 1
+//   scripts    every npm script in package.json is named in README.md
 //
 // Usage: node tools/docs-check.mjs [--verbose]
 // Prints one line per failed check (every check with --verbose) and exits non-zero if any fails.
@@ -35,6 +47,16 @@ import { validatePreset, validatePresets } from '../src/spawns/schema.js';
 import { ENGINE_NAMES } from '../src/spawns/engineRegistry.js';
 import { RECIPES } from '../src/audio/recipes/index.js';
 import { WIND_SOURCE_TYPES, sourceParameterNames } from '../src/spawns/engines/windSources.js';
+import { RECIPES as STRUCTURE_RECIPES } from '../src/spawns/engines/structure/recipes/index.js';
+import { RECIPE_STAMP_TYPES } from '../src/spawns/engines/structure/stamps.js';
+import { CELESTIAL_COMPONENTS } from '../src/spawns/engines/celestial/params.js';
+import { ALTITUDE_MODES, FAUNA_BEHAVIORS } from '../src/spawns/engines/faunaEngine.js';
+import { SPECIES_IDS } from '../src/spawns/engines/faunaSpecies.js';
+import { WATER_EFFECT_DEFAULTS } from '../src/spawns/engines/waterEffectEngine.js';
+import { GROUND_MODES, PARTICLE_STYLES } from '../src/spawns/engines/particleSystem.js';
+import { GLOW_SHAPES } from '../src/spawns/engines/glowPoints.js';
+import { craftRegistry } from '../src/craft/index.js';
+import { INSTRUMENT_IDS } from '../src/ui/instruments/index.js';
 
 const VERBOSE = process.argv.includes('--verbose');
 for (const flag of process.argv.slice(2)) {
@@ -43,6 +65,12 @@ for (const flag of process.argv.slice(2)) {
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SPAWNS_DOC = join(ROOT, 'docs', 'spawns.md');
+const ARCHITECTURE_DOC = join(ROOT, 'docs', 'architecture.md');
+const CONTROLS_DOC = join(ROOT, 'docs', 'controls.md');
+/** The six craft of Phase 1; every craft after them has a full profile in docs/controls.md. */
+const PHASE1_CRAFT = Object.freeze(['glider', 'bushplane', 'jet', 'helicopter', 'wingsuit', 'fpv']);
+/** Structure params every recipe shares (the "Common params" table), never repeated per recipe. */
+const COMMON_STRUCTURE_PARAMS = Object.freeze(['stamp']);
 const TEMPLATE_HEADINGS = Object.freeze(['### Template: an event', '### Template: a site']);
 
 const results = [];
@@ -522,12 +550,201 @@ function testWindParams() {
   }
 }
 
+// ---- Engine pages --------------------------------------------------------------------------------
+/** The engine page's text, read once per engine. */
+const enginePages = new Map();
+function enginePage(engine) {
+  if (!enginePages.has(engine)) enginePages.set(engine, readFileSync(join(ROOT, 'docs', 'engines', `${engine}.md`), 'utf8'));
+  return enginePages.get(engine);
+}
+
+/** Every object key in a params value, with its dotted path (array entries share their array's path). */
+function paramNames(value, path, out) {
+  if (Array.isArray(value)) {
+    for (const item of value) paramNames(item, path, out);
+  } else if (value !== null && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      const childPath = path ? `${path}.${key}` : key;
+      out.push({ key, path: childPath });
+      paramNames(child, childPath, out);
+    }
+  }
+  return out;
+}
+
+/** Whether a page names a param: the name as a whole word anywhere (tables, `{ name default }` shapes, prose). */
+function namesWord(text, name) {
+  return new RegExp(`(^|[^A-Za-z0-9_])${name}([^A-Za-z0-9_]|$)`).test(text);
+}
+
+/**
+ * The param names of one engine entry that its page never names, as dotted paths. A set piece's
+ * per-child engine overrides (children.<name>.params.<engine>) are checked on that engine's page.
+ */
+function undocumentedParams(engine, params) {
+  const missing = [];
+  const children = engine === 'setPiece' && params && params.children ? params.children : null;
+  for (const { key, path } of paramNames(params, '', [])) {
+    if (children && path.startsWith('children.') && path.split('.').length > 2) continue;
+    if (!namesWord(enginePage(engine), key)) missing.push(`${engine} ${path}`);
+  }
+  if (children) {
+    for (const [childName, child] of Object.entries(children)) {
+      for (const [childEngine, overrides] of Object.entries(child?.params ?? {})) {
+        if (!ENGINE_NAMES.includes(childEngine)) continue;
+        for (const { key, path } of paramNames(overrides, '', [])) {
+          if (!namesWord(enginePage(childEngine), key)) missing.push(`${childEngine} children.${childName}.params.${childEngine}.${path}`);
+        }
+      }
+    }
+  }
+  return missing;
+}
+
+function testPresetParams() {
+  for (const engine of ENGINE_NAMES) {
+    const missing = [];
+    for (const preset of PRESETS) {
+      for (const entry of preset.engines) {
+        if (entry.engine !== engine) continue;
+        for (const item of undocumentedParams(engine, entry.params)) missing.push(`${preset.id}: ${item}`);
+      }
+    }
+    check('engines', `${engine}: every param the presets give it is on its page`, missing.length === 0, missing.join('; '));
+  }
+}
+
+/** The text of a level-2 section of a Markdown text, by its exact heading, or null. */
+function levelTwoSection(text, heading) {
+  const lines = text.split(/\r?\n/);
+  const start = lines.indexOf(`## ${heading}`);
+  if (start < 0) return null;
+  const end = lines.findIndex((line, index) => index > start && /^##\s/.test(line));
+  return lines.slice(start, end < 0 ? lines.length : end).join('\n');
+}
+
+function testStructureRecipes() {
+  const page = enginePage('structure');
+  const stampTypes = [...new Set(Object.values(RECIPE_STAMP_TYPES).filter(Boolean))];
+  const rows = new Map();
+  for (const { line } of proseLines(page)) {
+    const match = /^\|\s*`([A-Za-z]+)`\s*\|/.exec(line);
+    if (match && Object.hasOwn(STRUCTURE_RECIPES, match[1]) && !rows.has(match[1])) rows.set(match[1], line.slice(1, -1).split('|').map((cell) => cell.trim()));
+  }
+  for (const [name, recipe] of Object.entries(STRUCTURE_RECIPES)) {
+    const section = levelTwoSection(page, name);
+    check('engines', `structure recipe ${name}: has its section`, section !== null);
+    const row = rows.get(name);
+    const stamp = RECIPE_STAMP_TYPES[name] ?? null;
+    const stampCell = row ? row[2] : '';
+    const stampOk = stamp
+      ? stampCell.includes(`\`${stamp}\``)
+      : !stampTypes.some((type) => stampCell.includes(`\`${type}\``));
+    check('engines', `structure recipe ${name}: its table row reads stamp ${stamp ?? 'none'}`, Boolean(row) && stampOk, row ? `the row says ${stampCell}` : 'no row');
+    if (section === null) continue;
+    const missing = Object.keys(recipe.defaults).filter((key) => !COMMON_STRUCTURE_PARAMS.includes(key) && !section.includes(`\`${key}\``));
+    check('engines', `structure recipe ${name}: every default is a documented param`, missing.length === 0, missing.length ? `missing ${missing.join(', ')}` : '');
+  }
+}
+
+/** Whether a page names a value as code: `value` or 'value'. */
+function namesValue(text, value) {
+  return text.includes(`\`${value}\``) || text.includes(`'${value}'`);
+}
+
+function testEngineVocabulary() {
+  const celestial = enginePage('celestial');
+  for (const component of CELESTIAL_COMPONENTS) {
+    check('engines', `celestial component ${component}: has its section`, new RegExp(`^### ${component}$`, 'm').test(celestial));
+  }
+  const water = enginePage('waterEffect');
+  for (const effect of Object.keys(WATER_EFFECT_DEFAULTS).filter((key) => key !== 'common')) {
+    check('engines', `waterEffect effect ${effect}: has its section`, new RegExp(`^### ${effect}$`, 'm').test(water));
+  }
+  const vocabularies = [
+    ['fauna', 'behaviour', FAUNA_BEHAVIORS],
+    ['fauna', 'species', SPECIES_IDS],
+    ['fauna', 'altitude mode', ALTITUDE_MODES],
+    ['emitter', 'particle style', PARTICLE_STYLES],
+    ['emitter', 'ground mode', GROUND_MODES],
+    ['lightEffect', 'glow shape', GLOW_SHAPES],
+  ];
+  for (const [engine, label, values] of vocabularies) {
+    const missing = values.filter((value) => !namesValue(enginePage(engine), value));
+    check('engines', `${engine}: every ${label} is named on its page`, missing.length === 0, missing.length ? `missing ${missing.join(', ')}` : '');
+  }
+}
+
+// ---- Craft ---------------------------------------------------------------------------------------
+/** The ids in an instruments cell: each comma-separated item's first word, notes in brackets dropped. */
+function instrumentIdsOf(cell) {
+  return cell.replace(/\([^)]*\)/g, '').split(',').map((item) => item.trim().split(/\s+/)[0]).filter(Boolean);
+}
+
+/** The rows of the architecture's craft table (craft, model kind, instruments), by craft id. */
+function craftTableRows(text) {
+  const rows = new Map();
+  let inTable = false;
+  for (const { line } of proseLines(text)) {
+    if (/^\| craft \| model kind \| instruments \|/.test(line)) {
+      inTable = true;
+      continue;
+    }
+    if (!inTable) continue;
+    if (!line.startsWith('|')) break;
+    if (/^\|\s*-/.test(line)) continue;
+    const cells = line.slice(1, -1).split('|').map((cell) => cell.trim());
+    rows.set(cells[0], cells);
+  }
+  return rows;
+}
+
+function testCraftDocs() {
+  const architecture = readFileSync(ARCHITECTURE_DOC, 'utf8');
+  const rows = craftTableRows(architecture);
+  const countMatch = /There are (\d+) ids/.exec(architecture);
+  check('craft', `architecture: the instrument count is ${INSTRUMENT_IDS.length}`, countMatch !== null && Number(countMatch[1]) === INSTRUMENT_IDS.length, countMatch ? `it says ${countMatch[1]}` : 'no count');
+  const controls = readFileSync(CONTROLS_DOC, 'utf8');
+  const perCraft = levelTwoSection(controls, 'What the controls mean for each craft') ?? '';
+  const profiles = levelTwoSection(controls, 'Craft profiles: the Phase 3 craft') ?? '';
+  for (const { id } of craftRegistry.list()) {
+    const module = craftRegistry.get(id);
+    if (!module) {
+      check('craft', `${id}: has a registered module`, false);
+      continue;
+    }
+    const row = rows.get(id);
+    const kindOk = Boolean(row) && row[1].split(/\s+/)[0] === module.simProfile.model;
+    check('craft', `architecture: ${id} flies the ${module.simProfile.model} model`, kindOk, row ? `the row says ${row[1]}` : 'no row');
+    const documented = row ? instrumentIdsOf(row[2]) : [];
+    check('craft', `architecture: ${id} has its instruments in order`, documented.join(',') === module.instruments.join(','), `the row says ${documented.join(', ')}; the module has ${module.instruments.join(', ')}`);
+    check('craft', `controls: ${id} has a row in "What the controls mean for each craft"`, perCraft.includes(`| ${module.name} |`));
+    if (!PHASE1_CRAFT.includes(id)) {
+      check('craft', `controls: ${id} has its full profile`, profiles.split(/\r?\n/).includes(`### ${module.name}`));
+    }
+  }
+}
+
+// ---- npm scripts ---------------------------------------------------------------------------------
+function testScripts() {
+  const scripts = Object.keys(JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts);
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  const named = (name) => readme.includes(`\`npm run ${name}\``) || readme.includes(`\`${name}\``) || (name === 'test' && readme.includes('`npm test`'));
+  const missing = scripts.filter((name) => !named(name));
+  check('scripts', `README.md names all ${scripts.length} npm scripts`, missing.length === 0, missing.length ? `missing ${missing.join(', ')}` : '');
+}
+
 testLinks();
 testPresets();
 testSections();
 testEngineTable();
 testTemplates();
 testWindParams();
+testPresetParams();
+testStructureRecipes();
+testEngineVocabulary();
+testCraftDocs();
+testScripts();
 
 let failed = 0;
 for (const result of results) {
