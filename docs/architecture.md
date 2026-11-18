@@ -213,7 +213,7 @@ system, and then starts the frame loop.
 | `jetAero.js` | the jet's SimFixedWing extension: turbofan with afterburner and detent, transonic drag, wing rock, buffet |
 | `jetFcs.js` | the jet's flight control system: its assist catalog and handler, autopilot and trim handler |
 | `aerobaticAero.js`, `aerobaticAssists.js`, `maneuverRecognizer.js` | the aerobatic (kind `aerobatic`, SimFixedWing): the stalled wing's autorotation (snap rolls) and the figure judging; its assists (no attitude protection at any level); the pure recognizer of the 12 figures (`figureFlown`) |
-| `spaceplaneAero.js`, `spaceplaneFcs.js` | the spaceplane (kind `spaceplane`, SimFixedWing): the air-augmented rocket, RCS blended by dynamic pressure, wave drag, heating (rho V^3), the apogee; its flight control system with attitude hold and auto re-entry |
+| `spaceplaneAero.js`, `spaceplaneFcs.js` | the spaceplane (kind `spaceplane`, SimFixedWing): the air-augmented rocket, RCS blended by dynamic pressure, wave drag, heating (rho V^3), the apogee; its flight control system with attitude hold, auto re-entry and the copilot's climb to space (`craftState.spaceClimb`) |
 | `floats.js` | the seaplane's SimFixedWing extension: per-float buoyancy against the water query, planing and the hump, porpoising, water rudders, the amphibian wheels (nose-over, skid on land), water strikes, the gear advisory and the water handling assist |
 | `assists.js` | the assists control stage, assist catalogs and handlers per model kind, the fixed-wing handler |
 | `assistDefaults.js` | the one-time HOTAS assist default (50 % on craft the player never set) and which craft the player set |
@@ -357,12 +357,13 @@ system, and then starts the frame loop.
 | file | what |
 | --- | --- |
 | `copilot.js` | `Copilot` (local grammar brain), `RemoteCopilot` (HTTP brain with fallback), the `copilot` system |
-| `grammar.js` | the v2 aircraft grammar and the shared action validator `sanitizeFlightAction` |
+| `grammar.js` | the v2 aircraft grammar and the shared action validator `sanitizeFlightAction`; the names and synonyms of all 14 craft and skins by name ("the dragon"), never a craft named as a place ("fly over the balloon festival") or in a negated request |
 | `flightActions.js` | the executor for aircraft actions, reporting real outcomes |
-| `flightState.js` | the v2 half of the flight-state snapshot and craft capabilities |
+| `flightState.js` | the v2 half of the flight-state snapshot and craft capabilities; `onWater`, `craftState` (each craft's contract h.3 fields, rounded and bounded: `CRAFT_STATE_FIELDS`, `craftStateSnapshot`) and `challenge` (`challengeSnapshot` of `state.challenge`) |
 | `flightChatter.js` | chatter for landings, soft crashes, craft changes, lift hints, and the lines a set piece narrates (`setPiece:narrate`, tokens {distance} {direction} {name} {eta} filled when offered), all through the chatter gate |
-| `commandChips.js` | the "Aircraft" and "Guide" quick-chip rows |
+| `commandChips.js` | the "Aircraft" and "Guide" quick-chip rows; the Guide row adds the cross-craft chips: Find water, Find a perch (on a craft that perches), To space (on the spaceplane), Start challenge (while a start prompt shows) and Yes, switch / No (while an offer to switch craft is open) |
 | `tourGuide.js` | the Phase 2 tour guide: "what's nearby", "take me to the ...", "find a thermal", "chase the storm", "next discovery", the proactive callouts and their "yes", and the `nearby` / `activeEvents` / `weather` / `callouts` flight-state fields |
+| `craftGuide.js` | the Phase 3 cross-craft guide (contract j.2): "find water to land" (`waterQuery.bodiesNear` and the open sea), "find a perch" (`colliders.perchesNear`; the eagle's own approach within 300 m), "wind at [altitude]" (`ctx.wind.probe`; metres, feet, km, words and flight levels), "start / cancel the challenge", "take me to space" (the spaceplane's `climbToSpace`), "scenic cruise" and "smoke on / off" on every craft; the yes / no offer before a switch to the spaceplane or the airship (15 s, `copilot:confirm`, the `confirm` flight-state field) and "craft help" |
 
 ### `src/gameplay`
 
@@ -425,7 +426,7 @@ and `waypoints.js` (waypoint beacon and arrow), from v1. `ignition.js` (Phase 3,
 | `lab/spawns.mjs`, `lab/director.mjs`, `lab/audio.mjs`, `lab/discovery.mjs` | the spawn framework, the event director and the regional weather, the spawn voices and recipes, and the discovery loop, headless ([Testing](#testing)) |
 | `lab/wind-engines.mjs`, `lab/structure.mjs`, `lab/setpiece.mjs` | the vortex and windModifier engines, the structure engine and the set-piece engine, headless |
 | `lab/preset-pacing.mjs`, `lab/preset-flight.mjs`, `lab/preset-wind.mjs` | the game's presets under the real director over simulated hours, and the SIM glider and jet flown through the real wind-affecting presets (Milestone E) |
-| `lab/copilot.mjs` | WREN's local grammar (version one, the view commands, the tour guide, retired commands) and the `switchVersion`, `setView` and tour-guide action schemas |
+| `lab/copilot.mjs` | WREN's local grammar (version one, the view commands, the tour guide, retired commands, each craft's commands, the cross-craft phrases with their variants and negatives) and the action schemas; the remote flight-state fields; the cross-craft guide and the craft switch with a skin on a mock game |
 | `lab/input.mjs`, `lab/storage.mjs`, `lab/copilot-server.mjs` | input pipeline, storage and copilot-server origin labs |
 | `spawn-check.mjs`, `engine-alloc.mjs`, `engine-cost.mjs` | the spawn framework in the browser with the dev test kit; the sampled allocations of an engine's frame update; an engine's per-frame CPU, triangles and draw calls in representative scenes |
 | `png-diff.mjs`, `process-load.mjs` | pixel comparison of two screenshots; other programs' CPU and GPU load against the harness's own (Windows) |
@@ -724,6 +725,7 @@ Untyped events keep v1's `namespace:verb` names:
 - `landmark:discovered`, `landmark:threaded`, `journal:changed`, `birds:scattered`;
 - `copilot:speech { text, source }`, `copilot:listening`, `copilot:transcript`, `mic:toggle`;
 - `copilot:callout { text, presetId, spawnId }`, `copilot:offer { active, name?, presetId?, expiresIn? }` (the tour guide);
+- `copilot:confirm { active, kind?, craft?, question?, expiresIn? }` (the cross-craft guide's offer to switch craft);
 - `ui:command`, `ui:action`;
 - `journal:discovery { entry, found, total }`, `journal:record { key, value, previous, improved, op,
   presetId }`, `journal:achievement { entry }` (the journal, after it recorded one).
@@ -2069,6 +2071,7 @@ separately and judged only against [v1-known-issues.md](v1-known-issues.md).
 | `node tools/lab/preset-pacing.mjs [--hours N]` | the game's presets under the real director with the real placement over simulated hours (3 seeds, 3 speeds, day and night): every common and uncommon event preset activates, every rare one too (on its own runs when the shared runs miss it, the dirty thunderstorm with the volcano erupting often), the volcano's and the fissure's eruptions start, nothing activates behind; prints the drought shares and the activations per preset |
 | `node tools/lab/preset-pacing.mjs [--hours N]` | the game's presets under the real director with the real placement over simulated hours (3 seeds, 3 speeds, day and night): every event preset activates (each legendary combo and global override too, on its own runs with every other legendary set aside and the sites its `siteActive` precondition names kept awake when the shared runs miss it: a legendary is due only every 1-2 h), the volcano's eruption starts, nothing activates behind; prints the drought shares and the activations per preset |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/copilot-guide.json` (add `--query renderer=webgl`) | WREN's tour guide in the game: a callout on `spawnActivated` with an open offer, the Guide chips, "yes" placing the waypoint, the 45 s rate limit, "take me to", "find a thermal" against the WindField, "chase the storm", "next discovery", "guide help", and the remote flight state's `nearby[]`, `activeEvents[]`, `weather` and `callouts` |
+| `node tools/smoke-test.mjs --url <dev server>/v2/ --steps-file tools/steps/copilot-p3.json` (add `--query renderer=webgl`) | WREN's cross-craft phrases and their equivalents (contract j.2): the switch to all 14 craft by synonym and the dragon skin, the picker, keys 7, `]` and `[`; smoke by voice, Space and Shift+Space; Find water on real water and on a lake site within 40 km; Find a perch on a real perch and the eagle's own approach; the wind at three heights against the WindField and the balloon's wind column; a test course started by voice, chip and Y; the yes / no offers into the airship's scenic cruise (and Space) and the spaceplane; the remote flight state's `onWater`, `craftState`, `challenge` and `confirm`; the climb to space stepped by hand at 100 ms frames past 100 km with 0 NaN (about 3 minutes) |
 | `node tools/smoke-test.mjs --url <shell>/?v=2#seed=LINKTEST&t=0.300 --steps-file tools/steps/seed-link.json` | a share link opens V2 in the launcher in its seed at its time of day, Copy link inside the shell gives the shell URL, and a seed applied in V2 reloads the game inside the shell into that world |
 | `node tools/smoke-test.mjs --url <dev server>/v2/ --query seed=ENGINEFAUNA --steps-file tools/steps/engine-fauna.json` (and `engine-waterEffect.json` with `seed=ENGINEWATER`) | the fauna and waterEffect engines force-spawned ahead with screenshots, their behaviours, and dispose back to the memory baseline |
 | `node tools/engine-cost.mjs --url <dev server>/v2/ --engine fauna\|waterEffect` | the engine's per-frame CPU, triangles and draw calls in representative scenes, and its frame update's allocations from the heap profiler |
