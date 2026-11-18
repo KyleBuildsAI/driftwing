@@ -1067,6 +1067,13 @@ exactly as a Phase 2 recipe does.
 
 `stats()` also returns `movers`, `flames`, `litFlames` and `blocks`.
 
+- **Floating origin.** The engine's shared instanced pools (the turbine nacelles and rotors, the
+  windsocks, the mist puffs, the flames, the blocks and the lanterns) are created with
+  `createInstancedPool({ origin })` (`src/spawns/pools.js`, contract a.7 pattern 2): each mesh stands
+  at the render origin and its float32 instance matrices hold translations relative to it,
+  subtracted in float64 before the store, so a structure far from the world origin draws without
+  jitter. A rebase moves every drawn slot back by the delta with no allocation.
+
 ## Events
 
 | event | kind | payload |
