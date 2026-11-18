@@ -1823,24 +1823,22 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
 Waves 1, 2 and 3 are done: the 100 presets (31-100 in seven batches) are merged into `v2-phase3` in
 spec order, wired across batches and verified on both backends (the I3 subsection above). Not tagged yet: `v2-phase3` is tagged at the end of the phase.
 
-**PAUSED 2026-11-17 at the owner's request, mid wave 4.** The wave 4 workflow (run `wf_1ee2741c-25b`,
-script `.claude/orchestration/p3-wave4.js`) was stopped while all six engineers were working. Each branch's
-work is committed and pushed; the last commit on four of them is a `chore: save in-progress ... before
-the pause` commit holding unfinished, unverified edits that must be reviewed before building on them:
+**PAUSED again 2026-11-18 at the owner's request, mid wave 4** (first paused 2026-11-17, resumed 2026-11-18).
+The workflow (run `wf_1ee2741c-25b`, script `.claude/orchestration/p3-wave4.js`) was stopped at a clean point:
+every branch has all its work committed and pushed, with no save commit needed this time.
 
-| Branch | Head | State when stopped |
+| Branch | Head | State |
 | --- | --- | --- |
-| `p3/journal` | `c6f1c10` | records, panel sections, journal lab and docs committed; the save commit adds the unfinished `tools/steps/journal-p3.json` |
-| `p3/copilot` | `a010d51` | climb-to-space command, 14-craft switching, the cross-craft guide with its confirm, the Guide chips, the remote `flightState` fields, lab coverage and the reference server committed; no save commit |
-| `p3/docs` | `8ee001c` | spawns doc fixes and its docs-check cross-check, the engines list, controls profiles for every Phase 3 craft and the architecture's Phase 3 systems committed; no save commit |
-| `p3/verify-hooks` | `e27b0fb` | the k.5 soak legs committed; the save commit holds unfinished edits to the determinism test, the origin-rebase check and the golden-frame step |
-| `p3/verify-craft` | `2adf841` | only the save commit: unfinished edits to FlightController, SimFlapper, groundContact, landing and its progress subsection |
-| `p3/content-fixes` | `6581a67` | lava rivers rated rare, forced spawns freeing room, site-bound debug spawns on their nearest site committed; the save commit holds unfinished edits to the fauna engine, the water query, the sleeping giant, the presets 61-70 checks, the fauna-modes lab and the fauna engine doc |
+| `p3/journal` | `6130d7b` | done and verified by its engineer (result saved in `.claude/orchestration/p3-wave4-results.json`) |
+| `p3/copilot` | `16cc97f` | done and verified by its engineer (result saved) |
+| `p3/docs` | `e566021` | done and verified by its engineer (result saved) |
+| `p3/verify-hooks` | `bee2b4a` | in progress: the soak, the determinism digests, the terrain and spawns coverage and the origin-rebase check committed; the golden-frame first shot and the runs on both backends remain |
+| `p3/verify-craft` | `9628cbc` | in progress: independent craft test runs, the WebGL2 spaceplane stall, the eagle hillside hop and allocation, the balloon starts committed; the full WebGL2 run on `959d415` gave 382/386; the final full runs on both backends remain |
+| `p3/content-fixes` | `ab59714` | in progress: most listed items fixed and committed; the remaining items and the runs on both backends remain |
 
-To resume: the worktrees under `.claude/worktrees/p3-*` still exist on these branches. Relaunch the
-same script with `resumeFromRunId`; no agent finished, so all six rerun, and each engineer's prompt
-already says to review and continue any work left on its branch. Then I4, the final run, the review
-and the tag, as the table says.
+To resume: the worktrees under `.claude/worktrees/p3-*` are kept. Relaunch the script with
+`resumeFromRunId: 'wf_1ee2741c-25b'`; the three finished engineers return from the cache and the three
+unfinished ones rerun with handoff notes in their prompts. Then I4, the final run, the review and the tag.
 
 Next: **wave 4** (the table above). Six engineers work in parallel worktrees: Milestone O as journal
 (`p3/journal`), copilot (`p3/copilot`) and docs (`p3/docs`), and the Milestone P preparation as test hooks
