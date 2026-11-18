@@ -1799,6 +1799,30 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
     on open slopes the crest ran the full 320 m out on both sides over falling ground (17 real sites
     on four seeds: 20 of 34 ends at the 320 m limit, up to 158 m over the ground); every one now meets
     the ground within 480 m (`ccb340d`).
+  - the frozen lake (91): its one overlay laid the glossy ice material 180-300 m past the basin, under
+    about 1700 plants a site. Now two overlays: the basin's own ground takes the ice and is a clearing
+    (a region overlay's `vegetation: { species: [], density: 0, mode: 'replace' }`, new and additive in
+    `src/world/overlays.js` and `worldgen.js`: nothing but the biome's boulders grows inside it, steep
+    ground included, wherever its weight reaches 0.35, where the chunk builder may lay its material),
+    and the forest beyond stands on a hoarfrost band (the palette, no ice). The terrain lab checks 25
+    real sites on two seeds: 0 plants on the ice, the forest kept around it (`bd62a3e`, `5a124b4`);
+  - the flamingos: the shallows search sampled rings 60 m apart, so a steep shore's band (a metre or
+    two wide) fell between a dry and a deep sample and the flock ended with no shallows (the "flock
+    without shallows" of I3). Where a bearing steps from dry to deep between rings, the search now
+    bisects to the band; the fauna-modes lab anchors a flock 150 m inland of a steep bank and it
+    finds the band (`8ca7a0f`); the engine-fauna-modes runs below judge the flush on random seeds;
+  - the ridge lift band (73): its columns hung at the site's own height while the crest under them
+    rises and falls 400 m and more along 4 km, so 17 of 232 columns on 29 real sites (12 seeds) lifted
+    a craft 200 m over their ground by under 90 % of the band, 8 not at all (the 0.2 m/s column). A
+    wind modifier source now takes `upFrom: 'ground'` (its up offset and its type's heights count
+    from the ground under it, read again once it moves a metre: `e4f76ac`, the wind engines lab
+    proves it), the band's columns use it, and they lift 4 m/s, not 3: with every column on its
+    ground the WindField's own lee sink (up to 3 m/s 200 m up on a lee flank in a full wind) still left
+    about one band in nine with a column under 0.5 m/s (wind from 16 directions over 15 seeds' sites),
+    at 4 m/s one in a thousand. The batch 8 check reads each column's mean lift over 4 s of the
+    field's gusts (16 samples) instead of one instant; its thresholds are unchanged (`953d9df`);
+  - the dispose checks name the sky modifiers that ended or appeared since their baseline, not only
+    the counts (`57e6bc5`), for the meteor shower item below.
 
 ## Decisions
 
