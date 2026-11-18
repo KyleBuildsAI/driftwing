@@ -15,8 +15,9 @@
 //     stream with the craft and are not a spawn's, and a live spawn's are its own), every challenge
 //     course a spawn registered since the baseline unregistered (the ring course and live spawns'
 //     courses are not the spawn's), the sky modifiers and the real lights back to their counts, the
-//     sky's sun overrides, the render origin's rebase listeners and the live audio voices back to
-//     their counts (contract Appendix B), the SpawnManager's leak counters unchanged, and on request
+//     sky's sun overrides (less the director's own override handles), the render origin's rebase
+//     listeners and the live audio voices back to their counts (contract Appendix B), the
+//     SpawnManager's leak counters unchanged, and on request
 //     the JS heap within a tolerance.
 import { createGeometryTracker, splitFresh } from './geometryTracker.js';
 import { heapAvailable, readHeapMB, round } from './testStats.js';
@@ -236,10 +237,17 @@ export function createDisposeCheck(ctx, framing) {
     return held;
   }
 
-  /** The sky's sun overrides (the midnight sun bends the sun path through one). */
+  /**
+   * The sky's sun overrides that are not the director's own: its override sink (createSkyOverrideSink,
+   * contract i.4) makes one handle per global override on its first night and holds it, at weight 0
+   * once the night ends, until the director goes, so those are the world's, as the ring course is.
+   */
   function sunOverrideCount() {
     const sky = ctx.systems.sky.getModifierState();
-    return Array.isArray(sky.sunOverrides) ? sky.sunOverrides.length : 0;
+    if (!Array.isArray(sky.sunOverrides)) return 0;
+    const director = ctx.systems.spawns.director;
+    const directorIds = new Set(director && typeof director.getOverrides === 'function' ? director.getOverrides().map((entry) => entry.id) : []);
+    return sky.sunOverrides.filter((override) => !directorIds.has(override.id)).length;
   }
 
   /** The render origin's rebase listeners (spawn caches of render-frame positions subscribe). */
