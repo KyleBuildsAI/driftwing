@@ -1778,6 +1778,15 @@ are fixed, one commit each, fast-forwarded onto `v2-phase3`; none was skipped.
     additive: a second run of the same craft inherited the first one's wind column, cruise, timers),
     searches its start place from the world's spawn and takes the spawn's heading (before: from where
     and how the previous run ended, so a perch start picked a different tree in each view).
+  - the eagle's perch fly-out (wave 2 open issue): off a tree top the hop holds about the perch's
+    height for its first tens of metres, so a hop facing up a steep hillside flew into it (a diagnostic
+    over 12 CRAFT-1 tree tops near the spawn, 8 facings, 13 winds, hands off after the hop: 260 of
+    1248 hops touched the ground). A hop off a tree top or a structure whose ground ahead rises into
+    it (within 50 m, closer under the perch than 1 m plus 0.1 m per metre out) now turns the bird on
+    the spot to the open way nearest its facing first (`3c354e6`): 59 of 1248 touched, all 2.7 s or
+    more after the hop (hands off, flying on into terrain, not the launch). Eagle lab 52/52 (new
+    hillside checks: facing uphill it turns 90 degrees and stays 13.4 m clear; facing downhill it goes
+    the way it faces).
 
 ### Wave 4 - p3/content-fixes
 
