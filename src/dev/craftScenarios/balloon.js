@@ -15,16 +15,20 @@
 //                        drags in the wind without a soft crash; the vent stops it
 //   balloon-rotation     the rotation vents turn the basket; let go, the rotation damping stops it
 //   balloon-steer        the copilot's "take us ..." picks the layer going that way and climbs to it
+//                        (asked for a compass direction that a band well above the balloon serves best)
 //   balloon-water        a 'water' placement on a lake (a basket put down on the water): it floats,
 //                        no water soft crash (limits.waterLanding 'basket')
 //
 // The general flight test drifts 400 m up, the stick rotating the basket.
 import { compassName } from '../../core/util.js';
+import { bestLayerToward } from '../../craft/balloon.js';
 
 /** The wind-layer test's target: the first band at least this far (m) above the balloon at the start. */
 const TARGET_RISE = 450;
 /** The script lets go of the burner when the climb will coast the rest of the way: the vertical speed times this (s). */
 const COAST_SECONDS = 30;
+/** The steer test asks for a direction whose best band is at least this far (m) above the balloon. */
+const STEER_RISE = 150;
 
 /** The horizontal distance between the ground velocity and a band's wind (m/s). */
 function windMismatch(api, band) {
@@ -45,6 +49,26 @@ function nearestBand(api) {
     }
   });
   return best;
+}
+
+/**
+ * The compass direction (a name the copilot understands) to ask the steer command for: of the eight,
+ * the one nearest the top band's wind whose best layer (the copilot's own choice, bestLayerToward)
+ * stands STEER_RISE or more above the balloon; the top band's direction when none does. How the bands
+ * veer depends on the world and the time, so a fixed pick could name the layer the balloon is in.
+ */
+function steerDirection(api) {
+  const column = api.craftState.windColumn;
+  const top = column[column.length - 1];
+  let best = null;
+  for (let index = 0; index < 8; index++) {
+    const toward = index * 45;
+    const layer = bestLayerToward(column, toward);
+    if (!layer || layer.band.altitude < api.flight.altitude + STEER_RISE) continue;
+    const off = Math.abs(((toward - top.towardDegrees + 540) % 360) - 180);
+    if (!best || off < best.off) best = { toward, off };
+  }
+  return compassName(best ? best.toward : top.towardDegrees);
 }
 
 const IDLE = Object.freeze({ throttle: 0, roll: 0, pitch: 0, yaw: 0 });
@@ -214,7 +238,7 @@ export default Object.freeze({
         const column = api.craftState.windColumn;
         const top = column[column.length - 1];
         if (t >= 3 && top.primed && api.once('steer')) {
-          api.memo.direction = compassName(top.towardDegrees);
+          api.memo.direction = steerDirection(api);
           api.memo.reply = api.controller.runCraftCommand('steer', api.memo.direction);
         }
         return IDLE;
