@@ -1804,7 +1804,13 @@ flight time. It is `ctx.systems.spawns.director`.
   neighbour spawn's part through the manager's allocation-free `nearestPart(presetId, engine, x, z,
   radius)` (the resonating spires' arcs find the crystal spires with it). Since wave 3 the manager's
   anchor rules also take `seek: 'valley'` (the deepest valley floor on dry ground within the radius: the
-  relief ring's mean ground 450 m out less the ground at the point).
+  relief ring's mean ground 450 m out less the ground at the point) and, since wave 4, `seek:
+  'openWater'` (the point of the sea whose 5 km disc holds the most sea: the hurricane's eye). Every seek
+  is one sliced search (`src/spawns/anchorSeek.js`): the director asks `prepareAnchor(presetId, x, z)`
+  on the tick it picks a seeking candidate, the manager runs the seek 200 ground probes a frame, and
+  the director activates on its next tick (asking again finishes any slices left, so the log does not
+  depend on the frame rate); a debug spawn or a manager without the director seeks inside `activate`,
+  with the same answer.
 
 ### Regional weather (`ctx.systems.weather`, `src/spawns/weather.js`)
 

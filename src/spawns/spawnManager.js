@@ -34,6 +34,7 @@ import { createLightPool } from './lightPool.js';
 import { createInstancedPool, createMeshPool, createObjectPool, createScratch, createSlotAllocator } from './pools.js';
 import { matchesTimeOfDay } from './director.js';
 import { EngineCapacityError } from './engines/engineKit.js';
+import { createAnchorSeeks, seekDone } from './anchorSeek.js';
 
 export const DEFAULT_HEAVY_LIMIT = 2;
 export const DEFAULT_ENGINE_BUDGET = Object.freeze({ instances: 32, particles: 60000 });
@@ -60,29 +61,12 @@ const OCCLUSION_MARGIN = 1;
 const EVENT_GRACE_SECONDS = 45;
 const MEMORY_LOG_SIZE = 64;
 /**
- * preset.anchor seek 'peak': a coarse grid of this many samples a side over the disc, then its
- * PEAK_CLIMBS highest samples climb to their summits in strides halving down to PEAK_MIN_STRIDE (m).
+ * Ground probes a frame spends on the director's anchor seeks (src/spawns/anchorSeek.js: a valley's
+ * 2500-4000 probes run over about 15-20 frames instead of 13-27 ms in one), and the seeks kept at
+ * once (the oldest unclaimed one goes first).
  */
-const PEAK_SEEK_GRID = 25;
-const PEAK_CLIMBS = 4;
-const PEAK_MIN_STRIDE = 8;
-/**
- * preset.anchor seek 'valley' (Phase 3): the peak seek's strides over dry ground only (at least
- * VALLEY_DRY_MARGIN m above the water level: a valley floor, not its lake or the sea), climbing the
- * valley depth: the mean ground of a ring VALLEY_RING_RADIUS out (placement's relief ring) less the
- * ground at the point. A coastal plain's lowest dry ground is its beach, whose ring holds the sea and
- * scores low; a valley floor's ring holds both its slopes and scores high.
- */
-const VALLEY_DRY_MARGIN = 4;
-const VALLEY_RING_RADIUS = 450;
-const VALLEY_RING_SAMPLES = 8;
-/**
- * The valley's grid is sparser than the peak's, fewer samples climb and the strides stop coarser (a
- * herd's valley floor needs no metre precision): every probe reads its ring too.
- */
-const VALLEY_SEEK_GRID = 13;
-const VALLEY_CLIMBS = 3;
-const VALLEY_MIN_STRIDE = 40;
+const ANCHOR_SEEK_PROBES_PER_FRAME = 200;
+const MAX_ANCHOR_SEEKS = 4;
 /** Spawns alive at once (far above the budgets; activations past it are refused as 'capacity'). */
 export const MAX_SPAWNS = 512;
 /**
@@ -197,6 +181,9 @@ export function createSpawnManager(options) {
   let heavyLimit = DEFAULT_HEAVY_LIMIT;
   let nextSerial = 1;
   const worldSeedHash = hashString(String(seed));
+  /** The anchor seeks (src/spawns/anchorSeek.js) and those the director readied (prepareAnchor). */
+  const anchorSeeks = createAnchorSeeks(world);
+  const anchorSeekJobs = [];
 
   // ---- Records ----------------------------------------------------------------------------------
   const records = [];
@@ -599,12 +586,12 @@ export function createSpawnManager(options) {
 
   /**
    * preset.anchor (events): seek 'peak' moves the activation point to the highest ground within
-   * anchor.radius (a coarse grid over the disc, then a finer one around its best sample); seek
-   * 'valley' to the deepest valley floor on DRY ground there (seekValley; the activation itself when
-   * the disc holds no dry ground); align
-   * 'downwind' turns the heading downwind of the prevailing wind. Writes the result into out
-   * ({ x, y, z, heading }); without an anchor rule it is the activation itself. Runs once per
-   * activation, so it may allocate.
+   * anchor.radius, 'valley' to the deepest valley floor on DRY ground there, 'openWater' to the most
+   * open sea there (src/spawns/anchorSeek.js; valley and openWater keep the activation itself when the
+   * disc holds no dry ground or no sea); align 'downwind' turns the heading downwind of the prevailing
+   * wind. A seek prepareAnchor ran over the frames before is taken as it is; otherwise it runs now.
+   * Writes the result into out ({ x, y, z, heading }); without an anchor rule it is the activation
+   * itself. Runs once per activation, so it may allocate.
    */
   function applyAnchorRule(preset, position, heading, out) {
     out.x = position.x;
@@ -613,54 +600,13 @@ export function createSpawnManager(options) {
     out.heading = heading;
     const rule = preset.anchor;
     if (!rule) return out;
-    if (rule.seek === 'peak') {
-      const radiusSquared = rule.radius * rule.radius;
-      const inside = (x, z) => (x - position.x) * (x - position.x) + (z - position.z) * (z - position.z) <= radiusSquared;
-      // A coarse grid over the disc; its highest few samples then climb to their own summits (a
-      // peak narrower than the grid lies between samples), and the highest summit wins.
-      const step = (2 * rule.radius) / (PEAK_SEEK_GRID - 1);
-      const samples = [];
-      for (let row = 0; row < PEAK_SEEK_GRID; row++) {
-        for (let column = 0; column < PEAK_SEEK_GRID; column++) {
-          const x = position.x - rule.radius + column * step;
-          const z = position.z - rule.radius + row * step;
-          if (inside(x, z)) samples.push({ x, z, y: world.groundHeight(x, z) });
-        }
-      }
-      samples.sort((first, second) => second.y - first.y);
-      let best = samples.length > 0 ? samples[0] : { x: position.x, z: position.z, y: world.groundHeight(position.x, position.z) };
-      for (let index = 0; index < Math.min(PEAK_CLIMBS, samples.length); index++) {
-        const summit = { ...samples[index] };
-        for (let stride = step; stride >= PEAK_MIN_STRIDE; stride /= 2) {
-          let moved = true;
-          while (moved) {
-            moved = false;
-            for (let direction = 0; direction < 8; direction++) {
-              const angle = (direction / 8) * Math.PI * 2;
-              const x = summit.x + Math.cos(angle) * stride;
-              const z = summit.z + Math.sin(angle) * stride;
-              if (!inside(x, z)) continue;
-              const y = world.groundHeight(x, z);
-              if (y > summit.y) {
-                summit.x = x;
-                summit.z = z;
-                summit.y = y;
-                moved = true;
-              }
-            }
-          }
-        }
-        if (summit.y > best.y) best = summit;
-      }
-      out.x = best.x;
-      out.z = best.z;
-      out.y = Math.max(best.y, world.WATER_LEVEL);
-    } else if (rule.seek === 'valley') {
-      const best = seekValley(position, rule.radius);
-      if (best) {
-        out.x = best.x;
-        out.z = best.z;
-        out.y = best.y;
+    if (rule.seek) {
+      const job = claimAnchorSeek(preset.id, position.x, position.z) ?? anchorSeeks.start(rule.seek, position.x, position.z, rule.radius);
+      anchorSeeks.run(job);
+      if (job.found) {
+        out.x = job.x;
+        out.y = job.y;
+        out.z = job.z;
       }
     }
     if (rule.align === 'downwind') {
@@ -671,67 +617,51 @@ export function createSpawnManager(options) {
     return out;
   }
 
-  /** The valley depth at (x, z) whose ground is y: the relief ring's mean ground less y. */
-  function valleyDepth(x, z, y) {
-    let sum = 0;
-    for (let index = 0; index < VALLEY_RING_SAMPLES; index++) {
-      const angle = (index / VALLEY_RING_SAMPLES) * Math.PI * 2;
-      sum += world.groundHeight(x + Math.sin(angle) * VALLEY_RING_RADIUS, z - Math.cos(angle) * VALLEY_RING_RADIUS);
+  /** The kept seek of presetId at (x, z), or null. */
+  function findAnchorSeek(presetId, x, z) {
+    for (let index = 0; index < anchorSeekJobs.length; index++) {
+      const entry = anchorSeekJobs[index];
+      if (entry.presetId === presetId && entry.x === x && entry.z === z) return entry;
     }
-    return sum / VALLEY_RING_SAMPLES - y;
+    return null;
+  }
+
+  /** Takes the kept seek of presetId at (x, z) out of the list (its job), or null. */
+  function claimAnchorSeek(presetId, x, z) {
+    const entry = findAnchorSeek(presetId, x, z);
+    if (!entry) return null;
+    anchorSeekJobs.splice(anchorSeekJobs.indexOf(entry), 1);
+    return entry.job;
   }
 
   /**
-   * anchor seek 'valley': the deepest valley floor (VALLEY_RING_RADIUS) on dry ground within radius of
-   * position, as { x, y, z }, or null when the disc holds no dry ground. A coarse grid, then its deepest
-   * few samples climb the depth in halving strides (never onto water), and the deepest floor wins. Runs
-   * once per activation, so it may allocate.
+   * Readies the anchor seek of an activation the director is about to make (presetId at x, z):
+   * returns true when activate will find its answer without searching (a preset without a seek, or a
+   * seek done), and false when it has just started one, which update then runs a slice a frame
+   * (ANCHOR_SEEK_PROBES_PER_FRAME). Asked again for the same activation, it finishes whatever slices
+   * are left and returns true, so the director activates on its next tick whatever the frame rate
+   * (its log stays deterministic). Allocates only when it starts a seek.
    */
-  function seekValley(position, radius) {
-    const radiusSquared = radius * radius;
-    const dryFloor = world.WATER_LEVEL + VALLEY_DRY_MARGIN;
-    const inside = (x, z) => (x - position.x) * (x - position.x) + (z - position.z) * (z - position.z) <= radiusSquared;
-    const step = (2 * radius) / (VALLEY_SEEK_GRID - 1);
-    const samples = [];
-    for (let row = 0; row < VALLEY_SEEK_GRID; row++) {
-      for (let column = 0; column < VALLEY_SEEK_GRID; column++) {
-        const x = position.x - radius + column * step;
-        const z = position.z - radius + row * step;
-        if (!inside(x, z)) continue;
-        const y = world.groundHeight(x, z);
-        if (y > dryFloor) samples.push({ x, z, y, depth: valleyDepth(x, z, y) });
-      }
+  function prepareAnchor(presetId, x, z) {
+    const preset = presetById.get(presetId);
+    if (!preset || !preset.anchor || !preset.anchor.seek) return true;
+    const kept = findAnchorSeek(presetId, x, z);
+    if (kept) {
+      anchorSeeks.run(kept.job);
+      return true;
     }
-    if (samples.length === 0) return null;
-    samples.sort((first, second) => second.depth - first.depth);
-    let best = samples[0];
-    for (let index = 0; index < Math.min(VALLEY_CLIMBS, samples.length); index++) {
-      const floor = { ...samples[index] };
-      for (let stride = step; stride >= VALLEY_MIN_STRIDE; stride /= 2) {
-        let moved = true;
-        while (moved) {
-          moved = false;
-          for (let direction = 0; direction < 8; direction++) {
-            const angle = (direction / 8) * Math.PI * 2;
-            const x = floor.x + Math.cos(angle) * stride;
-            const z = floor.z + Math.sin(angle) * stride;
-            if (!inside(x, z)) continue;
-            const y = world.groundHeight(x, z);
-            if (y <= dryFloor) continue;
-            const depth = valleyDepth(x, z, y);
-            if (depth > floor.depth) {
-              floor.x = x;
-              floor.z = z;
-              floor.y = y;
-              floor.depth = depth;
-              moved = true;
-            }
-          }
-        }
-      }
-      if (floor.depth > best.depth) best = floor;
+    if (anchorSeekJobs.length >= MAX_ANCHOR_SEEKS) anchorSeekJobs.shift();
+    anchorSeekJobs.push({ presetId, x, z, job: anchorSeeks.start(preset.anchor.seek, x, z, preset.anchor.radius) });
+    return false;
+  }
+
+  /** A frame's slice of the kept seeks: ANCHOR_SEEK_PROBES_PER_FRAME ground probes, oldest first. */
+  function stepAnchorSeeks() {
+    let budget = ANCHOR_SEEK_PROBES_PER_FRAME;
+    for (let index = 0; index < anchorSeekJobs.length && budget > 0; index++) {
+      const job = anchorSeekJobs[index].job;
+      if (!seekDone(job)) budget = anchorSeeks.step(job, budget);
     }
-    return { x: best.x, y: best.y, z: best.z };
   }
 
   /** Whether the spawn's FAR lure shows: at the far tier, and for a dormant site (activeState) not at all. */
@@ -1236,6 +1166,7 @@ export function createSpawnManager(options) {
   function update(simDt, realDt) {
     if (!initialized) return;
     view.frame++;
+    if (anchorSeekJobs.length > 0) stepAnchorSeeks();
     scanSites();
     if (records.length > 0) {
       refreshCamera();
@@ -1380,6 +1311,7 @@ export function createSpawnManager(options) {
     activate,
     deactivate,
     update,
+    prepareAnchor,
     /** Why activating presetId from source would be refused now, or null. */
     canActivate(presetId, source = 'director') {
       return refusalFor(presetById.get(presetId) ?? null, source);
@@ -1559,6 +1491,7 @@ export function createSpawnManager(options) {
     /** Ends every spawn and frees the lures and lights. */
     dispose() {
       for (let index = records.length - 1; index >= 0; index--) removeRecordAt(index, 'disposed');
+      anchorSeekJobs.length = 0;
       lures.dispose();
       lightPool.dispose();
       initialized = false;

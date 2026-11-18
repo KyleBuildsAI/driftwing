@@ -1245,10 +1245,27 @@ export function createDirector({
     return record;
   }
 
+  /**
+   * Whether an activation of info at (x, z) waits for its anchor seek (preset.anchor.seek: a peak, a
+   * valley floor, open water): the SpawnManager runs the seek a slice a frame until the next tick
+   * (prepareAnchor), so no frame stalls on it, and the activation follows on that tick. A manager
+   * without prepareAnchor (the labs' stubs) seeks inside activate.
+   */
+  function anchorPending(info, x, z) {
+    const anchor = info.preset.anchor;
+    if (!anchor || !anchor.seek || typeof spawnManager.prepareAnchor !== 'function') return false;
+    return !spawnManager.prepareAnchor(info.id, x, z);
+  }
+
+  /**
+   * Activates the chosen candidate. Returns whether this tick's choice is spent: true when it started
+   * (or its anchor seek did, the activation following next tick), false when the manager refused it.
+   */
   function activateCandidate(record, reason) {
     const info = infos[record.presetIndex];
     if (info.combo) return activateCombo(info, record, reason);
     const site = record.siteIndex >= 0 ? siteScratch[record.siteIndex] : null;
+    if (site === null && anchorPending(info, record.x, record.z)) return true;
     const duration = durationFor(info, record.hash);
     const position = { x: record.x, y: site && Number.isFinite(site.groundY) ? site.groundY : groundY(record.x, record.z), z: record.z };
     const bucketEnd = (record.bucket + 1) * info.settings.bucketSeconds;
@@ -1279,6 +1296,7 @@ export function createDirector({
   // ---- Combo activation (contract i.3) ------------------------------------------------------------------
   /** A combo candidate passed every rule: start the combo and its members. */
   function activateCombo(info, record, reason) {
+    if (anchorPending(info, record.x, record.z)) return true;
     const bucketEnd = (record.bucket + 1) * info.settings.bucketSeconds;
     const label = candidateId(record, info.id);
     const started = startCombo(info, {

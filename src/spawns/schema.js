@@ -30,9 +30,10 @@ export const LURE_TYPES = Object.freeze(['plume', 'anvil', 'funnel', 'whale', 'i
 /**
  * How the SpawnManager may move an activation before the engines see it (preset.anchor): 'peak' the
  * highest ground in reach, 'valley' the deepest valley floor on dry ground in reach (Phase 3: a
- * migration's valley).
+ * migration's valley), 'openWater' the most open sea in reach (a hurricane's eye). See
+ * src/spawns/anchorSeek.js.
  */
-export const ANCHOR_SEEKS = Object.freeze(['peak', 'valley']);
+export const ANCHOR_SEEKS = Object.freeze(['peak', 'valley', 'openWater']);
 export const ANCHOR_ALIGNS = Object.freeze(['downwind']);
 /** Tokens a callout line may use; they are filled in when the line is spoken. */
 export const CALLOUT_TOKENS = Object.freeze(['distance', 'direction', 'name', 'eta']);
@@ -373,8 +374,10 @@ function validateActiveState(check, activeState, kind) {
 
 /**
  * anchor (events only, optional): moves an activation before the engines see it. seek 'peak' takes the
- * highest ground within radius metres of the activation point (lenticular clouds stand over peaks);
- * align 'downwind' turns the spawn's heading downwind of the prevailing wind.
+ * highest ground within radius metres of the activation point (lenticular clouds stand over peaks),
+ * 'valley' the deepest valley floor on dry ground there, 'openWater' the point of the sea whose 5 km
+ * disc holds the most sea there; align 'downwind' turns the spawn's heading downwind of the prevailing
+ * wind.
  */
 function validateAnchor(check, anchor, kind) {
   if (anchor === undefined || anchor === null) return;

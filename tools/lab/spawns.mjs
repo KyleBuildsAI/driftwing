@@ -19,6 +19,9 @@
 //                combo member; never one of its own combo; only holders the error names) and spawns,
 //                without a console error; with no holder left it is refused quietly as 'full'; an
 //                unforced spawn that meets a full pool still reports the error
+//   anchors      a director activation's anchor seek runs in slices (prepareAnchor, then at most
+//                200 ground probes a frame) and gives the same anchor as an activation that seeks at
+//                once; asked again it finishes at once; activate claims the readied seek
 //   lure         a heavy spawn 30 km out is FAR with its lure faded in, drawn at the projection limit
 //                with its angular size kept; it fades out when the spawn comes within mid range
 //   discovery    fires once when in range and in view; not while a ridge hides the sight line; a
@@ -570,6 +573,59 @@ function testForcedRoom() {
   consoleErrors.length = errorsBefore;
 }
 
+function testAnchorSeeks() {
+  const base = createTestPresets()[0];
+  const seeker = Object.freeze({ ...base, id: 'testPeakSeek', anchor: Object.freeze({ seek: 'peak', radius: 2500 }) });
+  // The ridge (800 m, |x| < 2000) lies 1500 m north of the activation: the peak seek finds it.
+  const position = { x: 300, y: 0, z: RIDGE_Z + 1500 };
+  const plainGround = world.groundHeight;
+  let probes = 0;
+  world.groundHeight = (x, z) => {
+    probes++;
+    return plainGround(x, z);
+  };
+  try {
+    const sliced = createLab();
+    sliced.manager.addPreset(seeker);
+    const readyAtOnce = sliced.manager.prepareAnchor(seeker.id, position.x, position.z);
+    let frames = 0;
+    let worstFrame = 0;
+    // Frames until a second ask finds the seek done without finishing it (probes stay put).
+    for (; frames < 200; frames++) {
+      const before = probes;
+      sliced.step(1);
+      worstFrame = Math.max(worstFrame, probes - before);
+      if (probes === before) break;
+    }
+    const before = probes;
+    const ready = sliced.manager.prepareAnchor(seeker.id, position.x, position.z);
+    const askProbes = probes - before;
+    const slicedId = sliced.manager.activate(seeker.id, { position, heading: 0, source: 'director' });
+    const activateProbes = probes - before - askProbes;
+    const slicedAnchor = sliced.manager.getInstance(slicedId).position;
+    const whole = createLab();
+    whole.manager.addPreset(seeker);
+    const wholeId = whole.manager.activate(seeker.id, { position, heading: 0, source: 'director' });
+    const wholeAnchor = whole.manager.getInstance(wholeId).position;
+    check('anchors', 'a readied seek runs in slices of at most 200 ground probes a frame', readyAtOnce === false && frames > 1 && worstFrame <= 200, `first ask ${readyAtOnce}, ${frames} frames, at most ${worstFrame} probes in one`);
+    check('anchors', 'the second ask finds it done and activate takes it without probing again', ready === true && askProbes === 0 && activateProbes === 0, `ask ${askProbes} probes, activate ${activateProbes}`);
+    check('anchors', 'the sliced seek puts the spawn where an activation that seeks at once does (on the ridge)', slicedAnchor.x === wholeAnchor.x && slicedAnchor.z === wholeAnchor.z && slicedAnchor.y === RIDGE_HEIGHT, `sliced ${slicedAnchor.x.toFixed(1)}, ${slicedAnchor.y}, ${slicedAnchor.z.toFixed(1)}; at once ${wholeAnchor.x.toFixed(1)}, ${wholeAnchor.y}, ${wholeAnchor.z.toFixed(1)}`);
+    check('anchors', 'activate claims the readied seek (the next ask starts a new one)', sliced.manager.prepareAnchor(seeker.id, position.x, position.z) === false);
+    // Asked again before its slices are done, it finishes at once (the director's next tick).
+    const hurried = createLab();
+    hurried.manager.addPreset(seeker);
+    hurried.manager.prepareAnchor(seeker.id, position.x, position.z);
+    hurried.step(1);
+    const hurriedReady = hurried.manager.prepareAnchor(seeker.id, position.x, position.z);
+    const hurriedId = hurried.manager.activate(seeker.id, { position, heading: 0, source: 'director' });
+    const hurriedAnchor = hurried.manager.getInstance(hurriedId).position;
+    check('anchors', 'asked again before it is done, the seek finishes at once with the same anchor', hurriedReady === true && hurriedAnchor.x === wholeAnchor.x && hurriedAnchor.z === wholeAnchor.z, `${hurriedAnchor.x.toFixed(1)}, ${hurriedAnchor.z.toFixed(1)}`);
+    check('anchors', 'a preset without a seek needs no readying', sliced.manager.prepareAnchor('testMarker', 0, 0) === true);
+  } finally {
+    world.groundHeight = plainGround;
+  }
+}
+
 function testIgnitableLeaks() {
   const ignition = createIgnitionService();
   const lab = createLab({ game: { ignition } });
@@ -772,6 +828,7 @@ testWind();
 testLeaks();
 testIgnitableLeaks();
 testForcedRoom();
+testAnchorSeeks();
 testLifetime();
 testMemoryLog();
 testCouplings();
