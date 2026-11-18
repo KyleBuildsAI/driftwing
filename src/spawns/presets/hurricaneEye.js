@@ -76,6 +76,10 @@ export default Object.freeze({
       },
     },
   ],
+  // The generated seas are archipelagos: the eye moves to the most open sea within 10 km of the
+  // candidate (the point whose eyewall disc holds the most sea), so the eye and its wall stand over
+  // the sea wherever the world has it.
+  anchor: Object.freeze({ seek: 'openWater', radius: 10000 }),
   lod: { near: 9000, mid: 30000, far: 70000 },
   lure: { type: 'anvil', height: 12000, width: 42000, color: 0xe1e5ea },
   wind: [],

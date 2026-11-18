@@ -51,6 +51,11 @@
 //                 regional blend on the real world, and the director's wiring (never candidates, the
 //                 scheduled nights exactly, the sink, the once-a-night spawn, forceSpawn)
 //   schema        the validator accepts a full combo and override and refuses broken blocks
+//   anchors       (wave 4) an event whose preset seeks its anchor waits one tick for the manager's
+//                 sliced seek (prepareAnchor) and starts on the next, at the same point and in a
+//                 deterministic log; without prepareAnchor it starts at once. On the real world the
+//                 sliced seeks (peak, valley, openWater) give exactly the unsliced answers, and the
+//                 hurricane's openWater seek moves its eye onto more open sea on four seeds
 //
 // Usage: node tools/lab/director.mjs [--hours 24] [--verbose] [--presets stub|real]
 // --presets real runs the pacing checks against the game's own presets (src/spawns/presets/index.js)
@@ -77,6 +82,7 @@ import {
   MIDNIGHT_SUN_SKIM, applyMidnightSun, createRegionField, nightIndex, nightWindow, scheduledNights,
 } from '../../src/spawns/overrides.js';
 import { validatePresets } from '../../src/spawns/schema.js';
+import { OPEN_WATER_DISC, createAnchorSeeks, seekDone, seekProbes } from '../../src/spawns/anchorSeek.js';
 import { angleBetween, bearingDegrees, hashString, mix32, rehash, unitFromHash } from '../../src/spawns/candidates.js';
 import {
   WEATHER_BUCKET_SECONDS, WEATHER_CYCLE_BUCKETS, WEATHER_REGION_SIZE, WEATHER_STATES, createWeatherModel, createWeatherSample,
@@ -1654,6 +1660,153 @@ function testNearActiveSites() {
 }
 
 /**
+ * Anchor seeks (wave 4): the director's one-tick wait for a seeking preset, and the sliced seeks on the
+ * real world generator.
+ */
+function testAnchorSeeks() {
+  const seeking = Object.freeze({
+    id: 'peakSeeker', name: 'peakSeeker', category: 'weather', kind: 'event', rarity: 'common', heavy: false,
+    candidates: { cellSize: 3500, bucketSeconds: 300, chance: 0.6 },
+    filters: { minDistance: 3000, maxDistance: 8000 },
+    engines: [{ engine: 'weatherVolume', params: {} }],
+    lifetime: { duration: [60, 90], despawn: DESPAWN },
+    anchor: Object.freeze({ seek: 'peak', radius: 2500 }),
+  });
+  const filler = eventPreset('seekFiller', 'wildlife', 'common', { candidates: { cellSize: 3500, bucketSeconds: 300, chance: 0.6 }, duration: [60, 90] });
+  function run(withPrepare) {
+    const world = createWorldGen('ANCHOR-LAB', WORLD_OPTIONS);
+    const path = createFlightPath({ pathSeed: 'anchor-lab', ...SPEEDS.bushplane });
+    const sun = createSun();
+    let time = 0;
+    const activations = [];
+    const asks = [];
+    const ready = new Set();
+    const live = new Map();
+    const manager = {
+      activate(presetId, options) {
+        const id = `anchor:${time}:${presetId}`;
+        if (presetId === seeking.id) activations.push({ time, x: options.position.x, z: options.position.z });
+        live.set(id, { anchor: { ...options.position }, radius: 300, heavy: false, ended: false, startedAt: time, duration: options.duration });
+        return id;
+      },
+      deactivate(id) { return live.delete(id); },
+      getActive: () => [...live.values()],
+      getInstance: (id) => live.get(id) ?? null,
+      getStats: () => ({ engines: {}, total: { lights: 0 } }),
+    };
+    if (withPrepare) {
+      // Ready on the second ask, as the SpawnManager's sliced seek is.
+      manager.prepareAnchor = (presetId, x, z) => {
+        const key = `${presetId}|${x}|${z}`;
+        asks.push({ time, key });
+        if (ready.has(key)) return true;
+        ready.add(key);
+        return false;
+      };
+    }
+    const director = createDirector({
+      seedHash: world.seedHash >>> 0, presets: [seeking, filler], spawnManager: manager, weather: createWeatherModel(world.seedHash >>> 0),
+      terrain: { heightAt: world.heightAt, biomeAt: world.biomeAt, waterLevel: CONFIG.WATER_LEVEL },
+      getPlayer: () => path.player, getTime: () => time, getSun: () => sun.sun, isInView: createView(path.player),
+    });
+    for (let step = 0; step <= Math.round(3600 / STEP_SECONDS); step++) {
+      time = step * STEP_SECONDS;
+      path.step(STEP_SECONDS, time);
+      sun.update(time);
+      for (const [id, instance] of live) if (time - instance.startedAt > instance.duration) live.delete(id);
+      director.update();
+    }
+    const log = director.getLog().map((entry) => `${entry.time}|${entry.presetId}|${entry.candidateId}`).join(';');
+    director.dispose();
+    return { activations, asks, log };
+  }
+  const prepared = run(true);
+  const again = run(true);
+  const direct = run(false);
+  const waited = prepared.activations.filter((entry) => {
+    const key = `${seeking.id}|${entry.x}|${entry.z}`;
+    const first = prepared.asks.find((ask) => ask.key === key);
+    return first && first.time < entry.time && entry.time - first.time <= 1;
+  });
+  check('anchors', 'a seeking event starts on the tick after the director readied its seek (prepareAnchor), at the same point', prepared.activations.length > 0 && waited.length === prepared.activations.length, `${waited.length}/${prepared.activations.length} started within a second of their first ask`);
+  check('anchors', 'its log is deterministic', prepared.log === again.log && prepared.log.length > 0, `${prepared.log.length} chars`);
+  check('anchors', 'without prepareAnchor (a stub manager) a seeking event starts when chosen', direct.activations.length > 0, `${direct.activations.length} starts`);
+
+  // The sliced seeks on the real world: the same answer in any slices.
+  const gen = createWorldGen('DRIFTWING', WORLD_OPTIONS);
+  const seeks = createAnchorSeeks({ groundHeight: (x, z) => gen.heightAt(x, z), WATER_LEVEL: CONFIG.WATER_LEVEL });
+  let compared = 0;
+  let same = 0;
+  for (let index = 0; index < 8; index++) {
+    const x = Math.cos(index * 2.4) * (4000 + index * 2500);
+    const z = Math.sin(index * 2.4) * (4000 + index * 2500);
+    for (const [kind, radius] of [['peak', 2500], ['valley', 2500], ['openWater', 10000]]) {
+      const whole = seeks.run(seeks.start(kind, x, z, radius));
+      const sliced = seeks.start(kind, x, z, radius);
+      while (!seekDone(sliced)) seeks.step(sliced, 17 + index * 41);
+      compared++;
+      if (sliced.found === whole.found && sliced.x === whole.x && sliced.y === whole.y && sliced.z === whole.z) same++;
+    }
+  }
+  check('anchors', 'sliced peak, valley and openWater seeks give exactly the unsliced answers (real world)', same === compared, `${same}/${compared}`);
+
+  // The hurricane's openWater seek: its eye's 5 km disc holds more sea than at the candidate.
+  const hurricane = GAME_PRESETS.find((preset) => preset.id === 'hurricaneEye');
+  const seaShare = (world, x, z) => {
+    let sea = 0;
+    let probes = 0;
+    for (let ring = 0; ring <= 4; ring++) {
+      const count = ring === 0 ? 1 : 8 * ring;
+      const reach = (OPEN_WATER_DISC * ring) / 4;
+      for (let index = 0; index < count; index++) {
+        const angle = (index / count) * Math.PI * 2;
+        probes++;
+        if (world.heightAt(x + Math.cos(angle) * reach, z + Math.sin(angle) * reach) < CONFIG.WATER_LEVEL) sea++;
+      }
+    }
+    return sea / probes;
+  };
+  const rows = [];
+  let allSea = true;
+  for (const seed of ['DRIFTWING', 'HARNESS-1', 'SOAK-1', 'UGTZV7']) {
+    const world = createWorldGen(seed, WORLD_OPTIONS);
+    const waterSeeks = createAnchorSeeks({ groundHeight: (x, z) => world.heightAt(x, z), WATER_LEVEL: CONFIG.WATER_LEVEL });
+    let before = 0;
+    let after = 0;
+    let count = 0;
+    let probes = 0;
+    for (let index = 0; index < 12; index++) {
+      // A candidate of the sea 18-34 km out (the preset's band), as the surface filter admits one.
+      const angle = index * 2.4;
+      const distance = 18000 + ((index * 7919) % 16000);
+      let x = Math.cos(angle) * distance;
+      let z = Math.sin(angle) * distance;
+      let found = false;
+      for (let reach = 0; reach < 6000 && !found; reach += 300) {
+        for (let probe = 0; probe < 16 && !found; probe++) {
+          const px = x + Math.cos((probe / 16) * Math.PI * 2) * reach;
+          const pz = z + Math.sin((probe / 16) * Math.PI * 2) * reach;
+          if (world.heightAt(px, pz) < CONFIG.WATER_LEVEL) {
+            x = px;
+            z = pz;
+            found = true;
+          }
+        }
+      }
+      if (!found) continue;
+      const job = waterSeeks.run(waterSeeks.start(hurricane.anchor.seek, x, z, hurricane.anchor.radius));
+      if (!job.found || world.heightAt(job.x, job.z) >= CONFIG.WATER_LEVEL) allSea = false;
+      before += seaShare(world, x, z);
+      after += seaShare(world, job.x, job.z);
+      probes += seekProbes(job);
+      count++;
+    }
+    rows.push({ seed, before: before / count, after: after / count, probes: probes / count });
+  }
+  check('anchors', "the hurricane's eye moves onto more open sea on every seed (the sea share of its eyewall's 5 km disc)", allSea && rows.every((row) => row.after > row.before + 0.04), rows.map((row) => `${row.seed} ${(row.before * 100).toFixed(0)} -> ${(row.after * 100).toFixed(0)} % (${Math.round(row.probes)} probes)`).join(', '));
+}
+
+/**
  * --presets real: which of the game's presets filled the drought flights, per speed (a report next to
  * the pacing checks, which run on the same presets).
  */
@@ -1686,6 +1839,7 @@ if (REAL_MODE) {
   await testShedding();
   testNearFilter();
   testNearActiveSites();
+  testAnchorSeeks();
   testTrack();
   testCraftWeighting();
   testCombos();

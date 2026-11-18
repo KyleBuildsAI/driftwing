@@ -868,6 +868,12 @@ through into the calm eye: still air, a stadium of cloud curving up all around, 
   the volume); `emitter` (sea spray swept around under the eyewall).
 - **Filters:** any biome; day, dawn or dusk; clear, building or clearing weather (the eye shows the
   sky above); over water; player 0-14 000 m; 18-34 km ahead.
+- **Anchor:** `seek: 'openWater'` within 10 km: the eye moves to the point of the sea whose 5 km disc
+  (the eyewall's reach) holds the most sea. The generated worlds have no open ocean at a hurricane's
+  scale (their seas are archipelagos: within 60 km of the start no point has more than 43-46 % sea
+  within 5 km on DRIFTWING, HARNESS-1, SOAK-1 and UGTZV7), so this is the most open sea the world
+  offers near the candidate: the sea under the eyewall rises from 15-17 % at the candidate to 22-25 %
+  on average. The candidates, filters and rarity are unchanged.
 - **Candidates:** 30 km cells, 1800 s buckets, chance 0.4.
 - **Wind:** a cyclone: the eye calm (under 5 m/s, turbulence 0.04), the eyewall 42 m/s with lift and
   turbulence 0.95 with 9 m/s gusts, falling off as (wall / r)^0.6 to 28 km, inflow at low level, and
@@ -2599,7 +2605,7 @@ export default Object.freeze({
 | `achievements` | both | optional | `[{ id, title, description }]` | engines, journal |
 | `activeState` | site | optional | `{ duration: [min, max] }`: a dormant site the director wakes | director, SpawnManager |
 | `cooldown` | both | optional | seconds before it may run again | director |
-| `anchor` | event | optional | `{ seek: 'peak' \| 'valley', radius, align: 'downwind' }` | SpawnManager |
+| `anchor` | event | optional | `{ seek: 'peak' \| 'valley' \| 'openWater', radius, align: 'downwind' }` | SpawnManager |
 | `tags` | both | optional | distinct names from `PRESET_TAGS` (schema.js): the craft weighting's vocabulary | director (contract i.2) |
 | `combo` | event | optional, legendary only | `{ preconditions?, members, exclusive?, heavySlots? }`, a member `{ presetId, role?, place?, delay?, optional? }` ([Combos](#combos-legendary-presets-92-97-99-and-100)) | director (contract i.3) |
 | `override` | event | optional, not with `combo` | `{ kind: bloodMoon \| midnightSun, nightChance, region: null \| { biomes, blendKm } }` ([Global overrides](#global-overrides-the-blood-moon-and-the-midnight-sun)) | director, sky (contract i.4) |
