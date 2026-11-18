@@ -2272,8 +2272,10 @@ fluff they stir up.
 [src/spawns/presets/migrationConvergence.js](../src/spawns/presets/migrationConvergence.js)
 
 - **Kind:** event, legendary combo.
-- **Anchor:** `seek: 'valley'` within 2.5 km: the deepest valley floor on dry ground (never a beach);
-  the members stand around it.
+- **Anchor:** `seek: 'valley'` within 2.5 km: the deepest valley floor on dry ground (never a beach):
+  the point whose ground rises the most 450 m out in all but two of eight directions (a floor may fall
+  away down its valley; a hollow on a mountain's flank, open below on half its sides, scores low). The
+  members stand around it.
 - **Combo:** preconditions meadows or pine, day or golden, clear or clearing; members
   `butterflyMigration` (51, the anchor), `geeseFormation` (15, 500 m on), `herdStampede` (49, 700 m
   at 70 degrees, 10 s later: the grazing bison, which stampede when buzzed); exclusive.

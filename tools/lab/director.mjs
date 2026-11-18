@@ -54,7 +54,8 @@
 //   anchors       (wave 4) an event whose preset seeks its anchor waits one tick for the manager's
 //                 sliced seek (prepareAnchor) and starts on the next, at the same point and in a
 //                 deterministic log; without prepareAnchor it starts at once. On the real world the
-//                 sliced seeks (peak, valley, openWater) give exactly the unsliced answers, and the
+//                 sliced seeks (peak, valley, openWater) give exactly the unsliced answers, the
+//                 valley seek stands on a floor (never a hollow on a mountain's flank), and the
 //                 hurricane's openWater seek moves its eye onto more open sea on four seeds
 //
 // Usage: node tools/lab/director.mjs [--hours 24] [--verbose] [--presets stub|real]
@@ -1749,6 +1750,33 @@ function testAnchorSeeks() {
     }
   }
   check('anchors', 'sliced peak, valley and openWater seeks give exactly the unsliced answers (real world)', same === compared, `${same}/${compared}`);
+
+  // The valley seek finds a floor, not a hollow on a mountain's flank: the ground 400 m round its
+  // answer stands 5 m+ higher on average and falls below it in at most 6 of 16 directions (the
+  // presets 91-100 check of the migration convergence), over 40 activations on each of four seeds.
+  let valleys = 0;
+  let floors = 0;
+  const flanks = [];
+  for (const seed of ['AU9VRV', 'DRIFTWING', 'HARNESS-1', 'SOAK-1']) {
+    const world = createWorldGen(seed, WORLD_OPTIONS);
+    const valleySeeks = createAnchorSeeks({ groundHeight: (x, z) => world.heightAt(x, z), WATER_LEVEL: CONFIG.WATER_LEVEL });
+    for (let index = 0; index < 40; index++) {
+      const job = valleySeeks.run(valleySeeks.start('valley', Math.sin(index * 12.9898) * 30000, Math.cos(index * 78.233) * 30000, 2500));
+      if (!job.found) continue;
+      valleys++;
+      let ring = 0;
+      let lower = 0;
+      for (let direction = 0; direction < 16; direction++) {
+        const angle = (direction / 16) * Math.PI * 2;
+        const height = world.heightAt(job.x + Math.sin(angle) * 400, job.z - Math.cos(angle) * 400);
+        ring += height;
+        if (height < job.y) lower++;
+      }
+      if (ring / 16 - job.y >= 5 && lower <= 6) floors++;
+      else flanks.push(`${seed} ${index}: ${lower} lower`);
+    }
+  }
+  check('anchors', 'the valley seek stands on a valley floor (the ground 400 m round 5 m+ higher, at most 6 of 16 directions lower), never a flank hollow', valleys > 100 && floors === valleys, `${floors}/${valleys} floors${flanks.length ? `; ${flanks.slice(0, 4).join(', ')}` : ''}`);
 
   // The hurricane's openWater seek: its eye's 5 km disc holds more sea than at the candidate.
   const hurricane = GAME_PRESETS.find((preset) => preset.id === 'hurricaneEye');

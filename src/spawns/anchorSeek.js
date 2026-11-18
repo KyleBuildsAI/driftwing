@@ -5,9 +5,13 @@
 //
 //   peak       the ground height (the highest ground in reach; a lenticular's summit, the bats' crag)
 //   valley     the valley depth on DRY ground (at least VALLEY_DRY_MARGIN m above the water level):
-//              the mean ground of a ring VALLEY_RING_RADIUS out less the ground at the point. A coastal
-//              plain's lowest dry ground is its beach, whose ring holds the sea and scores low; a valley
-//              floor's ring holds both its slopes and scores high (a migration's valley)
+//              how far the ground rises in all but VALLEY_LOWER_ALLOWED of the VALLEY_RING_SAMPLES
+//              directions of a ring VALLEY_RING_RADIUS out (the ring's third lowest ground less the
+//              ground at the point). A coastal plain's lowest dry ground is its beach, whose ring holds
+//              the sea and scores low; a valley floor's ring holds both its slopes and scores high, and
+//              may fall away down the valley in two directions; a hollow on a mountain's flank, whose
+//              ring falls away on half its sides under the summit's mass, scores low (a migration's
+//              valley)
 //   openWater  the share of sea in the disc OPEN_WATER_DISC around a point of the sea: the most open
 //              water in reach (the hurricane's eye; the generated worlds' seas are archipelagos, so the
 //              sea-iest point of reach is the open ocean the world has)
@@ -31,6 +35,8 @@ const SEEK_SETTINGS = Object.freeze({ peak: PEAK, valley: VALLEY, openWater: OPE
 export const VALLEY_DRY_MARGIN = 4;
 export const VALLEY_RING_RADIUS = 450;
 const VALLEY_RING_SAMPLES = 8;
+/** Ring directions a valley floor may fall away in (down the valley, both ways). */
+const VALLEY_LOWER_ALLOWED = 2;
 /** The open-water seek's disc (m): a hurricane's eyewall reach, the sea the eye and its wall stand on. */
 export const OPEN_WATER_DISC = 5000;
 /** Its probe rings: ring k (1..OPEN_WATER_RINGS) at k / OPEN_WATER_RINGS of the disc, 8 k probes. */
@@ -72,6 +78,8 @@ const SAMPLE_SIZE = 4;
  */
 export function createAnchorSeeks(world) {
   const waterLevel = world.WATER_LEVEL;
+  /** A valley score's ring heights, kept sorted as they are read (no allocation per probe). */
+  const ringHeights = new Float64Array(VALLEY_RING_SAMPLES);
 
   /**
    * A new seek job: kind 'peak' | 'valley' | 'openWater' over the disc of radius around (x, z). The
@@ -120,13 +128,18 @@ export function createAnchorSeeks(world) {
     if (job.kind === 'peak') return ground;
     if (job.kind === 'valley') {
       if (ground <= waterLevel + VALLEY_DRY_MARGIN) return NaN;
-      let sum = 0;
       for (let index = 0; index < VALLEY_RING_SAMPLES; index++) {
         const angle = (index / VALLEY_RING_SAMPLES) * Math.PI * 2;
-        sum += world.groundHeight(x + Math.sin(angle) * VALLEY_RING_RADIUS, z - Math.cos(angle) * VALLEY_RING_RADIUS);
+        const height = world.groundHeight(x + Math.sin(angle) * VALLEY_RING_RADIUS, z - Math.cos(angle) * VALLEY_RING_RADIUS);
+        let slot = index;
+        while (slot > 0 && ringHeights[slot - 1] > height) {
+          ringHeights[slot] = ringHeights[slot - 1];
+          slot--;
+        }
+        ringHeights[slot] = height;
       }
       state[S_PROBES] += VALLEY_RING_SAMPLES;
-      return sum / VALLEY_RING_SAMPLES - ground;
+      return ringHeights[VALLEY_LOWER_ALLOWED] - ground;
     }
     // openWater: the share of sea in the disc around a point of the sea.
     if (ground >= waterLevel) return NaN;
