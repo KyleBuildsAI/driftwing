@@ -83,7 +83,12 @@ const MAX_DETAILS = 20;
 /** Where the start places are searched (m around the craft). */
 const OCEAN_SEARCH = Object.freeze({ radius: 40000, step: 500, angles: 16, minDepth: 15 });
 const LAKE_SEARCH_RADIUS = 60000;
-const THERMAL_RING = Object.freeze({ radius: 6000, samples: 8, minStrength: 1 });
+/**
+ * A thermal start: thermals within radius of the spawn, their core strength sampled every step (s)
+ * over the run's length; the nearest whose core stays at working strength the whole time, else the
+ * one that stays strongest (at least minStrength m/s).
+ */
+const THERMAL_SEARCH = Object.freeze({ radius: 6000, step: 10, working: 2.5, minStrength: 1 });
 const SLOPE_SEARCH = Object.freeze({ radius: 20000, step: 400, angles: 16, minGrade: 0.25, maxGrade: 1, minHeight: 60, probe: 20 });
 /**
  * Perch searches widen ring by ring (m) and stop at the first that finds one: the vegetation perch
@@ -422,13 +427,32 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     return found;
   }
 
-  function findThermal(origin) {
+  /**
+   * The thermal to start in (THERMAL_SEARCH). A thermal's core waxes and wanes over its life cycle on
+   * the world clock, which runs on through every run: judged over the run's whole length, the start is
+   * as good whatever flew before it (the nearest thermal at the start may be dying by mid-run).
+   */
+  function findThermal(origin, seconds) {
     const wind = ctx.wind;
-    if (!wind || typeof wind.nearestThermal !== 'function') return null;
-    let best = wind.nearestThermal(origin, THERMAL_RING.minStrength);
-    for (let sample = 0; !best && sample < THERMAL_RING.samples; sample++) {
-      const angle = (sample / THERMAL_RING.samples) * Math.PI * 2;
-      best = wind.nearestThermal({ x: origin.x + Math.sin(angle) * THERMAL_RING.radius, y: origin.y, z: origin.z - Math.cos(angle) * THERMAL_RING.radius }, THERMAL_RING.minStrength);
+    if (!wind || typeof wind.thermalsNear !== 'function') return null;
+    const now = state.time.elapsed;
+    const thermals = new Map();
+    for (let offset = 0; offset <= Math.max(0, seconds); offset += THERMAL_SEARCH.step) {
+      wind.thermalsNear(origin.x, origin.z, THERMAL_SEARCH.radius, (thermal) => {
+        const known = thermals.get(thermal.id);
+        if (known) known.weakest = Math.min(known.weakest, thermal.strength);
+        else thermals.set(thermal.id, { x: thermal.x, z: thermal.z, weakest: thermal.strength, distance: Math.hypot(thermal.x - origin.x, thermal.z - origin.z) });
+      }, now + offset);
+    }
+    let best = null;
+    for (const thermal of thermals.values()) {
+      if (thermal.weakest < THERMAL_SEARCH.minStrength) continue;
+      const working = thermal.weakest >= THERMAL_SEARCH.working;
+      const better = !best
+        || (working && !best.working)
+        || (working && best.working && thermal.distance < best.distance)
+        || (!working && !best.working && thermal.weakest > best.weakest);
+      if (better) best = { x: thermal.x, z: thermal.z, working, weakest: thermal.weakest, distance: thermal.distance };
     }
     return best ? { x: best.x, z: best.z } : null;
   }
@@ -478,9 +502,10 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
   /**
    * The placement for a start (flight.startAt) and the resolved start point. Throws when the place is
    * not found. Every place is searched from the world's spawn point and the heading defaults to the
-   * spawn's, so a start never depends on where the run before it ended ('here' alone starts there).
+   * spawn's, so a start never depends on where the run before it ended ('here' alone starts there);
+   * a thermal is judged over the run's `seconds` (findThermal).
    */
-  function resolveStart(start) {
+  function resolveStart(start, seconds) {
     const at = start.at ?? 'here';
     const mode = start.mode ?? 'air';
     const spawn = state.spawn;
@@ -494,7 +519,7 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     else if (at === 'spawn') place = { x: state.spawn.x, z: state.spawn.z };
     else if (at === 'ocean') place = findOcean(origin);
     else if (at === 'lake') place = findLake(origin);
-    else if (at === 'thermal') place = findThermal(origin);
+    else if (at === 'thermal') place = findThermal(origin, seconds);
     else if (at === 'slope') place = findSlope(origin);
     else if (at === 'perch') place = findPerch(origin);
     if (at !== 'here') {
@@ -611,7 +636,7 @@ function createCraftTestSystem(ctx, { params, capture, listeners, world: pageWor
     result.notes.push(...setup.notes);
     let start;
     try {
-      start = resolveStart(spec.start);
+      start = resolveStart(spec.start, spec.seconds);
       result.start = { mode: start.placement.mode, applied: flight().startAt(start.placement), x: round(start.point.x, 1), y: round(start.point.y, 1), z: round(start.point.z, 1), heading: round(start.point.heading, 1) };
     } catch (error) {
       result.setupOk = false;
