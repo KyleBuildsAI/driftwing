@@ -47,13 +47,16 @@ export default Object.freeze({
         voice: true,
       }),
     }),
-    // The band: eight overlapping lift columns along the ridge's axis, centred over the crest.
+    // The band: eight overlapping lift columns along the ridge's axis, centred over the crest, each
+    // standing on the ground under it (the crest rises and falls 400 m and more along 4 km). 4 m/s,
+    // so a column standing on a lee flank of the crest still lifts in a full wind (the WindField's lee
+    // sink there reaches 3 m/s 200 m up).
     Object.freeze({
       engine: 'windModifier',
       params: Object.freeze({
         endWithDuration: false,
         sources: Object.freeze([-2100, -1500, -900, -300, 300, 900, 1500, 2100].map((along) => Object.freeze({
-          type: 'updraft', direction: 'heading', offset: Object.freeze([along, 0, 0]), radius: 520, updraft: 3, base: -160, top: 700,
+          type: 'updraft', direction: 'heading', offset: Object.freeze([along, 0, 0]), upFrom: 'ground', radius: 520, updraft: 4, base: -160, top: 700,
           sinkRing: 0, ringWidth: 0.5, turbulence: 0.22, gust: 2, fadeIn: 0,
         }))),
       }),

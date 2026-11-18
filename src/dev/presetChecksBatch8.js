@@ -109,9 +109,9 @@ export function installBatch8Checks(game) {
     return partsOf(spawn).flatMap((part) => part.windSourceIds ?? []);
   }
   /** The WindField's air at (x, y, z) now: { x, y, z, speed }. */
-  function airAt(x, y, z) {
+  function airAt(x, y, z, time = state.time.elapsed) {
     probePoint.set(x, y, z);
-    ctx.wind.probe(probePoint, state.time.elapsed, probeOut);
+    ctx.wind.probe(probePoint, time, probeOut);
     const vel = probeOut.vel;
     return { x: vel.x, y: vel.y, z: vel.z, speed: Math.hypot(vel.x, vel.z) };
   }
@@ -122,13 +122,18 @@ export function installBatch8Checks(game) {
   }
   /**
    * Lift (m/s) on the axes of the spawn's updraft sources, `above` m over the ground under each (or at
-   * the column's own centre height with above null).
+   * the column's own centre height with above null). averageSeconds > 0 reads the mean lift over that
+   * much of the field's clock (a sample every 0.25 s), so a gust passing at the moment of the read does
+   * not stand in for the column's lift.
    */
-  function updraftLifts(spawn, above = null) {
+  function updraftLifts(spawn, above = null, averageSeconds = 0) {
     const own = new Set(windIdsOf(spawn));
+    const samples = Math.max(1, Math.round(averageSeconds / 0.25));
     return ctx.wind.listSources().filter((source) => own.has(source.id) && source.kind === 'spawn-updraft').map((source) => {
       const y = above === null ? source.position.y : ctx.world.groundHeight(source.position.x, source.position.z) + above;
-      return airAt(source.position.x, y, source.position.z).y;
+      let sum = 0;
+      for (let index = 0; index < samples; index++) sum += airAt(source.position.x, y, source.position.z, state.time.elapsed + index * 0.25).y;
+      return sum / samples;
     });
   }
   /** The registered course of a spawn: its structure part's definition (world frame) and course key. */
@@ -215,12 +220,13 @@ export function installBatch8Checks(game) {
       if (!spawn) return check(`${presetId}: wind`, false, 'no live spawn');
       const sources = windIdsOf(spawn).length;
       if (presetId === 'ridgeLiftBand') {
-        // 200 m over the ground under each column: the real ridge's own slope lift and lee sink add to
-        // the band's 3 m/s (a column over a saddle in the lee reads well under it), so every column must
-        // still lift and the band 2.5 m/s on average.
-        const lifts = updraftLifts(spawn, 200);
+        // 200 m over the ground under each column (each stands on the ground under it), the mean over
+        // 4 s of gusts: the real ridge's own slope lift and lee sink add to the band's 4 m/s (a column
+        // on a lee flank in a full wind reads well under it), so every column must still lift and the
+        // band 2.5 m/s on average.
+        const lifts = updraftLifts(spawn, 200, 4);
         const mean = lifts.reduce((sum, lift) => sum + lift, 0) / Math.max(1, lifts.length);
-        return check('ridgeLiftBand: 8 lift columns along the crest, each rising 0.5+ m/s 200 m over the ground, 2.5+ m/s on average', lifts.length === 8 && lifts.every((lift) => lift >= 0.5) && mean >= 2.5, { sources, mean: Math.round(mean * 10) / 10, lifts: lifts.map((lift) => Math.round(lift * 10) / 10) });
+        return check('ridgeLiftBand: 8 lift columns along the crest, each rising 0.5+ m/s 200 m over the ground (mean over 4 s of gusts), 2.5+ m/s on average', lifts.length === 8 && lifts.every((lift) => lift >= 0.5) && mean >= 2.5, { sources, mean: Math.round(mean * 10) / 10, lifts: lifts.map((lift) => Math.round(lift * 10) / 10) });
       }
       if (presetId === 'reverseWaterfall' || presetId === 'thermalStreet') {
         const lifts = updraftLifts(spawn);

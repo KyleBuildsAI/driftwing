@@ -1743,9 +1743,17 @@ holds a glider up for kilometres.
   110 m tall, 55 m above the crest and following it, 130 puffs, smooth and bright; no voice);
   `fauna` (6-9 hawks circling 90-420 m up over the crest; owns the voice); `windModifier` (the band).
 - **Wind:** eight overlapping updraft columns along the ridge's axis, 600 m apart and 520 m in
-  radius: 3 m/s from 160 m below the crest to 700 m above it, turbulence 0.22, on top of the
-  WindField's own slope lift. The lab measures the band's own lift at 2.6-3.1 m/s all along the
-  crest; a glider along it climbs at 2.2 m/s where it sank at 0.6 m/s, and so does the bush plane.
+  radius, each standing on the ground under it (`upFrom: 'ground'`): 4 m/s from 160 m below that
+  ground to 700 m above it, turbulence 0.22, on top of the WindField's own slope lift. The lab measures
+  the band's own lift at 3.5-4.1 m/s all along the crest; a glider along it climbs at 3.0 m/s where it
+  sank at 0.6 m/s, and the bush plane at 4.3 m/s where it rose 0.7.
+- **Why the columns stand on the ground and lift 4 m/s (wave 4):** a real crest rises and falls 400 m
+  and more along 4 km, and the columns used to hang at the site's own height: 17 of 232 columns on 29
+  real sites (12 seeds) lifted a craft 200 m over the ground under them by less than 90 % of the band,
+  8 not at all. On the ground under each, the band holds all along; the WindField's own lee sink
+  remains where a column stands on a lee flank (up to 3 m/s 200 m up in a full wind), so at 3 m/s
+  about one band in nine (wind from 16 directions over the same sites) had a column rising under
+  0.5 m/s; at 4 m/s one in a thousand.
 - **Sound:** `raptor` (pitch 0.95: the hawks' calls every 20-45 s).
 - **LOD:** near 2500 m, mid 9000 m, far 20 km. **Discovery:** 4 km, in view.
 - **Lifetime:** a site; removed beyond 20 + 3 km.
