@@ -158,7 +158,9 @@ export default Object.freeze({
       seconds: 75,
       script(t, api) {
         const memo = api.memo;
-        if (t >= 1.5 && memo.startTemperature === undefined) memo.startTemperature = api.craftState.envelopeTemperature;
+        // The heating is measured from the frame the burn starts: the envelope cools by itself before
+        // it (about 0.1 K/s off the hold at 0 % assists), which is not the burn's doing.
+        if (t >= 2 && memo.startTemperature === undefined) memo.startTemperature = api.craftState.envelopeTemperature;
         if (t >= 50 && memo.ventTemperature === undefined) memo.ventTemperature = api.craftState.envelopeTemperature;
         const held = [];
         if (t >= 2 && t < 10) held.push('craftAbility');
