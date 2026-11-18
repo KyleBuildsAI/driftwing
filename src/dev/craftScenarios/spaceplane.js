@@ -29,7 +29,9 @@
 // WebGL2 page for tens of seconds at a time (a link waits on the GPU process) and the runs were cut
 // short. So the probe's pipelines are compiled ahead and asynchronously (renderer.compileAsync in the
 // probe's pose and target: WebGL2's parallel shader compile, WebGPU's async pipelines), once in each
-// altitude tier the flight enters (PROBE_TIERS: the ground, the far field's band, space).
+// altitude tier the flight enters (PROBE_TIERS: the ground, the far field's band, space). A probe
+// waits while one of those compiles is still running: a draw skips an object whose pipeline is not
+// ready yet, which would read as a hole.
 
 const CONTINUITY_TOLERANCE = 0.001;
 // The width keeps a WebGPU readback row a multiple of 256 bytes.
@@ -150,8 +152,8 @@ function inProbeSetup(api, pitch, target, draw) {
 /**
  * Compiles the probe's pipelines ahead and asynchronously, once per altitude tier the flight enters
  * (PROBE_TIERS): what the probe would draw from here, in its target's format. memo.probeCompiles counts
- * the compiles started and finished; a failed compile is kept in memo.probeCompileError (the probe
- * then compiles what it needs when it renders, as before).
+ * the compiles started and settled; a failed compile is kept in memo.probeCompileError (it settles
+ * too: the probe then compiles what it needs when it renders, as before).
  */
 function prepareProbes(api) {
   const memo = api.memo;
@@ -161,7 +163,7 @@ function prepareProbes(api) {
   memo.probeTiers = memo.probeTiers ?? [];
   if (memo.probeTiers.includes(tier)) return;
   memo.probeTiers.push(tier);
-  memo.probeCompiles = memo.probeCompiles ?? { started: 0, finished: 0 };
+  memo.probeCompiles = memo.probeCompiles ?? { started: 0, settled: 0 };
   memo.probeCompiles.started++;
   const { ctx } = api;
   const target = createProbeTarget(ctx.THREE);
@@ -170,10 +172,11 @@ function prepareProbes(api) {
     compiling = ctx.renderer.compileAsync(ctx.scene, camera);
   });
   compiling.then(() => {
-    memo.probeCompiles.finished++;
+    memo.probeCompiles.settled++;
     target.dispose();
   }, (error) => {
     memo.probeCompileError = String(error && error.message ? error.message : error);
+    memo.probeCompiles.settled++;
     target.dispose();
   });
 }
@@ -181,11 +184,14 @@ function prepareProbes(api) {
 /**
  * One readback probe (async; the result lands in memo[key]): the camera pitched `pitch` degrees down
  * along the craft's heading, the sky dome and the cloud shell hidden, a magenta background; counts the
- * magenta pixels whose view ray points more than a degree below the rendered horizon.
+ * magenta pixels whose view ray points more than a degree below the rendered horizon. Waits (starts on
+ * a later frame) while the probe's pipelines are still compiling (prepareProbes).
  */
 function startProbe(api, key, pitch) {
   const memo = api.memo;
   if (memo[key]) return;
+  const compiles = memo.probeCompiles;
+  if (compiles && compiles.settled < compiles.started) return;
   memo[key] = { pending: true };
   const { ctx, state } = api;
   const THREE = ctx.THREE;
