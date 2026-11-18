@@ -69,6 +69,20 @@ export function findCraft(text) {
   return null;
 }
 
+/** The words before a craft's name that make it a thing out there ("fly over the balloon festival"). */
+const CRAFT_AS_PLACE = /\b(over|toward|towards|past|around|near|above|below|under|underneath|behind|beside|alongside|through|follow|following|chase|chasing|watch|see|spot|at|after)( the| that| those| this| a| an| some)?\s*$/;
+/** A negated request ("don't switch to the jet", "do not start the challenge"); "never mind" is not one. */
+export const NEGATED_REQUEST = /\b(don'?t|dont|do not|never(?! ?mind))\b/;
+
+/** True when the craft the text names is a thing out in the world, not the craft to fly. */
+function craftIsPlace(text) {
+  for (const [, pattern] of CRAFT_SYNONYMS) {
+    const match = pattern.exec(text);
+    if (match) return CRAFT_AS_PLACE.test(text.slice(0, match.index));
+  }
+  return false;
+}
+
 /** The skin the text names for a craft ("dragon" for the eagle), or null. */
 export function findSkin(text, craft) {
   for (const [id, skin, pattern] of SKIN_NAMES) if (id === craft && pattern.test(text)) return skin;
@@ -365,9 +379,11 @@ export function createFlightGrammar({ pick, helpLine }) {
   /** "Switch to the stunt plane", "blimp", "let's fly the dragon" (the eagle in its dragon skin). */
   function matchCraft(text, flight, core) {
     const craft = findCraft(text);
-    if (!craft) return null;
+    if (!craft || craftIsPlace(text)) return null;
     const bare = core.every((word) => CRAFT_FILLER.has(word) || findCraft(word) !== null || CRAFT_NAME_PARTS.test(word));
     if (!bare && !CRAFT_VERB.test(text)) return null;
+    // "Don't switch to the jet" switches nothing.
+    if (NEGATED_REQUEST.test(text)) return { speech: "All right, we'll stay in this one.", action: null };
     const action = { type: 'setCraft', craft };
     const skin = findSkin(text, craft);
     if (skin) action.skin = skin;

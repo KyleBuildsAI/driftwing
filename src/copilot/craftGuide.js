@@ -1,5 +1,5 @@
 import { bearingTo, compassName, headingFromVector, wrapDegrees } from '../core/util.js';
-import { formatSpeed } from './grammar.js';
+import { NEGATED_REQUEST, formatSpeed } from './grammar.js';
 import { formatDistance, headingDigits, offerAnswer } from './tourGuide.js';
 
 /**
@@ -78,6 +78,8 @@ const NEGATION = /\b(stop|abort|cancel|end|quit|enough|no more|don'?t|do not|nev
 /** A question about a thing ("is the smoke on?") is not a request to switch it. */
 const QUESTION = /^(is|are|was|were|what|what'?s|how|why|where|when|do|does|did|can i see)\b/;
 const FIND_VERB = /\b(find|locate|search for|look for|looking for|where'?s|where is|where are|nearest|closest|need|show me|take (me|us) to|guide (me|us) to|get (me|us) to|head (for|to)|any)\b/;
+/** What the cross-craft phrases are about: a negated request naming one of them does nothing. */
+const GUIDE_SUBJECT = /\b(smoke|challenges?|space|karman line|scenic|sightseeing|perch(es)?|water to land|landable water|somewhere wet)\b/;
 const AUTOPILOT_WORDS = /\b(autopilot|auto pilot|fly (me|us) there|you fly|on auto|and fly|take (me|us) there|steer us)\b/;
 
 /**
@@ -224,6 +226,12 @@ export function createCraftGuideGrammar() {
     };
   }
 
+  /** "Don't start the challenge", "do not take me to space": answered, nothing started or stopped. */
+  function matchNegated(text) {
+    if (!NEGATED_REQUEST.test(text) || !GUIDE_SUBJECT.test(text)) return null;
+    return { speech: "All right, I'll leave that be.", action: null };
+  }
+
   /** "Take me to space", "climb to space"; "abort the climb" stops it. */
   function matchToSpace(text) {
     const space = /\b(?:(?:in)?to|reach|make it to|get to) (?:outer |the edge of )?space\b|\bkarman line\b|\bspace ?flight\b|^space( please)?$/;
@@ -311,7 +319,7 @@ export function createCraftGuideGrammar() {
     /** Runs before the general help. */
     matchHelp: matchCraftHelp,
     /** In priority order: they run before the tour guide's, the craft's own and the v1 matchers. */
-    matchers: [matchToSpace, matchScenicCruise, matchSmoke, matchFindWater, matchFindPerch, matchWindAt, matchChallenge],
+    matchers: [matchNegated, matchToSpace, matchScenicCruise, matchSmoke, matchFindWater, matchFindPerch, matchWindAt, matchChallenge],
   };
 }
 

@@ -51,6 +51,9 @@
 //   space        "take me to space" and friends; "abort the climb" stops (never starts); questions
 //                about space and the celestial tour category are not
 //   scenic       "scenic cruise": the airship's command on the airship, the cross-craft action elsewhere
+//   negated      a craft named as a thing out there ("fly over the balloon festival", "follow the jet")
+//                switches nothing; "don't switch to the jet", "do not start the challenge" and the
+//                other negated requests are answered and act on nothing; "never mind, ..." still acts
 //   help         "craft help" lists every phrase with its key or chip in one line
 //   remote       the schema of the eight cross-craft actions; the flightState fields onWater, craftState
 //                (only the h.3 fields, rounded, bounded) and challenge, JSON-safe and small
@@ -838,6 +841,22 @@ const actionIn = (flight, transcript) => brain.interpret(flight, transcript).act
   check('scenic', 'airship: "is the scenic cruise on" is answered from its state and starts nothing', asked.action === null && /scenic cruise is off/.test(asked.speech), JSON.stringify(asked));
   const smokeAsked = brain.interpret({ ...flightIn('aerobatic'), craftState: { smoke: true } }, 'is the smoke on');
   check('smoke', 'aerobatic: "is the smoke on" is answered from its state', smokeAsked.action === null && smokeAsked.speech === 'The smoke is on.', JSON.stringify(smokeAsked));
+}
+
+// negated and place phrases: a craft named as a thing out there, or a request said with "don't", starts nothing.
+{
+  for (const phrase of ['fly over the balloon festival', 'fly toward the dragon', 'follow the jet', 'fly near the eagle nest', 'watch the airship']) {
+    const action = actionFor(phrase);
+    check('negated', `"${phrase}" is not a craft switch`, !action || action.type !== 'setCraft', JSON.stringify(action));
+  }
+  for (const phrase of ["don't switch to the jet", 'do not take me to space', "don't start the challenge", 'do not start the scenic cruise', "don't turn the smoke on", 'dont find a perch', 'never take me to space', "don't find water to land"]) {
+    const reply = brain.interpret(FLIGHT, phrase);
+    check('negated', `"${phrase}" is answered and acts on nothing`, reply.action === null && reply.speech.length > 0, `${JSON.stringify(reply.action)} "${reply.speech}"`);
+  }
+  const later = actionFor('never mind, switch to the jet');
+  check('negated', '"never mind, switch to the jet" still switches', later && later.type === 'setCraft' && later.craft === 'jet', JSON.stringify(later));
+  const aerobaticNo = actionIn(flightIn('aerobatic'), "don't turn the smoke on");
+  check('negated', 'aerobatic: "don\'t turn the smoke on" runs no smoke command', aerobaticNo === null, JSON.stringify(aerobaticNo));
 }
 
 // help: every phrase is listed.
