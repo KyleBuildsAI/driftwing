@@ -48,8 +48,8 @@ and the controls panel with a Thrustmaster stick connected.*
     and an airship with vectored props, ballonets and a scenic cruise.
   - Creature: an eagle that flaps, soars and lands on tree tops, ledges and peaks by itself, or the
     same bird as a dragon whose fire breath lights lanterns and torches.
-  - Space: a spaceplane that climbs past 100 km on its rocket, steers with its RCS jets in vacuum and
-    flies a belly-first re-entry.
+  - Space: a spaceplane that climbs past 100 km on its rocket, steers with its RCS jets in vacuum
+    and flies a belly-first re-entry.
 - **The craft picker.** The craft in six groups, ten favorites on the number keys 1-9 and 0, `[`
   and `]` to cycle them, and the eagle's dragon skin.
 - **100 things to find.** 51 places (sites, always in the same spot for the same seed) and 49
@@ -439,8 +439,8 @@ above were captured from the single-file build with the headless smoke-test tool
 built the same way: placement, the engine framework, the director and the spawn audio first, then
 the ten engines, the 30 presets in three verified batches, and the discovery loop, each wave on
 its own worktrees and merged per milestone. Phase 3 followed the same pattern in four waves: the
-systems first, then the craft framework and the eight craft, the 70 presets in seven batches of ten, and the
-journal, copilot and docs, each wave integrated and reviewed before the next.
+systems first, then the craft framework and the eight craft, the 70 presets in seven batches of
+ten, and the journal, copilot and docs, each wave integrated and reviewed before the next.
 
 <details>
 <summary>The original v1 prompt</summary>
