@@ -719,7 +719,7 @@ async function takeRequestedShot(page, options, runner) {
 
 function spawnsTable(report) {
   const lines = ['  #  preset               sun  weather   anchor   engines                              fps   p99ms  maxms  show: geo/world tex wind  leak: geo/world tex wind  heapMB  err/warn  shot  result'];
-  const cycleText = (cycle) => (cycle ? `${cycle.geometryDelta}/${cycle.worldFirstDrawn} ${cycle.textureDelta} ${cycle.windLeft.length}${cycle.gpuOk && cycle.windOk && cycle.skyOk && cycle.lightsOk && cycle.leaksOk && cycle.collidersOk && cycle.challengesOk && cycle.ignitablesOk ? '' : '!'}` : '-');
+  const cycleText = (cycle) => (cycle ? `${cycle.geometryDelta}/${cycle.worldFirstDrawn} ${cycle.textureDelta} ${cycle.windLeft.length}${cycle.ok ?? (cycle.gpuOk && cycle.windOk && cycle.skyOk && cycle.lightsOk && cycle.leaksOk && cycle.collidersOk && cycle.challengesOk && cycle.ignitablesOk) ? '' : '!'}` : '-');
   for (const row of report.presets) {
     lines.push([
       String(row.index).padStart(3),

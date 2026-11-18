@@ -15,7 +15,9 @@
 //     stream with the craft and are not a spawn's, and a live spawn's are its own), every challenge
 //     course a spawn registered since the baseline unregistered (the ring course and live spawns'
 //     courses are not the spawn's), the sky modifiers and the real lights back to their counts, the
-//     SpawnManager's leak counters unchanged, and on request the JS heap within a tolerance.
+//     sky's sun overrides, the render origin's rebase listeners and the live audio voices back to
+//     their counts (contract Appendix B), the SpawnManager's leak counters unchanged, and on request
+//     the JS heap within a tolerance.
 import { createGeometryTracker, splitFresh } from './geometryTracker.js';
 import { heapAvailable, readHeapMB, round } from './testStats.js';
 
@@ -234,6 +236,23 @@ export function createDisposeCheck(ctx, framing) {
     return held;
   }
 
+  /** The sky's sun overrides (the midnight sun bends the sun path through one). */
+  function sunOverrideCount() {
+    const sky = ctx.systems.sky.getModifierState();
+    return Array.isArray(sky.sunOverrides) ? sky.sunOverrides.length : 0;
+  }
+
+  /** The render origin's rebase listeners (spawn caches of render-frame positions subscribe). */
+  function originListenerCount() {
+    return ctx.origin ? ctx.origin.listenerCount : 0;
+  }
+
+  /** Live spawn audio voices (realized or virtual), or null where the audio debug tools are missing. */
+  function audioVoiceCount() {
+    const audio = ctx.systems.audio;
+    return audio && audio.debug && audio.debug.spawn ? audio.debug.spawn.stats().voices : null;
+  }
+
   function lightsInUse() {
     const lights = manager.getStats().lights;
     return lights ? lights.active : 0;
@@ -270,6 +289,9 @@ export function createDisposeCheck(ctx, framing) {
         courseKeys: new Set(spawnCourseKeys()),
         ignitableIds: new Set(spawnIgnitableIds()),
         sky: ctx.systems.sky.getModifierState().count,
+        sunOverrides: sunOverrideCount(),
+        originListeners: originListenerCount(),
+        voices: audioVoiceCount(),
         lights: lightsInUse(),
         leaks: { ...manager.getStats().leaks },
       };
@@ -281,8 +303,8 @@ export function createDisposeCheck(ctx, framing) {
      * Compares the state after a dispose with its baseline. options: { presetIds (the presets under
      * test: a structure geometry can only be theirs when one has a structure part), heapToleranceMB
      * (judge the heap; the baseline must have read it), waitTerrain = true }. Returns the readings
-     * with gpuOk, windOk, collidersOk, challengesOk, ignitablesOk, skyOk, lightsOk, leaksOk, heapOk and
-     * ok (all of them).
+     * with gpuOk, windOk, collidersOk, challengesOk, ignitablesOk, skyOk, sunOk, originOk, voicesOk,
+     * lightsOk, leaksOk, heapOk and ok (all of them).
      */
     async compare(baseline, { presetIds = [], heapToleranceMB = null, waitTerrain = true } = {}) {
       await frames(SETTLE_FRAMES);
@@ -305,6 +327,9 @@ export function createDisposeCheck(ctx, framing) {
       const heldIgnitables = heldIgnitableIds();
       const ignitablesLeft = spawnIgnitableIds().filter((id) => !baseline.ignitableIds.has(id) && !heldIgnitables.has(id));
       const sky = ctx.systems.sky.getModifierState().count;
+      const sunOverrides = sunOverrideCount();
+      const originListeners = originListenerCount();
+      const voices = audioVoiceCount();
       const lights = lightsInUse();
       const leaks = manager.getStats().leaks;
       const judgeHeap = Number.isFinite(heapToleranceMB);
@@ -334,6 +359,12 @@ export function createDisposeCheck(ctx, framing) {
         ignitablesOk: ignitablesLeft.length === 0,
         skyModifiers: `${baseline.sky} -> ${sky}`,
         skyOk: sky === baseline.sky,
+        sunOverrides: `${baseline.sunOverrides} -> ${sunOverrides}`,
+        sunOk: sunOverrides === baseline.sunOverrides,
+        originListeners: `${baseline.originListeners} -> ${originListeners}`,
+        originOk: originListeners === baseline.originListeners,
+        voices: voices === null || baseline.voices === null ? 'n/a' : `${baseline.voices} -> ${voices}`,
+        voicesOk: voices === null || baseline.voices === null || voices === baseline.voices,
         lights: `${baseline.lights} -> ${lights}`,
         lightsOk: lights === baseline.lights,
         leaks,
@@ -343,7 +374,8 @@ export function createDisposeCheck(ctx, framing) {
         heapDeltaMB,
         heapOk: !judgeHeap || (heapDeltaMB === null ? !heapAvailable() : heapDeltaMB <= heapToleranceMB),
       };
-      result.ok = result.gpuOk && result.windOk && result.collidersOk && result.challengesOk && result.ignitablesOk && result.skyOk && result.lightsOk && result.leaksOk && result.heapOk;
+      result.ok = result.gpuOk && result.windOk && result.collidersOk && result.challengesOk && result.ignitablesOk && result.skyOk
+        && result.sunOk && result.originOk && result.voicesOk && result.lightsOk && result.leaksOk && result.heapOk;
       return result;
     },
 

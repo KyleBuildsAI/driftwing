@@ -27,7 +27,9 @@
 //   alive, the geometry count moved by no more than the world's own first draws, which the geometry
 //   tracker tells apart, and the texture count exactly back), every wind source the spawn added
 //   removed, the sky modifiers and real lights back to their counts, no leak reported by the
-//   SpawnManager. Across the leak check the JS heap (read after two forced collections) must stay
+//   SpawnManager; Phase 3 adds every collider, challenge course and ignitable the spawn registered
+//   removed, and the sky's sun overrides, the render origin's rebase listeners and the live audio
+//   voices back to their counts (contract Appendix B). Across the leak check the JS heap (read after two forced collections) must stay
 //   within HEAP_TOLERANCE_MB of its baseline: a spawn that kept even a third of a megabyte per create
 //   fails it. The show itself is not judged on the heap: a first create builds the shared pipelines and
 //   caches it leaves behind on purpose, and the craft flies through streaming terrain.
@@ -36,8 +38,9 @@
 // override (`override`: scheduled on the night, its preset shown, the forced night released after), and
 // stand up the real sites a combo needs before the baseline (`sites`, `wake` for an active state), so
 // they count as the world's and stay out of the judged deltas (src/dev/spawnScenarios.js).
-// Criteria: 30 / 30 presets spawned, GPU memory, wind sources, lights and sky modifiers back after
-// every dispose, the heap within tolerance across every leak check, 0 console errors and 0 warnings, every
+// ?testPresets=a,b shows only those presets (by id; an unknown id is a harness problem).
+// Criteria: every preset spawned (100 / 100), GPU memory, wind sources, lights, sky modifiers, colliders,
+// challenge courses, ignitables, sun overrides, origin listeners and audio voices back after every dispose, the heap within tolerance across every leak check, 0 console errors and 0 warnings, every
 // screenshot taken (with ?testShots=1), no harness problems. Frame times are reported, not judged.
 //
 // Output: the on-screen summary panel (one row per preset, JSON download) and
@@ -130,10 +133,12 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
   const leakCycles = Number.isInteger(requestedCycles) && requestedCycles >= 1 ? Math.min(requestedCycles, MAX_LEAK_CYCLES) : LEAK_CYCLES;
   const only = (params.get('testPresets') ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
   const scenarios = SPAWN_SCENARIOS.filter((scenario) => only.length === 0 || only.includes(scenario.id));
+  const unknownPresets = only.filter((id) => !SPAWN_SCENARIOS.some((scenario) => scenario.id === id));
   const presetById = new Map(PRESETS.map((preset) => [preset.id, preset]));
   const report = {};
   const rows = [];
   const harnessErrors = deleteError ? [deleteError] : [];
+  if (unknownPresets.length > 0) harnessErrors.push(`testPresets names no spawn scenario: ${unknownPresets.join(', ')}`);
   const startedAt = new Date().toISOString();
   const spotCache = new Map();
   /** The dispose check (spawnCheckKit.js), created when the run starts. */
@@ -170,6 +175,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
     const heap = count((row) => row.cycles.length === 2 && row.cycles[1].heapOk);
     const wind = count((row) => row.cycles.length === 2 && row.cycles.every((cycle) => cycle.windOk));
     const other = count((row) => row.cycles.length === 2 && row.cycles.every((cycle) => cycle.lightsOk && cycle.skyOk && cycle.leaksOk && cycle.collidersOk && cycle.challengesOk && cycle.ignitablesOk));
+    const services = count((row) => row.cycles.length === 2 && row.cycles.every((cycle) => cycle.sunOk && cycle.originOk && cycle.voicesOk));
     const shots = count((row) => Boolean(row.shot && row.shot.taken));
     const counts = capture.counts;
     const fpsRows = rows.filter((row) => Number.isFinite(row.frames.avgFps));
@@ -179,6 +185,7 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
       { id: 'heap', label: `JS heap within ${HEAP_TOLERANCE_MB} MB after ${leakCycles} more creates and disposes`, value: heapAvailable() ? ratio(heap) : 'unavailable', status: heapAvailable() ? allOf(heap) : 'muted' },
       { id: 'wind', label: 'Wind sources removed after every dispose', value: ratio(wind), status: allOf(wind) },
       { id: 'other', label: 'Real lights, sky modifiers, colliders, challenge courses, ignitables and leak counters back', value: ratio(other), status: allOf(other) },
+      { id: 'services', label: 'Sun overrides, origin listeners and audio voices back', value: ratio(services), status: allOf(services) },
       { id: 'console', label: 'Console errors / warnings', value: `${counts.errors} / ${counts.warnings}`, status: counts.errors === 0 && counts.warnings === 0 ? 'pass' : 'fail' },
       shotsWanted
         ? { id: 'shots', label: 'Screenshots taken', value: ratio(shots, total), status: allOf(shots) }
@@ -990,8 +997,8 @@ function createSpawnsTestSystem(ctx, { params, capture, deleteError }) {
   // ---- Summary ------------------------------------------------------------------------------------------------
   function cycleCell(cycle) {
     if (!cycle) return { text: '-', status: 'fail' };
-    const ok = cycle.gpuOk && cycle.windOk && cycle.skyOk && cycle.lightsOk && cycle.leaksOk && cycle.collidersOk && cycle.challengesOk && cycle.ignitablesOk;
-    return { text: `g${cycle.geometryDelta >= 0 ? '+' : ''}${cycle.geometryDelta} (world ${cycle.worldFirstDrawn}) t${cycle.textureDelta >= 0 ? '+' : ''}${cycle.textureDelta} w${cycle.windLeft.length}`, status: ok ? 'pass' : 'fail', title: JSON.stringify({ leftBehind: cycle.leftBehind, wind: cycle.windSources, sky: cycle.skyModifiers, lights: cycle.lights }) };
+    const ok = cycle.ok;
+    return { text: `g${cycle.geometryDelta >= 0 ? '+' : ''}${cycle.geometryDelta} (world ${cycle.worldFirstDrawn}) t${cycle.textureDelta >= 0 ? '+' : ''}${cycle.textureDelta} w${cycle.windLeft.length}`, status: ok ? 'pass' : 'fail', title: JSON.stringify({ leftBehind: cycle.leftBehind, wind: cycle.windSources, sky: cycle.skyModifiers, lights: cycle.lights, colliders: cycle.colliders, courses: cycle.challenges, ignitables: cycle.ignitables, sunOverrides: cycle.sunOverrides, originListeners: cycle.originListeners, voices: cycle.voices }) };
   }
 
   function showSummary() {
