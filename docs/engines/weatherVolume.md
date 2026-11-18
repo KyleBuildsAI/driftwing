@@ -124,7 +124,7 @@ null.
 | param | default | notes |
 | --- | --- | --- |
 | `ownsAudio` | the first engine entry of the preset owns `preset.audio` | the voice plays at the anchor, with the growth as its intensity; a `ring`'s voice stands on the eyewall where the camera's bearing from the eye crosses it and ducks to 30 % at the eye's centre, so the roar is loudest in the wall |
-| `journal` | none | approach stats, as the vortex engine's `journal` param: the player's closest horizontal distance to the anchor (a storm's core) while the volume stands grown, sent as typed `journalStat` events when the spawn ends. The supercell preset counts `stormsChased` (op `add`) within 6 km |
+| `journal` | none | approach stats in the vortex engine's `journal` shape, `[{ key, record: 'closestDistance', op, max? } \| { key, value, op, max? }]`: the player's closest horizontal distance to the anchor (a storm's core) while the volume stands grown, sent as one typed `journalStat` per entry whose `max` (m) the approach came within when the spawn ends. The supercell preset counts `stormsChased` (`{ key: 'stormsChased', value: 1, op: 'add', max: 6000 }`: within 6 km) |
 
 ### Live control (set pieces)
 
