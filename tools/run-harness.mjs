@@ -31,7 +31,8 @@
 // per world (a craft switch every 2 minutes through the settings channel), each leg a minute in third
 // person and a minute in first person (a view swap every minute). The ten legs fly aerobatic, seaplane,
 // tiltrotor, paraglider, balloon, airship, eagle, spaceplane, jet and glider; --crafts a,b overrides
-// them (?testSoakCraft=, in order, repeated when shorter) and --seconds sets the minute per view.
+// them (?testSoakCraft=, in order, repeated when shorter) and --seconds sets the measured seconds per
+// view (57 by default: with the run's 3 s warmup each view lasts a minute).
 //
 // The spawns test (/v2/?test=spawns) force-spawns each of the 100 presets ahead of the craft on one seed
 // (the first of --seeds, by default TERRAIN-REAL-8, with real sites of most stamped presets in reach; a
@@ -143,7 +144,8 @@ Tests:
 Options:
   --backend webgpu|webgl     the renderer (default webgpu)
   --seeds A,B,C              the world seed(s); the first one for single-world tests
-  --seconds N                run length (1, soak: the seconds per view; craft: the general runs)
+  --seconds N                run length (1: 60 by default; soak: the measured seconds per view, 57
+                             by default, a minute with the warmup; craft: the general runs)
   --crafts a,b               1, craft: the craft flown; soak: the legs in order (?testSoakCraft)
   --views first,third        1, soak, craft: the views flown
   --scenarios id,general-x   craft: the scenarios flown

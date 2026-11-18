@@ -130,6 +130,8 @@ const SOAK_SEEDS = Object.freeze(['SOAK-1', 'SOAK-2', 'SOAK-3', 'SOAK-4', 'SOAK-
 const SOAK_LEGS_PER_WORLD = 2;
 const SOAK_HEAP_LIMIT_MB = 75;
 const SWITCH_CRASH_SECONDS = 10;
+/** A soak run measures this long after its RUN_WARMUP_SECONDS, so each view lasts a minute and each leg two. */
+const SOAK_RUN_SECONDS = 60 - RUN_WARMUP_SECONDS;
 const PENETRATION_LIMIT_M = 1;
 /** A collision probe deeper than this (m) inside a solid collider is a structure penetration (?test=collision's tolerance). */
 const STRUCTURE_TOLERANCE_M = 0.05;
@@ -179,7 +181,7 @@ function readConfig(params) {
   });
   if (views.length === 0) views = VIEWS.slice();
   const requestedSeconds = Number.parseFloat(params.get('testSeconds'));
-  const runSeconds = Number.isFinite(requestedSeconds) && requestedSeconds >= 5 ? Math.min(requestedSeconds, 600) : DEFAULT_RUN_SECONDS;
+  const runSeconds = Number.isFinite(requestedSeconds) && requestedSeconds >= 5 ? Math.min(requestedSeconds, 600) : soak ? SOAK_RUN_SECONDS : DEFAULT_RUN_SECONDS;
   if (params.has('testSeconds') && runSeconds !== requestedSeconds) notes.push(`testSeconds ${params.get('testSeconds')} is outside 5-600 s; using ${runSeconds} s`);
   return {
     plan: soak ? 'soak' : 'matrix',
