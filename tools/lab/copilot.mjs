@@ -1110,11 +1110,11 @@ function createCraftGame({ craft = 'glider', units = 'metric' } = {}) {
   // take me to space: the confirm offer, "yes" switches and climbs, "no" declines, and it lapses.
   const game = createCraftGame({ craft: 'glider' });
   const offer = game.guide.handlers.toSpace({ type: 'toSpace' });
-  check('executor', 'toSpace from the glider: asks first, switches nothing', offer.ok && /Switch from the glider to the spaceplane and climb to space\? Yes or no\./.test(offer.text) && game.flight.current === 'glider' && game.guide.getConfirm()?.kind === 'toSpace', offer.text);
+  check('executor', 'toSpace from the glider: asks first, switches nothing', offer.ok && /Switch from the glider to the spaceplane and climb to space\? Yes or no\./.test(offer.text) && game.flight.current === 'glider' && game.guide.getConfirm()?.kind === 'toSpace' && game.guide.hasConfirm(), offer.text);
   check('executor', 'toSpace: the snapshot carries the open offer', game.guide.snapshotFields().confirm?.craft === 'spaceplane' && game.guide.snapshotFields().confirm.expiresIn === CONFIRM_SECONDS, JSON.stringify(game.guide.snapshotFields()));
   check('executor', 'toSpace: another request is not an answer', game.guide.handleReply('make it dusk') === null && game.guide.getConfirm() !== null, '');
   const yes = await game.guide.handleReply('yes');
-  check('executor', '"yes" switches to the spaceplane, then runs climbToSpace', yes.ok && game.flight.current === 'spaceplane' && same(game.commands.at(-1), { craft: 'spaceplane', command: 'climbToSpace', value: undefined }) && game.guide.getConfirm() === null, `${yes.speech} ${JSON.stringify(game.commands)}`);
+  check('executor', '"yes" switches to the spaceplane, then runs climbToSpace', yes.ok && game.flight.current === 'spaceplane' && same(game.commands.at(-1), { craft: 'spaceplane', command: 'climbToSpace', value: undefined }) && game.guide.getConfirm() === null && !game.guide.hasConfirm(), `${yes.speech} ${JSON.stringify(game.commands)}`);
   const direct = game.guide.handlers.toSpace({ type: 'toSpace' });
   check('executor', 'toSpace in the spaceplane runs the climb at once', direct.ok && game.commands.length === 2 && game.guide.getConfirm() === null, direct.text);
   const abort = game.guide.handlers.toSpace({ type: 'toSpace', enabled: false });

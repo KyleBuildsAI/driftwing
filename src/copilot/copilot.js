@@ -1591,7 +1591,7 @@ export function createCopilotSystem(ctx) {
     say,
     directionPhrase: Copilot.directionPhrase,
     /** WREN is answering, listening or speaking, or spoke within quietSeconds. */
-    isBusy: (quietSeconds) => asksQueued > 0 || voiceInput.isListening() || voiceOutput.isSpeaking() || state.time.realElapsed - lastLineAt < quietSeconds || craftGuide.getConfirm() !== null,
+    isBusy: (quietSeconds) => asksQueued > 0 || voiceInput.isListening() || voiceOutput.isSpeaking() || state.time.realElapsed - lastLineAt < quietSeconds || craftGuide.hasConfirm(),
   });
   Object.assign(handlers, tourGuide.handlers);
 
@@ -1914,7 +1914,7 @@ export function createCopilotSystem(ctx) {
     getBrainName: () => (brain instanceof RemoteCopilot ? 'remote' : 'local'),
     /** The tour guide: gatherEntries(radiusKm), getOffer(), snapshotFields() (the eval steps read these). */
     tourGuide,
-    /** The cross-craft guide: getConfirm(), snapshotFields(), getStats(). */
+    /** The cross-craft guide: hasConfirm(), getConfirm(), snapshotFields(), getStats(). */
     craftGuide,
     getStats() {
       return {

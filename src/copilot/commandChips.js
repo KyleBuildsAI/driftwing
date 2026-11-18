@@ -111,7 +111,7 @@ export function createGuideChips(ctx, tourGuide, craftGuide = null) {
 
   function chipsFor() {
     const chips = [];
-    if (craftGuide && craftGuide.getConfirm()) chips.push(['Yes, switch', 'yes'], ['No', 'no']);
+    if (craftGuide && craftGuide.hasConfirm()) chips.push(['Yes, switch', 'yes'], ['No', 'no']);
     else if (tourGuide.getOffer()) chips.push(['Yes, heading', 'yes'], ['No thanks', 'no thanks']);
     chips.push(["What's nearby", "what's nearby"]);
     for (const destination of tourGuide.listDestinations(2)) chips.push([`To ${destination.name}`, `take me to the ${destination.name.toLowerCase()}`]);

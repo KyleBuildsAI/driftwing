@@ -129,7 +129,7 @@ export function parseSpokenNumber(tokens, start) {
     } else if (word === 'a' && !any && (next === 'hundred' || next === 'thousand')) {
       // "a hundred", "a thousand": the multiplier counts it as one.
       used = 1;
-    }    else if (word === 'half' && !any) {
+    } else if (word === 'half' && !any) {
       // "half a kilometre"
       group = 0.5;
       if (next === 'a' || next === 'an') used = 2;
@@ -371,7 +371,7 @@ export function sanitizeCraftGuideAction(raw) {
  * Creates the cross-craft guide. helpers: { succeed(text, informative), fail(text), pick(key, lines),
  * placeWaypoint(x, z, label) -> placed | null, engageFollow() -> boolean, directionPhrase(bearing,
  * heading), waiter ({ wait(check, seconds) }), setCraft(action) -> result (the flight action) }.
- * Returns { handlers, handleReply, snapshotFields, getConfirm, update, getStats }.
+ * Returns { handlers, handleReply, snapshotFields, hasConfirm, getConfirm, update, getStats }.
  */
 export function createCraftGuide(ctx, helpers) {
   const { bus, state, settings, world } = ctx;
@@ -759,6 +759,8 @@ export function createCraftGuide(ctx, helpers) {
       const open = confirm && now() <= confirm.expiresAt ? confirm : null;
       return { confirm: open ? { kind: open.kind, craft: open.craft, question: open.question, expiresIn: Math.max(0, Math.round((open.expiresAt - now()) * 10) / 10) } : null };
     },
+    /** Whether a yes / no offer is open (no allocation: the callout gate asks every frame). */
+    hasConfirm: () => confirm !== null,
     getConfirm: () => (confirm ? { kind: confirm.kind, craft: confirm.craft, question: confirm.question, expiresIn: Math.max(0, confirm.expiresAt - now()) } : null),
     update() {
       if (confirm && now() > confirm.expiresAt) {
