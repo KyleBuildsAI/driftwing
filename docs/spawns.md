@@ -1389,6 +1389,8 @@ disappears into the other, where it waits before coming back. Fly under the arch
   leaves a tunnel).
 - **LOD:** near 1800 m, mid 6000 m, far 14 km. **Discovery:** 2.5 km, in view.
 - **Lifetime:** a site; removed beyond 14 + 2.5 km.
+- **Debug spawn:** the F9 Spawn button starts it on its nearest placed site (its gorge is a stamp), or
+  refuses it in the panel when none lies within 60 km.
 - **Achievement:** `underTheArches`, "Under the Arches": fly under an arch of the viaduct.
 
 #### 57. Dam spillway
@@ -1406,9 +1408,13 @@ rainbow below and a river running on down the valley.
   narrow, steep berm (`structureStamps('dam')`). **Water:** a lake filling it to 97 %, tinted green-grey
   (the seaplane can land on it).
 - **Engines:** `structure` (recipe `dam`: the wall on a line outside the down-valley shoreline, its
-  crest out to the valley sides, a 26-34 m spillway with training walls, a bridge, a stilling basin and
-  the river; intake towers and a valve house; hull colliders, the crest landable), `emitter` (spray
-  at the foot) and `celestial` (a rainbow in the spray by day).
+  crest out to the valley sides but never more than a 12 m abutment past the reservoir's shoreline;
+  where the ground falls away to the sides (an open slope), each end steps down as a 1 : 1 wing to the
+  ground; a 26-34 m spillway with training walls, a bridge, a stilling basin and the river; intake
+  towers and a valve house; hull colliders, the crest landable), `emitter` (spray at the foot) and
+  `celestial` (a rainbow in the spray by day).
+- **Debug spawn:** the F9 Spawn button starts it on its nearest placed site (its look is the basin
+  stamp and its lake), or refuses it in the panel when none lies within 60 km.
 - **Wind:** none.
 - **Sound:** `dam` (the spillway's roar over a surging sub rumble and the spray's hiss).
 - **LOD:** near 1800 m, mid 6000 m, far 15 km. **Discovery:** 2.8 km, in view.
