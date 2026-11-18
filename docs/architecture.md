@@ -1565,7 +1565,9 @@ are implemented here. The preset schema (section 1) and the 30 presets are in [s
   hours (`hours`).
 - **Discovery.** A spawn within `discovery.radius` that is in view (inside the camera's view cone,
   the frustum's four side planes, at any distance; and not hidden by visible terrain: the sight line
-  to the middle of its lure or body is sampled 10 times out to the fog's far distance) emits the
+  to the middle of its lure or body, over the higher of its anchor and the ground there (a stamped
+  site's anchor keeps its placement's ground, which a cliff step or a cone can bury 100-400 m deep), is
+  sampled 10 times out to the fog's far distance) emits the
   typed `discovery` once per site id or event preset per world. `markDiscovered(keys)`, `isDiscovered(key)` and `getDiscovered()` let the
   journal restore and read it. Visibility checks run round-robin, 2 a frame, only for spawns that
   still need one, and at most every 30 frames per spawn.

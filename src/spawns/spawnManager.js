@@ -379,7 +379,11 @@ export function createSpawnManager(options) {
   function isInView(record) {
     const lift = sightLift(record);
     const anchor = record.anchor;
-    visibilitySphere.center.set(anchor.x, anchor.y + lift, anchor.z);
+    // A stamped site's anchor keeps the ground its placement read before the stamps: a cliff step, a
+    // cone or a falls' plateau can raise the ground there by 100-400 m, and the sight point must stand
+    // over the ground the player sees, not inside the hill.
+    const base = Math.max(anchor.y, world.groundHeight(anchor.x, anchor.z));
+    visibilitySphere.center.set(anchor.x, base + lift, anchor.z);
     visibilitySphere.radius = Math.max(record.radius, lift);
     if (!sphereInViewCone(visibilitySphere)) return false;
     return !occludedByTerrain(visibilitySphere.center);

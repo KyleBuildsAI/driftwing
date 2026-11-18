@@ -24,7 +24,8 @@
 //                once; asked again it finishes at once; activate claims the readied seek
 //   lure         a heavy spawn 30 km out is FAR with its lure faded in, drawn at the projection limit
 //                with its angular size kept; it fades out when the spawn comes within mid range
-//   discovery    fires once when in range and in view; not while a ridge hides the sight line; a
+//   discovery    fires once when in range and in view; not while a ridge hides the sight line (the
+//                sight point stands over the ground at the anchor: a site on a raised plateau); a
 //                respawned event and a re-created site do not fire again
 //   sites        the site feed creates a site within lod.far and removes it past far + hysteresis
 //   wind         a wind engine's source is live while its spawn runs and gone after dispose (with
@@ -410,6 +411,24 @@ function testDiscovery() {
   lab.step(60);
   check('discovery', 'the re-created site does not fire again', Boolean(lab.manager.getSiteSpawn(site.id)) && siteDiscoveries().length === 1);
   check('discovery', 'in-view notices fire once per spawn', lab.events.inView.filter((event) => event.siteId === site.id).length === 2, `${lab.events.inView.length} notices`);
+  lab.manager.setSiteFeed(null);
+  lab.step(5);
+
+  // A stamped site keeps the ground its placement read before the stamps (a cliff step's plateau, a
+  // cone): here the ridge's top, 800 m over the site's groundY 0. Seen from over the ridge, the sight
+  // point stands over the ground there, not inside the hill.
+  lab.camera.position.set(0, 900, -500);
+  lab.camera.lookAt(0, 900, -1500);
+  lab.camera.updateMatrixWorld();
+  const plateau = { id: 'testSite:0:-2', presetId: 'testSite', x: 0, z: -1600, groundY: 0, rotation: 0, scale: 1, seed: 98, stamps: [] };
+  lab.manager.setSiteFeed(createTestSiteFeed([plateau]));
+  lab.step(90);
+  const plateauFound = lab.events.discovery.filter((event) => event.id === plateau.id);
+  check('discovery', 'a site whose stamped ground rose over its placement ground (a plateau) is discovered from above it', Boolean(lab.manager.getSiteSpawn(plateau.id)) && plateauFound.length === 1, JSON.stringify(plateauFound));
+  lab.manager.setSiteFeed(null);
+  lab.camera.position.set(0, 300, 0);
+  lab.camera.lookAt(0, 300, -1000);
+  lab.camera.updateMatrixWorld();
 }
 
 // ---- sites -------------------------------------------------------------------------------------------------------------
