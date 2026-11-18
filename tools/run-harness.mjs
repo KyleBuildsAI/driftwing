@@ -22,8 +22,9 @@
 // (chase) by default; --views first or --views third flies one of them.
 //
 // The determinism test (/v2/?test=determinism) flies the same scripted path on the same seed (the
-// first of --seeds, by default DETERMINISM-1) in two page loads and compares the site-list hash and the
-// director's activation log; the runner follows it through its reload.
+// first of --seeds, by default DETERMINISM-1) in two page loads and compares the site-list hash, the
+// water heights, the director's activation log, a collider sweep battery around the path and the live
+// PathFollower positions (contract k.4); the runner follows it through its reload.
 //
 // The soak (--test soak: /v2/?test=1&testPlan=soak, Phase 3 contract k.5) is the flight test as a
 // 20-minute run with the event director live: 5 seeds (SOAK-1..5 unless --seeds) x 4 minutes, two legs
@@ -133,7 +134,8 @@ Tests:
                2 minutes), each leg a minute per view (a view swap every minute), the director live
   hotas        the HOTAS pipeline test (?test=hotas)
   terrain      the terrain stamps, overlays, worker parity, seams and collision (?test=terrain)
-  determinism  two page loads of one stepped path, compared (?test=determinism)
+  determinism  two page loads of one stepped path, compared: sites, water, director log, collider
+               battery, followers (?test=determinism)
   spawns       the 100 presets force-spawned, screenshotted and disposed (?test=spawns)
   collision    every collider type struck at speed (?test=collision)
   craft        the craft scenarios of every craft (?test=craft)
@@ -676,6 +678,9 @@ function determinismTable(report) {
       run.pathHash.padStart(13),
       String(run.distanceKm).padStart(5),
     ].join(' '));
+  }
+  for (const run of report.runs) {
+    lines.push(`  run ${run.run} digests: water ${run.waterDigest}, collider battery ${run.batteryHash ?? 'n/a'} (${run.batteryHits ?? 0} hits / ${run.batterySweeps ?? 0} sweeps), followers ${run.followerHash ?? 'n/a'} (${run.followerSamples ?? 0} samples)`);
   }
   const longest = Math.max(0, ...report.runs.map((run) => run.log.length));
   for (let index = 0; index < longest; index++) {

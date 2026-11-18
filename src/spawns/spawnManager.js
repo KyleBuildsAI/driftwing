@@ -1434,7 +1434,7 @@ export function createSpawnManager(options) {
     /**
      * Dev only (the determinism test, src/dev/determinismTest.js): ends every spawn (reason 'reset'),
      * forgets the discoveries, restarts the site sweep and the visibility rotation from their first
-     * cell and record, and puts the LOD bias back to 1. What the manager does from here on then
+     * cell and record and the spawn serials from 1, and puts the LOD bias back to 1. What the manager does from here on then
      * depends only on the seed and the flown path, not on how many frames ran before (the loading
      * frames differ between two page loads). Returns the number of spawns ended.
      */
@@ -1447,6 +1447,8 @@ export function createSpawnManager(options) {
       visibilityCursor = 0;
       view.frame = 0;
       nextVisibilityFrame.fill(0);
+      // Every record is gone: event ids and seeds (from the serial) start afresh, as in a new load.
+      nextSerial = 1;
       lodScale[0] = 1;
       return ended;
     },

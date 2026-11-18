@@ -650,7 +650,9 @@ async function boot() {
         if (stepper.paused) return;
         stepper.paused = true;
         renderer.setAnimationLoop(null);
-        stepper.timeMs = performance.now();
+        // The stepped clock starts at 0, not at performance.now(): the frame interval is a difference
+        // of two clock values, and of two large ones it rounds differently in every page load.
+        stepper.timeMs = 0;
         loop.resetTiming();
       },
       /** Restarts the next stepped frame's timing (its frame carries no physics time). */
