@@ -46,6 +46,13 @@ take us there", ...) places the waypoint and a bare "no" ("no", "no thanks", "no
 declines, whatever brain is active. A "yes" followed by another request ("yes, switch to the jet")
 is not an answer and goes to the brain as usual. See [Proactive callouts](#proactive-callouts).
 
+The answer to an open offer to switch craft is handled the same way, and first. "Take me to space"
+from any craft but the spaceplane, and "scenic cruise" from any craft but the airship, ask the pilot
+before switching ("That's a job for the spaceplane. Switch from the glider to the spaceplane and
+climb to space? Yes or no."). While that offer is open (`flightState.confirm` is not `null`, 15 s), a
+bare "yes" switches craft and runs the command on the new craft, and a bare "no" declines ("Staying
+in the glider, then."), whatever brain is active. See [v2 cross-craft actions](#v2-cross-craft-actions).
+
 ### Timeouts and failures
 
 | rule | value |
@@ -153,7 +160,7 @@ Numbers are rounded as shown, and a value that cannot be read is sent as `0` or 
 
 | field | type | meaning |
 | --- | --- | --- |
-| `craft` | string | active craft id: `glider`, `bushplane`, `jet`, `helicopter`, `wingsuit`, `fpv`, or (as their modules land in Phase 3) `aerobatic`, `seaplane`, `tiltrotor`, `paraglider`, `balloon`, `airship`, `eagle`, `spaceplane` |
+| `craft` | string | active craft id: `glider`, `bushplane`, `jet`, `helicopter`, `wingsuit`, `fpv`, `aerobatic`, `seaplane`, `tiltrotor`, `paraglider`, `balloon`, `airship`, `eagle` (the eagle and its dragon skin; `craftState.skin` says which), `spaceplane` |
 | `craftName` | string | display name, for example `Bush plane` |
 | `availableCraft` | string[] | the craft installed in this build (the catalog lists 14; a craft whose module is not installed yet is not here). `setCraft` to anything else is refused |
 | `units` | `'metric'` \| `'aviation'` | the pilot's units. Metric is km/h and metres; aviation is knots and feet. Speak in them |
@@ -185,6 +192,7 @@ Numbers are rounded as shown, and a value that cannot be read is sent as `0` or 
 | `gear` | `{ retractable, down }` booleans | landing gear |
 | `flaps` | `{ position: 0..1, notch: integer }` | flaps |
 | `onGround` | boolean | wheels or skids on the ground |
+| `onWater` | boolean | floating on water: the seaplane on its floats, the balloon's basket or the paraglider pilot in a lake or the sea |
 | `engineOn` | boolean | engine or motors running |
 | `stall` | `{ warning, stalled }` booleans | stall warning and stall |
 | `lastLandingGrade` | `'butter'` \| `'smooth'` \| `'firm'` \| `'hard'` \| `null` | grade of the last landing this session |
@@ -193,6 +201,9 @@ Numbers are rounded as shown, and a value that cannot be read is sent as `0` or 
 | `landingCount` | integer | graded landings this session |
 | `craftCommands` | `{ id, phrases }[]` | the active craft's own commands (its module's `copilot.commands`; `phrases` are regex sources the local brain matches). Answer one with a `craftCommand` action. Empty for craft without commands |
 | `craftStatus` | string | the active craft's own spoken status (its module's `copilot.status`), or `''` |
+| `craftState` | object | the active craft's own state: the fields listed for it under [v2 cross-craft fields](#v2-cross-craft-fields) (`{}` for a craft or field it does not have) |
+| `challenge` | object or `null` | the challenge being flown, or the course whose start prompt shows, below; `null` with neither |
+| `confirm` | object or `null` | the open offer to switch craft, below; `null` when none is open |
 
 Landing grades come from the sink rate at touchdown: butter up to 0.5 m/s (100 fpm), smooth up
 to 1.2 m/s, firm up to 2.2 m/s, and hard above that. Beyond the craft's limit it is a soft crash:
@@ -224,6 +235,53 @@ the event director's `getNearby(radiusKm)` merged with the spawn manager's live 
 Undiscovered sites are never drawn on the world map, but WREN (and your brain) may name them and
 guide the pilot to them.
 
+### v2 cross-craft fields
+
+`craftState` is the active craft's own state, as plain data: only the fields below for that craft
+(timers, animation phases and caches stay in the game), numbers rounded to 2 decimals, strings cut
+to 48 characters, lists cut to 12 entries and nested records to the fields shown. Units as above.
+
+| craft | `craftState` fields |
+| --- | --- |
+| `glider` | `ballast` (0..1, water ballast left), `dumping` (boolean) |
+| `bushplane` | `smoke` (boolean, the smoke trail) |
+| `jet` | `afterburner` (0..1), `mach`, `overG` (boolean) |
+| `helicopter` | `hoverHold` (boolean) |
+| `wingsuit` | `canopy` (boolean, parachute open), `phase` (string) |
+| `fpv` | `droneMode` (`'angle'` \| `'rate'`), `altitudeHold` (boolean), `turtle` (boolean) |
+| `aerobatic` | `smoke` (boolean), `smokeColor` (index: white, red, blue, yellow, green, orange), `figureInProgress` (figure id or `null`), `lastFigure` (`{ figure, score }` or `null`) |
+| `seaplane` | `onWater`, `onStep` (planing), `waterRudders` (booleans), `porpoise` (0..1), `noseOverWarning` (boolean: wheels down over water) |
+| `tiltrotor` | `nacelleAngle` (deg, 0 airplane .. 97), `nacelleTarget` (deg), `autoNacelle` (boolean), `corridor` (`{ min, max, state }`: the nacelle angles safe at this airspeed, `state` `'ok'` \| `'wingStall'` \| `'overspeed'`) |
+| `paraglider` | `brakeLeft`, `brakeRight`, `speedBar` (0..1), `bigEars` (boolean), `collapse` (`{ left, right }`, 0..1), `pendulum` (deg) |
+| `balloon` | `envelopeTemperature`, `ambientTemperature` (deg C), `burner`, `vent` (0..1), `altitudeHold` (m or `null`), `windColumn` (`[{ altitude, fromDegrees, speed }]`, the WindField at nine heights from 40 m to 2000 m above the ground under the basket, lowest first, refreshed once a second) |
+| `airship` | `ballonet` (0..1), `vectorAngle` (deg), `scenicCruise` (`{ active, index, waypoints: [{ name, x, z }] }`: the sites of the cruise and the one it heads for) |
+| `eagle` | `skin` (`'eagle'` \| `'dragon'`), `perched` (boolean), `perchId` (string or `null`), `flapPower` (0..1), `wingTuck` (0..1) |
+| `spaceplane` | `apogee` (m, the ballistic prediction; `null` when descending), `dynamicPressure` (Pa), `rcsBlend` (0..1, reaction jets versus surfaces), `heating` (0..1), `blackout` (boolean), `attitudeHold`, `autoReentry` (booleans), `spaceClimb` (`'off'` \| `'boost'` \| `'coast'`: the climb to space), `spaceClimbPeak` (m, the highest point of the climb) |
+
+`challenge` is the challenge run or the start prompt near the craft (`state.challenge`), or `null`:
+
+| field | type | meaning |
+| --- | --- | --- |
+| `active` | boolean | a course is armed or being flown |
+| `name` | string or `null` | the course's name, for example `Canyon Gauntlet` |
+| `phase` | string or `null` | `armed` (waiting for the start gate), `running`, `finished`; `null` when none |
+| `elapsed` | s, 1 decimal | the run's clock |
+| `gateIndex`, `gatesTotal` | integers | the next gate (0-based) and the gate count |
+| `nextGate` | `{ distance, bearing }` or `null` | to the next gate, m and deg, integers |
+| `missed` | integer | gates missed |
+| `penalties` | s, 1 decimal | penalty time added |
+| `lastSplit` | `{ index, time, delta }` or `null` | the last gate's split and its difference to the best run (s, 1 decimal; `delta` `null` without a best) |
+| `medalPace` | string or `null` | the medal the run is on pace for |
+| `best` | s, 1 decimal, or `null` | the best time on this course in this craft |
+| `rival` | `{ distanceAhead }` or `null` | a course with a rival: how far the rival is ahead of us along the course, m (negative when behind) |
+| `prompt` | `{ name, distance, bearing }` or `null` | the course whose start prompt shows (within its prompt radius of its start gate); `challengeStart` arms it |
+
+`confirm` is the open offer to switch craft, or `null`: `{ kind, craft, question, expiresIn }`, where
+`kind` is `toSpace` or `scenicCruise`, `craft` the craft it switches to, `question` what WREN asked
+and `expiresIn` the seconds left (1 decimal). The game answers a "yes" or "no" to it itself.
+
+The whole request stays small (about 7 KB with a full wind column and the tour-guide fields).
+
 New fields are only ever added. Ignore fields you do not know.
 
 ## Actions
@@ -252,7 +310,7 @@ instead. Optional parameters may be omitted or `null`. Extra unknown keys are ig
 
 | type | parameters | validation | effect and outcome |
 | --- | --- | --- | --- |
-| `setCraft` | `craft`: a catalog id, `glider` \| `bushplane` \| `jet` \| `helicopter` \| `wingsuit` \| `fpv` \| `aerobatic` \| `seaplane` \| `tiltrotor` \| `paraglider` \| `balloon` \| `airship` \| `eagle` \| `spaceplane` (case-insensitive) | any other value is invalid | writes the `craft` setting. The flight controller applies it or refuses it. A craft that is not in `availableCraft` is refused with a friendly line that names the installed craft |
+| `setCraft` | `craft`: a catalog id, `glider` \| `bushplane` \| `jet` \| `helicopter` \| `wingsuit` \| `fpv` \| `aerobatic` \| `seaplane` \| `tiltrotor` \| `paraglider` \| `balloon` \| `airship` \| `eagle` \| `spaceplane` (case-insensitive); `skin` (optional): one of that craft's skins by id, today `eagle` or `dragon` for the `eagle` | an unknown craft, or a skin that is not a camelCase id of at most 32 characters, is invalid | writes the `craft` setting (with a `skin`, the `craftSkins` setting first, so the craft is built in it). The flight controller applies it or refuses it. A craft that is not in `availableCraft` is refused with a friendly line that names the installed craft, and a skin the craft does not have is refused ("No gold skin for that one: it comes as the eagle or the dragon."). Locally the 14 craft answer to their names and synonyms (stunt plane, float plane, osprey, paragliding, hot air balloon, blimp, zeppelin, rocket plane, sailplane, cub, fighter, chopper, squirrel suit, drone, ...), and "switch to the dragon" is `{ craft: 'eagle', skin: 'dragon' }`. A craft named as a place ("fly over the balloon festival") or in a negated request ("don't switch to the jet") switches nothing |
 | `setAssists` | exactly one of: `level` (number 0..1, rounded to 0.01) or `change` (`up` \| `down` \| `full` \| `off`) | both or neither, a level outside 0..1, or an unknown change is invalid | sets the assists of the active craft. `up` and `down` move to the next 25 % step, `full` is 100 % and `off` is 0 %. WREN reports the new level and what is active ("auto-coordination, auto-trim and stall warning, with AoA limiter at part strength"). It counts as the pilot's own choice, so the one-time HOTAS default (50 %) leaves that craft alone |
 | `setView` | `view`: `cockpit` \| `chase` \| `wing` \| `flyby` \| `outside` | any other value is invalid | `cockpit` (first person), `chase` and `outside` (the craft's last third-person view: chase, wing or flyby) send the `viewForward`, `viewBack` or `viewToggle1P3P` input action (`input:action`, source `copilot`); `wing` and `flyby` set the active craft's entry in `settings.views`. WREN then waits up to 1.2 s for the camera to confirm the change. On the FPV drone the first-person view is its FPV camera (`view: 'fpv'`), which counts as the cockpit. Asking for the view already on screen is answered without an action. If the camera does not switch, WREN says so |
 | `deployChute` | none | | refused with "No chute on the ..." when the craft has no chute. Otherwise sends `chuteDeploy` and confirms only when the canopy is open (`craftState.canopy`) |
@@ -275,6 +333,45 @@ when the pilot asked you to fly there. A present but non-boolean `autopilot` is 
 | `findThermal` | `autopilot` | | "find a thermal": the nearest working thermal from the WindField (at least 0.8 m/s, searched out to about 7 km), aimed at where the leaning column is at our height, with its strength and top. Inside one already, WREN says so and places nothing. None working (or night), it says so |
 | `chaseStorm` | `autopilot` | | "chase the storm": the nearest active storm (a preset that needs storm weather or is a supercell, tornado, microburst, waterspout or storm) within 40 km; else the nearest storm candidate, marked "Possible ..." and spoken as a possibility; else it fails honestly with the regional weather ("No storms active within 40 km. The weather is building here though ...") |
 | `nextDiscovery` | `autopilot` | | "next discovery": the nearest live spawn (within 40 km) or site (within 20 km) not in the journal (never a dormant candidate), else the nearest undiscovered landmark. The waypoint is labelled "Next discovery" and WREN gives only a hint ("Something new, a structure: ..."), so the discovery stays a surprise. With nothing left, it says everything near is already in the journal |
+
+### v2 cross-craft actions
+
+These work whatever craft is flying. Where the active craft has the command itself (smoke on the
+aerobatic, the scenic cruise on the airship) the local grammar answers with that `craftCommand`
+instead, and the cross-craft action reaches the same command, so either is fine to send. Every
+parameter is optional; a present parameter of the wrong type or out of range is invalid.
+
+| type | parameters | validation | effect and outcome |
+| --- | --- | --- | --- |
+| `findWater` | `autopilot` (boolean) | a non-boolean `autopilot` is invalid | "find water to land": a waypoint on the nearest landable water, a local lake (from the water bodies: water, not ice or a thin film, at least 300 m across and 0.5 m deep, within 20 km) or the open sea (at least 2 m deep, with 400 m of open water past the point, within 20 km), whichever is nearer. WREN gives the distance, the direction and the heading ("Nearest landable water: the meteor crater lake, 1.4 km to the south, heading 183. Waypoint set."), and on a craft that cannot land on water says which can. Over landable water already, it says so and places nothing. With none in range, it fails honestly |
+| `findPerch` | `autopilot` | a non-boolean `autopilot` is invalid | "find a perch": a waypoint on the nearest perch (tree tops and the tops of structures, from the colliders), searched out to 400 m, 1.2 km and 2.5 km, with its height above the ground. On the eagle within 300 m of it, the eagle's own `findPerch` command flies the approach instead ("Found a tree top 36 metres south-east. Bringing us in."). On another craft, WREN says only the eagle can perch. Perched already, it says so |
+| `windAt` | `altitude` (number, m, 0..150000; omitted: the wind where we fly); `reference` (`'msl'` default \| `'agl'`, above the ground under the craft); `unit` (`'metres'` \| `'feet'` \| `'km'`: how WREN says the height back) | anything else is invalid | "wind at 2000 feet": the WindField at that height over the craft, spoken as the direction it blows from and its speed in the pilot's units, with rising or sinking air when it is 0.5 m/s or more, and the wind here for comparison ("At 2,000 feet: wind from the east, 075 degrees, at 24 km/h. Here it's from the east, 078 degrees, at 25 km/h."). A height under the ground here is read just above the ground, and said so. In the balloon WREN points at the wind column on the HUD |
+| `challengeStart` | none | | "start the challenge": arms the course whose start prompt shows (`flightState.challenge.prompt`) with the start gate's distance and direction and the best time in this craft ("Canyon Gauntlet, armed. The start gate is 820 metres straight ahead; fly through it to start the clock."). With no prompt it places a waypoint on the nearest course's start gate within 20 km, else it fails honestly. Armed or running already, it says so |
+| `challengeCancel` | none | | "cancel the challenge": calls off the armed or running course ("Canyon Gauntlet cancelled."); with none, it says so |
+| `toSpace` | `enabled` (boolean; `false` aborts the climb) | a non-boolean `enabled` is invalid | "take me to space": on the spaceplane, its `climbToSpace` command: full power, a pull to 72 degrees inside the load and angle-of-attack limits, the throttle eased off above 55 kPa of dynamic pressure, the engine cut once the ballistic apogee reaches 112 km above 35 km, and a coast to the top; WREN calls the cut-off and the apogee, then hands back with auto re-entry armed. Any stick or pedal input, the autopilot, the ground or the engine off hands back at once. From any other craft WREN asks first (`flightState.confirm`): "yes" switches to the spaceplane (which spawns climbing at 45 degrees) and starts the climb, "no" declines, and the offer lapses after 15 s |
+| `scenicCruise` | `enabled` (boolean; `false` ends it) | a non-boolean `enabled` is invalid | "scenic cruise": on the airship, its `scenicCruise` command (the autopilot tours up to three sites around it); from any other craft the same yes / no offer to switch to the airship first. Ending it on another craft is refused ("There's no scenic cruise running") |
+| `smoke` | `enabled` (boolean, default `true`) | a non-boolean `enabled` is invalid | "smoke on / off": the craft's own smoke (the aerobatic's `smoke` command, the bush plane's smoke trail) and its confirmation; on a craft without smoke WREN says so and names the craft that carry it ("No smoke system on the glider. The bush plane and the aerobatic carry smoke.") |
+
+Locally these phrases never act on a question ("is the smoke on?", "how high is space?") or on a
+negated request ("don't start the challenge", "do not take me to space"): WREN answers without an
+action.
+
+### Craft commands
+
+Each craft's own commands (`flightState.craftCommands`, contract h.6) are answered with
+`{ "type": "craftCommand", "craft": "<the active craft>", "command": "<id>", "value": ... }`. The
+`value` is what the command's phrase captures; the table shows what each accepts.
+
+| craft | command: value |
+| --- | --- |
+| `aerobatic` | `smoke`: `'on'` \| `'start'` or `'off'` \| `'stop'` (omitted toggles); `smokeColor`: `'white'` \| `'red'` \| `'blue'` \| `'yellow'` \| `'green'` \| `'orange'` (omitted: the next colour); `lastFigure`, `figures`: none |
+| `seaplane` | `waterRudders`: `'down'` \| `'on'` \| `'lower'` \| `'drop'` \| `'deploy'` or `'up'` \| `'off'` \| `'raise'` \| `'retract'`, or a boolean (omitted toggles); `landingConfig`: `'water'` (the default) \| `'lake'` \| `'ocean'` \| `'sea'`, or a runway word (`'runway'`, `'land'`, `'ground'`, `'airfield'`); `stepCheck`: none |
+| `tiltrotor` | `nacelle`: degrees 0..97; `airplaneMode`, `hoverMode`: none; `autoNacelle`: `'on'` \| `'off'` |
+| `paraglider` | `bigEars`: `'off'` \| `'out'` releases them, anything else pulls them in; `speedBar`: percent or `'off'` \| `'half'` \| `'full'`; `launch`, `findThermal`: none |
+| `balloon` | `burn`: seconds 1..20 (default 4); `vent`: seconds 1..15 (default 3); `steer`: a compass direction (`'north-east'`, ...); `windReport`, `land`: none |
+| `airship` | `scenicCruise`: `'start'` \| `'on'` or `'stop'` \| `'off'` (omitted toggles); `ballonet`: percent, `'heavier'` \| `'lighter'` \| `'neutral'`; `vector`: degrees or `'up'` \| `'down'` \| `'forward'` \| `'level'` |
+| `eagle` | `findPerch`, `takeOff`, `screech`, `fireBreath` (the dragon skin), `tuck`, `glide`: none |
+| `spaceplane` | `autoReentry`, `attitudeHold`: `'on'` \| `'arm'` \| `'hold'` \| `'engage'` or `'off'` \| `'disarm'` \| `'release'` \| `'disengage'`, or a boolean (omitted toggles); `apogee`, `mach`: none (spoken readouts); `climbToSpace`: none starts the climb, `'abort'` \| `'stop'` \| `'cancel'` \| `'off'` or `false` ends it |
 
 Everything the local grammar says maps onto these same actions, so a remote brain can do
 everything the local one can.
@@ -395,6 +492,56 @@ response { "speech": "Storm dead ahead!", "action": { "type": "chaseStorm" } }
 heard    "No storms active within 40 km. The weather is building here though, so watch the horizon."
 ```
 
+The dragon (a craft by its skin):
+
+```json
+request  { "transcript": "let me be the dragon", "flightState": { "craft": "glider", "...": "..." } }
+response { "speech": "", "action": { "type": "setCraft", "craft": "eagle", "skin": "dragon" } }
+heard    "The dragon it is."
+```
+
+The wind at a height, in the pilot's units (`altitude` is always metres):
+
+```json
+request  { "transcript": "what's the wind at 2000 feet", "flightState": { "units": "metric", "...": "..." } }
+response { "speech": "", "action": { "type": "windAt", "altitude": 609.6, "unit": "feet" } }
+heard    "At 2,000 feet: wind from the east, 075 degrees, at 24 km/h. Here it's from the east, 078 degrees, at 25 km/h."
+```
+
+Water to land on, flown there:
+
+```json
+response { "speech": "", "action": { "type": "findWater", "autopilot": true } }
+heard    "Nearest landable water: the flamingo lake, 1.4 km to the south, heading 183. Waypoint set, autopilot engaged."
+```
+
+Take me to space from the airship: the game asks first, answers the "yes" itself, then climbs:
+
+```json
+request  { "transcript": "take me to space", "flightState": { "craft": "airship", "confirm": null, "...": "..." } }
+response { "speech": "", "action": { "type": "toSpace" } }
+heard    "That's a job for the spaceplane. Switch from the airship to the spaceplane and climb to space? Yes or no."
+pilot    "yes"   (never sent to the endpoint while flightState.confirm is open)
+heard    "The spaceplane it is. Climbing to space: full power, pulling up to 72 degrees, engine cut-off for a 112 km apogee. Hands off; touch the stick and she's yours."
+later    "Engine cut-off at 111 km, Mach 1.8. Predicted apogee 112 km. Coasting up now; enjoy the quiet."
+later    "Apogee 112 km. We made space. You have control. Auto re-entry is armed for the way down."
+```
+
+The challenge whose start prompt shows:
+
+```json
+request  { "transcript": "let's race it", "flightState": { "challenge": { "active": false, "phase": null, "prompt": { "name": "Canyon Gauntlet", "distance": 820, "bearing": 45 }, "...": "..." }, "...": "..." } }
+response { "speech": "", "action": { "type": "challengeStart" } }
+heard    "Canyon Gauntlet, armed. The start gate is 820 metres to the north-east; fly through it to start the clock."
+```
+
+A craft's own command, read from `craftState` and `craftCommands`:
+
+```json
+request  { "transcript": "red smoke please", "flightState": { "craft": "aerobatic", "craftState": { "smoke": true, "smokeColor": 0, "figureInProgress": null, "lastFigure": null }, "craftCommands": [{ "id": "smoke", "phrases": ["..."] }, { "id": "smokeColor", "phrases": ["..."] }], "...": "..." } }
+response { "speech": "", "action": { "type": "craftCommand", "craft": "aerobatic", "command": "smokeColor", "value": "red" } }
+```
+
 Invalid replies (each makes the game answer locally):
 
 ```json
@@ -403,6 +550,11 @@ Invalid replies (each makes the game answer locally):
 { "speech": "ok", "action": { "type": "engine", "enabled": "off" } }
 { "speech": "ok", "action": { "type": "goTo", "name": "volcano", "id": "volcano:3:1" } }
 { "speech": "ok", "action": { "type": "findThermal", "autopilot": "yes" } }
+{ "speech": "ok", "action": { "type": "setCraft", "craft": "eagle", "skin": "Red Dragon" } }
+{ "speech": "ok", "action": { "type": "windAt", "altitude": "2000 feet" } }
+{ "speech": "ok", "action": { "type": "windAt", "altitude": 200000 } }
+{ "speech": "ok", "action": { "type": "toSpace", "enabled": "yes" } }
+{ "speech": "ok", "action": { "type": "smoke", "enabled": "on" } }
 { "speech": 42 }
 { "speech": "", "action": null }
 ```
@@ -441,3 +593,16 @@ its phrases:
 | next discovery ("find something new", "something we haven't seen") | the **Next discovery** chip |
 | yes / no to a callout | the **Yes, heading** and **No thanks** chips, shown while the offer is open |
 | callouts on / off | the **Tour-guide callouts** switch in Settings (`,`), General, Copilot |
+
+The cross-craft phrases (Phase 3) and what does the same; "craft help" lists them:
+
+| command | equivalent |
+| --- | --- |
+| switch to [craft] ("switch to the stunt plane", "float plane", "hot air balloon", "blimp", "rocket plane", "the dragon") | the favorites on keys 1-9 and 0, `[` / `]`, the craft picker (and its roster panel for the skins) |
+| smoke on / off ("turn the smoke on", "kill the smoke") | Space on the aerobatic and the bush plane (`craftAbility`); Shift+Space cycles the aerobatic's colour (`craftAbilityAlt`) |
+| find water to land ("where can we land on water", "find a lake to land on") | the **Find water** Guide chip; the world map (M) shows the water and the waypoint |
+| find a perch ("nearest perch", "where can we perch") | the **Find a perch** Guide chip, shown on the eagle |
+| wind at [altitude] ("wind at 2000 feet", "wind at three kilometres", "wind at 1,500 m", "winds at flight level 100", "wind at 500 metres above the ground") | the balloon's wind-layer column on the HUD |
+| start the challenge / cancel the challenge | Y at the start prompt; the **Start challenge** Guide chip while the prompt shows |
+| take me to space / abort the climb | the **To space** Guide chip on the spaceplane; from another craft the **Yes, switch** and **No** chips answer the offer |
+| scenic cruise / scenic cruise off | Space on the airship (`craftAbility`) |
