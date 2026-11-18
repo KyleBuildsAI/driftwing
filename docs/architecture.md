@@ -1143,8 +1143,25 @@ height; `stall.warning` is the low-rotor-rpm horn.
   `skidWarning`, `spray` (0..1), `trim` (deg on the water), `waterSpeed` (m/s through the water),
   `gearPosition` (0 up .. 1 down), `gearAdvisories` (spoken), and `gearRequest` (the copilot's
   `'up' | 'down'`, applied and cleared by the model);
-- the Phase 3 craft: the fields of contract h.3 (aerobatic `smoke`, `smokeColor`, ...; seaplane
-  `onStep`, `waterRudders`, ...; and so on), written by their own models and abilities.
+- bush plane: `smoke` (its smoke trail);
+- aerobatic: `smoke`, `smokeColor` (an index into `SMOKE_COLORS`), `figureInProgress`, `lastFigure
+  { figure, score }` (from the manoeuvre recognizer);
+- paraglider: `phase` (`launch` \| `flight` \| `landed`), `brakeLeft` / `brakeRight`, `speedBar`,
+  `weightShift`, `bigEars`, `bigEarsLatched`, `earsFold`, `collapse { left, right }` (0..1),
+  `collapses`, `pendulum` (deg), `stalled`, `inflation`, `climb`, `onWater`, `canopyOffset`,
+  `canopyPitch`, `landedSeconds`, `splashRelaunch`, and the request `launchRequested`;
+- balloon: `envelopeTemperature` and `ambientTemperature` (deg C), `equilibriumTemperature`,
+  `redLine`, `overTemperature`, `tempFlag`, `burner`, `burnerHeld`, `burnTimer`, `vent` (0..1),
+  `ventHeld`, `ventTimer`, `rotationVent`, `lift`, `inflation`, `landing`, `tethered`,
+  `altitudeHold` (m or null), `windColumn [{ altitude, fromDegrees, speed }]` and its
+  `windColumnTimer`;
+- airship: `ballonet` (0..1) and `ballonetTarget`, `vectorAngle` (deg) and `vectorTarget`,
+  `heaviness`, `pressureHeight`, `propShare`, `sternThrust`, `engineOn`, `scenicCruise { active,
+  index, waypoints, visited, legs, target, altitude, speed, startedAt }`;
+- spaceplane: `apogee` (m, the ballistic prediction; null when descending), `maxAltitude`,
+  `dynamicPressure` (Pa), `mach`, `heating` (0..1), `rcsBlend` (0..1), `rcsPitch` / `rcsRoll` /
+  `rcsYaw`, `thrust`, `thrustLevel`, `blackout`, `commsBlackout`, `attitudeHold`, `autoReentry`,
+  `reentry`, `reentryPhase` (`off` \| `armed` \| `entry` \| `glide`).
 
 A deployed chute is `craftState.canopy === true`.
 
