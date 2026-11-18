@@ -845,6 +845,17 @@ export function createFlightController(ctx) {
     return mode;
   }
 
+  /**
+   * Every field the active craft's abilities start with back at its initial value (fresh nested
+   * records too), in place: the model, the telemetry and the visuals keep the same object, and no
+   * field is deleted (a delete would drop the object's fast properties). The skin is kept.
+   */
+  function resetCraftState() {
+    const skin = craftState.skin;
+    Object.assign(craftState, initialCraftState(craft));
+    if (activeSkin !== null) craftState.skin = skin;
+  }
+
   /** A placement's craftState fields join the craft state the abilities started. */
   function mergePlacementState(placement) {
     if (placement.craftState && typeof placement.craftState === 'object') Object.assign(craftState, placement.craftState);
@@ -2311,6 +2322,14 @@ export function createFlightController(ctx) {
     /** The active craft's skin id, or null for a craft without skins. */
     getSkin() {
       return activeSkin;
+    },
+    /**
+     * The active craft's own state as its abilities start it (after a switch), for a fresh start of
+     * the same craft (the craft test, before each run's placement); the skin is kept. Returns true.
+     */
+    resetCraftState() {
+      resetCraftState();
+      return true;
     },
     /**
      * Places the active craft as a situate placement says ({ mode, position?, heading?, speed?,

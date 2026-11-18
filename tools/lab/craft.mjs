@@ -489,6 +489,29 @@ function testCarry() {
   check('carry', 'resumeFlight refuses a carry it cannot use', /resumeFlight: a position that is not/.test(refused), refused);
 }
 
+// ---- a fresh start of the craft already installed (the craft test, before each run) ---------------------
+function testResetCraftState() {
+  const rig = createRig({ craft: 'balloon', modules: ['balloon'], wind: new THREE.Vector3(4, 0, 0) });
+  rig.flight.startAt({ mode: 'drift', position: { x: 0, y: 1200, z: 0 }, heading: 0 });
+  rig.run(3);
+  const craftState = rig.state.flight.craftState;
+  const column = craftState.windColumn;
+  craftState.burnTimer = 5;
+  craftState.ventTimer = 2;
+  craftState.windColumnTimer = 0.5;
+  // The lab's air has no WindField to sample: the column is marked primed as a run leaves it.
+  for (const band of column) band.primed = true;
+  const primed = column.every((band) => band.primed);
+  rig.flight.resetCraftState();
+  const after = rig.state.flight.craftState;
+  check('reset', 'resetCraftState: the same object, the abilities\' fields back at their start (timers, a fresh unprimed wind column)', after === craftState && primed && after.windColumn !== column && after.windColumn.every((band) => !band.primed) && after.burnTimer === 0 && after.ventTimer === 0 && after.windColumnTimer === 0,
+    `primed before ${primed}, burn ${after.burnTimer}, vent ${after.ventTimer}, column ${after.windColumn === column ? 'kept' : 'fresh'}`);
+  const skinned = createRig({ craft: 'aerobatic', skins: { aerobatic: 'blue' } });
+  skinned.state.flight.craftState.smoke = true;
+  skinned.flight.resetCraftState();
+  check('reset', 'resetCraftState keeps the skin', skinned.state.flight.craftState.skin === 'blue' && skinned.state.flight.craftState.smoke === false, `skin ${skinned.state.flight.craftState.skin}, smoke ${skinned.state.flight.craftState.smoke}`);
+}
+
 // ---- abilities, commands, skins, state ---------------------------------------------------------------
 function testAbilitiesAndCommands() {
   const rig = createRig({ craft: 'aerobatic', skins: { aerobatic: 'blue' } });
@@ -602,6 +625,7 @@ testValidation();
 testFavorites();
 testSituate();
 testCarry();
+testResetCraftState();
 testAbilitiesAndCommands();
 testBindings();
 await testJournal();
